@@ -1,0 +1,52 @@
+# API Server Architecture
+#
+# This diagram visualizes the API server workflow with multiple endpoints
+
+┌──────────────────────────────────────────────────────────────────┐
+│                      API Server Workflow                         │
+└─────────────────────────────────┬────────────────────────────────┘
+                                 │
+┌─────────────────────────────────┼────────────────────────────────┐
+│                                 │                                │
+│   ┌───────────────┐       ┌─────┴────────┐                       │
+│   │               │       │              │                       │
+│   │  HTTP Server  │       │  API Router  │                       │
+│   │  (:8080)      ├──────►│              │                       │
+│   │               │       │              │                       │
+│   └───────────────┘       └──────┬───────┘                       │
+│                                  │                               │
+│            ┌─────────────────────┼─────────────────────┐        │
+│            │                     │                     │        │
+│            ▼                     ▼                     ▼        │
+│    ┌───────────────┐     ┌───────────────┐     ┌───────────────┐│
+│    │               │     │               │     │               ││
+│    │ Users Handler │     │Products Handler│     │Health Handler ││
+│    │               │     │               │     │               ││
+│    └───────────────┘     └───────────────┘     └───────────────┘│
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+# API Endpoints
+#
+# This shows the endpoints available in this API
+
+┌───────────────────────────────────────────────────────────────┐
+│                                                               │
+│  GET /api/users            - Retrieve users                   │
+│  POST /api/users           - Create user                      │
+│                                                               │
+│  GET /api/products         - Retrieve products                │
+│  POST /api/products        - Create product                   │
+│                                                               │
+│  GET /health               - Health check                     │
+│                                                               │
+└───────────────────────────────────────────────────────────────┘
+
+# Request Flow
+#
+# This shows how a request flows through the system
+
+┌─────────┐     ┌───────────────┐     ┌────────────┐     ┌───────────┐
+│ Client  │────►│ HTTP Server   │────►│ API Router │────►│ Handler   │────► JSON Response
+│ Request │     │ (:8080)       │     │            │     │           │
+└─────────┘     └───────────────┘     └────────────┘     └───────────┘
