@@ -76,3 +76,8 @@ func (h *SimpleHTTPHandler) ProvidesServices() []modular.ServiceProvider {
 		},
 	}
 }
+
+// RequiresServices returns a list of services required by this module
+func (h *SimpleHTTPHandler) RequiresServices() []modular.ServiceDependency {
+	return nil
+}

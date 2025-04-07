@@ -21,6 +21,7 @@ type SimpleMessageHandler struct {
 	targetTopics []string
 	producer     MessageProducer
 	dependencies []string // Names of message broker modules this handler depends on
+	logger       modular.Logger
 }
 
 // NewSimpleMessageHandler creates a new message handler with the given name
@@ -66,11 +67,12 @@ func (h *SimpleMessageHandler) Constructor() modular.ModuleConstructor {
 	return func(app modular.Application, services map[string]any) (modular.Module, error) {
 		// Create a new handler with the same name
 		handler := NewSimpleMessageHandlerWithNamespace(h.name, h.namespace)
+		handler.logger = app.Logger()
 
 		// Find message broker in the provided services
 		for name, service := range services {
 			if broker, ok := service.(MessageBroker); ok {
-				fmt.Printf("Handler %s connecting to message broker %s\n", h.name, name)
+				handler.logger.Info("Connecting to message broker", "broker", name, "handler", h.name)
 				handler.producer = broker.Producer()
 				handler.targetTopics = h.targetTopics // Copy target topics from original handler
 				handler.handleFunc = h.handleFunc     // Copy handle function from original handler
@@ -95,17 +97,19 @@ func (h *SimpleMessageHandler) SetBrokerDependencies(brokerNames []string) {
 
 // Init initializes the module with the application context
 func (h *SimpleMessageHandler) Init(app modular.Application) error {
+	h.logger = app.Logger()
 	return nil
 }
 
 // HandleMessage implements the MessageHandler interface
 func (h *SimpleMessageHandler) HandleMessage(message []byte) error {
 	if h.handleFunc != nil {
+		h.logger.Info("Custom message handler invoked", "handler", h.name)
 		return h.handleFunc(message)
 	}
 
 	// Default implementation if no custom handler is provided
-	fmt.Printf("Message received by %s: %s\n", h.name, string(message))
+	h.logger.Info("Message received", "handler", h.name, "message", string(message))
 
 	// Forward to target topics if configured
 	if h.producer != nil && len(h.targetTopics) > 0 {

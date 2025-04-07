@@ -37,11 +37,6 @@ func (m *AuthMiddleware) Name() string {
 
 // Init initializes the middleware with the application context
 func (m *AuthMiddleware) Init(app modular.Application) error {
-	// Register this middleware as a service
-	if err := app.RegisterService(m.name, m); err != nil {
-		return fmt.Errorf("failed to register auth middleware service: %w", err)
-	}
-
 	return nil
 }
 

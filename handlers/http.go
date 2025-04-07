@@ -77,15 +77,10 @@ func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 		}
 
 		// Get handler service by name
-		var handlerSvc interface{}
-		_ = app.GetService(handlerName, &handlerSvc)
-		if handlerSvc == nil {
-			return fmt.Errorf("handler service '%s' not found for route %s %s", handlerName, method, path)
-		}
-
-		httpHandler, ok := handlerSvc.(workflowmodule.HTTPHandler)
-		if !ok {
-			return fmt.Errorf("service '%s' does not implement HTTPHandler interface", handlerName)
+		var httpHandler workflowmodule.HTTPHandler
+		err = app.GetService(handlerName, &httpHandler)
+		if err != nil {
+			return fmt.Errorf("handler service '%s' not found for route %s %s. Error: %w", handlerName, method, path, err)
 		}
 
 		// Process middleware if specified

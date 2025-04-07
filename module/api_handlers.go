@@ -87,11 +87,6 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 		}
 	}
 
-	// Register this handler as a service
-	if err := app.RegisterService(h.name, h); err != nil {
-		return fmt.Errorf("failed to register REST API handler service: %w", err)
-	}
-
 	return nil
 }
 

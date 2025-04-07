@@ -2,7 +2,6 @@ package module
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/GoCodeAlone/modular"
@@ -21,6 +20,7 @@ type InMemoryMessageBroker struct {
 	mu            sync.RWMutex
 	producer      *inMemoryProducer
 	consumer      *inMemoryConsumer
+	logger        modular.Logger
 }
 
 // NewInMemoryMessageBroker creates a new in-memory message broker
@@ -60,6 +60,7 @@ func (b *InMemoryMessageBroker) Name() string {
 
 // Init initializes the module with the application context
 func (b *InMemoryMessageBroker) Init(app modular.Application) error {
+	b.logger = app.Logger()
 	return nil
 }
 
@@ -85,13 +86,13 @@ func (b *InMemoryMessageBroker) SendMessage(topic string, message []byte) error 
 
 // Start starts the message broker
 func (b *InMemoryMessageBroker) Start(ctx context.Context) error {
-	fmt.Println("In-memory message broker started")
+	b.logger.Info("In-memory message broker started")
 	return nil
 }
 
 // Stop stops the message broker
 func (b *InMemoryMessageBroker) Stop(ctx context.Context) error {
-	fmt.Println("In-memory message broker stopped")
+	b.logger.Info("In-memory message broker stopped")
 	return nil
 }
 
@@ -134,15 +135,17 @@ func (p *inMemoryProducer) SendMessage(topic string, message []byte) error {
 
 	handlers, exists := p.broker.subscriptions[topic]
 	if !exists {
+		p.broker.logger.Warn("No subscribers for ", "topic", topic)
 		return nil // No subscribers for this topic
 	}
 
 	// Deliver message to all subscribers
 	for _, handler := range handlers {
 		if err := handler.HandleMessage(message); err != nil {
-			fmt.Printf("Error handling message on topic %s: %v\n", topic, err)
+			p.broker.logger.Error("Error handling message on", "topic", topic, "error", err)
 		}
 	}
+	p.broker.logger.Info("Message sent to ", "topic", topic, "message", string(message))
 
 	return nil
 }
@@ -158,7 +161,7 @@ func (c *inMemoryConsumer) Subscribe(topic string, handler MessageHandler) error
 	defer c.broker.mu.Unlock()
 
 	c.broker.subscriptions[topic] = append(c.broker.subscriptions[topic], handler)
-	fmt.Printf("Handler subscribed to topic: %s\n", topic)
+	c.broker.logger.Info("Handler subscribed to ", "topic", topic)
 	return nil
 }
 
@@ -168,6 +171,6 @@ func (c *inMemoryConsumer) Unsubscribe(topic string) error {
 	defer c.broker.mu.Unlock()
 
 	delete(c.broker.subscriptions, topic)
-	fmt.Printf("All handlers unsubscribed from topic: %s\n", topic)
+	c.broker.logger.Info("Handler unsubscribed from ", "topic", topic)
 	return nil
 }
