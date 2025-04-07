@@ -1,46 +1,47 @@
 modules:
-  - name: httpServer
-    type: http.Server
+  # Module names must exactly match what the HTTP workflow handler is looking for
+  - name: httpServer  # This exact name is required by the HTTP workflow handler
+    type: http.server
     config:
-      port: 8080
+      address: ":8080"
 
-  - name: router
-    type: http.Router
+  - name: httpRouter  # This exact name is required by the HTTP workflow handler
+    type: http.router
     dependsOn: [httpServer]
 
   - name: authMiddleware
-    type: auth.JWT
+    type: http.middleware.auth
     config:
-      secretKey: ${ENV_SECRET_KEY}
+      secretKey: "example-secret-key" 
 
   - name: messageBroker
-    type: messaging.Kafka
+    type: messaging.broker
     config:
-      bootstrapServers: localhost:9092
+      description: "Message broker for multi-workflow example"
 
   - name: userService
-    type: service.User
-    dependsOn: [authMiddleware]
+    type: http.handler
+    config:
+      contentType: "application/json"
+
+  - name: notificationService
+    type: messaging.handler
+    config:
+      description: "Notification service handler"
 
 workflows:
   http:
     routes:
       - path: /api/users
         method: GET
-        middleware: [authMiddleware]
-        handler:
-          module: userService
-          method: ListUsers
-        response:
-          success: 200
-          error: 500
-
+        middlewares: [authMiddleware]
+        handler: userService
+        
   messaging:
-    topics:
-      - name: user-events
-        producers:
-          - module: userService
-            events: [UserCreated, UserUpdated]
-        consumers:
-          - module: notificationService
-            handler: ProcessUserEvent
+    subscriptions:
+      - topic: user-events
+        handler: notificationService
+    producers:
+      - name: userService
+        forwardTo: 
+          - user-events

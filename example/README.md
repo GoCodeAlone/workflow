@@ -4,17 +4,29 @@ This directory contains example configurations for the workflow engine. Each exa
 
 ## Running an Example
 
-To run any example, use the following command from the root directory:
+There are two ways to run the examples:
+
+### Option 1: Specify a configuration file
 
 ```bash
-go run example/main.go -config example/<configuration-file>.yaml
+go run main.go -config <configuration-file>.yaml
 ```
 
 For instance, to run the state machine workflow example:
 
 ```bash
-go run example/main.go -config example/state-machine-workflow.yaml
+go run main.go -config state-machine-workflow.yaml
 ```
+
+### Option 2: Interactive selection menu
+
+Simply run the main.go without any arguments to see an interactive menu of all available workflow configurations:
+
+```bash
+go run main.go
+```
+
+This will display a numbered list of all available workflow configurations. Enter the number corresponding to the workflow you want to run.
 
 ## Example Types
 
