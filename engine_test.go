@@ -27,7 +27,7 @@ func setupEngineTest(t *testing.T) (*Engine, modular.Application, context.Contex
 	}
 
 	// Create engine with the isolated app
-	engine := NewEngine(app)
+	engine := NewEngine(app, mockLogger)
 
 	// Create a context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)

@@ -48,24 +48,14 @@ func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 	var server workflowmodule.HTTPServer
 
 	// Look for standard router and server implementations
-	var routerSvc interface{}
-	_ = app.GetService("httpRouter", &routerSvc)
-	if routerSvc != nil {
-		router, _ = routerSvc.(workflowmodule.HTTPRouter)
+	err := app.GetService("httpRouter", &router)
+	if err != nil {
+		return fmt.Errorf("error getting HTTP router service: %v", err)
 	}
 
-	var serverSvc interface{}
-	_ = app.GetService("httpServer", &serverSvc)
-	if serverSvc != nil {
-		server, _ = serverSvc.(workflowmodule.HTTPServer)
-	}
-
-	if router == nil {
-		return fmt.Errorf("no HTTP router service found")
-	}
-
-	if server == nil {
-		return fmt.Errorf("no HTTP server service found")
+	err = app.GetService("httpServer", &server)
+	if err != nil {
+		return fmt.Errorf("error getting HTTP server service: %v", err)
 	}
 
 	// Connect router to server

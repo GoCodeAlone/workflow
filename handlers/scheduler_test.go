@@ -25,7 +25,7 @@ func TestSchedulerWorkflow(t *testing.T) {
 	testHelper := NewSchedulerTestHelper(app)
 
 	// Create workflow engine
-	engine := workflow.NewEngine(app)
+	engine = workflow.NewEngine(app, &mock.Logger{LogEntries: make([]string, 0)})
 
 	// Register workflow handlers
 	engine.RegisterWorkflowHandler(NewSchedulerWorkflowHandler())

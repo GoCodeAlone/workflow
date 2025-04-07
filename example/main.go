@@ -44,7 +44,7 @@ func main() {
 	app := modular.NewStdApplication(nil, logger)
 
 	// Create workflow engine
-	engine := workflow.NewEngine(app)
+	engine := workflow.NewEngine(app, logger)
 
 	// Register workflow handlers
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())

@@ -27,7 +27,7 @@ func TestStateMachineWorkflow(t *testing.T) {
 	namespace := module.NewStandardNamespace("test", "")
 
 	// Create workflow engine
-	engine := workflow.NewEngine(app)
+	engine = workflow.NewEngine(app, &mock.Logger{LogEntries: make([]string, 0)})
 
 	// Register workflow handlers
 	engine.RegisterWorkflowHandler(NewStateMachineWorkflowHandlerWithNamespace(namespace))

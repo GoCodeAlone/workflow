@@ -1,47 +1,59 @@
 modules:
-  # Module names must exactly match what the HTTP workflow handler is looking for
-  - name: httpServer  # This exact name is required by the HTTP workflow handler
+  # HTTP infrastructure modules
+  - name: httpServer
     type: http.server
     config:
       address: ":8080"
 
-  - name: httpRouter  # This exact name is required by the HTTP workflow handler
+  - name: httpRouter
     type: http.router
-    dependsOn: [httpServer]
+    dependsOn:
+      - httpServer  # Explicitly state that router depends on server
 
+  # Authentication middleware
   - name: authMiddleware
     type: http.middleware.auth
     config:
       secretKey: "example-secret-key" 
 
+  # API handlers
+  - name: userService
+    type: http.handler
+    config:
+      contentType: "application/json"
+    dependsOn:
+      - httpRouter  # User service depends on router
+
+  # Messaging infrastructure
   - name: messageBroker
     type: messaging.broker
     config:
       description: "Message broker for multi-workflow example"
 
-  - name: userService
-    type: http.handler
-    config:
-      contentType: "application/json"
-
   - name: notificationService
     type: messaging.handler
     config:
       description: "Notification service handler"
+    dependsOn:
+      - messageBroker  # Notification service depends on broker
 
 workflows:
+  # HTTP routes workflow
   http:
     routes:
-      - path: /api/users
-        method: GET
-        middlewares: [authMiddleware]
+      - method: GET
+        path: /api/users
+        handler: userService
+        middlewares: 
+          - authMiddleware
+
+      # Add a simple health endpoint
+      - method: GET
+        path: /health
         handler: userService
         
+  # Messaging workflow
   messaging:
     subscriptions:
       - topic: user-events
         handler: notificationService
-    producers:
-      - name: userService
-        forwardTo: 
-          - user-events

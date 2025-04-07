@@ -33,7 +33,7 @@ func TestIntegrationWorkflow(t *testing.T) {
 	}
 
 	// Create workflow engine
-	engine = workflow.NewEngine(app)
+	engine = workflow.NewEngine(app, mockLogger)
 
 	// Register workflow handlers
 	engine.RegisterWorkflowHandler(NewIntegrationWorkflowHandler())
