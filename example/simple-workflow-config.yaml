@@ -1,0 +1,67 @@
+modules:
+  # HTTP infrastructure modules
+  - name: httpServer
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: httpRouter
+    type: http.router
+    dependsOn:
+      - httpServer  # Explicitly state that router depends on server
+
+  # Authentication middleware
+  - name: authMiddleware
+    type: http.middleware.auth
+    config:
+      secretKey: "example-secret-key"
+      # TODO: Add proper jwt auth workflow
+
+  # API handlers
+  - name: userService
+    type: http.handler
+    config:
+      contentType: "application/json"
+    dependsOn:
+      - httpRouter  # User service depends on router
+
+  - name: healthService
+    type: http.handler
+    config:
+      contentType: "application/json"
+    dependsOn:
+      - httpRouter  # Health service depends on router
+
+  # Messaging infrastructure
+  - name: messageBroker
+    type: messaging.broker
+    config:
+      description: "Message broker for multi-workflow example"
+
+  - name: notificationService
+    type: messaging.handler
+    config:
+      description: "Notification service handler"
+    dependsOn:
+      - messageBroker  # Notification service depends on broker
+
+workflows:
+  # HTTP routes workflow
+  http:
+    routes:
+      - method: GET
+        path: /api/users
+        handler: userService
+        #middlewares:
+        #  - authMiddleware
+
+      # Add a simple health endpoint
+      - method: GET
+        path: /health
+        handler: healthService
+        
+  # Messaging workflow
+  messaging:
+    subscriptions:
+      - topic: user-events
+        handler: notificationService
