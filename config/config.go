@@ -1,10 +1,11 @@
 package config
 
-// WorkflowConfig represents a workflow definition
-type WorkflowConfig struct {
-	Modules   []ModuleConfig         `json:"modules" yaml:"modules"`
-	Workflows map[string]interface{} `json:"workflows" yaml:"workflows"`
-}
+import (
+	"fmt"
+	"os"
+
+	"gopkg.in/yaml.v3"
+)
 
 // ModuleConfig represents configuration for a single module
 type ModuleConfig struct {
@@ -12,4 +13,25 @@ type ModuleConfig struct {
 	Type      string                 `json:"type" yaml:"type"`
 	DependsOn []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
 	Config    map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
+}
+
+// WorkflowConfig represents a workflow definition
+type WorkflowConfig struct {
+	Modules   []ModuleConfig         `json:"modules" yaml:"modules"`
+	Workflows map[string]interface{} `json:"workflows" yaml:"workflows"`
+}
+
+// LoadFromFile loads a workflow configuration from a YAML file
+func LoadFromFile(filepath string) (*WorkflowConfig, error) {
+	data, err := os.ReadFile(filepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var cfg WorkflowConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	return &cfg, nil
 }

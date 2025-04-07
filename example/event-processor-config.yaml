@@ -1,0 +1,26 @@
+modules:
+  - name: event-broker
+    type: messaging.broker
+  - name: event-receiver
+    type: messaging.handler
+  - name: event-processor
+    type: messaging.handler
+  - name: event-notifier
+    type: messaging.handler
+  - name: error-handler
+    type: messaging.handler
+
+workflows:
+  messaging:
+    subscriptions:
+      - topic: incoming-events
+        handler: event-receiver
+      - topic: processed-events
+        handler: event-notifier
+      - topic: error-events
+        handler: error-handler
+    producers:
+      - name: event-receiver
+        forwardTo: 
+          - processed-events
+          - error-events

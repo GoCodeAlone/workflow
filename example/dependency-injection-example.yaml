@@ -1,0 +1,128 @@
+modules:
+  # Core services
+  - name: config-provider
+    type: core.config
+    config:
+      sourcePath: "./config"
+  
+  - name: logger-service
+    type: core.logger
+    config:
+      level: "info"
+      format: "json"
+  
+  - name: metrics-service
+    type: core.metrics
+    config:
+      collectInterval: 10
+
+  # Data services
+  - name: cache-service
+    type: data.cache
+    config:
+      backend: "memory"
+      maxSize: 1000
+    dependsOn:
+      - config-provider
+      - logger-service
+
+  - name: database-service
+    type: data.database
+    config:
+      connectionString: "postgres://localhost:5432/appdb"
+    dependsOn:
+      - config-provider
+      - logger-service
+  
+  # Business logic services
+  - name: user-service
+    type: business.service
+    dependsOn:
+      - database-service
+      - cache-service
+      - logger-service
+  
+  - name: product-service
+    type: business.service
+    dependsOn:
+      - database-service
+      - cache-service
+      - logger-service
+
+  - name: order-service
+    type: business.service
+    dependsOn:
+      - database-service
+      - cache-service
+      - user-service
+      - product-service
+      - logger-service
+  
+  # External interfaces
+  - name: http-server
+    type: http.server
+    config:
+      address: ":8080"
+    dependsOn:
+      - config-provider
+      - logger-service
+      - metrics-service
+  
+  - name: grpc-server
+    type: grpc.server
+    config:
+      address: ":9090"
+    dependsOn:
+      - config-provider
+      - logger-service
+      - metrics-service
+
+  # API Components
+  - name: http-router
+    type: http.router
+    dependsOn:
+      - http-server
+  
+  - name: user-http-handler
+    type: http.handler
+    dependsOn:
+      - user-service
+      - logger-service
+  
+  - name: product-http-handler
+    type: http.handler
+    dependsOn:
+      - product-service
+      - logger-service
+  
+  - name: order-http-handler
+    type: http.handler
+    dependsOn:
+      - order-service
+      - logger-service
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/users
+        handler: user-http-handler
+      
+      - method: GET
+        path: /api/products
+        handler: product-http-handler
+      
+      - method: GET
+        path: /api/orders
+        handler: order-http-handler
+
+  messaging:
+    subscriptions:
+      - topic: users-events
+        handler: audit-handler
+      
+      - topic: users-events
+        handler: notification-handler
+      
+      - topic: products-events
+        handler: audit-handler

@@ -1,0 +1,190 @@
+# Integration Workflow Example Configuration
+# This demonstrates integration with third-party services with connectors
+
+modules:
+  # Integration registry
+  - name: integration-registry
+    type: integration.registry
+    config:
+      description: "Registry for third-party service connectors"
+
+  # API server for receiving integration triggers
+  - name: http-server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: api-router
+    type: http.router
+    dependsOn:
+      - http-server
+
+  - name: integration-api
+    type: api.handler
+    config:
+      resourceName: "integrations"
+
+  # Message broker for integration workflow notifications
+  - name: integration-broker
+    type: messaging.broker
+    config:
+      description: "Message broker for integration events"
+
+  # Integration result handlers
+  - name: success-handler
+    type: messaging.handler
+    config:
+      description: "Handles successful integrations"
+
+  - name: error-handler
+    type: messaging.handler
+    config:
+      description: "Handles failed integrations"
+
+  # Data transformation module
+  - name: data-transformer
+    type: messaging.handler
+    config:
+      description: "Transforms data between integration steps"
+
+workflows:
+  # HTTP routes for integration API
+  http:
+    routes:
+      - method: "POST"
+        path: "/api/integrations/:name/execute"
+        handler: integration-api
+      - method: "GET"
+        path: "/api/integrations"
+        handler: integration-api
+
+  # Integration workflow
+  integration:
+    # Define the integration registry to use
+    registry: integration-registry
+    
+    # Define external service connectors
+    connectors:
+      # CRM connector
+      - name: crm-connector
+        type: http
+        config:
+          baseURL: "https://api.crm-provider.com/v1"
+          authType: "bearer"
+          token: "${INTEGRATION_CRM_TOKEN}"
+          headers:
+            Content-Type: "application/json"
+            Accept: "application/json"
+          timeoutSeconds: 30
+          requestsPerMinute: 60
+      
+      # Payment gateway connector
+      - name: payment-connector
+        type: http
+        config:
+          baseURL: "https://api.payment-provider.com/v2"
+          authType: "basic"
+          username: "${INTEGRATION_PAYMENT_USER}"
+          password: "${INTEGRATION_PAYMENT_PASSWORD}"
+          headers:
+            Content-Type: "application/json"
+          timeoutSeconds: 15
+          requestsPerMinute: 30
+      
+      # Email service connector
+      - name: email-connector
+        type: http
+        config:
+          baseURL: "https://api.email-service.com/v3"
+          authType: "bearer"
+          token: "${INTEGRATION_EMAIL_TOKEN}"
+          headers:
+            Content-Type: "application/json"
+          timeoutSeconds: 10
+      
+      # Inventory service connector
+      - name: inventory-connector
+        type: http
+        config:
+          baseURL: "https://api.inventory-system.com"
+          authType: "bearer"
+          token: "${INTEGRATION_INVENTORY_TOKEN}"
+      
+      # Webhook receiver for external events
+      - name: webhook-receiver
+        type: webhook
+        config:
+          path: "/webhooks/external-events"
+          port: 8081
+    
+    # Define integration workflow steps
+    steps:
+      # Order Processing Integration Steps
+      - name: check-customer
+        connector: crm-connector
+        action: "GET /customers/{customerId}"
+        input:
+          customerId: "${data.customerId}"
+        retryCount: 2
+        retryDelay: "2s"
+        onError: "order-error-handler"
+      
+      - name: check-inventory
+        connector: inventory-connector
+        action: "GET /products/{productId}/inventory"
+        input:
+          productId: "${data.productId}"
+          locationId: "${data.locationId}"
+        retryCount: 2
+        retryDelay: "1s"
+        onError: "order-error-handler"
+      
+      - name: process-payment
+        connector: payment-connector
+        action: "POST /transactions"
+        input:
+          amount: "${data.amount}"
+          currency: "${data.currency}"
+          customerId: "${data.customerId}"
+          paymentMethodId: "${data.paymentMethodId}"
+          description: "Order ${data.orderId}"
+        retryCount: 3
+        retryDelay: "3s"
+        onError: "payment-error-handler"
+        transform: |
+          {
+            "amount": data.totalAmount,
+            "currency": data.currency,
+            "customerId": check-customer.id,
+            "paymentMethodId": data.paymentMethod.id
+          }
+      
+      - name: update-inventory
+        connector: inventory-connector
+        action: "POST /products/{productId}/reserve"
+        input:
+          productId: "${data.productId}"
+          quantity: "${data.quantity}"
+          orderId: "${data.orderId}"
+        retryCount: 2
+        onSuccess: "inventory-updated"
+        transform: |
+          {
+            "productId": data.productId,
+            "quantity": data.quantity,
+            "orderId": data.orderId,
+            "locationId": data.locationId || check-inventory.preferredLocation
+          }
+      
+      - name: send-confirmation
+        connector: email-connector
+        action: "POST /send"
+        input:
+          to: "${data.customerEmail}"
+          template: "order-confirmation"
+          variables:
+            orderId: "${data.orderId}"
+            total: "${process-payment.amount}"
+            estimatedDelivery: "${data.estimatedDelivery}"
+        retryCount: 3
+        retryDelay: "60s"

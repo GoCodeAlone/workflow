@@ -1,0 +1,104 @@
+modules:
+  # Data sources
+  - name: csv-input
+    type: messaging.handler
+    config:
+      inputType: "csv"
+      watchPath: "./input"
+  
+  - name: api-input
+    type: http.handler
+    config:
+      contentType: "application/json"
+
+  # Processing components
+  - name: data-validation
+    type: messaging.handler
+    dependsOn:
+      - message-broker
+
+  - name: data-transformation
+    type: messaging.handler
+    dependsOn:
+      - message-broker
+
+  - name: data-enrichment
+    type: messaging.handler
+    dependsOn:
+      - message-broker
+
+  # Output handlers
+  - name: db-output
+    type: messaging.handler
+    dependsOn:
+      - message-broker
+  
+  - name: notification-output
+    type: messaging.handler
+    dependsOn:
+      - message-broker
+
+  # Supporting infrastructure
+  - name: message-broker
+    type: messaging.broker
+
+  - name: http-server
+    type: http.server
+    config:
+      address: ":8085"
+  
+  - name: api-router
+    type: http.router
+    dependsOn:
+      - http-server
+
+workflows:
+  http:
+    routes:
+      - method: POST
+        path: /api/data
+        handler: api-input
+
+  messaging:
+    subscriptions:
+      # Input stage
+      - topic: raw-input
+        handler: data-validation
+      
+      # Processing stages
+      - topic: validated-data
+        handler: data-transformation
+      
+      - topic: transformed-data
+        handler: data-enrichment
+      
+      # Output stage
+      - topic: processed-data
+        handler: db-output
+      
+      - topic: processed-data
+        handler: notification-output
+    
+    producers:
+      - name: api-input
+        forwardTo:
+          - raw-input
+      
+      - name: csv-input
+        forwardTo:
+          - raw-input
+      
+      - name: data-validation
+        forwardTo:
+          - validated-data
+          - validation-errors
+      
+      - name: data-transformation
+        forwardTo:
+          - transformed-data
+          - transformation-errors
+      
+      - name: data-enrichment
+        forwardTo:
+          - processed-data
+          - enrichment-errors

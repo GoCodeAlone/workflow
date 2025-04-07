@@ -1,0 +1,74 @@
+modules:
+  - name: api-http-server
+    type: http.server
+    config:
+      address: ":8080"
+  
+  - name: api-router
+    type: http.router
+
+  - name: auth-middleware
+    type: http.middleware.auth
+    config:
+      secretKey: "my-secret-key" 
+
+  - name: message-broker
+    type: messaging.broker
+
+  - name: users-api
+    type: api.handler
+    config:
+      resourceName: "users"
+
+  - name: products-api
+    type: api.handler
+    config:
+      resourceName: "products"
+
+  - name: health-handler
+    type: http.handler
+    config:
+      contentType: "application/json"
+
+  - name: user-event-handler
+    type: messaging.handler
+
+  - name: audit-log-handler
+    type: messaging.handler
+
+workflows:
+  http:
+    routes:
+      # Public endpoints
+      - method: GET
+        path: /health
+        handler: health-handler
+
+      # Protected endpoints
+      - method: GET
+        path: /api/users
+        handler: users-api
+        middlewares:
+          - auth-middleware
+      - method: POST
+        path: /api/users
+        handler: users-api
+        middlewares:
+          - auth-middleware
+      - method: GET
+        path: /api/products
+        handler: products-api
+        middlewares:
+          - auth-middleware
+      - method: POST
+        path: /api/products
+        handler: products-api
+        middlewares:
+          - auth-middleware
+
+  messaging:
+    subscriptions:
+      - topic: user-events
+        handler: user-event-handler
+      - topic: audit-logs
+        handler: audit-log-handler

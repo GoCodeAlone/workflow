@@ -1,0 +1,111 @@
+modules:
+  # Job schedulers
+  - name: daily-scheduler
+    type: scheduler
+    config:
+      cronExpression: "0 0 * * *" # Daily at midnight
+  
+  - name: hourly-scheduler
+    type: scheduler
+    config:
+      cronExpression: "0 * * * *" # Every hour
+
+  - name: minute-scheduler
+    type: scheduler
+    config:
+      cronExpression: "* * * * *" # Every minute
+  
+  # Job handlers
+  - name: data-cleanup-job
+    type: messaging.handler
+    dependsOn:
+      - message-broker
+  
+  - name: report-generation-job
+    type: messaging.handler
+    dependsOn:
+      - message-broker
+
+  - name: health-check-job
+    type: messaging.handler
+    dependsOn:
+      - message-broker
+  
+  - name: metrics-collection-job
+    type: messaging.handler
+    dependsOn:
+      - message-broker
+
+  # Infrastructure
+  - name: message-broker
+    type: messaging.broker
+
+  - name: job-status-store
+    type: job.store
+    config:
+      storeType: "memory"  # Could be "redis", "db", etc.
+  
+  # Monitoring
+  - name: http-server
+    type: http.server
+    config:
+      address: ":8086"
+  
+  - name: api-router
+    type: http.router
+    dependsOn:
+      - http-server
+
+  - name: job-status-api
+    type: http.handler
+    config:
+      contentType: "application/json"
+    dependsOn:
+      - job-status-store
+
+workflows:
+  scheduler:
+    jobs:
+      - scheduler: daily-scheduler
+        job: report-generation-job
+      
+      - scheduler: hourly-scheduler
+        job: data-cleanup-job
+      
+      - scheduler: minute-scheduler
+        job: health-check-job
+      
+      - scheduler: minute-scheduler
+        job: metrics-collection-job
+
+  messaging:
+    subscriptions:
+      - topic: job-events
+        handler: job-status-store
+
+    producers:
+      - name: report-generation-job
+        forwardTo:
+          - job-events
+      
+      - name: data-cleanup-job
+        forwardTo:
+          - job-events
+      
+      - name: health-check-job
+        forwardTo:
+          - job-events
+      
+      - name: metrics-collection-job
+        forwardTo:
+          - job-events
+
+  http:
+    routes:
+      - method: GET
+        path: /api/jobs/status
+        handler: job-status-api
+      
+      - method: POST
+        path: /api/jobs/trigger
+        handler: job-status-api

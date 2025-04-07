@@ -1,0 +1,138 @@
+# Event-Driven Workflow Example Configuration
+# This demonstrates complex event pattern processing with multiple event types
+
+modules:
+  # Message broker for receiving events
+  - name: event-broker
+    type: messaging.broker
+    config:
+      description: "Central message broker for events"
+
+  # Event processor for complex pattern matching
+  - name: event-processor
+    type: event.processor
+    config:
+      bufferSize: 1000
+      cleanupInterval: "5m"
+
+  # Event handlers for different pattern matches
+  - name: security-alert-handler
+    type: messaging.handler
+    config:
+      description: "Handles security related event patterns"
+
+  - name: system-fault-handler
+    type: messaging.handler
+    config:
+      description: "Handles system fault event patterns"
+
+  - name: user-activity-handler
+    type: messaging.handler
+    config:
+      description: "Handles user activity event patterns"
+
+  - name: business-insight-handler
+    type: messaging.handler
+    config:
+      description: "Handles business insight event patterns"
+
+  # API endpoints that emit events
+  - name: http-server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: api-router
+    type: http.router
+    dependsOn:
+      - http-server
+
+  - name: event-api
+    type: http.handler
+    config:
+      contentType: "application/json"
+
+workflows:
+  # HTTP routes for API
+  http:
+    routes:
+      - method: "POST"
+        path: "/api/events"
+        handler: event-api
+
+  # Event processing workflow
+  event:
+    # Define the processor to use
+    processor: event-processor
+    
+    # Define event patterns to match
+    patterns:
+      # Detect login failures - 3 or more failed logins within 5 minutes
+      - patternId: "login-brute-force"
+        eventTypes: ["user.login.failed"]
+        windowTime: "5m"
+        condition: "count"
+        minOccurs: 3
+        maxOccurs: 0
+        orderMatters: false
+        
+      # Detect system errors - sequence of specific errors within 2 minutes
+      - patternId: "critical-system-fault"
+        eventTypes: ["system.error.db", "system.error.api", "system.error.auth"]
+        windowTime: "2m"
+        condition: "sequence"
+        minOccurs: 1
+        maxOccurs: 0
+        orderMatters: true
+        
+      # Detect potential data breach - specific sequence within 10 minutes
+      - patternId: "potential-data-breach"
+        eventTypes: ["user.permission.escalation", "data.access.sensitive", "user.unusual.location"]
+        windowTime: "10m"
+        condition: "sequence"
+        minOccurs: 1
+        maxOccurs: 0
+        orderMatters: true
+        
+      # Detect business opportunity - specific user behavior pattern
+      - patternId: "purchase-opportunity"
+        eventTypes: ["user.view.product", "user.add.cart", "user.abandon.cart"]
+        windowTime: "30m"
+        condition: "sequence"
+        minOccurs: 1
+        maxOccurs: 0
+        orderMatters: true
+    
+    # Define handlers for patterns
+    handlers:
+      - patternId: "login-brute-force"
+        handler: security-alert-handler
+        
+      - patternId: "critical-system-fault"
+        handler: system-fault-handler
+        
+      - patternId: "potential-data-breach"
+        handler: security-alert-handler
+        
+      - patternId: "purchase-opportunity"
+        handler: business-insight-handler
+    
+    # Define message broker to event processor adapters
+    adapters:
+      - broker: event-broker
+        topics: ["user.login.failed", "user.permission.escalation", "user.unusual.location"]
+        eventType: "security.event"
+        sourceIdKey: "userId"
+        correlIdKey: "sessionId"
+        
+      - broker: event-broker
+        topics: ["system.error.db", "system.error.api", "system.error.auth"]
+        eventType: "system.event"
+        sourceIdKey: "serviceId"
+        correlIdKey: "traceId"
+        
+      - broker: event-broker
+        topics: ["user.view.product", "user.add.cart", "user.abandon.cart", "data.access.sensitive"]
+        eventType: "user.event"
+        sourceIdKey: "userId"
+        correlIdKey: "sessionId"

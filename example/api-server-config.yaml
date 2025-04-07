@@ -1,0 +1,38 @@
+modules:
+  - name: api-http-server
+    type: http.server
+    config:
+      address: ":8080"
+  - name: api-router
+    type: http.router
+  - name: users-handler
+    type: http.handler
+    config:
+      contentType: application/json
+  - name: products-handler
+    type: http.handler
+    config:
+      contentType: application/json
+  - name: health-handler
+    type: http.handler
+    config:
+      contentType: application/json
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/users
+        handler: users-handler
+      - method: POST
+        path: /api/users
+        handler: users-handler
+      - method: GET
+        path: /api/products
+        handler: products-handler
+      - method: POST
+        path: /api/products
+        handler: products-handler
+      - method: GET
+        path: /health
+        handler: health-handler

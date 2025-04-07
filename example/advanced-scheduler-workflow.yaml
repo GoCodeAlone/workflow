@@ -1,0 +1,81 @@
+# Advanced Scheduler Workflow Example Configuration
+# This demonstrates a more complex scheduler workflow with multiple jobs and schedules
+
+modules:
+  # Define schedulers with different cron patterns
+  - name: minutely-scheduler
+    type: scheduler.cron
+    config:
+      cronExpression: "* * * * *" # Run every minute
+
+  - name: hourly-scheduler
+    type: scheduler.cron
+    config:
+      cronExpression: "0 * * * *" # Run at the start of every hour
+
+  - name: daily-scheduler
+    type: scheduler.cron
+    config:
+      cronExpression: "0 0 * * *" # Run at midnight every day
+
+  # Define job handlers
+  - name: system-stats-job
+    type: messaging.handler
+    config:
+      description: "Collects system statistics"
+
+  - name: data-cleanup-job
+    type: messaging.handler
+    config:
+      description: "Cleans up old data"
+
+  - name: report-generator-job
+    type: messaging.handler
+    config:
+      description: "Generates daily reports"
+
+  - name: health-check-job
+    type: messaging.handler
+    config:
+      description: "Performs health checks on services"
+
+workflows:
+  scheduler:
+    jobs:
+      # System statistics job runs every minute
+      - scheduler: minutely-scheduler
+        job: system-stats-job
+        config:
+          metrics: ["cpu", "memory", "disk", "network"]
+          retention: "24h"
+
+      # Health check job runs every hour
+      - scheduler: hourly-scheduler
+        job: health-check-job
+        config:
+          endpoints:
+            - name: "api-server"
+              url: "http://localhost:8080/health"
+            - name: "database"
+              url: "http://localhost:5432/health"
+            - name: "cache"
+              url: "http://localhost:6379/health"
+
+      # Data cleanup job runs every day at midnight
+      - scheduler: daily-scheduler
+        job: data-cleanup-job
+        config:
+          tables: ["logs", "events", "metrics"]
+          olderThan: "30d"
+
+      # Report generation job runs every day at midnight
+      - scheduler: daily-scheduler
+        job: report-generator-job
+        config:
+          reportTypes: ["system-health", "performance", "errors"]
+          format: "pdf"
+          destinations: 
+            - type: "email"
+              recipients: ["admin@example.com", "alerts@example.com"]
+            - type: "storage"
+              path: "/reports"

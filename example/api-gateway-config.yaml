@@ -1,0 +1,133 @@
+modules:
+  # Gateway Server
+  - name: gateway-server
+    type: http.server
+    config:
+      address: ":8090"
+  
+  - name: gateway-router
+    type: http.router
+    dependsOn:
+      - gateway-server
+  
+  # Middleware components
+  - name: auth-middleware
+    type: http.middleware.auth
+    config:
+      secretKey: "gateway-secret-key"
+  
+  - name: rate-limit-middleware
+    type: http.middleware.ratelimit
+    config:
+      requestsPerMinute: 60
+      burstSize: 10
+  
+  - name: logging-middleware
+    type: http.middleware.logging
+    config:
+      logLevel: "info"
+  
+  - name: cors-middleware
+    type: http.middleware.cors
+    config:
+      allowedOrigins: ["*"]
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  
+  # Service proxies
+  - name: users-service-proxy
+    type: http.proxy
+    config:
+      targetURL: "http://users-service:8080"
+      servicePath: "/users"
+  
+  - name: products-service-proxy
+    type: http.proxy
+    config:
+      targetURL: "http://products-service:8080"
+      servicePath: "/products"
+  
+  - name: orders-service-proxy
+    type: http.proxy
+    config:
+      targetURL: "http://orders-service:8080"
+      servicePath: "/orders"
+
+  # Status and monitoring
+  - name: health-check-handler
+    type: http.handler
+    config:
+      contentType: "application/json"
+  
+  - name: metrics-handler
+    type: http.handler
+    config:
+      contentType: "application/json"
+
+workflows:
+  http:
+    routes:
+      # Public endpoints
+      - method: GET
+        path: /health
+        handler: health-check-handler
+      
+      - method: GET
+        path: /metrics
+        handler: metrics-handler
+        middlewares:
+          - auth-middleware
+      
+      # Protected service endpoints with full middleware stack
+      - method: GET
+        path: /api/users
+        handler: users-service-proxy
+        middlewares:
+          - cors-middleware
+          - logging-middleware
+          - rate-limit-middleware
+          - auth-middleware
+      
+      - method: POST
+        path: /api/users
+        handler: users-service-proxy
+        middlewares:
+          - cors-middleware
+          - logging-middleware
+          - rate-limit-middleware
+          - auth-middleware
+      
+      - method: GET
+        path: /api/products
+        handler: products-service-proxy
+        middlewares:
+          - cors-middleware
+          - logging-middleware
+          - rate-limit-middleware
+          - auth-middleware
+      
+      - method: POST
+        path: /api/products
+        handler: products-service-proxy
+        middlewares:
+          - cors-middleware
+          - logging-middleware
+          - rate-limit-middleware
+          - auth-middleware
+      
+      - method: GET
+        path: /api/orders
+        handler: orders-service-proxy
+        middlewares:
+          - cors-middleware
+          - logging-middleware
+          - rate-limit-middleware
+          - auth-middleware
+      
+      - method: POST
+        path: /api/orders
+        handler: orders-service-proxy
+        middlewares:
+          - cors-middleware
+          - logging-middleware
+          - rate-limit-middleware
+          - auth-middleware

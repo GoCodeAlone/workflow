@@ -1,0 +1,97 @@
+# Event-Driven Workflow Architecture
+#
+# This diagram visualizes the complex event pattern processing system with its components
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│                         Event-Driven Workflow Engine                       │
+└───────────────────────────────────────┬───────────────────────────────────┘
+                                        │
+                                        ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│                                                                           │
+│  ┌────────────────┐           ┌───────────────────┐                       │
+│  │                │           │                   │                       │
+│  │  HTTP Server   │           │  Event Broker     │                       │
+│  │  (:8080)       ├──────────►│  (Message Queue)  │                       │
+│  │                │           │                   │                       │
+│  └────────────────┘           └─────────┬─────────┘                       │
+│                                         │                                 │
+│                                         │ Events                          │
+│                                         │                                 │
+│                                         ▼                                 │
+│                               ┌─────────────────────┐                     │
+│                               │                     │                     │
+│                               │  Event Processor    │                     │
+│                               │  (Pattern Matching) │                     │
+│                               │                     │                     │
+│                               └───┬─────┬─────┬─────┘                     │
+│                                   │     │     │                           │
+│           ┌─────────────────────┐ │     │     │ ┌────────────────────┐   │
+│           │                     │ │     │     │ │                    │   │
+│           │  Pattern:           │ │     │     │ │  Pattern:          │   │
+│           │  Login Brute Force  │◄┘     │     └►│  Critical System   │   │
+│           │  (3+ failed logins) │       │       │  Fault             │   │
+│           │                     │       │       │  (Error Sequence)   │   │
+│           └──────────┬──────────┘       │       └─────────┬──────────┘   │
+│                      │                  │                 │              │
+│                      ▼                  │                 ▼              │
+│           ┌────────────────────┐        │       ┌────────────────────┐   │
+│           │                    │        │       │                    │   │
+│           │ Security Alert     │        │       │ System Fault       │   │
+│           │ Handler            │        │       │ Handler            │   │
+│           │                    │        │       │                    │   │
+│           └────────────────────┘        │       └────────────────────┘   │
+│                                         │                                 │
+│                      ┌─────────────────┐│┌──────────────────┐            │
+│                      │                 ││                   │            │
+│                      │  Pattern:       ││  Pattern:         │            │
+│                      │  Data Breach    │◄┘  Purchase        │            │
+│                      │  (Access seq.)  │   Opportunity      │            │
+│                      │                 │   (Cart abandon)   │            │
+│                      └────────┬────────┘   └───────┬────────┘            │
+│                               │                    │                      │
+│                               ▼                    ▼                      │
+│                      ┌────────────────┐   ┌─────────────────────┐        │
+│                      │                │   │                     │        │
+│                      │ Security Alert │   │ Business Insight    │        │
+│                      │ Handler        │   │ Handler             │        │
+│                      │                │   │                     │        │
+│                      └────────────────┘   └─────────────────────┘        │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+
+# Event Pattern Detection Example
+#
+# This visualizes how the login brute force pattern is detected over time
+
+Time  Event                  Buffer           Pattern Match
+----  ---------------------  --------------   -------------
+00:00  user.login.failed     [1]              No match (< 3)
+00:01  user.login.failed     [1,2]            No match (< 3)
+00:03  user.login.failed     [1,2,3]          MATCH! (>= 3)
+00:04  user.login.failed     [1,2,3,4]        MATCH! (>= 3)
+...
+00:06  [5 min window start]
+00:06  [event 1 expires]     [2,3,4]          MATCH! (>= 3)
+00:07  [event 2 expires]     [3,4]            No match (< 3)
+
+# Complex Event Pattern - Critical System Fault
+#
+# This shows detection of ordered sequence of events
+
+┌──────────┐      ┌──────────┐      ┌──────────┐
+│ DB Error │ ──► │ API Error │ ──► │Auth Error │ ──► MATCH!
+└──────────┘      └──────────┘      └──────────┘
+    t=0             t=30s             t=1m
+              < must occur within 2 minute window >
+
+# Complex Event Pattern - Data Breach
+#
+# Shows detection of a potential data breach sequence
+
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  Permission  │ ──► │   Sensitive  │ ──► │   Unusual    │ ──► MATCH!
+│  Escalation  │     │ Data Access  │     │   Location   │
+└──────────────┘     └──────────────┘     └──────────────┘
+    t=0                   t=3m                 t=5m
+              < must occur within 10 minute window >

@@ -1,11 +1,12 @@
 package workflow
 
 import (
+	"context"
 	"fmt"
-	//"github.com/GoCodeAlone/modular/config"
-	//"github.com/GoCodeAlone/modular/factory"
-	//"github.com/GoCodeAlone/modular/module"
+
 	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/module"
 )
 
 // WorkflowHandler interface for handling different workflow types
@@ -14,22 +15,25 @@ type WorkflowHandler interface {
 	CanHandle(workflowType string) bool
 
 	// ConfigureWorkflow sets up the workflow from configuration
-	ConfigureWorkflow(registry *module.Registry, workflowConfig interface{}) error
+	ConfigureWorkflow(app modular.Application, workflowConfig interface{}) error
 }
+
+// ModuleFactory is a function that creates a module from a name and configuration
+type ModuleFactory func(name string, config map[string]interface{}) modular.Module
 
 // Engine represents the workflow execution engine
 type Engine struct {
-	factory          *factory.Factory
-	registry         *module.Registry
+	app              modular.Application
 	workflowHandlers []WorkflowHandler
+	moduleFactories  map[string]ModuleFactory
 }
 
 // NewEngine creates a new workflow engine
-func NewEngine(factory *factory.Factory, registry *module.Registry) *Engine {
+func NewEngine(app modular.Application) *Engine {
 	return &Engine{
-		factory:          factory,
-		registry:         registry,
+		app:              app,
 		workflowHandlers: make([]WorkflowHandler, 0),
+		moduleFactories:  make(map[string]ModuleFactory),
 	}
 }
 
@@ -38,15 +42,71 @@ func (e *Engine) RegisterWorkflowHandler(handler WorkflowHandler) {
 	e.workflowHandlers = append(e.workflowHandlers, handler)
 }
 
+// AddModuleType registers a factory function for a module type
+func (e *Engine) AddModuleType(moduleType string, factory ModuleFactory) {
+	e.moduleFactories[moduleType] = factory
+}
+
 // BuildFromConfig builds a workflow from configuration
 func (e *Engine) BuildFromConfig(cfg *config.WorkflowConfig) error {
-	// First, create all modules
+	// Register all modules from config
 	for _, modCfg := range cfg.Modules {
-		_, err := e.factory.BuildModule(modCfg)
-		if err != nil {
-			return err
+		// Create modules based on type
+		var mod modular.Module
+
+		// First check in the custom module factories
+		if factory, exists := e.moduleFactories[modCfg.Type]; exists {
+			mod = factory(modCfg.Name, modCfg.Config)
+		} else {
+			// Use built-in module types
+			switch modCfg.Type {
+			case "http.server":
+				address := ""
+				if addr, ok := modCfg.Config["address"].(string); ok {
+					address = addr
+				}
+				mod = module.NewStandardHTTPServer(modCfg.Name, address)
+			case "http.router":
+				mod = module.NewStandardHTTPRouter(modCfg.Name)
+			case "http.handler":
+				contentType := "application/json"
+				if ct, ok := modCfg.Config["contentType"].(string); ok {
+					contentType = ct
+				}
+				mod = module.NewSimpleHTTPHandler(modCfg.Name, contentType)
+			case "api.handler":
+				resourceName := "resources"
+				if rn, ok := modCfg.Config["resourceName"].(string); ok {
+					resourceName = rn
+				}
+				mod = module.NewRESTAPIHandler(modCfg.Name, resourceName)
+			case "http.middleware.auth":
+				authType := "Bearer" // Default auth type
+				if at, ok := modCfg.Config["authType"].(string); ok {
+					authType = at
+				}
+				mod = module.NewAuthMiddleware(modCfg.Name, authType)
+			case "messaging.broker":
+				mod = module.NewInMemoryMessageBroker(modCfg.Name)
+			case "messaging.handler":
+				mod = module.NewSimpleMessageHandler(modCfg.Name)
+			case "statemachine.engine":
+				mod = module.NewStandardStateMachineEngine(nil)
+			default:
+				return fmt.Errorf("unknown module type: %s", modCfg.Type)
+			}
 		}
+
+		e.app.RegisterModule(mod)
 	}
+
+	// Initialize all modules
+	if err := e.app.Init(); err != nil {
+		return fmt.Errorf("failed to initialize modules: %w", err)
+	}
+
+	// Register config section for workflow
+	e.app.RegisterConfigSection("workflow", modular.NewStdConfigProvider(cfg))
 
 	// Handle each workflow configuration section
 	for workflowType, workflowConfig := range cfg.Workflows {
@@ -55,7 +115,7 @@ func (e *Engine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		// Find a handler for this workflow type
 		for _, handler := range e.workflowHandlers {
 			if handler.CanHandle(workflowType) {
-				if err := handler.ConfigureWorkflow(e.registry, workflowConfig); err != nil {
+				if err := handler.ConfigureWorkflow(e.app, workflowConfig); err != nil {
 					return fmt.Errorf("failed to configure %s workflow: %w", workflowType, err)
 				}
 				handled = true
@@ -71,40 +131,12 @@ func (e *Engine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	return nil
 }
 
-// Start starts all modules that implement the Startable interface
-func (e *Engine) Start() error {
-	var startErrors []error
-
-	e.registry.Each(func(name string, mod module.Module) {
-		if starter, ok := mod.(module.Startable); ok {
-			if err := starter.Start(); err != nil {
-				startErrors = append(startErrors, fmt.Errorf("failed to start module %s: %w", name, err))
-			}
-		}
-	})
-
-	if len(startErrors) > 0 {
-		return fmt.Errorf("errors starting modules: %v", startErrors)
-	}
-
-	return nil
+// Start starts all modules
+func (e *Engine) Start(ctx context.Context) error {
+	return e.app.Start()
 }
 
-// Stop stops all modules that implement the Stoppable interface
-func (e *Engine) Stop() error {
-	var stopErrors []error
-
-	e.registry.Each(func(name string, mod module.Module) {
-		if stopper, ok := mod.(module.Stoppable); ok {
-			if err := stopper.Stop(); err != nil {
-				stopErrors = append(stopErrors, fmt.Errorf("failed to stop module %s: %w", name, err))
-			}
-		}
-	})
-
-	if len(stopErrors) > 0 {
-		return fmt.Errorf("errors stopping modules: %v", stopErrors)
-	}
-
-	return nil
+// Stop stops all modules
+func (e *Engine) Stop(ctx context.Context) error {
+	return e.app.Stop()
 }

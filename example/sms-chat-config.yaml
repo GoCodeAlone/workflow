@@ -1,0 +1,40 @@
+modules:
+  - name: sms-http-server
+    type: http.server
+    config:
+      address: ":8081"
+  - name: sms-router
+    type: http.router
+  - name: sms-webhook-handler
+    type: http.handler
+  - name: message-broker
+    type: messaging.broker
+  - name: triage-survey-handler
+    type: messaging.handler
+  - name: agent-assignment-handler
+    type: messaging.handler
+  - name: chat-response-handler
+    type: messaging.handler
+  - name: notification-handler
+    type: messaging.handler
+
+workflows:
+  http:
+    routes:
+      - method: POST
+        path: /sms/webhook
+        handler: sms-webhook-handler
+      - method: GET
+        path: /sms/status
+        handler: sms-webhook-handler
+  
+  messaging:
+    subscriptions:
+      - topic: incoming-sms
+        handler: triage-survey-handler
+      - topic: triage-complete
+        handler: agent-assignment-handler
+      - topic: agent-response
+        handler: chat-response-handler
+      - topic: outgoing-sms
+        handler: notification-handler
