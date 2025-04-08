@@ -3,8 +3,6 @@ package module
 import (
 	"context"
 	"testing"
-
-	"github.com/GoCodeAlone/modular"
 )
 
 // TestScheduleTrigger tests the Schedule trigger functionality
@@ -27,12 +25,12 @@ func TestScheduleTrigger(t *testing.T) {
 	}
 
 	// Initialize the trigger
-	registry := make(modular.ServiceRegistry)
-	err := trigger.Init(registry)
+	err := trigger.Init(app)
 	if err != nil {
 		t.Fatalf("Failed to initialize trigger: %v", err)
 	}
-	if _, exists := registry[ScheduleTriggerName]; !exists {
+	var trigger2 *ScheduleTrigger
+	if app.GetService(trigger.name, &trigger2) != nil {
 		t.Error("Trigger did not register itself in the service registry")
 	}
 

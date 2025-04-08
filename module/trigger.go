@@ -1,24 +1,14 @@
 package module
 
 import (
-	"context"
-
 	"github.com/GoCodeAlone/modular"
 )
 
 // Trigger defines what can start a workflow execution
 type Trigger interface {
-	// Name returns the name of this trigger
-	Name() string
-
-	// Init initializes the trigger
-	Init(registry modular.ServiceRegistry) error
-
-	// Start starts the trigger
-	Start(ctx context.Context) error
-
-	// Stop stops the trigger
-	Stop(ctx context.Context) error
+	modular.Module
+	modular.Startable
+	modular.Stoppable
 
 	// Configure sets up the trigger from configuration
 	Configure(app modular.Application, triggerConfig interface{}) error

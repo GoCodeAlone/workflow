@@ -60,9 +60,8 @@ func (t *ScheduleTrigger) Name() string {
 }
 
 // Init initializes the trigger
-func (t *ScheduleTrigger) Init(registry modular.ServiceRegistry) error {
-	registry[t.name] = t
-	return nil
+func (t *ScheduleTrigger) Init(app modular.Application) error {
+	return app.RegisterService(t.name, t)
 }
 
 // Start starts the trigger

@@ -74,7 +74,7 @@ func (t *MockTrigger) Name() string {
 	return t.name
 }
 
-func (t *MockTrigger) Init(registry modular.ServiceRegistry) error {
+func (t *MockTrigger) Init(app modular.Application) error {
 	t.initCalled = true
 	return nil
 }

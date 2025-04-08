@@ -438,7 +438,7 @@ func (t *mockTrigger) Name() string {
 	return t.name
 }
 
-func (t *mockTrigger) Init(registry modular.ServiceRegistry) error {
+func (t *mockTrigger) Init(app modular.Application) error {
 	t.initCalled = true
 	return nil
 }
