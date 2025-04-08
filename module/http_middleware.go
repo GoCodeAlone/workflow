@@ -48,7 +48,7 @@ func (m *RateLimitMiddleware) Name() string {
 
 // Init initializes the middleware
 func (m *RateLimitMiddleware) Init(app modular.Application) error {
-	return app.RegisterService(m.name, m)
+	return nil
 }
 
 // Process implements middleware processing
@@ -142,7 +142,7 @@ func (m *LoggingMiddleware) Name() string {
 
 // Init initializes the middleware
 func (m *LoggingMiddleware) Init(app modular.Application) error {
-	return app.RegisterService(m.name, m)
+	return nil
 }
 
 // Process implements middleware processing
@@ -208,7 +208,7 @@ func (m *CORSMiddleware) Name() string {
 
 // Init initializes the middleware
 func (m *CORSMiddleware) Init(app modular.Application) error {
-	return app.RegisterService(m.name, m)
+	return nil
 }
 
 // Process implements middleware processing

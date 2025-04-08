@@ -38,6 +38,9 @@ func TestIntegrationWorkflow(t *testing.T) {
 	// Register workflow handlers
 	engine.RegisterWorkflowHandler(NewIntegrationWorkflowHandler())
 
+	// Create a unique registry name for this test to avoid conflicts
+	registryName := fmt.Sprintf("test-integration-registry-%d", time.Now().UnixNano())
+
 	// Create mock HTTP server for testing the HTTP connector
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check request path
@@ -76,7 +79,7 @@ func TestIntegrationWorkflow(t *testing.T) {
 	defer mockServer.Close()
 
 	// Create and configure the integration registry
-	intRegistry := module.NewIntegrationRegistry("test-integration-registry")
+	intRegistry := module.NewIntegrationRegistry(registryName)
 
 	// Pre-create and connect the HTTP connectors with the mock server URL
 	crmConnector := module.NewHTTPIntegrationConnector("crm-connector", mockServer.URL)
@@ -102,9 +105,6 @@ func TestIntegrationWorkflow(t *testing.T) {
 	intRegistry.RegisterConnector(crmConnector)
 	intRegistry.RegisterConnector(emailConnector)
 
-	// Register the registry with the application
-	app.SvcRegistry()["test-integration-registry"] = intRegistry
-
 	// Create the adapter for the module system
 	registryAdapter := NewIntegrationRegistryAdapter(intRegistry, nil)
 	app.RegisterModule(registryAdapter)
@@ -113,7 +113,7 @@ func TestIntegrationWorkflow(t *testing.T) {
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
 			{
-				Name: "test-integration-registry",
+				Name: registryName,
 				Type: "integration.registry",
 				Config: map[string]interface{}{
 					"description": "Test integration registry",
@@ -122,7 +122,7 @@ func TestIntegrationWorkflow(t *testing.T) {
 		},
 		Workflows: map[string]interface{}{
 			"integration": map[string]interface{}{
-				"registry": "test-integration-registry",
+				"registry": registryName,
 				"connectors": []interface{}{
 					map[string]interface{}{
 						"name": "crm-connector",
@@ -336,7 +336,7 @@ func NewIntegrationRegistryAdapter(registry IntegrationRegistry, namespace modul
 
 // Init initializes the adapter with the application
 func (a *integrationRegistryAdapter) Init(app modular.Application) error {
-	return a.registry.Init(app.SvcRegistry())
+	return nil
 }
 
 func (a *integrationRegistryAdapter) Name() string {

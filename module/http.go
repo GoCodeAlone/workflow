@@ -5,7 +5,7 @@ import (
 	"net/http"
 )
 
-// HTTPHandler interface for handling HTTP requests
+// HTTPHandler defines the interface for HTTP request handlers
 type HTTPHandler interface {
 	Handle(w http.ResponseWriter, r *http.Request)
 }

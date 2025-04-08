@@ -370,7 +370,7 @@ type IntegrationRegistry interface {
 	// Name returns the name of the registry
 	Name() string
 	// Init initializes the registry
-	Init(registry modular.ServiceRegistry) error
+	Init(app modular.Application) error
 	// Start starts the registry
 	Start() error
 	// Stop stops the registry
@@ -402,11 +402,9 @@ func (r *StdIntegrationRegistry) Name() string {
 	return r.name
 }
 
-// Init initializes the integration registry
-func (r *StdIntegrationRegistry) Init(registry modular.ServiceRegistry) error {
-	// Register ourselves in the service registry
-	registry[r.name] = r
-	return nil
+// Init initializes the registry with service dependencies
+func (r *StdIntegrationRegistry) Init(app modular.Application) error {
+	return app.RegisterService(r.name, r)
 }
 
 // Start starts all registered connectors

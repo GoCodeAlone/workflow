@@ -46,10 +46,9 @@ func (s *CronScheduler) Name() string {
 }
 
 // Init initializes the scheduler
-func (s *CronScheduler) Init(registry modular.ServiceRegistry) error {
+func (s *CronScheduler) Init(app modular.Application) error {
 	// Register ourselves in the service registry
-	registry[s.name] = s
-	return nil
+	return app.RegisterService(s.name, s)
 }
 
 // Start starts the scheduler
@@ -113,6 +112,23 @@ func (s *CronScheduler) Stop(ctx context.Context) error {
 func (s *CronScheduler) Schedule(job Job) error {
 	s.jobs = append(s.jobs, job)
 	return nil
+}
+
+// FunctionJob is a Job implementation that executes a function
+type FunctionJob struct {
+	fn func(context.Context) error
+}
+
+// NewFunctionJob creates a new job from a function
+func NewFunctionJob(fn func(context.Context) error) *FunctionJob {
+	return &FunctionJob{
+		fn: fn,
+	}
+}
+
+// Execute runs the job function
+func (j *FunctionJob) Execute(ctx context.Context) error {
+	return j.fn(ctx)
 }
 
 // MessageHandlerJobAdapter adapts a MessageHandler to the Job interface

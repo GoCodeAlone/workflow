@@ -7,18 +7,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ModuleConfig represents configuration for a single module
+// ModuleConfig represents a single module configuration
 type ModuleConfig struct {
 	Name      string                 `json:"name" yaml:"name"`
 	Type      string                 `json:"type" yaml:"type"`
-	DependsOn []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
 	Config    map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
+	DependsOn []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
 }
 
-// WorkflowConfig represents a workflow definition
+// WorkflowConfig represents the overall configuration for the workflow engine
 type WorkflowConfig struct {
 	Modules   []ModuleConfig         `json:"modules" yaml:"modules"`
 	Workflows map[string]interface{} `json:"workflows" yaml:"workflows"`
+	Triggers  map[string]interface{} `json:"triggers" yaml:"triggers"`
 }
 
 // LoadFromFile loads a workflow configuration from a YAML file
@@ -34,4 +35,13 @@ func LoadFromFile(filepath string) (*WorkflowConfig, error) {
 	}
 
 	return &cfg, nil
+}
+
+// NewEmptyWorkflowConfig creates a new empty workflow configuration
+func NewEmptyWorkflowConfig() *WorkflowConfig {
+	return &WorkflowConfig{
+		Modules:   make([]ModuleConfig, 0),
+		Workflows: make(map[string]interface{}),
+		Triggers:  make(map[string]interface{}),
+	}
 }

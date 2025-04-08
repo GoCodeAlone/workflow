@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"log"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -15,13 +17,17 @@ import (
 // TestStateMachineWorkflow tests the state machine workflow handler
 func TestStateMachineWorkflow(t *testing.T) {
 	// Create a simple application with proper config provider and logger
-	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), &mock.Logger{LogEntries: make([]string, 0)})
+	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), slog.New(slog.NewTextHandler(log.Writer(), nil)))
 
 	// Initialize the app
 	err := app.Init()
 	if err != nil {
 		t.Fatalf("Failed to initialize app: %v", err)
 	}
+
+	// Create a unique module name for this test to avoid conflicts
+	moduleBaseName := "test-order-processor"
+	uniqueModuleName := moduleBaseName + "-" + time.Now().Format("20060102150405.000000000")
 
 	// Create namespace provider for testing
 	namespace := module.NewStandardNamespace("test", "")
@@ -53,7 +59,7 @@ func TestStateMachineWorkflow(t *testing.T) {
 	})
 
 	// Initialize the state machine before registering handlers
-	stateMachine := module.NewStateMachineEngineWithNamespace("order-processor", namespace)
+	stateMachine := module.NewStateMachineEngineWithNamespace(uniqueModuleName, namespace)
 
 	// Register a state machine definition manually to ensure it exists
 	definition := &module.StateMachineDefinition{
@@ -101,8 +107,7 @@ func TestStateMachineWorkflow(t *testing.T) {
 
 	// Register in service registry to make it available to workflow
 	validationHandlerName := namespace.FormatName("validation-handler")
-	app.SvcRegistry()[validationHandlerName] = validationHandler
-	app.SvcRegistry()[stateMachine.Name()] = stateMachine
+	app.RegisterService(validationHandlerName, validationHandler)
 
 	// Use our adapter for proper modular.Module implementation
 	stateMachineModule := &stateMachineModuleAdapter{
@@ -115,7 +120,7 @@ func TestStateMachineWorkflow(t *testing.T) {
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
 			{
-				Name: stateMachine.Name(), // Use the namespaced name
+				Name: uniqueModuleName, // Use the unique generated name instead of just stateMachine.Name()
 				Type: "statemachine.engine",
 				Config: map[string]interface{}{
 					"description": "Order processing state machine",
@@ -124,7 +129,7 @@ func TestStateMachineWorkflow(t *testing.T) {
 		},
 		Workflows: map[string]interface{}{
 			"statemachine": map[string]interface{}{
-				"engine": "order-processor",
+				"engine": uniqueModuleName, // Use the unique name here too
 				"definitions": []interface{}{
 					map[string]interface{}{
 						"name":         "test-workflow",

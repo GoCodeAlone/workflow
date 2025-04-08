@@ -10,11 +10,18 @@ import (
 )
 
 func TestInMemoryMessageBroker(t *testing.T) {
-	// Create broker
+	// Create broker with a proper logger initialization
 	broker := NewInMemoryMessageBroker("test-broker")
 
+	// Initialize the broker with a mock application to set the logger
+	mockApp := NewMockApplication()
+	err := broker.Init(mockApp)
+	if err != nil {
+		t.Fatalf("Failed to initialize broker: %v", err)
+	}
+
 	// Test message sending with no subscribers
-	err := broker.Producer().SendMessage("test-topic", []byte("test message"))
+	err = broker.Producer().SendMessage("test-topic", []byte("test message"))
 	if err != nil {
 		t.Errorf("failed to send message to empty topic: %v", err)
 	}
@@ -33,6 +40,7 @@ func TestInMemoryMessageBroker(t *testing.T) {
 			messageWg.Done()
 			return nil
 		},
+		logger: mockApp.Logger(), // Add logger to avoid nil pointer dereference
 	}
 
 	// Subscribe handler to topic
@@ -105,8 +113,9 @@ func (m *mockMessageProducer) SendMessage(topic string, message []byte) error {
 }
 
 func TestSimpleMessageHandler(t *testing.T) {
-	// Create handler
+	// Create handler with a mock logger
 	handler := NewSimpleMessageHandler("test-handler")
+	handler.logger = &mockLogger{entries: make([]string, 0)} // Add logger to avoid nil pointer dereference
 
 	// Test default handler implementation
 	err := handler.HandleMessage([]byte("test message"))
@@ -200,6 +209,11 @@ func TestMessagingModulesIntegration(t *testing.T) {
 	// Create message handlers with unique names
 	handler1 := NewSimpleMessageHandler(handler1Name)
 	handler2 := NewSimpleMessageHandler(handler2Name)
+
+	// Initialize loggers immediately to avoid nil pointer dereference
+	mockLogger := &mockLogger{entries: make([]string, 0)}
+	handler1.logger = mockLogger
+	handler2.logger = mockLogger
 
 	// Set the broker dependencies for the handlers to match our unique broker name
 	handler1.SetBrokerDependencies([]string{brokerName})
@@ -296,6 +310,12 @@ func TestMessageForwarding(t *testing.T) {
 	broker := NewInMemoryMessageBroker(forwarderBrokerName)
 	forwarder := NewSimpleMessageHandler(forwarderName)
 	receiver := NewSimpleMessageHandler(receiverName)
+
+	// Initialize loggers immediately to avoid nil pointer dereference
+	mockLogger := &mockLogger{entries: make([]string, 0)}
+	broker.logger = mockLogger
+	forwarder.logger = mockLogger
+	receiver.logger = mockLogger
 
 	// Set the broker dependencies for the forwarding handlers
 	forwarder.SetBrokerDependencies([]string{forwarderBrokerName})

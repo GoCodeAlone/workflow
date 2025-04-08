@@ -1,0 +1,184 @@
+modules:
+  # HTTP infrastructure
+  - name: api-http-server
+    type: http.server
+    config:
+      address: ":8080"
+  
+  - name: api-router
+    type: http.router
+    dependsOn:
+      - api-http-server
+
+  # Authentication middleware
+  - name: auth-middleware
+    type: http.middleware.auth
+    config:
+      secretKey: "my-secret-key"
+  
+  # Messaging infrastructure
+  - name: message-broker
+    type: messaging.broker
+
+  # Scheduler for timed operations
+  - name: cron-scheduler
+    type: scheduler.cron
+  
+  # API handlers
+  - name: users-api
+    type: api.handler
+    config:
+      resourceName: "users"
+
+  - name: products-api
+    type: api.handler
+    config:
+      resourceName: "products"
+
+  - name: orders-api
+    type: api.handler
+    config:
+      resourceName: "orders"
+  
+  - name: health-api
+    type: http.handler
+    config:
+      contentType: "application/json"
+
+  # Messaging handlers
+  - name: user-event-handler
+    type: messaging.handler
+
+  - name: order-processor
+    type: messaging.handler
+
+  - name: inventory-updater
+    type: messaging.handler
+
+  - name: notification-service
+    type: messaging.handler
+  
+  # State machine for order processing
+  - name: order-state-machine
+    type: statemachine.engine
+    config:
+      description: "Processes orders through their lifecycle"
+
+workflows:
+  http:
+    routes:
+      # Public endpoints
+      - method: GET
+        path: /health
+        handler: health-api
+
+      # Protected endpoints
+      - method: GET
+        path: /api/users
+        handler: users-api
+        middlewares:
+          - auth-middleware
+      - method: POST
+        path: /api/users
+        handler: users-api
+        middlewares:
+          - auth-middleware
+      - method: GET
+        path: /api/products
+        handler: products-api
+        middlewares:
+          - auth-middleware
+      - method: GET
+        path: /api/orders
+        handler: orders-api
+        middlewares:
+          - auth-middleware
+      - method: POST
+        path: /api/orders
+        handler: orders-api
+        middlewares:
+          - auth-middleware
+
+  messaging:
+    subscriptions:
+      - topic: user-events
+        handler: user-event-handler
+      - topic: order-events
+        handler: order-processor
+      - topic: inventory-updates
+        handler: inventory-updater
+      - topic: notifications
+        handler: notification-service
+
+  statemachine:
+    engine: order-state-machine
+    definitions:
+      - name: order-workflow
+        description: "Order processing workflow"
+        initialState: "new"
+        states:
+          new:
+            description: "New order"
+            isFinal: false
+          processing:
+            description: "Order is being processed"
+            isFinal: false
+          completed:
+            description: "Order has been completed"
+            isFinal: true
+          cancelled:
+            description: "Order was cancelled"
+            isFinal: true
+        transitions:
+          submit_order:
+            fromState: "new"
+            toState: "processing"
+          complete_order:
+            fromState: "processing"
+            toState: "completed"
+          cancel_order:
+            fromState: "processing"
+            toState: "cancelled"
+
+# New section for triggers
+triggers:
+  http:
+    routes:
+      - path: "/api/workflows/orders/submit"
+        method: "POST"
+        workflow: "order-workflow"
+        action: "submit_order"
+      - path: "/api/workflows/orders/:id/complete"
+        method: "POST"
+        workflow: "order-workflow"
+        action: "complete_order"
+      - path: "/api/workflows/orders/:id/cancel"
+        method: "POST"
+        workflow: "order-workflow"
+        action: "cancel_order"
+
+  schedule:
+    jobs:
+      - cron: "0 * * * *"  # Every hour
+        workflow: "order-workflow"
+        action: "process_pending_orders"
+        params:
+          batchSize: 100
+      - cron: "0 0 * * *"  # Every day at midnight
+        workflow: "inventory-workflow"
+        action: "daily_inventory_check"
+
+  event:
+    subscriptions:
+      - topic: "order-events"
+        event: "order.created"
+        workflow: "order-workflow"
+        action: "submit_order"
+      - topic: "order-events"
+        event: "order.payment_received"
+        workflow: "order-workflow"
+        action: "complete_order"
+      - topic: "order-events"
+        event: "order.cancelled"
+        workflow: "order-workflow"
+        action: "cancel_order"

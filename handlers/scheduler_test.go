@@ -38,12 +38,7 @@ func TestSchedulerWorkflow(t *testing.T) {
 	})
 
 	// Create and register the scheduler
-	cronScheduler := module.NewCronScheduler("cron-scheduler", "* * * * *")
-
-	// Register using the adapter
-	schedulerAdapter := &schedulerModuleAdapter{scheduler: cronScheduler}
-	app.RegisterModule(schedulerAdapter)
-	app.SvcRegistry()["cron-scheduler"] = cronScheduler
+	app.RegisterModule(module.NewCronScheduler("cron-scheduler", "* * * * *"))
 
 	// Create a minimal scheduler workflow configuration
 	cfg := &config.WorkflowConfig{
@@ -74,8 +69,7 @@ func TestSchedulerWorkflow(t *testing.T) {
 		if expr, ok := config["cronExpression"].(string); ok {
 			cronExpression = expr
 		}
-		scheduler := module.NewCronScheduler(name, cronExpression)
-		return &schedulerModuleAdapter{scheduler: scheduler}
+		return module.NewCronScheduler(name, cronExpression)
 	})
 
 	// Build workflow
@@ -111,18 +105,6 @@ func TestSchedulerWorkflow(t *testing.T) {
 	if !mockJobExecuted {
 		t.Errorf("Expected scheduler job to be executed")
 	}
-}
-
-type schedulerModuleAdapter struct {
-	scheduler *module.CronScheduler
-}
-
-func (a *schedulerModuleAdapter) Init(app modular.Application) error {
-	return a.scheduler.Init(app.SvcRegistry())
-}
-
-func (a *schedulerModuleAdapter) Name() string {
-	return a.scheduler.Name()
 }
 
 // The applicationServiceRegistryAdapter is now defined in test_helpers.go

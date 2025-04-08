@@ -118,8 +118,6 @@ func (e *StateMachineEngine) Name() string {
 
 // Init initializes the state machine engine
 func (e *StateMachineEngine) Init(app modular.Application) error {
-	// Register ourselves in the service registry
-	app.SvcRegistry()[e.name] = e
 	return nil
 }
 

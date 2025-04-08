@@ -42,6 +42,7 @@ func NewInMemoryMessageBrokerWithNamespace(name string, namespace ModuleNamespac
 		name:          formattedName,
 		namespace:     namespace,
 		subscriptions: make(map[string][]MessageHandler),
+		logger:        &noopLogger{}, // Initialize with a no-op logger until Init is called
 	}
 	broker.producer = &inMemoryProducer{broker: broker}
 	broker.consumer = &inMemoryConsumer{broker: broker}
@@ -174,3 +175,12 @@ func (c *inMemoryConsumer) Unsubscribe(topic string) error {
 	c.broker.logger.Info("Handler unsubscribed from ", "topic", topic)
 	return nil
 }
+
+// noopLogger is a simple logger implementation that does nothing
+type noopLogger struct{}
+
+func (l *noopLogger) Debug(format string, args ...interface{}) {}
+func (l *noopLogger) Info(format string, args ...interface{})  {}
+func (l *noopLogger) Warn(format string, args ...interface{})  {}
+func (l *noopLogger) Error(format string, args ...interface{}) {}
+func (l *noopLogger) Fatal(format string, args ...interface{}) {}
