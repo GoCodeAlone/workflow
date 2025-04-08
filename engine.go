@@ -28,8 +28,8 @@ type StartStopModule interface {
 	Stop(ctx context.Context) error
 }
 
-// Engine represents the workflow execution engine
-type Engine struct {
+// StdEngine represents the workflow execution engine
+type StdEngine struct {
 	app              modular.Application
 	workflowHandlers []WorkflowHandler
 	moduleFactories  map[string]ModuleFactory
@@ -39,9 +39,9 @@ type Engine struct {
 	triggerRegistry  *module.TriggerRegistry
 }
 
-// NewEngine creates a new workflow engine
-func NewEngine(app modular.Application, logger modular.Logger) *Engine {
-	return &Engine{
+// NewStdEngine creates a new workflow engine
+func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
+	return &StdEngine{
 		app:              app,
 		workflowHandlers: make([]WorkflowHandler, 0),
 		moduleFactories:  make(map[string]ModuleFactory),
@@ -53,23 +53,23 @@ func NewEngine(app modular.Application, logger modular.Logger) *Engine {
 }
 
 // RegisterWorkflowHandler adds a workflow handler to the engine
-func (e *Engine) RegisterWorkflowHandler(handler WorkflowHandler) {
+func (e *StdEngine) RegisterWorkflowHandler(handler WorkflowHandler) {
 	e.workflowHandlers = append(e.workflowHandlers, handler)
 }
 
 // RegisterTrigger registers a trigger with the engine
-func (e *Engine) RegisterTrigger(trigger module.Trigger) {
+func (e *StdEngine) RegisterTrigger(trigger module.Trigger) {
 	e.triggers = append(e.triggers, trigger)
 	e.triggerRegistry.RegisterTrigger(trigger)
 }
 
 // AddModuleType registers a factory function for a module type
-func (e *Engine) AddModuleType(moduleType string, factory ModuleFactory) {
+func (e *StdEngine) AddModuleType(moduleType string, factory ModuleFactory) {
 	e.moduleFactories[moduleType] = factory
 }
 
 // BuildFromConfig builds a workflow from configuration
-func (e *Engine) BuildFromConfig(cfg *config.WorkflowConfig) error {
+func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	// Register all modules from config
 	for _, modCfg := range cfg.Modules {
 		// Create modules based on type
@@ -173,7 +173,7 @@ func (e *Engine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 }
 
 // Start starts all modules and triggers
-func (e *Engine) Start(ctx context.Context) error {
+func (e *StdEngine) Start(ctx context.Context) error {
 	// Start all modules
 	for _, mod := range e.modules {
 		// Check if the module implements our StartStopModule interface
@@ -196,7 +196,7 @@ func (e *Engine) Start(ctx context.Context) error {
 }
 
 // Stop stops all modules and triggers
-func (e *Engine) Stop(ctx context.Context) error {
+func (e *StdEngine) Stop(ctx context.Context) error {
 	var lastErr error
 
 	// Stop all triggers first
@@ -223,7 +223,7 @@ func (e *Engine) Stop(ctx context.Context) error {
 }
 
 // TriggerWorkflow starts a workflow based on a trigger
-func (e *Engine) TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) error {
+func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) error {
 	// Find the appropriate workflow handler
 	for _, handler := range e.workflowHandlers {
 		if handler.CanHandle(workflowType) {
@@ -247,19 +247,19 @@ func (e *Engine) TriggerWorkflow(ctx context.Context, workflowType string, actio
 }
 
 // buildModules creates and initializes all modules from configuration
-func (e *Engine) buildModules(modulesConfig []map[string]interface{}) error {
+func (e *StdEngine) buildModules(modulesConfig []map[string]interface{}) error {
 	// ... existing code ...
 	return nil
 }
 
 // configureWorkflows sets up all workflows from configuration
-func (e *Engine) configureWorkflows(workflowConfigs map[string]interface{}) error {
+func (e *StdEngine) configureWorkflows(workflowConfigs map[string]interface{}) error {
 	// ... existing code ...
 	return nil
 }
 
 // configureTriggers sets up all triggers from configuration
-func (e *Engine) configureTriggers(triggerConfigs map[string]interface{}) error {
+func (e *StdEngine) configureTriggers(triggerConfigs map[string]interface{}) error {
 	if len(triggerConfigs) == 0 {
 		// No triggers configured, which is fine
 		return nil
@@ -307,4 +307,14 @@ func canHandleTrigger(trigger module.Trigger, triggerType string) bool {
 	default:
 		return false
 	}
+}
+
+type Engine interface {
+	RegisterWorkflowHandler(handler WorkflowHandler)
+	RegisterTrigger(trigger module.Trigger)
+	AddModuleType(moduleType string, factory ModuleFactory)
+	BuildFromConfig(cfg *config.WorkflowConfig) error
+	Start(ctx context.Context) error
+	Stop(ctx context.Context) error
+	TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) error
 }

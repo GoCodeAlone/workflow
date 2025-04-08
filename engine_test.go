@@ -15,7 +15,7 @@ import (
 )
 
 // setupEngineTest creates an isolated test environment for engine tests
-func setupEngineTest(t *testing.T) (*Engine, modular.Application, context.Context, context.CancelFunc) {
+func setupEngineTest(t *testing.T) (*StdEngine, modular.Application, context.Context, context.CancelFunc) {
 	t.Helper()
 
 	// Create isolated mock logger
@@ -31,7 +31,7 @@ func setupEngineTest(t *testing.T) (*Engine, modular.Application, context.Contex
 	}
 
 	// Create engine with the isolated app
-	engine := NewEngine(app, mockLogger)
+	engine := NewStdEngine(app, mockLogger)
 
 	// Create a context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
@@ -115,7 +115,7 @@ func TestEngineTriggerIntegration(t *testing.T) {
 	app := newMockApplication()
 
 	// Create the engine
-	engine := NewEngine(app, app.Logger())
+	engine := NewStdEngine(app, app.Logger())
 
 	// Register a mock trigger with a matching configType
 	mockTrigger := &mockTrigger{
@@ -152,7 +152,7 @@ func TestEngineTriggerIntegration(t *testing.T) {
 	// Check if the engine registered itself as a service
 	engineSvc, ok := app.services["workflowEngine"]
 	if !ok {
-		t.Error("Engine did not register itself as a service")
+		t.Error("StdEngine did not register itself as a service")
 	}
 	if engineSvc != engine {
 		t.Error("Registered engine service is not the same instance")
@@ -188,7 +188,7 @@ func TestEngineTriggerWorkflow(t *testing.T) {
 	app := newMockApplication()
 
 	// Create the engine
-	engine := NewEngine(app, app.Logger())
+	engine := NewStdEngine(app, app.Logger())
 
 	// Register a mock workflow handler
 	mockHandler := &mockWorkflowHandler{

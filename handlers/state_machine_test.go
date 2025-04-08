@@ -33,7 +33,7 @@ func TestStateMachineWorkflow(t *testing.T) {
 	namespace := module.NewStandardNamespace("test", "")
 
 	// Create workflow engine
-	engine = workflow.NewEngine(app, &mock.Logger{LogEntries: make([]string, 0)})
+	engine = workflow.NewStdEngine(app, &mock.Logger{LogEntries: make([]string, 0)})
 
 	// Register workflow handlers
 	engine.RegisterWorkflowHandler(NewStateMachineWorkflowHandlerWithNamespace(namespace))
@@ -263,7 +263,7 @@ func (a *stateMachineModuleAdapter) ProvidesServices() []modular.ServiceProvider
 	return []modular.ServiceProvider{
 		{
 			Name:        a.engine.Name(),
-			Description: "State Machine Engine",
+			Description: "State Machine StdEngine",
 			Instance:    a.engine,
 		},
 	}
