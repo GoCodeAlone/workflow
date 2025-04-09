@@ -116,6 +116,13 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				}
 				e.logger.Debug("Loading HTTP middleware auth module with auth type: " + authType)
 				mod = module.NewAuthMiddleware(modCfg.Name, authType)
+			case "http.middleware.logging":
+				logLevel := "info" // Default log level
+				if ll, ok := modCfg.Config["logLevel"].(string); ok {
+					logLevel = ll
+				}
+				e.logger.Debug("Loading HTTP middleware logging module with log level: " + logLevel)
+				mod = module.NewLoggingMiddleware(modCfg.Name, logLevel)
 			case "messaging.broker":
 				e.logger.Debug("Loading messaging broker module")
 				mod = module.NewInMemoryMessageBroker(modCfg.Name)

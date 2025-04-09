@@ -46,6 +46,11 @@ modules:
     dependsOn:
       - http-server
 
+  - name: logging-middleware
+    type: http.middleware.logging
+    config:
+      logLevel: "info"
+
   - name: order-api
     type: api.handler
     dependsOn:
@@ -62,12 +67,23 @@ workflows:
       - method: "POST"
         path: "/api/orders"
         handler: order-api
+        middlewares:
+          - logging-middleware
       - method: "GET"
-        path: "/api/orders/:id"
+        path: "/api/orders"
         handler: order-api
+        middlewares:
+          - logging-middleware
+      - method: "GET"
+        path: "/api/orders/{id}"
+        handler: order-api
+        middlewares:
+          - logging-middleware
       - method: "PUT"
-        path: "/api/orders/:id/transition"
+        path: "/api/orders/{id}/transition"
         handler: order-api
+        middlewares:
+          - logging-middleware
 
   # State machine workflow definition
   statemachine:

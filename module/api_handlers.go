@@ -4,11 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/GoCodeAlone/modular"
 	"net/http"
 	"strings"
 	"sync"
-
-	"github.com/GoCodeAlone/modular"
 )
 
 // RESTResource represents a simple in-memory resource store for REST APIs
@@ -24,6 +23,8 @@ type RESTAPIHandler struct {
 	resources    map[string]RESTResource
 	mu           sync.RWMutex
 	eventBroker  MessageProducer // Optional dependency for publishing events
+	logger       modular.Logger
+	app          modular.Application
 }
 
 // RESTAPIHandlerConfig contains configuration for a REST API handler
@@ -51,6 +52,8 @@ func (h *RESTAPIHandler) Constructor() modular.ModuleConstructor {
 	return func(app modular.Application, services map[string]any) (modular.Module, error) {
 		// Create a new instance with the same name
 		handler := NewRESTAPIHandler(h.name, h.resourceName)
+		handler.app = app
+		handler.logger = app.Logger()
 
 		// Look for a message broker service for event publishing
 		if broker, ok := services["message-broker"]; ok {
@@ -65,6 +68,8 @@ func (h *RESTAPIHandler) Constructor() modular.ModuleConstructor {
 
 // Init initializes the module with the application context
 func (h *RESTAPIHandler) Init(app modular.Application) error {
+	h.app = app
+	h.logger = app.Logger()
 	// Get configuration if available
 	configSection, err := app.GetConfigSection("workflow")
 	if err == nil {
@@ -94,25 +99,51 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 func (h *RESTAPIHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// Extract ID from path if present (e.g., /api/users/123)
-	path := strings.TrimPrefix(r.URL.Path, "/api/"+h.resourceName)
-	id := ""
-	if path != "" && path[0] == '/' {
-		id = path[1:]
+	// Extract path segments for proper routing
+	pathSegments := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+
+	// Check if this is a resource-specific request (has ID) or a collection request
+	id := r.PathValue("id")
+	isTransitionRequest := false
+
+	// We expect paths like:
+	// - /api/orders (collection)
+	// - /api/orders/123 (specific resource)
+	// - /api/orders/123/transition (resource action)
+
+	if len(pathSegments) >= 3 && pathSegments[0] == "api" && pathSegments[1] == h.resourceName {
+		// Check if this is a transition request
+		if len(pathSegments) >= 4 && pathSegments[3] == "transition" {
+			isTransitionRequest = true
+		}
 	}
 
-	switch r.Method {
-	case http.MethodGet:
+	h.logger.Debug(fmt.Sprintf("[%s] %s %s %s %+v\n", h.resourceName, r.Method, r.URL.Path, id, pathSegments))
+
+	// Route based on method and path structure
+	switch {
+	case isTransitionRequest && r.Method == http.MethodPut:
+		// Handle state machine transition request
+		h.handleTransition(id, w, r)
+	case r.Method == http.MethodGet && id != "":
+		// Get a specific resource
 		h.handleGet(id, w, r)
-	case http.MethodPost:
+	case r.Method == http.MethodGet:
+		// List all resources
+		h.handleGetAll(w, r)
+	case r.Method == http.MethodPost:
+		// Create a new resource
 		h.handlePost(id, w, r)
-	case http.MethodPut:
+	case r.Method == http.MethodPut && id != "":
+		// Update an existing resource
 		h.handlePut(id, w, r)
-	case http.MethodDelete:
+	case r.Method == http.MethodDelete && id != "":
+		// Delete a resource
 		h.handleDelete(id, w, r)
 	default:
+		// Method not allowed or invalid path
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed or invalid path"})
 	}
 }
 
@@ -140,6 +171,21 @@ func (h *RESTAPIHandler) handleGet(id string, w http.ResponseWriter, r *http.Req
 	// Not found
 	w.WriteHeader(http.StatusNotFound)
 	json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"})
+}
+
+// handleGetAll handles GET requests for listing all resources
+func (h *RESTAPIHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	// List all resources
+	resources := make([]RESTResource, 0, len(h.resources))
+	for _, resource := range h.resources {
+		resources = append(resources, resource)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resources)
 }
 
 // handlePost handles POST requests for creating resources
@@ -276,6 +322,138 @@ func (h *RESTAPIHandler) handleDelete(id string, w http.ResponseWriter, r *http.
 			}
 		}()
 	}
+}
+
+// handleTransition handles state transitions for state machine resources
+func (h *RESTAPIHandler) handleTransition(id string, w http.ResponseWriter, r *http.Request) {
+	if id == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Resource ID is required for transition"})
+		return
+	}
+
+	// Parse the transition request
+	var transitionRequest struct {
+		Transition string                 `json:"transition"`
+		Data       map[string]interface{} `json:"data,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&transitionRequest); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid transition request format"})
+		return
+	}
+
+	if transitionRequest.Transition == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Transition name is required"})
+		return
+	}
+
+	// Prepare the workflow data
+	workflowData := make(map[string]interface{})
+
+	// Merge existing resource data
+	h.mu.RLock()
+	resource, exists := h.resources[id]
+	h.mu.RUnlock()
+
+	if !exists {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"})
+		return
+	}
+
+	// Add resource data to workflow data
+	for k, v := range resource.Data {
+		workflowData[k] = v
+	}
+
+	// Add custom transition data if provided
+	if transitionRequest.Data != nil {
+		for k, v := range transitionRequest.Data {
+			workflowData[k] = v
+		}
+	}
+
+	// Ensure we have the required fields
+	workflowData["id"] = id
+	workflowData["instanceId"] = id
+
+	// Find workflow engine to trigger the transition
+	var engine interface{}
+
+	// Look for the workflow engine in the service registry
+	for name, svc := range h.app.SvcRegistry() {
+		if strings.Contains(strings.ToLower(name), "engine") ||
+			strings.Contains(strings.ToLower(name), "workflow") ||
+			strings.Contains(strings.ToLower(name), "processor") {
+			engine = svc
+			break
+		}
+	}
+
+	if engine == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Workflow engine not found"})
+		return
+	}
+
+	// Try to trigger the workflow
+	var result map[string]interface{}
+	var err error
+
+	// Try different engine types
+	switch e := engine.(type) {
+	case interface {
+		TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) error
+	}:
+		// Using the main engine
+		err = e.TriggerWorkflow(r.Context(), "statemachine", transitionRequest.Transition, workflowData)
+		result = map[string]interface{}{
+			"success":    err == nil,
+			"id":         id,
+			"transition": transitionRequest.Transition,
+		}
+
+	case interface {
+		TriggerTransition(ctx context.Context, instanceID, transitionID string, data map[string]interface{}) error
+	}:
+		// Using the state machine directly
+		err = e.TriggerTransition(r.Context(), id, transitionRequest.Transition, workflowData)
+		result = map[string]interface{}{
+			"success":    err == nil,
+			"id":         id,
+			"transition": transitionRequest.Transition,
+		}
+
+	default:
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Workflow engine does not support transitions"})
+		return
+	}
+
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":    false,
+			"error":      err.Error(),
+			"transition": transitionRequest.Transition,
+		})
+		return
+	}
+
+	// Get updated resource data
+	h.mu.RLock()
+	updatedResource, exists := h.resources[id]
+	h.mu.RUnlock()
+
+	if exists {
+		result["resource"] = updatedResource
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(result)
 }
 
 // Start is a no-op for this handler

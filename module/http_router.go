@@ -24,6 +24,7 @@ type StandardHTTPRouter struct {
 	routes     []Route
 	mu         sync.RWMutex
 	serverDeps []string // Names of HTTP server modules this router depends on
+	serveMux   *http.ServeMux
 }
 
 // NewStandardHTTPRouter creates a new HTTP router
@@ -99,9 +100,17 @@ func (r *StandardHTTPRouter) ServeHTTP(w http.ResponseWriter, req *http.Request)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// Simple route matching
+	r.serveMux.ServeHTTP(w, req)
+}
+
+// Start is a no-op for router (implements Startable interface)
+func (r *StandardHTTPRouter) Start(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	mux := http.NewServeMux()
 	for _, route := range r.routes {
-		if route.Method == req.Method && route.Path == req.URL.Path {
+		mux.HandleFunc(fmt.Sprintf("%s %s", route.Method, route.Path), func(w http.ResponseWriter, r *http.Request) {
 			// Create handler chain with middleware
 			var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				route.Handler.Handle(w, r)
@@ -115,19 +124,13 @@ func (r *StandardHTTPRouter) ServeHTTP(w http.ResponseWriter, req *http.Request)
 			}
 
 			// Execute the handler chain
-			handler.ServeHTTP(w, req)
-			return
-		}
+			handler.ServeHTTP(w, r)
+		})
 	}
 
-	// No route matched
-	w.WriteHeader(http.StatusNotFound)
-	w.Write([]byte("404 - Not Found"))
-}
+	r.serveMux = mux
 
-// Start is a no-op for router (implements Startable interface)
-func (r *StandardHTTPRouter) Start(ctx context.Context) error {
-	return nil // Nothing to start
+	return nil
 }
 
 // Stop is a no-op for router (implements Stoppable interface)

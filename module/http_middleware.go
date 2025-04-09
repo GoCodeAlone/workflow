@@ -125,6 +125,7 @@ func min(a, b int) int {
 type LoggingMiddleware struct {
 	name     string
 	logLevel string
+	logger   modular.Logger
 }
 
 // NewLoggingMiddleware creates a new logging middleware
@@ -142,6 +143,7 @@ func (m *LoggingMiddleware) Name() string {
 
 // Init initializes the middleware
 func (m *LoggingMiddleware) Init(app modular.Application) error {
+	m.logger = app.Logger()
 	return nil
 }
 
@@ -153,8 +155,7 @@ func (m *LoggingMiddleware) Process(next http.Handler) http.Handler {
 		// Call the next handler
 		next.ServeHTTP(w, r)
 
-		// Log the request
-		fmt.Printf("[%s] %s %s %s\n", m.logLevel, r.Method, r.URL.Path, time.Since(start))
+		m.logger.Info(fmt.Sprintf("[%s] %s %s %s\n", m.logLevel, r.Method, r.URL.Path, time.Since(start)))
 	})
 }
 
@@ -172,16 +173,6 @@ func (m *LoggingMiddleware) ProvidesServices() []modular.ServiceProvider {
 // RequiresServices returns services required by this middleware
 func (m *LoggingMiddleware) RequiresServices() []modular.ServiceDependency {
 	// No dependencies required
-	return nil
-}
-
-// Start is a no-op for this middleware
-func (m *LoggingMiddleware) Start(ctx context.Context) error {
-	return nil
-}
-
-// Stop is a no-op for this middleware
-func (m *LoggingMiddleware) Stop(ctx context.Context) error {
 	return nil
 }
 
