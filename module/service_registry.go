@@ -1,4 +1,4 @@
-// package module defines core interfaces for the workflow engine
+// Package module defines core interfaces for the workflow engine
 package module
 
 // ServiceRegistry defines the interface for registering and retrieving services

@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/GoCodeAlone/modular"
 	workflowmodule "github.com/GoCodeAlone/workflow/module"
@@ -167,4 +170,122 @@ func (h *MessagingWorkflowHandler) ConfigureWorkflow(app modular.Application, wo
 	}
 
 	return nil
+}
+
+// ExecuteWorkflow executes a workflow with the given action and input data
+func (h *MessagingWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
+	// For messaging workflows, the action represents the broker:topic or just topic
+	// The data will be the message payload
+
+	// Parse the broker and topic from the action
+	brokerName := ""
+	topic := action
+
+	// Parse broker:topic format if used
+	if parts := strings.Split(action, ":"); len(parts) > 1 {
+		brokerName = parts[0]
+		topic = parts[1]
+	}
+
+	// Extract broker name from data if not in action
+	if brokerName == "" {
+		brokerName, _ = data["broker"].(string)
+	}
+
+	// Get the application from context
+	var app modular.Application
+	if appVal := ctx.Value("application"); appVal != nil {
+		app = appVal.(modular.Application)
+	} else {
+		return nil, fmt.Errorf("application context not available")
+	}
+
+	// Find the broker service
+	var broker workflowmodule.MessageBroker
+	services := FixMessagingHandlerServices(app)
+
+	// If broker name specified, try to get that specific broker
+	if brokerName != "" {
+		// Apply namespace if needed
+		if h.namespace != nil {
+			brokerName = h.namespace.ResolveDependency(brokerName)
+		}
+
+		var brokerSvc interface{}
+		_ = app.GetService(brokerName, &brokerSvc)
+		if brokerSvc != nil {
+			if b, ok := brokerSvc.(workflowmodule.MessageBroker); ok {
+				broker = b
+			}
+		}
+	}
+
+	// If no broker found yet, scan all services
+	if broker == nil {
+		// Look through available services
+		for _, svc := range services {
+			if b, ok := svc.(workflowmodule.MessageBroker); ok {
+				broker = b
+				break
+			}
+		}
+
+		// If still not found, look through registry
+		if broker == nil {
+			for _, svc := range app.SvcRegistry() {
+				if b, ok := svc.(workflowmodule.MessageBroker); ok {
+					broker = b
+					break
+				}
+			}
+		}
+	}
+
+	if broker == nil {
+		return nil, fmt.Errorf("no message broker found")
+	}
+
+	if topic == "" {
+		return nil, fmt.Errorf("topic not specified")
+	}
+
+	// Extract the message payload
+	var payload []byte
+	var err error
+
+	// Use the "message" field if present, otherwise use all data
+	if msg, ok := data["message"]; ok {
+		switch m := msg.(type) {
+		case string:
+			payload = []byte(m)
+		case []byte:
+			payload = m
+		default:
+			// Serialize the message object to JSON
+			payload, err = json.Marshal(msg)
+			if err != nil {
+				return nil, fmt.Errorf("failed to serialize message: %w", err)
+			}
+		}
+	} else {
+		// Use data as the message payload
+		payload, err = json.Marshal(data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to serialize message data: %w", err)
+		}
+	}
+
+	// Send the message
+	err = broker.Producer().SendMessage(topic, payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send message to topic '%s': %w", topic, err)
+	}
+
+	// Return success
+	return map[string]interface{}{
+		"success": true,
+		"broker":  broker.(modular.Module).Name(),
+		"topic":   topic,
+		"length":  len(payload),
+	}, nil
 }

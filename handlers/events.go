@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/GoCodeAlone/modular"
@@ -74,15 +75,10 @@ func (h *EventWorkflowHandler) ConfigureWorkflow(app modular.Application, workfl
 	}
 
 	// Get the event processor
-	var processorSvc interface{}
-	_ = app.GetService(processorName, &processorSvc)
-	if processorSvc == nil {
+	var processor *module.EventProcessor
+	err := app.GetService(processorName, &processor)
+	if err != nil || processor == nil {
 		return fmt.Errorf("service '%s' not found", processorName)
-	}
-
-	processor, ok := processorSvc.(*module.EventProcessor)
-	if !ok {
-		return fmt.Errorf("service '%s' is not an EventProcessor", processorName)
 	}
 
 	// Configure patterns
@@ -231,6 +227,85 @@ func (h *EventWorkflowHandler) ConfigureWorkflow(app modular.Application, workfl
 	}
 
 	return nil
+}
+
+// ExecuteWorkflow executes a workflow with the given action and input data
+func (h *EventWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
+	// For event workflows, the action represents the event processor or a specific pattern
+	// Format: processor:pattern or just processor
+	processorName := action
+
+	if parts := strings.Split(action, ":"); len(parts) > 1 {
+		processorName = parts[0]
+	}
+
+	// If no processor name specified, look for one in the data
+	if processorName == "" {
+		if procName, ok := data["processor"].(string); ok {
+			processorName = procName
+		}
+	}
+
+	// Get the application from context
+	var app modular.Application
+	if appVal := ctx.Value("application"); appVal != nil {
+		app = appVal.(modular.Application)
+	} else {
+		return nil, fmt.Errorf("application context not available")
+	}
+
+	// Get the event processor
+	var processor *module.EventProcessor
+	err := app.GetService(processorName, &processor)
+	if err != nil || processor == nil {
+		return nil, fmt.Errorf("event processor '%s' not found: %v", processorName, err)
+	}
+
+	// Create an event from the data
+	eventType := "custom.event"
+	if evtType, ok := data["eventType"].(string); ok {
+		eventType = evtType
+	} else if evtType, ok = data["type"].(string); ok {
+		eventType = evtType
+	}
+
+	sourceID := ""
+	if srcID, ok := data["sourceId"].(string); ok {
+		sourceID = srcID
+	} else if srcID, ok = data["id"].(string); ok {
+		sourceID = srcID
+	} else if srcID, ok = data["userId"].(string); ok {
+		sourceID = srcID
+	}
+
+	correlID := ""
+	if corrID, ok := data["correlationId"].(string); ok {
+		correlID = corrID
+	}
+
+	// Create the event
+	event := module.EventData{
+		EventType:  eventType,
+		SourceID:   sourceID,
+		CorrelID:   correlID,
+		Timestamp:  time.Now(),
+		Data:       data,
+		RawMessage: nil, // We don't have raw message bytes here
+	}
+
+	// Process the event normally
+	err = processor.ProcessEvent(ctx, event)
+	if err != nil {
+		return nil, fmt.Errorf("error processing event: %w", err)
+	}
+
+	return map[string]interface{}{
+		"success":   true,
+		"eventType": eventType,
+		"sourceId":  sourceID,
+		"correlId":  correlID,
+		"processed": true,
+	}, nil
 }
 
 // adaptMessageHandler adapts a message handler to handle event patterns

@@ -93,11 +93,11 @@ func TestIntegrationWorkflow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := crmConnector.Connect(ctx); err != nil {
+	if err = crmConnector.Connect(ctx); err != nil {
 		t.Fatalf("Failed to connect crm-connector: %v", err)
 	}
 
-	if err := emailConnector.Connect(ctx); err != nil {
+	if err = emailConnector.Connect(ctx); err != nil {
 		t.Fatalf("Failed to connect email-connector: %v", err)
 	}
 

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/GoCodeAlone/modular"
@@ -374,4 +375,88 @@ func (h *IntegrationWorkflowHandler) ExecuteIntegrationWorkflow(
 	}
 
 	return results, nil
+}
+
+// ExecuteWorkflow executes a workflow with the given action and input data
+func (h *IntegrationWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
+	// For integration workflows, the action should specify which workflow to run
+	// Find the integration registry
+	registryName := action
+	// If the action contains a colon, it specifies registry:workflow
+	if parts := strings.Split(action, ":"); len(parts) > 1 {
+		registryName = parts[0]
+		action = parts[1]
+	}
+
+	// Get the registry from the service registry
+	appHelper := GetServiceHelper(ctx.Value("application").(modular.Application))
+	registrySvc := appHelper.Service(registryName)
+	if registrySvc == nil {
+		return nil, fmt.Errorf("integration registry '%s' not found", registryName)
+	}
+
+	registry, ok := registrySvc.(module.IntegrationRegistry)
+	if !ok {
+		return nil, fmt.Errorf("service '%s' is not an IntegrationRegistry", registryName)
+	}
+
+	// Parse steps from the data if provided
+	var steps []IntegrationStep
+	if stepsData, ok := data["steps"].([]interface{}); ok {
+		for i, stepData := range stepsData {
+			stepMap, ok := stepData.(map[string]interface{})
+			if !ok {
+				return nil, fmt.Errorf("invalid step data at index %d", i)
+			}
+
+			step := IntegrationStep{
+				Name:       fmt.Sprintf("%s-%d", action, i),
+				Connector:  stepMap["connector"].(string),
+				Action:     stepMap["action"].(string),
+				RetryCount: 0,
+				RetryDelay: "1s",
+			}
+
+			// Extract optional fields if present
+			if input, ok := stepMap["input"].(map[string]interface{}); ok {
+				step.Input = input
+			}
+			if transform, ok := stepMap["transform"].(string); ok {
+				step.Transform = transform
+			}
+			if onSuccess, ok := stepMap["onSuccess"].(string); ok {
+				step.OnSuccess = onSuccess
+			}
+			if onError, ok := stepMap["onError"].(string); ok {
+				step.OnError = onError
+			}
+			if retryCount, ok := stepMap["retryCount"].(float64); ok {
+				step.RetryCount = int(retryCount)
+			}
+			if retryDelay, ok := stepMap["retryDelay"].(string); ok {
+				step.RetryDelay = retryDelay
+			}
+
+			steps = append(steps, step)
+		}
+	} else if action != "" {
+		// Create a single step based on action
+		connector, ok := data["connector"].(string)
+		if !ok {
+			return nil, fmt.Errorf("connector not specified")
+		}
+
+		step := IntegrationStep{
+			Name:      "step-0",
+			Connector: connector,
+			Action:    action,
+			Input:     data,
+		}
+		steps = append(steps, step)
+	} else {
+		return nil, fmt.Errorf("no steps provided and no action specified")
+	}
+
+	// Execute the integration workflow with the steps
+	return h.ExecuteIntegrationWorkflow(ctx, registry, steps, data)
 }

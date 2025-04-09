@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/module"
@@ -87,7 +88,7 @@ func (h *StateMachineWorkflowHandler) Name() string {
 
 // CanHandle returns true if this handler can process the given workflow type
 func (h *StateMachineWorkflowHandler) CanHandle(workflowType string) bool {
-	return workflowType == "statemachine"
+	return workflowType == "statemachine.engine"
 }
 
 // ConfigureWorkflow sets up the workflow from configuration
@@ -110,15 +111,10 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 	}
 
 	// Get the state machine engine
-	var engineSvc interface{}
-	err := app.GetService(engineName, &engineSvc)
-	if err != nil || engineSvc == nil {
+	var engine *module.StateMachineEngine
+	err := app.GetService(engineName, &engine)
+	if err != nil || engine == nil {
 		return fmt.Errorf("state machine engine '%s' not found: %v", engineName, err)
-	}
-
-	engine, ok := engineSvc.(*module.StateMachineEngine)
-	if !ok {
-		return fmt.Errorf("service '%s' is not a StateMachineEngine", engineName)
 	}
 
 	// Configure workflow definitions
@@ -242,7 +238,7 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 
 		// Get the handler service
 		var handlerSvc interface{}
-		err := app.GetService(handlerName, &handlerSvc)
+		err = app.GetService(handlerName, &handlerSvc)
 		if err != nil || handlerSvc == nil {
 			return fmt.Errorf("handler '%s' not found: %v", handlerName, err)
 		}
@@ -401,4 +397,117 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 
 		return nil
 	})
+}
+
+// ExecuteWorkflow executes a workflow with the given action and input data
+func (h *StateMachineWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
+	// For state machine workflows, the action represents a transition to trigger
+	// and data should contain the workflow instance ID
+
+	// Extract the workflow ID from the data
+	instanceID, ok := data["instanceId"].(string)
+	if !ok {
+		// Try other common key names
+		instanceID, ok = data["id"].(string)
+		if !ok {
+			return nil, fmt.Errorf("workflow instance ID not provided in data")
+		}
+	}
+
+	// Extract the workflow definition name if provided
+	workflowName, _ := data["workflowName"].(string)
+
+	// Parse the engine and transition name from the action
+	// Format: engine:transition or just transition
+	engineName := ""
+	transitionName := action
+
+	if parts := strings.Split(action, ":"); len(parts) > 1 {
+		engineName = parts[0]
+		transitionName = parts[1]
+	}
+
+	// Get the state machine engine from the app context
+	var app modular.Application
+	if appVal := ctx.Value("application"); appVal != nil {
+		app = appVal.(modular.Application)
+	} else {
+		return nil, fmt.Errorf("application context not available")
+	}
+
+	// If no specific engine was provided, try to find one
+	var engineSvc interface{}
+	if engineName != "" {
+		// Apply namespace if needed
+		if h.namespace != nil {
+			engineName = h.namespace.ResolveDependency(engineName)
+		}
+
+		// Get the named engine
+		if err := app.GetService(engineName, &engineSvc); err != nil {
+			return nil, fmt.Errorf("state machine engine '%s' not found: %v", engineName, err)
+		}
+	} else {
+		// Try to find a state machine engine by scanning services
+		for name, svc := range app.SvcRegistry() {
+			if engine, ok := svc.(*module.StateMachineEngine); ok {
+				engineSvc = engine
+				engineName = name
+				break
+			}
+		}
+
+		if engineSvc == nil {
+			return nil, fmt.Errorf("no state machine engine found")
+		}
+	}
+
+	engine, ok := engineSvc.(*module.StateMachineEngine)
+	if !ok {
+		return nil, fmt.Errorf("service '%s' is not a StateMachineEngine", engineName)
+	}
+
+	// If workflow name is provided, check if we need to create an instance
+	if workflowName != "" && instanceID == "" {
+		// Create a new instance with the provided data
+		instance, err := engine.CreateWorkflow(workflowType, workflowName, data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create workflow instance: %w", err)
+		}
+
+		instanceID = instance.ID
+
+		// Return the instance without triggering a transition
+		if transitionName == "" {
+			result := map[string]interface{}{
+				"instanceId":   instance.ID,
+				"currentState": instance.CurrentState,
+				"created":      true,
+			}
+			return result, nil
+		}
+	}
+
+	// Execute the state machine transition
+	err := engine.TriggerTransition(ctx, instanceID, transitionName, data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to trigger transition '%s' for instance '%s': %w",
+			transitionName, instanceID, err)
+	}
+
+	// Get the updated instance state
+	instance, err := engine.GetInstance(instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get workflow instance '%s' after transition: %w", instanceID, err)
+	}
+
+	// Return the result
+	result := map[string]interface{}{
+		"instanceId":   instanceID,
+		"currentState": instance.CurrentState,
+		"transition":   transitionName,
+		"success":      true,
+	}
+
+	return result, nil
 }

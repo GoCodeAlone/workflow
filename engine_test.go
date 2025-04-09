@@ -480,3 +480,7 @@ func (h *mockWorkflowHandler) CanHandle(workflowType string) bool {
 func (h *mockWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig interface{}) error {
 	return nil
 }
+
+func (h *mockWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
+	return nil, nil
+}

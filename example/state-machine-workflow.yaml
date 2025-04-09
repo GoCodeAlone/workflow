@@ -48,6 +48,8 @@ modules:
 
   - name: order-api
     type: api.handler
+    dependsOn:
+      - api-router
     config:
       resourceName: "orders"
 

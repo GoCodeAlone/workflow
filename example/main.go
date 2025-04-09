@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -40,7 +41,10 @@ func main() {
 	}
 
 	// Create application with basic logger
-	logger := &simpleLogger{}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: true,
+		Level:     slog.LevelDebug,
+	}))
 	app := modular.NewStdApplication(nil, logger)
 
 	// Create workflow engine
@@ -54,7 +58,7 @@ func main() {
 	engine.RegisterWorkflowHandler(handlers.NewIntegrationWorkflowHandler())
 
 	// Build and start the workflows
-	if err := engine.BuildFromConfig(cfg); err != nil {
+	if err = engine.BuildFromConfig(cfg); err != nil {
 		log.Fatalf("Failed to build workflow: %v", err)
 	}
 
@@ -172,23 +176,4 @@ func findWorkflowConfigs() ([]string, error) {
 	}
 
 	return filteredConfigs, nil
-}
-
-// Simple logger implementation
-type simpleLogger struct{}
-
-func (l *simpleLogger) Info(msg string, args ...any) {
-	log.Printf("[INFO] %s %v\n", msg, args)
-}
-
-func (l *simpleLogger) Error(msg string, args ...any) {
-	log.Printf("[ERROR] %s %v\n", msg, args)
-}
-
-func (l *simpleLogger) Warn(msg string, args ...any) {
-	log.Printf("[WARN] %s %v\n", msg, args)
-}
-
-func (l *simpleLogger) Debug(msg string, args ...any) {
-	log.Printf("[DEBUG] %s %v\n", msg, args)
 }

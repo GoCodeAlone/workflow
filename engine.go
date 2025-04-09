@@ -16,6 +16,9 @@ type WorkflowHandler interface {
 
 	// ConfigureWorkflow sets up the workflow from configuration
 	ConfigureWorkflow(app modular.Application, workflowConfig interface{}) error
+
+	// ExecuteWorkflow executes a workflow with the given action and input data
+	ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error)
 }
 
 // ModuleFactory is a function that creates a module from a name and configuration
@@ -227,8 +230,7 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 	// Find the appropriate workflow handler
 	for _, handler := range e.workflowHandlers {
 		if handler.CanHandle(workflowType) {
-			// The actual workflow execution will depend on the specific handler
-			// For now, we'll implement a generic logging behavior
+			// Log workflow execution
 			e.logger.Info(fmt.Sprintf("Triggered workflow '%s' with action '%s'", workflowType, action))
 
 			// Log the data in debug mode
@@ -236,9 +238,19 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 				e.logger.Debug(fmt.Sprintf("  %s: %v", k, v))
 			}
 
-			// Here we would normally call a method on the handler to execute the workflow
-			// This requires extending the WorkflowHandler interface with an Execute method
-			// For now, we'll just return success
+			// Execute the workflow using the handler
+			results, err := handler.ExecuteWorkflow(ctx, workflowType, action, data)
+			if err != nil {
+				e.logger.Error(fmt.Sprintf("Failed to execute workflow '%s': %v", workflowType, err))
+				return fmt.Errorf("workflow execution failed: %w", err)
+			}
+
+			// Log execution results in debug mode
+			e.logger.Info(fmt.Sprintf("Workflow '%s' executed successfully", workflowType))
+			for k, v := range results {
+				e.logger.Debug(fmt.Sprintf("  Result %s: %v", k, v))
+			}
+
 			return nil
 		}
 	}
