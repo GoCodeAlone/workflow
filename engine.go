@@ -177,15 +177,9 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 
 // Start starts all modules and triggers
 func (e *StdEngine) Start(ctx context.Context) error {
-	// Start all modules
-	for _, mod := range e.modules {
-		// Check if the module implements our StartStopModule interface
-		if startStopMod, ok := mod.(StartStopModule); ok {
-			if err := startStopMod.Start(ctx); err != nil {
-				return fmt.Errorf("failed to start module '%s': %w", mod.Name(), err)
-			}
-		}
-		// Skip modules that don't implement the Start method
+	err := e.app.Start()
+	if err != nil {
+		return fmt.Errorf("failed to start application: %w", err)
 	}
 
 	// Start all triggers
@@ -210,16 +204,10 @@ func (e *StdEngine) Stop(ctx context.Context) error {
 		}
 	}
 
-	// Stop all modules
-	for _, mod := range e.modules {
-		// Check if the module implements our StartStopModule interface
-		if startStopMod, ok := mod.(StartStopModule); ok {
-			if err := startStopMod.Stop(ctx); err != nil {
-				lastErr = fmt.Errorf("failed to stop module '%s': %w", mod.Name(), err)
-				e.logger.Error(lastErr.Error())
-			}
-		}
-		// Skip modules that don't implement the Stop method
+	err := e.app.Stop()
+	if err != nil {
+		lastErr = fmt.Errorf("failed to stop application: %w", err)
+		e.logger.Error(lastErr.Error())
 	}
 
 	return lastErr

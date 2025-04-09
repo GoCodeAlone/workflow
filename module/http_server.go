@@ -15,6 +15,7 @@ type StandardHTTPServer struct {
 	server  *http.Server
 	address string
 	router  HTTPRouter
+	logger  modular.Logger
 }
 
 // NewStandardHTTPServer creates a new HTTP server with the given name and address
@@ -32,6 +33,7 @@ func (s *StandardHTTPServer) Name() string {
 
 // Init initializes the module with the application context
 func (s *StandardHTTPServer) Init(app modular.Application) error {
+	s.logger = app.Logger()
 	// Get configuration if available
 	configSection, err := app.GetConfigSection("http")
 	if err == nil {
@@ -72,11 +74,11 @@ func (s *StandardHTTPServer) Start(ctx context.Context) error {
 	// Start the server in a goroutine
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			fmt.Printf("HTTP server error: %v\n", err)
+			s.logger.Error("HTTP server error", "error", err)
 		}
 	}()
 
-	fmt.Printf("HTTP server started on %s\n", s.address)
+	s.logger.Info("HTTP server started", "address", s.address)
 	return nil
 }
 

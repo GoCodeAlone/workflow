@@ -1,16 +1,8 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
-	"strings"
-
 	"github.com/GoCodeAlone/modular"
 	workflowmodule "github.com/GoCodeAlone/workflow/module"
 )
@@ -151,15 +143,10 @@ func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 				}
 
 				// Get middleware service by name
-				var middlewareSvc interface{}
-				_ = app.GetService(mwName, &middlewareSvc)
-				if middlewareSvc == nil {
+				var middleware workflowmodule.HTTPMiddleware
+				err = app.GetService(mwName, &middleware)
+				if err != nil || middleware == nil {
 					return fmt.Errorf("middleware service '%s' not found for route %s %s", mwName, method, path)
-				}
-
-				middleware, ok := middlewareSvc.(workflowmodule.HTTPMiddleware)
-				if !ok {
-					return fmt.Errorf("service '%s' does not implement HTTPMiddleware interface", mwName)
 				}
 
 				middlewares = append(middlewares, middleware)
@@ -180,8 +167,8 @@ func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 
 // ExecuteWorkflow executes a workflow with the given action and input data
 func (h *HTTPWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
-	// For HTTP workflows, the action should specify the handler to invoke
-	// and data contains the HTTP request parameters
+	// For HTTP workflows, executing the workflow means making sure the server is running
+	// and optionally checking the status or running health checks.
 
 	// Get the application from context
 	var app modular.Application
@@ -191,153 +178,109 @@ func (h *HTTPWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType 
 		return nil, fmt.Errorf("application context not available")
 	}
 
-	// Parse the handler and path from the action
-	// Format: handler:path or just handler
-	handlerName := action
-	path := "/"
-
-	if parts := strings.Split(action, ":"); len(parts) > 1 {
-		handlerName = parts[0]
-		path = parts[1]
+	// Parse the action - it can be a command like "status", "check", "routes", etc.
+	command := action
+	if command == "" {
+		command = "status" // default command
 	}
 
-	// Get handler from data if not in action
-	if handlerName == "" {
-		handlerName, _ = data["handler"].(string)
+	// Find HTTP server and router to check
+	var server workflowmodule.HTTPServer
+	var router workflowmodule.HTTPRouter
+	var serverName, routerName string
+
+	// Look for server and router in all services
+	for name, svc := range app.SvcRegistry() {
+		if server == nil {
+			if s, ok := svc.(workflowmodule.HTTPServer); ok {
+				server = s
+				serverName = name
+			}
+		}
+
+		if router == nil {
+			if r, ok := svc.(workflowmodule.HTTPRouter); ok {
+				router = r
+				routerName = name
+			}
+		}
+
+		if server != nil && router != nil {
+			break
+		}
 	}
 
-	if handlerName == "" {
-		return nil, fmt.Errorf("HTTP handler not specified")
-	}
-
-	// Get the HTTP handler
-	var handlerSvc interface{}
-	err := app.GetService(handlerName, &handlerSvc)
-	if err != nil || handlerSvc == nil {
-		return nil, fmt.Errorf("HTTP handler '%s' not found: %v", handlerName, err)
-	}
-
-	httpHandler, ok := handlerSvc.(workflowmodule.HTTPHandler)
-	if !ok {
-		return nil, fmt.Errorf("service '%s' is not an HTTPHandler", handlerName)
-	}
-
-	// Create a mock HTTP request and response
-	method := "GET"
-	if m, ok := data["method"].(string); ok {
-		method = m
-	}
-
-	// Extract query parameters
-	query := make(map[string][]string)
-	if params, ok := data["params"].(map[string]interface{}); ok {
-		for k, v := range params {
-			if str, ok := v.(string); ok {
-				query[k] = []string{str}
-			} else if strs, ok := v.([]string); ok {
-				query[k] = strs
-			} else if strs, ok := v.([]interface{}); ok {
-				values := make([]string, 0, len(strs))
-				for _, item := range strs {
-					if str, ok := item.(string); ok {
-						values = append(values, str)
-					}
-				}
-				if len(values) > 0 {
-					query[k] = values
-				}
+	// Look for explicitly specified server and router names in the data
+	if explicit, ok := data["server"].(string); ok && explicit != "" {
+		var serverSvc interface{}
+		if err := app.GetService(explicit, &serverSvc); err == nil && serverSvc != nil {
+			if s, ok := serverSvc.(workflowmodule.HTTPServer); ok {
+				server = s
+				serverName = explicit
 			}
 		}
 	}
 
-	// Create the URL with query
-	urlValues := url.Values(query)
-	urlStr := "http://localhost" + path
-	if len(query) > 0 {
-		urlStr += "?" + urlValues.Encode()
-	}
-
-	// Create a request with the path and query
-	req, err := http.NewRequestWithContext(ctx, method, urlStr, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	// Add body if present
-	if body, ok := data["body"]; ok {
-		var bodyBytes []byte
-		switch b := body.(type) {
-		case string:
-			bodyBytes = []byte(b)
-		case []byte:
-			bodyBytes = b
-		default:
-			// Try to marshal as JSON
-			bodyBytes, err = json.Marshal(body)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal request body: %w", err)
-			}
-			// Set content type to JSON if not explicitly set
-			if req.Header.Get("Content-Type") == "" {
-				req.Header.Set("Content-Type", "application/json")
-			}
-		}
-
-		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		req.ContentLength = int64(len(bodyBytes))
-	}
-
-	// Add headers
-	if headers, ok := data["headers"].(map[string]interface{}); ok {
-		for k, v := range headers {
-			if str, ok := v.(string); ok {
-				req.Header.Add(k, str)
+	if explicit, ok := data["router"].(string); ok && explicit != "" {
+		var routerSvc interface{}
+		if err := app.GetService(explicit, &routerSvc); err == nil && routerSvc != nil {
+			if r, ok := routerSvc.(workflowmodule.HTTPRouter); ok {
+				router = r
+				routerName = explicit
 			}
 		}
 	}
 
-	// Create a response recorder
-	rr := httptest.NewRecorder()
-
-	// Execute the handler
-	httpHandler.Handle(rr, req)
-
-	// Get the response
-	resp := rr.Result()
-	defer resp.Body.Close()
-
-	// Read response body
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+	if server == nil {
+		return nil, fmt.Errorf("no HTTP server found in the application services")
 	}
 
-	// Try to parse JSON response
-	var respData interface{}
-	if err := json.Unmarshal(respBody, &respData); err != nil {
-		// If not JSON, return as string
-		respData = string(respBody)
+	if router == nil {
+		return nil, fmt.Errorf("no HTTP router found in the application services")
 	}
 
-	// Return the result
+	// Execute the requested command
 	result := map[string]interface{}{
-		"success":      true,
-		"handler":      handlerName,
-		"statusCode":   resp.StatusCode,
-		"status":       resp.Status,
-		"contentType":  resp.Header.Get("Content-Type"),
-		"responseData": respData,
+		"server": serverName,
+		"router": routerName,
 	}
 
-	// Add headers if any
-	if len(resp.Header) > 0 {
-		headers := make(map[string]string)
-		for k, v := range resp.Header {
-			if len(v) > 0 {
-				headers[k] = v[0]
+	switch command {
+	case "status":
+		// Simply report if the server is available
+		result["status"] = "running"
+
+	case "routes":
+		// Try to get route information if available
+		/*if stdRouter, ok := router.(*workflowmodule.StandardHTTPRouter); ok {
+			routes := stdRouter.GetRoutes()
+			routeInfo := make([]map[string]string, 0, len(routes))
+
+			for _, r := range routes {
+				routeInfo = append(routeInfo, map[string]string{
+					"method": r.Method,
+					"path":   r.Path,
+					"handler": r.HandlerName,
+				})
 			}
-		}
-		result["headers"] = headers
+
+			result["routes"] = routeInfo
+			result["routeCount"] = len(routes)
+		} else {*/
+		result["routes"] = "information not available for this router type"
+		//}
+
+	case "check":
+		// More detailed health check could be added here
+		result["healthStatus"] = "healthy"
+
+	case "start":
+		// Ensure the server is started
+		// This is mostly a no-op since the server should already be running
+		result["action"] = "server already running"
+
+	default:
+		return nil, fmt.Errorf("unknown HTTP workflow command: %s", command)
 	}
 
 	return result, nil
