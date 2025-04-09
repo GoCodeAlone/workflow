@@ -174,6 +174,13 @@ func (e *StateMachineEngine) SetTransitionHandler(handler TransitionHandler) {
 	e.transitionHandler = handler
 }
 
+// HasTransitionHandler checks if a transition handler is set
+func (e *StateMachineEngine) HasTransitionHandler() bool {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+	return e.transitionHandler != nil
+}
+
 // CreateWorkflow creates a new workflow instance
 func (e *StateMachineEngine) CreateWorkflow(
 	workflowType string,

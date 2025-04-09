@@ -51,19 +51,69 @@ func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 		return fmt.Errorf("routes not found in HTTP workflow configuration")
 	}
 
-	// Find router and server modules
+	// Find router and server modules dynamically by looking for the first services
+	// that implement the required interfaces
 	var router workflowmodule.HTTPRouter
 	var server workflowmodule.HTTPServer
 
-	// Look for standard router and server implementations
-	err := app.GetService("httpRouter", &router)
-	if err != nil {
-		return fmt.Errorf("error getting HTTP router service: %v", err)
+	// Extract explicit names if provided in config
+	explicitRouterName, _ := httpConfig["router"].(string)
+	explicitServerName, _ := httpConfig["server"].(string)
+
+	// First try with explicitly configured names if provided
+	if explicitRouterName != "" {
+		if err := app.GetService(explicitRouterName, &router); err != nil || router == nil {
+			return fmt.Errorf("explicit router '%s' not found", explicitRouterName)
+		}
 	}
 
-	err = app.GetService("httpServer", &server)
-	if err != nil {
-		return fmt.Errorf("error getting HTTP server service: %v", err)
+	if explicitServerName != "" {
+		if err := app.GetService(explicitServerName, &server); err != nil || server == nil {
+			return fmt.Errorf("explicit server '%s' not found", explicitServerName)
+		}
+	}
+
+	// If not found by explicit names, try to find by scanning all services
+	if router == nil || server == nil {
+		for _, svc := range app.SvcRegistry() {
+			// First try to find a router if we don't have one yet
+			if router == nil {
+				if r, ok := svc.(workflowmodule.HTTPRouter); ok {
+					router = r
+				}
+			}
+
+			// Then try to find a server if we don't have one yet
+			if server == nil {
+				if s, ok := svc.(workflowmodule.HTTPServer); ok {
+					server = s
+				}
+			}
+
+			// If we have both, break out of the loop
+			if router != nil && server != nil {
+				break
+			}
+		}
+	}
+
+	// If we still don't have a router, try the default name as a fallback
+	if router == nil {
+		app.GetService("httpRouter", &router)
+	}
+
+	// If we still don't have a server, try the default name as a fallback
+	if server == nil {
+		app.GetService("httpServer", &server)
+	}
+
+	// Verify we found both required services
+	if router == nil {
+		return fmt.Errorf("no HTTP router service found - ensure a router module is configured")
+	}
+
+	if server == nil {
+		return fmt.Errorf("no HTTP server service found - ensure a server module is configured")
 	}
 
 	// Connect router to server
@@ -86,7 +136,7 @@ func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 
 		// Get handler service by name
 		var httpHandler workflowmodule.HTTPHandler
-		err = app.GetService(handlerName, &httpHandler)
+		err := app.GetService(handlerName, &httpHandler)
 		if err != nil {
 			return fmt.Errorf("handler service '%s' not found for route %s %s. Error: %w", handlerName, method, path, err)
 		}

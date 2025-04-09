@@ -88,7 +88,7 @@ func (h *StateMachineWorkflowHandler) Name() string {
 
 // CanHandle returns true if this handler can process the given workflow type
 func (h *StateMachineWorkflowHandler) CanHandle(workflowType string) bool {
-	return workflowType == "statemachine.engine"
+	return workflowType == "statemachine"
 }
 
 // ConfigureWorkflow sets up the workflow from configuration
@@ -211,7 +211,7 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 		}
 
 		// Register the definition with the engine
-		err := engine.RegisterDefinition(definition)
+		err = engine.RegisterDefinition(definition)
 		if err != nil {
 			return fmt.Errorf("failed to register state machine definition '%s': %w", name, err)
 		}
@@ -245,18 +245,20 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 
 		// Check if it's a TransitionHandler
 		handler, ok := handlerSvc.(module.TransitionHandler)
-		if !ok {
-			return fmt.Errorf("service '%s' is not a TransitionHandler", handlerName)
+		if ok {
+			// Register the handler with the engine
+			engine.SetTransitionHandler(handler)
 		}
-
-		// Register the handler with the engine
-		engine.SetTransitionHandler(handler)
 	}
 
 	// If there are multiple hooks, create a composite handler
 	if len(hooks) > 1 {
 		compositeHandler := h.createCompositeTransitionHandler(app, hooks)
 		engine.SetTransitionHandler(compositeHandler)
+	}
+
+	if !engine.HasTransitionHandler() {
+		return fmt.Errorf("no transition handler configured for state machine engine '%s'", engineName)
 	}
 
 	return nil
