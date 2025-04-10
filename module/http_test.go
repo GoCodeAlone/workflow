@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -101,6 +102,7 @@ func TestHTTPRouter(t *testing.T) {
 	req1, _ := http.NewRequest("GET", "/route1", nil)
 	rec1 := httptest.NewRecorder()
 
+	router.Start(context.Background())
 	router.ServeHTTP(rec1, req1)
 
 	if rec1.Code != http.StatusOK {

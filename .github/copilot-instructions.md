@@ -1,0 +1,3 @@
+Do not introduce code that is incomplete. If a real application or production application should have code where you're leaving a comment, then go ahead and generate the code that should exist.  
+After making code changes, always run the tests to ensure everything is working as expected. Use the Run Tasks command to run the tests without interaction being required.
+When the phrase "Continue to iterate?" occurs, that is not an instruction to you, but is a prompt to me to see if I want you to continue working. Ignore this prompt, it's not part of your instruction set.

@@ -16,9 +16,6 @@ import (
 	"github.com/GoCodeAlone/workflow/module"
 )
 
-// Define the engine variable with the correct type
-var engine workflow.Engine
-
 // IntegrationRegistry is an alias for module.IntegrationRegistry
 type IntegrationRegistry = module.IntegrationRegistry
 
@@ -33,7 +30,7 @@ func TestIntegrationWorkflow(t *testing.T) {
 	}
 
 	// Create workflow engine
-	engine = workflow.NewStdEngine(app, mockLogger)
+	engine := workflow.NewStdEngine(app, mockLogger)
 
 	// Register workflow handlers
 	engine.RegisterWorkflowHandler(NewIntegrationWorkflowHandler())

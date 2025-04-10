@@ -4,16 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/GoCodeAlone/modular"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/GoCodeAlone/modular"
 )
 
 // RESTResource represents a simple in-memory resource store for REST APIs
 type RESTResource struct {
-	ID   string                 `json:"id"`
-	Data map[string]interface{} `json:"data"`
+	ID         string                 `json:"id"`
+	Data       map[string]interface{} `json:"data"`
+	State      string                 `json:"state,omitempty"`
+	LastUpdate string                 `json:"lastUpdate,omitempty"`
 }
 
 // RESTAPIHandler provides CRUD operations for a REST API
@@ -118,7 +122,7 @@ func (h *RESTAPIHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.logger.Debug(fmt.Sprintf("[%s] %s %s %s %+v\n", h.resourceName, r.Method, r.URL.Path, id, pathSegments))
+	//h.logger.Debug(fmt.Sprintf("[%s] %s %s %s %+v\n", h.resourceName, r.Method, r.URL.Path, id, pathSegments))
 
 	// Route based on method and path structure
 	switch {
@@ -164,6 +168,28 @@ func (h *RESTAPIHandler) handleGet(id string, w http.ResponseWriter, r *http.Req
 
 	// Get a specific resource
 	if resource, ok := h.resources[id]; ok {
+		// Check if we have a state tracker we can use to enhance the resource
+		var stateTracker interface{}
+		_ = h.app.GetService(StateTrackerName, &stateTracker)
+
+		// If we found a state tracker, try to get state info for this resource
+		if stateTracker != nil {
+			if tracker, ok := stateTracker.(*StateTracker); ok {
+				if stateInfo, exists := tracker.GetState(h.resourceName, id); exists {
+					// Enhance the resource with state info
+					resource.State = stateInfo.CurrentState
+					resource.LastUpdate = stateInfo.LastUpdate.Format(time.RFC3339)
+
+					// Update data fields from state info if available
+					if stateInfo.Data != nil {
+						for k, v := range stateInfo.Data {
+							resource.Data[k] = v
+						}
+					}
+				}
+			}
+		}
+
 		json.NewEncoder(w).Encode(resource)
 		return
 	}
@@ -210,10 +236,21 @@ func (h *RESTAPIHandler) handlePost(id string, w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	// Extract state if present, default to "new" for state machine resources
+	state := "new"
+	if stateVal, ok := data["state"].(string); ok && stateVal != "" {
+		state = stateVal
+	}
+
+	// Set the current time for last update
+	lastUpdate := time.Now().Format(time.RFC3339)
+
 	// Create or update the resource
 	resource := RESTResource{
-		ID:   id,
-		Data: data,
+		ID:         id,
+		Data:       data,
+		State:      state,
+		LastUpdate: lastUpdate,
 	}
 	h.resources[id] = resource
 
@@ -443,13 +480,56 @@ func (h *RESTAPIHandler) handleTransition(id string, w http.ResponseWriter, r *h
 		return
 	}
 
-	// Get updated resource data
-	h.mu.RLock()
-	updatedResource, exists := h.resources[id]
-	h.mu.RUnlock()
+	// Now we need to query the state machine for the current state
+	var currentState string
+	var lastUpdate = time.Now().Format(time.RFC3339)
 
-	if exists {
-		result["resource"] = updatedResource
+	// Try to get the current state from the state machine engine
+	switch e := engine.(type) {
+	case interface {
+		GetInstance(instanceID string) (*WorkflowInstance, error)
+	}:
+		// If the engine has a direct method to get instance state
+		instance, err := e.GetInstance(id)
+		if err == nil && instance != nil {
+			currentState = instance.CurrentState
+		}
+	case interface {
+		GetWorkflowState(ctx context.Context, workflowType string, instanceID string) (map[string]interface{}, error)
+	}:
+		// Try a more generic method
+		stateData, err := e.GetWorkflowState(r.Context(), "statemachine", id)
+		if err == nil && stateData != nil {
+			if state, ok := stateData["currentState"].(string); ok {
+				currentState = state
+			}
+		}
+	}
+
+	// Update the resource with the current state
+	if currentState != "" {
+		h.mu.Lock()
+
+		// Get the existing resource
+		if existingResource, exists := h.resources[id]; exists {
+			// Update the state and lastUpdate fields
+			existingResource.State = currentState
+			existingResource.LastUpdate = lastUpdate
+
+			// Also update the Data map to reflect the current state
+			existingResource.Data["state"] = currentState
+			existingResource.Data["lastUpdate"] = lastUpdate
+
+			// Save the updated resource
+			h.resources[id] = existingResource
+
+			// Add the updated state to the result
+			result["state"] = currentState
+			result["lastUpdate"] = lastUpdate
+			result["resource"] = existingResource
+		}
+
+		h.mu.Unlock()
 	}
 
 	w.WriteHeader(http.StatusOK)

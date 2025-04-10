@@ -8,6 +8,17 @@ modules:
     config:
       description: "Processes orders through their lifecycle"
 
+  # State tracker modules
+  - name: workflow.service.statetracker
+    type: module.StateTracker
+    config:
+      description: "Tracks state for workflow resources"
+      
+  - name: workflow.connector.statemachine
+    type: module.StateMachineStateConnector
+    config:
+      description: "Connects state machines to resources"
+      
   # Event broker for transition notifications
   - name: transition-broker
     type: messaging.broker
@@ -89,6 +100,12 @@ workflows:
   statemachine:
     # Define the state machine engine to use
     engine: order-processor
+    
+    # Define resource mappings to state machines
+    resourceMappings:
+      - resourceType: "orders"
+        stateMachine: "order-processor"
+        instanceIDKey: "id"
     
     # Define workflow definitions
     definitions:

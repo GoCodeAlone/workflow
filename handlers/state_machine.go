@@ -94,171 +94,270 @@ func (h *StateMachineWorkflowHandler) CanHandle(workflowType string) bool {
 // ConfigureWorkflow sets up the workflow from configuration
 func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig interface{}) error {
 	// Convert the generic config to state machine-specific config
-	config, ok := workflowConfig.(map[string]interface{})
+	smConfig, ok := workflowConfig.(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("invalid state machine workflow configuration format")
+		return fmt.Errorf("invalid state machine workflow configuration")
 	}
 
-	// Get the state machine engine name
-	engineName, _ := config["engine"].(string)
+	// Extract engine name
+	engineName, _ := smConfig["engine"].(string)
 	if engineName == "" {
-		return fmt.Errorf("state machine engine name not specified")
+		return fmt.Errorf("state machine engine name not specified in configuration")
 	}
 
-	// Apply namespace to engine name if needed
-	if h.namespace != nil {
-		engineName = h.namespace.ResolveDependency(engineName)
+	// Find the state machine engine
+	var engineSvc interface{}
+	err := app.GetService(engineName, &engineSvc)
+	if err != nil {
+		return fmt.Errorf("state machine engine '%s' not found: %w", engineName, err)
 	}
 
-	// Get the state machine engine
-	var engine *module.StateMachineEngine
-	err := app.GetService(engineName, &engine)
-	if err != nil || engine == nil {
-		return fmt.Errorf("state machine engine '%s' not found: %v", engineName, err)
+	smEngine, ok := engineSvc.(*module.StateMachineEngine)
+	if !ok {
+		return fmt.Errorf("service '%s' is not a StateMachineEngine", engineName)
 	}
 
-	// Configure workflow definitions
-	definitions, _ := config["definitions"].([]interface{})
-	if len(definitions) == 0 {
-		return fmt.Errorf("no state machine definitions provided")
+	// Get the custom state tracker name if specified in the engine module config
+	var stateTrackerName string
+	if engines, ok := smConfig["modules"].([]interface{}); ok {
+		for _, engineModule := range engines {
+			if engineConfig, ok := engineModule.(map[string]interface{}); ok {
+				if name, _ := engineConfig["name"].(string); name == engineName {
+					if config, ok := engineConfig["config"].(map[string]interface{}); ok {
+						if trackerRef, ok := config["stateTracker"].(string); ok && trackerRef != "" {
+							stateTrackerName = trackerRef
+							break
+						}
+					}
+				}
+			}
+		}
 	}
 
-	for i, defConfig := range definitions {
-		defMap, ok := defConfig.(map[string]interface{})
+	// Create or find a state tracker
+	var stateTracker *module.StateTracker
+	var stateTrackerSvc interface{}
+
+	if stateTrackerName != "" {
+		// Try to find the custom state tracker by name
+		err := app.GetService(stateTrackerName, &stateTrackerSvc)
+		if err != nil || stateTrackerSvc == nil {
+			return fmt.Errorf("specified state tracker '%s' not found", stateTrackerName)
+		}
+
+		var ok bool
+		stateTracker, ok = stateTrackerSvc.(*module.StateTracker)
 		if !ok {
-			return fmt.Errorf("invalid definition at index %d", i)
+			return fmt.Errorf("service '%s' is not a StateTracker", stateTrackerName)
 		}
-
-		// Extract basic definition properties
-		name, _ := defMap["name"].(string)
-		if name == "" {
-			return fmt.Errorf("definition at index %d has no name", i)
-		}
-
-		description, _ := defMap["description"].(string)
-		initialState, _ := defMap["initialState"].(string)
-		if initialState == "" {
-			return fmt.Errorf("definition '%s' has no initial state", name)
-		}
-
-		// Extract states
-		statesConfig, _ := defMap["states"].(map[string]interface{})
-		if len(statesConfig) == 0 {
-			return fmt.Errorf("definition '%s' has no states", name)
-		}
-
-		states := make(map[string]*module.State)
-		for stateName, stateConfig := range statesConfig {
-			stateMap, ok := stateConfig.(map[string]interface{})
+	} else {
+		// Try to find the default state tracker
+		err := app.GetService(module.StateTrackerName, &stateTrackerSvc)
+		if err == nil && stateTrackerSvc != nil {
+			// State tracker already exists, use it
+			var ok bool
+			stateTracker, ok = stateTrackerSvc.(*module.StateTracker)
 			if !ok {
-				return fmt.Errorf("invalid state '%s' in definition '%s'", stateName, name)
+				return fmt.Errorf("service '%s' is not a StateTracker", module.StateTrackerName)
 			}
+		} else {
+			// State tracker doesn't exist, create a new one
+			stateTracker = module.NewStateTracker("")
+			app.RegisterModule(stateTracker)
 
-			stateDesc, _ := stateMap["description"].(string)
-			isFinal, _ := stateMap["isFinal"].(bool)
-			isError, _ := stateMap["isError"].(bool)
-
-			state := &module.State{
-				Name:        stateName,
-				Description: stateDesc,
-				IsFinal:     isFinal,
-				IsError:     isError,
+			// Initialize the newly created tracker
+			if err = stateTracker.Init(app); err != nil {
+				return fmt.Errorf("failed to initialize state tracker: %w", err)
 			}
-			states[stateName] = state
+		}
+	}
+
+	// Create a state connector if not already registered
+	var stateConnector *module.StateMachineStateConnector
+	var stateConnectorSvc interface{}
+	err = app.GetService(module.StateMachineStateConnectorName, &stateConnectorSvc)
+	if err == nil && stateConnectorSvc != nil {
+		// State connector already exists, use it
+		var ok bool
+		stateConnector, ok = stateConnectorSvc.(*module.StateMachineStateConnector)
+		if !ok {
+			return fmt.Errorf("service '%s' is not a StateMachineStateConnector", module.StateMachineStateConnectorName)
+		}
+	} else {
+		// State connector doesn't exist, create a new one
+		stateConnector = module.NewStateMachineStateConnector("")
+		app.RegisterModule(stateConnector)
+
+		// Initialize the newly created connector
+		if err = stateConnector.Init(app); err != nil {
+			return fmt.Errorf("failed to initialize state connector: %w", err)
+		}
+	}
+
+	// Process resource mappings if provided
+	if mappings, ok := smConfig["resourceMappings"].([]interface{}); ok {
+		for _, mappingObj := range mappings {
+			if mapping, ok := mappingObj.(map[string]interface{}); ok {
+				resourceType, _ := mapping["resourceType"].(string)
+				stateMachine, _ := mapping["stateMachine"].(string)
+				instanceIDKey, _ := mapping["instanceIDKey"].(string)
+
+				if resourceType != "" && stateMachine != "" {
+					if instanceIDKey == "" {
+						instanceIDKey = "id" // Default to "id"
+					}
+
+					stateConnector.RegisterMapping(resourceType, stateMachine, instanceIDKey)
+				}
+			}
+		}
+	} else {
+		// Automatically create mappings based on workflow definitions
+		if definitions, ok := smConfig["definitions"].([]interface{}); ok {
+			for _, defObj := range definitions {
+				if def, ok := defObj.(map[string]interface{}); ok {
+					name, _ := def["name"].(string)
+					if name != "" {
+						// Create a default mapping using the workflow name as resource type
+						resourceType := strings.ReplaceAll(name, "-", "_")
+						stateConnector.RegisterMapping(resourceType, engineName, "id")
+					}
+				}
+			}
+		}
+	}
+
+	// Process workflow definitions
+	definitions, ok := smConfig["definitions"].([]interface{})
+	if !ok {
+		return fmt.Errorf("workflow definitions not specified in configuration")
+	}
+
+	// Configure each workflow definition
+	for i, defObj := range definitions {
+		def, ok := defObj.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("invalid workflow definition at index %d", i)
 		}
 
-		// Extract transitions
-		transitionsConfig, _ := defMap["transitions"].(map[string]interface{})
-		if len(transitionsConfig) == 0 {
-			return fmt.Errorf("definition '%s' has no transitions", name)
+		// Extract basic workflow properties
+		name, _ := def["name"].(string)
+		description, _ := def["description"].(string)
+		initialState, _ := def["initialState"].(string)
+
+		if name == "" || initialState == "" {
+			return fmt.Errorf("workflow definition at index %d missing required fields", i)
 		}
 
-		transitions := make(map[string]*module.Transition)
+		// Process states
+		states := make(map[string]module.StateMachineStateConfig)
+		if stateConfigs, ok := def["states"].(map[string]interface{}); ok {
+			for stateID, stateObj := range stateConfigs {
+				stateMap, ok := stateObj.(map[string]interface{})
+				if !ok {
+					return fmt.Errorf("invalid state configuration for state '%s'", stateID)
+				}
 
-		for transName, transConfig := range transitionsConfig {
-			transMap, ok := transConfig.(map[string]interface{})
-			if !ok {
-				return fmt.Errorf("invalid transition '%s' in definition '%s'", transName, name)
+				// Create state config with default values
+				stateConfig := module.StateMachineStateConfig{
+					ID:          stateID,
+					Description: "",    // Default empty description
+					IsFinal:     false, // Default value
+					IsError:     false, // Default value
+				}
+
+				// Safely extract description with a default empty string
+				if desc, ok := stateMap["description"].(string); ok {
+					stateConfig.Description = desc
+				}
+
+				// Safely extract boolean values with proper nil checks
+				if isFinalVal, exists := stateMap["isFinal"]; exists {
+					if isFinal, ok := isFinalVal.(bool); ok {
+						stateConfig.IsFinal = isFinal
+					}
+				}
+
+				if isErrorVal, exists := stateMap["isError"]; exists {
+					if isError, ok := isErrorVal.(bool); ok {
+						stateConfig.IsError = isError
+					}
+				}
+
+				// Add custom data if provided
+				if stateData, ok := stateMap["data"].(map[string]interface{}); ok {
+					stateConfig.Data = stateData
+				}
+
+				states[stateID] = stateConfig
 			}
-
-			fromState, _ := transMap["fromState"].(string)
-			toState, _ := transMap["toState"].(string)
-			condition, _ := transMap["condition"].(string)
-			autoTransform, _ := transMap["autoTransform"].(bool)
-
-			if fromState == "" || toState == "" {
-				return fmt.Errorf("transition '%s' has incomplete state information", transName)
-			}
-
-			transition := &module.Transition{
-				Name:          transName,
-				FromState:     fromState,
-				ToState:       toState,
-				Condition:     condition,
-				AutoTransform: autoTransform,
-			}
-			transitions[transName] = transition
 		}
 
-		// Create the state machine definition
-		definition := &module.StateMachineDefinition{
-			Name:         name,
+		// Process transitions
+		transitions := make(map[string]module.StateMachineTransitionConfig)
+		if transitionConfigs, ok := def["transitions"].(map[string]interface{}); ok {
+			for transID, transObj := range transitionConfigs {
+				transMap, ok := transObj.(map[string]interface{})
+				if !ok {
+					return fmt.Errorf("invalid transition configuration for transition '%s'", transID)
+				}
+
+				fromState, _ := transMap["fromState"].(string)
+				toState, _ := transMap["toState"].(string)
+				condition, _ := transMap["condition"].(string)
+
+				// Safely handle the autoTransform boolean with nil check
+				autoTransform := false // Default value
+				if autoTransformVal, exists := transMap["autoTransform"]; exists {
+					if at, ok := autoTransformVal.(bool); ok {
+						autoTransform = at
+					}
+				}
+
+				if fromState == "" || toState == "" {
+					return fmt.Errorf("transition '%s' missing required fields", transID)
+				}
+
+				// Create transition config
+				transConfig := module.StateMachineTransitionConfig{
+					ID:            transID,
+					FromState:     fromState,
+					ToState:       toState,
+					Condition:     condition,
+					AutoTransform: autoTransform,
+				}
+
+				// Add custom data if provided
+				if transData, ok := transMap["data"].(map[string]interface{}); ok {
+					transConfig.Data = transData
+				}
+
+				transitions[transID] = transConfig
+			}
+		}
+
+		// Create workflow definition
+		workflowDef := module.ExternalStateMachineDefinition{
+			ID:           name,
 			Description:  description,
+			InitialState: initialState,
 			States:       states,
 			Transitions:  transitions,
-			InitialState: initialState,
-			Data:         make(map[string]interface{}),
 		}
 
-		// Register the definition with the engine
-		err = engine.RegisterDefinition(definition)
-		if err != nil {
-			return fmt.Errorf("failed to register state machine definition '%s': %w", name, err)
+		// Add the workflow definition to the engine
+		if err := smEngine.RegisterWorkflow(workflowDef); err != nil {
+			return fmt.Errorf("failed to register workflow '%s': %w", name, err)
 		}
 	}
 
-	// Configure hooks
-	hooks, _ := config["hooks"].([]interface{})
-	for i, hookConfig := range hooks {
-		hookMap, ok := hookConfig.(map[string]interface{})
-		if !ok {
-			return fmt.Errorf("invalid hook at index %d", i)
-		}
-
-		// Get handler service name
-		handlerName, _ := hookMap["handler"].(string)
-		if handlerName == "" {
-			return fmt.Errorf("hook at index %d has no handler", i)
-		}
-
-		// Apply namespace to handler name
-		if h.namespace != nil {
-			handlerName = h.namespace.ResolveDependency(handlerName)
-		}
-
-		// Get the handler service
-		var handlerSvc interface{}
-		err = app.GetService(handlerName, &handlerSvc)
-		if err != nil || handlerSvc == nil {
-			return fmt.Errorf("handler '%s' not found: %v", handlerName, err)
-		}
-
-		// Check if it's a TransitionHandler
-		handler, ok := handlerSvc.(module.TransitionHandler)
-		if ok {
-			// Register the handler with the engine
-			engine.SetTransitionHandler(handler)
-		}
-	}
-
-	// If there are multiple hooks, create a composite handler
-	if len(hooks) > 1 {
+	// Process transition hooks if any
+	if hooks, ok := smConfig["hooks"].([]interface{}); ok && len(hooks) > 0 {
+		// Create a single composite handler for all hooks
 		compositeHandler := h.createCompositeTransitionHandler(app, hooks)
-		engine.SetTransitionHandler(compositeHandler)
-	}
 
-	if !engine.HasTransitionHandler() {
-		return fmt.Errorf("no transition handler configured for state machine engine '%s'", engineName)
+		// Register the handler with the engine
+		smEngine.AddGlobalTransitionHandler(compositeHandler)
 	}
 
 	return nil
@@ -270,6 +369,37 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 	hooksConfig []interface{},
 ) module.TransitionHandler {
 	return module.NewFunctionTransitionHandler(func(ctx context.Context, event module.TransitionEvent) error {
+		// Get the workflow instance to determine its type
+		var workflowType string
+
+		// Extract the state machine engine from context if available
+		if engine, ok := ctx.Value("stateMachineEngine").(*module.StateMachineEngine); ok {
+			// First try to get the instance directly from the engine in context
+			instance, err := engine.GetInstance(event.WorkflowID)
+			if err == nil && instance != nil {
+				workflowType = instance.WorkflowType
+			}
+		}
+
+		// If we couldn't get the workflow type from context, try to get the instance details
+		// by scanning available state machine engines
+		if workflowType == "" {
+			for _, svc := range app.SvcRegistry() {
+				if engine, ok := svc.(*module.StateMachineEngine); ok {
+					instance, err := engine.GetInstance(event.WorkflowID)
+					if err == nil && instance != nil {
+						workflowType = instance.WorkflowType
+						break
+					}
+				}
+			}
+		}
+
+		// If we still couldn't get the workflow type, fall back to using the event WorkflowID
+		if workflowType == "" {
+			workflowType = event.WorkflowID
+		}
+
 		for i, hookConfig := range hooksConfig {
 			hookMap, ok := hookConfig.(map[string]interface{})
 			if !ok {
@@ -278,8 +408,8 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 			}
 
 			// Check for workflow type match
-			workflowType, _ := hookMap["workflowType"].(string)
-			if workflowType != "" && workflowType != event.WorkflowID {
+			hookWorkflowType, _ := hookMap["workflowType"].(string)
+			if hookWorkflowType != "" && hookWorkflowType != workflowType {
 				// Skip hooks for other workflow types
 				continue
 			}
@@ -386,8 +516,8 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 				}
 			} else if msgHandler, ok := handlerSvc.(module.MessageHandler); ok {
 				// Adapt message handler
-				payload := []byte(fmt.Sprintf(`{"workflowId":"%s","transition":"%s","fromState":"%s","toState":"%s"}`,
-					event.WorkflowID, event.TransitionID, event.FromState, event.ToState))
+				payload := []byte(fmt.Sprintf(`{"workflowId":"%s","instanceId":"%s","transition":"%s","fromState":"%s","toState":"%s"}`,
+					workflowType, event.WorkflowID, event.TransitionID, event.FromState, event.ToState))
 				if err := msgHandler.HandleMessage(payload); err != nil {
 					return err
 				}

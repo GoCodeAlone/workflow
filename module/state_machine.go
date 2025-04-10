@@ -43,6 +43,12 @@ type TransitionEvent struct {
 	Data         map[string]interface{} `json:"data,omitempty"`
 }
 
+// InstanceID returns the workflow instance ID
+// This method is provided for backward compatibility with code that expects an InstanceID field
+func (e TransitionEvent) InstanceID() string {
+	return e.WorkflowID
+}
+
 // TransitionHandler handles workflow state transitions
 type TransitionHandler interface {
 	HandleTransition(ctx context.Context, event TransitionEvent) error
@@ -353,4 +359,201 @@ func NewFunctionTransitionHandler(fn func(ctx context.Context, event TransitionE
 // HandleTransition handles a state transition by calling the function
 func (h *FunctionTransitionHandler) HandleTransition(ctx context.Context, event TransitionEvent) error {
 	return h.handlerFunc(ctx, event)
+}
+
+// TransitionListener is a function that gets called when a transition occurs
+type TransitionListener func(event TransitionEvent)
+
+// AddTransitionListener registers a function to be called on every transition
+func (e *StateMachineEngine) AddTransitionListener(listener TransitionListener) {
+	// Create a transition handler that will call our listener
+	if !e.HasTransitionHandler() {
+		// Create a composite handler if there isn't one already
+		e.SetTransitionHandler(NewCompositeTransitionHandler())
+	}
+
+	// Get the existing handler and cast to composite if possible
+	handler := e.GetTransitionHandler()
+	if composite, ok := handler.(*CompositeTransitionHandler); ok {
+		// Add our listener adapter to the composite handler
+		composite.AddHandler(NewListenerAdapter(listener))
+	} else {
+		// Create a new composite handler with the existing handler and our listener
+		composite := NewCompositeTransitionHandler()
+		composite.AddHandler(handler)                      // Add the existing handler
+		composite.AddHandler(NewListenerAdapter(listener)) // Add our listener
+		e.SetTransitionHandler(composite)
+	}
+}
+
+// GetTransitionHandler returns the current transition handler
+func (e *StateMachineEngine) GetTransitionHandler() TransitionHandler {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+	return e.transitionHandler
+}
+
+// AddGlobalTransitionHandler adds a handler for all transitions
+func (e *StateMachineEngine) AddGlobalTransitionHandler(handler TransitionHandler) {
+	if !e.HasTransitionHandler() {
+		// If no handler exists, just set this one
+		e.SetTransitionHandler(handler)
+		return
+	}
+
+	// Get the existing handler
+	existingHandler := e.GetTransitionHandler()
+
+	// If it's already a composite, add to it
+	if composite, ok := existingHandler.(*CompositeTransitionHandler); ok {
+		composite.AddHandler(handler)
+	} else {
+		// Create a new composite with both handlers
+		composite := NewCompositeTransitionHandler()
+		composite.AddHandler(existingHandler)
+		composite.AddHandler(handler)
+		e.SetTransitionHandler(composite)
+	}
+}
+
+// ListenerAdapter adapts a TransitionListener function to a TransitionHandler
+type ListenerAdapter struct {
+	listener TransitionListener
+}
+
+// NewListenerAdapter creates a new adapter for a transition listener
+func NewListenerAdapter(listener TransitionListener) *ListenerAdapter {
+	return &ListenerAdapter{
+		listener: listener,
+	}
+}
+
+// HandleTransition implements the TransitionHandler interface
+func (a *ListenerAdapter) HandleTransition(ctx context.Context, event TransitionEvent) error {
+	// Call the listener function
+	a.listener(event)
+	// Listeners don't return errors
+	return nil
+}
+
+// CompositeTransitionHandler combines multiple transition handlers
+type CompositeTransitionHandler struct {
+	handlers []TransitionHandler
+	mutex    sync.RWMutex
+}
+
+// NewCompositeTransitionHandler creates a new composite handler
+func NewCompositeTransitionHandler() *CompositeTransitionHandler {
+	return &CompositeTransitionHandler{
+		handlers: make([]TransitionHandler, 0),
+	}
+}
+
+// AddHandler adds a handler to the composite
+func (c *CompositeTransitionHandler) AddHandler(handler TransitionHandler) {
+	if handler == nil {
+		return
+	}
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.handlers = append(c.handlers, handler)
+}
+
+// HandleTransition calls all handlers in sequence
+func (c *CompositeTransitionHandler) HandleTransition(ctx context.Context, event TransitionEvent) error {
+	c.mutex.RLock()
+	handlers := make([]TransitionHandler, len(c.handlers))
+	copy(handlers, c.handlers)
+	c.mutex.RUnlock()
+
+	// Call all handlers in sequence
+	for _, handler := range handlers {
+		if err := handler.HandleTransition(ctx, event); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// GetAllInstances returns all workflow instances
+func (e *StateMachineEngine) GetAllInstances() ([]*WorkflowInstance, error) {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+
+	// Create a slice with all instances
+	instances := make([]*WorkflowInstance, 0, len(e.instances))
+	for _, instance := range e.instances {
+		instances = append(instances, instance)
+	}
+
+	return instances, nil
+}
+
+// RegisterWorkflow registers a workflow definition
+func (e *StateMachineEngine) RegisterWorkflow(def ExternalStateMachineDefinition) error {
+	// Convert from the external configuration struct to our internal representation
+	internalDef := &StateMachineDefinition{
+		Name:         def.ID,
+		Description:  def.Description,
+		InitialState: def.InitialState,
+		States:       make(map[string]*State),
+		Transitions:  make(map[string]*Transition),
+		Data:         make(map[string]interface{}),
+	}
+
+	// Process states
+	for stateID, stateConfig := range def.States {
+		internalDef.States[stateID] = &State{
+			Name:        stateID,
+			Description: stateConfig.Description,
+			IsFinal:     stateConfig.IsFinal,
+			IsError:     stateConfig.IsError,
+			Data:        stateConfig.Data,
+		}
+	}
+
+	// Process transitions
+	for transID, transConfig := range def.Transitions {
+		internalDef.Transitions[transID] = &Transition{
+			Name:          transID,
+			FromState:     transConfig.FromState,
+			ToState:       transConfig.ToState,
+			Condition:     transConfig.Condition,
+			AutoTransform: transConfig.AutoTransform,
+			Data:          transConfig.Data,
+		}
+	}
+
+	// Register the definition
+	return e.RegisterDefinition(internalDef)
+}
+
+// StateMachineStateConfig represents configuration for a state machine state
+type StateMachineStateConfig struct {
+	ID          string                 `json:"id" yaml:"id"`
+	Description string                 `json:"description,omitempty" yaml:"description,omitempty"`
+	IsFinal     bool                   `json:"isFinal" yaml:"isFinal"`
+	IsError     bool                   `json:"isError" yaml:"isError"`
+	Data        map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+}
+
+// StateMachineTransitionConfig represents configuration for a state transition
+type StateMachineTransitionConfig struct {
+	ID            string                 `json:"id" yaml:"id"`
+	FromState     string                 `json:"fromState" yaml:"fromState"`
+	ToState       string                 `json:"toState" yaml:"toState"`
+	Condition     string                 `json:"condition,omitempty" yaml:"condition,omitempty"`
+	AutoTransform bool                   `json:"autoTransform" yaml:"autoTransform"`
+	Data          map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+}
+
+// ExternalStateMachineDefinition is used for registering state machines from configuration
+type ExternalStateMachineDefinition struct {
+	ID           string                                  `json:"id" yaml:"id"`
+	Description  string                                  `json:"description,omitempty" yaml:"description,omitempty"`
+	InitialState string                                  `json:"initialState" yaml:"initialState"`
+	States       map[string]StateMachineStateConfig      `json:"states" yaml:"states"`
+	Transitions  map[string]StateMachineTransitionConfig `json:"transitions" yaml:"transitions"`
 }

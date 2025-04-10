@@ -100,7 +100,11 @@ func (r *StandardHTTPRouter) ServeHTTP(w http.ResponseWriter, req *http.Request)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	r.serveMux.ServeHTTP(w, req)
+	if r.serveMux != nil {
+		r.serveMux.ServeHTTP(w, req)
+	} else {
+		http.NotFound(w, req)
+	}
 }
 
 // Start is a no-op for router (implements Startable interface)
