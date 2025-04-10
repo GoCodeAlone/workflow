@@ -54,6 +54,10 @@ type TransitionHandler interface {
 	HandleTransition(ctx context.Context, event TransitionEvent) error
 }
 
+type TransitionTrigger interface {
+	TriggerTransition(ctx context.Context, workflowID, transitionName string, data map[string]interface{}) error
+}
+
 // WorkflowInstance represents an instance of a state machine workflow
 type WorkflowInstance struct {
 	ID            string                 `json:"id"`

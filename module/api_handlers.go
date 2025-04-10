@@ -107,7 +107,7 @@ func (h *RESTAPIHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	pathSegments := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 
 	// Check if this is a resource-specific request (has ID) or a collection request
-	id := r.PathValue("id")
+	resourceId := r.PathValue("id")
 	isTransitionRequest := false
 
 	// We expect paths like:
@@ -122,28 +122,26 @@ func (h *RESTAPIHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	//h.logger.Debug(fmt.Sprintf("[%s] %s %s %s %+v\n", h.resourceName, r.Method, r.URL.Path, id, pathSegments))
-
 	// Route based on method and path structure
 	switch {
 	case isTransitionRequest && r.Method == http.MethodPut:
 		// Handle state machine transition request
-		h.handleTransition(id, w, r)
-	case r.Method == http.MethodGet && id != "":
+		h.handleTransition(resourceId, w, r)
+	case r.Method == http.MethodGet && resourceId != "":
 		// Get a specific resource
-		h.handleGet(id, w, r)
+		h.handleGet(resourceId, w, r)
 	case r.Method == http.MethodGet:
 		// List all resources
 		h.handleGetAll(w, r)
 	case r.Method == http.MethodPost:
 		// Create a new resource
-		h.handlePost(id, w, r)
-	case r.Method == http.MethodPut && id != "":
+		h.handlePost(resourceId, w, r)
+	case r.Method == http.MethodPut && resourceId != "":
 		// Update an existing resource
-		h.handlePut(id, w, r)
-	case r.Method == http.MethodDelete && id != "":
+		h.handlePut(resourceId, w, r)
+	case r.Method == http.MethodDelete && resourceId != "":
 		// Delete a resource
-		h.handleDelete(id, w, r)
+		h.handleDelete(resourceId, w, r)
 	default:
 		// Method not allowed or invalid path
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -152,11 +150,11 @@ func (h *RESTAPIHandler) Handle(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGet handles GET requests for listing or retrieving resources
-func (h *RESTAPIHandler) handleGet(id string, w http.ResponseWriter, r *http.Request) {
+func (h *RESTAPIHandler) handleGet(resourceId string, w http.ResponseWriter, r *http.Request) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	if id == "" {
+	if resourceId == "" {
 		// List all resources
 		resources := make([]RESTResource, 0, len(h.resources))
 		for _, resource := range h.resources {
@@ -167,7 +165,7 @@ func (h *RESTAPIHandler) handleGet(id string, w http.ResponseWriter, r *http.Req
 	}
 
 	// Get a specific resource
-	if resource, ok := h.resources[id]; ok {
+	if resource, ok := h.resources[resourceId]; ok {
 		// Check if we have a state tracker we can use to enhance the resource
 		var stateTracker interface{}
 		_ = h.app.GetService(StateTrackerName, &stateTracker)
@@ -175,7 +173,7 @@ func (h *RESTAPIHandler) handleGet(id string, w http.ResponseWriter, r *http.Req
 		// If we found a state tracker, try to get state info for this resource
 		if stateTracker != nil {
 			if tracker, ok := stateTracker.(*StateTracker); ok {
-				if stateInfo, exists := tracker.GetState(h.resourceName, id); exists {
+				if stateInfo, exists := tracker.GetState(h.resourceName, resourceId); exists {
 					// Enhance the resource with state info
 					resource.State = stateInfo.CurrentState
 					resource.LastUpdate = stateInfo.LastUpdate.Format(time.RFC3339)
@@ -215,7 +213,7 @@ func (h *RESTAPIHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePost handles POST requests for creating resources
-func (h *RESTAPIHandler) handlePost(id string, w http.ResponseWriter, r *http.Request) {
+func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r *http.Request) {
 	var data map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -227,12 +225,12 @@ func (h *RESTAPIHandler) handlePost(id string, w http.ResponseWriter, r *http.Re
 	defer h.mu.Unlock()
 
 	// If ID is provided in the URL, use it; otherwise use the ID from the body
-	if id == "" {
+	if resourceId == "" {
 		if idFromBody, ok := data["id"].(string); ok && idFromBody != "" {
-			id = idFromBody
+			resourceId = idFromBody
 		} else {
-			// Generate an ID (in a real app, use a proper UUID generator)
-			id = fmt.Sprintf("%d", len(h.resources)+1)
+			// Generate an ID (TODO: use a proper UUID generator)
+			resourceId = fmt.Sprintf("%d", len(h.resources)+1)
 		}
 	}
 
@@ -247,12 +245,12 @@ func (h *RESTAPIHandler) handlePost(id string, w http.ResponseWriter, r *http.Re
 
 	// Create or update the resource
 	resource := RESTResource{
-		ID:         id,
+		ID:         resourceId,
 		Data:       data,
 		State:      state,
 		LastUpdate: lastUpdate,
 	}
-	h.resources[id] = resource
+	h.resources[resourceId] = resource
 
 	// Publish event if broker is available
 	if h.eventBroker != nil {
@@ -270,12 +268,12 @@ func (h *RESTAPIHandler) handlePost(id string, w http.ResponseWriter, r *http.Re
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(h.resources[id])
+	json.NewEncoder(w).Encode(h.resources[resourceId])
 }
 
 // handlePut handles PUT requests for updating resources
-func (h *RESTAPIHandler) handlePut(id string, w http.ResponseWriter, r *http.Request) {
-	if id == "" {
+func (h *RESTAPIHandler) handlePut(resourceId string, w http.ResponseWriter, r *http.Request) {
+	if resourceId == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "ID is required for PUT"})
 		return
@@ -292,25 +290,25 @@ func (h *RESTAPIHandler) handlePut(id string, w http.ResponseWriter, r *http.Req
 	defer h.mu.Unlock()
 
 	// Check if resource exists
-	if _, ok := h.resources[id]; !ok {
+	if _, ok := h.resources[resourceId]; !ok {
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"})
 		return
 	}
 
 	// Update the resource
-	h.resources[id] = RESTResource{
-		ID:   id,
+	h.resources[resourceId] = RESTResource{
+		ID:   resourceId,
 		Data: data,
 	}
 
-	json.NewEncoder(w).Encode(h.resources[id])
+	json.NewEncoder(w).Encode(h.resources[resourceId])
 
 	// Existing implementation plus event publishing:
 	if h.eventBroker != nil {
 		eventData, _ := json.Marshal(map[string]interface{}{
 			"eventType": h.resourceName + ".updated",
-			"resource":  h.resources[id],
+			"resource":  h.resources[resourceId],
 		})
 
 		// Non-blocking event publishing
@@ -323,8 +321,8 @@ func (h *RESTAPIHandler) handlePut(id string, w http.ResponseWriter, r *http.Req
 }
 
 // handleDelete handles DELETE requests for removing resources
-func (h *RESTAPIHandler) handleDelete(id string, w http.ResponseWriter, r *http.Request) {
-	if id == "" {
+func (h *RESTAPIHandler) handleDelete(resourceId string, w http.ResponseWriter, r *http.Request) {
+	if resourceId == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "ID is required for DELETE"})
 		return
@@ -334,14 +332,14 @@ func (h *RESTAPIHandler) handleDelete(id string, w http.ResponseWriter, r *http.
 	defer h.mu.Unlock()
 
 	// Check if resource exists
-	if _, ok := h.resources[id]; !ok {
+	if _, ok := h.resources[resourceId]; !ok {
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"})
 		return
 	}
 
 	// Delete the resource
-	delete(h.resources, id)
+	delete(h.resources, resourceId)
 
 	w.WriteHeader(http.StatusNoContent)
 
@@ -349,7 +347,7 @@ func (h *RESTAPIHandler) handleDelete(id string, w http.ResponseWriter, r *http.
 	if h.eventBroker != nil {
 		eventData, _ := json.Marshal(map[string]interface{}{
 			"eventType":  h.resourceName + ".deleted",
-			"resourceId": id,
+			"resourceId": resourceId,
 		})
 
 		// Non-blocking event publishing
@@ -362,8 +360,8 @@ func (h *RESTAPIHandler) handleDelete(id string, w http.ResponseWriter, r *http.
 }
 
 // handleTransition handles state transitions for state machine resources
-func (h *RESTAPIHandler) handleTransition(id string, w http.ResponseWriter, r *http.Request) {
-	if id == "" {
+func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWriter, r *http.Request) {
+	if resourceId == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Resource ID is required for transition"})
 		return
@@ -392,7 +390,7 @@ func (h *RESTAPIHandler) handleTransition(id string, w http.ResponseWriter, r *h
 
 	// Merge existing resource data
 	h.mu.RLock()
-	resource, exists := h.resources[id]
+	resource, exists := h.resources[resourceId]
 	h.mu.RUnlock()
 
 	if !exists {
@@ -414,8 +412,8 @@ func (h *RESTAPIHandler) handleTransition(id string, w http.ResponseWriter, r *h
 	}
 
 	// Ensure we have the required fields
-	workflowData["id"] = id
-	workflowData["instanceId"] = id
+	workflowData["id"] = resourceId
+	workflowData["instanceId"] = resourceId
 
 	// Find workflow engine to trigger the transition
 	var engine interface{}
@@ -449,18 +447,16 @@ func (h *RESTAPIHandler) handleTransition(id string, w http.ResponseWriter, r *h
 		err = e.TriggerWorkflow(r.Context(), "statemachine", transitionRequest.Transition, workflowData)
 		result = map[string]interface{}{
 			"success":    err == nil,
-			"id":         id,
+			"id":         resourceId,
 			"transition": transitionRequest.Transition,
 		}
 
-	case interface {
-		TriggerTransition(ctx context.Context, instanceID, transitionID string, data map[string]interface{}) error
-	}:
+	case TransitionTrigger:
 		// Using the state machine directly
-		err = e.TriggerTransition(r.Context(), id, transitionRequest.Transition, workflowData)
+		err = e.TriggerTransition(r.Context(), resourceId, transitionRequest.Transition, workflowData)
 		result = map[string]interface{}{
 			"success":    err == nil,
-			"id":         id,
+			"id":         resourceId,
 			"transition": transitionRequest.Transition,
 		}
 
@@ -490,7 +486,7 @@ func (h *RESTAPIHandler) handleTransition(id string, w http.ResponseWriter, r *h
 		GetInstance(instanceID string) (*WorkflowInstance, error)
 	}:
 		// If the engine has a direct method to get instance state
-		instance, err := e.GetInstance(id)
+		instance, err := e.GetInstance(resourceId)
 		if err == nil && instance != nil {
 			currentState = instance.CurrentState
 		}
@@ -498,7 +494,7 @@ func (h *RESTAPIHandler) handleTransition(id string, w http.ResponseWriter, r *h
 		GetWorkflowState(ctx context.Context, workflowType string, instanceID string) (map[string]interface{}, error)
 	}:
 		// Try a more generic method
-		stateData, err := e.GetWorkflowState(r.Context(), "statemachine", id)
+		stateData, err := e.GetWorkflowState(r.Context(), "statemachine", resourceId)
 		if err == nil && stateData != nil {
 			if state, ok := stateData["currentState"].(string); ok {
 				currentState = state
@@ -511,7 +507,7 @@ func (h *RESTAPIHandler) handleTransition(id string, w http.ResponseWriter, r *h
 		h.mu.Lock()
 
 		// Get the existing resource
-		if existingResource, exists := h.resources[id]; exists {
+		if existingResource, exists := h.resources[resourceId]; exists {
 			// Update the state and lastUpdate fields
 			existingResource.State = currentState
 			existingResource.LastUpdate = lastUpdate
@@ -521,7 +517,7 @@ func (h *RESTAPIHandler) handleTransition(id string, w http.ResponseWriter, r *h
 			existingResource.Data["lastUpdate"] = lastUpdate
 
 			// Save the updated resource
-			h.resources[id] = existingResource
+			h.resources[resourceId] = existingResource
 
 			// Add the updated state to the result
 			result["state"] = currentState
