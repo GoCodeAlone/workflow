@@ -639,15 +639,6 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 				return
 			}
 			h.logger.Info(fmt.Sprintf("Successfully created workflow instance '%s'", instanceId))
-
-			// If this is the very first transition and it's not from the initial state,
-			// we might need to skip it since the instance was just created
-			if transitionRequest.Transition == "submit_order" &&
-				resource.State == "new" {
-				// This is expected behavior - the instance is created in the "new" state
-				// and the first transition is typically from "new" to another state
-				h.logger.Debug("First transition for new workflow instance")
-			}
 		}
 	}
 
