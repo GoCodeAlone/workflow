@@ -16,6 +16,8 @@ modules:
       
   - name: workflow.connector.statemachine
     type: state.connector
+    dependsOn:
+      - workflow.service.statetracker
     config:
       description: "Connects state machines to resources"
       
@@ -68,6 +70,10 @@ modules:
       - api-router
     config:
       resourceName: "orders"
+      workflowType: "order-workflow"
+      workflowEngine: "order-processor"
+      instanceIDPrefix: "order-"
+      instanceIDField: "id"
 
 workflows:
   # HTTP routes for API

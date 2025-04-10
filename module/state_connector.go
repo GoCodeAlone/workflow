@@ -223,6 +223,17 @@ func (c *StateMachineStateConnector) GetResourceState(resourceType, resourceID s
 	return "", nil, fmt.Errorf("resource state not found")
 }
 
+// GetEngineForResourceType finds the state machine engine for a resource type
+func (c *StateMachineStateConnector) GetEngineForResourceType(resourceType string) (string, bool) {
+	// Find mapping for this resource type
+	for _, mapping := range c.mappings {
+		if mapping.ResourceType == resourceType {
+			return mapping.StateMachine, true
+		}
+	}
+	return "", false
+}
+
 // ProvidesServices returns the services provided by this module
 func (c *StateMachineStateConnector) ProvidesServices() []modular.ServiceProvider {
 	return []modular.ServiceProvider{
