@@ -132,6 +132,12 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "statemachine.engine":
 				e.logger.Debug("Loading state machine engine module")
 				mod = module.NewStateMachineEngine(modCfg.Name)
+			case "state.tracker":
+				e.logger.Debug("Loading state tracker module")
+				mod = module.NewStateTracker(modCfg.Name)
+			case "state.connector":
+				e.logger.Debug("Loading state machine connector module")
+				mod = module.NewStateMachineStateConnector(modCfg.Name)
 			default:
 				e.logger.Warn("Unknown module type: " + modCfg.Type)
 				return fmt.Errorf("unknown module type: %s", modCfg.Type)

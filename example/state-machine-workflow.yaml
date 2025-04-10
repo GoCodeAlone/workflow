@@ -10,12 +10,12 @@ modules:
 
   # State tracker modules
   - name: workflow.service.statetracker
-    type: module.StateTracker
+    type: state.tracker
     config:
       description: "Tracks state for workflow resources"
       
   - name: workflow.connector.statemachine
-    type: module.StateMachineStateConnector
+    type: state.connector
     config:
       description: "Connects state machines to resources"
       
