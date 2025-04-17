@@ -3,7 +3,7 @@ module github.com/GoCodeAlone/workflow
 go 1.24.1
 
 require (
-	github.com/GoCodeAlone/modular v1.2.1
+	github.com/GoCodeAlone/modular v1.2.2
 	gopkg.in/yaml.v3 v3.0.1
 )
 
