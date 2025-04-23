@@ -54,6 +54,19 @@ func (s *StandardHTTPServer) AddRouter(router HTTPRouter) {
 	s.router = router
 }
 
+// ServeHTTP logs every request and delegates to the router
+func (s *StandardHTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.logger.Info("Request received", "method", r.Method, "path", r.URL.Path, "remoteAddr", r.RemoteAddr)
+	if s.router != nil {
+		handler, ok := s.router.(http.Handler)
+		if ok {
+			handler.ServeHTTP(w, r)
+			return
+		}
+	}
+	http.Error(w, "No router configured", http.StatusInternalServerError)
+}
+
 // Start starts the HTTP server
 func (s *StandardHTTPServer) Start(ctx context.Context) error {
 	if s.router == nil {
@@ -61,14 +74,14 @@ func (s *StandardHTTPServer) Start(ctx context.Context) error {
 	}
 
 	// Create HTTP server with the router
-	handler, ok := s.router.(http.Handler)
+	_, ok := s.router.(http.Handler)
 	if !ok {
 		return fmt.Errorf("router does not implement http.Handler")
 	}
 
 	s.server = &http.Server{
 		Addr:    s.address,
-		Handler: handler,
+		Handler: s, // Use the server itself as the handler
 	}
 
 	// Start the server in a goroutine

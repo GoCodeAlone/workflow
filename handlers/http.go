@@ -112,6 +112,8 @@ func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 	// Connect router to server
 	server.AddRouter(router)
 
+	logger := app.Logger()
+
 	// Configure each route
 	for i, rc := range routesConfig {
 		routeMap, ok := rc.(map[string]interface{})
@@ -153,6 +155,9 @@ func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 				middlewares = append(middlewares, middleware)
 			}
 		}
+
+		// Log route addition
+		logger.Info("Adding route", "method", method, "path", path, "handler", handlerName)
 
 		// Add route to router with middleware if any
 		if stdRouter, ok := router.(*workflowmodule.StandardHTTPRouter); ok && len(middlewares) > 0 {

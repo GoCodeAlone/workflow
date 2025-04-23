@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/GoCodeAlone/modular"
@@ -24,7 +25,7 @@ type StandardHTTPRouter struct {
 	routes     []Route
 	mu         sync.RWMutex
 	serverDeps []string // Names of HTTP server modules this router depends on
-	serveMux   *http.ServeMux
+	logger     modular.Logger
 }
 
 // NewStandardHTTPRouter creates a new HTTP router
@@ -72,6 +73,7 @@ func (r *StandardHTTPRouter) SetServerDependencies(serverNames []string) {
 
 // Init initializes the module with the application context
 func (r *StandardHTTPRouter) Init(app modular.Application) error {
+	r.logger = app.Logger()
 	return nil
 }
 
@@ -85,6 +87,12 @@ func (r *StandardHTTPRouter) AddRouteWithMiddleware(method, path string, handler
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// Ensure handler has a name for logging
+	handlerName := "unknown"
+	if named, ok := handler.(interface{ Name() string }); ok {
+		handlerName = named.Name()
+	}
+
 	r.routes = append(r.routes, Route{
 		Method:      method,
 		Path:        path,
@@ -92,48 +100,93 @@ func (r *StandardHTTPRouter) AddRouteWithMiddleware(method, path string, handler
 		Middlewares: middlewares,
 	})
 
-	fmt.Printf("Route added: %s %s\n", method, path)
+	// Use logger if available, otherwise fmt.Printf
+	if r.logger != nil {
+		r.logger.Info("Route added", "method", method, "path", path, "handler", handlerName)
+	} else {
+		fmt.Printf("Route added: %s %s -> %s\n", method, path, handlerName)
+	}
 }
 
-// ServeHTTP implements the http.Handler interface
+// ServeHTTP implements the http.Handler interface with custom routing logic
 func (r *StandardHTTPRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if r.logger != nil {
+		r.logger.Info("Router ServeHTTP called", "method", req.Method, "path", req.URL.Path, "remoteAddr", req.RemoteAddr)
+		r.logger.Debug("Router checking request", "method", req.Method, "path", req.URL.Path) // Add Debug log
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if r.serveMux != nil {
-		r.serveMux.ServeHTTP(w, req)
-	} else {
-		http.NotFound(w, req)
+	var matchedRoute *Route
+	var potentialRoutes []string // Log potential matches
+
+	// Find the best matching route (exact path and method match)
+	for i := range r.routes {
+		route := r.routes[i] // Use index to get route safely
+
+		// Log every route being checked for the specific request path
+		if req.URL.Path == route.Path {
+			potentialRoutes = append(potentialRoutes, fmt.Sprintf("%s %s", route.Method, route.Path))
+		}
+
+		// Check for exact path match
+		if req.URL.Path == route.Path {
+			// Check if method matches
+			if req.Method == route.Method {
+				matchedRoute = &route
+				if r.logger != nil {
+					r.logger.Debug("Router matched route", "method", route.Method, "path", route.Path) // Add Debug log
+				}
+				break // Found exact match, stop searching
+			}
+		}
+		// Note: Prefix matching (e.g., for /static/) is not implemented here
+		// but could be added if needed.
 	}
+	if r.logger != nil && len(potentialRoutes) > 0 {
+		r.logger.Debug("Potential routes for path", "path", req.URL.Path, "routes", strings.Join(potentialRoutes, ", "))
+	}
+
+	// Execute the matched route's handler
+	if matchedRoute != nil {
+		handlerName := "unknown"
+		if named, ok := matchedRoute.Handler.(interface{ Name() string }); ok {
+			handlerName = named.Name()
+		}
+		if r.logger != nil {
+			r.logger.Info("Routing request", "method", req.Method, "path", req.URL.Path, "handler", handlerName)
+		}
+
+		// Create handler chain starting with the final handler
+		var finalHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			matchedRoute.Handler.Handle(w, r)
+		})
+
+		// Apply middlewares in reverse order so they execute in the configured order
+		if matchedRoute.Middlewares != nil {
+			for i := len(matchedRoute.Middlewares) - 1; i >= 0; i-- {
+				finalHandler = matchedRoute.Middlewares[i].Process(finalHandler)
+			}
+		}
+
+		// Execute the full handler chain (middlewares + final handler)
+		finalHandler.ServeHTTP(w, req)
+		return // Request handled
+	}
+
+	// No matching route found
+	if r.logger != nil {
+		r.logger.Warn("No matching route found for request", "method", req.Method, "path", req.URL.Path)
+	}
+	http.NotFound(w, req)
 }
 
-// Start is a no-op for router (implements Startable interface)
+// Start logs the router initialization.
 func (r *StandardHTTPRouter) Start(ctx context.Context) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	mux := http.NewServeMux()
-	for _, route := range r.routes {
-		mux.HandleFunc(fmt.Sprintf("%s %s", route.Method, route.Path), func(w http.ResponseWriter, r *http.Request) {
-			// Create handler chain with middleware
-			var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				route.Handler.Handle(w, r)
-			})
-
-			// Apply middlewares in reverse order so they execute in the order they were added
-			if route.Middlewares != nil {
-				for i := len(route.Middlewares) - 1; i >= 0; i-- {
-					handler = route.Middlewares[i].Process(handler)
-				}
-			}
-
-			// Execute the handler chain
-			handler.ServeHTTP(w, r)
-		})
+	if r.logger != nil {
+		r.logger.Info("HTTP Router started", "name", r.name, "routes_configured", len(r.routes))
 	}
-
-	r.serveMux = mux
-
+	// No need to create or manage an internal serveMux anymore
 	return nil
 }
 

@@ -1,0 +1,57 @@
+modules:
+  - name: mcpHttpServer
+    type: http.server
+    config:
+      address: ":8081" # Use a different port than the main example
+
+  - name: mcpHttpRouter
+    type: http.router
+    dependsOn:
+      - mcpHttpServer
+
+  # Custom handlers for MCP functionality
+  - name: rootHandler # Add root handler module
+    type: http.handler
+    config:
+      contentType: "application/json"
+    dependsOn:
+      - mcpHttpRouter
+
+  - name: docsHandler
+    type: http.handler
+    config:
+      contentType: "application/json"
+    dependsOn:
+      - mcpHttpRouter
+
+  - name: generateHandler
+    type: http.handler
+    config:
+      contentType: "application/json"
+    dependsOn:
+      - mcpHttpRouter
+
+workflows:
+  http:
+    router: mcpHttpRouter # Explicitly specify the router
+    server: mcpHttpServer # Explicitly specify the server
+    routes:
+      - method: GET # Add route for root path
+        path: /
+        handler: rootHandler
+
+      - method: POST # Add route for JSON-RPC POST requests
+        path: /
+        handler: rootHandler
+        
+      - method: OPTIONS # Add route for OPTIONS preflight requests
+        path: /
+        handler: rootHandler
+
+      - method: GET
+        path: /docs
+        handler: docsHandler
+
+      - method: POST
+        path: /generate
+        handler: generateHandler
