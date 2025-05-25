@@ -1,4 +1,4 @@
-package main
+package module
 
 import (
 	"context"
@@ -7,13 +7,11 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-
-	"github.com/GoCodeAlone/workflow/module"
 )
 
 func TestUIServer(t *testing.T) {
 	// Create a UI server
-	uiServer := module.NewUIServer("test-ui", ":8080", nil)
+	uiServer := NewUIServer("test-ui", ":8080", nil)
 
 	// Start the server
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
