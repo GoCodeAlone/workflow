@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "playwright test",
-    "ui-test": "playwright test tests/ui"
+    "ui-test": "playwright test tests/ui",
+    "server-test": "playwright test tests/ui/workflow-ui-server.test.js --config playwright.api.config.js"
   },
   "keywords": [],
   "author": "",

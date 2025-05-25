@@ -273,3 +273,8 @@ func (s *UIServer) deleteWorkflow(w http.ResponseWriter, r *http.Request, name s
 		"name":   name,
 	})
 }
+
+// ServeHTTP serves HTTP requests (implements http.Handler interface)
+func (s *UIServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.router.ServeHTTP(w, r)
+}
