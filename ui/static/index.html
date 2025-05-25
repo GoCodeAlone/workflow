@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workflow Manager</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Workflow Manager</h1>
+            <div class="actions">
+                <button id="create-workflow-btn" class="btn primary">Create New Workflow</button>
+            </div>
+        </header>
+
+        <main>
+            <section id="workflows-list">
+                <h2>Workflows</h2>
+                <div class="list-container">
+                    <div id="workflows-container" class="workflows">
+                        <p class="loading">Loading workflows...</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="workflow-detail" class="hidden">
+                <div class="detail-header">
+                    <h2 id="detail-title">Workflow Details</h2>
+                    <div class="actions">
+                        <button id="edit-workflow-btn" class="btn secondary">Edit</button>
+                        <button id="delete-workflow-btn" class="btn danger">Delete</button>
+                        <button id="back-btn" class="btn">Back to List</button>
+                    </div>
+                </div>
+                <div id="workflow-properties" class="properties">
+                    <div class="property">
+                        <span class="label">Name:</span>
+                        <span id="workflow-name" class="value"></span>
+                    </div>
+                    <div class="property">
+                        <span class="label">Status:</span>
+                        <span id="workflow-status" class="value"></span>
+                    </div>
+                    <div class="property">
+                        <span class="label">Configuration:</span>
+                        <pre id="workflow-config" class="config-editor"></pre>
+                    </div>
+                </div>
+            </section>
+
+            <section id="workflow-form" class="hidden">
+                <div class="form-header">
+                    <h2 id="form-title">Create New Workflow</h2>
+                    <div class="actions">
+                        <button id="save-workflow-btn" class="btn primary">Save</button>
+                        <button id="cancel-workflow-btn" class="btn">Cancel</button>
+                    </div>
+                </div>
+                <form id="workflow-editor-form">
+                    <div class="form-group">
+                        <label for="workflow-form-name">Name:</label>
+                        <input type="text" id="workflow-form-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="workflow-form-config">Configuration (YAML):</label>
+                        <textarea id="workflow-form-config" required rows="20"></textarea>
+                    </div>
+                </form>
+            </section>
+        </main>
+
+        <footer>
+            <p>Workflow Engine UI - Manage your workflows with ease</p>
+        </footer>
+    </div>
+
+    <div id="modal" class="modal hidden">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h2 id="modal-title">Confirmation</h2>
+            <p id="modal-message">Are you sure you want to continue?</p>
+            <div class="modal-actions">
+                <button id="modal-confirm" class="btn danger">Confirm</button>
+                <button id="modal-cancel" class="btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

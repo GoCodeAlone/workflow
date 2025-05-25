@@ -95,6 +95,15 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "http.router":
 				e.logger.Debug("Loading standard HTTP router module")
 				mod = module.NewStandardHTTPRouter(modCfg.Name)
+			case "ui.server":
+				address := ":8080" // Default UI server address
+				if addr, ok := modCfg.Config["address"].(string); ok {
+					address = addr
+				}
+				e.logger.Debug("Loading UI server module with address: " + address)
+				uiServer := module.NewUIServer(modCfg.Name, address, e.logger)
+				uiServer.SetEngine(e) // Set the engine reference
+				mod = uiServer
 			case "http.handler":
 				contentType := "application/json"
 				if ct, ok := modCfg.Config["contentType"].(string); ok {
@@ -330,4 +339,20 @@ type Engine interface {
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
 	TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) error
+	GetWorkflows() map[string]interface{}
+}
+
+// GetWorkflows returns a map of all active workflows
+func (e *StdEngine) GetWorkflows() map[string]interface{} {
+	workflows := make(map[string]interface{})
+	
+	// For now, return a simple representation of registered modules and handlers
+	for i, mod := range e.modules {
+		workflows[fmt.Sprintf("module-%d", i)] = map[string]string{
+			"name": mod.Name(),
+			"type": fmt.Sprintf("%T", mod),
+		}
+	}
+	
+	return workflows
 }

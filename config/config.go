@@ -17,9 +17,11 @@ type ModuleConfig struct {
 
 // WorkflowConfig represents the overall configuration for the workflow engine
 type WorkflowConfig struct {
-	Modules   []ModuleConfig         `json:"modules" yaml:"modules"`
-	Workflows map[string]interface{} `json:"workflows" yaml:"workflows"`
-	Triggers  map[string]interface{} `json:"triggers" yaml:"triggers"`
+	Name        string                 `json:"name,omitempty" yaml:"name,omitempty"`
+	Description string                 `json:"description,omitempty" yaml:"description,omitempty"`
+	Modules     []ModuleConfig         `json:"modules" yaml:"modules"`
+	Workflows   map[string]interface{} `json:"workflows" yaml:"workflows"`
+	Triggers    map[string]interface{} `json:"triggers" yaml:"triggers"`
 }
 
 // LoadFromFile loads a workflow configuration from a YAML file
@@ -40,8 +42,10 @@ func LoadFromFile(filepath string) (*WorkflowConfig, error) {
 // NewEmptyWorkflowConfig creates a new empty workflow configuration
 func NewEmptyWorkflowConfig() *WorkflowConfig {
 	return &WorkflowConfig{
-		Modules:   make([]ModuleConfig, 0),
-		Workflows: make(map[string]interface{}),
-		Triggers:  make(map[string]interface{}),
+		Name:        "",
+		Description: "",
+		Modules:     make([]ModuleConfig, 0),
+		Workflows:   make(map[string]interface{}),
+		Triggers:    make(map[string]interface{}),
 	}
 }
