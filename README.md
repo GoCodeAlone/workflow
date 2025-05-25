@@ -30,6 +30,7 @@ The engine supports several types of modules:
 - **Authentication Middleware**: Validates requests before they reach handlers
 - **Message Broker**: Facilitates message-based communication
 - **Message Handlers**: Processes messages from specific topics
+- **UI Server**: Provides a web-based interface for workflow management
 
 ## Configuration
 

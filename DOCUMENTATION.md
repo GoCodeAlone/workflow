@@ -39,6 +39,12 @@ The Workflow Engine is a modular Go-based system designed to orchestrate and man
    - Cron-like scheduling
    - One-time and recurring tasks
 
+4. **UI Module**
+   - Web-based workflow management interface
+   - Workflow visualization and monitoring
+   - Interactive workflow editor
+   - Workflow lifecycle management (create, edit, delete)
+
 ### Configuration
 
 The workflow engine is configured through YAML files that define:

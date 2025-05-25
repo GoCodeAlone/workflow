@@ -1,0 +1,25 @@
+name: "Workflow UI Server Test"
+description: "Configuration for testing the Workflow UI server"
+
+modules:
+  - name: ui-server
+    type: ui.server
+    config:
+      address: ":8080"
+  
+  - name: http-server
+    type: http.server
+    config:
+      address: ":8081"
+  
+  - name: http-router
+    type: http.router
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/status
+        response:
+          statusCode: 200
+          body: '{"status":"ok"}'
