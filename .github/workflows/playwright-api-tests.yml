@@ -1,0 +1,64 @@
+name: Playwright API Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Run Playwright API tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.20'
+        cache: true
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Create test configuration
+      run: |
+        cat > test_api_config.js << EOL
+// @ts-check
+const { defineConfig } = require('@playwright/test');
+
+module.exports = defineConfig({
+  testDir: './tests',
+  timeout: 30 * 1000,
+  expect: {
+    timeout: 5000
+  },
+  reporter: [['line']],
+  use: {
+    baseURL: 'http://localhost:8080',
+  },
+  // Skip browser downloads
+  skipInstallBrowsers: true,
+  webServer: {
+    command: 'go run test_api_server.go',
+    port: 8080,
+    reuseExistingServer: false,
+  },
+});
+EOL
+
+    - name: Build Go code
+      run: go build -v ./config/... ./handlers/... ./module/...
+
+    - name: Run Playwright API tests
+      env:
+        PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+      run: npx playwright test tests/ui/workflow-ui-server.test.js --config test_api_config.js

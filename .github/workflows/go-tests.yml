@@ -1,0 +1,31 @@
+name: Go Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Run Go tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.20'
+        cache: true
+
+    - name: Build
+      run: go build -v ./config/... ./handlers/... ./module/...
+
+    - name: Test
+      run: |
+        go test -v ./config/...
+        go test -v ./handlers/...
+        go test -v ./module/...
+        go test -v ui_server_test.go
