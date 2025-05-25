@@ -48,7 +48,7 @@ module.exports = defineConfig({
   // Skip browser downloads
   skipInstallBrowsers: true,
   webServer: {
-    command: 'go run test_api_server.go',
+    command: 'go run ./cmd/test_api/test_api_server.go',
     port: 8080,
     reuseExistingServer: false,
   },
@@ -56,7 +56,7 @@ module.exports = defineConfig({
 EOL
 
     - name: Build Go code
-      run: go build -v ./config/... ./handlers/... ./module/...
+      run: go build -v ./config/... ./module/...
 
     - name: Run Playwright API tests
       env:
