@@ -1,6 +1,6 @@
 # Workflow Engine
 
-A configurable workflow engine based on GoCodeAlone's Modular library, allowing applications to be built entirely from configuration.
+A configurable workflow engine built on GoCodeAlone's Modular library v1.3.9, allowing applications to be built entirely from YAML configuration files.
 
 ## Overview
 
@@ -11,6 +11,11 @@ This workflow engine lets you create applications by chaining together modular c
 - A bidirectional chat system with triage capabilities
 
 All without changing code - just by modifying configuration files.
+
+## Requirements
+
+- Go 1.23 or later
+- GoCodeAlone/modular v1.3.9
 
 ## Architecture
 
