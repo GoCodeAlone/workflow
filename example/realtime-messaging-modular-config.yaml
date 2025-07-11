@@ -1,0 +1,36 @@
+modules:
+  # Real-time event bus for pub/sub messaging
+  - name: realtime-eventbus
+    type: eventbus.modular
+  
+  # HTTP server for API endpoints
+  - name: api-server
+    type: httpserver.modular
+  
+  # Chi router for HTTP routing
+  - name: api-router
+    type: chimux.router
+
+# Module configurations
+eventbus:
+  engine: memory
+  maxEventQueueSize: 5000
+  defaultEventBufferSize: 100
+  workerCount: 20
+  eventTTL: 7200  # 2 hours
+  retentionDays: 3
+
+httpserver:
+  address: ":8080"
+  readTimeoutSeconds: 30
+  writeTimeoutSeconds: 30
+
+chimux:
+  logRoutes: true
+  cors:
+    enabled: true
+    allowedOrigins: ["*"]
+    allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  middleware:
+    requestId: true
+    realIP: true
