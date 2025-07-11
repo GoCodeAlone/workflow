@@ -23,9 +23,9 @@ chimux:
 reverseproxy:
   backend_services:
     users: "http://users-service:8080"
-    products: "http://products-service:8080"
+    products: "http://products-service:8080" 
     orders: "http://orders-service:8080"
-    health: "http://localhost:8091"  # Mock health service
+    health: "http://httpbin.org"  # Use httpbin.org for testing
   default_backend: "health"
   timeout: 10
   forward_headers:
@@ -33,5 +33,21 @@ reverseproxy:
     - "User-Agent"
     - "X-Request-ID"
   
-  # Default route that catches all requests and routes to backends
-  default_pattern: "/*"
+  # Define specific routes  
+  composite_routes:
+    "/health":
+      pattern: "/health"
+      backends: ["health"]
+      strategy: "select"
+    "/api/users":
+      pattern: "/api/users"
+      backends: ["users"]
+      strategy: "select"
+    "/api/products":
+      pattern: "/api/products"
+      backends: ["products"] 
+      strategy: "select"
+    "/api/orders":
+      pattern: "/api/orders"
+      backends: ["orders"]
+      strategy: "select"
