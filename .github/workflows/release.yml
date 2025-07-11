@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        cache: true
+
+    - name: Run tests
+      run: go test -v ./...
+
+    - name: Build binaries
+      run: |
+        mkdir -p dist
+        
+        # Build for multiple platforms
+        GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/workflow-linux-amd64 ./example
+        GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o dist/workflow-linux-arm64 ./example
+        GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o dist/workflow-darwin-amd64 ./example
+        GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o dist/workflow-darwin-arm64 ./example
+        GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/workflow-windows-amd64.exe ./example
+
+    - name: Create checksums
+      run: |
+        cd dist
+        sha256sum * > checksums.txt
+
+    - name: Extract release notes
+      id: extract_notes
+      run: |
+        # Extract version from tag
+        VERSION=${GITHUB_REF#refs/tags/}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        
+        # Create basic release notes
+        echo "## Release $VERSION" > release_notes.md
+        echo "" >> release_notes.md
+        echo "### Changes" >> release_notes.md
+        echo "- Updated to Modular v1.3.9" >> release_notes.md
+        echo "- Improved error handling and linting compliance" >> release_notes.md
+        echo "- Enhanced CI/CD workflows" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "### Downloads" >> release_notes.md
+        echo "Choose the appropriate binary for your platform:" >> release_notes.md
+        echo "- **Linux (AMD64)**: workflow-linux-amd64" >> release_notes.md
+        echo "- **Linux (ARM64)**: workflow-linux-arm64" >> release_notes.md
+        echo "- **macOS (Intel)**: workflow-darwin-amd64" >> release_notes.md
+        echo "- **macOS (Apple Silicon)**: workflow-darwin-arm64" >> release_notes.md
+        echo "- **Windows (AMD64)**: workflow-windows-amd64.exe" >> release_notes.md
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          dist/*
+        body_path: release_notes.md
+        draft: false
+        prerelease: ${{ contains(github.ref, '-') }}
+        generate_release_notes: true

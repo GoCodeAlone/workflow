@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ['1.23', '1.24']
+    
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+        cache: true
+
+    - name: Download dependencies
+      run: |
+        go mod download
+        go mod verify
+
+    - name: Run tests
+      run: |
+        go test -v -race -coverprofile=coverage.out ./...
+
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v5
+      if: matrix.go-version == '1.24'
+      with:
+        file: ./coverage.out
+        fail_ci_if_error: false
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        cache: true
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v7
+      with:
+        version: latest
+        args: --timeout=10m
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        cache: true
+
+    - name: Build main package
+      run: |
+        go build -v ./...
+
+    - name: Build examples
+      run: |
+        cd example
+        go build -v ./...
+
+  example-tests:
+    name: Example Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        cache: true
+
+    - name: Build examples
+      run: |
+        cd example
+        go build -o workflow-example ./...
+
+    - name: Test simple workflow config
+      run: |
+        cd example
+        timeout 10s ./workflow-example -config simple-workflow-config.yaml || test $? -eq 124
+
+    - name: Test API server config
+      run: |
+        cd example
+        timeout 10s ./workflow-example -config api-server-config.yaml || test $? -eq 124
+
+    - name: Test event processor config
+      run: |
+        cd example
+        timeout 10s ./workflow-example -config event-processor-config.yaml || test $? -eq 124
