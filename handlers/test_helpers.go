@@ -92,6 +92,21 @@ func (t *TestServiceRegistry) GetConfigSection(section string) (modular.ConfigPr
 	return t.configSections[section], nil
 }
 
+// IsVerboseConfig returns whether verbose config debugging is enabled
+func (t *TestServiceRegistry) IsVerboseConfig() bool {
+	return false // Default to false for tests
+}
+
+// SetVerboseConfig sets verbose config debugging (no-op for tests)
+func (t *TestServiceRegistry) SetVerboseConfig(enabled bool) {
+	// No-op for tests
+}
+
+// SetLogger sets the application's logger
+func (t *TestServiceRegistry) SetLogger(logger modular.Logger) {
+	t.logger = logger
+}
+
 // RegisterModule registers a module in the test registry
 func (t *TestServiceRegistry) RegisterModule(module modular.Module) {
 	// Simplified implementation for tests

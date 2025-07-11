@@ -118,6 +118,21 @@ func (a *MockApplication) Run() error {
 	return nil
 }
 
+// IsVerboseConfig returns whether verbose config debugging is enabled
+func (a *MockApplication) IsVerboseConfig() bool {
+	return false // Default to false for tests
+}
+
+// SetVerboseConfig sets verbose config debugging (no-op for tests)
+func (a *MockApplication) SetVerboseConfig(enabled bool) {
+	// No-op for tests
+}
+
+// SetLogger sets the application's logger
+func (a *MockApplication) SetLogger(logger modular.Logger) {
+	a.MockLogger = logger.(*MockLogger) // Assume it's a MockLogger for tests
+}
+
 // SvcRegistry satisfies the modular.Application interface
 func (a *MockApplication) SvcRegistry() modular.ServiceRegistry {
 	// Return the Services map directly as it implements the needed interface
