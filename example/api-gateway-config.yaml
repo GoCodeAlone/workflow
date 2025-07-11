@@ -1,133 +1,74 @@
 modules:
-  # Gateway Server
-  - name: gateway-server
-    type: http.server
-    config:
-      address: ":8090"
-  
+  # Chi router module (required for reverse proxy)
   - name: gateway-router
-    type: http.router
-    dependsOn:
-      - gateway-server
-  
-  # Middleware components
-  - name: auth-middleware
-    type: http.middleware.auth
-    config:
-      secretKey: "gateway-secret-key"
-  
-  - name: rate-limit-middleware
-    type: http.middleware.ratelimit
-    config:
-      requestsPerMinute: 60
-      burstSize: 10
-  
-  - name: logging-middleware
-    type: http.middleware.logging
-    config:
-      logLevel: "info"
-  
-  - name: cors-middleware
-    type: http.middleware.cors
-    config:
-      allowedOrigins: ["*"]
-      allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-  
-  # Service proxies
-  - name: users-service-proxy
-    type: http.proxy
-    config:
-      targetURL: "http://users-service:8080"
-      servicePath: "/users"
-  
-  - name: products-service-proxy
-    type: http.proxy
-    config:
-      targetURL: "http://products-service:8080"
-      servicePath: "/products"
-  
-  - name: orders-service-proxy
-    type: http.proxy
-    config:
-      targetURL: "http://orders-service:8080"
-      servicePath: "/orders"
+    type: chimux.router
 
-  # Status and monitoring
-  - name: health-check-handler
-    type: http.handler
-    config:
-      contentType: "application/json"
-  
-  - name: metrics-handler
-    type: http.handler
-    config:
-      contentType: "application/json"
+  # HTTP server module  
+  - name: gateway-server
+    type: httpserver.modular
+
+  # Reverse proxy module
+  - name: gateway-proxy
+    type: reverseproxy
 
 workflows:
   http:
     routes:
-      # Public endpoints
+      # Health check
       - method: GET
         path: /health
-        handler: health-check-handler
+        handler: gateway-proxy
       
+      # Metrics endpoint
       - method: GET
         path: /metrics
-        handler: metrics-handler
-        middlewares:
-          - auth-middleware
+        handler: gateway-proxy
       
-      # Protected service endpoints with full middleware stack
+      # User service routes
       - method: GET
         path: /api/users
-        handler: users-service-proxy
-        middlewares:
-          - cors-middleware
-          - logging-middleware
-          - rate-limit-middleware
-          - auth-middleware
+        handler: gateway-proxy
       
       - method: POST
         path: /api/users
-        handler: users-service-proxy
-        middlewares:
-          - cors-middleware
-          - logging-middleware
-          - rate-limit-middleware
-          - auth-middleware
+        handler: gateway-proxy
       
+      # Product service routes
       - method: GET
         path: /api/products
-        handler: products-service-proxy
-        middlewares:
-          - cors-middleware
-          - logging-middleware
-          - rate-limit-middleware
-          - auth-middleware
+        handler: gateway-proxy
       
       - method: POST
         path: /api/products
-        handler: products-service-proxy
-        middlewares:
-          - cors-middleware
-          - logging-middleware
-          - rate-limit-middleware
-          - auth-middleware
+        handler: gateway-proxy
       
+      # Order service routes
       - method: GET
         path: /api/orders
-        handler: orders-service-proxy
-        middlewares:
-          - cors-middleware
-          - logging-middleware
-          - rate-limit-middleware
-          - auth-middleware
+        handler: gateway-proxy
       
       - method: POST
         path: /api/orders
-        handler: orders-service-proxy
-        middlewares:
-          - cors-middleware
-          - logging-middleware
-          - rate-limit-middleware
-          - auth-middleware
+        handler: gateway-proxy
+
+# Configuration for the modules
+httpserver:
+  address: ":8090"
+  readTimeoutSeconds: 30
+  writeTimeoutSeconds: 30
+
+chimux:
+  logRoutes: true
+
+reverseproxy:
+  backend_services:
+    users: "http://users-service:8080"
+    products: "http://products-service:8080"
+    orders: "http://orders-service:8080"
+    health: "http://localhost:8091"  # Mock health service
+  default_backend: "health"
+  timeout: 10
+  forward_headers:
+    - "Authorization"
+    - "User-Agent"
+    - "X-Request-ID"

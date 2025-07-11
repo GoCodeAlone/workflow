@@ -1,0 +1,37 @@
+modules:
+  # Chi router module (required for reverse proxy)
+  - name: gateway-router
+    type: chimux.router
+
+  # HTTP server module  
+  - name: gateway-server
+    type: httpserver.modular
+
+  # Reverse proxy module
+  - name: gateway-proxy
+    type: reverseproxy
+
+# Configuration for the modules
+httpserver:
+  address: ":8090"
+  readTimeoutSeconds: 30
+  writeTimeoutSeconds: 30
+
+chimux:
+  logRoutes: true
+
+reverseproxy:
+  backend_services:
+    users: "http://users-service:8080"
+    products: "http://products-service:8080"
+    orders: "http://orders-service:8080"
+    health: "http://localhost:8091"  # Mock health service
+  default_backend: "health"
+  timeout: 10
+  forward_headers:
+    - "Authorization"
+    - "User-Agent"
+    - "X-Request-ID"
+  
+  # Default route that catches all requests and routes to backends
+  default_pattern: "/*"
