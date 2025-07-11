@@ -259,17 +259,7 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 	return fmt.Errorf("no handler found for workflow type: %s", workflowType)
 }
 
-// buildModules creates and initializes all modules from configuration
-func (e *StdEngine) buildModules(modulesConfig []map[string]interface{}) error {
-	// ... existing code ...
-	return nil
-}
 
-// configureWorkflows sets up all workflows from configuration
-func (e *StdEngine) configureWorkflows(workflowConfigs map[string]interface{}) error {
-	// ... existing code ...
-	return nil
-}
 
 // configureTriggers sets up all triggers from configuration
 func (e *StdEngine) configureTriggers(triggerConfigs map[string]interface{}) error {
@@ -279,7 +269,9 @@ func (e *StdEngine) configureTriggers(triggerConfigs map[string]interface{}) err
 	}
 
 	// Register this engine as a service so triggers can find it
-	e.app.RegisterService("workflowEngine", e)
+	if err := e.app.RegisterService("workflowEngine", e); err != nil {
+		return fmt.Errorf("failed to register workflow engine service: %w", err)
+	}
 
 	// Configure each trigger type
 	for triggerType, triggerConfig := range triggerConfigs {

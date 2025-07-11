@@ -331,7 +331,10 @@ func (p *EventProcessor) GetService(name string, out interface{}) error {
 // Service provides access to a named service
 func (p *EventProcessor) Service(name string) interface{} {
 	var result interface{}
-	p.GetService(name, &result)
+	if err := p.GetService(name, &result); err != nil {
+		// Return nil if service not found - this is expected behavior
+		return nil
+	}
 	return result
 }
 

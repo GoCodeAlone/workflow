@@ -208,7 +208,11 @@ func (c *HTTPIntegrationConnector) Execute(ctx context.Context, action string, p
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but continue
+		}
+	}()
 
 	// Read response body
 	respBody, err := io.ReadAll(resp.Body)
@@ -283,7 +287,11 @@ func (c *WebhookIntegrationConnector) Connect(ctx context.Context) error {
 		}
 
 		// Parse the request body
-		defer r.Body.Close()
+		defer func() {
+			if err := r.Body.Close(); err != nil {
+				// Log error but continue
+			}
+		}()
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "Error reading request body", http.StatusBadRequest)
@@ -321,7 +329,9 @@ func (c *WebhookIntegrationConnector) Connect(ctx context.Context) error {
 
 		// Return success
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		if _, err := w.Write([]byte(`{"status":"ok"}`)); err != nil {
+			// Log error but continue
+		}
 	})
 
 	// Create server

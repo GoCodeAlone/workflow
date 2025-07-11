@@ -222,7 +222,9 @@ func (h *RESTAPIHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	default:
 		// Method not allowed or invalid path
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed or invalid path"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed or invalid path"}); err != nil {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
 	}
 }
 
@@ -237,7 +239,9 @@ func (h *RESTAPIHandler) handleGet(resourceId string, w http.ResponseWriter, r *
 		for _, resource := range h.resources {
 			resources = append(resources, resource)
 		}
-		json.NewEncoder(w).Encode(resources)
+		if err := json.NewEncoder(w).Encode(resources); err != nil {
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -265,7 +269,9 @@ func (h *RESTAPIHandler) handleGet(resourceId string, w http.ResponseWriter, r *
 			}
 		}
 
-		json.NewEncoder(w).Encode(resource)
+		if err := json.NewEncoder(w).Encode(resource); err != nil {
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
 		return
 	}
 
