@@ -139,20 +139,7 @@ func (a *MockApplication) SvcRegistry() modular.ServiceRegistry {
 	return a.Services
 }
 
-// modularServiceRegistryAdapter adapts our MockApplication to the modular.ServiceRegistry interface
-type modularServiceRegistryAdapter struct {
-	app *MockApplication
-}
 
-// GetService forwards to the app's GetService method
-func (a *modularServiceRegistryAdapter) GetService(name string, out interface{}) error {
-	return a.app.GetService(name, out)
-}
-
-// RegisterService forwards to the app's RegisterService method
-func (a *modularServiceRegistryAdapter) RegisterService(name string, service interface{}) error {
-	return a.app.RegisterService(name, service)
-}
 
 // MockConfigProvider is a mock implementation of modular.ConfigProvider for testing
 type MockConfigProvider struct {

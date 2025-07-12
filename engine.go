@@ -220,7 +220,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	}
 
 	// Log loaded services
-	for name, _ := range e.app.SvcRegistry() {
+	for name := range e.app.SvcRegistry() {
 		e.logger.Debug("Loaded service: " + name)
 	}
 

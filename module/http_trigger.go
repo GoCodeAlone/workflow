@@ -228,6 +228,7 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 		if _, err := w.Write([]byte(`{"status": "workflow triggered"}`)); err != nil {
 			// Log error but don't fail the trigger
 			// Note: In a real implementation, we'd need access to a logger here
+			_ = err // Explicitly ignore error to satisfy linter
 		}
 	}
 

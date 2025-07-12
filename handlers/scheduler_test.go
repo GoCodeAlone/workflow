@@ -90,7 +90,9 @@ func TestSchedulerWorkflow(t *testing.T) {
 
 	// Manually trigger the job instead of relying on ExecuteImmediately
 	go func() {
-		testHelper.TriggerJobExecution(ctx, "test-job")
+		if err := testHelper.TriggerJobExecution(ctx, "test-job"); err != nil {
+			t.Errorf("Failed to trigger job execution: %v", err)
+		}
 	}()
 
 	// Wait for job execution

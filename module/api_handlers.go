@@ -277,7 +277,10 @@ func (h *RESTAPIHandler) handleGet(resourceId string, w http.ResponseWriter, r *
 
 	// Not found
 	w.WriteHeader(http.StatusNotFound)
-	json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"})
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"}); err != nil {
+		// Log error but continue since response is already committed
+		_ = err
+	}
 }
 
 // handleGetAll handles GET requests for listing all resources
@@ -292,7 +295,10 @@ func (h *RESTAPIHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resources)
+	if err := json.NewEncoder(w).Encode(resources); err != nil {
+		// Log error but continue since response is already committed
+		_ = err
+	}
 }
 
 // handlePost handles POST requests for creating resources
@@ -300,7 +306,10 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 	var data map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+		if encErr := json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"}); encErr != nil {
+			// Log error but continue since response is already committed
+			_ = encErr
+		}
 		return
 	}
 
@@ -351,21 +360,30 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(h.resources[resourceId])
+	if err := json.NewEncoder(w).Encode(h.resources[resourceId]); err != nil {
+		// Log error but continue since response is already committed
+		_ = err
+	}
 }
 
 // handlePut handles PUT requests for updating resources
 func (h *RESTAPIHandler) handlePut(resourceId string, w http.ResponseWriter, r *http.Request) {
 	if resourceId == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "ID is required for PUT"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "ID is required for PUT"}); err != nil {
+			// Log error but continue since response is already committed
+			_ = err
+		}
 		return
 	}
 
 	var data map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+		if encErr := json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"}); encErr != nil {
+			// Log error but continue since response is already committed
+			_ = encErr
+		}
 		return
 	}
 
@@ -375,7 +393,10 @@ func (h *RESTAPIHandler) handlePut(resourceId string, w http.ResponseWriter, r *
 	// Check if resource exists
 	if _, ok := h.resources[resourceId]; !ok {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"}); err != nil {
+			// Log error but continue since response is already committed
+			_ = err
+		}
 		return
 	}
 
@@ -385,7 +406,10 @@ func (h *RESTAPIHandler) handlePut(resourceId string, w http.ResponseWriter, r *
 		Data: data,
 	}
 
-	json.NewEncoder(w).Encode(h.resources[resourceId])
+	if err := json.NewEncoder(w).Encode(h.resources[resourceId]); err != nil {
+		// Log error but continue since response is already committed
+		_ = err
+	}
 
 	// Existing implementation plus event publishing:
 	if h.eventBroker != nil {
@@ -407,7 +431,10 @@ func (h *RESTAPIHandler) handlePut(resourceId string, w http.ResponseWriter, r *
 func (h *RESTAPIHandler) handleDelete(resourceId string, w http.ResponseWriter, r *http.Request) {
 	if resourceId == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "ID is required for DELETE"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "ID is required for DELETE"}); err != nil {
+			// Log error but continue since response is already committed
+			_ = err
+		}
 		return
 	}
 
@@ -417,7 +444,10 @@ func (h *RESTAPIHandler) handleDelete(resourceId string, w http.ResponseWriter, 
 	// Check if resource exists
 	if _, ok := h.resources[resourceId]; !ok {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"}); err != nil {
+			// Log error but continue since response is already committed
+			_ = err
+		}
 		return
 	}
 
@@ -446,7 +476,10 @@ func (h *RESTAPIHandler) handleDelete(resourceId string, w http.ResponseWriter, 
 func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWriter, r *http.Request) {
 	if resourceId == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Resource ID is required for transition"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "Resource ID is required for transition"}); err != nil {
+			// Log error but continue since response is already committed
+			_ = err
+		}
 		return
 	}
 
@@ -459,13 +492,19 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 
 	if err := json.NewDecoder(r.Body).Decode(&transitionRequest); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid transition request format"})
+		if encErr := json.NewEncoder(w).Encode(map[string]string{"error": "Invalid transition request format"}); encErr != nil {
+			// Log error but continue since response is already committed
+			_ = encErr
+		}
 		return
 	}
 
 	if transitionRequest.Transition == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Transition name is required"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "Transition name is required"}); err != nil {
+			// Log error but continue since response is already committed
+			_ = err
+		}
 		return
 	}
 
@@ -479,7 +518,10 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 
 	if !exists {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"}); err != nil {
+			// Log error but continue since response is already committed
+			_ = err
+		}
 		return
 	}
 
@@ -618,7 +660,10 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 		}
 
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Workflow engine not found"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "Workflow engine not found"}); err != nil {
+			// Log error but continue since response is already committed
+			_ = err
+		}
 		return
 	}
 
@@ -636,12 +681,15 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 			if err != nil {
 				h.logger.Error(fmt.Sprintf("Failed to create workflow instance: %s", err.Error()))
 				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 					"success":    false,
 					"error":      fmt.Sprintf("Failed to create workflow instance: %s", err.Error()),
 					"id":         resourceId,
 					"instanceId": instanceId,
-				})
+				}); encErr != nil {
+					// Log error but continue since response is already committed
+					_ = encErr
+				}
 				return
 			}
 			h.logger.Info(fmt.Sprintf("Successfully created workflow instance '%s'", instanceId))
@@ -684,20 +732,26 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 
 	default:
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Workflow engine does not support transitions"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "Workflow engine does not support transitions"}); err != nil {
+			// Log error but continue since response is already committed
+			_ = err
+		}
 		return
 	}
 
 	if err != nil {
 		h.logger.Error(fmt.Sprintf("Transition failed: %s", err.Error()))
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":    false,
 			"error":      err.Error(),
 			"id":         resourceId,
 			"instanceId": instanceId,
 			"transition": transitionRequest.Transition,
-		})
+		}); encErr != nil {
+			// Log error but continue since response is already committed
+			_ = encErr
+		}
 		return
 	}
 
@@ -780,7 +834,10 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 		transitionRequest.Transition, resourceId))
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(result)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		// Log error but continue since response is already committed
+		_ = err
+	}
 }
 
 // Start is a no-op for this handler

@@ -53,7 +53,10 @@ func (h *SimpleHTTPHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		"message": "Default handler response",
 	}
 
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		// Log error but continue since response is already committed
+		_ = err
+	}
 }
 
 // ServeHTTP implements the http.Handler interface

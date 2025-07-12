@@ -310,10 +310,8 @@ func (e *StateMachineEngine) TriggerTransition(
 	instance.LastUpdated = time.Now()
 
 	// Merge data if provided
-	if data != nil {
-		for k, v := range data {
-			instance.Data[k] = v
-		}
+	for k, v := range data {
+		instance.Data[k] = v
 	}
 
 	// Create a transition event
