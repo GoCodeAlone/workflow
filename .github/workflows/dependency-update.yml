@@ -1,0 +1,62 @@
+name: Dependency Update
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  schedule:
+    # Run weekly on Mondays at 9 AM UTC
+   - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  update-dependencies:
+    name: Update Go Dependencies
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        cache: true
+
+    - name: Update main dependencies
+      run: |
+        go get -u ./...
+        go mod tidy
+
+    - name: Update example dependencies
+      run: |
+        cd example
+        go get -u ./...
+        go mod tidy
+
+    - name: Run tests
+      run: |
+        go test ./...
+        cd example && go build ./...
+
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v7
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: 'chore: update Go dependencies'
+        title: 'chore: update Go dependencies'
+        body: |
+          This PR updates Go dependencies to their latest versions.
+          
+          Changes:
+          - Updated dependencies in main go.mod
+          - Updated dependencies in example/go.mod
+          - Verified tests still pass
+          
+          Please review the changes and ensure all functionality works as expected.
+        branch: chore/update-dependencies
+        delete-branch: true

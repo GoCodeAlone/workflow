@@ -1,67 +1,131 @@
-# Workflow Engine Examples
+# Workflow Engine Examples: Custom vs Modular Modules
 
-This directory contains example configurations for the workflow engine. Each example demonstrates a different type of workflow and functionality.
+This directory demonstrates the two approaches for building applications with the Workflow Engine:
 
-## Running an Example
+## 🔧 **Custom Module Approach** (Simple & Fast)
+Perfect for prototyping, learning, and simple applications.
 
-There are two ways to run the examples:
+**Examples:**
+- `simple-workflow-config.yaml` - Basic HTTP server with routing
+- `api-server-config.yaml` - REST API with custom handlers  
+- `event-processor-config.yaml` - Simple event processing
 
-### Option 1: Specify a configuration file
+**Benefits:**
+- Easy YAML-based configuration
+- Built-in workflow routing system
+- Great for rapid prototyping
+- Simple JSON response handlers
 
+## 🚀 **Modular v1.3.9 Approach** (Production-Ready)
+Enterprise-grade modules with advanced features.
+
+**Examples:**
+- `api-gateway-modular-config.yaml` - Production API gateway with reverse proxy
+- `scheduled-jobs-modular-config.yaml` - Advanced job scheduling with cron
+
+**Benefits:**
+- Production-ready with TLS, metrics, circuit breakers
+- Advanced features (load balancing, caching, pub/sub)
+- Better performance and reliability
+- Tenant-aware multi-tenancy support
+
+## 🎯 **Hybrid Approach** (Best of Both)
+Combine custom and Modular modules as needed.
+
+**Examples:**
+- `api-gateway-config.yaml` - Uses both custom middleware and reverse proxy
+
+## 📊 **Feature Comparison**
+
+| Feature | Custom Modules | Modular Modules |
+|---------|----------------|-----------------|
+| **Learning Curve** | ⭐⭐⭐⭐⭐ Easy | ⭐⭐⭐ Moderate |
+| **Configuration** | YAML workflows | Module configs |
+| **Performance** | ⭐⭐⭐ Good | ⭐⭐⭐⭐⭐ Excellent |
+| **Features** | ⭐⭐ Basic | ⭐⭐⭐⭐⭐ Advanced |
+| **Production Ready** | ⭐⭐ Limited | ⭐⭐⭐⭐⭐ Full |
+| **Extensibility** | ⭐⭐⭐ Good | ⭐⭐⭐⭐⭐ Excellent |
+
+## 🚀 **Getting Started**
+
+### Test Custom Modules
+```bash
+go run main.go -config simple-workflow-config.yaml
+curl http://localhost:8080/health
+```
+
+### Test Modular Modules  
+```bash
+go run main.go -config api-gateway-modular-config.yaml
+# Full API gateway with reverse proxy running on port 8080
+```
+
+### Test Advanced Scheduling
+```bash
+go run main.go -config scheduled-jobs-modular-config.yaml
+# Production scheduler with eventbus integration
+```
+
+## 📚 **Module Reference**
+
+### Available Custom Module Types
+- `http.server` - Basic HTTP server
+- `http.router` - Request routing  
+- `http.handler` - Simple JSON handlers
+- `http.middleware.auth` - Basic authentication
+- `http.middleware.logging` - Request logging
+- `http.middleware.ratelimit` - Rate limiting
+- `http.middleware.cors` - CORS headers
+- `messaging.broker` - In-memory message broker
+- `messaging.handler` - Message handlers
+
+### Available Modular Module Types
+- `reverseproxy` - Production reverse proxy with load balancing
+- `httpserver.modular` - Enterprise HTTP server with TLS
+- `scheduler.modular` - Advanced cron job scheduling
+- `auth.modular` - JWT/OAuth authentication
+- `eventbus.modular` - Pub/sub messaging system
+- `cache.modular` - Multi-backend caching
+- `chimux.router` - Chi router with middleware
+
+Choose the approach that best fits your needs!
+
+---
+
+## Legacy Examples
+
+The following examples demonstrate various workflow patterns:
+
+### State Machine & Event Processing
+- `state-machine-workflow.yaml` - E-commerce order processing states
+- `event-driven-workflow.yaml` - Complex event pattern detection
+- `event-processor-config.yaml` - Basic event processing
+
+### Integration & APIs  
+- `integration-workflow.yaml` - Third-party service integration
+- `api-gateway-config.yaml` - API gateway with authentication
+- `sms-chat-config.yaml` - SMS-based messaging workflow
+
+### Scheduling & Jobs
+- `advanced-scheduler-workflow.yaml` - Complex scheduling scenarios
+- `scheduled-jobs-config.yaml` - Recurring task management
+- `data-pipeline-config.yaml` - Data processing workflows
+
+### Patterns & Examples
+- `multi-workflow-config.yaml` - Multiple parallel workflows
+- `dependency-injection-example.yaml` - Service injection patterns
+- `trigger-workflow-example.yaml` - Event trigger demonstrations
+
+### Running Legacy Examples
+
+Option 1: Specify configuration file
 ```bash
 go run main.go -config <configuration-file>.yaml
 ```
 
-For instance, to run the state machine workflow example:
-
-```bash
-go run main.go -config state-machine-workflow.yaml
-```
-
-### Option 2: Interactive selection menu
-
-Simply run the main.go without any arguments to see an interactive menu of all available workflow configurations:
-
+Option 2: Interactive selection menu
 ```bash
 go run main.go
 ```
 
-This will display a numbered list of all available workflow configurations. Enter the number corresponding to the workflow you want to run.
-
-## Example Types
-
-### State Machine Workflow
-
-A workflow that tracks explicit states and transitions, demonstrated in `state-machine-workflow.yaml`. This example models an e-commerce order processing system with states like "new", "validating", "paid", and "shipped".
-
-### Event-Driven Workflow
-
-A complex event pattern processing system, demonstrated in `event-driven-workflow.yaml`. This example detects patterns like login brute force attempts and system faults.
-
-### Integration Workflow
-
-An integration workflow connecting to third-party services, demonstrated in `integration-workflow.yaml`. It shows how to connect to external APIs for CRM, payment processing, and inventory management.
-
-### Multi-Workflow Configuration
-
-Running multiple workflows in parallel, demonstrated in `multi-workflow-config.yaml`. This example combines HTTP routing with message-based workflows.
-
-### Advanced Scheduler Workflow
-
-A scheduler for executing various jobs at different intervals, demonstrated in `advanced-scheduler-workflow.yaml`. It includes jobs running at minute, hourly, and daily intervals.
-
-### API Gateway and Server
-
-HTTP API examples shown in `api-gateway-config.yaml` and `api-server-config.yaml`. These demonstrate building RESTful APIs and routing between services.
-
-### Other Examples
-
-- `data-pipeline-config.yaml`: Data processing workflows
-- `dependency-injection-example.yaml`: Service injection patterns
-- `event-processor-config.yaml`: Event processing with messaging
-- `scheduled-jobs-config.yaml`: Recurring task scheduling
-- `sms-chat-config.yaml`: Messaging-based workflow
-
-## Understanding the Diagrams
-
-Some examples include `.txt` files with ASCII diagrams that visualize the workflow structure. For example, `state-machine-workflow.txt` shows the state diagram for the order processing workflow.
+This displays a numbered list of available configurations.

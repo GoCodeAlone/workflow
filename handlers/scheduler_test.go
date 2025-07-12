@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,9 +32,9 @@ func TestSchedulerWorkflow(t *testing.T) {
 	engine.RegisterWorkflowHandler(NewSchedulerWorkflowHandler())
 
 	// Mock job for testing using our helper
-	mockJobExecuted := false
+	var mockJobExecuted int32 // Use atomic int32 instead of bool
 	testHelper.RegisterTestJob("test-job", func(ctx context.Context) error {
-		mockJobExecuted = true
+		atomic.StoreInt32(&mockJobExecuted, 1)
 		return nil
 	})
 
@@ -89,7 +90,9 @@ func TestSchedulerWorkflow(t *testing.T) {
 
 	// Manually trigger the job instead of relying on ExecuteImmediately
 	go func() {
-		testHelper.TriggerJobExecution(ctx, "test-job")
+		if err := testHelper.TriggerJobExecution(ctx, "test-job"); err != nil {
+			t.Errorf("Failed to trigger job execution: %v", err)
+		}
 	}()
 
 	// Wait for job execution
@@ -102,7 +105,7 @@ func TestSchedulerWorkflow(t *testing.T) {
 	}
 
 	// Verify job executed
-	if !mockJobExecuted {
+	if atomic.LoadInt32(&mockJobExecuted) == 0 {
 		t.Errorf("Expected scheduler job to be executed")
 	}
 }

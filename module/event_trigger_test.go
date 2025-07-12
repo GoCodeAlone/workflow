@@ -13,11 +13,15 @@ func TestEventTrigger(t *testing.T) {
 
 	// Register a mock message broker with the name expected by the event trigger
 	broker := NewMockMessageBroker()
-	app.RegisterService("messageBroker", broker)
+	if err := app.RegisterService("messageBroker", broker); err != nil {
+		t.Fatalf("Failed to register message broker: %v", err)
+	}
 
 	// Register a mock workflow engine with the name expected by the event trigger
 	engine := NewMockWorkflowEngine()
-	app.RegisterService("workflowEngine", engine)
+	if err := app.RegisterService("workflowEngine", engine); err != nil {
+		t.Fatalf("Failed to register workflow engine: %v", err)
+	}
 
 	// Print registered services for debugging
 	t.Logf("Available services: %v", getMapKeys(app.SvcRegistry()))
@@ -127,7 +131,9 @@ func TestEventTrigger(t *testing.T) {
 	userEventJson, _ := json.Marshal(userEvent)
 
 	// Simulate message received
-	broker.simulateMessage("user-events", userEventJson)
+	if err := broker.simulateMessage("user-events", userEventJson); err != nil {
+		t.Fatalf("Failed to simulate message: %v", err)
+	}
 
 	// Verify workflow was triggered
 	if len(engine.triggeredWorkflows) != 1 {
@@ -162,7 +168,9 @@ func TestEventTrigger(t *testing.T) {
 	engine.triggeredWorkflows = []WorkflowTriggerInfo{}
 
 	// Simulate message received
-	broker.simulateMessage("user-events", otherEventJson)
+	if err := broker.simulateMessage("user-events", otherEventJson); err != nil {
+		t.Fatalf("Failed to simulate message: %v", err)
+	}
 
 	// Verify workflow was not triggered (event type doesn't match)
 	if len(engine.triggeredWorkflows) != 0 {
@@ -178,7 +186,9 @@ func TestEventTrigger(t *testing.T) {
 	systemEventJson, _ := json.Marshal(systemEvent)
 
 	// Simulate message received
-	broker.simulateMessage("system-events", systemEventJson)
+	if err := broker.simulateMessage("system-events", systemEventJson); err != nil {
+		t.Fatalf("Failed to simulate message: %v", err)
+	}
 
 	// Verify workflow was triggered
 	if len(engine.triggeredWorkflows) != 1 {

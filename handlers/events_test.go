@@ -16,36 +16,7 @@ import (
 // Variable to track if pattern was matched in test
 var patternMatchDetected bool
 
-// Mock handler for event pattern detection
-var mockHandler = &mockEventHandler{
-	HandleFn: func(ctx context.Context, events []interface{}) error {
-		patternMatchDetected = true
-		return nil
-	},
-}
 
-// mockEventHandler implements module.EventHandler for testing
-type mockEventHandler struct {
-	HandleFn func(ctx context.Context, events []interface{}) error
-}
-
-// HandlePattern implements the EventHandler interface that EventProcessor expects
-func (h *mockEventHandler) HandlePattern(ctx context.Context, match module.PatternMatch) error {
-	patternMatchDetected = true
-	if h.HandleFn != nil {
-		// Convert the pattern match to what our handler expects
-		return h.HandleFn(ctx, []interface{}{match})
-	}
-	return nil
-}
-
-// HandleEvent is the legacy method - keep it for backwards compatibility
-func (h *mockEventHandler) HandleEvent(ctx context.Context, events []interface{}) error {
-	if h.HandleFn != nil {
-		return h.HandleFn(ctx, events)
-	}
-	return nil
-}
 
 // TestEventWorkflow tests the event workflow handler
 func TestEventWorkflow(t *testing.T) {

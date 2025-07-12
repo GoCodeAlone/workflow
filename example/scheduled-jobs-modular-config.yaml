@@ -1,0 +1,59 @@
+modules:
+  # Modular scheduler - much more robust than custom scheduler
+  - name: job-scheduler
+    type: scheduler.modular
+  
+  # Event bus for job coordination
+  - name: job-eventbus
+    type: eventbus.modular
+  
+  # HTTP server for job monitoring API
+  - name: monitor-server
+    type: httpserver.modular
+  
+  # Chi router for HTTP routing  
+  - name: monitor-router
+    type: chimux.router
+
+# Configuration for Modular modules
+scheduler:
+  # Configure scheduled jobs with cron expressions
+  jobs:
+    - name: "data-cleanup"
+      schedule: "0 0 * * *"  # Daily at midnight
+      enabled: true
+      command: "cleanup"
+      
+    - name: "report-generation"  
+      schedule: "0 * * * *"   # Every hour
+      enabled: true
+      command: "generate-report"
+      
+    - name: "health-check"
+      schedule: "*/5 * * * *"  # Every 5 minutes
+      enabled: true
+      command: "health-check"
+      
+    - name: "metrics-collection"
+      schedule: "*/1 * * * *"  # Every minute
+      enabled: true
+      command: "collect-metrics"
+
+eventbus:
+  engine: memory
+  maxEventQueueSize: 1000
+  defaultEventBufferSize: 50
+  workerCount: 10
+  eventTTL: 3600
+
+httpserver:
+  address: ":8086"
+  readTimeoutSeconds: 30
+  writeTimeoutSeconds: 30
+
+chimux:
+  logRoutes: true
+  cors:
+    enabled: true
+    allowedOrigins: ["*"]
+    allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]

@@ -92,12 +92,18 @@ func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 
 	// If we still don't have a router, try the default name as a fallback
 	if router == nil {
-		app.GetService("httpRouter", &router)
+		if err := app.GetService("httpRouter", &router); err != nil {
+			// Log the error but continue since this might be expected
+			app.Logger().Debug("Failed to get httpRouter service: %v", err)
+		}
 	}
 
 	// If we still don't have a server, try the default name as a fallback
 	if server == nil {
-		app.GetService("httpServer", &server)
+		if err := app.GetService("httpServer", &server); err != nil {
+			// Log the error but continue since this might be expected
+			app.Logger().Debug("Failed to get httpServer service: %v", err)
+		}
 	}
 
 	// Verify we found both required services

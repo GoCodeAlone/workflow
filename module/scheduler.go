@@ -59,12 +59,13 @@ func (s *CronScheduler) Start(ctx context.Context) error {
 
 	// For testing purposes, we'll use a simple ticker with fixed intervals
 	// In a real implementation, this would parse the cron expression and schedule accordingly
-	var interval time.Duration = time.Minute
-	if s.cronExpression == "* * * * *" { // every minute
+	interval := time.Minute
+	switch s.cronExpression {
+	case "* * * * *": // every minute
 		interval = time.Minute
-	} else if s.cronExpression == "0 * * * *" { // every hour
+	case "0 * * * *": // every hour
 		interval = time.Hour
-	} else if s.cronExpression == "0 0 * * *" { // every day
+	case "0 0 * * *": // every day
 		interval = 24 * time.Hour
 	}
 

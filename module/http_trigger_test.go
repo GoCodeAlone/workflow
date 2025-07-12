@@ -16,11 +16,15 @@ func TestHTTPTrigger(t *testing.T) {
 
 	// Create a mock HTTP router
 	router := NewMockHTTPRouter("test-router")
-	app.RegisterService("httpRouter", router)
+	if err := app.RegisterService("httpRouter", router); err != nil {
+		t.Fatalf("Failed to register HTTP router: %v", err)
+	}
 
 	// Create a mock workflow engine
 	engine := NewMockWorkflowEngine()
-	app.RegisterService("workflowEngine", engine)
+	if err := app.RegisterService("workflowEngine", engine); err != nil {
+		t.Fatalf("Failed to register workflow engine: %v", err)
+	}
 
 	// Create the HTTP trigger
 	trigger := NewHTTPTrigger()

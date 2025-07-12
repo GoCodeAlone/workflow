@@ -206,7 +206,9 @@ func testConfigRegistration(t *testing.T, engineName string, stateTrackerName st
 
 	// Create unique handler name and register before config setup
 	validationHandlerName := "test-validation-handler-" + time.Now().Format("20060102150405.000000000")
-	app.RegisterService(validationHandlerName, validationHandler)
+	if err := app.RegisterService(validationHandlerName, validationHandler); err != nil {
+		t.Fatalf("Failed to register validation handler: %v", err)
+	}
 
 	// Create a clean workflow engine for this test
 	engine := workflow.NewStdEngine(app, &mock.Logger{LogEntries: make([]string, 0)})

@@ -5,6 +5,13 @@ import (
 	"fmt"
 
 	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/modular/modules/auth"
+	"github.com/GoCodeAlone/modular/modules/cache"
+	"github.com/GoCodeAlone/modular/modules/chimux"
+	"github.com/GoCodeAlone/modular/modules/eventbus"
+	"github.com/GoCodeAlone/modular/modules/httpserver"
+	"github.com/GoCodeAlone/modular/modules/reverseproxy"
+	"github.com/GoCodeAlone/modular/modules/scheduler"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/module"
 )
@@ -123,6 +130,42 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				}
 				e.logger.Debug("Loading HTTP middleware logging module with log level: " + logLevel)
 				mod = module.NewLoggingMiddleware(modCfg.Name, logLevel)
+			case "http.middleware.ratelimit":
+				requestsPerMinute := 60 // default
+				burstSize := 10         // default
+				if rpm, ok := modCfg.Config["requestsPerMinute"].(int); ok {
+					requestsPerMinute = rpm
+				} else if rpm, ok := modCfg.Config["requestsPerMinute"].(float64); ok {
+					requestsPerMinute = int(rpm)
+				}
+				if bs, ok := modCfg.Config["burstSize"].(int); ok {
+					burstSize = bs
+				} else if bs, ok := modCfg.Config["burstSize"].(float64); ok {
+					burstSize = int(bs)
+				}
+				e.logger.Debug("Loading HTTP middleware rate limit module")
+				mod = module.NewRateLimitMiddleware(modCfg.Name, requestsPerMinute, burstSize)
+			case "http.middleware.cors":
+				allowedOrigins := []string{"*"}                                       // default
+				allowedMethods := []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"} // default
+				if origins, ok := modCfg.Config["allowedOrigins"].([]interface{}); ok {
+					allowedOrigins = make([]string, len(origins))
+					for i, origin := range origins {
+						if str, ok := origin.(string); ok {
+							allowedOrigins[i] = str
+						}
+					}
+				}
+				if methods, ok := modCfg.Config["allowedMethods"].([]interface{}); ok {
+					allowedMethods = make([]string, len(methods))
+					for i, method := range methods {
+						if str, ok := method.(string); ok {
+							allowedMethods[i] = str
+						}
+					}
+				}
+				e.logger.Debug("Loading HTTP middleware CORS module")
+				mod = module.NewCORSMiddleware(modCfg.Name, allowedOrigins, allowedMethods)
 			case "messaging.broker":
 				e.logger.Debug("Loading messaging broker module")
 				mod = module.NewInMemoryMessageBroker(modCfg.Name)
@@ -138,6 +181,30 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "state.connector":
 				e.logger.Debug("Loading state machine connector module")
 				mod = module.NewStateMachineStateConnector(modCfg.Name)
+			case "http.proxy":
+				e.logger.Debug("Loading reverse proxy module")
+				mod = reverseproxy.NewModule()
+			case "reverseproxy":
+				e.logger.Debug("Loading reverse proxy module")
+				mod = reverseproxy.NewModule()
+			case "httpserver.modular":
+				e.logger.Debug("Loading Modular HTTP server module")
+				mod = httpserver.NewHTTPServerModule()
+			case "scheduler.modular":
+				e.logger.Debug("Loading Modular scheduler module")
+				mod = scheduler.NewModule()
+			case "auth.modular":
+				e.logger.Debug("Loading Modular auth module")
+				mod = auth.NewModule()
+			case "eventbus.modular":
+				e.logger.Debug("Loading Modular eventbus module")
+				mod = eventbus.NewModule()
+			case "cache.modular":
+				e.logger.Debug("Loading Modular cache module")
+				mod = cache.NewModule()
+			case "chimux.router":
+				e.logger.Debug("Loading Chi router module")
+				mod = chimux.NewChiMuxModule()
 			default:
 				e.logger.Warn("Unknown module type: " + modCfg.Type)
 				return fmt.Errorf("unknown module type: %s", modCfg.Type)
@@ -153,7 +220,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	}
 
 	// Log loaded services
-	for name, _ := range e.app.SvcRegistry() {
+	for name := range e.app.SvcRegistry() {
 		e.logger.Debug("Loaded service: " + name)
 	}
 
@@ -259,18 +326,6 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 	return fmt.Errorf("no handler found for workflow type: %s", workflowType)
 }
 
-// buildModules creates and initializes all modules from configuration
-func (e *StdEngine) buildModules(modulesConfig []map[string]interface{}) error {
-	// ... existing code ...
-	return nil
-}
-
-// configureWorkflows sets up all workflows from configuration
-func (e *StdEngine) configureWorkflows(workflowConfigs map[string]interface{}) error {
-	// ... existing code ...
-	return nil
-}
-
 // configureTriggers sets up all triggers from configuration
 func (e *StdEngine) configureTriggers(triggerConfigs map[string]interface{}) error {
 	if len(triggerConfigs) == 0 {
@@ -279,7 +334,9 @@ func (e *StdEngine) configureTriggers(triggerConfigs map[string]interface{}) err
 	}
 
 	// Register this engine as a service so triggers can find it
-	e.app.RegisterService("workflowEngine", e)
+	if err := e.app.RegisterService("workflowEngine", e); err != nil {
+		return fmt.Errorf("failed to register workflow engine service: %w", err)
+	}
 
 	// Configure each trigger type
 	for triggerType, triggerConfig := range triggerConfigs {

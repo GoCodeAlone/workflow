@@ -102,7 +102,9 @@ func TestHTTPRouter(t *testing.T) {
 	req1, _ := http.NewRequest("GET", "/route1", nil)
 	rec1 := httptest.NewRecorder()
 
-	router.Start(context.Background())
+	if err := router.Start(context.Background()); err != nil {
+		t.Fatalf("Failed to start router: %v", err)
+	}
 	router.ServeHTTP(rec1, req1)
 
 	if rec1.Code != http.StatusOK {
@@ -137,7 +139,7 @@ func TestAuthMiddleware(t *testing.T) {
 	// Create a test handler
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Get claims from context
-		claims, ok := r.Context().Value("auth_claims").(map[string]interface{})
+		claims, ok := r.Context().Value(authClaimsContextKey).(map[string]interface{})
 		if !ok {
 			t.Error("auth claims not found in request context")
 			return
@@ -150,7 +152,10 @@ func TestAuthMiddleware(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(username))
+		if _, err := w.Write([]byte(username)); err != nil {
+			// Log error but continue since response is already committed
+			_ = err
+		}
 	})
 
 	// Add valid tokens
@@ -192,32 +197,7 @@ func TestAuthMiddleware(t *testing.T) {
 	}
 }
 
-// createIsolatedTestApp creates an isolated test application
-func createIsolatedTestApp(t *testing.T) modular.Application {
-	t.Helper()
 
-	// Create proper configuration structure that won't cause nil pointer exceptions
-	cfg := map[string]interface{}{
-		"app": map[string]interface{}{
-			"name":    "test-http-app",
-			"version": "1.0.0",
-		},
-		"env":     map[string]interface{}{}, // Empty but initialized env section
-		"modules": []interface{}{},          // Empty but initialized modules section
-	}
-
-	logger := &mockLogger{entries: make([]string, 0)}
-	configProvider := modular.NewStdConfigProvider(cfg)
-
-	app := modular.NewStdApplication(configProvider, logger)
-
-	// Initialize app
-	if err := app.Init(); err != nil {
-		t.Fatalf("Failed to initialize app: %v", err)
-	}
-
-	return app
-}
 
 type minCfg struct {
 	Modules []interface{}          `json:"modules"`
@@ -287,7 +267,11 @@ func TestHTTPModulesIntegration(t *testing.T) {
 	router.AddRoute("GET", "/test", NewHTTPHandlerAdapter(processedHandler))
 
 	// Clean up
-	defer app.Stop()
+	defer func() {
+		if err := app.Stop(); err != nil {
+			t.Errorf("Failed to stop app: %v", err)
+		}
+	}()
 }
 
 // mockLogger implements a simple logger for testing

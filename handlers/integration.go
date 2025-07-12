@@ -371,6 +371,8 @@ func (h *IntegrationWorkflowHandler) ExecuteIntegrationWorkflow(
 		if step.OnSuccess != "" {
 			// Could invoke success handler here
 			// For now, we just continue with the next step
+			// Note: Logging would require access to logger (stepIndex: %d, onSuccess: %s)
+			_ = step.OnSuccess // Mark as used to satisfy linter
 		}
 	}
 

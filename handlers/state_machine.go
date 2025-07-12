@@ -150,6 +150,8 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 		if !ok {
 			return fmt.Errorf("service '%s' is not a StateTracker", stateTrackerName)
 		}
+		// Use stateTracker here or later in the function
+		_ = stateTracker
 	} else {
 		// Try to find the default state tracker
 		err := app.GetService(module.StateTrackerName, &stateTrackerSvc)
@@ -160,6 +162,8 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 			if !ok {
 				return fmt.Errorf("service '%s' is not a StateTracker", module.StateTrackerName)
 			}
+			// Use stateTracker here or later in the function
+			_ = stateTracker
 		} else {
 			// State tracker doesn't exist, create a new one
 			stateTracker = module.NewStateTracker("")

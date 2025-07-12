@@ -12,11 +12,15 @@ func TestScheduleTrigger(t *testing.T) {
 
 	// Create a mock scheduler
 	scheduler := NewMockScheduler()
-	app.RegisterService("cronScheduler", scheduler)
+	if err := app.RegisterService("cronScheduler", scheduler); err != nil {
+		t.Fatalf("Failed to register scheduler: %v", err)
+	}
 
 	// Create a mock workflow engine
 	engine := NewMockWorkflowEngine()
-	app.RegisterService("workflowEngine", engine)
+	if err := app.RegisterService("workflowEngine", engine); err != nil {
+		t.Fatalf("Failed to register workflow engine: %v", err)
+	}
 
 	// Create the Schedule trigger
 	trigger := NewScheduleTrigger()

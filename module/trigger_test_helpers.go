@@ -118,26 +118,28 @@ func (a *MockApplication) Run() error {
 	return nil
 }
 
+// IsVerboseConfig returns whether verbose config debugging is enabled
+func (a *MockApplication) IsVerboseConfig() bool {
+	return false // Default to false for tests
+}
+
+// SetVerboseConfig sets verbose config debugging (no-op for tests)
+func (a *MockApplication) SetVerboseConfig(enabled bool) {
+	// No-op for tests
+}
+
+// SetLogger sets the application's logger
+func (a *MockApplication) SetLogger(logger modular.Logger) {
+	a.MockLogger = logger.(*MockLogger) // Assume it's a MockLogger for tests
+}
+
 // SvcRegistry satisfies the modular.Application interface
 func (a *MockApplication) SvcRegistry() modular.ServiceRegistry {
 	// Return the Services map directly as it implements the needed interface
 	return a.Services
 }
 
-// modularServiceRegistryAdapter adapts our MockApplication to the modular.ServiceRegistry interface
-type modularServiceRegistryAdapter struct {
-	app *MockApplication
-}
 
-// GetService forwards to the app's GetService method
-func (a *modularServiceRegistryAdapter) GetService(name string, out interface{}) error {
-	return a.app.GetService(name, out)
-}
-
-// RegisterService forwards to the app's RegisterService method
-func (a *modularServiceRegistryAdapter) RegisterService(name string, service interface{}) error {
-	return a.app.RegisterService(name, service)
-}
 
 // MockConfigProvider is a mock implementation of modular.ConfigProvider for testing
 type MockConfigProvider struct {

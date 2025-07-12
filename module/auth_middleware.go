@@ -9,6 +9,11 @@ import (
 	"github.com/GoCodeAlone/modular"
 )
 
+// Define a custom type for context keys to avoid collisions
+type authContextKey string
+
+const authClaimsContextKey authContextKey = "auth_claims"
+
 // AuthMiddleware implements an HTTP authorization middleware
 type AuthMiddleware struct {
 	name      string
@@ -70,7 +75,7 @@ func (m *AuthMiddleware) Process(next http.Handler) http.Handler {
 
 			if valid {
 				// Store claims in request context
-				ctx := context.WithValue(r.Context(), "auth_claims", claims)
+				ctx := context.WithValue(r.Context(), authClaimsContextKey, claims)
 
 				// Call next handler with updated context
 				next.ServeHTTP(w, r.WithContext(ctx))

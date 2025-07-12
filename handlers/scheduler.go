@@ -10,6 +10,11 @@ import (
 	workflowmodule "github.com/GoCodeAlone/workflow/module"
 )
 
+// Define a custom type for context keys to avoid collisions
+type contextKey string
+
+const paramsContextKey contextKey = "params"
+
 // ScheduledJobConfig represents a job scheduler configuration
 type ScheduledJobConfig struct {
 	Scheduler string                 `json:"scheduler" yaml:"scheduler"`
@@ -163,10 +168,10 @@ func (h *SchedulerWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflow
 	if job, ok := jobSvc.(workflowmodule.Job); ok {
 		// Execute the job with the provided context
 		// If data contains a "params" field, add it to the context
-		var execCtx context.Context = ctx
+		execCtx := ctx
 		if params, ok := data["params"].(map[string]interface{}); ok {
 			// Create a context with the parameters
-			execCtx = context.WithValue(ctx, "params", params)
+			execCtx = context.WithValue(ctx, paramsContextKey, params)
 		}
 
 		execErr = job.Execute(execCtx)

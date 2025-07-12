@@ -379,6 +379,21 @@ func (a *mockApplication) ConfigProvider() modular.ConfigProvider {
 	return &mockConfigProvider{configs: a.configs}
 }
 
+// IsVerboseConfig returns whether verbose config debugging is enabled
+func (a *mockApplication) IsVerboseConfig() bool {
+	return false // Default to false for tests
+}
+
+// SetVerboseConfig sets verbose config debugging (no-op for tests)
+func (a *mockApplication) SetVerboseConfig(enabled bool) {
+	// No-op for tests
+}
+
+// SetLogger sets the application's logger
+func (a *mockApplication) SetLogger(logger modular.Logger) {
+	a.logger = logger.(*mockLogger) // Assume it's a mockLogger for tests
+}
+
 // mockConfigProvider implements the modular.ConfigProvider interface
 type mockConfigProvider struct {
 	configs map[string]interface{}

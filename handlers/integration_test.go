@@ -45,7 +45,9 @@ func TestIntegrationWorkflow(t *testing.T) {
 			// Return mock customer data
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"id":"123","name":"Test Customer","email":"test@example.com"}`))
+			if _, err := w.Write([]byte(`{"id":"123","name":"Test Customer","email":"test@example.com"}`)); err != nil {
+				t.Errorf("Failed to write response: %v", err)
+			}
 			return
 		}
 
@@ -66,7 +68,9 @@ func TestIntegrationWorkflow(t *testing.T) {
 			// Return success
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"sent","id":"email-123"}`))
+			if _, err := w.Write([]byte(`{"status":"sent","id":"email-123"}`)); err != nil {
+				t.Errorf("Failed to write response: %v", err)
+			}
 			return
 		}
 
@@ -435,19 +439,21 @@ func (r *MockIntegrationRegistry) GetConnector(name string) (module.IntegrationC
 	connector := &MockIntegrationConnector{
 		name: name,
 		executeFn: func(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error) {
-			if action == "GET /customers/123" {
+			switch action {
+			case "GET /customers/123":
 				return map[string]interface{}{
 					"id":    "123",
 					"name":  "Test Customer",
 					"email": "test@example.com",
 				}, nil
-			} else if action == "POST /send" {
+			case "POST /send":
 				return map[string]interface{}{
 					"status": "sent",
 					"id":     "email-123",
 				}, nil
+			default:
+				return nil, fmt.Errorf("unsupported action: %s", action)
 			}
-			return nil, fmt.Errorf("unsupported action: %s", action)
 		},
 	}
 	return connector, nil
