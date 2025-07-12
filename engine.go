@@ -146,7 +146,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				e.logger.Debug("Loading HTTP middleware rate limit module")
 				mod = module.NewRateLimitMiddleware(modCfg.Name, requestsPerMinute, burstSize)
 			case "http.middleware.cors":
-				allowedOrigins := []string{"*"} // default
+				allowedOrigins := []string{"*"}                                       // default
 				allowedMethods := []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"} // default
 				if origins, ok := modCfg.Config["allowedOrigins"].([]interface{}); ok {
 					allowedOrigins = make([]string, len(origins))
@@ -325,8 +325,6 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 
 	return fmt.Errorf("no handler found for workflow type: %s", workflowType)
 }
-
-
 
 // configureTriggers sets up all triggers from configuration
 func (e *StdEngine) configureTriggers(triggerConfigs map[string]interface{}) error {
