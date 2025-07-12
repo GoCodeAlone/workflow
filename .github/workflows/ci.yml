@@ -44,12 +44,12 @@ jobs:
       with:
         file: ./coverage.out
         fail_ci_if_error: false
-    permissions:
-      contents: read
 
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     
     steps:
     - name: Check out code
@@ -66,12 +66,12 @@ jobs:
       with:
         version: latest
         args: --timeout=10m
-    permissions:
-      contents: read
 
   build:
     name: Build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     
     steps:
     - name: Check out code
@@ -91,12 +91,12 @@ jobs:
       run: |
         cd example
         go build -v ./...
-    permissions:
-      contents: read
 
   example-tests:
     name: Example Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     
     steps:
     - name: Check out code
