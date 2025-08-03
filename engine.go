@@ -9,6 +9,8 @@ import (
 	"github.com/GoCodeAlone/modular/modules/cache"
 	"github.com/GoCodeAlone/modular/modules/chimux"
 	"github.com/GoCodeAlone/modular/modules/eventbus"
+	"github.com/GoCodeAlone/modular/modules/eventlogger"
+	"github.com/GoCodeAlone/modular/modules/httpclient"
 	"github.com/GoCodeAlone/modular/modules/httpserver"
 	"github.com/GoCodeAlone/modular/modules/reverseproxy"
 	"github.com/GoCodeAlone/modular/modules/scheduler"
@@ -205,6 +207,12 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "chimux.router":
 				e.logger.Debug("Loading Chi router module")
 				mod = chimux.NewChiMuxModule()
+			case "eventlogger.modular":
+				e.logger.Debug("Loading Modular event logger module")
+				mod = eventlogger.NewModule()
+			case "httpclient.modular":
+				e.logger.Debug("Loading Modular HTTP client module")
+				mod = httpclient.NewHTTPClientModule()
 			default:
 				e.logger.Warn("Unknown module type: " + modCfg.Type)
 				return fmt.Errorf("unknown module type: %s", modCfg.Type)
