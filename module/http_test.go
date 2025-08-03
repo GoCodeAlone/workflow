@@ -197,8 +197,6 @@ func TestAuthMiddleware(t *testing.T) {
 	}
 }
 
-
-
 type minCfg struct {
 	Modules []interface{}          `json:"modules"`
 	Env     map[string]interface{} `json:"env"`

@@ -16,8 +16,6 @@ import (
 // Variable to track if pattern was matched in test
 var patternMatchDetected bool
 
-
-
 // TestEventWorkflow tests the event workflow handler
 func TestEventWorkflow(t *testing.T) {
 	// Reset the pattern detection flag
