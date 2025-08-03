@@ -8,10 +8,12 @@ import (
 	"github.com/GoCodeAlone/modular/modules/auth"
 	"github.com/GoCodeAlone/modular/modules/cache"
 	"github.com/GoCodeAlone/modular/modules/chimux"
+	"github.com/GoCodeAlone/modular/modules/database"
 	"github.com/GoCodeAlone/modular/modules/eventbus"
 	"github.com/GoCodeAlone/modular/modules/eventlogger"
 	"github.com/GoCodeAlone/modular/modules/httpclient"
 	"github.com/GoCodeAlone/modular/modules/httpserver"
+	"github.com/GoCodeAlone/modular/modules/jsonschema"
 	"github.com/GoCodeAlone/modular/modules/reverseproxy"
 	"github.com/GoCodeAlone/modular/modules/scheduler"
 	"github.com/GoCodeAlone/workflow/config"
@@ -213,6 +215,12 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "httpclient.modular":
 				e.logger.Debug("Loading Modular HTTP client module")
 				mod = httpclient.NewHTTPClientModule()
+			case "database.modular":
+				e.logger.Debug("Loading Modular database module")
+				mod = database.NewModule()
+			case "jsonschema.modular":
+				e.logger.Debug("Loading Modular JSON schema module")
+				mod = jsonschema.NewModule()
 			default:
 				e.logger.Warn("Unknown module type: " + modCfg.Type)
 				return fmt.Errorf("unknown module type: %s", modCfg.Type)
