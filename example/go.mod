@@ -14,8 +14,8 @@ require (
 require (
 	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/GoCodeAlone/modular/modules/auth v0.1.0 // indirect
-	github.com/GoCodeAlone/modular/modules/cache v0.0.4 // indirect
-	github.com/GoCodeAlone/modular/modules/chimux v1.0.7 // indirect
+	github.com/GoCodeAlone/modular/modules/cache v0.1.0 // indirect
+	github.com/GoCodeAlone/modular/modules/chimux v1.1.0 // indirect
 	github.com/GoCodeAlone/modular/modules/database v1.1.0 // indirect
 	github.com/GoCodeAlone/modular/modules/eventbus v0.1.0 // indirect
 	github.com/GoCodeAlone/modular/modules/eventlogger v0.1.0 // indirect

@@ -4,10 +4,10 @@ github.com/GoCodeAlone/modular v1.4.0 h1:sWmk1uwUW0ze3J9jnkefyZ7js98mRvCLHxHl70Q
 github.com/GoCodeAlone/modular v1.4.0/go.mod h1:wdc8S5mcjnCsLWliLxvKPVgX0LP/Hl8wIp96i3c2d28=
 github.com/GoCodeAlone/modular/modules/auth v0.1.0 h1:kN/0r0phwVCNEfgXGOwhyC+Z8Vi3c62LcCfLgB33+AQ=
 github.com/GoCodeAlone/modular/modules/auth v0.1.0/go.mod h1:mv3CNYenZvyhGWD+cZVi0ze8K2pr05jlMZv7SIlFNbI=
-github.com/GoCodeAlone/modular/modules/cache v0.0.4 h1:pbTmOi5ulWh48d25dvW76nE8g+nDO/F/8hzAko3NXVE=
-github.com/GoCodeAlone/modular/modules/cache v0.0.4/go.mod h1:uealEcND2fUHI80s7YTBCUOhuDcjjjy1ihyvGPv1zBU=
-github.com/GoCodeAlone/modular/modules/chimux v1.0.7 h1:13HY1BvSK+AIAz9jXrEWIdvEdhm4k6DfjSOn0snz6fY=
-github.com/GoCodeAlone/modular/modules/chimux v1.0.7/go.mod h1:UG8dpcRCxpVt5I/unahXLhn2YMcD/2Wyj8GR7nEDsBY=
+github.com/GoCodeAlone/modular/modules/cache v0.1.0 h1:fNnWdIf47sMR36SffAY3MwvXtuiNZ7PTvd8Y0tpdAxE=
+github.com/GoCodeAlone/modular/modules/cache v0.1.0/go.mod h1:Ed9nXlSVm6fXk2h99bxAwzG4u8wRgQM1o+4km9/cxSQ=
+github.com/GoCodeAlone/modular/modules/chimux v1.1.0 h1:groGQgMyGhl2ATptoDPu1nflp7CkYvSlA81UO2q5LbA=
+github.com/GoCodeAlone/modular/modules/chimux v1.1.0/go.mod h1:6a/UNnA6YweF9w0eFCUdFVXjiYdsKdK7l3oJeC9dxls=
 github.com/GoCodeAlone/modular/modules/database v1.1.0 h1:gI/iBX6R0LFbiohIrOzynU8o2UNkddRyesdQQ8tw1Ws=
 github.com/GoCodeAlone/modular/modules/database v1.1.0/go.mod h1:KKpcioNNrnzyF30gZtRyv06z3SHbd4ydrKj5unWetBU=
 github.com/GoCodeAlone/modular/modules/eventbus v0.1.0 h1:oYylPVP7nxXH9awsUdrTv/n7+xxaBAqcFg90td52avs=

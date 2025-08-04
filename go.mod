@@ -7,8 +7,8 @@ toolchain go1.24.4
 require (
 	github.com/GoCodeAlone/modular v1.4.0
 	github.com/GoCodeAlone/modular/modules/auth v0.1.0
-	github.com/GoCodeAlone/modular/modules/cache v0.0.4
-	github.com/GoCodeAlone/modular/modules/chimux v1.0.7
+	github.com/GoCodeAlone/modular/modules/cache v0.1.0
+	github.com/GoCodeAlone/modular/modules/chimux v1.1.0
 	github.com/GoCodeAlone/modular/modules/database v1.1.0
 	github.com/GoCodeAlone/modular/modules/eventbus v0.1.0
 	github.com/GoCodeAlone/modular/modules/eventlogger v0.1.0
