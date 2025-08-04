@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workflow Engine UI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .sidebar {
+            height: 100vh;
+            background-color: #f8f9fa;
+            border-right: 1px solid #dee2e6;
+        }
+        .main-content {
+            height: 100vh;
+            overflow-y: auto;
+        }
+        .workflow-card {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .workflow-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .status-badge {
+            font-size: 0.75rem;
+        }
+        .code-editor {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+        .execution-log {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .navbar-brand {
+            font-weight: bold;
+        }
+        .login-container {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .login-card {
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- Login Page -->
+        <div v-if="!isAuthenticated" class="login-container d-flex align-items-center justify-content-center">
+            <div class="container">
+                <div class="row justify-content-center">
+                    <div class="col-md-6 col-lg-4">
+                        <div class="card login-card">
+                            <div class="card-body p-5">
+                                <div class="text-center mb-4">
+                                    <h3 class="fw-bold text-primary">Workflow Engine</h3>
+                                    <p class="text-muted">Sign in to your account</p>
+                                </div>
+                                <form @submit.prevent="login">
+                                    <div class="mb-3">
+                                        <label class="form-label">Username</label>
+                                        <input type="text" class="form-control" v-model="loginForm.username" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Password</label>
+                                        <input type="password" class="form-control" v-model="loginForm.password" required>
+                                    </div>
+                                    <div class="d-grid">
+                                        <button type="submit" class="btn btn-primary" :disabled="isLoading">
+                                            <i v-if="isLoading" class="fas fa-spinner fa-spin me-2"></i>
+                                            Sign In
+                                        </button>
+                                    </div>
+                                </form>
+                                <div v-if="loginError" class="alert alert-danger mt-3">
+                                    {{ loginError }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Application -->
+        <div v-if="isAuthenticated" class="container-fluid">
+            <div class="row">
+                <!-- Sidebar -->
+                <div class="col-md-3 col-lg-2 sidebar p-3">
+                    <div class="d-flex align-items-center mb-4">
+                        <i class="fas fa-cogs text-primary me-2"></i>
+                        <h5 class="mb-0">Workflows</h5>
+                    </div>
+                    
+                    <nav class="nav nav-pills flex-column">
+                        <a class="nav-link" :class="{active: currentView === 'dashboard'}" href="#" @click="setView('dashboard')">
+                            <i class="fas fa-tachometer-alt me-2"></i>Dashboard
+                        </a>
+                        <a class="nav-link" :class="{active: currentView === 'workflows'}" href="#" @click="setView('workflows')">
+                            <i class="fas fa-project-diagram me-2"></i>Workflows
+                        </a>
+                        <a class="nav-link" :class="{active: currentView === 'executions'}" href="#" @click="setView('executions')">
+                            <i class="fas fa-play-circle me-2"></i>Executions
+                        </a>
+                    </nav>
+
+                    <div class="mt-auto pt-4">
+                        <div class="dropdown">
+                            <button class="btn btn-outline-secondary dropdown-toggle w-100" type="button" data-bs-toggle="dropdown">
+                                <i class="fas fa-user me-2"></i>{{ user.username }}
+                            </button>
+                            <ul class="dropdown-menu">
+                                <li><span class="dropdown-item-text small">{{ tenant.name }}</span></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="#" @click="logout">
+                                    <i class="fas fa-sign-out-alt me-2"></i>Sign Out
+                                </a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Main Content -->
+                <div class="col-md-9 col-lg-10 main-content">
+                    <!-- Header -->
+                    <nav class="navbar navbar-light bg-white border-bottom px-4">
+                        <span class="navbar-brand mb-0 h1">
+                            <span v-if="currentView === 'dashboard'">Dashboard</span>
+                            <span v-if="currentView === 'workflows'">Workflows</span>
+                            <span v-if="currentView === 'executions'">Executions</span>
+                        </span>
+                        <div>
+                            <button v-if="currentView === 'workflows'" class="btn btn-primary" @click="showCreateWorkflow">
+                                <i class="fas fa-plus me-2"></i>New Workflow
+                            </button>
+                        </div>
+                    </nav>
+
+                    <!-- Dashboard View -->
+                    <div v-if="currentView === 'dashboard'" class="p-4">
+                        <div class="row">
+                            <div class="col-md-3 mb-4">
+                                <div class="card text-center">
+                                    <div class="card-body">
+                                        <i class="fas fa-project-diagram fa-2x text-primary mb-2"></i>
+                                        <h4>{{ workflows.length }}</h4>
+                                        <p class="text-muted mb-0">Total Workflows</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-4">
+                                <div class="card text-center">
+                                    <div class="card-body">
+                                        <i class="fas fa-play-circle fa-2x text-success mb-2"></i>
+                                        <h4>{{ executions.length }}</h4>
+                                        <p class="text-muted mb-0">Executions</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-4">
+                                <div class="card text-center">
+                                    <div class="card-body">
+                                        <i class="fas fa-check-circle fa-2x text-info mb-2"></i>
+                                        <h4>{{ completedExecutions }}</h4>
+                                        <p class="text-muted mb-0">Completed</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3 mb-4">
+                                <div class="card text-center">
+                                    <div class="card-body">
+                                        <i class="fas fa-exclamation-circle fa-2x text-warning mb-2"></i>
+                                        <h4>{{ failedExecutions }}</h4>
+                                        <p class="text-muted mb-0">Failed</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="mb-0">Recent Workflows</h6>
+                                    </div>
+                                    <div class="card-body">
+                                        <div v-for="workflow in workflows.slice(0, 5)" :key="workflow.id" class="d-flex justify-content-between align-items-center py-2">
+                                            <div>
+                                                <strong>{{ workflow.name }}</strong>
+                                                <small class="text-muted d-block">{{ workflow.description }}</small>
+                                            </div>
+                                            <span class="badge" :class="getStatusClass(workflow.status)">{{ workflow.status }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="mb-0">Recent Executions</h6>
+                                    </div>
+                                    <div class="card-body">
+                                        <div v-for="execution in executions.slice(0, 5)" :key="execution.id" class="d-flex justify-content-between align-items-center py-2">
+                                            <div>
+                                                <strong>{{ getWorkflowName(execution.workflow_id) }}</strong>
+                                                <small class="text-muted d-block">{{ formatDate(execution.started_at) }}</small>
+                                            </div>
+                                            <span class="badge" :class="getStatusClass(execution.status)">{{ execution.status }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Workflows View -->
+                    <div v-if="currentView === 'workflows'" class="p-4">
+                        <div class="row">
+                            <div v-for="workflow in workflows" :key="workflow.id" class="col-md-6 col-lg-4 mb-4">
+                                <div class="card workflow-card h-100" @click="selectWorkflow(workflow)">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <h6 class="card-title mb-1">{{ workflow.name }}</h6>
+                                            <span class="badge status-badge" :class="getStatusClass(workflow.status)">
+                                                {{ workflow.status }}
+                                            </span>
+                                        </div>
+                                        <p class="card-text text-muted small">{{ workflow.description }}</p>
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <small class="text-muted">{{ formatDate(workflow.updated_at) }}</small>
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-primary" @click.stop="executeWorkflow(workflow)">
+                                                    <i class="fas fa-play"></i>
+                                                </button>
+                                                <button class="btn btn-outline-secondary" @click.stop="editWorkflow(workflow)">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Executions View -->
+                    <div v-if="currentView === 'executions'" class="p-4">
+                        <div class="card">
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Workflow</th>
+                                                <th>Status</th>
+                                                <th>Started</th>
+                                                <th>Duration</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr v-for="execution in executions" :key="execution.id">
+                                                <td>{{ getWorkflowName(execution.workflow_id) }}</td>
+                                                <td>
+                                                    <span class="badge" :class="getStatusClass(execution.status)">
+                                                        {{ execution.status }}
+                                                    </span>
+                                                </td>
+                                                <td>{{ formatDate(execution.started_at) }}</td>
+                                                <td>{{ getDuration(execution) }}</td>
+                                                <td>
+                                                    <button class="btn btn-sm btn-outline-primary" @click="viewExecution(execution)">
+                                                        <i class="fas fa-eye"></i> View
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Create/Edit Workflow Modal -->
+        <div class="modal fade" id="workflowModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">{{ editingWorkflow ? 'Edit' : 'Create' }} Workflow</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form @submit.prevent="saveWorkflow">
+                            <div class="mb-3">
+                                <label class="form-label">Name</label>
+                                <input type="text" class="form-control" v-model="workflowForm.name" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Description</label>
+                                <textarea class="form-control" v-model="workflowForm.description" rows="2"></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Configuration (YAML)</label>
+                                <textarea class="form-control code-editor" v-model="workflowForm.config" rows="15" required></textarea>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" @click="saveWorkflow" :disabled="isLoading">
+                            <i v-if="isLoading" class="fas fa-spinner fa-spin me-2"></i>
+                            {{ editingWorkflow ? 'Update' : 'Create' }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Execution Details Modal -->
+        <div class="modal fade" id="executionModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Execution Details</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div v-if="selectedExecution">
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <strong>Status:</strong>
+                                    <span class="badge ms-2" :class="getStatusClass(selectedExecution.status)">
+                                        {{ selectedExecution.status }}
+                                    </span>
+                                </div>
+                                <div class="col-md-6">
+                                    <strong>Duration:</strong> {{ getDuration(selectedExecution) }}
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <strong>Logs:</strong>
+                                <div class="execution-log border rounded p-3 mt-2">
+                                    <div v-for="log in selectedExecution.logs" :key="log" class="mb-1">
+                                        {{ log }}
+                                    </div>
+                                    <div v-if="!selectedExecution.logs || selectedExecution.logs.length === 0" class="text-muted">
+                                        No logs available
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div v-if="selectedExecution.error" class="mb-3">
+                                <strong>Error:</strong>
+                                <div class="alert alert-danger mt-2">
+                                    {{ selectedExecution.error }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+{
+  "name": "workflow",
+  "version": "1.0.0",
+  "description": "A configurable workflow engine built on GoCodeAlone's Modular library v1.3.9, allowing applications to be built entirely from YAML configuration files.",
+  "main": "index.js",
+  "directories": {
+    "example": "example",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:bdd": "cd tests/bdd && go test -v",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test:all": "npm run test:bdd && npm run test:e2e",
+    "start:ui": "go run example/main.go -config example/ui-workflow-config.yaml"
+  },
+  "keywords": [
+    "workflow",
+    "engine",
+    "golang", 
+    "modular",
+    "yaml",
+    "configuration"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.54.2",
+    "playwright": "^1.54.2"
+  }
+}

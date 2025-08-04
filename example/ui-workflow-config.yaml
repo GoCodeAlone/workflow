@@ -1,0 +1,34 @@
+modules:
+  - name: ui-database
+    type: database.modular
+    config:
+      type: sqlite
+      dsn: "./workflow_ui.db"
+  
+  - name: ui-web
+    type: ui.web
+    config:
+      address: ":8080"
+      staticDir: "./ui/static"
+      secretKey: "your-secret-key-here"
+      database: "./workflow_ui.db"
+  
+  - name: api-http-server
+    type: http.server
+    config:
+      address: ":8081"
+  
+  - name: api-router
+    type: http.router
+  
+  - name: hello-handler
+    type: http.handler
+    config:
+      contentType: application/json
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/hello
+        handler: hello-handler

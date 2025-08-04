@@ -221,6 +221,10 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "jsonschema.modular":
 				e.logger.Debug("Loading Modular JSON schema module")
 				mod = jsonschema.NewModule()
+			case "ui.web":
+				e.logger.Debug("Loading UI web module")
+				// Import the UI module here - we'll add the import at the top
+				mod = module.NewUIModule(modCfg.Name, modCfg.Config)
 			default:
 				e.logger.Warn("Unknown module type: " + modCfg.Type)
 				return fmt.Errorf("unknown module type: %s", modCfg.Type)
