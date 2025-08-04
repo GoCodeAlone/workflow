@@ -139,8 +139,6 @@ func (a *MockApplication) SvcRegistry() modular.ServiceRegistry {
 	return a.Services
 }
 
-
-
 // MockConfigProvider is a mock implementation of modular.ConfigProvider for testing
 type MockConfigProvider struct {
 	Config map[string]interface{} // Changed from lowercase config to Config to match usage elsewhere
