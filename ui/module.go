@@ -97,7 +97,7 @@ func (m *UIModule) Init(app modular.Application) error {
 		}
 	}
 	
-	m.dbService = NewDatabaseService(db)
+	m.dbService = NewDatabaseService(db, m.logger)
 
 	// Initialize database schema
 	if err := m.dbService.InitializeSchema(context.Background()); err != nil {
@@ -148,9 +148,15 @@ func (m *UIModule) Init(app modular.Application) error {
 	}
 
 	// Register services
-	app.RegisterService("ui-database", m.dbService)
-	app.RegisterService("ui-auth", m.authService)
-	app.RegisterService("ui-api", m.apiHandler)
+	if err := app.RegisterService("ui-database", m.dbService); err != nil {
+		return fmt.Errorf("failed to register database service: %w", err)
+	}
+	if err := app.RegisterService("ui-auth", m.authService); err != nil {
+		return fmt.Errorf("failed to register auth service: %w", err)
+	}
+	if err := app.RegisterService("ui-api", m.apiHandler); err != nil {
+		return fmt.Errorf("failed to register api service: %w", err)
+	}
 
 	m.logger.Info("UI module configured", "address", m.config.Address, "staticDir", m.config.StaticDir)
 

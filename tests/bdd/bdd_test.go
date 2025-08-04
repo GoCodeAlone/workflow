@@ -13,8 +13,18 @@ import (
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/ui"
 )
+
+// MockLogger implements modular.Logger for testing
+type MockLogger struct{}
+
+func (l *MockLogger) Debug(msg string, args ...interface{}) {}
+func (l *MockLogger) Info(msg string, args ...interface{})  {}
+func (l *MockLogger) Warn(msg string, args ...interface{})  {}
+func (l *MockLogger) Error(msg string, args ...interface{}) {}
+func (l *MockLogger) With(args ...interface{}) modular.Logger { return l }
 
 type BDDTestContext struct {
 	uiModule      *ui.UIModule
@@ -46,7 +56,7 @@ func (ctx *BDDTestContext) setupTestDatabase() error {
 	}
 	ctx.testDB = db
 
-	ctx.dbService = ui.NewDatabaseService(db)
+	ctx.dbService = ui.NewDatabaseService(db, &MockLogger{})
 	if err := ctx.dbService.InitializeSchema(context.Background()); err != nil {
 		return err
 	}

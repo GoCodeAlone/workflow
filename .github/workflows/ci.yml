@@ -127,3 +127,73 @@ jobs:
       run: |
         cd example
         timeout 10s ./workflow-example -config event-processor-config.yaml || test $? -eq 124
+
+  bdd-tests:
+    name: BDD Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        cache: true
+
+    - name: Install dependencies
+      run: |
+        cd tests/bdd
+        go mod download
+
+    - name: Run BDD tests
+      run: |
+        cd tests/bdd
+        go test -v
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        cache: true
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install Node.js dependencies
+      run: npm ci
+
+    - name: Install Playwright browsers
+      run: npx playwright install --with-deps chromium
+
+    - name: Build Go application
+      run: |
+        cd example
+        go build -o workflow-example ./...
+
+    - name: Run E2E tests
+      run: npx playwright test
+
+    - name: Upload Playwright report
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: playwright-report
+        path: playwright-report/
+        retention-days: 30

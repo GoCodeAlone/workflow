@@ -7,18 +7,23 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/GoCodeAlone/modular"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
 // DatabaseService handles database operations for the UI
 type DatabaseService struct {
-	db *sql.DB
+	db     *sql.DB
+	logger modular.Logger
 }
 
 // NewDatabaseService creates a new database service
-func NewDatabaseService(db *sql.DB) *DatabaseService {
-	return &DatabaseService{db: db}
+func NewDatabaseService(db *sql.DB, logger modular.Logger) *DatabaseService {
+	return &DatabaseService{
+		db:     db,
+		logger: logger,
+	}
 }
 
 // InitializeSchema creates the required database tables
@@ -263,7 +268,11 @@ func (s *DatabaseService) GetWorkflows(ctx context.Context, tenantID uuid.UUID, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to query workflows: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			s.logger.Error("failed to close rows", "error", closeErr)
+		}
+	}()
 
 	var workflows []*StoredWorkflow
 	for rows.Next() {
@@ -396,7 +405,11 @@ func (s *DatabaseService) GetExecutions(ctx context.Context, workflowID, tenantI
 	if err != nil {
 		return nil, fmt.Errorf("failed to query executions: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			s.logger.Error("failed to close rows", "error", closeErr)
+		}
+	}()
 
 	var executions []*WorkflowExecution
 	for rows.Next() {
@@ -413,14 +426,21 @@ func (s *DatabaseService) GetExecutions(ctx context.Context, workflowID, tenantI
 			return nil, fmt.Errorf("failed to scan execution: %w", err)
 		}
 
+		// Unmarshal JSON fields with error handling
 		if inputJSON.Valid {
-			json.Unmarshal([]byte(inputJSON.String), &execution.Input)
+			if err := json.Unmarshal([]byte(inputJSON.String), &execution.Input); err != nil {
+				s.logger.Error("failed to unmarshal input JSON", "error", err)
+			}
 		}
 		if outputJSON.Valid {
-			json.Unmarshal([]byte(outputJSON.String), &execution.Output)
+			if err := json.Unmarshal([]byte(outputJSON.String), &execution.Output); err != nil {
+				s.logger.Error("failed to unmarshal output JSON", "error", err)
+			}
 		}
 		if logsJSON.Valid {
-			json.Unmarshal([]byte(logsJSON.String), &execution.Logs)
+			if err := json.Unmarshal([]byte(logsJSON.String), &execution.Logs); err != nil {
+				s.logger.Error("failed to unmarshal logs JSON", "error", err)
+			}
 		}
 		if endedAt.Valid {
 			execution.EndedAt = &endedAt.Time

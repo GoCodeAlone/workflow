@@ -88,14 +88,23 @@ func (h *APIHandler) AuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		// Add auth context to request context
-		ctx := context.WithValue(r.Context(), "auth", authCtx)
+	// Define custom type for context key to avoid collisions
+	type contextKey string
+	const authKey contextKey = "auth"
+
+	// Create context with authentication data
+	ctx := context.WithValue(r.Context(), authKey, authCtx)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 // getAuthContext extracts authentication context from request
 func (h *APIHandler) getAuthContext(r *http.Request) *AuthContext {
-	authCtx, ok := r.Context().Value("auth").(*AuthContext)
+	// Define custom type for context key to avoid collisions
+	type contextKey string
+	const authKey contextKey = "auth"
+	
+	authCtx, ok := r.Context().Value(authKey).(*AuthContext)
 	if !ok {
 		return nil
 	}
@@ -344,7 +353,9 @@ func (h *APIHandler) executeWorkflowAsync(execution *WorkflowExecution, configYA
 		if r := recover(); r != nil {
 			h.logger.Error("workflow execution panicked", "error", r)
 			logs = append(logs, fmt.Sprintf("ERROR: Workflow execution panicked: %v", r))
-			h.dbService.UpdateExecution(ctx, execution.ID, "failed", nil, logs, fmt.Sprintf("panic: %v", r))
+			if err := h.dbService.UpdateExecution(ctx, execution.ID, "failed", nil, logs, fmt.Sprintf("panic: %v", r)); err != nil {
+				h.logger.Error("failed to update execution after panic", "error", err)
+			}
 		}
 	}()
 
@@ -354,7 +365,9 @@ func (h *APIHandler) executeWorkflowAsync(execution *WorkflowExecution, configYA
 	var workflowConfig config.WorkflowConfig
 	if err := yaml.Unmarshal([]byte(configYAML), &workflowConfig); err != nil {
 		logs = append(logs, fmt.Sprintf("ERROR: Failed to parse workflow configuration: %v", err))
-		h.dbService.UpdateExecution(ctx, execution.ID, "failed", nil, logs, err.Error())
+		if updateErr := h.dbService.UpdateExecution(ctx, execution.ID, "failed", nil, logs, err.Error()); updateErr != nil {
+			h.logger.Error("failed to update execution after parse error", "error", updateErr)
+		}
 		return
 	}
 
@@ -418,12 +431,16 @@ func (h *APIHandler) GetExecutions(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		h.logger.Error("failed to encode JSON response", "error", err)
+	}
 }
 
 // writeError writes an error response
 func (h *APIHandler) writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
+		h.logger.Error("failed to encode JSON error response", "error", err)
+	}
 }

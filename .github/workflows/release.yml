@@ -9,9 +9,60 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    name: Run All Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        cache: true
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install Node.js dependencies
+      run: npm ci
+
+    - name: Install Playwright browsers
+      run: npx playwright install --with-deps chromium
+
+    - name: Run Go tests
+      run: go test -v ./...
+
+    - name: Run linting
+      uses: golangci/golangci-lint-action@v7
+      with:
+        version: latest
+        args: --timeout=10m
+
+    - name: Build examples
+      run: |
+        cd example
+        go build -o workflow-example ./...
+
+    - name: Run BDD tests
+      run: |
+        cd tests/bdd
+        go test -v
+
+    - name: Run E2E tests
+      run: npx playwright test
+
   release:
     name: Create Release
     runs-on: ubuntu-latest
+    needs: test
     
     steps:
     - name: Check out code
