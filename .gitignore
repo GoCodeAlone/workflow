@@ -24,3 +24,15 @@ go.work.sum
 # env file
 .env
 .idea
+
+# Node.js dependencies
+node_modules/
+
+# Playwright test results and reports
+test-results/
+playwright-report/
+screenshots/
+
+# Database files
+*.db
+*.sqlite
