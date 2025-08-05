@@ -24,9 +24,32 @@ All functionality is configured through YAML files without code changes.
 ### Required Before Each Commit
 - Format Go code with `gofmt`
 - Run `golangci-lint run` and fix any linting issues
-- Ensure all tests pass
+- **Ensure ALL tests pass** - this includes:
+  - Unit tests: `go test ./...`
+  - BDD tests: `go test ./tests/bdd/...`
+  - End-to-end Playwright tests: `npx playwright test`
 - Update documentation when adding new module types or workflow handlers
 - Test configuration files in `/example` directory
+
+### Test Suite Compliance
+**CRITICAL**: No work is considered complete until ALL test suites pass:
+- **Unit Tests**: Core Go functionality and module behavior
+- **BDD Tests**: Behavioral specifications in `/tests/bdd/`
+- **Playwright E2E Tests**: Full application workflows and UI interactions
+- **Integration Tests**: Complete workflow configurations
+
+Run the full test suite before any commit:
+```bash
+# Run all Go tests (unit + BDD + integration)
+go test ./... -v
+
+# Run Playwright end-to-end tests
+npx playwright test
+
+# Verify all example configurations work
+cd example && go run main.go -config api-server-config.yaml &
+# Test endpoints, then kill server
+```
 
 ## Architecture Overview
 
@@ -114,6 +137,12 @@ The engine supports these built-in module types:
    })
    ```
 
+4. **MANDATORY: Create Test Coverage**:
+   - **Unit Tests**: Test module behavior, configuration, and dependencies
+   - **BDD Tests**: Test workflow scenarios that use the new module type
+   - **Playwright Tests**: Test end-to-end workflows if the module affects user experience
+   - **Integration Tests**: Test module interactions with other components
+
 ### Creating Workflow Handlers
 
 1. **Implement WorkflowHandler Interface**:
@@ -137,6 +166,12 @@ The engine supports these built-in module types:
    ```go
    engine.RegisterWorkflowHandler(&YourHandler{})
    ```
+
+3. **MANDATORY: Create Test Coverage**:
+   - **Unit Tests**: Test handler logic, configuration, and execution
+   - **BDD Tests**: Test complete workflow scenarios and business rules
+   - **Playwright Tests**: Test end-to-end user workflows if handler affects UI
+   - **Integration Tests**: Test handler interactions with modules and other handlers
 
 ### Configuration Best Practices
 
@@ -203,10 +238,48 @@ The engine supports these built-in module types:
 
 ### Testing Guidelines
 
+**MANDATORY**: All test suites must pass before any work is considered complete.
+
+#### Test Hierarchy (ALL REQUIRED)
 1. **Unit Tests**: Test individual modules and handlers
-2. **Integration Tests**: Test complete workflow configurations
-3. **Configuration Tests**: Validate example YAML files
-4. **Mock Dependencies**: Use test helpers in `/mock` directory
+   - Location: Throughout codebase with `_test.go` files
+   - Command: `go test ./...`
+   - Purpose: Validate core functionality and module behavior
+
+2. **BDD Tests**: Behavioral specifications using Gherkin syntax
+   - Location: `/tests/bdd/`
+   - Command: `go test ./tests/bdd/...`
+   - Purpose: Validate business requirements and user stories
+
+3. **End-to-End Playwright Tests**: Complete application workflows
+   - Location: `/tests/e2e/` (Playwright configuration)
+   - Command: `npx playwright test`
+   - Purpose: Full application testing including UI interactions
+
+4. **Integration Tests**: Test complete workflow configurations
+   - Mixed with unit tests and in dedicated test files
+   - Purpose: Validate module interactions and workflow execution
+
+5. **Configuration Tests**: Validate example YAML files
+   - Location: `/example/` directory
+   - Purpose: Ensure example configurations work correctly
+
+#### Test Execution Requirements
+- **Before any commit**: ALL test suites must pass
+- **During development**: Run relevant test subset frequently
+- **Before PR submission**: Full test suite execution required
+- **Mock Dependencies**: Use test helpers in `/mock` directory
+
+#### Test Development Standards
+- **New Functionality Requirement**: Every new feature, module, or workflow behavior MUST include corresponding test coverage:
+  - **BDD Tests**: Required for all new workflow types, business logic, and user-facing behaviors
+  - **Playwright Tests**: Required for all UI interactions, end-to-end workflows, and user journeys
+  - **Unit Tests**: Required for all new modules, handlers, and core functionality
+- Write BDD scenarios for new workflow types
+- Create Playwright tests for UI-related features
+- Maintain test coverage for all modules
+- Update tests when modifying existing functionality
+- **No feature is complete without proper test coverage across all relevant test suites**
 
 ### Running Examples
 
@@ -234,6 +307,11 @@ go run example/main.go -config example/sms-chat-config.yaml
 ├── /handlers             # Workflow handlers
 ├── /example              # Example configurations and runner
 ├── /mock                 # Test mocks and helpers
+├── /tests                # Test suites
+│   ├── /bdd              # BDD test specifications
+│   └── /e2e              # Playwright end-to-end tests
+├── /ui                   # User interface components
+├── playwright.config.ts  # Playwright configuration
 └── go.mod                # Go module definition
 ```
 

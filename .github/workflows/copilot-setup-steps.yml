@@ -44,6 +44,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Setup Node.js for Playwright
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # Install Playwright and its browsers
+      - name: Install Playwright
+        run: |
+          npm install -g @playwright/test
+          npx playwright install --with-deps
+
       # Install Go dependencies and development tools
       - name: Install Go dependencies and tools
         run: |
@@ -64,4 +77,7 @@ jobs:
           go version
           golangci-lint version
           docker --version
+          node --version
+          npm --version
+          npx playwright --version
           echo "All tools installed successfully!"
