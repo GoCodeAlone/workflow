@@ -1,0 +1,306 @@
+{
+  "config": {
+    "configFile": "/home/runner/work/workflow/workflow/playwright.config.ts",
+    "rootDir": "/home/runner/work/workflow/workflow/tests/e2e",
+    "forbidOnly": true,
+    "fullyParallel": true,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "ci": {
+        "commitHref": "https://github.com/GoCodeAlone/workflow/commit/c810968560a14321dab7467130e169e41664cbca",
+        "commitHash": "c810968560a14321dab7467130e169e41664cbca",
+        "buildHref": "https://github.com/GoCodeAlone/workflow/actions/runs/16737469846"
+      },
+      "gitCommit": {
+        "shortHash": "c810968",
+        "hash": "c810968560a14321dab7467130e169e41664cbca",
+        "subject": "Fix linting errors and add BDD/E2E tests to CI/CD pipeline",
+        "body": "Fix linting errors and add BDD/E2E tests to CI/CD pipeline\n\n- Fixed all golangci-lint errcheck and staticcheck issues\n- Added logger parameter to DatabaseService constructor\n- Created MockLogger for BDD tests\n- Updated CI workflow with dedicated jobs for BDD and E2E tests\n- Updated release workflow to run all tests before creating releases\n- Enhanced error handling in database operations and JSON encoding\n\nCo-authored-by: intel352 <77607+intel352@users.noreply.github.com>\n",
+        "author": {
+          "name": "copilot-swe-agent[bot]",
+          "email": "198982749+Copilot@users.noreply.github.com",
+          "time": 1754291071000
+        },
+        "committer": {
+          "name": "copilot-swe-agent[bot]",
+          "email": "198982749+Copilot@users.noreply.github.com",
+          "time": 1754291071000
+        },
+        "branch": "copilot/fix-1-2"
+      },
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "reporter": [
+      [
+        "html",
+        {
+          "outputFolder": "playwright-report"
+        }
+      ],
+      [
+        "json",
+        {
+          "outputFile": "test-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "quiet": false,
+    "projects": [
+      {
+        "outputDir": "/home/runner/work/workflow/workflow/test-results",
+        "repeatEach": 1,
+        "retries": 2,
+        "metadata": {
+          "ci": {
+            "commitHref": "https://github.com/GoCodeAlone/workflow/commit/c810968560a14321dab7467130e169e41664cbca",
+            "commitHash": "c810968560a14321dab7467130e169e41664cbca",
+            "buildHref": "https://github.com/GoCodeAlone/workflow/actions/runs/16737469846"
+          },
+          "gitCommit": {
+            "shortHash": "c810968",
+            "hash": "c810968560a14321dab7467130e169e41664cbca",
+            "subject": "Fix linting errors and add BDD/E2E tests to CI/CD pipeline",
+            "body": "Fix linting errors and add BDD/E2E tests to CI/CD pipeline\n\n- Fixed all golangci-lint errcheck and staticcheck issues\n- Added logger parameter to DatabaseService constructor\n- Created MockLogger for BDD tests\n- Updated CI workflow with dedicated jobs for BDD and E2E tests\n- Updated release workflow to run all tests before creating releases\n- Enhanced error handling in database operations and JSON encoding\n\nCo-authored-by: intel352 <77607+intel352@users.noreply.github.com>\n",
+            "author": {
+              "name": "copilot-swe-agent[bot]",
+              "email": "198982749+Copilot@users.noreply.github.com",
+              "time": 1754291071000
+            },
+            "committer": {
+              "name": "copilot-swe-agent[bot]",
+              "email": "198982749+Copilot@users.noreply.github.com",
+              "time": 1754291071000
+            },
+            "branch": "copilot/fix-1-2"
+          },
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/home/runner/work/workflow/workflow/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 60000
+      },
+      {
+        "outputDir": "/home/runner/work/workflow/workflow/test-results",
+        "repeatEach": 1,
+        "retries": 2,
+        "metadata": {
+          "ci": {
+            "commitHref": "https://github.com/GoCodeAlone/workflow/commit/c810968560a14321dab7467130e169e41664cbca",
+            "commitHash": "c810968560a14321dab7467130e169e41664cbca",
+            "buildHref": "https://github.com/GoCodeAlone/workflow/actions/runs/16737469846"
+          },
+          "gitCommit": {
+            "shortHash": "c810968",
+            "hash": "c810968560a14321dab7467130e169e41664cbca",
+            "subject": "Fix linting errors and add BDD/E2E tests to CI/CD pipeline",
+            "body": "Fix linting errors and add BDD/E2E tests to CI/CD pipeline\n\n- Fixed all golangci-lint errcheck and staticcheck issues\n- Added logger parameter to DatabaseService constructor\n- Created MockLogger for BDD tests\n- Updated CI workflow with dedicated jobs for BDD and E2E tests\n- Updated release workflow to run all tests before creating releases\n- Enhanced error handling in database operations and JSON encoding\n\nCo-authored-by: intel352 <77607+intel352@users.noreply.github.com>\n",
+            "author": {
+              "name": "copilot-swe-agent[bot]",
+              "email": "198982749+Copilot@users.noreply.github.com",
+              "time": 1754291071000
+            },
+            "committer": {
+              "name": "copilot-swe-agent[bot]",
+              "email": "198982749+Copilot@users.noreply.github.com",
+              "time": 1754291071000
+            },
+            "branch": "copilot/fix-1-2"
+          },
+          "actualWorkers": 1
+        },
+        "id": "firefox",
+        "name": "firefox",
+        "testDir": "/home/runner/work/workflow/workflow/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 60000
+      },
+      {
+        "outputDir": "/home/runner/work/workflow/workflow/test-results",
+        "repeatEach": 1,
+        "retries": 2,
+        "metadata": {
+          "ci": {
+            "commitHref": "https://github.com/GoCodeAlone/workflow/commit/c810968560a14321dab7467130e169e41664cbca",
+            "commitHash": "c810968560a14321dab7467130e169e41664cbca",
+            "buildHref": "https://github.com/GoCodeAlone/workflow/actions/runs/16737469846"
+          },
+          "gitCommit": {
+            "shortHash": "c810968",
+            "hash": "c810968560a14321dab7467130e169e41664cbca",
+            "subject": "Fix linting errors and add BDD/E2E tests to CI/CD pipeline",
+            "body": "Fix linting errors and add BDD/E2E tests to CI/CD pipeline\n\n- Fixed all golangci-lint errcheck and staticcheck issues\n- Added logger parameter to DatabaseService constructor\n- Created MockLogger for BDD tests\n- Updated CI workflow with dedicated jobs for BDD and E2E tests\n- Updated release workflow to run all tests before creating releases\n- Enhanced error handling in database operations and JSON encoding\n\nCo-authored-by: intel352 <77607+intel352@users.noreply.github.com>\n",
+            "author": {
+              "name": "copilot-swe-agent[bot]",
+              "email": "198982749+Copilot@users.noreply.github.com",
+              "time": 1754291071000
+            },
+            "committer": {
+              "name": "copilot-swe-agent[bot]",
+              "email": "198982749+Copilot@users.noreply.github.com",
+              "time": 1754291071000
+            },
+            "branch": "copilot/fix-1-2"
+          },
+          "actualWorkers": 1
+        },
+        "id": "webkit",
+        "name": "webkit",
+        "testDir": "/home/runner/work/workflow/workflow/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 60000
+      }
+    ],
+    "shard": null,
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.54.2",
+    "workers": 1,
+    "webServer": {
+      "command": "go run example/main.go -config example/ui-workflow-config.yaml",
+      "url": "http://localhost:8080",
+      "reuseExistingServer": false,
+      "timeout": 180000,
+      "stdout": "pipe",
+      "stderr": "pipe"
+    }
+  },
+  "suites": [
+    {
+      "title": "workflow-ui.spec.ts",
+      "file": "workflow-ui.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Workflow UI Authentication",
+          "file": "workflow-ui.spec.ts",
+          "line": 19,
+          "column": 6,
+          "specs": [
+            {
+              "title": "should display login page",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 3,
+                      "error": {
+                        "message": "Error: browserType.launch: Executable doesn't exist at /home/runner/.cache/ms-playwright/chromium_headless_shell-1181/chrome-linux/headless_shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+                        "stack": "Error: browserType.launch: Executable doesn't exist at /home/runner/.cache/ms-playwright/chromium_headless_shell-1181/chrome-linux/headless_shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝"
+                      },
+                      "errors": [
+                        {
+                          "message": "Error: browserType.launch: Executable doesn't exist at /home/runner/.cache/ms-playwright/chromium_headless_shell-1181/chrome-linux/headless_shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2025-08-05T00:45:13.195Z",
+                      "annotations": [],
+                      "attachments": []
+                    },
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 3,
+                      "error": {
+                        "message": "Error: browserType.launch: Executable doesn't exist at /home/runner/.cache/ms-playwright/chromium_headless_shell-1181/chrome-linux/headless_shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+                        "stack": "Error: browserType.launch: Executable doesn't exist at /home/runner/.cache/ms-playwright/chromium_headless_shell-1181/chrome-linux/headless_shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝"
+                      },
+                      "errors": [
+                        {
+                          "message": "Error: browserType.launch: Executable doesn't exist at /home/runner/.cache/ms-playwright/chromium_headless_shell-1181/chrome-linux/headless_shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 1,
+                      "startTime": "2025-08-05T00:45:13.784Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/home/runner/work/workflow/workflow/test-results/workflow-ui-Workflow-UI-Au-55b2e-n-should-display-login-page-chromium-retry1/trace.zip"
+                        }
+                      ]
+                    },
+                    {
+                      "workerIndex": 2,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 3,
+                      "error": {
+                        "message": "Error: browserType.launch: Executable doesn't exist at /home/runner/.cache/ms-playwright/chromium_headless_shell-1181/chrome-linux/headless_shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+                        "stack": "Error: browserType.launch: Executable doesn't exist at /home/runner/.cache/ms-playwright/chromium_headless_shell-1181/chrome-linux/headless_shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝"
+                      },
+                      "errors": [
+                        {
+                          "message": "Error: browserType.launch: Executable doesn't exist at /home/runner/.cache/ms-playwright/chromium_headless_shell-1181/chrome-linux/headless_shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 2,
+                      "startTime": "2025-08-05T00:45:14.350Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "045979a41990a29506ee-274f90e3628ddcd2f8a4",
+              "file": "workflow-ui.spec.ts",
+              "line": 20,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2025-08-05T00:45:12.009Z",
+    "duration": 2376.7380000000003,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 1,
+    "flaky": 0
+  }
+}

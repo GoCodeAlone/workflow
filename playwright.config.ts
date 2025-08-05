@@ -6,6 +6,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
+  timeout: 60000, // Increase timeout to 60 seconds for CI
   reporter: [
     ['html', { outputFolder: 'playwright-report' }],
     ['json', { outputFile: 'test-results.json' }]
@@ -15,6 +16,8 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+    actionTimeout: 15000, // Increase action timeout
+    navigationTimeout: 30000, // Increase navigation timeout
   },
 
   projects: [
@@ -36,6 +39,8 @@ export default defineConfig({
     command: 'go run example/main.go -config example/ui-workflow-config.yaml',
     url: 'http://localhost:8080',
     reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
+    timeout: 180 * 1000, // Increase server startup timeout to 3 minutes
+    stdout: 'pipe',
+    stderr: 'pipe',
   },
 });

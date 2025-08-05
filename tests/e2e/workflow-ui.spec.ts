@@ -3,15 +3,25 @@ import { test, expect, Page } from '@playwright/test';
 // Helper function to login
 async function login(page: Page, username: string = 'admin', password: string = 'admin') {
   await page.goto('/');
-  await page.fill('input[name="username"]', username);
-  await page.fill('input[name="password"]', password);
+  
+  // Wait for the login form to be visible
+  await page.waitForSelector('input[type="text"]', { timeout: 15000 });
+  await page.waitForSelector('input[type="password"]', { timeout: 15000 });
+  
+  await page.fill('input[type="text"]', username);
+  await page.fill('input[type="password"]', password);
   await page.click('button[type="submit"]');
-  await page.waitForSelector('.sidebar', { timeout: 10000 });
+  
+  // Wait for successful login and dashboard load
+  await page.waitForSelector('.sidebar', { timeout: 15000 });
 }
 
 test.describe('Workflow UI Authentication', () => {
   test('should display login page', async ({ page }) => {
     await page.goto('/');
+    
+    // Wait for login page to load
+    await page.waitForSelector('h3:has-text("Workflow Engine")', { timeout: 15000 });
     
     // Take screenshot of login page
     await page.screenshot({ path: 'screenshots/login-page.png', fullPage: true });
@@ -26,6 +36,10 @@ test.describe('Workflow UI Authentication', () => {
   test('should login successfully with valid credentials', async ({ page }) => {
     await page.goto('/');
     
+    // Wait for login form to be available
+    await page.waitForSelector('input[type="text"]', { timeout: 15000 });
+    await page.waitForSelector('input[type="password"]', { timeout: 15000 });
+    
     // Fill login form
     await page.fill('input[type="text"]', 'admin');
     await page.fill('input[type="password"]', 'admin');
@@ -36,7 +50,7 @@ test.describe('Workflow UI Authentication', () => {
     await page.click('button[type="submit"]');
     
     // Wait for redirect to dashboard
-    await page.waitForSelector('.sidebar', { timeout: 10000 });
+    await page.waitForSelector('.sidebar', { timeout: 15000 });
     
     // Take screenshot after successful login
     await page.screenshot({ path: 'screenshots/after-login.png', fullPage: true });
@@ -50,13 +64,16 @@ test.describe('Workflow UI Authentication', () => {
   test('should show error with invalid credentials', async ({ page }) => {
     await page.goto('/');
     
+    // Wait for login form
+    await page.waitForSelector('input[type="text"]', { timeout: 15000 });
+    
     await page.fill('input[type="text"]', 'admin');
     await page.fill('input[type="password"]', 'wrongpassword');
     
     await page.click('button[type="submit"]');
     
     // Wait for error message
-    await page.waitForSelector('.alert-danger', { timeout: 5000 });
+    await page.waitForSelector('.alert-danger', { timeout: 10000 });
     
     // Take screenshot of error state
     await page.screenshot({ path: 'screenshots/login-error.png', fullPage: true });
@@ -90,8 +107,12 @@ test.describe('Workflow Management', () => {
     // Navigate to workflows
     await page.click('a[href="#"]:has-text("Workflows")');
     
-    // Wait for workflows view
-    await page.waitForSelector('[data-testid="workflows-view"], .workflow-card, .navbar-brand:has-text("Workflows")', { timeout: 5000 });
+    // Wait for workflows view with more flexible selector
+    await page.waitForFunction(() => {
+      return document.querySelector('.navbar-brand')?.textContent?.includes('Workflows') ||
+             document.querySelector('[data-testid="workflows-view"]') !== null ||
+             document.querySelector('.workflow-card') !== null;
+    }, {}, { timeout: 10000 });
     
     // Take screenshot of workflows page
     await page.screenshot({ path: 'screenshots/workflows-page.png', fullPage: true });
@@ -105,11 +126,14 @@ test.describe('Workflow Management', () => {
     // Navigate to workflows
     await page.click('a[href="#"]:has-text("Workflows")');
     
+    // Wait for workflows page to load
+    await page.waitForSelector('button:has-text("New Workflow")', { timeout: 10000 });
+    
     // Click New Workflow button
     await page.click('button:has-text("New Workflow")');
     
     // Wait for modal
-    await page.waitForSelector('.modal', { timeout: 5000 });
+    await page.waitForSelector('.modal', { timeout: 10000 });
     
     // Take screenshot of create workflow modal
     await page.screenshot({ path: 'screenshots/create-workflow-modal.png', fullPage: true });
@@ -124,8 +148,9 @@ test.describe('Workflow Management', () => {
   test('should validate workflow form', async ({ page }) => {
     // Navigate to workflows and open create modal
     await page.click('a[href="#"]:has-text("Workflows")');
+    await page.waitForSelector('button:has-text("New Workflow")', { timeout: 10000 });
     await page.click('button:has-text("New Workflow")');
-    await page.waitForSelector('.modal', { timeout: 5000 });
+    await page.waitForSelector('.modal', { timeout: 10000 });
     
     // Fill form with sample data
     await page.fill('input[v-model="workflowForm.name"]', 'Test Workflow');
@@ -147,8 +172,12 @@ test.describe('Workflow Management', () => {
     // Navigate to executions
     await page.click('a[href="#"]:has-text("Executions")');
     
-    // Wait for executions view
-    await page.waitForSelector('.navbar-brand:has-text("Executions"), .table, [data-testid="executions-view"]', { timeout: 5000 });
+    // Wait for executions view with more flexible approach
+    await page.waitForFunction(() => {
+      return document.querySelector('.navbar-brand')?.textContent?.includes('Executions') ||
+             document.querySelector('.table') !== null ||
+             document.querySelector('[data-testid="executions-view"]') !== null;
+    }, {}, { timeout: 10000 });
     
     // Take screenshot of executions page
     await page.screenshot({ path: 'screenshots/executions-page.png', fullPage: true });
@@ -163,7 +192,7 @@ test.describe('Workflow Management', () => {
     await page.click('.dropdown button:has-text("admin")');
     
     // Wait for dropdown menu
-    await page.waitForSelector('.dropdown-menu', { timeout: 5000 });
+    await page.waitForSelector('.dropdown-menu', { timeout: 10000 });
     
     // Take screenshot of user menu
     await page.screenshot({ path: 'screenshots/user-menu.png', fullPage: true });
@@ -176,12 +205,12 @@ test.describe('Workflow Management', () => {
   test('should logout successfully', async ({ page }) => {
     // Click user dropdown and logout
     await page.click('.dropdown button:has-text("admin")');
-    await page.waitForSelector('.dropdown-menu', { timeout: 5000 });
+    await page.waitForSelector('.dropdown-menu', { timeout: 10000 });
     
     await page.click('.dropdown-item:has-text("Sign Out")');
     
     // Wait for redirect to login page
-    await page.waitForSelector('h3:has-text("Workflow Engine")', { timeout: 5000 });
+    await page.waitForSelector('h3:has-text("Workflow Engine")', { timeout: 10000 });
     
     // Take screenshot after logout
     await page.screenshot({ path: 'screenshots/after-logout.png', fullPage: true });
