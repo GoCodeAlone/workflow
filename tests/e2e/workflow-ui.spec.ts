@@ -95,12 +95,16 @@ test.describe('Workflow Management', () => {
     // Take screenshot of dashboard
     await page.screenshot({ path: 'screenshots/dashboard.png', fullPage: true });
     
-    // Verify dashboard cards
-    await expect(page.locator('.card')).toHaveCount(4); // Total workflows, executions, completed, failed
+    // Verify dashboard metric cards (first row with metrics only)
+    await expect(page.locator('.row:first-child .card')).toHaveCount(4); // Total workflows, executions, completed, failed
     await expect(page.locator('.card:has-text("Total Workflows")')).toBeVisible();
     await expect(page.locator('.card:has-text("Executions")')).toBeVisible();
     await expect(page.locator('.card:has-text("Completed")')).toBeVisible();
     await expect(page.locator('.card:has-text("Failed")')).toBeVisible();
+    
+    // Verify additional dashboard cards (second row)
+    await expect(page.locator('.card:has-text("Recent Workflows")')).toBeVisible();
+    await expect(page.locator('.card:has-text("Recent Executions")')).toBeVisible();
   });
 
   test('should navigate to workflows page', async ({ page }) => {

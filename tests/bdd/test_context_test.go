@@ -92,20 +92,30 @@ func (ctx *BDDTestContext) makeRequest(method, endpoint, token string, body inte
 		return nil
 	}
 	
-	// For now, simulate success for authenticated requests
+	// Simulate successful authentication for requests with token
+	if token != "" {
+		ctx.lastResponse = &http.Response{
+			StatusCode: http.StatusOK,
+		}
+		ctx.lastBody = []byte(`{"success": true}`)
+		
+		if endpoint == "/api/workflows" && method == "POST" {
+			ctx.lastResponse.StatusCode = http.StatusCreated
+			ctx.lastBody = []byte(fmt.Sprintf(`{"id": "%s", "name": "Test Workflow", "status": "stopped"}`, uuid.New().String()))
+		}
+
+		if endpoint == "/api/workflows" && method == "GET" {
+			ctx.lastBody = []byte(`{"workflows": [{"id": "test-id", "name": "Test Workflow", "description": "Test", "status": "stopped"}]}`)
+		}
+		
+		return nil
+	}
+	
+	// Default response for unauthenticated requests
 	ctx.lastResponse = &http.Response{
 		StatusCode: http.StatusOK,
 	}
 	ctx.lastBody = []byte(`{"success": true}`)
-	
-	if endpoint == "/api/workflows" && method == "POST" {
-		ctx.lastResponse.StatusCode = http.StatusCreated
-		ctx.lastBody = []byte(fmt.Sprintf(`{"id": "%s", "name": "Test Workflow", "status": "stopped"}`, uuid.New().String()))
-	}
-
-	if endpoint == "/api/workflows" && method == "GET" {
-		ctx.lastBody = []byte(`{"workflows": [{"id": "test-id", "name": "Test Workflow", "description": "Test", "status": "stopped"}]}`)
-	}
 
 	return nil
 }
