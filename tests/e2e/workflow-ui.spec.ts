@@ -92,16 +92,22 @@ test.describe('Workflow Management', () => {
     // Navigate to dashboard
     await page.click('a[href="#"]:has-text("Dashboard")');
     
-    // Wait for dashboard to load
-    await page.waitForSelector('[data-testid="dashboard-view"], .p-4:has(.row)', { timeout: 10000 });
+    // Wait for dashboard to load using test ID
+    await page.waitForSelector('[data-testid="dashboard-view"]', { timeout: 10000 });
     
     // Take screenshot of dashboard
     await page.screenshot({ path: 'screenshots/dashboard.png', fullPage: true });
     
-    // Verify dashboard metric cards (select only the first row cards with col-md-3)
-    await expect(page.locator('.row:first-of-type .col-md-3.mb-4')).toHaveCount(4); // Total workflows, executions, completed, failed
+    // Verify dashboard metric cards using data-testid selectors
+    await expect(page.locator('[data-testid="dashboard-metrics-row"] [data-testid^="metric-card-"]')).toHaveCount(4);
+    await expect(page.locator('[data-testid="metric-card-workflows"]')).toBeVisible();
+    await expect(page.locator('[data-testid="metric-card-executions"]')).toBeVisible();
+    await expect(page.locator('[data-testid="metric-card-completed"]')).toBeVisible();
+    await expect(page.locator('[data-testid="metric-card-failed"]')).toBeVisible();
+    
+    // Verify individual card content
     await expect(page.locator('.card:has-text("Total Workflows")')).toBeVisible();
-    await expect(page.locator('.card:has-text("Executions")')).toBeVisible();
+    await expect(page.locator('.card:has-text("Executions")').and(page.locator(':not(:has-text("Recent"))'))).toBeVisible();
     await expect(page.locator('.card:has-text("Completed")')).toBeVisible();
     await expect(page.locator('.card:has-text("Failed")')).toBeVisible();
     
@@ -114,12 +120,8 @@ test.describe('Workflow Management', () => {
     // Navigate to workflows
     await page.click('a[href="#"]:has-text("Workflows")');
     
-    // Wait for workflows view with more flexible selector
-    await page.waitForFunction(() => {
-      return document.querySelector('.navbar-brand')?.textContent?.includes('Workflows') ||
-             document.querySelector('[data-testid="workflows-view"]') !== null ||
-             document.querySelector('.workflow-card') !== null;
-    }, {}, { timeout: 10000 });
+    // Wait for workflows view using data-testid
+    await page.waitForSelector('[data-testid="workflows-view"]', { timeout: 10000 });
     
     // Take screenshot of workflows page
     await page.screenshot({ path: 'screenshots/workflows-page.png', fullPage: true });
@@ -139,19 +141,18 @@ test.describe('Workflow Management', () => {
     // Click New Workflow button
     await page.click('button:has-text("New Workflow")');
     
-    // Wait for modal to appear
-    await page.waitForSelector('#workflowModal.show, #workflowModal:visible', { timeout: 10000 });
+    // Wait for modal to appear using data-testid
+    await page.waitForSelector('[data-testid="workflow-modal"]', { timeout: 10000 });
     
     // Take screenshot of create workflow modal
     await page.screenshot({ path: 'screenshots/create-workflow-modal.png', fullPage: true });
     
-    // Verify modal elements with proper selectors for rendered DOM
+    // Verify modal elements with data-testid selectors
     await expect(page.locator('.modal-title')).toContainText('Create Workflow');
-    
-    // Use more specific selectors for form fields that will exist in rendered DOM
-    await expect(page.locator('#workflowModal input[type="text"]')).toBeVisible();
-    await expect(page.locator('#workflowModal textarea').first()).toBeVisible(); // Description field
-    await expect(page.locator('#workflowModal textarea.code-editor')).toBeVisible(); // Config field
+    await expect(page.locator('[data-testid="workflow-name-input"]')).toBeVisible();
+    await expect(page.locator('[data-testid="workflow-description-input"]')).toBeVisible();
+    await expect(page.locator('[data-testid="workflow-config-input"]')).toBeVisible();
+    await expect(page.locator('[data-testid="workflow-save-button"]')).toBeVisible();
   });
 
   test('should validate workflow form', async ({ page }) => {
@@ -160,58 +161,50 @@ test.describe('Workflow Management', () => {
     await page.waitForSelector('button:has-text("New Workflow")', { timeout: 10000 });
     await page.click('button:has-text("New Workflow")');
     
-    // Wait for modal to be visible and fully loaded
-    await page.waitForSelector('#workflowModal.show, #workflowModal:visible', { timeout: 10000 });
+    // Wait for modal to be visible using data-testid
+    await page.waitForSelector('[data-testid="workflow-modal"]', { timeout: 10000 });
     
-    // Wait for form fields to be available
-    await page.waitForSelector('#workflowModal input[type="text"]', { timeout: 10000 });
-    await page.waitForSelector('#workflowModal textarea', { timeout: 10000 });
+    // Wait for form fields to be available using data-testid selectors
+    await page.waitForSelector('[data-testid="workflow-name-input"]', { timeout: 10000 });
+    await page.waitForSelector('[data-testid="workflow-description-input"]', { timeout: 10000 });
+    await page.waitForSelector('[data-testid="workflow-config-input"]', { timeout: 10000 });
     
     // Wait for Vue.js to initialize the form with default config
     await page.waitForFunction(
       () => {
-        const configTextarea = document.querySelector('#workflowModal textarea.code-editor');
+        const configTextarea = document.querySelector('[data-testid="workflow-config-input"]') as HTMLTextAreaElement;
         return configTextarea && configTextarea.value && configTextarea.value.length > 0;
       },
       {},
       { timeout: 10000 }
     );
     
-    // Fill form with sample data using more reliable selectors
-    await page.fill('#workflowModal input[type="text"]', 'Test Workflow');
-    
-    // Fill description field (first textarea)
-    const textareas = await page.locator('#workflowModal textarea').all();
-    if (textareas.length >= 1) {
-      await textareas[0].fill('A test workflow for demonstration');
-    }
+    // Fill form with sample data using data-testid selectors
+    await page.fill('[data-testid="workflow-name-input"]', 'Test Workflow');
+    await page.fill('[data-testid="workflow-description-input"]', 'A test workflow for demonstration');
     
     // The config should have a default value, let's verify it exists
-    const configValue = await page.inputValue('#workflowModal textarea.code-editor');
+    const configValue = await page.inputValue('[data-testid="workflow-config-input"]');
     expect(configValue.length).toBeGreaterThan(0);
     
     // Take screenshot of filled form
     await page.screenshot({ path: 'screenshots/workflow-form-filled.png', fullPage: true });
     
-    // Verify form is fillable
-    await expect(page.locator('#workflowModal input[type="text"]')).toHaveValue('Test Workflow');
+    // Verify form is fillable using data-testid selectors
+    await expect(page.locator('[data-testid="workflow-name-input"]')).toHaveValue('Test Workflow');
+    await expect(page.locator('[data-testid="workflow-description-input"]')).toHaveValue('A test workflow for demonstration');
     
-    // Check description field value
-    if (textareas.length >= 1) {
-      await expect(textareas[0]).toHaveValue('A test workflow for demonstration');
-    }
+    // Verify config field has content
+    const finalConfigValue = await page.inputValue('[data-testid="workflow-config-input"]');
+    expect(finalConfigValue).toBeTruthy();
   });
 
   test('should navigate to executions page', async ({ page }) => {
     // Navigate to executions
     await page.click('a[href="#"]:has-text("Executions")');
     
-    // Wait for executions view with more flexible approach
-    await page.waitForFunction(() => {
-      return document.querySelector('.navbar-brand')?.textContent?.includes('Executions') ||
-             document.querySelector('.table') !== null ||
-             document.querySelector('[data-testid="executions-view"]') !== null;
-    }, {}, { timeout: 10000 });
+    // Wait for executions view using data-testid
+    await page.waitForSelector('[data-testid="executions-view"]', { timeout: 10000 });
     
     // Take screenshot of executions page
     await page.screenshot({ path: 'screenshots/executions-page.png', fullPage: true });
