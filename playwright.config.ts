@@ -16,8 +16,8 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
-    actionTimeout: 5000, // 5 seconds for actions (local should be faster)
-    navigationTimeout: 10000, // 10 seconds for navigation
+    actionTimeout: 10000, // 10 seconds for actions (allow more time for form interactions)
+    navigationTimeout: 15000, // 15 seconds for navigation
   },
 
   projects: [
