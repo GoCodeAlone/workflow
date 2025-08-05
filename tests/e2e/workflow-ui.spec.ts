@@ -92,11 +92,14 @@ test.describe('Workflow Management', () => {
     // Navigate to dashboard
     await page.click('a[href="#"]:has-text("Dashboard")');
     
+    // Wait for dashboard to load
+    await page.waitForSelector('[data-testid="dashboard-view"], .p-4:has(.row)', { timeout: 10000 });
+    
     // Take screenshot of dashboard
     await page.screenshot({ path: 'screenshots/dashboard.png', fullPage: true });
     
-    // Verify dashboard metric cards (first row with metrics only)
-    await expect(page.locator('.row:first-child .card')).toHaveCount(4); // Total workflows, executions, completed, failed
+    // Verify dashboard metric cards (select only the first row cards with col-md-3)
+    await expect(page.locator('.row:first-of-type .col-md-3.mb-4')).toHaveCount(4); // Total workflows, executions, completed, failed
     await expect(page.locator('.card:has-text("Total Workflows")')).toBeVisible();
     await expect(page.locator('.card:has-text("Executions")')).toBeVisible();
     await expect(page.locator('.card:has-text("Completed")')).toBeVisible();
@@ -136,17 +139,19 @@ test.describe('Workflow Management', () => {
     // Click New Workflow button
     await page.click('button:has-text("New Workflow")');
     
-    // Wait for modal
-    await page.waitForSelector('#workflowModal', { timeout: 10000 });
+    // Wait for modal to appear
+    await page.waitForSelector('#workflowModal.show, #workflowModal:visible', { timeout: 10000 });
     
     // Take screenshot of create workflow modal
     await page.screenshot({ path: 'screenshots/create-workflow-modal.png', fullPage: true });
     
-    // Verify modal elements with proper selectors
+    // Verify modal elements with proper selectors for rendered DOM
     await expect(page.locator('.modal-title')).toContainText('Create Workflow');
+    
+    // Use more specific selectors for form fields that will exist in rendered DOM
     await expect(page.locator('#workflowModal input[type="text"]')).toBeVisible();
-    await expect(page.locator('#workflowModal textarea:nth-of-type(1)')).toBeVisible();
-    await expect(page.locator('#workflowModal textarea.code-editor')).toBeVisible();
+    await expect(page.locator('#workflowModal textarea').first()).toBeVisible(); // Description field
+    await expect(page.locator('#workflowModal textarea.code-editor')).toBeVisible(); // Config field
   });
 
   test('should validate workflow form', async ({ page }) => {
@@ -154,22 +159,32 @@ test.describe('Workflow Management', () => {
     await page.click('a[href="#"]:has-text("Workflows")');
     await page.waitForSelector('button:has-text("New Workflow")', { timeout: 10000 });
     await page.click('button:has-text("New Workflow")');
-    await page.waitForSelector('#workflowModal', { timeout: 10000 });
     
-    // Wait for modal to be visible and form fields to be loaded
+    // Wait for modal to be visible and fully loaded
+    await page.waitForSelector('#workflowModal.show, #workflowModal:visible', { timeout: 10000 });
+    
+    // Wait for form fields to be available
     await page.waitForSelector('#workflowModal input[type="text"]', { timeout: 10000 });
-    await page.waitForSelector('#workflowModal textarea:nth-of-type(1)', { timeout: 10000 });
-    await page.waitForSelector('#workflowModal textarea.code-editor', { timeout: 10000 });
+    await page.waitForSelector('#workflowModal textarea', { timeout: 10000 });
     
-    // Wait for the config textarea to have default content loaded
-    await page.waitForFunction(() => {
-      const configTextarea = document.querySelector('#workflowModal textarea.code-editor') as HTMLTextAreaElement;
-      return configTextarea && configTextarea.value.length > 0;
-    }, {}, { timeout: 10000 });
+    // Wait for Vue.js to initialize the form with default config
+    await page.waitForFunction(
+      () => {
+        const configTextarea = document.querySelector('#workflowModal textarea.code-editor');
+        return configTextarea && configTextarea.value && configTextarea.value.length > 0;
+      },
+      {},
+      { timeout: 10000 }
+    );
     
-    // Fill form with sample data
+    // Fill form with sample data using more reliable selectors
     await page.fill('#workflowModal input[type="text"]', 'Test Workflow');
-    await page.fill('#workflowModal textarea:nth-of-type(1)', 'A test workflow for demonstration');
+    
+    // Fill description field (first textarea)
+    const textareas = await page.locator('#workflowModal textarea').all();
+    if (textareas.length >= 1) {
+      await textareas[0].fill('A test workflow for demonstration');
+    }
     
     // The config should have a default value, let's verify it exists
     const configValue = await page.inputValue('#workflowModal textarea.code-editor');
@@ -180,7 +195,11 @@ test.describe('Workflow Management', () => {
     
     // Verify form is fillable
     await expect(page.locator('#workflowModal input[type="text"]')).toHaveValue('Test Workflow');
-    await expect(page.locator('#workflowModal textarea:nth-of-type(1)')).toHaveValue('A test workflow for demonstration');
+    
+    // Check description field value
+    if (textareas.length >= 1) {
+      await expect(textareas[0]).toHaveValue('A test workflow for demonstration');
+    }
   });
 
   test('should navigate to executions page', async ({ page }) => {
