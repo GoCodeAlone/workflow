@@ -4,13 +4,13 @@ import { test, expect, Page } from '@playwright/test';
 async function login(page: Page, username: string = 'admin', password: string = 'admin') {
   await page.goto('/');
   
-  // Wait for the login form to be visible
-  await page.waitForSelector('input[type="text"]', { timeout: 15000 });
-  await page.waitForSelector('input[type="password"]', { timeout: 15000 });
+  // Wait for the login form to be visible (specifically in the login container)
+  await page.waitForSelector('.login-container input[type="text"]', { timeout: 15000 });
+  await page.waitForSelector('.login-container input[type="password"]', { timeout: 15000 });
   
-  await page.fill('input[type="text"]', username);
-  await page.fill('input[type="password"]', password);
-  await page.click('button[type="submit"]');
+  await page.fill('.login-container input[type="text"]', username);
+  await page.fill('.login-container input[type="password"]', password);
+  await page.click('.login-container button[type="submit"]');
   
   // Wait for successful login and dashboard load
   await page.waitForSelector('.sidebar', { timeout: 15000 });
@@ -28,26 +28,26 @@ test.describe('Workflow UI Authentication', () => {
     
     await expect(page).toHaveTitle(/Workflow Engine/);
     await expect(page.locator('h3')).toContainText('Workflow Engine');
-    await expect(page.locator('input[type="text"]')).toBeVisible();
-    await expect(page.locator('input[type="password"]')).toBeVisible();
-    await expect(page.locator('button[type="submit"]')).toBeVisible();
+    await expect(page.locator('.login-container input[type="text"]')).toBeVisible();
+    await expect(page.locator('.login-container input[type="password"]')).toBeVisible();
+    await expect(page.locator('.login-container button[type="submit"]')).toBeVisible();
   });
 
   test('should login successfully with valid credentials', async ({ page }) => {
     await page.goto('/');
     
     // Wait for login form to be available
-    await page.waitForSelector('input[type="text"]', { timeout: 15000 });
-    await page.waitForSelector('input[type="password"]', { timeout: 15000 });
+    await page.waitForSelector('.login-container input[type="text"]', { timeout: 15000 });
+    await page.waitForSelector('.login-container input[type="password"]', { timeout: 15000 });
     
     // Fill login form
-    await page.fill('input[type="text"]', 'admin');
-    await page.fill('input[type="password"]', 'admin');
+    await page.fill('.login-container input[type="text"]', 'admin');
+    await page.fill('.login-container input[type="password"]', 'admin');
     
     // Take screenshot before login
     await page.screenshot({ path: 'screenshots/before-login.png', fullPage: true });
     
-    await page.click('button[type="submit"]');
+    await page.click('.login-container button[type="submit"]');
     
     // Wait for redirect to dashboard
     await page.waitForSelector('.sidebar', { timeout: 15000 });
@@ -65,12 +65,12 @@ test.describe('Workflow UI Authentication', () => {
     await page.goto('/');
     
     // Wait for login form
-    await page.waitForSelector('input[type="text"]', { timeout: 15000 });
+    await page.waitForSelector('.login-container input[type="text"]', { timeout: 15000 });
     
-    await page.fill('input[type="text"]', 'admin');
-    await page.fill('input[type="password"]', 'wrongpassword');
+    await page.fill('.login-container input[type="text"]', 'admin');
+    await page.fill('.login-container input[type="password"]', 'wrongpassword');
     
-    await page.click('button[type="submit"]');
+    await page.click('.login-container button[type="submit"]');
     
     // Wait for error message
     await page.waitForSelector('.alert-danger', { timeout: 10000 });
@@ -140,9 +140,9 @@ test.describe('Workflow Management', () => {
     
     // Verify modal elements
     await expect(page.locator('.modal-title')).toContainText('Create Workflow');
-    await expect(page.locator('input[v-model="workflowForm.name"]')).toBeVisible();
-    await expect(page.locator('textarea[v-model="workflowForm.description"]')).toBeVisible();
-    await expect(page.locator('textarea[v-model="workflowForm.config"]')).toBeVisible();
+    await expect(page.locator('#workflowModal input[v-model="workflowForm.name"]')).toBeVisible();
+    await expect(page.locator('#workflowModal textarea[v-model="workflowForm.description"]')).toBeVisible();
+    await expect(page.locator('#workflowModal textarea[v-model="workflowForm.config"]')).toBeVisible();
   });
 
   test('should validate workflow form', async ({ page }) => {
@@ -153,19 +153,19 @@ test.describe('Workflow Management', () => {
     await page.waitForSelector('.modal', { timeout: 10000 });
     
     // Fill form with sample data
-    await page.fill('input[v-model="workflowForm.name"]', 'Test Workflow');
-    await page.fill('textarea[v-model="workflowForm.description"]', 'A test workflow for demonstration');
+    await page.fill('#workflowModal input[v-model="workflowForm.name"]', 'Test Workflow');
+    await page.fill('#workflowModal textarea[v-model="workflowForm.description"]', 'A test workflow for demonstration');
     
     // The config should have a default value, let's verify it exists
-    const configValue = await page.inputValue('textarea[v-model="workflowForm.config"]');
+    const configValue = await page.inputValue('#workflowModal textarea[v-model="workflowForm.config"]');
     expect(configValue.length).toBeGreaterThan(0);
     
     // Take screenshot of filled form
     await page.screenshot({ path: 'screenshots/workflow-form-filled.png', fullPage: true });
     
     // Verify form is fillable
-    await expect(page.locator('input[v-model="workflowForm.name"]')).toHaveValue('Test Workflow');
-    await expect(page.locator('textarea[v-model="workflowForm.description"]')).toHaveValue('A test workflow for demonstration');
+    await expect(page.locator('#workflowModal input[v-model="workflowForm.name"]')).toHaveValue('Test Workflow');
+    await expect(page.locator('#workflowModal textarea[v-model="workflowForm.description"]')).toHaveValue('A test workflow for demonstration');
   });
 
   test('should navigate to executions page', async ({ page }) => {
@@ -217,8 +217,8 @@ test.describe('Workflow Management', () => {
     
     // Verify we're back on login page
     await expect(page.locator('h3')).toContainText('Workflow Engine');
-    await expect(page.locator('input[type="text"]')).toBeVisible();
-    await expect(page.locator('input[type="password"]')).toBeVisible();
+    await expect(page.locator('.login-container input[type="text"]')).toBeVisible();
+    await expect(page.locator('.login-container input[type="password"]')).toBeVisible();
   });
 });
 
