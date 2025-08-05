@@ -90,7 +90,7 @@ test.describe('Workflow Management', () => {
 
   test('should display dashboard with metrics', async ({ page }) => {
     // Navigate to dashboard
-    await page.click('a[href="#"]:has-text("Dashboard")');
+    await page.click('[data-testid="nav-dashboard"]');
     
     // Wait for dashboard to load using test ID
     await page.waitForSelector('[data-testid="dashboard-view"]', { timeout: 10000 });
@@ -118,7 +118,7 @@ test.describe('Workflow Management', () => {
 
   test('should navigate to workflows page', async ({ page }) => {
     // Navigate to workflows
-    await page.click('a[href="#"]:has-text("Workflows")');
+    await page.click('[data-testid="nav-workflows"]');
     
     // Wait for workflows view using data-testid
     await page.waitForSelector('[data-testid="workflows-view"]', { timeout: 10000 });
@@ -132,17 +132,23 @@ test.describe('Workflow Management', () => {
   });
 
   test('should open create workflow modal', async ({ page }) => {
-    // Navigate to workflows
-    await page.click('a[href="#"]:has-text("Workflows")');
+    // Navigate to workflows using more specific selector
+    await page.click('[data-testid="nav-workflows"]');
     
     // Wait for workflows page to load
-    await page.waitForSelector('button:has-text("New Workflow")', { timeout: 10000 });
+    await page.waitForSelector('[data-testid="new-workflow-button"]', { timeout: 15000 });
     
     // Click New Workflow button
-    await page.click('button:has-text("New Workflow")');
+    await page.click('[data-testid="new-workflow-button"]');
     
     // Wait for modal to appear using data-testid
-    await page.waitForSelector('[data-testid="workflow-modal"]', { timeout: 10000 });
+    await page.waitForSelector('[data-testid="workflow-modal"]', { timeout: 15000 });
+    
+    // Wait for modal to be fully initialized (Bootstrap modal)
+    await page.waitForFunction(() => {
+      const modal = document.getElementById('workflowModal');
+      return modal && modal.classList.contains('show');
+    }, { timeout: 10000 });
     
     // Take screenshot of create workflow modal
     await page.screenshot({ path: 'screenshots/create-workflow-modal.png', fullPage: true });
@@ -157,16 +163,22 @@ test.describe('Workflow Management', () => {
 
   test('should validate workflow form', async ({ page }) => {
     // Navigate to workflows and open create modal
-    await page.click('a[href="#"]:has-text("Workflows")');
-    await page.waitForSelector('button:has-text("New Workflow")', { timeout: 10000 });
-    await page.click('button:has-text("New Workflow")');
+    await page.click('[data-testid="nav-workflows"]');
+    await page.waitForSelector('[data-testid="new-workflow-button"]', { timeout: 15000 });
+    await page.click('[data-testid="new-workflow-button"]');
     
     // Wait for modal to be visible using data-testid
-    await page.waitForSelector('[data-testid="workflow-modal"]', { timeout: 10000 });
+    await page.waitForSelector('[data-testid="workflow-modal"]', { timeout: 15000 });
+    
+    // Wait for modal to be fully initialized (Bootstrap modal)
+    await page.waitForFunction(() => {
+      const modal = document.getElementById('workflowModal');
+      return modal && modal.classList.contains('show');
+    }, { timeout: 10000 });
     
     // Wait for form fields to be available using data-testid selectors
-    await page.waitForSelector('[data-testid="workflow-name-input"]', { timeout: 10000 });
-    await page.waitForSelector('[data-testid="workflow-description-input"]', { timeout: 10000 });
+    await page.waitForSelector('[data-testid="workflow-name-input"]', { timeout: 15000 });
+    await page.waitForSelector('[data-testid="workflow-description-input"]', { timeout: 15000 });
     await page.waitForSelector('[data-testid="workflow-config-input"]', { timeout: 10000 });
     
     // Wait for Vue.js to initialize the form with default config
@@ -201,7 +213,7 @@ test.describe('Workflow Management', () => {
 
   test('should navigate to executions page', async ({ page }) => {
     // Navigate to executions
-    await page.click('a[href="#"]:has-text("Executions")');
+    await page.click('[data-testid="nav-executions"]');
     
     // Wait for executions view using data-testid
     await page.waitForSelector('[data-testid="executions-view"]', { timeout: 10000 });

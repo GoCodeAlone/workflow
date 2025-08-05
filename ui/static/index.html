@@ -101,13 +101,13 @@
                     </div>
                     
                     <nav class="nav nav-pills flex-column">
-                        <a class="nav-link" :class="{active: currentView === 'dashboard'}" href="#" @click="setView('dashboard')">
+                        <a class="nav-link" :class="{active: currentView === 'dashboard'}" href="#" @click="setView('dashboard')" data-testid="nav-dashboard">
                             <i class="fas fa-tachometer-alt me-2"></i>Dashboard
                         </a>
-                        <a class="nav-link" :class="{active: currentView === 'workflows'}" href="#" @click="setView('workflows')">
+                        <a class="nav-link" :class="{active: currentView === 'workflows'}" href="#" @click="setView('workflows')" data-testid="nav-workflows">
                             <i class="fas fa-project-diagram me-2"></i>Workflows
                         </a>
-                        <a class="nav-link" :class="{active: currentView === 'executions'}" href="#" @click="setView('executions')">
+                        <a class="nav-link" :class="{active: currentView === 'executions'}" href="#" @click="setView('executions')" data-testid="nav-executions">
                             <i class="fas fa-play-circle me-2"></i>Executions
                         </a>
                     </nav>
@@ -138,7 +138,7 @@
                             <span v-if="currentView === 'executions'">Executions</span>
                         </span>
                         <div>
-                            <button v-if="currentView === 'workflows'" class="btn btn-primary" @click="showCreateWorkflow">
+                            <button v-if="currentView === 'workflows'" class="btn btn-primary" @click="showCreateWorkflow" data-testid="new-workflow-button">
                                 <i class="fas fa-plus me-2"></i>New Workflow
                             </button>
                         </div>
