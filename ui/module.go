@@ -79,7 +79,7 @@ func (m *UIModule) Name() string {
 
 // Dependencies returns the module dependencies
 func (m *UIModule) Dependencies() []string {
-	return []string{"database", "auth.modular", "chimux.modular", "httpserver.modular"}
+	return []string{"database"}
 }
 
 // Configure sets up the UI module
