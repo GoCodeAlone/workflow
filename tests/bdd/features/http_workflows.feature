@@ -29,7 +29,7 @@ Feature: HTTP Workflow Testing
     When I create a workflow with:
       | name        | HTTP Middleware Workflow |
       | description | HTTP server with auth middleware |
-      | config      | modules:\n  - name: http-server\n    type: http.server\n    config:\n      address: ":8082"\n  - name: auth-middleware\n    type: http.middleware.auth\n    config:\n      authType: "Bearer"\n  - name: api-router\n    type: http.router\n  - name: test-handler\n    type: http.handler\n\nworkflows:\n  http:\n    routes:\n      - method: GET\n        path: /api/secure\n        handler: test-handler\n        middlewares:\n          - auth-middleware |
+      | config_file | http_middleware_workflow.yaml |
     Then the workflow should be created successfully
     And the workflow should use "http.middleware.auth" module
 
@@ -37,7 +37,7 @@ Feature: HTTP Workflow Testing
     When I create a workflow with:
       | name        | CORS HTTP Workflow |
       | description | HTTP server with CORS support |
-      | config      | modules:\n  - name: http-server\n    type: http.server\n    config:\n      address: ":8083"\n  - name: cors-middleware\n    type: http.middleware.cors\n    config:\n      allowedOrigins: ["*"]\n      allowedMethods: ["GET", "POST", "PUT", "DELETE"]\n  - name: api-router\n    type: http.router\n  - name: api-handler\n    type: http.handler\n\nworkflows:\n  http:\n    routes:\n      - method: GET\n        path: /api/cors-test\n        handler: api-handler\n        middlewares:\n          - cors-middleware |
+      | config_file | cors_http_workflow.yaml |
     Then the workflow should be created successfully
     And the workflow should use "http.middleware.cors" module
 

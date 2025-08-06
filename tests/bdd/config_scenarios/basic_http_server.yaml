@@ -1,0 +1,16 @@
+modules:
+  - name: http-server
+    type: http.server
+    config:
+      address: ":8081"
+  - name: api-router
+    type: http.router
+  - name: api-handler
+    type: http.handler
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/test
+        handler: api-handler

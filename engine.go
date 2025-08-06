@@ -18,6 +18,7 @@ import (
 	"github.com/GoCodeAlone/modular/modules/scheduler"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/ui"
 )
 
 // WorkflowHandler interface for handling different workflow types
@@ -223,8 +224,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				mod = jsonschema.NewModule()
 			case "ui.web":
 				e.logger.Debug("Loading UI web module")
-				// Import the UI module here - we'll add the import at the top
-				mod = module.NewUIModule(modCfg.Name, modCfg.Config)
+				mod = ui.NewUIModule(modCfg.Name, modCfg.Config)
 			default:
 				e.logger.Warn("Unknown module type: " + modCfg.Type)
 				return fmt.Errorf("unknown module type: %s", modCfg.Type)

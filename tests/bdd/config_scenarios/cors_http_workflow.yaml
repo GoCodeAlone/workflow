@@ -1,0 +1,23 @@
+modules:
+  - name: http-server
+    type: http.server
+    config:
+      address: ":8083"
+  - name: cors-middleware
+    type: http.middleware.cors
+    config:
+      allowedOrigins: ["*"]
+      allowedMethods: ["GET", "POST", "PUT", "DELETE"]
+  - name: api-router
+    type: http.router
+  - name: api-handler
+    type: http.handler
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/cors-test
+        handler: api-handler
+        middlewares:
+          - cors-middleware

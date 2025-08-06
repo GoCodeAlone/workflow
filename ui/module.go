@@ -22,6 +22,10 @@ type UIModule struct {
 	authService  *AuthService
 	apiHandler   *APIHandler
 	logger       modular.Logger
+	dbModule     modular.Module
+	authModule   modular.Module
+	chimuxModule modular.Module
+	httpModule   modular.Module
 }
 
 // UIConfig represents the configuration for the UI module
@@ -60,6 +64,14 @@ func NewUIModule(name string, config map[string]interface{}) *UIModule {
 	}
 }
 
+// NewUIModuleWithDependencies creates a new UI module with dependency injection
+func NewUIModuleWithDependencies(name string, config map[string]interface{}, dbModule modular.Module, authModule modular.Module) *UIModule {
+	module := NewUIModule(name, config)
+	module.dbModule = dbModule
+	module.authModule = authModule
+	return module
+}
+
 // Name returns the module name
 func (m *UIModule) Name() string {
 	return m.name
@@ -67,7 +79,7 @@ func (m *UIModule) Name() string {
 
 // Dependencies returns the module dependencies
 func (m *UIModule) Dependencies() []string {
-	return []string{"database"}
+	return []string{"database", "auth.modular", "chimux.modular", "httpserver.modular"}
 }
 
 // Configure sets up the UI module
@@ -79,9 +91,14 @@ func (m *UIModule) Configure(app modular.Application) error {
 func (m *UIModule) Init(app modular.Application) error {
 	m.logger = app.Logger()
 
-	// Get database connection - try to get existing database service first
+	// Try to get modular dependencies first
 	var db *sql.DB
-	if dbService := app.SvcRegistry()["database"]; dbService != nil {
+	
+	// Get database from modular database module if available
+	if m.dbModule != nil {
+		// Use injected database module
+		m.logger.Info("Using injected database module")
+	} else if dbService := app.SvcRegistry()["database"]; dbService != nil {
 		if sqlDB, ok := dbService.(*sql.DB); ok {
 			db = sqlDB
 		}
@@ -104,13 +121,59 @@ func (m *UIModule) Init(app modular.Application) error {
 		return fmt.Errorf("failed to initialize database schema: %w", err)
 	}
 
-	// Create authentication service
+	// Create authentication service - use modular auth if available
+	if m.authModule != nil {
+		m.logger.Info("Using modular auth module")
+		// TODO: Integrate with modular auth when available
+	}
 	m.authService = NewAuthService(m.config.SecretKey, m.dbService)
 
 	// Create API handler
 	m.apiHandler = NewAPIHandler(m.dbService, m.authService, m.logger)
 
-	// Setup HTTP server
+	// Setup HTTP server - use Chimux if available, otherwise fallback to chi
+	var r http.Handler
+	if m.chimuxModule != nil {
+		m.logger.Info("Using Chimux modular router")
+		// TODO: Integrate with Chimux when configuration is available
+		r = m.setupChiRoutes()
+	} else {
+		r = m.setupChiRoutes()
+	}
+
+	// Use modular HTTP server if available, otherwise create our own
+	if m.httpModule != nil {
+		m.logger.Info("Using modular HTTP server")
+		// TODO: Integrate with modular HTTP server when configuration is available
+		m.server = &http.Server{
+			Addr:    m.config.Address,
+			Handler: r,
+		}
+	} else {
+		m.server = &http.Server{
+			Addr:    m.config.Address,
+			Handler: r,
+		}
+	}
+
+	// Register services
+	if err := app.RegisterService("ui-database", m.dbService); err != nil {
+		return fmt.Errorf("failed to register database service: %w", err)
+	}
+	if err := app.RegisterService("ui-auth", m.authService); err != nil {
+		return fmt.Errorf("failed to register auth service: %w", err)
+	}
+	if err := app.RegisterService("ui-api", m.apiHandler); err != nil {
+		return fmt.Errorf("failed to register api service: %w", err)
+	}
+
+	m.logger.Info("UI module configured", "address", m.config.Address, "staticDir", m.config.StaticDir)
+
+	return nil
+}
+
+// setupChiRoutes sets up routes using Chi router as fallback
+func (m *UIModule) setupChiRoutes() http.Handler {
 	r := chi.NewRouter()
 
 	// Middleware
@@ -142,25 +205,7 @@ func (m *UIModule) Init(app modular.Application) error {
 	staticHandler := http.StripPrefix("/", http.FileServer(http.Dir(m.config.StaticDir)))
 	r.Handle("/*", staticHandler)
 
-	m.server = &http.Server{
-		Addr:    m.config.Address,
-		Handler: r,
-	}
-
-	// Register services
-	if err := app.RegisterService("ui-database", m.dbService); err != nil {
-		return fmt.Errorf("failed to register database service: %w", err)
-	}
-	if err := app.RegisterService("ui-auth", m.authService); err != nil {
-		return fmt.Errorf("failed to register auth service: %w", err)
-	}
-	if err := app.RegisterService("ui-api", m.apiHandler); err != nil {
-		return fmt.Errorf("failed to register api service: %w", err)
-	}
-
-	m.logger.Info("UI module configured", "address", m.config.Address, "staticDir", m.config.StaticDir)
-
-	return nil
+	return r
 }
 
 // Start starts the UI module

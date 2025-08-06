@@ -1,3 +1,15 @@
+# Ignore all
+*
+
+# Unignore all with extensions
+!*.*
+
+# Unignore all directories
+!*/
+
+# Unignore all hidden files
+!.*
+
 # If you prefer the allow list template instead of the deny list, see community template:
 # https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
 #
@@ -32,6 +44,9 @@ node_modules/
 test-results/
 playwright-report/
 screenshots/
+debug-*.png
+test-results.json
+UI_SCREENSHOTS.html
 
 # Database files
 *.db

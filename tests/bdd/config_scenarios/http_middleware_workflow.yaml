@@ -1,0 +1,22 @@
+modules:
+  - name: http-server
+    type: http.server
+    config:
+      address: ":8082"
+  - name: auth-middleware
+    type: http.middleware.auth
+    config:
+      authType: "Bearer"
+  - name: api-router
+    type: http.router
+  - name: test-handler
+    type: http.handler
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/secure
+        handler: test-handler
+        middlewares:
+          - auth-middleware
