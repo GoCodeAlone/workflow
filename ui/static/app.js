@@ -200,7 +200,21 @@ workflows:
                 description: '',
                 config: this.sampleYaml
             };
-            new bootstrap.Modal(document.getElementById('workflowModal')).show();
+            // Try to use Bootstrap modal, fallback to manual show if Bootstrap isn't available
+            const modal = document.getElementById('workflowModal');
+            if (typeof bootstrap !== 'undefined') {
+                new bootstrap.Modal(modal).show();
+            } else {
+                // Fallback: manually show modal with CSS
+                modal.style.display = 'block';
+                modal.classList.add('show');
+                document.body.classList.add('modal-open');
+                // Create backdrop manually
+                const backdrop = document.createElement('div');
+                backdrop.className = 'modal-backdrop fade show';
+                backdrop.id = 'manual-backdrop';
+                document.body.appendChild(backdrop);
+            }
         },
         
         editWorkflow(workflow) {
@@ -210,7 +224,23 @@ workflows:
                 description: workflow.description,
                 config: workflow.config
             };
-            new bootstrap.Modal(document.getElementById('workflowModal')).show();
+            // Try to use Bootstrap modal, fallback to manual show if Bootstrap isn't available
+            const modal = document.getElementById('workflowModal');
+            if (typeof bootstrap !== 'undefined') {
+                new bootstrap.Modal(modal).show();
+            } else {
+                // Fallback: manually show modal with CSS
+                modal.style.display = 'block';
+                modal.classList.add('show');
+                document.body.classList.add('modal-open');
+                // Create backdrop manually if it doesn't exist
+                if (!document.getElementById('manual-backdrop')) {
+                    const backdrop = document.createElement('div');
+                    backdrop.className = 'modal-backdrop fade show';
+                    backdrop.id = 'manual-backdrop';
+                    document.body.appendChild(backdrop);
+                }
+            }
         },
         
         async saveWorkflow() {
@@ -229,7 +259,21 @@ workflows:
                 }
                 
                 if (response.ok) {
-                    bootstrap.Modal.getInstance(document.getElementById('workflowModal')).hide();
+                    // Close modal with fallback
+                    const modal = document.getElementById('workflowModal');
+                    if (typeof bootstrap !== 'undefined') {
+                        bootstrap.Modal.getInstance(modal).hide();
+                    } else {
+                        // Fallback: manually hide modal
+                        modal.style.display = 'none';
+                        modal.classList.remove('show');
+                        document.body.classList.remove('modal-open');
+                        // Remove manual backdrop
+                        const backdrop = document.getElementById('manual-backdrop');
+                        if (backdrop) {
+                            backdrop.remove();
+                        }
+                    }
                     await this.loadWorkflows();
                 } else {
                     const error = await response.json();
@@ -274,7 +318,23 @@ workflows:
         
         viewExecution(execution) {
             this.selectedExecution = execution;
-            new bootstrap.Modal(document.getElementById('executionModal')).show();
+            // Try to use Bootstrap modal, fallback to manual show if Bootstrap isn't available
+            const modal = document.getElementById('executionModal');
+            if (typeof bootstrap !== 'undefined') {
+                new bootstrap.Modal(modal).show();
+            } else {
+                // Fallback: manually show modal with CSS
+                modal.style.display = 'block';
+                modal.classList.add('show');
+                document.body.classList.add('modal-open');
+                // Create backdrop manually if it doesn't exist
+                if (!document.getElementById('manual-backdrop')) {
+                    const backdrop = document.createElement('div');
+                    backdrop.className = 'modal-backdrop fade show';
+                    backdrop.id = 'manual-backdrop';
+                    document.body.appendChild(backdrop);
+                }
+            }
         },
         
         getStatusClass(status) {

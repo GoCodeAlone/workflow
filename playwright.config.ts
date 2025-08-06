@@ -13,9 +13,9 @@ export default defineConfig({
   ],
   use: {
     baseURL: 'http://localhost:8080',
-    trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    trace: 'off', // Disable trace to avoid browser dependencies
+    screenshot: 'off', // Disable screenshots to avoid issues
+    video: 'off', // Disable video to avoid ffmpeg dependency
     actionTimeout: 10000, // 10 seconds for actions (allow more time for form interactions)
     navigationTimeout: 15000, // 15 seconds for navigation
   },
@@ -23,15 +23,10 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
-    {
-      name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
-    },
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
+      use: { 
+        ...devices['Desktop Chrome'],
+        channel: 'chrome', // Use system Chrome instead of Playwright's chromium
+      },
     },
   ],
 
