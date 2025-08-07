@@ -98,7 +98,14 @@ func (m *UIModule) Init(app modular.Application) error {
 	if m.dbModule != nil {
 		// Use injected database module
 		m.logger.Info("Using injected database module")
+	} else if dbService := app.SvcRegistry()["database.service"]; dbService != nil {
+		// Database service from modular database module
+		m.logger.Info("Using modular database service")
+		if sqlDB, ok := dbService.(*sql.DB); ok {
+			db = sqlDB
+		}
 	} else if dbService := app.SvcRegistry()["database"]; dbService != nil {
+		// Legacy database service
 		if sqlDB, ok := dbService.(*sql.DB); ok {
 			db = sqlDB
 		}
@@ -122,34 +129,42 @@ func (m *UIModule) Init(app modular.Application) error {
 	}
 
 	// Create authentication service - use modular auth if available
-	if m.authModule != nil {
-		m.logger.Info("Using modular auth module")
-		// TODO: Integrate with modular auth when available
+	authService := app.SvcRegistry()["auth-modular"]
+	if authService != nil {
+		m.logger.Info("Using modular auth service")
+		// Use modular auth service
+		m.authService = NewAuthService(m.config.SecretKey, m.dbService) // Fallback for now
+	} else {
+		m.logger.Info("Using custom auth service")
+		m.authService = NewAuthService(m.config.SecretKey, m.dbService)
 	}
-	m.authService = NewAuthService(m.config.SecretKey, m.dbService)
 
 	// Create API handler
 	m.apiHandler = NewAPIHandler(m.dbService, m.authService, m.logger)
 
 	// Setup HTTP server - use Chimux if available, otherwise fallback to chi
 	var r http.Handler
-	if m.chimuxModule != nil {
-		m.logger.Info("Using Chimux modular router")
-		// TODO: Integrate with Chimux when configuration is available
+	chimuxService := app.SvcRegistry()["router"] // Chimux registers as "router"
+	if chimuxService != nil {
+		m.logger.Info("Using Chimux modular router service")
+		// For now, fallback to chi until chimux integration is complete
 		r = m.setupChiRoutes()
 	} else {
+		m.logger.Info("Using Chi router")
 		r = m.setupChiRoutes()
 	}
 
 	// Use modular HTTP server if available, otherwise create our own
-	if m.httpModule != nil {
-		m.logger.Info("Using modular HTTP server")
-		// TODO: Integrate with modular HTTP server when configuration is available
+	httpServerService := app.SvcRegistry()["httpserver"] // HTTPServer module registers as "httpserver"
+	if httpServerService != nil {
+		m.logger.Info("Using modular HTTP server service")
+		// For now, fallback to standard server until httpserver integration is complete
 		m.server = &http.Server{
 			Addr:    m.config.Address,
 			Handler: r,
 		}
 	} else {
+		m.logger.Info("Using standard HTTP server")
 		m.server = &http.Server{
 			Addr:    m.config.Address,
 			Handler: r,

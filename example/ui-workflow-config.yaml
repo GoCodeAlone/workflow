@@ -5,6 +5,11 @@ modules:
       type: sqlite
       dsn: "./workflow_ui.db"
   
+  - name: chimux-modular
+    type: chimux.router
+    config:
+      logRoutes: true
+  
   - name: ui-web
     type: ui.web
     config:
@@ -25,6 +30,14 @@ modules:
     type: http.handler
     config:
       contentType: application/json
+
+# Configuration sections for modular modules
+database:
+  type: sqlite
+  dsn: "./workflow_ui.db"
+
+chimux:
+  logRoutes: true
 
 workflows:
   http:
