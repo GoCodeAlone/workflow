@@ -1,0 +1,62 @@
+modules:
+  - name: document-engine
+    type: statemachine.engine
+  - name: document-tracker
+    type: state.tracker
+  - name: review-handler
+    type: messaging.handler
+  - name: approval-handler
+    type: messaging.handler
+  - name: document-broker
+    type: messaging.broker
+
+workflows:
+  statemachine:
+    engine: document-engine
+    definitions:
+      - name: document-approval
+        initialState: "draft"
+        states:
+          draft:
+            description: "Document in draft"
+            isFinal: false
+            isError: false
+          submitted:
+            description: "Document submitted for review"
+            isFinal: false
+            isError: false
+          under_review:
+            description: "Document under review"
+            isFinal: false
+            isError: false
+          changes_requested:
+            description: "Changes requested"
+            isFinal: false
+            isError: false
+          approved:
+            description: "Document approved"
+            isFinal: true
+            isError: false
+          rejected:
+            description: "Document rejected"
+            isFinal: true
+            isError: true
+        transitions:
+          submit:
+            fromState: "draft"
+            toState: "submitted"
+          start_review:
+            fromState: "submitted"
+            toState: "under_review"
+          request_changes:
+            fromState: "under_review"
+            toState: "changes_requested"
+          approve:
+            fromState: "under_review"
+            toState: "approved"
+          reject:
+            fromState: "under_review"
+            toState: "rejected"
+          resubmit:
+            fromState: "changes_requested"
+            toState: "submitted"

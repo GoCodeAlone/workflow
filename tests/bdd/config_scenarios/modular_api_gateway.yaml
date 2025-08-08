@@ -1,0 +1,15 @@
+modules:
+  - name: gateway-server
+    type: httpserver.modular
+  - name: gateway-router
+    type: chimux.router
+  - name: gateway-auth
+    type: auth.modular
+  - name: gateway-cache
+    type: cache.modular
+  - name: gateway-client
+    type: httpclient.modular
+  - name: gateway-eventbus
+    type: eventbus.modular
+  - name: gateway-logger
+    type: eventlogger.modular

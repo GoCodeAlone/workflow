@@ -1,0 +1,89 @@
+modules:
+  - name: gateway-server
+    type: http.server
+    config:
+      address: ":8083"
+  - name: gateway-router
+    type: http.router
+  - name: auth-middleware
+    type: http.middleware.auth
+  - name: rate-limiter
+    type: http.middleware.ratelimit
+    config:
+      requestsPerMinute: 1000
+  - name: cors-middleware
+    type: http.middleware.cors
+  - name: proxy-handler
+    type: http.proxy
+  - name: gateway-broker
+    type: messaging.broker
+  - name: circuit-breaker
+    type: messaging.handler
+  - name: load-balancer
+    type: messaging.handler
+  - name: metrics-collector
+    type: messaging.handler
+  - name: health-checker
+    type: messaging.handler
+  - name: health-scheduler
+    type: scheduler
+    config:
+      cronExpression: "*/30 * * * * *"
+  - name: metrics-scheduler
+    type: scheduler
+    config:
+      cronExpression: "*/10 * * * * *"
+  - name: service-state-machine
+    type: statemachine.engine
+  - name: service-tracker
+    type: state.tracker
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/users/*
+        handler: proxy-handler
+        middlewares: [auth-middleware, rate-limiter, cors-middleware]
+      - method: POST
+        path: /api/orders/*
+        handler: proxy-handler
+        middlewares: [auth-middleware, rate-limiter]
+      - method: GET
+        path: /api/products/*
+        handler: proxy-handler
+        middlewares: [rate-limiter, cors-middleware]
+  messaging:
+    subscriptions:
+      - topic: gateway.request
+        handler: circuit-breaker
+      - topic: circuit.closed
+        handler: load-balancer
+      - topic: service.response
+        handler: metrics-collector
+    producers:
+      - name: proxy-handler
+        forwardTo: [gateway.request]
+      - name: circuit-breaker
+        forwardTo: [circuit.closed]
+      - name: load-balancer
+        forwardTo: [service.response]
+  statemachine:
+    engine: service-state-machine
+    definitions:
+      - name: service-health
+        initialState: "healthy"
+        states:
+          healthy: {description: "Service healthy", isFinal: false}
+          degraded: {description: "Service degraded", isFinal: false}
+          unhealthy: {description: "Service unhealthy", isFinal: false}
+        transitions:
+          degrade: {fromState: "healthy", toState: "degraded"}
+          fail: {fromState: "degraded", toState: "unhealthy"}
+          recover: {fromState: "degraded", toState: "healthy"}
+  scheduler:
+    jobs:
+      - scheduler: health-scheduler
+        job: health-checker
+      - scheduler: metrics-scheduler
+        job: metrics-collector

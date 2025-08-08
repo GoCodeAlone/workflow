@@ -1,0 +1,91 @@
+modules:
+  - name: dashboard-server
+    type: http.server
+    config:
+      address: ":8085"
+  - name: dashboard-router
+    type: http.router
+  - name: metrics-api
+    type: api.handler
+    config:
+      resourceName: "metrics"
+  - name: alerts-api
+    type: api.handler
+    config:
+      resourceName: "alerts"
+  - name: monitoring-broker
+    type: messaging.broker
+  - name: metrics-aggregator
+    type: messaging.handler
+  - name: alert-evaluator
+    type: messaging.handler
+  - name: dashboard-updater
+    type: messaging.handler
+  - name: alert-state-machine
+    type: statemachine.engine
+  - name: alert-tracker
+    type: state.tracker
+  - name: metrics-scheduler
+    type: scheduler
+    config:
+      cronExpression: "*/15 * * * * *"
+  - name: aggregation-job
+    type: messaging.handler
+  - name: cleanup-scheduler
+    type: scheduler
+    config:
+      cronExpression: "0 0 * * *"
+  - name: data-cleanup-job
+    type: messaging.handler
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/metrics
+        handler: metrics-api
+      - method: POST
+        path: /api/metrics
+        handler: metrics-api
+      - method: GET
+        path: /api/alerts
+        handler: alerts-api
+      - method: POST
+        path: /api/alerts
+        handler: alerts-api
+  messaging:
+    subscriptions:
+      - topic: metrics.received
+        handler: metrics-aggregator
+      - topic: metrics.aggregated
+        handler: alert-evaluator
+      - topic: alert.triggered
+        handler: dashboard-updater
+    producers:
+      - name: metrics-api
+        forwardTo: [metrics.received]
+      - name: metrics-aggregator
+        forwardTo: [metrics.aggregated]
+      - name: alert-evaluator
+        forwardTo: [alert.triggered]
+  statemachine:
+    engine: alert-state-machine
+    definitions:
+      - name: alert-lifecycle
+        initialState: "monitoring"
+        states:
+          monitoring: {description: "Monitoring state", isFinal: false}
+          warning: {description: "Warning triggered", isFinal: false}
+          critical: {description: "Critical alert", isFinal: false}
+          resolved: {description: "Alert resolved", isFinal: true}
+        transitions:
+          trigger_warning: {fromState: "monitoring", toState: "warning"}
+          escalate: {fromState: "warning", toState: "critical"}
+          resolve: {fromState: "warning", toState: "resolved"}
+          resolve_critical: {fromState: "critical", toState: "resolved"}
+  scheduler:
+    jobs:
+      - scheduler: metrics-scheduler
+        job: aggregation-job
+      - scheduler: cleanup-scheduler
+        job: data-cleanup-job

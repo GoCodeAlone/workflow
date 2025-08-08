@@ -1,0 +1,17 @@
+modules:
+  - name: data-server
+    type: httpserver.modular
+  - name: data-auth
+    type: auth.modular
+  - name: data-cache
+    type: cache.modular
+  - name: data-database
+    type: database.modular
+  - name: data-scheduler
+    type: scheduler.modular
+  - name: data-eventbus
+    type: eventbus.modular
+  - name: data-logger
+    type: eventlogger.modular
+  - name: data-schema
+    type: jsonschema.modular

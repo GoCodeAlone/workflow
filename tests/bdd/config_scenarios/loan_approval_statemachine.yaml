@@ -1,0 +1,65 @@
+modules:
+  - name: loan-engine
+    type: statemachine.engine
+  - name: loan-tracker
+    type: state.tracker
+  - name: credit-check-handler
+    type: messaging.handler
+  - name: underwriting-handler
+    type: messaging.handler
+  - name: approval-handler
+    type: messaging.handler
+  - name: loan-broker
+    type: messaging.broker
+
+workflows:
+  statemachine:
+    engine: loan-engine
+    definitions:
+      - name: loan-approval
+        initialState: "application_submitted"
+        states:
+          application_submitted:
+            description: "Loan application submitted"
+            isFinal: false
+            isError: false
+          document_review:
+            description: "Documents under review"
+            isFinal: false
+            isError: false
+          credit_check:
+            description: "Credit check in progress"
+            isFinal: false
+            isError: false
+          underwriting:
+            description: "Underwriting review"
+            isFinal: false
+            isError: false
+          approved:
+            description: "Loan approved"
+            isFinal: true
+            isError: false
+          rejected:
+            description: "Loan rejected"
+            isFinal: true
+            isError: true
+          cancelled:
+            description: "Application cancelled"
+            isFinal: true
+            isError: false
+        transitions:
+          start_review:
+            fromState: "application_submitted"
+            toState: "document_review"
+          start_credit_check:
+            fromState: "document_review"
+            toState: "credit_check"
+          start_underwriting:
+            fromState: "credit_check"
+            toState: "underwriting"
+          approve_loan:
+            fromState: "underwriting"
+            toState: "approved"
+          reject_loan:
+            fromState: "underwriting"
+            toState: "rejected"

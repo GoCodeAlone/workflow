@@ -1,0 +1,90 @@
+modules:
+  - name: ecommerce-server
+    type: http.server
+    config:
+      address: ":8081"
+  - name: ecommerce-router
+    type: http.router
+  - name: auth-middleware
+    type: http.middleware.auth
+  - name: orders-api
+    type: api.handler
+    config:
+      resourceName: "orders"
+  - name: order-broker
+    type: messaging.broker
+  - name: payment-processor
+    type: messaging.handler
+  - name: inventory-checker
+    type: messaging.handler
+  - name: fulfillment-handler
+    type: messaging.handler
+  - name: notification-handler
+    type: messaging.handler
+  - name: order-state-machine
+    type: statemachine.engine
+  - name: order-tracker
+    type: state.tracker
+  - name: order-connector
+    type: state.connector
+  - name: daily-reports
+    type: scheduler
+    config:
+      cronExpression: "0 6 * * *"
+  - name: report-generator
+    type: messaging.handler
+
+workflows:
+  http:
+    routes:
+      - method: POST
+        path: /api/orders
+        handler: orders-api
+        middlewares: [auth-middleware]
+      - method: GET
+        path: /api/orders
+        handler: orders-api
+        middlewares: [auth-middleware]
+      - method: GET
+        path: /api/orders/{id}
+        handler: orders-api
+        middlewares: [auth-middleware]
+  messaging:
+    subscriptions:
+      - topic: order.created
+        handler: inventory-checker
+      - topic: inventory.checked
+        handler: payment-processor
+      - topic: payment.processed
+        handler: fulfillment-handler
+      - topic: order.shipped
+        handler: notification-handler
+    producers:
+      - name: orders-api
+        forwardTo: [order.created]
+      - name: inventory-checker
+        forwardTo: [inventory.checked]
+      - name: payment-processor
+        forwardTo: [payment.processed]
+      - name: fulfillment-handler
+        forwardTo: [order.shipped]
+  statemachine:
+    engine: order-state-machine
+    definitions:
+      - name: order-lifecycle
+        initialState: "created"
+        states:
+          created: {description: "Order created", isFinal: false}
+          inventory_checked: {description: "Inventory verified", isFinal: false}
+          payment_processed: {description: "Payment completed", isFinal: false}
+          shipped: {description: "Order shipped", isFinal: false}
+          delivered: {description: "Order delivered", isFinal: true}
+        transitions:
+          check_inventory: {fromState: "created", toState: "inventory_checked"}
+          process_payment: {fromState: "inventory_checked", toState: "payment_processed"}
+          ship_order: {fromState: "payment_processed", toState: "shipped"}
+          deliver_order: {fromState: "shipped", toState: "delivered"}
+  scheduler:
+    jobs:
+      - scheduler: daily-reports
+        job: report-generator

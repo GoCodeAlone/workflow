@@ -1,0 +1,57 @@
+modules:
+  - name: api-server
+    type: http.server
+    config:
+      address: ":8080"
+  - name: api-router
+    type: http.router
+  - name: data-ingestion-api
+    type: api.handler
+    config:
+      resourceName: "data"
+  - name: pipeline-broker
+    type: messaging.broker
+  - name: data-validator
+    type: messaging.handler
+  - name: data-transformer
+    type: messaging.handler
+  - name: data-enricher
+    type: messaging.handler
+  - name: data-loader
+    type: messaging.handler
+  - name: batch-scheduler
+    type: scheduler
+    config:
+      cronExpression: "0 */6 * * *"
+  - name: batch-processor
+    type: messaging.handler
+
+workflows:
+  http:
+    routes:
+      - method: POST
+        path: /api/data/ingest
+        handler: data-ingestion-api
+  messaging:
+    subscriptions:
+      - topic: raw-data
+        handler: data-validator
+      - topic: validated-data
+        handler: data-transformer
+      - topic: transformed-data
+        handler: data-enricher
+      - topic: enriched-data
+        handler: data-loader
+    producers:
+      - name: data-ingestion-api
+        forwardTo: [raw-data]
+      - name: data-validator
+        forwardTo: [validated-data]
+      - name: data-transformer
+        forwardTo: [transformed-data]
+      - name: data-enricher
+        forwardTo: [enriched-data]
+  scheduler:
+    jobs:
+      - scheduler: batch-scheduler
+        job: batch-processor

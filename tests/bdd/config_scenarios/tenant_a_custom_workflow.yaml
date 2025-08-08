@@ -1,0 +1,28 @@
+modules:
+  - name: tenant-a-server
+    type: http.server
+    config:
+      address: ":8080"
+  - name: tenant-a-auth
+    type: http.middleware.auth
+    config:
+      authType: "Bearer"
+  - name: tenant-a-broker
+    type: messaging.broker
+  - name: tenant-a-scheduler
+    type: scheduler
+    config:
+      cronExpression: "0 6 * * *"
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /tenant-a/secure
+        handler: tenant-a-handler
+        middlewares:
+          - tenant-a-auth
+  scheduler:
+    jobs:
+      - scheduler: tenant-a-scheduler
+        job: tenant-a-daily-job

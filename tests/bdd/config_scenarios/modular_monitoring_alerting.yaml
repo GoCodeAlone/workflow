@@ -1,0 +1,19 @@
+modules:
+  - name: monitoring-server
+    type: httpserver.modular
+  - name: monitoring-auth
+    type: auth.modular
+  - name: metrics-cache
+    type: cache.modular
+  - name: metrics-database
+    type: database.modular
+  - name: alert-scheduler
+    type: scheduler.modular
+  - name: metrics-eventbus
+    type: eventbus.modular
+  - name: system-logger
+    type: eventlogger.modular
+  - name: external-client
+    type: httpclient.modular
+  - name: alert-schema
+    type: jsonschema.modular

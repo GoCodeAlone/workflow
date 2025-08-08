@@ -1,0 +1,52 @@
+modules:
+  - name: analytics-server
+    type: http.server
+    config:
+      address: ":8081"
+  - name: analytics-router
+    type: http.router
+  - name: cors-middleware
+    type: http.middleware.cors
+  - name: analytics-api
+    type: api.handler
+    config:
+      resourceName: "analytics"
+  - name: data-broker
+    type: messaging.broker
+  - name: data-collector
+    type: messaging.handler
+  - name: data-processor
+    type: messaging.handler
+  - name: data-aggregator
+    type: messaging.handler
+  - name: hourly-processor
+    type: scheduler
+    config:
+      cronExpression: "0 * * * *"
+  - name: processing-job
+    type: messaging.handler
+
+workflows:
+  http:
+    routes:
+      - method: POST
+        path: /api/data
+        handler: analytics-api
+        middlewares: [cors-middleware]
+  messaging:
+    subscriptions:
+      - topic: raw-data
+        handler: data-collector
+      - topic: collected-data
+        handler: data-processor
+      - topic: processed-data
+        handler: data-aggregator
+    producers:
+      - name: data-collector
+        forwardTo: [collected-data]
+      - name: data-processor
+        forwardTo: [processed-data]
+  scheduler:
+    jobs:
+      - scheduler: hourly-processor
+        job: processing-job

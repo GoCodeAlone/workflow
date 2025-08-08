@@ -1,0 +1,16 @@
+modules:
+  - name: http-server
+    type: http.server
+    config:
+      address: ":8086"
+  - name: reverse-proxy
+    type: http.proxy
+  - name: api-router
+    type: http.router
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /proxy/*
+        handler: reverse-proxy

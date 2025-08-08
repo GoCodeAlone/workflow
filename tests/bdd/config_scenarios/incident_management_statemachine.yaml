@@ -1,0 +1,68 @@
+modules:
+  - name: incident-engine
+    type: statemachine.engine
+  - name: incident-tracker
+    type: state.tracker
+  - name: triage-handler
+    type: messaging.handler
+  - name: assignment-handler
+    type: messaging.handler
+  - name: resolution-handler
+    type: messaging.handler
+  - name: incident-broker
+    type: messaging.broker
+
+workflows:
+  statemachine:
+    engine: incident-engine
+    definitions:
+      - name: incident-management
+        initialState: "reported"
+        states:
+          reported:
+            description: "Incident reported"
+            isFinal: false
+            isError: false
+          triaged:
+            description: "Incident triaged"
+            isFinal: false
+            isError: false
+          assigned:
+            description: "Incident assigned to team"
+            isFinal: false
+            isError: false
+          in_progress:
+            description: "Work in progress"
+            isFinal: false
+            isError: false
+          resolved:
+            description: "Incident resolved"
+            isFinal: false
+            isError: false
+          closed:
+            description: "Incident closed"
+            isFinal: true
+            isError: false
+          escalated:
+            description: "Incident escalated"
+            isFinal: false
+            isError: false
+        transitions:
+          triage:
+            fromState: "reported"
+            toState: "triaged"
+          assign:
+            fromState: "triaged"
+            toState: "assigned"
+          start_work:
+            fromState: "assigned"
+            toState: "in_progress"
+          resolve:
+            fromState: "in_progress"
+            toState: "resolved"
+          close:
+            fromState: "resolved"
+            toState: "closed"
+          escalate:
+            fromState: "assigned"
+            toState: "escalated"

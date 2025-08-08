@@ -1,0 +1,40 @@
+modules:
+  - name: http-server
+    type: http.server
+    config:
+      address: ":8085"
+  - name: api-router
+    type: http.router
+  - name: users-api
+    type: api.handler
+    config:
+      resourceName: "users"
+  - name: products-api
+    type: api.handler
+    config:
+      resourceName: "products"
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/users
+        handler: users-api
+      - method: POST
+        path: /api/users
+        handler: users-api
+      - method: GET
+        path: /api/users/{id}
+        handler: users-api
+      - method: PUT
+        path: /api/users/{id}
+        handler: users-api
+      - method: DELETE
+        path: /api/users/{id}
+        handler: users-api
+      - method: GET
+        path: /api/products
+        handler: products-api
+      - method: POST
+        path: /api/products
+        handler: products-api

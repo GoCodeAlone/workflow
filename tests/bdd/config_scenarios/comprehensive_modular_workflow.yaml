@@ -1,0 +1,15 @@
+modules:
+  - name: http-server-modular
+    type: httpserver.modular
+  - name: auth-modular
+    type: auth.modular
+  - name: cache-modular
+    type: cache.modular
+  - name: eventbus-modular
+    type: eventbus.modular
+  - name: scheduler-modular
+    type: scheduler.modular
+  - name: database-modular
+    type: database.modular
+  - name: httpclient-modular
+    type: httpclient.modular

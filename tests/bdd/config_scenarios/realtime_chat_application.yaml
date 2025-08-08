@@ -1,0 +1,97 @@
+modules:
+  - name: chat-server
+    type: http.server
+    config:
+      address: ":8084"
+  - name: chat-router
+    type: http.router
+  - name: auth-middleware
+    type: http.middleware.auth
+  - name: users-api
+    type: api.handler
+    config:
+      resourceName: "users"
+  - name: messages-api
+    type: api.handler
+    config:
+      resourceName: "messages"
+  - name: chat-broker
+    type: messaging.broker
+  - name: message-processor
+    type: messaging.handler
+  - name: notification-handler
+    type: messaging.handler
+  - name: moderation-handler
+    type: messaging.handler
+  - name: user-state-machine
+    type: statemachine.engine
+  - name: user-tracker
+    type: state.tracker
+  - name: cleanup-scheduler
+    type: scheduler
+    config:
+      cronExpression: "0 2 * * *"
+  - name: cleanup-job
+    type: messaging.handler
+  - name: analytics-scheduler
+    type: scheduler
+    config:
+      cronExpression: "0 * * * *"
+  - name: analytics-job
+    type: messaging.handler
+
+workflows:
+  http:
+    routes:
+      - method: POST
+        path: /api/users/register
+        handler: users-api
+      - method: POST
+        path: /api/users/login
+        handler: users-api
+      - method: POST
+        path: /api/messages
+        handler: messages-api
+        middlewares: [auth-middleware]
+      - method: GET
+        path: /api/messages
+        handler: messages-api
+        middlewares: [auth-middleware]
+  messaging:
+    subscriptions:
+      - topic: user.registered
+        handler: notification-handler
+      - topic: message.sent
+        handler: message-processor
+      - topic: message.processed
+        handler: moderation-handler
+      - topic: message.approved
+        handler: notification-handler
+    producers:
+      - name: users-api
+        forwardTo: [user.registered]
+      - name: messages-api
+        forwardTo: [message.sent]
+      - name: message-processor
+        forwardTo: [message.processed]
+      - name: moderation-handler
+        forwardTo: [message.approved]
+  statemachine:
+    engine: user-state-machine
+    definitions:
+      - name: user-status
+        initialState: "active"
+        states:
+          active: {description: "User active", isFinal: false}
+          inactive: {description: "User inactive", isFinal: false}
+          banned: {description: "User banned", isFinal: false}
+        transitions:
+          deactivate: {fromState: "active", toState: "inactive"}
+          ban: {fromState: "active", toState: "banned"}
+          reactivate: {fromState: "inactive", toState: "active"}
+  scheduler:
+    jobs:
+      - scheduler: cleanup-scheduler
+        job: cleanup-job
+      - scheduler: analytics-scheduler
+        job: analytics-job

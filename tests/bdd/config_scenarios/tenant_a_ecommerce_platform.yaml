@@ -1,0 +1,64 @@
+modules:
+  - name: web-server
+    type: http.server
+    config:
+      address: ":8080"
+  - name: api-router
+    type: http.router
+  - name: auth-middleware
+    type: http.middleware.auth
+  - name: rate-limiter
+    type: http.middleware.ratelimit
+    config:
+      requestsPerMinute: 1000
+  - name: users-api
+    type: api.handler
+    config:
+      resourceName: "users"
+  - name: orders-api
+    type: api.handler
+    config:
+      resourceName: "orders"
+  - name: event-broker
+    type: messaging.broker
+  - name: order-processor
+    type: messaging.handler
+  - name: notification-service
+    type: messaging.handler
+  - name: daily-reports
+    type: scheduler
+    config:
+      cronExpression: "0 6 * * *"
+  - name: report-generator
+    type: messaging.handler
+  - name: order-state-machine
+    type: statemachine.engine
+  - name: order-tracker
+    type: state.tracker
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/users
+        handler: users-api
+        middlewares: [auth-middleware, rate-limiter]
+      - method: POST
+        path: /api/orders
+        handler: orders-api
+        middlewares: [auth-middleware]
+  messaging:
+    subscriptions:
+      - topic: order.created
+        handler: order-processor
+      - topic: order.processed
+        handler: notification-service
+  scheduler:
+    jobs:
+      - scheduler: daily-reports
+        job: report-generator
+  statemachine:
+    engine: order-state-machine
+    definitions:
+      - name: order-lifecycle
+        initialState: "created"

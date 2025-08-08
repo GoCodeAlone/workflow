@@ -1,0 +1,19 @@
+modules:
+  - name: messaging-server
+    type: httpserver.modular
+  - name: messaging-router
+    type: chimux.router
+  - name: messaging-auth
+    type: auth.modular
+  - name: messaging-cache
+    type: cache.modular
+  - name: messaging-database
+    type: database.modular
+  - name: messaging-eventbus
+    type: eventbus.modular
+  - name: messaging-logger
+    type: eventlogger.modular
+  - name: messaging-client
+    type: httpclient.modular
+  - name: message-scheduler
+    type: scheduler.modular

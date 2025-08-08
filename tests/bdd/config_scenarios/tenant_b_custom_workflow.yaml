@@ -1,0 +1,27 @@
+modules:
+  - name: tenant-b-server
+    type: http.server
+    config:
+      address: ":8081"
+  - name: tenant-b-cors
+    type: http.middleware.cors
+    config:
+      allowedOrigins: ["https://tenant-b.example.com"]
+  - name: tenant-b-engine
+    type: statemachine.engine
+  - name: tenant-b-tracker
+    type: state.tracker
+
+workflows:
+  http:
+    routes:
+      - method: POST
+        path: /tenant-b/api
+        handler: tenant-b-handler
+        middlewares:
+          - tenant-b-cors
+  statemachine:
+    engine: tenant-b-engine
+    definitions:
+      - name: tenant-b-process
+        initialState: "started"

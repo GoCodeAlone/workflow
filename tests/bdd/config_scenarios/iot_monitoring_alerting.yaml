@@ -1,0 +1,91 @@
+modules:
+  - name: iot-server
+    type: http.server
+    config:
+      address: ":8082"
+  - name: iot-router
+    type: http.router
+  - name: device-api
+    type: api.handler
+    config:
+      resourceName: "devices"
+  - name: metrics-api
+    type: http.handler
+    config:
+      contentType: "application/json"
+  - name: iot-broker
+    type: messaging.broker
+  - name: metrics-processor
+    type: messaging.handler
+  - name: anomaly-detector
+    type: messaging.handler
+  - name: alert-generator
+    type: messaging.handler
+  - name: notification-sender
+    type: messaging.handler
+  - name: device-state-machine
+    type: statemachine.engine
+  - name: device-tracker
+    type: state.tracker
+  - name: metrics-scheduler
+    type: scheduler
+    config:
+      cronExpression: "*/5 * * * *"
+  - name: metrics-aggregator
+    type: messaging.handler
+  - name: alert-scheduler
+    type: scheduler
+    config:
+      cronExpression: "* * * * *"
+  - name: alert-checker
+    type: messaging.handler
+
+workflows:
+  http:
+    routes:
+      - method: POST
+        path: /api/devices/{id}/metrics
+        handler: metrics-api
+      - method: GET
+        path: /api/devices
+        handler: device-api
+  messaging:
+    subscriptions:
+      - topic: device.metrics
+        handler: metrics-processor
+      - topic: processed.metrics
+        handler: anomaly-detector
+      - topic: anomaly.detected
+        handler: alert-generator
+      - topic: alert.generated
+        handler: notification-sender
+    producers:
+      - name: metrics-api
+        forwardTo: [device.metrics]
+      - name: metrics-processor
+        forwardTo: [processed.metrics]
+      - name: anomaly-detector
+        forwardTo: [anomaly.detected]
+      - name: alert-generator
+        forwardTo: [alert.generated]
+  statemachine:
+    engine: device-state-machine
+    definitions:
+      - name: device-status
+        initialState: "online"
+        states:
+          online: {description: "Device online", isFinal: false}
+          warning: {description: "Device warning", isFinal: false}
+          critical: {description: "Device critical", isFinal: false}
+          offline: {description: "Device offline", isFinal: false}
+        transitions:
+          to_warning: {fromState: "online", toState: "warning"}
+          to_critical: {fromState: "warning", toState: "critical"}
+          to_offline: {fromState: "critical", toState: "offline"}
+          to_online: {fromState: "warning", toState: "online"}
+  scheduler:
+    jobs:
+      - scheduler: metrics-scheduler
+        job: metrics-aggregator
+      - scheduler: alert-scheduler
+        job: alert-checker

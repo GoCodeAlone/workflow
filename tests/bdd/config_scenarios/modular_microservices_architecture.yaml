@@ -1,0 +1,25 @@
+modules:
+  - name: user-service-server
+    type: httpserver.modular
+  - name: user-service-auth
+    type: auth.modular
+  - name: user-service-db
+    type: database.modular
+  - name: order-service-server
+    type: httpserver.modular
+  - name: order-service-auth
+    type: auth.modular
+  - name: order-service-db
+    type: database.modular
+  - name: notification-service-server
+    type: httpserver.modular
+  - name: notification-scheduler
+    type: scheduler.modular
+  - name: shared-eventbus
+    type: eventbus.modular
+  - name: shared-cache
+    type: cache.modular
+  - name: api-gateway
+    type: chimux.router
+  - name: central-logger
+    type: eventlogger.modular

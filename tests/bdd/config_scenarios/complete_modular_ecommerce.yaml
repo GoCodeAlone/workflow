@@ -1,0 +1,31 @@
+modules:
+  - name: web-server
+    type: httpserver.modular
+  - name: api-router
+    type: chimux.router
+  - name: customer-auth
+    type: auth.modular
+  - name: session-cache
+    type: cache.modular
+  - name: product-database
+    type: database.modular
+  - name: order-scheduler
+    type: scheduler.modular
+  - name: event-bus
+    type: eventbus.modular
+  - name: audit-logger
+    type: eventlogger.modular
+  - name: payment-client
+    type: httpclient.modular
+  - name: order-schema
+    type: jsonschema.modular
+  - name: inventory-server
+    type: httpserver.modular
+  - name: inventory-auth
+    type: auth.modular
+  - name: inventory-cache
+    type: cache.modular
+  - name: inventory-database
+    type: database.modular
+  - name: notification-scheduler
+    type: scheduler.modular
