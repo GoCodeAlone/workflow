@@ -1,0 +1,67 @@
+modules:
+  - name: order-engine
+    type: statemachine.engine
+  - name: order-tracker
+    type: state.tracker
+  - name: order-connector
+    type: state.connector
+  - name: payment-handler
+    type: messaging.handler
+  - name: fulfillment-handler
+    type: messaging.handler
+  - name: notification-handler
+    type: messaging.handler
+  - name: order-broker
+    type: messaging.broker
+
+workflows:
+  statemachine:
+    engine: order-engine
+    definitions:
+      - name: order-workflow
+        initialState: "created"
+        states:
+          created:
+            description: "Order created"
+            isFinal: false
+            isError: false
+          payment_pending:
+            description: "Awaiting payment"
+            isFinal: false
+            isError: false
+          paid:
+            description: "Payment received"
+            isFinal: false
+            isError: false
+          shipped:
+            description: "Order shipped"
+            isFinal: false
+            isError: false
+          delivered:
+            description: "Order delivered"
+            isFinal: true
+            isError: false
+          cancelled:
+            description: "Order cancelled"
+            isFinal: true
+            isError: false
+          failed:
+            description: "Order failed"
+            isFinal: true
+            isError: true
+        transitions:
+          process_payment:
+            fromState: "created"
+            toState: "payment_pending"
+          payment_success:
+            fromState: "payment_pending"
+            toState: "paid"
+          ship_order:
+            fromState: "paid"
+            toState: "shipped"
+          deliver_order:
+            fromState: "shipped"
+            toState: "delivered"
+          cancel_order:
+            fromState: "created"
+            toState: "cancelled"

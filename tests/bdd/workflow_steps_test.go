@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
+	"path/filepath"
 
 	"github.com/cucumber/godog"
 	"github.com/google/uuid"
@@ -23,6 +25,14 @@ func (ctx *BDDTestContext) iCreateAWorkflowWith(table *godog.Table) error {
 			workflow.Description = row.Cells[1].Value
 		case "config":
 			workflow.Config = row.Cells[1].Value
+		case "config_file":
+			// Load config from file
+			configPath := filepath.Join("config_scenarios", row.Cells[1].Value)
+			configBytes, err := ioutil.ReadFile(configPath)
+			if err != nil {
+				return fmt.Errorf("failed to read config file %s: %v", configPath, err)
+			}
+			workflow.Config = string(configBytes)
 		}
 	}
 

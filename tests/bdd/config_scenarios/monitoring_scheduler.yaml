@@ -1,0 +1,31 @@
+modules:
+  - name: health-check-scheduler
+    type: scheduler
+    config:
+      cronExpression: "*/5 * * * *"
+  - name: metrics-scheduler
+    type: scheduler
+    config:
+      cronExpression: "* * * * *"
+  - name: alert-scheduler
+    type: scheduler
+    config:
+      cronExpression: "*/10 * * * *"
+  - name: health-check-job
+    type: messaging.handler
+  - name: metrics-collection-job
+    type: messaging.handler
+  - name: alert-check-job
+    type: messaging.handler
+  - name: monitoring-broker
+    type: messaging.broker
+
+workflows:
+  scheduler:
+    jobs:
+      - scheduler: health-check-scheduler
+        job: health-check-job
+      - scheduler: metrics-scheduler
+        job: metrics-collection-job
+      - scheduler: alert-scheduler
+        job: alert-check-job

@@ -1,0 +1,48 @@
+modules:
+  - name: onboarding-engine
+    type: statemachine.engine
+  - name: state-tracker
+    type: state.tracker
+  - name: state-connector
+    type: state.connector
+
+workflows:
+  statemachine:
+    engine: onboarding-engine
+    definitions:
+      - name: user-onboarding
+        initialState: "registered"
+        states:
+          registered:
+            description: "User has registered"
+            isFinal: false
+            isError: false
+          email_verified:
+            description: "Email verification completed"
+            isFinal: false
+            isError: false
+          profile_completed:
+            description: "User profile completed"
+            isFinal: false
+            isError: false
+          approved:
+            description: "User account approved"
+            isFinal: true
+            isError: false
+          rejected:
+            description: "User account rejected"
+            isFinal: true
+            isError: true
+        transitions:
+          verify_email:
+            fromState: "registered"
+            toState: "email_verified"
+          complete_profile:
+            fromState: "email_verified"
+            toState: "profile_completed"
+          approve_account:
+            fromState: "profile_completed"
+            toState: "approved"
+          reject_account:
+            fromState: "profile_completed"
+            toState: "rejected"

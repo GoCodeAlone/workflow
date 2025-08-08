@@ -1,0 +1,31 @@
+modules:
+  - name: daily-scheduler
+    type: scheduler
+    config:
+      cronExpression: "0 0 * * *"
+  - name: hourly-scheduler
+    type: scheduler
+    config:
+      cronExpression: "0 * * * *"
+  - name: minute-scheduler
+    type: scheduler
+    config:
+      cronExpression: "* * * * *"
+  - name: backup-job
+    type: messaging.handler
+  - name: cleanup-job
+    type: messaging.handler
+  - name: health-check-job
+    type: messaging.handler
+  - name: message-broker
+    type: messaging.broker
+
+workflows:
+  scheduler:
+    jobs:
+      - scheduler: daily-scheduler
+        job: backup-job
+      - scheduler: hourly-scheduler
+        job: cleanup-job
+      - scheduler: minute-scheduler
+        job: health-check-job

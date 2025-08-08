@@ -1,0 +1,31 @@
+modules:
+  - name: daily-reports
+    type: scheduler
+    config:
+      cronExpression: "0 6 * * *"
+  - name: weekly-reports
+    type: scheduler
+    config:
+      cronExpression: "0 6 * * 1"
+  - name: monthly-reports
+    type: scheduler
+    config:
+      cronExpression: "0 6 1 * *"
+  - name: daily-report-job
+    type: messaging.handler
+  - name: weekly-report-job
+    type: messaging.handler
+  - name: monthly-report-job
+    type: messaging.handler
+  - name: report-broker
+    type: messaging.broker
+
+workflows:
+  scheduler:
+    jobs:
+      - scheduler: daily-reports
+        job: daily-report-job
+      - scheduler: weekly-reports
+        job: weekly-report-job
+      - scheduler: monthly-reports
+        job: monthly-report-job

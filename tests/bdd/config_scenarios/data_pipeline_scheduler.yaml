@@ -1,0 +1,32 @@
+modules:
+  - name: pipeline-scheduler
+    type: scheduler
+    config:
+      cronExpression: "0 2 * * *"
+  - name: data-extractor
+    type: messaging.handler
+  - name: data-transformer
+    type: messaging.handler
+  - name: data-loader
+    type: messaging.handler
+  - name: pipeline-broker
+    type: messaging.broker
+
+workflows:
+  scheduler:
+    jobs:
+      - scheduler: pipeline-scheduler
+        job: data-extractor
+  messaging:
+    subscriptions:
+      - topic: extracted-data
+        handler: data-transformer
+      - topic: transformed-data
+        handler: data-loader
+    producers:
+      - name: data-extractor
+        forwardTo:
+          - extracted-data
+      - name: data-transformer
+        forwardTo:
+          - transformed-data

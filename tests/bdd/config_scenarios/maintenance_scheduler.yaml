@@ -1,0 +1,31 @@
+modules:
+  - name: log-cleanup-scheduler
+    type: scheduler
+    config:
+      cronExpression: "0 1 * * 0"
+  - name: cache-cleanup-scheduler
+    type: scheduler
+    config:
+      cronExpression: "0 2 * * *"
+  - name: db-maintenance-scheduler
+    type: scheduler
+    config:
+      cronExpression: "0 3 * * 0"
+  - name: log-cleanup-job
+    type: messaging.handler
+  - name: cache-cleanup-job
+    type: messaging.handler
+  - name: db-maintenance-job
+    type: messaging.handler
+  - name: maintenance-broker
+    type: messaging.broker
+
+workflows:
+  scheduler:
+    jobs:
+      - scheduler: log-cleanup-scheduler
+        job: log-cleanup-job
+      - scheduler: cache-cleanup-scheduler
+        job: cache-cleanup-job
+      - scheduler: db-maintenance-scheduler
+        job: db-maintenance-job

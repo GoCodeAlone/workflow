@@ -1,0 +1,29 @@
+modules:
+  - name: message-broker
+    type: messaging.broker
+  - name: message-router
+    type: messaging.handler
+  - name: priority-handler
+    type: messaging.handler
+  - name: standard-handler
+    type: messaging.handler
+  - name: error-handler
+    type: messaging.handler
+
+workflows:
+  messaging:
+    subscriptions:
+      - topic: incoming-messages
+        handler: message-router
+      - topic: priority-messages
+        handler: priority-handler
+      - topic: standard-messages
+        handler: standard-handler
+      - topic: error-messages
+        handler: error-handler
+    producers:
+      - name: message-router
+        forwardTo:
+          - priority-messages
+          - standard-messages
+          - error-messages

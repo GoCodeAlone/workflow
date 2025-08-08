@@ -11,7 +11,7 @@ Feature: Workflow Management
     When I create a workflow with:
       | name        | Test Workflow           |
       | description | A simple test workflow  |
-      | config      | modules:\n  - name: test\n    type: http.server |
+      | config_file | basic_workflow.yaml     |
     Then the workflow should be created successfully
     And I should be able to retrieve the workflow
 

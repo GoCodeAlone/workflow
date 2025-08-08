@@ -1,0 +1,42 @@
+modules:
+  - name: event-bus
+    type: messaging.broker
+  - name: user-service
+    type: messaging.handler
+  - name: order-service
+    type: messaging.handler
+  - name: payment-service
+    type: messaging.handler
+  - name: notification-service
+    type: messaging.handler
+  - name: audit-service
+    type: messaging.handler
+
+workflows:
+  messaging:
+    subscriptions:
+      - topic: user.created
+        handler: notification-service
+      - topic: user.updated
+        handler: audit-service
+      - topic: order.placed
+        handler: payment-service
+      - topic: order.placed
+        handler: notification-service
+      - topic: payment.processed
+        handler: order-service
+      - topic: payment.failed
+        handler: notification-service
+    producers:
+      - name: user-service
+        forwardTo:
+          - user.created
+          - user.updated
+      - name: order-service
+        forwardTo:
+          - order.placed
+          - order.updated
+      - name: payment-service
+        forwardTo:
+          - payment.processed
+          - payment.failed

@@ -1,0 +1,27 @@
+modules:
+  - name: main-broker
+    type: messaging.broker
+  - name: primary-processor
+    type: messaging.handler
+  - name: retry-processor
+    type: messaging.handler
+  - name: dlq-processor
+    type: messaging.handler
+
+workflows:
+  messaging:
+    subscriptions:
+      - topic: main-queue
+        handler: primary-processor
+      - topic: retry-queue
+        handler: retry-processor
+      - topic: dead-letter-queue
+        handler: dlq-processor
+    producers:
+      - name: primary-processor
+        forwardTo:
+          - retry-queue
+          - dead-letter-queue
+      - name: retry-processor
+        forwardTo:
+          - dead-letter-queue

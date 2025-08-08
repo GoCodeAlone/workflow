@@ -1,0 +1,33 @@
+modules:
+  - name: event-broker
+    type: messaging.broker
+  - name: input-processor
+    type: messaging.handler
+  - name: validation-processor
+    type: messaging.handler
+  - name: transformation-processor
+    type: messaging.handler
+  - name: output-processor
+    type: messaging.handler
+
+workflows:
+  messaging:
+    subscriptions:
+      - topic: raw-events
+        handler: input-processor
+      - topic: validated-events
+        handler: validation-processor
+      - topic: transformed-events
+        handler: transformation-processor
+      - topic: processed-events
+        handler: output-processor
+    producers:
+      - name: input-processor
+        forwardTo:
+          - validated-events
+      - name: validation-processor
+        forwardTo:
+          - transformed-events
+      - name: transformation-processor
+        forwardTo:
+          - processed-events

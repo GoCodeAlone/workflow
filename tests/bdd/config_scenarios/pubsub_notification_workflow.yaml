@@ -1,0 +1,35 @@
+modules:
+  - name: notification-broker
+    type: messaging.broker
+  - name: email-publisher
+    type: messaging.handler
+  - name: sms-publisher
+    type: messaging.handler
+  - name: push-publisher
+    type: messaging.handler
+  - name: email-subscriber
+    type: messaging.handler
+  - name: sms-subscriber
+    type: messaging.handler
+  - name: push-subscriber
+    type: messaging.handler
+
+workflows:
+  messaging:
+    subscriptions:
+      - topic: email-notifications
+        handler: email-subscriber
+      - topic: sms-notifications
+        handler: sms-subscriber
+      - topic: push-notifications
+        handler: push-subscriber
+    producers:
+      - name: email-publisher
+        forwardTo:
+          - email-notifications
+      - name: sms-publisher
+        forwardTo:
+          - sms-notifications
+      - name: push-publisher
+        forwardTo:
+          - push-notifications
