@@ -15,17 +15,15 @@ import (
 
 // UIModule provides web UI functionality for the workflow engine
 type UIModule struct {
-	name         string
-	config       UIConfig
-	server       *http.Server
-	dbService    *DatabaseService
-	authService  *AuthService
-	apiHandler   *APIHandler
-	logger       modular.Logger
-	dbModule     modular.Module
-	authModule   modular.Module
-	chimuxModule modular.Module
-	httpModule   modular.Module
+	name        string
+	config      UIConfig
+	server      *http.Server
+	dbService   *DatabaseService
+	authService *AuthService
+	apiHandler  *APIHandler
+	logger      modular.Logger
+	dbModule    modular.Module
+	authModule  modular.Module
 }
 
 // UIConfig represents the configuration for the UI module
