@@ -5,12 +5,23 @@ modules:
       address: ":8086"
   - name: data-auth
     type: auth.modular
+    config:
+      enableJWT: true
+      enableApiKey: false
   - name: data-cache
     type: cache.modular
+    config:
+      defaultTTL: "2h"
+      cleanupInterval: "15m"
   - name: data-database
     type: database.modular
+    config:
+      driver: sqlite
+      dsn: ":memory:"
   - name: data-scheduler
     type: scheduler.modular
+    config:
+      timezone: "UTC"
   - name: data-eventbus
     type: eventbus.modular
   - name: data-logger
@@ -64,3 +75,25 @@ workflows:
       - scheduler: data-scheduler
         job: batch-processor
         schedule: "0 */2 * * *"
+# Configuration sections for modular modules
+auth:
+  JWT:
+    Secret: "test-jwt-secret-key"
+    Expiration: "24h"
+
+cache:
+  defaultTTL: "1h"
+  cleanupInterval: "10m"
+  maxItems: 10000
+
+database:
+  driver: sqlite
+  dsn: ":memory:"
+
+scheduler:
+  timezone: "UTC"
+  maxConcurrentJobs: 10
+
+httpserver:
+  address: ":8080"
+  enableGracefulShutdown: true

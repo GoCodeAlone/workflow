@@ -88,3 +88,25 @@ workflows:
       - scheduler: notification-scheduler
         job: notification-digest
         schedule: "0 9 * * *"
+# Configuration sections for modular modules
+auth:
+  JWT:
+    Secret: "test-jwt-secret-key"
+    Expiration: "24h"
+
+cache:
+  defaultTTL: "1h"
+  cleanupInterval: "10m"
+  maxItems: 10000
+
+database:
+  driver: sqlite
+  dsn: ":memory:"
+
+scheduler:
+  timezone: "UTC"
+  maxConcurrentJobs: 10
+
+httpserver:
+  address: ":8080"
+  enableGracefulShutdown: true

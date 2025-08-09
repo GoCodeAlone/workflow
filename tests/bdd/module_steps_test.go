@@ -276,8 +276,8 @@ func (ctx *BDDTestContext) buildModularConfig(table *godog.Table) string {
 		// Add necessary configuration for modules that require it
 		switch module {
 		case "cache.modular":
-			// The cache module expects duration values, not strings
-			continue // Skip for now, will handle in workflow validation instead
+			// Skip cache.modular for now due to configuration complexity
+			continue
 		case "httpserver.modular":
 			config += `
     config:
@@ -298,8 +298,7 @@ func (ctx *BDDTestContext) buildModularConfig(table *godog.Table) string {
 }
 
 func (ctx *BDDTestContext) theWorkflowShouldUseModule(moduleType string) error {
-	// For problematic modules that can't be tested due to external dependencies or configuration issues,
-	// just validate that the configuration was accepted
+	// Skip problematic modules that have configuration issues
 	problematicModules := []string{"cache.modular"}
 	for _, problematic := range problematicModules {
 		if moduleType == problematic {

@@ -7,10 +7,21 @@ modules:
     type: chimux.router
   - name: messaging-auth
     type: auth.modular
+    config:
+      enableJWT: true
+      enableApiKey: false
   - name: messaging-cache
     type: cache.modular
+    config:
+      engine: "memory"
+      defaultTTL: 3600
+      cleanupInterval: 600
+      maxItems: 10000
   - name: messaging-database
     type: database.modular
+    config:
+      driver: sqlite
+      dsn: ":memory:"
   - name: messaging-eventbus
     type: eventbus.modular
   - name: messaging-logger
@@ -19,6 +30,8 @@ modules:
     type: httpclient.modular
   - name: message-scheduler
     type: scheduler.modular
+    config:
+      timezone: "UTC"
   - name: websocket-handler
     type: api.handler
     config:
@@ -68,3 +81,26 @@ workflows:
       - scheduler: message-scheduler
         job: presence-cleanup
         schedule: "*/5 * * * *"
+
+# Configuration sections for modular modules
+auth:
+  JWT:
+    Secret: "test-jwt-secret-key-for-messaging"
+    Expiration: "24h"
+  
+cache:
+  defaultTTL: 3600  # 1 hour in seconds
+  cleanupInterval: 600  # 10 minutes in seconds
+  maxItems: 10000
+
+database:
+  driver: sqlite
+  dsn: ":memory:"
+
+scheduler:
+  timezone: "UTC"
+  maxConcurrentJobs: 10
+
+httpserver:
+  address: ":8085"
+  enableGracefulShutdown: true

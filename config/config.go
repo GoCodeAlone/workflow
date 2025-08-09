@@ -20,6 +20,16 @@ type WorkflowConfig struct {
 	Modules   []ModuleConfig         `json:"modules" yaml:"modules"`
 	Workflows map[string]interface{} `json:"workflows" yaml:"workflows"`
 	Triggers  map[string]interface{} `json:"triggers" yaml:"triggers"`
+	
+	// Configuration sections for modular modules
+	Auth       map[string]interface{} `json:"auth,omitempty" yaml:"auth,omitempty"`
+	Cache      map[string]interface{} `json:"cache,omitempty" yaml:"cache,omitempty"`
+	Database   map[string]interface{} `json:"database,omitempty" yaml:"database,omitempty"`
+	Scheduler  map[string]interface{} `json:"scheduler,omitempty" yaml:"scheduler,omitempty"`
+	HTTPServer map[string]interface{} `json:"httpserver,omitempty" yaml:"httpserver,omitempty"`
+	Chimux     map[string]interface{} `json:"chimux,omitempty" yaml:"chimux,omitempty"`
+	EventBus   map[string]interface{} `json:"eventbus,omitempty" yaml:"eventbus,omitempty"`
+	HTTPClient map[string]interface{} `json:"httpclient,omitempty" yaml:"httpclient,omitempty"`
 }
 
 // LoadFromFile loads a workflow configuration from a YAML file
