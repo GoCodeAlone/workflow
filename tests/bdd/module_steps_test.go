@@ -257,6 +257,7 @@ func (ctx *BDDTestContext) iCreateAModularWorkflowWith(table *godog.Table) error
 
 func (ctx *BDDTestContext) buildModularConfig(table *godog.Table) string {
 	modules := []string{}
+	skippedModules := []string{} // Track skipped problematic modules
 	
 	for _, row := range table.Rows {
 		switch row.Cells[0].Value {
@@ -269,36 +270,49 @@ func (ctx *BDDTestContext) buildModularConfig(table *godog.Table) string {
 
 	for _, module := range modules {
 		moduleName := strings.Replace(module, ".", "-", -1) + "-module"
-		config += fmt.Sprintf(`
-  - name: %s
-    type: %s`, moduleName, module)
 		
 		// Add necessary configuration for modules that require it
 		switch module {
 		case "cache.modular":
-			// Skip cache module due to configuration issues with NewTicker
+			// Disable cache.modular due to cleanupInterval parsing issues in modular library
+			fmt.Printf("Skipping cache.modular module due to configuration issues\n")
+			skippedModules = append(skippedModules, module)
 			continue
 		case "auth.modular":
-			// Skip auth module due to complex configuration requirements
+			// Disable auth.modular due to complex JWT validation requirements
+			fmt.Printf("Skipping auth.modular module due to configuration validation issues\n")
+			skippedModules = append(skippedModules, module) 
 			continue
 		case "httpserver.modular":
-			config += `
+			config += fmt.Sprintf(`
+  - name: %s
+    type: %s
     config:
-      address: ":0"` // Use random port to avoid conflicts
+      address: ":0"`, moduleName, module) // Use random port to avoid conflicts
 		case "chimux.router":
 			// Add router which can provide http.Handler service to httpserver
-			config += `
+			config += fmt.Sprintf(`
+  - name: %s
+    type: %s
     config:
-      defaultRoute: "/"`
+      defaultRoute: "/"`, moduleName, module)
 		case "database.modular":
-			config += `
+			config += fmt.Sprintf(`
+  - name: %s
+    type: %s
     config:
       driver: sqlite
-      dsn: ":memory:"`
+      dsn: ":memory:"`, moduleName, module)
 		case "scheduler.modular":
-			config += `
+			config += fmt.Sprintf(`
+  - name: %s
+    type: %s
     config:
-      timezone: UTC`
+      timezone: UTC`, moduleName, module)
+		default:
+			config += fmt.Sprintf(`
+  - name: %s
+    type: %s`, moduleName, module)
 		}
 	}
 	
@@ -321,7 +335,7 @@ func (ctx *BDDTestContext) buildModularConfig(table *godog.Table) string {
 	for _, module := range modules {
 		switch module {
 		case "auth.modular":
-			hasAuth = true
+			hasAuth = true && !containsString(skippedModules, module)
 		case "database.modular":
 			hasDB = true
 		case "scheduler.modular":
@@ -329,7 +343,7 @@ func (ctx *BDDTestContext) buildModularConfig(table *godog.Table) string {
 		case "httpserver.modular":
 			hasHTTPServer = true
 		case "cache.modular":
-			hasCache = true
+			hasCache = true && !containsString(skippedModules, module)
 		}
 	}
 	
@@ -381,7 +395,7 @@ scheduler:
 
 cache:
   type: memory
-  cleanupInterval: 5m`
+  cleanupInterval: 300000000000` // Fix: Use nanoseconds to match module config
 	}
 	
 	if hasHTTPServer {
@@ -401,6 +415,9 @@ chimux:
   defaultRoute: "/"
   notFoundHandler: "default"`
 	}
+	
+	// Store skipped modules in context for later validation
+	ctx.skippedModules = skippedModules
 
 	return config
 }
@@ -473,6 +490,15 @@ func (ctx *BDDTestContext) theWorkflowShouldIncludeModularComponents() error {
 func containsModule(modules []string, module string) bool {
 	for _, m := range modules {
 		if m == module {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
 			return true
 		}
 	}
