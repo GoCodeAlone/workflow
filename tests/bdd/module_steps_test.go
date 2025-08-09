@@ -11,7 +11,18 @@ import (
 
 func (ctx *BDDTestContext) iCreateAnHTTPServerWorkflowWith(table *godog.Table) error {
 	config := ctx.buildHTTPServerConfig(table)
-	return ctx.iCreateAWorkflowNamed("HTTP Server Workflow", config)
+	
+	// Create the workflow
+	if err := ctx.iCreateAWorkflowNamed("HTTP Server Workflow", config); err != nil {
+		return err
+	}
+	
+	// Build and start the workflow for testing
+	if err := ctx.buildAndStartWorkflow(config); err != nil {
+		return fmt.Errorf("failed to build and start HTTP workflow: %v", err)
+	}
+	
+	return nil
 }
 
 func (ctx *BDDTestContext) buildHTTPServerConfig(table *godog.Table) string {
@@ -65,7 +76,18 @@ workflows:
 
 func (ctx *BDDTestContext) iCreateAMessagingWorkflowWith(table *godog.Table) error {
 	config := ctx.buildMessagingConfig(table)
-	return ctx.iCreateAWorkflowNamed("Messaging Workflow", config)
+	
+	// Create the workflow
+	if err := ctx.iCreateAWorkflowNamed("Messaging Workflow", config); err != nil {
+		return err
+	}
+	
+	// Build and start the workflow for testing
+	if err := ctx.buildAndStartWorkflow(config); err != nil {
+		return fmt.Errorf("failed to build and start messaging workflow: %v", err)
+	}
+	
+	return nil
 }
 
 func (ctx *BDDTestContext) buildMessagingConfig(table *godog.Table) string {
@@ -112,7 +134,18 @@ workflows:
 
 func (ctx *BDDTestContext) iCreateASchedulerWorkflowWith(table *godog.Table) error {
 	config := ctx.buildSchedulerConfig(table)
-	return ctx.iCreateAWorkflowNamed("Scheduler Workflow", config)
+	
+	// Create the workflow
+	if err := ctx.iCreateAWorkflowNamed("Scheduler Workflow", config); err != nil {
+		return err
+	}
+	
+	// Build and start the workflow for testing
+	if err := ctx.buildAndStartWorkflow(config); err != nil {
+		return fmt.Errorf("failed to build and start scheduler workflow: %v", err)
+	}
+	
+	return nil
 }
 
 func (ctx *BDDTestContext) buildSchedulerConfig(table *godog.Table) string {
@@ -149,7 +182,18 @@ workflows:
 
 func (ctx *BDDTestContext) iCreateAStateMachineWorkflowWith(table *godog.Table) error {
 	config := ctx.buildStateMachineConfig(table)
-	return ctx.iCreateAWorkflowNamed("State Machine Workflow", config)
+	
+	// Create the workflow
+	if err := ctx.iCreateAWorkflowNamed("State Machine Workflow", config); err != nil {
+		return err
+	}
+	
+	// Build and start the workflow for testing
+	if err := ctx.buildAndStartWorkflow(config); err != nil {
+		return fmt.Errorf("failed to build and start state machine workflow: %v", err)
+	}
+	
+	return nil
 }
 
 func (ctx *BDDTestContext) buildStateMachineConfig(table *godog.Table) string {
@@ -195,7 +239,19 @@ workflows:
 
 func (ctx *BDDTestContext) iCreateAModularWorkflowWith(table *godog.Table) error {
 	config := ctx.buildModularConfig(table)
-	return ctx.iCreateAWorkflowNamed("Modular Workflow", config)
+	
+	// Create the workflow
+	if err := ctx.iCreateAWorkflowNamed("Modular Workflow", config); err != nil {
+		return err
+	}
+	
+	// Build and start the workflow for testing (if config is complete enough)
+	if err := ctx.buildAndStartWorkflow(config); err != nil {
+		// Many modular configs might not be complete enough to start, so just log warning
+		fmt.Printf("Warning: Failed to build modular workflow for testing: %v\n", err)
+	}
+	
+	return nil
 }
 
 func (ctx *BDDTestContext) buildModularConfig(table *godog.Table) string {
@@ -220,32 +276,61 @@ func (ctx *BDDTestContext) buildModularConfig(table *godog.Table) string {
 }
 
 func (ctx *BDDTestContext) theWorkflowShouldUseModule(moduleType string) error {
-	// Verify that the created workflow contains the expected module type
-	// This is a simplified check for testing purposes
+	// First validate the configuration contains the module
+	if err := ctx.validateWorkflowModule(moduleType); err != nil {
+		return err
+	}
+	
+	// If we don't have a running workflow, build and start it from the last created workflow config
+	if ctx.currentWorkflowEngine == nil {
+		// Get the last workflow created
+		for _, workflow := range ctx.workflows {
+			if err := ctx.buildAndStartWorkflow(workflow.Config); err != nil {
+				return fmt.Errorf("failed to build and start workflow for module validation: %v", err)
+			}
+			break
+		}
+	}
+	
 	return nil
 }
 
 func (ctx *BDDTestContext) theWorkflowShouldHandleRequests() error {
-	// Verify HTTP workflow can handle requests
-	return nil
+	if ctx.currentWorkflowEngine == nil {
+		return fmt.Errorf("no workflow engine running")
+	}
+	
+	return ctx.testHTTPWorkflow()
 }
 
 func (ctx *BDDTestContext) theWorkflowShouldProcessMessages() error {
-	// Verify messaging workflow can process messages
-	return nil
+	if ctx.currentWorkflowEngine == nil {
+		return fmt.Errorf("no workflow engine running")
+	}
+	
+	return ctx.testMessagingWorkflow()
 }
 
 func (ctx *BDDTestContext) theWorkflowShouldExecuteOnSchedule() error {
-	// Verify scheduler workflow executes according to schedule
-	return nil
+	if ctx.currentWorkflowEngine == nil {
+		return fmt.Errorf("no workflow engine running")
+	}
+	
+	return ctx.testSchedulerWorkflow()
 }
 
 func (ctx *BDDTestContext) theWorkflowShouldManageStateTransitions() error {
-	// Verify state machine workflow manages state transitions
-	return nil
+	if ctx.currentWorkflowEngine == nil {
+		return fmt.Errorf("no workflow engine running")
+	}
+	
+	return ctx.testStateMachineWorkflow()
 }
 
 func (ctx *BDDTestContext) theWorkflowShouldIncludeModularComponents() error {
-	// Verify modular workflow includes expected components
-	return nil
+	if ctx.currentWorkflowEngine == nil {
+		return fmt.Errorf("no workflow engine running")
+	}
+	
+	return ctx.testModularComponents()
 }
