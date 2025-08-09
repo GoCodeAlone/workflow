@@ -275,13 +275,21 @@ func (ctx *BDDTestContext) buildModularConfig(table *godog.Table) string {
 		
 		// Add necessary configuration for modules that require it
 		switch module {
-		case "cache.modular", "auth.modular":
-			// Skip problematic modules for now due to configuration complexity
+		case "cache.modular":
+			// Skip cache module due to configuration issues with NewTicker
+			continue
+		case "auth.modular":
+			// Skip auth module due to complex configuration requirements
 			continue
 		case "httpserver.modular":
 			config += `
     config:
       address: ":0"` // Use random port to avoid conflicts
+		case "chimux.router":
+			// Add router which can provide http.Handler service to httpserver
+			config += `
+    config:
+      defaultRoute: "/"`
 		case "database.modular":
 			config += `
     config:
@@ -293,12 +301,22 @@ func (ctx *BDDTestContext) buildModularConfig(table *godog.Table) string {
       timezone: UTC`
 		}
 	}
+	
+	// Add chimux router if we have httpserver (to provide http.Handler service)
+	if containsModule(modules, "httpserver.modular") && !containsModule(modules, "chimux.router") {
+		config += `
+  - name: chimux-router-module
+    type: chimux.router
+    config:
+      defaultRoute: "/"`
+	}
 
 	// Add configuration sections for modular modules at the end
 	hasAuth := false
 	hasDB := false
 	hasScheduler := false
 	hasHTTPServer := false
+	hasCache := false
 	
 	for _, module := range modules {
 		switch module {
@@ -310,6 +328,8 @@ func (ctx *BDDTestContext) buildModularConfig(table *godog.Table) string {
 			hasScheduler = true
 		case "httpserver.modular":
 			hasHTTPServer = true
+		case "cache.modular":
+			hasCache = true
 		}
 	}
 	
@@ -318,8 +338,10 @@ func (ctx *BDDTestContext) buildModularConfig(table *godog.Table) string {
 
 # Configuration sections for modular modules
 auth:
+  enableJWT: true
+  enableBasicAuth: false
   JWT:
-    Secret: "test-jwt-secret-key"
+    Secret: "test-jwt-secret-key-for-modular-workflow"
     Expiration: "24h"`
 	}
 	
@@ -349,6 +371,19 @@ scheduler:
   maxConcurrentJobs: 10`
 	}
 	
+	if hasCache {
+		if !hasAuth && !hasDB && !hasScheduler {
+			config += `
+
+# Configuration sections for modular modules`
+		}
+		config += `
+
+cache:
+  type: memory
+  cleanupInterval: 5m`
+	}
+	
 	if hasHTTPServer {
 		if !hasAuth && !hasDB && !hasScheduler {
 			config += `
@@ -359,22 +394,18 @@ scheduler:
 
 httpserver:
   address: ":0"
-  enableGracefulShutdown: true`
+  enableGracefulShutdown: true
+
+# Add chimux configuration if router is present  
+chimux:
+  defaultRoute: "/"
+  notFoundHandler: "default"`
 	}
 
 	return config
 }
 
 func (ctx *BDDTestContext) theWorkflowShouldUseModule(moduleType string) error {
-	// Skip problematic modules that have configuration issues
-	problematicModules := []string{"cache.modular", "auth.modular"}
-	for _, problematic := range problematicModules {
-		if moduleType == problematic {
-			// Just verify workflow creation was successful for these modules
-			return nil
-		}
-	}
-	
 	// First validate the configuration contains the module
 	if err := ctx.validateWorkflowModule(moduleType); err != nil {
 		return err
@@ -437,4 +468,13 @@ func (ctx *BDDTestContext) theWorkflowShouldIncludeModularComponents() error {
 	}
 	
 	return ctx.testModularComponents()
+}
+
+func containsModule(modules []string, module string) bool {
+	for _, m := range modules {
+		if m == module {
+			return true
+		}
+	}
+	return false
 }
