@@ -170,7 +170,14 @@ func (ctx *BDDTestContext) cleanup() error {
 }
 
 // buildAndStartWorkflow builds a workflow from config and starts it for testing
-func (ctx *BDDTestContext) buildAndStartWorkflow(configYAML string) error {
+func (ctx *BDDTestContext) buildAndStartWorkflow(configYAML string) (returnErr error) {
+	// Add panic recovery to handle modular module panics
+	defer func() {
+		if r := recover(); r != nil {
+			returnErr = fmt.Errorf("panic during workflow build/start: %v", r)
+		}
+	}()
+	
 	// Parse the YAML configuration
 	var cfg config.WorkflowConfig
 	if err := yaml.Unmarshal([]byte(configYAML), &cfg); err != nil {

@@ -7,6 +7,9 @@ modules:
     type: auth.modular
   - name: cache-modular
     type: cache.modular
+    config:
+      cleanupInterval: 5m
+      defaultTTL: 1h
   - name: eventbus-modular
     type: eventbus.modular
   - name: scheduler-modular
