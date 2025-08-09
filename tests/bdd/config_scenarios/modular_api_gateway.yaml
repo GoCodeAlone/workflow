@@ -1,6 +1,8 @@
 modules:
   - name: gateway-server
     type: httpserver.modular
+    config:
+      address: ":8080"
   - name: gateway-router
     type: chimux.router
   - name: gateway-auth
@@ -13,3 +15,45 @@ modules:
     type: eventbus.modular
   - name: gateway-logger
     type: eventlogger.modular
+  - name: auth-middleware
+    type: http.middleware.auth
+  - name: api-proxy
+    type: http.handler
+    config:
+      proxyTarget: "http://localhost:8081"
+  - name: user-service-proxy
+    type: http.handler
+    config:
+      proxyTarget: "http://localhost:8082"
+  - name: rate-limiter
+    type: messaging.handler
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/v1/users/*
+        handler: user-service-proxy
+        middlewares: [auth-middleware]
+      - method: POST
+        path: /api/v1/users
+        handler: user-service-proxy
+        middlewares: [auth-middleware]
+      - method: GET
+        path: /api/v1/orders/*
+        handler: api-proxy
+        middlewares: [auth-middleware]
+      - method: POST
+        path: /api/v1/orders
+        handler: api-proxy
+        middlewares: [auth-middleware]
+      - method: GET
+        path: /health
+        handler: api-proxy
+  messaging:
+    subscriptions:
+      - topic: gateway.request
+        handler: rate-limiter
+    producers:
+      - name: gateway-router
+        forwardTo: [gateway.request]

@@ -1,6 +1,8 @@
 modules:
   - name: http-server-modular
     type: httpserver.modular
+    config:
+      address: ":8091"
   - name: auth-modular
     type: auth.modular
   - name: cache-modular
@@ -13,3 +15,61 @@ modules:
     type: database.modular
   - name: httpclient-modular
     type: httpclient.modular
+  - name: router-modular
+    type: chimux.router
+  - name: logger-modular
+    type: eventlogger.modular
+  - name: schema-modular
+    type: jsonschema.modular
+  - name: comprehensive-api
+    type: api.handler
+    config:
+      resourceName: "resources"
+  - name: webhook-handler
+    type: messaging.handler
+  - name: task-processor
+    type: messaging.handler
+  - name: audit-handler
+    type: messaging.handler
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/resources
+        handler: comprehensive-api
+      - method: POST
+        path: /api/resources
+        handler: comprehensive-api
+      - method: PUT
+        path: /api/resources/:id
+        handler: comprehensive-api
+      - method: DELETE
+        path: /api/resources/:id
+        handler: comprehensive-api
+      - method: POST
+        path: /api/webhooks
+        handler: comprehensive-api
+  messaging:
+    subscriptions:
+      - topic: resource.created
+        handler: audit-handler
+      - topic: resource.updated
+        handler: audit-handler
+      - topic: webhook.received
+        handler: webhook-handler
+      - topic: task.scheduled
+        handler: task-processor
+    producers:
+      - name: comprehensive-api
+        forwardTo: [resource.created, resource.updated, webhook.received]
+      - name: webhook-handler
+        forwardTo: [task.scheduled]
+  scheduler:
+    jobs:
+      - scheduler: scheduler-modular
+        job: daily-cleanup
+        schedule: "0 2 * * *"
+      - scheduler: scheduler-modular
+        job: weekly-report
+        schedule: "0 9 * * 1"

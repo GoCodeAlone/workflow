@@ -1,18 +1,24 @@
 modules:
   - name: user-service-server
     type: httpserver.modular
+    config:
+      address: ":8087"
   - name: user-service-auth
     type: auth.modular
   - name: user-service-db
     type: database.modular
   - name: order-service-server
     type: httpserver.modular
+    config:
+      address: ":8088"
   - name: order-service-auth
     type: auth.modular
   - name: order-service-db
     type: database.modular
   - name: notification-service-server
     type: httpserver.modular
+    config:
+      address: ":8089"
   - name: notification-scheduler
     type: scheduler.modular
   - name: shared-eventbus
@@ -23,3 +29,62 @@ modules:
     type: chimux.router
   - name: central-logger
     type: eventlogger.modular
+  - name: users-api
+    type: api.handler
+    config:
+      resourceName: "users"
+  - name: orders-api
+    type: api.handler
+    config:
+      resourceName: "orders"
+  - name: notifications-api
+    type: api.handler
+    config:
+      resourceName: "notifications"
+  - name: user-event-handler
+    type: messaging.handler
+  - name: order-event-handler
+    type: messaging.handler
+  - name: notification-sender
+    type: messaging.handler
+
+workflows:
+  http:
+    routes:
+      - method: POST
+        path: /users
+        handler: users-api
+      - method: GET
+        path: /users/:id
+        handler: users-api
+      - method: POST
+        path: /orders
+        handler: orders-api
+      - method: GET
+        path: /orders/:id
+        handler: orders-api
+      - method: GET
+        path: /notifications
+        handler: notifications-api
+  messaging:
+    subscriptions:
+      - topic: user.created
+        handler: user-event-handler
+      - topic: order.placed
+        handler: order-event-handler
+      - topic: notification.requested
+        handler: notification-sender
+    producers:
+      - name: users-api
+        forwardTo: [user.created]
+      - name: orders-api
+        forwardTo: [order.placed]
+      - name: user-event-handler
+        forwardTo: [notification.requested]
+      - name: order-event-handler
+        forwardTo: [notification.requested]
+  scheduler:
+    jobs:
+      - scheduler: notification-scheduler
+        job: notification-digest
+        schedule: "0 9 * * *"

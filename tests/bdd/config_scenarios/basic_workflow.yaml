@@ -1,3 +1,21 @@
 modules:
-  - name: test
+  - name: basic-server
     type: http.server
+    config:
+      address: ":8094"
+  - name: basic-router
+    type: http.router
+  - name: basic-handler
+    type: http.handler
+    config:
+      response: '{"message": "Hello from basic workflow"}'
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/hello
+        handler: basic-handler
+      - method: GET
+        path: /health
+        handler: basic-handler

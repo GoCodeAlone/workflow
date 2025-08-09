@@ -1,6 +1,8 @@
 modules:
   - name: web-server
     type: httpserver.modular
+    config:
+      address: ":8092"
   - name: api-router
     type: chimux.router
   - name: customer-auth
@@ -21,6 +23,8 @@ modules:
     type: jsonschema.modular
   - name: inventory-server
     type: httpserver.modular
+    config:
+      address: ":8093"
   - name: inventory-auth
     type: auth.modular
   - name: inventory-cache
@@ -29,3 +33,82 @@ modules:
     type: database.modular
   - name: notification-scheduler
     type: scheduler.modular
+  - name: products-api
+    type: api.handler
+    config:
+      resourceName: "products"
+  - name: orders-api
+    type: api.handler
+    config:
+      resourceName: "orders"
+  - name: customers-api
+    type: api.handler
+    config:
+      resourceName: "customers"
+  - name: inventory-api
+    type: api.handler
+    config:
+      resourceName: "inventory"
+  - name: order-processor
+    type: messaging.handler
+  - name: inventory-updater
+    type: messaging.handler
+  - name: payment-processor
+    type: messaging.handler
+  - name: notification-sender
+    type: messaging.handler
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /api/products
+        handler: products-api
+      - method: POST
+        path: /api/products
+        handler: products-api
+      - method: POST
+        path: /api/customers
+        handler: customers-api
+      - method: GET
+        path: /api/customers/:id
+        handler: customers-api
+      - method: POST
+        path: /api/orders
+        handler: orders-api
+      - method: GET
+        path: /api/orders/:id
+        handler: orders-api
+      - method: GET
+        path: /api/inventory
+        handler: inventory-api
+      - method: PUT
+        path: /api/inventory/:id
+        handler: inventory-api
+  messaging:
+    subscriptions:
+      - topic: order.placed
+        handler: order-processor
+      - topic: order.confirmed
+        handler: inventory-updater
+      - topic: inventory.reserved
+        handler: payment-processor
+      - topic: payment.successful
+        handler: notification-sender
+    producers:
+      - name: orders-api
+        forwardTo: [order.placed]
+      - name: order-processor
+        forwardTo: [order.confirmed]
+      - name: inventory-updater
+        forwardTo: [inventory.reserved]
+      - name: payment-processor
+        forwardTo: [payment.successful]
+  scheduler:
+    jobs:
+      - scheduler: order-scheduler
+        job: abandoned-cart-reminder
+        schedule: "0 */2 * * *"
+      - scheduler: notification-scheduler
+        job: daily-sales-report
+        schedule: "0 18 * * *"

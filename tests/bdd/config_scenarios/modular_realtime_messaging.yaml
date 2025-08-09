@@ -1,6 +1,8 @@
 modules:
   - name: messaging-server
     type: httpserver.modular
+    config:
+      address: ":8085"
   - name: messaging-router
     type: chimux.router
   - name: messaging-auth
@@ -17,3 +19,52 @@ modules:
     type: httpclient.modular
   - name: message-scheduler
     type: scheduler.modular
+  - name: websocket-handler
+    type: api.handler
+    config:
+      resourceName: "messages"
+  - name: user-handler
+    type: api.handler
+    config:
+      resourceName: "users"
+  - name: message-processor
+    type: messaging.handler
+  - name: presence-updater
+    type: messaging.handler
+  - name: notification-sender
+    type: messaging.handler
+
+workflows:
+  http:
+    routes:
+      - method: POST
+        path: /api/users/connect
+        handler: user-handler
+      - method: GET
+        path: /api/messages/history
+        handler: websocket-handler
+      - method: POST
+        path: /api/messages/send
+        handler: websocket-handler
+  messaging:
+    subscriptions:
+      - topic: message.sent
+        handler: message-processor
+      - topic: user.connected
+        handler: presence-updater
+      - topic: user.disconnected
+        handler: presence-updater
+      - topic: message.processed
+        handler: notification-sender
+    producers:
+      - name: websocket-handler
+        forwardTo: [message.sent]
+      - name: user-handler
+        forwardTo: [user.connected, user.disconnected]
+      - name: message-processor
+        forwardTo: [message.processed]
+  scheduler:
+    jobs:
+      - scheduler: message-scheduler
+        job: presence-cleanup
+        schedule: "*/5 * * * *"
