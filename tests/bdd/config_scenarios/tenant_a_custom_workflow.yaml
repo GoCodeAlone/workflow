@@ -10,7 +10,7 @@ modules:
   - name: tenant-a-broker
     type: messaging.broker
   - name: tenant-a-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 6 * * *"
 

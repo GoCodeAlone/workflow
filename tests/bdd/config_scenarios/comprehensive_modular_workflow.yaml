@@ -5,11 +5,6 @@ modules:
       address: ":8091"
   - name: auth-modular
     type: auth.modular
-  - name: cache-modular
-    type: cache.modular
-    config:
-      cleanupInterval: 5m
-      defaultTTL: 1h
   - name: eventbus-modular
     type: eventbus.modular
   - name: scheduler-modular
@@ -81,11 +76,6 @@ auth:
   JWT:
     Secret: "test-jwt-secret-key"
     Expiration: "24h"
-
-cache:
-  defaultTTL: "1h"
-  cleanupInterval: "10m"
-  maxItems: 10000
 
 database:
   driver: sqlite

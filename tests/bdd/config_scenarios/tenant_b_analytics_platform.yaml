@@ -20,7 +20,7 @@ modules:
   - name: data-aggregator
     type: messaging.handler
   - name: hourly-processor
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 * * * *"
   - name: processing-job

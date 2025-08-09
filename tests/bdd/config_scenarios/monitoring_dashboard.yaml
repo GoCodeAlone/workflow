@@ -26,13 +26,13 @@ modules:
   - name: alert-tracker
     type: state.tracker
   - name: metrics-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "*/15 * * * * *"
   - name: aggregation-job
     type: messaging.handler
   - name: cleanup-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 0 * * *"
   - name: data-cleanup-job

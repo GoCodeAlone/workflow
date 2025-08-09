@@ -26,7 +26,7 @@ modules:
   - name: notification-service
     type: messaging.handler
   - name: daily-reports
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 6 * * *"
   - name: report-generator

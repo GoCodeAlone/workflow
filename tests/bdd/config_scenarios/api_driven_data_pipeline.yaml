@@ -20,7 +20,7 @@ modules:
   - name: data-loader
     type: messaging.handler
   - name: batch-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 */6 * * *"
   - name: batch-processor

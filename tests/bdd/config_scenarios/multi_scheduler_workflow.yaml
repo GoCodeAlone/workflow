@@ -1,14 +1,14 @@
 modules:
   - name: daily-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 0 * * *"
   - name: hourly-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 * * * *"
   - name: minute-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "* * * * *"
   - name: backup-job

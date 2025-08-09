@@ -28,13 +28,13 @@ modules:
   - name: user-tracker
     type: state.tracker
   - name: cleanup-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 2 * * *"
   - name: cleanup-job
     type: messaging.handler
   - name: analytics-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 * * * *"
   - name: analytics-job

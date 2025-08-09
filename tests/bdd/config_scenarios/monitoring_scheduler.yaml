@@ -1,14 +1,14 @@
 modules:
   - name: health-check-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "*/5 * * * *"
   - name: metrics-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "* * * * *"
   - name: alert-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "*/10 * * * *"
   - name: health-check-job

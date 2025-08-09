@@ -26,11 +26,11 @@ modules:
   - name: health-checker
     type: messaging.handler
   - name: health-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "*/30 * * * * *"
   - name: metrics-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "*/10 * * * * *"
   - name: service-state-machine

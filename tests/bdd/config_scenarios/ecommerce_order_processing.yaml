@@ -28,7 +28,7 @@ modules:
   - name: order-connector
     type: state.connector
   - name: daily-reports
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 6 * * *"
   - name: report-generator

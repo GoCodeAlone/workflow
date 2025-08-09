@@ -1,14 +1,14 @@
 modules:
   - name: daily-reports
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 6 * * *"
   - name: weekly-reports
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 6 * * 1"
   - name: monthly-reports
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 6 1 * *"
   - name: daily-report-job

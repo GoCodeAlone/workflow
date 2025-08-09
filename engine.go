@@ -234,6 +234,60 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		e.app.RegisterModule(mod)
 	}
 
+	// Register required configuration sections for modular modules before initialization
+	// Check which modular modules are present and register their configurations
+	
+	for _, modCfg := range cfg.Modules {
+		switch modCfg.Type {
+		case "auth.modular":
+			authConfig := cfg.Auth
+			if authConfig == nil {
+				// Provide default auth configuration if not specified in config file
+				authConfig = map[string]interface{}{
+					"JWT": map[string]interface{}{
+						"Secret":     "default-jwt-secret-key",
+						"Expiration": "24h",
+					},
+				}
+			}
+			e.logger.Debug("Registering auth config section")
+			e.app.RegisterConfigSection("auth", modular.NewStdConfigProvider(authConfig))
+			
+		case "database.modular":
+			dbConfig := cfg.Database
+			if dbConfig == nil {
+				dbConfig = map[string]interface{}{
+					"driver": "sqlite",
+					"dsn":    ":memory:",
+				}
+			}
+			e.logger.Debug("Registering database config section")
+			e.app.RegisterConfigSection("database", modular.NewStdConfigProvider(dbConfig))
+			
+		case "scheduler.modular":
+			schedulerConfig := cfg.Scheduler
+			if schedulerConfig == nil {
+				schedulerConfig = map[string]interface{}{
+					"timezone":          "UTC",
+					"maxConcurrentJobs": 10,
+				}
+			}
+			e.logger.Debug("Registering scheduler config section")
+			e.app.RegisterConfigSection("scheduler", modular.NewStdConfigProvider(schedulerConfig))
+			
+		case "httpserver.modular":
+			serverConfig := cfg.HTTPServer
+			if serverConfig == nil {
+				serverConfig = map[string]interface{}{
+					"address":                ":8080",
+					"enableGracefulShutdown": true,
+				}
+			}
+			e.logger.Debug("Registering httpserver config section")
+			e.app.RegisterConfigSection("httpserver", modular.NewStdConfigProvider(serverConfig))
+		}
+	}
+
 	// Initialize all modules
 	if err := e.app.Init(); err != nil {
 		return fmt.Errorf("failed to initialize modules: %w", err)

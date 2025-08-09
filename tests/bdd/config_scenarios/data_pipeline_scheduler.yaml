@@ -1,6 +1,6 @@
 modules:
   - name: pipeline-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 2 * * *"
   - name: data-extractor

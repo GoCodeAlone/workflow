@@ -1,14 +1,14 @@
 modules:
   - name: log-cleanup-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 1 * * 0"
   - name: cache-cleanup-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 2 * * *"
   - name: db-maintenance-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 3 * * 0"
   - name: log-cleanup-job
