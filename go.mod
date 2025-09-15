@@ -1,11 +1,9 @@
 module github.com/GoCodeAlone/workflow
 
-go 1.24.2
-
-toolchain go1.24.4
+go 1.25
 
 require (
-	github.com/GoCodeAlone/modular v1.4.0
+	github.com/GoCodeAlone/modular v1.4.3
 	github.com/GoCodeAlone/modular/modules/auth v0.1.0
 	github.com/GoCodeAlone/modular/modules/cache v0.1.0
 	github.com/GoCodeAlone/modular/modules/chimux v1.1.0
