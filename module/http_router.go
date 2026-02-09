@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // Route represents an HTTP route

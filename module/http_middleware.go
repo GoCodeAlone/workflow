@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // HTTPMiddleware defines a middleware that can process HTTP requests

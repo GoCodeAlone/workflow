@@ -1,7 +1,7 @@
 package module
 
 import (
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // Trigger defines what can start a workflow execution

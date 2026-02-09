@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/module"
 )
 

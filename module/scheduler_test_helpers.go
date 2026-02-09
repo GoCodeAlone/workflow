@@ -3,7 +3,7 @@ package module
 import (
 	"context"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // ScheduledJobInfo captures information about a scheduled job

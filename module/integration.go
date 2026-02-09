@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // IntegrationConnector represents a connector to a third-party service

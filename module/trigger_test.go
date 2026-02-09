@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // TestTriggerRegistry tests the trigger registry functionality

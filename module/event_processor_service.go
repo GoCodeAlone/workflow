@@ -3,7 +3,7 @@ package module
 import (
 	"errors"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // EventProcessorLocator helps locate the event processor

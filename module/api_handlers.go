@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // RESTResource represents a simple in-memory resource store for REST APIs

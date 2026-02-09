@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // EventPattern defines a pattern for matching complex event sequences

@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // ServiceHelper helps with service access in handlers

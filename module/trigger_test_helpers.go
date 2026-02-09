@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"time"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // MockApplication is a mock implementation of modular.Application for testing
@@ -137,6 +138,44 @@ func (a *MockApplication) SetLogger(logger modular.Logger) {
 func (a *MockApplication) SvcRegistry() modular.ServiceRegistry {
 	// Return the Services map directly as it implements the needed interface
 	return a.Services
+}
+
+// GetServicesByModule returns all services provided by a specific module
+func (a *MockApplication) GetServicesByModule(moduleName string) []string {
+	return []string{}
+}
+
+// GetServiceEntry retrieves detailed information about a registered service
+func (a *MockApplication) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) {
+	return nil, false
+}
+
+// GetServicesByInterface returns all services that implement the given interface
+func (a *MockApplication) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
+	return nil
+}
+
+// StartTime returns the time when the application was started
+func (a *MockApplication) StartTime() time.Time {
+	return time.Time{}
+}
+
+// GetModule returns the module with the given name
+func (a *MockApplication) GetModule(name string) modular.Module {
+	if a.Modules == nil {
+		return nil
+	}
+	return a.Modules[name]
+}
+
+// GetAllModules returns a map of all registered modules
+func (a *MockApplication) GetAllModules() map[string]modular.Module {
+	return a.Modules
+}
+
+// OnConfigLoaded registers a callback to run after config loading
+func (a *MockApplication) OnConfigLoaded(hook func(modular.Application) error) {
+	// No-op for tests
 }
 
 // MockConfigProvider is a mock implementation of modular.ConfigProvider for testing

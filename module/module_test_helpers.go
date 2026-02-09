@@ -3,7 +3,7 @@ package module
 import (
 	"testing"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // TestHelper provides utilities for module tests

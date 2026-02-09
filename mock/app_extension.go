@@ -1,7 +1,7 @@
 package mock
 
 import (
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // ApplicationWithReset extends the standard application with testing utilities

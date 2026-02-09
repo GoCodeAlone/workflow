@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/mock"
@@ -15,12 +15,8 @@ import (
 
 // TestSchedulerWorkflow tests the scheduler workflow handler
 func TestSchedulerWorkflow(t *testing.T) {
-	// Create and initialize the application properly
+	// Create the application (do NOT call Init() here; BuildFromConfig will call it)
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), &mock.Logger{LogEntries: make([]string, 0)})
-	err := app.Init()
-	if err != nil {
-		t.Fatalf("Failed to initialize app: %v", err)
-	}
 
 	// Create test helper
 	testHelper := NewSchedulerTestHelper(app)
@@ -74,7 +70,7 @@ func TestSchedulerWorkflow(t *testing.T) {
 	})
 
 	// Build workflow
-	err = engine.BuildFromConfig(cfg)
+	err := engine.BuildFromConfig(cfg)
 	if err != nil {
 		t.Fatalf("Failed to build workflow: %v", err)
 	}

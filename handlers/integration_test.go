@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/mock"
@@ -21,13 +21,9 @@ type IntegrationRegistry = module.IntegrationRegistry
 
 // TestIntegrationWorkflow tests the integration workflow handler
 func TestIntegrationWorkflow(t *testing.T) {
-	// Initialize the engine variable
+	// Create application (do NOT call Init() here; BuildFromConfig will call it)
 	mockLogger := &mock.Logger{LogEntries: make([]string, 0)}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), mockLogger)
-	err := app.Init()
-	if err != nil {
-		t.Fatalf("Failed to initialize app: %v", err)
-	}
 
 	// Create workflow engine
 	engine := workflow.NewStdEngine(app, mockLogger)
@@ -94,11 +90,11 @@ func TestIntegrationWorkflow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err = crmConnector.Connect(ctx); err != nil {
+	if err := crmConnector.Connect(ctx); err != nil {
 		t.Fatalf("Failed to connect crm-connector: %v", err)
 	}
 
-	if err = emailConnector.Connect(ctx); err != nil {
+	if err := emailConnector.Connect(ctx); err != nil {
 		t.Fatalf("Failed to connect email-connector: %v", err)
 	}
 
@@ -174,7 +170,7 @@ func TestIntegrationWorkflow(t *testing.T) {
 	})
 
 	// Build workflow
-	err = engine.BuildFromConfig(cfg)
+	err := engine.BuildFromConfig(cfg)
 	if err != nil {
 		t.Fatalf("Failed to build workflow: %v", err)
 	}

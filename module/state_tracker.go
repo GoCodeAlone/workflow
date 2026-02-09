@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // StateTrackerName is the standard name for the state tracker service

@@ -8,7 +8,7 @@ import (
 
 	"reflect"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/mock"
@@ -392,6 +392,44 @@ func (a *mockApplication) SetVerboseConfig(enabled bool) {
 // SetLogger sets the application's logger
 func (a *mockApplication) SetLogger(logger modular.Logger) {
 	a.logger = logger.(*mockLogger) // Assume it's a mockLogger for tests
+}
+
+// GetServicesByModule returns all services provided by a specific module
+func (a *mockApplication) GetServicesByModule(moduleName string) []string {
+	return []string{}
+}
+
+// GetServiceEntry retrieves detailed information about a registered service
+func (a *mockApplication) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) {
+	return nil, false
+}
+
+// GetServicesByInterface returns all services that implement the given interface
+func (a *mockApplication) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
+	return nil
+}
+
+// StartTime returns the time when the application was started
+func (a *mockApplication) StartTime() time.Time {
+	return time.Time{}
+}
+
+// GetModule returns the module with the given name
+func (a *mockApplication) GetModule(name string) modular.Module {
+	if a.modules == nil {
+		return nil
+	}
+	return a.modules[name]
+}
+
+// GetAllModules returns a map of all registered modules
+func (a *mockApplication) GetAllModules() map[string]modular.Module {
+	return a.modules
+}
+
+// OnConfigLoaded registers a callback to run after config loading
+func (a *mockApplication) OnConfigLoaded(hook func(modular.Application) error) {
+	// No-op for tests
 }
 
 // mockConfigProvider implements the modular.ConfigProvider interface

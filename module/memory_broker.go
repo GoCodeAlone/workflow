@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // Standard module name constants

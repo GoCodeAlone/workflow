@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // ServiceAccessor provides methods for accessing services

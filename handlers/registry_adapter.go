@@ -2,7 +2,7 @@
 package handlers
 
 import (
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 )
 
 // applicationServiceRegistryAdapter is an adapter for allowing an Application to be used as a service registry

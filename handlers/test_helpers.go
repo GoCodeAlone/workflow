@@ -3,8 +3,10 @@ package handlers
 
 import (
 	"context"
+	"reflect"
+	"time"
 
-	"github.com/GoCodeAlone/modular"
+	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/mock"
 )
 
@@ -112,6 +114,41 @@ func (t *TestServiceRegistry) RegisterModule(module modular.Module) {
 	// Simplified implementation for tests
 }
 
+// GetServicesByModule returns all services provided by a specific module
+func (t *TestServiceRegistry) GetServicesByModule(moduleName string) []string {
+	return []string{}
+}
+
+// GetServiceEntry retrieves detailed information about a registered service
+func (t *TestServiceRegistry) GetServiceEntry(serviceName string) (*modular.ServiceRegistryEntry, bool) {
+	return nil, false
+}
+
+// GetServicesByInterface returns all services that implement the given interface
+func (t *TestServiceRegistry) GetServicesByInterface(interfaceType reflect.Type) []*modular.ServiceRegistryEntry {
+	return nil
+}
+
+// StartTime returns the time when the application was started
+func (t *TestServiceRegistry) StartTime() time.Time {
+	return time.Time{}
+}
+
+// GetModule returns the module with the given name
+func (t *TestServiceRegistry) GetModule(name string) modular.Module {
+	return nil
+}
+
+// GetAllModules returns a map of all registered modules
+func (t *TestServiceRegistry) GetAllModules() map[string]modular.Module {
+	return nil
+}
+
+// OnConfigLoaded registers a callback to run after config loading
+func (t *TestServiceRegistry) OnConfigLoaded(hook func(modular.Application) error) {
+	// No-op for tests
+}
+
 // CreateMockApplication creates a mock application for testing
 func CreateMockApplication() modular.Application {
 	return NewTestServiceRegistry()
@@ -162,7 +199,11 @@ func NewSchedulerTestHelper(app modular.Application) *SchedulerTestHelper {
 // RegisterTestJob registers a test job with the application
 func (h *SchedulerTestHelper) RegisterTestJob(name string, fn func(ctx context.Context) error) *TestJob {
 	job := NewTestJob(fn)
-	h.App.SvcRegistry()[name] = job
+	// Use RegisterService instead of direct map assignment to work with the enhanced service registry
+	if err := h.App.RegisterService(name, job); err != nil {
+		// If it fails (e.g., already registered), fall back to direct assignment
+		h.App.SvcRegistry()[name] = job
+	}
 	return job
 }
 
