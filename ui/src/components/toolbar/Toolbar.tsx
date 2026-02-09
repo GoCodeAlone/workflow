@@ -1,11 +1,25 @@
 import useWorkflowStore from '../../store/workflowStore.ts';
 import { configToYaml, parseYaml } from '../../utils/serialization.ts';
+import {
+  saveWorkflowConfig,
+  getWorkflowConfig,
+  validateWorkflow,
+} from '../../utils/api.ts';
 
 export default function Toolbar() {
   const exportToConfig = useWorkflowStore((s) => s.exportToConfig);
   const importFromConfig = useWorkflowStore((s) => s.importFromConfig);
   const clearCanvas = useWorkflowStore((s) => s.clearCanvas);
   const nodes = useWorkflowStore((s) => s.nodes);
+  const addToast = useWorkflowStore((s) => s.addToast);
+  const undo = useWorkflowStore((s) => s.undo);
+  const redo = useWorkflowStore((s) => s.redo);
+  const undoStack = useWorkflowStore((s) => s.undoStack);
+  const redoStack = useWorkflowStore((s) => s.redoStack);
+  const toggleAIPanel = useWorkflowStore((s) => s.toggleAIPanel);
+  const showAIPanel = useWorkflowStore((s) => s.showAIPanel);
+  const toggleComponentBrowser = useWorkflowStore((s) => s.toggleComponentBrowser);
+  const showComponentBrowser = useWorkflowStore((s) => s.showComponentBrowser);
 
   const handleExport = () => {
     const config = exportToConfig();
@@ -35,43 +49,82 @@ export default function Toolbar() {
           const config = parseYaml(text);
           importFromConfig(config);
         }
+        addToast('Workflow imported from file', 'success');
       } catch (e) {
         console.error('Failed to import:', e);
-        alert('Failed to parse workflow file');
+        addToast('Failed to parse workflow file', 'error');
       }
     };
     input.click();
   };
 
-  const handleValidate = () => {
-    const config = exportToConfig();
-    const errors: string[] = [];
-
-    if (config.modules.length === 0) {
-      errors.push('Workflow has no modules');
+  const handleLoadFromServer = async () => {
+    try {
+      const config = await getWorkflowConfig();
+      importFromConfig(config);
+      addToast('Workflow loaded from server', 'success');
+    } catch (e) {
+      addToast(`Failed to load: ${(e as Error).message}`, 'error');
     }
+  };
 
+  const handleSave = async () => {
+    const config = exportToConfig();
+    try {
+      await saveWorkflowConfig(config);
+      addToast('Workflow saved to server', 'success');
+    } catch (e) {
+      addToast(`Save failed: ${(e as Error).message}`, 'error');
+    }
+  };
+
+  const handleValidate = async () => {
+    const config = exportToConfig();
+
+    // Client-side validation first
+    const localErrors: string[] = [];
+    if (config.modules.length === 0) {
+      localErrors.push('Workflow has no modules');
+    }
     const names = config.modules.map((m) => m.name);
     const dupes = names.filter((n, i) => names.indexOf(n) !== i);
     if (dupes.length > 0) {
-      errors.push(`Duplicate module names: ${dupes.join(', ')}`);
+      localErrors.push(`Duplicate module names: ${dupes.join(', ')}`);
     }
-
     for (const mod of config.modules) {
-      if (!mod.name.trim()) errors.push(`Module of type ${mod.type} has no name`);
+      if (!mod.name.trim()) localErrors.push(`Module of type ${mod.type} has no name`);
       if (mod.dependsOn) {
         for (const dep of mod.dependsOn) {
           if (!names.includes(dep)) {
-            errors.push(`${mod.name} depends on unknown module: ${dep}`);
+            localErrors.push(`${mod.name} depends on unknown module: ${dep}`);
           }
         }
       }
     }
 
-    if (errors.length === 0) {
-      alert('Workflow is valid!');
-    } else {
-      alert('Validation errors:\n\n' + errors.join('\n'));
+    if (localErrors.length > 0) {
+      for (const err of localErrors) {
+        addToast(err, 'error');
+      }
+      return;
+    }
+
+    // Try server validation
+    try {
+      const result = await validateWorkflow(config);
+      if (result.valid) {
+        addToast('Workflow is valid', 'success');
+      } else {
+        for (const err of result.errors) {
+          addToast(err, 'error');
+        }
+        for (const warn of result.warnings) {
+          addToast(warn, 'warning');
+        }
+      }
+    } catch {
+      // Server not available, use local result
+      addToast('Workflow is valid (local check only)', 'info');
     }
   };
 
@@ -92,8 +145,28 @@ export default function Toolbar() {
       </span>
 
       <ToolbarButton label="Import" onClick={handleImport} />
+      <ToolbarButton label="Load Server" onClick={handleLoadFromServer} />
       <ToolbarButton label="Export YAML" onClick={handleExport} disabled={nodes.length === 0} />
+      <ToolbarButton label="Save" onClick={handleSave} disabled={nodes.length === 0} />
       <ToolbarButton label="Validate" onClick={handleValidate} disabled={nodes.length === 0} />
+
+      <Separator />
+
+      <ToolbarButton label="Undo" onClick={undo} disabled={undoStack.length === 0} />
+      <ToolbarButton label="Redo" onClick={redo} disabled={redoStack.length === 0} />
+
+      <Separator />
+
+      <ToolbarButton
+        label="AI Copilot"
+        onClick={toggleAIPanel}
+        variant={showAIPanel ? 'active' : undefined}
+      />
+      <ToolbarButton
+        label="Components"
+        onClick={toggleComponentBrowser}
+        variant={showComponentBrowser ? 'active' : undefined}
+      />
 
       <div style={{ flex: 1 }} />
 
@@ -101,6 +174,10 @@ export default function Toolbar() {
       <ToolbarButton label="Clear" onClick={clearCanvas} disabled={nodes.length === 0} variant="danger" />
     </div>
   );
+}
+
+function Separator() {
+  return <div style={{ width: 1, height: 20, background: '#313244', margin: '0 4px' }} />;
 }
 
 function ToolbarButton({
@@ -112,18 +189,26 @@ function ToolbarButton({
   label: string;
   onClick: () => void;
   disabled?: boolean;
-  variant?: 'danger';
+  variant?: 'danger' | 'active';
 }) {
+  const color = disabled
+    ? '#585b70'
+    : variant === 'danger'
+    ? '#f38ba8'
+    : variant === 'active'
+    ? '#89b4fa'
+    : '#cdd6f4';
+
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       style={{
         padding: '5px 12px',
-        background: variant === 'danger' ? '#45475a' : '#313244',
-        border: '1px solid #45475a',
+        background: variant === 'active' ? '#313244' : variant === 'danger' ? '#45475a' : '#313244',
+        border: `1px solid ${variant === 'active' ? '#89b4fa' : '#45475a'}`,
         borderRadius: 4,
-        color: disabled ? '#585b70' : variant === 'danger' ? '#f38ba8' : '#cdd6f4',
+        color,
         fontSize: 12,
         cursor: disabled ? 'default' : 'pointer',
         fontWeight: 500,

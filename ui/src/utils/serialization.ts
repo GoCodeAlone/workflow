@@ -1,3 +1,4 @@
+import yaml from 'js-yaml';
 import type { Edge } from '@xyflow/react';
 import type { WorkflowNode } from '../store/workflowStore.ts';
 import type { ModuleConfig, WorkflowConfig } from '../types/workflow.ts';
@@ -105,154 +106,14 @@ function nodeComponentType(moduleType: string): string {
 }
 
 export function configToYaml(config: WorkflowConfig): string {
-  return toYaml(config, 0);
-}
-
-function toYaml(value: unknown, indent: number): string {
-  const prefix = '  '.repeat(indent);
-
-  if (value === null || value === undefined) return 'null';
-  if (typeof value === 'string') return value.includes(':') || value.includes('#') ? `"${value}"` : value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) return '[]';
-    return value.map((item) => {
-      if (typeof item === 'object' && item !== null) {
-        const entries = Object.entries(item as Record<string, unknown>);
-        const firstEntry = entries[0];
-        const rest = entries.slice(1);
-        let result = `${prefix}- ${firstEntry[0]}: ${toYaml(firstEntry[1], indent + 2)}`;
-        for (const [k, v] of rest) {
-          result += `\n${prefix}  ${k}: ${toYaml(v, indent + 2)}`;
-        }
-        return result;
-      }
-      return `${prefix}- ${toYaml(item, indent + 1)}`;
-    }).join('\n');
-  }
-
-  if (typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
-    const entries = Object.entries(obj);
-    if (entries.length === 0) return '{}';
-    return entries
-      .map(([k, v]) => {
-        if (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v as object).length > 0) {
-          return `${prefix}${k}:\n${toYaml(v, indent + 1)}`;
-        }
-        if (Array.isArray(v) && v.length > 0) {
-          return `${prefix}${k}:\n${toYaml(v, indent + 1)}`;
-        }
-        return `${prefix}${k}: ${toYaml(v, indent + 1)}`;
-      })
-      .join('\n');
-  }
-
-  return String(value);
+  return yaml.dump(config, { lineWidth: -1, noRefs: true, sortKeys: false });
 }
 
 export function parseYaml(text: string): WorkflowConfig {
-  // Simple YAML parser for workflow configs - handles basic cases
-  // For production use, a full YAML parser library would be recommended
-  const lines = text.split('\n');
-  const result: Record<string, unknown> = {};
-  const modules: ModuleConfig[] = [];
-  let currentModule: Partial<ModuleConfig> | null = null;
-  let inModules = false;
-  let inConfig = false;
-  let configObj: Record<string, unknown> = {};
-  let inDependsOn = false;
-  const deps: string[] = [];
-
-  for (const rawLine of lines) {
-    const line = rawLine.trimEnd();
-    if (!line || line.startsWith('#')) continue;
-
-    if (line === 'modules:') {
-      inModules = true;
-      continue;
-    }
-    if (line === 'workflows:' || line === 'triggers:') {
-      if (currentModule) {
-        if (Object.keys(configObj).length > 0) currentModule.config = { ...configObj };
-        if (deps.length > 0) currentModule.dependsOn = [...deps];
-        modules.push(currentModule as ModuleConfig);
-      }
-      inModules = false;
-      inConfig = false;
-      inDependsOn = false;
-      currentModule = null;
-      continue;
-    }
-
-    if (inModules) {
-      const itemMatch = line.match(/^\s*-\s+(\w+):\s*(.*)/);
-      if (itemMatch) {
-        if (currentModule) {
-          if (Object.keys(configObj).length > 0) currentModule.config = { ...configObj };
-          if (deps.length > 0) currentModule.dependsOn = [...deps];
-          modules.push(currentModule as ModuleConfig);
-        }
-        currentModule = {};
-        configObj = {};
-        deps.length = 0;
-        inConfig = false;
-        inDependsOn = false;
-        currentModule[itemMatch[1] as keyof ModuleConfig] = itemMatch[2] as never;
-        continue;
-      }
-
-      if (currentModule) {
-        const kvMatch = line.match(/^\s+(\w+):\s*(.*)/);
-        if (kvMatch) {
-          const [, key, value] = kvMatch;
-          if (key === 'config') {
-            inConfig = true;
-            inDependsOn = false;
-            continue;
-          }
-          if (key === 'dependsOn') {
-            inDependsOn = true;
-            inConfig = false;
-            continue;
-          }
-          if (inConfig) {
-            configObj[key] = parseValue(value);
-          } else if (!inDependsOn) {
-            inConfig = false;
-            inDependsOn = false;
-            currentModule[key as keyof ModuleConfig] = value as never;
-          }
-        }
-        const depMatch = line.match(/^\s+-\s+(.*)/);
-        if (depMatch && inDependsOn) {
-          deps.push(depMatch[1].trim());
-        }
-      }
-    }
-  }
-
-  if (currentModule) {
-    if (Object.keys(configObj).length > 0) currentModule.config = { ...configObj };
-    if (deps.length > 0) currentModule.dependsOn = [...deps];
-    modules.push(currentModule as ModuleConfig);
-  }
-
-  result.modules = modules;
-  result.workflows = {};
-  result.triggers = {};
-
-  return result as unknown as WorkflowConfig;
-}
-
-function parseValue(s: string): unknown {
-  s = s.trim();
-  if (s === 'true') return true;
-  if (s === 'false') return false;
-  if (s === 'null') return null;
-  const num = Number(s);
-  if (!isNaN(num) && s !== '') return num;
-  if (s.startsWith('"') && s.endsWith('"')) return s.slice(1, -1);
-  return s;
+  const parsed = yaml.load(text) as Record<string, unknown>;
+  return {
+    modules: (parsed.modules ?? []) as ModuleConfig[],
+    workflows: (parsed.workflows ?? {}) as Record<string, unknown>,
+    triggers: (parsed.triggers ?? {}) as Record<string, unknown>,
+  };
 }

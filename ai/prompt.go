@@ -228,6 +228,17 @@ For each component in "components", include:
 	return b.String()
 }
 
+// ComponentFormat specifies the target format for generated component code.
+type ComponentFormat string
+
+const (
+	// FormatModule generates code implementing the modular.Module interface (struct-based).
+	FormatModule ComponentFormat = "module"
+	// FormatDynamic generates code as a flat package with exported functions
+	// compatible with the Yaegi dynamic interpreter.
+	FormatDynamic ComponentFormat = "dynamic"
+)
+
 // ComponentPrompt builds a prompt for generating a single component.
 func ComponentPrompt(spec ComponentSpec) string {
 	return fmt.Sprintf(`Generate Go source code for a workflow component with the following specification:
@@ -245,6 +256,61 @@ Requirements:
 5. Follow Go conventions and best practices.
 
 Return only the Go source code, no explanation.`, spec.Name, spec.Type, spec.Description, spec.Interface, spec.Interface)
+}
+
+// DynamicComponentPrompt builds a prompt for generating a component in dynamic format.
+// Dynamic components are flat packages with exported functions that can be loaded
+// by the Yaegi interpreter at runtime.
+func DynamicComponentPrompt(spec ComponentSpec) string {
+	return fmt.Sprintf(`Generate Go source code for a dynamic workflow component with the following specification:
+
+Name: %s
+Type: %s
+Description: %s
+
+The code MUST follow this exact format for the Yaegi dynamic interpreter:
+
+1. Package must be "package component"
+2. Only use standard library imports from this allowed list:
+   fmt, strings, strconv, encoding/json, encoding/xml, encoding/csv,
+   encoding/base64, context, time, math, math/rand, sort, sync,
+   sync/atomic, errors, io, bytes, bufio, unicode, unicode/utf8,
+   regexp, path, net/url, net/http, log, maps, slices,
+   crypto/sha256, crypto/hmac, crypto/md5, hash, html,
+   html/template, text/template
+3. NO third-party imports (no github.com/... packages)
+4. Must have these exported functions:
+   - Name() string - returns %q
+   - Init(map[string]interface{}) error - initialization with service map
+   - Execute(context.Context, map[string]interface{}) (map[string]interface{}, error) - main logic
+5. Optionally include:
+   - Start(context.Context) error
+   - Stop(context.Context) error
+
+Example structure:
+` + "```go" + `
+package component
+
+import (
+    "context"
+    "fmt"
+)
+
+func Name() string {
+    return "component-name"
+}
+
+func Init(services map[string]interface{}) error {
+    return nil
+}
+
+func Execute(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
+    // Component logic here
+    return map[string]interface{}{"result": "value"}, nil
+}
+` + "```" + `
+
+Return only the Go source code, no explanation.`, spec.Name, spec.Type, spec.Description, spec.Name)
 }
 
 // SuggestPrompt builds a prompt for workflow suggestions.

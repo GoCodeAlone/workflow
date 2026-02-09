@@ -12,6 +12,7 @@ import {
 import type { WorkflowConfig } from '../types/workflow.ts';
 import { MODULE_TYPE_MAP } from '../types/workflow.ts';
 import { nodesToConfig, configToNodes } from '../utils/serialization.ts';
+import type { Toast } from '../components/toast/ToastContainer.tsx';
 
 export interface WorkflowNodeData extends Record<string, unknown> {
   moduleType: string;
@@ -21,11 +22,34 @@ export interface WorkflowNodeData extends Record<string, unknown> {
 
 export type WorkflowNode = Node<WorkflowNodeData>;
 
+interface HistoryEntry {
+  nodes: WorkflowNode[];
+  edges: Edge[];
+}
+
 interface WorkflowStore {
   nodes: WorkflowNode[];
   edges: Edge[];
   selectedNodeId: string | null;
   nodeCounter: number;
+
+  // Toast notifications
+  toasts: Toast[];
+  addToast: (message: string, type: Toast['type']) => void;
+  removeToast: (id: string) => void;
+
+  // Undo/redo
+  undoStack: HistoryEntry[];
+  redoStack: HistoryEntry[];
+  pushHistory: () => void;
+  undo: () => void;
+  redo: () => void;
+
+  // UI panels
+  showAIPanel: boolean;
+  showComponentBrowser: boolean;
+  toggleAIPanel: () => void;
+  toggleComponentBrowser: () => void;
 
   onNodesChange: OnNodesChange<WorkflowNode>;
   onEdgesChange: OnEdgesChange;
@@ -42,11 +66,72 @@ interface WorkflowStore {
   clearCanvas: () => void;
 }
 
+let toastIdCounter = 0;
+
 const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
   nodeCounter: 0,
+
+  // Toast
+  toasts: [],
+  addToast: (message, type) => {
+    const id = `toast-${++toastIdCounter}`;
+    set({ toasts: [...get().toasts, { id, message, type }] });
+  },
+  removeToast: (id) => {
+    set({ toasts: get().toasts.filter((t) => t.id !== id) });
+  },
+
+  // Undo/redo
+  undoStack: [],
+  redoStack: [],
+  pushHistory: () => {
+    const { nodes, edges, undoStack } = get();
+    const entry: HistoryEntry = {
+      nodes: JSON.parse(JSON.stringify(nodes)),
+      edges: JSON.parse(JSON.stringify(edges)),
+    };
+    set({
+      undoStack: [...undoStack.slice(-49), entry],
+      redoStack: [],
+    });
+  },
+  undo: () => {
+    const { undoStack, nodes, edges } = get();
+    if (undoStack.length === 0) return;
+    const prev = undoStack[undoStack.length - 1];
+    set({
+      undoStack: undoStack.slice(0, -1),
+      redoStack: [
+        ...get().redoStack,
+        { nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) },
+      ],
+      nodes: prev.nodes,
+      edges: prev.edges,
+    });
+  },
+  redo: () => {
+    const { redoStack, nodes, edges } = get();
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    set({
+      redoStack: redoStack.slice(0, -1),
+      undoStack: [
+        ...get().undoStack,
+        { nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) },
+      ],
+      nodes: next.nodes,
+      edges: next.edges,
+    });
+  },
+
+  // UI panels
+  showAIPanel: false,
+  showComponentBrowser: false,
+  toggleAIPanel: () => set({ showAIPanel: !get().showAIPanel }),
+  toggleComponentBrowser: () => set({ showComponentBrowser: !get().showComponentBrowser }),
 
   onNodesChange: (changes) => {
     set({ nodes: applyNodeChanges(changes, get().nodes) });
@@ -57,6 +142,7 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   onConnect: (connection) => {
+    get().pushHistory();
     set({ edges: rfAddEdge(connection, get().edges) });
   },
 
@@ -66,6 +152,7 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     const info = MODULE_TYPE_MAP[moduleType];
     if (!info) return;
 
+    get().pushHistory();
     const counter = get().nodeCounter + 1;
     const id = `${moduleType.replace(/\./g, '_')}_${counter}`;
     const newNode: WorkflowNode = {
@@ -86,6 +173,7 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   removeNode: (id) => {
+    get().pushHistory();
     set({
       nodes: get().nodes.filter((n) => n.id !== id),
       edges: get().edges.filter((e) => e.source !== id && e.target !== id),
@@ -115,11 +203,13 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   importFromConfig: (config) => {
+    get().pushHistory();
     const { nodes, edges } = configToNodes(config);
     set({ nodes, edges, selectedNodeId: null });
   },
 
   clearCanvas: () => {
+    get().pushHistory();
     set({ nodes: [], edges: [], selectedNodeId: null, nodeCounter: 0 });
   },
 }));

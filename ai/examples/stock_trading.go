@@ -191,6 +191,134 @@ var _ modular.Module = (*TradeExecutor)(nil)
 	},
 }
 
+// DynamicStockPriceCheckerSource is the stock price checker component written
+// in dynamic format (package component, stdlib only) for the Yaegi interpreter.
+const DynamicStockPriceCheckerSource = `package component
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"math/rand"
+	"strings"
+	"time"
+)
+
+var openPrice float64
+var lastPrice float64
+
+func Name() string {
+	return "stock-price-checker"
+}
+
+func Init(services map[string]interface{}) error {
+	// Seed with a mock opening price
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	openPrice = 150.0 + r.Float64()*10.0
+	lastPrice = openPrice
+	return nil
+}
+
+func Execute(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
+	symbol, _ := params["symbol"].(string)
+	if symbol == "" {
+		return nil, fmt.Errorf("missing required parameter: symbol")
+	}
+
+	thresholdVal, _ := params["threshold"].(float64)
+	if thresholdVal == 0 {
+		thresholdVal = 5.0
+	}
+
+	// Simulate price movement
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	change := (r.Float64() - 0.5) * 4.0
+	lastPrice = lastPrice + change
+
+	pctChange := ((lastPrice - openPrice) / openPrice) * 100.0
+	exceeded := math.Abs(pctChange) >= thresholdVal
+
+	signal := "hold"
+	if exceeded && pctChange < 0 {
+		signal = "buy"
+	} else if exceeded && pctChange > 0 {
+		signal = "sell"
+	}
+
+	return map[string]interface{}{
+		"symbol":     strings.ToUpper(symbol),
+		"openPrice":  fmt.Sprintf("%.2f", openPrice),
+		"lastPrice":  fmt.Sprintf("%.2f", lastPrice),
+		"pctChange":  fmt.Sprintf("%.2f", pctChange),
+		"exceeded":   exceeded,
+		"signal":     signal,
+		"timestamp":  time.Now().Format(time.RFC3339),
+	}, nil
+}
+`
+
+// DynamicTradeExecutorSource is the trade executor component written
+// in dynamic format (package component, stdlib only) for the Yaegi interpreter.
+const DynamicTradeExecutorSource = `package component
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+)
+
+func Name() string {
+	return "trade-executor"
+}
+
+func Init(services map[string]interface{}) error {
+	return nil
+}
+
+func Execute(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
+	action, _ := params["action"].(string)
+	if action == "" {
+		return nil, fmt.Errorf("missing required parameter: action")
+	}
+	symbol, _ := params["symbol"].(string)
+	if symbol == "" {
+		return nil, fmt.Errorf("missing required parameter: symbol")
+	}
+	price, _ := params["price"].(string)
+
+	orderID := fmt.Sprintf("ORD-%d", time.Now().UnixNano())
+
+	return map[string]interface{}{
+		"orderId":   orderID,
+		"status":    "executed",
+		"action":    strings.ToLower(action),
+		"symbol":    strings.ToUpper(symbol),
+		"price":     price,
+		"timestamp": time.Now().Format(time.RFC3339),
+	}, nil
+}
+`
+
+// DynamicStockTradingComponents provides the stock trading components
+// in dynamic format suitable for deployment via the DeployService.
+var DynamicStockTradingComponents = []ai.ComponentSpec{
+	{
+		Name:        "stock-price-checker",
+		Type:        "stock.price.checker",
+		Description: "Fetches current stock price using mock data and detects percentage changes from opening price.",
+		Interface:   "dynamic",
+		GoCode:      DynamicStockPriceCheckerSource,
+	},
+	{
+		Name:        "trade-executor",
+		Type:        "trade.executor",
+		Description: "Executes buy or sell trades and returns order confirmation.",
+		Interface:   "dynamic",
+		GoCode:      DynamicTradeExecutorSource,
+	},
+}
+
 // StockTradingYAML is the expected workflow YAML config for the stock trading example.
 const StockTradingYAML = `# Stock Trading Alert Workflow
 # Monitors AAPL price, alerts on 5% change, triggers buy/sell decisions
