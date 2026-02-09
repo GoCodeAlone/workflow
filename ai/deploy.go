@@ -21,6 +21,7 @@ type DeployService struct {
 	registry  *dynamic.ComponentRegistry
 	pool      *dynamic.InterpreterPool
 	loader    *dynamic.Loader
+	validator *Validator
 }
 
 // NewDeployService creates a DeployService that connects the AI service
@@ -31,6 +32,7 @@ func NewDeployService(ai *Service, registry *dynamic.ComponentRegistry, pool *dy
 		registry:  registry,
 		pool:      pool,
 		loader:    dynamic.NewLoader(pool, registry),
+		validator: NewValidator(DefaultValidationConfig(), pool),
 	}
 }
 
@@ -78,6 +80,18 @@ func (d *DeployService) DeployComponent(ctx context.Context, spec ComponentSpec)
 	source, err := ensureDynamicFormat(source, spec.Name)
 	if err != nil {
 		return fmt.Errorf("source format validation failed: %w", err)
+	}
+
+	// Validate and fix the source if needed
+	if d.validator != nil {
+		fixedSource, result, verr := d.validator.ValidateAndFix(ctx, d.aiService, spec, source)
+		if verr != nil {
+			return fmt.Errorf("validation failed: %w", verr)
+		}
+		if !result.Valid {
+			return fmt.Errorf("source validation failed after retries: %v", result.Errors)
+		}
+		source = fixedSource
 	}
 
 	// Load into the dynamic system (validates imports, compiles, registers)

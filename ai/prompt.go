@@ -374,6 +374,32 @@ func LoadExampleConfigs(exampleDir string) (map[string]string, error) {
 	return examples, nil
 }
 
+// ContextEnrichedPrompt enriches a component generation prompt with available
+// module types and services so the AI can generate components that integrate
+// with the existing system.
+func ContextEnrichedPrompt(spec ComponentSpec, availableModules []string, availableServices []string) string {
+	var b strings.Builder
+	b.WriteString(DynamicComponentPrompt(spec))
+
+	if len(availableModules) > 0 {
+		b.WriteString("\n\n## Available Module Types\n")
+		b.WriteString("The following module types are available in the system:\n")
+		for _, m := range availableModules {
+			b.WriteString(fmt.Sprintf("- %s\n", m))
+		}
+	}
+
+	if len(availableServices) > 0 {
+		b.WriteString("\n\n## Available Services\n")
+		b.WriteString("The following services are available via the Init(services) map:\n")
+		for _, s := range availableServices {
+			b.WriteString(fmt.Sprintf("- %s\n", s))
+		}
+	}
+
+	return b.String()
+}
+
 // ExamplePromptSection builds a prompt section with example configs.
 func ExamplePromptSection(examples map[string]string) string {
 	if len(examples) == 0 {

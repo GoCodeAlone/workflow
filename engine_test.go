@@ -537,3 +537,223 @@ func (h *mockWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 func (h *mockWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
 	return nil, nil
 }
+
+func TestEngine_AddModuleType(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	called := false
+	engine.AddModuleType("custom.module", func(name string, cfg map[string]interface{}) modular.Module {
+		called = true
+		return &mockModule{name: name}
+	})
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "my-custom", Type: "custom.module", Config: map[string]interface{}{}},
+		},
+		Workflows: map[string]interface{}{},
+		Triggers:  map[string]interface{}{},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("BuildFromConfig failed: %v", err)
+	}
+	if !called {
+		t.Error("expected custom factory to be called")
+	}
+}
+
+func TestEngine_BuildFromConfig_BuiltinModules(t *testing.T) {
+	tests := []struct {
+		name       string
+		moduleType string
+		config     map[string]interface{}
+	}{
+		{"http-server", "http.server", map[string]interface{}{"address": ":8080"}},
+		{"http-router", "http.router", map[string]interface{}{}},
+		{"http-handler", "http.handler", map[string]interface{}{"contentType": "text/html"}},
+		{"api-handler", "api.handler", map[string]interface{}{"resourceName": "orders"}},
+		{"auth-mw", "http.middleware.auth", map[string]interface{}{"authType": "Bearer"}},
+		{"logging-mw", "http.middleware.logging", map[string]interface{}{"logLevel": "debug"}},
+		{"ratelimit-mw", "http.middleware.ratelimit", map[string]interface{}{"requestsPerMinute": 100.0, "burstSize": 20.0}},
+		{"cors-mw", "http.middleware.cors", map[string]interface{}{
+			"allowedOrigins": []interface{}{"http://localhost"},
+			"allowedMethods": []interface{}{"GET", "POST"},
+		}},
+		{"broker", "messaging.broker", map[string]interface{}{}},
+		{"msg-handler", "messaging.handler", map[string]interface{}{}},
+		{"sm-engine", "statemachine.engine", map[string]interface{}{}},
+		{"tracker", "state.tracker", map[string]interface{}{}},
+		{"connector", "state.connector", map[string]interface{}{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := newMockApplication()
+			engine := NewStdEngine(app, app.Logger())
+
+			cfg := &config.WorkflowConfig{
+				Modules: []config.ModuleConfig{
+					{Name: tt.name, Type: tt.moduleType, Config: tt.config},
+				},
+				Workflows: map[string]interface{}{},
+				Triggers:  map[string]interface{}{},
+			}
+
+			err := engine.BuildFromConfig(cfg)
+			if err != nil {
+				t.Fatalf("BuildFromConfig failed for %s: %v", tt.moduleType, err)
+			}
+		})
+	}
+}
+
+func TestEngine_BuildFromConfig_UnknownModuleType(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "unknown", Type: "nonexistent.type", Config: map[string]interface{}{}},
+		},
+		Workflows: map[string]interface{}{},
+		Triggers:  map[string]interface{}{},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for unknown module type")
+	}
+}
+
+func TestEngine_BuildFromConfig_NoHandlerForWorkflow(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{},
+		Workflows: map[string]interface{}{
+			"unknown-type": map[string]interface{}{},
+		},
+		Triggers: map[string]interface{}{},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for unhandled workflow type")
+	}
+}
+
+func TestEngine_BuildFromConfig_WithWorkflowHandler(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	engine.RegisterWorkflowHandler(&mockWorkflowHandler{
+		name:       "test",
+		handlesFor: []string{"my-workflow"},
+	})
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{},
+		Workflows: map[string]interface{}{
+			"my-workflow": map[string]interface{}{"key": "val"},
+		},
+		Triggers: map[string]interface{}{},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("BuildFromConfig failed: %v", err)
+	}
+}
+
+func TestEngine_BuildFromConfig_TriggerNoHandler(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	cfg := &config.WorkflowConfig{
+		Modules:   []config.ModuleConfig{},
+		Workflows: map[string]interface{}{},
+		Triggers: map[string]interface{}{
+			"unknown-trigger": map[string]interface{}{},
+		},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for unhandled trigger type")
+	}
+}
+
+func TestEngine_BuildFromConfig_ModularModules(t *testing.T) {
+	modularTypes := []string{
+		"httpserver.modular",
+		"scheduler.modular",
+		"auth.modular",
+		"eventbus.modular",
+		"cache.modular",
+		"chimux.router",
+		"eventlogger.modular",
+		"httpclient.modular",
+		"database.modular",
+		"jsonschema.modular",
+		"http.proxy",
+		"reverseproxy",
+	}
+
+	for _, modType := range modularTypes {
+		t.Run(modType, func(t *testing.T) {
+			app := newMockApplication()
+			engine := NewStdEngine(app, app.Logger())
+
+			cfg := &config.WorkflowConfig{
+				Modules: []config.ModuleConfig{
+					{Name: "test-" + modType, Type: modType, Config: map[string]interface{}{}},
+				},
+				Workflows: map[string]interface{}{},
+				Triggers:  map[string]interface{}{},
+			}
+
+			err := engine.BuildFromConfig(cfg)
+			if err != nil {
+				t.Fatalf("BuildFromConfig failed for %s: %v", modType, err)
+			}
+		})
+	}
+}
+
+func TestCanHandleTrigger(t *testing.T) {
+	tests := []struct {
+		triggerName string
+		triggerType string
+		expected    bool
+	}{
+		{"trigger.http", "http", true},
+		{"trigger.schedule", "schedule", true},
+		{"trigger.event", "event", true},
+		{"mock.trigger", "mock", true},
+		{"any.trigger", "unknown", false},
+		{"trigger.http", "schedule", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.triggerName+"_"+tt.triggerType, func(t *testing.T) {
+			trigger := &mockTrigger{name: tt.triggerName}
+			result := canHandleTrigger(trigger, tt.triggerType)
+			if result != tt.expected {
+				t.Errorf("canHandleTrigger(%q, %q) = %v, want %v", tt.triggerName, tt.triggerType, result, tt.expected)
+			}
+		})
+	}
+}
+
+// mockModule implements modular.Module for testing
+type mockModule struct {
+	name string
+}
+
+func (m *mockModule) Name() string { return m.name }
+func (m *mockModule) Init(app modular.Application) error {
+	return app.RegisterService(m.name, m)
+}

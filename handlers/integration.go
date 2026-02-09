@@ -209,6 +209,21 @@ func (h *IntegrationWorkflowHandler) ConfigureWorkflow(app modular.Application, 
 			// support mapping webhook events to internal handlers or message queues
 
 			connector = webhookConn
+		case "database":
+			driver, _ := config["driver"].(string)
+			dsn, _ := config["dsn"].(string)
+			if driver == "" || dsn == "" {
+				return fmt.Errorf("driver and dsn must be specified for database connector '%s'", name)
+			}
+			dbConfig := module.DatabaseConfig{
+				Driver: driver,
+				DSN:    dsn,
+			}
+			if maxOpen, ok := config["maxOpenConns"].(float64); ok {
+				dbConfig.MaxOpenConns = int(maxOpen)
+			}
+			dbConn := module.NewDatabaseIntegrationConnector(name, module.NewWorkflowDatabase(name+"-db", dbConfig))
+			connector = dbConn
 		default:
 			return fmt.Errorf("unsupported connector type '%s' for connector '%s'", connType, name)
 		}

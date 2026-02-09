@@ -19,7 +19,9 @@ export type ModuleCategory =
   | 'integration'
   | 'scheduling'
   | 'infrastructure'
-  | 'middleware';
+  | 'middleware'
+  | 'database'
+  | 'observability';
 
 export interface ModuleTypeInfo {
   type: string;
@@ -46,6 +48,8 @@ export const CATEGORY_COLORS: Record<ModuleCategory, string> = {
   scheduling: '#6366f1',
   infrastructure: '#64748b',
   middleware: '#06b6d4',
+  database: '#f97316',
+  observability: '#84cc16',
 };
 
 export const MODULE_TYPES: ModuleTypeInfo[] = [
@@ -274,6 +278,65 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
       { key: 'schema', label: 'Schema', type: 'json' },
     ],
   },
+  // Database
+  {
+    type: 'database.workflow',
+    label: 'Workflow Database',
+    category: 'database',
+    defaultConfig: { driver: 'postgres' },
+    configFields: [
+      { key: 'driver', label: 'Driver', type: 'select', options: ['postgres', 'mysql', 'sqlite'] },
+      { key: 'dsn', label: 'DSN', type: 'string' },
+      { key: 'maxOpenConns', label: 'Max Open Connections', type: 'number', defaultValue: 25 },
+      { key: 'maxIdleConns', label: 'Max Idle Connections', type: 'number', defaultValue: 5 },
+    ],
+  },
+  // Observability
+  {
+    type: 'metrics.collector',
+    label: 'Metrics Collector',
+    category: 'observability',
+    defaultConfig: {},
+    configFields: [],
+  },
+  {
+    type: 'health.checker',
+    label: 'Health Checker',
+    category: 'observability',
+    defaultConfig: {},
+    configFields: [],
+  },
+  {
+    type: 'http.middleware.requestid',
+    label: 'Request ID Middleware',
+    category: 'middleware',
+    defaultConfig: {},
+    configFields: [
+      { key: 'headerName', label: 'Header Name', type: 'string', defaultValue: 'X-Request-ID' },
+    ],
+  },
+  // Integration additions
+  {
+    type: 'data.transformer',
+    label: 'Data Transformer',
+    category: 'integration',
+    defaultConfig: {},
+    configFields: [
+      { key: 'pipelines', label: 'Pipeline Config', type: 'json' },
+    ],
+  },
+  {
+    type: 'webhook.sender',
+    label: 'Webhook Sender',
+    category: 'integration',
+    defaultConfig: { maxRetries: 3 },
+    configFields: [
+      { key: 'maxRetries', label: 'Max Retries', type: 'number', defaultValue: 3 },
+      { key: 'initialBackoff', label: 'Initial Backoff', type: 'string', defaultValue: '1s' },
+      { key: 'maxBackoff', label: 'Max Backoff', type: 'string', defaultValue: '60s' },
+      { key: 'timeout', label: 'Timeout', type: 'string', defaultValue: '30s' },
+    ],
+  },
 ];
 
 export const MODULE_TYPE_MAP: Record<string, ModuleTypeInfo> = Object.fromEntries(
@@ -289,4 +352,6 @@ export const CATEGORIES: { key: ModuleCategory; label: string }[] = [
   { key: 'integration', label: 'Integration' },
   { key: 'scheduling', label: 'Scheduling' },
   { key: 'infrastructure', label: 'Infrastructure' },
+  { key: 'database', label: 'Database' },
+  { key: 'observability', label: 'Observability' },
 ];

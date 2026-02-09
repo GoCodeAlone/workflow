@@ -9,7 +9,7 @@ describe('NodePalette', () => {
     expect(screen.getByText('Modules')).toBeInTheDocument();
   });
 
-  it('renders all 8 categories', () => {
+  it('renders all 10 categories', () => {
     render(<NodePalette />);
 
     for (const cat of CATEGORIES) {
@@ -28,7 +28,8 @@ describe('NodePalette', () => {
     expect(screen.getByText('Message Broker')).toBeInTheDocument();
     expect(screen.getByText('Scheduler')).toBeInTheDocument();
     expect(screen.getByText('Event Logger')).toBeInTheDocument();
-    expect(screen.getByText('Database')).toBeInTheDocument();
+    // "Database" appears both as category label and module label
+    expect(screen.getAllByText('Database').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Rate Limiter')).toBeInTheDocument();
     expect(screen.getByText('CORS Middleware')).toBeInTheDocument();
     // "State Machine" appears both as category and module label

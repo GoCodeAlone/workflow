@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/CrisisTextLine/modular/modules/auth"
@@ -17,6 +18,7 @@ import (
 	"github.com/CrisisTextLine/modular/modules/reverseproxy/v2"
 	"github.com/CrisisTextLine/modular/modules/scheduler"
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/module"
 )
 
@@ -51,6 +53,12 @@ type StdEngine struct {
 	modules          []modular.Module
 	triggers         []module.Trigger
 	triggerRegistry  *module.TriggerRegistry
+	dynamicRegistry  *dynamic.ComponentRegistry
+}
+
+// SetDynamicRegistry sets the dynamic component registry on the engine.
+func (e *StdEngine) SetDynamicRegistry(registry *dynamic.ComponentRegistry) {
+	e.dynamicRegistry = registry
 }
 
 // NewStdEngine creates a new workflow engine
@@ -221,6 +229,74 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "jsonschema.modular":
 				e.logger.Debug("Loading Modular JSON schema module")
 				mod = jsonschema.NewModule()
+			case "metrics.collector":
+				e.logger.Debug("Loading metrics collector module")
+				mod = module.NewMetricsCollector(modCfg.Name)
+			case "health.checker":
+				e.logger.Debug("Loading health checker module")
+				mod = module.NewHealthChecker(modCfg.Name)
+			case "http.middleware.requestid":
+				e.logger.Debug("Loading request ID middleware module")
+				mod = module.NewRequestIDMiddleware(modCfg.Name)
+			case "dynamic.component":
+				e.logger.Debug("Loading dynamic component module: " + modCfg.Name)
+				if e.dynamicRegistry == nil {
+					return fmt.Errorf("dynamic registry not set, cannot load dynamic component %q", modCfg.Name)
+				}
+				componentID := modCfg.Name
+				if id, ok := modCfg.Config["componentId"].(string); ok {
+					componentID = id
+				}
+				comp, ok := e.dynamicRegistry.Get(componentID)
+				if !ok {
+					return fmt.Errorf("dynamic component %q not found in registry", componentID)
+				}
+				adapter := dynamic.NewModuleAdapter(comp)
+				if provides, ok := modCfg.Config["provides"].([]interface{}); ok {
+					svcs := make([]string, 0, len(provides))
+					for _, p := range provides {
+						if s, ok := p.(string); ok {
+							svcs = append(svcs, s)
+						}
+					}
+					adapter.SetProvides(svcs)
+				}
+				if requires, ok := modCfg.Config["requires"].([]interface{}); ok {
+					svcs := make([]string, 0, len(requires))
+					for _, r := range requires {
+						if s, ok := r.(string); ok {
+							svcs = append(svcs, s)
+						}
+					}
+					adapter.SetRequires(svcs)
+				}
+				mod = adapter
+			case "database.workflow":
+				e.logger.Debug("Loading workflow database module")
+				dbConfig := module.DatabaseConfig{}
+				if driver, ok := modCfg.Config["driver"].(string); ok {
+					dbConfig.Driver = driver
+				}
+				if dsn, ok := modCfg.Config["dsn"].(string); ok {
+					dbConfig.DSN = dsn
+				}
+				if maxOpen, ok := modCfg.Config["maxOpenConns"].(float64); ok {
+					dbConfig.MaxOpenConns = int(maxOpen)
+				}
+				if maxIdle, ok := modCfg.Config["maxIdleConns"].(float64); ok {
+					dbConfig.MaxIdleConns = int(maxIdle)
+				}
+				mod = module.NewWorkflowDatabase(modCfg.Name, dbConfig)
+			case "data.transformer":
+				e.logger.Debug("Loading data transformer module")
+				mod = module.NewDataTransformer(modCfg.Name)
+			case "webhook.sender":
+				e.logger.Debug("Loading webhook sender module")
+				webhookConfig := module.WebhookConfig{}
+				if mr, ok := modCfg.Config["maxRetries"].(float64); ok {
+					webhookConfig.MaxRetries = int(mr)
+				}
+				mod = module.NewWebhookSender(modCfg.Name, webhookConfig)
 			default:
 				e.logger.Warn("Unknown module type: " + modCfg.Type)
 				return fmt.Errorf("unknown module type: %s", modCfg.Type)
@@ -311,6 +387,8 @@ func (e *StdEngine) Stop(ctx context.Context) error {
 
 // TriggerWorkflow starts a workflow based on a trigger
 func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) error {
+	startTime := time.Now()
+
 	// Find the appropriate workflow handler
 	for _, handler := range e.workflowHandlers {
 		if handler.CanHandle(workflowType) {
@@ -326,6 +404,7 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 			results, err := handler.ExecuteWorkflow(ctx, workflowType, action, data)
 			if err != nil {
 				e.logger.Error(fmt.Sprintf("Failed to execute workflow '%s': %v", workflowType, err))
+				e.recordWorkflowMetrics(workflowType, action, "error", time.Since(startTime))
 				return fmt.Errorf("workflow execution failed: %w", err)
 			}
 
@@ -335,11 +414,21 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 				e.logger.Debug(fmt.Sprintf("  Result %s: %v", k, v))
 			}
 
+			e.recordWorkflowMetrics(workflowType, action, "success", time.Since(startTime))
 			return nil
 		}
 	}
 
 	return fmt.Errorf("no handler found for workflow type: %s", workflowType)
+}
+
+// recordWorkflowMetrics records workflow execution metrics if the metrics collector is available.
+func (e *StdEngine) recordWorkflowMetrics(workflowType, action, status string, duration time.Duration) {
+	var mc *module.MetricsCollector
+	if err := e.app.GetService("metrics.collector", &mc); err == nil && mc != nil {
+		mc.RecordWorkflowExecution(workflowType, action, status)
+		mc.RecordWorkflowDuration(workflowType, action, duration)
+	}
 }
 
 // configureTriggers sets up all triggers from configuration

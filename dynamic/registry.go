@@ -69,3 +69,14 @@ func (r *ComponentRegistry) Count() int {
 	defer r.mu.RUnlock()
 	return len(r.components)
 }
+
+// ListNames returns the IDs of all registered components.
+func (r *ComponentRegistry) ListNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.components))
+	for id := range r.components {
+		names = append(names, id)
+	}
+	return names
+}
