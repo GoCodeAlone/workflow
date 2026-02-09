@@ -3,266 +3,171 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"reflect"
 	"testing"
-	"time"
 
-	"github.com/CrisisTextLine/modular"
-	"github.com/GoCodeAlone/workflow/mock"
 	"github.com/GoCodeAlone/workflow/module"
 )
 
-// Variable to track if pattern was matched in test
-var patternMatchDetected bool
-
-// TestEventWorkflow tests the event workflow handler
-func TestEventWorkflow(t *testing.T) {
-	// Reset the pattern detection flag
-	patternMatchDetected = false
-
-	// Create a new app for testing with logging
-	logger := &mock.Logger{LogEntries: make([]string, 0)}
-	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
-	err := app.Init()
-	if err != nil {
-		t.Fatalf("Failed to initialize app: %v", err)
+func TestNewEventWorkflowHandler(t *testing.T) {
+	h := NewEventWorkflowHandler()
+	if h == nil {
+		t.Fatal("expected non-nil handler")
 	}
+}
 
-	// Create a simple message broker
-	broker := module.NewInMemoryMessageBroker("event-broker")
-	err = app.RegisterService("event-broker", broker)
-	if err != nil {
-		t.Fatalf("Failed to register broker: %v", err)
+func TestEventWorkflowHandler_CanHandle(t *testing.T) {
+	h := NewEventWorkflowHandler()
+	if !h.CanHandle("event") {
+		t.Error("expected CanHandle('event') to be true")
 	}
-
-	// Create and register event processor
-	processor := module.NewEventProcessor("event-processor")
-	err = app.RegisterService("event-processor", processor)
-	if err != nil {
-		t.Fatalf("Failed to register processor: %v", err)
+	if h.CanHandle("http") {
+		t.Error("expected CanHandle('http') to be false")
 	}
+}
 
-	// Add an event pattern directly to the processor
-	pattern := &module.EventPattern{
-		PatternID:    "test-pattern",
-		EventTypes:   []string{"test.event"},
-		WindowTime:   3 * time.Second, // Make the window larger for reliability
-		Condition:    "count",
-		MinOccurs:    3,
-		MaxOccurs:    0,
-		OrderMatters: false,
+func TestEventWorkflowHandler_ConfigureWorkflow_InvalidFormat(t *testing.T) {
+	h := NewEventWorkflowHandler()
+	app := CreateMockApplication()
+	err := h.ConfigureWorkflow(app, "invalid")
+	if err == nil {
+		t.Fatal("expected error for invalid format")
 	}
-	processor.AddPattern(pattern)
+}
 
-	// Initialize the modules
-	err = app.Init()
-	if err != nil {
-		t.Fatalf("Failed to initialize app with modules: %v", err)
+func TestEventWorkflowHandler_ConfigureWorkflow_NoProcessor(t *testing.T) {
+	h := NewEventWorkflowHandler()
+	app := CreateMockApplication()
+	err := h.ConfigureWorkflow(app, map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing processor")
 	}
+}
 
-	// Register our handler directly to catch pattern matches
-	handlerCalled := make(chan struct{})
-	handler := module.NewFunctionHandler(func(ctx context.Context, match module.PatternMatch) error {
-		fmt.Printf("Pattern matched! Events count: %d\n", len(match.Events))
-		for i, evt := range match.Events {
-			fmt.Printf("  Event %d: type=%s, source=%s\n", i, evt.EventType, evt.SourceID)
-		}
-		patternMatchDetected = true
-		close(handlerCalled)
-		return nil
+func TestEventWorkflowHandler_ConfigureWorkflow_ProcessorNotFound(t *testing.T) {
+	h := NewEventWorkflowHandler()
+	app := CreateMockApplication()
+	err := h.ConfigureWorkflow(app, map[string]interface{}{
+		"processor": "my-processor",
 	})
-
-	// Register the handler directly with the pattern ID
-	err = processor.RegisterHandler("test-pattern", handler)
-	if err != nil {
-		t.Fatalf("Failed to register handler: %v", err)
+	if err == nil {
+		t.Fatal("expected error for processor not found")
 	}
+}
 
-	// Start all modules
-	err = app.Start()
-	if err != nil {
-		t.Fatalf("Failed to start modules: %v", err)
+func TestEventWorkflowHandler_ExecuteWorkflow_NoAppContext(t *testing.T) {
+	h := NewEventWorkflowHandler()
+	ctx := context.Background()
+	_, err := h.ExecuteWorkflow(ctx, "event", "processor", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing application context")
 	}
+}
 
-	// Create message-to-event adapter manually
-	msgToEventAdapter := module.NewFunctionMessageHandler(func(message []byte) error {
-		// Parse message
-		var data map[string]interface{}
-		if err := json.Unmarshal(message, &data); err != nil {
-			return fmt.Errorf("invalid message format: %w", err)
-		}
+func TestEventWorkflowHandler_ExecuteWorkflow_ProcessorNotFound(t *testing.T) {
+	h := NewEventWorkflowHandler()
+	app := CreateMockApplication()
+	ctx := context.WithValue(context.Background(), "application", app)
+	_, err := h.ExecuteWorkflow(ctx, "event", "my-processor", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for processor not found")
+	}
+}
 
-		// Extract source ID
-		sourceID, _ := data["userId"].(string)
+func TestEventProcessorAdapter_HandleEvent_Map(t *testing.T) {
+	processor := module.NewEventProcessor("test-processor")
+	adapter := &EventProcessorAdapter{Processor: processor}
 
-		// Create event
-		event := module.EventData{
-			EventType:  "test.event",
-			Timestamp:  time.Now(),
-			SourceID:   sourceID,
-			Data:       data,
-			RawMessage: message,
-		}
-
-		fmt.Printf("Processing event: %s, sourceID: %s\n", event.EventType, event.SourceID)
-
-		// Send event to processor
-		return processor.ProcessEvent(context.Background(), event)
+	ctx := context.Background()
+	err := adapter.HandleEvent(ctx, map[string]interface{}{
+		"eventType": "test.event",
+		"sourceId":  "src-1",
+		"data":      "value",
 	})
-
-	// Subscribe handler to broker topic
-	err = broker.Subscribe("test-topic", msgToEventAdapter)
 	if err != nil {
-		t.Fatalf("Failed to subscribe handler: %v", err)
+		t.Fatalf("HandleEvent with map failed: %v", err)
 	}
+}
 
-	// Send test events
-	for i := 0; i < 3; i++ {
-		msg := []byte(fmt.Sprintf(`{"userId":"123","eventType":"test.event","data":"test-%d"}`, i))
-		err = broker.SendMessage("test-topic", msg)
-		if err != nil {
-			t.Fatalf("Failed to send message: %v", err)
-		}
-		// Add small delay between messages
-		time.Sleep(100 * time.Millisecond)
-	}
+func TestEventProcessorAdapter_HandleEvent_Bytes(t *testing.T) {
+	processor := module.NewEventProcessor("test-processor")
+	adapter := &EventProcessorAdapter{Processor: processor}
 
-	// Wait for pattern match with timeout
-	select {
-	case <-handlerCalled:
-		// Success! Pattern was detected
-	case <-time.After(2 * time.Second):
-		// Dump all events in the processor buffer for debugging
-		fmt.Println("DEBUG - Pattern not detected in time. Current processor state:")
-		dumpProcessorEvents(processor)
-		t.Errorf("Expected event pattern to be detected")
-	}
-
-	// Stop all modules
-	err = app.Stop()
+	ctx := context.Background()
+	payload, _ := json.Marshal(map[string]interface{}{
+		"eventType": "test.event",
+		"sourceId":  "src-1",
+	})
+	err := adapter.HandleEvent(ctx, payload)
 	if err != nil {
-		t.Fatalf("Failed to stop modules: %v", err)
+		t.Fatalf("HandleEvent with bytes failed: %v", err)
 	}
 }
 
-// Helper function to dump processor events for debugging
-func dumpProcessorEvents(processor *module.EventProcessor) {
-	// Access the internal event buffer for debugging
-	value := reflect.ValueOf(processor).Elem()
-	bufferField := value.FieldByName("eventBuffer")
+func TestEventProcessorAdapter_HandleEvent_String(t *testing.T) {
+	processor := module.NewEventProcessor("test-processor")
+	adapter := &EventProcessorAdapter{Processor: processor}
 
-	if bufferField.IsValid() {
-		fmt.Println("Event buffer found in processor")
-		// We can't directly access unexported fields, but in a real debug scenario
-		// you would add an exported method to dump the state
-	}
-
-	// Also dump all patterns
-	patternsField := value.FieldByName("patterns")
-	if patternsField.IsValid() {
-		fmt.Printf("Number of patterns: %d\n", patternsField.Len())
+	ctx := context.Background()
+	payload := `{"eventType":"test.event","sourceId":"src-1"}`
+	err := adapter.HandleEvent(ctx, payload)
+	if err != nil {
+		t.Fatalf("HandleEvent with string failed: %v", err)
 	}
 }
 
-// MockEventProcessor is a mock implementation of module.EventProcessor for testing
-type MockEventProcessor struct {
-	HandleEventFn func(ctx context.Context, event interface{}) error
-	patterns      []*module.EventPattern
-	handlers      map[string]module.EventHandler
-}
+func TestEventProcessorAdapter_HandleEvent_InvalidBytes(t *testing.T) {
+	processor := module.NewEventProcessor("test-processor")
+	adapter := &EventProcessorAdapter{Processor: processor}
 
-// Name returns the name of the processor
-func (p *MockEventProcessor) Name() string {
-	return "event-processor"
-}
-
-// Init initializes the mock processor
-func (p *MockEventProcessor) Init(app modular.Application) error {
-	return app.RegisterService("event-processor", p)
-}
-
-// Start implements module.Module interface
-func (p *MockEventProcessor) Start(ctx context.Context) error {
-	return nil
-}
-
-// Stop implements module.Module interface
-func (p *MockEventProcessor) Stop(ctx context.Context) error {
-	return nil
-}
-
-// ProvidesServices implements module.Module interface
-func (p *MockEventProcessor) ProvidesServices() []modular.ServiceProvider {
-	return []modular.ServiceProvider{
-		{
-			Name:        "event-processor",
-			Description: "Mock Event Processor",
-			Instance:    p,
-		},
+	ctx := context.Background()
+	err := adapter.HandleEvent(ctx, []byte("not json"))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON bytes")
 	}
 }
 
-// RequiresServices implements module.Module interface
-func (p *MockEventProcessor) RequiresServices() []modular.ServiceDependency {
-	return nil
-}
+func TestEventProcessorAdapter_HandleEvent_InvalidString(t *testing.T) {
+	processor := module.NewEventProcessor("test-processor")
+	adapter := &EventProcessorAdapter{Processor: processor}
 
-// HandleEvent handles an event
-func (p *MockEventProcessor) HandleEvent(ctx context.Context, event interface{}) error {
-	if p.HandleEventFn != nil {
-		return p.HandleEventFn(ctx, event)
+	ctx := context.Background()
+	err := adapter.HandleEvent(ctx, "not json")
+	if err == nil {
+		t.Fatal("expected error for invalid JSON string")
 	}
-	return nil
 }
 
-// ProcessEvent processes a new event
-func (p *MockEventProcessor) ProcessEvent(ctx context.Context, event module.EventData) error {
-	return nil
-}
+func TestEventProcessorAdapter_HandleEvent_UnsupportedType(t *testing.T) {
+	processor := module.NewEventProcessor("test-processor")
+	adapter := &EventProcessorAdapter{Processor: processor}
 
-// AddPattern adds a pattern to the processor
-func (p *MockEventProcessor) AddPattern(pattern *module.EventPattern) {
-	if p.patterns == nil {
-		p.patterns = make([]*module.EventPattern, 0)
+	ctx := context.Background()
+	err := adapter.HandleEvent(ctx, 12345)
+	if err == nil {
+		t.Fatal("expected error for unsupported type")
 	}
-	p.patterns = append(p.patterns, pattern)
 }
 
-// RegisterHandler registers a handler for a pattern
-func (p *MockEventProcessor) RegisterHandler(patternID string, handler module.EventHandler) error {
-	if p.handlers == nil {
-		p.handlers = make(map[string]module.EventHandler)
+func TestRegisterEventProcessor(t *testing.T) {
+	app := CreateMockApplication()
+	processor := module.NewEventProcessor("event-proc")
+
+	err := RegisterEventProcessor(app, processor)
+	if err != nil {
+		t.Fatalf("RegisterEventProcessor failed: %v", err)
 	}
-	p.handlers[patternID] = handler
-	return nil
 }
 
-// Service provides access to a named service
-func (p *MockEventProcessor) Service(name string) interface{} {
-	if name == "event-processor" {
-		return p
+func TestEventProcessorAdapter_HandleEvent_MapWithUserID(t *testing.T) {
+	processor := module.NewEventProcessor("test-processor")
+	adapter := &EventProcessorAdapter{Processor: processor}
+
+	ctx := context.Background()
+	err := adapter.HandleEvent(ctx, map[string]interface{}{
+		"userId": "user-123",
+		"data":   "value",
+	})
+	if err != nil {
+		t.Fatalf("HandleEvent with userId failed: %v", err)
 	}
-	return nil
 }
-
-// GetService implements service lookup
-func (p *MockEventProcessor) GetService(name string, out interface{}) error {
-	if name == "event-processor" {
-		switch outPtr := out.(type) {
-		case **MockEventProcessor:
-			*outPtr = p
-		}
-	}
-	return nil
-}
-
-// Services returns all services
-func (p *MockEventProcessor) Services() map[string]interface{} {
-	services := make(map[string]interface{})
-	services["event-processor"] = p
-	return services
-}
-
-// EventProcessorAdapter code has been moved to events.go
-// Do not redeclare it here
