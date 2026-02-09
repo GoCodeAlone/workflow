@@ -1,0 +1,7 @@
+modules:
+  - name: Custom Server
+    type: http.server
+    config:
+      address: ':8080'
+workflows: {}
+triggers: {}

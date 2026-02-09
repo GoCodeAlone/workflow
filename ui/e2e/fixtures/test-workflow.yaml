@@ -1,0 +1,19 @@
+modules:
+  - name: Web Server
+    type: http.server
+    config:
+      address: ":3000"
+  - name: API Router
+    type: http.router
+    config:
+      prefix: /api
+    dependsOn:
+      - Web Server
+  - name: Auth
+    type: http.middleware.auth
+    config:
+      type: jwt
+    dependsOn:
+      - API Router
+workflows: {}
+triggers: {}
