@@ -23,8 +23,8 @@ type ClientConfig struct {
 
 // Client implements ai.WorkflowGenerator using the GitHub Copilot SDK.
 type Client struct {
-	cfg        ClientConfig
-	copilotCli *copilot.Client
+	cfg     ClientConfig
+	wrapper ClientWrapper
 }
 
 // NewClient creates a new Copilot SDK client. The Copilot CLI must be available.
@@ -39,8 +39,8 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	})
 
 	return &Client{
-		cfg:        cfg,
-		copilotCli: cli,
+		cfg:     cfg,
+		wrapper: &realClientWrapper{cli: cli},
 	}, nil
 }
 
@@ -131,8 +131,8 @@ func workflowTools() []copilot.Tool {
 	}
 }
 
-func (c *Client) createSession(ctx context.Context) (*copilot.Session, error) {
-	session, err := c.copilotCli.CreateSession(ctx, &copilot.SessionConfig{
+func (c *Client) createSession(ctx context.Context) (SessionWrapper, error) {
+	session, err := c.wrapper.CreateSession(ctx, &copilot.SessionConfig{
 		Model: c.cfg.Model,
 		Tools: workflowTools(),
 		SystemMessage: &copilot.SystemMessageConfig{

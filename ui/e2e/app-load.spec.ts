@@ -14,11 +14,11 @@ test.describe('App Load', () => {
     await expect(page.getByText('Workflow Editor')).toBeVisible();
   });
 
-  test('should display the node palette sidebar with all 8 categories', async ({ page }) => {
+  test('should display the node palette sidebar with all 10 categories', async ({ page }) => {
     // The sidebar header "Modules" should be visible
     await expect(page.getByText('Modules', { exact: true })).toBeVisible();
 
-    // All 8 categories should be present
+    // All 10 categories should be present
     const categories = [
       'HTTP',
       'Middleware',
@@ -28,6 +28,8 @@ test.describe('App Load', () => {
       'Integration',
       'Scheduling',
       'Infrastructure',
+      'Database',
+      'Observability',
     ];
 
     for (const category of categories) {
@@ -91,5 +93,16 @@ test.describe('App Load', () => {
   test('should display the property panel placeholder', async ({ page }) => {
     // When no node is selected, the property panel shows placeholder text
     await expect(page.getByText('Select a node to edit its properties')).toBeVisible();
+  });
+
+  test('should display new Database category items', async ({ page }) => {
+    // Database category should show module items
+    await expect(page.getByText('Workflow Database')).toBeVisible();
+  });
+
+  test('should display new Observability category items', async ({ page }) => {
+    // Observability category should show module items
+    await expect(page.getByText('Metrics Collector')).toBeVisible();
+    await expect(page.getByText('Health Checker')).toBeVisible();
   });
 });

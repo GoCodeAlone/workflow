@@ -10,6 +10,7 @@ async function dragModuleToCanvas(
   canvasY: number,
 ) {
   const paletteItem = page.getByText(moduleLabel, { exact: true }).first();
+  await paletteItem.scrollIntoViewIfNeeded();
   await expect(paletteItem).toBeVisible();
 
   const sourceBounds = await paletteItem.boundingBox();
@@ -60,6 +61,12 @@ async function dragModuleToCanvas(
         'HTTP Client': 'httpclient.modular',
         'Database': 'database.modular',
         'JSON Schema Validator': 'jsonschema.modular',
+        'Workflow Database': 'database.workflow',
+        'Metrics Collector': 'metrics.collector',
+        'Health Checker': 'health.checker',
+        'Request ID Middleware': 'http.middleware.requestid',
+        'Data Transformer': 'data.transformer',
+        'Webhook Sender': 'webhook.sender',
       };
 
       const modType = moduleTypeMap[label];

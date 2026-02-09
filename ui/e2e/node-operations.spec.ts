@@ -13,6 +13,7 @@ async function dragModuleToCanvas(
 ) {
   // Find the palette item
   const paletteItem = page.getByText(moduleLabel, { exact: true }).first();
+  await paletteItem.scrollIntoViewIfNeeded();
   await expect(paletteItem).toBeVisible();
 
   const sourceBounds = await paletteItem.boundingBox();
@@ -85,6 +86,12 @@ async function dragModuleToCanvas(
         'HTTP Client': 'httpclient.modular',
         'Database': 'database.modular',
         'JSON Schema Validator': 'jsonschema.modular',
+        'Workflow Database': 'database.workflow',
+        'Metrics Collector': 'metrics.collector',
+        'Health Checker': 'health.checker',
+        'Request ID Middleware': 'http.middleware.requestid',
+        'Data Transformer': 'data.transformer',
+        'Webhook Sender': 'webhook.sender',
       };
 
       const modType = moduleTypeMap[label];
@@ -251,5 +258,48 @@ test.describe('Node Operations', () => {
     await expect(page.getByText('3 modules')).toBeVisible();
 
     await page.screenshot({ path: 'e2e/screenshots/11-multiple-nodes.png', fullPage: true });
+  });
+
+  test('should add a Metrics Collector node to canvas', async ({ page }) => {
+    await dragModuleToCanvas(page, 'Metrics Collector', 300, 200);
+
+    // Verify node appeared
+    const node = page.locator('.react-flow__node').first();
+    await expect(node).toBeVisible();
+
+    // Node should show the label and type badge
+    await expect(node.getByText(/Metrics Collector/)).toBeVisible();
+    await expect(node.getByText('metrics.collector')).toBeVisible();
+
+    // Module count should update
+    await expect(page.getByText('1 modules')).toBeVisible();
+  });
+
+  test('should add a Workflow Database node and show correct property fields', async ({ page }) => {
+    await dragModuleToCanvas(page, 'Workflow Database', 300, 200);
+
+    // Verify node appeared
+    const node = page.locator('.react-flow__node').first();
+    await expect(node).toBeVisible();
+    await expect(node.getByText('database.workflow')).toBeVisible();
+
+    // Click on node to open property panel
+    await node.click();
+
+    // Property panel should show correct config fields for Workflow Database
+    await expect(page.getByText('Properties', { exact: true })).toBeVisible();
+    await expect(page.locator('text=database.workflow').last()).toBeVisible();
+
+    // Should show Driver select field
+    await expect(page.locator('label').filter({ hasText: 'Driver' })).toBeVisible();
+
+    // Should show DSN field
+    await expect(page.locator('label').filter({ hasText: 'DSN' })).toBeVisible();
+
+    // Should show Max Open Connections field
+    await expect(page.locator('label').filter({ hasText: 'Max Open Connections' })).toBeVisible();
+
+    // Should show Max Idle Connections field
+    await expect(page.locator('label').filter({ hasText: 'Max Idle Connections' })).toBeVisible();
   });
 });
