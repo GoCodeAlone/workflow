@@ -1,0 +1,34 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #1e1e2e;
+  color: #cdd6f4;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* ReactFlow overrides for dark theme */
+.react-flow__controls button {
+  background: #313244 !important;
+  border: none !important;
+  color: #cdd6f4 !important;
+  fill: #cdd6f4 !important;
+}
+
+.react-flow__controls button:hover {
+  background: #45475a !important;
+}
+
+.react-flow__edge-path {
+  stroke: #585b70;
+}
+
+.react-flow__connection-line {
+  stroke: #89b4fa;
+}
