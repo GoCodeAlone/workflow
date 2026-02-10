@@ -66,7 +66,7 @@ func TestEventWorkflowHandler_ExecuteWorkflow_NoAppContext(t *testing.T) {
 func TestEventWorkflowHandler_ExecuteWorkflow_ProcessorNotFound(t *testing.T) {
 	h := NewEventWorkflowHandler()
 	app := CreateMockApplication()
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 	_, err := h.ExecuteWorkflow(ctx, "event", "my-processor", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error for processor not found")

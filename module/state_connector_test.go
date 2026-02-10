@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"testing"
 )
 
@@ -169,8 +170,8 @@ func TestStateMachineStateConnector_UpdateResourceState_Success(t *testing.T) {
 			"process": {Name: "process", FromState: "new", ToState: "processing"},
 		},
 	}
-	engine.RegisterDefinition(def)
-	engine.CreateWorkflow("order-flow", "order-1", map[string]interface{}{"item": "widget"})
+	_ = engine.RegisterDefinition(def)
+	_, _ = engine.CreateWorkflow("order-flow", "order-1", map[string]interface{}{"item": "widget"})
 	c.stateMachines["order-flow"] = engine
 
 	err := c.UpdateResourceState("orders", "order-1")
@@ -218,8 +219,8 @@ func TestStateMachineStateConnector_GetResourceState_FallbackToEngine(t *testing
 		States:       map[string]*State{"new": {Name: "new"}},
 		Transitions:  map[string]*Transition{},
 	}
-	engine.RegisterDefinition(def)
-	engine.CreateWorkflow("order-flow", "order-1", nil)
+	_ = engine.RegisterDefinition(def)
+	_, _ = engine.CreateWorkflow("order-flow", "order-1", nil)
 	c.stateMachines["order-flow"] = engine
 
 	state, _, err := c.GetResourceState("orders", "order-1")
@@ -243,7 +244,7 @@ func TestStateMachineStateConnector_GetResourceState_NotFound(t *testing.T) {
 
 func TestStateMachineStateConnector_Stop(t *testing.T) {
 	c := NewStateMachineStateConnector("connector")
-	if err := c.Stop(nil); err != nil {
+	if err := c.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop failed: %v", err)
 	}
 }

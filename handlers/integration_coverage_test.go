@@ -996,7 +996,7 @@ func TestExecuteWorkflow_WithSteps(t *testing.T) {
 	}
 	registry.RegisterConnector(conn)
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	data := map[string]interface{}{
 		"steps": []interface{}{
@@ -1029,7 +1029,7 @@ func TestExecuteWorkflow_SingleStepFromAction(t *testing.T) {
 	}
 	registry.RegisterConnector(conn)
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	data := map[string]interface{}{
 		"connector": "my-conn",
@@ -1048,7 +1048,7 @@ func TestExecuteWorkflow_RegistryNotFound(t *testing.T) {
 	h := NewIntegrationWorkflowHandler()
 	app := newMockApp()
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	_, err := h.ExecuteWorkflow(ctx, "integration", "missing-registry", map[string]interface{}{})
 	if err == nil || !strings.Contains(err.Error(), "not found") {
@@ -1061,7 +1061,7 @@ func TestExecuteWorkflow_NotIntegrationRegistry(t *testing.T) {
 	app := newMockApp()
 	app.services["bad-svc"] = "not-a-registry"
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	_, err := h.ExecuteWorkflow(ctx, "integration", "bad-svc", map[string]interface{}{})
 	if err == nil || !strings.Contains(err.Error(), "is not an IntegrationRegistry") {
@@ -1075,7 +1075,7 @@ func TestExecuteWorkflow_NoStepsNoAction(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	// action is the same as registryName when no colon, so action becomes ""
 	// after splitting. But here action == registryName == "test-registry" (no colon),
@@ -1094,7 +1094,7 @@ func TestExecuteWorkflow_MissingConnectorInSingleStep(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	data := map[string]interface{}{
 		// No "connector" key
@@ -1118,7 +1118,7 @@ func TestExecuteWorkflow_StepsWithOptionalFields(t *testing.T) {
 	}
 	registry.RegisterConnector(conn)
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	data := map[string]interface{}{
 		"steps": []interface{}{
@@ -1156,7 +1156,7 @@ func TestExecuteWorkflow_ColonSeparatedAction(t *testing.T) {
 	}
 	registry.RegisterConnector(conn)
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	data := map[string]interface{}{
 		"connector": "conn1",

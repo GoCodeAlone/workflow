@@ -80,12 +80,6 @@ func (c *collected) len() int {
 	return len(c.events)
 }
 
-func (c *collected) get(i int) eventbus.Event {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.events[i]
-}
-
 // --- WS2 tests ---------------------------------------------------------------
 
 func TestWorkflowTopic(t *testing.T) {
@@ -196,7 +190,7 @@ func TestEmitter_WorkflowStarted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	defer sub.Cancel()
+	defer func() { _ = sub.Cancel() }()
 
 	emitter := NewWorkflowEventEmitter(app)
 	emitter.EmitWorkflowStarted(ctx, "order", "create", map[string]interface{}{"item": "widget"})
@@ -219,7 +213,7 @@ func TestEmitter_WorkflowCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	defer sub.Cancel()
+	defer func() { _ = sub.Cancel() }()
 
 	emitter := NewWorkflowEventEmitter(app)
 	emitter.EmitWorkflowCompleted(ctx, "order", "create", 2*time.Second, map[string]interface{}{"count": 5})
@@ -241,7 +235,7 @@ func TestEmitter_WorkflowFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	defer sub.Cancel()
+	defer func() { _ = sub.Cancel() }()
 
 	emitter := NewWorkflowEventEmitter(app)
 	emitter.EmitWorkflowFailed(ctx, "order", "create", time.Second, errors.New("timeout"))
@@ -263,7 +257,7 @@ func TestEmitter_StepStarted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	defer sub.Cancel()
+	defer func() { _ = sub.Cancel() }()
 
 	emitter := NewWorkflowEventEmitter(app)
 	emitter.EmitStepStarted(ctx, "order", "validate", "http", "post")
@@ -285,7 +279,7 @@ func TestEmitter_StepCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	defer sub.Cancel()
+	defer func() { _ = sub.Cancel() }()
 
 	emitter := NewWorkflowEventEmitter(app)
 	emitter.EmitStepCompleted(ctx, "order", "validate", "http", "post", 100*time.Millisecond, map[string]interface{}{"valid": true})
@@ -307,7 +301,7 @@ func TestEmitter_StepFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	defer sub.Cancel()
+	defer func() { _ = sub.Cancel() }()
 
 	emitter := NewWorkflowEventEmitter(app)
 	emitter.EmitStepFailed(ctx, "order", "validate", "http", "post", 100*time.Millisecond, errors.New("bad request"))

@@ -147,7 +147,7 @@ func TestStateMachineEngine_GetInstance(t *testing.T) {
 		t.Fatalf("failed to register: %v", err)
 	}
 
-	engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
 
 	instance, err := engine.GetInstance("order-1")
 	if err != nil {
@@ -173,8 +173,8 @@ func TestStateMachineEngine_GetInstancesByType(t *testing.T) {
 		t.Fatalf("failed to register: %v", err)
 	}
 
-	engine.CreateWorkflow("order-workflow", "order-1", nil)
-	engine.CreateWorkflow("order-workflow", "order-2", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-2", nil)
 
 	instances, err := engine.GetInstancesByType("order-workflow")
 	if err != nil {
@@ -200,8 +200,8 @@ func TestStateMachineEngine_GetAllInstances(t *testing.T) {
 		t.Fatalf("failed to register: %v", err)
 	}
 
-	engine.CreateWorkflow("order-workflow", "order-1", nil)
-	engine.CreateWorkflow("order-workflow", "order-2", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-2", nil)
 
 	instances, err := engine.GetAllInstances()
 	if err != nil {
@@ -218,7 +218,7 @@ func TestStateMachineEngine_TriggerTransition_Valid(t *testing.T) {
 		t.Fatalf("failed to register: %v", err)
 	}
 
-	engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
 
 	err := engine.TriggerTransition(context.Background(), "order-1", "process", map[string]interface{}{
 		"processedBy": "worker-1",
@@ -257,7 +257,7 @@ func TestStateMachineEngine_TriggerTransition_InvalidTransition(t *testing.T) {
 		t.Fatalf("failed to register: %v", err)
 	}
 
-	engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
 
 	err := engine.TriggerTransition(context.Background(), "order-1", "nonexistent", nil)
 	if err == nil {
@@ -271,7 +271,7 @@ func TestStateMachineEngine_TriggerTransition_WrongState(t *testing.T) {
 		t.Fatalf("failed to register: %v", err)
 	}
 
-	engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
 
 	// Try to ship from "new" state (should fail, needs "processing")
 	err := engine.TriggerTransition(context.Background(), "order-1", "ship", nil)
@@ -286,7 +286,7 @@ func TestStateMachineEngine_TriggerTransition_FinalState(t *testing.T) {
 		t.Fatalf("failed to register: %v", err)
 	}
 
-	engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
 
 	// Transition to a final state
 	err := engine.TriggerTransition(context.Background(), "order-1", "cancel", nil)
@@ -309,12 +309,12 @@ func TestStateMachineEngine_TriggerTransition_DeliveredFinalState(t *testing.T) 
 		t.Fatalf("failed to register: %v", err)
 	}
 
-	engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
 
 	// Walk through full workflow: new -> processing -> shipped -> delivered
-	engine.TriggerTransition(context.Background(), "order-1", "process", nil)
-	engine.TriggerTransition(context.Background(), "order-1", "ship", nil)
-	engine.TriggerTransition(context.Background(), "order-1", "deliver", nil)
+	_ = engine.TriggerTransition(context.Background(), "order-1", "process", nil)
+	_ = engine.TriggerTransition(context.Background(), "order-1", "ship", nil)
+	_ = engine.TriggerTransition(context.Background(), "order-1", "deliver", nil)
 
 	instance, _ := engine.GetInstance("order-1")
 	if !instance.Completed {
@@ -348,8 +348,8 @@ func TestStateMachineEngine_TransitionHandler(t *testing.T) {
 		t.Error("expected HasTransitionHandler=true")
 	}
 
-	engine.CreateWorkflow("order-workflow", "order-1", nil)
-	engine.TriggerTransition(context.Background(), "order-1", "process", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_ = engine.TriggerTransition(context.Background(), "order-1", "process", nil)
 
 	if !handlerCalled {
 		t.Error("expected transition handler to be called")
@@ -373,7 +373,7 @@ func TestStateMachineEngine_TransitionHandler_Error(t *testing.T) {
 	})
 	engine.SetTransitionHandler(handler)
 
-	engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
 	err := engine.TriggerTransition(context.Background(), "order-1", "process", nil)
 
 	if err == nil {
@@ -392,8 +392,8 @@ func TestStateMachineEngine_AddTransitionListener(t *testing.T) {
 		listenerCalled = true
 	})
 
-	engine.CreateWorkflow("order-workflow", "order-1", nil)
-	engine.TriggerTransition(context.Background(), "order-1", "process", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_ = engine.TriggerTransition(context.Background(), "order-1", "process", nil)
 
 	if !listenerCalled {
 		t.Error("expected listener to be called")
@@ -412,8 +412,8 @@ func TestStateMachineEngine_AddGlobalTransitionHandler_NoExisting(t *testing.T) 
 		return nil
 	}))
 
-	engine.CreateWorkflow("order-workflow", "order-1", nil)
-	engine.TriggerTransition(context.Background(), "order-1", "process", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_ = engine.TriggerTransition(context.Background(), "order-1", "process", nil)
 
 	if !called {
 		t.Error("expected global handler to be called")
@@ -438,8 +438,8 @@ func TestStateMachineEngine_AddGlobalTransitionHandler_WithExisting(t *testing.T
 		return nil
 	}))
 
-	engine.CreateWorkflow("order-workflow", "order-1", nil)
-	engine.TriggerTransition(context.Background(), "order-1", "process", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_ = engine.TriggerTransition(context.Background(), "order-1", "process", nil)
 
 	if len(callOrder) != 2 {
 		t.Fatalf("expected 2 handlers called, got %d", len(callOrder))
@@ -639,8 +639,8 @@ func TestStateMachineEngine_AddTransitionListener_WithExistingNonComposite(t *te
 		callOrder = append(callOrder, "listener")
 	})
 
-	engine.CreateWorkflow("order-workflow", "order-1", nil)
-	engine.TriggerTransition(context.Background(), "order-1", "process", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_ = engine.TriggerTransition(context.Background(), "order-1", "process", nil)
 
 	if len(callOrder) != 2 {
 		t.Errorf("expected 2 calls, got %d: %v", len(callOrder), callOrder)

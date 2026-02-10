@@ -118,14 +118,6 @@ func (h *testMessageHandler) HandleMessage(message []byte) error {
 	return nil
 }
 
-func (h *testMessageHandler) received() [][]byte {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	out := make([][]byte, len(h.messages))
-	copy(out, h.messages)
-	return out
-}
-
 // --- Tests ---
 
 func TestEventBusBridge_NewAndName(t *testing.T) {
@@ -191,7 +183,7 @@ func TestEventBusBridge_SendMessageThenReceiveViaEventBus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EventBus Subscribe: %v", err)
 	}
-	defer sub.Cancel()
+	defer func() { _ = sub.Cancel() }()
 
 	payload := map[string]interface{}{"hello": "world"}
 	msg, _ := json.Marshal(payload)
@@ -306,7 +298,7 @@ func TestEventBusBridge_SendInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	defer sub.Cancel()
+	defer func() { _ = sub.Cancel() }()
 
 	// Send invalid JSON
 	rawMsg := []byte("this is not json")

@@ -126,7 +126,7 @@ func (c *Client) call(ctx context.Context, system string, messages []message, to
 	if err != nil {
 		return nil, fmt.Errorf("API request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -150,11 +150,7 @@ func (c *Client) callWithToolLoop(ctx context.Context, system string, userConten
 	tools := Tools()
 	apiTools := make([]toolDef, len(tools))
 	for i, t := range tools {
-		apiTools[i] = toolDef{
-			Name:        t.Name,
-			Description: t.Description,
-			InputSchema: t.InputSchema,
-		}
+		apiTools[i] = toolDef(t)
 	}
 
 	userMsg, _ := json.Marshal(userContent)

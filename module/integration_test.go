@@ -187,7 +187,7 @@ func TestHTTPIntegrationConnector_ExecutePOST(t *testing.T) {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 		var body map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewDecoder(r.Body).Decode(&body)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"id": "123", "name": body["name"]})
 	}))
@@ -303,7 +303,7 @@ func TestHTTPIntegrationConnector_ExecuteErrorStatus(t *testing.T) {
 func TestHTTPIntegrationConnector_ExecuteNonJSONResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte("plain text response"))
+		_, _ = w.Write([]byte("plain text response"))
 	}))
 	defer server.Close()
 

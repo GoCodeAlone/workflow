@@ -1,6 +1,7 @@
 package dynamic
 
 import (
+	"context"
 	"fmt"
 	"go/parser"
 	"go/token"
@@ -109,7 +110,7 @@ func (l *Loader) Reload(id, source string) (*DynamicComponent, error) {
 		info := old.Info()
 		if info.Status == StatusRunning {
 			// Best-effort stop
-			_ = old.Stop(nil)
+			_ = old.Stop(context.Background())
 		}
 	}
 

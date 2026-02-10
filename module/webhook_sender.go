@@ -170,7 +170,7 @@ func (ws *WebhookSender) doSend(ctx context.Context, delivery *WebhookDelivery) 
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	// Drain body to allow connection reuse
 	_, _ = io.Copy(io.Discard, resp.Body)
 

@@ -1,6 +1,7 @@
 package dynamic
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -74,7 +75,7 @@ func (h *APIHandler) createComponent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	// Expect JSON with "id" and "source" fields
 	var req struct {
@@ -124,7 +125,7 @@ func (h *APIHandler) updateComponent(w http.ResponseWriter, r *http.Request, id 
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	var req loadComponentRequest
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -155,7 +156,7 @@ func (h *APIHandler) deleteComponent(w http.ResponseWriter, id string) {
 	// Stop if running
 	info := comp.Info()
 	if info.Status == StatusRunning {
-		_ = comp.Stop(nil)
+		_ = comp.Stop(context.Background())
 	}
 
 	if err := h.registry.Unregister(id); err != nil {
@@ -169,5 +170,5 @@ func (h *APIHandler) deleteComponent(w http.ResponseWriter, id string) {
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }

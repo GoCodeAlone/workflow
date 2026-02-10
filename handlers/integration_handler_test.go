@@ -96,7 +96,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow(t *testing.T) {
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 	conn := module.NewHTTPIntegrationConnector("test-api", server.URL)
-	conn.Connect(context.Background())
+	_ = conn.Connect(context.Background())
 	registry.RegisterConnector(conn)
 
 	steps := []IntegrationStep{
@@ -176,7 +176,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_VariableSubstitut
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 	conn := module.NewHTTPIntegrationConnector("test-api", server.URL)
-	conn.Connect(context.Background())
+	_ = conn.Connect(context.Background())
 	registry.RegisterConnector(conn)
 
 	steps := []IntegrationStep{
@@ -213,7 +213,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_WithOnError(t *te
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 	conn := module.NewHTTPIntegrationConnector("test-api", server.URL)
-	conn.Connect(context.Background())
+	_ = conn.Connect(context.Background())
 	registry.RegisterConnector(conn)
 
 	steps := []IntegrationStep{
@@ -243,7 +243,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_WithOnSuccess(t *
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 	conn := module.NewHTTPIntegrationConnector("test-api", server.URL)
-	conn.Connect(context.Background())
+	_ = conn.Connect(context.Background())
 	registry.RegisterConnector(conn)
 
 	steps := []IntegrationStep{

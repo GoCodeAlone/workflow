@@ -13,7 +13,10 @@ import (
 // Define a custom type for context keys to avoid collisions
 type contextKey string
 
-const paramsContextKey contextKey = "params"
+const (
+	paramsContextKey      contextKey = "params"
+	applicationContextKey contextKey = "application"
+)
 
 // ScheduledJobConfig represents a job scheduler configuration
 type ScheduledJobConfig struct {
@@ -132,7 +135,7 @@ func (h *SchedulerWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflow
 
 	// Get the application from context
 	var app modular.Application
-	if appVal := ctx.Value("application"); appVal != nil {
+	if appVal := ctx.Value(applicationContextKey); appVal != nil {
 		app = appVal.(modular.Application)
 	} else {
 		return nil, fmt.Errorf("application context not available")

@@ -194,7 +194,7 @@ type WorkflowHandler interface {
 // GeneratePrompt builds a workflow generation prompt from the request.
 func GeneratePrompt(req GenerateRequest) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Generate a workflow configuration for the following request:\n\n"))
+	b.WriteString("Generate a workflow configuration for the following request:\n\n")
 	b.WriteString(fmt.Sprintf("Intent: %s\n\n", req.Intent))
 
 	if len(req.Context) > 0 {
