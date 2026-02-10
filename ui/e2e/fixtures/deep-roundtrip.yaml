@@ -1,0 +1,11 @@
+modules:
+  - name: Production Server
+    type: http.server
+    config:
+      address: ':9090'
+  - name: Rate Limiter 2
+    type: http.middleware.ratelimit
+    config:
+      rps: 100
+workflows: {}
+triggers: {}

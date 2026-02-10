@@ -1,0 +1,11 @@
+modules:
+  - name: Workflow Database 1
+    type: database.workflow
+    config:
+      driver: postgres
+  - name: Metrics Collector 2
+    type: metrics.collector
+  - name: Data Transformer 3
+    type: data.transformer
+workflows: {}
+triggers: {}

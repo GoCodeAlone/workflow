@@ -12,6 +12,10 @@ export default defineConfig({
     baseURL: 'http://localhost:5173',
     screenshot: 'on',
     trace: 'on-first-retry',
+    video: 'retain-on-failure',
+  },
+  expect: {
+    toHaveScreenshot: { maxDiffPixels: 100 },
   },
   projects: [
     {

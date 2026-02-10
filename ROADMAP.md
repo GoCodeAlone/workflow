@@ -48,7 +48,7 @@ A production-grade, AI-powered workflow orchestration engine with a visual build
 ---
 
 ## Phase 2: Expanded Capabilities (Complete)
-*Uncommitted - pending push*
+*Complete*
 
 ### Observability Foundation (WS1)
 - [x] MetricsCollector - Prometheus metrics with 6 pre-registered vectors
@@ -84,11 +84,11 @@ A production-grade, AI-powered workflow orchestration engine with a visual build
 ## Phase 3: Quality, Testing & Stability (In Progress)
 
 ### Copilot SDK Testing
-- [ ] Mock-based unit tests for all Copilot client methods
-- [ ] Tool handler invocation tests with realistic payloads
-- [ ] Session lifecycle tests (create, send, destroy)
-- [ ] Error path coverage (CLI not found, session failure, empty response, malformed JSON)
-- [ ] Integration verification with mock Copilot server
+- [x] Mock-based unit tests for all Copilot client methods
+- [x] Tool handler invocation tests with realistic payloads
+- [x] Session lifecycle tests (create, send, destroy)
+- [x] Error path coverage (CLI not found, session failure, empty response, malformed JSON)
+- [x] Integration verification with mock Copilot server
 
 ### E2E Test Expansion
 - [ ] Update moduleTypeMap in all e2e specs with 6 new module types
@@ -117,7 +117,60 @@ A production-grade, AI-powered workflow orchestration engine with a visual build
 
 ---
 
-## Phase 4: Production Readiness (Planned)
+## Phase 4: EventBus Integration (Complete)
+*PR #18 merged*
+
+### EventBus Bridge
+- [x] EventBusBridge adapter (MessageBroker → EventBus)
+- [x] WorkflowEventEmitter with lifecycle events (workflow.started, workflow.completed, workflow.failed, step.started, step.completed, step.failed)
+
+### EventBus Trigger
+- [x] EventBusTrigger for native EventBus subscriptions
+- [x] Configure with topics, event filtering, async mode
+- [x] Start/Stop with subscription lifecycle management
+
+### Engine Integration
+- [x] Engine integration with workflow/step event emission
+- [x] canHandleTrigger support for "eventbus" trigger type
+- [x] TriggerWorkflow emits start/complete/fail events
+
+### UI Updates
+- [x] messaging.broker.eventbus module type in NodePalette (30 total)
+
+---
+
+## Phase 5: AI Server Bootstrap, Test Coverage & E2E Testing (In Progress)
+
+### AI Server Bootstrap (WS1)
+- [ ] cmd/server/main.go with HTTP mux and AI handler registration
+- [ ] CLI flags for config, address, AI provider configuration
+- [ ] Graceful shutdown with signal handling
+- [ ] initAIService with conditional Anthropic/Copilot provider registration
+- [ ] cmd/server/main_test.go with route verification tests
+
+### Go Test Coverage (WS2)
+- [ ] Root package (engine_test.go): 68.6% → ≥80%
+- [ ] Module package: 77.1% → ≥80%
+- [ ] Dynamic package: 75.4% → ≥80%
+- [ ] AI packages: maintain ≥85%
+
+### Playwright E2E Tests (WS3)
+- [ ] Shared helpers (helpers.ts) with complete module type map
+- [ ] deep-module-coverage.spec.ts: All 30 module types verified
+- [ ] deep-complex-workflows.spec.ts: Multi-node workflow tests
+- [ ] deep-property-editing.spec.ts: All field types tested
+- [ ] deep-keyboard-shortcuts.spec.ts: Shortcut verification
+- [ ] deep-ai-panel.spec.ts: AI Copilot panel tests
+- [ ] deep-component-browser.spec.ts: Component Browser tests
+- [ ] deep-import-export.spec.ts: Complex round-trip tests
+- [ ] deep-edge-cases.spec.ts: Edge case coverage
+- [ ] deep-accessibility.spec.ts: A11y testing
+- [ ] deep-toast-notifications.spec.ts: Toast behavior tests
+- [ ] deep-visual-regression.spec.ts: Visual regression baselines
+
+---
+
+## Phase 6: Production Readiness (Planned)
 
 ### Workflow Execution Runtime
 - [ ] End-to-end workflow execution from YAML config
@@ -146,13 +199,13 @@ A production-grade, AI-powered workflow orchestration engine with a visual build
 
 ## Coverage Targets
 
-| Package | Current | Target |
-|---------|---------|--------|
-| workflow (root) | 70.4% | 80% |
-| ai | 84.8% | 85% |
-| ai/copilot | 6.2% | 70% |
-| ai/llm | 84.5% | 85% |
-| config | 100% | 100% |
-| dynamic | 75.4% | 80% |
-| handlers | 50.9% | 70% |
-| module | 76.1% | 80% |
+| Package | Current | Target | Status |
+|---------|---------|--------|--------|
+| workflow (root) | 68.6% | 80% | Below target |
+| ai | 84.8% | 85% | Near target |
+| ai/copilot | 90.3% | 70% | ✓ Exceeded |
+| ai/llm | 84.5% | 85% | Near target |
+| config | 100% | 100% | ✓ Met |
+| dynamic | 75.4% | 80% | Below target |
+| handlers | 70.8% | 70% | ✓ Met |
+| module | 77.1% | 80% | Below target |

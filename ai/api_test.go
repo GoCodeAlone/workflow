@@ -149,3 +149,78 @@ func TestHandleProviders(t *testing.T) {
 		t.Error("response missing providers field")
 	}
 }
+
+func TestHandler_RegisterRoutes(t *testing.T) {
+	h := setupTestHandler()
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	// Each registered route should respond (not 404).
+	routes := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/ai/generate"},
+		{http.MethodPost, "/api/ai/component"},
+		{http.MethodPost, "/api/ai/suggest"},
+		{http.MethodGet, "/api/ai/providers"},
+	}
+
+	for _, rt := range routes {
+		t.Run(rt.method+" "+rt.path, func(t *testing.T) {
+			var body *bytes.Reader
+			if rt.method == http.MethodPost {
+				body = bytes.NewReader([]byte("{}"))
+			} else {
+				body = bytes.NewReader(nil)
+			}
+			req := httptest.NewRequest(rt.method, rt.path, body)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			if w.Code == http.StatusNotFound {
+				t.Errorf("route %s %s returned 404, expected it to be registered", rt.method, rt.path)
+			}
+		})
+	}
+}
+
+func TestHandleGenerate_MethodNotAllowed(t *testing.T) {
+	h := setupTestHandler()
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	// GET to a POST-only route should return 405.
+	req := httptest.NewRequest(http.MethodGet, "/api/ai/generate", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for GET /api/ai/generate, got %d", w.Code)
+	}
+}
+
+func TestHandleComponent_InvalidBody(t *testing.T) {
+	h := setupTestHandler()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ai/component", bytes.NewReader([]byte("not json")))
+	w := httptest.NewRecorder()
+
+	h.HandleComponent(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandleSuggest_InvalidBody(t *testing.T) {
+	h := setupTestHandler()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ai/suggest", bytes.NewReader([]byte("not json")))
+	w := httptest.NewRecorder()
+
+	h.HandleSuggest(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}

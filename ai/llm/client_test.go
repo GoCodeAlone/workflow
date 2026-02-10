@@ -392,3 +392,123 @@ func TestParseMissingComponents_NoJSON(t *testing.T) {
 		t.Errorf("expected nil specs, got %v", specs)
 	}
 }
+
+func TestParseGenerateResponse_YAMLWorkflow(t *testing.T) {
+	// When the LLM returns a YAML string as the workflow value instead of a JSON object.
+	yamlCfg := "modules:\n  - name: srv\n    type: http.server"
+	raw, _ := json.Marshal(yamlCfg) // produces a JSON string
+	text := fmt.Sprintf(`{"workflow": %s, "explanation": "yaml variant"}`, string(raw))
+
+	resp, err := parseGenerateResponse(text)
+	if err != nil {
+		t.Fatalf("parseGenerateResponse: %v", err)
+	}
+	if resp.Workflow == nil {
+		t.Fatal("expected non-nil workflow from YAML string")
+	}
+	if len(resp.Workflow.Modules) != 1 {
+		t.Errorf("expected 1 module, got %d", len(resp.Workflow.Modules))
+	}
+	if resp.Workflow.Modules[0].Type != "http.server" {
+		t.Errorf("expected type http.server, got %s", resp.Workflow.Modules[0].Type)
+	}
+	if resp.Explanation != "yaml variant" {
+		t.Errorf("expected explanation 'yaml variant', got %q", resp.Explanation)
+	}
+}
+
+func TestExtractJSON_NoMatch(t *testing.T) {
+	result := ExtractJSON("no json here at all")
+	if result != "" {
+		t.Errorf("expected empty string, got %q", result)
+	}
+}
+
+func TestExtractJSON_CodeBlockNonJSON(t *testing.T) {
+	// A code block that doesn't start with { or [ should not be returned
+	text := "```\nsome plain text\n```"
+	result := ExtractJSON(text)
+	if result != "" {
+		t.Errorf("expected empty string for non-JSON code block, got %q", result)
+	}
+}
+
+func TestExtractCode_MultipleBlocks(t *testing.T) {
+	// Should extract the first go block
+	text := "Here is code:\n```go\npackage main\n```\nAnd more:\n```go\npackage other\n```"
+	got := ExtractCode(text)
+	if got != "package main" {
+		t.Errorf("expected 'package main', got %q", got)
+	}
+}
+
+func TestClient_GenerateWorkflow_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"error": {"message": "server error"}}`)
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(ClientConfig{APIKey: "test-key", BaseURL: server.URL})
+
+	_, err := client.GenerateWorkflow(context.Background(), ai.GenerateRequest{Intent: "test"})
+	if err == nil {
+		t.Error("expected error from GenerateWorkflow on API error")
+	}
+}
+
+func TestClient_GenerateComponent_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"error": {"message": "server error"}}`)
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(ClientConfig{APIKey: "test-key", BaseURL: server.URL})
+
+	_, err := client.GenerateComponent(context.Background(), ai.ComponentSpec{Name: "test", Type: "test"})
+	if err == nil {
+		t.Error("expected error from GenerateComponent on API error")
+	}
+}
+
+func TestClient_SuggestWorkflow_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"error": {"message": "server error"}}`)
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(ClientConfig{APIKey: "test-key", BaseURL: server.URL})
+
+	_, err := client.SuggestWorkflow(context.Background(), "test")
+	if err == nil {
+		t.Error("expected error from SuggestWorkflow on API error")
+	}
+}
+
+func TestClient_CallWithToolLoop_TextResponse(t *testing.T) {
+	// Verify that callWithToolLoop returns text when stop_reason is not tool_use.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := apiResponse{
+			ID: "msg_text",
+			Content: []contentBlock{
+				{Type: "text", Text: "Hello "},
+				{Type: "text", Text: "World"},
+			},
+			StopReason: "end_turn",
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(ClientConfig{APIKey: "test-key", BaseURL: server.URL})
+
+	result, err := client.callWithToolLoop(context.Background(), "system", "test")
+	if err != nil {
+		t.Fatalf("callWithToolLoop: %v", err)
+	}
+	if result != "Hello \nWorld" {
+		t.Errorf("expected 'Hello \\nWorld', got %q", result)
+	}
+}

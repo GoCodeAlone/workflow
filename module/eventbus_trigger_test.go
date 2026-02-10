@@ -430,3 +430,98 @@ func TestEventBusTrigger_StartWithoutEngine(t *testing.T) {
 		t.Fatal("expected error when starting without engine")
 	}
 }
+
+func TestEventBusTrigger_Configure_Incomplete(t *testing.T) {
+	app, _, cleanup := setupEventBus(t)
+	defer cleanup()
+
+	engine := &mockEBWorkflowEngine{}
+	if err := app.RegisterService("workflowEngine", engine); err != nil {
+		t.Fatalf("RegisterService: %v", err)
+	}
+
+	trigger := NewEventBusTrigger()
+
+	// Subscription with empty topic should fail
+	config := map[string]interface{}{
+		"subscriptions": []interface{}{
+			map[string]interface{}{
+				"topic":    "",
+				"workflow": "wf",
+				"action":   "act",
+			},
+		},
+	}
+
+	err := trigger.Configure(app, config)
+	if err == nil {
+		t.Fatal("expected error for incomplete subscription (empty topic)")
+	}
+}
+
+func TestEventBusTrigger_Configure_InvalidEntry(t *testing.T) {
+	app, _, cleanup := setupEventBus(t)
+	defer cleanup()
+
+	engine := &mockEBWorkflowEngine{}
+	if err := app.RegisterService("workflowEngine", engine); err != nil {
+		t.Fatalf("RegisterService: %v", err)
+	}
+
+	trigger := NewEventBusTrigger()
+
+	// Non-map subscription entry
+	config := map[string]interface{}{
+		"subscriptions": []interface{}{
+			"not a map",
+		},
+	}
+
+	err := trigger.Configure(app, config)
+	if err == nil {
+		t.Fatal("expected error for invalid subscription entry (non-map)")
+	}
+}
+
+func TestEventBusTrigger_Configure_NoEventBus(t *testing.T) {
+	app := NewMockApplication()
+
+	trigger := NewEventBusTrigger()
+
+	config := map[string]interface{}{
+		"subscriptions": []interface{}{
+			map[string]interface{}{
+				"topic":    "t",
+				"workflow": "wf",
+				"action":   "act",
+			},
+		},
+	}
+
+	err := trigger.Configure(app, config)
+	if err == nil {
+		t.Fatal("expected error when eventbus.provider service is missing")
+	}
+}
+
+func TestEventBusTrigger_Configure_NoEngine(t *testing.T) {
+	app, _, cleanup := setupEventBus(t)
+	defer cleanup()
+
+	trigger := NewEventBusTrigger()
+
+	config := map[string]interface{}{
+		"subscriptions": []interface{}{
+			map[string]interface{}{
+				"topic":    "t",
+				"workflow": "wf",
+				"action":   "act",
+			},
+		},
+	}
+
+	err := trigger.Configure(app, config)
+	if err == nil {
+		t.Fatal("expected error when workflowEngine service is missing")
+	}
+}

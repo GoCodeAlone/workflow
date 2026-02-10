@@ -1,0 +1,17 @@
+modules:
+  - name: Web Server
+    type: http.server
+    config:
+      address: ":8080"
+  - name: Auth
+    type: http.middleware.auth
+    config:
+      type: jwt
+    dependsOn:
+      - Web Server
+  - name: Router
+    type: http.router
+    dependsOn:
+      - Auth
+workflows: {}
+triggers: {}
