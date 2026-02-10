@@ -17,6 +17,8 @@ require (
 	github.com/CrisisTextLine/modular/modules/scheduler v0.4.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/github/copilot-sdk/go v0.1.23
+	github.com/google/uuid v1.6.0
+	github.com/prometheus/client_golang v1.19.1
 	github.com/traefik/yaegi v0.16.1
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -60,7 +62,6 @@ require (
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/golobby/cast v1.3.3 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
@@ -88,7 +89,6 @@ require (
 	github.com/nats-io/nkeys v0.4.11 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
-	github.com/prometheus/client_golang v1.19.1 // indirect
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.48.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
@@ -105,19 +105,4 @@ require (
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
-)
-
-replace (
-	github.com/CrisisTextLine/modular => /home/jon/workspace/modular-fork
-	github.com/CrisisTextLine/modular/modules/auth => /home/jon/workspace/modular-fork/modules/auth
-	github.com/CrisisTextLine/modular/modules/cache => /home/jon/workspace/modular-fork/modules/cache
-	github.com/CrisisTextLine/modular/modules/chimux => /home/jon/workspace/modular-fork/modules/chimux
-	github.com/CrisisTextLine/modular/modules/database/v2 => /home/jon/workspace/modular-fork/modules/database
-	github.com/CrisisTextLine/modular/modules/eventbus => /home/jon/workspace/modular-fork/modules/eventbus
-	github.com/CrisisTextLine/modular/modules/eventlogger => /home/jon/workspace/modular-fork/modules/eventlogger
-	github.com/CrisisTextLine/modular/modules/httpclient => /home/jon/workspace/modular-fork/modules/httpclient
-	github.com/CrisisTextLine/modular/modules/httpserver => /home/jon/workspace/modular-fork/modules/httpserver
-	github.com/CrisisTextLine/modular/modules/jsonschema => /home/jon/workspace/modular-fork/modules/jsonschema
-	github.com/CrisisTextLine/modular/modules/reverseproxy/v2 => /home/jon/workspace/modular-fork/modules/reverseproxy
-	github.com/CrisisTextLine/modular/modules/scheduler => /home/jon/workspace/modular-fork/modules/scheduler
 )
