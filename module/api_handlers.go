@@ -56,6 +56,16 @@ func NewRESTAPIHandler(name, resourceName string) *RESTAPIHandler {
 	}
 }
 
+// SetWorkflowType sets the workflow type for state machine operations.
+func (h *RESTAPIHandler) SetWorkflowType(wt string) {
+	h.workflowType = wt
+}
+
+// SetWorkflowEngine sets the name of the workflow engine service to use.
+func (h *RESTAPIHandler) SetWorkflowEngine(we string) {
+	h.workflowEngine = we
+}
+
 // Name returns the unique identifier for this module
 func (h *RESTAPIHandler) Name() string {
 	return h.name
@@ -64,10 +74,14 @@ func (h *RESTAPIHandler) Name() string {
 // Constructor returns a function to construct this module with dependencies
 func (h *RESTAPIHandler) Constructor() modular.ModuleConstructor {
 	return func(app modular.Application, services map[string]any) (modular.Module, error) {
-		// Create a new instance with the same name
+		// Create a new instance with the same name and workflow config
 		handler := NewRESTAPIHandler(h.name, h.resourceName)
 		handler.app = app
 		handler.logger = app.Logger()
+		handler.workflowType = h.workflowType
+		handler.workflowEngine = h.workflowEngine
+		handler.instanceIDPrefix = h.instanceIDPrefix
+		handler.instanceIDField = h.instanceIDField
 
 		// Look for a message broker service for event publishing
 		if broker, ok := services["message-broker"]; ok {

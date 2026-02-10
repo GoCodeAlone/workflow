@@ -128,7 +128,14 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					resourceName = rn
 				}
 				e.logger.Debug("Loading REST API handler module with resource name: " + resourceName)
-				mod = module.NewRESTAPIHandler(modCfg.Name, resourceName)
+				handler := module.NewRESTAPIHandler(modCfg.Name, resourceName)
+				if wt, ok := modCfg.Config["workflowType"].(string); ok && wt != "" {
+					handler.SetWorkflowType(wt)
+				}
+				if we, ok := modCfg.Config["workflowEngine"].(string); ok && we != "" {
+					handler.SetWorkflowEngine(we)
+				}
+				mod = handler
 			case "http.middleware.auth":
 				authType := "Bearer" // Default auth type
 				if at, ok := modCfg.Config["authType"].(string); ok {

@@ -233,7 +233,7 @@ func TestBuildMux_AllRoutesRegistered(t *testing.T) {
 	deploy := ai.NewDeployService(svc, registry, pool)
 	cfg := config.NewEmptyWorkflowConfig()
 
-	mux := buildMux(svc, deploy, loader, registry, cfg)
+	mux := buildMux(svc, deploy, loader, registry, module.NewWorkflowUIHandler(cfg))
 
 	tests := []struct {
 		name   string
@@ -278,7 +278,7 @@ func TestBuildMux_StaticFilesFallback(t *testing.T) {
 	deploy := ai.NewDeployService(svc, registry, pool)
 	cfg := config.NewEmptyWorkflowConfig()
 
-	mux := buildMux(svc, deploy, loader, registry, cfg)
+	mux := buildMux(svc, deploy, loader, registry, module.NewWorkflowUIHandler(cfg))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
@@ -328,7 +328,7 @@ func TestIntegration_GenerateEndpoint(t *testing.T) {
 	deploy := ai.NewDeployService(svc, registry, pool)
 	cfg := config.NewEmptyWorkflowConfig()
 
-	mux := buildMux(svc, deploy, loader, registry, cfg)
+	mux := buildMux(svc, deploy, loader, registry, module.NewWorkflowUIHandler(cfg))
 
 	body, _ := json.Marshal(ai.GenerateRequest{Intent: "Create a REST API"})
 	req := httptest.NewRequest(http.MethodPost, "/api/ai/generate", bytes.NewReader(body))

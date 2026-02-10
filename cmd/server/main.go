@@ -58,12 +58,12 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 }
 
 // buildMux creates the HTTP mux with all routes registered.
-func buildMux(aiSvc *ai.Service, deploySvc *ai.DeployService, loader *dynamic.Loader, registry *dynamic.ComponentRegistry, cfg *config.WorkflowConfig) *http.ServeMux {
+func buildMux(aiSvc *ai.Service, deploySvc *ai.DeployService, loader *dynamic.Loader, registry *dynamic.ComponentRegistry, uiHandler *module.WorkflowUIHandler) *http.ServeMux {
 	mux := http.NewServeMux()
 	ai.NewHandler(aiSvc).RegisterRoutes(mux)
 	ai.NewDeployHandler(deploySvc).RegisterRoutes(mux)
 	dynamic.NewAPIHandler(loader, registry).RegisterRoutes(mux)
-	module.NewWorkflowUIHandler(cfg).RegisterRoutes(mux)
+	uiHandler.RegisterRoutes(mux)
 	return mux
 }
 
@@ -95,15 +95,47 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 		return nil, fmt.Errorf("failed to build engine: %w", err)
 	}
 
+	app := &serverApp{
+		engine: engine,
+		logger: logger,
+	}
+
+	// Create UI handler with live reload and status callbacks
+	uiHandler := module.NewWorkflowUIHandler(cfg)
+
+	uiHandler.SetReloadFunc(func(newCfg *config.WorkflowConfig) error {
+		// Stop current engine
+		if stopErr := app.engine.Stop(context.Background()); stopErr != nil {
+			logger.Warn("Error stopping engine during reload", "error", stopErr)
+		}
+
+		// Build new engine from the updated config
+		newEngine, _, _, buildErr := buildEngine(newCfg, logger)
+		if buildErr != nil {
+			return fmt.Errorf("failed to rebuild engine: %w", buildErr)
+		}
+
+		// Start new engine
+		if startErr := newEngine.Start(context.Background()); startErr != nil {
+			return fmt.Errorf("failed to start reloaded engine: %w", startErr)
+		}
+
+		app.engine = newEngine
+		logger.Info("Engine reloaded successfully")
+		return nil
+	})
+
+	uiHandler.SetStatusFunc(func() map[string]interface{} {
+		return map[string]interface{}{
+			"status": "running",
+		}
+	})
+
 	pool := dynamic.NewInterpreterPool()
 	aiSvc, deploySvc := initAIService(logger, registry, pool)
-	mux := buildMux(aiSvc, deploySvc, loader, registry, cfg)
+	app.mux = buildMux(aiSvc, deploySvc, loader, registry, uiHandler)
 
-	return &serverApp{
-		engine: engine,
-		mux:    mux,
-		logger: logger,
-	}, nil
+	return app, nil
 }
 
 // run starts the engine and HTTP server, blocking until ctx is canceled.
