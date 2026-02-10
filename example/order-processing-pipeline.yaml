@@ -32,28 +32,38 @@ modules:
   # --- Processing layer ---
   - name: order-transformer
     type: data.transformer
+    dependsOn:
+      - order-api
     config:
       description: "Transforms and validates incoming order data"
 
   # --- State machine layer ---
   - name: order-state-engine
     type: statemachine.engine
+    dependsOn:
+      - order-transformer
     config:
       description: "Manages order lifecycle state transitions"
 
   - name: order-state-tracker
     type: state.tracker
+    dependsOn:
+      - order-state-engine
     config:
       description: "Tracks current state for all order resources"
 
   # --- Messaging layer ---
   - name: order-broker
     type: messaging.broker
+    dependsOn:
+      - order-state-tracker
     config:
       description: "In-memory message broker for order events"
 
   - name: notification-handler
     type: messaging.handler
+    dependsOn:
+      - order-broker
     config:
       topic: "order.completed"
       description: "Handles notifications when orders reach terminal states"

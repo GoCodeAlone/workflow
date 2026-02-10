@@ -8,10 +8,12 @@ import EventProcessorNode from './EventProcessorNode.tsx';
 import IntegrationNode from './IntegrationNode.tsx';
 import MiddlewareNode from './MiddlewareNode.tsx';
 import InfrastructureNode from './InfrastructureNode.tsx';
+import GroupNode from './GroupNode.tsx';
 
 // All HTTP-type nodes use the same general component but with different configs
 // We register them by the category key used in workflowStore's nodeComponentType()
 export const nodeTypes: NodeTypes = {
+  groupNode: GroupNode,
   httpNode: HTTPServerNode,
   httpRouterNode: HTTPRouterNode,
   messagingNode: MessagingBrokerNode,

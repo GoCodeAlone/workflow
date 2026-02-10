@@ -14,8 +14,10 @@
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
-# Compiled server binary
-/server
+# Compiled Go binaries (ignore extensionless files)
+*
+!*.*
+!*/
 
 # Dependency directories (remove the comment below to include it)
 # vendor/

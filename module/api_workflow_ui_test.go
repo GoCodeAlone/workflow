@@ -3,6 +3,7 @@ package module
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -397,5 +398,158 @@ func TestWorkflowUIHandler_HandleValidate_InvalidJSON(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestWorkflowUIHandler_HandleStatus_Default(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "a", Type: "http.server"},
+			{Name: "b", Type: "http.router"},
+		},
+		Workflows: map[string]interface{}{"w1": nil},
+	}
+	h := NewWorkflowUIHandler(cfg)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workflow/status", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if result["status"] != "running" {
+		t.Errorf("expected status 'running', got %v", result["status"])
+	}
+	if result["moduleCount"] != float64(2) {
+		t.Errorf("expected moduleCount 2, got %v", result["moduleCount"])
+	}
+	if result["workflowCount"] != float64(1) {
+		t.Errorf("expected workflowCount 1, got %v", result["workflowCount"])
+	}
+}
+
+func TestWorkflowUIHandler_HandleStatus_WithStatusFunc(t *testing.T) {
+	h := NewWorkflowUIHandler(nil)
+	h.SetStatusFunc(func() map[string]interface{} {
+		return map[string]interface{}{
+			"status": "custom",
+			"uptime": "10m",
+		}
+	})
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workflow/status", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if result["status"] != "custom" {
+		t.Errorf("expected status 'custom', got %v", result["status"])
+	}
+	if result["uptime"] != "10m" {
+		t.Errorf("expected uptime '10m', got %v", result["uptime"])
+	}
+}
+
+func TestWorkflowUIHandler_HandleReload_NoFunc(t *testing.T) {
+	h := NewWorkflowUIHandler(nil)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workflow/reload", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, w.Code)
+	}
+}
+
+func TestWorkflowUIHandler_HandleReload_Success(t *testing.T) {
+	h := NewWorkflowUIHandler(nil)
+	called := false
+	h.SetReloadFunc(func(cfg *config.WorkflowConfig) error {
+		called = true
+		return nil
+	})
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workflow/reload", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+	if !called {
+		t.Error("expected reload function to be called")
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if result["status"] != "reloaded" {
+		t.Errorf("expected status 'reloaded', got %v", result["status"])
+	}
+}
+
+func TestWorkflowUIHandler_HandleReload_Error(t *testing.T) {
+	h := NewWorkflowUIHandler(nil)
+	h.SetReloadFunc(func(cfg *config.WorkflowConfig) error {
+		return fmt.Errorf("reload failed")
+	})
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workflow/reload", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if result["error"] != "reload failed" {
+		t.Errorf("expected error 'reload failed', got %v", result["error"])
+	}
+}
+
+func TestWorkflowUIHandler_SetReloadFunc(t *testing.T) {
+	h := NewWorkflowUIHandler(nil)
+	if h.reloadFn != nil {
+		t.Error("expected nil reloadFn initially")
+	}
+	h.SetReloadFunc(func(cfg *config.WorkflowConfig) error { return nil })
+	if h.reloadFn == nil {
+		t.Error("expected non-nil reloadFn after set")
+	}
+}
+
+func TestWorkflowUIHandler_SetStatusFunc(t *testing.T) {
+	h := NewWorkflowUIHandler(nil)
+	if h.engineStatus != nil {
+		t.Error("expected nil engineStatus initially")
+	}
+	h.SetStatusFunc(func() map[string]interface{} { return nil })
+	if h.engineStatus == nil {
+		t.Error("expected non-nil engineStatus after set")
 	}
 }

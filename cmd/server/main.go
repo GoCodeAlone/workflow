@@ -23,11 +23,11 @@ import (
 )
 
 var (
-	configFile    = flag.String("config", "", "Path to workflow configuration YAML file")
-	addr          = flag.String("addr", ":8080", "HTTP listen address")
-	copilotCLI    = flag.String("copilot-cli", "", "Path to Copilot CLI binary")
-	copilotModel  = flag.String("copilot-model", "", "Model to use with Copilot SDK")
-	anthropicKey  = flag.String("anthropic-key", "", "Anthropic API key (or set ANTHROPIC_API_KEY env)")
+	configFile     = flag.String("config", "", "Path to workflow configuration YAML file")
+	addr           = flag.String("addr", ":8080", "HTTP listen address")
+	copilotCLI     = flag.String("copilot-cli", "", "Path to Copilot CLI binary")
+	copilotModel   = flag.String("copilot-model", "", "Model to use with Copilot SDK")
+	anthropicKey   = flag.String("anthropic-key", "", "Anthropic API key (or set ANTHROPIC_API_KEY env)")
 	anthropicModel = flag.String("anthropic-model", "", "Anthropic model name")
 )
 

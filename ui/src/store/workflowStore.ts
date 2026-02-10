@@ -11,7 +11,7 @@ import {
 } from '@xyflow/react';
 import type { WorkflowConfig } from '../types/workflow.ts';
 import { MODULE_TYPE_MAP } from '../types/workflow.ts';
-import { nodesToConfig, configToNodes } from '../utils/serialization.ts';
+import { nodesToConfig, configToNodes, nodeComponentType } from '../utils/serialization.ts';
 import type { Toast } from '../components/toast/ToastContainer.tsx';
 
 export interface WorkflowNodeData extends Record<string, unknown> {
@@ -44,6 +44,10 @@ interface WorkflowStore {
   pushHistory: () => void;
   undo: () => void;
   redo: () => void;
+
+  // View level
+  viewLevel: 'component' | 'container';
+  setViewLevel: (level: 'component' | 'container') => void;
 
   // UI panels
   showAIPanel: boolean;
@@ -126,6 +130,10 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       edges: next.edges,
     });
   },
+
+  // View level
+  viewLevel: 'component',
+  setViewLevel: (level) => set({ viewLevel: level }),
 
   // UI panels
   showAIPanel: false,
@@ -215,19 +223,5 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     set({ nodes: [], edges: [], selectedNodeId: null, nodeCounter: 0 });
   },
 }));
-
-function nodeComponentType(moduleType: string): string {
-  if (moduleType.startsWith('http.middleware.')) return 'middlewareNode';
-  if (moduleType === 'http.server') return 'httpNode';
-  if (moduleType.startsWith('http.')) return 'httpRouterNode';
-  if (moduleType === 'api.handler') return 'httpRouterNode';
-  if (moduleType.startsWith('messaging.')) return 'messagingNode';
-  if (moduleType.startsWith('statemachine.') || moduleType.startsWith('state.')) return 'stateMachineNode';
-  if (moduleType === 'scheduler.modular') return 'schedulerNode';
-  if (moduleType === 'eventlogger.modular' || moduleType === 'eventbus.modular') return 'eventNode';
-  if (moduleType === 'httpclient.modular') return 'integrationNode';
-  if (moduleType === 'chimux.router') return 'httpRouterNode';
-  return 'infrastructureNode';
-}
 
 export default useWorkflowStore;

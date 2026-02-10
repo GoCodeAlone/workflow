@@ -18,8 +18,10 @@ var uiAssets embed.FS
 // WorkflowUIHandler serves the workflow editor UI and provides API endpoints
 // for managing workflow configurations.
 type WorkflowUIHandler struct {
-	mu     sync.RWMutex
-	config *config.WorkflowConfig
+	mu           sync.RWMutex
+	config       *config.WorkflowConfig
+	reloadFn     func(*config.WorkflowConfig) error
+	engineStatus func() map[string]interface{}
 }
 
 // NewWorkflowUIHandler creates a new handler with an optional initial config.
@@ -30,12 +32,24 @@ func NewWorkflowUIHandler(cfg *config.WorkflowConfig) *WorkflowUIHandler {
 	return &WorkflowUIHandler{config: cfg}
 }
 
+// SetReloadFunc sets the callback for reloading the engine with new config.
+func (h *WorkflowUIHandler) SetReloadFunc(fn func(*config.WorkflowConfig) error) {
+	h.reloadFn = fn
+}
+
+// SetStatusFunc sets the callback for getting engine status.
+func (h *WorkflowUIHandler) SetStatusFunc(fn func() map[string]interface{}) {
+	h.engineStatus = fn
+}
+
 // RegisterRoutes registers all workflow UI routes on the given mux.
 func (h *WorkflowUIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workflow/config", h.handleGetConfig)
 	mux.HandleFunc("PUT /api/workflow/config", h.handlePutConfig)
 	mux.HandleFunc("GET /api/workflow/modules", h.handleGetModules)
 	mux.HandleFunc("POST /api/workflow/validate", h.handleValidate)
+	mux.HandleFunc("POST /api/workflow/reload", h.handleReload)
+	mux.HandleFunc("GET /api/workflow/status", h.handleStatus)
 
 	// Serve the embedded UI assets
 	uiFS, err := fs.Sub(uiAssets, "ui_dist")
@@ -90,10 +104,10 @@ func (h *WorkflowUIHandler) handleGetModules(w http.ResponseWriter, r *http.Requ
 }
 
 type moduleTypeDef struct {
-	Type          string              `json:"type"`
-	Label         string              `json:"label"`
-	Category      string              `json:"category"`
-	ConfigFields  []configFieldSchema `json:"configFields"`
+	Type         string              `json:"type"`
+	Label        string              `json:"label"`
+	Category     string              `json:"category"`
+	ConfigFields []configFieldSchema `json:"configFields"`
 }
 
 type configFieldSchema struct {
@@ -179,6 +193,27 @@ var availableModules = []moduleTypeDef{
 	{Type: "jsonschema.modular", Label: "JSON Schema Validator", Category: "infrastructure", ConfigFields: []configFieldSchema{
 		{Key: "schema", Label: "Schema", Type: "json"},
 	}},
+	{Type: "notification.slack", Label: "Slack Notification", Category: "integration", ConfigFields: []configFieldSchema{
+		{Key: "webhookURL", Label: "Webhook URL", Type: "string"},
+		{Key: "channel", Label: "Channel", Type: "string"},
+		{Key: "username", Label: "Username", Type: "string", DefaultValue: "workflow-bot"},
+	}},
+	{Type: "storage.s3", Label: "S3 Storage", Category: "integration", ConfigFields: []configFieldSchema{
+		{Key: "bucket", Label: "Bucket", Type: "string"},
+		{Key: "region", Label: "Region", Type: "string", DefaultValue: "us-east-1"},
+		{Key: "endpoint", Label: "Endpoint", Type: "string"},
+	}},
+	{Type: "messaging.nats", Label: "NATS Broker", Category: "messaging", ConfigFields: []configFieldSchema{
+		{Key: "url", Label: "URL", Type: "string", DefaultValue: "nats://localhost:4222"},
+	}},
+	{Type: "messaging.kafka", Label: "Kafka Broker", Category: "messaging", ConfigFields: []configFieldSchema{
+		{Key: "brokers", Label: "Brokers", Type: "string", DefaultValue: "localhost:9092"},
+		{Key: "groupID", Label: "Group ID", Type: "string"},
+	}},
+	{Type: "observability.otel", Label: "OpenTelemetry", Category: "observability", ConfigFields: []configFieldSchema{
+		{Key: "endpoint", Label: "OTLP Endpoint", Type: "string", DefaultValue: "localhost:4318"},
+		{Key: "serviceName", Label: "Service Name", Type: "string", DefaultValue: "workflow"},
+	}},
 }
 
 func init() {
@@ -197,6 +232,53 @@ func (h *WorkflowUIHandler) handleGetModulesImpl(w http.ResponseWriter, _ *http.
 type validationResult struct {
 	Valid  bool     `json:"valid"`
 	Errors []string `json:"errors,omitempty"`
+}
+
+func (h *WorkflowUIHandler) handleReload(w http.ResponseWriter, r *http.Request) {
+	if h.reloadFn == nil {
+		http.Error(w, "reload not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	h.mu.RLock()
+	cfg := h.config
+	h.mu.RUnlock()
+
+	if err := h.reloadFn(cfg); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if encErr := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); encErr != nil {
+			http.Error(w, "failed to encode error response", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "reloaded"}); err != nil {
+		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+func (h *WorkflowUIHandler) handleStatus(w http.ResponseWriter, _ *http.Request) {
+	status := map[string]interface{}{
+		"status": "running",
+	}
+
+	if h.engineStatus != nil {
+		status = h.engineStatus()
+	}
+
+	h.mu.RLock()
+	if h.config != nil {
+		status["moduleCount"] = len(h.config.Modules)
+		status["workflowCount"] = len(h.config.Workflows)
+	}
+	h.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		http.Error(w, "failed to encode status", http.StatusInternalServerError)
+	}
 }
 
 func (h *WorkflowUIHandler) handleValidate(w http.ResponseWriter, r *http.Request) {

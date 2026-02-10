@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, type DragEvent } from 'react';
 import {
   ReactFlow,
   Background,
@@ -7,11 +7,14 @@ import {
   BackgroundVariant,
   useReactFlow,
   type Connection,
+  type Edge,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { nodeTypes } from '../nodes/index.ts';
 import useWorkflowStore from '../../store/workflowStore.ts';
 import { saveWorkflowConfig } from '../../utils/api.ts';
+import type { WorkflowEdgeData } from '../../types/workflow.ts';
+import { computeContainerView } from '../../utils/grouping.ts';
 
 export default function WorkflowCanvas() {
   const nodes = useWorkflowStore((s) => s.nodes);
@@ -27,8 +30,38 @@ export default function WorkflowCanvas() {
   const redo = useWorkflowStore((s) => s.redo);
   const exportToConfig = useWorkflowStore((s) => s.exportToConfig);
   const addToast = useWorkflowStore((s) => s.addToast);
+  const viewLevel = useWorkflowStore((s) => s.viewLevel);
 
   const { screenToFlowPosition } = useReactFlow();
+
+  const styledEdges: Edge[] = useMemo(() => {
+    const edgeStyles: Record<string, { stroke: string; strokeDasharray?: string }> = {
+      'dependency': { stroke: '#585b70', strokeDasharray: '5,5' },
+      'http-route': { stroke: '#3b82f6' },
+      'messaging-subscription': { stroke: '#8b5cf6' },
+      'statemachine': { stroke: '#f59e0b' },
+      'event': { stroke: '#ef4444' },
+    };
+    return edges.map((edge) => {
+      const edgeData = edge.data as WorkflowEdgeData | undefined;
+      const edgeType = edgeData?.edgeType;
+      if (!edgeType) return edge;
+      const style = edgeStyles[edgeType];
+      if (!style) return edge;
+      return {
+        ...edge,
+        style: { ...edge.style, stroke: style.stroke, strokeWidth: 2, strokeDasharray: style.strokeDasharray },
+        labelStyle: { fill: style.stroke, fontWeight: 600, fontSize: 11 },
+      };
+    });
+  }, [edges]);
+
+  const { nodes: displayNodes, edges: displayEdges } = useMemo(() => {
+    if (viewLevel === 'container' && nodes.length > 0) {
+      return computeContainerView(nodes, styledEdges);
+    }
+    return { nodes, edges: styledEdges };
+  }, [viewLevel, nodes, styledEdges]);
 
   const handleDragOver = useCallback((event: DragEvent) => {
     event.preventDefault();
@@ -103,8 +136,8 @@ export default function WorkflowCanvas() {
   return (
     <div style={{ flex: 1, height: '100%' }} onDragOver={handleDragOver} onDrop={handleDrop}>
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={displayNodes}
+        edges={displayEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={handleConnect}

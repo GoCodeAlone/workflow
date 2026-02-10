@@ -20,6 +20,8 @@ export default function Toolbar() {
   const showAIPanel = useWorkflowStore((s) => s.showAIPanel);
   const toggleComponentBrowser = useWorkflowStore((s) => s.toggleComponentBrowser);
   const showComponentBrowser = useWorkflowStore((s) => s.showComponentBrowser);
+  const viewLevel = useWorkflowStore((s) => s.viewLevel);
+  const setViewLevel = useWorkflowStore((s) => s.setViewLevel);
 
   const handleExport = () => {
     const config = exportToConfig();
@@ -166,6 +168,14 @@ export default function Toolbar() {
         label="Components"
         onClick={toggleComponentBrowser}
         variant={showComponentBrowser ? 'active' : undefined}
+      />
+
+      <Separator />
+
+      <ToolbarButton
+        label={viewLevel === 'component' ? 'Container View' : 'Component View'}
+        onClick={() => setViewLevel(viewLevel === 'component' ? 'container' : 'component')}
+        disabled={nodes.length === 0}
       />
 
       <div style={{ flex: 1 }} />

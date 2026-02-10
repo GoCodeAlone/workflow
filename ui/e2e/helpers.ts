@@ -35,6 +35,11 @@ export const COMPLETE_MODULE_TYPE_MAP: Record<string, string> = {
   'Request ID Middleware': 'http.middleware.requestid',
   'Data Transformer': 'data.transformer',
   'Webhook Sender': 'webhook.sender',
+  'Slack Notification': 'notification.slack',
+  'S3 Storage': 'storage.s3',
+  'NATS Broker': 'messaging.nats',
+  'Kafka Broker': 'messaging.kafka',
+  'OpenTelemetry': 'observability.otel',
 };
 
 /**

@@ -1,0 +1,70 @@
+# Notification Pipeline Example
+# HTTP endpoint receives events, broker distributes to Slack + S3 archival
+
+modules:
+  - name: webhook-server
+    type: http.server
+    config:
+      address: ":9090"
+
+  - name: webhook-router
+    type: http.router
+    dependsOn:
+      - webhook-server
+
+  - name: webhook-handler
+    type: http.handler
+    dependsOn:
+      - webhook-router
+    config:
+      method: "POST"
+      path: "/webhooks/events"
+
+  - name: event-broker
+    type: messaging.broker
+    dependsOn:
+      - webhook-handler
+
+  - name: slack-notifier
+    type: notification.slack
+    dependsOn:
+      - event-broker
+    config:
+      webhookURL: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+      channel: "#alerts"
+      username: "workflow-bot"
+
+  - name: event-archive
+    type: storage.s3
+    dependsOn:
+      - event-broker
+    config:
+      bucket: "event-archive"
+      region: "us-east-1"
+
+  - name: pipeline-metrics
+    type: metrics.collector
+
+  - name: pipeline-health
+    type: health.checker
+
+workflows:
+  http:
+    server: webhook-server
+    router: webhook-router
+    routes:
+      - method: "POST"
+        path: "/webhooks/events"
+        handler: webhook-handler
+
+  messaging:
+    broker: event-broker
+    subscriptions:
+      - topic: "events.received"
+        handler: slack-notifier
+      - topic: "events.received"
+        handler: event-archive
+
+triggers:
+  http:
+    port: 9090

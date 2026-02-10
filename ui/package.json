@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "npx playwright test"
+    "test:e2e": "npx playwright test",
+    "test:e2e:execution": "npx playwright test --config playwright-e2e.config.ts"
   },
   "dependencies": {
     "@xyflow/react": "^12.10.0",

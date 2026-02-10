@@ -11,6 +11,53 @@ export interface WorkflowConfig {
   triggers: Record<string, unknown>;
 }
 
+// Workflow section types for edge extraction
+export interface HTTPWorkflowConfig {
+  server: string;
+  router: string;
+  routes?: Array<{
+    method: string;
+    path: string;
+    handler: string;
+    middlewares?: string[];
+  }>;
+}
+
+export interface MessagingWorkflowConfig {
+  broker: string;
+  subscriptions?: Array<{
+    topic: string;
+    handler: string;
+  }>;
+}
+
+export interface StateMachineWorkflowConfig {
+  engine: string;
+  definitions?: Array<{
+    name: string;
+    [key: string]: unknown;
+  }>;
+}
+
+export interface EventWorkflowConfig {
+  processor: string;
+  handlers?: string[];
+  adapters?: string[];
+}
+
+export interface IntegrationWorkflowConfig {
+  registry: string;
+  connectors?: string[];
+}
+
+// Edge type classification
+export type WorkflowEdgeType = 'dependency' | 'http-route' | 'messaging-subscription' | 'statemachine' | 'event';
+
+export interface WorkflowEdgeData extends Record<string, unknown> {
+  edgeType: WorkflowEdgeType;
+  label?: string;
+}
+
 export type ModuleCategory =
   | 'http'
   | 'messaging'
@@ -342,6 +389,58 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
       { key: 'initialBackoff', label: 'Initial Backoff', type: 'string', defaultValue: '1s' },
       { key: 'maxBackoff', label: 'Max Backoff', type: 'string', defaultValue: '60s' },
       { key: 'timeout', label: 'Timeout', type: 'string', defaultValue: '30s' },
+    ],
+  },
+  // 3rd Party Integrations
+  {
+    type: 'notification.slack',
+    label: 'Slack Notification',
+    category: 'integration',
+    defaultConfig: { username: 'workflow-bot' },
+    configFields: [
+      { key: 'webhookURL', label: 'Webhook URL', type: 'string' },
+      { key: 'channel', label: 'Channel', type: 'string' },
+      { key: 'username', label: 'Username', type: 'string', defaultValue: 'workflow-bot' },
+    ],
+  },
+  {
+    type: 'storage.s3',
+    label: 'S3 Storage',
+    category: 'integration',
+    defaultConfig: { region: 'us-east-1' },
+    configFields: [
+      { key: 'bucket', label: 'Bucket', type: 'string' },
+      { key: 'region', label: 'Region', type: 'string', defaultValue: 'us-east-1' },
+      { key: 'endpoint', label: 'Endpoint', type: 'string' },
+    ],
+  },
+  {
+    type: 'messaging.nats',
+    label: 'NATS Broker',
+    category: 'messaging',
+    defaultConfig: { url: 'nats://localhost:4222' },
+    configFields: [
+      { key: 'url', label: 'URL', type: 'string', defaultValue: 'nats://localhost:4222' },
+    ],
+  },
+  {
+    type: 'messaging.kafka',
+    label: 'Kafka Broker',
+    category: 'messaging',
+    defaultConfig: { brokers: 'localhost:9092' },
+    configFields: [
+      { key: 'brokers', label: 'Brokers', type: 'string', defaultValue: 'localhost:9092' },
+      { key: 'groupID', label: 'Group ID', type: 'string' },
+    ],
+  },
+  {
+    type: 'observability.otel',
+    label: 'OpenTelemetry',
+    category: 'observability',
+    defaultConfig: { endpoint: 'localhost:4318', serviceName: 'workflow' },
+    configFields: [
+      { key: 'endpoint', label: 'OTLP Endpoint', type: 'string', defaultValue: 'localhost:4318' },
+      { key: 'serviceName', label: 'Service Name', type: 'string', defaultValue: 'workflow' },
     ],
   },
 ];

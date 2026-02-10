@@ -301,6 +301,21 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					webhookConfig.MaxRetries = int(mr)
 				}
 				mod = module.NewWebhookSender(modCfg.Name, webhookConfig)
+			case "notification.slack":
+				e.logger.Debug("Loading Slack notification module")
+				mod = module.NewSlackNotification(modCfg.Name)
+			case "storage.s3":
+				e.logger.Debug("Loading S3 storage module")
+				mod = module.NewS3Storage(modCfg.Name)
+			case "messaging.nats":
+				e.logger.Debug("Loading NATS broker module")
+				mod = module.NewNATSBroker(modCfg.Name)
+			case "messaging.kafka":
+				e.logger.Debug("Loading Kafka broker module")
+				mod = module.NewKafkaBroker(modCfg.Name)
+			case "observability.otel":
+				e.logger.Debug("Loading OpenTelemetry tracing module")
+				mod = module.NewOTelTracing(modCfg.Name)
 			default:
 				e.logger.Warn("Unknown module type: " + modCfg.Type)
 				return fmt.Errorf("unknown module type: %s", modCfg.Type)
