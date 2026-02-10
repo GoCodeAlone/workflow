@@ -39,8 +39,8 @@ type Watcher struct {
 	done      chan struct{}
 	wg        sync.WaitGroup
 
-	mu       sync.Mutex
-	pending  map[string]time.Time // path -> last event time
+	mu      sync.Mutex
+	pending map[string]time.Time // path -> last event time
 }
 
 // NewWatcher creates a file system watcher that automatically reloads components

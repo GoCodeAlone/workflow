@@ -333,4 +333,3 @@ func (s *mockHTTPServer) Start(ctx context.Context) error {
 func (s *mockHTTPServer) Stop(ctx context.Context) error {
 	return nil
 }
-

@@ -1,0 +1,200 @@
+=== TestE2E_SimpleHTTPWorkflow ===
+    e2e_execution_test.go:124: E2E HTTP workflow: POST /api/test → 200 OK, handler=test-handler
+
+=== TestE2E_OrderPipeline_FullExecution ===
+    e2e_execution_test.go:226: Step 1: Creating order via POST /api/orders
+    e2e_execution_test.go:243:   Created order: id=ORD-001, state=new
+    e2e_execution_test.go:246: Step 2: Transitioning order to 'validated'
+    e2e_execution_test.go:249:   State after validate_order: validated
+    e2e_execution_test.go:252: Step 3: Transitioning order to 'stored'
+    e2e_execution_test.go:255:   State after store_order: stored
+    e2e_execution_test.go:258: Step 4: Transitioning order to 'notified' (final state)
+    e2e_execution_test.go:261:   State after send_notification: notified
+    e2e_execution_test.go:264: Step 5: Verifying final state via GET /api/orders/ORD-001
+    e2e_execution_test.go:285:   Final order state: notified
+    e2e_execution_test.go:288: Step 6: Verifying message broker delivery
+    e2e_execution_test.go:289:   Broker delivered message: {"test":"broker-delivery","orderId":"ORD-001"}
+    e2e_execution_test.go:291: E2E Order Pipeline: All 6 steps passed - full pipeline execution verified
+
+=== TestE2E_OrderPipeline_ErrorPath ===
+    e2e_execution_test.go:392: E2E Error Path: Order correctly transitioned to 'failed' and rejected further transitions
+
+=== TestE2E_BrokerMessaging ===
+    e2e_execution_test.go:479: E2E Broker Messaging: Message broker and HTTP server both operational within same engine
+
+=== TestE2E_ConfigPushAndReload ===
+    e2e_execution_test.go:542:   Initial config retrieved: {"modules":[],"workflows":{},"triggers":{}}
+    e2e_execution_test.go:632: E2E Config Push & Reload: Config CRUD, reload, status, and validation all working
+
+=== TestE2E_DynamicComponent_LoadAndExecute ===
+    e2e_execution_test.go:794: Step 1: Creating dynamic component via POST /api/dynamic/components
+    e2e_execution_test.go:848:   Created component: id=greeter, name=greeter, status=loaded
+    e2e_execution_test.go:855: Step 2: Verifying component is listed via GET /api/dynamic/components
+    e2e_execution_test.go:870:   Registry has 1 component(s)
+    e2e_execution_test.go:873: Step 3: Executing dynamic component directly
+    e2e_execution_test.go:897:   Execute result: greeting=Hello, E2E!, source=dynamic
+    e2e_execution_test.go:900: Step 4: Verifying component details via GET /api/dynamic/components/greeter
+    e2e_execution_test.go:919:   Component detail: name=greeter, status=running
+    e2e_execution_test.go:925: E2E Dynamic Component Load & Execute: All steps passed
+
+=== TestE2E_DynamicComponent_HotReload ===
+    e2e_execution_test.go:953: Step 1: Creating v1 of component (returns 'v1')
+    e2e_execution_test.go:1001:   v1 result: version=v1, output=v1:data
+    e2e_execution_test.go:1004: Step 2: Updating to v2 via PUT /api/dynamic/components/transformer
+    e2e_execution_test.go:1042:   Updated component: name=transformer-v2, status=loaded
+    e2e_execution_test.go:1045: Step 3: Executing updated component - verifying new behavior
+    e2e_execution_test.go:1061:   v2 result: version=v2, output=v2:DATA
+    e2e_execution_test.go:1064: Step 4: Confirming v1 behavior is no longer present
+    e2e_execution_test.go:1070: Step 5: Deleting component via DELETE /api/dynamic/components/transformer
+    e2e_execution_test.go:1085:   Component deleted from registry, count=0
+    e2e_execution_test.go:1087: E2E Dynamic Component Hot Reload: All steps passed - v1 loaded, v2 hot-reloaded, behavior changed, component deleted
+
+=== TestE2E_DynamicComponent_SandboxRejectsUnsafe ===
+    e2e_execution_test.go:1237:   Blocked os/exec: status=422, error contains "os/exec"
+    e2e_execution_test.go:1237:   Blocked syscall: status=422, error contains "syscall"
+    e2e_execution_test.go:1237:   Blocked unsafe: status=422, error contains "unsafe"
+    e2e_execution_test.go:1237:   Blocked os (filesystem access): status=422, error contains "os"
+    e2e_execution_test.go:1237:   Blocked net (raw sockets): status=422, error contains "net"
+    e2e_execution_test.go:1237:   Blocked reflect: status=422, error contains "reflect"
+    e2e_execution_test.go:1250: Verifying valid component still loads after rejections
+    e2e_execution_test.go:1294:   Valid component loaded and executed: message=safe and sound
+    e2e_execution_test.go:1295: E2E Dynamic Component Sandbox: All blocked imports rejected, valid component still works
+    --- PASS: TestE2E_DynamicComponent_SandboxRejectsUnsafe/os/exec (0.00s)
+    --- PASS: TestE2E_DynamicComponent_SandboxRejectsUnsafe/syscall (0.00s)
+    --- PASS: TestE2E_DynamicComponent_SandboxRejectsUnsafe/unsafe (0.00s)
+    --- PASS: TestE2E_DynamicComponent_SandboxRejectsUnsafe/os_(filesystem_access) (0.00s)
+    --- PASS: TestE2E_DynamicComponent_SandboxRejectsUnsafe/net_(raw_sockets) (0.00s)
+    --- PASS: TestE2E_DynamicComponent_SandboxRejectsUnsafe/reflect (0.00s)
+
+=== TestE2E_DynamicComponent_EngineIntegration ===
+    e2e_execution_test.go:1396: Step 1: Building engine with dynamic.component module type
+    e2e_execution_test.go:1400:   BuildFromConfig succeeded with dynamic.component
+    e2e_execution_test.go:1403: Step 2: Starting engine (full lifecycle)
+    e2e_execution_test.go:1413:   Engine started, HTTP server accepting connections
+    e2e_execution_test.go:1416: Step 3: Executing dynamic component through registry
+    e2e_execution_test.go:1429:   upper: Hello World -> HELLO WORLD
+    e2e_execution_test.go:1438:   reverse: Hello World -> dlroW olleH
+    e2e_execution_test.go:1441: Step 4: Hot-reloading component while engine is running
+    e2e_execution_test.go:1495:   v2 result: HELLO_WORLD (version=v2)
+    e2e_execution_test.go:1498: Step 5: Verifying HTTP server still works after hot-reload
+    e2e_execution_test.go:1507:   HTTP server still healthy after hot-reload
+    e2e_execution_test.go:1510: Step 6: Verifying BuildFromConfig fails without dynamic registry
+    e2e_execution_test.go:1527:   Got expected error: dynamic registry not set, cannot load dynamic component "orphan"
+    e2e_execution_test.go:1530: E2E Dynamic Component Engine Integration: All steps passed
+
+=== TestE2E_DynamicComponent_MessageProcessor ===
+    e2e_execution_test.go:1664: Step 1: Verifying dynamic component and broker are in service registry
+    e2e_execution_test.go:1680:   Both dynamic component and broker found
+    e2e_execution_test.go:1683: Step 2: Publishing message via broker and processing with dynamic component
+    e2e_execution_test.go:1716:   Transform result: input=hello world, output=HELLO WORLD
+    e2e_execution_test.go:1737:   Results subscriber received: {"action":"transform","input":"hello world","output":"HELLO WORLD","processed":true}
+    e2e_execution_test.go:1743: Step 3: Processing validate message
+    e2e_execution_test.go:1752:   Validate result: action=validate, output=valid
+    e2e_execution_test.go:1755: Step 4: Processing echo message
+    e2e_execution_test.go:1764:   Echo result: action=unknown, output=echo:test-data
+    e2e_execution_test.go:1767: Step 5: Testing error handling with invalid input
+    e2e_execution_test.go:1772:   Got expected error: invalid JSON message: invalid character 'o' in literal null (expecting 'u')
+    e2e_execution_test.go:1776: Step 6: Verifying HTTP server still operational
+    e2e_execution_test.go:1785:   HTTP server healthy
+    e2e_execution_test.go:1787: E2E Dynamic Component Message Processor: All steps passed - component loaded, messages processed, broker pub/sub working
+
+=== TestE2E_IntegrationWorkflow ===
+    e2e_execution_test.go:1904:   Registered connectors: [api-connector]
+    e2e_execution_test.go:1929:   Integration connector returned: name=Alice, status=active
+    e2e_execution_test.go:1930: E2E Integration Workflow: Registry configured, HTTP connector executed against real server
+
+=== TestE2E_EventWorkflow ===
+    e2e_execution_test.go:2066: E2E Event Workflow: Processor configured with patterns, adapters connected to broker, HTTP running
+
+=== TestE2E_DataTransformer ===
+    e2e_execution_test.go:2201:   Transformed result: first_name=Alice, last_name=Smith, email=alice@example.com
+    e2e_execution_test.go:2202: E2E Data Transformer: Pipeline executed extract->map->filter, sensitive fields stripped
+
+=== TestE2E_SchedulerWorkflow ===
+    e2e_execution_test.go:2336: E2E Scheduler Workflow: Scheduler configured with job, job executed, HTTP server running
+
+=== TestE2E_MetricsAndHealthCheck ===
+    e2e_execution_test.go:2406: Step 1: Verifying metrics collector is registered as a service
+    e2e_execution_test.go:2414:   metrics.collector service found in registry
+    e2e_execution_test.go:2417: Step 2: Verifying health checker is registered as a service
+    e2e_execution_test.go:2425:   health.checker service found in registry
+    e2e_execution_test.go:2428: Step 3: Registering health check and setting started
+    e2e_execution_test.go:2435: Step 4: Making HTTP requests to generate metrics
+    e2e_execution_test.go:2447:   Made 3 successful HTTP requests
+    e2e_execution_test.go:2450: Step 5: Recording and verifying metrics
+    e2e_execution_test.go:2478:   Prometheus metrics contain expected counters
+    e2e_execution_test.go:2481: Step 6: Testing health checker HTTP handlers
+    e2e_execution_test.go:2495:   Health endpoint: status=healthy
+    e2e_execution_test.go:2509:   Ready endpoint: status=ready
+    e2e_execution_test.go:2523:   Live endpoint: status=alive
+    e2e_execution_test.go:2526: Step 7: Testing health check with unhealthy component
+    e2e_execution_test.go:2545:   Unhealthy endpoint: status=unhealthy, httpCode=503
+    e2e_execution_test.go:2547: E2E Metrics & Health Check: All steps passed
+
+=== TestE2E_EventBusBridge ===
+    e2e_execution_test.go:2606: Step 1: Subscribing to topic via EventBusBridge
+    e2e_execution_test.go:2619:   Subscribed to 'test.events' via bridge
+    e2e_execution_test.go:2622: Step 2: Publishing message through the bridge
+    e2e_execution_test.go:2641:   Received message via bridge: {"action":"test","value":42}
+    e2e_execution_test.go:2647: Step 3: Publishing directly through EventBus module
+    e2e_execution_test.go:2668:   Bridge subscriber received direct EventBus message: {"id":123,"source":"direct"}
+    e2e_execution_test.go:2673: Step 4: Unsubscribing and verifying no more messages
+    e2e_execution_test.go:2689:   No messages received after unsubscribe (correct)
+    e2e_execution_test.go:2693: E2E EventBusBridge: All steps passed - pub/sub through bridge and direct EventBus verified
+
+=== TestE2E_WebhookSender ===
+    e2e_execution_test.go:2769: Step 1: Retrieving webhook sender from service registry
+    e2e_execution_test.go:2774:   webhook.sender service found
+    e2e_execution_test.go:2777: Step 2: Sending webhook to target server
+    e2e_execution_test.go:2795:   Webhook delivered: id=wh-1770761424204701929-1, status=delivered, attempts=1
+    e2e_execution_test.go:2798: Step 3: Verifying target server received the webhook
+    e2e_execution_test.go:2823:   Target server received correct payload and headers
+    e2e_execution_test.go:2826: Step 4: Sending webhook to invalid URL (expects dead letter)
+    e2e_execution_test.go:2836:   Failed delivery: id=wh-1770761424205642485-2, status=dead_letter, attempts=3
+    e2e_execution_test.go:2839: Step 5: Verifying dead letter queue
+    e2e_execution_test.go:2844:   Dead letter queue: id=wh-1770761424205642485-2, lastError=request failed: Post "http://127.0.0.1:1/nonexistent": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+    e2e_execution_test.go:2847: E2E Webhook Sender: All steps passed - delivery, headers, dead letter verified
+
+=== TestE2E_SlackNotification_MockEndpoint ===
+    e2e_execution_test.go:2921: Step 1: Configuring Slack notification module
+    e2e_execution_test.go:2936:   Configured: webhook, channel, username
+    e2e_execution_test.go:2939: Step 2: Sending notification via HandleMessage
+    e2e_execution_test.go:2944:   Notification sent
+    e2e_execution_test.go:2947: Step 3: Verifying mock Slack server received the payload
+    e2e_execution_test.go:2968:   Slack payload correct: text="Order ORD-300 has been completed successfully", channel=#test-alerts, username=workflow-bot
+    e2e_execution_test.go:2972: Step 4: Sending second notification
+    e2e_execution_test.go:2984: Step 5: Testing error handling with empty webhook URL
+    e2e_execution_test.go:2989:   Got expected error: slack webhook URL not configured
+    e2e_execution_test.go:2992: E2E Slack Notification: All steps passed - message delivery, payload format, error handling verified
+
+=== TestE2E_Middleware_Auth ===
+    e2e_middleware_test.go:139: E2E Middleware Auth: All auth scenarios verified
+    --- PASS: TestE2E_Middleware_Auth/no_auth_header (0.00s)
+    --- PASS: TestE2E_Middleware_Auth/wrong_auth_type (0.00s)
+    --- PASS: TestE2E_Middleware_Auth/invalid_token (0.00s)
+    --- PASS: TestE2E_Middleware_Auth/valid_token (0.00s)
+
+=== TestE2E_Middleware_RateLimit ===
+    e2e_middleware_test.go:221:   Got 429 on request 3 (burst=3)
+    e2e_middleware_test.go:224: E2E Middleware RateLimit: Rate limiting verified with burstSize=3
+
+=== TestE2E_Middleware_CORS ===
+    e2e_middleware_test.go:419: E2E Middleware CORS: Allowed, disallowed, headers, and preflight scenarios verified
+    --- PASS: TestE2E_Middleware_CORS/allowed_origin (0.00s)
+    --- PASS: TestE2E_Middleware_CORS/disallowed_origin (0.00s)
+    --- PASS: TestE2E_Middleware_CORS/allowed_headers (0.00s)
+    --- PASS: TestE2E_Middleware_CORS/preflight_with_options_route (0.05s)
+
+=== TestE2E_Middleware_RequestID ===
+    e2e_middleware_test.go:464:   Generated X-Request-ID: d91af827-329f-48c7-bcfe-09893992be72
+    e2e_middleware_test.go:484: E2E Middleware RequestID: Generated and preserved ID scenarios verified
+    --- PASS: TestE2E_Middleware_RequestID/generated_id (0.00s)
+    --- PASS: TestE2E_Middleware_RequestID/preserved_id (0.00s)
+
+=== TestE2E_Middleware_FullChain ===
+    e2e_middleware_test.go:617:   Got 429 on request 3 (burst=5)
+    e2e_middleware_test.go:626: E2E Middleware FullChain: CORS + RateLimit + Auth + Logging all cooperating
+    --- PASS: TestE2E_Middleware_FullChain/no_auth_no_origin (0.00s)
+    --- PASS: TestE2E_Middleware_FullChain/valid_auth_with_cors (0.00s)
+    --- PASS: TestE2E_Middleware_FullChain/rate_limit_after_burst (0.00s)
+

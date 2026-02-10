@@ -29,8 +29,8 @@ type GenerateRequest struct {
 // GenerateResponse contains the output of workflow generation.
 type GenerateResponse struct {
 	Workflow    *config.WorkflowConfig `json:"workflow"`
-	Components []ComponentSpec        `json:"components"`
-	Explanation string                `json:"explanation"`
+	Components  []ComponentSpec        `json:"components"`
+	Explanation string                 `json:"explanation"`
 }
 
 // Provider identifies an AI backend.

@@ -13,7 +13,7 @@ import (
 
 // TransformOperation defines a single transformation step
 type TransformOperation struct {
-	Type   string                 `json:"type" yaml:"type"`     // "extract", "map", "convert", "filter"
+	Type   string                 `json:"type" yaml:"type"` // "extract", "map", "convert", "filter"
 	Config map[string]interface{} `json:"config" yaml:"config"`
 }
 

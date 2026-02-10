@@ -24,12 +24,12 @@ const (
 
 // ComponentInfo holds metadata about a loaded dynamic component.
 type ComponentInfo struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Source    string          `json:"source,omitempty"`
-	Status    ComponentStatus `json:"status"`
-	LoadedAt  time.Time       `json:"loaded_at"`
-	Error     string          `json:"error,omitempty"`
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Source   string          `json:"source,omitempty"`
+	Status   ComponentStatus `json:"status"`
+	LoadedAt time.Time       `json:"loaded_at"`
+	Error    string          `json:"error,omitempty"`
 }
 
 // DynamicComponent wraps Yaegi-interpreted Go code as a workflow component

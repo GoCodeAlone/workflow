@@ -20,10 +20,10 @@ func newTestDefinition() *StateMachineDefinition {
 			"cancelled":  {Name: "cancelled", IsFinal: true, IsError: true},
 		},
 		Transitions: map[string]*Transition{
-			"process":  {Name: "process", FromState: "new", ToState: "processing"},
-			"ship":     {Name: "ship", FromState: "processing", ToState: "shipped"},
-			"deliver":  {Name: "deliver", FromState: "shipped", ToState: "delivered"},
-			"cancel":   {Name: "cancel", FromState: "new", ToState: "cancelled"},
+			"process": {Name: "process", FromState: "new", ToState: "processing"},
+			"ship":    {Name: "ship", FromState: "processing", ToState: "shipped"},
+			"deliver": {Name: "deliver", FromState: "shipped", ToState: "delivered"},
+			"cancel":  {Name: "cancel", FromState: "new", ToState: "cancelled"},
 		},
 	}
 }

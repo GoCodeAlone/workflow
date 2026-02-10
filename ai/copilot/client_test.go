@@ -124,7 +124,7 @@ func TestWorkflowTools(t *testing.T) {
 		"list_components":      false,
 		"get_component_schema": false,
 		"validate_config":      false,
-		"get_example_workflow":  false,
+		"get_example_workflow": false,
 	}
 
 	for _, tool := range tools {

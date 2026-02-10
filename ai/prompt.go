@@ -288,7 +288,7 @@ The code MUST follow this exact format for the Yaegi dynamic interpreter:
    - Stop(context.Context) error
 
 Example structure:
-` + "```go" + `
+`+"```go"+`
 package component
 
 import (
@@ -308,7 +308,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
     // Component logic here
     return map[string]interface{}{"result": "value"}, nil
 }
-` + "```" + `
+`+"```"+`
 
 Return only the Go source code, no explanation.`, spec.Name, spec.Type, spec.Description, spec.Name)
 }

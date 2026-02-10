@@ -63,8 +63,8 @@ func (a *bridgeMockApp) GetConfigSection(name string) (modular.ConfigProvider, e
 func (a *bridgeMockApp) ConfigSections() map[string]modular.ConfigProvider {
 	return a.configSections
 }
-func (a *bridgeMockApp) Logger() modular.Logger         { return a.logger }
-func (a *bridgeMockApp) SetLogger(l modular.Logger)     { a.logger = l }
+func (a *bridgeMockApp) Logger() modular.Logger                 { return a.logger }
+func (a *bridgeMockApp) SetLogger(l modular.Logger)             { a.logger = l }
 func (a *bridgeMockApp) ConfigProvider() modular.ConfigProvider { return nil }
 func (a *bridgeMockApp) SvcRegistry() modular.ServiceRegistry {
 	return a.services
@@ -91,9 +91,9 @@ func (a *bridgeMockApp) GetServiceEntry(string) (*modular.ServiceRegistryEntry, 
 func (a *bridgeMockApp) GetServicesByInterface(_ reflect.Type) []*modular.ServiceRegistryEntry {
 	return nil
 }
-func (a *bridgeMockApp) GetModule(name string) modular.Module       { return a.modules[name] }
-func (a *bridgeMockApp) GetAllModules() map[string]modular.Module   { return a.modules }
-func (a *bridgeMockApp) StartTime() time.Time                       { return time.Time{} }
+func (a *bridgeMockApp) GetModule(name string) modular.Module           { return a.modules[name] }
+func (a *bridgeMockApp) GetAllModules() map[string]modular.Module       { return a.modules }
+func (a *bridgeMockApp) StartTime() time.Time                           { return time.Time{} }
 func (a *bridgeMockApp) OnConfigLoaded(func(modular.Application) error) {}
 
 // testMessageHandler is a simple MessageHandler for tests.

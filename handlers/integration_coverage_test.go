@@ -52,26 +52,30 @@ func (a *mockApp) SvcRegistry() modular.ServiceRegistry {
 	return a.services
 }
 
-func (a *mockApp) Init() error                                                    { return nil }
-func (a *mockApp) Start() error                                                   { return nil }
-func (a *mockApp) Stop() error                                                    { return nil }
-func (a *mockApp) Run() error                                                     { return nil }
-func (a *mockApp) Logger() modular.Logger                                         { return a.logger }
-func (a *mockApp) SetLogger(l modular.Logger)                                     { a.logger = l }
-func (a *mockApp) ConfigProvider() modular.ConfigProvider                         { return a.config }
-func (a *mockApp) ConfigSections() map[string]modular.ConfigProvider              { return a.configSections }
-func (a *mockApp) RegisterConfigSection(s string, cp modular.ConfigProvider)      { a.configSections[s] = cp }
-func (a *mockApp) GetConfigSection(s string) (modular.ConfigProvider, error)      { return a.configSections[s], nil }
-func (a *mockApp) RegisterModule(m modular.Module)                                {}
-func (a *mockApp) IsVerboseConfig() bool                                          { return false }
-func (a *mockApp) SetVerboseConfig(bool)                                          {}
-func (a *mockApp) GetServicesByModule(string) []string                            { return nil }
-func (a *mockApp) GetServiceEntry(string) (*modular.ServiceRegistryEntry, bool)   { return nil, false }
+func (a *mockApp) Init() error                                       { return nil }
+func (a *mockApp) Start() error                                      { return nil }
+func (a *mockApp) Stop() error                                       { return nil }
+func (a *mockApp) Run() error                                        { return nil }
+func (a *mockApp) Logger() modular.Logger                            { return a.logger }
+func (a *mockApp) SetLogger(l modular.Logger)                        { a.logger = l }
+func (a *mockApp) ConfigProvider() modular.ConfigProvider            { return a.config }
+func (a *mockApp) ConfigSections() map[string]modular.ConfigProvider { return a.configSections }
+func (a *mockApp) RegisterConfigSection(s string, cp modular.ConfigProvider) {
+	a.configSections[s] = cp
+}
+func (a *mockApp) GetConfigSection(s string) (modular.ConfigProvider, error) {
+	return a.configSections[s], nil
+}
+func (a *mockApp) RegisterModule(m modular.Module)                                     {}
+func (a *mockApp) IsVerboseConfig() bool                                               { return false }
+func (a *mockApp) SetVerboseConfig(bool)                                               {}
+func (a *mockApp) GetServicesByModule(string) []string                                 { return nil }
+func (a *mockApp) GetServiceEntry(string) (*modular.ServiceRegistryEntry, bool)        { return nil, false }
 func (a *mockApp) GetServicesByInterface(reflect.Type) []*modular.ServiceRegistryEntry { return nil }
-func (a *mockApp) StartTime() time.Time                                           { return time.Time{} }
-func (a *mockApp) GetModule(string) modular.Module                                { return nil }
-func (a *mockApp) GetAllModules() map[string]modular.Module                       { return nil }
-func (a *mockApp) OnConfigLoaded(func(modular.Application) error)                 {}
+func (a *mockApp) StartTime() time.Time                                                { return time.Time{} }
+func (a *mockApp) GetModule(string) modular.Module                                     { return nil }
+func (a *mockApp) GetAllModules() map[string]modular.Module                            { return nil }
+func (a *mockApp) OnConfigLoaded(func(modular.Application) error)                      {}
 
 // controllableMockConnector is a mock connector with controllable behavior
 type controllableMockConnector struct {
@@ -909,11 +913,11 @@ func TestExecuteIntegrationWorkflow_VariableSubstitutionResolved(t *testing.T) {
 			Connector: "test-conn",
 			Action:    "action2",
 			Input: map[string]interface{}{
-				"ref":       "${step1}",
+				"ref":        "${step1}",
 				"unresolved": "${nonexistent}",
-				"static":    "plain",
-				"short":     "${x",
-				"number":    42,
+				"static":     "plain",
+				"short":      "${x",
+				"number":     42,
 			},
 		},
 	}

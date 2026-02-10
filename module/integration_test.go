@@ -496,9 +496,9 @@ type failingConnector struct {
 func (c *failingConnector) Connect(ctx context.Context) error {
 	return fmt.Errorf("connection refused")
 }
-func (c *failingConnector) Disconnect(ctx context.Context) error     { return nil }
-func (c *failingConnector) GetName() string                          { return c.name }
-func (c *failingConnector) IsConnected() bool                        { return false }
+func (c *failingConnector) Disconnect(ctx context.Context) error { return nil }
+func (c *failingConnector) GetName() string                      { return c.name }
+func (c *failingConnector) IsConnected() bool                    { return false }
 func (c *failingConnector) Execute(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error) {
 	return nil, fmt.Errorf("not connected")
 }

@@ -272,9 +272,9 @@ func parseGenerateResponse(text string) (*ai.GenerateResponse, error) {
 
 	// Try parsing as GenerateResponse with embedded YAML
 	var raw struct {
-		Workflow    json.RawMessage  `json:"workflow"`
-		Components []ai.ComponentSpec `json:"components"`
-		Explanation string           `json:"explanation"`
+		Workflow    json.RawMessage    `json:"workflow"`
+		Components  []ai.ComponentSpec `json:"components"`
+		Explanation string             `json:"explanation"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &raw); err != nil {
 		return nil, fmt.Errorf("failed to parse response JSON: %w", err)
