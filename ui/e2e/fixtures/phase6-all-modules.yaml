@@ -1,0 +1,63 @@
+modules:
+  - name: http-server
+    type: http.server
+  - name: http-router
+    type: http.router
+  - name: http-handler
+    type: http.handler
+  - name: http-proxy
+    type: http.proxy
+  - name: api-handler
+    type: api.handler
+  - name: auth-middleware
+    type: http.middleware.auth
+  - name: logging-middleware
+    type: http.middleware.logging
+  - name: rate-limiter
+    type: http.middleware.ratelimit
+  - name: cors-middleware
+    type: http.middleware.cors
+  - name: message-broker
+    type: messaging.broker
+  - name: message-handler
+    type: messaging.handler
+  - name: eventbus-bridge
+    type: messaging.broker.eventbus
+  - name: state-machine
+    type: statemachine.engine
+  - name: state-tracker
+    type: state.tracker
+  - name: state-connector
+    type: state.connector
+  - name: scheduler
+    type: scheduler.modular
+  - name: auth-service
+    type: auth.modular
+  - name: event-bus
+    type: eventbus.modular
+  - name: cache
+    type: cache.modular
+  - name: chi-mux-router
+    type: chimux.router
+  - name: event-logger
+    type: eventlogger.modular
+  - name: http-client
+    type: httpclient.modular
+  - name: database
+    type: database.modular
+  - name: json-schema-validator
+    type: jsonschema.modular
+  - name: workflow-database
+    type: database.workflow
+  - name: metrics-collector
+    type: metrics.collector
+  - name: health-checker
+    type: health.checker
+  - name: request-id-middleware
+    type: http.middleware.requestid
+  - name: data-transformer
+    type: data.transformer
+  - name: webhook-sender
+    type: webhook.sender
+workflows: {}
+triggers: {}

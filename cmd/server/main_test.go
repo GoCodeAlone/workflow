@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/ai"
 	"github.com/GoCodeAlone/workflow/config"
@@ -174,5 +175,437 @@ func TestEndToEnd_MockProvider(t *testing.T) {
 	}
 	if len(resp.Workflow.Modules) == 0 {
 		t.Error("expected at least one module in workflow")
+	}
+}
+
+func TestBuildEngine_WithConfig(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "web-server", Type: "http.server", Config: map[string]interface{}{"address": ":9090"}},
+			{Name: "web-router", Type: "http.router", Config: map[string]interface{}{"prefix": "/api"}, DependsOn: []string{"web-server"}},
+		},
+		Workflows: map[string]interface{}{},
+		Triggers:  map[string]interface{}{},
+	}
+
+	engine, loader, registry, err := buildEngine(cfg, logger)
+	if err != nil {
+		t.Fatalf("buildEngine failed: %v", err)
+	}
+	if engine == nil {
+		t.Fatal("expected non-nil engine")
+	}
+	if loader == nil {
+		t.Fatal("expected non-nil loader")
+	}
+	if registry == nil {
+		t.Fatal("expected non-nil registry")
+	}
+}
+
+func TestBuildEngine_EmptyConfig(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	cfg := config.NewEmptyWorkflowConfig()
+
+	engine, loader, registry, err := buildEngine(cfg, logger)
+	if err != nil {
+		t.Fatalf("buildEngine with empty config failed: %v", err)
+	}
+	if engine == nil {
+		t.Fatal("expected non-nil engine")
+	}
+	if loader == nil {
+		t.Fatal("expected non-nil loader")
+	}
+	if registry == nil {
+		t.Fatal("expected non-nil registry")
+	}
+}
+
+func TestBuildMux_AllRoutesRegistered(t *testing.T) {
+	svc := ai.NewService()
+	svc.RegisterGenerator(ai.ProviderAnthropic, &mockGenerator{})
+
+	pool := dynamic.NewInterpreterPool()
+	registry := dynamic.NewComponentRegistry()
+	loader := dynamic.NewLoader(pool, registry)
+	deploy := ai.NewDeployService(svc, registry, pool)
+	cfg := config.NewEmptyWorkflowConfig()
+
+	mux := buildMux(svc, deploy, loader, registry, cfg)
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   interface{}
+	}{
+		{"ai providers", http.MethodGet, "/api/ai/providers", nil},
+		{"ai generate", http.MethodPost, "/api/ai/generate", ai.GenerateRequest{Intent: "test"}},
+		{"ai suggest", http.MethodPost, "/api/ai/suggest", map[string]string{"useCase": "test"}},
+		{"dynamic components", http.MethodGet, "/api/dynamic/components", nil},
+		{"workflow config", http.MethodGet, "/api/workflow/config", nil},
+		{"workflow validate", http.MethodPost, "/api/workflow/validate", map[string]interface{}{"modules": []interface{}{}}},
+		{"workflow modules", http.MethodGet, "/api/workflow/modules", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var req *http.Request
+			if tt.body != nil {
+				body, _ := json.Marshal(tt.body)
+				req = httptest.NewRequest(tt.method, tt.path, bytes.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+			} else {
+				req = httptest.NewRequest(tt.method, tt.path, nil)
+			}
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+
+			if w.Code == http.StatusNotFound {
+				t.Errorf("route %s %s returned 404, expected a registered handler", tt.method, tt.path)
+			}
+		})
+	}
+}
+
+func TestBuildMux_StaticFilesFallback(t *testing.T) {
+	svc := ai.NewService()
+	pool := dynamic.NewInterpreterPool()
+	registry := dynamic.NewComponentRegistry()
+	loader := dynamic.NewLoader(pool, registry)
+	deploy := ai.NewDeployService(svc, registry, pool)
+	cfg := config.NewEmptyWorkflowConfig()
+
+	mux := buildMux(svc, deploy, loader, registry, cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code == http.StatusNotFound {
+		t.Error("GET / returned 404, expected static file server response")
+	}
+}
+
+func TestInitAIService_CopilotFailure(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	pool := dynamic.NewInterpreterPool()
+	registry := dynamic.NewComponentRegistry()
+
+	*anthropicKey = ""
+	// NewClient accepts any path without validation, so the provider registers
+	// successfully. The failure will occur later at generation time.
+	*copilotCLI = "/nonexistent/path/to/copilot-cli-binary"
+	defer func() { *copilotCLI = "" }()
+
+	svc, deploy := initAIService(logger, registry, pool)
+	if svc == nil {
+		t.Fatal("expected non-nil service even with invalid copilot path")
+	}
+	if deploy == nil {
+		t.Fatal("expected non-nil deploy service even with invalid copilot path")
+	}
+
+	// Copilot client is created successfully (path is validated at call time, not creation),
+	// so we should have 1 provider (copilot) registered.
+	providers := svc.Providers()
+	if len(providers) != 1 {
+		t.Errorf("expected 1 provider (copilot), got %d", len(providers))
+	}
+}
+
+func TestIntegration_GenerateEndpoint(t *testing.T) {
+	svc := ai.NewService()
+	svc.RegisterGenerator(ai.ProviderAnthropic, &mockGenerator{})
+
+	pool := dynamic.NewInterpreterPool()
+	registry := dynamic.NewComponentRegistry()
+	loader := dynamic.NewLoader(pool, registry)
+	deploy := ai.NewDeployService(svc, registry, pool)
+	cfg := config.NewEmptyWorkflowConfig()
+
+	mux := buildMux(svc, deploy, loader, registry, cfg)
+
+	body, _ := json.Marshal(ai.GenerateRequest{Intent: "Create a REST API"})
+	req := httptest.NewRequest(http.MethodPost, "/api/ai/generate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp ai.GenerateResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.Workflow == nil {
+		t.Error("expected workflow in response")
+	}
+	if resp.Explanation == "" {
+		t.Error("expected non-empty explanation")
+	}
+}
+
+func TestLoadConfig_NoFile(t *testing.T) {
+	*configFile = ""
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	cfg, err := loadConfig(logger)
+	if err != nil {
+		t.Fatalf("loadConfig failed: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if len(cfg.Modules) != 0 {
+		t.Errorf("expected empty modules, got %d", len(cfg.Modules))
+	}
+}
+
+func TestLoadConfig_InvalidFile(t *testing.T) {
+	*configFile = "/nonexistent/config.yaml"
+	defer func() { *configFile = "" }()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	_, err := loadConfig(logger)
+	if err == nil {
+		t.Fatal("expected error for nonexistent config file")
+	}
+}
+
+func TestLoadConfig_ValidFile(t *testing.T) {
+	// Create a temp YAML config file
+	tmpFile, err := os.CreateTemp("", "workflow-test-*.yaml")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	yamlContent := `modules:
+  - name: test-server
+    type: http.server
+    config:
+      address: ":9999"
+workflows: {}
+triggers: {}
+`
+	if _, err := tmpFile.WriteString(yamlContent); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	*configFile = tmpFile.Name()
+	defer func() { *configFile = "" }()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	cfg, err := loadConfig(logger)
+	if err != nil {
+		t.Fatalf("loadConfig failed: %v", err)
+	}
+	if len(cfg.Modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(cfg.Modules))
+	}
+	if cfg.Modules[0].Name != "test-server" {
+		t.Errorf("expected module name test-server, got %s", cfg.Modules[0].Name)
+	}
+}
+
+func TestSetup_EmptyConfig(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	cfg := config.NewEmptyWorkflowConfig()
+
+	app, err := setup(logger, cfg)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	if app == nil {
+		t.Fatal("expected non-nil serverApp")
+	}
+	if app.engine == nil {
+		t.Fatal("expected non-nil engine")
+	}
+	if app.mux == nil {
+		t.Fatal("expected non-nil mux")
+	}
+	if app.logger == nil {
+		t.Fatal("expected non-nil logger")
+	}
+}
+
+func TestRun_ImmediateCancel(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	cfg := config.NewEmptyWorkflowConfig()
+
+	app, err := setup(logger, cfg)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	// Create a context and cancel it immediately so run() exits quickly
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = run(ctx, app, ":0")
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+}
+
+func TestRun_ServerStartsAndStops(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	cfg := config.NewEmptyWorkflowConfig()
+
+	app, err := setup(logger, cfg)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, app, ":0")
+	}()
+
+	// Give the server a moment to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Cancel and wait for shutdown
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+}
+
+func TestInitAIService_BothProviders(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key-both")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	pool := dynamic.NewInterpreterPool()
+	registry := dynamic.NewComponentRegistry()
+
+	*anthropicKey = ""
+	*copilotCLI = "/some/copilot/path"
+	defer func() { *copilotCLI = "" }()
+
+	svc, deploy := initAIService(logger, registry, pool)
+	if svc == nil {
+		t.Fatal("expected non-nil service")
+	}
+	if deploy == nil {
+		t.Fatal("expected non-nil deploy service")
+	}
+
+	providers := svc.Providers()
+	if len(providers) != 2 {
+		t.Errorf("expected 2 providers, got %d", len(providers))
+	}
+}
+
+func TestInitAIService_AnthropicViaFlag(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	pool := dynamic.NewInterpreterPool()
+	registry := dynamic.NewComponentRegistry()
+
+	*anthropicKey = "flag-key-123"
+	*copilotCLI = ""
+	defer func() { *anthropicKey = "" }()
+
+	svc, _ := initAIService(logger, registry, pool)
+
+	providers := svc.Providers()
+	if len(providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(providers))
+	}
+	if providers[0] != ai.ProviderAnthropic {
+		t.Errorf("expected anthropic provider, got %s", providers[0])
+	}
+}
+
+func TestSetup_EngineError(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "bad", Type: "nonexistent.type"},
+		},
+		Workflows: map[string]interface{}{},
+		Triggers:  map[string]interface{}{},
+	}
+
+	_, err := setup(logger, cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid module type in setup")
+	}
+}
+
+func TestBuildEngine_InvalidModuleType(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "bad-module", Type: "nonexistent.type.that.does.not.exist"},
+		},
+		Workflows: map[string]interface{}{},
+		Triggers:  map[string]interface{}{},
+	}
+
+	_, _, _, err := buildEngine(cfg, logger)
+	if err == nil {
+		t.Fatal("expected error for invalid module type")
+	}
+}
+
+func TestSetup_WithModules(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	*anthropicKey = ""
+	*copilotCLI = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "srv", Type: "http.server", Config: map[string]interface{}{"address": ":7070"}},
+		},
+		Workflows: map[string]interface{}{},
+		Triggers:  map[string]interface{}{},
+	}
+
+	app, err := setup(logger, cfg)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	if app == nil {
+		t.Fatal("expected non-nil serverApp")
+	}
+
+	// Verify the mux has routes by testing one
+	req := httptest.NewRequest(http.MethodGet, "/api/ai/providers", nil)
+	w := httptest.NewRecorder()
+	app.mux.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Error("expected /api/ai/providers to be registered")
 	}
 }

@@ -73,6 +73,7 @@ async function dragModuleToCanvas(
         'Request ID Middleware': 'http.middleware.requestid',
         'Data Transformer': 'data.transformer',
         'Webhook Sender': 'webhook.sender',
+        'EventBus Bridge': 'messaging.broker.eventbus',
       };
 
       const modType = moduleTypeMap[label];

@@ -1,0 +1,11 @@
+modules:
+  - name: web-server
+    type: http.server
+    config:
+      address: ":8080"
+  - name: api-router
+    type: http.router
+    dependsOn:
+      - web-server
+workflows: {}
+triggers: {}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -502,6 +503,107 @@ func TestRESTAPIHandler_HandleTransition_WithStateMachineEngine(t *testing.T) {
 	}
 	if result["success"] != true {
 		t.Errorf("expected success=true, got %v", result["success"])
+	}
+}
+
+func TestRESTAPIHandler_HandleGet_WithStateTracker(t *testing.T) {
+	h := setupHandler(t)
+
+	// Register a state tracker service in the app
+	tracker := NewStateTracker("workflow.service.statetracker")
+	if err := h.app.RegisterService(StateTrackerName, tracker); err != nil {
+		t.Fatalf("failed to register state tracker: %v", err)
+	}
+
+	// Create a resource
+	createBody := `{"id": "order-1", "product": "widget"}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/orders", bytes.NewBufferString(createBody))
+	createW := httptest.NewRecorder()
+	h.Handle(createW, createReq)
+
+	// Set state for the resource
+	tracker.SetState("orders", "order-1", "processing", map[string]interface{}{
+		"priority": "high",
+	})
+
+	// Get the resource - should be enhanced with state info
+	req := httptest.NewRequest(http.MethodGet, "/api/orders/{id}", nil)
+	req.SetPathValue("id", "order-1")
+	w := httptest.NewRecorder()
+
+	h.Handle(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resource RESTResource
+	if err := json.NewDecoder(w.Body).Decode(&resource); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resource.State != "processing" {
+		t.Errorf("expected state 'processing', got '%s'", resource.State)
+	}
+	if resource.Data["priority"] != "high" {
+		t.Errorf("expected priority 'high' from state tracker, got %v", resource.Data["priority"])
+	}
+}
+
+func TestRESTAPIHandler_HandlePut_MissingID(t *testing.T) {
+	h := setupHandler(t)
+
+	body := `{"product": "widget"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/orders", bytes.NewBufferString(body))
+	w := httptest.NewRecorder()
+
+	// Directly call handlePut with empty ID
+	h.handlePut("", w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestRESTAPIHandler_HandleDelete_MissingID(t *testing.T) {
+	h := setupHandler(t)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/orders", nil)
+	w := httptest.NewRecorder()
+
+	// Directly call handleDelete with empty ID
+	h.handleDelete("", w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestRESTAPIHandler_HandleGet_ResourceWithModules(t *testing.T) {
+	h := setupHandler(t)
+
+	// Create resources
+	for i, id := range []string{"a", "b", "c"} {
+		body := `{"id": "` + id + `", "order": ` + fmt.Sprintf("%d", i+1) + `}`
+		req := httptest.NewRequest(http.MethodPost, "/api/orders", bytes.NewBufferString(body))
+		w := httptest.NewRecorder()
+		h.Handle(w, req)
+	}
+
+	// List all resources (handleGet with empty ID path)
+	req := httptest.NewRequest(http.MethodGet, "/api/orders", nil)
+	w := httptest.NewRecorder()
+	h.handleGet("", w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resources []RESTResource
+	if err := json.NewDecoder(w.Body).Decode(&resources); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if len(resources) != 3 {
+		t.Errorf("expected 3 resources, got %d", len(resources))
 	}
 }
 

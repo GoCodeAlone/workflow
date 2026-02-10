@@ -184,6 +184,14 @@ func TestHealthChecker_ProvidesServices(t *testing.T) {
 	}
 }
 
+func TestHealthChecker_RequiresServices(t *testing.T) {
+	h := NewHealthChecker("test-health")
+	deps := h.RequiresServices()
+	if deps != nil {
+		t.Errorf("expected nil dependencies, got %v", deps)
+	}
+}
+
 func TestHealthChecker_HealthHandler_NoChecks(t *testing.T) {
 	h := NewHealthChecker("test-health")
 

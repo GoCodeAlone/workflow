@@ -211,6 +211,73 @@ func TestCustomNamespaceImplementation(t *testing.T) {
 	}
 }
 
+func TestStandardNamespace_ResolveDependency(t *testing.T) {
+	ns := NewStandardNamespace("dev", "")
+	result := ns.ResolveDependency("database")
+	if result != "dev-database" {
+		t.Errorf("expected 'dev-database', got %q", result)
+	}
+}
+
+func TestModuleNamespace_ResolveDependency(t *testing.T) {
+	ns := NewModuleNamespace("prod", "")
+	result := ns.ResolveDependency("cache")
+	if result != "prod-cache" {
+		t.Errorf("expected 'prod-cache', got %q", result)
+	}
+}
+
+func TestModuleNamespace_ResolveServiceName(t *testing.T) {
+	ns := NewModuleNamespace("prod", "")
+	result := ns.ResolveServiceName("auth")
+	if result != "prod-auth" {
+		t.Errorf("expected 'prod-auth', got %q", result)
+	}
+}
+
+func TestValidatingNamespace_ResolveDependency(t *testing.T) {
+	stdNs := NewStandardNamespace("dev", "")
+	vn := WithValidation(stdNs)
+	result := vn.ResolveDependency("service")
+	if result != "dev-service" {
+		t.Errorf("expected 'dev-service', got %q", result)
+	}
+}
+
+func TestValidatingNamespace_ResolveServiceName(t *testing.T) {
+	stdNs := NewStandardNamespace("dev", "")
+	vn := WithValidation(stdNs)
+	result := vn.ResolveServiceName("auth")
+	if result != "dev-auth" {
+		t.Errorf("expected 'dev-auth', got %q", result)
+	}
+}
+
+func TestModuleNamespaceProviderFunc_Defaults(t *testing.T) {
+	// Test with nil functions - should use defaults
+	provider := ModuleNamespaceProviderFunc{}
+
+	// FormatName with nil func returns baseName as-is
+	if result := provider.FormatName("test"); result != "test" {
+		t.Errorf("expected 'test', got %q", result)
+	}
+
+	// ResolveDependency with nil func delegates to FormatName
+	if result := provider.ResolveDependency("dep"); result != "dep" {
+		t.Errorf("expected 'dep', got %q", result)
+	}
+
+	// ResolveServiceName with nil func delegates to FormatName
+	if result := provider.ResolveServiceName("svc"); result != "svc" {
+		t.Errorf("expected 'svc', got %q", result)
+	}
+
+	// ValidateModuleName with nil func returns nil
+	if err := provider.ValidateModuleName("anything"); err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+}
+
 // ScopeError represents a namespace error
 type ScopeError struct {
 	message string
