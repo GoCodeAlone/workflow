@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -54,7 +55,11 @@ func (m *RateLimitMiddleware) Init(app modular.Application) error {
 // Process implements middleware processing
 func (m *RateLimitMiddleware) Process(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		clientIP := r.RemoteAddr // In production, use X-Forwarded-For or similar
+		// Strip port from RemoteAddr to identify by IP only
+		clientIP := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(clientIP); err == nil {
+			clientIP = host
+		}
 
 		m.mu.Lock()
 		c, exists := m.clients[clientIP]
