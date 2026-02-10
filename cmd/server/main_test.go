@@ -386,7 +386,7 @@ func TestLoadConfig_ValidFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	yamlContent := `modules:
   - name: test-server
@@ -399,7 +399,7 @@ triggers: {}
 	if _, err := tmpFile.WriteString(yamlContent); err != nil {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	*configFile = tmpFile.Name()
 	defer func() { *configFile = "" }()

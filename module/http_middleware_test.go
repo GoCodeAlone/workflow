@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -290,28 +291,28 @@ func TestCORSMiddleware_RequiresServices(t *testing.T) {
 
 func TestRateLimitMiddleware_Start(t *testing.T) {
 	m := NewRateLimitMiddleware("rl", 60, 10)
-	if err := m.Start(nil); err != nil {
+	if err := m.Start(context.TODO()); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
 }
 
 func TestRateLimitMiddleware_Stop(t *testing.T) {
 	m := NewRateLimitMiddleware("rl", 60, 10)
-	if err := m.Stop(nil); err != nil {
+	if err := m.Stop(context.TODO()); err != nil {
 		t.Fatalf("Stop failed: %v", err)
 	}
 }
 
 func TestCORSMiddleware_Start(t *testing.T) {
 	m := NewCORSMiddleware("cors", nil, nil)
-	if err := m.Start(nil); err != nil {
+	if err := m.Start(context.TODO()); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
 }
 
 func TestCORSMiddleware_Stop(t *testing.T) {
 	m := NewCORSMiddleware("cors", nil, nil)
-	if err := m.Stop(nil); err != nil {
+	if err := m.Stop(context.TODO()); err != nil {
 		t.Fatalf("Stop failed: %v", err)
 	}
 }
