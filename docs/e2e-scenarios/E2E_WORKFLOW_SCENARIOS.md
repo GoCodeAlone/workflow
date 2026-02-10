@@ -8,6 +8,7 @@ All scenarios use **real HTTP servers on random ports**, **real modular.Applicat
 
 ## Table of Contents
 
+### Positive Tests
 1. [Core HTTP Pipeline](#1-core-http-pipeline)
 2. [Order Processing Pipeline](#2-order-processing-pipeline)
 3. [Order Pipeline Error Path](#3-order-pipeline-error-path)
@@ -31,6 +32,27 @@ All scenarios use **real HTTP servers on random ports**, **real modular.Applicat
 21. [Middleware: CORS](#21-middleware-cors)
 22. [Middleware: Request ID](#22-middleware-request-id)
 23. [Middleware: Full Chain](#23-middleware-full-chain)
+
+### Negative & Validation Tests
+- [N1: HTTP Routing Validation](#n1-http-routing-validation)
+- [N2: Order Data Roundtrip](#n2-order-pipeline-data-roundtrip)
+- [N3: Invalid Transitions](#n3-order-pipeline-invalid-transitions)
+- [N4: Config Validation](#n4-config-validation)
+- [N5: Dynamic Invalid Ops](#n5-dynamic-component-invalid-operations)
+- [N6: Dynamic Computation](#n6-dynamic-component-computation-verification)
+- [N7: Broker Message Verification](#n7-broker-message-verification)
+- [N8: Webhook Payload Verification](#n8-webhook-payload-verification)
+- [N9: Auth Token Propagation](#n9-auth-token-content-propagation)
+- [N10: Rate Limit Per-Client](#n10-rate-limit-per-client-isolation)
+- [N11: Rate Limit Recovery](#n11-rate-limit-recovery)
+- [N12: CORS Method Enforcement](#n12-cors-method-enforcement)
+- [N13: Request ID Uniqueness](#n13-request-id-uniqueness)
+- [N14: Full Chain Order](#n14-full-chain-order-verification)
+- [N15: Auth Error Responses](#n15-auth-error-responses)
+- [N16: Response Headers](#n16-middleware-response-headers)
+
+### UI Visualization
+- [UI Workflow Visualization](#ui-workflow-visualization)
 
 ---
 
@@ -1152,7 +1174,293 @@ flowchart LR
 
 ---
 
+---
+
+## Negative & Validation Tests
+
+The negative tests verify that the engine doesn't just return 200 for everything — they prove correct error handling, data roundtrip fidelity, boundary enforcement, and response body content. Each subtest documents exactly what it proves with `t.Logf("Proves: ...")`.
+
+### Execution Negative Tests (`e2e_negative_test.go`)
+
+#### N1. HTTP Routing Validation
+
+**Test:** `TestE2E_Negative_HTTPRouting` (5 subtests)
+
+Proves the HTTP pipeline doesn't blindly return 200:
+
+| Subtest | Proves |
+|---------|--------|
+| `POST_valid_route_returns_200_with_handler_name` | Response body contains the handler name, not empty |
+| `POST_valid_route_has_json_content_type` | Content-Type is `application/json` |
+| `GET_registered_POST_route_returns_non_200` | Wrong method returns 405, not 200 |
+| `POST_nonexistent_path_returns_non_200` | Wrong path returns 404, not 200 |
+| `response_JSON_has_correct_structure` | Response JSON has exactly expected keys |
+
+<details>
+<summary>Execution Evidence</summary>
+
+```
+--- PASS: TestE2E_Negative_HTTPRouting (0.06s)
+    --- PASS: POST_valid_route_returns_200_with_handler_name (0.00s)
+    --- PASS: POST_valid_route_has_json_content_type (0.00s)
+    --- PASS: GET_registered_POST_route_returns_non_200 (0.00s)
+    --- PASS: POST_nonexistent_path_returns_non_200 (0.00s)
+    --- PASS: response_JSON_has_correct_structure (0.00s)
+```
+</details>
+
+#### N2. Order Pipeline Data Roundtrip
+
+**Test:** `TestE2E_Negative_OrderPipeline_DataRoundtrip` (4 subtests)
+
+Proves data integrity — POST data equals GET data:
+
+| Subtest | Proves |
+|---------|--------|
+| `create_and_retrieve_order_data_matches` | POST customer/total matches GET exactly |
+| `POST_with_invalid_JSON_returns_400` | Malformed JSON rejected, not silently accepted |
+| `GET_nonexistent_order_returns_404` | Non-existent order ID returns 404 with error message |
+| `two_different_orders_stored_independently` | Orders don't overwrite each other |
+
+#### N3. Order Pipeline Invalid Transitions
+
+**Test:** `TestE2E_Negative_OrderPipeline_InvalidTransitions` (5 subtests)
+
+Proves the state machine enforces transition rules:
+
+| Subtest | Proves |
+|---------|--------|
+| `invalid_transition_name_returns_400_with_error` | `fly_to_moon` rejected with descriptive error |
+| `wrong_from_state_transition_returns_400` | `store_order` from `received` rejected (needs `validated`) |
+| `transition_from_final_state_returns_400` | No transitions allowed from final state |
+| `transition_on_nonexistent_order_returns_404` | Can't transition non-existent orders |
+| `empty_transition_name_returns_400` | Empty transition name rejected |
+
+#### N4. Config Validation
+
+**Test:** `TestE2E_Negative_ConfigValidation` (6 subtests)
+
+Proves the config API validates input:
+
+| Subtest | Proves |
+|---------|--------|
+| `PUT_invalid_JSON_returns_400` | Malformed JSON rejected |
+| `GET_returns_initial_config_before_any_PUT` | Initial config is real, not null |
+| `PUT_then_GET_returns_exact_config` | Config roundtrip is lossless |
+| `validate_valid_config_returns_valid_true` | Valid config returns `valid:true` |
+| `validate_config_with_no_modules_returns_valid_false` | Empty config returns `valid:false` with error list |
+| `validate_config_with_missing_dependency_returns_error` | Missing dependency detected and reported |
+
+#### N5. Dynamic Component Invalid Operations
+
+**Test:** `TestE2E_Negative_DynamicComponent_InvalidOps` (6 subtests)
+
+Proves the dynamic component API rejects bad input:
+
+| Subtest | Proves |
+|---------|--------|
+| `POST_with_syntax_error_returns_422` | Go syntax errors rejected at load time |
+| `GET_nonexistent_component_returns_404` | Unknown component returns 404 |
+| `PUT_nonexistent_component_returns_error` | PUT creates if not exists (documents actual behavior) |
+| `DELETE_nonexistent_component_returns_404` | Can't delete what doesn't exist |
+| `POST_with_missing_fields_returns_400` | Required fields enforced |
+| `POST_invalid_JSON_returns_400` | Malformed JSON rejected |
+
+#### N6. Dynamic Component Computation Verification
+
+**Test:** `TestE2E_Negative_DynamicComponent_DataVerification` (5 subtests)
+
+Proves dynamic components **actually execute code**, not return canned responses:
+
+| Subtest | Proves |
+|---------|--------|
+| `add_5_plus_3_equals_8` | Real arithmetic: 5+3=8 |
+| `multiply_4_times_7_equals_28` | Different operation: 4*7=28 |
+| `subtract_10_minus_3_equals_7` | Third code path: 10-3=7 |
+| `unknown_operation_returns_error` | Unknown ops return errors, not silence |
+| `results_change_with_different_inputs` | 1+1=2 and 100+200=300 (not canned) |
+
+#### N7. Broker Message Verification
+
+**Test:** `TestE2E_Negative_BrokerMessageVerification` (3 subtests)
+
+Proves broker delivers exact content to correct subscribers:
+
+| Subtest | Proves |
+|---------|--------|
+| `subscriber_receives_exact_message_content` | Message content matches byte-for-byte |
+| `subscriber_on_different_topic_does_not_receive` | Topic isolation: A doesn't see B's messages |
+| `multiple_messages_delivered_in_order_with_correct_content` | 3 messages delivered with correct content |
+
+#### N8. Webhook Payload Verification
+
+**Test:** `TestE2E_Negative_WebhookPayloadVerification` (4 subtests)
+
+Proves webhooks deliver exact payloads and handle failures:
+
+| Subtest | Proves |
+|---------|--------|
+| `exact_payload_and_all_headers_received` | Target gets exact JSON + all custom headers |
+| `empty_payload_is_delivered` | Empty payload works without errors |
+| `failed_delivery_goes_to_dead_letter` | Unreachable URL -> 3 retries -> dead letter |
+| `server_returning_500_triggers_retry_and_dead_letter` | 500 responses trigger retry exhaustion |
+
+---
+
+### Middleware Negative Tests (`e2e_middleware_negative_test.go`)
+
+#### N9. Auth Token Content Propagation
+
+**Test:** `TestE2E_Negative_Auth_TokenContentPropagation` (5 subtests)
+
+Proves auth middleware validates tokens AND the handler actually executes:
+
+| Subtest | Proves |
+|---------|--------|
+| `valid_token_returns_handler_body` | Response contains handler JSON, not empty |
+| `different_token_also_succeeds` | Multiple valid tokens work |
+| `empty_bearer_token_returns_401` | `Bearer ` (space, no token) rejected |
+| `bearer_double_space_returns_401` | `Bearer  token` (double space) rejected |
+| `error_response_body_is_meaningful` | Error body is descriptive, not empty |
+
+#### N10. Rate Limit Per-Client Isolation
+
+**Test:** `TestE2E_Negative_RateLimit_PerClientIsolation` (3 subtests)
+
+Proves rate limiting tracks per-client state:
+
+| Subtest | Proves |
+|---------|--------|
+| `client_A_exhausts_burst` | 3 requests succeed (burst=3) |
+| `client_A_gets_429` | 4th request returns 429 |
+| `429_response_body_content` | 429 body contains "Rate limit exceeded" |
+
+#### N11. Rate Limit Recovery
+
+**Test:** `TestE2E_Negative_RateLimit_RecoveryAfterWindow` (3 subtests)
+
+Proves rate limit tokens refill over time:
+
+| Subtest | Proves |
+|---------|--------|
+| `exhaust_burst` | All burst tokens consumed |
+| `verify_429_after_exhaustion` | Confirmed 429 is active |
+| `recovery_after_wait` | After token refill wait, 200 returns |
+
+#### N12. CORS Method Enforcement
+
+**Test:** `TestE2E_Negative_CORS_MethodEnforcement` (4 subtests)
+
+Proves CORS restricts methods to configured values:
+
+| Subtest | Proves |
+|---------|--------|
+| `allowed_methods_header_does_not_include_PUT` | Only GET, POST in Allow-Methods (not PUT) |
+| `preflight_for_PUT_shows_only_configured_methods` | OPTIONS doesn't grant PUT access |
+| `no_origin_still_processed` | Same-origin requests work without CORS headers |
+| `disallowed_origin_response_accessible_but_no_cors` | Response body sent but no CORS headers (browser-enforced) |
+
+#### N13. Request ID Uniqueness
+
+**Test:** `TestE2E_Negative_RequestID_Uniqueness` (4 subtests)
+
+Proves every request gets a unique, valid UUID:
+
+| Subtest | Proves |
+|---------|--------|
+| `100_unique_ids` | 100 requests, 100 unique UUIDs |
+| `context_contains_same_id_as_header` | Context ID matches response header |
+| `custom_id_preserved` | Client-supplied ID is not overwritten |
+| `empty_id_generates_new` | Empty X-Request-ID generates new UUID |
+
+#### N14. Full Chain Order Verification
+
+**Test:** `TestE2E_Negative_FullChain_OrderVerification` (4 subtests)
+
+Proves middleware chain ordering and interaction:
+
+| Subtest | Proves |
+|---------|--------|
+| `no_auth_no_origin_returns_401_no_cors` | CORS + RateLimit + Auth all execute in order |
+| `valid_auth_disallowed_origin_returns_200_no_cors` | Auth passes but CORS headers absent |
+| `valid_auth_allowed_origin_returns_200_with_cors` | Full chain passes, all headers present |
+| `failed_auth_still_consumes_rate_limit_token` | Auth failures DO consume rate limit tokens (RateLimit runs BEFORE Auth) |
+
+#### N15. Auth Error Responses
+
+**Test:** `TestE2E_Negative_Auth_ErrorResponses` (5 subtests)
+
+Proves auth errors are safe and descriptive:
+
+| Subtest | Proves |
+|---------|--------|
+| `no_auth_header_error` | "Authorization header required" |
+| `wrong_scheme_error` | "Bearer authorization required" |
+| `invalid_token_error` | "Invalid credentials" |
+| `error_does_not_leak_sensitive_info` | No stack traces or token echoes |
+| `error_content_type_consistent` | All auth errors use text/plain |
+
+#### N16. Middleware Response Headers
+
+**Test:** `TestE2E_Negative_Middleware_ResponseHeaders` (5 subtests)
+
+Proves headers are set correctly in all scenarios:
+
+| Subtest | Proves |
+|---------|--------|
+| `success_response_has_request_id` | 200 response includes X-Request-ID |
+| `success_with_origin_has_cors_headers` | Full CORS + Request-ID headers on success |
+| `error_401_still_has_request_id` | Error responses still get Request-ID (outer middleware ran) |
+| `error_with_origin_has_cors_headers` | 401 with allowed origin still gets CORS headers |
+| `content_type_consistency` | Success=application/json, Error=text/plain |
+
+---
+
+## UI Workflow Visualization
+
+The following screenshots show how the workflow YAML configs render in the Workflow Builder UI. Each screenshot demonstrates that the module topology, node types, and edge connections are visually represented correctly.
+
+### Order Processing Pipeline
+![Order Processing Pipeline](screenshots/01-order-processing-pipeline.png)
+*10 modules with 7 dependency edges in a topological left-to-right layout*
+
+### Order Pipeline - Container View (C4)
+![Order Pipeline Container View](screenshots/01b-order-pipeline-container-view.png)
+*Same pipeline grouped by category (HTTP, Messaging, StateMachine) in C4 Container View*
+
+### Event-Driven Workflow
+![Event-Driven Workflow](screenshots/02-event-driven-workflow.png)
+*9 modules: event-broker, event-processor, 4 messaging handlers, HTTP stack*
+
+### State Machine Workflow
+![State Machine Workflow](screenshots/03-state-machine-workflow.png)
+*12 modules: state engine, tracker, connector, 4 handlers, HTTP + middleware*
+
+### Integration Workflow
+![Integration Workflow](screenshots/04-integration-workflow.png)
+*8 modules: integration registry, API handler, broker, 3 handlers*
+
+### Notification Pipeline
+![Notification Pipeline](screenshots/05-notification-pipeline.png)
+*8 modules: HTTP -> broker -> slack-notifier + S3 storage, metrics, health*
+
+### Data Pipeline
+![Data Pipeline](screenshots/06-data-pipeline.png)
+*10 modules: fan-out from broker to validation/transformation/enrichment/output handlers*
+
+### Scheduled Jobs
+![Scheduled Jobs](screenshots/07-scheduled-jobs.png)
+*12 modules: 3 schedulers, 4 job handlers, broker, job store, HTTP*
+
+### API Gateway
+![API Gateway](screenshots/08-api-gateway.png)
+*3 modules: chimux.router, httpserver.modular, reverseproxy*
+
+---
+
 ## Summary
+
+### Positive Tests (23 scenarios)
 
 | # | Scenario | Modules Tested | Status |
 |---|----------|---------------|--------|
@@ -1180,4 +1488,25 @@ flowchart LR
 | 22 | Middleware: Request ID | RequestID middleware (generate/preserve) | PASS |
 | 23 | Middleware: Full Chain | CORS + RateLimit + Auth + Logging combined | PASS |
 
-**Total: 23 scenarios, 23 PASS, 0 FAIL**
+### Negative & Validation Tests (16 scenarios, 66 subtests)
+
+| # | Scenario | Subtests | What It Proves |
+|---|----------|----------|---------------|
+| N1 | HTTP Routing Validation | 5 | Wrong path=404, wrong method=405, body has handler name |
+| N2 | Order Data Roundtrip | 4 | POST data = GET data, invalid JSON rejected, independent storage |
+| N3 | Invalid Transitions | 5 | State machine enforces rules, descriptive errors |
+| N4 | Config Validation | 6 | Config roundtrip, dependency checking, empty config rejection |
+| N5 | Dynamic Invalid Ops | 6 | Syntax errors rejected, missing fields rejected, 404 for unknown |
+| N6 | Dynamic Computation | 5 | Real math: 5+3=8, 4*7=28, different inputs = different outputs |
+| N7 | Broker Message Verification | 3 | Exact content match, topic isolation, ordered delivery |
+| N8 | Webhook Payload Verification | 4 | Exact payload + headers, empty payload, dead letter on failure |
+| N9 | Auth Token Propagation | 5 | Handler executes, empty/double-space tokens rejected |
+| N10 | Rate Limit Per-Client | 3 | Burst exhaustion, 429 body content |
+| N11 | Rate Limit Recovery | 3 | Token refill after wait period |
+| N12 | CORS Method Enforcement | 4 | Only configured methods allowed, browser-enforced model |
+| N13 | Request ID Uniqueness | 4 | 100 unique UUIDs, custom IDs preserved |
+| N14 | Full Chain Order | 4 | Middleware chain order, auth failures consume rate tokens |
+| N15 | Auth Error Responses | 5 | Descriptive errors, no info leakage, consistent content-type |
+| N16 | Response Headers | 5 | Request-ID on errors, CORS on errors, content-type consistency |
+
+**Total: 39 test functions, 23 positive + 16 negative (66 subtests), 0 FAIL**
