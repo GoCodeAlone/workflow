@@ -789,11 +789,10 @@ func (h *errorMockWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflow
 	return map[string]interface{}{"status": "ok"}, nil
 }
 
-// errorMockApplication extends mockApplication with Start/Stop that return errors.
+// errorMockApplication extends mockApplication with Stop that returns errors.
 type errorMockApplication struct {
 	mockApplication
-	startErr error
-	stopErr  error
+	stopErr error
 }
 
 func (a *errorMockApplication) Stop() error {

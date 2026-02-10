@@ -95,7 +95,7 @@ func TestClient_Call_Success(t *testing.T) {
 			StopReason: "end_turn",
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -120,7 +120,7 @@ func TestClient_Call_Success(t *testing.T) {
 func TestClient_Call_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, `{"error": {"message": "bad request"}}`)
+		_, _ = fmt.Fprint(w, `{"error": {"message": "bad request"}}`)
 	}))
 	defer server.Close()
 
@@ -139,7 +139,7 @@ func TestClient_Call_APIError(t *testing.T) {
 func TestClient_Call_InvalidResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, "not json")
+		_, _ = fmt.Fprint(w, "not json")
 	}))
 	defer server.Close()
 
@@ -445,7 +445,7 @@ func TestExtractCode_MultipleBlocks(t *testing.T) {
 func TestClient_GenerateWorkflow_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, `{"error": {"message": "server error"}}`)
+		_, _ = fmt.Fprint(w, `{"error": {"message": "server error"}}`)
 	}))
 	defer server.Close()
 
@@ -460,7 +460,7 @@ func TestClient_GenerateWorkflow_APIError(t *testing.T) {
 func TestClient_GenerateComponent_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, `{"error": {"message": "server error"}}`)
+		_, _ = fmt.Fprint(w, `{"error": {"message": "server error"}}`)
 	}))
 	defer server.Close()
 
@@ -475,7 +475,7 @@ func TestClient_GenerateComponent_APIError(t *testing.T) {
 func TestClient_SuggestWorkflow_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, `{"error": {"message": "server error"}}`)
+		_, _ = fmt.Fprint(w, `{"error": {"message": "server error"}}`)
 	}))
 	defer server.Close()
 
