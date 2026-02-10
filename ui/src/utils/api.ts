@@ -108,7 +108,7 @@ export async function listDynamicComponents(): Promise<DynamicComponent[]> {
 export async function createDynamicComponent(name: string, source: string, language: string): Promise<void> {
   await apiFetch<void>('/dynamic/components', {
     method: 'POST',
-    body: JSON.stringify({ name, source, language }),
+    body: JSON.stringify({ id: name, source, language }),
   });
 }
 
