@@ -182,6 +182,7 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   updateNodeConfig: (id, config) => {
+    get().pushHistory();
     set({
       nodes: get().nodes.map((n) =>
         n.id === id ? { ...n, data: { ...n.data, config: { ...n.data.config, ...config } } } : n
@@ -190,6 +191,7 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   updateNodeName: (id, name) => {
+    get().pushHistory();
     set({
       nodes: get().nodes.map((n) =>
         n.id === id ? { ...n, data: { ...n.data, label: name } } : n
@@ -216,14 +218,15 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
 function nodeComponentType(moduleType: string): string {
   if (moduleType.startsWith('http.middleware.')) return 'middlewareNode';
-  if (moduleType.startsWith('http.')) return 'httpNode';
-  if (moduleType === 'api.handler') return 'httpNode';
+  if (moduleType === 'http.server') return 'httpNode';
+  if (moduleType.startsWith('http.')) return 'httpRouterNode';
+  if (moduleType === 'api.handler') return 'httpRouterNode';
   if (moduleType.startsWith('messaging.')) return 'messagingNode';
   if (moduleType.startsWith('statemachine.') || moduleType.startsWith('state.')) return 'stateMachineNode';
   if (moduleType === 'scheduler.modular') return 'schedulerNode';
   if (moduleType === 'eventlogger.modular' || moduleType === 'eventbus.modular') return 'eventNode';
   if (moduleType === 'httpclient.modular') return 'integrationNode';
-  if (moduleType === 'chimux.router') return 'httpNode';
+  if (moduleType === 'chimux.router') return 'httpRouterNode';
   return 'infrastructureNode';
 }
 
