@@ -44,8 +44,14 @@ type IntegrationStep struct {
 
 // IntegrationWorkflowHandler handles integration workflows
 type IntegrationWorkflowHandler struct {
-	name      string
-	namespace module.ModuleNamespaceProvider
+	name         string
+	namespace    module.ModuleNamespaceProvider
+	eventEmitter *module.WorkflowEventEmitter
+}
+
+// SetEventEmitter sets the workflow event emitter for step-level lifecycle events.
+func (h *IntegrationWorkflowHandler) SetEventEmitter(emitter *module.WorkflowEventEmitter) {
+	h.eventEmitter = emitter
 }
 
 // NewIntegrationWorkflowHandler creates a new integration workflow handler
@@ -285,6 +291,11 @@ func (h *IntegrationWorkflowHandler) ExecuteIntegrationWorkflow(
 
 	// Execute steps sequentially
 	for _, step := range steps {
+		stepStartTime := time.Now()
+		if h.eventEmitter != nil {
+			h.eventEmitter.EmitStepStarted(ctx, "integration", step.Name, step.Connector, step.Action)
+		}
+
 		// Get the connector for this step
 		connector, err := registry.GetConnector(step.Connector)
 		if err != nil {
@@ -375,12 +386,19 @@ func (h *IntegrationWorkflowHandler) ExecuteIntegrationWorkflow(
 					continue
 				}
 				// No error handler, return the error
+				if h.eventEmitter != nil {
+					h.eventEmitter.EmitStepFailed(ctx, "integration", step.Name, step.Connector, step.Action, time.Since(stepStartTime), err)
+				}
 				return results, fmt.Errorf("error executing step '%s': %w", step.Name, err)
 			}
 		}
 
 		// Store the result
 		results[step.Name] = stepResult
+
+		if h.eventEmitter != nil {
+			h.eventEmitter.EmitStepCompleted(ctx, "integration", step.Name, step.Connector, step.Action, time.Since(stepStartTime), stepResult)
+		}
 
 		// Handle success path if specified
 		if step.OnSuccess != "" {

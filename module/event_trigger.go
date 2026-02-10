@@ -110,7 +110,7 @@ func (t *EventTrigger) Configure(app modular.Application, triggerConfig interfac
 
 	// Find the message broker
 	var broker MessageBroker
-	brokerNames := []string{"messageBroker", "eventBroker", "broker"}
+	brokerNames := []string{"messageBroker", "eventBroker", "broker", "messaging.broker.eventbus"}
 
 	for _, name := range brokerNames {
 		var svc interface{}

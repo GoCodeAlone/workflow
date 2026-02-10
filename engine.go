@@ -54,6 +54,7 @@ type StdEngine struct {
 	triggers         []module.Trigger
 	triggerRegistry  *module.TriggerRegistry
 	dynamicRegistry  *dynamic.ComponentRegistry
+	eventEmitter     *module.WorkflowEventEmitter
 }
 
 // SetDynamicRegistry sets the dynamic component registry on the engine.
@@ -181,6 +182,9 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "messaging.broker":
 				e.logger.Debug("Loading messaging broker module")
 				mod = module.NewInMemoryMessageBroker(modCfg.Name)
+			case "messaging.broker.eventbus":
+				e.logger.Debug("Loading EventBus bridge module")
+				mod = module.NewEventBusBridge(modCfg.Name)
 			case "messaging.handler":
 				e.logger.Debug("Loading messaging handler module")
 				mod = module.NewSimpleMessageHandler(modCfg.Name)
@@ -316,6 +320,9 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		e.logger.Debug("Loaded service: " + name)
 	}
 
+	// Initialize the workflow event emitter
+	e.eventEmitter = module.NewWorkflowEventEmitter(e.app)
+
 	// Register config section for workflow
 	e.app.RegisterConfigSection("workflow", modular.NewStdConfigProvider(cfg))
 
@@ -400,10 +407,17 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 				e.logger.Debug(fmt.Sprintf("  %s: %v", k, v))
 			}
 
+			if e.eventEmitter != nil {
+				e.eventEmitter.EmitWorkflowStarted(ctx, workflowType, action, data)
+			}
+
 			// Execute the workflow using the handler
 			results, err := handler.ExecuteWorkflow(ctx, workflowType, action, data)
 			if err != nil {
 				e.logger.Error(fmt.Sprintf("Failed to execute workflow '%s': %v", workflowType, err))
+				if e.eventEmitter != nil {
+					e.eventEmitter.EmitWorkflowFailed(ctx, workflowType, action, time.Since(startTime), err)
+				}
 				e.recordWorkflowMetrics(workflowType, action, "error", time.Since(startTime))
 				return fmt.Errorf("workflow execution failed: %w", err)
 			}
@@ -414,6 +428,9 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 				e.logger.Debug(fmt.Sprintf("  Result %s: %v", k, v))
 			}
 
+			if e.eventEmitter != nil {
+				e.eventEmitter.EmitWorkflowCompleted(ctx, workflowType, action, time.Since(startTime), results)
+			}
 			e.recordWorkflowMetrics(workflowType, action, "success", time.Since(startTime))
 			return nil
 		}
@@ -476,6 +493,8 @@ func canHandleTrigger(trigger module.Trigger, triggerType string) bool {
 		return trigger.Name() == module.ScheduleTriggerName
 	case "event":
 		return trigger.Name() == module.EventTriggerName
+	case "eventbus":
+		return trigger.Name() == module.EventBusTriggerName
 	case "mock":
 		// For tests - match the name of the trigger
 		return trigger.Name() == "mock.trigger"
