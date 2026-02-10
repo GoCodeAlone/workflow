@@ -60,8 +60,8 @@ func (h *WorkflowUIHandler) handlePutConfig(w http.ResponseWriter, r *http.Reque
 	contentType := r.Header.Get("Content-Type")
 
 	var cfg config.WorkflowConfig
-	switch {
-	case contentType == "application/x-yaml" || contentType == "text/yaml":
+	switch contentType {
+	case "application/x-yaml", "text/yaml":
 		decoder := yaml.NewDecoder(r.Body)
 		if err := decoder.Decode(&cfg); err != nil {
 			http.Error(w, fmt.Sprintf("invalid YAML: %v", err), http.StatusBadRequest)

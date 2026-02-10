@@ -129,7 +129,7 @@ func (w *WorkflowDatabase) Query(ctx context.Context, sqlStr string, args ...int
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	columns, err := rows.Columns()
 	if err != nil {

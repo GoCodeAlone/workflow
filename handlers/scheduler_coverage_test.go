@@ -55,7 +55,7 @@ func TestSchedulerExecuteWorkflow_JobExecution(t *testing.T) {
 	}}
 	app.services["my-job"] = job
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	result, err := h.ExecuteWorkflow(ctx, "scheduler", "my-job", map[string]interface{}{})
 	if err != nil {
@@ -80,7 +80,7 @@ func TestSchedulerExecuteWorkflow_JobExecutionWithParams(t *testing.T) {
 	}}
 	app.services["my-job"] = job
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	data := map[string]interface{}{
 		"params": map[string]interface{}{
@@ -107,7 +107,7 @@ func TestSchedulerExecuteWorkflow_JobExecutionError(t *testing.T) {
 	}}
 	app.services["my-job"] = job
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	result, err := h.ExecuteWorkflow(ctx, "scheduler", "my-job", map[string]interface{}{})
 	if err != nil {
@@ -128,7 +128,7 @@ func TestSchedulerExecuteWorkflow_MessageHandler(t *testing.T) {
 	handler := &mockMsgHandler{}
 	app.services["my-handler"] = handler
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	_, err := h.ExecuteWorkflow(ctx, "scheduler", "my-handler", map[string]interface{}{
 		"key": "value",
@@ -155,7 +155,7 @@ func TestSchedulerExecuteWorkflow_ColonSeparatedAction(t *testing.T) {
 	}}
 	app.services["my-job"] = job
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	_, err := h.ExecuteWorkflow(ctx, "scheduler", "my-sched:my-job", map[string]interface{}{})
 	if err != nil {
@@ -176,7 +176,7 @@ func TestSchedulerExecuteWorkflow_SchedulerFromData(t *testing.T) {
 	job := &mockJob{}
 	app.services["my-job"] = job
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	_, err := h.ExecuteWorkflow(ctx, "scheduler", "my-job", map[string]interface{}{
 		"scheduler": "my-sched",
@@ -199,7 +199,7 @@ func TestSchedulerExecuteWorkflow_NoAppContext(t *testing.T) {
 func TestSchedulerExecuteWorkflow_EmptyJobName(t *testing.T) {
 	h := NewSchedulerWorkflowHandler()
 	app := newMockApp()
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	// Use ":" to get empty job name after split
 	_, err := h.ExecuteWorkflow(ctx, "scheduler", "sched:", map[string]interface{}{})
@@ -215,7 +215,7 @@ func TestSchedulerExecuteWorkflow_SchedulerNotFound(t *testing.T) {
 	job := &mockJob{}
 	app.services["my-job"] = job
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	_, err := h.ExecuteWorkflow(ctx, "scheduler", "missing-sched:my-job", map[string]interface{}{})
 	if err == nil {
@@ -227,7 +227,7 @@ func TestSchedulerExecuteWorkflow_JobNotFound(t *testing.T) {
 	h := NewSchedulerWorkflowHandler()
 	app := newMockApp()
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	_, err := h.ExecuteWorkflow(ctx, "scheduler", "missing-job", map[string]interface{}{})
 	if err == nil {
@@ -242,7 +242,7 @@ func TestSchedulerExecuteWorkflow_HelperFallback(t *testing.T) {
 	// Register something that's neither a Job nor MessageHandler
 	app.services["weird-svc"] = "just-a-string"
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	result, err := h.ExecuteWorkflow(ctx, "scheduler", "weird-svc", map[string]interface{}{})
 	if err != nil {

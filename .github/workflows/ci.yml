@@ -17,7 +17,7 @@ jobs:
       contents: write
     strategy:
       matrix:
-        go-version: ['1.23', '1.24']
+        go-version: ['1.25']
     
     steps:
     - name: Check out code
@@ -40,7 +40,7 @@ jobs:
 
     - name: Upload coverage reports
       uses: codecov/codecov-action@v5
-      if: matrix.go-version == '1.24'
+      if: matrix.go-version == '1.25'
       with:
         file: ./coverage.out
         fail_ci_if_error: false
@@ -58,7 +58,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24'
+        go-version: '1.25'
         cache: true
 
     - name: Run golangci-lint
@@ -80,7 +80,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24'
+        go-version: '1.25'
         cache: true
 
     - name: Build main package
@@ -105,7 +105,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24'
+        go-version: '1.25'
         cache: true
 
     - name: Build examples

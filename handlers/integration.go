@@ -424,7 +424,7 @@ func (h *IntegrationWorkflowHandler) ExecuteWorkflow(ctx context.Context, workfl
 	}
 
 	// Get the registry from the service registry
-	appHelper := GetServiceHelper(ctx.Value("application").(modular.Application))
+	appHelper := GetServiceHelper(ctx.Value(applicationContextKey).(modular.Application))
 	registrySvc := appHelper.Service(registryName)
 	if registrySvc == nil {
 		return nil, fmt.Errorf("integration registry '%s' not found", registryName)

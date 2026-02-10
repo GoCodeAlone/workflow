@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"context"
-	"fmt"
-	"net/http"
 	"testing"
 
 	workflowmodule "github.com/GoCodeAlone/workflow/module"
@@ -175,7 +173,7 @@ func TestHTTPWorkflowHandler_ExecuteWorkflow_Status(t *testing.T) {
 	app.services["router"] = router
 	app.services["server"] = server
 
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	result, err := h.ExecuteWorkflow(ctx, "http", "status", nil)
 	if err != nil {
@@ -195,7 +193,7 @@ func TestHTTPWorkflowHandler_ExecuteWorkflow_DefaultCommand(t *testing.T) {
 	app.services["router"] = router
 	app.services["server"] = server
 
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	result, err := h.ExecuteWorkflow(ctx, "http", "", nil)
 	if err != nil {
@@ -215,7 +213,7 @@ func TestHTTPWorkflowHandler_ExecuteWorkflow_Routes(t *testing.T) {
 	app.services["router"] = router
 	app.services["server"] = server
 
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	result, err := h.ExecuteWorkflow(ctx, "http", "routes", nil)
 	if err != nil {
@@ -235,7 +233,7 @@ func TestHTTPWorkflowHandler_ExecuteWorkflow_Check(t *testing.T) {
 	app.services["router"] = router
 	app.services["server"] = server
 
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	result, err := h.ExecuteWorkflow(ctx, "http", "check", nil)
 	if err != nil {
@@ -255,7 +253,7 @@ func TestHTTPWorkflowHandler_ExecuteWorkflow_Start(t *testing.T) {
 	app.services["router"] = router
 	app.services["server"] = server
 
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	result, err := h.ExecuteWorkflow(ctx, "http", "start", nil)
 	if err != nil {
@@ -275,7 +273,7 @@ func TestHTTPWorkflowHandler_ExecuteWorkflow_UnknownCommand(t *testing.T) {
 	app.services["router"] = router
 	app.services["server"] = server
 
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	_, err := h.ExecuteWorkflow(ctx, "http", "unknown-command", nil)
 	if err == nil {
@@ -286,7 +284,7 @@ func TestHTTPWorkflowHandler_ExecuteWorkflow_UnknownCommand(t *testing.T) {
 func TestHTTPWorkflowHandler_ExecuteWorkflow_NoServer(t *testing.T) {
 	h := NewHTTPWorkflowHandler()
 	app := NewTestServiceRegistry()
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	_, err := h.ExecuteWorkflow(ctx, "http", "status", nil)
 	if err == nil {
@@ -303,7 +301,7 @@ func TestHTTPWorkflowHandler_ExecuteWorkflow_ExplicitServerRouter(t *testing.T) 
 	app.services["my-router"] = router
 	app.services["my-server"] = server
 
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	data := map[string]interface{}{
 		"server": "my-server",
@@ -336,10 +334,3 @@ func (s *mockHTTPServer) Stop(ctx context.Context) error {
 	return nil
 }
 
-// mockHTTPHandler implements workflowmodule.HTTPHandler for testing
-type mockHTTPHandlerForTest struct{}
-
-func (h *mockHTTPHandlerForTest) Handle(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, "ok")
-}

@@ -1,0 +1,12 @@
+modules:
+  - name: DB
+    type: database.workflow
+    config:
+      driver: sqlite
+      dsn: "file:test.db"
+  - name: Metrics
+    type: metrics.collector
+  - name: Transformer
+    type: data.transformer
+workflows: {}
+triggers: {}

@@ -161,7 +161,7 @@ func TestHTTPIntegrationConnector_ExecuteGET(t *testing.T) {
 			t.Errorf("expected query param key=value, got %q", r.URL.Query().Get("key"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"result": "ok"})
 	}))
 	defer server.Close()
 
@@ -187,9 +187,9 @@ func TestHTTPIntegrationConnector_ExecutePOST(t *testing.T) {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 		var body map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewDecoder(r.Body).Decode(&body)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"id": "123", "name": body["name"]})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "123", "name": body["name"]})
 	}))
 	defer server.Close()
 
@@ -214,7 +214,7 @@ func TestHTTPIntegrationConnector_ExecuteWithBasicAuth(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"auth": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"auth": "ok"})
 	}))
 	defer server.Close()
 
@@ -240,7 +240,7 @@ func TestHTTPIntegrationConnector_ExecuteWithBearerAuth(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"auth": "bearer-ok"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"auth": "bearer-ok"})
 	}))
 	defer server.Close()
 
@@ -264,7 +264,7 @@ func TestHTTPIntegrationConnector_ExecuteCustomHeaders(t *testing.T) {
 			t.Errorf("expected X-Custom header, got %q", r.Header.Get("X-Custom"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 	}))
 	defer server.Close()
 
@@ -283,7 +283,7 @@ func TestHTTPIntegrationConnector_ExecuteErrorStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "not found"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "not found"})
 	}))
 	defer server.Close()
 
@@ -303,7 +303,7 @@ func TestHTTPIntegrationConnector_ExecuteErrorStatus(t *testing.T) {
 func TestHTTPIntegrationConnector_ExecuteNonJSONResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte("plain text response"))
+		_, _ = w.Write([]byte("plain text response"))
 	}))
 	defer server.Close()
 
@@ -455,7 +455,7 @@ func TestStdIntegrationRegistry_StartAndStop(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 	}))
 	defer server.Close()
 

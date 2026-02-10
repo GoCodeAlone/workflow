@@ -35,7 +35,7 @@ func TestStateMachineExecuteWorkflow_NoAppContext(t *testing.T) {
 func TestStateMachineExecuteWorkflow_MissingInstanceID(t *testing.T) {
 	h := NewStateMachineWorkflowHandler()
 	app := newMockApp()
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	_, err := h.ExecuteWorkflow(ctx, "statemachine", "transition", map[string]interface{}{})
 	if err == nil || !strings.Contains(err.Error(), "workflow instance ID not provided") {
@@ -50,7 +50,7 @@ func TestStateMachineExecuteWorkflow_InstanceIDFromIdField(t *testing.T) {
 	engine := module.NewStateMachineEngine("test-engine")
 	app.services["test-engine"] = engine
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	// Use "id" instead of "instanceId" - should still be found
 	// Will fail because engine has no such instance, but at least the ID extraction works
@@ -70,7 +70,7 @@ func TestStateMachineExecuteWorkflow_NoEngineFound(t *testing.T) {
 	h := NewStateMachineWorkflowHandler()
 	app := newMockApp()
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	_, err := h.ExecuteWorkflow(ctx, "statemachine", "do-transition", map[string]interface{}{
 		"instanceId": "test-123",
@@ -88,7 +88,7 @@ func TestStateMachineExecuteWorkflow_EngineFoundInRegistry(t *testing.T) {
 	// Put engine in SvcRegistry so it can be found by scanning
 	app.services["sm-engine"] = engine
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	// No colon in action so it scans for engine in registry
 	_, err := h.ExecuteWorkflow(ctx, "statemachine", "transition", map[string]interface{}{
@@ -107,7 +107,7 @@ func TestStateMachineExecuteWorkflow_NamedEngineNotFound(t *testing.T) {
 	h := NewStateMachineWorkflowHandler()
 	app := newMockApp()
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	_, err := h.ExecuteWorkflow(ctx, "statemachine", "missing-engine:transition", map[string]interface{}{
 		"instanceId": "test-123",
@@ -124,7 +124,7 @@ func TestStateMachineExecuteWorkflow_ServiceNotEngine(t *testing.T) {
 	app := newMockApp()
 	app.services["not-engine"] = "just-a-string"
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	_, err := h.ExecuteWorkflow(ctx, "statemachine", "not-engine:transition", map[string]interface{}{
 		"instanceId": "test-123",
@@ -141,7 +141,7 @@ func TestStateMachineExecuteWorkflow_SuccessfulTransition(t *testing.T) {
 	engine := module.NewStateMachineEngine("sm-engine")
 
 	// Register a workflow definition with states and transitions
-	engine.RegisterDefinition(&module.StateMachineDefinition{
+	_ = engine.RegisterDefinition(&module.StateMachineDefinition{
 		Name:         "test-workflow",
 		InitialState: "new",
 		States: map[string]*module.State{
@@ -165,7 +165,7 @@ func TestStateMachineExecuteWorkflow_SuccessfulTransition(t *testing.T) {
 
 	app.services["sm-engine"] = engine
 
-	ctx := context.WithValue(context.Background(), "application", modular.Application(app))
+	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	result, err := h.ExecuteWorkflow(ctx, "statemachine", "sm-engine:start", map[string]interface{}{
 		"instanceId": instance.ID,

@@ -202,7 +202,7 @@ func TestGenerateWorkflow_SendError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "Copilot request failed") {
+	if !strings.Contains(err.Error(), "copilot request failed") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -327,7 +327,7 @@ func TestGenerateComponent_SendError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "Copilot request failed") {
+	if !strings.Contains(err.Error(), "copilot request failed") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -440,7 +440,7 @@ func TestSuggestWorkflow_SendError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "Copilot request failed") {
+	if !strings.Contains(err.Error(), "copilot request failed") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -546,7 +546,7 @@ func TestIdentifyMissingComponents_SendError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "Copilot request failed") {
+	if !strings.Contains(err.Error(), "copilot request failed") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }

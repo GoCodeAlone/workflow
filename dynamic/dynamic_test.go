@@ -664,7 +664,7 @@ func TestWatcher_FileChange(t *testing.T) {
 	if err := watcher.Start(); err != nil {
 		t.Fatalf("Start watcher failed: %v", err)
 	}
-	defer watcher.Stop()
+	defer func() { _ = watcher.Stop() }()
 
 	// Write a component file
 	path := filepath.Join(dir, "mycomp.go")
@@ -697,7 +697,7 @@ func TestWatcher_FileRemoval(t *testing.T) {
 	if err := watcher.Start(); err != nil {
 		t.Fatalf("Start watcher failed: %v", err)
 	}
-	defer watcher.Stop()
+	defer func() { _ = watcher.Stop() }()
 
 	// Remove the file
 	if err := os.Remove(path); err != nil {

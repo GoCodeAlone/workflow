@@ -476,7 +476,7 @@ func TestWorkflowDatabase_OpenInvalidDriver(t *testing.T) {
 	if err == nil {
 		// sql.Open may not fail immediately for unknown drivers
 		// but let's close it if it succeeded
-		db.Close()
+		_ = db.Close()
 	}
 	// Either way is fine - the important thing is no panic
 	_ = fmt.Sprintf("Open result: %v", err)

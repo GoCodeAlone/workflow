@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,8 +11,10 @@ import (
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/mock"
+	"github.com/GoCodeAlone/workflow/module"
 )
 
 // setupEngineTest creates an isolated test environment for engine tests
@@ -756,4 +759,452 @@ type mockModule struct {
 func (m *mockModule) Name() string { return m.name }
 func (m *mockModule) Init(app modular.Application) error {
 	return app.RegisterService(m.name, m)
+}
+
+// errorMockTrigger returns errors from Start/Stop.
+type errorMockTrigger struct {
+	mockTrigger
+	startErr error
+	stopErr  error
+}
+
+func (t *errorMockTrigger) Start(ctx context.Context) error { return t.startErr }
+func (t *errorMockTrigger) Stop(ctx context.Context) error  { return t.stopErr }
+
+// errorMockWorkflowHandler returns error from ConfigureWorkflow.
+type errorMockWorkflowHandler struct {
+	mockWorkflowHandler
+	configureErr error
+	executeErr   error
+}
+
+func (h *errorMockWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig interface{}) error {
+	return h.configureErr
+}
+
+func (h *errorMockWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
+	if h.executeErr != nil {
+		return nil, h.executeErr
+	}
+	return map[string]interface{}{"status": "ok"}, nil
+}
+
+// errorMockApplication extends mockApplication with Stop that returns errors.
+type errorMockApplication struct {
+	mockApplication
+	stopErr error
+}
+
+func (a *errorMockApplication) Stop() error {
+	return a.stopErr
+}
+
+func TestEngine_SetDynamicRegistry(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	registry := dynamic.NewComponentRegistry()
+	engine.SetDynamicRegistry(registry)
+
+	if engine.dynamicRegistry != registry {
+		t.Error("expected dynamicRegistry to be set")
+	}
+}
+
+func TestEngine_BuildFromConfig_EventBusBridge(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "eb-bridge", Type: "messaging.broker.eventbus", Config: map[string]interface{}{}},
+		},
+		Workflows: map[string]interface{}{},
+		Triggers:  map[string]interface{}{},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("BuildFromConfig failed for messaging.broker.eventbus: %v", err)
+	}
+}
+
+func TestEngine_BuildFromConfig_MetricsHealthRequestID(t *testing.T) {
+	tests := []struct {
+		name       string
+		moduleType string
+	}{
+		{"metrics", "metrics.collector"},
+		{"health", "health.checker"},
+		{"requestid", "http.middleware.requestid"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := newMockApplication()
+			engine := NewStdEngine(app, app.Logger())
+
+			cfg := &config.WorkflowConfig{
+				Modules: []config.ModuleConfig{
+					{Name: tt.name, Type: tt.moduleType, Config: map[string]interface{}{}},
+				},
+				Workflows: map[string]interface{}{},
+				Triggers:  map[string]interface{}{},
+			}
+
+			err := engine.BuildFromConfig(cfg)
+			if err != nil {
+				t.Fatalf("BuildFromConfig failed for %s: %v", tt.moduleType, err)
+			}
+		})
+	}
+}
+
+func TestEngine_BuildFromConfig_DynamicComponent_NoRegistry(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "dyn-comp", Type: "dynamic.component", Config: map[string]interface{}{}},
+		},
+		Workflows: map[string]interface{}{},
+		Triggers:  map[string]interface{}{},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for dynamic.component with nil registry")
+	}
+	if !strings.Contains(err.Error(), "dynamic registry not set") {
+		t.Errorf("expected error containing 'dynamic registry not set', got: %v", err)
+	}
+}
+
+func TestEngine_BuildFromConfig_DynamicComponent_NotFound(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	registry := dynamic.NewComponentRegistry()
+	engine.SetDynamicRegistry(registry)
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "missing-comp", Type: "dynamic.component", Config: map[string]interface{}{}},
+		},
+		Workflows: map[string]interface{}{},
+		Triggers:  map[string]interface{}{},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing dynamic component")
+	}
+	if !strings.Contains(err.Error(), "not found in registry") {
+		t.Errorf("expected error containing 'not found in registry', got: %v", err)
+	}
+}
+
+func TestEngine_BuildFromConfig_DynamicComponent_Full(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	pool := dynamic.NewInterpreterPool()
+	registry := dynamic.NewComponentRegistry()
+	loader := dynamic.NewLoader(pool, registry)
+
+	source := `package component
+
+import "context"
+
+func Name() string { return "test-comp" }
+func Init(services map[string]interface{}) error { return nil }
+func Start(ctx context.Context) error { return nil }
+func Execute(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) { return params, nil }
+func Stop(ctx context.Context) error { return nil }
+`
+	_, err := loader.LoadFromString("test-comp", source)
+	if err != nil {
+		t.Fatalf("LoadFromString failed: %v", err)
+	}
+
+	engine.SetDynamicRegistry(registry)
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{
+				Name: "test-comp",
+				Type: "dynamic.component",
+				Config: map[string]interface{}{
+					"provides": []interface{}{"my-svc"},
+					"requires": []interface{}{"other-svc"},
+				},
+			},
+		},
+		Workflows: map[string]interface{}{},
+		Triggers:  map[string]interface{}{},
+	}
+
+	err = engine.BuildFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("BuildFromConfig failed for dynamic.component: %v", err)
+	}
+}
+
+func TestEngine_BuildFromConfig_DatabaseWorkflow(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{
+				Name: "wf-db",
+				Type: "database.workflow",
+				Config: map[string]interface{}{
+					"driver":       "sqlite3",
+					"dsn":          ":memory:",
+					"maxOpenConns": float64(10),
+				},
+			},
+		},
+		Workflows: map[string]interface{}{},
+		Triggers:  map[string]interface{}{},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("BuildFromConfig failed for database.workflow: %v", err)
+	}
+}
+
+func TestEngine_BuildFromConfig_DataTransformerWebhook(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "transformer", Type: "data.transformer", Config: map[string]interface{}{}},
+			{Name: "webhook", Type: "webhook.sender", Config: map[string]interface{}{"maxRetries": float64(3)}},
+		},
+		Workflows: map[string]interface{}{},
+		Triggers:  map[string]interface{}{},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("BuildFromConfig failed for data.transformer/webhook.sender: %v", err)
+	}
+}
+
+func TestEngine_BuildFromConfig_RateLimitIntConfig(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{
+				Name: "rl",
+				Type: "http.middleware.ratelimit",
+				Config: map[string]interface{}{
+					"requestsPerMinute": 120,
+					"burstSize":         25,
+				},
+			},
+		},
+		Workflows: map[string]interface{}{},
+		Triggers:  map[string]interface{}{},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("BuildFromConfig failed for rate limiter with int config: %v", err)
+	}
+}
+
+func TestEngine_BuildFromConfig_DefaultConfigs(t *testing.T) {
+	t.Run("http.handler no contentType", func(t *testing.T) {
+		app := newMockApplication()
+		engine := NewStdEngine(app, app.Logger())
+
+		cfg := &config.WorkflowConfig{
+			Modules: []config.ModuleConfig{
+				{Name: "h1", Type: "http.handler", Config: map[string]interface{}{}},
+			},
+			Workflows: map[string]interface{}{},
+			Triggers:  map[string]interface{}{},
+		}
+
+		err := engine.BuildFromConfig(cfg)
+		if err != nil {
+			t.Fatalf("BuildFromConfig failed: %v", err)
+		}
+	})
+
+	t.Run("api.handler no resourceName", func(t *testing.T) {
+		app := newMockApplication()
+		engine := NewStdEngine(app, app.Logger())
+
+		cfg := &config.WorkflowConfig{
+			Modules: []config.ModuleConfig{
+				{Name: "a1", Type: "api.handler", Config: map[string]interface{}{}},
+			},
+			Workflows: map[string]interface{}{},
+			Triggers:  map[string]interface{}{},
+		}
+
+		err := engine.BuildFromConfig(cfg)
+		if err != nil {
+			t.Fatalf("BuildFromConfig failed: %v", err)
+		}
+	})
+}
+
+func TestEngine_BuildFromConfig_HandlerConfigureError(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	engine.RegisterWorkflowHandler(&errorMockWorkflowHandler{
+		mockWorkflowHandler: mockWorkflowHandler{
+			name:       "err-handler",
+			handlesFor: []string{"failing-workflow"},
+		},
+		configureErr: fmt.Errorf("configure failed"),
+	})
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{},
+		Workflows: map[string]interface{}{
+			"failing-workflow": map[string]interface{}{},
+		},
+		Triggers: map[string]interface{}{},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error from handler ConfigureWorkflow")
+	}
+	if !strings.Contains(err.Error(), "configure failed") {
+		t.Errorf("expected error containing 'configure failed', got: %v", err)
+	}
+}
+
+func TestEngine_Start_TriggerStartError(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	trigger := &errorMockTrigger{
+		mockTrigger: mockTrigger{name: "err-trigger"},
+		startErr:    fmt.Errorf("trigger start failed"),
+	}
+	engine.triggers = append(engine.triggers, trigger)
+
+	err := engine.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected error from trigger Start")
+	}
+	if !strings.Contains(err.Error(), "trigger start failed") {
+		t.Errorf("expected error containing 'trigger start failed', got: %v", err)
+	}
+}
+
+func TestEngine_Stop_TriggerAndAppErrors(t *testing.T) {
+	errApp := &errorMockApplication{
+		mockApplication: *newMockApplication(),
+		stopErr:         fmt.Errorf("app stop failed"),
+	}
+
+	engine := NewStdEngine(errApp, errApp.Logger())
+
+	trigger := &errorMockTrigger{
+		mockTrigger: mockTrigger{name: "err-trigger"},
+		stopErr:     fmt.Errorf("trigger stop failed"),
+	}
+	engine.triggers = append(engine.triggers, trigger)
+
+	err := engine.Stop(context.Background())
+	if err == nil {
+		t.Fatal("expected error from Stop")
+	}
+	// The last error should be the app stop error (it overwrites the trigger error)
+	if !strings.Contains(err.Error(), "app stop failed") {
+		t.Errorf("expected error containing 'app stop failed', got: %v", err)
+	}
+}
+
+func TestEngine_TriggerWorkflow_WithEventEmitter(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	handler := &errorMockWorkflowHandler{
+		mockWorkflowHandler: mockWorkflowHandler{
+			name:       "test-handler",
+			handlesFor: []string{"test-wf"},
+		},
+	}
+	engine.RegisterWorkflowHandler(handler)
+
+	// Create a no-op event emitter (no eventbus registered)
+	engine.eventEmitter = module.NewWorkflowEventEmitter(app)
+
+	err := engine.TriggerWorkflow(context.Background(), "test-wf", "act", map[string]interface{}{"key": "val"})
+	if err != nil {
+		t.Fatalf("TriggerWorkflow should succeed, got: %v", err)
+	}
+}
+
+func TestEngine_TriggerWorkflow_FailureWithEventEmitter(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	handler := &errorMockWorkflowHandler{
+		mockWorkflowHandler: mockWorkflowHandler{
+			name:       "fail-handler",
+			handlesFor: []string{"fail-wf"},
+		},
+		executeErr: fmt.Errorf("execution failed"),
+	}
+	engine.RegisterWorkflowHandler(handler)
+
+	// Create a no-op event emitter (no eventbus registered)
+	engine.eventEmitter = module.NewWorkflowEventEmitter(app)
+
+	err := engine.TriggerWorkflow(context.Background(), "fail-wf", "act", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error from failing handler")
+	}
+	if !strings.Contains(err.Error(), "execution failed") {
+		t.Errorf("expected error containing 'execution failed', got: %v", err)
+	}
+}
+
+func TestEngine_TriggerWorkflow_WithMetricsCollector(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	handler := &errorMockWorkflowHandler{
+		mockWorkflowHandler: mockWorkflowHandler{
+			name:       "metrics-handler",
+			handlesFor: []string{"metrics-wf"},
+		},
+	}
+	engine.RegisterWorkflowHandler(handler)
+
+	// Register a MetricsCollector service
+	mc := module.NewMetricsCollector("test-metrics")
+	app.services["metrics.collector"] = mc
+
+	engine.eventEmitter = module.NewWorkflowEventEmitter(app)
+
+	err := engine.TriggerWorkflow(context.Background(), "metrics-wf", "act", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("TriggerWorkflow should succeed, got: %v", err)
+	}
+}
+
+func TestCanHandleTrigger_EventBus(t *testing.T) {
+	trigger := &mockTrigger{name: module.EventBusTriggerName}
+	result := canHandleTrigger(trigger, "eventbus")
+	if !result {
+		t.Errorf("canHandleTrigger(%q, %q) = false, want true", module.EventBusTriggerName, "eventbus")
+	}
 }

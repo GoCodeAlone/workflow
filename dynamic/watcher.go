@@ -69,7 +69,7 @@ func (w *Watcher) Start() error {
 	w.fsWatcher = fsw
 
 	if err := fsw.Add(w.dir); err != nil {
-		fsw.Close()
+		_ = fsw.Close()
 		return err
 	}
 

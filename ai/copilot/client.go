@@ -153,13 +153,13 @@ func (c *Client) GenerateWorkflow(ctx context.Context, req ai.GenerateRequest) (
 	if err != nil {
 		return nil, err
 	}
-	defer session.Destroy()
+	defer func() { _ = session.Destroy() }()
 
 	prompt := ai.GeneratePrompt(req)
 
 	resp, err := session.SendAndWait(ctx, copilot.MessageOptions{Prompt: prompt})
 	if err != nil {
-		return nil, fmt.Errorf("Copilot request failed: %w", err)
+		return nil, fmt.Errorf("copilot request failed: %w", err)
 	}
 
 	if resp == nil || resp.Data.Content == nil {
@@ -185,13 +185,13 @@ func (c *Client) GenerateComponent(ctx context.Context, spec ai.ComponentSpec) (
 	if err != nil {
 		return "", err
 	}
-	defer session.Destroy()
+	defer func() { _ = session.Destroy() }()
 
 	prompt := ai.ComponentPrompt(spec)
 
 	resp, err := session.SendAndWait(ctx, copilot.MessageOptions{Prompt: prompt})
 	if err != nil {
-		return "", fmt.Errorf("Copilot request failed: %w", err)
+		return "", fmt.Errorf("copilot request failed: %w", err)
 	}
 
 	if resp == nil || resp.Data.Content == nil {
@@ -207,13 +207,13 @@ func (c *Client) SuggestWorkflow(ctx context.Context, useCase string) ([]ai.Work
 	if err != nil {
 		return nil, err
 	}
-	defer session.Destroy()
+	defer func() { _ = session.Destroy() }()
 
 	prompt := ai.SuggestPrompt(useCase)
 
 	resp, err := session.SendAndWait(ctx, copilot.MessageOptions{Prompt: prompt})
 	if err != nil {
-		return nil, fmt.Errorf("Copilot request failed: %w", err)
+		return nil, fmt.Errorf("copilot request failed: %w", err)
 	}
 
 	if resp == nil || resp.Data.Content == nil {
@@ -244,13 +244,13 @@ func (c *Client) IdentifyMissingComponents(ctx context.Context, cfg *config.Work
 	if err != nil {
 		return nil, err
 	}
-	defer session.Destroy()
+	defer func() { _ = session.Destroy() }()
 
 	prompt := ai.MissingComponentsPrompt(types)
 
 	resp, err := session.SendAndWait(ctx, copilot.MessageOptions{Prompt: prompt})
 	if err != nil {
-		return nil, fmt.Errorf("Copilot request failed: %w", err)
+		return nil, fmt.Errorf("copilot request failed: %w", err)
 	}
 
 	if resp == nil || resp.Data.Content == nil {

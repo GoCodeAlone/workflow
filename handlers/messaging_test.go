@@ -137,7 +137,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_NoApp(t *testing.T) {
 func TestMessagingWorkflowHandler_ExecuteWorkflow_NoBroker(t *testing.T) {
 	h := NewMessagingWorkflowHandler()
 	app := NewTestServiceRegistry()
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	_, err := h.ExecuteWorkflow(ctx, "messaging", "topic", nil)
 	if err == nil {
@@ -152,7 +152,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_EmptyTopic(t *testing.T) {
 	broker := workflowmodule.NewInMemoryMessageBroker("test-broker")
 	app.services["test-broker"] = broker
 
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	_, err := h.ExecuteWorkflow(ctx, "messaging", "", nil)
 	if err == nil {
@@ -166,7 +166,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_SendMessage(t *testing.T) {
 
 	broker := workflowmodule.NewInMemoryMessageBroker("test-broker")
 	brokerApp := createMinimalBrokerApp(t)
-	broker.Init(brokerApp)
+	_ = broker.Init(brokerApp)
 	app.services["test-broker"] = broker
 
 	// Subscribe a handler to capture the message
@@ -177,9 +177,9 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_SendMessage(t *testing.T) {
 			return nil
 		},
 	}
-	broker.Subscribe("test-topic", handler)
+	_ = broker.Subscribe("test-topic", handler)
 
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	data := map[string]interface{}{
 		"message": "hello world",
@@ -209,7 +209,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_SendJSONMessage(t *testing.T) 
 
 	broker := workflowmodule.NewInMemoryMessageBroker("test-broker")
 	brokerApp := createMinimalBrokerApp(t)
-	broker.Init(brokerApp)
+	_ = broker.Init(brokerApp)
 	app.services["test-broker"] = broker
 
 	var received []byte
@@ -219,9 +219,9 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_SendJSONMessage(t *testing.T) 
 			return nil
 		},
 	}
-	broker.Subscribe("test-topic", handler)
+	_ = broker.Subscribe("test-topic", handler)
 
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	data := map[string]interface{}{
 		"message": map[string]interface{}{
@@ -255,7 +255,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_SendDataAsPayload(t *testing.T
 
 	broker := workflowmodule.NewInMemoryMessageBroker("test-broker")
 	brokerApp := createMinimalBrokerApp(t)
-	broker.Init(brokerApp)
+	_ = broker.Init(brokerApp)
 	app.services["test-broker"] = broker
 
 	var received []byte
@@ -265,9 +265,9 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_SendDataAsPayload(t *testing.T
 			return nil
 		},
 	}
-	broker.Subscribe("test-topic", handler)
+	_ = broker.Subscribe("test-topic", handler)
 
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	// No "message" field - should use entire data as payload
 	data := map[string]interface{}{
@@ -284,7 +284,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_SendDataAsPayload(t *testing.T
 		t.Fatal("expected message")
 	}
 	var parsed map[string]interface{}
-	json.Unmarshal(received, &parsed)
+	_ = json.Unmarshal(received, &parsed)
 	if parsed["order_id"] != "123" {
 		t.Errorf("expected order_id='123', got '%v'", parsed["order_id"])
 	}
@@ -296,7 +296,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_BrokerTopicFormat(t *testing.T
 
 	broker := workflowmodule.NewInMemoryMessageBroker("mybroker")
 	brokerApp := createMinimalBrokerApp(t)
-	broker.Init(brokerApp)
+	_ = broker.Init(brokerApp)
 	app.services["mybroker"] = broker
 
 	var received []byte
@@ -306,9 +306,9 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_BrokerTopicFormat(t *testing.T
 			return nil
 		},
 	}
-	broker.Subscribe("events", handler)
+	_ = broker.Subscribe("events", handler)
 
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	// Use "broker:topic" format in action
 	data := map[string]interface{}{"message": "test"}
@@ -330,7 +330,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_ByteMessage(t *testing.T) {
 
 	broker := workflowmodule.NewInMemoryMessageBroker("test-broker")
 	brokerApp := createMinimalBrokerApp(t)
-	broker.Init(brokerApp)
+	_ = broker.Init(brokerApp)
 	app.services["test-broker"] = broker
 
 	var received []byte
@@ -340,9 +340,9 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_ByteMessage(t *testing.T) {
 			return nil
 		},
 	}
-	broker.Subscribe("test-topic", handler)
+	_ = broker.Subscribe("test-topic", handler)
 
-	ctx := context.WithValue(context.Background(), "application", app)
+	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	data := map[string]interface{}{
 		"message": []byte("byte payload"),

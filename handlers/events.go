@@ -248,7 +248,7 @@ func (h *EventWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType
 
 	// Get the application from context
 	var app modular.Application
-	if appVal := ctx.Value("application"); appVal != nil {
+	if appVal := ctx.Value(applicationContextKey); appVal != nil {
 		app = appVal.(modular.Application)
 	} else {
 		return nil, fmt.Errorf("application context not available")

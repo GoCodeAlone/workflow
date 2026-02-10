@@ -2,10 +2,13 @@ package module
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/CrisisTextLine/modular"
 )
 
 func TestNewRESTAPIHandler(t *testing.T) {
@@ -533,6 +536,46 @@ func TestRESTAPIHandler_ContentTypeJSON(t *testing.T) {
 	ct := w.Header().Get("Content-Type")
 	if ct != "application/json" {
 		t.Errorf("expected Content-Type 'application/json', got '%s'", ct)
+	}
+}
+
+func TestRESTAPIHandler_StartStop(t *testing.T) {
+	h := setupHandler(t)
+	ctx := context.Background()
+
+	if err := h.Start(ctx); err != nil {
+		t.Errorf("Start should return nil, got: %v", err)
+	}
+	if err := h.Stop(ctx); err != nil {
+		t.Errorf("Stop should return nil, got: %v", err)
+	}
+}
+
+func TestRESTAPIHandler_Init_FullSetup(t *testing.T) {
+	app := CreateIsolatedApp(t)
+
+	// Register a workflow config section with module config containing workflowType
+	workflowCfg := map[string]interface{}{
+		"modules": []interface{}{
+			map[string]interface{}{
+				"name": "full-handler",
+				"config": map[string]interface{}{
+					"resourceName": "items",
+					"workflowType": "item-workflow",
+				},
+			},
+		},
+		"workflows": map[string]interface{}{},
+	}
+	app.RegisterConfigSection("workflow", modular.NewStdConfigProvider(workflowCfg))
+
+	h := NewRESTAPIHandler("full-handler", "orders")
+	if err := h.Init(app); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	if h.workflowType != "item-workflow" {
+		t.Errorf("expected workflowType 'item-workflow', got '%s'", h.workflowType)
 	}
 }
 

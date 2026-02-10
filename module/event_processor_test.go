@@ -77,13 +77,13 @@ func TestEventProcessor_ProcessEvent_SimpleMatch(t *testing.T) {
 		matchResult = match
 		return nil
 	})
-	ep.RegisterHandler("burst-detection", handler)
+	_ = ep.RegisterHandler("burst-detection", handler)
 
 	ctx := context.Background()
 	now := time.Now()
 
 	// First event - should not trigger
-	ep.ProcessEvent(ctx, EventData{
+	_ = ep.ProcessEvent(ctx, EventData{
 		EventType: "error",
 		Timestamp: now.Add(-1 * time.Minute),
 		SourceID:  "server-1",
@@ -94,7 +94,7 @@ func TestEventProcessor_ProcessEvent_SimpleMatch(t *testing.T) {
 	}
 
 	// Second event - should trigger (minOccurs=2)
-	ep.ProcessEvent(ctx, EventData{
+	_ = ep.ProcessEvent(ctx, EventData{
 		EventType: "error",
 		Timestamp: now,
 		SourceID:  "server-1",
@@ -125,19 +125,19 @@ func TestEventProcessor_ProcessEvent_WithCorrelID(t *testing.T) {
 		matched = true
 		return nil
 	})
-	ep.RegisterHandler("corr-pattern", handler)
+	_ = ep.RegisterHandler("corr-pattern", handler)
 
 	ctx := context.Background()
 	now := time.Now()
 
 	// Events with same correlation ID
-	ep.ProcessEvent(ctx, EventData{
+	_ = ep.ProcessEvent(ctx, EventData{
 		EventType: "step-1",
 		Timestamp: now,
 		SourceID:  "svc-1",
 		CorrelID:  "tx-123",
 	})
-	ep.ProcessEvent(ctx, EventData{
+	_ = ep.ProcessEvent(ctx, EventData{
 		EventType: "step-2",
 		Timestamp: now,
 		SourceID:  "svc-2",
@@ -188,7 +188,7 @@ func TestEventProcessor_ProcessEvent_HandlerError(t *testing.T) {
 	handler := NewFunctionHandler(func(ctx context.Context, match PatternMatch) error {
 		return fmt.Errorf("handler error")
 	})
-	ep.RegisterHandler("error-pattern", handler)
+	_ = ep.RegisterHandler("error-pattern", handler)
 
 	ctx := context.Background()
 	err := ep.ProcessEvent(ctx, EventData{
@@ -218,10 +218,10 @@ func TestEventProcessor_ProcessEvent_TypeMismatch(t *testing.T) {
 		matched = true
 		return nil
 	})
-	ep.RegisterHandler("specific", handler)
+	_ = ep.RegisterHandler("specific", handler)
 
 	ctx := context.Background()
-	ep.ProcessEvent(ctx, EventData{
+	_ = ep.ProcessEvent(ctx, EventData{
 		EventType: "logout", // different type
 		Timestamp: time.Now(),
 		SourceID:  "src",
@@ -250,14 +250,14 @@ func TestEventProcessor_ProcessEvent_MaxOccurs(t *testing.T) {
 		matchCount++
 		return nil
 	})
-	ep.RegisterHandler("bounded", handler)
+	_ = ep.RegisterHandler("bounded", handler)
 
 	ctx := context.Background()
 	now := time.Now()
 
 	// 3 events exceed MaxOccurs - should NOT match after 3rd
 	for i := 0; i < 3; i++ {
-		ep.ProcessEvent(ctx, EventData{
+		_ = ep.ProcessEvent(ctx, EventData{
 			EventType: "event",
 			Timestamp: now,
 			SourceID:  "src",
@@ -292,18 +292,18 @@ func TestEventProcessor_ProcessEvent_OutsideWindow(t *testing.T) {
 		matched = true
 		return nil
 	})
-	ep.RegisterHandler("timed", handler)
+	_ = ep.RegisterHandler("timed", handler)
 
 	ctx := context.Background()
 
 	// Event outside the window
-	ep.ProcessEvent(ctx, EventData{
+	_ = ep.ProcessEvent(ctx, EventData{
 		EventType: "event",
 		Timestamp: time.Now().Add(-10 * time.Minute), // way outside window
 		SourceID:  "src",
 	})
 	// Event inside the window
-	ep.ProcessEvent(ctx, EventData{
+	_ = ep.ProcessEvent(ctx, EventData{
 		EventType: "event",
 		Timestamp: time.Now(),
 		SourceID:  "src",

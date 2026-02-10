@@ -37,7 +37,7 @@ func TestCronScheduler_Schedule(t *testing.T) {
 	}
 
 	// Schedule another
-	s.Schedule(job)
+	_ = s.Schedule(job)
 	if len(s.jobs) != 2 {
 		t.Errorf("expected 2 jobs, got %d", len(s.jobs))
 	}
@@ -107,7 +107,7 @@ func TestCronScheduler_CronExpressions(t *testing.T) {
 			s := NewCronScheduler("test", tc.cron)
 			ctx, cancel := context.WithCancel(context.Background())
 
-			s.Start(ctx)
+			_ = s.Start(ctx)
 			// Verify the ticker was created
 			if s.ticker == nil {
 				t.Error("expected ticker to be created")
@@ -186,12 +186,12 @@ func TestCronScheduler_ExecutesJobs(t *testing.T) {
 		executed.Add(1)
 		return nil
 	})
-	s.Schedule(job)
+	_ = s.Schedule(job)
 
 	// Manually trigger jobs instead of waiting for the ticker
 	ctx := context.Background()
 	for _, j := range s.jobs {
-		j.Execute(ctx)
+		_ = j.Execute(ctx)
 	}
 
 	if executed.Load() != 1 {

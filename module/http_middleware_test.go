@@ -140,7 +140,7 @@ func TestLoggingMiddleware_Init(t *testing.T) {
 func TestLoggingMiddleware_Process(t *testing.T) {
 	app := CreateIsolatedApp(t)
 	m := NewLoggingMiddleware("logger", "INFO")
-	m.Init(app)
+	_ = m.Init(app)
 
 	nextCalled := false
 	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
