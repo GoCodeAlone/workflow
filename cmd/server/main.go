@@ -31,28 +31,8 @@ var (
 	anthropicModel = flag.String("anthropic-model", "", "Anthropic model name")
 )
 
-func main() {
-	flag.Parse()
-
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		AddSource: true,
-		Level:     slog.LevelDebug,
-	}))
-
-	// Load workflow config
-	var cfg *config.WorkflowConfig
-	if *configFile != "" {
-		var err error
-		cfg, err = config.LoadFromFile(*configFile)
-		if err != nil {
-			log.Fatalf("Failed to load configuration: %v", err)
-		}
-	} else {
-		cfg = config.NewEmptyWorkflowConfig()
-		logger.Info("No config file specified, using empty workflow config")
-	}
-
-	// Create modular application and workflow engine
+// buildEngine creates the workflow engine with all handlers registered and built from config.
+func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
 	app := modular.NewStdApplication(nil, logger)
 	engine := workflow.NewStdEngine(app, logger)
 
@@ -71,63 +51,126 @@ func main() {
 
 	// Build engine from config
 	if err := engine.BuildFromConfig(cfg); err != nil {
-		log.Fatalf("Failed to build workflow: %v", err)
+		return nil, nil, nil, fmt.Errorf("failed to build workflow: %w", err)
 	}
 
-	// Initialize AI service
-	aiSvc, deploySvc := initAIService(logger, registry, pool)
+	return engine, loader, registry, nil
+}
 
-	// Create HTTP mux and register all handlers
+// buildMux creates the HTTP mux with all routes registered.
+func buildMux(aiSvc *ai.Service, deploySvc *ai.DeployService, loader *dynamic.Loader, registry *dynamic.ComponentRegistry, cfg *config.WorkflowConfig) *http.ServeMux {
 	mux := http.NewServeMux()
-
-	// AI handlers
 	ai.NewHandler(aiSvc).RegisterRoutes(mux)
 	ai.NewDeployHandler(deploySvc).RegisterRoutes(mux)
-
-	// TODO: UI api.ts calls /api/dynamic/components but Go handler registers at /api/components
-	// Dynamic component API
 	dynamic.NewAPIHandler(loader, registry).RegisterRoutes(mux)
-
-	// Workflow UI (static file catch-all MUST be last)
 	module.NewWorkflowUIHandler(cfg).RegisterRoutes(mux)
+	return mux
+}
 
-	// Create context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+// loadConfig loads a workflow configuration from the configured file path,
+// or returns an empty config if no path is set.
+func loadConfig(logger *slog.Logger) (*config.WorkflowConfig, error) {
+	if *configFile != "" {
+		cfg, err := config.LoadFromFile(*configFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load configuration: %w", err)
+		}
+		return cfg, nil
+	}
+	logger.Info("No config file specified, using empty workflow config")
+	return config.NewEmptyWorkflowConfig(), nil
+}
 
-	// Start the workflow engine
-	if err := engine.Start(ctx); err != nil {
-		log.Fatalf("Failed to start workflow engine: %v", err)
+// serverApp holds the components needed to run the server.
+type serverApp struct {
+	engine *workflow.StdEngine
+	mux    *http.ServeMux
+	logger *slog.Logger
+}
+
+// setup initializes all server components: engine, AI services, and HTTP mux.
+func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) {
+	engine, loader, registry, err := buildEngine(cfg, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build engine: %w", err)
 	}
 
-	// Start HTTP server
+	pool := dynamic.NewInterpreterPool()
+	aiSvc, deploySvc := initAIService(logger, registry, pool)
+	mux := buildMux(aiSvc, deploySvc, loader, registry, cfg)
+
+	return &serverApp{
+		engine: engine,
+		mux:    mux,
+		logger: logger,
+	}, nil
+}
+
+// run starts the engine and HTTP server, blocking until ctx is canceled.
+// It performs graceful shutdown when the context is done.
+func run(ctx context.Context, app *serverApp, listenAddr string) error {
+	// Start the workflow engine
+	if err := app.engine.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start workflow engine: %w", err)
+	}
+
 	server := &http.Server{
-		Addr:    *addr,
-		Handler: mux,
+		Addr:    listenAddr,
+		Handler: app.mux,
 	}
 
 	go func() {
-		logger.Info("Starting server", "addr", *addr)
+		app.logger.Info("Starting server", "addr", listenAddr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server failed: %v", err)
+			app.logger.Error("Server failed", "error", err)
 		}
 	}()
 
-	fmt.Printf("Workflow server started on %s\n", *addr)
-
-	// Wait for termination signal
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
-
-	fmt.Println("Shutting down...")
-	cancel()
+	// Wait for context cancellation
+	<-ctx.Done()
 
 	if err := server.Shutdown(context.Background()); err != nil {
-		log.Printf("HTTP server shutdown error: %v", err)
+		app.logger.Error("HTTP server shutdown error", "error", err)
 	}
-	if err := engine.Stop(ctx); err != nil {
-		log.Printf("Engine shutdown error: %v", err)
+	if err := app.engine.Stop(context.Background()); err != nil {
+		app.logger.Error("Engine shutdown error", "error", err)
+	}
+
+	return nil
+}
+
+func main() {
+	flag.Parse()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: true,
+		Level:     slog.LevelDebug,
+	}))
+
+	cfg, err := loadConfig(logger)
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+
+	app, err := setup(logger, cfg)
+	if err != nil {
+		log.Fatalf("Setup error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Wait for termination signal in a goroutine
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Println("Shutting down...")
+		cancel()
+	}()
+
+	fmt.Printf("Workflow server started on %s\n", *addr)
+	if err := run(ctx, app, *addr); err != nil {
+		log.Fatalf("Server error: %v", err)
 	}
 
 	fmt.Println("Shutdown complete")

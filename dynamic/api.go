@@ -29,8 +29,8 @@ type loadComponentRequest struct {
 
 // RegisterRoutes registers the dynamic component API routes on the given mux.
 func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/components", h.handleComponents)
-	mux.HandleFunc("/api/components/", h.handleComponentByID)
+	mux.HandleFunc("/api/dynamic/components", h.handleComponents)
+	mux.HandleFunc("/api/dynamic/components/", h.handleComponentByID)
 }
 
 func (h *APIHandler) handleComponents(w http.ResponseWriter, r *http.Request) {
@@ -45,8 +45,8 @@ func (h *APIHandler) handleComponents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) handleComponentByID(w http.ResponseWriter, r *http.Request) {
-	// Extract ID from path: /api/components/{id}
-	id := strings.TrimPrefix(r.URL.Path, "/api/components/")
+	// Extract ID from path: /api/dynamic/components/{id}
+	id := strings.TrimPrefix(r.URL.Path, "/api/dynamic/components/")
 	if id == "" {
 		http.Error(w, "component id required", http.StatusBadRequest)
 		return

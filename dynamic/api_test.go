@@ -22,7 +22,7 @@ func TestAPI_ComponentsMethodNotAllowed(t *testing.T) {
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/components", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/dynamic/components", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -40,8 +40,8 @@ func TestAPI_ComponentByID_EmptyID(t *testing.T) {
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
 
-	// Requesting /api/components/ with no ID suffix
-	req := httptest.NewRequest(http.MethodGet, "/api/components/", nil)
+	// Requesting /api/dynamic/components/ with no ID suffix
+	req := httptest.NewRequest(http.MethodGet, "/api/dynamic/components/", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -59,7 +59,7 @@ func TestAPI_ComponentByID_MethodNotAllowed(t *testing.T) {
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/components/some-id", nil)
+	req := httptest.NewRequest(http.MethodPatch, "/api/dynamic/components/some-id", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -77,7 +77,7 @@ func TestAPI_CreateComponent_InvalidJSON(t *testing.T) {
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/components", strings.NewReader("not json"))
+	req := httptest.NewRequest(http.MethodPost, "/api/dynamic/components", strings.NewReader("not json"))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -97,7 +97,7 @@ func TestAPI_CreateComponent_MissingFields(t *testing.T) {
 
 	// Missing source
 	body := `{"id":"test"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/components", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/dynamic/components", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -107,7 +107,7 @@ func TestAPI_CreateComponent_MissingFields(t *testing.T) {
 
 	// Missing id
 	body = `{"source":"package component"}`
-	req = httptest.NewRequest(http.MethodPost, "/api/components", strings.NewReader(body))
+	req = httptest.NewRequest(http.MethodPost, "/api/dynamic/components", strings.NewReader(body))
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -125,7 +125,7 @@ func TestAPI_UpdateComponent_InvalidJSON(t *testing.T) {
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/components/test", strings.NewReader("not json"))
+	req := httptest.NewRequest(http.MethodPut, "/api/dynamic/components/test", strings.NewReader("not json"))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -144,7 +144,7 @@ func TestAPI_UpdateComponent_EmptySource(t *testing.T) {
 	api.RegisterRoutes(mux)
 
 	body := `{"source":""}`
-	req := httptest.NewRequest(http.MethodPut, "/api/components/test", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/dynamic/components/test", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -164,7 +164,7 @@ func TestAPI_UpdateComponent_ReloadError(t *testing.T) {
 
 	// Try to reload with invalid Go source
 	body := `{"source":"this is not valid go source"}`
-	req := httptest.NewRequest(http.MethodPut, "/api/components/nonexistent", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/dynamic/components/nonexistent", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -182,7 +182,7 @@ func TestAPI_DeleteComponent_NotFound(t *testing.T) {
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/components/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/dynamic/components/nonexistent", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -217,7 +217,7 @@ func TestAPI_DeleteComponent_RunningComponent(t *testing.T) {
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/components/running", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/dynamic/components/running", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -389,12 +389,12 @@ func TestAPI_RegisterRoutes_Patterns(t *testing.T) {
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
 
-	// GET /api/components should work (200 with empty list)
-	req := httptest.NewRequest(http.MethodGet, "/api/components", nil)
+	// GET /api/dynamic/components should work (200 with empty list)
+	req := httptest.NewRequest(http.MethodGet, "/api/dynamic/components", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
-		t.Errorf("expected 200 for GET /api/components, got %d", w.Code)
+		t.Errorf("expected 200 for GET /api/dynamic/components, got %d", w.Code)
 	}
 
 	var infos []ComponentInfo

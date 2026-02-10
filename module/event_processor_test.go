@@ -412,6 +412,35 @@ func TestEventProcessor_CleanupOldEvents(t *testing.T) {
 	}
 }
 
+func TestEventProcessor_Init(t *testing.T) {
+	ep := NewEventProcessor("test-ep")
+	app := CreateIsolatedApp(t)
+
+	if err := ep.Init(app); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	// Verify appContext was stored
+	if ep.appContext == nil {
+		t.Fatal("expected appContext to be set after Init")
+	}
+
+	// Verify service was registered
+	var svc interface{}
+	if err := app.GetService("test-ep", &svc); err != nil {
+		t.Fatalf("expected service to be registered: %v", err)
+	}
+}
+
+func TestEventProcessor_Start(t *testing.T) {
+	ep := NewEventProcessor("test-processor")
+
+	// Start launches a goroutine for cleanup; verify it doesn't error
+	if err := ep.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+}
+
 func TestEventProcessor_Stop(t *testing.T) {
 	ep := NewEventProcessor("test-processor")
 	if err := ep.Stop(context.Background()); err != nil {

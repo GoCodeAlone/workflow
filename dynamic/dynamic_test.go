@@ -498,7 +498,7 @@ func TestAPI_ListComponents(t *testing.T) {
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/components", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/dynamic/components", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -529,7 +529,7 @@ func TestAPI_CreateComponent(t *testing.T) {
 		"source": minimalComponentSource,
 	}
 	bodyBytes, _ := json.Marshal(payload)
-	req := httptest.NewRequest(http.MethodPost, "/api/components", strings.NewReader(string(bodyBytes)))
+	req := httptest.NewRequest(http.MethodPost, "/api/dynamic/components", strings.NewReader(string(bodyBytes)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -553,7 +553,7 @@ func TestAPI_CreateComponent_BadSource(t *testing.T) {
 	api.RegisterRoutes(mux)
 
 	body := `{"id":"bad","source":"this is not valid go"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/components", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/dynamic/components", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -572,7 +572,7 @@ func TestAPI_GetComponent(t *testing.T) {
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/components/mycomp", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/dynamic/components/mycomp", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -590,7 +590,7 @@ func TestAPI_GetComponent_NotFound(t *testing.T) {
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/components/nope", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/dynamic/components/nope", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -609,7 +609,7 @@ func TestAPI_DeleteComponent(t *testing.T) {
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/components/del", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/dynamic/components/del", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -635,7 +635,7 @@ func TestAPI_UpdateComponent(t *testing.T) {
 	newSource := strings.Replace(simpleComponentSource, "test-component", "updated-component", 1)
 	payload := map[string]string{"source": newSource}
 	bodyBytes, _ := json.Marshal(payload)
-	req := httptest.NewRequest(http.MethodPut, "/api/components/upd", strings.NewReader(string(bodyBytes)))
+	req := httptest.NewRequest(http.MethodPut, "/api/dynamic/components/upd", strings.NewReader(string(bodyBytes)))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 

@@ -1,0 +1,48 @@
+modules:
+  - name: order-server
+    type: http.server
+    config:
+      address: ':8080'
+  - name: order-router
+    type: http.router
+    dependsOn:
+      - order-server
+  - name: order-api
+    type: http.handler
+    config:
+      method: POST
+      path: /api/orders
+      contentType: application/json
+    dependsOn:
+      - order-router
+  - name: order-transformer
+    type: data.transformer
+    config:
+      description: Transforms and validates incoming order data
+  - name: order-state-engine
+    type: statemachine.engine
+    config:
+      description: Manages order lifecycle state transitions
+  - name: order-state-tracker
+    type: state.tracker
+    config:
+      description: Tracks current state for all order resources
+  - name: order-broker
+    type: messaging.broker
+    config:
+      description: In-memory message broker for order events
+  - name: notification-handler
+    type: messaging.handler
+    config:
+      topic: order.completed
+      description: Handles notifications when orders reach terminal states
+  - name: order-metrics
+    type: metrics.collector
+    config:
+      description: Collects Prometheus metrics for the order pipeline
+  - name: order-health
+    type: health.checker
+    config:
+      description: Provides health, readiness, and liveness endpoints
+workflows: {}
+triggers: {}

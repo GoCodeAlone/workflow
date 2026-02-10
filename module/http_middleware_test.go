@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -285,5 +286,45 @@ func TestCORSMiddleware_RequiresServices(t *testing.T) {
 	m := NewCORSMiddleware("cors", nil, nil)
 	if m.RequiresServices() != nil {
 		t.Error("expected nil dependencies")
+	}
+}
+
+func TestRateLimitMiddleware_Start(t *testing.T) {
+	m := NewRateLimitMiddleware("rl", 60, 10)
+	if err := m.Start(context.TODO()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+}
+
+func TestRateLimitMiddleware_Stop(t *testing.T) {
+	m := NewRateLimitMiddleware("rl", 60, 10)
+	if err := m.Stop(context.TODO()); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+}
+
+func TestCORSMiddleware_Start(t *testing.T) {
+	m := NewCORSMiddleware("cors", nil, nil)
+	if err := m.Start(context.TODO()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+}
+
+func TestCORSMiddleware_Stop(t *testing.T) {
+	m := NewCORSMiddleware("cors", nil, nil)
+	if err := m.Stop(context.TODO()); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+}
+
+func TestMin(t *testing.T) {
+	if min(3, 5) != 3 {
+		t.Error("expected min(3, 5) = 3")
+	}
+	if min(7, 2) != 2 {
+		t.Error("expected min(7, 2) = 2")
+	}
+	if min(4, 4) != 4 {
+		t.Error("expected min(4, 4) = 4")
 	}
 }

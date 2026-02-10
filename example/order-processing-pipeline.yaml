@@ -1,0 +1,129 @@
+# Order Processing Pipeline Example Configuration
+# A 10-component pipeline demonstrating HTTP, processing, state machine,
+# messaging, and observability modules working together.
+#
+# Data flow:
+#   HTTP POST /api/orders -> order-server -> order-router -> order-api
+#   -> order-transformer -> order-state-engine -> order-state-tracker
+#   -> order-broker -> notification-handler
+#   with order-metrics and order-health providing observability
+
+modules:
+  # --- HTTP layer ---
+  - name: order-server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: order-router
+    type: http.router
+    dependsOn:
+      - order-server
+
+  - name: order-api
+    type: http.handler
+    dependsOn:
+      - order-router
+    config:
+      method: "POST"
+      path: "/api/orders"
+      contentType: "application/json"
+
+  # --- Processing layer ---
+  - name: order-transformer
+    type: data.transformer
+    config:
+      description: "Transforms and validates incoming order data"
+
+  # --- State machine layer ---
+  - name: order-state-engine
+    type: statemachine.engine
+    config:
+      description: "Manages order lifecycle state transitions"
+
+  - name: order-state-tracker
+    type: state.tracker
+    config:
+      description: "Tracks current state for all order resources"
+
+  # --- Messaging layer ---
+  - name: order-broker
+    type: messaging.broker
+    config:
+      description: "In-memory message broker for order events"
+
+  - name: notification-handler
+    type: messaging.handler
+    config:
+      topic: "order.completed"
+      description: "Handles notifications when orders reach terminal states"
+
+  # --- Observability layer ---
+  - name: order-metrics
+    type: metrics.collector
+    config:
+      description: "Collects Prometheus metrics for the order pipeline"
+
+  - name: order-health
+    type: health.checker
+    config:
+      description: "Provides health, readiness, and liveness endpoints"
+
+workflows:
+  # HTTP routing
+  http:
+    router: order-router
+    server: order-server
+    routes:
+      - method: "POST"
+        path: "/api/orders"
+        handler: order-api
+
+  # State machine definitions
+  statemachine:
+    engine: order-state-engine
+    definitions:
+      - name: order-processing
+        description: "Order processing workflow"
+        initialState: "received"
+        states:
+          received:
+            description: "Order has been received"
+            isFinal: false
+            isError: false
+          validated:
+            description: "Order has been validated"
+            isFinal: false
+            isError: false
+          stored:
+            description: "Order has been persisted"
+            isFinal: false
+            isError: false
+          notified:
+            description: "Notification has been sent"
+            isFinal: true
+            isError: false
+          failed:
+            description: "Order processing failed"
+            isFinal: true
+            isError: true
+        transitions:
+          validate_order:
+            fromState: "received"
+            toState: "validated"
+          store_order:
+            fromState: "validated"
+            toState: "stored"
+          send_notification:
+            fromState: "stored"
+            toState: "notified"
+          fail_validation:
+            fromState: "received"
+            toState: "failed"
+
+  # Messaging subscriptions
+  messaging:
+    broker: order-broker
+    subscriptions:
+      - topic: "order.completed"
+        handler: notification-handler
