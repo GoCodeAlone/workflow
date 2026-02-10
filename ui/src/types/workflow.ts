@@ -165,6 +165,13 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
       { key: 'queue', label: 'Queue Group', type: 'string' },
     ],
   },
+  {
+    type: 'messaging.broker.eventbus',
+    label: 'EventBus Bridge',
+    category: 'messaging',
+    defaultConfig: {},
+    configFields: [],
+  },
   // State Machine
   {
     type: 'statemachine.engine',
