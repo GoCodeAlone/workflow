@@ -284,7 +284,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_SendDataAsPayload(t *testing.T
 		t.Fatal("expected message")
 	}
 	var parsed map[string]interface{}
-	json.Unmarshal(received, &parsed)
+	_ = json.Unmarshal(received, &parsed)
 	if parsed["order_id"] != "123" {
 		t.Errorf("expected order_id='123', got '%v'", parsed["order_id"])
 	}

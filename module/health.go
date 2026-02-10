@@ -90,7 +90,7 @@ func (h *HealthChecker) HealthHandler() http.HandlerFunc {
 		if overallStatus == "unhealthy" {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}
 }
 
@@ -109,7 +109,7 @@ func (h *HealthChecker) ReadyHandler() http.HandlerFunc {
 		if !started {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]string{"status": "not_ready"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "not_ready"})
 			return
 		}
 
@@ -118,13 +118,13 @@ func (h *HealthChecker) ReadyHandler() http.HandlerFunc {
 			if result.Status != "healthy" {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusServiceUnavailable)
-				json.NewEncoder(w).Encode(map[string]string{"status": "not_ready"})
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "not_ready"})
 				return
 			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
 	}
 }
 
@@ -133,7 +133,7 @@ func (h *HealthChecker) ReadyHandler() http.HandlerFunc {
 func (h *HealthChecker) LiveHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "alive"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "alive"})
 	}
 }
 

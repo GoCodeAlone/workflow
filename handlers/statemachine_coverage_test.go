@@ -141,7 +141,7 @@ func TestStateMachineExecuteWorkflow_SuccessfulTransition(t *testing.T) {
 	engine := module.NewStateMachineEngine("sm-engine")
 
 	// Register a workflow definition with states and transitions
-	engine.RegisterDefinition(&module.StateMachineDefinition{
+	_ = engine.RegisterDefinition(&module.StateMachineDefinition{
 		Name:         "test-workflow",
 		InitialState: "new",
 		States: map[string]*module.State{

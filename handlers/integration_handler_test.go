@@ -89,7 +89,7 @@ func TestIntegrationWorkflowHandler_ConfigureWorkflow_RegistryNotFound(t *testin
 func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"result": "ok"})
 	}))
 	defer server.Close()
 
@@ -140,7 +140,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_ConnectorNotFound
 
 func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_NotConnected(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"result": "ok"})
 	}))
 	defer server.Close()
 
@@ -169,7 +169,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_NotConnected(t *t
 
 func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_VariableSubstitution(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{"value": "test-data"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"value": "test-data"})
 	}))
 	defer server.Close()
 
@@ -206,7 +206,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_WithOnError(t *te
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "internal"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "internal"})
 	}))
 	defer server.Close()
 
@@ -236,7 +236,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_WithOnError(t *te
 
 func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_WithOnSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 	}))
 	defer server.Close()
 
