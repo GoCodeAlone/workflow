@@ -152,3 +152,13 @@ func (h *HealthChecker) ProvidesServices() []modular.ServiceProvider {
 func (h *HealthChecker) RequiresServices() []modular.ServiceDependency {
 	return nil
 }
+
+// HealthHTTPHandler adapts an http.HandlerFunc to the HTTPHandler interface
+type HealthHTTPHandler struct {
+	Handler http.HandlerFunc
+}
+
+// Handle implements the HTTPHandler interface
+func (h *HealthHTTPHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	h.Handler(w, r)
+}

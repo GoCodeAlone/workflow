@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <rect width="120" height="120" rx="16" fill="#313244"/>
+  <!-- Cable/connector shape -->
+  <rect x="35" y="30" width="50" height="20" rx="10" fill="#45475a"/>
+  <rect x="42" y="35" width="10" height="10" rx="2" fill="#89b4fa"/>
+  <rect x="55" y="35" width="10" height="10" rx="2" fill="#89b4fa"/>
+  <rect x="68" y="35" width="10" height="10" rx="2" fill="#cba6f7"/>
+  <!-- Cable lines -->
+  <path d="M47 50 Q47 65 40 75 Q33 85 40 95" stroke="#a6e3a1" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <path d="M60 50 Q60 65 60 75 Q60 85 60 95" stroke="#f9e2af" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <path d="M73 50 Q73 65 80 75 Q87 85 80 95" stroke="#f38ba8" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <!-- Dots at cable ends -->
+  <circle cx="40" cy="95" r="3" fill="#a6e3a1"/>
+  <circle cx="60" cy="95" r="3" fill="#f9e2af"/>
+  <circle cx="80" cy="95" r="3" fill="#f38ba8"/>
+</svg>

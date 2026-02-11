@@ -134,6 +134,11 @@ func (t *EventBusTrigger) Configure(app modular.Application, triggerConfig inter
 
 // Start subscribes to the configured EventBus topics.
 func (t *EventBusTrigger) Start(ctx context.Context) error {
+	// If no subscriptions are configured, nothing to do
+	if len(t.subscriptions) == 0 {
+		return nil
+	}
+
 	if t.eventBus == nil {
 		return fmt.Errorf("event bus not configured for eventbus trigger")
 	}

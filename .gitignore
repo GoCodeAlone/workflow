@@ -26,6 +26,9 @@
 go.work
 go.work.sum
 
+# Node
+node_modules/
+
 # env file
 .env
 .idea

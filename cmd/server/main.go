@@ -49,6 +49,12 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	engine.RegisterWorkflowHandler(handlers.NewSchedulerWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewIntegrationWorkflowHandler())
 
+	// Register standard triggers
+	engine.RegisterTrigger(module.NewHTTPTrigger())
+	engine.RegisterTrigger(module.NewEventTrigger())
+	engine.RegisterTrigger(module.NewScheduleTrigger())
+	engine.RegisterTrigger(module.NewEventBusTrigger())
+
 	// Set up dynamic component system
 	pool := dynamic.NewInterpreterPool()
 	registry := dynamic.NewComponentRegistry()

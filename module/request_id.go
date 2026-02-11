@@ -40,22 +40,27 @@ func (m *RequestIDMiddleware) Name() string {
 
 // Init registers the middleware as a service.
 func (m *RequestIDMiddleware) Init(app modular.Application) error {
-	return app.RegisterService("http.middleware.requestid", m)
+	return nil
+}
+
+// Process implements the HTTPMiddleware interface.
+func (m *RequestIDMiddleware) Process(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.Header.Get(m.headerName)
+		if requestID == "" {
+			requestID = uuid.New().String()
+		}
+
+		ctx := context.WithValue(r.Context(), requestIDKey{}, requestID)
+		w.Header().Set(m.headerName, requestID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 // Middleware returns the HTTP middleware function.
 func (m *RequestIDMiddleware) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			requestID := r.Header.Get(m.headerName)
-			if requestID == "" {
-				requestID = uuid.New().String()
-			}
-
-			ctx := context.WithValue(r.Context(), requestIDKey{}, requestID)
-			w.Header().Set(m.headerName, requestID)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
+		return m.Process(next)
 	}
 }
 
@@ -63,7 +68,7 @@ func (m *RequestIDMiddleware) Middleware() func(http.Handler) http.Handler {
 func (m *RequestIDMiddleware) ProvidesServices() []modular.ServiceProvider {
 	return []modular.ServiceProvider{
 		{
-			Name:        "http.middleware.requestid",
+			Name:        m.name,
 			Description: "HTTP Request ID Middleware",
 			Instance:    m,
 		},

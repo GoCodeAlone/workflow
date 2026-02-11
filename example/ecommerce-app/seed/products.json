@@ -1,0 +1,98 @@
+[
+  {
+    "id": "prod-001",
+    "data": {
+      "name": "Mechanical Keyboard",
+      "price": 149.99,
+      "category": "Electronics",
+      "description": "Premium hot-swappable mechanical keyboard with RGB backlighting, PBT keycaps, and a solid aluminum frame. Gateron switches included.",
+      "image": "/img/electronics.svg",
+      "stock": 50
+    },
+    "state": "active"
+  },
+  {
+    "id": "prod-002",
+    "data": {
+      "name": "Wireless Mouse",
+      "price": 49.99,
+      "category": "Electronics",
+      "description": "Ergonomic wireless mouse with 16000 DPI optical sensor, USB-C charging, and up to 70 hours of battery life.",
+      "image": "/img/electronics.svg",
+      "stock": 120
+    },
+    "state": "active"
+  },
+  {
+    "id": "prod-003",
+    "data": {
+      "name": "USB-C Hub",
+      "price": 79.99,
+      "category": "Electronics",
+      "description": "7-in-1 USB-C hub with 4K HDMI, 100W pass-through charging, SD card reader, and three USB-A 3.0 ports.",
+      "image": "/img/electronics.svg",
+      "stock": 85
+    },
+    "state": "active"
+  },
+  {
+    "id": "prod-004",
+    "data": {
+      "name": "Laptop Stand",
+      "price": 89.99,
+      "category": "Home Office",
+      "description": "Adjustable aluminum laptop stand with ventilation cutouts. Supports laptops from 10 to 17 inches. Cable management built in.",
+      "image": "/img/home-office.svg",
+      "stock": 65
+    },
+    "state": "active"
+  },
+  {
+    "id": "prod-005",
+    "data": {
+      "name": "Desk Mat",
+      "price": 34.99,
+      "category": "Accessories",
+      "description": "Extended desk mat (900x400mm) with stitched edges and non-slip rubber base. Water-resistant microfiber surface.",
+      "image": "/img/accessories.svg",
+      "stock": 200
+    },
+    "state": "active"
+  },
+  {
+    "id": "prod-006",
+    "data": {
+      "name": "Cable Management Kit",
+      "price": 24.99,
+      "category": "Accessories",
+      "description": "Complete cable management solution with under-desk tray, adhesive clips, velcro ties, and cable sleeves for a clean setup.",
+      "image": "/img/accessories.svg",
+      "stock": 150
+    },
+    "state": "active"
+  },
+  {
+    "id": "prod-007",
+    "data": {
+      "name": "Monitor Light Bar",
+      "price": 59.99,
+      "category": "Home Office",
+      "description": "Asymmetric LED monitor light bar with adjustable color temperature (2700K-6500K) and brightness. No screen glare design.",
+      "image": "/img/home-office.svg",
+      "stock": 90
+    },
+    "state": "active"
+  },
+  {
+    "id": "prod-008",
+    "data": {
+      "name": "IDE License Pro",
+      "price": 9.99,
+      "category": "Software",
+      "description": "Annual license for IDE Pro with AI code completion, advanced refactoring tools, and integrated debugging across all major languages.",
+      "image": "/img/software.svg",
+      "stock": 999
+    },
+    "state": "active"
+  }
+]

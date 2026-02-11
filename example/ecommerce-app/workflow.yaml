@@ -1,0 +1,327 @@
+# E-Commerce Store Application Configuration
+# A full-stack e-commerce application demonstrating the Workflow engine's ability
+# to compose an entire web application from declarative YAML configuration.
+#
+# Architecture:
+#   SPA (static files) + REST API + JWT auth + order state machine + event messaging
+#
+# Data flow:
+#   Browser -> SPA (static.fileserver) -> /api/* (router) -> middleware chain
+#   -> api.handler -> statemachine.engine -> messaging.broker -> notification handler
+#
+# Public endpoints:  GET /api/products, POST /api/auth/login, POST /api/auth/register
+# Protected endpoints: POST/GET /api/orders, GET /api/orders/{id}
+# Observability: GET /healthz, GET /metrics
+
+modules:
+  # --- HTTP infrastructure ---
+  - name: web-server
+    type: http.server
+    config:
+      address: ":8080"
+      readTimeout: "15s"
+      writeTimeout: "15s"
+
+  - name: router
+    type: http.router
+    config:
+      prefix: /api
+    dependsOn:
+      - web-server
+
+  # --- Middleware chain ---
+  - name: cors
+    type: http.middleware.cors
+    config:
+      allowedOrigins: ["*"]
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+      allowedHeaders: ["Content-Type", "Authorization"]
+    dependsOn:
+      - router
+
+  - name: request-id
+    type: http.middleware.requestid
+    dependsOn:
+      - cors
+
+  - name: rate-limiter
+    type: http.middleware.ratelimit
+    config:
+      requestsPerMinute: 300
+      burstSize: 50
+    dependsOn:
+      - request-id
+
+  # --- Authentication ---
+  - name: auth
+    type: auth.jwt
+    config:
+      secret: "${JWT_SECRET}"
+      tokenExpiry: "24h"
+      issuer: "workflow-store"
+    dependsOn:
+      - rate-limiter
+
+  - name: auth-middleware
+    type: http.middleware.auth
+    config:
+      authType: Bearer
+    dependsOn:
+      - auth
+
+  # --- API handlers ---
+  - name: products-api
+    type: api.handler
+    config:
+      resourceName: products
+      seedFile: "./seed/products.json"
+    dependsOn:
+      - rate-limiter
+
+  - name: orders-api
+    type: api.handler
+    config:
+      resourceName: orders
+      workflowType: "order-processing"
+      workflowEngine: "order-state"
+      instanceIDPrefix: "order-"
+      instanceIDField: "id"
+    dependsOn:
+      - auth-middleware
+
+  # --- Order state machine ---
+  - name: order-state
+    type: statemachine.engine
+    config:
+      description: "Manages order lifecycle state transitions"
+    dependsOn:
+      - orders-api
+
+  # --- Messaging ---
+  - name: event-broker
+    type: messaging.broker
+    config:
+      topics:
+        - "order.created"
+        - "order.validated"
+        - "order.shipped"
+        - "order.delivered"
+        - "order.cancelled"
+        - "order.failed"
+    dependsOn:
+      - order-state
+
+  - name: notification-handler
+    type: messaging.handler
+    config:
+      topic: "order.*"
+      description: "Handles notifications for all order lifecycle events"
+    dependsOn:
+      - event-broker
+
+  # --- Observability ---
+  - name: metrics
+    type: metrics.collector
+    config:
+      namespace: ecommerce
+
+  - name: health
+    type: health.checker
+    config:
+      description: "Health, readiness, and liveness probes"
+
+  # --- Static file serving (SPA) ---
+  - name: spa
+    type: static.fileserver
+    config:
+      root: "./spa"
+      prefix: "/"
+      spaFallback: true
+      cacheMaxAge: 3600
+    dependsOn:
+      - web-server
+
+# --- Workflow definitions ---
+workflows:
+  # HTTP routing
+  http:
+    router: router
+    server: web-server
+    routes:
+      # Public: product catalog (read-only)
+      - method: "GET"
+        path: "/api/products"
+        handler: products-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      - method: "GET"
+        path: "/api/products/{id}"
+        handler: products-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      # Public: authentication
+      - method: "POST"
+        path: "/api/auth/login"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      - method: "POST"
+        path: "/api/auth/register"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      # Protected: user profile (requires JWT)
+      - method: "GET"
+        path: "/api/auth/profile"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/auth/profile"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # Protected: orders (requires JWT)
+      - method: "POST"
+        path: "/api/orders"
+        handler: orders-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/orders"
+        handler: orders-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/orders/{id}"
+        handler: orders-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+  # Order state machine
+  statemachine:
+    engine: order-state
+    resourceMappings:
+      - resourceType: "orders"
+        stateMachine: "order-state"
+        instanceIDKey: "id"
+    definitions:
+      - name: order-processing
+        description: "E-commerce order processing workflow"
+        initialState: "new"
+        states:
+          new:
+            description: "Order has been created"
+            isFinal: false
+            isError: false
+          validated:
+            description: "Order has been validated"
+            isFinal: false
+            isError: false
+          shipped:
+            description: "Order has been shipped"
+            isFinal: false
+            isError: false
+          delivered:
+            description: "Order has been delivered"
+            isFinal: true
+            isError: false
+          cancelled:
+            description: "Order has been cancelled"
+            isFinal: true
+            isError: false
+          failed:
+            description: "Order processing failed"
+            isFinal: true
+            isError: true
+        transitions:
+          validate_order:
+            fromState: "new"
+            toState: "validated"
+          ship_order:
+            fromState: "validated"
+            toState: "shipped"
+          deliver_order:
+            fromState: "shipped"
+            toState: "delivered"
+          cancel_order:
+            fromState: "new"
+            toState: "cancelled"
+          cancel_validated:
+            fromState: "validated"
+            toState: "cancelled"
+          fail_order:
+            fromState: "new"
+            toState: "failed"
+    hooks:
+      - workflowType: "order-processing"
+        transitions: ["validate_order"]
+        handler: "notification-handler"
+      - workflowType: "order-processing"
+        toStates: ["shipped", "delivered", "cancelled", "failed"]
+        handler: "notification-handler"
+
+  # Messaging subscriptions
+  messaging:
+    broker: event-broker
+    subscriptions:
+      - topic: "order.created"
+        handler: notification-handler
+      - topic: "order.validated"
+        handler: notification-handler
+      - topic: "order.shipped"
+        handler: notification-handler
+      - topic: "order.delivered"
+        handler: notification-handler
+      - topic: "order.cancelled"
+        handler: notification-handler
+
+# --- Triggers ---
+triggers:
+  http:
+    routes:
+      - path: "/api/orders"
+        method: "POST"
+        workflow: "order-processing"
+        action: "validate_order"
+  event:
+    subscriptions:
+      - topic: "order.created"
+        event: "order.created"
+        workflow: "order-processing"
+        action: "validate_order"
+      - topic: "order.validated"
+        event: "order.validated"
+        workflow: "order-processing"
+        action: "ship_order"

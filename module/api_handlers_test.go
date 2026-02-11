@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/CrisisTextLine/modular"
@@ -728,5 +730,83 @@ func TestRESTAPIHandler_CRUDRoundTrip(t *testing.T) {
 	h.Handle(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("GET after DELETE: expected %d, got %d", http.StatusNotFound, w.Code)
+	}
+}
+
+func TestRESTAPIHandler_LoadSeedData(t *testing.T) {
+	dir := t.TempDir()
+	seedFile := filepath.Join(dir, "seed.json")
+	seedData := `[
+		{"id": "prod-1", "data": {"name": "Widget", "price": 9.99}, "state": "active"},
+		{"id": "prod-2", "data": {"name": "Gadget", "price": 19.99}, "state": "active"},
+		{"id": "prod-3", "data": {"name": "Doohickey", "price": 4.99}, "state": "draft"}
+	]`
+	if err := os.WriteFile(seedFile, []byte(seedData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := CreateIsolatedApp(t)
+	h := NewRESTAPIHandler("seed-handler", "products")
+	h.SetSeedFile(seedFile)
+	if err := h.Init(app); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	// Verify seed data was loaded
+	req := httptest.NewRequest(http.MethodGet, "/api/products", nil)
+	w := httptest.NewRecorder()
+	h.Handle(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resources []RESTResource
+	if err := json.NewDecoder(w.Body).Decode(&resources); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if len(resources) != 3 {
+		t.Fatalf("expected 3 seeded resources, got %d", len(resources))
+	}
+
+	// Verify specific resource
+	req = httptest.NewRequest(http.MethodGet, "/api/products/{id}", nil)
+	req.SetPathValue("id", "prod-1")
+	w = httptest.NewRecorder()
+	h.Handle(w, req)
+
+	var resource RESTResource
+	json.NewDecoder(w.Body).Decode(&resource)
+	if resource.State != "active" {
+		t.Errorf("expected state 'active', got '%s'", resource.State)
+	}
+	if resource.Data["name"] != "Widget" {
+		t.Errorf("expected name 'Widget', got %v", resource.Data["name"])
+	}
+}
+
+func TestRESTAPIHandler_LoadSeedData_InvalidFile(t *testing.T) {
+	app := CreateIsolatedApp(t)
+	h := NewRESTAPIHandler("seed-handler", "products")
+	h.SetSeedFile("/nonexistent/path/seed.json")
+	// Init should succeed but warn about missing seed file
+	if err := h.Init(app); err != nil {
+		t.Fatalf("Init should not fail for missing seed file: %v", err)
+	}
+}
+
+func TestRESTAPIHandler_LoadSeedData_InvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	seedFile := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(seedFile, []byte("not json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := CreateIsolatedApp(t)
+	h := NewRESTAPIHandler("seed-handler", "products")
+	h.SetSeedFile(seedFile)
+	// Init should succeed but warn about bad JSON
+	if err := h.Init(app); err != nil {
+		t.Fatalf("Init should not fail for bad JSON seed: %v", err)
 	}
 }

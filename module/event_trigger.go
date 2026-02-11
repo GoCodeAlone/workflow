@@ -67,6 +67,11 @@ func (t *EventTrigger) Init(app modular.Application) error {
 
 // Start starts the trigger
 func (t *EventTrigger) Start(ctx context.Context) error {
+	// If no subscriptions are configured, nothing to do
+	if len(t.subscriptions) == 0 {
+		return nil
+	}
+
 	// If no broker is set, we can't start
 	if t.broker == nil {
 		return fmt.Errorf("message broker not configured for event trigger")
@@ -110,7 +115,7 @@ func (t *EventTrigger) Configure(app modular.Application, triggerConfig interfac
 
 	// Find the message broker
 	var broker MessageBroker
-	brokerNames := []string{"messageBroker", "eventBroker", "broker", "messaging.broker.eventbus"}
+	brokerNames := []string{"messageBroker", "eventBroker", "broker", "event-broker", "messaging.broker.eventbus"}
 
 	for _, name := range brokerNames {
 		var svc interface{}

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	pathpkg "path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,6 +22,19 @@ type WorkflowConfig struct {
 	Modules   []ModuleConfig         `json:"modules" yaml:"modules"`
 	Workflows map[string]interface{} `json:"workflows" yaml:"workflows"`
 	Triggers  map[string]interface{} `json:"triggers" yaml:"triggers"`
+	ConfigDir string                 `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
+}
+
+// ResolveRelativePath resolves a path relative to the config file's directory.
+// If the path is absolute, it is returned as-is.
+func (c *WorkflowConfig) ResolveRelativePath(path string) string {
+	if path == "" || c.ConfigDir == "" {
+		return path
+	}
+	if pathpkg.IsAbs(path) {
+		return path
+	}
+	return pathpkg.Join(c.ConfigDir, path)
 }
 
 // LoadFromFile loads a workflow configuration from a YAML file
@@ -33,6 +47,12 @@ func LoadFromFile(filepath string) (*WorkflowConfig, error) {
 	var cfg WorkflowConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	// Store the config file's directory for relative path resolution
+	absPath, err := pathpkg.Abs(filepath)
+	if err == nil {
+		cfg.ConfigDir = pathpkg.Dir(absPath)
 	}
 
 	return &cfg, nil

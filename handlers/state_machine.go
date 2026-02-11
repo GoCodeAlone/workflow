@@ -173,6 +173,13 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 			if err = stateTracker.Init(app); err != nil {
 				return fmt.Errorf("failed to initialize state tracker: %w", err)
 			}
+
+			// Register services from ProvidesServices (since app.Init already ran)
+			if svcAware, ok := interface{}(stateTracker).(modular.ServiceAware); ok {
+				for _, svc := range svcAware.ProvidesServices() {
+					_ = app.RegisterService(svc.Name, svc.Instance)
+				}
+			}
 		}
 	}
 
@@ -195,6 +202,13 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 		// Initialize the newly created connector
 		if err = stateConnector.Init(app); err != nil {
 			return fmt.Errorf("failed to initialize state connector: %w", err)
+		}
+
+		// Register services from ProvidesServices (since app.Init already ran)
+		if svcAware, ok := interface{}(stateConnector).(modular.ServiceAware); ok {
+			for _, svc := range svcAware.ProvidesServices() {
+				_ = app.RegisterService(svc.Name, svc.Instance)
+			}
 		}
 	}
 

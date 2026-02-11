@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,7 @@ type RESTAPIHandler struct {
 	workflowEngine   string // The name of the workflow engine service to use
 	instanceIDPrefix string // Optional prefix for workflow instance IDs
 	instanceIDField  string // Field in resource data to use for instance ID (defaults to "id")
+	seedFile         string // Path to JSON seed data file
 }
 
 // RESTAPIHandlerConfig contains configuration for a REST API handler
@@ -66,6 +68,11 @@ func (h *RESTAPIHandler) SetWorkflowEngine(we string) {
 	h.workflowEngine = we
 }
 
+// SetSeedFile sets the path to a JSON seed data file.
+func (h *RESTAPIHandler) SetSeedFile(path string) {
+	h.seedFile = path
+}
+
 // Name returns the unique identifier for this module
 func (h *RESTAPIHandler) Name() string {
 	return h.name
@@ -82,6 +89,7 @@ func (h *RESTAPIHandler) Constructor() modular.ModuleConstructor {
 		handler.workflowEngine = h.workflowEngine
 		handler.instanceIDPrefix = h.instanceIDPrefix
 		handler.instanceIDField = h.instanceIDField
+		handler.seedFile = h.seedFile
 
 		// Look for a message broker service for event publishing
 		if broker, ok := services["message-broker"]; ok {
@@ -172,6 +180,15 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 					}
 				}
 			}
+		}
+	}
+
+	// Load seed data if configured
+	if h.seedFile != "" {
+		if err := h.loadSeedData(h.seedFile); err != nil {
+			h.logger.Warn(fmt.Sprintf("Failed to load seed data from %s: %v", h.seedFile, err))
+		} else {
+			h.logger.Info(fmt.Sprintf("Loaded seed data from %s", h.seedFile))
 		}
 	}
 
@@ -852,6 +869,44 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 		// Log error but continue since response is already committed
 		_ = err
 	}
+}
+
+// loadSeedData reads a JSON file containing an array of resources and populates the resources map
+func (h *RESTAPIHandler) loadSeedData(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("reading seed file: %w", err)
+	}
+
+	var seeds []struct {
+		ID    string                 `json:"id"`
+		Data  map[string]interface{} `json:"data"`
+		State string                 `json:"state"`
+	}
+	if err := json.Unmarshal(data, &seeds); err != nil {
+		return fmt.Errorf("parsing seed file: %w", err)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	for _, seed := range seeds {
+		if seed.ID == "" {
+			continue
+		}
+		resource := RESTResource{
+			ID:         seed.ID,
+			Data:       seed.Data,
+			State:      seed.State,
+			LastUpdate: time.Now().Format(time.RFC3339),
+		}
+		if resource.Data == nil {
+			resource.Data = make(map[string]interface{})
+		}
+		h.resources[seed.ID] = resource
+	}
+
+	return nil
 }
 
 // Start is a no-op for this handler

@@ -66,6 +66,11 @@ func (t *ScheduleTrigger) Init(app modular.Application) error {
 
 // Start starts the trigger
 func (t *ScheduleTrigger) Start(ctx context.Context) error {
+	// If no jobs are configured, nothing to do
+	if len(t.jobs) == 0 {
+		return nil
+	}
+
 	// If no scheduler is set, we can't start
 	if t.scheduler == nil {
 		return fmt.Errorf("scheduler not configured for schedule trigger")

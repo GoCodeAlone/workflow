@@ -72,6 +72,11 @@ func (t *HTTPTrigger) Init(app modular.Application) error {
 
 // Start starts the trigger
 func (t *HTTPTrigger) Start(ctx context.Context) error {
+	// If no routes are configured, nothing to do
+	if len(t.routes) == 0 {
+		return nil
+	}
+
 	// If no router is set, we can't start
 	if t.router == nil {
 		return fmt.Errorf("HTTP router not configured for HTTP trigger")
@@ -112,7 +117,7 @@ func (t *HTTPTrigger) Configure(app modular.Application, triggerConfig interface
 
 	// Find the HTTP router
 	var router HTTPRouter
-	routerNames := []string{"httpRouter", "api-router"}
+	routerNames := []string{"httpRouter", "api-router", "router"}
 
 	for _, name := range routerNames {
 		var svc interface{}

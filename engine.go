@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -134,6 +135,9 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				}
 				if we, ok := modCfg.Config["workflowEngine"].(string); ok && we != "" {
 					handler.SetWorkflowEngine(we)
+				}
+				if sf, ok := modCfg.Config["seedFile"].(string); ok && sf != "" {
+					handler.SetSeedFile(cfg.ResolveRelativePath(sf))
 				}
 				mod = handler
 			case "http.middleware.auth":
@@ -323,6 +327,44 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "observability.otel":
 				e.logger.Debug("Loading OpenTelemetry tracing module")
 				mod = module.NewOTelTracing(modCfg.Name)
+			case "static.fileserver":
+				root := ""
+				if r, ok := modCfg.Config["root"].(string); ok {
+					root = cfg.ResolveRelativePath(r)
+				}
+				prefix := "/"
+				if p, ok := modCfg.Config["prefix"].(string); ok && p != "" {
+					prefix = p
+				}
+				spaFallback := true
+				if sf, ok := modCfg.Config["spaFallback"].(bool); ok {
+					spaFallback = sf
+				}
+				cacheMaxAge := 3600
+				if cma, ok := modCfg.Config["cacheMaxAge"].(int); ok {
+					cacheMaxAge = cma
+				} else if cma, ok := modCfg.Config["cacheMaxAge"].(float64); ok {
+					cacheMaxAge = int(cma)
+				}
+				e.logger.Debug("Loading static file server module with root: " + root)
+				mod = module.NewStaticFileServer(modCfg.Name, root, prefix, spaFallback, cacheMaxAge)
+			case "auth.jwt":
+				secret := ""
+				if s, ok := modCfg.Config["secret"].(string); ok {
+					secret = os.ExpandEnv(s)
+				}
+				tokenExpiry := 24 * time.Hour
+				if te, ok := modCfg.Config["tokenExpiry"].(string); ok && te != "" {
+					if d, err := time.ParseDuration(te); err == nil {
+						tokenExpiry = d
+					}
+				}
+				issuer := "workflow"
+				if iss, ok := modCfg.Config["issuer"].(string); ok && iss != "" {
+					issuer = iss
+				}
+				e.logger.Debug("Loading JWT auth module")
+				mod = module.NewJWTAuthModule(modCfg.Name, secret, tokenExpiry, issuer)
 			default:
 				e.logger.Warn("Unknown module type: " + modCfg.Type)
 				return fmt.Errorf("unknown module type: %s", modCfg.Type)
@@ -340,6 +382,23 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	// Log loaded services
 	for name := range e.app.SvcRegistry() {
 		e.logger.Debug("Loaded service: " + name)
+	}
+
+	// Wire AuthProviders to AuthMiddleware instances (post-init because init order is alphabetical)
+	var authMiddlewares []*module.AuthMiddleware
+	var authProviders []module.AuthProvider
+	for _, svc := range e.app.SvcRegistry() {
+		if am, ok := svc.(*module.AuthMiddleware); ok {
+			authMiddlewares = append(authMiddlewares, am)
+		}
+		if ap, ok := svc.(module.AuthProvider); ok {
+			authProviders = append(authProviders, ap)
+		}
+	}
+	for _, am := range authMiddlewares {
+		for _, ap := range authProviders {
+			am.RegisterProvider(ap)
+		}
 	}
 
 	// Initialize the workflow event emitter
@@ -365,6 +424,37 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 
 		if !handled {
 			return fmt.Errorf("no handler found for workflow type: %s", workflowType)
+		}
+	}
+
+	// Wire static file servers as catch-all routes on any available router
+	for _, svc := range e.app.SvcRegistry() {
+		if sfs, ok := svc.(*module.StaticFileServer); ok {
+			// Find a router to attach the static file server to
+			for _, routerSvc := range e.app.SvcRegistry() {
+				if router, ok := routerSvc.(module.HTTPRouter); ok {
+					router.AddRoute("GET", sfs.Prefix()+"{path...}", sfs)
+					e.logger.Debug("Registered static file server on router at prefix: " + sfs.Prefix())
+					break
+				}
+			}
+		}
+	}
+
+	// Wire health checker endpoints on any available router (only if not already configured via workflows)
+	for _, svc := range e.app.SvcRegistry() {
+		if hc, ok := svc.(*module.HealthChecker); ok {
+			for _, routerSvc := range e.app.SvcRegistry() {
+				if router, ok := routerSvc.(*module.StandardHTTPRouter); ok {
+					if !router.HasRoute("GET", "/healthz") {
+						router.AddRoute("GET", "/healthz", &module.HealthHTTPHandler{Handler: hc.HealthHandler()})
+						router.AddRoute("GET", "/readyz", &module.HealthHTTPHandler{Handler: hc.ReadyHandler()})
+						router.AddRoute("GET", "/livez", &module.HealthHTTPHandler{Handler: hc.LiveHandler()})
+						e.logger.Debug("Registered health check endpoints on router")
+					}
+					break
+				}
+			}
 		}
 	}
 

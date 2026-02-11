@@ -8,9 +8,9 @@ require (
 	github.com/CrisisTextLine/modular/modules/cache v0.4.0
 	github.com/CrisisTextLine/modular/modules/chimux v1.4.0
 	github.com/CrisisTextLine/modular/modules/database/v2 v2.3.0
-	github.com/CrisisTextLine/modular/modules/eventbus v1.5.0
+	github.com/CrisisTextLine/modular/modules/eventbus v1.6.0
 	github.com/CrisisTextLine/modular/modules/eventlogger v0.6.0
-	github.com/CrisisTextLine/modular/modules/httpclient v0.4.0
+	github.com/CrisisTextLine/modular/modules/httpclient v0.5.0
 	github.com/CrisisTextLine/modular/modules/httpserver v0.4.0
 	github.com/CrisisTextLine/modular/modules/jsonschema v1.4.0
 	github.com/CrisisTextLine/modular/modules/reverseproxy/v2 v2.2.0
@@ -20,13 +20,17 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/github/copilot-sdk/go v0.1.23
+	github.com/golang-jwt/jwt/v5 v5.2.3
 	github.com/google/uuid v1.6.0
+	github.com/jackc/pgx/v5 v5.7.5
 	github.com/nats-io/nats.go v1.46.1
 	github.com/prometheus/client_golang v1.19.1
 	github.com/traefik/yaegi v0.16.1
 	go.opentelemetry.io/otel v1.40.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.40.0
 	go.opentelemetry.io/otel/sdk v1.40.0
+	golang.org/x/crypto v0.47.0
+	golang.org/x/oauth2 v0.34.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -69,7 +73,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-sql-driver/mysql v1.9.3 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
-	github.com/golang-jwt/jwt/v5 v5.2.3 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/golobby/cast v1.3.3 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
@@ -85,7 +88,6 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgtype v1.14.4 // indirect
 	github.com/jackc/pgx/v4 v4.18.3 // indirect
-	github.com/jackc/pgx/v5 v5.7.5 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jcmturner/aescts/v2 v2.0.0 // indirect
 	github.com/jcmturner/dnsutils/v2 v2.0.0 // indirect
@@ -114,9 +116,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect

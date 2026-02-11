@@ -88,7 +88,7 @@ func TestRequestIDMiddleware_ProvidesServices(t *testing.T) {
 	if len(svcs) != 1 {
 		t.Fatalf("expected 1 service, got %d", len(svcs))
 	}
-	if svcs[0].Name != "http.middleware.requestid" {
-		t.Errorf("expected service name 'http.middleware.requestid', got %q", svcs[0].Name)
+	if svcs[0].Name != "test-request-id" {
+		t.Errorf("expected service name 'test-request-id', got %q", svcs[0].Name)
 	}
 }

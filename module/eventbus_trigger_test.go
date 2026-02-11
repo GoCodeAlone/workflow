@@ -413,6 +413,7 @@ func TestEventBusTrigger_Init(t *testing.T) {
 func TestEventBusTrigger_StartWithoutEventBus(t *testing.T) {
 	trigger := NewEventBusTrigger()
 	trigger.engine = &mockEBWorkflowEngine{}
+	trigger.subscriptions = []EventBusTriggerSubscription{{Topic: "test"}}
 	err := trigger.Start(context.Background())
 	if err == nil {
 		t.Fatal("expected error when starting without eventbus")
@@ -425,6 +426,7 @@ func TestEventBusTrigger_StartWithoutEngine(t *testing.T) {
 
 	trigger := NewEventBusTrigger()
 	trigger.eventBus = eb
+	trigger.subscriptions = []EventBusTriggerSubscription{{Topic: "test"}}
 	err := trigger.Start(context.Background())
 	if err == nil {
 		t.Fatal("expected error when starting without engine")

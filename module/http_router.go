@@ -95,6 +95,18 @@ func (r *StandardHTTPRouter) AddRouteWithMiddleware(method, path string, handler
 	fmt.Printf("Route added: %s %s\n", method, path)
 }
 
+// HasRoute checks if a route with the given method and path already exists
+func (r *StandardHTTPRouter) HasRoute(method, path string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, route := range r.routes {
+		if route.Method == method && route.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
 // ServeHTTP implements the http.Handler interface
 func (r *StandardHTTPRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mu.RLock()
