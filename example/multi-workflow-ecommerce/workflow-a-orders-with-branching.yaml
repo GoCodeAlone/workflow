@@ -1,0 +1,113 @@
+modules:
+  # HTTP ingestion
+  - name: order-server
+    type: http.server
+    config:
+      port: 8080
+
+  - name: order-router
+    type: http.router
+    config:
+      prefix: /api
+    dependsOn:
+      - order-server
+
+  - name: order-api
+    type: http.handler
+    config:
+      path: /orders
+    dependsOn:
+      - order-router
+
+  # Validate request body
+  - name: validate-body
+    type: conditional.ifelse
+    config:
+      expression: "request.body != null && request.body.items.length > 0"
+    dependsOn:
+      - order-api
+    branches:
+      "true": validate-amount
+      "false": reject-empty
+
+  # Reject empty body
+  - name: reject-empty
+    type: http.handler
+    config:
+      path: /error
+      status: 400
+
+  # Check order amount for routing
+  - name: validate-amount
+    type: conditional.ifelse
+    config:
+      expression: "order.total > 0 && order.total < 100000"
+    branches:
+      "true": route-by-priority
+      "false": reject-amount
+
+  # Reject invalid amount
+  - name: reject-amount
+    type: http.handler
+    config:
+      path: /error
+      status: 422
+
+  # Route by priority level
+  - name: route-by-priority
+    type: conditional.switch
+    config:
+      expression: "order.priority"
+      cases:
+        - express
+        - standard
+        - bulk
+    branches:
+      case-0: express-handler
+      case-1: standard-handler
+      case-2: bulk-handler
+
+  # Express priority processing
+  - name: express-handler
+    type: data.transformer
+    config:
+      pipeline: express-fulfillment
+
+  # Standard priority processing
+  - name: standard-handler
+    type: data.transformer
+    config:
+      pipeline: standard-fulfillment
+
+  # Bulk order processing
+  - name: bulk-handler
+    type: data.transformer
+    config:
+      pipeline: bulk-fulfillment
+
+  # All paths converge to state machine
+  - name: order-state-engine
+    type: statemachine.engine
+    config:
+      initial_state: new
+    dependsOn:
+      - express-handler
+      - standard-handler
+      - bulk-handler
+
+  - name: order-broker
+    type: messaging.broker
+    config:
+      topics:
+        - order.created
+        - order.validated
+    dependsOn:
+      - order-state-engine
+
+  - name: order-metrics
+    type: metrics.collector
+    config:
+      namespace: orders
+
+workflows: {}
+triggers: {}

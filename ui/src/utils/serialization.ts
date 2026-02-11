@@ -19,10 +19,14 @@ function makeEdge(
   targetId: string,
   edgeType: WorkflowEdgeType,
   label?: string,
+  sourceHandle?: string,
 ): Edge {
-  const id = `e-${edgeType}-${sourceId}-${targetId}`;
+  const id = `e-${edgeType}-${sourceId}-${targetId}${sourceHandle ? `-${sourceHandle}` : ''}`;
   const data: WorkflowEdgeData = { edgeType, label };
   const edge: Edge = { id, source: sourceId, target: targetId, data };
+  if (sourceHandle) {
+    edge.sourceHandle = sourceHandle;
+  }
   if (label) {
     edge.label = label;
     edge.labelBgStyle = { fill: '#1e1e2e', fillOpacity: 0.9 };
@@ -195,6 +199,7 @@ export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowCon
   const dependencyEdges: Edge[] = [];
   const httpRouteEdges: Edge[] = [];
   const messagingEdges: Edge[] = [];
+  const conditionalEdges: Edge[] = [];
 
   for (const edge of edges) {
     const edgeData = edge.data as WorkflowEdgeData | undefined;
@@ -207,12 +212,24 @@ export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowCon
         messagingEdges.push(edge);
         break;
       case 'conditional':
-        // Skip conditional edges in export
+        conditionalEdges.push(edge);
         break;
       default:
         dependencyEdges.push(edge);
         break;
     }
+  }
+
+  // Build branches map from conditional edges (sourceId -> { handleId: targetName })
+  const branchesMap: Record<string, Record<string, string>> = {};
+  const idToName: Record<string, string> = {};
+  for (const n of realNodes) idToName[n.id] = n.data.label;
+  for (const edge of conditionalEdges) {
+    const sourceNode = realNodes.find((n) => n.id === edge.source);
+    if (!sourceNode || sourceNode.data.synthesized) continue;
+    if (!branchesMap[edge.source]) branchesMap[edge.source] = {};
+    const handleId = edge.sourceHandle ?? (edge.data as WorkflowEdgeData)?.label ?? 'default';
+    branchesMap[edge.source][handleId] = idToName[edge.target] ?? edge.target;
   }
 
   // Build dependsOn from dependency edges
@@ -240,6 +257,11 @@ export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowCon
     const deps = dependencyMap[node.id];
     if (deps && deps.length > 0) {
       mod.dependsOn = deps;
+    }
+
+    const branches = branchesMap[node.id];
+    if (branches && Object.keys(branches).length > 0) {
+      mod.branches = branches;
     }
 
     return mod;
@@ -343,6 +365,20 @@ export function configToNodes(config: WorkflowConfig): {
         const sourceId = nameToId[dep];
         if (sourceId && targetId) {
           edges.push(makeEdge(sourceId, targetId, 'dependency', dep));
+        }
+      }
+    }
+  });
+
+  // Conditional branch edges (from output handles to target modules)
+  config.modules.forEach((mod) => {
+    if (mod.branches) {
+      const sourceId = nameToId[mod.name];
+      if (!sourceId) return;
+      for (const [handleId, targetName] of Object.entries(mod.branches)) {
+        const targetId = nameToId[targetName];
+        if (targetId) {
+          edges.push(makeEdge(sourceId, targetId, 'conditional', handleId, handleId));
         }
       }
     }

@@ -1,0 +1,123 @@
+modules:
+  # Receive order events
+  - name: fulfillment-broker
+    type: messaging.broker
+    config:
+      topics:
+        - order.validated
+
+  - name: fulfillment-handler
+    type: messaging.handler
+    config:
+      topic: order.validated
+    dependsOn:
+      - fulfillment-broker
+
+  # Check inventory availability
+  - name: check-inventory
+    type: conditional.ifelse
+    config:
+      expression: "inventory.available(order.items) == true"
+    dependsOn:
+      - fulfillment-handler
+    branches:
+      "true": check-shipping
+      "false": backorder-handler
+
+  # Handle backorder
+  - name: backorder-handler
+    type: webhook.sender
+    config:
+      url: /api/backorders
+      method: POST
+
+  # Check shipping destination
+  - name: check-shipping
+    type: conditional.switch
+    config:
+      expression: "order.shipping.region"
+      cases:
+        - domestic
+        - international
+        - restricted
+    branches:
+      case-0: domestic-shipper
+      case-1: international-shipper
+      case-2: reject-restricted
+
+  # Domestic shipping
+  - name: domestic-shipper
+    type: data.transformer
+    config:
+      pipeline: domestic-fulfillment
+
+  # International shipping
+  - name: international-shipper
+    type: data.transformer
+    config:
+      pipeline: international-fulfillment
+
+  # Restricted region rejection
+  - name: reject-restricted
+    type: webhook.sender
+    config:
+      url: /api/notifications/restricted
+      method: POST
+
+  # Verify external API response
+  - name: call-carrier-api
+    type: http.handler
+    config:
+      path: /carrier/rate
+    dependsOn:
+      - domestic-shipper
+      - international-shipper
+
+  - name: check-response
+    type: conditional.switch
+    config:
+      expression: "response.statusCode"
+      cases:
+        - "200"
+        - "403"
+        - "429"
+        - "500"
+    dependsOn:
+      - call-carrier-api
+    branches:
+      case-0: process-shipment
+      case-1: auth-failure-handler
+      case-2: rate-limit-handler
+      case-3: server-error-handler
+
+  # Success path
+  - name: process-shipment
+    type: statemachine.engine
+    config:
+      initial_state: pending
+
+  # Error handlers
+  - name: auth-failure-handler
+    type: webhook.sender
+    config:
+      url: /api/alerts/auth-failure
+      method: POST
+
+  - name: rate-limit-handler
+    type: data.transformer
+    config:
+      pipeline: retry-with-backoff
+
+  - name: server-error-handler
+    type: webhook.sender
+    config:
+      url: /api/alerts/carrier-down
+      method: POST
+
+  - name: fulfillment-metrics
+    type: metrics.collector
+    config:
+      namespace: fulfillment
+
+workflows: {}
+triggers: {}

@@ -5,6 +5,7 @@ export interface ModuleConfig {
   type: string;
   config?: Record<string, unknown>;
   dependsOn?: string[];
+  branches?: Record<string, string>;
 }
 
 export interface WorkflowConfig {

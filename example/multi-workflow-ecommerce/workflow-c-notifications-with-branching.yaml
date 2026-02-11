@@ -1,0 +1,121 @@
+modules:
+  # Receive all platform events
+  - name: event-broker
+    type: messaging.broker
+    config:
+      topics:
+        - "order.*"
+        - "fulfillment.*"
+        - "payment.*"
+
+  - name: event-receiver
+    type: messaging.handler
+    config:
+      topic: "*"
+    dependsOn:
+      - event-broker
+
+  # Route by event category
+  - name: route-event-type
+    type: conditional.switch
+    config:
+      expression: "event.category"
+      cases:
+        - order
+        - fulfillment
+        - payment
+        - system
+    dependsOn:
+      - event-receiver
+    branches:
+      case-0: order-notifications
+      case-1: fulfillment-notifications
+      case-2: payment-notifications
+      case-3: system-alerts
+
+  # Order notification sub-routing
+  - name: order-notifications
+    type: conditional.switch
+    config:
+      expression: "event.type"
+      cases:
+        - order.created
+        - order.confirmed
+        - order.cancelled
+        - order.failed
+    branches:
+      case-0: email-confirmation
+      case-1: email-confirmation
+      case-2: send-cancellation
+      case-3: alert-ops-team
+
+  # Fulfillment notification decisions
+  - name: fulfillment-notifications
+    type: conditional.ifelse
+    config:
+      expression: "event.type == 'fulfillment.shipped'"
+    branches:
+      "true": send-tracking
+      "false": log-fulfillment-event
+
+  # Payment notification decisions
+  - name: payment-notifications
+    type: conditional.ifelse
+    config:
+      expression: "event.data.payment_success == true"
+    branches:
+      "true": send-receipt
+      "false": send-payment-failure
+
+  # System alerts
+  - name: system-alerts
+    type: webhook.sender
+    config:
+      url: /api/ops/pagerduty
+      method: POST
+
+  # Email handlers
+  - name: email-confirmation
+    type: notification.slack
+    config:
+      channel: "#order-updates"
+
+  - name: send-cancellation
+    type: notification.slack
+    config:
+      channel: "#order-cancellations"
+
+  - name: alert-ops-team
+    type: webhook.sender
+    config:
+      url: /api/ops/alerts
+      method: POST
+
+  - name: send-tracking
+    type: notification.slack
+    config:
+      channel: "#shipping-updates"
+
+  - name: log-fulfillment-event
+    type: data.transformer
+    config:
+      pipeline: event-logging
+
+  - name: send-receipt
+    type: notification.slack
+    config:
+      channel: "#payments"
+
+  - name: send-payment-failure
+    type: webhook.sender
+    config:
+      url: /api/ops/payment-failures
+      method: POST
+
+  - name: notification-metrics
+    type: metrics.collector
+    config:
+      namespace: notifications
+
+workflows: {}
+triggers: {}

@@ -13,6 +13,7 @@ type ModuleConfig struct {
 	Type      string                 `json:"type" yaml:"type"`
 	Config    map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
 	DependsOn []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
+	Branches  map[string]string      `json:"branches,omitempty" yaml:"branches,omitempty"`
 }
 
 // WorkflowConfig represents the overall configuration for the workflow engine

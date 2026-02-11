@@ -1493,6 +1493,18 @@ The following screenshots show how the workflow YAML configs render in the Workf
 ![Multi-Workflow Tabs Overview](screenshots/12-multi-workflow-tabs-overview.png)
 *All 3 e-commerce workflows loaded in separate tabs (Workflow 1, 2, 3), demonstrating multi-workflow management with independent canvas state per tab*
 
+### Branching: Order Validation (Workflow A with Conditionals)
+![Branching Order Validation](screenshots/13-branching-order-validation.png)
+*14 modules with diamond-shaped conditional nodes: IF (body validation → true/false), IF (amount validation → true/false → reject-empty/reject-amount), SW (priority routing: express/standard/bulk → express-handler/standard-handler/bulk-handler), all converging to state machine → broker*
+
+### Branching: Fulfillment Response Codes (Workflow B with Conditionals)
+![Branching Fulfillment Response Codes](screenshots/14-branching-fulfillment-response-codes.png)
+*15 modules with cascading decisions: IF (inventory.available → true/false → backorder-handler), SW (shipping.region: domestic/international/restricted), SW (response.statusCode: 200/403/429/500 → process-shipment/auth-failure-handler/rate-limit-handler/server-error-handler)*
+
+### Branching: Notification Routing (Workflow C with Conditionals)
+![Branching Notification Routing](screenshots/15-branching-notification-routing.png)
+*16 modules with multi-level event routing: SW (event.category: order/fulfillment/payment/system), SW (event.type: created/confirmed/cancelled/failed), IF (fulfillment.shipped → send-tracking/log-fulfillment-event), IF (payment_success → send-receipt/send-payment-failure)*
+
 ---
 
 ## Summary
@@ -2030,6 +2042,9 @@ flowchart LR
 | `workflow-a-orders.yaml` | Order ingestion: HTTP server, state machine (new→validated→processing→completed) |
 | `workflow-b-fulfillment.yaml` | Fulfillment: messaging handler, state machine (pending→picking→packing→shipped) |
 | `workflow-c-notifications.yaml` | Notification hub: subscribes to order.* and fulfillment.* events |
+| `workflow-a-orders-with-branching.yaml` | **With conditionals:** IF (body validation), IF (amount validation), SW (priority: express/standard/bulk) |
+| `workflow-b-fulfillment-with-branching.yaml` | **With conditionals:** IF (inventory check), SW (shipping region), SW (HTTP status code: 200/403/429/500) |
+| `workflow-c-notifications-with-branching.yaml` | **With conditionals:** SW (event category), SW (order event type), IF (shipped?), IF (payment success?) |
 | `cross-workflow-links.yaml` | Documents the 3 cross-workflow event routing links |
 | `README.md` | Architecture docs with running instructions |
 
