@@ -1477,6 +1477,22 @@ The following screenshots show how the workflow YAML configs render in the Workf
 ![API Gateway](screenshots/08-api-gateway.png)
 *3 modules: chimux.router, httpserver.modular, reverseproxy*
 
+### Multi-Workflow: Order Ingestion (Workflow A)
+![Multi-Workflow A - Order Ingestion](screenshots/09-multi-workflow-a-orders.png)
+*10 modules: http.server -> http.router -> http.handler -> data.transformer -> statemachine.engine -> state.tracker -> messaging.broker -> messaging.handler, plus metrics.collector and health.checker in Monitoring group*
+
+### Multi-Workflow: Fulfillment Processing (Workflow B)
+![Multi-Workflow B - Fulfillment](screenshots/10-multi-workflow-b-fulfillment.png)
+*7 modules: messaging.broker -> messaging.handler (order.validated) -> data.transformer -> statemachine.engine -> state.tracker -> webhook.sender, plus metrics.collector*
+
+### Multi-Workflow: Notification Hub (Workflow C)
+![Multi-Workflow C - Notifications](screenshots/11-multi-workflow-c-notifications.png)
+*6 modules: messaging.broker fan-out to order-notification-handler (order.\*) and fulfillment-notification-handler (fulfillment.\*), both feeding customer-webhook and ops-webhook, plus notification-metrics*
+
+### Multi-Workflow: Three-Tab Overview
+![Multi-Workflow Tabs Overview](screenshots/12-multi-workflow-tabs-overview.png)
+*All 3 e-commerce workflows loaded in separate tabs (Workflow 1, 2, 3), demonstrating multi-workflow management with independent canvas state per tab*
+
 ---
 
 ## Summary
