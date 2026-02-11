@@ -4,10 +4,28 @@
 #
 # Architecture:
 #   SPA (static files) + REST API + JWT auth + order state machine + event messaging
+#   + dynamic processing components (inventory, payment, shipping, notifications)
+#   + SQLite persistence + Prometheus metrics
 #
 # Data flow:
 #   Browser -> SPA (static.fileserver) -> /api/* (router) -> middleware chain
-#   -> api.handler -> statemachine.engine -> messaging.broker -> notification handler
+#   -> api.handler -> statemachine.engine -> processing.step -> dynamic.component
+#   -> messaging.broker -> notification handler
+#
+# Processing pipeline:
+#   POST /api/orders -> new -> start_validation -> validating
+#   -> [inventory-checker] -> validation_passed -> validated
+#   -> [event: order.validated] -> start_payment -> paying
+#   -> [payment-processor] -> payment_approved -> paid
+#   -> [event: order.paid] -> start_shipping -> shipping
+#   -> [shipping-service] -> shipping_confirmed -> shipped -> delivered
+#
+# Failure paths:
+#   validating -> [inventory check fails] -> validation_failed -> failed
+#   paying -> [payment declined] -> payment_declined -> payment_failed
+#   payment_failed -> retry_payment -> paying (max retries)
+#   shipping -> [shipping fails] -> shipping_failed -> ship_failed
+#   ship_failed -> retry_shipping -> shipping (max retries)
 #
 # Public endpoints:  GET /api/products, POST /api/auth/login, POST /api/auth/register
 # Protected endpoints: POST/GET /api/orders, GET /api/orders/{id}
@@ -97,6 +115,99 @@ modules:
     dependsOn:
       - orders-api
 
+  # --- Persistence ---
+  - name: order-db
+    type: database.workflow
+    config:
+      driver: "sqlite"
+      dsn: "./data/ecommerce.db"
+
+  - name: persistence
+    type: persistence.store
+    config:
+      database: "order-db"
+    dependsOn:
+      - order-db
+
+  # --- Dynamic processing components ---
+  # These simulate real-world integrations (payment gateways, shipping APIs, etc.)
+  # In production, these would call actual third-party APIs.
+
+  - name: inventory-checker
+    type: dynamic.component
+    config:
+      source: "./components/inventory_checker.go"
+      description: "Simulates warehouse inventory check (real-world: ShipBob, Fulfil.io API)"
+    dependsOn:
+      - order-state
+
+  - name: payment-processor
+    type: dynamic.component
+    config:
+      source: "./components/payment_processor.go"
+      description: "Simulates payment gateway (real-world: Stripe, PayPal API)"
+    dependsOn:
+      - order-state
+
+  - name: shipping-service
+    type: dynamic.component
+    config:
+      source: "./components/shipping_service.go"
+      description: "Simulates shipping label generation (real-world: EasyPost, ShipStation API)"
+    dependsOn:
+      - order-state
+
+  - name: notification-sender
+    type: dynamic.component
+    config:
+      source: "./components/notification_sender.go"
+      description: "Simulates email/SMS notifications (real-world: SendGrid, Twilio, SNS)"
+    dependsOn:
+      - order-state
+
+  # --- Processing steps (bridge: dynamic component -> state machine) ---
+  # Each processing step wraps a dynamic component with retry logic and
+  # fires success/compensation transitions based on the component's result.
+
+  - name: step-validate
+    type: processing.step
+    config:
+      componentId: "inventory-checker"
+      successTransition: "validation_passed"
+      compensateTransition: "validation_failed"
+      maxRetries: 1
+      retryBackoffMs: 500
+      timeoutSeconds: 10
+    dependsOn:
+      - inventory-checker
+      - order-state
+
+  - name: step-payment
+    type: processing.step
+    config:
+      componentId: "payment-processor"
+      successTransition: "payment_approved"
+      compensateTransition: "payment_declined"
+      maxRetries: 2
+      retryBackoffMs: 1000
+      timeoutSeconds: 30
+    dependsOn:
+      - payment-processor
+      - order-state
+
+  - name: step-shipping
+    type: processing.step
+    config:
+      componentId: "shipping-service"
+      successTransition: "shipping_confirmed"
+      compensateTransition: "shipping_failed"
+      maxRetries: 2
+      retryBackoffMs: 2000
+      timeoutSeconds: 30
+    dependsOn:
+      - shipping-service
+      - order-state
+
   # --- Messaging ---
   - name: event-broker
     type: messaging.broker
@@ -104,10 +215,13 @@ modules:
       topics:
         - "order.created"
         - "order.validated"
+        - "order.paid"
         - "order.shipped"
         - "order.delivered"
         - "order.cancelled"
         - "order.failed"
+        - "order.payment_failed"
+        - "order.ship_failed"
     dependsOn:
       - order-state
 
@@ -229,7 +343,7 @@ workflows:
           - rate-limiter
           - auth-middleware
 
-  # Order state machine
+  # Order state machine — 10-state production pipeline
   statemachine:
     engine: order-state
     resourceMappings:
@@ -238,40 +352,95 @@ workflows:
         instanceIDKey: "id"
     definitions:
       - name: order-processing
-        description: "E-commerce order processing workflow"
+        description: "Production-realistic order processing pipeline"
         initialState: "new"
         states:
           new:
-            description: "Order has been created"
+            description: "Order created, awaiting validation"
+            isFinal: false
+            isError: false
+          validating:
+            description: "Checking inventory availability"
             isFinal: false
             isError: false
           validated:
-            description: "Order has been validated"
+            description: "Inventory confirmed, ready for payment"
+            isFinal: false
+            isError: false
+          paying:
+            description: "Processing payment"
+            isFinal: false
+            isError: false
+          paid:
+            description: "Payment confirmed, ready for shipping"
+            isFinal: false
+            isError: false
+          payment_failed:
+            description: "Payment declined, may retry"
+            isFinal: false
+            isError: false
+          shipping:
+            description: "Generating shipping label"
             isFinal: false
             isError: false
           shipped:
-            description: "Order has been shipped"
+            description: "Order shipped, in transit"
+            isFinal: false
+            isError: false
+          ship_failed:
+            description: "Shipping label generation failed, may retry"
             isFinal: false
             isError: false
           delivered:
-            description: "Order has been delivered"
+            description: "Order delivered successfully"
             isFinal: true
             isError: false
           cancelled:
-            description: "Order has been cancelled"
+            description: "Order cancelled"
             isFinal: true
             isError: false
           failed:
-            description: "Order processing failed"
+            description: "Order processing failed permanently"
             isFinal: true
             isError: true
         transitions:
-          validate_order:
+          # Validation pipeline
+          start_validation:
             fromState: "new"
+            toState: "validating"
+          validation_passed:
+            fromState: "validating"
             toState: "validated"
-          ship_order:
+          validation_failed:
+            fromState: "validating"
+            toState: "failed"
+          # Payment pipeline
+          start_payment:
             fromState: "validated"
+            toState: "paying"
+          payment_approved:
+            fromState: "paying"
+            toState: "paid"
+          payment_declined:
+            fromState: "paying"
+            toState: "payment_failed"
+          retry_payment:
+            fromState: "payment_failed"
+            toState: "paying"
+          # Shipping pipeline
+          start_shipping:
+            fromState: "paid"
+            toState: "shipping"
+          shipping_confirmed:
+            fromState: "shipping"
             toState: "shipped"
+          shipping_failed:
+            fromState: "shipping"
+            toState: "ship_failed"
+          retry_shipping:
+            fromState: "ship_failed"
+            toState: "shipping"
+          # Final transitions
           deliver_order:
             fromState: "shipped"
             toState: "delivered"
@@ -281,15 +450,22 @@ workflows:
           cancel_validated:
             fromState: "validated"
             toState: "cancelled"
-          fail_order:
-            fromState: "new"
-            toState: "failed"
     hooks:
+      # When entering 'validating' state, run inventory check
       - workflowType: "order-processing"
-        transitions: ["validate_order"]
-        handler: "notification-handler"
+        transitions: ["start_validation"]
+        handler: "step-validate"
+      # When entering 'paying' state, run payment processing
       - workflowType: "order-processing"
-        toStates: ["shipped", "delivered", "cancelled", "failed"]
+        transitions: ["start_payment"]
+        handler: "step-payment"
+      # When entering 'shipping' state, run shipping label generation
+      - workflowType: "order-processing"
+        transitions: ["start_shipping"]
+        handler: "step-shipping"
+      # Notify on all terminal and milestone states
+      - workflowType: "order-processing"
+        toStates: ["validated", "paid", "shipped", "delivered", "cancelled", "failed", "payment_failed", "ship_failed"]
         handler: "notification-handler"
 
   # Messaging subscriptions
@@ -300,6 +476,8 @@ workflows:
         handler: notification-handler
       - topic: "order.validated"
         handler: notification-handler
+      - topic: "order.paid"
+        handler: notification-handler
       - topic: "order.shipped"
         handler: notification-handler
       - topic: "order.delivered"
@@ -308,20 +486,24 @@ workflows:
         handler: notification-handler
 
 # --- Triggers ---
+# Triggers automatically chain the processing pipeline:
+#   POST /api/orders -> start_validation
+#   order.validated event -> start_payment
+#   order.paid event -> start_shipping
 triggers:
   http:
     routes:
       - path: "/api/orders"
         method: "POST"
         workflow: "order-processing"
-        action: "validate_order"
+        action: "start_validation"
   event:
     subscriptions:
-      - topic: "order.created"
-        event: "order.created"
-        workflow: "order-processing"
-        action: "validate_order"
       - topic: "order.validated"
         event: "order.validated"
         workflow: "order-processing"
-        action: "ship_order"
+        action: "start_payment"
+      - topic: "order.paid"
+        event: "order.paid"
+        workflow: "order-processing"
+        action: "start_shipping"

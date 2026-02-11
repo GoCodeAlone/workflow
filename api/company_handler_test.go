@@ -13,15 +13,15 @@ import (
 // --- mock company store ---
 
 type mockCompanyStore struct {
-	companies    map[uuid.UUID]*store.Company
-	slugIndex    map[string]*store.Company
+	companies     map[uuid.UUID]*store.Company
+	slugIndex     map[string]*store.Company
 	userCompanies map[uuid.UUID][]*store.Company
 }
 
 func newMockCompanyStore() *mockCompanyStore {
 	return &mockCompanyStore{
-		companies:    make(map[uuid.UUID]*store.Company),
-		slugIndex:    make(map[string]*store.Company),
+		companies:     make(map[uuid.UUID]*store.Company),
+		slugIndex:     make(map[string]*store.Company),
 		userCompanies: make(map[uuid.UUID][]*store.Company),
 	}
 }

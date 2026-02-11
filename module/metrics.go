@@ -120,6 +120,16 @@ func (m *MetricsCollector) SetActiveWorkflows(workflowType string, count float64
 	m.ActiveWorkflows.WithLabelValues(workflowType).Set(count)
 }
 
+// MetricsHTTPHandler adapts an http.Handler to the HTTPHandler interface
+type MetricsHTTPHandler struct {
+	Handler http.Handler
+}
+
+// Handle implements the HTTPHandler interface
+func (h *MetricsHTTPHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	h.Handler.ServeHTTP(w, r)
+}
+
 // ProvidesServices returns the services provided by this module.
 func (m *MetricsCollector) ProvidesServices() []modular.ServiceProvider {
 	return []modular.ServiceProvider{

@@ -303,28 +303,23 @@ func (e *StateMachineEngine) TriggerTransition(
 			transitionName, instance.CurrentState, transition.FromState)
 	}
 
-	// Apply the transition
+	// Record the old state before any changes
 	oldState := instance.CurrentState
-	instance.PreviousState = oldState
-	instance.CurrentState = transition.ToState
-	instance.LastUpdated = time.Now()
 
-	// Merge data if provided
-	for k, v := range data {
-		instance.Data[k] = v
-	}
-
-	// Create a transition event
+	// Create a transition event (uses FromState/ToState so handlers see
+	// the intended transition without needing instance updated first)
+	now := time.Now()
 	event := TransitionEvent{
 		WorkflowID:   workflowID,
 		TransitionID: transitionName,
 		FromState:    oldState,
 		ToState:      transition.ToState,
-		Timestamp:    instance.LastUpdated,
+		Timestamp:    now,
 		Data:         data,
 	}
 
-	// Call the transition handler if one exists
+	// Call the transition handler BEFORE committing the state change.
+	// If the handler fails, the instance state remains unchanged.
 	if e.transitionHandler != nil {
 		// Call handler outside of the mutex lock to prevent deadlocks
 		e.mutex.Unlock()
@@ -333,6 +328,16 @@ func (e *StateMachineEngine) TriggerTransition(
 		if err != nil {
 			return fmt.Errorf("transition handler failed: %w", err)
 		}
+	}
+
+	// Handler succeeded (or none set) — now commit the state change
+	instance.PreviousState = oldState
+	instance.CurrentState = transition.ToState
+	instance.LastUpdated = now
+
+	// Merge data if provided
+	for k, v := range data {
+		instance.Data[k] = v
 	}
 
 	// Check if the workflow is now in a final state

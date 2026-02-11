@@ -25,10 +25,14 @@ WORKDIR /app
 # Copy binary
 COPY --from=builder /build/server .
 
-# Copy example config, seed data, and SPA assets
+# Copy example config, seed data, SPA assets, and dynamic components
 COPY example/ecommerce-app/workflow.yaml ./config/workflow.yaml
 COPY example/ecommerce-app/seed/          ./config/seed/
 COPY example/ecommerce-app/spa/           ./config/spa/
+COPY example/ecommerce-app/components/    ./config/components/
+
+# Create data directory for SQLite persistence
+RUN mkdir -p /app/data && chown appuser:appuser /app/data
 
 USER appuser
 

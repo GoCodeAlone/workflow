@@ -60,6 +60,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	registry := dynamic.NewComponentRegistry()
 	loader := dynamic.NewLoader(pool, registry)
 	engine.SetDynamicRegistry(registry)
+	engine.SetDynamicLoader(loader)
 
 	// Build engine from config
 	if err := engine.BuildFromConfig(cfg); err != nil {

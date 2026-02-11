@@ -168,6 +168,140 @@ export function attachOrderDetailHandlers(id) {
   loadOrderDetail(id);
 }
 
+// Pipeline stages for the order processing timeline
+const PIPELINE_STAGES = [
+  { key: 'new', label: 'Created' },
+  { key: 'validating', label: 'Checking Inventory' },
+  { key: 'validated', label: 'Inventory OK' },
+  { key: 'paying', label: 'Processing Payment' },
+  { key: 'paid', label: 'Payment OK' },
+  { key: 'shipping', label: 'Shipping' },
+  { key: 'shipped', label: 'Shipped' },
+  { key: 'delivered', label: 'Delivered' },
+];
+
+// Error states and what stage they correspond to
+const ERROR_STATE_MAP = {
+  'failed': 1,          // failed during validation
+  'payment_failed': 3,  // failed during payment
+  'ship_failed': 5,     // failed during shipping
+};
+
+function getStageIndex(state) {
+  const idx = PIPELINE_STAGES.findIndex(s => s.key === state);
+  if (idx >= 0) return idx;
+  // Check error states
+  if (state in ERROR_STATE_MAP) return ERROR_STATE_MAP[state];
+  return -1;
+}
+
+function isErrorState(state) {
+  return ['failed', 'payment_failed', 'ship_failed', 'cancelled'].includes(state);
+}
+
+function getErrorMessage(state, order) {
+  const messages = {
+    'failed': { title: 'Inventory Check Failed', detail: 'One or more items are out of stock.' },
+    'payment_failed': { title: 'Payment Declined', detail: order.error || 'Your payment method was declined. The system will retry automatically.' },
+    'ship_failed': { title: 'Shipping Failed', detail: order.error || 'Unable to generate shipping label. The system will retry automatically.' },
+    'cancelled': { title: 'Order Cancelled', detail: 'This order has been cancelled.' },
+  };
+  return messages[state] || { title: 'Error', detail: 'An unexpected error occurred.' };
+}
+
+function renderTimeline(state) {
+  const currentIdx = getStageIndex(state);
+  const isError = isErrorState(state);
+  const isCancelled = state === 'cancelled';
+
+  if (isCancelled) {
+    return `
+      <div class="order-timeline">
+        <h3>Order Status</h3>
+        <div class="timeline-track">
+          <div class="timeline-step error">
+            <div class="timeline-dot">X</div>
+            <span class="timeline-label">Cancelled</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  let html = '<div class="order-timeline"><h3>Processing Pipeline</h3><div class="timeline-track">';
+
+  PIPELINE_STAGES.forEach((stage, i) => {
+    let stepClass = '';
+    let dotContent = '';
+
+    if (i < currentIdx) {
+      stepClass = 'completed';
+      dotContent = '&#10003;';
+    } else if (i === currentIdx) {
+      if (isError) {
+        stepClass = 'error';
+        dotContent = '!';
+      } else {
+        stepClass = 'current';
+        dotContent = '&#9679;';
+      }
+    } else {
+      dotContent = (i + 1).toString();
+    }
+
+    html += `
+      <div class="timeline-step ${stepClass}">
+        <div class="timeline-dot">${dotContent}</div>
+        <span class="timeline-label">${stage.label}</span>
+      </div>
+    `;
+
+    // Add connector between steps (not after last)
+    if (i < PIPELINE_STAGES.length - 1) {
+      const connClass = i < currentIdx ? 'completed' : '';
+      html += `<div class="timeline-connector ${connClass}"></div>`;
+    }
+  });
+
+  html += '</div></div>';
+  return html;
+}
+
+function renderProcessingInfo(order) {
+  const details = [];
+
+  // Show transaction ID if payment was processed
+  if (order.transaction_id) {
+    details.push({ label: 'Transaction ID', value: order.transaction_id });
+  }
+  if (order.last4) {
+    details.push({ label: 'Card', value: `**** ${order.last4}` });
+  }
+  if (order.tracking_number) {
+    details.push({ label: 'Tracking Number', value: order.tracking_number });
+  }
+  if (order.carrier) {
+    details.push({ label: 'Carrier', value: order.carrier });
+  }
+  if (order.estimated_delivery) {
+    details.push({ label: 'Est. Delivery', value: order.estimated_delivery });
+  }
+
+  if (details.length === 0) return '';
+
+  return `
+    <div class="order-processing-info">
+      <h3>Processing Details</h3>
+      ${details.map(d => `
+        <div class="processing-detail">
+          <span class="detail-label">${escapeHtml(d.label)}</span>
+          <span class="detail-value">${escapeHtml(d.value)}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 async function loadOrderDetail(id) {
   const container = document.getElementById('order-detail-content');
   if (!container) return;
@@ -178,6 +312,8 @@ async function loadOrderDetail(id) {
     const items = order.items || [];
     const shipping = order.shipping || {};
 
+    const errorInfo = isErrorState(state) ? getErrorMessage(state, order) : null;
+
     container.innerHTML = `
       <div class="order-detail-header">
         <div>
@@ -186,6 +322,20 @@ async function loadOrderDetail(id) {
         </div>
         <span class="order-status status-${state}">${escapeHtml(order.state || order.status || 'pending')}</span>
       </div>
+
+      ${renderTimeline(state)}
+
+      ${errorInfo ? `
+        <div class="order-error-callout">
+          <span class="error-icon">&#9888;</span>
+          <div class="error-text">
+            <strong>${escapeHtml(errorInfo.title)}</strong>
+            <span class="error-detail">${escapeHtml(errorInfo.detail)}</span>
+          </div>
+        </div>
+      ` : ''}
+
+      ${renderProcessingInfo(order)}
 
       <div class="order-detail-items">
         <h3 style="margin-bottom: 0.75rem;">Items</h3>

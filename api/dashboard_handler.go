@@ -35,17 +35,17 @@ func NewDashboardHandler(
 
 // systemDashboard is the response for the system-wide dashboard.
 type systemDashboard struct {
-	TotalWorkflows   int                    `json:"total_workflows"`
+	TotalWorkflows    int                   `json:"total_workflows"`
 	WorkflowSummaries []workflowDashSummary `json:"workflow_summaries"`
 }
 
 // workflowDashSummary is a per-workflow summary for the dashboard.
 type workflowDashSummary struct {
-	WorkflowID   uuid.UUID                       `json:"workflow_id"`
-	WorkflowName string                          `json:"workflow_name"`
-	Status       store.WorkflowStatus            `json:"status"`
-	Executions   map[store.ExecutionStatus]int    `json:"executions"`
-	LogCounts    map[store.LogLevel]int           `json:"log_counts"`
+	WorkflowID   uuid.UUID                     `json:"workflow_id"`
+	WorkflowName string                        `json:"workflow_name"`
+	Status       store.WorkflowStatus          `json:"status"`
+	Executions   map[store.ExecutionStatus]int `json:"executions"`
+	LogCounts    map[store.LogLevel]int        `json:"log_counts"`
 }
 
 // System handles GET /api/v1/dashboard.
@@ -142,9 +142,9 @@ func (h *DashboardHandler) Workflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
-		"workflow":           wf,
-		"execution_counts":   execCounts,
-		"log_counts":         logCounts,
-		"recent_executions":  recentExecs,
+		"workflow":          wf,
+		"execution_counts":  execCounts,
+		"log_counts":        logCounts,
+		"recent_executions": recentExecs,
 	})
 }

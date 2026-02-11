@@ -480,12 +480,21 @@ a:hover { text-decoration: underline; }
   font-weight: 600;
 }
 
+.status-new { background: var(--yellow); color: var(--crust); }
 .status-pending { background: var(--yellow); color: var(--crust); }
+.status-validating { background: var(--peach); color: var(--crust); }
+.status-validated { background: var(--blue); color: var(--crust); }
 .status-confirmed { background: var(--blue); color: var(--crust); }
+.status-paying { background: var(--mauve); color: var(--crust); }
+.status-paid { background: var(--lavender); color: var(--crust); }
 .status-processing { background: var(--mauve); color: var(--crust); }
+.status-shipping { background: var(--teal); color: var(--crust); }
 .status-shipped { background: var(--teal); color: var(--crust); }
 .status-delivered { background: var(--green); color: var(--crust); }
 .status-cancelled { background: var(--red); color: var(--crust); }
+.status-failed { background: var(--red); color: var(--crust); }
+.status-payment_failed { background: var(--peach); color: var(--crust); }
+.status-ship_failed { background: var(--peach); color: var(--crust); }
 
 .order-card-meta {
   font-size: 0.85rem;
@@ -517,6 +526,163 @@ a:hover { text-decoration: underline; }
 }
 
 .order-detail-item:last-child { border-bottom: none; }
+
+/* Order processing timeline */
+.order-timeline {
+  background: var(--surface0);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.order-timeline h3 {
+  margin-bottom: 1rem;
+  font-size: 1rem;
+}
+
+.timeline-track {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  position: relative;
+  padding: 0.5rem 0;
+}
+
+.timeline-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  position: relative;
+  z-index: 1;
+}
+
+.timeline-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface1);
+  border: 2px solid var(--surface2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
+  transition: all 0.3s ease;
+}
+
+.timeline-step.completed .timeline-dot {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--crust);
+}
+
+.timeline-step.current .timeline-dot {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: var(--crust);
+  box-shadow: 0 0 0 4px rgba(137, 180, 250, 0.25);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.timeline-step.error .timeline-dot {
+  background: var(--red);
+  border-color: var(--red);
+  color: var(--crust);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(137, 180, 250, 0.25); }
+  50% { box-shadow: 0 0 0 8px rgba(137, 180, 250, 0.1); }
+}
+
+.timeline-label {
+  font-size: 0.7rem;
+  color: var(--subtext0);
+  text-align: center;
+  max-width: 80px;
+  line-height: 1.2;
+}
+
+.timeline-step.completed .timeline-label { color: var(--green); }
+.timeline-step.current .timeline-label { color: var(--blue); font-weight: 600; }
+.timeline-step.error .timeline-label { color: var(--red); font-weight: 600; }
+
+.timeline-connector {
+  flex: 1;
+  height: 2px;
+  background: var(--surface2);
+  margin-bottom: 1.5rem;
+}
+
+.timeline-connector.completed {
+  background: var(--green);
+}
+
+/* Error callout for failed states */
+.order-error-callout {
+  background: rgba(243, 139, 168, 0.1);
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.order-error-callout .error-icon {
+  color: var(--red);
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+.order-error-callout .error-text {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.order-error-callout .error-text strong {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.order-error-callout .error-text .error-detail {
+  color: var(--subtext0);
+  font-size: 0.85rem;
+}
+
+/* Processing info (tracking, payment, etc.) */
+.order-processing-info {
+  background: var(--surface0);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.order-processing-info h3 {
+  margin-bottom: 0.75rem;
+  font-size: 1rem;
+}
+
+.processing-detail {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.4rem 0;
+  font-size: 0.9rem;
+  border-bottom: 1px solid var(--surface1);
+}
+
+.processing-detail:last-child { border-bottom: none; }
+
+.processing-detail .detail-label {
+  color: var(--subtext0);
+}
+
+.processing-detail .detail-value {
+  color: var(--text);
+  font-weight: 500;
+}
 
 /* Profile */
 .profile-container { max-width: 600px; margin: 0 auto; }

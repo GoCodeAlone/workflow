@@ -62,7 +62,7 @@ func (m *mockLogStore) CountByLevel(_ context.Context, workflowID uuid.UUID) (ma
 // --- mock project store for dashboard (with ListForUser) ---
 
 type mockProjectStoreForDashboard struct {
-	projects    map[uuid.UUID]*store.Project
+	projects     map[uuid.UUID]*store.Project
 	userProjects map[uuid.UUID][]*store.Project
 }
 

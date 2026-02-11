@@ -620,6 +620,44 @@ func TestStateMachineEngine_GetTransitionHandler(t *testing.T) {
 	}
 }
 
+func TestTriggerTransition_HandlerFailure_StateUnchanged(t *testing.T) {
+	engine := NewStateMachineEngine("test")
+	if err := engine.RegisterDefinition(newTestDefinition()); err != nil {
+		t.Fatalf("failed to register: %v", err)
+	}
+
+	// Set a handler that always fails
+	engine.SetTransitionHandler(NewFunctionTransitionHandler(func(ctx context.Context, event TransitionEvent) error {
+		return fmt.Errorf("handler deliberately failed")
+	}))
+
+	_, err := engine.CreateWorkflow("order-workflow", "order-1", nil)
+	if err != nil {
+		t.Fatalf("CreateWorkflow failed: %v", err)
+	}
+
+	// Attempt a transition — should fail because the handler returns an error
+	err = engine.TriggerTransition(context.Background(), "order-1", "process", map[string]interface{}{
+		"note": "should not persist",
+	})
+	if err == nil {
+		t.Fatal("expected error from failing handler, got nil")
+	}
+
+	// Verify state was NOT changed
+	instance, _ := engine.GetInstance("order-1")
+	if instance.CurrentState != "new" {
+		t.Errorf("expected state to remain 'new' after handler failure, got '%s'", instance.CurrentState)
+	}
+	if instance.PreviousState != "" {
+		t.Errorf("expected previous state to remain empty after handler failure, got '%s'", instance.PreviousState)
+	}
+	// Data should also not be merged on failure
+	if _, exists := instance.Data["note"]; exists {
+		t.Error("expected data not to be merged after handler failure")
+	}
+}
+
 func TestStateMachineEngine_AddTransitionListener_WithExistingNonComposite(t *testing.T) {
 	engine := NewStateMachineEngine("test")
 	if err := engine.RegisterDefinition(newTestDefinition()); err != nil {

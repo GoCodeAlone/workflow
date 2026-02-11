@@ -55,12 +55,19 @@ type StdEngine struct {
 	triggers         []module.Trigger
 	triggerRegistry  *module.TriggerRegistry
 	dynamicRegistry  *dynamic.ComponentRegistry
+	dynamicLoader    *dynamic.Loader
 	eventEmitter     *module.WorkflowEventEmitter
 }
 
 // SetDynamicRegistry sets the dynamic component registry on the engine.
 func (e *StdEngine) SetDynamicRegistry(registry *dynamic.ComponentRegistry) {
 	e.dynamicRegistry = registry
+}
+
+// SetDynamicLoader sets the dynamic component loader on the engine.
+// When set, dynamic.component modules can load from source files via the "source" config key.
+func (e *StdEngine) SetDynamicLoader(loader *dynamic.Loader) {
+	e.dynamicLoader = loader
 }
 
 // NewStdEngine creates a new workflow engine
@@ -259,8 +266,17 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					return fmt.Errorf("dynamic registry not set, cannot load dynamic component %q", modCfg.Name)
 				}
 				componentID := modCfg.Name
-				if id, ok := modCfg.Config["componentId"].(string); ok {
+				if id, ok := modCfg.Config["componentId"].(string); ok && id != "" {
 					componentID = id
+				}
+				// Load from source file if a dynamic loader is available and a source path is configured
+				if e.dynamicLoader != nil {
+					if sourcePath, ok := modCfg.Config["source"].(string); ok && sourcePath != "" {
+						resolvedPath := cfg.ResolveRelativePath(sourcePath)
+						if _, err := e.dynamicLoader.LoadFromFile(componentID, resolvedPath); err != nil {
+							return fmt.Errorf("load dynamic component %q from %s: %w", componentID, resolvedPath, err)
+						}
+					}
 				}
 				comp, ok := e.dynamicRegistry.Get(componentID)
 				if !ok {
@@ -348,6 +364,13 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				}
 				e.logger.Debug("Loading static file server module with root: " + root)
 				mod = module.NewStaticFileServer(modCfg.Name, root, prefix, spaFallback, cacheMaxAge)
+			case "persistence.store":
+				e.logger.Debug("Loading persistence store module")
+				dbServiceName := "database"
+				if name, ok := modCfg.Config["database"].(string); ok && name != "" {
+					dbServiceName = name
+				}
+				mod = module.NewPersistenceStore(modCfg.Name, dbServiceName)
 			case "auth.jwt":
 				secret := ""
 				if s, ok := modCfg.Config["secret"].(string); ok {
@@ -365,6 +388,17 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				}
 				e.logger.Debug("Loading JWT auth module")
 				mod = module.NewJWTAuthModule(modCfg.Name, secret, tokenExpiry, issuer)
+			case "processing.step":
+				e.logger.Debug("Loading processing step module: " + modCfg.Name)
+				stepConfig := module.ProcessingStepConfig{
+					ComponentID:          getStringConfig(modCfg.Config, "componentId", ""),
+					SuccessTransition:    getStringConfig(modCfg.Config, "successTransition", ""),
+					CompensateTransition: getStringConfig(modCfg.Config, "compensateTransition", ""),
+					MaxRetries:           getIntConfig(modCfg.Config, "maxRetries", 2),
+					RetryBackoffMs:       getIntConfig(modCfg.Config, "retryBackoffMs", 1000),
+					TimeoutSeconds:       getIntConfig(modCfg.Config, "timeoutSeconds", 30),
+				}
+				mod = module.NewProcessingStep(modCfg.Name, stepConfig)
 			default:
 				e.logger.Warn("Unknown module type: " + modCfg.Type)
 				return fmt.Errorf("unknown module type: %s", modCfg.Type)
@@ -451,6 +485,21 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 						router.AddRoute("GET", "/readyz", &module.HealthHTTPHandler{Handler: hc.ReadyHandler()})
 						router.AddRoute("GET", "/livez", &module.HealthHTTPHandler{Handler: hc.LiveHandler()})
 						e.logger.Debug("Registered health check endpoints on router")
+					}
+					break
+				}
+			}
+		}
+	}
+
+	// Wire metrics collector endpoint on any available router (only if not already configured)
+	for _, svc := range e.app.SvcRegistry() {
+		if mc, ok := svc.(*module.MetricsCollector); ok {
+			for _, routerSvc := range e.app.SvcRegistry() {
+				if router, ok := routerSvc.(*module.StandardHTTPRouter); ok {
+					if !router.HasRoute("GET", "/metrics") {
+						router.AddRoute("GET", "/metrics", &module.MetricsHTTPHandler{Handler: mc.Handler()})
+						e.logger.Debug("Registered metrics endpoint on router")
 					}
 					break
 				}
@@ -618,6 +667,26 @@ func canHandleTrigger(trigger module.Trigger, triggerType string) bool {
 // GetApp returns the underlying modular Application.
 func (e *StdEngine) GetApp() modular.Application {
 	return e.app
+}
+
+// getStringConfig extracts a string value from a config map with a default.
+func getStringConfig(cfg map[string]interface{}, key, defaultVal string) string {
+	if v, ok := cfg[key].(string); ok {
+		return v
+	}
+	return defaultVal
+}
+
+// getIntConfig extracts an int value from a config map with a default.
+// Handles both int and float64 (YAML numbers are decoded as float64).
+func getIntConfig(cfg map[string]interface{}, key string, defaultVal int) int {
+	if v, ok := cfg[key].(int); ok {
+		return v
+	}
+	if v, ok := cfg[key].(float64); ok {
+		return int(v)
+	}
+	return defaultVal
 }
 
 type Engine interface {

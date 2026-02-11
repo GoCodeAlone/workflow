@@ -72,11 +72,11 @@ type e2eFixture struct {
 	auditStore      *store.MockAuditStore
 
 	// Pre-created entities
-	alice, bob, carol                       *store.User
-	acmeCorp                                *store.Company
-	ecommerceProject                        *store.Project
-	workflowA, workflowB, workflowC         *store.WorkflowRecord
-	workflowAID, workflowBID, workflowCID   uuid.UUID
+	alice, bob, carol                     *store.User
+	acmeCorp                              *store.Company
+	ecommerceProject                      *store.Project
+	workflowA, workflowB, workflowC       *store.WorkflowRecord
+	workflowAID, workflowBID, workflowCID uuid.UUID
 
 	// Services
 	permissionSvc *api.PermissionService

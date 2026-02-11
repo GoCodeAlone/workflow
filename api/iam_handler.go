@@ -48,9 +48,9 @@ func (h *IAMHandler) CreateProvider(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		ProviderType store.IAMProviderType `json:"provider_type"`
-		Name         string               `json:"name"`
-		Config       json.RawMessage      `json:"config"`
-		Enabled      *bool                `json:"enabled"`
+		Name         string                `json:"name"`
+		Config       json.RawMessage       `json:"config"`
+		Enabled      *bool                 `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteError(w, http.StatusBadRequest, "invalid request body")
@@ -194,9 +194,9 @@ func (h *IAMHandler) UpdateProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name    *string          `json:"name"`
-		Config  json.RawMessage  `json:"config"`
-		Enabled *bool            `json:"enabled"`
+		Name    *string         `json:"name"`
+		Config  json.RawMessage `json:"config"`
+		Enabled *bool           `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteError(w, http.StatusBadRequest, "invalid request body")
