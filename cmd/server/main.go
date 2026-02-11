@@ -29,6 +29,12 @@ var (
 	copilotModel   = flag.String("copilot-model", "", "Model to use with Copilot SDK")
 	anthropicKey   = flag.String("anthropic-key", "", "Anthropic API key (or set ANTHROPIC_API_KEY env)")
 	anthropicModel = flag.String("anthropic-model", "", "Anthropic model name")
+
+	// Multi-workflow mode flags
+	databaseDSN   = flag.String("database-dsn", "", "PostgreSQL connection string for multi-workflow mode")
+	jwtSecret     = flag.String("jwt-secret", "", "JWT signing secret for API authentication")
+	adminEmail    = flag.String("admin-email", "", "Initial admin user email (first-run bootstrap)")
+	adminPassword = flag.String("admin-password", "", "Initial admin user password (first-run bootstrap)")
 )
 
 // buildEngine creates the workflow engine with all handlers registered and built from config.
@@ -83,9 +89,10 @@ func loadConfig(logger *slog.Logger) (*config.WorkflowConfig, error) {
 
 // serverApp holds the components needed to run the server.
 type serverApp struct {
-	engine *workflow.StdEngine
-	mux    *http.ServeMux
-	logger *slog.Logger
+	engine        *workflow.StdEngine
+	engineManager *workflow.WorkflowEngineManager
+	mux           *http.ServeMux
+	logger        *slog.Logger
 }
 
 // setup initializes all server components: engine, AI services, and HTTP mux.
@@ -141,9 +148,11 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 // run starts the engine and HTTP server, blocking until ctx is canceled.
 // It performs graceful shutdown when the context is done.
 func run(ctx context.Context, app *serverApp, listenAddr string) error {
-	// Start the workflow engine
-	if err := app.engine.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start workflow engine: %w", err)
+	// Start the workflow engine (single-config mode)
+	if app.engine != nil {
+		if err := app.engine.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start workflow engine: %w", err)
+		}
 	}
 
 	server := &http.Server{
@@ -164,8 +173,15 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 	if err := server.Shutdown(context.Background()); err != nil {
 		app.logger.Error("HTTP server shutdown error", "error", err)
 	}
-	if err := app.engine.Stop(context.Background()); err != nil {
-		app.logger.Error("Engine shutdown error", "error", err)
+	if app.engineManager != nil {
+		if err := app.engineManager.StopAll(context.Background()); err != nil {
+			app.logger.Error("Engine manager shutdown error", "error", err)
+		}
+	}
+	if app.engine != nil {
+		if err := app.engine.Stop(context.Background()); err != nil {
+			app.logger.Error("Engine shutdown error", "error", err)
+		}
 	}
 
 	return nil
@@ -179,6 +195,36 @@ func main() {
 		Level:     slog.LevelDebug,
 	}))
 
+	if *databaseDSN != "" {
+		// Multi-workflow mode
+		logger.Info("Starting in multi-workflow mode")
+
+		// TODO: Once the api package is implemented, this section will:
+		// 1. Connect to PostgreSQL using *databaseDSN
+		// 2. Run database migrations
+		// 3. Create store instances (UserStore, CompanyStore, ProjectStore, WorkflowStore, etc.)
+		// 4. Bootstrap admin user if *adminEmail and *adminPassword are set (first-run)
+		// 5. Create WorkflowEngineManager with stores
+		// 6. Create api.NewRouter() with stores, *jwtSecret, and engine manager
+		// 7. Mount API router at /api/v1/ alongside existing routes
+
+		// For now, log the configuration and fall through to single-config mode
+		logger.Info("Multi-workflow mode configured",
+			"database_dsn_set", *databaseDSN != "",
+			"jwt_secret_set", *jwtSecret != "",
+			"admin_email_set", *adminEmail != "",
+		)
+
+		// Suppress unused variable warnings until api package is ready
+		_ = databaseDSN
+		_ = jwtSecret
+		_ = adminEmail
+		_ = adminPassword
+
+		logger.Warn("Multi-workflow mode requires the api package (not yet available); falling back to single-config mode")
+	}
+
+	// Existing single-config behavior
 	cfg, err := loadConfig(logger)
 	if err != nil {
 		log.Fatalf("Configuration error: %v", err)

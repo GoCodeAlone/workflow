@@ -1,0 +1,160 @@
+# Workflow A: Order Ingestion
+# Receives HTTP orders, validates them, manages state, and emits events
+# for downstream workflows (Fulfillment, Notifications).
+#
+# Data flow:
+#   POST /api/orders -> order-server -> order-router -> order-api
+#   -> order-transformer -> order-state-engine -> order-state-tracker
+#   -> order-broker (emits order.validated / order.failed)
+
+modules:
+  # --- HTTP layer ---
+  - name: order-server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: order-router
+    type: http.router
+    dependsOn:
+      - order-server
+
+  - name: order-api
+    type: http.handler
+    dependsOn:
+      - order-router
+    config:
+      method: "POST"
+      path: "/api/orders"
+      contentType: "application/json"
+
+  # --- Processing layer ---
+  - name: order-transformer
+    type: data.transformer
+    dependsOn:
+      - order-api
+    config:
+      description: "Validates and normalizes incoming order data"
+
+  # --- State machine layer ---
+  - name: order-state-engine
+    type: statemachine.engine
+    dependsOn:
+      - order-transformer
+    config:
+      description: "Manages order lifecycle state transitions"
+
+  - name: order-state-tracker
+    type: state.tracker
+    dependsOn:
+      - order-state-engine
+    config:
+      description: "Tracks current state for all order resources"
+
+  # --- Messaging layer ---
+  - name: order-broker
+    type: messaging.broker
+    dependsOn:
+      - order-state-tracker
+    config:
+      description: "Publishes order events for cross-workflow consumption"
+
+  - name: order-event-handler
+    type: messaging.handler
+    dependsOn:
+      - order-broker
+    config:
+      topic: "order.state_changed"
+      description: "Handles internal order state change events"
+
+  # --- Observability ---
+  - name: order-metrics
+    type: metrics.collector
+    config:
+      description: "Prometheus metrics for order ingestion pipeline"
+
+  - name: order-health
+    type: health.checker
+    config:
+      description: "Health and readiness endpoints"
+
+workflows:
+  # HTTP routing
+  http:
+    server: order-server
+    router: order-router
+    routes:
+      - method: "POST"
+        path: "/api/orders"
+        handler: order-api
+      - method: "GET"
+        path: "/api/orders/{id}"
+        handler: order-api
+
+  # State machine definitions
+  statemachine:
+    engine: order-state-engine
+    definitions:
+      - name: order-lifecycle
+        description: "Order processing lifecycle"
+        initialState: "new"
+        states:
+          new:
+            description: "Order received, pending validation"
+            isFinal: false
+            isError: false
+          validated:
+            description: "Order passed validation checks"
+            isFinal: false
+            isError: false
+          processing:
+            description: "Order handed off for fulfillment"
+            isFinal: false
+            isError: false
+          completed:
+            description: "Order fully processed"
+            isFinal: true
+            isError: false
+          failed:
+            description: "Order failed validation or processing"
+            isFinal: true
+            isError: true
+        transitions:
+          validate_order:
+            fromState: "new"
+            toState: "validated"
+          fail_validation:
+            fromState: "new"
+            toState: "failed"
+          start_processing:
+            fromState: "validated"
+            toState: "processing"
+          complete_order:
+            fromState: "processing"
+            toState: "completed"
+          fail_processing:
+            fromState: "processing"
+            toState: "failed"
+
+    hooks:
+      - workflowType: "order-lifecycle"
+        transitions: ["validate_order"]
+        handler: "order-transformer"
+      - workflowType: "order-lifecycle"
+        toStates: ["validated", "failed"]
+        handler: "order-event-handler"
+
+  # Internal messaging subscriptions
+  messaging:
+    broker: order-broker
+    subscriptions:
+      - topic: "order.state_changed"
+        handler: order-event-handler
+
+triggers:
+  http:
+    routes:
+      - path: "/api/orders"
+        method: "POST"
+        workflow: "order-lifecycle"
+        action: "validate_order"

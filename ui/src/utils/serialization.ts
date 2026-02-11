@@ -10,6 +10,7 @@ import type {
   MessagingWorkflowConfig,
   StateMachineWorkflowConfig,
   EventWorkflowConfig,
+  WorkflowTab,
 } from '../types/workflow.ts';
 import { MODULE_TYPE_MAP } from '../types/workflow.ts';
 
@@ -24,6 +25,7 @@ function makeEdge(
   const edge: Edge = { id, source: sourceId, target: targetId, data };
   if (label) {
     edge.label = label;
+    edge.labelBgStyle = { fill: '#1e1e2e', fillOpacity: 0.9 };
   }
   return edge;
 }
@@ -187,6 +189,9 @@ function topologicalLayout(
 }
 
 export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowConfig {
+  // Filter out synthesized conditional nodes
+  const realNodes = nodes.filter((n) => !n.data.synthesized);
+
   const dependencyEdges: Edge[] = [];
   const httpRouteEdges: Edge[] = [];
   const messagingEdges: Edge[] = [];
@@ -201,6 +206,9 @@ export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowCon
       case 'messaging-subscription':
         messagingEdges.push(edge);
         break;
+      case 'conditional':
+        // Skip conditional edges in export
+        break;
       default:
         dependencyEdges.push(edge);
         break;
@@ -213,13 +221,13 @@ export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowCon
     if (!dependencyMap[edge.target]) {
       dependencyMap[edge.target] = [];
     }
-    const sourceNode = nodes.find((n) => n.id === edge.source);
+    const sourceNode = realNodes.find((n) => n.id === edge.source);
     if (sourceNode) {
       dependencyMap[edge.target].push(sourceNode.data.label);
     }
   }
 
-  const modules: ModuleConfig[] = nodes.map((node) => {
+  const modules: ModuleConfig[] = realNodes.map((node) => {
     const mod: ModuleConfig = {
       name: node.data.label,
       type: node.data.moduleType,
@@ -327,14 +335,14 @@ export function configToNodes(config: WorkflowConfig): {
     });
   });
 
-  // Dependency edges
+  // Dependency edges (labeled with source module name)
   config.modules.forEach((mod) => {
     if (mod.dependsOn) {
       const targetId = nameToId[mod.name];
       for (const dep of mod.dependsOn) {
         const sourceId = nameToId[dep];
         if (sourceId && targetId) {
-          edges.push(makeEdge(sourceId, targetId, 'dependency'));
+          edges.push(makeEdge(sourceId, targetId, 'dependency', dep));
         }
       }
     }
@@ -359,6 +367,7 @@ export function configToNodes(config: WorkflowConfig): {
 }
 
 export function nodeComponentType(moduleType: string): string {
+  if (moduleType.startsWith('conditional.')) return 'conditionalNode';
   if (moduleType.startsWith('http.middleware.')) return 'middlewareNode';
   if (moduleType === 'http.server') return 'httpNode';
   if (moduleType.startsWith('http.')) return 'httpRouterNode';
@@ -385,4 +394,106 @@ export function parseYaml(text: string): WorkflowConfig {
     workflows: (parsed.workflows ?? {}) as Record<string, unknown>,
     triggers: (parsed.triggers ?? {}) as Record<string, unknown>,
   };
+}
+
+// Extract conditional branch points from state machine workflow definitions
+export function extractStateMachineBranches(
+  workflows: Record<string, unknown>,
+  nameToId: Record<string, string>,
+): { nodes: WorkflowNode[]; edges: Edge[] } {
+  const newNodes: WorkflowNode[] = [];
+  const newEdges: Edge[] = [];
+
+  const sm = workflows.statemachine as StateMachineWorkflowConfig | undefined;
+  if (!sm?.definitions) return { nodes: newNodes, edges: newEdges };
+
+  for (const def of sm.definitions) {
+    const states = def.states as Record<string, { transitions?: Record<string, string> }> | undefined;
+    if (!states) continue;
+
+    for (const [stateName, stateConfig] of Object.entries(states)) {
+      const transitions = stateConfig?.transitions;
+      if (!transitions || Object.keys(transitions).length <= 1) continue;
+
+      // Multiple outgoing transitions = branch point
+      const branchId = `synth_branch_${stateName}_${Date.now()}`;
+      const sourceId = nameToId[stateName];
+      if (!sourceId) continue;
+
+      const branchNode: WorkflowNode = {
+        id: branchId,
+        type: 'conditionalNode',
+        position: { x: 0, y: 0 },
+        data: {
+          moduleType: 'conditional.switch',
+          label: `${stateName} branch`,
+          config: {
+            expression: stateName,
+            cases: Object.keys(transitions),
+          },
+          synthesized: true,
+        },
+      };
+
+      newNodes.push(branchNode);
+      newEdges.push(makeEdge(sourceId, branchId, 'statemachine', `branch: ${stateName}`));
+
+      for (const [eventName, targetState] of Object.entries(transitions)) {
+        const targetId = nameToId[targetState];
+        if (targetId) {
+          newEdges.push(makeEdge(branchId, targetId, 'conditional', `transition: ${eventName}`));
+        }
+      }
+    }
+  }
+
+  return { nodes: newNodes, edges: newEdges };
+}
+
+// Multi-workflow export: all tabs as a single YAML with `workflows` top-level array
+export function nodesToMultiConfig(tabs: WorkflowTab[]): string {
+  const multiConfig = {
+    workflows: tabs.map((tab) => {
+      const config = nodesToConfig(
+        tab.nodes as WorkflowNode[],
+        tab.edges,
+      );
+      return {
+        name: tab.name,
+        ...config,
+      };
+    }),
+  };
+  return yaml.dump(multiConfig, { lineWidth: -1, noRefs: true, sortKeys: false });
+}
+
+// Multi-workflow import: parse YAML with `workflows` array into tabs
+interface MultiWorkflowEntry {
+  name?: string;
+  modules?: ModuleConfig[];
+  workflows?: Record<string, unknown>;
+  triggers?: Record<string, unknown>;
+}
+
+export function multiConfigToTabs(yamlContent: string): WorkflowTab[] {
+  const parsed = yaml.load(yamlContent) as { workflows?: MultiWorkflowEntry[] };
+  const entries = parsed?.workflows ?? [];
+
+  return entries.map((entry, i) => {
+    const config: WorkflowConfig = {
+      modules: (entry.modules ?? []) as ModuleConfig[],
+      workflows: (entry.workflows ?? {}) as Record<string, unknown>,
+      triggers: (entry.triggers ?? {}) as Record<string, unknown>,
+    };
+    const { nodes, edges } = configToNodes(config);
+    return {
+      id: `imported-${i}-${Date.now()}`,
+      name: entry.name || `Workflow ${i + 1}`,
+      nodes,
+      edges,
+      undoStack: [],
+      redoStack: [],
+      dirty: false,
+    };
+  });
 }

@@ -117,3 +117,381 @@ export async function deleteDynamicComponent(name: string): Promise<void> {
     method: 'DELETE',
   });
 }
+
+// --- v1 API client (authenticated) ---
+
+const V1_BASE = '/api/v1';
+
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = localStorage.getItem('auth_token');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+async function v1Fetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${V1_BASE}${path}`, {
+    ...options,
+    headers: { ...getAuthHeaders(), ...(options?.headers as Record<string, string>) },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json();
+}
+
+// --- Auth ---
+
+export interface TokenResponse {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+}
+
+export interface ApiUser {
+  id: string;
+  email: string;
+  display_name: string;
+  avatar_url?: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export function apiLogin(email: string, password: string): Promise<TokenResponse> {
+  return v1Fetch<TokenResponse>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function apiRegister(email: string, password: string, displayName: string): Promise<TokenResponse> {
+  return v1Fetch<TokenResponse>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, display_name: displayName }),
+  });
+}
+
+export function apiRefreshToken(refreshToken: string): Promise<TokenResponse> {
+  return v1Fetch<TokenResponse>('/auth/refresh', {
+    method: 'POST',
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+}
+
+export function apiLogout(): Promise<void> {
+  return v1Fetch<void>('/auth/logout', { method: 'POST' });
+}
+
+export function apiGetMe(): Promise<ApiUser> {
+  return v1Fetch<ApiUser>('/auth/me');
+}
+
+export function apiUpdateMe(data: { display_name?: string; avatar_url?: string }): Promise<ApiUser> {
+  return v1Fetch<ApiUser>('/auth/me', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+// --- Companies ---
+
+export interface ApiCompany {
+  id: string;
+  name: string;
+  slug: string;
+  owner_id: string;
+  metadata?: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export function apiListCompanies(): Promise<ApiCompany[]> {
+  return v1Fetch<ApiCompany[]>('/companies');
+}
+
+export function apiCreateCompany(name: string, slug?: string): Promise<ApiCompany> {
+  return v1Fetch<ApiCompany>('/companies', {
+    method: 'POST',
+    body: JSON.stringify({ name, slug }),
+  });
+}
+
+export function apiGetCompany(id: string): Promise<ApiCompany> {
+  return v1Fetch<ApiCompany>(`/companies/${encodeURIComponent(id)}`);
+}
+
+// --- Organizations ---
+
+export function apiListOrgs(companyId: string): Promise<ApiCompany[]> {
+  return v1Fetch<ApiCompany[]>(`/companies/${encodeURIComponent(companyId)}/organizations`);
+}
+
+export function apiCreateOrg(companyId: string, name: string, slug?: string): Promise<ApiCompany> {
+  return v1Fetch<ApiCompany>(`/companies/${encodeURIComponent(companyId)}/organizations`, {
+    method: 'POST',
+    body: JSON.stringify({ name, slug }),
+  });
+}
+
+// --- Projects ---
+
+export interface ApiProject {
+  id: string;
+  company_id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  metadata?: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export function apiListProjects(orgId: string): Promise<ApiProject[]> {
+  return v1Fetch<ApiProject[]>(`/organizations/${encodeURIComponent(orgId)}/projects`);
+}
+
+export function apiCreateProject(orgId: string, name: string, slug?: string): Promise<ApiProject> {
+  return v1Fetch<ApiProject>(`/organizations/${encodeURIComponent(orgId)}/projects`, {
+    method: 'POST',
+    body: JSON.stringify({ name, slug }),
+  });
+}
+
+// --- Workflows ---
+
+export interface ApiWorkflowRecord {
+  id: string;
+  project_id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  config_yaml: string;
+  version: number;
+  status: 'draft' | 'active' | 'stopped' | 'error';
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function apiListWorkflows(projectId?: string): Promise<ApiWorkflowRecord[]> {
+  if (projectId) {
+    return v1Fetch<ApiWorkflowRecord[]>(`/projects/${encodeURIComponent(projectId)}/workflows`);
+  }
+  return v1Fetch<ApiWorkflowRecord[]>('/workflows');
+}
+
+export function apiCreateWorkflow(
+  projectId: string,
+  data: { name: string; slug?: string; description?: string; config_yaml?: string },
+): Promise<ApiWorkflowRecord> {
+  return v1Fetch<ApiWorkflowRecord>(`/projects/${encodeURIComponent(projectId)}/workflows`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function apiGetWorkflow(id: string): Promise<ApiWorkflowRecord> {
+  return v1Fetch<ApiWorkflowRecord>(`/workflows/${encodeURIComponent(id)}`);
+}
+
+export function apiUpdateWorkflow(
+  id: string,
+  data: { name?: string; description?: string; config_yaml?: string },
+): Promise<ApiWorkflowRecord> {
+  return v1Fetch<ApiWorkflowRecord>(`/workflows/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function apiDeleteWorkflow(id: string): Promise<void> {
+  return v1Fetch<void>(`/workflows/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export function apiDeployWorkflow(id: string): Promise<ApiWorkflowRecord> {
+  return v1Fetch<ApiWorkflowRecord>(`/workflows/${encodeURIComponent(id)}/deploy`, { method: 'POST' });
+}
+
+export function apiStopWorkflow(id: string): Promise<ApiWorkflowRecord> {
+  return v1Fetch<ApiWorkflowRecord>(`/workflows/${encodeURIComponent(id)}/stop`, { method: 'POST' });
+}
+
+export function apiGetWorkflowStatus(id: string): Promise<{ id: string; status: string; version: number }> {
+  return v1Fetch<{ id: string; status: string; version: number }>(`/workflows/${encodeURIComponent(id)}/status`);
+}
+
+export function apiListVersions(id: string): Promise<ApiWorkflowRecord[]> {
+  return v1Fetch<ApiWorkflowRecord[]>(`/workflows/${encodeURIComponent(id)}/versions`);
+}
+
+export interface ApiMembership {
+  id: string;
+  user_id: string;
+  company_id: string;
+  project_id?: string;
+  role: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function apiListPermissions(id: string): Promise<ApiMembership[]> {
+  return v1Fetch<ApiMembership[]>(`/workflows/${encodeURIComponent(id)}/permissions`);
+}
+
+export function apiShareWorkflow(id: string, userId: string, role: string): Promise<ApiMembership> {
+  return v1Fetch<ApiMembership>(`/workflows/${encodeURIComponent(id)}/permissions`, {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId, role }),
+  });
+}
+
+// --- Dashboard ---
+
+import type {
+  SystemDashboard,
+  WorkflowDashboardResponse,
+  WorkflowExecution,
+  ExecutionStep,
+  ExecutionLog,
+  ExecutionFilter,
+  LogFilter,
+  IAMProviderConfig,
+  IAMRoleMapping,
+  AuditEntry,
+  AuditFilter,
+} from '../types/observability.ts';
+
+export function apiFetchDashboard(): Promise<SystemDashboard> {
+  return v1Fetch<SystemDashboard>('/dashboard');
+}
+
+export function apiFetchWorkflowDashboard(workflowId: string): Promise<WorkflowDashboardResponse> {
+  return v1Fetch<WorkflowDashboardResponse>(`/workflows/${encodeURIComponent(workflowId)}/dashboard`);
+}
+
+// --- Executions ---
+
+export function apiFetchExecutions(workflowId: string, filter?: ExecutionFilter): Promise<WorkflowExecution[]> {
+  const params = new URLSearchParams();
+  if (filter?.status) params.set('status', filter.status);
+  if (filter?.since) params.set('since', filter.since);
+  if (filter?.until) params.set('until', filter.until);
+  const qs = params.toString();
+  return v1Fetch<WorkflowExecution[]>(
+    `/workflows/${encodeURIComponent(workflowId)}/executions${qs ? '?' + qs : ''}`,
+  );
+}
+
+export function apiFetchExecutionDetail(executionId: string): Promise<WorkflowExecution> {
+  return v1Fetch<WorkflowExecution>(`/executions/${encodeURIComponent(executionId)}`);
+}
+
+export function apiFetchExecutionSteps(executionId: string): Promise<ExecutionStep[]> {
+  return v1Fetch<ExecutionStep[]>(`/executions/${encodeURIComponent(executionId)}/steps`);
+}
+
+export function apiTriggerExecution(workflowId: string, triggerData?: unknown): Promise<WorkflowExecution> {
+  return v1Fetch<WorkflowExecution>(`/workflows/${encodeURIComponent(workflowId)}/trigger`, {
+    method: 'POST',
+    body: JSON.stringify({ trigger_data: triggerData ?? {} }),
+  });
+}
+
+export function apiCancelExecution(executionId: string): Promise<WorkflowExecution> {
+  return v1Fetch<WorkflowExecution>(`/executions/${encodeURIComponent(executionId)}/cancel`, {
+    method: 'POST',
+  });
+}
+
+// --- Logs ---
+
+export function apiFetchLogs(workflowId: string, filter?: LogFilter): Promise<ExecutionLog[]> {
+  const params = new URLSearchParams();
+  if (filter?.level) params.set('level', filter.level);
+  if (filter?.executionId) params.set('execution_id', filter.executionId);
+  if (filter?.module) params.set('module', filter.module);
+  if (filter?.since) params.set('since', filter.since);
+  const qs = params.toString();
+  return v1Fetch<ExecutionLog[]>(
+    `/workflows/${encodeURIComponent(workflowId)}/logs${qs ? '?' + qs : ''}`,
+  );
+}
+
+export function createLogStream(workflowId: string, token: string): EventSource {
+  const url = `${V1_BASE}/workflows/${encodeURIComponent(workflowId)}/logs/stream?token=${encodeURIComponent(token)}`;
+  return new EventSource(url);
+}
+
+// --- Events ---
+
+export function apiFetchEvents(workflowId: string): Promise<WorkflowExecution[]> {
+  return v1Fetch<WorkflowExecution[]>(`/workflows/${encodeURIComponent(workflowId)}/events`);
+}
+
+export function createEventStream(workflowId: string, token: string): EventSource {
+  const url = `${V1_BASE}/workflows/${encodeURIComponent(workflowId)}/events/stream?token=${encodeURIComponent(token)}`;
+  return new EventSource(url);
+}
+
+// --- Audit ---
+
+export function apiFetchAuditLog(filter?: AuditFilter): Promise<AuditEntry[]> {
+  const params = new URLSearchParams();
+  if (filter?.action) params.set('action', filter.action);
+  if (filter?.resourceType) params.set('resource_type', filter.resourceType);
+  if (filter?.since) params.set('since', filter.since);
+  if (filter?.until) params.set('until', filter.until);
+  const qs = params.toString();
+  return v1Fetch<AuditEntry[]>(`/audit${qs ? '?' + qs : ''}`);
+}
+
+// --- IAM ---
+
+export function apiFetchIAMProviders(companyId: string): Promise<IAMProviderConfig[]> {
+  return v1Fetch<IAMProviderConfig[]>(`/companies/${encodeURIComponent(companyId)}/iam/providers`);
+}
+
+export function apiCreateIAMProvider(companyId: string, data: Partial<IAMProviderConfig>): Promise<IAMProviderConfig> {
+  return v1Fetch<IAMProviderConfig>(`/companies/${encodeURIComponent(companyId)}/iam/providers`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function apiUpdateIAMProvider(providerId: string, data: Partial<IAMProviderConfig>): Promise<IAMProviderConfig> {
+  return v1Fetch<IAMProviderConfig>(`/iam/providers/${encodeURIComponent(providerId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export function apiDeleteIAMProvider(providerId: string): Promise<void> {
+  return v1Fetch<void>(`/iam/providers/${encodeURIComponent(providerId)}`, { method: 'DELETE' });
+}
+
+export function apiTestIAMProvider(providerId: string): Promise<{ success: boolean; message: string }> {
+  return v1Fetch<{ success: boolean; message: string }>(`/iam/providers/${encodeURIComponent(providerId)}/test`, {
+    method: 'POST',
+  });
+}
+
+export function apiFetchIAMRoleMappings(providerId: string): Promise<IAMRoleMapping[]> {
+  return v1Fetch<IAMRoleMapping[]>(`/iam/providers/${encodeURIComponent(providerId)}/mappings`);
+}
+
+export function apiCreateIAMRoleMapping(providerId: string, data: Partial<IAMRoleMapping>): Promise<IAMRoleMapping> {
+  return v1Fetch<IAMRoleMapping>(`/iam/providers/${encodeURIComponent(providerId)}/mappings`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function apiDeleteIAMRoleMapping(mappingId: string): Promise<void> {
+  return v1Fetch<void>(`/iam/mappings/${encodeURIComponent(mappingId)}`, { method: 'DELETE' });
+}

@@ -41,6 +41,7 @@ export default function WorkflowCanvas() {
       'messaging-subscription': { stroke: '#8b5cf6' },
       'statemachine': { stroke: '#f59e0b' },
       'event': { stroke: '#ef4444' },
+      'conditional': { stroke: '#22c55e' },
     };
     return edges.map((edge) => {
       const edgeData = edge.data as WorkflowEdgeData | undefined;
@@ -52,6 +53,7 @@ export default function WorkflowCanvas() {
         ...edge,
         style: { ...edge.style, stroke: style.stroke, strokeWidth: 2, strokeDasharray: style.strokeDasharray },
         labelStyle: { fill: style.stroke, fontWeight: 600, fontSize: 11 },
+        labelBgStyle: { fill: '#1e1e2e', fillOpacity: 0.9 },
       };
     });
   }, [edges]);

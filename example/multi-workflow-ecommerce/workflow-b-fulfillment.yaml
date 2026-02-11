@@ -1,0 +1,143 @@
+# Workflow B: Fulfillment Processing
+# Triggered by order.validated events from Workflow A.
+# Manages the fulfillment lifecycle: picking, packing, shipping, delivery.
+# Emits fulfillment.* events consumed by Workflow C (Notification Hub).
+#
+# Data flow:
+#   order.validated event -> fulfillment-broker -> fulfillment-handler
+#   -> fulfillment-transformer -> fulfillment-state-engine
+#   -> fulfillment-state-tracker -> fulfillment-webhook (external warehouse API)
+
+modules:
+  # --- Messaging layer ---
+  - name: fulfillment-broker
+    type: messaging.broker
+    config:
+      description: "Receives order events and publishes fulfillment events"
+
+  - name: fulfillment-handler
+    type: messaging.handler
+    dependsOn:
+      - fulfillment-broker
+    config:
+      topic: "order.validated"
+      description: "Handles incoming validated orders for fulfillment"
+
+  # --- Processing layer ---
+  - name: fulfillment-transformer
+    type: data.transformer
+    dependsOn:
+      - fulfillment-handler
+    config:
+      description: "Transforms order data into fulfillment instructions"
+
+  # --- State machine layer ---
+  - name: fulfillment-state-engine
+    type: statemachine.engine
+    dependsOn:
+      - fulfillment-transformer
+    config:
+      description: "Manages fulfillment lifecycle state transitions"
+
+  - name: fulfillment-state-tracker
+    type: state.tracker
+    dependsOn:
+      - fulfillment-state-engine
+    config:
+      description: "Tracks current state for all fulfillment jobs"
+
+  # --- External integrations ---
+  - name: fulfillment-webhook
+    type: webhook.sender
+    dependsOn:
+      - fulfillment-state-tracker
+    config:
+      url: "https://warehouse.example.com/api/shipments"
+      method: "POST"
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Bearer ${WAREHOUSE_API_TOKEN}"
+      description: "Sends shipment requests to external warehouse system"
+
+  # --- Observability ---
+  - name: fulfillment-metrics
+    type: metrics.collector
+    config:
+      description: "Prometheus metrics for fulfillment pipeline"
+
+workflows:
+  # State machine definitions
+  statemachine:
+    engine: fulfillment-state-engine
+    definitions:
+      - name: fulfillment-lifecycle
+        description: "Fulfillment processing lifecycle"
+        initialState: "pending"
+        states:
+          pending:
+            description: "Fulfillment request received, awaiting processing"
+            isFinal: false
+            isError: false
+          picking:
+            description: "Items are being picked from warehouse"
+            isFinal: false
+            isError: false
+          packing:
+            description: "Items are being packed for shipment"
+            isFinal: false
+            isError: false
+          shipped:
+            description: "Package has been shipped"
+            isFinal: false
+            isError: false
+          delivered:
+            description: "Package has been delivered"
+            isFinal: true
+            isError: false
+          failed:
+            description: "Fulfillment failed (out of stock, shipping error)"
+            isFinal: true
+            isError: true
+        transitions:
+          start_picking:
+            fromState: "pending"
+            toState: "picking"
+            autoTransform: true
+          finish_picking:
+            fromState: "picking"
+            toState: "packing"
+          ship_package:
+            fromState: "packing"
+            toState: "shipped"
+          confirm_delivery:
+            fromState: "shipped"
+            toState: "delivered"
+          fail_fulfillment:
+            fromState: "pending"
+            toState: "failed"
+          fail_picking:
+            fromState: "picking"
+            toState: "failed"
+
+    hooks:
+      - workflowType: "fulfillment-lifecycle"
+        transitions: ["ship_package"]
+        handler: "fulfillment-webhook"
+      - workflowType: "fulfillment-lifecycle"
+        toStates: ["shipped", "delivered", "failed"]
+        handler: "fulfillment-handler"
+
+  # Messaging subscriptions
+  messaging:
+    broker: fulfillment-broker
+    subscriptions:
+      - topic: "order.validated"
+        handler: fulfillment-handler
+
+triggers:
+  event:
+    subscriptions:
+      - topic: "order.validated"
+        event: "order.validated"
+        workflow: "fulfillment-lifecycle"
+        action: "start_picking"

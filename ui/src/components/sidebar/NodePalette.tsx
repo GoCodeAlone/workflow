@@ -85,15 +85,27 @@ export default function NodePalette() {
                 onMouseOver={(e) => (e.currentTarget.style.background = '#313244')}
                 onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
               >
-                <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: CATEGORY_COLORS[cat.key as ModuleCategory],
-                    flexShrink: 0,
-                  }}
-                />
+                {t.type.startsWith('conditional.') ? (
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      transform: 'rotate(45deg)',
+                      background: CATEGORY_COLORS[cat.key as ModuleCategory],
+                      flexShrink: 0,
+                    }}
+                  />
+                ) : (
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: CATEGORY_COLORS[cat.key as ModuleCategory],
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
                 {t.label}
               </div>
             ))}

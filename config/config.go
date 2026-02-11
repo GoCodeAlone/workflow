@@ -37,6 +37,15 @@ func LoadFromFile(filepath string) (*WorkflowConfig, error) {
 	return &cfg, nil
 }
 
+// LoadFromString loads a workflow configuration from a YAML string.
+func LoadFromString(yamlContent string) (*WorkflowConfig, error) {
+	var cfg WorkflowConfig
+	if err := yaml.Unmarshal([]byte(yamlContent), &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse config string: %w", err)
+	}
+	return &cfg, nil
+}
+
 // NewEmptyWorkflowConfig creates a new empty workflow configuration
 func NewEmptyWorkflowConfig() *WorkflowConfig {
 	return &WorkflowConfig{

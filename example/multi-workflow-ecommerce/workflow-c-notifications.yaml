@@ -1,0 +1,101 @@
+# Workflow C: Notification Hub
+# Subscribes to events from Workflow A (orders) and Workflow B (fulfillment).
+# Sends notifications to customers and internal teams via webhooks.
+#
+# Event sources:
+#   - order.validated   -> Send order confirmation to customer
+#   - order.failed      -> Send failure alert to support team
+#   - fulfillment.shipped   -> Send shipping notification to customer
+#   - fulfillment.delivered -> Send delivery confirmation to customer
+#   - fulfillment.completed -> Send summary to operations team
+
+modules:
+  # --- Messaging layer ---
+  - name: notification-broker
+    type: messaging.broker
+    config:
+      description: "Receives events from order and fulfillment workflows"
+
+  - name: order-notification-handler
+    type: messaging.handler
+    dependsOn:
+      - notification-broker
+    config:
+      topic: "order.*"
+      description: "Handles order-related notifications"
+
+  - name: fulfillment-notification-handler
+    type: messaging.handler
+    dependsOn:
+      - notification-broker
+    config:
+      topic: "fulfillment.*"
+      description: "Handles fulfillment-related notifications"
+
+  # --- External integrations ---
+  - name: customer-webhook
+    type: webhook.sender
+    dependsOn:
+      - order-notification-handler
+      - fulfillment-notification-handler
+    config:
+      url: "https://notifications.example.com/api/send"
+      method: "POST"
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Bearer ${NOTIFICATION_API_TOKEN}"
+      description: "Sends customer-facing notifications"
+
+  - name: ops-webhook
+    type: webhook.sender
+    config:
+      url: "https://hooks.slack.com/services/YOUR/OPS/WEBHOOK"
+      method: "POST"
+      headers:
+        Content-Type: "application/json"
+      description: "Sends operational alerts to Slack"
+
+  # --- Observability ---
+  - name: notification-metrics
+    type: metrics.collector
+    config:
+      description: "Prometheus metrics for notification delivery"
+
+workflows:
+  # Messaging subscriptions
+  messaging:
+    broker: notification-broker
+    subscriptions:
+      # Order events from Workflow A
+      - topic: "order.validated"
+        handler: order-notification-handler
+      - topic: "order.failed"
+        handler: order-notification-handler
+
+      # Fulfillment events from Workflow B
+      - topic: "fulfillment.shipped"
+        handler: fulfillment-notification-handler
+      - topic: "fulfillment.delivered"
+        handler: fulfillment-notification-handler
+      - topic: "fulfillment.completed"
+        handler: fulfillment-notification-handler
+
+triggers:
+  event:
+    subscriptions:
+      - topic: "order.validated"
+        event: "order.validated"
+        workflow: "notification-dispatch"
+        action: "send_order_confirmation"
+      - topic: "order.failed"
+        event: "order.failed"
+        workflow: "notification-dispatch"
+        action: "send_failure_alert"
+      - topic: "fulfillment.shipped"
+        event: "fulfillment.shipped"
+        workflow: "notification-dispatch"
+        action: "send_shipping_update"
+      - topic: "fulfillment.delivered"
+        event: "fulfillment.delivered"
+        workflow: "notification-dispatch"
+        action: "send_delivery_confirmation"

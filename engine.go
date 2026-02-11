@@ -525,6 +525,11 @@ func canHandleTrigger(trigger module.Trigger, triggerType string) bool {
 	}
 }
 
+// GetApp returns the underlying modular Application.
+func (e *StdEngine) GetApp() modular.Application {
+	return e.app
+}
+
 type Engine interface {
 	RegisterWorkflowHandler(handler WorkflowHandler)
 	RegisterTrigger(trigger module.Trigger)

@@ -1,7 +1,7 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { CATEGORY_COLORS, MODULE_TYPE_MAP } from '../../types/workflow.ts';
-import type { ModuleCategory } from '../../types/workflow.ts';
+import type { ModuleCategory, IOPort } from '../../types/workflow.ts';
 import useWorkflowStore from '../../store/workflowStore.ts';
 
 interface BaseNodeProps {
@@ -13,6 +13,53 @@ interface BaseNodeProps {
   hasInput?: boolean;
   hasOutput?: boolean;
   children?: ReactNode;
+}
+
+function IOPortList({ ports, direction, color }: { ports: IOPort[]; direction: 'in' | 'out'; color: string }) {
+  const [expanded, setExpanded] = useState(ports.length <= 2);
+  if (ports.length === 0) return null;
+
+  const arrow = direction === 'in' ? '\u2192' : '\u2190';
+
+  return (
+    <div style={{ padding: '2px 0' }}>
+      {!expanded && ports.length > 2 ? (
+        <div
+          onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
+          style={{ fontSize: 9, color: '#585b70', cursor: 'pointer', padding: '1px 0' }}
+        >
+          {arrow} {ports.length} {direction === 'in' ? 'inputs' : 'outputs'}
+        </div>
+      ) : (
+        ports.map((port) => (
+          <div
+            key={port.name}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 3,
+              fontSize: 9,
+              color: '#585b70',
+              padding: '1px 0',
+            }}
+          >
+            <span
+              style={{
+                width: 5,
+                height: 5,
+                borderRadius: '50%',
+                background: color,
+                opacity: 0.6,
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ color: '#a6adc8' }}>{port.name}</span>
+            <span style={{ color: '#45475a' }}>{port.type}</span>
+          </div>
+        ))
+      )}
+    </div>
+  );
 }
 
 export default function BaseNode({
@@ -31,6 +78,7 @@ export default function BaseNode({
   const category: ModuleCategory = info?.category ?? 'infrastructure';
   const color = CATEGORY_COLORS[category];
   const isSelected = selectedNodeId === id;
+  const ioSig = info?.ioSignature;
 
   return (
     <div
@@ -76,6 +124,9 @@ export default function BaseNode({
       </div>
 
       <div style={{ padding: '6px 10px' }}>
+        {ioSig && ioSig.inputs.length > 0 && (
+          <IOPortList ports={ioSig.inputs} direction="in" color={color} />
+        )}
         <span
           style={{
             background: `${color}30`,
@@ -92,6 +143,9 @@ export default function BaseNode({
           <div style={{ marginTop: 4, color: '#a6adc8', fontSize: 11 }}>{preview}</div>
         )}
         {children}
+        {ioSig && ioSig.outputs.length > 0 && (
+          <IOPortList ports={ioSig.outputs} direction="out" color={color} />
+        )}
       </div>
 
       {hasOutput && (

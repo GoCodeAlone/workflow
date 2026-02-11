@@ -9,9 +9,10 @@ import {
   applyEdgeChanges,
   addEdge as rfAddEdge,
 } from '@xyflow/react';
-import type { WorkflowConfig } from '../types/workflow.ts';
+import type { WorkflowConfig, WorkflowTab, CrossWorkflowLink } from '../types/workflow.ts';
 import { MODULE_TYPE_MAP } from '../types/workflow.ts';
 import { nodesToConfig, configToNodes, nodeComponentType } from '../utils/serialization.ts';
+import { autoGroupOrphanedNodes } from '../utils/grouping.ts';
 import type { Toast } from '../components/toast/ToastContainer.tsx';
 
 export interface WorkflowNodeData extends Record<string, unknown> {
@@ -68,15 +69,46 @@ interface WorkflowStore {
   exportToConfig: () => WorkflowConfig;
   importFromConfig: (config: WorkflowConfig) => void;
   clearCanvas: () => void;
+
+  // Tab management
+  tabs: WorkflowTab[];
+  activeTabId: string;
+  crossWorkflowLinks: CrossWorkflowLink[];
+  addTab: () => void;
+  closeTab: (tabId: string) => void;
+  switchTab: (tabId: string) => void;
+  renameTab: (tabId: string, name: string) => void;
+  duplicateTab: (tabId: string) => void;
+  autoGroupOrphans: () => void;
+  addCrossWorkflowLink: (link: CrossWorkflowLink) => void;
+  removeCrossWorkflowLink: (linkId: string) => void;
 }
 
 let toastIdCounter = 0;
+let tabCounter = 1;
+
+function makeDefaultTab(id: string, name: string): WorkflowTab {
+  return {
+    id,
+    name,
+    nodes: [],
+    edges: [],
+    undoStack: [],
+    redoStack: [],
+    dirty: false,
+  };
+}
 
 const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
   nodeCounter: 0,
+
+  // Tab management
+  tabs: [makeDefaultTab('default', 'Workflow 1')],
+  activeTabId: 'default',
+  crossWorkflowLinks: [],
 
   // Toast
   toasts: [],
@@ -221,6 +253,154 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   clearCanvas: () => {
     get().pushHistory();
     set({ nodes: [], edges: [], selectedNodeId: null, nodeCounter: 0 });
+  },
+
+  // Tab actions
+  addTab: () => {
+    const { tabs, nodes, edges, undoStack, redoStack, activeTabId } = get();
+    tabCounter++;
+    const newTabId = `tab-${Date.now()}`;
+    const newTab = makeDefaultTab(newTabId, `Workflow ${tabCounter}`);
+
+    // Save current state into active tab
+    const updatedTabs = tabs.map((t) =>
+      t.id === activeTabId
+        ? {
+            ...t,
+            nodes: structuredClone(nodes),
+            edges: structuredClone(edges),
+            undoStack: structuredClone(undoStack),
+            redoStack: structuredClone(redoStack),
+          }
+        : t,
+    );
+
+    set({
+      tabs: [...updatedTabs, newTab],
+      activeTabId: newTabId,
+      nodes: [],
+      edges: [],
+      undoStack: [],
+      redoStack: [],
+      selectedNodeId: null,
+      nodeCounter: 0,
+    });
+  },
+
+  closeTab: (tabId) => {
+    const { tabs, activeTabId } = get();
+    if (tabs.length <= 1) return;
+
+    const idx = tabs.findIndex((t) => t.id === tabId);
+    const newTabs = tabs.filter((t) => t.id !== tabId);
+
+    if (tabId === activeTabId) {
+      // Switch to adjacent tab
+      const nextTab = newTabs[Math.min(idx, newTabs.length - 1)];
+      set({
+        tabs: newTabs,
+        activeTabId: nextTab.id,
+        nodes: nextTab.nodes as WorkflowNode[],
+        edges: nextTab.edges,
+        undoStack: nextTab.undoStack as HistoryEntry[],
+        redoStack: nextTab.redoStack as HistoryEntry[],
+        selectedNodeId: null,
+      });
+    } else {
+      set({ tabs: newTabs });
+    }
+  },
+
+  switchTab: (tabId) => {
+    const { activeTabId, tabs, nodes, edges, undoStack, redoStack } = get();
+    if (tabId === activeTabId) return;
+
+    // Save current state into current tab
+    const updatedTabs = tabs.map((t) =>
+      t.id === activeTabId
+        ? {
+            ...t,
+            nodes: structuredClone(nodes),
+            edges: structuredClone(edges),
+            undoStack: structuredClone(undoStack),
+            redoStack: structuredClone(redoStack),
+          }
+        : t,
+    );
+
+    const newTab = updatedTabs.find((t) => t.id === tabId);
+    if (!newTab) return;
+
+    set({
+      tabs: updatedTabs,
+      activeTabId: tabId,
+      nodes: newTab.nodes as WorkflowNode[],
+      edges: newTab.edges,
+      undoStack: newTab.undoStack as HistoryEntry[],
+      redoStack: newTab.redoStack as HistoryEntry[],
+      selectedNodeId: null,
+    });
+  },
+
+  renameTab: (tabId, name) => {
+    set({
+      tabs: get().tabs.map((t) => (t.id === tabId ? { ...t, name } : t)),
+    });
+  },
+
+  duplicateTab: (tabId) => {
+    const { tabs, nodes, edges, undoStack, redoStack, activeTabId } = get();
+
+    // Save current state first
+    const updatedTabs = tabs.map((t) =>
+      t.id === activeTabId
+        ? {
+            ...t,
+            nodes: structuredClone(nodes),
+            edges: structuredClone(edges),
+            undoStack: structuredClone(undoStack),
+            redoStack: structuredClone(redoStack),
+          }
+        : t,
+    );
+
+    const sourceTab = updatedTabs.find((t) => t.id === tabId);
+    if (!sourceTab) return;
+
+    tabCounter++;
+    const newTabId = `tab-${Date.now()}`;
+    const newTab: WorkflowTab = {
+      ...structuredClone(sourceTab),
+      id: newTabId,
+      name: `Copy of ${sourceTab.name}`,
+    };
+
+    set({
+      tabs: [...updatedTabs, newTab],
+      activeTabId: newTabId,
+      nodes: newTab.nodes as WorkflowNode[],
+      edges: newTab.edges,
+      undoStack: newTab.undoStack as HistoryEntry[],
+      redoStack: newTab.redoStack as HistoryEntry[],
+      selectedNodeId: null,
+    });
+  },
+
+  autoGroupOrphans: () => {
+    const { nodes, edges } = get();
+    get().pushHistory();
+    const result = autoGroupOrphanedNodes(nodes, edges);
+    set({ nodes: result.nodes as WorkflowNode[], edges: result.edges });
+  },
+
+  addCrossWorkflowLink: (link) => {
+    set({ crossWorkflowLinks: [...get().crossWorkflowLinks, link] });
+  },
+
+  removeCrossWorkflowLink: (linkId) => {
+    set({
+      crossWorkflowLinks: get().crossWorkflowLinks.filter((l) => l.id !== linkId),
+    });
   },
 }));
 

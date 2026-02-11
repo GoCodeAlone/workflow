@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import useWorkflowStore from '../../store/workflowStore.ts';
 import { MODULE_TYPE_MAP, CATEGORY_COLORS } from '../../types/workflow.ts';
-import type { ConfigFieldDef } from '../../types/workflow.ts';
+import type { ConfigFieldDef, IOPort } from '../../types/workflow.ts';
 
 export default function PropertyPanel() {
   const nodes = useWorkflowStore((s) => s.nodes);
@@ -171,6 +172,53 @@ export default function PropertyPanel() {
           </div>
         )}
 
+        {/* I/O Signature */}
+        {info?.ioSignature && (info.ioSignature.inputs.length > 0 || info.ioSignature.outputs.length > 0) && (
+          <div style={{ marginBottom: 16 }}>
+            <span style={{ color: '#a6adc8', fontSize: 11, display: 'block', marginBottom: 8, fontWeight: 600 }}>
+              I/O Ports
+            </span>
+            {info.ioSignature.inputs.length > 0 && (
+              <div style={{ marginBottom: 6 }}>
+                <span style={{ color: '#585b70', fontSize: 10, display: 'block', marginBottom: 2 }}>Inputs</span>
+                {info.ioSignature.inputs.map((port: IOPort) => (
+                  <div key={port.name} style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 11, padding: '1px 0' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, opacity: 0.6 }} />
+                    <span style={{ color: '#cdd6f4' }}>{port.name}</span>
+                    <span style={{ color: '#585b70' }}>{port.type}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {info.ioSignature.outputs.length > 0 && (
+              <div>
+                <span style={{ color: '#585b70', fontSize: 10, display: 'block', marginBottom: 2 }}>Outputs</span>
+                {info.ioSignature.outputs.map((port: IOPort) => (
+                  <div key={port.name} style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 11, padding: '1px 0' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, opacity: 0.6 }} />
+                    <span style={{ color: '#cdd6f4' }}>{port.name}</span>
+                    <span style={{ color: '#585b70' }}>{port.type}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Conditional-specific UI */}
+        {node.data.moduleType === 'conditional.switch' && (
+          <ConditionalCasesEditor
+            cases={(node.data.config?.cases as string[]) ?? []}
+            onChange={(cases) => updateNodeConfig(node.id, { cases })}
+          />
+        )}
+        {node.data.moduleType === 'conditional.expression' && (
+          <ConditionalOutputsEditor
+            outputs={(node.data.config?.outputs as string[]) ?? []}
+            onChange={(outputs) => updateNodeConfig(node.id, { outputs })}
+          />
+        )}
+
         {/* Delete */}
         <button
           onClick={() => {
@@ -189,6 +237,100 @@ export default function PropertyPanel() {
           }}
         >
           Delete Node
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ConditionalCasesEditor({ cases, onChange }: { cases: string[]; onChange: (c: string[]) => void }) {
+  const [newCase, setNewCase] = useState('');
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <span style={{ color: '#a6adc8', fontSize: 11, display: 'block', marginBottom: 6, fontWeight: 600 }}>
+        Switch Cases
+      </span>
+      {cases.map((c, i) => (
+        <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+          <span style={{ color: '#cdd6f4', fontSize: 11, flex: 1 }}>{c}</span>
+          <button
+            onClick={() => onChange(cases.filter((_, j) => j !== i))}
+            style={{ background: 'none', border: 'none', color: '#f38ba8', cursor: 'pointer', fontSize: 11, padding: '0 4px' }}
+          >
+            x
+          </button>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 4 }}>
+        <input
+          value={newCase}
+          onChange={(e) => setNewCase(e.target.value)}
+          placeholder="Add case..."
+          style={{ ...inputStyle, flex: 1 }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && newCase.trim()) {
+              onChange([...cases, newCase.trim()]);
+              setNewCase('');
+            }
+          }}
+        />
+        <button
+          onClick={() => {
+            if (newCase.trim()) {
+              onChange([...cases, newCase.trim()]);
+              setNewCase('');
+            }
+          }}
+          style={{ background: '#313244', border: '1px solid #45475a', borderRadius: 4, color: '#cdd6f4', cursor: 'pointer', fontSize: 11, padding: '4px 8px' }}
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ConditionalOutputsEditor({ outputs, onChange }: { outputs: string[]; onChange: (o: string[]) => void }) {
+  const [newOutput, setNewOutput] = useState('');
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <span style={{ color: '#a6adc8', fontSize: 11, display: 'block', marginBottom: 6, fontWeight: 600 }}>
+        Output Labels
+      </span>
+      {outputs.map((o, i) => (
+        <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+          <span style={{ color: '#cdd6f4', fontSize: 11, flex: 1 }}>{o}</span>
+          <button
+            onClick={() => onChange(outputs.filter((_, j) => j !== i))}
+            style={{ background: 'none', border: 'none', color: '#f38ba8', cursor: 'pointer', fontSize: 11, padding: '0 4px' }}
+          >
+            x
+          </button>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 4 }}>
+        <input
+          value={newOutput}
+          onChange={(e) => setNewOutput(e.target.value)}
+          placeholder="Add output..."
+          style={{ ...inputStyle, flex: 1 }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && newOutput.trim()) {
+              onChange([...outputs, newOutput.trim()]);
+              setNewOutput('');
+            }
+          }}
+        />
+        <button
+          onClick={() => {
+            if (newOutput.trim()) {
+              onChange([...outputs, newOutput.trim()]);
+              setNewOutput('');
+            }
+          }}
+          style={{ background: '#313244', border: '1px solid #45475a', borderRadius: 4, color: '#cdd6f4', cursor: 'pointer', fontSize: 11, padding: '4px 8px' }}
+        >
+          +
         </button>
       </div>
     </div>

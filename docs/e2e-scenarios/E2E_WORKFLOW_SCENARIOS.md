@@ -54,6 +54,27 @@ All scenarios use **real HTTP servers on random ports**, **real modular.Applicat
 ### UI Visualization
 - [UI Workflow Visualization](#ui-workflow-visualization)
 
+### Multi-Workflow & Multi-User Scenarios (Phase 9)
+- [MW1: Multi-Workflow E2E Setup](#mw1-multi-workflow-e2e-setup)
+- [MW2: Permission Isolation](#mw2-permission-isolation)
+- [MW3: Cross-Workflow Routing](#mw3-cross-workflow-routing)
+- [MW4: Data Flow & Persistence](#mw4-data-flow--persistence)
+- [MW5: Execution Tracking](#mw5-execution-tracking)
+- [MW6: Audit Trail](#mw6-audit-trail)
+- [MW7: State Queryable](#mw7-state-queryable)
+
+### Store & API Unit Tests (Phase 9)
+- [Store Interface Tests](#store-interface-tests)
+- [API Handler Tests](#api-handler-tests)
+- [Engine Manager Tests](#engine-manager-tests)
+- [Cross-Workflow Router Tests](#cross-workflow-router-tests)
+- [Observability Tracker Tests](#observability-tracker-tests)
+- [IAM Provider Tests](#iam-provider-tests)
+
+### UI Unit & E2E Tests (Phase 9)
+- [UI Unit Tests](#ui-unit-tests)
+- [Playwright E2E Tests](#playwright-e2e-tests)
+
 ---
 
 ## 1. Core HTTP Pipeline
@@ -1510,3 +1531,497 @@ The following screenshots show how the workflow YAML configs render in the Workf
 | N16 | Response Headers | 5 | Request-ID on errors, CORS on errors, content-type consistency |
 
 **Total: 39 test functions, 23 positive + 16 negative (66 subtests), 0 FAIL**
+
+---
+
+---
+
+## Multi-Workflow & Multi-User Scenarios (Phase 9)
+
+These scenarios validate the multi-tenant platform layer: store interfaces, permission cascading, cross-workflow event routing, execution tracking, audit trails, and full data flow from ingestion through transformation to queryable state. All tests use **in-memory mock stores** (no PostgreSQL required) and run in `go test` without external dependencies.
+
+### MW1. Multi-Workflow E2E Setup
+
+**Test:** `TestMultiWorkflowE2E_Setup`
+
+Creates a full organizational hierarchy with 3 users, a company, organization, project, and 3 workflows to validate the foundation for all subsequent multi-workflow tests.
+
+```mermaid
+flowchart TD
+    Alice["Alice<br/>(Company Owner)"]
+    Bob["Bob<br/>(Project Editor)"]
+    Carol["Carol<br/>(Workflow C Creator)"]
+
+    AcmeCorp["Acme Corp<br/>(Company)"]
+    Engineering["Engineering<br/>(Organization)"]
+    ECommerce["E-Commerce<br/>(Project)"]
+
+    WFA["Workflow A<br/>Order Ingestion"]
+    WFB["Workflow B<br/>Fulfillment"]
+    WFC["Workflow C<br/>Notifications"]
+
+    Alice -->|"owner"| AcmeCorp
+    AcmeCorp --> Engineering
+    Engineering --> ECommerce
+    Bob -->|"editor"| ECommerce
+    Carol -->|"creator"| WFC
+    ECommerce --> WFA
+    ECommerce --> WFB
+    ECommerce --> WFC
+
+    style Alice fill:#4A90D9,color:white
+    style Bob fill:#50C878,color:white
+    style Carol fill:#FF8C00,color:white
+    style AcmeCorp fill:#7B68EE,color:white
+    style ECommerce fill:#7B68EE,color:white
+```
+
+<details>
+<summary>Execution Evidence</summary>
+
+```
+=== RUN   TestMultiWorkflowE2E_Setup
+--- PASS: TestMultiWorkflowE2E_Setup (0.00s)
+```
+</details>
+
+---
+
+### MW2. Permission Isolation
+
+**Test:** `TestMultiWorkflowE2E_PermissionIsolation` (5 subtests)
+
+Proves cascading role-based access control: company owners see everything, project editors see project workflows, and users with no membership are denied access.
+
+```mermaid
+flowchart LR
+    subgraph Access["Permission Resolution"]
+        Alice["Alice"] -->|"company owner<br/>→ owner on all"| All["Workflows A, B, C"]
+        Bob["Bob"] -->|"project editor<br/>→ editor on all"| All
+        Carol["Carol"] -->|"creator of C<br/>→ owner on C only"| WFC["Workflow C"]
+        Carol -.->|"NO ACCESS"| AB["Workflows A, B"]
+        Unknown["Unknown User"] -.->|"NO ACCESS"| All
+    end
+
+    style Alice fill:#4A90D9,color:white
+    style Bob fill:#50C878,color:white
+    style Carol fill:#FF8C00,color:white
+    style Unknown fill:#888,color:white
+```
+
+| Subtest | Proves |
+|---------|--------|
+| `Alice_OwnerAccessAll` | Company owner has owner-level access on all 3 workflows |
+| `Bob_EditorAccessAll` | Project editor cascades to editor access on project workflows |
+| `Carol_OnlyWorkflowC` | Non-member can only access workflows they created |
+| `UnknownUser_NoAccess` | Unregistered users have zero access |
+| `RoleHierarchy` | owner > admin > editor > viewer ordering is correct |
+
+<details>
+<summary>Execution Evidence</summary>
+
+```
+=== RUN   TestMultiWorkflowE2E_PermissionIsolation
+=== RUN   TestMultiWorkflowE2E_PermissionIsolation/Alice_OwnerAccessAll
+=== RUN   TestMultiWorkflowE2E_PermissionIsolation/Bob_EditorAccessAll
+=== RUN   TestMultiWorkflowE2E_PermissionIsolation/Carol_OnlyWorkflowC
+=== RUN   TestMultiWorkflowE2E_PermissionIsolation/UnknownUser_NoAccess
+=== RUN   TestMultiWorkflowE2E_PermissionIsolation/RoleHierarchy
+--- PASS: TestMultiWorkflowE2E_PermissionIsolation (0.00s)
+    --- PASS: Alice_OwnerAccessAll (0.00s)
+    --- PASS: Bob_EditorAccessAll (0.00s)
+    --- PASS: Carol_OnlyWorkflowC (0.00s)
+    --- PASS: UnknownUser_NoAccess (0.00s)
+    --- PASS: RoleHierarchy (0.00s)
+```
+</details>
+
+---
+
+### MW3. Cross-Workflow Routing
+
+**Test:** `TestMultiWorkflowE2E_CrossWorkflowRouting` (5 subtests)
+
+Validates glob-style event pattern matching routes events between independent workflow engines. Uses `*` for single-segment and `**` for multi-segment wildcards.
+
+```mermaid
+flowchart LR
+    WFA["Workflow A<br/>Orders"]
+    WFB["Workflow B<br/>Fulfillment"]
+    WFC["Workflow C<br/>Notifications"]
+
+    WFA -->|"order.validated"| WFB
+    WFB -->|"fulfillment.*"| WFC
+    WFA -.->|"order.cancelled<br/>(NO MATCH)"| X["No Routing"]
+
+    style WFA fill:#4A90D9,color:white
+    style WFB fill:#50C878,color:white
+    style WFC fill:#FF8C00,color:white
+    style X fill:#888,color:white
+```
+
+| Subtest | Event | Pattern | Result |
+|---------|-------|---------|--------|
+| `OrderValidated_RoutesToB` | `order.validated` | `order.validated` | Routed to B |
+| `FulfillmentCompleted_RoutesToC` | `fulfillment.completed` | `fulfillment.*` | Routed to C |
+| `FulfillmentShipped_RoutesToC` | `fulfillment.shipped` | `fulfillment.*` | Routed to C |
+| `OrderCancelled_NoRouting` | `order.cancelled` | — | No match |
+| `RandomEvent_NoRouting` | `random.event` | — | No match |
+
+<details>
+<summary>Execution Evidence</summary>
+
+```
+=== RUN   TestMultiWorkflowE2E_CrossWorkflowRouting
+=== RUN   TestMultiWorkflowE2E_CrossWorkflowRouting/OrderValidated_RoutesToB
+=== RUN   TestMultiWorkflowE2E_CrossWorkflowRouting/FulfillmentCompleted_RoutesToC
+=== RUN   TestMultiWorkflowE2E_CrossWorkflowRouting/FulfillmentShipped_RoutesToC
+=== RUN   TestMultiWorkflowE2E_CrossWorkflowRouting/OrderCancelled_NoRouting
+=== RUN   TestMultiWorkflowE2E_CrossWorkflowRouting/RandomEvent_NoRouting
+--- PASS: TestMultiWorkflowE2E_CrossWorkflowRouting (0.00s)
+    --- PASS: OrderValidated_RoutesToB (0.00s)
+    --- PASS: FulfillmentCompleted_RoutesToC (0.00s)
+    --- PASS: FulfillmentShipped_RoutesToC (0.00s)
+    --- PASS: OrderCancelled_NoRouting (0.00s)
+    --- PASS: RandomEvent_NoRouting (0.00s)
+```
+</details>
+
+---
+
+### MW4. Data Flow & Persistence
+
+**Test:** `TestMultiWorkflowE2E_DataFlowAndPersistence`
+
+The core data flow proof: an order enters the system as JSON trigger data, transforms through 3 execution steps (validate, transform, persist), completes with output data, and all artifacts are persisted and verifiable.
+
+```mermaid
+flowchart LR
+    Input["Input<br/>{order_id: ORD-001<br/>customer: john@...<br/>total: 99.99}"]
+    Step1["Step 1<br/>validate"]
+    Step2["Step 2<br/>transform"]
+    Step3["Step 3<br/>persist"]
+    Output["Output<br/>{order_id: ORD-001<br/>status: validated}"]
+    Store["ExecutionStore<br/>+ StepStore"]
+
+    Input -->|"StartExecution"| Step1
+    Step1 -->|"seq=0"| Step2
+    Step2 -->|"seq=1"| Step3
+    Step3 -->|"seq=2"| Output
+    Output -->|"CompleteExecution"| Store
+    Store -->|"status=completed<br/>duration_ms > 0"| Store
+
+    style Input fill:#4A90D9,color:white
+    style Step1 fill:#50C878,color:white
+    style Step2 fill:#50C878,color:white
+    style Step3 fill:#50C878,color:white
+    style Output fill:#FF8C00,color:white
+    style Store fill:#7B68EE,color:white
+```
+
+**Proves:** Data entered → transformed through steps → persisted as output → execution record has correct status, duration, and step sequence numbers.
+
+<details>
+<summary>Execution Evidence</summary>
+
+```
+=== RUN   TestMultiWorkflowE2E_DataFlowAndPersistence
+--- PASS: TestMultiWorkflowE2E_DataFlowAndPersistence (0.01s)
+```
+</details>
+
+---
+
+### MW5. Execution Tracking
+
+**Test:** `TestMultiWorkflowE2E_ExecutionTracking` (7 subtests)
+
+Creates multiple executions (completed, failed, cancelled) and validates filtering, counting, and log-level queries.
+
+| Subtest | Proves |
+|---------|--------|
+| `ListAllExecutions` | 3 executions returned for workflow |
+| `FilterByStatusCompleted` | Status filter returns only completed |
+| `FilterByStatusFailed` | Status filter returns only failed |
+| `CountByStatus` | {completed: 1, failed: 1, cancelled: 1} |
+| `QueryLogsByLevelError` | Level filter returns only error logs |
+| `CountByLevel` | Correct counts per log level |
+| `ExecutionDurationSet` | duration_ms > 0 for all completed executions |
+
+<details>
+<summary>Execution Evidence</summary>
+
+```
+=== RUN   TestMultiWorkflowE2E_ExecutionTracking
+--- PASS: TestMultiWorkflowE2E_ExecutionTracking (0.01s)
+    --- PASS: ListAllExecutions (0.00s)
+    --- PASS: FilterByStatusCompleted (0.00s)
+    --- PASS: FilterByStatusFailed (0.00s)
+    --- PASS: CountByStatus (0.00s)
+    --- PASS: QueryLogsByLevelError (0.00s)
+    --- PASS: CountByLevel (0.00s)
+    --- PASS: ExecutionDurationSet (0.00s)
+```
+</details>
+
+---
+
+### MW6. Audit Trail
+
+**Test:** `TestMultiWorkflowE2E_AuditTrail` (7 subtests)
+
+Records actions (deploy, stop, share) by multiple users and verifies query filtering by user, resource, action, and combined criteria.
+
+| Subtest | Proves |
+|---------|--------|
+| `QueryByUser_Alice` | Alice's actions returned in isolation |
+| `QueryByUser_Bob` | Bob's actions returned in isolation |
+| `QueryByResource_WorkflowA` | All actions on a specific resource found |
+| `QueryByAction_Deploy` | Filter by action type works |
+| `QueryByAction_Share` | Single-action queries return correctly |
+| `QueryCombined_AliceDeploy` | Combined user+action filter works |
+| `AutoIncrementIDs` | Audit entry IDs are monotonically increasing |
+
+<details>
+<summary>Execution Evidence</summary>
+
+```
+=== RUN   TestMultiWorkflowE2E_AuditTrail
+--- PASS: TestMultiWorkflowE2E_AuditTrail (0.00s)
+    --- PASS: QueryByUser_Alice (0.00s)
+    --- PASS: QueryByUser_Bob (0.00s)
+    --- PASS: QueryByResource_WorkflowA (0.00s)
+    --- PASS: QueryByAction_Deploy (0.00s)
+    --- PASS: QueryByAction_Share (0.00s)
+    --- PASS: QueryCombined_AliceDeploy (0.00s)
+    --- PASS: AutoIncrementIDs (0.00s)
+```
+</details>
+
+---
+
+### MW7. State Queryable
+
+**Test:** `TestMultiWorkflowE2E_StateQueryable` (8 subtests)
+
+The crown jewel: after a full lifecycle (deploy workflow, run execution with steps, write logs), proves every artifact is queryable through the store interfaces.
+
+```mermaid
+flowchart TD
+    Deploy["Deploy Workflow<br/>(draft → active)"]
+    Execute["Run Execution<br/>(3 steps + logs)"]
+    Query["Query Everything"]
+
+    Deploy --> Execute
+    Execute --> Query
+
+    subgraph Queries["All Queryable"]
+        Q1["Workflow by status=active"]
+        Q2["Version history (v1 draft, v2 active)"]
+        Q3["Executions by workflow"]
+        Q4["Steps by execution (ordered)"]
+        Q5["Logs by execution"]
+        Q6["Logs by workflow"]
+        Q7["Execution output data"]
+    end
+
+    Query --> Queries
+
+    style Deploy fill:#4A90D9,color:white
+    style Execute fill:#50C878,color:white
+    style Query fill:#FF8C00,color:white
+```
+
+| Subtest | Proves |
+|---------|--------|
+| `QueryWorkflowByStatus` | Active workflows found by status filter |
+| `QueryVersionHistory` | Version tracking: draft v1 → active v2 |
+| `QueryExecutionsByWorkflow` | Execution records scoped to workflow |
+| `QueryStepsByExecution` | Steps returned in sequence order |
+| `QueryLogsByExecution` | Logs scoped to specific execution |
+| `QueryLogsByWorkflow` | Logs scoped to workflow |
+| `ExecutionOutput` | Output data persisted and unmarshallable |
+| `DataEntered_Transformed_Persisted_Queryable` | **Full proof: data in → steps → output → queryable** |
+
+<details>
+<summary>Execution Evidence</summary>
+
+```
+=== RUN   TestMultiWorkflowE2E_StateQueryable
+--- PASS: TestMultiWorkflowE2E_StateQueryable (0.00s)
+    --- PASS: QueryWorkflowByStatus (0.00s)
+    --- PASS: QueryVersionHistory (0.00s)
+    --- PASS: QueryExecutionsByWorkflow (0.00s)
+    --- PASS: QueryStepsByExecution (0.00s)
+    --- PASS: QueryLogsByExecution (0.00s)
+    --- PASS: QueryLogsByWorkflow (0.00s)
+    --- PASS: ExecutionOutput (0.00s)
+    --- PASS: DataEntered_Transformed_Persisted_Queryable (0.00s)
+```
+</details>
+
+---
+
+---
+
+## Store & API Unit Tests (Phase 9)
+
+### Store Interface Tests
+
+**File:** `store/stores_test.go` — **189 tests**
+
+Comprehensive tests for all 11 mock store implementations, validating the interface contracts that any store backend must satisfy.
+
+| Store | Tests | Key Scenarios |
+|-------|-------|---------------|
+| UserStore | 21 | CRUD, duplicate email, OAuth, filters, pagination, copy safety |
+| CompanyStore | 15 | CRUD, slug uniqueness, ListForUser by ownership + membership |
+| ProjectStore | 15 | CRUD, slug scoped to company, ListForUser |
+| WorkflowStore | 22 | CRUD, version auto-increment, version history, status transitions |
+| MembershipStore | 21 | Company/project level, duplicate prevention, cascading GetEffectiveRole |
+| CrossWorkflowLinkStore | 10 | CRUD, filter by source/target/type, pagination |
+| SessionStore | 11 | CRUD, GetByToken, DeleteExpired |
+| ExecutionStore | 18 | Executions + steps CRUD, ordering, CountByStatus, time filters |
+| LogStore | 13 | Append, auto-ID, level/module/execution/date filters, CountByLevel |
+| AuditStore | 10 | Record, auto-ID, user/action/resource/date filters |
+| IAMStore | 15 | Provider + mapping CRUD, filters, ResolveRole |
+| Interface Compliance | 11 | Compile-time interface satisfaction assertions |
+
+### API Handler Tests
+
+**Files:** 10 new test files in `api/` — **139 tests**
+
+| File | Tests | Handler Coverage |
+|------|-------|-----------------|
+| `link_handler_test.go` | 14 | Create, List, Delete + error paths |
+| `execution_handler_test.go` | 16 | List, Get, Steps, Cancel, Trigger + auth/perms |
+| `dashboard_handler_test.go` | 10 | System dashboard, workflow dashboard + empty state |
+| `log_handler_test.go` | 9 | Query with level/module/execution/since filters |
+| `events_handler_test.go` | 7 | Event listing + auth/permission checks |
+| `iam_handler_test.go` | 20 | Provider CRUD, TestConnection, Mapping CRUD |
+| `permissions_test.go` | 16 | RoleAtLeast, PermissionService, cascading resolution |
+| `company_handler_test.go` | 12 | Company CRUD + member management |
+| `org_handler_test.go` | 8 | Organization CRUD under parent company |
+| `project_handler_test.go` | 12 | Project CRUD + member management |
+
+### Engine Manager Tests
+
+**File:** `engine_manager_test.go` — **18 tests**
+
+| Test | Proves |
+|------|--------|
+| `DeployWorkflow_Success` | Loads config, builds engine, status=running |
+| `DeployWorkflow_NotFound` | Returns error for missing workflow |
+| `DeployWorkflow_InvalidYAML` | Returns error for malformed config |
+| `DeployWorkflow_AlreadyRunning` | Rejects duplicate deployment |
+| `DeployWorkflow_BuilderError` | Handles engine builder failures |
+| `StopWorkflow_Success` | Graceful shutdown, removed from active |
+| `StopWorkflow_NotRunning` | Error for non-active workflow |
+| `ReloadWorkflow_Success` | Stop + redeploy in sequence |
+| `ReloadWorkflow_NotRunning` | Fresh deploy when not running |
+| `GetStatus_Running` | Returns status, uptime, module count |
+| `GetStatus_NotFound` | Returns error for non-deployed |
+| `ListActive_Empty/Multiple` | Empty and multi-engine listing |
+| `StopAll_Success/Empty` | Graceful shutdown of all engines |
+| `ConcurrentDeploy` | Multiple goroutines deploying simultaneously |
+| `ConcurrentDeployStop` | Deploy and stop racing on same workflow |
+| `Router_NotNil` | Cross-workflow router initialized |
+
+### Cross-Workflow Router Tests
+
+**File:** `module/cross_workflow_router_test.go` — **22 tests**
+
+12 pattern matching tests + 10 router behavior tests:
+
+| Pattern | Event | Match? |
+|---------|-------|--------|
+| `order.completed` | `order.completed` | Yes (exact) |
+| `order.*` | `order.completed` | Yes (single wildcard) |
+| `order.*` | `order.sub.completed` | No (too deep) |
+| `order.**` | `order.a.b.c` | Yes (multi-segment) |
+| `**` | `any.thing.here` | Yes (match all) |
+
+### Observability Tracker Tests
+
+**File:** `observability/tracker_test.go` — **14 tests**
+
+Full execution lifecycle: Start → RecordStep → Complete/Fail/Cancel, LogWriter at correct levels, duration calculation.
+
+### IAM Provider Tests
+
+**File:** `iam/providers_test.go` — **29 tests**
+
+| Provider | Tests | Key Scenarios |
+|----------|-------|---------------|
+| AWS IAM | 8 | Config validation, ARN parsing, missing/invalid ARN |
+| Kubernetes | 6 | Config validation, service_account + group resolution |
+| OIDC | 6 | Config validation, default/custom claim extraction |
+| IAMResolver | 9 | Register, get, multi-provider highest-role-wins, disabled skip |
+
+---
+
+## UI Unit & E2E Tests (Phase 9)
+
+### UI Unit Tests
+
+**Files:** 6 new test files — **76 tests** (199 total with existing 123)
+
+| File | Tests | Coverage |
+|------|-------|----------|
+| `store/authStore.test.ts` | 18 | Login, register, logout, OAuth, token persistence |
+| `store/observabilityStore.test.ts` | 26 | Dashboard, executions, logs, events, IAM CRUD |
+| `components/tabs/WorkflowTabs.test.tsx` | 10 | Add/close/switch/rename tabs, dirty indicator |
+| `components/auth/LoginPage.test.tsx` | 11 | Sign in/up forms, OAuth buttons, validation |
+| `components/navigation/AppNav.test.tsx` | 5 | Nav items, active view, click handling |
+| `components/dashboard/SystemDashboard.test.tsx` | 6 | Loading, empty, data states, metric cards |
+
+### Playwright E2E Tests
+
+**Files:** 2 new spec files — **14 tests**
+
+| File | Tests | Coverage |
+|------|-------|----------|
+| `e2e/multi-workflow.spec.ts` | 6 | Tab create/close/switch/rename, canvas state preservation |
+| `e2e/auth-flow.spec.ts` | 8 | Login page, sign up mode, password validation, OAuth buttons |
+
+---
+
+## Multi-Workflow Example Configurations
+
+### E-Commerce Multi-Workflow System
+
+**Directory:** `example/multi-workflow-ecommerce/`
+
+Three interconnected workflows demonstrating cross-workflow event routing:
+
+```mermaid
+flowchart LR
+    A["Workflow A<br/>Order Ingestion<br/>(HTTP → State Machine)"]
+    B["Workflow B<br/>Fulfillment<br/>(Event → Processing)"]
+    C["Workflow C<br/>Notifications<br/>(Event → Webhooks)"]
+
+    A -->|"order.validated"| B
+    B -->|"fulfillment.*"| C
+    A -->|"order.failed"| C
+
+    style A fill:#4A90D9,color:white
+    style B fill:#50C878,color:white
+    style C fill:#FF8C00,color:white
+```
+
+| File | Purpose |
+|------|---------|
+| `workflow-a-orders.yaml` | Order ingestion: HTTP server, state machine (new→validated→processing→completed) |
+| `workflow-b-fulfillment.yaml` | Fulfillment: messaging handler, state machine (pending→picking→packing→shipped) |
+| `workflow-c-notifications.yaml` | Notification hub: subscribes to order.* and fulfillment.* events |
+| `cross-workflow-links.yaml` | Documents the 3 cross-workflow event routing links |
+| `README.md` | Architecture docs with running instructions |
+
+### Multi-User Scenario
+
+**Directory:** `example/multi-user-scenario/`
+
+| File | Purpose |
+|------|---------|
+| `README.md` | Documents 3-user permission model (Alice=owner, Bob=editor, Carol=viewer) |
+| `setup.sh` | Executable script using curl to create full hierarchy and verify access |

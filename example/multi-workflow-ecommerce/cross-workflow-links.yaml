@@ -1,0 +1,62 @@
+# Cross-Workflow Event Routing Links
+#
+# This file documents the event routing between workflows in the e-commerce
+# scenario. These links are NOT loaded by the engine directly -- they are
+# managed via the platform API:
+#
+#   POST /api/v1/workflows/{id}/links
+#   GET  /api/v1/workflows/{id}/links
+#
+# The link records are stored in the CrossWorkflowLinkStore and define how
+# events produced by one workflow are routed to another.
+
+links:
+  # Workflow A -> Workflow B
+  # When an order is validated, trigger fulfillment processing.
+  - source: workflow-a-orders
+    target: workflow-b-fulfillment
+    link_type: "event_trigger"
+    event_pattern: "order.validated"
+    target_action: "process_fulfillment"
+    description: "Route validated orders to fulfillment pipeline"
+
+  # Workflow B -> Workflow C
+  # All fulfillment events are forwarded to the notification hub.
+  - source: workflow-b-fulfillment
+    target: workflow-c-notifications
+    link_type: "event_forward"
+    event_pattern: "fulfillment.*"
+    target_action: "send_notification"
+    description: "Forward fulfillment status updates to notification hub"
+
+  # Workflow A -> Workflow C
+  # Failed orders trigger an alert via the notification hub.
+  - source: workflow-a-orders
+    target: workflow-c-notifications
+    link_type: "event_forward"
+    event_pattern: "order.failed"
+    target_action: "send_alert"
+    description: "Route order failures to notification hub for alerting"
+
+# Example API calls to create these links:
+#
+# 1. Get workflow IDs:
+#    WF_A=$(curl -s http://localhost:8080/api/v1/workflows | jq -r '.data[] | select(.name=="order-ingestion") | .id')
+#    WF_B=$(curl -s http://localhost:8080/api/v1/workflows | jq -r '.data[] | select(.name=="fulfillment-processing") | .id')
+#    WF_C=$(curl -s http://localhost:8080/api/v1/workflows | jq -r '.data[] | select(.name=="notification-hub") | .id')
+#
+# 2. Create links:
+#    curl -X POST http://localhost:8080/api/v1/workflows/$WF_A/links \
+#      -H "Authorization: Bearer $TOKEN" \
+#      -H "Content-Type: application/json" \
+#      -d "{\"target_workflow_id\": \"$WF_B\", \"link_type\": \"event_trigger\"}"
+#
+#    curl -X POST http://localhost:8080/api/v1/workflows/$WF_B/links \
+#      -H "Authorization: Bearer $TOKEN" \
+#      -H "Content-Type: application/json" \
+#      -d "{\"target_workflow_id\": \"$WF_C\", \"link_type\": \"event_forward\"}"
+#
+#    curl -X POST http://localhost:8080/api/v1/workflows/$WF_A/links \
+#      -H "Authorization: Bearer $TOKEN" \
+#      -H "Content-Type: application/json" \
+#      -d "{\"target_workflow_id\": \"$WF_C\", \"link_type\": \"event_forward\"}"
