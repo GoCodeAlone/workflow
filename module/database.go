@@ -55,6 +55,23 @@ func (w *WorkflowDatabase) Init(app modular.Application) error {
 	return app.RegisterService(w.name, w)
 }
 
+// ProvidesServices declares the service this module provides, enabling proper
+// dependency ordering in the modular framework.
+func (w *WorkflowDatabase) ProvidesServices() []modular.ServiceProvider {
+	return []modular.ServiceProvider{
+		{
+			Name:        w.name,
+			Description: "Workflow Database: " + w.name,
+			Instance:    w,
+		},
+	}
+}
+
+// RequiresServices returns no dependencies.
+func (w *WorkflowDatabase) RequiresServices() []modular.ServiceDependency {
+	return nil
+}
+
 // Open opens the database connection using config
 func (w *WorkflowDatabase) Open() (*sql.DB, error) {
 	w.mu.Lock()

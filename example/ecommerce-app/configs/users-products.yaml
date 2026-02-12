@@ -69,7 +69,7 @@ modules:
     type: api.handler
     config:
       resourceName: products
-      seedFile: "./seed/products.json"
+      seedFile: "../seed/products.json"
     dependsOn:
       - rate-limiter
 

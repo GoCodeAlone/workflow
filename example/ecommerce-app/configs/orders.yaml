@@ -107,7 +107,7 @@ modules:
   - name: inventory-checker
     type: dynamic.component
     config:
-      source: "./components/inventory_checker.go"
+      source: "../components/inventory_checker.go"
       description: "Simulates warehouse inventory check"
     dependsOn:
       - order-state
@@ -115,7 +115,7 @@ modules:
   - name: payment-processor
     type: dynamic.component
     config:
-      source: "./components/payment_processor.go"
+      source: "../components/payment_processor.go"
       description: "Simulates payment gateway"
     dependsOn:
       - order-state
@@ -123,7 +123,7 @@ modules:
   - name: shipping-service
     type: dynamic.component
     config:
-      source: "./components/shipping_service.go"
+      source: "../components/shipping_service.go"
       description: "Simulates shipping label generation"
     dependsOn:
       - order-state
@@ -131,7 +131,7 @@ modules:
   - name: notification-sender
     type: dynamic.component
     config:
-      source: "./components/notification_sender.go"
+      source: "../components/notification_sender.go"
       description: "Simulates email/SMS notifications"
     dependsOn:
       - order-state
