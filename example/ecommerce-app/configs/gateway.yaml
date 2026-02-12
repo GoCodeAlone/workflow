@@ -1,0 +1,144 @@
+# Gateway Container Configuration
+# Serves the SPA and proxies API requests to backend services.
+#
+# Architecture:
+#   Browser -> [gateway:8080] -> SPA (static files)
+#                             -> /api/auth/*     -> users-products:8080
+#                             -> /api/products/* -> users-products:8080
+#                             -> /api/orders/*   -> orders:8080
+#
+# No business logic — pure routing and static file serving.
+
+modules:
+  # --- HTTP infrastructure ---
+  - name: web-server
+    type: http.server
+    config:
+      address: ":8080"
+      readTimeout: "15s"
+      writeTimeout: "15s"
+
+  - name: router
+    type: http.router
+    config:
+      prefix: /api
+    dependsOn:
+      - web-server
+
+  # --- Reverse proxy to backend services ---
+  - name: api-proxy
+    type: http.simple_proxy
+    config:
+      targets:
+        "/api/auth": "http://users-products:8080"
+        "/api/products": "http://users-products:8080"
+        "/api/orders": "http://orders:8080"
+    dependsOn:
+      - router
+
+  # --- Middleware chain ---
+  - name: cors
+    type: http.middleware.cors
+    config:
+      allowedOrigins: ["*"]
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+      allowedHeaders: ["Content-Type", "Authorization"]
+    dependsOn:
+      - router
+
+  - name: request-id
+    type: http.middleware.requestid
+    dependsOn:
+      - cors
+
+  # --- Observability ---
+  - name: metrics
+    type: metrics.collector
+    config:
+      namespace: ecommerce_gateway
+
+  - name: health
+    type: health.checker
+    config:
+      description: "Gateway health, readiness, and liveness probes"
+
+  # --- Static file serving (SPA) ---
+  - name: spa
+    type: static.fileserver
+    config:
+      root: "./spa"
+      prefix: "/"
+      spaFallback: true
+      cacheMaxAge: 3600
+    dependsOn:
+      - web-server
+
+# --- Workflow definitions ---
+workflows:
+  http:
+    router: router
+    server: web-server
+    routes:
+      # Proxy all API requests to backend services
+      - method: "GET"
+        path: "/api/products"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/products/{id}"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/auth/login"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/auth/register"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/auth/profile"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "PUT"
+        path: "/api/auth/profile"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/orders"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/orders"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/orders/{id}"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id

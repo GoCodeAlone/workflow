@@ -1,0 +1,396 @@
+# Orders Container Configuration
+# Handles order lifecycle with state machine, processing steps, and Kafka messaging.
+#
+# Architecture:
+#   Gateway -> [orders:8080] -> /api/orders/* (order CRUD + state machine)
+#   [orders] <-> [Kafka] (order lifecycle events for async processing)
+#
+# Processing pipeline (via Kafka):
+#   POST /api/orders -> new -> start_validation -> validating
+#   -> [inventory-checker] -> validation_passed -> validated
+#   -> [event: order.validated via Kafka] -> start_payment -> paying
+#   -> [payment-processor] -> payment_approved -> paid
+#   -> [event: order.paid via Kafka] -> start_shipping -> shipping
+#   -> [shipping-service] -> shipping_confirmed -> shipped -> delivered
+
+modules:
+  # --- HTTP infrastructure ---
+  - name: web-server
+    type: http.server
+    config:
+      address: ":8080"
+      readTimeout: "15s"
+      writeTimeout: "15s"
+
+  - name: router
+    type: http.router
+    config:
+      prefix: /api
+    dependsOn:
+      - web-server
+
+  # --- Middleware chain ---
+  - name: cors
+    type: http.middleware.cors
+    config:
+      allowedOrigins: ["*"]
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+      allowedHeaders: ["Content-Type", "Authorization"]
+    dependsOn:
+      - router
+
+  - name: request-id
+    type: http.middleware.requestid
+    dependsOn:
+      - cors
+
+  - name: rate-limiter
+    type: http.middleware.ratelimit
+    config:
+      requestsPerMinute: 300
+      burstSize: 50
+    dependsOn:
+      - request-id
+
+  # --- Authentication (for token validation — same secret as users-products) ---
+  - name: auth
+    type: auth.jwt
+    config:
+      secret: "${JWT_SECRET}"
+      tokenExpiry: "24h"
+      issuer: "workflow-store"
+    dependsOn:
+      - rate-limiter
+
+  - name: auth-middleware
+    type: http.middleware.auth
+    config:
+      authType: Bearer
+    dependsOn:
+      - auth
+
+  # --- API handlers ---
+  - name: orders-api
+    type: api.handler
+    config:
+      resourceName: orders
+      workflowType: "order-processing"
+      workflowEngine: "order-state"
+      instanceIDPrefix: "order-"
+      instanceIDField: "id"
+    dependsOn:
+      - auth-middleware
+
+  # --- Order state machine ---
+  - name: order-state
+    type: statemachine.engine
+    config:
+      description: "Manages order lifecycle state transitions"
+    dependsOn:
+      - orders-api
+
+  # --- Persistence ---
+  - name: order-db
+    type: database.workflow
+    config:
+      driver: "sqlite"
+      dsn: "./data/orders.db"
+
+  - name: persistence
+    type: persistence.store
+    config:
+      database: "order-db"
+    dependsOn:
+      - order-db
+
+  # --- Dynamic processing components ---
+  - name: inventory-checker
+    type: dynamic.component
+    config:
+      source: "./components/inventory_checker.go"
+      description: "Simulates warehouse inventory check"
+    dependsOn:
+      - order-state
+
+  - name: payment-processor
+    type: dynamic.component
+    config:
+      source: "./components/payment_processor.go"
+      description: "Simulates payment gateway"
+    dependsOn:
+      - order-state
+
+  - name: shipping-service
+    type: dynamic.component
+    config:
+      source: "./components/shipping_service.go"
+      description: "Simulates shipping label generation"
+    dependsOn:
+      - order-state
+
+  - name: notification-sender
+    type: dynamic.component
+    config:
+      source: "./components/notification_sender.go"
+      description: "Simulates email/SMS notifications"
+    dependsOn:
+      - order-state
+
+  # --- Processing steps ---
+  - name: step-validate
+    type: processing.step
+    config:
+      componentId: "inventory-checker"
+      successTransition: "validation_passed"
+      compensateTransition: "validation_failed"
+      maxRetries: 1
+      retryBackoffMs: 500
+      timeoutSeconds: 10
+    dependsOn:
+      - inventory-checker
+      - order-state
+
+  - name: step-payment
+    type: processing.step
+    config:
+      componentId: "payment-processor"
+      successTransition: "payment_approved"
+      compensateTransition: "payment_declined"
+      maxRetries: 2
+      retryBackoffMs: 1000
+      timeoutSeconds: 30
+    dependsOn:
+      - payment-processor
+      - order-state
+
+  - name: step-shipping
+    type: processing.step
+    config:
+      componentId: "shipping-service"
+      successTransition: "shipping_confirmed"
+      compensateTransition: "shipping_failed"
+      maxRetries: 2
+      retryBackoffMs: 2000
+      timeoutSeconds: 30
+    dependsOn:
+      - shipping-service
+      - order-state
+
+  # --- Kafka messaging (replaces in-memory broker) ---
+  - name: event-broker
+    type: messaging.kafka
+    config:
+      brokers:
+        - "kafka:9092"
+      groupId: "orders-group"
+    dependsOn:
+      - order-state
+
+  - name: notification-handler
+    type: messaging.handler
+    config:
+      topic: "order.*"
+      description: "Handles notifications for all order lifecycle events"
+    dependsOn:
+      - event-broker
+
+  # --- Observability ---
+  - name: metrics
+    type: metrics.collector
+    config:
+      namespace: ecommerce_orders
+
+  - name: health
+    type: health.checker
+    config:
+      description: "Orders service health"
+
+# --- Workflow definitions ---
+workflows:
+  http:
+    router: router
+    server: web-server
+    routes:
+      # Protected: orders (requires JWT)
+      - method: "POST"
+        path: "/api/orders"
+        handler: orders-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/orders"
+        handler: orders-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/orders/{id}"
+        handler: orders-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+  # Order state machine
+  statemachine:
+    engine: order-state
+    resourceMappings:
+      - resourceType: "orders"
+        stateMachine: "order-state"
+        instanceIDKey: "id"
+    definitions:
+      - name: order-processing
+        description: "Production-realistic order processing pipeline"
+        initialState: "new"
+        states:
+          new:
+            description: "Order created, awaiting validation"
+            isFinal: false
+            isError: false
+          validating:
+            description: "Checking inventory availability"
+            isFinal: false
+            isError: false
+          validated:
+            description: "Inventory confirmed, ready for payment"
+            isFinal: false
+            isError: false
+          paying:
+            description: "Processing payment"
+            isFinal: false
+            isError: false
+          paid:
+            description: "Payment confirmed, ready for shipping"
+            isFinal: false
+            isError: false
+          payment_failed:
+            description: "Payment declined, may retry"
+            isFinal: false
+            isError: false
+          shipping:
+            description: "Generating shipping label"
+            isFinal: false
+            isError: false
+          shipped:
+            description: "Order shipped, in transit"
+            isFinal: false
+            isError: false
+          ship_failed:
+            description: "Shipping label generation failed, may retry"
+            isFinal: false
+            isError: false
+          delivered:
+            description: "Order delivered successfully"
+            isFinal: true
+            isError: false
+          cancelled:
+            description: "Order cancelled"
+            isFinal: true
+            isError: false
+          failed:
+            description: "Order processing failed permanently"
+            isFinal: true
+            isError: true
+        transitions:
+          start_validation:
+            fromState: "new"
+            toState: "validating"
+          validation_passed:
+            fromState: "validating"
+            toState: "validated"
+          validation_failed:
+            fromState: "validating"
+            toState: "failed"
+          start_payment:
+            fromState: "validated"
+            toState: "paying"
+            autoTransform: true
+          payment_approved:
+            fromState: "paying"
+            toState: "paid"
+          payment_declined:
+            fromState: "paying"
+            toState: "payment_failed"
+          retry_payment:
+            fromState: "payment_failed"
+            toState: "paying"
+          start_shipping:
+            fromState: "paid"
+            toState: "shipping"
+            autoTransform: true
+          shipping_confirmed:
+            fromState: "shipping"
+            toState: "shipped"
+          shipping_failed:
+            fromState: "shipping"
+            toState: "ship_failed"
+          retry_shipping:
+            fromState: "ship_failed"
+            toState: "shipping"
+          deliver_order:
+            fromState: "shipped"
+            toState: "delivered"
+            autoTransform: true
+          cancel_order:
+            fromState: "new"
+            toState: "cancelled"
+          cancel_validated:
+            fromState: "validated"
+            toState: "cancelled"
+    hooks:
+      - workflowType: "order-processing"
+        transitions: ["start_validation"]
+        handler: "step-validate"
+      - workflowType: "order-processing"
+        transitions: ["start_payment"]
+        handler: "step-payment"
+      - workflowType: "order-processing"
+        transitions: ["start_shipping"]
+        handler: "step-shipping"
+      - workflowType: "order-processing"
+        toStates: ["validated", "paid", "shipped", "delivered", "cancelled", "failed", "payment_failed", "ship_failed"]
+        handler: "notification-handler"
+
+  # Messaging subscriptions (via Kafka)
+  messaging:
+    broker: event-broker
+    subscriptions:
+      - topic: "order.created"
+        handler: notification-handler
+      - topic: "order.validated"
+        handler: notification-handler
+      - topic: "order.paid"
+        handler: notification-handler
+      - topic: "order.shipped"
+        handler: notification-handler
+      - topic: "order.delivered"
+        handler: notification-handler
+      - topic: "order.cancelled"
+        handler: notification-handler
+
+# --- Triggers ---
+triggers:
+  http:
+    routes:
+      - path: "/api/orders"
+        method: "POST"
+        workflow: "order-processing"
+        action: "start_validation"
+  event:
+    subscriptions:
+      - topic: "order.validated"
+        event: "order.validated"
+        workflow: "order-processing"
+        action: "start_payment"
+      - topic: "order.paid"
+        event: "order.paid"
+        workflow: "order-processing"
+        action: "start_shipping"

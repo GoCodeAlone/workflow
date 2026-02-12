@@ -1,0 +1,158 @@
+# Users & Products Container Configuration
+# Handles user authentication (JWT) and product catalog.
+#
+# Architecture:
+#   Gateway -> [users-products:8080] -> /api/auth/*     (JWT auth)
+#                                    -> /api/products/* (product catalog)
+#
+# No state machine, no processing steps, no Kafka.
+# Persistence via SQLite for user data.
+
+modules:
+  # --- HTTP infrastructure ---
+  - name: web-server
+    type: http.server
+    config:
+      address: ":8080"
+      readTimeout: "15s"
+      writeTimeout: "15s"
+
+  - name: router
+    type: http.router
+    config:
+      prefix: /api
+    dependsOn:
+      - web-server
+
+  # --- Middleware chain ---
+  - name: cors
+    type: http.middleware.cors
+    config:
+      allowedOrigins: ["*"]
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+      allowedHeaders: ["Content-Type", "Authorization"]
+    dependsOn:
+      - router
+
+  - name: request-id
+    type: http.middleware.requestid
+    dependsOn:
+      - cors
+
+  - name: rate-limiter
+    type: http.middleware.ratelimit
+    config:
+      requestsPerMinute: 300
+      burstSize: 50
+    dependsOn:
+      - request-id
+
+  # --- Authentication ---
+  - name: auth
+    type: auth.jwt
+    config:
+      secret: "${JWT_SECRET}"
+      tokenExpiry: "24h"
+      issuer: "workflow-store"
+    dependsOn:
+      - rate-limiter
+
+  - name: auth-middleware
+    type: http.middleware.auth
+    config:
+      authType: Bearer
+    dependsOn:
+      - auth
+
+  # --- API handlers ---
+  - name: products-api
+    type: api.handler
+    config:
+      resourceName: products
+      seedFile: "./seed/products.json"
+    dependsOn:
+      - rate-limiter
+
+  # --- Persistence ---
+  - name: users-db
+    type: database.workflow
+    config:
+      driver: "sqlite"
+      dsn: "./data/users-products.db"
+
+  - name: persistence
+    type: persistence.store
+    config:
+      database: "users-db"
+    dependsOn:
+      - users-db
+
+  # --- Observability ---
+  - name: metrics
+    type: metrics.collector
+    config:
+      namespace: ecommerce_users_products
+
+  - name: health
+    type: health.checker
+    config:
+      description: "Users & Products service health"
+
+# --- Workflow definitions ---
+workflows:
+  http:
+    router: router
+    server: web-server
+    routes:
+      # Public: product catalog (read-only)
+      - method: "GET"
+        path: "/api/products"
+        handler: products-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      - method: "GET"
+        path: "/api/products/{id}"
+        handler: products-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      # Public: authentication
+      - method: "POST"
+        path: "/api/auth/login"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      - method: "POST"
+        path: "/api/auth/register"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      # Protected: user profile (requires JWT)
+      - method: "GET"
+        path: "/api/auth/profile"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/auth/profile"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware

@@ -221,6 +221,21 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "reverseproxy":
 				e.logger.Debug("Loading reverse proxy module")
 				mod = reverseproxy.NewModule()
+			case "http.simple_proxy":
+				e.logger.Debug("Loading simple reverse proxy module")
+				sp := module.NewSimpleProxy(modCfg.Name)
+				if targets, ok := modCfg.Config["targets"].(map[string]interface{}); ok {
+					ts := make(map[string]string, len(targets))
+					for prefix, backend := range targets {
+						if s, ok := backend.(string); ok {
+							ts[prefix] = s
+						}
+					}
+					if err := sp.SetTargets(ts); err != nil {
+						return fmt.Errorf("simple proxy %q: %w", modCfg.Name, err)
+					}
+				}
+				mod = sp
 			case "httpserver.modular":
 				e.logger.Debug("Loading Modular HTTP server module")
 				mod = httpserver.NewHTTPServerModule()
@@ -341,7 +356,22 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				mod = module.NewNATSBroker(modCfg.Name)
 			case "messaging.kafka":
 				e.logger.Debug("Loading Kafka broker module")
-				mod = module.NewKafkaBroker(modCfg.Name)
+				kb := module.NewKafkaBroker(modCfg.Name)
+				if brokers, ok := modCfg.Config["brokers"].([]interface{}); ok {
+					bs := make([]string, 0, len(brokers))
+					for _, b := range brokers {
+						if s, ok := b.(string); ok {
+							bs = append(bs, s)
+						}
+					}
+					if len(bs) > 0 {
+						kb.SetBrokers(bs)
+					}
+				}
+				if groupID, ok := modCfg.Config["groupId"].(string); ok && groupID != "" {
+					kb.SetGroupID(groupID)
+				}
+				mod = kb
 			case "observability.otel":
 				e.logger.Debug("Loading OpenTelemetry tracing module")
 				mod = module.NewOTelTracing(modCfg.Name)
