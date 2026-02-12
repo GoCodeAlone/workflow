@@ -226,9 +226,8 @@ All 3 distributed services report as UP targets with sub-millisecond scrape dura
 | Target | Status | Scrape Duration |
 |--------|--------|----------------|
 | gateway:8080 | UP | ~0.5ms |
-| orders:8080 | UP | ~0.6ms |
+| orders:8080 | UP | ~0.8ms |
 | users-products:8080 | UP | ~0.5ms |
-| store:8080 (monolith) | DOWN | expected when running distributed |
 
 #### Prometheus Queries
 
