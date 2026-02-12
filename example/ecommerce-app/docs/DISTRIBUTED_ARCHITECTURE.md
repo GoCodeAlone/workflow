@@ -6,16 +6,40 @@ This document describes the multi-container distributed architecture of the Work
 
 The application is split into 3 containers communicating via Kafka events, plus observability infrastructure:
 
-```
-Browser --> [gateway:8080] --> /api/auth/*     --> [users-products:8080]
-                           --> /api/products/* --> [users-products:8080]
-                           --> /api/orders/*   --> [orders:8080]
-                           --> /static (SPA)
+```mermaid
+flowchart LR
+    Browser([Browser])
 
-[orders] <--> [Kafka] <--> [orders]  (order lifecycle events)
+    subgraph Gateway["gateway :8080"]
+        SPA[SPA Static Files]
+        Proxy[Reverse Proxy]
+    end
 
-[Prometheus:9090] scrapes all 3 services
-[Grafana:3000]    visualizes metrics
+    subgraph UP["users-products :8080"]
+        Auth[JWT Auth]
+        Products[Product Catalog]
+        UsersDB[(SQLite)]
+    end
+
+    subgraph Orders["orders :8080"]
+        OrdersAPI[Orders API]
+        SM[State Machine]
+        DC[Dynamic Components]
+        OrdersDB[(SQLite)]
+    end
+
+    Kafka{{Apache Kafka}}
+    Prom[Prometheus :9090]
+    Graf[Grafana :3000]
+
+    Browser --> Gateway
+    Proxy -->|"/api/auth, /api/products"| UP
+    Proxy -->|"/api/orders"| Orders
+    SM <-->|order events| Kafka
+    Prom -.->|scrape| Gateway
+    Prom -.->|scrape| UP
+    Prom -.->|scrape| Orders
+    Graf -.->|query| Prom
 ```
 
 ### Container Responsibilities
@@ -158,25 +182,31 @@ Users can view and update their profile information, or sign out.
 
 #### Request Path (Technical)
 
-```
-Browser POST /api/orders
-  -> gateway (simple_proxy) -> orders:8080/api/orders
-    -> auth-middleware (validates JWT)
-    -> orders-api (creates order + workflow instance)
-    -> state machine: new -> start_validation -> validating
-    -> step-validate: inventory-checker component runs
-    -> validation_passed -> validated
-    -> Kafka: publish "order.validated"
-    -> event trigger: start_payment
-    -> step-payment: payment-processor runs
-    -> payment_approved -> paid
-    -> Kafka: publish "order.paid"
-    -> event trigger: start_shipping
-    -> step-shipping: shipping-service runs
-    -> shipping_confirmed -> shipped
-    -> auto-transition: deliver_order -> delivered
-    -> Kafka: publish "order.delivered"
-    -> notification-handler logs all events
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant G as Gateway
+    participant O as Orders
+    participant K as Kafka
+
+    B->>G: POST /api/orders
+    G->>O: proxy request
+    O->>O: auth-middleware (validate JWT)
+    O->>O: create order + workflow instance
+    O->>O: start_validation → inventory-checker
+    O->>O: validation_passed → validated
+    O->>K: publish order.validated
+    K->>O: event trigger → start_payment
+    O->>O: payment-processor runs
+    O->>O: payment_approved → paid
+    O->>K: publish order.paid
+    K->>O: event trigger → start_shipping
+    O->>O: shipping-service runs
+    O->>O: shipping_confirmed → shipped
+    O->>O: deliver_order → delivered (auto)
+    O->>K: publish order.delivered
+    O-->>G: 201 Created
+    G-->>B: order response
 ```
 
 ---
@@ -330,14 +360,35 @@ To add a new container (e.g., a notifications service):
 
 The order processing pipeline is defined as a state machine with 12 states and 15 transitions:
 
-```
-new --> validating --> validated --> paying --> paid --> shipping --> shipped --> delivered
-  \                      \           \                     \
-   --> cancelled          --> cancelled  --> payment_failed   --> ship_failed
-                                             \                    \
-                                              --> paying (retry)   --> shipping (retry)
+```mermaid
+stateDiagram-v2
+    [*] --> new
+    new --> validating : start_validation
+    new --> cancelled : cancel_order
 
-validating --> failed (permanent)
+    validating --> validated : validation_passed
+    validating --> failed : validation_failed
+
+    validated --> paying : start_payment (auto)
+    validated --> cancelled : cancel_validated
+
+    paying --> paid : payment_approved
+    paying --> payment_failed : payment_declined
+
+    payment_failed --> paying : retry_payment
+
+    paid --> shipping : start_shipping (auto)
+
+    shipping --> shipped : shipping_confirmed
+    shipping --> ship_failed : shipping_failed
+
+    ship_failed --> shipping : retry_shipping
+
+    shipped --> delivered : deliver_order (auto)
+
+    delivered --> [*]
+    cancelled --> [*]
+    failed --> [*]
 ```
 
 ### State Descriptions
@@ -391,6 +442,75 @@ Four Go components are loaded at runtime via the Yaegi interpreter:
 | notification-sender | `components/notification_sender.go` | Simulates email/SMS notifications |
 
 These components run in a sandboxed stdlib-only environment and can be hot-reloaded without restarting the container.
+
+---
+
+## API Endpoints Reference
+
+All endpoints are accessed through the gateway at `http://localhost:8080`.
+
+### Authentication (proxied to users-products)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/auth/register` | No | Register a new user. Body: `{"name":"...","email":"...","password":"..."}` |
+| `POST` | `/api/auth/login` | No | Login. Body: `{"email":"...","password":"..."}`. Returns `{"token":"...","user":{...}}` |
+| `GET` | `/api/auth/profile` | Bearer | Get current user profile |
+| `PUT` | `/api/auth/profile` | Bearer | Update profile. Body: `{"name":"...","email":"..."}` |
+
+### Products (proxied to users-products)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/products` | No | List all products |
+| `GET` | `/api/products/{id}` | No | Get product by ID (e.g., `prod-001`) |
+
+### Orders (proxied to orders)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/orders` | Bearer | Place a new order. Body: `{"items":[...],"shipping":{...}}` |
+| `GET` | `/api/orders` | Bearer | List orders for current user |
+| `GET` | `/api/orders/{id}` | Bearer | Get order detail with pipeline status |
+
+### Health & Metrics (per-container)
+
+| Method | Path | Container | Description |
+|--------|------|-----------|-------------|
+| `GET` | `/healthz` | All | Health check (used by Docker healthcheck) |
+| `GET` | `/metrics` | All | Prometheus metrics endpoint |
+
+### Quick Test with curl
+
+```bash
+# Register
+curl -s http://localhost:8080/api/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Test User","email":"test@example.com","password":"password123"}'
+
+# Login (save token)
+TOKEN=$(curl -s http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"test@example.com","password":"password123"}' | jq -r .token)
+
+# Browse products
+curl -s http://localhost:8080/api/products | jq
+
+# Place an order
+curl -s http://localhost:8080/api/orders \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "items":[{"productId":"prod-001","name":"Mechanical Keyboard","price":149.99,"quantity":1}],
+    "shipping":{"address":"123 Main St","city":"Portland","state":"OR","zip":"97201"}
+  }'
+
+# Check order status (wait 1s for pipeline to complete)
+sleep 1
+curl -s http://localhost:8080/api/orders \
+  -H "Authorization: Bearer $TOKEN" | jq '.[0].state'
+# Expected: "delivered"
+```
 
 ---
 
