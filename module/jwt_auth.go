@@ -32,6 +32,8 @@ type JWTAuthModule struct {
 	users       map[string]*User // keyed by email
 	mu          sync.RWMutex
 	nextID      int
+	app         modular.Application
+	persistence *PersistenceStore // optional write-through backend
 }
 
 // NewJWTAuthModule creates a new JWT auth module
@@ -62,6 +64,16 @@ func (j *JWTAuthModule) Init(app modular.Application) error {
 	if j.secret == "" {
 		return fmt.Errorf("jwt secret is required")
 	}
+	j.app = app
+
+	// Wire persistence (optional)
+	var ps interface{}
+	if err := app.GetService("persistence", &ps); err == nil && ps != nil {
+		if store, ok := ps.(*PersistenceStore); ok {
+			j.persistence = store
+		}
+	}
+
 	return nil
 }
 
@@ -154,6 +166,17 @@ func (j *JWTAuthModule) handleRegister(w http.ResponseWriter, r *http.Request) {
 	j.nextID++
 	j.users[req.Email] = user
 
+	// Write-through to persistence
+	if j.persistence != nil {
+		_ = j.persistence.SaveUser(UserRecord{
+			ID:           user.ID,
+			Email:        user.Email,
+			Name:         user.Name,
+			PasswordHash: user.PasswordHash,
+			CreatedAt:    user.CreatedAt,
+		})
+	}
+
 	token, err := j.generateToken(user)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -242,6 +265,17 @@ func (j *JWTAuthModule) handleUpdateProfile(w http.ResponseWriter, r *http.Reque
 	}
 	j.mu.Unlock()
 
+	// Write-through to persistence
+	if j.persistence != nil {
+		_ = j.persistence.SaveUser(UserRecord{
+			ID:           user.ID,
+			Email:        user.Email,
+			Name:         user.Name,
+			PasswordHash: user.PasswordHash,
+			CreatedAt:    user.CreatedAt,
+		})
+	}
+
 	json.NewEncoder(w).Encode(user)
 }
 
@@ -301,8 +335,39 @@ func (j *JWTAuthModule) generateToken(user *User) (string, error) {
 	return token.SignedString([]byte(j.secret))
 }
 
-// Start is a no-op
+// Start loads persisted users if available.
 func (j *JWTAuthModule) Start(ctx context.Context) error {
+	if j.persistence == nil {
+		return nil
+	}
+
+	users, err := j.persistence.LoadUsers()
+	if err != nil {
+		return nil // Non-fatal — start without persisted users
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	for _, u := range users {
+		// Skip users that already exist in memory
+		if _, exists := j.users[u.Email]; exists {
+			continue
+		}
+		j.users[u.Email] = &User{
+			ID:           u.ID,
+			Email:        u.Email,
+			Name:         u.Name,
+			PasswordHash: u.PasswordHash,
+			CreatedAt:    u.CreatedAt,
+		}
+		// Track highest ID to avoid collisions with new registrations
+		var idNum int
+		if _, err := fmt.Sscanf(u.ID, "%d", &idNum); err == nil && idNum >= j.nextID {
+			j.nextID = idNum + 1
+		}
+	}
+
 	return nil
 }
 
@@ -324,5 +389,10 @@ func (j *JWTAuthModule) ProvidesServices() []modular.ServiceProvider {
 
 // RequiresServices returns services required by this module
 func (j *JWTAuthModule) RequiresServices() []modular.ServiceDependency {
-	return nil
+	return []modular.ServiceDependency{
+		{
+			Name:     "persistence",
+			Required: false, // Optional dependency
+		},
+	}
 }

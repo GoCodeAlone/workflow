@@ -90,6 +90,8 @@ type StateMachineEngine struct {
 	instancesByType   map[string][]string // workflowType -> []instanceID
 	transitionHandler TransitionHandler
 	mutex             sync.RWMutex
+	persistence       *PersistenceStore // optional write-through backend
+	wg                sync.WaitGroup    // tracks in-flight goroutines
 }
 
 // NewStateMachineEngine creates a new state machine engine
@@ -136,9 +138,180 @@ func (e *StateMachineEngine) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops the state machine engine
+// Stop stops the state machine engine. It waits for in-flight goroutines to
+// finish (or context to expire) and flushes all instances to persistence.
 func (e *StateMachineEngine) Stop(ctx context.Context) error {
+	// Wait for in-flight goroutines or context timeout
+	done := make(chan struct{})
+	go func() {
+		e.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// All goroutines finished
+	case <-ctx.Done():
+		// Timeout — proceed with flush anyway
+	}
+
+	// Flush all instances to persistence
+	if e.persistence != nil {
+		e.mutex.RLock()
+		instances := make([]*WorkflowInstance, 0, len(e.instances))
+		for _, inst := range e.instances {
+			instances = append(instances, inst)
+		}
+		e.mutex.RUnlock()
+
+		for _, inst := range instances {
+			_ = e.persistence.SaveWorkflowInstance(inst)
+		}
+	}
+
 	return nil
+}
+
+// SetPersistence sets the optional write-through persistence backend.
+func (e *StateMachineEngine) SetPersistence(ps *PersistenceStore) {
+	e.persistence = ps
+}
+
+// TrackGoroutine spawns a goroutine tracked by the engine's WaitGroup so
+// that Stop() can drain in-flight work before shutdown.
+func (e *StateMachineEngine) TrackGoroutine(fn func()) {
+	e.wg.Add(1)
+	go func() {
+		defer e.wg.Done()
+		fn()
+	}()
+}
+
+// LoadAllPersistedInstances loads workflow instances from persistence for all
+// registered definition types and populates the in-memory maps. Instances that
+// already exist in memory are skipped.
+func (e *StateMachineEngine) LoadAllPersistedInstances() error {
+	if e.persistence == nil {
+		return nil
+	}
+
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	for defName := range e.definitions {
+		instances, err := e.persistence.LoadWorkflowInstances(defName)
+		if err != nil {
+			return fmt.Errorf("failed to load instances for %q: %w", defName, err)
+		}
+
+		for _, inst := range instances {
+			// Skip instances that already exist in memory
+			if _, exists := e.instances[inst.ID]; exists {
+				continue
+			}
+
+			e.instances[inst.ID] = inst
+
+			if _, ok := e.instancesByType[inst.WorkflowType]; !ok {
+				e.instancesByType[inst.WorkflowType] = make([]string, 0)
+			}
+			e.instancesByType[inst.WorkflowType] = append(e.instancesByType[inst.WorkflowType], inst.ID)
+		}
+	}
+
+	return nil
+}
+
+// RecoverProcessingInstances finds instances stuck in intermediate processing
+// states and re-triggers their transitions so processing can resume after a
+// restart. It resets each stuck instance back to PreviousState and re-fires
+// the transition that originally moved it into the processing state.
+func (e *StateMachineEngine) RecoverProcessingInstances(ctx context.Context, processingStates []string) int {
+	if len(processingStates) == 0 {
+		return 0
+	}
+
+	stateSet := make(map[string]bool, len(processingStates))
+	for _, s := range processingStates {
+		stateSet[s] = true
+	}
+
+	e.mutex.RLock()
+	// Collect instances that need recovery
+	type recoveryItem struct {
+		instanceID     string
+		previousState  string
+		currentState   string
+		workflowType   string
+		transitionName string
+		data           map[string]interface{}
+	}
+	var toRecover []recoveryItem
+
+	for _, inst := range e.instances {
+		if inst.Completed || !stateSet[inst.CurrentState] || inst.PreviousState == "" {
+			continue
+		}
+
+		// Find the transition that goes from PreviousState to CurrentState
+		def, ok := e.definitions[inst.WorkflowType]
+		if !ok {
+			continue
+		}
+
+		var transName string
+		for tName, trans := range def.Transitions {
+			if trans.FromState == inst.PreviousState && trans.ToState == inst.CurrentState {
+				transName = tName
+				break
+			}
+		}
+		if transName == "" {
+			continue
+		}
+
+		dataCopy := make(map[string]interface{})
+		for k, v := range inst.Data {
+			dataCopy[k] = v
+		}
+
+		toRecover = append(toRecover, recoveryItem{
+			instanceID:     inst.ID,
+			previousState:  inst.PreviousState,
+			currentState:   inst.CurrentState,
+			workflowType:   inst.WorkflowType,
+			transitionName: transName,
+			data:           dataCopy,
+		})
+	}
+	e.mutex.RUnlock()
+
+	// Reset state and re-trigger transitions
+	for _, item := range toRecover {
+		e.mutex.Lock()
+		if inst, ok := e.instances[item.instanceID]; ok {
+			inst.CurrentState = item.previousState
+			inst.LastUpdated = time.Now()
+		}
+		e.mutex.Unlock()
+
+		// Persist the reset state
+		if e.persistence != nil {
+			if inst, ok := e.instances[item.instanceID]; ok {
+				_ = e.persistence.SaveWorkflowInstance(inst)
+			}
+		}
+
+		// Re-trigger the transition asynchronously
+		instanceID := item.instanceID
+		transName := item.transitionName
+		data := item.data
+		e.TrackGoroutine(func() {
+			_ = e.TriggerTransition(ctx, instanceID, transName, data)
+		})
+	}
+
+	return len(toRecover)
 }
 
 // ProvidesServices returns services provided by this module
@@ -224,7 +397,6 @@ func (e *StateMachineEngine) CreateWorkflow(
 
 	// Store the instance
 	e.mutex.Lock()
-	defer e.mutex.Unlock()
 	e.instances[id] = instance
 
 	// Add to type index
@@ -232,6 +404,12 @@ func (e *StateMachineEngine) CreateWorkflow(
 		e.instancesByType[workflowType] = make([]string, 0)
 	}
 	e.instancesByType[workflowType] = append(e.instancesByType[workflowType], id)
+	e.mutex.Unlock()
+
+	// Write-through to persistence
+	if e.persistence != nil {
+		_ = e.persistence.SaveWorkflowInstance(instance)
+	}
 
 	return instance, nil
 }
@@ -348,6 +526,11 @@ func (e *StateMachineEngine) TriggerTransition(
 		}
 	}
 
+	// Write-through to persistence after state commit
+	if e.persistence != nil {
+		_ = e.persistence.SaveWorkflowInstance(instance)
+	}
+
 	// Check for auto-transform transitions from the new state.
 	// If any transition has AutoTransform=true and its FromState matches
 	// the current state, fire it asynchronously to continue the pipeline.
@@ -359,9 +542,9 @@ func (e *StateMachineEngine) TriggerTransition(
 				for k, v := range instance.Data {
 					autoData[k] = v
 				}
-				go func() {
+				e.TrackGoroutine(func() {
 					_ = e.TriggerTransition(ctx, workflowID, autoTransName, autoData)
-				}()
+				})
 				break // Only fire one auto-transition per state entry
 			}
 		}

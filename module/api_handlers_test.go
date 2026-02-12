@@ -41,14 +41,20 @@ func TestRESTAPIHandler_ProvidesServices(t *testing.T) {
 func TestRESTAPIHandler_RequiresServices(t *testing.T) {
 	h := NewRESTAPIHandler("test-handler", "orders")
 	deps := h.RequiresServices()
-	if len(deps) != 1 {
-		t.Fatalf("expected 1 dependency, got %d", len(deps))
+	if len(deps) != 2 {
+		t.Fatalf("expected 2 dependencies, got %d", len(deps))
 	}
 	if deps[0].Name != "message-broker" {
 		t.Errorf("expected dependency 'message-broker', got '%s'", deps[0].Name)
 	}
 	if deps[0].Required {
 		t.Error("expected message-broker to be optional")
+	}
+	if deps[1].Name != "persistence" {
+		t.Errorf("expected dependency 'persistence', got '%s'", deps[1].Name)
+	}
+	if deps[1].Required {
+		t.Error("expected persistence to be optional")
 	}
 }
 
@@ -750,6 +756,9 @@ func TestRESTAPIHandler_LoadSeedData(t *testing.T) {
 	h.SetSeedFile(seedFile)
 	if err := h.Init(app); err != nil {
 		t.Fatalf("Init failed: %v", err)
+	}
+	if err := h.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
 	}
 
 	// Verify seed data was loaded

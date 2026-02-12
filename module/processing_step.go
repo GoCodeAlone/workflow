@@ -196,15 +196,16 @@ func (ps *ProcessingStep) calculateBackoff(attempt int) time.Duration {
 	return time.Duration(base) * time.Millisecond
 }
 
-// fireTransition triggers a state machine transition in a goroutine to avoid
-// deadlocking when called from inside a transition handler.
+// fireTransition triggers a state machine transition to avoid deadlocking
+// when called from inside a transition handler. Uses the engine's tracked
+// goroutine so shutdown can drain in-flight work.
 func (ps *ProcessingStep) fireTransition(ctx context.Context, workflowID, transition string, data map[string]interface{}) {
 	if transition == "" || ps.smEngine == nil {
 		return
 	}
-	go func() {
+	ps.smEngine.TrackGoroutine(func() {
 		_ = ps.smEngine.TriggerTransition(ctx, workflowID, transition, data)
-	}()
+	})
 }
 
 // recordMetrics records processing step metrics if a collector is available.

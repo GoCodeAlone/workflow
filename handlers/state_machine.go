@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/module"
@@ -370,12 +371,42 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 	}
 
 	// Process transition hooks if any
+	var hooksConfig []interface{}
 	if hooks, ok := smConfig["hooks"].([]interface{}); ok && len(hooks) > 0 {
+		hooksConfig = hooks
 		// Create a single composite handler for all hooks
 		compositeHandler := h.createCompositeTransitionHandler(app, hooks)
 
 		// Register the handler with the engine
 		smEngine.AddGlobalTransitionHandler(compositeHandler)
+	}
+
+	// Wire persistence (optional) — look up "persistence" from the service registry
+	var persistenceSvc interface{}
+	if err := app.GetService("persistence", &persistenceSvc); err == nil && persistenceSvc != nil {
+		if ps, ok := persistenceSvc.(*module.PersistenceStore); ok {
+			smEngine.SetPersistence(ps)
+
+			// Restore workflow instances from a previous run
+			if loadErr := smEngine.LoadAllPersistedInstances(); loadErr != nil {
+				fmt.Printf("Warning: failed to load persisted instances: %v\n", loadErr)
+			}
+
+			// Recover instances stuck in processing states.
+			// Extract processing states from hook config (states that have
+			// processing.step handlers which represent intermediate states).
+			processingStates := h.extractProcessingStates(hooksConfig, definitions)
+			if len(processingStates) > 0 {
+				go func() {
+					// Small startup delay to let all modules finish initializing
+					time.Sleep(2 * time.Second)
+					recovered := smEngine.RecoverProcessingInstances(context.Background(), processingStates)
+					if recovered > 0 {
+						fmt.Printf("Recovered %d stuck workflow instances\n", recovered)
+					}
+				}()
+			}
+		}
 	}
 
 	return nil
@@ -547,6 +578,90 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 
 		return nil
 	})
+}
+
+// extractProcessingStates identifies intermediate processing states by looking
+// at hook handlers that reference processing steps. A state is considered a
+// processing state if a hook targets transitions into it via a processing.step
+// handler. Falls back to scanning transition definitions for auto-transform
+// targets that aren't final states.
+func (h *StateMachineWorkflowHandler) extractProcessingStates(
+	hooksConfig []interface{},
+	definitions []interface{},
+) []string {
+	stateSet := make(map[string]bool)
+
+	// Scan hooks for processing step handlers — the toStates of such hooks
+	// are intermediate processing states.
+	for _, hookObj := range hooksConfig {
+		hookMap, ok := hookObj.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		handler, _ := hookMap["handler"].(string)
+		if handler == "" {
+			continue
+		}
+
+		// Check if the handler name suggests a processing step
+		if !strings.Contains(handler, "processing") && !strings.Contains(handler, "step") {
+			continue
+		}
+
+		// The toStates of this hook are processing states
+		if toStates, ok := hookMap["toStates"].([]interface{}); ok {
+			for _, s := range toStates {
+				if sStr, ok := s.(string); ok {
+					stateSet[sStr] = true
+				}
+			}
+		}
+	}
+
+	// If no processing states found from hooks, try to infer from definitions.
+	// Auto-transform transitions target intermediate states that may need recovery.
+	if len(stateSet) == 0 {
+		for _, defObj := range definitions {
+			def, ok := defObj.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			states, _ := def["states"].(map[string]interface{})
+			transitions, _ := def["transitions"].(map[string]interface{})
+			if transitions == nil {
+				continue
+			}
+			for _, transObj := range transitions {
+				transMap, ok := transObj.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				autoTransform, _ := transMap["autoTransform"].(bool)
+				if !autoTransform {
+					continue
+				}
+				toState, _ := transMap["toState"].(string)
+				if toState == "" {
+					continue
+				}
+				// Check that the target is not a final state
+				if states != nil {
+					if stateObj, ok := states[toState].(map[string]interface{}); ok {
+						if isFinal, _ := stateObj["isFinal"].(bool); isFinal {
+							continue
+						}
+					}
+				}
+				stateSet[toState] = true
+			}
+		}
+	}
+
+	result := make([]string, 0, len(stateSet))
+	for s := range stateSet {
+		result = append(result, s)
+	}
+	return result
 }
 
 // ExecuteWorkflow executes a workflow with the given action and input data

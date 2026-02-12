@@ -30,6 +30,7 @@ type RESTAPIHandler struct {
 	eventBroker  MessageProducer // Optional dependency for publishing events
 	logger       modular.Logger
 	app          modular.Application
+	persistence  *PersistenceStore // optional write-through backend
 
 	// Workflow-related fields
 	workflowType     string // The type of workflow to use (e.g., "order-workflow")
@@ -95,6 +96,13 @@ func (h *RESTAPIHandler) Constructor() modular.ModuleConstructor {
 		if broker, ok := services["message-broker"]; ok {
 			if mb, ok := broker.(MessageBroker); ok {
 				handler.eventBroker = mb.Producer()
+			}
+		}
+
+		// Look for persistence store (optional)
+		if ps, ok := services["persistence"]; ok {
+			if store, ok := ps.(*PersistenceStore); ok {
+				handler.persistence = store
 			}
 		}
 
@@ -183,12 +191,13 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 		}
 	}
 
-	// Load seed data if configured
-	if h.seedFile != "" {
-		if err := h.loadSeedData(h.seedFile); err != nil {
-			h.logger.Warn(fmt.Sprintf("Failed to load seed data from %s: %v", h.seedFile, err))
-		} else {
-			h.logger.Info(fmt.Sprintf("Loaded seed data from %s", h.seedFile))
+	// Wire persistence (optional)
+	if h.persistence == nil {
+		var ps interface{}
+		if err := app.GetService("persistence", &ps); err == nil && ps != nil {
+			if store, ok := ps.(*PersistenceStore); ok {
+				h.persistence = store
+			}
 		}
 	}
 
@@ -443,6 +452,13 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 
 	h.mu.Unlock()
 
+	// Write-through to persistence
+	if h.persistence != nil {
+		resource.Data["state"] = resource.State
+		resource.Data["lastUpdate"] = resource.LastUpdate
+		_ = h.persistence.SaveResource(h.resourceName, resource.ID, resource.Data)
+	}
+
 	// Publish event if broker is available
 	if h.eventBroker != nil {
 		eventData, _ := json.Marshal(map[string]interface{}{
@@ -536,6 +552,13 @@ func (h *RESTAPIHandler) syncResourceStateFromEngine(instanceId, resourceId stri
 		res.State = instance.CurrentState
 		res.LastUpdate = instance.LastUpdated.Format(time.RFC3339)
 		h.resources[resourceId] = res
+
+		// Write-through to persistence
+		if h.persistence != nil {
+			res.Data["state"] = res.State
+			res.Data["lastUpdate"] = res.LastUpdate
+			_ = h.persistence.SaveResource(h.resourceName, res.ID, res.Data)
+		}
 	}
 }
 
@@ -577,6 +600,11 @@ func (h *RESTAPIHandler) handlePut(resourceId string, w http.ResponseWriter, r *
 	h.resources[resourceId] = RESTResource{
 		ID:   resourceId,
 		Data: data,
+	}
+
+	// Write-through to persistence
+	if h.persistence != nil {
+		_ = h.persistence.SaveResource(h.resourceName, resourceId, data)
 	}
 
 	if err := json.NewEncoder(w).Encode(h.resources[resourceId]); err != nil {
@@ -626,6 +654,11 @@ func (h *RESTAPIHandler) handleDelete(resourceId string, w http.ResponseWriter, 
 
 	// Delete the resource
 	delete(h.resources, resourceId)
+
+	// Write-through to persistence
+	if h.persistence != nil {
+		_ = h.persistence.DeleteResource(h.resourceName, resourceId)
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 
@@ -1051,8 +1084,47 @@ func (h *RESTAPIHandler) loadSeedData(path string) error {
 	return nil
 }
 
-// Start is a no-op for this handler
+// Start loads persisted resources (if available) and seed data.
 func (h *RESTAPIHandler) Start(ctx context.Context) error {
+	// Load persisted resources
+	if h.persistence != nil {
+		loaded, err := h.persistence.LoadResources(h.resourceName)
+		if err != nil {
+			if h.logger != nil {
+				h.logger.Warn(fmt.Sprintf("Failed to load persisted resources for %s: %v", h.resourceName, err))
+			}
+		} else if len(loaded) > 0 {
+			h.mu.Lock()
+			for id, data := range loaded {
+				state, _ := data["state"].(string)
+				lastUpdate, _ := data["lastUpdate"].(string)
+				h.resources[id] = RESTResource{
+					ID:         id,
+					Data:       data,
+					State:      state,
+					LastUpdate: lastUpdate,
+				}
+			}
+			h.mu.Unlock()
+			if h.logger != nil {
+				h.logger.Info(fmt.Sprintf("Loaded %d persisted %s resources", len(loaded), h.resourceName))
+			}
+			// Skip seed data if we loaded persisted data
+			return nil
+		}
+	}
+
+	// Load seed data only if no persisted data was loaded
+	if h.seedFile != "" {
+		if err := h.loadSeedData(h.seedFile); err != nil {
+			if h.logger != nil {
+				h.logger.Warn(fmt.Sprintf("Failed to load seed data from %s: %v", h.seedFile, err))
+			}
+		} else if h.logger != nil {
+			h.logger.Info(fmt.Sprintf("Loaded seed data from %s", h.seedFile))
+		}
+	}
+
 	return nil
 }
 
@@ -1077,6 +1149,10 @@ func (h *RESTAPIHandler) RequiresServices() []modular.ServiceDependency {
 	return []modular.ServiceDependency{
 		{
 			Name:     "message-broker",
+			Required: false, // Optional dependency
+		},
+		{
+			Name:     "persistence",
 			Required: false, // Optional dependency
 		},
 	}

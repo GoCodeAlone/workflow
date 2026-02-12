@@ -93,6 +93,16 @@ func (p *PersistenceStore) RequiresServices() []modular.ServiceDependency {
 
 // migrate creates the required tables if they don't already exist.
 func (p *PersistenceStore) migrate() error {
+	// Enable WAL mode for concurrent read/write performance
+	if _, err := p.db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		return fmt.Errorf("failed to enable WAL mode: %w", err)
+	}
+
+	// Set busy timeout to avoid SQLITE_BUSY errors during concurrent access
+	if _, err := p.db.Exec(`PRAGMA busy_timeout=5000`); err != nil {
+		return fmt.Errorf("failed to set busy timeout: %w", err)
+	}
+
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS workflow_instances (
 			id TEXT PRIMARY KEY,
@@ -121,6 +131,11 @@ func (p *PersistenceStore) migrate() error {
 			password_hash TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
+		// Indexes for query performance
+		`CREATE INDEX IF NOT EXISTS idx_instances_type ON workflow_instances(workflow_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_instances_state ON workflow_instances(current_state)`,
+		`CREATE INDEX IF NOT EXISTS idx_instances_completed ON workflow_instances(completed)`,
+		`CREATE INDEX IF NOT EXISTS idx_resources_type ON resources(resource_type)`,
 	}
 
 	for _, stmt := range statements {
@@ -288,6 +303,12 @@ func (p *PersistenceStore) SaveUser(user UserRecord) error {
 			password_hash = excluded.password_hash`,
 		user.ID, user.Email, user.Name, user.PasswordHash, user.CreatedAt.Format(time.RFC3339Nano),
 	)
+	return err
+}
+
+// DeleteResource deletes a resource by type and ID.
+func (p *PersistenceStore) DeleteResource(resourceType, id string) error {
+	_, err := p.db.Exec(`DELETE FROM resources WHERE resource_type = ? AND id = ?`, resourceType, id)
 	return err
 }
 
