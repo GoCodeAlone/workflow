@@ -23,6 +23,11 @@ async function request(method, path, body = null) {
   const data = await res.json().catch(() => null);
 
   if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.hash = '#/login';
+    }
     const message = (data && data.error) || (data && data.message) || `Request failed (${res.status})`;
     throw new Error(message);
   }
