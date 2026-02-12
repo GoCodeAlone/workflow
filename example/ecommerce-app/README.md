@@ -73,67 +73,35 @@ Open [http://localhost:8080](http://localhost:8080).
 
 ### System Diagram
 
-```
-                           +-----------------+
-                           |   Browser SPA   |
-                           |  (vanilla JS)   |
-                           +--------+--------+
-                                    |
-                              HTTP :8080
-                                    |
-                 +------------------+------------------+
-                 |            web-server               |
-                 |          (http.server)               |
-                 +--+-------------------+--+-----------+
-                    |                   |  |
-          +---------+------+     +------+--+--------+
-          | static.fileserver|   |     router       |
-          |    (SPA files)   |   |  (http.router)   |
-          +------------------+   +------+-----------+
-                                        |
-                          +-------------+-------------+
-                          |             |             |
-                     cors + request-id + rate-limiter
-                          |             |             |
-                +---------+--+  +-------+---+  +-----+-------+
-                | /api/auth/* |  |/api/products|  |/api/orders  |
-                |  (auth.jwt) |  | (api.handler)|  |(api.handler)|
-                +-------------+  +-------------+  +------+------+
-                                                         |
-                                                  auth-middleware
-                                                         |
-                                                  +------+------+
-                                                  | orders-api  |
-                                                  +------+------+
-                                                         |
-                                                +--------+--------+
-                                                | statemachine     |
-                                                | engine           |
-                                                +--------+--------+
-                                                         |
-                        +----------------+---------------+---------------+
-                        |                |               |               |
-               +--------+------+ +------+------+ +------+------+ +-----+--------+
-               | step-validate | | step-payment | | step-shipping| | notification |
-               |(processing.   | |(processing.  | |(processing.  | | handler      |
-               |  step)        | |  step)       | |  step)       | |              |
-               +--------+------+ +------+------+ +------+------+ +--------------+
-                        |                |               |
-               +--------+------+ +------+------+ +------+------+
-               | inventory-    | | payment-    | | shipping-   |
-               | checker       | | processor   | | service     |
-               | (dynamic)     | | (dynamic)   | | (dynamic)   |
-               +---------------+ +-------------+ +-------------+
-                                                         |
-                                                +--------+--------+
-                                                | messaging.broker |
-                                                | (event pub/sub)  |
-                                                +--------+--------+
-                                                         |
-                                                +--------+--------+
-                                                |  persistence    |
-                                                |  (SQLite)       |
-                                                +-----------------+
+```mermaid
+graph TD
+    Browser["Browser SPA<br/>(vanilla JS)"] -->|HTTP :8080| WebServer["web-server<br/>(http.server)"]
+
+    WebServer --> SPA["static.fileserver<br/>(SPA files)"]
+    WebServer --> Router["router<br/>(http.router)"]
+
+    Router --> MW["cors + request-id + rate-limiter"]
+
+    MW --> Auth["/api/auth/*<br/>(auth.jwt)"]
+    MW --> Products["/api/products<br/>(api.handler)"]
+    MW --> OrdersRoute["/api/orders<br/>(api.handler)"]
+
+    OrdersRoute --> AuthMW["auth-middleware"]
+    AuthMW --> OrdersAPI["orders-api"]
+
+    OrdersAPI --> SM["statemachine engine<br/>(order-state)"]
+
+    SM --> StepValidate["step-validate<br/>(processing.step)"]
+    SM --> StepPayment["step-payment<br/>(processing.step)"]
+    SM --> StepShipping["step-shipping<br/>(processing.step)"]
+    SM --> NotifHandler["notification<br/>handler"]
+
+    StepValidate --> InvChecker["inventory-checker<br/>(dynamic)"]
+    StepPayment --> PayProcessor["payment-processor<br/>(dynamic)"]
+    StepShipping --> ShipService["shipping-service<br/>(dynamic)"]
+
+    SM --> Broker["messaging.broker<br/>(event pub/sub)"]
+    SM --> Persist["persistence<br/>(SQLite)"]
 ```
 
 ### Module Inventory
@@ -187,50 +155,36 @@ external services with retry), and **dynamic components** (simulate integrations
 
 ### Pipeline Flow
 
-```
-POST /api/orders
-       │
-       ▼
-  ┌─────────┐  start_validation   ┌────────────┐  validation_passed  ┌───────────┐
-  │   new   │ ──────────────────> │ validating  │ ──────────────────> │ validated │
-  └─────────┘                     └────────────┘                      └─────┬─────┘
-       │                                │                                   │
-  cancel_order                   validation_failed              event: order.validated
-       │                                │                          start_payment
-       ▼                                ▼                                   │
-  ┌───────────┐                   ┌──────────┐                              ▼
-  │ cancelled │                   │  failed  │                        ┌──────────┐
-  └───────────┘                   └──────────┘                        │  paying  │
-                                                                      └────┬─────┘
-                                                              ┌────────────┤
-                                                    payment_approved  payment_declined
-                                                              │            │
-                                                              ▼            ▼
-                                                         ┌────────┐  ┌──────────────┐
-                                                         │  paid  │  │payment_failed│
-                                                         └───┬────┘  └──────────────┘
-                                                             │           │
-                                                   event: order.paid  retry_payment
-                                                    start_shipping     (up to 2x)
-                                                             │
-                                                             ▼
-                                                       ┌──────────┐
-                                                       │ shipping │
-                                                       └────┬─────┘
-                                               ┌────────────┤
-                                     shipping_confirmed  shipping_failed
-                                               │            │
-                                               ▼            ▼
-                                          ┌─────────┐  ┌────────────┐
-                                          │ shipped │  │ ship_failed│
-                                          └────┬────┘  └────────────┘
-                                               │           │
-                                         deliver_order  retry_shipping
-                                               │         (up to 2x)
-                                               ▼
-                                          ┌───────────┐
-                                          │ delivered │  (final)
-                                          └───────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> new : POST /api/orders
+
+    new --> validating : start_validation
+    new --> cancelled : cancel_order
+
+    validating --> validated : validation_passed
+    validating --> failed : validation_failed
+
+    validated --> paying : start_payment (auto)
+    validated --> cancelled : cancel_validated
+
+    paying --> paid : payment_approved
+    paying --> payment_failed : payment_declined
+
+    payment_failed --> paying : retry_payment (up to 2x)
+
+    paid --> shipping : start_shipping (auto)
+
+    shipping --> shipped : shipping_confirmed
+    shipping --> ship_failed : shipping_failed
+
+    ship_failed --> shipping : retry_shipping (up to 2x)
+
+    shipped --> delivered : deliver_order (auto)
+
+    delivered --> [*]
+    cancelled --> [*]
+    failed --> [*]
 ```
 
 ### What Each Dynamic Component Does
@@ -424,9 +378,16 @@ The storefront is a vanilla JavaScript SPA with no build step. It's served by th
 
 The order detail page shows a visual processing timeline:
 
-```
-[Created] --> [Checking Inventory] --> [Processing Payment] --> [Shipping] --> [Delivered]
-    V               V                        *  (current)
+```mermaid
+graph LR
+    Created(["Created ✓"]) --> Inventory(["Checking Inventory ✓"])
+    Inventory --> Payment(["Processing Payment ●"])
+    Payment --> Shipping(["Shipping"])
+    Shipping --> Delivered(["Delivered"])
+
+    style Created fill:#d4edda,stroke:#28a745
+    style Inventory fill:#d4edda,stroke:#28a745
+    style Payment fill:#cce5ff,stroke:#007bff,stroke-width:3px
 ```
 
 - Completed stages show green checkmarks
