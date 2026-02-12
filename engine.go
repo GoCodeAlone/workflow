@@ -283,15 +283,17 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					return fmt.Errorf("dynamic component %q not found in registry", componentID)
 				}
 				adapter := dynamic.NewModuleAdapter(comp)
+				// Always register the module name as a provided service so processing
+				// steps and other modules can look it up by name.
+				providesList := []string{modCfg.Name}
 				if provides, ok := modCfg.Config["provides"].([]interface{}); ok {
-					svcs := make([]string, 0, len(provides))
 					for _, p := range provides {
 						if s, ok := p.(string); ok {
-							svcs = append(svcs, s)
+							providesList = append(providesList, s)
 						}
 					}
-					adapter.SetProvides(svcs)
 				}
+				adapter.SetProvides(providesList)
 				if requires, ok := modCfg.Config["requires"].([]interface{}); ok {
 					svcs := make([]string, 0, len(requires))
 					for _, r := range requires {

@@ -418,6 +418,7 @@ workflows:
           start_payment:
             fromState: "validated"
             toState: "paying"
+            autoTransform: true
           payment_approved:
             fromState: "paying"
             toState: "paid"
@@ -431,6 +432,7 @@ workflows:
           start_shipping:
             fromState: "paid"
             toState: "shipping"
+            autoTransform: true
           shipping_confirmed:
             fromState: "shipping"
             toState: "shipped"
@@ -444,6 +446,7 @@ workflows:
           deliver_order:
             fromState: "shipped"
             toState: "delivered"
+            autoTransform: true
           cancel_order:
             fromState: "new"
             toState: "cancelled"

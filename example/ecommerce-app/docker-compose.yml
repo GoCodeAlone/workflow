@@ -4,7 +4,8 @@ services:
       context: ../..
       dockerfile: example/ecommerce-app/Dockerfile
     ports:
-      - "8080:8080"
+      - "8080:8080"   # Workflow engine (SPA, API, health, metrics)
+      - "8081:8081"   # Management API (AI, dynamic components, workflow UI)
     environment:
       - JWT_SECRET=change-me-in-production-use-a-real-secret
     volumes:

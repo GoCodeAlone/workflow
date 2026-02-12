@@ -54,8 +54,8 @@ export function getOrders() {
   return request('GET', '/api/orders');
 }
 
-export function createOrder(items, shipping) {
-  return request('POST', '/api/orders', { items, shipping });
+export function createOrder(items, shipping, total) {
+  return request('POST', '/api/orders', { items, shipping, total });
 }
 
 export function getOrder(id) {

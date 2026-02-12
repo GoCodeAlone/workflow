@@ -58,12 +58,9 @@ func (ps *ProcessingStep) Name() string {
 }
 
 // Init resolves dependencies from the service registry.
+// Note: service registration is handled by ProvidesServices() — the framework
+// calls it after Init completes, so we don't register here.
 func (ps *ProcessingStep) Init(app modular.Application) error {
-	// Register self as a service so hooks can look us up
-	if err := app.RegisterService(ps.name, ps); err != nil {
-		return fmt.Errorf("processing step %q: register service: %w", ps.name, err)
-	}
-
 	// Resolve the executor (dynamic component) from the service registry
 	if ps.config.ComponentID != "" {
 		var executor Executor
@@ -73,10 +70,18 @@ func (ps *ProcessingStep) Init(app modular.Application) error {
 		ps.executor = executor
 	}
 
-	// Resolve state machine engine (optional, for firing transitions)
+	// Resolve state machine engine (optional, for firing transitions).
+	// Try by standard name first, then scan the registry for any engine.
 	var smEngine *StateMachineEngine
 	if err := app.GetService(StateMachineEngineName, &smEngine); err == nil && smEngine != nil {
 		ps.smEngine = smEngine
+	} else {
+		for _, svc := range app.SvcRegistry() {
+			if engine, ok := svc.(*StateMachineEngine); ok {
+				ps.smEngine = engine
+				break
+			}
+		}
 	}
 
 	// Resolve metrics collector (optional)

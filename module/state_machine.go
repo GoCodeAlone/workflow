@@ -348,6 +348,25 @@ func (e *StateMachineEngine) TriggerTransition(
 		}
 	}
 
+	// Check for auto-transform transitions from the new state.
+	// If any transition has AutoTransform=true and its FromState matches
+	// the current state, fire it asynchronously to continue the pipeline.
+	if !instance.Completed {
+		for autoName, autoTrans := range def.Transitions {
+			if autoTrans.AutoTransform && autoTrans.FromState == instance.CurrentState {
+				autoTransName := autoName
+				autoData := make(map[string]interface{})
+				for k, v := range instance.Data {
+					autoData[k] = v
+				}
+				go func() {
+					_ = e.TriggerTransition(ctx, workflowID, autoTransName, autoData)
+				}()
+				break // Only fire one auto-transition per state entry
+			}
+		}
+	}
+
 	return nil
 }
 

@@ -71,6 +71,8 @@ export function attachCheckoutHandlers() {
 
     const items = getCartItems().map(item => ({
       productId: item.productId,
+      name: item.name,
+      price: item.price,
       quantity: item.quantity,
     }));
 
@@ -82,7 +84,8 @@ export function attachCheckoutHandlers() {
     };
 
     try {
-      const order = await api.createOrder(items, shipping);
+      const total = getCartTotal();
+      const order = await api.createOrder(items, shipping, total);
       clearCart();
       showToast('Order placed successfully!', 'success');
       window.location.hash = `#/orders/${order.id || order.orderId}`;
@@ -116,7 +119,7 @@ async function loadOrders() {
 
   try {
     const data = await api.getOrders();
-    const orders = Array.isArray(data) ? data : (data.orders || []);
+    const orders = (Array.isArray(data) ? data : (data.orders || [])).map(normalizeOrder);
 
     if (orders.length === 0) {
       container.innerHTML = `
@@ -307,7 +310,7 @@ async function loadOrderDetail(id) {
   if (!container) return;
 
   try {
-    const order = await api.getOrder(id);
+    const order = normalizeOrder(await api.getOrder(id));
     const state = (order.state || order.status || 'pending').toLowerCase();
     const items = order.items || [];
     const shipping = order.shipping || {};
@@ -364,6 +367,26 @@ async function loadOrderDetail(id) {
   } catch (err) {
     container.innerHTML = `<p class="text-muted">Failed to load order. ${escapeHtml(err.message)}</p>`;
   }
+}
+
+// normalizeOrder flattens the API response format.
+// The API returns {id, data: {items, shipping, ...}, state, lastUpdate}
+// but the SPA expects {id, items, shipping, state, ...} at the top level.
+function normalizeOrder(raw) {
+  const order = { ...raw };
+  if (raw.data && typeof raw.data === 'object') {
+    // Merge nested data fields to top level (items, shipping, total, userId, etc.)
+    for (const [k, v] of Object.entries(raw.data)) {
+      if (order[k] === undefined) {
+        order[k] = v;
+      }
+    }
+  }
+  // Use lastUpdate as createdAt fallback
+  if (!order.createdAt && order.lastUpdate) {
+    order.createdAt = order.lastUpdate;
+  }
+  return order;
 }
 
 function escapeHtml(str) {

@@ -24,7 +24,8 @@ import (
 
 var (
 	configFile     = flag.String("config", "", "Path to workflow configuration YAML file")
-	addr           = flag.String("addr", ":8080", "HTTP listen address")
+	addr           = flag.String("addr", ":8080", "HTTP listen address (workflow engine)")
+	mgmtAddr       = flag.String("mgmt-addr", ":8081", "Management API listen address (AI, dynamic components, workflow UI)")
 	copilotCLI     = flag.String("copilot-cli", "", "Path to Copilot CLI binary")
 	copilotModel   = flag.String("copilot-model", "", "Model to use with Copilot SDK")
 	anthropicKey   = flag.String("anthropic-key", "", "Anthropic API key (or set ANTHROPIC_API_KEY env)")
@@ -99,6 +100,7 @@ type serverApp struct {
 	engine        *workflow.StdEngine
 	engineManager *workflow.WorkflowEngineManager
 	mux           *http.ServeMux
+	mgmtAddr      string // management API listen address (AI, dynamic, UI)
 	logger        *slog.Logger
 }
 
@@ -148,6 +150,7 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 	pool := dynamic.NewInterpreterPool()
 	aiSvc, deploySvc := initAIService(logger, registry, pool)
 	app.mux = buildMux(aiSvc, deploySvc, loader, registry, uiHandler)
+	app.mgmtAddr = *mgmtAddr
 
 	return app, nil
 }
@@ -155,22 +158,31 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 // run starts the engine and HTTP server, blocking until ctx is canceled.
 // It performs graceful shutdown when the context is done.
 func run(ctx context.Context, app *serverApp, listenAddr string) error {
-	// Start the workflow engine (single-config mode)
+	// Start the workflow engine (single-config mode).
+	// The engine may start its own HTTP server (via http.server module) on the
+	// configured address. The management mux (AI, dynamic components, workflow UI)
+	// listens on a separate management port to avoid conflicts.
 	if app.engine != nil {
 		if err := app.engine.Start(ctx); err != nil {
 			return fmt.Errorf("failed to start workflow engine: %w", err)
 		}
 	}
 
+	// Determine management port: default to :8081 unless overridden.
+	mgmtAddr := ":8081"
+	if app.mgmtAddr != "" {
+		mgmtAddr = app.mgmtAddr
+	}
+
 	server := &http.Server{
-		Addr:    listenAddr,
+		Addr:    mgmtAddr,
 		Handler: app.mux,
 	}
 
 	go func() {
-		app.logger.Info("Starting server", "addr", listenAddr)
+		app.logger.Info("Starting management server", "addr", mgmtAddr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			app.logger.Error("Server failed", "error", err)
+			app.logger.Error("Management server failed", "error", err)
 		}
 	}()
 
@@ -178,7 +190,7 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 	<-ctx.Done()
 
 	if err := server.Shutdown(context.Background()); err != nil {
-		app.logger.Error("HTTP server shutdown error", "error", err)
+		app.logger.Error("Management server shutdown error", "error", err)
 	}
 	if app.engineManager != nil {
 		if err := app.engineManager.StopAll(context.Background()); err != nil {
@@ -253,7 +265,7 @@ func main() {
 		cancel()
 	}()
 
-	fmt.Printf("Workflow server started on %s\n", *addr)
+	fmt.Printf("Workflow engine on %s, management API on %s\n", *addr, *mgmtAddr)
 	if err := run(ctx, app, *addr); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}

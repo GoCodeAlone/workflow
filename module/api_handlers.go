@@ -278,19 +278,35 @@ func (h *RESTAPIHandler) handleGet(resourceId string, w http.ResponseWriter, r *
 
 	// Get a specific resource
 	if resource, ok := h.resources[resourceId]; ok {
-		// Check if we have a state tracker we can use to enhance the resource
+		// Try to get the latest state directly from the workflow engine
+		if h.workflowEngine != "" {
+			instanceId := resourceId
+			if h.instanceIDPrefix != "" {
+				instanceId = h.instanceIDPrefix + resourceId
+			}
+			var engineSvc interface{}
+			if err := h.app.GetService(h.workflowEngine, &engineSvc); err == nil {
+				if smEngine, ok := engineSvc.(*StateMachineEngine); ok {
+					if instance, err := smEngine.GetInstance(instanceId); err == nil && instance != nil {
+						resource.State = instance.CurrentState
+						resource.LastUpdate = instance.LastUpdated.Format(time.RFC3339)
+					}
+				}
+			}
+		}
+
+		// Also check state tracker for additional data enrichment
 		var stateTracker interface{}
 		_ = h.app.GetService(StateTrackerName, &stateTracker)
-
-		// If we found a state tracker, try to get state info for this resource
 		if stateTracker != nil {
 			if tracker, ok := stateTracker.(*StateTracker); ok {
 				if stateInfo, exists := tracker.GetState(h.resourceName, resourceId); exists {
-					// Enhance the resource with state info
-					resource.State = stateInfo.CurrentState
-					resource.LastUpdate = stateInfo.LastUpdate.Format(time.RFC3339)
-
-					// Update data fields from state info if available
+					// Use state tracker state if we didn't get one from the engine
+					if resource.State == "" || resource.State == "new" {
+						resource.State = stateInfo.CurrentState
+						resource.LastUpdate = stateInfo.LastUpdate.Format(time.RFC3339)
+					}
+					// Merge any data from the state tracker
 					if stateInfo.Data != nil {
 						for k, v := range stateInfo.Data {
 							resource.Data[k] = v
@@ -319,9 +335,39 @@ func (h *RESTAPIHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	// List all resources
+	// If there's an authenticated user, filter resources to only show theirs
+	currentUserID := extractUserID(r)
+
+	// Optionally get the state machine engine for live state lookup
+	var smEngine *StateMachineEngine
+	if h.workflowEngine != "" {
+		var engineSvc interface{}
+		if err := h.app.GetService(h.workflowEngine, &engineSvc); err == nil {
+			smEngine, _ = engineSvc.(*StateMachineEngine)
+		}
+	}
+
 	resources := make([]RESTResource, 0, len(h.resources))
 	for _, resource := range h.resources {
+		// If user is authenticated and resource has a userId, only include matching resources
+		if currentUserID != "" {
+			if resUserID, ok := resource.Data["userId"].(string); ok && resUserID != currentUserID {
+				continue
+			}
+		}
+
+		// Enrich with live state from the workflow engine
+		if smEngine != nil {
+			instanceId := resource.ID
+			if h.instanceIDPrefix != "" {
+				instanceId = h.instanceIDPrefix + resource.ID
+			}
+			if instance, err := smEngine.GetInstance(instanceId); err == nil && instance != nil {
+				resource.State = instance.CurrentState
+				resource.LastUpdate = instance.LastUpdated.Format(time.RFC3339)
+			}
+		}
+
 		resources = append(resources, resource)
 	}
 
@@ -330,6 +376,19 @@ func (h *RESTAPIHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
 		// Log error but continue since response is already committed
 		_ = err
 	}
+}
+
+// extractUserID extracts the authenticated user's ID from the request context.
+// Returns empty string if no auth claims are present.
+func extractUserID(r *http.Request) string {
+	claims, ok := r.Context().Value(authClaimsContextKey).(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	if sub, ok := claims["sub"].(string); ok {
+		return sub
+	}
+	return ""
 }
 
 // handlePost handles POST requests for creating resources
@@ -344,8 +403,12 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 		return
 	}
 
+	// Attach the authenticated user's ID to the resource data
+	if userID := extractUserID(r); userID != "" {
+		data["userId"] = userID
+	}
+
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	// If ID is provided in the URL, use it; otherwise use the ID from the body
 	if resourceId == "" {
@@ -366,6 +429,9 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 	// Set the current time for last update
 	lastUpdate := time.Now().Format(time.RFC3339)
 
+	// Store the ID in data so it's available downstream
+	data["id"] = resourceId
+
 	// Create or update the resource
 	resource := RESTResource{
 		ID:         resourceId,
@@ -374,6 +440,8 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 		LastUpdate: lastUpdate,
 	}
 	h.resources[resourceId] = resource
+
+	h.mu.Unlock()
 
 	// Publish event if broker is available
 	if h.eventBroker != nil {
@@ -390,10 +458,84 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 		}()
 	}
 
+	// If a workflow engine is configured, create an instance and trigger the initial transition
+	if h.workflowType != "" && h.workflowEngine != "" {
+		h.startWorkflowForResource(r.Context(), resourceId, resource)
+	}
+
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(h.resources[resourceId]); err != nil {
+	if err := json.NewEncoder(w).Encode(resource); err != nil {
 		// Log error but continue since response is already committed
 		_ = err
+	}
+}
+
+// startWorkflowForResource creates a workflow instance and triggers the initial transition
+// for a newly created resource. Uses background context for async processing since
+// the HTTP request context is cancelled when the handler returns.
+func (h *RESTAPIHandler) startWorkflowForResource(_ context.Context, resourceId string, resource RESTResource) {
+	// Find the state machine engine
+	var engineSvc interface{}
+	if err := h.app.GetService(h.workflowEngine, &engineSvc); err != nil {
+		h.logger.Warn(fmt.Sprintf("Workflow engine '%s' not found: %v", h.workflowEngine, err))
+		return
+	}
+
+	smEngine, ok := engineSvc.(*StateMachineEngine)
+	if !ok {
+		h.logger.Warn(fmt.Sprintf("Service '%s' is not a StateMachineEngine", h.workflowEngine))
+		return
+	}
+
+	// Build the instance ID
+	instanceId := resourceId
+	if h.instanceIDPrefix != "" {
+		instanceId = h.instanceIDPrefix + resourceId
+	}
+
+	// Create the workflow instance
+	_, err := smEngine.CreateWorkflow(h.workflowType, instanceId, resource.Data)
+	if err != nil {
+		h.logger.Error(fmt.Sprintf("Failed to create workflow instance '%s': %v", instanceId, err))
+		return
+	}
+	h.logger.Info(fmt.Sprintf("Created workflow instance '%s' for resource '%s'", instanceId, resourceId))
+
+	// Trigger the initial transition (start_validation) asynchronously so we don't
+	// block the HTTP response. Use context.Background() since the HTTP request context
+	// is cancelled when the handler returns, which would abort the processing pipeline.
+	go func() {
+		bgCtx := context.Background()
+		transitionName := "start_validation" // convention for order-processing
+		if err := smEngine.TriggerTransition(bgCtx, instanceId, transitionName, resource.Data); err != nil {
+			h.logger.Warn(fmt.Sprintf("Failed to trigger initial transition '%s' for '%s': %v",
+				transitionName, instanceId, err))
+		} else {
+			h.logger.Info(fmt.Sprintf("Triggered '%s' for workflow instance '%s'", transitionName, instanceId))
+
+			// Update the resource state from the engine after the transition chain completes
+			h.syncResourceStateFromEngine(instanceId, resourceId, smEngine)
+		}
+	}()
+}
+
+// syncResourceStateFromEngine reads the workflow instance state and updates the in-memory resource.
+func (h *RESTAPIHandler) syncResourceStateFromEngine(instanceId, resourceId string, engine *StateMachineEngine) {
+	// Give the async processing pipeline a moment to progress
+	time.Sleep(500 * time.Millisecond)
+
+	instance, err := engine.GetInstance(instanceId)
+	if err != nil || instance == nil {
+		return
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if res, exists := h.resources[resourceId]; exists {
+		res.State = instance.CurrentState
+		res.LastUpdate = instance.LastUpdated.Format(time.RFC3339)
+		h.resources[resourceId] = res
 	}
 }
 
