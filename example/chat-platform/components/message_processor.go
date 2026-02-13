@@ -32,10 +32,6 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	direction, _ := params["direction"].(string)
-	if direction == "" {
-		return nil, fmt.Errorf("missing required parameter: direction")
-	}
-
 	conversationId, _ := params["conversationId"].(string)
 	content, _ := params["content"].(string)
 	provider, _ := params["provider"].(string)
@@ -52,6 +48,20 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 
 	messageId := fmt.Sprintf("msg-%d", r.Int63())
 	timestamp := time.Now().UTC().Format(time.RFC3339)
+
+	// System event — no direction specified (e.g., start_conversation transition)
+	if direction == "" {
+		transitionId, _ := params["transitionId"].(string)
+		return map[string]interface{}{
+			"messageId":      messageId,
+			"conversationId": conversationId,
+			"direction":      "system",
+			"status":         "processed",
+			"transition":     transitionId,
+			"timestamp":      timestamp,
+			"event":          "conversation.system",
+		}, nil
+	}
 
 	switch direction {
 	case "inbound":

@@ -12,11 +12,12 @@ import (
 
 // UserRecord represents a user for persistence
 type UserRecord struct {
-	ID           string    `json:"id"`
-	Email        string    `json:"email"`
-	Name         string    `json:"name"`
-	PasswordHash string    `json:"-"`
-	CreatedAt    time.Time `json:"createdAt"`
+	ID           string                 `json:"id"`
+	Email        string                 `json:"email"`
+	Name         string                 `json:"name"`
+	PasswordHash string                 `json:"-"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt    time.Time              `json:"createdAt"`
 }
 
 // PersistenceStore provides SQLite-backed persistence for workflow instances,
@@ -25,6 +26,7 @@ type PersistenceStore struct {
 	name          string
 	dbServiceName string
 	db            *sql.DB
+	encryptor     *FieldEncryptor
 }
 
 // NewPersistenceStore creates a new PersistenceStore module.
@@ -32,6 +34,7 @@ func NewPersistenceStore(name, dbServiceName string) *PersistenceStore {
 	return &PersistenceStore{
 		name:          name,
 		dbServiceName: dbServiceName,
+		encryptor:     NewFieldEncryptorFromEnv(),
 	}
 }
 
@@ -129,6 +132,7 @@ func (p *PersistenceStore) migrate() error {
 			email TEXT UNIQUE NOT NULL,
 			name TEXT DEFAULT '',
 			password_hash TEXT NOT NULL,
+			metadata TEXT DEFAULT '{}',
 			created_at TEXT NOT NULL
 		)`,
 		// Indexes for query performance
@@ -143,6 +147,10 @@ func (p *PersistenceStore) migrate() error {
 			return fmt.Errorf("failed to execute migration: %w", err)
 		}
 	}
+
+	// Idempotent migration: add metadata column to users if it doesn't exist
+	p.db.Exec(`ALTER TABLE users ADD COLUMN metadata TEXT DEFAULT '{}'`)
+
 	return nil
 }
 
@@ -159,9 +167,24 @@ func (p *PersistenceStore) SetDB(db *sql.DB) {
 	p.db = db
 }
 
-// SaveWorkflowInstance upserts a workflow instance.
+// SetEncryptor sets a custom field encryptor (useful for testing).
+func (p *PersistenceStore) SetEncryptor(enc *FieldEncryptor) {
+	p.encryptor = enc
+}
+
+// SaveWorkflowInstance upserts a workflow instance. PII fields within instance
+// data are encrypted before writing to SQLite when ENCRYPTION_KEY is set.
 func (p *PersistenceStore) SaveWorkflowInstance(instance *WorkflowInstance) error {
-	dataJSON, err := json.Marshal(instance.Data)
+	dataToStore := instance.Data
+	if p.encryptor != nil && p.encryptor.Enabled() && dataToStore != nil {
+		encrypted, err := p.encryptor.EncryptPIIFields(dataToStore)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt instance PII: %w", err)
+		}
+		dataToStore = encrypted
+	}
+
+	dataJSON, err := json.Marshal(dataToStore)
 	if err != nil {
 		return fmt.Errorf("failed to marshal instance data: %w", err)
 	}
@@ -210,6 +233,16 @@ func (p *PersistenceStore) LoadWorkflowInstances(workflowType string) ([]*Workfl
 		if err != nil {
 			return nil, err
 		}
+
+		// Decrypt PII fields after loading
+		if p.encryptor != nil && p.encryptor.Enabled() && inst.Data != nil {
+			decrypted, decErr := p.encryptor.DecryptPIIFields(inst.Data)
+			if decErr != nil {
+				return nil, fmt.Errorf("failed to decrypt instance PII for %s: %w", inst.ID, decErr)
+			}
+			inst.Data = decrypted
+		}
+
 		instances = append(instances, inst)
 	}
 	return instances, rows.Err()
@@ -253,9 +286,20 @@ func scanWorkflowInstance(rows *sql.Rows) (*WorkflowInstance, error) {
 	return &inst, nil
 }
 
-// SaveResource upserts a resource.
+// SaveResource upserts a resource. PII fields within the data map are encrypted
+// before writing to SQLite when ENCRYPTION_KEY is set.
 func (p *PersistenceStore) SaveResource(resourceType, id string, data map[string]interface{}) error {
-	dataJSON, err := json.Marshal(data)
+	// Encrypt PII fields before persisting
+	dataToStore := data
+	if p.encryptor != nil && p.encryptor.Enabled() {
+		encrypted, err := p.encryptor.EncryptPIIFields(data)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt resource PII: %w", err)
+		}
+		dataToStore = encrypted
+	}
+
+	dataJSON, err := json.Marshal(dataToStore)
 	if err != nil {
 		return fmt.Errorf("failed to marshal resource data: %w", err)
 	}
@@ -278,6 +322,7 @@ func (p *PersistenceStore) SaveResource(resourceType, id string, data map[string
 }
 
 // LoadResources loads all resources for a given type, keyed by ID.
+// Encrypted PII fields are decrypted transparently on read.
 func (p *PersistenceStore) LoadResources(resourceType string) (map[string]map[string]interface{}, error) {
 	rows, err := p.db.Query(
 		`SELECT id, data FROM resources WHERE resource_type = ?`, resourceType)
@@ -296,20 +341,56 @@ func (p *PersistenceStore) LoadResources(resourceType string) (map[string]map[st
 		if err := json.Unmarshal([]byte(dataJSON), &data); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal resource data for %s: %w", id, err)
 		}
+
+		// Decrypt PII fields after loading
+		if p.encryptor != nil && p.encryptor.Enabled() {
+			decrypted, err := p.encryptor.DecryptPIIFields(data)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decrypt resource PII for %s: %w", id, err)
+			}
+			data = decrypted
+		}
+
 		result[id] = data
 	}
 	return result, rows.Err()
 }
 
-// SaveUser upserts a user record.
+// SaveUser upserts a user record. PII fields (name, email) are encrypted
+// before writing to SQLite when ENCRYPTION_KEY is set.
 func (p *PersistenceStore) SaveUser(user UserRecord) error {
-	_, err := p.db.Exec(`INSERT INTO users (id, email, name, password_hash, created_at)
-		VALUES (?, ?, ?, ?, ?)
+	metadataJSON := "{}"
+	if user.Metadata != nil {
+		b, err := json.Marshal(user.Metadata)
+		if err != nil {
+			return fmt.Errorf("failed to marshal user metadata: %w", err)
+		}
+		metadataJSON = string(b)
+	}
+
+	// Encrypt PII fields
+	emailToStore := user.Email
+	nameToStore := user.Name
+	if p.encryptor != nil && p.encryptor.Enabled() {
+		var err error
+		emailToStore, err = p.encryptor.EncryptValue(user.Email)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt user email: %w", err)
+		}
+		nameToStore, err = p.encryptor.EncryptValue(user.Name)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt user name: %w", err)
+		}
+	}
+
+	_, err := p.db.Exec(`INSERT INTO users (id, email, name, password_hash, metadata, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			email = excluded.email,
 			name = excluded.name,
-			password_hash = excluded.password_hash`,
-		user.ID, user.Email, user.Name, user.PasswordHash, user.CreatedAt.Format(time.RFC3339Nano),
+			password_hash = excluded.password_hash,
+			metadata = excluded.metadata`,
+		user.ID, emailToStore, nameToStore, user.PasswordHash, metadataJSON, user.CreatedAt.Format(time.RFC3339Nano),
 	)
 	return err
 }
@@ -320,9 +401,10 @@ func (p *PersistenceStore) DeleteResource(resourceType, id string) error {
 	return err
 }
 
-// LoadUsers loads all user records.
+// LoadUsers loads all user records. Encrypted PII fields (name, email) are
+// decrypted transparently on read.
 func (p *PersistenceStore) LoadUsers() ([]UserRecord, error) {
-	rows, err := p.db.Query(`SELECT id, email, name, password_hash, created_at FROM users`)
+	rows, err := p.db.Query(`SELECT id, email, name, password_hash, COALESCE(metadata, '{}'), created_at FROM users`)
 	if err != nil {
 		return nil, err
 	}
@@ -331,14 +413,32 @@ func (p *PersistenceStore) LoadUsers() ([]UserRecord, error) {
 	var users []UserRecord
 	for rows.Next() {
 		var u UserRecord
-		var createdStr string
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &createdStr); err != nil {
+		var createdStr, metadataJSON string
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &metadataJSON, &createdStr); err != nil {
 			return nil, err
 		}
 		u.CreatedAt, err = time.Parse(time.RFC3339Nano, createdStr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse created_at for user %s: %w", u.ID, err)
 		}
+		if metadataJSON != "" && metadataJSON != "{}" {
+			if err := json.Unmarshal([]byte(metadataJSON), &u.Metadata); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal metadata for user %s: %w", u.ID, err)
+			}
+		}
+
+		// Decrypt PII fields after loading
+		if p.encryptor != nil && p.encryptor.Enabled() {
+			u.Email, err = p.encryptor.DecryptValue(u.Email)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decrypt email for user %s: %w", u.ID, err)
+			}
+			u.Name, err = p.encryptor.DecryptValue(u.Name)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decrypt name for user %s: %w", u.ID, err)
+			}
+		}
+
 		users = append(users, u)
 	}
 	return users, rows.Err()

@@ -13,6 +13,67 @@ import (
 	"github.com/CrisisTextLine/modular"
 )
 
+// riskPatterns maps risk categories to keyword patterns for message analysis.
+var riskPatterns = map[string][]string{
+	"self-harm":         {"cut myself", "cutting myself", "hurt myself", "hurting myself", "self-harm", "self harm", "burning myself", "hitting myself"},
+	"suicidal-ideation": {"kill myself", "suicide", "end my life", "not alive", "want to die", "better off dead", "no reason to live", "dont want to be alive"},
+	"crisis-immediate":  {"right now", "tonight", "plan to", "going to do it", "goodbye", "final"},
+	"substance-abuse":   {"drinking", "drugs", "overdose", "alcohol", "pills", "high right now", "substance"},
+	"domestic-violence": {"hits me", "abuses me", "beats me", "violent", "domestic", "partner hurts", "partner hits"},
+}
+
+// assessRiskLevel analyzes messages and returns the risk level and detected tags.
+func assessRiskLevel(messages []interface{}) (string, []string) {
+	var allText strings.Builder
+	for _, m := range messages {
+		msg, ok := m.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for _, field := range []string{"body", "Body", "content", "message"} {
+			if body, ok := msg[field].(string); ok && body != "" {
+				allText.WriteString(strings.ToLower(body))
+				allText.WriteString(" ")
+				break
+			}
+		}
+	}
+	combined := allText.String()
+	if combined == "" {
+		return "low", nil
+	}
+
+	tagSet := make(map[string]bool)
+	for category, patterns := range riskPatterns {
+		for _, pattern := range patterns {
+			if strings.Contains(combined, pattern) {
+				tagSet[category] = true
+				break
+			}
+		}
+	}
+
+	riskLevel := "low"
+	if tagSet["substance-abuse"] || tagSet["domestic-violence"] {
+		riskLevel = "medium"
+	}
+	if tagSet["self-harm"] {
+		riskLevel = "high"
+	}
+	if tagSet["suicidal-ideation"] {
+		riskLevel = "high"
+	}
+	if tagSet["crisis-immediate"] {
+		riskLevel = "critical"
+	}
+
+	tags := make([]string, 0, len(tagSet))
+	for t := range tagSet {
+		tags = append(tags, t)
+	}
+	return riskLevel, tags
+}
+
 // RESTResource represents a simple in-memory resource store for REST APIs
 type RESTResource struct {
 	ID         string                 `json:"id"`
@@ -33,11 +94,21 @@ type RESTAPIHandler struct {
 	persistence  *PersistenceStore // optional write-through backend
 
 	// Workflow-related fields
-	workflowType     string // The type of workflow to use (e.g., "order-workflow")
-	workflowEngine   string // The name of the workflow engine service to use
-	instanceIDPrefix string // Optional prefix for workflow instance IDs
-	instanceIDField  string // Field in resource data to use for instance ID (defaults to "id")
-	seedFile         string // Path to JSON seed data file
+	workflowType      string // The type of workflow to use (e.g., "order-workflow")
+	workflowEngine    string // The name of the workflow engine service to use
+	initialTransition string // The first transition to trigger after creating a workflow instance (defaults to "start_validation")
+	instanceIDPrefix  string // Optional prefix for workflow instance IDs
+	instanceIDField   string // Field in resource data to use for instance ID (defaults to "id")
+	seedFile          string // Path to JSON seed data file
+
+	// View/aggregation fields (e.g., queue-api reading from conversations)
+	sourceResourceName string // Read from a different resource's persistence data (defaults to resourceName)
+	stateFilter        string // Only include resources matching this state in GET responses
+
+	// Dynamic field mapping (configurable via YAML, defaults match existing behavior)
+	fieldMapping  *FieldMapping     // Maps logical field names to actual field names with fallback chains
+	transitionMap map[string]string // Maps sub-action names to state machine transition names
+	summaryFields []string          // Fields to include in summary sub-resource responses
 }
 
 // RESTAPIHandlerConfig contains configuration for a REST API handler
@@ -52,11 +123,13 @@ type RESTAPIHandlerConfig struct {
 
 // NewRESTAPIHandler creates a new REST API handler
 func NewRESTAPIHandler(name, resourceName string) *RESTAPIHandler {
-	return &RESTAPIHandler{
+	h := &RESTAPIHandler{
 		name:         name,
 		resourceName: resourceName,
 		resources:    make(map[string]RESTResource),
 	}
+	h.initFieldDefaults()
+	return h
 }
 
 // SetWorkflowType sets the workflow type for state machine operations.
@@ -69,9 +142,53 @@ func (h *RESTAPIHandler) SetWorkflowEngine(we string) {
 	h.workflowEngine = we
 }
 
+// SetInitialTransition sets the first transition to trigger after creating a workflow instance.
+func (h *RESTAPIHandler) SetInitialTransition(t string) {
+	h.initialTransition = t
+}
+
 // SetSeedFile sets the path to a JSON seed data file.
 func (h *RESTAPIHandler) SetSeedFile(path string) {
 	h.seedFile = path
+}
+
+// SetSourceResourceName sets a different resource name for read operations (e.g., queue reads from conversations).
+func (h *RESTAPIHandler) SetSourceResourceName(name string) {
+	h.sourceResourceName = name
+}
+
+// SetStateFilter restricts GET responses to resources matching the given state.
+func (h *RESTAPIHandler) SetStateFilter(state string) {
+	h.stateFilter = state
+}
+
+// SetFieldMapping sets a custom field mapping, merged on top of defaults.
+func (h *RESTAPIHandler) SetFieldMapping(fm *FieldMapping) {
+	h.fieldMapping = fm
+}
+
+// SetTransitionMap sets a custom sub-action to transition name mapping.
+func (h *RESTAPIHandler) SetTransitionMap(tm map[string]string) {
+	h.transitionMap = tm
+}
+
+// SetSummaryFields sets the list of fields to include in summary responses.
+func (h *RESTAPIHandler) SetSummaryFields(fields []string) {
+	h.summaryFields = fields
+}
+
+// initFieldDefaults initializes fieldMapping, transitionMap, and summaryFields
+// with default values if not already set.
+func (h *RESTAPIHandler) initFieldDefaults() {
+	if h.fieldMapping == nil {
+		h.fieldMapping = DefaultRESTFieldMapping()
+	}
+	if h.transitionMap == nil {
+		h.transitionMap = DefaultTransitionMap()
+	}
+	if h.summaryFields == nil {
+		h.summaryFields = DefaultSummaryFields()
+	}
 }
 
 // Name returns the unique identifier for this module
@@ -88,9 +205,15 @@ func (h *RESTAPIHandler) Constructor() modular.ModuleConstructor {
 		handler.logger = app.Logger()
 		handler.workflowType = h.workflowType
 		handler.workflowEngine = h.workflowEngine
+		handler.initialTransition = h.initialTransition
 		handler.instanceIDPrefix = h.instanceIDPrefix
 		handler.instanceIDField = h.instanceIDField
 		handler.seedFile = h.seedFile
+		handler.sourceResourceName = h.sourceResourceName
+		handler.stateFilter = h.stateFilter
+		handler.fieldMapping = h.fieldMapping
+		handler.transitionMap = h.transitionMap
+		handler.summaryFields = h.summaryFields
 
 		// Look for a message broker service for event publishing
 		if broker, ok := services["message-broker"]; ok {
@@ -117,6 +240,7 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 
 	// Default values for workflow configuration
 	h.instanceIDField = "id" // Default to using "id" field if not specified
+	h.initFieldDefaults()
 
 	// Get configuration if available
 	configSection, err := app.GetConfigSection("workflow")
@@ -152,6 +276,44 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 								// Extract instance ID field
 								if field, ok := cfg["instanceIDField"].(string); ok && field != "" {
 									h.instanceIDField = field
+								}
+
+								// Extract source resource name (for view handlers like queue)
+								if src, ok := cfg["sourceResourceName"].(string); ok && src != "" {
+									h.sourceResourceName = src
+								}
+
+								// Extract state filter (for view handlers like queue)
+								if sf, ok := cfg["stateFilter"].(string); ok && sf != "" {
+									h.stateFilter = sf
+								}
+
+								// Extract dynamic field mapping (merged on top of defaults)
+								if fmCfg, ok := cfg["fieldMapping"].(map[string]interface{}); ok {
+									override := FieldMappingFromConfig(fmCfg)
+									h.fieldMapping.Merge(override)
+								}
+
+								// Extract custom transition map (merged on top of defaults)
+								if tmCfg, ok := cfg["transitionMap"].(map[string]interface{}); ok {
+									for action, trans := range tmCfg {
+										if t, ok := trans.(string); ok {
+											h.transitionMap[action] = t
+										}
+									}
+								}
+
+								// Extract custom summary fields (replaces defaults)
+								if sfCfg, ok := cfg["summaryFields"].([]interface{}); ok {
+									fields := make([]string, 0, len(sfCfg))
+									for _, f := range sfCfg {
+										if s, ok := f.(string); ok {
+											fields = append(fields, s)
+										}
+									}
+									if len(fields) > 0 {
+										h.summaryFields = fields
+									}
 								}
 							}
 						}
@@ -226,24 +388,45 @@ func (h *RESTAPIHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// Check if this is a resource-specific request (has ID) or a collection request
 	resourceId := r.PathValue("id")
 	isTransitionRequest := false
+	subAction := ""
+
+	// For view handlers (e.g., queue-api), detect virtual endpoints like "health"
+	if h.sourceResourceName != "" && resourceId == "" && len(pathSegments) >= 3 {
+		lastSeg := pathSegments[len(pathSegments)-1]
+		if lastSeg == "health" {
+			resourceId = "health"
+		}
+	}
 
 	// We expect paths like:
 	// - /api/orders (collection)
 	// - /api/orders/123 (specific resource)
 	// - /api/orders/123/transition (resource action)
+	// - /api/orders/123/assign (sub-resource action)
 
-	if len(pathSegments) >= 3 && pathSegments[0] == "api" && pathSegments[1] == h.resourceName {
-		// Check if this is a transition request
-		if len(pathSegments) >= 4 && pathSegments[3] == "transition" {
+	if len(pathSegments) >= 4 {
+		lastSegment := pathSegments[len(pathSegments)-1]
+		if lastSegment == "transition" {
 			isTransitionRequest = true
+		} else if h.workflowType != "" {
+			// Only detect sub-actions for handlers with a workflow engine.
+			// This prevents non-workflow handlers (e.g. messages-api) from
+			// misinterpreting nested resource paths as sub-actions.
+			subAction = lastSegment
 		}
 	}
 
 	// Route based on method and path structure
 	switch {
-	case isTransitionRequest && r.Method == http.MethodPut:
+	case isTransitionRequest && (r.Method == http.MethodPut || r.Method == http.MethodPost):
 		// Handle state machine transition request
 		h.handleTransition(resourceId, w, r)
+	case subAction != "" && r.Method == http.MethodPost:
+		// Handle sub-resource action (assign, messages, transfer, etc.)
+		h.handleSubAction(resourceId, subAction, w, r)
+	case subAction != "" && r.Method == http.MethodGet:
+		// Handle sub-resource GET (summary, etc.)
+		h.handleSubActionGet(resourceId, subAction, w, r)
 	case r.Method == http.MethodGet && resourceId != "":
 		// Get a specific resource
 		h.handleGet(resourceId, w, r)
@@ -268,8 +451,63 @@ func (h *RESTAPIHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// syncFromPersistence merges any resources from the persistence store that are
+// not yet in the in-memory map. This allows resources created by other handler
+// instances sharing the same persistence resourceName to be visible.
+func (h *RESTAPIHandler) syncFromPersistence() {
+	if h.persistence == nil {
+		return
+	}
+	loadFrom := h.resourceName
+	if h.sourceResourceName != "" {
+		loadFrom = h.sourceResourceName
+	}
+	loaded, err := h.persistence.LoadResources(loadFrom)
+	if err != nil || len(loaded) == 0 {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	// For view handlers (sourceResourceName set), always refresh from persistence
+	// to reflect state changes made by other handlers.
+	isView := h.sourceResourceName != ""
+
+	for id, data := range loaded {
+		if !isView {
+			if _, exists := h.resources[id]; exists {
+				continue // don't overwrite in-memory state for primary handlers
+			}
+		}
+		state := h.fieldMapping.ResolveString(data, "state")
+		lastUpdate := h.fieldMapping.ResolveString(data, "lastUpdate")
+		h.resources[id] = RESTResource{
+			ID:         id,
+			Data:       data,
+			State:      state,
+			LastUpdate: lastUpdate,
+		}
+	}
+
+	// For view handlers, remove resources that no longer exist in persistence
+	if isView {
+		for id := range h.resources {
+			if _, exists := loaded[id]; !exists {
+				delete(h.resources, id)
+			}
+		}
+	}
+}
+
 // handleGet handles GET requests for listing or retrieving resources
 func (h *RESTAPIHandler) handleGet(resourceId string, w http.ResponseWriter, r *http.Request) {
+	// Handle virtual "health" endpoint for view handlers (e.g., /api/queue/health)
+	if resourceId == "health" && h.sourceResourceName != "" {
+		h.handleQueueHealth(w, r)
+		return
+	}
+
+	h.syncFromPersistence()
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -341,6 +579,7 @@ func (h *RESTAPIHandler) handleGet(resourceId string, w http.ResponseWriter, r *
 
 // handleGetAll handles GET requests for listing all resources
 func (h *RESTAPIHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
+	h.syncFromPersistence()
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -377,7 +616,29 @@ func (h *RESTAPIHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// Apply state filter if configured (e.g., queue handler only shows "queued" resources)
+		if h.stateFilter != "" {
+			resState := resource.State
+			if resState == "" {
+				resState, _ = resource.Data["state"].(string)
+			}
+			if resState != h.stateFilter {
+				continue
+			}
+		}
+
 		resources = append(resources, resource)
+	}
+
+	// For view handlers (sourceResourceName set), return summary with count
+	if h.sourceResourceName != "" {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"totalQueued":   len(resources),
+			"count":         len(resources),
+			"conversations": resources,
+		})
+		return
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -414,14 +675,14 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 
 	// Attach the authenticated user's ID to the resource data
 	if userID := extractUserID(r); userID != "" {
-		data["userId"] = userID
+		h.fieldMapping.SetValue(data, "userId", userID)
 	}
 
 	h.mu.Lock()
 
 	// If ID is provided in the URL, use it; otherwise use the ID from the body
 	if resourceId == "" {
-		if idFromBody, ok := data["id"].(string); ok && idFromBody != "" {
+		if idFromBody := h.fieldMapping.ResolveString(data, "id"); idFromBody != "" {
 			resourceId = idFromBody
 		} else {
 			// Generate an ID (TODO: use a proper UUID generator)
@@ -431,7 +692,7 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 
 	// Extract state if present, default to "new" for state machine resources
 	state := "new"
-	if stateVal, ok := data["state"].(string); ok && stateVal != "" {
+	if stateVal := h.fieldMapping.ResolveString(data, "state"); stateVal != "" {
 		state = stateVal
 	}
 
@@ -439,7 +700,21 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 	lastUpdate := time.Now().Format(time.RFC3339)
 
 	// Store the ID in data so it's available downstream
-	data["id"] = resourceId
+	h.fieldMapping.SetValue(data, "id", resourceId)
+
+	// Assess risk level from initial message content if present
+	if bodyText := h.fieldMapping.ResolveString(data, "body"); bodyText != "" {
+		initialMsgs := []interface{}{map[string]interface{}{"body": bodyText}}
+		riskLevel, riskTags := assessRiskLevel(initialMsgs)
+		h.fieldMapping.SetValue(data, "riskLevel", riskLevel)
+		if len(riskTags) > 0 {
+			tagIfaces := make([]interface{}, len(riskTags))
+			for i, t := range riskTags {
+				tagIfaces[i] = t
+			}
+			h.fieldMapping.SetValue(data, "tags", tagIfaces)
+		}
+	}
 
 	// Create or update the resource
 	resource := RESTResource{
@@ -454,8 +729,8 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 
 	// Write-through to persistence
 	if h.persistence != nil {
-		resource.Data["state"] = resource.State
-		resource.Data["lastUpdate"] = resource.LastUpdate
+		h.fieldMapping.SetValue(resource.Data, "state", resource.State)
+		h.fieldMapping.SetValue(resource.Data, "lastUpdate", resource.LastUpdate)
 		_ = h.persistence.SaveResource(h.resourceName, resource.ID, resource.Data)
 	}
 
@@ -517,12 +792,15 @@ func (h *RESTAPIHandler) startWorkflowForResource(_ context.Context, resourceId 
 	}
 	h.logger.Info(fmt.Sprintf("Created workflow instance '%s' for resource '%s'", instanceId, resourceId))
 
-	// Trigger the initial transition (start_validation) asynchronously so we don't
-	// block the HTTP response. Use context.Background() since the HTTP request context
-	// is cancelled when the handler returns, which would abort the processing pipeline.
+	// Trigger the initial transition asynchronously so we don't block the HTTP response.
+	// Use context.Background() since the HTTP request context is cancelled when the
+	// handler returns, which would abort the processing pipeline.
 	go func() {
 		bgCtx := context.Background()
-		transitionName := "start_validation" // convention for order-processing
+		transitionName := h.initialTransition
+		if transitionName == "" {
+			transitionName = "start_validation" // default convention
+		}
 		if err := smEngine.TriggerTransition(bgCtx, instanceId, transitionName, resource.Data); err != nil {
 			h.logger.Warn(fmt.Sprintf("Failed to trigger initial transition '%s' for '%s': %v",
 				transitionName, instanceId, err))
@@ -1046,6 +1324,438 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 	}
 }
 
+// handleSubAction handles POST requests to sub-resource actions like /assign, /transfer, etc.
+// These map to state machine transitions on the parent resource.
+func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.ResponseWriter, r *http.Request) {
+	if resourceId == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Resource ID is required"})
+		return
+	}
+
+	// Parse request body for additional data
+	var body map[string]interface{}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	if body == nil {
+		body = make(map[string]interface{})
+	}
+
+	// Attach the authenticated user's ID
+	if userID := extractUserID(r); userID != "" {
+		h.fieldMapping.SetValue(body, "responderId", userID)
+	}
+
+	// Tag is a data-only update, no state transition
+	if subAction == "tag" {
+		h.handleTagAction(resourceId, body, w)
+		return
+	}
+
+	// Messages sub-action: append to the resource's messages array (no state transition)
+	if subAction == "messages" {
+		h.mu.Lock()
+		resource, exists := h.resources[resourceId]
+		if !exists {
+			h.mu.Unlock()
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"})
+			return
+		}
+
+		// Build message record
+		msg := map[string]interface{}{
+			"body":      h.fieldMapping.ResolveString(body, "body"),
+			"direction": h.fieldMapping.ResolveString(body, "direction"),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		if from := h.fieldMapping.ResolveString(body, "from"); from != "" {
+			msg["from"] = from
+		}
+		if userID := h.fieldMapping.ResolveString(body, "userId"); userID != "" {
+			msg["sender"] = userID
+		} else if respID := h.fieldMapping.ResolveString(body, "responderId"); respID != "" {
+			msg["sender"] = respID
+		}
+		if direction := h.fieldMapping.ResolveString(body, "direction"); direction == "outbound" {
+			msg["status"] = "sent"
+		} else {
+			msg["status"] = "delivered"
+		}
+
+		// Append to messages array
+		msgs := h.fieldMapping.ResolveSlice(resource.Data, "messages")
+		msgs = append(msgs, msg)
+		h.fieldMapping.SetValue(resource.Data, "messages", msgs)
+
+		// Assess risk level from all messages
+		riskLevel, riskTags := assessRiskLevel(msgs)
+		h.fieldMapping.SetValue(resource.Data, "riskLevel", riskLevel)
+		if len(riskTags) > 0 {
+			existingTags := h.fieldMapping.ResolveSlice(resource.Data, "tags")
+			tagSet := make(map[string]bool)
+			for _, t := range existingTags {
+				if s, ok := t.(string); ok {
+					tagSet[s] = true
+				}
+			}
+			for _, t := range riskTags {
+				tagSet[t] = true
+			}
+			allTags := make([]interface{}, 0, len(tagSet))
+			for t := range tagSet {
+				allTags = append(allTags, t)
+			}
+			h.fieldMapping.SetValue(resource.Data, "tags", allTags)
+		}
+
+		resource.LastUpdate = time.Now().UTC().Format(time.RFC3339)
+		h.resources[resourceId] = resource
+		h.mu.Unlock()
+
+		// Persist
+		if h.persistence != nil {
+			_ = h.persistence.SaveResource(h.resourceName, resourceId, map[string]interface{}{
+				"id":         resource.ID,
+				"data":       resource.Data,
+				"state":      resource.State,
+				"lastUpdate": resource.LastUpdate,
+			})
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"messageId":      fmt.Sprintf("msg-%s-%d", resourceId, len(msgs)),
+			"conversationId": resourceId,
+			"direction":      h.fieldMapping.ResolveString(body, "direction"),
+			"status":         msg["status"],
+			"timestamp":      msg["timestamp"],
+		})
+		return
+	}
+
+	// Look up sub-action in the configurable transition map
+	transitionName, ok := h.transitionMap[subAction]
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Unknown action: %s", subAction)})
+		return
+	}
+
+	// Refine transition based on request body or current state
+	if subAction == "escalate" {
+		if escType, ok := body["type"].(string); ok && escType == "police" {
+			transitionName = "escalate_to_police"
+		}
+	}
+	if subAction == "close" {
+		h.mu.RLock()
+		if res, exists := h.resources[resourceId]; exists {
+			switch res.State {
+			case "wrap_up":
+				transitionName = "close_from_wrap_up"
+			case "follow_up_active":
+				transitionName = "close_from_followup"
+			}
+		}
+		h.mu.RUnlock()
+	}
+
+	// Find the state machine engine
+	var smEngine *StateMachineEngine
+	if h.workflowEngine != "" {
+		var engineSvc interface{}
+		if err := h.app.GetService(h.workflowEngine, &engineSvc); err == nil {
+			smEngine, _ = engineSvc.(*StateMachineEngine)
+		}
+	}
+	if smEngine == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Workflow engine not available"})
+		return
+	}
+
+	// Build instance ID
+	instanceId := resourceId
+	if h.instanceIDPrefix != "" {
+		instanceId = h.instanceIDPrefix + resourceId
+	}
+
+	// Merge existing resource data into the transition payload
+	h.mu.RLock()
+	resource, exists := h.resources[resourceId]
+	h.mu.RUnlock()
+	if !exists {
+		// Try syncing from persistence first
+		h.syncFromPersistence()
+		h.mu.RLock()
+		resource, exists = h.resources[resourceId]
+		h.mu.RUnlock()
+	}
+	if !exists {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"})
+		return
+	}
+
+	workflowData := make(map[string]interface{})
+	for k, v := range resource.Data {
+		workflowData[k] = v
+	}
+	for k, v := range body {
+		workflowData[k] = v
+	}
+
+	// Ensure workflow instance exists
+	if _, err := smEngine.GetInstance(instanceId); err != nil {
+		// Create it if missing
+		if _, err := smEngine.CreateWorkflow(h.workflowType, instanceId, workflowData); err != nil {
+			h.logger.Error(fmt.Sprintf("Failed to create workflow instance for sub-action: %v", err))
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create workflow instance"})
+			return
+		}
+	}
+
+	// Trigger the transition
+	if err := smEngine.TriggerTransition(r.Context(), instanceId, transitionName, workflowData); err != nil {
+		h.logger.Error(fmt.Sprintf("Sub-action '%s' (transition '%s') failed for resource '%s': %v",
+			subAction, transitionName, resourceId, err))
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":    false,
+			"error":      err.Error(),
+			"action":     subAction,
+			"transition": transitionName,
+		})
+		return
+	}
+
+	// Read back the updated state
+	var currentState string
+	if instance, err := smEngine.GetInstance(instanceId); err == nil && instance != nil {
+		currentState = instance.CurrentState
+	}
+
+	// Update the in-memory resource
+	lastUpdate := time.Now().Format(time.RFC3339)
+	h.mu.Lock()
+	if res, ok := h.resources[resourceId]; ok {
+		if currentState != "" {
+			res.State = currentState
+			res.Data["state"] = currentState
+		}
+		res.LastUpdate = lastUpdate
+		res.Data["lastUpdate"] = lastUpdate
+		// Merge body data into the resource
+		for k, v := range body {
+			res.Data[k] = v
+		}
+		h.resources[resourceId] = res
+
+		if h.persistence != nil {
+			_ = h.persistence.SaveResource(h.resourceName, res.ID, res.Data)
+		}
+	}
+	h.mu.Unlock()
+
+	// Publish event
+	if h.eventBroker != nil {
+		eventData, _ := json.Marshal(map[string]interface{}{
+			"eventType":  h.resourceName + "." + subAction,
+			"resourceId": resourceId,
+			"action":     subAction,
+			"state":      currentState,
+		})
+		go func() {
+			_ = h.eventBroker.SendMessage(h.resourceName+"-events", eventData)
+		}()
+	}
+
+	h.logger.Info(fmt.Sprintf("Sub-action '%s' completed for resource '%s' → state '%s'",
+		subAction, resourceId, currentState))
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    true,
+		"action":     subAction,
+		"transition": transitionName,
+		"id":         resourceId,
+		"state":      currentState,
+		"lastUpdate": lastUpdate,
+	})
+}
+
+// handleQueueHealth returns aggregated queue health data grouped by program.
+func (h *RESTAPIHandler) handleQueueHealth(w http.ResponseWriter, _ *http.Request) {
+	h.syncFromPersistence()
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	type programStats struct {
+		ProgramID      string  `json:"programId"`
+		ProgramName    string  `json:"programName"`
+		Depth          int     `json:"depth"`
+		Queued         int     `json:"queued"`
+		AvgWaitSeconds float64 `json:"avgWaitSeconds"`
+		OldestMessage  string  `json:"oldestMessageAt,omitempty"`
+		AlertThreshold int     `json:"alertThreshold"`
+	}
+
+	programs := make(map[string]*programStats)
+	now := time.Now()
+
+	for _, res := range h.resources {
+		state := res.State
+		if state == "" {
+			state = h.fieldMapping.ResolveString(res.Data, "state")
+		}
+		if h.stateFilter != "" && state != h.stateFilter {
+			continue
+		}
+
+		pid := h.fieldMapping.ResolveString(res.Data, "programId")
+		if pid == "" {
+			pid = "default"
+		}
+
+		ps, ok := programs[pid]
+		if !ok {
+			pName := h.fieldMapping.ResolveString(res.Data, "programName")
+			if pName == "" {
+				pName = pid
+			}
+			ps = &programStats{
+				ProgramID:      pid,
+				ProgramName:    pName,
+				AlertThreshold: 10,
+			}
+			programs[pid] = ps
+		}
+		ps.Depth++
+		ps.Queued++
+
+		// Track oldest message for wait time calculation
+		if created := h.fieldMapping.ResolveString(res.Data, "createdAt"); created != "" {
+			if t, err := time.Parse(time.RFC3339, created); err == nil {
+				if ps.OldestMessage == "" || created < ps.OldestMessage {
+					ps.OldestMessage = created
+				}
+				waitSecs := now.Sub(t).Seconds()
+				ps.AvgWaitSeconds = (ps.AvgWaitSeconds*float64(ps.Depth-1) + waitSecs) / float64(ps.Depth)
+			}
+		}
+	}
+
+	result := make([]programStats, 0, len(programs))
+	for _, ps := range programs {
+		result = append(result, *ps)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"programs": result,
+		"alerts":   0,
+	})
+}
+
+// handleTagAction handles POST /tag — updates resource data without a state transition.
+func (h *RESTAPIHandler) handleTagAction(resourceId string, body map[string]interface{}, w http.ResponseWriter) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	res, exists := h.resources[resourceId]
+	if !exists {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"})
+		return
+	}
+
+	// Merge tag data into the resource
+	tags := h.fieldMapping.ResolveSlice(res.Data, "tags")
+	if newTag, ok := body["tag"].(string); ok && newTag != "" {
+		tags = append(tags, newTag)
+		h.fieldMapping.SetValue(res.Data, "tags", tags)
+	}
+	if newTags, ok := body["tags"].([]interface{}); ok {
+		tags = append(tags, newTags...)
+		h.fieldMapping.SetValue(res.Data, "tags", tags)
+	}
+	res.LastUpdate = time.Now().Format(time.RFC3339)
+	h.fieldMapping.SetValue(res.Data, "lastUpdate", res.LastUpdate)
+	h.resources[resourceId] = res
+
+	if h.persistence != nil {
+		_ = h.persistence.SaveResource(h.resourceName, res.ID, res.Data)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"id":      resourceId,
+		"tags":    tags,
+	})
+}
+
+// handleSubActionGet handles GET requests for sub-resource data (e.g., /summary).
+func (h *RESTAPIHandler) handleSubActionGet(resourceId, subAction string, w http.ResponseWriter, r *http.Request) {
+	if resourceId == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Resource ID is required"})
+		return
+	}
+
+	h.syncFromPersistence()
+	h.mu.RLock()
+	resource, exists := h.resources[resourceId]
+	h.mu.RUnlock()
+
+	if !exists {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"})
+		return
+	}
+
+	switch subAction {
+	case "summary":
+		// Return the resource data plus any summary fields
+		summary := map[string]interface{}{
+			"id":         resourceId,
+			"state":      resource.State,
+			"lastUpdate": resource.LastUpdate,
+		}
+		// Copy relevant summary fields from resource data (configurable via summaryFields)
+		for _, key := range h.summaryFields {
+			if v, ok := resource.Data[key]; ok {
+				summary[key] = v
+			}
+		}
+		// Enrich with live state from workflow engine
+		if h.workflowEngine != "" {
+			instanceId := resourceId
+			if h.instanceIDPrefix != "" {
+				instanceId = h.instanceIDPrefix + resourceId
+			}
+			var engineSvc interface{}
+			if err := h.app.GetService(h.workflowEngine, &engineSvc); err == nil {
+				if smEngine, ok := engineSvc.(*StateMachineEngine); ok {
+					if instance, err := smEngine.GetInstance(instanceId); err == nil && instance != nil {
+						summary["state"] = instance.CurrentState
+						summary["lastUpdate"] = instance.LastUpdated.Format(time.RFC3339)
+					}
+				}
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(summary)
+
+	default:
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Unknown sub-resource: %s", subAction)})
+	}
+}
+
 // loadSeedData reads a JSON file containing an array of resources and populates the resources map
 func (h *RESTAPIHandler) loadSeedData(path string) error {
 	data, err := os.ReadFile(path)
@@ -1086,6 +1796,9 @@ func (h *RESTAPIHandler) loadSeedData(path string) error {
 
 // Start loads persisted resources (if available) and seed data.
 func (h *RESTAPIHandler) Start(ctx context.Context) error {
+	// Ensure field defaults are initialized (covers Constructor path where Init is skipped)
+	h.initFieldDefaults()
+
 	// Late-bind persistence if it wasn't available during Init().
 	// This handles the case where the persistence module initializes after
 	// this module (e.g., alphabetical ordering without explicit dependsOn).
@@ -1108,8 +1821,8 @@ func (h *RESTAPIHandler) Start(ctx context.Context) error {
 		} else if len(loaded) > 0 {
 			h.mu.Lock()
 			for id, data := range loaded {
-				state, _ := data["state"].(string)
-				lastUpdate, _ := data["lastUpdate"].(string)
+				state := h.fieldMapping.ResolveString(data, "state")
+				lastUpdate := h.fieldMapping.ResolveString(data, "lastUpdate")
 				h.resources[id] = RESTResource{
 					ID:         id,
 					Data:       data,

@@ -59,6 +59,7 @@ modules:
       secret: "${JWT_SECRET}"
       tokenExpiry: "24h"
       issuer: "chat-platform"
+      seedFile: "../seed/users.json"
     dependsOn:
       - rate-limiter
 

@@ -38,8 +38,17 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	action, _ := params["action"].(string)
+
+	// When called from a state machine transition without an explicit action,
+	// return success without scheduling anything.
 	if action == "" {
-		return nil, fmt.Errorf("missing required parameter: action")
+		transitionId, _ := params["transitionId"].(string)
+		return map[string]interface{}{
+			"action":     "transition_hook",
+			"transition": transitionId,
+			"status":     "processed",
+			"timestamp":  time.Now().UTC().Format(time.RFC3339),
+		}, nil
 	}
 
 	switch action {

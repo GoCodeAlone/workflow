@@ -61,6 +61,14 @@ func Stop(ctx context.Context) error {
 func Execute(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
 	body, _ := params["body"].(string)
 	if body == "" {
+		// Twilio webhook sends "Body" (capitalized)
+		body, _ = params["Body"].(string)
+	}
+	if body == "" {
+		// Webchat sends "message"
+		body, _ = params["message"].(string)
+	}
+	if body == "" {
 		return nil, fmt.Errorf("missing required parameter: body")
 	}
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -16,11 +17,12 @@ import (
 
 // User represents a user in the in-memory store
 type User struct {
-	ID           string    `json:"id"`
-	Email        string    `json:"email"`
-	Name         string    `json:"name"`
-	PasswordHash string    `json:"-"`
-	CreatedAt    time.Time `json:"createdAt"`
+	ID           string                 `json:"id"`
+	Email        string                 `json:"email"`
+	Name         string                 `json:"name"`
+	PasswordHash string                 `json:"-"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt    time.Time              `json:"createdAt"`
 }
 
 // JWTAuthModule handles JWT authentication with an in-memory user store
@@ -29,6 +31,7 @@ type JWTAuthModule struct {
 	secret      string
 	tokenExpiry time.Duration
 	issuer      string
+	seedFile    string
 	users       map[string]*User // keyed by email
 	mu          sync.RWMutex
 	nextID      int
@@ -52,6 +55,11 @@ func NewJWTAuthModule(name, secret string, tokenExpiry time.Duration, issuer str
 		users:       make(map[string]*User),
 		nextID:      1,
 	}
+}
+
+// SetSeedFile sets the path to a JSON file of seed users to load on start.
+func (j *JWTAuthModule) SetSeedFile(path string) {
+	j.seedFile = path
 }
 
 // Name returns the module name
@@ -173,6 +181,7 @@ func (j *JWTAuthModule) handleRegister(w http.ResponseWriter, r *http.Request) {
 			Email:        user.Email,
 			Name:         user.Name,
 			PasswordHash: user.PasswordHash,
+			Metadata:     user.Metadata,
 			CreatedAt:    user.CreatedAt,
 		})
 	}
@@ -227,7 +236,7 @@ func (j *JWTAuthModule) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"token": token,
-		"user":  user,
+		"user":  j.buildUserResponse(user),
 	})
 }
 
@@ -239,7 +248,7 @@ func (j *JWTAuthModule) handleGetProfile(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	json.NewEncoder(w).Encode(user)
+	json.NewEncoder(w).Encode(j.buildUserResponse(user))
 }
 
 func (j *JWTAuthModule) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
@@ -272,11 +281,12 @@ func (j *JWTAuthModule) handleUpdateProfile(w http.ResponseWriter, r *http.Reque
 			Email:        user.Email,
 			Name:         user.Name,
 			PasswordHash: user.PasswordHash,
+			Metadata:     user.Metadata,
 			CreatedAt:    user.CreatedAt,
 		})
 	}
 
-	json.NewEncoder(w).Encode(user)
+	json.NewEncoder(w).Encode(j.buildUserResponse(user))
 }
 
 func (j *JWTAuthModule) extractUserFromRequest(r *http.Request) (*User, error) {
@@ -331,11 +341,112 @@ func (j *JWTAuthModule) generateToken(user *User) (string, error) {
 		"exp":   time.Now().Add(j.tokenExpiry).Unix(),
 	}
 
+	if role, ok := user.Metadata["role"].(string); ok && role != "" {
+		claims["role"] = role
+	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(j.secret))
 }
 
-// Start loads persisted users if available.
+// buildUserResponse creates a response map that flattens metadata fields to the
+// top level, so the SPA receives role, affiliateId, programIds, etc. directly.
+func (j *JWTAuthModule) buildUserResponse(user *User) map[string]interface{} {
+	resp := map[string]interface{}{
+		"id":        user.ID,
+		"email":     user.Email,
+		"name":      user.Name,
+		"createdAt": user.CreatedAt,
+	}
+	for k, v := range user.Metadata {
+		resp[k] = v
+	}
+	return resp
+}
+
+// loadSeedUsers reads a JSON seed file and registers users that don't already exist.
+// The seed format matches the api.handler seed format: [{id, data: {email, name, password, role, ...}}]
+func (j *JWTAuthModule) loadSeedUsers(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read seed file %s: %w", path, err)
+	}
+
+	var seeds []struct {
+		ID   string                 `json:"id"`
+		Data map[string]interface{} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &seeds); err != nil {
+		return fmt.Errorf("failed to parse seed file %s: %w", path, err)
+	}
+
+	for _, seed := range seeds {
+		email, _ := seed.Data["email"].(string)
+		if email == "" {
+			continue
+		}
+
+		// Skip if already loaded from persistence or memory
+		if _, exists := j.users[email]; exists {
+			continue
+		}
+
+		password, _ := seed.Data["password"].(string)
+		if password == "" {
+			password = "changeme" // fallback for seed users
+		}
+
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			continue
+		}
+
+		name, _ := seed.Data["name"].(string)
+
+		// Build metadata from all non-auth fields
+		metadata := make(map[string]interface{})
+		for k, v := range seed.Data {
+			switch k {
+			case "email", "name", "password":
+				// Skip auth fields
+			default:
+				metadata[k] = v
+			}
+		}
+
+		user := &User{
+			ID:           seed.ID,
+			Email:        email,
+			Name:         name,
+			PasswordHash: string(hash),
+			Metadata:     metadata,
+			CreatedAt:    time.Now(),
+		}
+		j.users[email] = user
+
+		// Track highest numeric ID
+		var idNum int
+		if _, err := fmt.Sscanf(seed.ID, "%d", &idNum); err == nil && idNum >= j.nextID {
+			j.nextID = idNum + 1
+		}
+
+		// Write-through to persistence
+		if j.persistence != nil {
+			_ = j.persistence.SaveUser(UserRecord{
+				ID:           user.ID,
+				Email:        user.Email,
+				Name:         user.Name,
+				PasswordHash: user.PasswordHash,
+				Metadata:     user.Metadata,
+				CreatedAt:    user.CreatedAt,
+			})
+		}
+	}
+
+	return nil
+}
+
+// Start loads persisted users if available, then seed users.
 func (j *JWTAuthModule) Start(ctx context.Context) error {
 	// Late-bind persistence if it wasn't available during Init().
 	if j.persistence == nil && j.app != nil {
@@ -347,34 +458,38 @@ func (j *JWTAuthModule) Start(ctx context.Context) error {
 		}
 	}
 
-	if j.persistence == nil {
-		return nil
-	}
-
-	users, err := j.persistence.LoadUsers()
-	if err != nil {
-		return nil // Non-fatal — start without persisted users
-	}
-
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
-	for _, u := range users {
-		// Skip users that already exist in memory
-		if _, exists := j.users[u.Email]; exists {
-			continue
+	// Load persisted users first (they take priority over seeds)
+	if j.persistence != nil {
+		users, err := j.persistence.LoadUsers()
+		if err == nil {
+			for _, u := range users {
+				if _, exists := j.users[u.Email]; exists {
+					continue
+				}
+				j.users[u.Email] = &User{
+					ID:           u.ID,
+					Email:        u.Email,
+					Name:         u.Name,
+					PasswordHash: u.PasswordHash,
+					Metadata:     u.Metadata,
+					CreatedAt:    u.CreatedAt,
+				}
+				var idNum int
+				if _, err := fmt.Sscanf(u.ID, "%d", &idNum); err == nil && idNum >= j.nextID {
+					j.nextID = idNum + 1
+				}
+			}
 		}
-		j.users[u.Email] = &User{
-			ID:           u.ID,
-			Email:        u.Email,
-			Name:         u.Name,
-			PasswordHash: u.PasswordHash,
-			CreatedAt:    u.CreatedAt,
-		}
-		// Track highest ID to avoid collisions with new registrations
-		var idNum int
-		if _, err := fmt.Sscanf(u.ID, "%d", &idNum); err == nil && idNum >= j.nextID {
-			j.nextID = idNum + 1
+	}
+
+	// Load seed users (skips any already loaded from persistence)
+	if j.seedFile != "" {
+		if err := j.loadSeedUsers(j.seedFile); err != nil {
+			// Non-fatal: log but don't prevent startup
+			_ = err
 		}
 	}
 

@@ -199,12 +199,23 @@ func (ps *ProcessingStep) calculateBackoff(attempt int) time.Duration {
 // fireTransition triggers a state machine transition to avoid deadlocking
 // when called from inside a transition handler. Uses the engine's tracked
 // goroutine so shutdown can drain in-flight work.
-func (ps *ProcessingStep) fireTransition(ctx context.Context, workflowID, transition string, data map[string]interface{}) {
+//
+// Note: Handlers are called BEFORE TriggerTransition commits the state change.
+// The goroutine must wait briefly so the parent transition commits first;
+// otherwise it may see stale state and silently fail.
+func (ps *ProcessingStep) fireTransition(_ context.Context, workflowID, transition string, data map[string]interface{}) {
 	if transition == "" || ps.smEngine == nil {
 		return
 	}
 	ps.smEngine.TrackGoroutine(func() {
-		_ = ps.smEngine.TriggerTransition(ctx, workflowID, transition, data)
+		// Brief pause to let the parent TriggerTransition commit the state
+		// change. Without this, the goroutine can race and find the instance
+		// still in its pre-transition state.
+		time.Sleep(10 * time.Millisecond)
+		// Use context.Background() because the spawned goroutine outlives
+		// the caller (e.g., an HTTP request handler whose context is
+		// cancelled after the response is written).
+		_ = ps.smEngine.TriggerTransition(context.Background(), workflowID, transition, data)
 	})
 }
 

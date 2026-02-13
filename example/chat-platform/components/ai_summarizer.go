@@ -43,8 +43,20 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	messages, _ := params["messages"].([]interface{})
+
+	// When called from a state machine transition without message data,
+	// return a placeholder summary.
 	if len(messages) == 0 {
-		return nil, fmt.Errorf("missing required parameter: messages")
+		transitionId, _ := params["transitionId"].(string)
+		return map[string]interface{}{
+			"summary":      "Transition event processed",
+			"transition":   transitionId,
+			"keyTopics":    []interface{}{"general-support"},
+			"riskLevel":    "low",
+			"sentiment":    "neutral",
+			"messageCount": 0,
+			"generatedAt":  time.Now().UTC().Format(time.RFC3339),
+		}, nil
 	}
 
 	// Simulate AI processing time (300-600ms)

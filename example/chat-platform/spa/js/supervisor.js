@@ -71,7 +71,7 @@ async function loadSupervisorData() {
 
     const activeConvos = conversations.filter(c => {
       const state = c.state || (c.data && c.data.state) || '';
-      return !['closed', 'expired', 'failed'].includes(state);
+      return ['active', 'wrap_up', 'follow_up_active'].includes(state);
     });
 
     const queuedConvos = conversations.filter(c => {

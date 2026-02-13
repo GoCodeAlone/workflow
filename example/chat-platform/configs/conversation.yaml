@@ -99,6 +99,8 @@ modules:
     type: api.handler
     config:
       resourceName: queue
+      sourceResourceName: conversations
+      stateFilter: queued
     dependsOn:
       - auth-middleware
       - persistence
@@ -106,9 +108,11 @@ modules:
   - name: webhooks-api
     type: api.handler
     config:
-      resourceName: webhooks
+      resourceName: conversations
       workflowType: "conversation-lifecycle"
       workflowEngine: "conversation-engine"
+      instanceIDPrefix: "conv-"
+      initialTransition: "route_message"
     dependsOn:
       - rate-limiter
       - persistence
@@ -116,9 +120,11 @@ modules:
   - name: webchat-api
     type: api.handler
     config:
-      resourceName: webchat
+      resourceName: conversations
       workflowType: "conversation-lifecycle"
       workflowEngine: "conversation-engine"
+      instanceIDPrefix: "conv-"
+      initialTransition: "route_message"
     dependsOn:
       - rate-limiter
       - persistence
@@ -499,7 +505,7 @@ workflows:
 
       - method: "POST"
         path: "/api/conversations/{id}/messages"
-        handler: messages-api
+        handler: conversations-api
         middlewares:
           - cors
           - request-id

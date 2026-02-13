@@ -216,11 +216,19 @@ async function loadMessages(conversationId) {
     const data = convo.data || convo;
     const messages = data.messages || [];
 
-    if (messages.length === lastMessageCount) return;
-    lastMessageCount = messages.length;
-
     const container = document.getElementById('chat-messages');
     if (!container) return;
+
+    // Clear spinner on first load even if messages are empty
+    if (messages.length === 0 && lastMessageCount === 0) {
+      if (container.querySelector('.spinner-container')) {
+        container.innerHTML = '<div class="empty-state"><p>No messages yet</p></div>';
+      }
+      return;
+    }
+
+    if (messages.length === lastMessageCount) return;
+    lastMessageCount = messages.length;
 
     const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
 

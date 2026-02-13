@@ -11,11 +11,11 @@ import (
 )
 
 var riskPatterns = map[string][]string{
-	"self-harm":          {"cut myself", "hurt myself", "self-harm", "self harm", "burning myself", "hitting myself"},
-	"suicidal-ideation":  {"kill myself", "suicide", "end my life", "not alive", "want to die", "better off dead", "no reason to live"},
-	"crisis-immediate":   {"right now", "tonight", "plan to", "going to do it", "goodbye", "final"},
-	"substance-abuse":    {"drinking", "drugs", "overdose", "alcohol", "pills", "high right now", "substance"},
-	"domestic-violence":  {"hits me", "abuses me", "beats me", "violent", "domestic", "partner hurts"},
+	"self-harm":         {"cut myself", "cutting myself", "hurt myself", "hurting myself", "self-harm", "self harm", "burning myself", "hitting myself"},
+	"suicidal-ideation": {"kill myself", "suicide", "end my life", "not alive", "want to die", "better off dead", "no reason to live", "dont want to be alive"},
+	"crisis-immediate":  {"right now", "tonight", "plan to", "going to do it", "goodbye", "final"},
+	"substance-abuse":   {"drinking", "drugs", "overdose", "alcohol", "pills", "high right now", "substance"},
+	"domestic-violence": {"hits me", "abuses me", "beats me", "violent", "domestic", "partner hurts", "partner hits"},
 }
 
 func Name() string {

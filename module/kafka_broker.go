@@ -24,16 +24,18 @@ type KafkaBroker struct {
 	logger        modular.Logger
 	healthy       bool
 	healthMsg     string
+	encryptor     *FieldEncryptor
 }
 
 // NewKafkaBroker creates a new Kafka message broker.
 func NewKafkaBroker(name string) *KafkaBroker {
 	broker := &KafkaBroker{
-		name:     name,
-		brokers:  []string{"localhost:9092"},
-		groupID:  "workflow-group",
-		handlers: make(map[string]MessageHandler),
-		logger:   &noopLogger{},
+		name:      name,
+		brokers:   []string{"localhost:9092"},
+		groupID:   "workflow-group",
+		handlers:  make(map[string]MessageHandler),
+		logger:    &noopLogger{},
+		encryptor: NewFieldEncryptorFromEnv(),
 	}
 	broker.kafkaProducer = &kafkaProducerAdapter{broker: broker}
 	broker.kafkaConsumer = &kafkaConsumerAdapter{broker: broker}
@@ -236,19 +238,31 @@ type kafkaProducerAdapter struct {
 	broker *KafkaBroker
 }
 
-// SendMessage publishes a message to a Kafka topic.
+// SendMessage publishes a message to a Kafka topic. When ENCRYPTION_KEY is set,
+// the message payload is encrypted before publishing to protect PII in transit.
 func (p *kafkaProducerAdapter) SendMessage(topic string, message []byte) error {
 	p.broker.mu.RLock()
 	producer := p.broker.producer
+	encryptor := p.broker.encryptor
 	p.broker.mu.RUnlock()
 
 	if producer == nil {
 		return fmt.Errorf("kafka producer not initialized; call Start first")
 	}
 
+	// Encrypt the message payload if encryption is enabled
+	payload := message
+	if encryptor != nil && encryptor.Enabled() {
+		encrypted, err := encryptor.EncryptJSON(message)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt kafka message for topic %q: %w", topic, err)
+		}
+		payload = encrypted
+	}
+
 	msg := &sarama.ProducerMessage{
 		Topic: topic,
-		Value: sarama.ByteEncoder(message),
+		Value: sarama.ByteEncoder(payload),
 	}
 
 	_, _, err := producer.SendMessage(msg)
@@ -298,10 +312,23 @@ func (h *kafkaGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, cl
 	for msg := range claim.Messages() {
 		h.broker.mu.RLock()
 		handler, ok := h.broker.handlers[msg.Topic]
+		encryptor := h.broker.encryptor
 		h.broker.mu.RUnlock()
 
 		if ok {
-			if err := handler.HandleMessage(msg.Value); err != nil {
+			// Decrypt message payload if encryption is enabled
+			payload := msg.Value
+			if encryptor != nil && encryptor.Enabled() {
+				decrypted, err := encryptor.DecryptJSON(payload)
+				if err != nil {
+					h.broker.logger.Error("Error decrypting Kafka message", "topic", msg.Topic, "error", err)
+					session.MarkMessage(msg, "")
+					continue
+				}
+				payload = decrypted
+			}
+
+			if err := handler.HandleMessage(payload); err != nil {
 				h.broker.logger.Error("Error handling Kafka message", "topic", msg.Topic, "error", err)
 			}
 		}

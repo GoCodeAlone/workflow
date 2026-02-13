@@ -29,8 +29,18 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	escalationType, _ := params["type"].(string)
+
+	// When called from a state machine transition without an explicit type,
+	// return success as a system event.
 	if escalationType == "" {
-		return nil, fmt.Errorf("missing required parameter: type")
+		transitionId, _ := params["transitionId"].(string)
+		return map[string]interface{}{
+			"escalationId": fmt.Sprintf("esc-%d", r.Int63()),
+			"type":         "system",
+			"transition":   transitionId,
+			"status":       "processed",
+			"timestamp":    time.Now().UTC().Format(time.RFC3339),
+		}, nil
 	}
 
 	conversationId, _ := params["conversationId"].(string)

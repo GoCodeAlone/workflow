@@ -29,8 +29,18 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	notifType, _ := params["type"].(string)
+
+	// When called from a state machine transition without an explicit type,
+	// treat it as a system notification.
 	if notifType == "" {
-		return nil, fmt.Errorf("missing required parameter: type")
+		transitionId, _ := params["transitionId"].(string)
+		return map[string]interface{}{
+			"notificationId": fmt.Sprintf("notif-%d", r.Int63()),
+			"type":           "system",
+			"transition":     transitionId,
+			"status":         "delivered",
+			"sent":           time.Now().UTC().Format(time.RFC3339),
+		}, nil
 	}
 
 	recipients, _ := params["recipients"].([]interface{})

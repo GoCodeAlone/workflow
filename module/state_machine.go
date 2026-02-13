@@ -562,6 +562,9 @@ func (e *StateMachineEngine) TriggerTransition(
 	// Check for auto-transform transitions from the new state.
 	// If any transition has AutoTransform=true and its FromState matches
 	// the current state, fire it asynchronously to continue the pipeline.
+	// Use context.Background() because the spawned goroutine outlives the
+	// caller (e.g., an HTTP request handler whose context gets cancelled
+	// after the response is written).
 	if !instance.Completed {
 		for autoName, autoTrans := range def.Transitions {
 			if autoTrans.AutoTransform && autoTrans.FromState == instance.CurrentState {
@@ -571,7 +574,7 @@ func (e *StateMachineEngine) TriggerTransition(
 					autoData[k] = v
 				}
 				e.TrackGoroutine(func() {
-					_ = e.TriggerTransition(ctx, workflowID, autoTransName, autoData)
+					_ = e.TriggerTransition(context.Background(), workflowID, autoTransName, autoData)
 				})
 				break // Only fire one auto-transition per state entry
 			}

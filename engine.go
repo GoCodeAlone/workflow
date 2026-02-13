@@ -143,8 +143,46 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				if we, ok := modCfg.Config["workflowEngine"].(string); ok && we != "" {
 					handler.SetWorkflowEngine(we)
 				}
+				if it, ok := modCfg.Config["initialTransition"].(string); ok && it != "" {
+					handler.SetInitialTransition(it)
+				}
 				if sf, ok := modCfg.Config["seedFile"].(string); ok && sf != "" {
 					handler.SetSeedFile(cfg.ResolveRelativePath(sf))
+				}
+				if src, ok := modCfg.Config["sourceResourceName"].(string); ok && src != "" {
+					handler.SetSourceResourceName(src)
+				}
+				if stf, ok := modCfg.Config["stateFilter"].(string); ok && stf != "" {
+					handler.SetStateFilter(stf)
+				}
+				// Dynamic field mapping (optional YAML override of default field names)
+				if fmCfg, ok := modCfg.Config["fieldMapping"].(map[string]interface{}); ok {
+					override := module.FieldMappingFromConfig(fmCfg)
+					defaults := module.DefaultRESTFieldMapping()
+					defaults.Merge(override)
+					handler.SetFieldMapping(defaults)
+				}
+				// Custom sub-action to transition mapping
+				if tmCfg, ok := modCfg.Config["transitionMap"].(map[string]interface{}); ok {
+					tm := module.DefaultTransitionMap()
+					for action, trans := range tmCfg {
+						if t, ok := trans.(string); ok {
+							tm[action] = t
+						}
+					}
+					handler.SetTransitionMap(tm)
+				}
+				// Custom summary fields
+				if sfCfg, ok := modCfg.Config["summaryFields"].([]interface{}); ok {
+					fields := make([]string, 0, len(sfCfg))
+					for _, f := range sfCfg {
+						if s, ok := f.(string); ok {
+							fields = append(fields, s)
+						}
+					}
+					if len(fields) > 0 {
+						handler.SetSummaryFields(fields)
+					}
 				}
 				mod = handler
 			case "http.middleware.auth":
@@ -419,7 +457,11 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					issuer = iss
 				}
 				e.logger.Debug("Loading JWT auth module")
-				mod = module.NewJWTAuthModule(modCfg.Name, secret, tokenExpiry, issuer)
+				authMod := module.NewJWTAuthModule(modCfg.Name, secret, tokenExpiry, issuer)
+				if sf, ok := modCfg.Config["seedFile"].(string); ok && sf != "" {
+					authMod.SetSeedFile(cfg.ResolveRelativePath(sf))
+				}
+				mod = authMod
 			case "processing.step":
 				e.logger.Debug("Loading processing step module: " + modCfg.Name)
 				stepConfig := module.ProcessingStepConfig{
