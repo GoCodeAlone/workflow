@@ -1,0 +1,1170 @@
+# Chat Platform - Monolith Configuration
+# A text-based crisis/support chat platform built entirely on the Workflow engine.
+# Supports inbound/outbound SMS (Twilio, AWS, partner webhooks) and webchat.
+#
+# Architecture (single-process mode):
+#   Browser -> SPA (static.fileserver) -> /api/* (router) -> middleware chain
+#   -> api.handler -> statemachine.engine -> processing.step -> dynamic.component
+#   -> messaging.broker (in-memory) -> notification handler
+#
+# This combines all services (gateway + api + conversation) into a single process
+# on port 8080. Uses in-memory messaging instead of Kafka.
+#
+# Data flow:
+#   Inbound webhook/webchat -> route_message -> queued -> assign_responder -> assigned
+#   -> start_conversation -> active -> (responder actions) -> wrap_up -> closed
+#
+# Public endpoints:  POST /api/auth/login, POST /api/auth/register,
+#                    POST /api/webhooks/*, POST /api/webchat/*
+# Protected endpoints: GET/POST /api/conversations/*, GET/POST /api/affiliates/*,
+#                      GET/POST /api/programs/*, GET/POST /api/users/*,
+#                      GET/POST /api/keywords/*, GET/POST /api/surveys/*
+# Observability: GET /healthz, GET /metrics
+
+modules:
+  # --- HTTP infrastructure ---
+  - name: web-server
+    type: http.server
+    config:
+      address: ":8080"
+      readTimeout: "30s"
+      writeTimeout: "30s"
+
+  - name: router
+    type: http.router
+    config:
+      prefix: /api
+    dependsOn:
+      - web-server
+
+  # --- Middleware chain ---
+  - name: cors
+    type: http.middleware.cors
+    config:
+      allowedOrigins: ["*"]
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+      allowedHeaders: ["Content-Type", "Authorization"]
+    dependsOn:
+      - router
+
+  - name: request-id
+    type: http.middleware.requestid
+    dependsOn:
+      - cors
+
+  - name: rate-limiter
+    type: http.middleware.ratelimit
+    config:
+      requestsPerMinute: 600
+      burstSize: 100
+    dependsOn:
+      - request-id
+
+  # --- Authentication ---
+  - name: auth
+    type: auth.jwt
+    config:
+      secret: "${JWT_SECRET}"
+      tokenExpiry: "24h"
+      issuer: "chat-platform"
+    dependsOn:
+      - rate-limiter
+
+  - name: auth-middleware
+    type: http.middleware.auth
+    config:
+      authType: Bearer
+    dependsOn:
+      - auth
+
+  # --- Platform API handlers (from api service) ---
+  - name: affiliates-api
+    type: api.handler
+    config:
+      resourceName: affiliates
+      seedFile: "./seed/affiliates.json"
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  - name: programs-api
+    type: api.handler
+    config:
+      resourceName: programs
+      seedFile: "./seed/programs.json"
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  - name: users-api
+    type: api.handler
+    config:
+      resourceName: users
+      seedFile: "./seed/users.json"
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  - name: keywords-api
+    type: api.handler
+    config:
+      resourceName: keywords
+      seedFile: "./seed/keywords.json"
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  - name: surveys-api
+    type: api.handler
+    config:
+      resourceName: surveys
+      seedFile: "./seed/surveys.json"
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  # --- Conversation API handlers (from conversation service) ---
+  - name: conversations-api
+    type: api.handler
+    config:
+      resourceName: conversations
+      workflowType: "conversation-lifecycle"
+      workflowEngine: "conversation-engine"
+      instanceIDPrefix: "conv-"
+      instanceIDField: "id"
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  - name: messages-api
+    type: api.handler
+    config:
+      resourceName: messages
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  - name: queue-api
+    type: api.handler
+    config:
+      resourceName: queue
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  - name: webhooks-api
+    type: api.handler
+    config:
+      resourceName: webhooks
+      workflowType: "conversation-lifecycle"
+      workflowEngine: "conversation-engine"
+    dependsOn:
+      - rate-limiter
+      - persistence
+
+  - name: webchat-api
+    type: api.handler
+    config:
+      resourceName: webchat
+      workflowType: "conversation-lifecycle"
+      workflowEngine: "conversation-engine"
+    dependsOn:
+      - rate-limiter
+      - persistence
+
+  - name: providers-api
+    type: api.handler
+    config:
+      resourceName: providers
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  # --- Conversation state machine ---
+  - name: conversation-engine
+    type: statemachine.engine
+    config:
+      description: "Manages conversation lifecycle state transitions"
+    dependsOn:
+      - conversations-api
+
+  # --- Persistence ---
+  - name: platform-db
+    type: database.workflow
+    config:
+      driver: "sqlite"
+      dsn: "./data/chat-platform.db"
+
+  - name: persistence
+    type: persistence.store
+    config:
+      database: "platform-db"
+    dependsOn:
+      - platform-db
+
+  # --- Dynamic processing components ---
+  - name: twilio-provider
+    type: dynamic.component
+    config:
+      source: "./components/twilio_provider.go"
+      description: "Twilio SMS provider - send/receive SMS via Twilio webhooks"
+    dependsOn:
+      - conversation-engine
+
+  - name: aws-provider
+    type: dynamic.component
+    config:
+      source: "./components/aws_provider.go"
+      description: "AWS SNS/Pinpoint SMS provider - send/receive via AWS"
+    dependsOn:
+      - conversation-engine
+
+  - name: partner-provider
+    type: dynamic.component
+    config:
+      source: "./components/partner_provider.go"
+      description: "Partner webhook provider - send/receive via partner API"
+    dependsOn:
+      - conversation-engine
+
+  - name: webchat-handler
+    type: dynamic.component
+    config:
+      source: "./components/webchat_handler.go"
+      description: "Webchat session handler - browser-based messaging"
+    dependsOn:
+      - conversation-engine
+
+  - name: conversation-router
+    type: dynamic.component
+    config:
+      source: "./components/conversation_router.go"
+      description: "Routes inbound messages to correct program and queue"
+    dependsOn:
+      - conversation-engine
+
+  - name: keyword-matcher
+    type: dynamic.component
+    config:
+      source: "./components/keyword_matcher.go"
+      description: "Matches texter keywords to programs for routing"
+    dependsOn:
+      - conversation-engine
+
+  - name: pii-encryptor
+    type: dynamic.component
+    config:
+      source: "./components/pii_encryptor.go"
+      description: "Field-level AES-256 encryption for PII data"
+    dependsOn:
+      - conversation-engine
+
+  - name: survey-engine
+    type: dynamic.component
+    config:
+      source: "./components/survey_engine.go"
+      description: "Entry and exit survey management"
+    dependsOn:
+      - conversation-engine
+
+  - name: followup-scheduler
+    type: dynamic.component
+    config:
+      source: "./components/followup_scheduler.go"
+      description: "Schedules follow-up check-ins for conversations"
+    dependsOn:
+      - conversation-engine
+
+  - name: escalation-handler
+    type: dynamic.component
+    config:
+      source: "./components/escalation_handler.go"
+      description: "Handles escalation to medical/police services"
+    dependsOn:
+      - conversation-engine
+
+  - name: ai-summarizer
+    type: dynamic.component
+    config:
+      source: "./components/ai_summarizer.go"
+      description: "Generates AI conversation summaries and analysis"
+    dependsOn:
+      - conversation-engine
+
+  - name: risk-tagger
+    type: dynamic.component
+    config:
+      source: "./components/risk_tagger.go"
+      description: "Tags conversations for risk assessment"
+    dependsOn:
+      - conversation-engine
+
+  - name: data-retention
+    type: dynamic.component
+    config:
+      source: "./components/data_retention.go"
+      description: "Enforces data retention policies and PII anonymization"
+    dependsOn:
+      - conversation-engine
+
+  - name: message-processor
+    type: dynamic.component
+    config:
+      source: "./components/message_processor.go"
+      description: "Central inbound/outbound message processing pipeline"
+    dependsOn:
+      - conversation-engine
+
+  - name: notification-sender
+    type: dynamic.component
+    config:
+      source: "./components/notification_sender.go"
+      description: "System notifications for queue alerts, escalations, transfers"
+    dependsOn:
+      - conversation-engine
+
+  # --- Processing steps ---
+  - name: step-route-message
+    type: processing.step
+    config:
+      componentId: "keyword-matcher"
+      successTransition: "route_message"
+      maxRetries: 1
+      retryBackoffMs: 500
+      timeoutSeconds: 10
+    dependsOn:
+      - keyword-matcher
+      - conversation-router
+      - conversation-engine
+
+  - name: step-assign
+    type: processing.step
+    config:
+      componentId: "conversation-router"
+      successTransition: "start_conversation"
+      maxRetries: 1
+      retryBackoffMs: 500
+      timeoutSeconds: 10
+    dependsOn:
+      - conversation-router
+      - ai-summarizer
+      - conversation-engine
+
+  - name: step-start-convo
+    type: processing.step
+    config:
+      componentId: "message-processor"
+      maxRetries: 1
+      retryBackoffMs: 500
+      timeoutSeconds: 10
+    dependsOn:
+      - message-processor
+      - conversation-engine
+
+  - name: step-survey
+    type: processing.step
+    config:
+      componentId: "survey-engine"
+      maxRetries: 1
+      retryBackoffMs: 500
+      timeoutSeconds: 10
+    dependsOn:
+      - survey-engine
+      - conversation-engine
+
+  - name: step-transfer
+    type: processing.step
+    config:
+      componentId: "ai-summarizer"
+      maxRetries: 1
+      retryBackoffMs: 1000
+      timeoutSeconds: 15
+    dependsOn:
+      - ai-summarizer
+      - conversation-engine
+
+  - name: step-accept-transfer
+    type: processing.step
+    config:
+      componentId: "notification-sender"
+      maxRetries: 2
+      retryBackoffMs: 500
+      timeoutSeconds: 10
+    dependsOn:
+      - notification-sender
+      - conversation-engine
+
+  - name: step-escalate
+    type: processing.step
+    config:
+      componentId: "escalation-handler"
+      maxRetries: 2
+      retryBackoffMs: 1000
+      timeoutSeconds: 30
+    dependsOn:
+      - escalation-handler
+      - conversation-engine
+
+  - name: step-wrap-up
+    type: processing.step
+    config:
+      componentId: "survey-engine"
+      maxRetries: 1
+      retryBackoffMs: 500
+      timeoutSeconds: 10
+    dependsOn:
+      - survey-engine
+      - risk-tagger
+      - conversation-engine
+
+  - name: step-schedule-followup
+    type: processing.step
+    config:
+      componentId: "followup-scheduler"
+      maxRetries: 2
+      retryBackoffMs: 1000
+      timeoutSeconds: 10
+    dependsOn:
+      - followup-scheduler
+      - conversation-engine
+
+  - name: step-trigger-followup
+    type: processing.step
+    config:
+      componentId: "message-processor"
+      maxRetries: 2
+      retryBackoffMs: 1000
+      timeoutSeconds: 15
+    dependsOn:
+      - message-processor
+      - conversation-engine
+
+  - name: step-close
+    type: processing.step
+    config:
+      componentId: "data-retention"
+      maxRetries: 1
+      retryBackoffMs: 500
+      timeoutSeconds: 10
+    dependsOn:
+      - data-retention
+      - conversation-engine
+
+  # --- Messaging (in-memory broker for monolith mode) ---
+  - name: event-broker
+    type: messaging.broker
+    config:
+      topics:
+        - "conversation.created"
+        - "conversation.assigned"
+        - "conversation.message.inbound"
+        - "conversation.message.outbound"
+        - "conversation.transferred"
+        - "conversation.escalated"
+        - "conversation.closed"
+        - "conversation.followup.scheduled"
+        - "conversation.followup.triggered"
+        - "conversation.survey.completed"
+        - "conversation.tag.updated"
+    dependsOn:
+      - conversation-engine
+
+  - name: notification-handler
+    type: messaging.handler
+    config:
+      topic: "conversation.*"
+      description: "Handles notifications for all conversation lifecycle events"
+    dependsOn:
+      - event-broker
+
+  # --- Observability ---
+  - name: metrics
+    type: metrics.collector
+    config:
+      namespace: chat_platform
+
+  - name: health
+    type: health.checker
+    config:
+      description: "Chat platform health, readiness, and liveness probes"
+
+  # --- Static file serving (SPA) ---
+  - name: spa
+    type: static.fileserver
+    config:
+      root: "./spa"
+      prefix: "/"
+      spaFallback: true
+      cacheMaxAge: 3600
+    dependsOn:
+      - web-server
+
+# --- Workflow definitions ---
+workflows:
+  # HTTP routing (all routes combined from api + conversation services)
+  http:
+    router: router
+    server: web-server
+    routes:
+      # === Authentication (public) ===
+      - method: "POST"
+        path: "/api/auth/login"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      - method: "POST"
+        path: "/api/auth/register"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      - method: "GET"
+        path: "/api/auth/profile"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/auth/profile"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # === Affiliates (protected) ===
+      - method: "GET"
+        path: "/api/affiliates"
+        handler: affiliates-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/affiliates/{id}"
+        handler: affiliates-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/affiliates"
+        handler: affiliates-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/affiliates/{id}"
+        handler: affiliates-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "DELETE"
+        path: "/api/affiliates/{id}"
+        handler: affiliates-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # === Programs (protected) ===
+      - method: "GET"
+        path: "/api/programs"
+        handler: programs-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/programs/{id}"
+        handler: programs-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/programs"
+        handler: programs-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/programs/{id}"
+        handler: programs-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "DELETE"
+        path: "/api/programs/{id}"
+        handler: programs-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # === Users (protected) ===
+      - method: "GET"
+        path: "/api/users"
+        handler: users-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/users/{id}"
+        handler: users-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/users"
+        handler: users-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/users/{id}"
+        handler: users-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "DELETE"
+        path: "/api/users/{id}"
+        handler: users-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # === Keywords (protected) ===
+      - method: "GET"
+        path: "/api/keywords"
+        handler: keywords-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/keywords/{id}"
+        handler: keywords-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/keywords"
+        handler: keywords-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/keywords/{id}"
+        handler: keywords-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "DELETE"
+        path: "/api/keywords/{id}"
+        handler: keywords-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # === Surveys (protected) ===
+      - method: "GET"
+        path: "/api/surveys"
+        handler: surveys-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/surveys/{id}"
+        handler: surveys-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/surveys"
+        handler: surveys-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/surveys/{id}"
+        handler: surveys-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "DELETE"
+        path: "/api/surveys/{id}"
+        handler: surveys-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # === Inbound webhooks (public) ===
+      - method: "POST"
+        path: "/api/webhooks/twilio"
+        handler: webhooks-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      - method: "POST"
+        path: "/api/webhooks/aws"
+        handler: webhooks-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      - method: "POST"
+        path: "/api/webhooks/partner"
+        handler: webhooks-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      # === Webchat (public) ===
+      - method: "POST"
+        path: "/api/webchat/message"
+        handler: webchat-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      - method: "GET"
+        path: "/api/webchat/poll/{id}"
+        handler: webchat-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      # === Conversations (protected) ===
+      - method: "GET"
+        path: "/api/conversations"
+        handler: conversations-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/conversations/{id}"
+        handler: conversations-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/conversations/{id}/messages"
+        handler: messages-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/conversations/{id}/assign"
+        handler: conversations-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/conversations/{id}/transfer"
+        handler: conversations-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/conversations/{id}/escalate"
+        handler: conversations-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/conversations/{id}/wrap-up"
+        handler: conversations-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/conversations/{id}/close"
+        handler: conversations-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/conversations/{id}/follow-up"
+        handler: conversations-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/conversations/{id}/tag"
+        handler: conversations-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/conversations/{id}/survey"
+        handler: conversations-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/conversations/{id}/summary"
+        handler: conversations-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # === Queue (protected) ===
+      - method: "GET"
+        path: "/api/queue"
+        handler: queue-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/queue/health"
+        handler: queue-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # === Providers (protected) ===
+      - method: "GET"
+        path: "/api/providers"
+        handler: providers-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+  # Conversation state machine -- 13-state lifecycle
+  statemachine:
+    engine: conversation-engine
+    resourceMappings:
+      - resourceType: "conversations"
+        stateMachine: "conversation-engine"
+        instanceIDKey: "id"
+    definitions:
+      - name: conversation-lifecycle
+        description: "Crisis/support conversation lifecycle with multi-provider messaging"
+        initialState: "new"
+        states:
+          new:
+            description: "Initial message received, not yet queued"
+            isFinal: false
+            isError: false
+          queued:
+            description: "In queue waiting for responder"
+            isFinal: false
+            isError: false
+          assigned:
+            description: "Responder assigned, not yet active"
+            isFinal: false
+            isError: false
+          active:
+            description: "Active conversation in progress"
+            isFinal: false
+            isError: false
+          transferred:
+            description: "Being transferred to another responder"
+            isFinal: false
+            isError: false
+          escalated_medical:
+            description: "Escalated to medical professional"
+            isFinal: false
+            isError: false
+          escalated_police:
+            description: "Escalated to police/emergency services"
+            isFinal: false
+            isError: false
+          wrap_up:
+            description: "Responder wrapping up, exit survey may be active"
+            isFinal: false
+            isError: false
+          follow_up_scheduled:
+            description: "Follow-up scheduled for later"
+            isFinal: false
+            isError: false
+          follow_up_active:
+            description: "Follow-up conversation in progress"
+            isFinal: false
+            isError: false
+          closed:
+            description: "Conversation ended normally"
+            isFinal: true
+            isError: false
+          expired:
+            description: "Timed out or retention policy applied"
+            isFinal: true
+            isError: false
+          failed:
+            description: "Processing error"
+            isFinal: true
+            isError: true
+        transitions:
+          route_message:
+            fromState: "new"
+            toState: "queued"
+            autoTransform: true
+          assign_responder:
+            fromState: "queued"
+            toState: "assigned"
+          start_conversation:
+            fromState: "assigned"
+            toState: "active"
+            autoTransform: true
+          send_entry_survey:
+            fromState: "active"
+            toState: "active"
+          transfer_to_responder:
+            fromState: "active"
+            toState: "transferred"
+          accept_transfer:
+            fromState: "transferred"
+            toState: "active"
+          escalate_to_medical:
+            fromState: "active"
+            toState: "escalated_medical"
+          escalate_to_police:
+            fromState: "active"
+            toState: "escalated_police"
+          resolve_escalation:
+            fromState: "escalated_medical"
+            toState: "active"
+          resolve_police_escalation:
+            fromState: "escalated_police"
+            toState: "active"
+          begin_wrap_up:
+            fromState: "active"
+            toState: "wrap_up"
+          schedule_follow_up:
+            fromState: "wrap_up"
+            toState: "follow_up_scheduled"
+          trigger_follow_up:
+            fromState: "follow_up_scheduled"
+            toState: "follow_up_active"
+          close_from_wrap_up:
+            fromState: "wrap_up"
+            toState: "closed"
+          close_from_followup:
+            fromState: "follow_up_active"
+            toState: "closed"
+          close_from_active:
+            fromState: "active"
+            toState: "closed"
+          timeout_expire:
+            fromState: "queued"
+            toState: "expired"
+    hooks:
+      - workflowType: "conversation-lifecycle"
+        transitions: ["route_message"]
+        handler: "step-route-message"
+      - workflowType: "conversation-lifecycle"
+        transitions: ["assign_responder"]
+        handler: "step-assign"
+      - workflowType: "conversation-lifecycle"
+        transitions: ["start_conversation"]
+        handler: "step-start-convo"
+      - workflowType: "conversation-lifecycle"
+        transitions: ["send_entry_survey"]
+        handler: "step-survey"
+      - workflowType: "conversation-lifecycle"
+        transitions: ["transfer_to_responder"]
+        handler: "step-transfer"
+      - workflowType: "conversation-lifecycle"
+        transitions: ["accept_transfer"]
+        handler: "step-accept-transfer"
+      - workflowType: "conversation-lifecycle"
+        transitions: ["escalate_to_medical", "escalate_to_police"]
+        handler: "step-escalate"
+      - workflowType: "conversation-lifecycle"
+        transitions: ["begin_wrap_up"]
+        handler: "step-wrap-up"
+      - workflowType: "conversation-lifecycle"
+        transitions: ["schedule_follow_up"]
+        handler: "step-schedule-followup"
+      - workflowType: "conversation-lifecycle"
+        transitions: ["trigger_follow_up"]
+        handler: "step-trigger-followup"
+      - workflowType: "conversation-lifecycle"
+        transitions: ["close_from_wrap_up", "close_from_followup", "close_from_active"]
+        handler: "step-close"
+      - workflowType: "conversation-lifecycle"
+        toStates: ["queued", "assigned", "active", "transferred", "escalated_medical", "escalated_police", "wrap_up", "closed", "expired", "failed"]
+        handler: "notification-handler"
+
+  # Messaging subscriptions (in-memory broker)
+  messaging:
+    broker: event-broker
+    subscriptions:
+      - topic: "conversation.created"
+        handler: notification-handler
+      - topic: "conversation.assigned"
+        handler: notification-handler
+      - topic: "conversation.message.inbound"
+        handler: notification-handler
+      - topic: "conversation.message.outbound"
+        handler: notification-handler
+      - topic: "conversation.transferred"
+        handler: notification-handler
+      - topic: "conversation.escalated"
+        handler: notification-handler
+      - topic: "conversation.closed"
+        handler: notification-handler
+      - topic: "conversation.followup.scheduled"
+        handler: notification-handler
+      - topic: "conversation.followup.triggered"
+        handler: notification-handler
+      - topic: "conversation.survey.completed"
+        handler: notification-handler
+      - topic: "conversation.tag.updated"
+        handler: notification-handler
+
+# --- Triggers ---
+triggers:
+  http:
+    routes:
+      - path: "/api/webhooks/twilio"
+        method: "POST"
+        workflow: "conversation-lifecycle"
+        action: "route_message"
+      - path: "/api/webhooks/aws"
+        method: "POST"
+        workflow: "conversation-lifecycle"
+        action: "route_message"
+      - path: "/api/webhooks/partner"
+        method: "POST"
+        workflow: "conversation-lifecycle"
+        action: "route_message"
+      - path: "/api/webchat/message"
+        method: "POST"
+        workflow: "conversation-lifecycle"
+        action: "route_message"
+  event:
+    subscriptions:
+      - topic: "conversation.created"
+        event: "conversation.created"
+        workflow: "conversation-lifecycle"
+        action: "route_message"
+      - topic: "conversation.assigned"
+        event: "conversation.assigned"
+        workflow: "conversation-lifecycle"
+        action: "start_conversation"
+      - topic: "conversation.followup.triggered"
+        event: "conversation.followup.triggered"
+        workflow: "conversation-lifecycle"
+        action: "trigger_follow_up"

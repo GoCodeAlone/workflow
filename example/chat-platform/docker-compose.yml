@@ -1,0 +1,132 @@
+# Multi-container chat platform with Kafka communication.
+#
+# Architecture:
+#   gateway        - SPA + reverse proxy (port 8080)
+#   api            - Auth + platform CRUD (port 8081)
+#   conversation   - Chat state machine + providers (port 8082)
+#   kafka          - Event bus (KRaft mode, no Zookeeper)
+#
+# Usage:
+#   Distributed: docker compose --profile distributed up
+#   Monolith:    go run ./cmd/server -config example/chat-platform/workflow.yaml
+
+services:
+  # --- Kafka (KRaft mode — no Zookeeper) ---
+  kafka:
+    image: apache/kafka:latest
+    environment:
+      - KAFKA_NODE_ID=0
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+      - CLUSTER_ID=chat-platform-kafka-cluster-001
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    profiles: [distributed]
+    restart: unless-stopped
+
+  # --- Gateway: SPA + reverse proxy ---
+  gateway:
+    build:
+      context: ../..
+      dockerfile: example/chat-platform/Dockerfile
+    ports:
+      - "8080:8080"
+    command: ["./server", "-config", "config/configs/gateway.yaml"]
+    depends_on:
+      api:
+        condition: service_healthy
+      conversation:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    profiles: [distributed]
+    restart: unless-stopped
+
+  # --- API service: Auth + platform CRUD ---
+  api:
+    build:
+      context: ../..
+      dockerfile: example/chat-platform/Dockerfile
+    environment:
+      - JWT_SECRET=chat-platform-jwt-secret-change-in-production
+      - ENCRYPTION_KEY=chat-platform-encryption-key-32ch
+    command: ["./server", "-config", "config/configs/api.yaml"]
+    volumes:
+      - api-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    profiles: [distributed]
+    restart: unless-stopped
+
+  # --- Conversation service: Chat + state machine ---
+  conversation:
+    build:
+      context: ../..
+      dockerfile: example/chat-platform/Dockerfile
+    environment:
+      - JWT_SECRET=chat-platform-jwt-secret-change-in-production
+      - ENCRYPTION_KEY=chat-platform-encryption-key-32ch
+    command: ["./server", "-config", "config/configs/conversation.yaml"]
+    volumes:
+      - conversation-data:/app/data
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8082/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    profiles: [distributed]
+    restart: unless-stopped
+
+  # --- Observability ---
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - gateway
+    profiles: [distributed]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+    profiles: [distributed]
+    restart: unless-stopped
+
+volumes:
+  api-data:
+  conversation-data:

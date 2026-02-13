@@ -1,0 +1,6 @@
+[
+  {"id":"prog-001","data":{"name":"Crisis Text Line","affiliateId":"aff-001","providers":["twilio","webchat"],"shortCode":"741741","description":"24/7 crisis support via text","status":"active","settings":{"maxConcurrentPerResponder":3,"queueAlertThreshold":10,"entrySurveyId":"survey-001","exitSurveyId":"survey-002"}},"state":"active"},
+  {"id":"prog-002","data":{"name":"Teen Support Line","affiliateId":"aff-001","providers":["twilio"],"shortCode":"741742","description":"Dedicated teen mental health support","status":"active","settings":{"maxConcurrentPerResponder":2,"queueAlertThreshold":5,"entrySurveyId":"survey-003","exitSurveyId":"survey-004"}},"state":"active"},
+  {"id":"prog-003","data":{"name":"Wellness Chat","affiliateId":"aff-002","providers":["webchat","aws"],"shortCode":"","description":"Web-based wellness support","status":"active","settings":{"maxConcurrentPerResponder":4,"queueAlertThreshold":15,"entrySurveyId":"","exitSurveyId":"survey-005"}},"state":"active"},
+  {"id":"prog-004","data":{"name":"Partner Assist","affiliateId":"aff-003","providers":["partner"],"shortCode":"","description":"Partner-integrated support service","status":"active","settings":{"maxConcurrentPerResponder":2,"queueAlertThreshold":8}},"state":"active"}
+]

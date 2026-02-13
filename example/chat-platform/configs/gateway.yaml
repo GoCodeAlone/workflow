@@ -1,0 +1,383 @@
+# Gateway Container Configuration
+# Serves the SPA and proxies API requests to backend services.
+#
+# Architecture:
+#   Browser -> [gateway:8080] -> SPA (static files)
+#                             -> /api/auth/*          -> api:8081
+#                             -> /api/affiliates/*    -> api:8081
+#                             -> /api/programs/*      -> api:8081
+#                             -> /api/users/*         -> api:8081
+#                             -> /api/keywords/*      -> api:8081
+#                             -> /api/surveys/*       -> api:8081
+#                             -> /api/admin/*         -> api:8081
+#                             -> /api/conversations/* -> conversation:8082
+#                             -> /api/messages/*      -> conversation:8082
+#                             -> /api/queue/*         -> conversation:8082
+#                             -> /api/webhooks/*      -> conversation:8082
+#                             -> /api/webchat/*       -> conversation:8082
+#                             -> /api/providers/*     -> conversation:8082
+#
+# No business logic -- pure routing and static file serving.
+
+modules:
+  # --- HTTP infrastructure ---
+  - name: web-server
+    type: http.server
+    config:
+      address: ":8080"
+      readTimeout: "15s"
+      writeTimeout: "15s"
+
+  - name: router
+    type: http.router
+    config:
+      prefix: /api
+    dependsOn:
+      - web-server
+
+  # --- Reverse proxy to backend services ---
+  - name: api-proxy
+    type: http.simple_proxy
+    config:
+      targets:
+        "/api/auth": "http://api:8081"
+        "/api/affiliates": "http://api:8081"
+        "/api/programs": "http://api:8081"
+        "/api/users": "http://api:8081"
+        "/api/keywords": "http://api:8081"
+        "/api/surveys": "http://api:8081"
+        "/api/admin": "http://api:8081"
+        "/api/conversations": "http://conversation:8082"
+        "/api/messages": "http://conversation:8082"
+        "/api/queue": "http://conversation:8082"
+        "/api/webhooks": "http://conversation:8082"
+        "/api/webchat": "http://conversation:8082"
+        "/api/providers": "http://conversation:8082"
+    dependsOn:
+      - router
+
+  # --- Middleware chain ---
+  - name: cors
+    type: http.middleware.cors
+    config:
+      allowedOrigins: ["*"]
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+      allowedHeaders: ["Content-Type", "Authorization"]
+    dependsOn:
+      - router
+
+  - name: request-id
+    type: http.middleware.requestid
+    dependsOn:
+      - cors
+
+  # --- Observability ---
+  - name: metrics
+    type: metrics.collector
+    config:
+      namespace: chat_gateway
+
+  - name: health
+    type: health.checker
+    config:
+      description: "Gateway health, readiness, and liveness probes"
+
+  # --- Static file serving (SPA) ---
+  - name: spa
+    type: static.fileserver
+    config:
+      root: "../spa"
+      prefix: "/"
+      spaFallback: true
+      cacheMaxAge: 3600
+    dependsOn:
+      - web-server
+
+# --- Workflow definitions ---
+workflows:
+  http:
+    router: router
+    server: web-server
+    routes:
+      # --- Platform API routes (proxied to api:8081) ---
+      - method: "POST"
+        path: "/api/auth/login"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/auth/register"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/auth/profile"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "PUT"
+        path: "/api/auth/profile"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/affiliates"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/affiliates/{id}"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/affiliates"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/programs"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/programs/{id}"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/programs"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/users"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/users/{id}"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/users"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/keywords"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/keywords/{id}"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/keywords"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/surveys"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/surveys/{id}"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/surveys"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/admin/{path}"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      # --- Conversation routes (proxied to conversation:8082) ---
+      - method: "GET"
+        path: "/api/conversations"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/conversations/{id}"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/conversations/{id}/messages"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/conversations/{id}/assign"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/conversations/{id}/transfer"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/conversations/{id}/escalate"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/conversations/{id}/wrap-up"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/conversations/{id}/close"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/conversations/{id}/follow-up"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/conversations/{id}/tag"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/conversations/{id}/survey"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/conversations/{id}/summary"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/queue"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/queue/health"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/providers"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      # --- Webhook routes (proxied to conversation:8082, public) ---
+      - method: "POST"
+        path: "/api/webhooks/twilio"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/webhooks/aws"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/webhooks/partner"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "POST"
+        path: "/api/webchat/message"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id
+
+      - method: "GET"
+        path: "/api/webchat/poll/{id}"
+        handler: api-proxy
+        middlewares:
+          - cors
+          - request-id

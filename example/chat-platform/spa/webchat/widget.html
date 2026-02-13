@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat Support</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: transparent;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* Chat Bubble Button */
+    .webchat-bubble {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: #4361ee;
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(67, 97, 238, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      z-index: 10000;
+    }
+    .webchat-bubble:hover {
+      transform: scale(1.05);
+      box-shadow: 0 6px 20px rgba(67, 97, 238, 0.5);
+    }
+    .webchat-bubble svg {
+      width: 28px;
+      height: 28px;
+      fill: white;
+    }
+    .webchat-bubble.has-unread::after {
+      content: '';
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      width: 12px;
+      height: 12px;
+      background: #e63946;
+      border-radius: 50%;
+      border: 2px solid white;
+    }
+
+    /* Chat Panel */
+    .webchat-panel {
+      position: fixed;
+      bottom: 96px;
+      right: 24px;
+      width: 380px;
+      max-height: 520px;
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+      z-index: 10000;
+      animation: panel-in 0.25s ease;
+    }
+    .webchat-panel.open {
+      display: flex;
+    }
+
+    @keyframes panel-in {
+      from { opacity: 0; transform: translateY(16px) scale(0.95); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* Panel Header */
+    .webchat-header {
+      background: #4361ee;
+      color: white;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .webchat-header-title {
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    .webchat-header-subtitle {
+      font-size: 0.8rem;
+      opacity: 0.85;
+      margin-top: 2px;
+    }
+    .webchat-close {
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: rgba(255,255,255,0.2);
+      color: white;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      transition: background 0.2s;
+    }
+    .webchat-close:hover {
+      background: rgba(255,255,255,0.3);
+    }
+
+    /* Pre-chat Form */
+    .webchat-prechat {
+      padding: 24px 20px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .webchat-prechat h3 {
+      font-size: 1.05rem;
+      color: #1a1a2e;
+      margin-bottom: 4px;
+    }
+    .webchat-prechat p {
+      font-size: 0.85rem;
+      color: #666;
+      line-height: 1.5;
+    }
+    .webchat-form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .webchat-form-group label {
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: #555;
+    }
+    .webchat-form-input {
+      padding: 10px 14px;
+      font-size: 0.9rem;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      outline: none;
+      font-family: inherit;
+      transition: border-color 0.2s;
+      color: #1a1a2e;
+      background: #f8f9fa;
+    }
+    .webchat-form-input:focus {
+      border-color: #4361ee;
+      background: white;
+    }
+    .webchat-form-input::placeholder {
+      color: #aaa;
+    }
+    .webchat-form-textarea {
+      resize: none;
+      min-height: 60px;
+    }
+    .webchat-start-btn {
+      padding: 12px;
+      background: #4361ee;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      font-family: inherit;
+    }
+    .webchat-start-btn:hover {
+      background: #5a7bff;
+    }
+    .webchat-start-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    /* Message Area */
+    .webchat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 280px;
+      max-height: 340px;
+      background: #f8f9fa;
+    }
+
+    .webchat-msg {
+      max-width: 80%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      line-height: 1.45;
+      word-wrap: break-word;
+    }
+    .webchat-msg.user {
+      align-self: flex-end;
+      background: #4361ee;
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+    .webchat-msg.agent {
+      align-self: flex-start;
+      background: white;
+      color: #1a1a2e;
+      border: 1px solid #e8e8e8;
+      border-bottom-left-radius: 4px;
+    }
+    .webchat-msg.system {
+      align-self: center;
+      background: transparent;
+      color: #888;
+      font-size: 0.8rem;
+      text-align: center;
+      max-width: 90%;
+    }
+    .webchat-msg-time {
+      font-size: 0.7rem;
+      margin-top: 4px;
+      opacity: 0.6;
+    }
+    .webchat-msg.user .webchat-msg-time {
+      text-align: right;
+    }
+
+    .webchat-typing {
+      display: none;
+      align-self: flex-start;
+      padding: 10px 14px;
+      background: white;
+      border: 1px solid #e8e8e8;
+      border-radius: 12px;
+      border-bottom-left-radius: 4px;
+      font-size: 0.85rem;
+      color: #888;
+    }
+    .webchat-typing.visible {
+      display: block;
+    }
+
+    /* Input Area */
+    .webchat-input-area {
+      padding: 12px 16px;
+      display: flex;
+      gap: 8px;
+      border-top: 1px solid #eee;
+      background: white;
+    }
+    .webchat-input {
+      flex: 1;
+      padding: 10px 14px;
+      font-size: 0.9rem;
+      border: 1px solid #ddd;
+      border-radius: 20px;
+      outline: none;
+      font-family: inherit;
+      transition: border-color 0.2s;
+      color: #1a1a2e;
+    }
+    .webchat-input:focus {
+      border-color: #4361ee;
+    }
+    .webchat-input::placeholder {
+      color: #aaa;
+    }
+    .webchat-send {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #4361ee;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+      flex-shrink: 0;
+    }
+    .webchat-send:hover {
+      background: #5a7bff;
+    }
+    .webchat-send:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .webchat-send svg {
+      width: 18px;
+      height: 18px;
+      fill: white;
+    }
+
+    /* Powered by footer */
+    .webchat-footer {
+      text-align: center;
+      padding: 8px;
+      font-size: 0.7rem;
+      color: #bbb;
+      background: white;
+    }
+
+    /* Scrollbar */
+    .webchat-messages::-webkit-scrollbar {
+      width: 5px;
+    }
+    .webchat-messages::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .webchat-messages::-webkit-scrollbar-thumb {
+      background: #ddd;
+      border-radius: 3px;
+    }
+
+    /* Responsive */
+    @media (max-width: 420px) {
+      .webchat-panel {
+        bottom: 0;
+        right: 0;
+        left: 0;
+        width: 100%;
+        max-height: 100vh;
+        border-radius: 0;
+      }
+      .webchat-bubble {
+        bottom: 16px;
+        right: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Chat Bubble -->
+  <button class="webchat-bubble" id="webchat-bubble" title="Chat with us">
+    <svg viewBox="0 0 24 24">
+      <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+    </svg>
+  </button>
+
+  <!-- Chat Panel -->
+  <div class="webchat-panel" id="webchat-panel">
+    <div class="webchat-header">
+      <div>
+        <div class="webchat-header-title">Support Chat</div>
+        <div class="webchat-header-subtitle">We're here to help</div>
+      </div>
+      <button class="webchat-close" id="webchat-close">&times;</button>
+    </div>
+
+    <!-- Pre-chat Form -->
+    <div id="webchat-prechat" class="webchat-prechat">
+      <h3>Welcome</h3>
+      <p>We're here for you. Start a conversation and a counselor will be with you shortly.</p>
+      <div class="webchat-form-group">
+        <label for="wc-name">Your name (optional)</label>
+        <input type="text" class="webchat-form-input" id="wc-name" placeholder="How should we address you?">
+      </div>
+      <div class="webchat-form-group">
+        <label for="wc-reason">What brings you here?</label>
+        <textarea class="webchat-form-input webchat-form-textarea" id="wc-reason" placeholder="Share what's on your mind..."></textarea>
+      </div>
+      <button class="webchat-start-btn" id="wc-start-btn">Start Chat</button>
+    </div>
+
+    <!-- Chat Area (hidden initially) -->
+    <div id="webchat-chat" style="display: none; flex: 1; display: none; flex-direction: column;">
+      <div class="webchat-messages" id="webchat-messages"></div>
+      <div class="webchat-typing" id="webchat-typing">Counselor is typing...</div>
+      <div class="webchat-input-area">
+        <input type="text" class="webchat-input" id="webchat-input" placeholder="Type a message...">
+        <button class="webchat-send" id="webchat-send-btn" title="Send">
+          <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+      <div class="webchat-footer">Powered by Chat Platform</div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const API_BASE = window.location.origin || '';
+      let sessionId = null;
+      let pollTimer = null;
+      let knownMessageIds = new Set();
+
+      // Elements
+      const bubble = document.getElementById('webchat-bubble');
+      const panel = document.getElementById('webchat-panel');
+      const closeBtn = document.getElementById('webchat-close');
+      const prechat = document.getElementById('webchat-prechat');
+      const chatArea = document.getElementById('webchat-chat');
+      const messagesContainer = document.getElementById('webchat-messages');
+      const input = document.getElementById('webchat-input');
+      const sendBtn = document.getElementById('webchat-send-btn');
+      const startBtn = document.getElementById('wc-start-btn');
+
+      // Toggle panel
+      bubble.addEventListener('click', function() {
+        panel.classList.toggle('open');
+        bubble.classList.remove('has-unread');
+        if (panel.classList.contains('open') && sessionId) {
+          input.focus();
+        }
+      });
+
+      closeBtn.addEventListener('click', function() {
+        panel.classList.remove('open');
+      });
+
+      // Start chat
+      startBtn.addEventListener('click', async function() {
+        const name = document.getElementById('wc-name').value.trim();
+        const reason = document.getElementById('wc-reason').value.trim();
+
+        startBtn.disabled = true;
+        startBtn.textContent = 'Connecting...';
+
+        try {
+          const res = await fetch(API_BASE + '/api/webchat/message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: name || 'Anonymous',
+              message: reason || 'Hello',
+              sessionId: null
+            })
+          });
+          const data = await res.json();
+          sessionId = data.sessionId || data.data?.sessionId;
+
+          if (!sessionId) {
+            throw new Error('No session ID returned');
+          }
+
+          // Switch to chat view
+          prechat.style.display = 'none';
+          chatArea.style.display = 'flex';
+
+          // Add system message
+          addMessage('system', 'Connected. A counselor will be with you shortly.');
+
+          // Add the initial message
+          if (reason) {
+            addMessage('user', reason);
+          }
+
+          // Start polling
+          startPolling();
+          input.focus();
+        } catch (err) {
+          startBtn.disabled = false;
+          startBtn.textContent = 'Start Chat';
+          alert('Failed to connect. Please try again.');
+        }
+      });
+
+      // Send message
+      function sendMessage() {
+        const text = input.value.trim();
+        if (!text || !sessionId) return;
+
+        sendBtn.disabled = true;
+        input.value = '';
+
+        addMessage('user', text);
+
+        fetch(API_BASE + '/api/webchat/message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: sessionId,
+            message: text
+          })
+        }).then(function(res) {
+          return res.json();
+        }).then(function() {
+          sendBtn.disabled = false;
+          input.focus();
+        }).catch(function() {
+          sendBtn.disabled = false;
+          input.focus();
+        });
+      }
+
+      sendBtn.addEventListener('click', sendMessage);
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+
+      // Polling for new messages
+      function startPolling() {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(pollMessages, 3000);
+      }
+
+      async function pollMessages() {
+        if (!sessionId) return;
+        try {
+          const res = await fetch(API_BASE + '/api/webchat/poll/' + sessionId);
+          const data = await res.json();
+          const messages = data.messages || data.data?.messages || [];
+
+          messages.forEach(function(msg) {
+            const msgId = msg.id || msg.messageId || (msg.timestamp + msg.content);
+            if (knownMessageIds.has(msgId)) return;
+            knownMessageIds.add(msgId);
+
+            const dir = msg.direction || 'inbound';
+            if (dir === 'outbound') {
+              addMessage('agent', msg.content || msg.body || msg.message);
+              // Show notification if panel is closed
+              if (!panel.classList.contains('open')) {
+                bubble.classList.add('has-unread');
+              }
+            }
+          });
+        } catch (err) {
+          // Silent poll failure
+        }
+      }
+
+      // Add message to UI
+      function addMessage(type, text) {
+        if (!text) return;
+        var msgEl = document.createElement('div');
+        msgEl.className = 'webchat-msg ' + type;
+
+        var now = new Date();
+        var timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        if (type === 'system') {
+          msgEl.textContent = text;
+        } else {
+          msgEl.innerHTML = escapeHtml(text) + '<div class="webchat-msg-time">' + timeStr + '</div>';
+        }
+
+        messagesContainer.appendChild(msgEl);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
+
+      function escapeHtml(str) {
+        var div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+      }
+
+      // Restore session
+      var stored = sessionStorage.getItem('webchat_session');
+      if (stored) {
+        sessionId = stored;
+        prechat.style.display = 'none';
+        chatArea.style.display = 'flex';
+        addMessage('system', 'Session restored. A counselor is standing by.');
+        startPolling();
+      }
+
+      // Save session on change
+      var origSessionId = sessionId;
+      setInterval(function() {
+        if (sessionId && sessionId !== origSessionId) {
+          sessionStorage.setItem('webchat_session', sessionId);
+          origSessionId = sessionId;
+        }
+      }, 1000);
+    })();
+  </script>
+</body>
+</html>

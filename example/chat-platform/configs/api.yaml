@@ -1,0 +1,413 @@
+# API Container Configuration
+# Handles authentication, platform CRUD (affiliates, programs, users, keywords, surveys).
+#
+# Architecture:
+#   Gateway -> [api:8081] -> /api/auth/*       (JWT auth: login, register, profile)
+#                         -> /api/affiliates/* (affiliate CRUD)
+#                         -> /api/programs/*   (program CRUD)
+#                         -> /api/users/*      (user management)
+#                         -> /api/keywords/*   (keyword routing rules)
+#                         -> /api/surveys/*    (survey templates)
+#                         -> /api/admin/*      (admin operations)
+#
+# No state machine, no dynamic components, no Kafka.
+# Persistence via SQLite for all platform data.
+
+modules:
+  # --- HTTP infrastructure ---
+  - name: web-server
+    type: http.server
+    config:
+      address: ":8081"
+      readTimeout: "15s"
+      writeTimeout: "15s"
+
+  - name: router
+    type: http.router
+    config:
+      prefix: /api
+    dependsOn:
+      - web-server
+
+  # --- Middleware chain ---
+  - name: cors
+    type: http.middleware.cors
+    config:
+      allowedOrigins: ["*"]
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+      allowedHeaders: ["Content-Type", "Authorization"]
+    dependsOn:
+      - router
+
+  - name: request-id
+    type: http.middleware.requestid
+    dependsOn:
+      - cors
+
+  - name: rate-limiter
+    type: http.middleware.ratelimit
+    config:
+      requestsPerMinute: 300
+      burstSize: 50
+    dependsOn:
+      - request-id
+
+  # --- Authentication ---
+  - name: auth
+    type: auth.jwt
+    config:
+      secret: "${JWT_SECRET}"
+      tokenExpiry: "24h"
+      issuer: "chat-platform"
+    dependsOn:
+      - rate-limiter
+
+  - name: auth-middleware
+    type: http.middleware.auth
+    config:
+      authType: Bearer
+    dependsOn:
+      - auth
+
+  # --- API handlers ---
+  - name: affiliates-api
+    type: api.handler
+    config:
+      resourceName: affiliates
+      seedFile: "../seed/affiliates.json"
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  - name: programs-api
+    type: api.handler
+    config:
+      resourceName: programs
+      seedFile: "../seed/programs.json"
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  - name: users-api
+    type: api.handler
+    config:
+      resourceName: users
+      seedFile: "../seed/users.json"
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  - name: keywords-api
+    type: api.handler
+    config:
+      resourceName: keywords
+      seedFile: "../seed/keywords.json"
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  - name: surveys-api
+    type: api.handler
+    config:
+      resourceName: surveys
+      seedFile: "../seed/surveys.json"
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  # --- Persistence ---
+  - name: platform-db
+    type: database.workflow
+    config:
+      driver: "sqlite"
+      dsn: "./data/platform.db"
+
+  - name: persistence
+    type: persistence.store
+    config:
+      database: "platform-db"
+    dependsOn:
+      - platform-db
+
+  # --- Observability ---
+  - name: metrics
+    type: metrics.collector
+    config:
+      namespace: chat_api
+
+  - name: health
+    type: health.checker
+    config:
+      description: "API service health"
+
+# --- Workflow definitions ---
+workflows:
+  http:
+    router: router
+    server: web-server
+    routes:
+      # --- Public: authentication ---
+      - method: "POST"
+        path: "/api/auth/login"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      - method: "POST"
+        path: "/api/auth/register"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+
+      # --- Protected: user profile ---
+      - method: "GET"
+        path: "/api/auth/profile"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/auth/profile"
+        handler: auth
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # --- Protected: affiliates ---
+      - method: "GET"
+        path: "/api/affiliates"
+        handler: affiliates-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/affiliates/{id}"
+        handler: affiliates-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/affiliates"
+        handler: affiliates-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/affiliates/{id}"
+        handler: affiliates-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "DELETE"
+        path: "/api/affiliates/{id}"
+        handler: affiliates-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # --- Protected: programs ---
+      - method: "GET"
+        path: "/api/programs"
+        handler: programs-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/programs/{id}"
+        handler: programs-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/programs"
+        handler: programs-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/programs/{id}"
+        handler: programs-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "DELETE"
+        path: "/api/programs/{id}"
+        handler: programs-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # --- Protected: users ---
+      - method: "GET"
+        path: "/api/users"
+        handler: users-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/users/{id}"
+        handler: users-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/users"
+        handler: users-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/users/{id}"
+        handler: users-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "DELETE"
+        path: "/api/users/{id}"
+        handler: users-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # --- Protected: keywords ---
+      - method: "GET"
+        path: "/api/keywords"
+        handler: keywords-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/keywords/{id}"
+        handler: keywords-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/keywords"
+        handler: keywords-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/keywords/{id}"
+        handler: keywords-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "DELETE"
+        path: "/api/keywords/{id}"
+        handler: keywords-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # --- Protected: surveys ---
+      - method: "GET"
+        path: "/api/surveys"
+        handler: surveys-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/surveys/{id}"
+        handler: surveys-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/surveys"
+        handler: surveys-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/surveys/{id}"
+        handler: surveys-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "DELETE"
+        path: "/api/surveys/{id}"
+        handler: surveys-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware

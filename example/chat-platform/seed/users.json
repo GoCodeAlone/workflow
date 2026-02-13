@@ -1,0 +1,8 @@
+[
+  {"id":"user-001","data":{"email":"responder1@example.com","name":"Alex Rivera","role":"responder","affiliateId":"aff-001","programIds":["prog-001","prog-002"],"status":"active","maxConcurrent":3,"password":"demo123"},"state":"active"},
+  {"id":"user-002","data":{"email":"responder2@example.com","name":"Jordan Chen","role":"responder","affiliateId":"aff-001","programIds":["prog-001"],"status":"active","maxConcurrent":3,"password":"demo123"},"state":"active"},
+  {"id":"user-003","data":{"email":"responder3@example.com","name":"Sam Okafor","role":"responder","affiliateId":"aff-002","programIds":["prog-003"],"status":"active","maxConcurrent":4,"password":"demo123"},"state":"active"},
+  {"id":"user-004","data":{"email":"supervisor1@example.com","name":"Dr. Maria Santos","role":"supervisor","affiliateId":"aff-001","programIds":["prog-001","prog-002"],"status":"active","password":"demo123"},"state":"active"},
+  {"id":"user-005","data":{"email":"supervisor2@example.com","name":"Taylor Kim","role":"supervisor","affiliateId":"aff-002","programIds":["prog-003"],"status":"active","password":"demo123"},"state":"active"},
+  {"id":"user-006","data":{"email":"admin@example.com","name":"Admin User","role":"admin","affiliateId":"aff-001","programIds":[],"status":"active","password":"demo123"},"state":"active"}
+]

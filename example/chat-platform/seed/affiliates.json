@@ -1,0 +1,5 @@
+[
+  {"id":"aff-001","data":{"name":"Crisis Support International","region":"US-East","dataRetentionDays":365,"encryptionKeyId":"key-001","contactEmail":"admin@csi.org","status":"active"},"state":"active"},
+  {"id":"aff-002","data":{"name":"Youth Mental Health Alliance","region":"US-West","dataRetentionDays":180,"encryptionKeyId":"key-002","contactEmail":"admin@ymha.org","status":"active"},"state":"active"},
+  {"id":"aff-003","data":{"name":"Global Wellness Network","region":"EU-West","dataRetentionDays":90,"encryptionKeyId":"key-003","contactEmail":"admin@gwn.eu","status":"active"},"state":"active"}
+]
