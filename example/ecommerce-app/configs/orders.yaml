@@ -80,6 +80,7 @@ modules:
       instanceIDField: "id"
     dependsOn:
       - auth-middleware
+      - persistence
 
   # --- Order state machine ---
   - name: order-state

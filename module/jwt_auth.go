@@ -337,6 +337,16 @@ func (j *JWTAuthModule) generateToken(user *User) (string, error) {
 
 // Start loads persisted users if available.
 func (j *JWTAuthModule) Start(ctx context.Context) error {
+	// Late-bind persistence if it wasn't available during Init().
+	if j.persistence == nil && j.app != nil {
+		var ps interface{}
+		if err := j.app.GetService("persistence", &ps); err == nil && ps != nil {
+			if store, ok := ps.(*PersistenceStore); ok {
+				j.persistence = store
+			}
+		}
+	}
+
 	if j.persistence == nil {
 		return nil
 	}

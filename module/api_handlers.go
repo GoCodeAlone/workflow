@@ -1086,6 +1086,18 @@ func (h *RESTAPIHandler) loadSeedData(path string) error {
 
 // Start loads persisted resources (if available) and seed data.
 func (h *RESTAPIHandler) Start(ctx context.Context) error {
+	// Late-bind persistence if it wasn't available during Init().
+	// This handles the case where the persistence module initializes after
+	// this module (e.g., alphabetical ordering without explicit dependsOn).
+	if h.persistence == nil && h.app != nil {
+		var ps interface{}
+		if err := h.app.GetService("persistence", &ps); err == nil && ps != nil {
+			if store, ok := ps.(*PersistenceStore); ok {
+				h.persistence = store
+			}
+		}
+	}
+
 	// Load persisted resources
 	if h.persistence != nil {
 		loaded, err := h.persistence.LoadResources(h.resourceName)
