@@ -22,6 +22,8 @@ type KafkaBroker struct {
 	kafkaConsumer *kafkaConsumerAdapter
 	cancelFunc    context.CancelFunc
 	logger        modular.Logger
+	healthy       bool
+	healthMsg     string
 }
 
 // NewKafkaBroker creates a new Kafka message broker.
@@ -89,6 +91,32 @@ func (b *KafkaBroker) SetGroupID(groupID string) {
 	b.groupID = groupID
 }
 
+// HealthStatus implements the HealthCheckable interface.
+func (b *KafkaBroker) HealthStatus() HealthCheckResult {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.healthy {
+		return HealthCheckResult{Status: "healthy", Message: b.healthMsg}
+	}
+	return HealthCheckResult{Status: "degraded", Message: b.healthMsg}
+}
+
+// setHealthy marks the broker as healthy with an optional message.
+func (b *KafkaBroker) setHealthy(msg string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.healthy = true
+	b.healthMsg = msg
+}
+
+// setUnhealthy marks the broker as unhealthy with a reason.
+func (b *KafkaBroker) setUnhealthy(msg string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.healthy = false
+	b.healthMsg = msg
+}
+
 // Producer returns the message producer interface.
 func (b *KafkaBroker) Producer() MessageProducer {
 	return b.kafkaProducer
@@ -119,6 +147,8 @@ func (b *KafkaBroker) Start(ctx context.Context) error {
 	// Create sync producer
 	producer, err := sarama.NewSyncProducer(b.brokers, config)
 	if err != nil {
+		b.healthy = false
+		b.healthMsg = fmt.Sprintf("producer connect failed: %v", err)
 		return fmt.Errorf("failed to create Kafka producer: %w", err)
 	}
 	b.producer = producer
@@ -133,6 +163,8 @@ func (b *KafkaBroker) Start(ctx context.Context) error {
 		group, groupErr := sarama.NewConsumerGroup(b.brokers, b.groupID, config)
 		if groupErr != nil {
 			_ = producer.Close()
+			b.healthy = false
+			b.healthMsg = fmt.Sprintf("consumer group connect failed: %v", groupErr)
 			return fmt.Errorf("failed to create Kafka consumer group: %w", groupErr)
 		}
 		b.consumerGroup = group
@@ -148,6 +180,9 @@ func (b *KafkaBroker) Start(ctx context.Context) error {
 			for {
 				if consumeErr := group.Consume(consumerCtx, topics, handler); consumeErr != nil {
 					b.logger.Error("Kafka consumer group error", "error", consumeErr)
+					b.setUnhealthy(fmt.Sprintf("consumer error: %v", consumeErr))
+				} else {
+					b.setHealthy("connected")
 				}
 				if consumerCtx.Err() != nil {
 					return
@@ -156,6 +191,8 @@ func (b *KafkaBroker) Start(ctx context.Context) error {
 		}()
 	}
 
+	b.healthy = true
+	b.healthMsg = "connected"
 	b.logger.Info("Kafka broker started", "brokers", b.brokers, "groupID", b.groupID)
 	return nil
 }
@@ -188,6 +225,8 @@ func (b *KafkaBroker) Stop(_ context.Context) error {
 		b.producer = nil
 	}
 
+	b.healthy = false
+	b.healthMsg = "stopped"
 	b.logger.Info("Kafka broker stopped")
 	return lastErr
 }
@@ -255,6 +294,7 @@ func (h *kafkaGroupHandler) Setup(_ sarama.ConsumerGroupSession) error   { retur
 func (h *kafkaGroupHandler) Cleanup(_ sarama.ConsumerGroupSession) error { return nil }
 
 func (h *kafkaGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+	h.broker.setHealthy("consuming")
 	for msg := range claim.Messages() {
 		h.broker.mu.RLock()
 		handler, ok := h.broker.handlers[msg.Topic]

@@ -18,12 +18,19 @@ type HealthCheckResult struct {
 // HealthCheck is a function that performs a health check.
 type HealthCheck func(ctx context.Context) HealthCheckResult
 
+// HealthCheckable is implemented by modules that can report their own health.
+// The health checker auto-discovers services implementing this interface.
+type HealthCheckable interface {
+	HealthStatus() HealthCheckResult
+}
+
 // HealthChecker provides /health, /ready, /live HTTP endpoints.
 type HealthChecker struct {
 	name    string
 	checks  map[string]HealthCheck
 	mu      sync.RWMutex
 	started bool
+	app     modular.Application
 }
 
 // NewHealthChecker creates a new HealthChecker module.
@@ -41,7 +48,25 @@ func (h *HealthChecker) Name() string {
 
 // Init registers the health checker as a service.
 func (h *HealthChecker) Init(app modular.Application) error {
+	h.app = app
 	return app.RegisterService("health.checker", h)
+}
+
+// DiscoverHealthCheckables scans the service registry for services implementing
+// HealthCheckable and auto-registers them as health checks.
+func (h *HealthChecker) DiscoverHealthCheckables() {
+	if h.app == nil {
+		return
+	}
+	for name, svc := range h.app.SvcRegistry() {
+		if hc, ok := svc.(HealthCheckable); ok {
+			checkName := name
+			checkable := hc
+			h.RegisterCheck(checkName, func(_ context.Context) HealthCheckResult {
+				return checkable.HealthStatus()
+			})
+		}
+	}
 }
 
 // RegisterCheck adds a named health check function.

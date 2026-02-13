@@ -192,6 +192,103 @@ func TestHealthChecker_RequiresServices(t *testing.T) {
 	}
 }
 
+func TestHealthChecker_PersistenceCheck_Healthy(t *testing.T) {
+	h := NewHealthChecker("test-health")
+
+	// Simulate registering a persistence check that succeeds
+	h.RegisterCheck("persistence.store", func(ctx context.Context) HealthCheckResult {
+		return HealthCheckResult{Status: "healthy", Message: "database connected"}
+	})
+
+	handler := h.HealthHandler()
+	req := httptest.NewRequest("GET", "/health", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp["status"] != "healthy" {
+		t.Errorf("expected status 'healthy', got %v", resp["status"])
+	}
+
+	checks := resp["checks"].(map[string]interface{})
+	psCheck := checks["persistence.store"].(map[string]interface{})
+	if psCheck["status"] != "healthy" {
+		t.Errorf("expected persistence check status 'healthy', got %v", psCheck["status"])
+	}
+	if psCheck["message"] != "database connected" {
+		t.Errorf("expected message 'database connected', got %v", psCheck["message"])
+	}
+}
+
+func TestHealthChecker_PersistenceCheck_Degraded(t *testing.T) {
+	h := NewHealthChecker("test-health")
+
+	// Simulate registering a persistence check that fails (degraded, not unhealthy)
+	h.RegisterCheck("persistence.store", func(ctx context.Context) HealthCheckResult {
+		return HealthCheckResult{Status: "degraded", Message: "database unreachable: connection refused"}
+	})
+
+	handler := h.HealthHandler()
+	req := httptest.NewRequest("GET", "/health", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	// Degraded returns HTTP 200 (not 503) so Docker healthcheck passes
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for degraded, got %d", rec.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp["status"] != "degraded" {
+		t.Errorf("expected overall status 'degraded', got %v", resp["status"])
+	}
+
+	checks := resp["checks"].(map[string]interface{})
+	psCheck := checks["persistence.store"].(map[string]interface{})
+	if psCheck["status"] != "degraded" {
+		t.Errorf("expected persistence check status 'degraded', got %v", psCheck["status"])
+	}
+}
+
+func TestHealthChecker_PersistenceCheck_WithOtherChecks(t *testing.T) {
+	h := NewHealthChecker("test-health")
+
+	// Other check is healthy, persistence is degraded
+	h.RegisterCheck("other", func(ctx context.Context) HealthCheckResult {
+		return HealthCheckResult{Status: "healthy"}
+	})
+	h.RegisterCheck("persistence.store", func(ctx context.Context) HealthCheckResult {
+		return HealthCheckResult{Status: "degraded", Message: "database unreachable: timeout"}
+	})
+
+	handler := h.HealthHandler()
+	req := httptest.NewRequest("GET", "/health", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Overall should be degraded because persistence is degraded
+	if resp["status"] != "degraded" {
+		t.Errorf("expected overall status 'degraded', got %v", resp["status"])
+	}
+}
+
 func TestHealthChecker_HealthHandler_NoChecks(t *testing.T) {
 	h := NewHealthChecker("test-health")
 
@@ -211,4 +308,95 @@ func TestHealthChecker_HealthHandler_NoChecks(t *testing.T) {
 	if resp["status"] != "healthy" {
 		t.Errorf("expected status 'healthy' with no checks, got %v", resp["status"])
 	}
+}
+
+// mockHealthCheckable implements HealthCheckable for testing.
+type mockHealthCheckable struct {
+	status  string
+	message string
+}
+
+func (m *mockHealthCheckable) HealthStatus() HealthCheckResult {
+	return HealthCheckResult{Status: m.status, Message: m.message}
+}
+
+func TestHealthChecker_DiscoverHealthCheckables(t *testing.T) {
+	app := CreateIsolatedApp(t)
+
+	// Register a mock HealthCheckable service
+	mock := &mockHealthCheckable{status: "healthy", message: "all good"}
+	if err := app.RegisterService("my-service", mock); err != nil {
+		t.Fatalf("RegisterService failed: %v", err)
+	}
+
+	h := NewHealthChecker("test-health")
+	if err := h.Init(app); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	h.DiscoverHealthCheckables()
+
+	// Check that the health handler now includes my-service
+	handler := h.HealthHandler()
+	req := httptest.NewRequest("GET", "/health", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp["status"] != "healthy" {
+		t.Errorf("expected status 'healthy', got %v", resp["status"])
+	}
+
+	checks, ok := resp["checks"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected 'checks' field in response")
+	}
+	if _, exists := checks["my-service"]; !exists {
+		t.Errorf("expected 'my-service' in health checks, got: %v", checks)
+	}
+}
+
+func TestHealthChecker_DiscoverHealthCheckables_Degraded(t *testing.T) {
+	app := CreateIsolatedApp(t)
+
+	mock := &mockHealthCheckable{status: "degraded", message: "connection lost"}
+	if err := app.RegisterService("kafka-broker", mock); err != nil {
+		t.Fatalf("RegisterService failed: %v", err)
+	}
+
+	h := NewHealthChecker("test-health")
+	if err := h.Init(app); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	h.DiscoverHealthCheckables()
+
+	handler := h.HealthHandler()
+	req := httptest.NewRequest("GET", "/health", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	// Should still return 200 (degraded is not unhealthy)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for degraded status, got %d", rec.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp["status"] != "degraded" {
+		t.Errorf("expected overall status 'degraded', got %v", resp["status"])
+	}
+}
+
+func TestHealthChecker_DiscoverHealthCheckables_NoApp(t *testing.T) {
+	h := NewHealthChecker("test-health")
+	// Should not panic when app is nil
+	h.DiscoverHealthCheckables()
 }

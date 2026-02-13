@@ -1,6 +1,9 @@
 package module
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -122,4 +125,131 @@ func TestKafkaBrokerUnsubscribe(t *testing.T) {
 	if _, ok := b.handlers["test-topic"]; ok {
 		t.Error("handler should be removed after unsubscribe")
 	}
+}
+
+func TestKafkaBrokerHealthStatus_Default(t *testing.T) {
+	b := NewKafkaBroker("kafka-test")
+
+	// Before Start, broker should be unhealthy (zero value = false)
+	result := b.HealthStatus()
+	if result.Status != "degraded" {
+		t.Errorf("expected status 'degraded' before start, got %q", result.Status)
+	}
+}
+
+func TestKafkaBrokerHealthStatus_SetHealthy(t *testing.T) {
+	b := NewKafkaBroker("kafka-test")
+	b.setHealthy("connected")
+
+	result := b.HealthStatus()
+	if result.Status != "healthy" {
+		t.Errorf("expected status 'healthy', got %q", result.Status)
+	}
+	if result.Message != "connected" {
+		t.Errorf("expected message 'connected', got %q", result.Message)
+	}
+}
+
+func TestKafkaBrokerHealthStatus_SetUnhealthy(t *testing.T) {
+	b := NewKafkaBroker("kafka-test")
+	b.setHealthy("connected")
+	b.setUnhealthy("consumer error: connection refused")
+
+	result := b.HealthStatus()
+	if result.Status != "degraded" {
+		t.Errorf("expected status 'degraded', got %q", result.Status)
+	}
+	if result.Message != "consumer error: connection refused" {
+		t.Errorf("expected error message, got %q", result.Message)
+	}
+}
+
+func TestKafkaBrokerImplementsHealthCheckable(t *testing.T) {
+	b := NewKafkaBroker("kafka-test")
+	var _ HealthCheckable = b
+}
+
+func TestKafkaBrokerHealthDiscoveredByHealthChecker(t *testing.T) {
+	app, _ := NewTestApplication()
+
+	// Create and init broker
+	b := NewKafkaBroker("event-broker")
+	if err := b.Init(app); err != nil {
+		t.Fatalf("broker Init failed: %v", err)
+	}
+	// Register services manually (normally done by framework)
+	for _, svc := range b.ProvidesServices() {
+		if err := app.RegisterService(svc.Name, svc.Instance); err != nil {
+			t.Fatalf("RegisterService %q failed: %v", svc.Name, err)
+		}
+	}
+
+	// Create and init health checker
+	hc := NewHealthChecker("test-health")
+	if err := hc.Init(app); err != nil {
+		t.Fatalf("health checker Init failed: %v", err)
+	}
+
+	// Discover health-checkable services
+	hc.DiscoverHealthCheckables()
+
+	// Broker is not started, so should be degraded
+	handler := hc.HealthHandler()
+	req := httpTestRequest(t, "GET", "/health")
+	rec := httpTestRecorder()
+	handler.ServeHTTP(rec, req)
+
+	resp := decodeJSONResponse(t, rec)
+	if resp["status"] != "degraded" {
+		t.Errorf("expected overall status 'degraded' when kafka not started, got %v", resp["status"])
+	}
+
+	// Now mark broker healthy
+	b.setHealthy("connected")
+
+	rec = httpTestRecorder()
+	handler.ServeHTTP(rec, httpTestRequest(t, "GET", "/health"))
+	resp = decodeJSONResponse(t, rec)
+
+	if resp["status"] != "healthy" {
+		t.Errorf("expected overall status 'healthy' when kafka connected, got %v", resp["status"])
+	}
+
+	// Verify kafka check appears in checks
+	checks, ok := resp["checks"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected 'checks' field in response")
+	}
+	// The broker registers with its name "event-broker" as the service name
+	found := false
+	for name := range checks {
+		if name == "event-broker" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'event-broker' in health checks, got keys: %v", checks)
+	}
+}
+
+// httpTestRequest creates an httptest.NewRequest, only importing is needed at top
+func httpTestRequest(t *testing.T, method, path string) *http.Request {
+	t.Helper()
+	return httptest.NewRequest(method, path, nil)
+}
+
+// httpTestRecorder creates an httptest.NewRecorder
+func httpTestRecorder() *httptest.ResponseRecorder {
+	return httptest.NewRecorder()
+}
+
+// decodeJSONResponse decodes the recorder body into a map
+func decodeJSONResponse(t *testing.T, rec *httptest.ResponseRecorder) map[string]interface{} {
+	t.Helper()
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	return resp
 }

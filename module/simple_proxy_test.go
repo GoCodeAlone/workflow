@@ -1,6 +1,7 @@
 package module
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -95,6 +96,47 @@ func TestSimpleProxy_HandleNoMatch(t *testing.T) {
 
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("expected 502, got %d", w.Code)
+	}
+}
+
+func TestSimpleProxy_HandleBackendUnavailable(t *testing.T) {
+	p := NewSimpleProxy("proxy")
+	err := p.SetTargets(map[string]string{
+		"/api/orders": "http://127.0.0.1:59999",
+	})
+	if err != nil {
+		t.Fatalf("SetTargets failed: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/orders/123", nil)
+	w := httptest.NewRecorder()
+	p.Handle(w, req)
+
+	resp := w.Result()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d", resp.StatusCode)
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
+
+	var errResp map[string]string
+	if err := json.Unmarshal(body, &errResp); err != nil {
+		t.Fatalf("failed to parse JSON response: %v\nbody: %s", err, string(body))
+	}
+
+	if errResp["error"] != "backend unavailable" {
+		t.Errorf("expected error 'backend unavailable', got %q", errResp["error"])
+	}
+	if errResp["backend"] != "127.0.0.1:59999" {
+		t.Errorf("expected backend '127.0.0.1:59999', got %q", errResp["backend"])
+	}
+	if errResp["path"] != "/api/orders/123" {
+		t.Errorf("expected path '/api/orders/123', got %q", errResp["path"])
 	}
 }
 

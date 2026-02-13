@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httputil"
@@ -39,7 +40,18 @@ func (p *SimpleProxy) SetTargets(targets map[string]string) error {
 			return fmt.Errorf("invalid backend URL %q for prefix %q: %w", backendStr, prefix, err)
 		}
 		p.targets[prefix] = backend
-		p.proxies[prefix] = httputil.NewSingleHostReverseProxy(backend)
+		rp := httputil.NewSingleHostReverseProxy(backend)
+		backendHost := backend.Host
+		rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, _ error) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error":   "backend unavailable",
+				"backend": backendHost,
+				"path":    r.URL.Path,
+			})
+		}
+		p.proxies[prefix] = rp
 	}
 	p.buildSortedPrefixes()
 	return nil

@@ -138,29 +138,85 @@ indication.
 | # | Issue | Severity | Status |
 |---|-------|----------|--------|
 | 1 | Data loss on restart (persistence init order) | High | **Fixed** |
-| 2 | 502 empty body on proxy failure | Low | Noted |
-| 3 | Kafka failures silent to users | Medium | By design |
-| 4 | No validation of persisted states vs definition | Low | By design |
+| 2 | 502 empty body on proxy failure | Low | **Fixed** |
+| 3 | Kafka failures silent to users | Medium | **Fixed** |
+| 4 | No validation of persisted states vs definition | Low | **Fixed** |
 | 5 | Monolith prometheus target showing DOWN | Low | **Fixed** (earlier) |
 
-## Recommendations
+## Fixes Applied (Follow-up)
 
-1. **Add health check that verifies persistence**: The `/healthz` endpoint
-   should verify that persistence is wired and the database is accessible,
-   not just that the HTTP server responds.
+### Fix 2: JSON Error Body on Proxy Failure
 
-2. **Add Kafka health to readiness probe**: If Kafka is configured but
-   unreachable, the readiness probe should report degraded status.
+**File**: `module/simple_proxy.go`
 
-3. **Return JSON error body on proxy failure**: The SimpleProxy module should
-   return `{"error": "backend unavailable", "service": "orders"}` instead
-   of an empty 502.
+The `SimpleProxy` module now sets a custom `ErrorHandler` on each
+`httputil.ReverseProxy` instance. When a backend is unreachable, the response
+is a structured JSON body:
 
-4. **Warn on orphaned workflow instances**: On startup, if persisted instances
-   have states not in the current definition, log a warning. This would catch
-   configuration drift.
+```json
+{"error": "backend unavailable", "backend": "orders:8080", "path": "/api/orders"}
+```
 
-5. **Consider making persistence Required**: For production configs that
+**Validated**: Stopped orders container, `GET /api/orders` returned
+`HTTP 502` with the JSON body above.
+
+### Fix 3: Kafka Health in /healthz
+
+**Files**: `module/kafka_broker.go`, `module/health.go`, `engine.go`
+
+The `KafkaBroker` now implements a `HealthCheckable` interface that tracks
+connection health in real time. The `HealthChecker` auto-discovers all
+`HealthCheckable` services via `DiscoverHealthCheckables()`.
+
+When Kafka is healthy:
+```json
+{"checks":{"event-broker":{"status":"healthy","message":"consuming"},...},"status":"healthy"}
+```
+
+When Kafka is unreachable:
+```json
+{"checks":{"event-broker":{"status":"degraded","message":"consumer error: kafka: client has run out of available brokers..."},...},"status":"degraded"}
+```
+
+**Validated**: Stopped Kafka container, waited for consumer error cycle,
+`/healthz` showed `degraded` status with the specific Kafka error.
+
+### Fix 4: Orphaned Workflow Instance Warnings
+
+**File**: `module/state_machine.go`
+
+`LoadAllPersistedInstances()` now checks each loaded instance's current state
+against the active state machine definition. If a state is not found, a
+`WARNING` log line is emitted:
+
+```
+WARNING: Orphaned workflow instance order-42 has state "shipping" not in current "order-processing" definition
+```
+
+A new `GetOrphanedInstances()` method provides programmatic access to
+orphaned instances for monitoring and tooling.
+
+**Validated**: Unit tests pass. In live deployment, no false warnings when all
+persisted orders have valid states (`delivered`).
+
+### Fix 5 (new): Persistence Health in /healthz
+
+**Files**: `module/persistence.go`, `engine.go`
+
+The `PersistenceStore` now exposes a `Ping(ctx)` method that calls
+`db.PingContext()` to verify the database connection. The engine registers
+a persistence health check with the `HealthChecker`:
+
+```json
+{"checks":{"persistence.persistence":{"status":"healthy","message":"database connected"},...}}
+```
+
+**Validated**: `/healthz` on orders and users-products containers shows
+`persistence.persistence: healthy`.
+
+## Remaining Recommendation
+
+1. **Consider making persistence Required**: For production configs that
    include a database module, the persistence dependency should be Required
    rather than Optional to ensure proper init ordering without relying on
    late-binding.

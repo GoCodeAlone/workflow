@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -198,7 +199,7 @@ func (e *StateMachineEngine) LoadAllPersistedInstances() error {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
 
-	for defName := range e.definitions {
+	for defName, def := range e.definitions {
 		instances, err := e.persistence.LoadWorkflowInstances(defName)
 		if err != nil {
 			return fmt.Errorf("failed to load instances for %q: %w", defName, err)
@@ -208,6 +209,11 @@ func (e *StateMachineEngine) LoadAllPersistedInstances() error {
 			// Skip instances that already exist in memory
 			if _, exists := e.instances[inst.ID]; exists {
 				continue
+			}
+
+			// Warn if the instance's current state doesn't exist in the definition
+			if _, stateExists := def.States[inst.CurrentState]; !stateExists {
+				log.Printf("WARNING: Orphaned workflow instance %s has state %q not in current %q definition", inst.ID, inst.CurrentState, defName)
 			}
 
 			e.instances[inst.ID] = inst
@@ -220,6 +226,28 @@ func (e *StateMachineEngine) LoadAllPersistedInstances() error {
 	}
 
 	return nil
+}
+
+// GetOrphanedInstances returns workflow instances whose current state does not
+// exist in the corresponding state machine definition. This helps operators
+// discover instances affected by configuration drift.
+func (e *StateMachineEngine) GetOrphanedInstances() []*WorkflowInstance {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+
+	var orphaned []*WorkflowInstance
+	for _, inst := range e.instances {
+		def, ok := e.definitions[inst.WorkflowType]
+		if !ok {
+			// No definition at all — consider it orphaned
+			orphaned = append(orphaned, inst)
+			continue
+		}
+		if _, stateExists := def.States[inst.CurrentState]; !stateExists {
+			orphaned = append(orphaned, inst)
+		}
+	}
+	return orphaned
 }
 
 // RecoverProcessingInstances finds instances stuck in intermediate processing

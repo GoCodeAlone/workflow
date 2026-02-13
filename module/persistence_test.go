@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -278,6 +279,39 @@ func TestPersistence_EmptyDatabase(t *testing.T) {
 	}
 	if len(users) != 0 {
 		t.Errorf("expected 0 users, got %d", len(users))
+	}
+}
+
+func TestPersistence_Ping_Healthy(t *testing.T) {
+	ps := newTestPersistenceStore(t)
+
+	if err := ps.Ping(context.Background()); err != nil {
+		t.Errorf("expected Ping to succeed on healthy db, got: %v", err)
+	}
+}
+
+func TestPersistence_Ping_NilDB(t *testing.T) {
+	ps := NewPersistenceStore("test-ps", "database")
+	// db is nil, Ping should return error
+	if err := ps.Ping(context.Background()); err == nil {
+		t.Error("expected Ping to fail when db is nil")
+	}
+}
+
+func TestPersistence_Ping_ClosedDB(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open in-memory sqlite: %v", err)
+	}
+
+	ps := NewPersistenceStore("test-ps", "database")
+	ps.SetDB(db)
+
+	// Close the db to simulate an unreachable database
+	db.Close()
+
+	if err := ps.Ping(context.Background()); err == nil {
+		t.Error("expected Ping to fail on closed database")
 	}
 }
 

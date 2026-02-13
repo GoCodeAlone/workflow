@@ -510,6 +510,24 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	// Wire health checker endpoints on any available router (only if not already configured via workflows)
 	for _, svc := range e.app.SvcRegistry() {
 		if hc, ok := svc.(*module.HealthChecker); ok {
+			// Register persistence health checks if any persistence stores exist
+			for svcName, innerSvc := range e.app.SvcRegistry() {
+				if ps, ok := innerSvc.(*module.PersistenceStore); ok {
+					checkName := "persistence." + svcName
+					psRef := ps // capture for closure
+					hc.RegisterCheck(checkName, func(ctx context.Context) module.HealthCheckResult {
+						if err := psRef.Ping(ctx); err != nil {
+							return module.HealthCheckResult{Status: "degraded", Message: "database unreachable: " + err.Error()}
+						}
+						return module.HealthCheckResult{Status: "healthy", Message: "database connected"}
+					})
+					e.logger.Debug("Registered persistence health check: " + checkName)
+				}
+			}
+
+			// Auto-discover any HealthCheckable services (e.g., Kafka broker)
+			hc.DiscoverHealthCheckables()
+
 			for _, routerSvc := range e.app.SvcRegistry() {
 				if router, ok := routerSvc.(*module.StandardHTTPRouter); ok {
 					if !router.HasRoute("GET", "/healthz") {

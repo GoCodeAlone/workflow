@@ -658,6 +658,75 @@ func TestTriggerTransition_HandlerFailure_StateUnchanged(t *testing.T) {
 	}
 }
 
+func TestStateMachineEngine_GetOrphanedInstances_NoOrphans(t *testing.T) {
+	engine := NewStateMachineEngine("test")
+	if err := engine.RegisterDefinition(newTestDefinition()); err != nil {
+		t.Fatalf("failed to register: %v", err)
+	}
+
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-2", nil)
+
+	orphaned := engine.GetOrphanedInstances()
+	if len(orphaned) != 0 {
+		t.Errorf("expected 0 orphaned instances, got %d", len(orphaned))
+	}
+}
+
+func TestStateMachineEngine_GetOrphanedInstances_WithOrphans(t *testing.T) {
+	engine := NewStateMachineEngine("test")
+	if err := engine.RegisterDefinition(newTestDefinition()); err != nil {
+		t.Fatalf("failed to register: %v", err)
+	}
+
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
+	_, _ = engine.CreateWorkflow("order-workflow", "order-2", nil)
+
+	// Simulate configuration drift: mutate an instance to a state that
+	// no longer exists in the definition.
+	engine.mutex.Lock()
+	engine.instances["order-2"].CurrentState = "removed_state"
+	engine.mutex.Unlock()
+
+	orphaned := engine.GetOrphanedInstances()
+	if len(orphaned) != 1 {
+		t.Fatalf("expected 1 orphaned instance, got %d", len(orphaned))
+	}
+	if orphaned[0].ID != "order-2" {
+		t.Errorf("expected orphaned instance 'order-2', got '%s'", orphaned[0].ID)
+	}
+}
+
+func TestStateMachineEngine_GetOrphanedInstances_NoDefinition(t *testing.T) {
+	engine := NewStateMachineEngine("test")
+	if err := engine.RegisterDefinition(newTestDefinition()); err != nil {
+		t.Fatalf("failed to register: %v", err)
+	}
+
+	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
+
+	// Remove the definition to simulate a type that was unregistered
+	engine.mutex.Lock()
+	delete(engine.definitions, "order-workflow")
+	engine.mutex.Unlock()
+
+	orphaned := engine.GetOrphanedInstances()
+	if len(orphaned) != 1 {
+		t.Fatalf("expected 1 orphaned instance, got %d", len(orphaned))
+	}
+	if orphaned[0].ID != "order-1" {
+		t.Errorf("expected orphaned instance 'order-1', got '%s'", orphaned[0].ID)
+	}
+}
+
+func TestStateMachineEngine_GetOrphanedInstances_Empty(t *testing.T) {
+	engine := NewStateMachineEngine("test")
+	orphaned := engine.GetOrphanedInstances()
+	if len(orphaned) != 0 {
+		t.Errorf("expected 0 orphaned instances, got %d", len(orphaned))
+	}
+}
+
 func TestStateMachineEngine_AddTransitionListener_WithExistingNonComposite(t *testing.T) {
 	engine := NewStateMachineEngine("test")
 	if err := engine.RegisterDefinition(newTestDefinition()); err != nil {

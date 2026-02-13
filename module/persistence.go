@@ -146,6 +146,14 @@ func (p *PersistenceStore) migrate() error {
 	return nil
 }
 
+// Ping verifies the database connection is alive.
+func (p *PersistenceStore) Ping(ctx context.Context) error {
+	if p.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	return p.db.PingContext(ctx)
+}
+
 // SetDB sets the underlying database connection directly (useful for testing).
 func (p *PersistenceStore) SetDB(db *sql.DB) {
 	p.db = db
