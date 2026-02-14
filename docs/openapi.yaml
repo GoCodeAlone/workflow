@@ -1,0 +1,2244 @@
+openapi: 3.0.3
+info:
+  title: Workflow Engine API
+  description: |
+    The Workflow Engine exposes two HTTP servers:
+
+    - **Workflow Engine** (default `:8080`) - Application endpoints defined by YAML config (health, metrics, REST resources, webhooks, auth)
+    - **Management API** (default `:8081`) - AI services, dynamic components, workflow UI, schema, plugins
+
+    All API endpoints accept and return `application/json` unless otherwise noted.
+    Authenticated endpoints require a JWT bearer token obtained via `POST /api/auth/login` or `POST /api/auth/register`.
+  version: 1.0.0
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  contact:
+    name: GoCodeAlone
+    url: https://github.com/GoCodeAlone/workflow
+
+servers:
+  - url: http://localhost:8080
+    description: Workflow Engine (application endpoints)
+  - url: http://localhost:8081
+    description: Management API (AI, dynamic components, workflow UI)
+
+tags:
+  - name: Health
+    description: Health check and readiness probes
+  - name: Metrics
+    description: Prometheus metrics
+  - name: Auth
+    description: JWT authentication (login, register, profile)
+  - name: Affiliates
+    description: Affiliate organization management
+  - name: Programs
+    description: Program management
+  - name: Users
+    description: User management
+  - name: Keywords
+    description: Keyword routing rules
+  - name: Surveys
+    description: Survey template management
+  - name: Conversations
+    description: Conversation lifecycle and messaging
+  - name: Queue
+    description: Conversation queue monitoring
+  - name: Webhooks
+    description: Inbound message webhooks (Twilio, AWS, Partner)
+  - name: Webchat
+    description: Web-based chat messaging
+  - name: Providers
+    description: Messaging provider configuration
+  - name: Schema
+    description: JSON Schema for workflow config validation
+  - name: Dynamic Components
+    description: Yaegi-based hot-reload component management
+  - name: AI
+    description: AI-powered workflow and component generation
+  - name: AI Deploy
+    description: AI generation with automatic deployment
+  - name: Workflow UI
+    description: Workflow configuration and management
+  - name: Plugins
+    description: Plugin registry management
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained via POST /api/auth/login or POST /api/auth/register
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Description of what went wrong
+      required:
+        - error
+      example:
+        error: "resource not found"
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        checks:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: [healthy, degraded, unhealthy]
+              message:
+                type: string
+      example:
+        status: healthy
+        checks:
+          database:
+            status: healthy
+            message: ""
+
+    ReadyResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+
+    LiveResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [alive]
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      example:
+        email: responder1@example.com
+        password: demo123
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        password:
+          type: string
+      example:
+        email: newuser@example.com
+        name: New User
+        password: securepassword
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: '#/components/schemas/UserProfile'
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [responder, supervisor, admin]
+        affiliateId:
+          type: string
+        programIds:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Resource:
+      type: object
+      properties:
+        id:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+        state:
+          type: string
+        lastUpdate:
+          type: string
+          format: date-time
+
+    Affiliate:
+      type: object
+      properties:
+        id:
+          type: string
+        data:
+          type: object
+          properties:
+            name:
+              type: string
+            region:
+              type: string
+            dataRetentionDays:
+              type: integer
+            contactEmail:
+              type: string
+        state:
+          type: string
+        lastUpdate:
+          type: string
+          format: date-time
+
+    Program:
+      type: object
+      properties:
+        id:
+          type: string
+        data:
+          type: object
+          properties:
+            name:
+              type: string
+            affiliateId:
+              type: string
+            providers:
+              type: array
+              items:
+                type: string
+            shortCode:
+              type: string
+            description:
+              type: string
+            settings:
+              type: object
+              properties:
+                maxConcurrentPerResponder:
+                  type: integer
+                queueAlertThreshold:
+                  type: integer
+        state:
+          type: string
+        lastUpdate:
+          type: string
+          format: date-time
+
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: string
+        data:
+          type: object
+          properties:
+            from:
+              type: string
+            programId:
+              type: string
+            programName:
+              type: string
+            affiliateId:
+              type: string
+            riskLevel:
+              type: string
+              enum: [low, medium, high, critical]
+            tags:
+              type: array
+              items:
+                type: string
+            messages:
+              type: array
+              items:
+                type: object
+        state:
+          type: string
+          enum: [new, queued, assigned, active, transferred, escalated_medical, escalated_police, wrap_up, follow_up_scheduled, follow_up_active, closed, expired, failed]
+        lastUpdate:
+          type: string
+          format: date-time
+
+    ConversationActionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        action:
+          type: string
+        transition:
+          type: string
+        id:
+          type: string
+        state:
+          type: string
+        lastUpdate:
+          type: string
+          format: date-time
+
+    MessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        direction:
+          type: string
+          enum: [inbound, outbound]
+
+    MessageResponse:
+      type: object
+      properties:
+        messageId:
+          type: string
+        conversationId:
+          type: string
+        direction:
+          type: string
+        status:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    EscalateRequest:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [medical, police]
+        urgency:
+          type: string
+          enum: [low, medium, high]
+        location:
+          type: string
+
+    FollowUpRequest:
+      type: object
+      properties:
+        scheduledTime:
+          type: string
+          format: date-time
+        message:
+          type: string
+
+    TagRequest:
+      type: object
+      properties:
+        tags:
+          type: array
+          items:
+            type: string
+        tag:
+          type: string
+
+    SurveySubmitRequest:
+      type: object
+      required: [surveyId, responses]
+      properties:
+        surveyId:
+          type: string
+        responses:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              value: {}
+
+    ConversationSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+        lastUpdate:
+          type: string
+          format: date-time
+        riskLevel:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        programId:
+          type: string
+
+    QueueResponse:
+      type: object
+      properties:
+        totalQueued:
+          type: integer
+        count:
+          type: integer
+        conversations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Conversation'
+
+    QueueHealthResponse:
+      type: object
+      properties:
+        programs:
+          type: array
+          items:
+            type: object
+            properties:
+              programId:
+                type: string
+              programName:
+                type: string
+              depth:
+                type: integer
+              queued:
+                type: integer
+              avgWaitSeconds:
+                type: number
+              oldestMessageAt:
+                type: string
+                format: date-time
+              alertThreshold:
+                type: integer
+        alerts:
+          type: integer
+
+    TransitionRequest:
+      type: object
+      required: [transition]
+      properties:
+        transition:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+        workflowType:
+          type: string
+
+    TransitionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        id:
+          type: string
+        instanceId:
+          type: string
+        transition:
+          type: string
+        state:
+          type: string
+        lastUpdate:
+          type: string
+          format: date-time
+        resource:
+          type: object
+
+    ComponentInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        loaded_at:
+          type: string
+          format: date-time
+        source:
+          type: string
+
+    ComponentCreateRequest:
+      type: object
+      required: [id, source]
+      properties:
+        id:
+          type: string
+        source:
+          type: string
+          description: Go source code (must use `package component`)
+
+    ComponentUpdateRequest:
+      type: object
+      required: [source]
+      properties:
+        source:
+          type: string
+
+    AIGenerateRequest:
+      type: object
+      required: [intent]
+      properties:
+        intent:
+          type: string
+          description: Natural language description of the desired workflow
+        context:
+          type: object
+          additionalProperties:
+            type: string
+        constraints:
+          type: array
+          items:
+            type: string
+
+    AIGenerateResponse:
+      type: object
+      properties:
+        workflow:
+          type: object
+        components:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+              description:
+                type: string
+              interface:
+                type: string
+              goCode:
+                type: string
+        explanation:
+          type: string
+
+    AIComponentRequest:
+      type: object
+      required: [name, interface]
+      properties:
+        name:
+          type: string
+        interface:
+          type: string
+        type:
+          type: string
+        description:
+          type: string
+
+    AIComponentResponse:
+      type: object
+      properties:
+        code:
+          type: string
+
+    AISuggestRequest:
+      type: object
+      required: [useCase]
+      properties:
+        useCase:
+          type: string
+
+    AISuggestResponse:
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+          description:
+            type: string
+          config:
+            type: object
+          confidence:
+            type: number
+
+    AIDeployRequest:
+      type: object
+      required: [intent]
+      properties:
+        intent:
+          type: string
+
+    AIDeployResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        components:
+          type: array
+          items:
+            type: string
+        workflow:
+          type: object
+
+    AIDeployComponentRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        description:
+          type: string
+        source:
+          type: string
+
+    WorkflowConfig:
+      type: object
+      properties:
+        modules:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              type:
+                type: string
+              config:
+                type: object
+                additionalProperties: true
+        workflows:
+          type: object
+          additionalProperties: true
+        triggers:
+          type: object
+          additionalProperties: true
+
+    WorkflowStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        moduleCount:
+          type: integer
+        workflowCount:
+          type: integer
+
+    ValidationResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        errors:
+          type: array
+          items:
+            type: string
+
+    ModuleType:
+      type: object
+      properties:
+        type:
+          type: string
+        label:
+          type: string
+        category:
+          type: string
+        configFields:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              label:
+                type: string
+              type:
+                type: string
+              defaultValue:
+                type: string
+
+    PluginManifest:
+      type: object
+      required: [name, version, author, description]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z][a-z0-9-]*[a-z0-9]$'
+        version:
+          type: string
+          description: Semver version (e.g., 1.0.0)
+        author:
+          type: string
+        description:
+          type: string
+        license:
+          type: string
+        dependencies:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              constraint:
+                type: string
+        contract:
+          type: object
+        tags:
+          type: array
+          items:
+            type: string
+        repository:
+          type: string
+
+    PluginListEntry:
+      type: object
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        author:
+          type: string
+        description:
+          type: string
+
+paths:
+  # ─── Health (port 8080) ────────────────────────────────────────────
+  /health:
+    get:
+      tags: [Health]
+      summary: Run all health checks
+      description: Returns aggregate health status with per-check details. Returns 503 if any check is unhealthy.
+      responses:
+        '200':
+          description: All checks healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: One or more checks unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      description: Returns 200 only if the engine has started and all health checks pass.
+      responses:
+        '200':
+          description: Ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+        '503':
+          description: Not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+
+  /live:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      description: Always returns 200.
+      responses:
+        '200':
+          description: Alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveResponse'
+
+  # ─── Metrics (port 8080) ───────────────────────────────────────────
+  /metrics:
+    get:
+      tags: [Metrics]
+      summary: Prometheus metrics
+      description: |
+        Prometheus-format metrics endpoint. Available metrics:
+        - `workflow_executions_total` (counter)
+        - `workflow_duration_seconds` (histogram)
+        - `http_requests_total` (counter)
+        - `http_request_duration_seconds` (histogram)
+        - `module_operations_total` (counter)
+        - `active_workflows` (gauge)
+      responses:
+        '200':
+          description: Prometheus exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  # ─── Auth (port 8080) ─────────────────────────────────────────────
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Create a new user account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Registration successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Missing fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/auth/profile:
+    get:
+      tags: [Auth]
+      summary: Get authenticated user profile
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [Auth]
+      summary: Update authenticated user profile
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Unauthorized
+
+  # ─── Affiliates (port 8080) ────────────────────────────────────────
+  /api/affiliates:
+    get:
+      tags: [Affiliates]
+      summary: List affiliates
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of affiliates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Affiliate'
+    post:
+      tags: [Affiliates]
+      summary: Create an affiliate
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, name]
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+                region:
+                  type: string
+                dataRetentionDays:
+                  type: integer
+                contactEmail:
+                  type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Affiliate'
+        '400':
+          description: Bad request
+
+  /api/affiliates/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Affiliates]
+      summary: Get an affiliate by ID
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Affiliate details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Affiliate'
+        '404':
+          description: Not found
+    put:
+      tags: [Affiliates]
+      summary: Update an affiliate
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Updated
+        '404':
+          description: Not found
+    delete:
+      tags: [Affiliates]
+      summary: Delete an affiliate
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Not found
+
+  # ─── Programs (port 8080) ──────────────────────────────────────────
+  /api/programs:
+    get:
+      tags: [Programs]
+      summary: List programs
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of programs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Program'
+    post:
+      tags: [Programs]
+      summary: Create a program
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, name, affiliateId]
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+                affiliateId:
+                  type: string
+                providers:
+                  type: array
+                  items:
+                    type: string
+                shortCode:
+                  type: string
+                description:
+                  type: string
+                settings:
+                  type: object
+      responses:
+        '201':
+          description: Created
+        '400':
+          description: Bad request
+
+  /api/programs/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Programs]
+      summary: Get a program by ID
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Program details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Program'
+        '404':
+          description: Not found
+    put:
+      tags: [Programs]
+      summary: Update a program
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Updated
+        '404':
+          description: Not found
+    delete:
+      tags: [Programs]
+      summary: Delete a program
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Not found
+
+  # ─── Users (port 8080) ─────────────────────────────────────────────
+  /api/users:
+    get:
+      tags: [Users]
+      summary: List users
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [responder, supervisor, admin]
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Resource'
+    post:
+      tags: [Users]
+      summary: Create a user
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, email, role]
+              properties:
+                id:
+                  type: string
+                email:
+                  type: string
+                name:
+                  type: string
+                role:
+                  type: string
+                affiliateId:
+                  type: string
+                programIds:
+                  type: array
+                  items:
+                    type: string
+                password:
+                  type: string
+      responses:
+        '201':
+          description: Created
+        '400':
+          description: Bad request
+
+  /api/users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Users]
+      summary: Get a user by ID
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User details
+        '404':
+          description: Not found
+    put:
+      tags: [Users]
+      summary: Update a user
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Updated
+        '404':
+          description: Not found
+    delete:
+      tags: [Users]
+      summary: Delete a user
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Not found
+
+  # ─── Keywords (port 8080) ──────────────────────────────────────────
+  /api/keywords:
+    get:
+      tags: [Keywords]
+      summary: List keyword routing rules
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of keywords
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Resource'
+    post:
+      tags: [Keywords]
+      summary: Create a keyword routing rule
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [programId, keyword, action]
+              properties:
+                programId:
+                  type: string
+                keyword:
+                  type: string
+                action:
+                  type: string
+                  enum: [route, route_priority]
+                subProgram:
+                  type: string
+                response:
+                  type: string
+      responses:
+        '201':
+          description: Created
+        '400':
+          description: Bad request
+
+  /api/keywords/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      tags: [Keywords]
+      summary: Update a keyword
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Updated
+    delete:
+      tags: [Keywords]
+      summary: Delete a keyword
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Deleted
+
+  # ─── Surveys (port 8080) ───────────────────────────────────────────
+  /api/surveys:
+    get:
+      tags: [Surveys]
+      summary: List survey templates
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of surveys
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Resource'
+    post:
+      tags: [Surveys]
+      summary: Create a survey template
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [programId, type, title, questions]
+              properties:
+                programId:
+                  type: string
+                type:
+                  type: string
+                  enum: [entry, exit]
+                title:
+                  type: string
+                questions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      text:
+                        type: string
+                      type:
+                        type: string
+                        enum: [scale, text, choice]
+                      min:
+                        type: integer
+                      max:
+                        type: integer
+                      options:
+                        type: array
+                        items:
+                          type: string
+      responses:
+        '201':
+          description: Created
+        '400':
+          description: Bad request
+
+  /api/surveys/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      tags: [Surveys]
+      summary: Update a survey
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Updated
+    delete:
+      tags: [Surveys]
+      summary: Delete a survey
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Deleted
+
+  # ─── Conversations (port 8080) ─────────────────────────────────────
+  /api/conversations:
+    get:
+      tags: [Conversations]
+      summary: List conversations
+      description: Filtered by the authenticated user's affiliate and program membership.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Conversation'
+
+  /api/conversations/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Conversations]
+      summary: Get conversation detail
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Conversation with messages and state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '404':
+          description: Not found
+
+  /api/conversations/{id}/messages:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Conversations]
+      summary: Send a message in a conversation
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageRequest'
+      responses:
+        '201':
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '404':
+          description: Conversation not found
+
+  /api/conversations/{id}/assign:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Conversations]
+      summary: Assign a conversation to the authenticated responder
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Assignment successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationActionResponse'
+        '400':
+          description: Invalid transition
+        '404':
+          description: Not found
+
+  /api/conversations/{id}/transfer:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Conversations]
+      summary: Transfer a conversation
+      security:
+        - BearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Transfer initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationActionResponse'
+
+  /api/conversations/{id}/escalate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Conversations]
+      summary: Escalate a conversation
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EscalateRequest'
+      responses:
+        '200':
+          description: Escalation initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationActionResponse'
+
+  /api/conversations/{id}/wrap-up:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Conversations]
+      summary: Begin conversation wrap-up
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Wrap-up initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationActionResponse'
+
+  /api/conversations/{id}/close:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Conversations]
+      summary: Close a conversation
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Conversation closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationActionResponse'
+
+  /api/conversations/{id}/follow-up:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Conversations]
+      summary: Schedule a follow-up
+      security:
+        - BearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FollowUpRequest'
+      responses:
+        '200':
+          description: Follow-up scheduled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationActionResponse'
+
+  /api/conversations/{id}/tag:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Conversations]
+      summary: Add tags to a conversation
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagRequest'
+      responses:
+        '200':
+          description: Tags added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  id:
+                    type: string
+                  tags:
+                    type: array
+                    items:
+                      type: string
+
+  /api/conversations/{id}/survey:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Conversations]
+      summary: Submit a survey response
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SurveySubmitRequest'
+      responses:
+        '200':
+          description: Survey submitted
+
+  /api/conversations/{id}/summary:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Conversations]
+      summary: Get conversation summary
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Conversation summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationSummary'
+
+  /api/conversations/{id}/transition:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Conversations]
+      summary: Trigger a named state machine transition
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionRequest'
+      responses:
+        '200':
+          description: Transition successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionResponse'
+        '400':
+          description: Invalid transition
+        '404':
+          description: Not found
+
+  # ─── Queue (port 8080) ─────────────────────────────────────────────
+  /api/queue:
+    get:
+      tags: [Queue]
+      summary: Get queued conversations
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Queue status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueResponse'
+
+  /api/queue/health:
+    get:
+      tags: [Queue]
+      summary: Get per-program queue health metrics
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Queue health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueHealthResponse'
+
+  # ─── Providers (port 8080) ─────────────────────────────────────────
+  /api/providers:
+    get:
+      tags: [Providers]
+      summary: List messaging providers
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of providers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Resource'
+
+  # ─── Webhooks (port 8080) ──────────────────────────────────────────
+  /api/webhooks/twilio:
+    post:
+      tags: [Webhooks]
+      summary: Receive inbound SMS from Twilio
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                From:
+                  type: string
+                To:
+                  type: string
+                Body:
+                  type: string
+                MessageSid:
+                  type: string
+      responses:
+        '201':
+          description: Message received and queued
+
+  /api/webhooks/aws:
+    post:
+      tags: [Webhooks]
+      summary: Receive inbound message from AWS SNS/Pinpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                Type:
+                  type: string
+                MessageId:
+                  type: string
+                Message:
+                  type: string
+      responses:
+        '201':
+          description: Message received and queued
+
+  /api/webhooks/partner:
+    post:
+      tags: [Webhooks]
+      summary: Receive inbound message from a partner integration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                partnerId:
+                  type: string
+                from:
+                  type: string
+                message:
+                  type: string
+                timestamp:
+                  type: string
+                  format: date-time
+                metadata:
+                  type: object
+      responses:
+        '201':
+          description: Message received and queued
+
+  # ─── Webchat (port 8080) ───────────────────────────────────────────
+  /api/webchat/message:
+    post:
+      tags: [Webchat]
+      summary: Send a message from the webchat widget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, message]
+              properties:
+                sessionId:
+                  type: string
+                message:
+                  type: string
+      responses:
+        '201':
+          description: Message received
+
+  /api/webchat/poll/{sessionId}:
+    parameters:
+      - name: sessionId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Webchat]
+      summary: Poll for new messages in a webchat session
+      responses:
+        '200':
+          description: Session messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '404':
+          description: Session not found
+
+  # ─── Schema (port 8081) ────────────────────────────────────────────
+  /api/schema:
+    get:
+      tags: [Schema]
+      summary: Get JSON Schema for workflow configuration
+      responses:
+        '200':
+          description: JSON Schema document
+          content:
+            application/schema+json:
+              schema:
+                type: object
+
+  # ─── Dynamic Components (port 8081) ────────────────────────────────
+  /api/dynamic/components:
+    get:
+      tags: [Dynamic Components]
+      summary: List all dynamic components
+      responses:
+        '200':
+          description: Component list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ComponentInfo'
+    post:
+      tags: [Dynamic Components]
+      summary: Load a new dynamic component
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComponentCreateRequest'
+      responses:
+        '201':
+          description: Component loaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComponentInfo'
+        '400':
+          description: Missing fields
+        '422':
+          description: Compilation error
+
+  /api/dynamic/components/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Dynamic Components]
+      summary: Get a specific dynamic component
+      responses:
+        '200':
+          description: Component details with source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComponentInfo'
+        '404':
+          description: Not found
+    put:
+      tags: [Dynamic Components]
+      summary: Replace a component's source and reload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComponentUpdateRequest'
+      responses:
+        '200':
+          description: Component updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComponentInfo'
+        '400':
+          description: Bad request
+        '422':
+          description: Compilation error
+    delete:
+      tags: [Dynamic Components]
+      summary: Unregister a dynamic component
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Not found
+
+  # ─── AI (port 8081) ────────────────────────────────────────────────
+  /api/ai/generate:
+    post:
+      tags: [AI]
+      summary: Generate a workflow from natural language
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIGenerateRequest'
+      responses:
+        '200':
+          description: Generated workflow
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIGenerateResponse'
+        '400':
+          description: Missing intent
+        '500':
+          description: Generation failed
+
+  /api/ai/component:
+    post:
+      tags: [AI]
+      summary: Generate Go source code for a component
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIComponentRequest'
+      responses:
+        '200':
+          description: Generated code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIComponentResponse'
+        '400':
+          description: Missing name or interface
+        '500':
+          description: Generation failed
+
+  /api/ai/suggest:
+    post:
+      tags: [AI]
+      summary: Get workflow suggestions for a use case
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AISuggestRequest'
+      responses:
+        '200':
+          description: Suggestions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AISuggestResponse'
+        '400':
+          description: Missing useCase
+        '500':
+          description: Suggestion failed
+
+  /api/ai/providers:
+    get:
+      tags: [AI]
+      summary: List registered AI providers
+      responses:
+        '200':
+          description: Provider list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providers:
+                    type: array
+                    items:
+                      type: string
+
+  # ─── AI Deploy (port 8081) ─────────────────────────────────────────
+  /api/ai/deploy:
+    post:
+      tags: [AI Deploy]
+      summary: Generate and deploy a workflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIDeployRequest'
+      responses:
+        '200':
+          description: Workflow deployed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIDeployResponse'
+        '400':
+          description: Missing intent
+        '500':
+          description: Deploy failed
+
+  /api/ai/deploy/component:
+    post:
+      tags: [AI Deploy]
+      summary: Deploy a single component
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIDeployComponentRequest'
+      responses:
+        '201':
+          description: Component deployed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComponentInfo'
+        '400':
+          description: Missing name
+        '422':
+          description: Deploy failed
+        '500':
+          description: Internal error
+
+  # ─── Workflow UI (port 8081) ───────────────────────────────────────
+  /api/workflow/config:
+    get:
+      tags: [Workflow UI]
+      summary: Get current workflow configuration
+      responses:
+        '200':
+          description: Workflow config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowConfig'
+    put:
+      tags: [Workflow UI]
+      summary: Replace workflow configuration
+      description: Accepts JSON or YAML (set Content-Type application/x-yaml for YAML).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowConfig'
+          application/x-yaml:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: Config updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        '400':
+          description: Invalid config
+
+  /api/workflow/modules:
+    get:
+      tags: [Workflow UI]
+      summary: List available module types
+      responses:
+        '200':
+          description: Module type list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModuleType'
+
+  /api/workflow/validate:
+    post:
+      tags: [Workflow UI]
+      summary: Validate a workflow configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowConfig'
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResponse'
+
+  /api/workflow/reload:
+    post:
+      tags: [Workflow UI]
+      summary: Reload the workflow engine
+      responses:
+        '200':
+          description: Engine reloaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        '500':
+          description: Reload failed
+        '503':
+          description: Reload not configured
+
+  /api/workflow/status:
+    get:
+      tags: [Workflow UI]
+      summary: Get engine status
+      responses:
+        '200':
+          description: Engine status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowStatusResponse'
+
+  # ─── OpenAPI spec self-serve (port 8081) ───────────────────────────
+  /api/docs/openapi.yaml:
+    get:
+      tags: [Schema]
+      summary: Get OpenAPI specification
+      responses:
+        '200':
+          description: OpenAPI 3.0 specification
+          content:
+            application/x-yaml:
+              schema:
+                type: string
+
+  # ─── Plugins (port 8081) ───────────────────────────────────────────
+  /api/plugins:
+    get:
+      tags: [Plugins]
+      summary: List registered plugins
+      responses:
+        '200':
+          description: Plugin list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PluginListEntry'
+    post:
+      tags: [Plugins]
+      summary: Register a plugin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [manifest]
+              properties:
+                manifest:
+                  $ref: '#/components/schemas/PluginManifest'
+                source:
+                  type: string
+                  description: Go source code for the plugin component
+      responses:
+        '201':
+          description: Plugin registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginManifest'
+        '400':
+          description: Invalid request
+        '422':
+          description: Validation or compilation error
+
+  /api/plugins/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Plugins]
+      summary: Get plugin details
+      responses:
+        '200':
+          description: Plugin manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginManifest'
+        '404':
+          description: Not found
+    delete:
+      tags: [Plugins]
+      summary: Unregister a plugin
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Not found
