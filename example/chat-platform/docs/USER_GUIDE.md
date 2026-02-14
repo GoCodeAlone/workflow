@@ -63,6 +63,7 @@ All demo accounts use the password `demo123`.
 | Escalation Dialog | ![Escalate](screenshots/responder-escalate.png) |
 | Tag Conversation | ![Tags](screenshots/responder-tags.png) |
 | Wrap Up | ![Wrap Up](screenshots/responder-wrapup.png) |
+| Multi-Chat | ![Multi-Chat](screenshots/responder-multi-chat.png) |
 
 ### Supervisor
 
@@ -161,6 +162,10 @@ Responders handle live conversations with texters.
 9. **Wrap-up**: Begin the wrap-up process. An exit survey is sent to the texter if configured.
 
    ![Wrap Up Dialog](screenshots/responder-wrapup.png)
+
+10. **Multi-chat view** (`#/responder/multi-chat`): Handle multiple conversations simultaneously in a side-by-side split view. Each panel shows an independent chat with its own message input, and the conversation list sidebar lets you filter and select which conversations to display.
+
+   ![Multi-Chat View](screenshots/responder-multi-chat.png)
 
 ### Supervisor
 
