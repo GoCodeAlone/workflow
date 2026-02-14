@@ -322,7 +322,7 @@ async function sendMessage(conversationId) {
 
   try {
     await api.post(`/api/conversations/${conversationId}/messages`, {
-      content,
+      body: content,
       direction: 'outbound'
     });
     input.value = '';

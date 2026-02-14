@@ -336,28 +336,28 @@ A production-grade, AI-powered workflow orchestration engine with a visual build
 
 ---
 
-## Phase 10: Multi-Affiliate Routing & End-to-End QA (Planned)
+## Phase 10: Multi-Affiliate Routing & End-to-End QA (Complete)
 
 ### Multi-Affiliate Conversation Routing
-- [ ] JWT claims enrichment with affiliateId/programIds from user metadata
-- [ ] handleGetAll() filtering by affiliate/program query params with JWT defaults
-- [ ] Conversation router with real routing logic (keyword → program → affiliate mapping)
-- [ ] Queue health scoping by affiliate (non-admin users see only their affiliate's data)
+- [x] JWT claims enrichment with affiliateId/programIds from user metadata
+- [x] handleGetAll() filtering by affiliate/program query params with JWT defaults
+- [x] Conversation router with real routing logic (keyword → program → affiliate mapping)
+- [x] Queue health scoping by affiliate (non-admin users see only their affiliate's data)
 
 ### Conversation Data Fixes
-- [ ] Initialize messages array on conversation creation (fix empty chat views)
-- [ ] Ensure messages sub-action handler creates slice before appending
+- [x] Initialize messages array on conversation creation (fix empty chat views)
+- [x] Ensure messages sub-action handler creates slice before appending
 
 ### SPA Multi-Tenant Updates
-- [ ] Responder view: pass affiliate/program params in API calls
-- [ ] Supervisor view: filter users and conversations by affiliate
-- [ ] Queue view: scope queue health by affiliate
-- [ ] Chat view: filter transfer responder list by affiliate
-- [ ] Display program/affiliate context badges in conversation cards
+- [x] Responder view: pass affiliate/program params in API calls
+- [x] Supervisor view: filter users and conversations by affiliate
+- [x] Queue view: scope queue health by affiliate
+- [x] Chat view: filter transfer responder list by affiliate
+- [x] Display program/affiliate context badges in conversation cards
 
 ### Seed Data Enrichment
-- [ ] Add EU-West users (responder + supervisor for aff-003/prog-004)
-- [ ] Add PARTNER keyword for prog-004
+- [x] Add EU-West users (responder + supervisor for aff-003/prog-004)
+- [x] Add PARTNER keyword for prog-004
 
 ### End-to-End QA Testing
 - [ ] Playwright multi-agent QA: texters send keywords, verify routing to correct programs
@@ -365,6 +365,27 @@ A production-grade, AI-powered workflow orchestration engine with a visual build
 - [ ] Supervisor scoping: supervisors see only their affiliate's responders
 - [ ] Multi-message flow verification with screenshots
 - [ ] Queue health per-affiliate validation
+
+---
+
+## Phase 11: End-to-End QA & Polish (Planned)
+
+### Playwright E2E Tests for Chat Platform
+- [ ] Login flow: verify all 8 seed users can log in with correct roles
+- [ ] Conversation routing: send messages with HELLO/TEEN/WELLNESS/PARTNER keywords, verify routing
+- [ ] Cross-affiliate isolation: login as aff-001 responder, verify only aff-001 conversations visible
+- [ ] Supervisor view: verify supervisors see only their affiliate's responders and conversations
+- [ ] Message flow: send messages both directions, verify real-time updates
+- [ ] Multi-chat: open multiple conversations simultaneously, verify messages route correctly
+- [ ] Queue health: verify per-affiliate program stats display correctly
+- [ ] Transfer flow: transfer conversation between responders, verify handoff
+- [ ] Escalation flow: test medical/police escalation state transitions
+- [ ] Screenshot documentation: capture key states for USER_GUIDE.md
+
+### Platform Polish
+- [ ] Error handling improvements for edge cases discovered during QA
+- [ ] Performance profiling of conversation routing under load
+- [ ] Documentation updates based on QA findings
 
 ---
 

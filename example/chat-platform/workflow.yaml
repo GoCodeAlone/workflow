@@ -858,7 +858,7 @@ workflows:
 
       - method: "POST"
         path: "/api/conversations/{id}/messages"
-        handler: messages-api
+        handler: conversations-api
         middlewares:
           - cors
           - request-id
