@@ -394,8 +394,8 @@ A production-grade, AI-powered workflow orchestration engine with a visual build
 
 ### Platform Polish
 - [x] Error handling improvements for edge cases discovered during QA
-- [ ] Performance profiling of conversation routing under load
-- [ ] Documentation updates based on QA findings
+- [x] Performance profiling of conversation routing under load (~20ms creation, ~6ms queries)
+- [x] Documentation updates based on QA findings
 
 ---
 
