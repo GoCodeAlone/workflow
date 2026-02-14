@@ -1,6 +1,17 @@
 import type { WorkflowConfig } from '../types/workflow.ts';
+import useAuthStore from '../store/authStore.ts';
 
 const API_BASE = '/api';
+
+/** If we get a 401, the token is invalid — force logout to show login screen. */
+function handleUnauthorized(status: number, body: string): void {
+  if (status === 401 || status === 403) {
+    const msg = body.toLowerCase();
+    if (msg.includes('user not found') || msg.includes('unauthorized') || msg.includes('invalid') || msg.includes('expired') || status === 401) {
+      useAuthStore.getState().logout();
+    }
+  }
+}
 
 export interface ValidationResult {
   valid: boolean;
@@ -41,12 +52,18 @@ export interface ModuleTypeInfo {
 }
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = localStorage.getItem('auth_token');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     ...options,
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
+    handleUnauthorized(res.status, text);
     throw new Error(`API ${res.status}: ${text}`);
   }
   return res.json();
@@ -82,13 +99,19 @@ export async function generateWorkflow(intent: string): Promise<GenerateResponse
 }
 
 export async function generateComponent(spec: ComponentSpec): Promise<string> {
+  const token = localStorage.getItem('auth_token');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   const res = await fetch(`${API_BASE}/ai/component`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(spec),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
+    handleUnauthorized(res.status, text);
     throw new Error(`API ${res.status}: ${text}`);
   }
   return res.text();
@@ -138,6 +161,7 @@ async function v1Fetch<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
+    handleUnauthorized(res.status, text);
     throw new Error(`API ${res.status}: ${text}`);
   }
   if (res.status === 204) return undefined as T;
@@ -198,6 +222,38 @@ export function apiUpdateMe(data: { display_name?: string; avatar_url?: string }
   });
 }
 
+// --- User Management (admin) ---
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  createdAt: string;
+}
+
+export function apiListUsers(): Promise<AdminUser[]> {
+  return v1Fetch<AdminUser[]>('/auth/users');
+}
+
+export function apiCreateUser(email: string, password: string, name: string, role: string): Promise<AdminUser> {
+  return v1Fetch<AdminUser>('/auth/users', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, name, role }),
+  });
+}
+
+export function apiDeleteUser(id: string): Promise<void> {
+  return v1Fetch<void>(`/auth/users/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export function apiUpdateUserRole(id: string, role: string): Promise<AdminUser> {
+  return v1Fetch<AdminUser>(`/auth/users/${encodeURIComponent(id)}/role`, {
+    method: 'PUT',
+    body: JSON.stringify({ role }),
+  });
+}
+
 // --- Companies ---
 
 export interface ApiCompany {
@@ -205,6 +261,8 @@ export interface ApiCompany {
   name: string;
   slug: string;
   owner_id: string;
+  parent_id?: string;
+  is_system?: boolean;
   metadata?: unknown;
   created_at: string;
   updated_at: string;
@@ -246,6 +304,7 @@ export interface ApiProject {
   name: string;
   slug: string;
   description?: string;
+  is_system?: boolean;
   metadata?: unknown;
   created_at: string;
   updated_at: string;
@@ -273,6 +332,7 @@ export interface ApiWorkflowRecord {
   config_yaml: string;
   version: number;
   status: 'draft' | 'active' | 'stopped' | 'error';
+  is_system?: boolean;
   created_by: string;
   updated_by: string;
   created_at: string;
@@ -326,8 +386,17 @@ export function apiGetWorkflowStatus(id: string): Promise<{ id: string; status: 
   return v1Fetch<{ id: string; status: string; version: number }>(`/workflows/${encodeURIComponent(id)}/status`);
 }
 
-export function apiListVersions(id: string): Promise<ApiWorkflowRecord[]> {
-  return v1Fetch<ApiWorkflowRecord[]>(`/workflows/${encodeURIComponent(id)}/versions`);
+export interface ApiWorkflowVersion {
+  id: string;
+  workflow_id: string;
+  version: number;
+  config_yaml: string;
+  created_by: string;
+  created_at: string;
+}
+
+export function apiListVersions(id: string): Promise<ApiWorkflowVersion[]> {
+  return v1Fetch<ApiWorkflowVersion[]>(`/workflows/${encodeURIComponent(id)}/versions`);
 }
 
 export interface ApiMembership {

@@ -553,3 +553,69 @@ func TestWorkflowUIHandler_SetStatusFunc(t *testing.T) {
 		t.Error("expected non-nil engineStatus after set")
 	}
 }
+
+func TestWorkflowUIHandler_HandleManagement_Dispatch(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "test-mod", Type: "http.server"},
+		},
+	}
+	h := NewWorkflowUIHandler(cfg)
+	h.SetStatusFunc(func() map[string]any {
+		return map[string]any{"status": "running"}
+	})
+
+	tests := []struct {
+		method string
+		path   string
+		code   int
+	}{
+		{http.MethodGet, "/api/workflow/config", http.StatusOK},
+		{http.MethodGet, "/api/workflow/modules", http.StatusOK},
+		{http.MethodGet, "/api/workflow/status", http.StatusOK},
+		{http.MethodPost, "/api/workflow/reload", http.StatusServiceUnavailable}, // no reload func
+		{http.MethodGet, "/api/unknown", http.StatusNotFound},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			w := httptest.NewRecorder()
+			h.HandleManagement(w, req)
+
+			if w.Code != tc.code {
+				t.Errorf("expected %d, got %d: %s", tc.code, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestWorkflowUIHandler_HandleManagement_WithHTTPHandler(t *testing.T) {
+	// Simulate how the admin config wires things: an http.handler module
+	// gets its SetHandleFunc called with HandleManagement
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "test-mod", Type: "http.server"},
+		},
+	}
+	uiHandler := NewWorkflowUIHandler(cfg)
+
+	httpHandler := NewSimpleHTTPHandler("admin-management", "application/json")
+	httpHandler.SetHandleFunc(uiHandler.HandleManagement)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workflow/config", nil)
+	w := httptest.NewRecorder()
+	httpHandler.Handle(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result config.WorkflowConfig
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if len(result.Modules) != 1 || result.Modules[0].Name != "test-mod" {
+		t.Errorf("unexpected config: %+v", result)
+	}
+}

@@ -65,18 +65,24 @@ describe('Toolbar', () => {
     expect(screen.getByText('2 modules')).toBeInTheDocument();
   });
 
-  it('Clear button calls clearCanvas on the store', () => {
+  it('Clear button calls clearCanvas on the store after confirmation', () => {
     // Add nodes first so Clear is enabled
     act(() => {
       useWorkflowStore.getState().addNode('http.server', { x: 0, y: 0 });
     });
+
+    // Mock window.confirm to return true
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(<Toolbar />);
 
     const clearButton = screen.getByText('Clear');
     fireEvent.click(clearButton);
 
+    expect(confirmSpy).toHaveBeenCalled();
     expect(useWorkflowStore.getState().nodes).toHaveLength(0);
+
+    confirmSpy.mockRestore();
   });
 
   it('disables Export YAML, Save, Validate, Clear when no nodes', () => {

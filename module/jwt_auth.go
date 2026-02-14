@@ -28,16 +28,17 @@ type User struct {
 
 // JWTAuthModule handles JWT authentication with an in-memory user store
 type JWTAuthModule struct {
-	name        string
-	secret      string
-	tokenExpiry time.Duration
-	issuer      string
-	seedFile    string
-	users       map[string]*User // keyed by email
-	mu          sync.RWMutex
-	nextID      int
-	app         modular.Application
-	persistence *PersistenceStore // optional write-through backend
+	name           string
+	secret         string
+	tokenExpiry    time.Duration
+	issuer         string
+	seedFile       string
+	responseFormat string           // "standard" (default) or "v1" (access_token/refresh_token)
+	users          map[string]*User // keyed by email
+	mu             sync.RWMutex
+	nextID         int
+	app            modular.Application
+	persistence    *PersistenceStore // optional write-through backend
 }
 
 // NewJWTAuthModule creates a new JWT auth module
@@ -61,6 +62,14 @@ func NewJWTAuthModule(name, secret string, tokenExpiry time.Duration, issuer str
 // SetSeedFile sets the path to a JSON file of seed users to load on start.
 func (j *JWTAuthModule) SetSeedFile(path string) {
 	j.seedFile = path
+}
+
+// SetResponseFormat sets the response format for auth endpoints.
+// "v1" returns {access_token, refresh_token, expires_in, user} and adds
+// /auth/refresh, /auth/me, /auth/logout handlers.
+// "standard" (default) returns {token, user}.
+func (j *JWTAuthModule) SetResponseFormat(format string) {
+	j.responseFormat = format
 }
 
 // Name returns the module name
@@ -118,10 +127,30 @@ func (j *JWTAuthModule) Handle(w http.ResponseWriter, r *http.Request) {
 		j.handleRegister(w, r)
 	case r.Method == http.MethodPost && strings.HasSuffix(path, "/auth/login"):
 		j.handleLogin(w, r)
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/auth/refresh"):
+		j.handleRefresh(w, r)
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/auth/logout"):
+		j.handleLogout(w, r)
+	case r.Method == http.MethodGet && strings.HasSuffix(path, "/auth/me"):
+		j.handleGetProfile(w, r)
+	case r.Method == http.MethodPut && strings.HasSuffix(path, "/auth/me"):
+		j.handleUpdateProfile(w, r)
 	case r.Method == http.MethodGet && strings.HasSuffix(path, "/auth/profile"):
 		j.handleGetProfile(w, r)
 	case r.Method == http.MethodPut && strings.HasSuffix(path, "/auth/profile"):
 		j.handleUpdateProfile(w, r)
+	case r.Method == http.MethodGet && strings.HasSuffix(path, "/auth/setup-status"):
+		j.handleSetupStatus(w, r)
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/auth/setup"):
+		j.handleSetup(w, r)
+	case r.Method == http.MethodGet && strings.HasSuffix(path, "/auth/users"):
+		j.handleListUsers(w, r)
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/auth/users"):
+		j.handleCreateUser(w, r)
+	case r.Method == http.MethodDelete && strings.Contains(path, "/auth/users/"):
+		j.handleDeleteUser(w, r)
+	case r.Method == http.MethodPut && strings.Contains(path, "/auth/users/") && strings.HasSuffix(path, "/role"):
+		j.handleUpdateUserRole(w, r)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
@@ -193,10 +222,25 @@ func (j *JWTAuthModule) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"token": token,
-		"user":  user,
-	})
+	if j.responseFormat == "v1" {
+		refreshToken, err := j.generateRefreshToken(user)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to generate refresh token"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  token,
+			"refresh_token": refreshToken,
+			"expires_in":    int(j.tokenExpiry.Seconds()),
+			"user":          j.buildUserResponse(user),
+		})
+	} else {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"token": token,
+			"user":  user,
+		})
+	}
 }
 
 func (j *JWTAuthModule) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -233,10 +277,25 @@ func (j *JWTAuthModule) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"token": token,
-		"user":  j.buildUserResponse(user),
-	})
+	if j.responseFormat == "v1" {
+		refreshToken, err := j.generateRefreshToken(user)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to generate refresh token"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  token,
+			"refresh_token": refreshToken,
+			"expires_in":    int(j.tokenExpiry.Seconds()),
+			"user":          j.buildUserResponse(user),
+		})
+	} else {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"token": token,
+			"user":  j.buildUserResponse(user),
+		})
+	}
 }
 
 func (j *JWTAuthModule) handleGetProfile(w http.ResponseWriter, r *http.Request) {
@@ -365,6 +424,504 @@ func (j *JWTAuthModule) buildUserResponse(user *User) map[string]any {
 	}
 	maps.Copy(resp, user.Metadata)
 	return resp
+}
+
+// generateRefreshToken creates a refresh JWT with longer expiry (7 days) and a "refresh" type claim.
+func (j *JWTAuthModule) generateRefreshToken(user *User) (string, error) {
+	claims := jwt.MapClaims{
+		"sub":   user.ID,
+		"email": user.Email,
+		"type":  "refresh",
+		"iss":   j.issuer,
+		"iat":   time.Now().Unix(),
+		"exp":   time.Now().Add(7 * 24 * time.Hour).Unix(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(j.secret))
+}
+
+// handleRefresh exchanges a refresh token for a new access/refresh token pair.
+func (j *JWTAuthModule) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	if req.RefreshToken == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "refresh_token is required"})
+		return
+	}
+
+	token, err := jwt.Parse(req.RefreshToken, func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return []byte(j.secret), nil
+	})
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid refresh token"})
+		return
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok || !token.Valid {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid refresh token claims"})
+		return
+	}
+
+	// Verify this is a refresh token
+	if tokenType, _ := claims["type"].(string); tokenType != "refresh" {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "not a refresh token"})
+		return
+	}
+
+	email, ok := claims["email"].(string)
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "email not found in token"})
+		return
+	}
+
+	j.mu.RLock()
+	user, exists := j.users[email]
+	j.mu.RUnlock()
+
+	if !exists {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+		return
+	}
+
+	accessToken, err := j.generateToken(user)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to generate token"})
+		return
+	}
+
+	refreshToken, err := j.generateRefreshToken(user)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to generate refresh token"})
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+		"expires_in":    int(j.tokenExpiry.Seconds()),
+	})
+}
+
+// handleLogout is a no-op that returns 200 OK (JWT tokens are stateless).
+func (j *JWTAuthModule) handleLogout(w http.ResponseWriter, _ *http.Request) {
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// handleSetupStatus returns whether the system needs initial setup (no users exist).
+func (j *JWTAuthModule) handleSetupStatus(w http.ResponseWriter, _ *http.Request) {
+	j.mu.RLock()
+	userCount := len(j.users)
+	j.mu.RUnlock()
+
+	// Also check persistence if in-memory is empty
+	if userCount == 0 && j.persistence != nil {
+		if users, err := j.persistence.LoadUsers(); err == nil {
+			userCount = len(users)
+		}
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"needsSetup": userCount == 0,
+		"userCount":  userCount,
+	})
+}
+
+// handleSetup creates the first admin user. Only works when no users exist.
+func (j *JWTAuthModule) handleSetup(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Name     string `json:"name"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "email and password are required"})
+		return
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	// Verify no users exist (in-memory)
+	if len(j.users) > 0 {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "setup already completed"})
+		return
+	}
+
+	// Also verify persistence has no users
+	if j.persistence != nil {
+		if users, err := j.persistence.LoadUsers(); err == nil && len(users) > 0 {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "setup already completed"})
+			return
+		}
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to hash password"})
+		return
+	}
+
+	user := &User{
+		ID:           fmt.Sprintf("%d", j.nextID),
+		Email:        req.Email,
+		Name:         req.Name,
+		PasswordHash: string(hash),
+		Metadata:     map[string]any{"role": "admin"},
+		CreatedAt:    time.Now(),
+	}
+	j.nextID++
+	j.users[req.Email] = user
+
+	// Write-through to persistence
+	if j.persistence != nil {
+		_ = j.persistence.SaveUser(UserRecord{
+			ID:           user.ID,
+			Email:        user.Email,
+			Name:         user.Name,
+			PasswordHash: user.PasswordHash,
+			Metadata:     user.Metadata,
+			CreatedAt:    user.CreatedAt,
+		})
+	}
+
+	token, err := j.generateToken(user)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to generate token"})
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	if j.responseFormat == "v1" {
+		refreshToken, err := j.generateRefreshToken(user)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to generate refresh token"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  token,
+			"refresh_token": refreshToken,
+			"expires_in":    int(j.tokenExpiry.Seconds()),
+			"user":          j.buildUserResponse(user),
+		})
+	} else {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"token": token,
+			"user":  j.buildUserResponse(user),
+		})
+	}
+}
+
+// handleListUsers returns all users. Requires admin role.
+func (j *JWTAuthModule) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	requestor, err := j.extractUserFromRequest(r)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	if !j.isAdmin(requestor) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "admin role required"})
+		return
+	}
+
+	j.mu.RLock()
+	users := make([]map[string]any, 0, len(j.users))
+	for _, u := range j.users {
+		users = append(users, j.buildUserResponse(u))
+	}
+	j.mu.RUnlock()
+
+	_ = json.NewEncoder(w).Encode(users)
+}
+
+// handleCreateUser creates a new user. Requires admin role.
+func (j *JWTAuthModule) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	requestor, err := j.extractUserFromRequest(r)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	if !j.isAdmin(requestor) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "admin role required"})
+		return
+	}
+
+	var req struct {
+		Email    string `json:"email"`
+		Name     string `json:"name"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "email and password are required"})
+		return
+	}
+
+	if req.Role == "" {
+		req.Role = "user"
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	if _, exists := j.users[req.Email]; exists {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "email already registered"})
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to hash password"})
+		return
+	}
+
+	user := &User{
+		ID:           fmt.Sprintf("%d", j.nextID),
+		Email:        req.Email,
+		Name:         req.Name,
+		PasswordHash: string(hash),
+		Metadata:     map[string]any{"role": req.Role},
+		CreatedAt:    time.Now(),
+	}
+	j.nextID++
+	j.users[req.Email] = user
+
+	// Write-through to persistence
+	if j.persistence != nil {
+		_ = j.persistence.SaveUser(UserRecord{
+			ID:           user.ID,
+			Email:        user.Email,
+			Name:         user.Name,
+			PasswordHash: user.PasswordHash,
+			Metadata:     user.Metadata,
+			CreatedAt:    user.CreatedAt,
+		})
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(j.buildUserResponse(user))
+}
+
+// handleDeleteUser deletes a user by ID. Requires admin role.
+func (j *JWTAuthModule) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	requestor, err := j.extractUserFromRequest(r)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	if !j.isAdmin(requestor) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "admin role required"})
+		return
+	}
+
+	// Extract user ID from URL: .../auth/users/{id}
+	userID := j.extractPathParam(r.URL.Path, "/auth/users/")
+	if userID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "user ID required"})
+		return
+	}
+
+	// Prevent self-deletion
+	if userID == requestor.ID {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "cannot delete yourself"})
+		return
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	// Find the user to delete
+	var targetEmail string
+	for email, u := range j.users {
+		if u.ID == userID {
+			targetEmail = email
+			break
+		}
+	}
+
+	if targetEmail == "" {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+		return
+	}
+
+	// Prevent deleting the last admin
+	target := j.users[targetEmail]
+	if j.isAdmin(target) && j.countAdmins() <= 1 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "cannot delete the last admin"})
+		return
+	}
+
+	delete(j.users, targetEmail)
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleUpdateUserRole updates a user's role. Requires admin role.
+func (j *JWTAuthModule) handleUpdateUserRole(w http.ResponseWriter, r *http.Request) {
+	requestor, err := j.extractUserFromRequest(r)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	if !j.isAdmin(requestor) {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "admin role required"})
+		return
+	}
+
+	// Extract user ID from URL: .../auth/users/{id}/role
+	path := r.URL.Path
+	// Strip trailing /role
+	path = strings.TrimSuffix(path, "/role")
+	userID := j.extractPathParam(path, "/auth/users/")
+	if userID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "user ID required"})
+		return
+	}
+
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	if req.Role == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "role is required"})
+		return
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	// Find the target user
+	var target *User
+	for _, u := range j.users {
+		if u.ID == userID {
+			target = u
+			break
+		}
+	}
+
+	if target == nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
+		return
+	}
+
+	// Prevent demoting yourself if you're the last admin
+	if target.ID == requestor.ID && j.isAdmin(target) && req.Role != "admin" && j.countAdmins() <= 1 {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "cannot demote the last admin"})
+		return
+	}
+
+	if target.Metadata == nil {
+		target.Metadata = make(map[string]any)
+	}
+	target.Metadata["role"] = req.Role
+
+	// Write-through to persistence
+	if j.persistence != nil {
+		_ = j.persistence.SaveUser(UserRecord{
+			ID:           target.ID,
+			Email:        target.Email,
+			Name:         target.Name,
+			PasswordHash: target.PasswordHash,
+			Metadata:     target.Metadata,
+			CreatedAt:    target.CreatedAt,
+		})
+	}
+
+	_ = json.NewEncoder(w).Encode(j.buildUserResponse(target))
+}
+
+// isAdmin checks if a user has the admin role.
+func (j *JWTAuthModule) isAdmin(user *User) bool {
+	if user.Metadata == nil {
+		return false
+	}
+	role, ok := user.Metadata["role"].(string)
+	return ok && role == "admin"
+}
+
+// countAdmins returns the number of admin users.
+func (j *JWTAuthModule) countAdmins() int {
+	count := 0
+	for _, u := range j.users {
+		if j.isAdmin(u) {
+			count++
+		}
+	}
+	return count
+}
+
+// extractPathParam extracts the value after a prefix in a URL path.
+// For example, extractPathParam("/api/v1/auth/users/42", "/auth/users/") returns "42".
+func (j *JWTAuthModule) extractPathParam(path, prefix string) string {
+	idx := strings.Index(path, prefix)
+	if idx < 0 {
+		return ""
+	}
+	return path[idx+len(prefix):]
 }
 
 // loadSeedUsers reads a JSON seed file and registers users that don't already exist.

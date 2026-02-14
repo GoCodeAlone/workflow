@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import useWorkflowStore from '../../store/workflowStore.ts';
-import { MODULE_TYPE_MAP, CATEGORY_COLORS } from '../../types/workflow.ts';
+import useModuleSchemaStore from '../../store/moduleSchemaStore.ts';
+import { CATEGORY_COLORS } from '../../types/workflow.ts';
 import type { ConfigFieldDef, IOPort } from '../../types/workflow.ts';
 
 export default function PropertyPanel() {
@@ -10,6 +11,14 @@ export default function PropertyPanel() {
   const updateNodeName = useWorkflowStore((s) => s.updateNodeName);
   const removeNode = useWorkflowStore((s) => s.removeNode);
   const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
+
+  const moduleTypeMap = useModuleSchemaStore((s) => s.moduleTypeMap);
+  const fetchSchemas = useModuleSchemaStore((s) => s.fetchSchemas);
+  const schemasLoaded = useModuleSchemaStore((s) => s.loaded);
+
+  useEffect(() => {
+    if (!schemasLoaded) fetchSchemas();
+  }, [schemasLoaded, fetchSchemas]);
 
   const node = nodes.find((n) => n.id === selectedNodeId);
   if (!node) {
@@ -32,7 +41,7 @@ export default function PropertyPanel() {
     );
   }
 
-  const info = MODULE_TYPE_MAP[node.data.moduleType];
+  const info = moduleTypeMap[node.data.moduleType];
   const color = info ? CATEGORY_COLORS[info.category] : '#64748b';
   const fields: ConfigFieldDef[] = info?.configFields ?? [];
 
@@ -115,6 +124,7 @@ export default function PropertyPanel() {
               <label key={field.key} style={{ display: 'block', marginBottom: 10 }}>
                 <span style={{ color: '#a6adc8', fontSize: 11, display: 'block', marginBottom: 3 }}>
                   {field.label}
+                  {field.required && <span style={{ color: '#f38ba8', marginLeft: 2 }}>*</span>}
                 </span>
                 {field.type === 'select' ? (
                   <select
@@ -134,14 +144,20 @@ export default function PropertyPanel() {
                     type="number"
                     value={String(node.data.config[field.key] ?? field.defaultValue ?? '')}
                     onChange={(e) => handleFieldChange(field.key, Number(e.target.value))}
+                    placeholder={field.placeholder}
                     style={inputStyle}
                   />
                 ) : field.type === 'boolean' ? (
-                  <input
-                    type="checkbox"
-                    checked={Boolean(node.data.config[field.key] ?? field.defaultValue ?? false)}
-                    onChange={(e) => handleFieldChange(field.key, e.target.checked)}
-                  />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(node.data.config[field.key] ?? field.defaultValue ?? false)}
+                      onChange={(e) => handleFieldChange(field.key, e.target.checked)}
+                    />
+                    {field.description && (
+                      <span style={{ color: '#585b70', fontSize: 10 }}>{field.description}</span>
+                    )}
+                  </div>
                 ) : field.type === 'json' ? (
                   <textarea
                     value={
@@ -157,6 +173,7 @@ export default function PropertyPanel() {
                       }
                     }}
                     rows={4}
+                    placeholder={field.placeholder}
                     style={{ ...inputStyle, resize: 'vertical', fontFamily: 'monospace' }}
                   />
                 ) : (
@@ -164,8 +181,12 @@ export default function PropertyPanel() {
                     type="text"
                     value={String(node.data.config[field.key] ?? field.defaultValue ?? '')}
                     onChange={(e) => handleFieldChange(field.key, e.target.value)}
+                    placeholder={field.placeholder}
                     style={inputStyle}
                   />
+                )}
+                {field.description && field.type !== 'boolean' && (
+                  <span style={{ color: '#585b70', fontSize: 10, display: 'block', marginTop: 2 }}>{field.description}</span>
                 )}
               </label>
             ))}

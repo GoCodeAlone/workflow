@@ -9,6 +9,7 @@ import {
   type ApiCompany,
   type ApiProject,
 } from '../../utils/api.ts';
+import useAuthStore from '../../store/authStore.ts';
 
 interface ProjectSwitcherProps {
   selectedProjectId: string | null;
@@ -33,6 +34,7 @@ export default function ProjectSwitcher({ selectedProjectId, onSelectProject }: 
   const [companies, setCompanies] = useState<CompanyNode[]>([]);
   const [creating, setCreating] = useState<{ type: 'company' | 'org' | 'project'; parentId?: string } | null>(null);
   const [newName, setNewName] = useState('');
+  const userRole = useAuthStore((s) => s.user?.role);
 
   const loadCompanies = useCallback(async () => {
     try {
@@ -164,7 +166,7 @@ export default function ProjectSwitcher({ selectedProjectId, onSelectProject }: 
         }}
       >
         <span style={{ fontWeight: 600, fontSize: 12, color: '#a6adc8', textTransform: 'uppercase' }}>
-          Projects
+          Companies
         </span>
         <button
           onClick={() => setCreating({ type: 'company' })}
@@ -217,7 +219,7 @@ export default function ProjectSwitcher({ selectedProjectId, onSelectProject }: 
       )}
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        {companies.map((compNode, ci) => (
+        {companies.filter((c) => !c.company.is_system || userRole === 'admin').map((compNode, ci) => (
           <div key={compNode.company.id}>
             <div
               style={{
@@ -231,20 +233,33 @@ export default function ProjectSwitcher({ selectedProjectId, onSelectProject }: 
               onClick={() => toggleCompany(ci)}
             >
               <span style={{ fontSize: 10, width: 12 }}>{compNode.expanded ? '\u25BC' : '\u25B6'}</span>
-              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {compNode.company.name}
-              </span>
-              <button
-                onClick={(e) => { e.stopPropagation(); setCreating({ type: 'org', parentId: compNode.company.id }); }}
-                style={{ ...addBtnStyle, fontSize: 10, padding: '0 4px' }}
-                title="New Organization"
+              <span style={{
+                flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                color: compNode.company.is_system ? '#f9e2af' : undefined,
+              }}
+              title={compNode.company.is_system ? 'System (Admin Only)' : compNode.company.name}
               >
-                +
-              </button>
+                {compNode.company.is_system ? '\u{1F512} ' : '\u{1F3E2} '}
+                {compNode.company.is_system ? 'System (Admin Only)' : compNode.company.name}
+              </span>
+              {!compNode.company.is_system && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setCreating({ type: 'org', parentId: compNode.company.id }); }}
+                  style={{ ...addBtnStyle, fontSize: 10, padding: '0 4px' }}
+                  title="New Organization"
+                >
+                  +
+                </button>
+              )}
             </div>
 
             {compNode.expanded && (
               <div style={{ paddingLeft: 12 }}>
+                {!compNode.loading && compNode.orgs.length > 0 && (
+                  <div style={{ padding: '2px 8px', fontSize: 9, color: '#585b70', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Organizations
+                  </div>
+                )}
                 {compNode.loading && (
                   <div style={{ padding: '4px 8px', color: '#6c7086', fontSize: 11 }}>Loading...</div>
                 )}
@@ -262,23 +277,33 @@ export default function ProjectSwitcher({ selectedProjectId, onSelectProject }: 
                       onClick={() => toggleOrg(ci, oi)}
                     >
                       <span style={{ fontSize: 10, width: 12 }}>{orgNode.expanded ? '\u25BC' : '\u25B6'}</span>
-                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span
+                        style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                        title={orgNode.org.name}
+                      >
                         {orgNode.org.name}
                       </span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCreating({ type: 'project', parentId: orgNode.org.id });
-                        }}
-                        style={{ ...addBtnStyle, fontSize: 10, padding: '0 4px' }}
-                        title="New Project"
-                      >
-                        +
-                      </button>
+                      {!compNode.company.is_system && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCreating({ type: 'project', parentId: orgNode.org.id });
+                          }}
+                          style={{ ...addBtnStyle, fontSize: 10, padding: '0 4px' }}
+                          title="New Project"
+                        >
+                          +
+                        </button>
+                      )}
                     </div>
 
                     {orgNode.expanded && (
                       <div style={{ paddingLeft: 12 }}>
+                        {!orgNode.loading && orgNode.projects.length > 0 && (
+                          <div style={{ padding: '2px 8px', fontSize: 9, color: '#585b70', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                            Projects
+                          </div>
+                        )}
                         {orgNode.loading && (
                           <div style={{ padding: '2px 8px', color: '#6c7086', fontSize: 11 }}>Loading...</div>
                         )}
@@ -286,6 +311,7 @@ export default function ProjectSwitcher({ selectedProjectId, onSelectProject }: 
                           <div
                             key={proj.id}
                             onClick={() => onSelectProject(proj)}
+                            title={proj.name}
                             style={{
                               padding: '4px 8px',
                               cursor: 'pointer',

@@ -1,7 +1,8 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { WorkflowNode } from '../../store/workflowStore.ts';
-import { CATEGORY_COLORS, MODULE_TYPE_MAP } from '../../types/workflow.ts';
+import { CATEGORY_COLORS } from '../../types/workflow.ts';
 import useWorkflowStore from '../../store/workflowStore.ts';
+import useModuleSchemaStore from '../../store/moduleSchemaStore.ts';
 
 export default function ConditionalNode({ id, data }: NodeProps<WorkflowNode>) {
   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
@@ -10,7 +11,8 @@ export default function ConditionalNode({ id, data }: NodeProps<WorkflowNode>) {
   const color = CATEGORY_COLORS.statemachine;
   const expression = (data.config?.expression as string) || '?';
 
-  const info = MODULE_TYPE_MAP[data.moduleType];
+  const moduleTypeMap = useModuleSchemaStore((s) => s.moduleTypeMap);
+  const info = moduleTypeMap[data.moduleType];
   const conditionType = data.moduleType === 'conditional.ifelse'
     ? 'ifelse'
     : data.moduleType === 'conditional.switch'

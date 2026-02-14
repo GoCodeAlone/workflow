@@ -221,13 +221,31 @@ export default function WorkflowList({ projectId, projectName, onOpenWorkflow }:
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
-                    color: '#89b4fa',
+                    color: wf.is_system ? '#f9e2af' : '#89b4fa',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
                   }}
                 >
+                  {wf.is_system && <span title="System workflow">{'\u{1F6E1}'}</span>}
                   {wf.name}
+                  {wf.is_system && (
+                    <span style={{
+                      fontSize: 10,
+                      padding: '1px 5px',
+                      borderRadius: 8,
+                      background: 'rgba(249, 226, 175, 0.15)',
+                      color: '#f9e2af',
+                      fontWeight: 600,
+                    }}>
+                      v{wf.version}
+                    </span>
+                  )}
                 </div>
                 <div style={{ fontSize: 11, color: '#6c7086', marginTop: 2 }}>
-                  v{wf.version} &middot; {new Date(wf.updated_at).toLocaleDateString()}
+                  {!wf.is_system && <>v{wf.version} &middot; </>}
+                  {new Date(wf.updated_at).toLocaleDateString()}
+                  {wf.is_system && ' \u00B7 Admin Configuration'}
                 </div>
               </div>
 
@@ -273,13 +291,15 @@ export default function WorkflowList({ projectId, projectName, onOpenWorkflow }:
                 >
                   &#9998;
                 </button>
-                <button
-                  onClick={() => handleDelete(wf.id)}
-                  style={{ ...iconBtnStyle, color: '#f38ba8' }}
-                  title="Delete"
-                >
-                  &#10005;
-                </button>
+                {!wf.is_system && (
+                  <button
+                    onClick={() => handleDelete(wf.id)}
+                    style={{ ...iconBtnStyle, color: '#f38ba8' }}
+                    title="Delete"
+                  >
+                    &#10005;
+                  </button>
+                )}
               </div>
             </div>
           );

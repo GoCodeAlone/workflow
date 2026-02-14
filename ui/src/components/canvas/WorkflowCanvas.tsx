@@ -81,6 +81,10 @@ export default function WorkflowCanvas() {
         y: event.clientY,
       });
 
+      // Ensure node isn't placed at a negative or too-small position
+      position.x = Math.max(position.x, 20);
+      position.y = Math.max(position.y, 20);
+
       addNode(moduleType, position);
     },
     [addNode, screenToFlowPosition]
@@ -161,7 +165,9 @@ export default function WorkflowCanvas() {
         <MiniMap
           nodeColor={() => '#45475a'}
           maskColor="rgba(0,0,0,0.5)"
-          style={{ background: '#181825', border: '1px solid #313244', borderRadius: 6 }}
+          style={{ background: '#181825', border: '1px solid #313244', borderRadius: 6, zIndex: 4 }}
+          pannable
+          zoomable
         />
       </ReactFlow>
     </div>

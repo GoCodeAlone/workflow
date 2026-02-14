@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/CrisisTextLine/modular"
 	workflowmodule "github.com/GoCodeAlone/workflow/module"
@@ -25,9 +26,11 @@ func NewHTTPWorkflowHandler() *HTTPWorkflowHandler {
 	return &HTTPWorkflowHandler{}
 }
 
-// CanHandle returns true if this handler can process the given workflow type
+// CanHandle returns true if this handler can process the given workflow type.
+// It matches "http" and any key prefixed with "http-" (e.g. "http-admin"),
+// allowing multiple independent HTTP workflow sections in a single config.
 func (h *HTTPWorkflowHandler) CanHandle(workflowType string) bool {
-	return workflowType == "http"
+	return workflowType == "http" || strings.HasPrefix(workflowType, "http-")
 }
 
 // ConfigureWorkflow sets up the workflow from configuration

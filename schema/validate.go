@@ -216,20 +216,51 @@ func ValidateConfig(cfg *config.WorkflowConfig, opts ...ValidationOption) error 
 	return nil
 }
 
-// validateModuleConfig checks type-specific required configuration.
+// schemaRegistry is used by validation for schema-driven config checks.
+var schemaRegistry = NewModuleSchemaRegistry()
+
+// validateModuleConfig checks type-specific required configuration using the
+// module schema registry. For modules with a schema, required fields are
+// validated automatically. Additional type-specific checks are preserved.
 func validateModuleConfig(mod config.ModuleConfig, prefix string, errs *ValidationErrors) {
+	// Schema-driven validation for required fields
+	s := schemaRegistry.Get(mod.Type)
+	if s != nil {
+		for _, field := range s.ConfigFields {
+			if !field.Required {
+				continue
+			}
+			fieldPath := prefix + ".config." + field.Key
+			if mod.Config == nil {
+				*errs = append(*errs, &ValidationError{
+					Path:    fieldPath,
+					Message: fmt.Sprintf("required config field %q is missing (no config section)", field.Key),
+				})
+				continue
+			}
+			v, ok := mod.Config[field.Key]
+			if !ok {
+				*errs = append(*errs, &ValidationError{
+					Path:    fieldPath,
+					Message: fmt.Sprintf("required config field %q is missing", field.Key),
+				})
+				continue
+			}
+			// Check non-empty for string fields
+			if field.Type == FieldTypeString || field.Type == FieldTypeDuration || field.Type == FieldTypeSelect {
+				if str, ok := v.(string); ok && str == "" {
+					*errs = append(*errs, &ValidationError{
+						Path:    fieldPath,
+						Message: fmt.Sprintf("required config field %q must be a non-empty string", field.Key),
+					})
+				}
+			}
+		}
+	}
+
+	// Additional type-specific structural checks beyond simple required fields
 	switch mod.Type {
-	case "http.server":
-		requireStringConfig(mod.Config, "address", prefix, errs)
-	case "static.fileserver":
-		requireStringConfig(mod.Config, "root", prefix, errs)
-	case "database.workflow":
-		requireStringConfig(mod.Config, "driver", prefix, errs)
-		requireStringConfig(mod.Config, "dsn", prefix, errs)
-	case "auth.jwt":
-		requireStringConfig(mod.Config, "secret", prefix, errs)
 	case "messaging.kafka":
-		// brokers should be present
 		if mod.Config != nil {
 			if brokers, ok := mod.Config["brokers"]; ok {
 				if arr, ok := brokers.([]any); ok && len(arr) == 0 {

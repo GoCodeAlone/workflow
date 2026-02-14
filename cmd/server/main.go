@@ -9,11 +9,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow"
+	"github.com/GoCodeAlone/workflow/admin"
 	"github.com/GoCodeAlone/workflow/ai"
 	copilotai "github.com/GoCodeAlone/workflow/ai/copilot"
 	"github.com/GoCodeAlone/workflow/ai/llm"
@@ -28,8 +31,9 @@ import (
 
 var (
 	configFile     = flag.String("config", "", "Path to workflow configuration YAML file")
+	adminFlag      = flag.Bool("admin", false, "Enable built-in admin UI (authenticated management interface on :8081)")
 	addr           = flag.String("addr", ":8080", "HTTP listen address (workflow engine)")
-	mgmtAddr       = flag.String("mgmt-addr", ":8081", "Management API listen address (AI, dynamic components, workflow UI)")
+	mgmtAddr       = flag.String("mgmt-addr", "", "Management API listen address (default :8081, or :8082 when --admin)")
 	copilotCLI     = flag.String("copilot-cli", "", "Path to Copilot CLI binary")
 	copilotModel   = flag.String("copilot-model", "", "Model to use with Copilot SDK")
 	anthropicKey   = flag.String("anthropic-key", "", "Anthropic API key (or set ANTHROPIC_API_KEY env)")
@@ -40,6 +44,10 @@ var (
 	jwtSecret     = flag.String("jwt-secret", "", "JWT signing secret for API authentication")
 	adminEmail    = flag.String("admin-email", "", "Initial admin user email (first-run bootstrap)")
 	adminPassword = flag.String("admin-password", "", "Initial admin user password (first-run bootstrap)")
+
+	// v1 API flags
+	dataDir      = flag.String("data-dir", "./data", "Directory for SQLite database and persistent data")
+	restoreAdmin = flag.Bool("restore-admin", false, "Restore admin config to embedded default on startup")
 )
 
 // buildEngine creates the workflow engine with all handlers registered and built from config.
@@ -108,65 +116,242 @@ type serverApp struct {
 	mgmtAddr      string       // management API listen address (AI, dynamic, UI)
 	logger        *slog.Logger
 	auditLogger   *audit.Logger
+	v1Store       *module.V1Store // v1 API SQLite store (nil when admin is disabled)
+	cleanupDirs   []string        // temp directories to clean up on shutdown
+	cleanupFiles  []string        // temp files to clean up on shutdown
 }
 
 // setup initializes all server components: engine, AI services, and HTTP mux.
 func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) {
+	app := &serverApp{
+		logger: logger,
+	}
+
+	// If --admin is enabled, merge admin config into primary config before building
+	if *adminFlag {
+		if err := mergeAdminConfig(logger, cfg, app); err != nil {
+			return nil, fmt.Errorf("failed to set up admin: %w", err)
+		}
+	}
+
 	engine, loader, registry, err := buildEngine(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build engine: %w", err)
 	}
+	app.engine = engine
 
-	app := &serverApp{
-		engine: engine,
-		logger: logger,
-	}
-
-	// Create UI handler with live reload and status callbacks
-	uiHandler := module.NewWorkflowUIHandler(cfg)
-
-	uiHandler.SetReloadFunc(func(newCfg *config.WorkflowConfig) error {
-		// Stop current engine
-		if stopErr := app.engine.Stop(context.Background()); stopErr != nil {
-			logger.Warn("Error stopping engine during reload", "error", stopErr)
-		}
-
-		// Build new engine from the updated config
-		newEngine, _, _, buildErr := buildEngine(newCfg, logger)
-		if buildErr != nil {
-			return fmt.Errorf("failed to rebuild engine: %w", buildErr)
-		}
-
-		// Start new engine
-		if startErr := newEngine.Start(context.Background()); startErr != nil {
-			return fmt.Errorf("failed to start reloaded engine: %w", startErr)
-		}
-
-		app.engine = newEngine
-		logger.Info("Engine reloaded successfully")
-		return nil
-	})
-
-	uiHandler.SetStatusFunc(func() map[string]any {
-		return map[string]any{
-			"status": "running",
-		}
-	})
-
+	// Initialize AI services and dynamic component pool
 	pool := dynamic.NewInterpreterPool()
 	aiSvc, deploySvc := initAIService(logger, registry, pool)
-	mux := buildMux(aiSvc, deploySvc, loader, registry, uiHandler)
 
-	// Wrap the mux with input validation middleware
-	validationCfg := middleware.DefaultValidationConfig()
-	app.handler = middleware.InputValidation(validationCfg, mux)
-	app.mgmtAddr = *mgmtAddr
+	if *adminFlag {
+		// Admin mode: wire all handlers through the engine's admin config.
+		// No separate management mux needed — everything runs on port 8081.
+		wireManagementHandler(logger, engine, cfg, app, aiSvc, deploySvc, loader, registry)
+		if err := wireV1Handler(logger, engine, app); err != nil {
+			logger.Warn("Failed to wire v1 API handler", "error", err)
+		}
+	} else {
+		// Non-admin mode: create a standalone management mux on a separate port
+		// for AI, dynamic, schema, and workflow management endpoints.
+		uiHandler := module.NewWorkflowUIHandler(cfg)
+		uiHandler.SetReloadFunc(func(newCfg *config.WorkflowConfig) error {
+			if stopErr := app.engine.Stop(context.Background()); stopErr != nil {
+				logger.Warn("Error stopping engine during reload", "error", stopErr)
+			}
+			newEngine, _, _, buildErr := buildEngine(newCfg, logger)
+			if buildErr != nil {
+				return fmt.Errorf("failed to rebuild engine: %w", buildErr)
+			}
+			if startErr := newEngine.Start(context.Background()); startErr != nil {
+				return fmt.Errorf("failed to start reloaded engine: %w", startErr)
+			}
+			app.engine = newEngine
+			logger.Info("Engine reloaded successfully")
+			return nil
+		})
+		uiHandler.SetStatusFunc(func() map[string]any {
+			return map[string]any{"status": "running"}
+		})
+
+		mux := buildMux(aiSvc, deploySvc, loader, registry, uiHandler)
+		validationCfg := middleware.DefaultValidationConfig()
+		app.handler = middleware.InputValidation(validationCfg, mux)
+		app.mgmtAddr = *mgmtAddr
+	}
 
 	// Initialize audit logger (writes structured JSON to stdout)
 	app.auditLogger = audit.NewLogger(os.Stdout)
 	app.auditLogger.LogConfigChange(context.Background(), "system", "server", "server started")
 
 	return app, nil
+}
+
+// mergeAdminConfig loads the embedded admin config, extracts assets to temp
+// locations, and merges admin modules/routes into the primary config.
+func mergeAdminConfig(logger *slog.Logger, cfg *config.WorkflowConfig, app *serverApp) error {
+	adminCfg, err := admin.LoadConfig()
+	if err != nil {
+		return err
+	}
+
+	// Extract UI assets to temp directory for static.fileserver
+	uiDir, err := admin.WriteUIAssets()
+	if err != nil {
+		return err
+	}
+	app.cleanupDirs = append(app.cleanupDirs, uiDir)
+	admin.InjectUIRoot(adminCfg, uiDir)
+
+	// Merge admin modules and routes into primary config
+	admin.MergeInto(cfg, adminCfg)
+
+	logger.Info("Admin UI enabled",
+		"uiDir", uiDir,
+	)
+	return nil
+}
+
+// wireManagementHandler wires all admin API handlers into their respective
+// http.handler modules in the engine's service registry. Each handler module
+// is defined in admin/config.yaml and routes are dispatched by the engine's
+// router — no custom dispatching logic needed.
+func wireManagementHandler(logger *slog.Logger, engine *workflow.StdEngine, cfg *config.WorkflowConfig, app *serverApp, aiSvc *ai.Service, deploySvc *ai.DeployService, loader *dynamic.Loader, registry *dynamic.ComponentRegistry) {
+	// Workflow management handler (config, reload, validate, status)
+	mgmtHandler := module.NewWorkflowUIHandler(cfg)
+	mgmtHandler.SetReloadFunc(func(newCfg *config.WorkflowConfig) error {
+		if stopErr := app.engine.Stop(context.Background()); stopErr != nil {
+			logger.Warn("Error stopping engine during reload", "error", stopErr)
+		}
+		newEngine, _, _, buildErr := buildEngine(newCfg, logger)
+		if buildErr != nil {
+			return fmt.Errorf("failed to rebuild engine: %w", buildErr)
+		}
+		if startErr := newEngine.Start(context.Background()); startErr != nil {
+			return fmt.Errorf("failed to start reloaded engine: %w", startErr)
+		}
+		app.engine = newEngine
+		logger.Info("Engine reloaded successfully via admin")
+		return nil
+	})
+	mgmtHandler.SetStatusFunc(func() map[string]any {
+		return map[string]any{"status": "running"}
+	})
+
+	// AI handler (generate, component, suggest, providers, deploy)
+	aiH := ai.NewHandler(aiSvc)
+	deployH := ai.NewDeployHandler(deploySvc)
+	aiDispatch := func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/ai/generate"):
+			aiH.HandleGenerate(w, r)
+		case strings.HasSuffix(r.URL.Path, "/ai/component"):
+			aiH.HandleComponent(w, r)
+		case strings.HasSuffix(r.URL.Path, "/ai/suggest"):
+			aiH.HandleSuggest(w, r)
+		case strings.HasSuffix(r.URL.Path, "/ai/providers"):
+			aiH.HandleProviders(w, r)
+		case strings.HasSuffix(r.URL.Path, "/ai/deploy/component"):
+			deployH.HandleDeployComponent(w, r)
+		case strings.HasSuffix(r.URL.Path, "/ai/deploy"):
+			deployH.HandleDeploy(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}
+
+	// Dynamic components handler
+	dynH := dynamic.NewAPIHandler(loader, registry)
+	dynDispatch := func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.HasPrefix(path, "/api/dynamic/components/") {
+			dynH.HandleComponentByID(w, r)
+		} else {
+			dynH.HandleComponents(w, r)
+		}
+	}
+
+	// Wire each handler to its named module in the service registry
+	handlers := map[string]func(http.ResponseWriter, *http.Request){
+		"admin-management":  mgmtHandler.HandleManagement,
+		"admin-ai-api":      aiDispatch,
+		"admin-dynamic-api": dynDispatch,
+		"admin-schema-api":  schema.HandleSchemaAPI,
+	}
+
+	for _, svc := range engine.GetApp().SvcRegistry() {
+		h, ok := svc.(*module.SimpleHTTPHandler)
+		if !ok {
+			continue
+		}
+		if fn, exists := handlers[h.Name()]; exists {
+			h.SetHandleFunc(fn)
+			logger.Info("Wired handler", "module", h.Name())
+		}
+	}
+}
+
+// wireV1Handler opens the SQLite store, creates the V1APIHandler, and wires
+// it to the admin-v1-api http.handler module in the engine's service registry.
+func wireV1Handler(logger *slog.Logger, engine *workflow.StdEngine, app *serverApp) error {
+	// Resolve JWT secret from flag or env
+	secret := envOrFlag("JWT_SECRET", jwtSecret)
+	if secret == "" {
+		logger.Warn("v1 API handler: no JWT secret configured; auth will fail")
+	}
+
+	dbPath := filepath.Join(*dataDir, "workflow.db")
+	store, err := module.OpenV1Store(dbPath)
+	if err != nil {
+		return fmt.Errorf("open v1 store at %s: %w", dbPath, err)
+	}
+	app.v1Store = store
+	logger.Info("Opened v1 data store", "path", dbPath)
+
+	// If --restore-admin, reset the system workflow to the embedded default
+	if *restoreAdmin {
+		adminCfgData, err := admin.LoadConfigRaw()
+		if err != nil {
+			logger.Warn("Failed to load embedded admin config for restore", "error", err)
+		} else if resetErr := store.ResetSystemWorkflow(string(adminCfgData)); resetErr != nil {
+			logger.Info("No system workflow to reset (first run)")
+		} else {
+			logger.Info("Restored admin config to embedded default")
+		}
+	}
+
+	// Ensure the system hierarchy exists (Company → Org → Project → Workflow).
+	// This is idempotent — if it already exists, it returns the existing IDs.
+	adminCfgData, loadErr := admin.LoadConfigRaw()
+	if loadErr != nil {
+		logger.Warn("Failed to load embedded admin config for system hierarchy", "error", loadErr)
+	} else {
+		_, _, _, _, ensureErr := store.EnsureSystemHierarchy("system", string(adminCfgData))
+		if ensureErr != nil {
+			logger.Warn("Failed to ensure system hierarchy", "error", ensureErr)
+		} else {
+			logger.Info("System hierarchy ready")
+		}
+	}
+
+	v1Handler := module.NewV1APIHandler(store, secret)
+	v1Handler.SetReloadFunc(func(configYAML string) error {
+		logger.Info("System workflow deploy requested — engine reload not yet wired for v1 deploy")
+		return nil
+	})
+
+	// Find the admin-v1-api http.handler and inject the handler function
+	for _, svc := range engine.GetApp().SvcRegistry() {
+		h, ok := svc.(*module.SimpleHTTPHandler)
+		if !ok || h.Name() != "admin-v1-api" {
+			continue
+		}
+		h.SetHandleFunc(v1Handler.HandleV1)
+		logger.Info("Wired admin-v1-api handler to V1APIHandler")
+		return nil
+	}
+	logger.Warn("Admin enabled but admin-v1-api handler not found in service registry")
+	return nil
 }
 
 // run starts the engine and HTTP server, blocking until ctx is canceled.
@@ -182,30 +367,37 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 		}
 	}
 
-	// Determine management port: default to :8081 unless overridden.
-	mgmtAddr := ":8081"
-	if app.mgmtAddr != "" {
-		mgmtAddr = app.mgmtAddr
-	}
-
-	server := &http.Server{
-		Addr:              mgmtAddr,
-		Handler:           app.handler,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-
-	go func() {
-		app.logger.Info("Starting management server", "addr", mgmtAddr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			app.logger.Error("Management server failed", "error", err)
+	// Start the standalone management server when NOT in admin mode.
+	// In admin mode, all management endpoints are served through the engine's
+	// admin config on :8081 — no separate management port is needed.
+	var server *http.Server
+	if app.handler != nil {
+		mgmtAddr := app.mgmtAddr
+		if mgmtAddr == "" {
+			mgmtAddr = ":8081"
 		}
-	}()
+
+		server = &http.Server{
+			Addr:              mgmtAddr,
+			Handler:           app.handler,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+
+		go func() {
+			app.logger.Info("Starting management server", "addr", mgmtAddr)
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				app.logger.Error("Management server failed", "error", err)
+			}
+		}()
+	}
 
 	// Wait for context cancellation
 	<-ctx.Done()
 
-	if err := server.Shutdown(context.Background()); err != nil {
-		app.logger.Error("Management server shutdown error", "error", err)
+	if server != nil {
+		if err := server.Shutdown(context.Background()); err != nil {
+			app.logger.Error("Management server shutdown error", "error", err)
+		}
 	}
 	if app.engineManager != nil {
 		if err := app.engineManager.StopAll(context.Background()); err != nil {
@@ -216,6 +408,21 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 		if err := app.engine.Stop(context.Background()); err != nil {
 			app.logger.Error("Engine shutdown error", "error", err)
 		}
+	}
+
+	// Close v1 store
+	if app.v1Store != nil {
+		if err := app.v1Store.Close(); err != nil {
+			app.logger.Error("V1 store close error", "error", err)
+		}
+	}
+
+	// Clean up temp files and directories
+	for _, f := range app.cleanupFiles {
+		os.Remove(f)
+	}
+	for _, d := range app.cleanupDirs {
+		os.RemoveAll(d)
 	}
 
 	return nil
@@ -241,6 +448,7 @@ func applyEnvOverrides() {
 		"anthropic-key":   "WORKFLOW_AI_API_KEY",
 		"anthropic-model": "WORKFLOW_AI_MODEL",
 		"jwt-secret":      "WORKFLOW_JWT_SECRET",
+		"data-dir":        "WORKFLOW_DATA_DIR",
 	}
 
 	// Track which flags were explicitly set on the command line.
@@ -326,7 +534,18 @@ func main() {
 		cancel()
 	}()
 
-	fmt.Printf("Workflow engine on %s, management API on %s\n", *addr, *mgmtAddr)
+	if *adminFlag {
+		fmt.Println("Admin UI enabled on http://localhost:8081")
+		if *configFile != "" {
+			fmt.Printf("Workflow engine on %s\n", *addr)
+		}
+	} else {
+		mgmtDisplay := *mgmtAddr
+		if mgmtDisplay == "" {
+			mgmtDisplay = ":8081"
+		}
+		fmt.Printf("Workflow engine on %s, management API on %s\n", *addr, mgmtDisplay)
+	}
 	if err := run(ctx, app, *addr); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}

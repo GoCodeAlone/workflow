@@ -1,6 +1,12 @@
 import type { Edge } from '@xyflow/react';
 import type { WorkflowNode } from '../store/workflowStore.ts';
-import { MODULE_TYPE_MAP, CATEGORY_COLORS, type ModuleCategory } from '../types/workflow.ts';
+import { MODULE_TYPE_MAP as STATIC_MODULE_TYPE_MAP, CATEGORY_COLORS, type ModuleCategory } from '../types/workflow.ts';
+import useModuleSchemaStore from '../store/moduleSchemaStore.ts';
+
+function getModuleTypeMap() {
+  const store = useModuleSchemaStore.getState();
+  return store.loaded ? store.moduleTypeMap : STATIC_MODULE_TYPE_MAP;
+}
 
 /**
  * Transform nodes/edges into container view:
@@ -16,7 +22,7 @@ export function computeContainerView(
   // Group nodes by category
   const groups: Record<string, WorkflowNode[]> = {};
   for (const node of nodes) {
-    const info = MODULE_TYPE_MAP[node.data.moduleType];
+    const info = getModuleTypeMap()[node.data.moduleType];
     const category = info?.category || 'infrastructure';
     if (!groups[category]) groups[category] = [];
     groups[category].push(node);
@@ -147,7 +153,7 @@ export function autoGroupOrphanedNodes(
   // Group orphans by category
   const orphansByCategory: Record<string, WorkflowNode[]> = {};
   for (const orphan of orphans) {
-    const info = MODULE_TYPE_MAP[orphan.data.moduleType];
+    const info = getModuleTypeMap()[orphan.data.moduleType];
     const category = info?.category || 'infrastructure';
     if (!orphansByCategory[category]) orphansByCategory[category] = [];
     orphansByCategory[category].push(orphan);

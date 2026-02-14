@@ -12,7 +12,13 @@ import type {
   EventWorkflowConfig,
   WorkflowTab,
 } from '../types/workflow.ts';
-import { MODULE_TYPE_MAP } from '../types/workflow.ts';
+import { MODULE_TYPE_MAP as STATIC_MODULE_TYPE_MAP } from '../types/workflow.ts';
+import useModuleSchemaStore from '../store/moduleSchemaStore.ts';
+
+function getModuleTypeMap() {
+  const store = useModuleSchemaStore.getState();
+  return store.loaded ? store.moduleTypeMap : STATIC_MODULE_TYPE_MAP;
+}
 
 function makeEdge(
   sourceId: string,
@@ -264,6 +270,12 @@ export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowCon
       mod.branches = branches;
     }
 
+    // Persist canvas position so layout survives save/load
+    mod.ui_position = {
+      x: Math.round(node.position.x),
+      y: Math.round(node.position.y),
+    };
+
     return mod;
   });
 
@@ -339,16 +351,19 @@ export function configToNodes(config: WorkflowConfig): {
   const edges: Edge[] = [];
   const nameToId: Record<string, string> = {};
 
+  let hasPositions = false;
   config.modules.forEach((mod, i) => {
     const id = `${mod.type.replace(/\./g, '_')}_${i + 1}`;
     nameToId[mod.name] = id;
 
-    const info = MODULE_TYPE_MAP[mod.type];
+    const info = getModuleTypeMap()[mod.type];
+    const savedPos = mod.ui_position;
+    if (savedPos) hasPositions = true;
 
     nodes.push({
       id,
       type: nodeComponentType(mod.type),
-      position: { x: 0, y: 0 }, // will be set by topological layout
+      position: savedPos ? { x: savedPos.x, y: savedPos.y } : { x: 0, y: 0 },
       data: {
         moduleType: mod.type,
         label: mod.name,
@@ -396,8 +411,10 @@ export function configToNodes(config: WorkflowConfig): {
     }
   }
 
-  // Apply topological layout
-  topologicalLayout(nodes, edges);
+  // Apply topological layout only when no saved positions exist
+  if (!hasPositions) {
+    topologicalLayout(nodes, edges);
+  }
 
   return { nodes, edges };
 }

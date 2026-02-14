@@ -53,14 +53,6 @@ describe('LoginPage', () => {
     expect(screen.getAllByText('Sign Up').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders OAuth buttons', () => {
-    render(<LoginPage />);
-
-    expect(screen.getByText('Continue with Google')).toBeInTheDocument();
-    expect(screen.getByText('Continue with Okta')).toBeInTheDocument();
-    expect(screen.getByText('Continue with Auth0')).toBeInTheDocument();
-  });
-
   it('shows confirm password and display name fields in sign-up mode', () => {
     render(<LoginPage />);
 

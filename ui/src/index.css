@@ -33,6 +33,22 @@ html, body, #root {
   stroke: #89b4fa;
 }
 
+/* Connection handle hover affordance */
+.react-flow__handle {
+  cursor: crosshair;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.react-flow__handle:hover {
+  transform: scale(1.6);
+  box-shadow: 0 0 6px 2px rgba(137, 180, 250, 0.5);
+  z-index: 10;
+}
+
+.react-flow__handle.connecting {
+  box-shadow: 0 0 8px 3px rgba(137, 180, 250, 0.7);
+}
+
 @keyframes toastSlideIn {
   from {
     transform: translateX(100%);

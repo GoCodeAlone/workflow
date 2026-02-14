@@ -19,6 +19,7 @@ export default function AICopilotPanel() {
   const [explanation, setExplanation] = useState('');
   const [suggestions, setSuggestions] = useState<WorkflowSuggestion[]>([]);
   const [suggestLoading, setSuggestLoading] = useState(false);
+  const [aiUnavailable, setAiUnavailable] = useState(false);
 
   const importFromConfig = useWorkflowStore((s) => s.importFromConfig);
   const addToast = useWorkflowStore((s) => s.addToast);
@@ -34,7 +35,13 @@ export default function AICopilotPanel() {
       setGeneratedConfig(result.config);
       setExplanation(result.explanation);
     } catch (e) {
-      addToast(`Generation failed: ${(e as Error).message}`, 'error');
+      const msg = (e as Error).message;
+      if (msg.includes('no AI generators') || msg.includes('500') || msg.includes('not configured')) {
+        setAiUnavailable(true);
+        addToast('AI service unavailable. No AI providers are configured on the server.', 'error');
+      } else {
+        addToast(`Generation failed: ${msg}`, 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -55,7 +62,13 @@ export default function AICopilotPanel() {
       const result = await suggestWorkflows(useCase);
       setSuggestions(result);
     } catch (e) {
-      addToast(`Suggestions failed: ${(e as Error).message}`, 'error');
+      const msg = (e as Error).message;
+      if (msg.includes('no AI generators') || msg.includes('500') || msg.includes('not configured')) {
+        setAiUnavailable(true);
+        addToast('AI service unavailable. No AI providers are configured on the server.', 'error');
+      } else {
+        addToast(`Suggestions failed: ${msg}`, 'error');
+      }
     } finally {
       setSuggestLoading(false);
     }
@@ -106,6 +119,30 @@ export default function AICopilotPanel() {
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+        {/* AI unavailable banner */}
+        {aiUnavailable && (
+          <div
+            style={{
+              padding: '10px 12px',
+              background: '#302020',
+              border: '1px solid #f38ba8',
+              borderRadius: 6,
+              marginBottom: 16,
+              fontSize: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            <div style={{ color: '#f38ba8', fontWeight: 600, marginBottom: 4 }}>AI Not Configured</div>
+            <div style={{ color: '#a6adc8' }}>
+              No AI providers are configured on the server. To enable AI features, configure an
+              AI provider (e.g., Anthropic Claude, OpenAI) in your server settings or environment variables.
+            </div>
+            <div style={{ color: '#585b70', marginTop: 6, fontSize: 11 }}>
+              The workflow editor is fully functional without AI — use the Components panel to add modules manually.
+            </div>
+          </div>
+        )}
+
         {/* Input */}
         <div style={{ marginBottom: 16 }}>
           <label style={{ color: '#a6adc8', fontSize: 11, display: 'block', marginBottom: 6 }}>

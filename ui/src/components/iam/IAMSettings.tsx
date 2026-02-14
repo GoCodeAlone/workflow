@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import useObservabilityStore from '../../store/observabilityStore.ts';
 import { apiListCompanies, type ApiCompany } from '../../utils/api.ts';
 import type { IAMProviderType, IAMRoleMapping } from '../../types/observability.ts';
+import UserManagement from '../settings/UserManagement.tsx';
 
 const PROVIDER_TYPE_COLORS: Record<string, string> = {
   aws_iam: '#fab387',
@@ -599,6 +600,13 @@ export default function IAMSettings() {
 
   return (
     <div style={{ flex: 1, background: '#1e1e2e', overflow: 'auto', padding: 24 }}>
+      {/* User Management Section */}
+      <div style={{ marginBottom: 32 }}>
+        <UserManagement />
+      </div>
+
+      <div style={{ height: 1, background: '#45475a', marginBottom: 24 }} />
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
         <h2 style={{ color: '#cdd6f4', margin: 0, fontSize: 18, fontWeight: 600 }}>IAM Settings</h2>
 

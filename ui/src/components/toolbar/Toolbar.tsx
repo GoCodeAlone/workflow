@@ -1,10 +1,13 @@
+import { useState } from 'react';
 import useWorkflowStore from '../../store/workflowStore.ts';
 import { configToYaml, parseYaml } from '../../utils/serialization.ts';
 import {
   saveWorkflowConfig,
   getWorkflowConfig,
   validateWorkflow,
+  apiUpdateWorkflow,
 } from '../../utils/api.ts';
+import WorkflowHistory from '../workflows/WorkflowHistory.tsx';
 
 export default function Toolbar() {
   const exportToConfig = useWorkflowStore((s) => s.exportToConfig);
@@ -23,6 +26,10 @@ export default function Toolbar() {
   const viewLevel = useWorkflowStore((s) => s.viewLevel);
   const setViewLevel = useWorkflowStore((s) => s.setViewLevel);
   const autoGroupOrphans = useWorkflowStore((s) => s.autoGroupOrphans);
+  const activeWorkflowRecord = useWorkflowStore((s) => s.activeWorkflowRecord);
+  const setActiveWorkflowRecord = useWorkflowStore((s) => s.setActiveWorkflowRecord);
+
+  const [showHistory, setShowHistory] = useState(false);
 
   const handleExport = () => {
     const config = exportToConfig();
@@ -43,6 +50,7 @@ export default function Toolbar() {
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
+      if (nodes.length > 0 && !window.confirm('This will replace your current workflow. Any unsaved changes will be lost. Continue?')) return;
       const text = await file.text();
       try {
         if (file.name.endsWith('.json')) {
@@ -62,6 +70,7 @@ export default function Toolbar() {
   };
 
   const handleLoadFromServer = async () => {
+    if (nodes.length > 0 && !window.confirm('This will replace your current workflow with the server configuration. Any unsaved changes will be lost. Continue?')) return;
     try {
       const config = await getWorkflowConfig();
       importFromConfig(config);
@@ -74,8 +83,20 @@ export default function Toolbar() {
   const handleSave = async () => {
     const config = exportToConfig();
     try {
-      await saveWorkflowConfig(config);
-      addToast('Workflow saved to server', 'success');
+      if (activeWorkflowRecord) {
+        // Save to v1 API workflow record
+        const yaml = configToYaml(config);
+        const updated = await apiUpdateWorkflow(activeWorkflowRecord.id, {
+          name: activeWorkflowRecord.name,
+          config_yaml: yaml,
+        });
+        setActiveWorkflowRecord(updated);
+        addToast(`Saved v${updated.version}`, 'success');
+      } else {
+        // Legacy: save to management API
+        await saveWorkflowConfig(config);
+        addToast('Workflow saved to server', 'success');
+      }
     } catch (e) {
       addToast(`Save failed: ${(e as Error).message}`, 'error');
     }
@@ -144,13 +165,21 @@ export default function Toolbar() {
       }}
     >
       <span style={{ fontWeight: 700, fontSize: 14, color: '#cdd6f4', marginRight: 16 }}>
-        Workflow Editor
+        {activeWorkflowRecord ? activeWorkflowRecord.name : 'Workflow Editor'}
       </span>
+      {activeWorkflowRecord && (
+        <span style={{ fontSize: 11, color: '#6c7086', marginRight: 8 }}>
+          v{activeWorkflowRecord.version}
+        </span>
+      )}
 
       <ToolbarButton label="Import" onClick={handleImport} />
       <ToolbarButton label="Load Server" onClick={handleLoadFromServer} />
       <ToolbarButton label="Export YAML" onClick={handleExport} disabled={nodes.length === 0} />
       <ToolbarButton label="Save" onClick={handleSave} disabled={nodes.length === 0} />
+      {activeWorkflowRecord && (
+        <ToolbarButton label="History" onClick={() => setShowHistory(true)} />
+      )}
       <ToolbarButton label="Validate" onClick={handleValidate} disabled={nodes.length === 0} />
 
       <Separator />
@@ -186,8 +215,31 @@ export default function Toolbar() {
 
       <div style={{ flex: 1 }} />
 
-      <span style={{ color: '#585b70', fontSize: 11, marginRight: 8 }}>{nodes.length} modules</span>
-      <ToolbarButton label="Clear" onClick={clearCanvas} disabled={nodes.length === 0} variant="danger" />
+      <span style={{ color: '#585b70', fontSize: 11, marginRight: 8 }}>{nodes.length} {nodes.length === 1 ? 'module' : 'modules'}</span>
+      <ToolbarButton label="Clear" onClick={() => { if (window.confirm('This will remove all modules from the canvas. This cannot be undone. Continue?')) clearCanvas(); }} disabled={nodes.length === 0} variant="danger" />
+      {showHistory && activeWorkflowRecord && (
+        <WorkflowHistory
+          workflowId={activeWorkflowRecord.id}
+          workflowName={activeWorkflowRecord.name}
+          onClose={() => setShowHistory(false)}
+          onRestore={async (configYaml, version) => {
+            try {
+              const updated = await apiUpdateWorkflow(activeWorkflowRecord.id, {
+                name: activeWorkflowRecord.name,
+                config_yaml: configYaml,
+              });
+              setActiveWorkflowRecord(updated);
+              const config = parseYaml(configYaml);
+              clearCanvas();
+              importFromConfig(config);
+              addToast(`Restored to v${version}, saved as v${updated.version}`, 'success');
+              setShowHistory(false);
+            } catch (e) {
+              addToast(`Restore failed: ${(e as Error).message}`, 'error');
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

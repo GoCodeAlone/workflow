@@ -10,10 +10,12 @@ import {
   addEdge as rfAddEdge,
 } from '@xyflow/react';
 import type { WorkflowConfig, WorkflowTab, CrossWorkflowLink } from '../types/workflow.ts';
-import { MODULE_TYPE_MAP } from '../types/workflow.ts';
+import { MODULE_TYPE_MAP as STATIC_MODULE_TYPE_MAP } from '../types/workflow.ts';
+import useModuleSchemaStore from './moduleSchemaStore.ts';
 import { nodesToConfig, configToNodes, nodeComponentType } from '../utils/serialization.ts';
 import { autoGroupOrphanedNodes } from '../utils/grouping.ts';
 import type { Toast } from '../components/toast/ToastContainer.tsx';
+import type { ApiWorkflowRecord } from '../utils/api.ts';
 
 export interface WorkflowNodeData extends Record<string, unknown> {
   moduleType: string;
@@ -66,9 +68,17 @@ interface WorkflowStore {
   updateNodeConfig: (id: string, config: Record<string, unknown>) => void;
   updateNodeName: (id: string, name: string) => void;
 
+  // Preserved workflow/trigger sections from imported config
+  importedWorkflows: Record<string, unknown>;
+  importedTriggers: Record<string, unknown>;
+
   exportToConfig: () => WorkflowConfig;
   importFromConfig: (config: WorkflowConfig) => void;
   clearCanvas: () => void;
+
+  // Active v1 workflow record (when editing a workflow from the sidebar)
+  activeWorkflowRecord: ApiWorkflowRecord | null;
+  setActiveWorkflowRecord: (record: ApiWorkflowRecord | null) => void;
 
   // Tab management
   tabs: WorkflowTab[];
@@ -104,6 +114,14 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   edges: [],
   selectedNodeId: null,
   nodeCounter: 0,
+
+  // Preserved workflow/trigger sections from imported config
+  importedWorkflows: {},
+  importedTriggers: {},
+
+  // Active v1 workflow record
+  activeWorkflowRecord: null,
+  setActiveWorkflowRecord: (record) => set({ activeWorkflowRecord: record }),
 
   // Tab management
   tabs: [makeDefaultTab('default', 'Workflow 1')],
@@ -189,7 +207,8 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   setSelectedNode: (id) => set({ selectedNodeId: id }),
 
   addNode: (moduleType, position) => {
-    const info = MODULE_TYPE_MAP[moduleType];
+    const schemaMap = useModuleSchemaStore.getState().moduleTypeMap;
+    const info = schemaMap[moduleType] ?? STATIC_MODULE_TYPE_MAP[moduleType];
     if (!info) return;
 
     get().pushHistory();
@@ -240,19 +259,35 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   exportToConfig: () => {
-    const { nodes, edges } = get();
-    return nodesToConfig(nodes, edges);
+    const { nodes, edges, importedWorkflows, importedTriggers } = get();
+    const config = nodesToConfig(nodes, edges);
+    // Merge back preserved workflow/trigger sections from the imported config.
+    // nodesToConfig reconstructs what it can from edges; the imported sections
+    // fill in anything that couldn't be reconstructed (routes, subscriptions, etc.)
+    if (Object.keys(config.workflows).length === 0 && Object.keys(importedWorkflows).length > 0) {
+      config.workflows = importedWorkflows;
+    }
+    if (Object.keys(config.triggers).length === 0 && Object.keys(importedTriggers).length > 0) {
+      config.triggers = importedTriggers;
+    }
+    return config;
   },
 
   importFromConfig: (config) => {
     get().pushHistory();
     const { nodes, edges } = configToNodes(config);
-    set({ nodes, edges, selectedNodeId: null });
+    set({
+      nodes,
+      edges,
+      selectedNodeId: null,
+      importedWorkflows: config.workflows ?? {},
+      importedTriggers: config.triggers ?? {},
+    });
   },
 
   clearCanvas: () => {
     get().pushHistory();
-    set({ nodes: [], edges: [], selectedNodeId: null, nodeCounter: 0 });
+    set({ nodes: [], edges: [], selectedNodeId: null, nodeCounter: 0, importedWorkflows: {}, importedTriggers: {} });
   },
 
   // Tab actions

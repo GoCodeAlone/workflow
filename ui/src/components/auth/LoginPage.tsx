@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import useAuthStore from '../../store/authStore.ts';
-import OAuthButton from './OAuthButton.tsx';
 
 type AuthMode = 'signin' | 'signup';
 
@@ -214,26 +213,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* OAuth Divider */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            margin: '20px 0',
-          }}
-        >
-          <div style={{ flex: 1, height: 1, background: '#45475a' }} />
-          <span style={{ color: '#6c7086', fontSize: 12 }}>Or continue with</span>
-          <div style={{ flex: 1, height: 1, background: '#45475a' }} />
-        </div>
-
-        {/* OAuth Buttons */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <OAuthButton provider="google" />
-          <OAuthButton provider="okta" />
-          <OAuthButton provider="auth0" />
-        </div>
       </div>
     </div>
   );

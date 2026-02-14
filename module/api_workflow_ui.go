@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -14,6 +17,34 @@ import (
 
 //go:embed all:ui_dist
 var uiAssets embed.FS
+
+// ExtractUIAssets extracts the embedded UI assets to destDir, preserving
+// directory structure. This is used by the admin package to provide a
+// filesystem path for static.fileserver to serve from.
+func ExtractUIAssets(destDir string) error {
+	return fs.WalkDir(uiAssets, "ui_dist", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Compute the relative path under ui_dist
+		rel, err := filepath.Rel("ui_dist", path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destDir, rel)
+
+		if d.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+
+		data, err := uiAssets.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read embedded file %s: %w", path, err)
+		}
+		return os.WriteFile(target, data, 0644)
+	})
+}
 
 // WorkflowUIHandler serves the workflow editor UI and provides API endpoints
 // for managing workflow configurations.
@@ -214,6 +245,33 @@ var availableModules = []moduleTypeDef{
 		{Key: "endpoint", Label: "OTLP Endpoint", Type: "string", DefaultValue: "localhost:4318"},
 		{Key: "serviceName", Label: "Service Name", Type: "string", DefaultValue: "workflow"},
 	}},
+}
+
+// HandleManagement dispatches management API requests to the appropriate
+// handler based on the request path. This is intended to be used as a
+// handler function for an http.handler module via SetHandleFunc.
+func (h *WorkflowUIHandler) HandleManagement(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+
+	w.Header().Set("Content-Type", "application/json")
+
+	switch {
+	case r.Method == http.MethodGet && strings.HasSuffix(path, "/workflow/config"):
+		h.handleGetConfig(w, r)
+	case r.Method == http.MethodPut && strings.HasSuffix(path, "/workflow/config"):
+		h.handlePutConfig(w, r)
+	case r.Method == http.MethodGet && strings.HasSuffix(path, "/workflow/modules"):
+		h.handleGetModules(w, r)
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/workflow/validate"):
+		h.handleValidate(w, r)
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/workflow/reload"):
+		h.handleReload(w, r)
+	case r.Method == http.MethodGet && strings.HasSuffix(path, "/workflow/status"):
+		h.handleStatus(w, r)
+	default:
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+	}
 }
 
 func init() {

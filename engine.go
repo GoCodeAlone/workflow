@@ -476,8 +476,16 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				} else if cma, ok := modCfg.Config["cacheMaxAge"].(float64); ok {
 					cacheMaxAge = int(cma)
 				}
+				routerName := ""
+				if rn, ok := modCfg.Config["router"].(string); ok {
+					routerName = rn
+				}
 				e.logger.Debug("Loading static file server module with root: " + root)
-				mod = module.NewStaticFileServer(modCfg.Name, root, prefix, spaFallback, cacheMaxAge)
+				sfs := module.NewStaticFileServer(modCfg.Name, root, prefix, spaFallback, cacheMaxAge)
+				if routerName != "" {
+					sfs.SetRouterName(routerName)
+				}
+				mod = sfs
 			case "persistence.store":
 				e.logger.Debug("Loading persistence store module")
 				dbServiceName := "database"
@@ -504,6 +512,9 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				authMod := module.NewJWTAuthModule(modCfg.Name, secret, tokenExpiry, issuer)
 				if sf, ok := modCfg.Config["seedFile"].(string); ok && sf != "" {
 					authMod.SetSeedFile(cfg.ResolveRelativePath(sf))
+				}
+				if rf, ok := modCfg.Config["responseFormat"].(string); ok && rf != "" {
+					authMod.SetResponseFormat(rf)
 				}
 				mod = authMod
 			case "processing.step":
@@ -579,16 +590,94 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		}
 	}
 
-	// Wire static file servers as catch-all routes on any available router
+	// Build lookup maps from config for intelligent static file server wiring.
+	routerNames := make(map[string]bool)      // set of router module names
+	serverToRouter := make(map[string]string) // server name → router name (via router's dependsOn)
+	sfsDeps := make(map[string][]string)      // static file server name → dependsOn list
+	for _, modCfg := range cfg.Modules {
+		switch modCfg.Type {
+		case "http.router":
+			routerNames[modCfg.Name] = true
+			// Track which server this router depends on (reverse map: server→router)
+			for _, dep := range modCfg.DependsOn {
+				serverToRouter[dep] = modCfg.Name
+			}
+		case "static.fileserver":
+			sfsDeps[modCfg.Name] = modCfg.DependsOn
+		}
+	}
+
+	// Wire static file servers as catch-all routes on their associated router.
+	// Priority: 1) explicit router config, 2) dependsOn referencing a router,
+	// 3) dependsOn referencing a server → find that server's router, 4) first available.
 	for _, svc := range e.app.SvcRegistry() {
 		if sfs, ok := svc.(*module.StaticFileServer); ok {
-			// Find a router to attach the static file server to
-			for _, routerSvc := range e.app.SvcRegistry() {
-				if router, ok := routerSvc.(module.HTTPRouter); ok {
-					router.AddRoute("GET", sfs.Prefix()+"{path...}", sfs)
-					e.logger.Debug("Registered static file server on router at prefix: " + sfs.Prefix())
-					break
+			var targetRouter module.HTTPRouter
+			targetName := sfs.RouterName()
+
+			// 1) Explicit router name from config
+			if targetName != "" {
+				for svcName, routerSvc := range e.app.SvcRegistry() {
+					if router, ok := routerSvc.(module.HTTPRouter); ok && svcName == targetName {
+						targetRouter = router
+						break
+					}
 				}
+			}
+
+			// 2) Check dependsOn for a direct router reference
+			if targetRouter == nil {
+				for _, dep := range sfsDeps[sfs.Name()] {
+					if routerNames[dep] {
+						for svcName, routerSvc := range e.app.SvcRegistry() {
+							if router, ok := routerSvc.(module.HTTPRouter); ok && svcName == dep {
+								targetRouter = router
+								targetName = dep
+								break
+							}
+						}
+						if targetRouter != nil {
+							break
+						}
+					}
+				}
+			}
+
+			// 3) Check dependsOn for a server reference, then find that server's router
+			if targetRouter == nil {
+				for _, dep := range sfsDeps[sfs.Name()] {
+					if rName, ok := serverToRouter[dep]; ok {
+						for svcName, routerSvc := range e.app.SvcRegistry() {
+							if router, ok := routerSvc.(module.HTTPRouter); ok && svcName == rName {
+								targetRouter = router
+								targetName = rName
+								break
+							}
+						}
+						if targetRouter != nil {
+							break
+						}
+					}
+				}
+			}
+
+			// 4) Fall back to first available router
+			if targetRouter == nil {
+				for _, routerSvc := range e.app.SvcRegistry() {
+					if router, ok := routerSvc.(module.HTTPRouter); ok {
+						targetRouter = router
+						break
+					}
+				}
+			}
+
+			if targetRouter != nil {
+				targetRouter.AddRoute("GET", sfs.Prefix()+"{path...}", sfs)
+				routerLabel := ""
+				if targetName != "" {
+					routerLabel = " " + targetName
+				}
+				e.logger.Debug("Registered static file server " + sfs.Name() + " on router" + routerLabel + " at prefix: " + sfs.Prefix())
 			}
 		}
 	}

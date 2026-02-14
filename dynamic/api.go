@@ -29,11 +29,12 @@ type loadComponentRequest struct {
 
 // RegisterRoutes registers the dynamic component API routes on the given mux.
 func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/dynamic/components", h.handleComponents)
-	mux.HandleFunc("/api/dynamic/components/", h.handleComponentByID)
+	mux.HandleFunc("/api/dynamic/components", h.HandleComponents)
+	mux.HandleFunc("/api/dynamic/components/", h.HandleComponentByID)
 }
 
-func (h *APIHandler) handleComponents(w http.ResponseWriter, r *http.Request) {
+// HandleComponents handles GET/POST /api/dynamic/components.
+func (h *APIHandler) HandleComponents(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		h.listComponents(w, r)
@@ -44,7 +45,8 @@ func (h *APIHandler) handleComponents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *APIHandler) handleComponentByID(w http.ResponseWriter, r *http.Request) {
+// HandleComponentByID handles GET/PUT/DELETE /api/dynamic/components/{id}.
+func (h *APIHandler) HandleComponentByID(w http.ResponseWriter, r *http.Request) {
 	// Extract ID from path: /api/dynamic/components/{id}
 	id := strings.TrimPrefix(r.URL.Path, "/api/dynamic/components/")
 	if id == "" {

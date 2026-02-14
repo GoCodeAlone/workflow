@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { act } from '@testing-library/react';
 import AppNav from './AppNav.tsx';
 import useObservabilityStore from '../../store/observabilityStore.ts';
 

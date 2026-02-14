@@ -1,8 +1,9 @@
 import { type ReactNode, useState } from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { CATEGORY_COLORS, MODULE_TYPE_MAP } from '../../types/workflow.ts';
+import { CATEGORY_COLORS } from '../../types/workflow.ts';
 import type { ModuleCategory, IOPort } from '../../types/workflow.ts';
 import useWorkflowStore from '../../store/workflowStore.ts';
+import useModuleSchemaStore from '../../store/moduleSchemaStore.ts';
 
 interface BaseNodeProps {
   id: string;
@@ -74,7 +75,8 @@ export default function BaseNode({
 }: BaseNodeProps) {
   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
   const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
-  const info = MODULE_TYPE_MAP[moduleType];
+  const moduleTypeMap = useModuleSchemaStore((s) => s.moduleTypeMap);
+  const info = moduleTypeMap[moduleType];
   const category: ModuleCategory = info?.category ?? 'infrastructure';
   const color = CATEGORY_COLORS[category];
   const isSelected = selectedNodeId === id;

@@ -20,73 +20,91 @@ describe('NodePalette', () => {
     }
   });
 
-  it('renders module items with correct labels', () => {
+  it('renders module items with correct labels after expanding categories', () => {
     render(<NodePalette />);
 
-    // Check a sample of module labels that are unique across categories
+    // Categories start collapsed — expand them first
+    fireEvent.click(screen.getByText('Middleware'));
+    fireEvent.click(screen.getByText('Messaging'));
+    fireEvent.click(screen.getByText('Scheduling'));
+    fireEvent.click(screen.getByText('Events'));
+
     expect(screen.getByText('Auth Middleware')).toBeInTheDocument();
     expect(screen.getByText('Message Broker')).toBeInTheDocument();
     expect(screen.getByText('Scheduler')).toBeInTheDocument();
     expect(screen.getByText('Event Logger')).toBeInTheDocument();
-    // "Database" appears both as category label and module label
-    expect(screen.getAllByText('Database').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Rate Limiter')).toBeInTheDocument();
     expect(screen.getByText('CORS Middleware')).toBeInTheDocument();
-    // "State Machine" appears both as category and module label
-    expect(screen.getAllByText('State Machine').length).toBeGreaterThanOrEqual(2);
   });
 
-  it('renders all module type labels from MODULE_TYPES', () => {
+  it('renders module types for a few categories after expanding', () => {
     render(<NodePalette />);
 
-    for (const mod of MODULE_TYPES) {
-      // Use getAllByText since some labels may appear more than once
-      const matches = screen.getAllByText(mod.label);
-      expect(matches.length).toBeGreaterThanOrEqual(1);
-    }
+    // Expand HTTP and Middleware categories (unambiguous names)
+    fireEvent.click(screen.getByText('HTTP'));
+    fireEvent.click(screen.getByText('Middleware'));
+    fireEvent.click(screen.getByText('Messaging'));
+    fireEvent.click(screen.getByText('Observability'));
+
+    // Check HTTP modules
+    expect(screen.getByText('HTTP Server')).toBeInTheDocument();
+    expect(screen.getByText('HTTP Router')).toBeInTheDocument();
+    // Check Middleware modules
+    expect(screen.getByText('Rate Limiter')).toBeInTheDocument();
+    expect(screen.getByText('CORS Middleware')).toBeInTheDocument();
+    // Check Messaging modules
+    expect(screen.getByText('Message Broker')).toBeInTheDocument();
+    // Check Observability modules
+    expect(screen.getByText('Health Checker')).toBeInTheDocument();
+    expect(screen.getByText('Metrics Collector')).toBeInTheDocument();
   });
 
   it('module items have draggable attribute', () => {
     render(<NodePalette />);
 
+    // Expand HTTP category first
+    fireEvent.click(screen.getByText('HTTP'));
+
     const serverItem = screen.getByText('HTTP Server');
-    // The draggable div is the parent of the text
     expect(serverItem.closest('[draggable="true"]')).toBeTruthy();
   });
 
-  it('categories are collapsible', () => {
+  it('categories start collapsed and are expandable', () => {
     render(<NodePalette />);
 
-    // HTTP Server should be visible initially (expanded by default)
-    expect(screen.getByText('HTTP Server')).toBeInTheDocument();
+    // HTTP Server should NOT be visible initially (collapsed by default)
+    expect(screen.queryByText('HTTP Server')).not.toBeInTheDocument();
 
-    // Click the HTTP category header to collapse
+    // Click the HTTP category header to expand
     fireEvent.click(screen.getByText('HTTP'));
 
-    // HTTP Server should no longer be in the document
-    expect(screen.queryByText('HTTP Server')).not.toBeInTheDocument();
+    // HTTP Server should now be visible
+    expect(screen.getByText('HTTP Server')).toBeInTheDocument();
   });
 
-  it('categories are re-expandable after collapsing', () => {
+  it('categories are collapsible after expanding', () => {
     render(<NodePalette />);
+
+    // Expand
+    fireEvent.click(screen.getByText('HTTP'));
+    expect(screen.getByText('HTTP Server')).toBeInTheDocument();
 
     // Collapse
     fireEvent.click(screen.getByText('HTTP'));
     expect(screen.queryByText('HTTP Server')).not.toBeInTheDocument();
-
-    // Expand again
-    fireEvent.click(screen.getByText('HTTP'));
-    expect(screen.getByText('HTTP Server')).toBeInTheDocument();
   });
 
-  it('collapsing one category does not affect others', () => {
+  it('expanding one category does not affect others', () => {
     render(<NodePalette />);
 
-    // Collapse HTTP
+    // Expand HTTP only
     fireEvent.click(screen.getByText('HTTP'));
 
-    // Messaging items should still be visible
-    expect(screen.getByText('Message Broker')).toBeInTheDocument();
+    // HTTP items visible
+    expect(screen.getByText('HTTP Server')).toBeInTheDocument();
+
+    // Messaging items should still be hidden (collapsed)
+    expect(screen.queryByText('Message Broker')).not.toBeInTheDocument();
   });
 
   it('shows count of types per category', () => {

@@ -150,7 +150,7 @@ describe('observabilityStore', () => {
 
     it('sets dashboardLoading during fetch', async () => {
       let resolve: (v: unknown) => void;
-      vi.mocked(apiFetchDashboard).mockReturnValue(new Promise((r) => { resolve = r; }));
+      vi.mocked(apiFetchDashboard).mockReturnValue(new Promise((r) => { resolve = r as (v: unknown) => void; }));
 
       const promise = act(async () => {
         return useObservabilityStore.getState().fetchSystemDashboard();
@@ -196,7 +196,7 @@ describe('observabilityStore', () => {
   describe('fetchExecutions', () => {
     it('populates executions on success', async () => {
       const executions = [
-        { id: 'ex-1', workflow_id: 'wf-1', trigger_type: 'http', status: 'completed', started_at: '2025-01-01' },
+        { id: 'ex-1', workflow_id: 'wf-1', trigger_type: 'http', status: 'completed' as const, started_at: '2025-01-01' },
       ];
       vi.mocked(apiFetchExecutions).mockResolvedValue(executions);
 
@@ -231,7 +231,7 @@ describe('observabilityStore', () => {
 
   describe('fetchExecutionDetail', () => {
     it('populates selectedExecution', async () => {
-      const execution = { id: 'ex-1', workflow_id: 'wf-1', trigger_type: 'http', status: 'completed', started_at: '2025-01-01' };
+      const execution = { id: 'ex-1', workflow_id: 'wf-1', trigger_type: 'http', status: 'completed' as const, started_at: '2025-01-01' };
       vi.mocked(apiFetchExecutionDetail).mockResolvedValue(execution);
 
       await act(async () => {
@@ -245,7 +245,7 @@ describe('observabilityStore', () => {
   describe('fetchExecutionSteps', () => {
     it('populates executionSteps', async () => {
       const steps = [
-        { id: 's-1', execution_id: 'ex-1', step_name: 'step1', step_type: 'http', status: 'completed', sequence_num: 1 },
+        { id: 's-1', execution_id: 'ex-1', step_name: 'step1', step_type: 'http', status: 'completed' as const, sequence_num: 1 },
       ];
       vi.mocked(apiFetchExecutionSteps).mockResolvedValue(steps);
 
@@ -320,7 +320,7 @@ describe('observabilityStore', () => {
   describe('fetchEvents', () => {
     it('populates events', async () => {
       const events = [
-        { id: 'ev-1', workflow_id: 'wf-1', trigger_type: 'event', status: 'completed', started_at: '2025-01-01' },
+        { id: 'ev-1', workflow_id: 'wf-1', trigger_type: 'event', status: 'completed' as const, started_at: '2025-01-01' },
       ];
       vi.mocked(apiFetchEvents).mockResolvedValue(events);
 

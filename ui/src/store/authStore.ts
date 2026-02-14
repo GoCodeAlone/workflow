@@ -5,6 +5,7 @@ export interface User {
   email: string;
   display_name: string;
   avatar_url?: string;
+  role?: string;
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -17,6 +18,8 @@ interface AuthStore {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
+  setupRequired: boolean | null;
+  setupLoading: boolean;
 
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, displayName: string) => Promise<void>;
@@ -26,6 +29,8 @@ interface AuthStore {
   oauthLogin: (provider: string) => void;
   setTokenFromCallback: (token: string, refreshToken: string) => void;
   clearError: () => void;
+  checkSetupStatus: () => Promise<void>;
+  setupAdmin: (email: string, password: string, name: string) => Promise<void>;
 }
 
 const API_BASE = '/api/v1';
@@ -68,6 +73,8 @@ const useAuthStore = create<AuthStore>((set, get) => ({
   isAuthenticated: !!localStorage.getItem('auth_token'),
   isLoading: false,
   error: null,
+  setupRequired: null,
+  setupLoading: false,
 
   login: async (email, password) => {
     set({ isLoading: true, error: null });
@@ -179,8 +186,12 @@ const useAuthStore = create<AuthStore>((set, get) => ({
     try {
       const user = await authFetch<User>('/auth/me');
       set({ user });
-    } catch {
-      // Token might be invalid
+    } catch (err) {
+      // If 401/403, token is invalid — force logout to show login screen
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('401') || msg.includes('403') || msg.includes('user not found') || msg.includes('Unauthorized')) {
+        get().logout();
+      }
     }
   },
 
@@ -197,6 +208,47 @@ const useAuthStore = create<AuthStore>((set, get) => ({
       isAuthenticated: true,
     });
     get().loadUser();
+  },
+
+  checkSetupStatus: async () => {
+    set({ setupLoading: true });
+    try {
+      const data = await authFetch<{ needsSetup: boolean; userCount: number }>('/auth/setup-status');
+      set({ setupRequired: data.needsSetup, setupLoading: false });
+    } catch {
+      // If the endpoint isn't available, assume setup is not required
+      set({ setupRequired: false, setupLoading: false });
+    }
+  },
+
+  setupAdmin: async (email, password, name) => {
+    set({ isLoading: true, error: null });
+    try {
+      const data = await authFetch<{
+        access_token: string;
+        refresh_token: string;
+        expires_in: number;
+      }>('/auth/setup', {
+        method: 'POST',
+        body: JSON.stringify({ email, password, name }),
+      });
+      localStorage.setItem('auth_token', data.access_token);
+      localStorage.setItem('auth_refresh_token', data.refresh_token);
+      set({
+        token: data.access_token,
+        refreshToken: data.refresh_token,
+        isAuthenticated: true,
+        isLoading: false,
+        setupRequired: false,
+      });
+      scheduleRefresh(data.expires_in, get().refreshAuth);
+      await get().loadUser();
+    } catch (err) {
+      set({
+        isLoading: false,
+        error: err instanceof Error ? err.message : 'Setup failed',
+      });
+    }
   },
 
   clearError: () => set({ error: null }),

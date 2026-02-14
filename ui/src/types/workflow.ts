@@ -6,6 +6,7 @@ export interface ModuleConfig {
   config?: Record<string, unknown>;
   dependsOn?: string[];
   branches?: Record<string, string>;
+  ui_position?: { x: number; y: number };
 }
 
 export interface WorkflowConfig {
@@ -112,6 +113,10 @@ export interface ConfigFieldDef {
   type: 'string' | 'number' | 'boolean' | 'select' | 'json';
   options?: string[];
   defaultValue?: unknown;
+  description?: string;
+  placeholder?: string;
+  required?: boolean;
+  group?: string;
 }
 
 export const CATEGORY_COLORS: Record<ModuleCategory, string> = {

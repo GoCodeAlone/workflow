@@ -1,0 +1,313 @@
+# Built-in Workflow Admin UI Configuration
+#
+# This config is embedded into the binary and enabled with the --admin flag.
+# It dogfoods the workflow engine to serve its own admin UI: the engine's
+# modules (HTTP server, router, auth, static file server, management API)
+# provide an authenticated admin interface running on the same engine as the
+# primary workflow.
+#
+# Usage:
+#   JWT_SECRET=your-secret go run ./cmd/server \
+#     -config your-workflow.yaml --admin
+#
+# On first launch, visit the admin UI to create your admin account.
+
+modules:
+  # --- HTTP Server (admin port) ---
+  - name: admin-server
+    type: http.server
+    config:
+      address: ":8081"
+
+  - name: admin-router
+    type: http.router
+    dependsOn: [admin-server]
+
+  # --- Middleware ---
+  - name: admin-cors
+    type: http.middleware.cors
+    config:
+      allowedOrigins: ["*"]
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+
+  - name: admin-ratelimit
+    type: http.middleware.ratelimit
+    config:
+      requestsPerMinute: 120
+      burstSize: 20
+
+  # --- Auth ---
+  - name: admin-auth
+    type: auth.jwt
+    config:
+      secret: "${JWT_SECRET}"
+      tokenExpiry: "24h"
+      issuer: "workflow-admin"
+      responseFormat: "v1"
+
+  - name: admin-auth-middleware
+    type: http.middleware.auth
+    config:
+      authType: Bearer
+    dependsOn: [admin-auth]
+
+  # --- Management API ---
+  - name: admin-management
+    type: http.handler
+
+  # --- v1 API (companies, projects, workflows) ---
+  - name: admin-v1-api
+    type: http.handler
+
+  # --- AI API ---
+  - name: admin-ai-api
+    type: http.handler
+
+  # --- Dynamic Components API ---
+  - name: admin-dynamic-api
+    type: http.handler
+
+  # --- Schema API ---
+  - name: admin-schema-api
+    type: http.handler
+
+  # --- Static File Server (serves embedded React UI) ---
+  # The root path is injected at runtime from extracted embed.FS assets.
+  # The router field ensures this file server attaches to admin-router, not
+  # the primary workflow's router.
+  - name: admin-ui
+    type: static.fileserver
+    config:
+      prefix: "/"
+      spaFallback: true
+      cacheMaxAge: 3600
+      router: admin-router
+    dependsOn: [admin-router]
+
+  # --- Observability ---
+  - name: admin-health
+    type: health.checker
+
+  - name: admin-metrics
+    type: metrics.collector
+
+workflows:
+  http-admin:
+    router: admin-router
+    server: admin-server
+    routes:
+      # === Setup (unauthenticated) ===
+      - method: GET
+        path: "/api/v1/auth/setup-status"
+        handler: admin-auth
+        middlewares: [admin-cors, admin-ratelimit]
+      - method: POST
+        path: "/api/v1/auth/setup"
+        handler: admin-auth
+        middlewares: [admin-cors, admin-ratelimit]
+
+      # === Auth (unauthenticated) ===
+      - method: POST
+        path: "/api/v1/auth/login"
+        handler: admin-auth
+        middlewares: [admin-cors, admin-ratelimit]
+      - method: POST
+        path: "/api/v1/auth/register"
+        handler: admin-auth
+        middlewares: [admin-cors, admin-ratelimit]
+      - method: POST
+        path: "/api/v1/auth/refresh"
+        handler: admin-auth
+        middlewares: [admin-cors]
+
+      # === Auth (authenticated) ===
+      - method: POST
+        path: "/api/v1/auth/logout"
+        handler: admin-auth
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: GET
+        path: "/api/v1/auth/me"
+        handler: admin-auth
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: PUT
+        path: "/api/v1/auth/me"
+        handler: admin-auth
+        middlewares: [admin-cors, admin-auth-middleware]
+
+      # === User Management (authenticated, admin-only) ===
+      - method: GET
+        path: "/api/v1/auth/users"
+        handler: admin-auth
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: POST
+        path: "/api/v1/auth/users"
+        handler: admin-auth
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: DELETE
+        path: "/api/v1/auth/users/{id}"
+        handler: admin-auth
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: PUT
+        path: "/api/v1/auth/users/{id}/role"
+        handler: admin-auth
+        middlewares: [admin-cors, admin-auth-middleware]
+
+      # === v1 API: Dashboard (authenticated) ===
+      - method: GET
+        path: "/api/v1/dashboard"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+
+      # === v1 API: Companies (authenticated) ===
+      - method: GET
+        path: "/api/v1/companies"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: POST
+        path: "/api/v1/companies"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: GET
+        path: "/api/v1/companies/{id}"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: GET
+        path: "/api/v1/companies/{id}/organizations"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: POST
+        path: "/api/v1/companies/{id}/organizations"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+
+      # === v1 API: Projects (authenticated) ===
+      - method: GET
+        path: "/api/v1/organizations/{id}/projects"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: POST
+        path: "/api/v1/organizations/{id}/projects"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+
+      # === v1 API: Workflows (authenticated) ===
+      - method: GET
+        path: "/api/v1/projects/{id}/workflows"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: POST
+        path: "/api/v1/projects/{id}/workflows"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: GET
+        path: "/api/v1/workflows"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: GET
+        path: "/api/v1/workflows/{id}"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: PUT
+        path: "/api/v1/workflows/{id}"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: DELETE
+        path: "/api/v1/workflows/{id}"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: GET
+        path: "/api/v1/workflows/{id}/versions"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: POST
+        path: "/api/v1/workflows/{id}/deploy"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: POST
+        path: "/api/v1/workflows/{id}/stop"
+        handler: admin-v1-api
+        middlewares: [admin-cors, admin-auth-middleware]
+
+      # === Management API (authenticated) ===
+      - method: GET
+        path: "/api/workflow/config"
+        handler: admin-management
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: PUT
+        path: "/api/workflow/config"
+        handler: admin-management
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: GET
+        path: "/api/workflow/modules"
+        handler: admin-management
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: POST
+        path: "/api/workflow/validate"
+        handler: admin-management
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: POST
+        path: "/api/workflow/reload"
+        handler: admin-management
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: GET
+        path: "/api/workflow/status"
+        handler: admin-management
+        middlewares: [admin-cors, admin-auth-middleware]
+
+      # === AI API (authenticated) ===
+      - method: POST
+        path: "/api/ai/generate"
+        handler: admin-ai-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: POST
+        path: "/api/ai/component"
+        handler: admin-ai-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: POST
+        path: "/api/ai/suggest"
+        handler: admin-ai-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: GET
+        path: "/api/ai/providers"
+        handler: admin-ai-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: POST
+        path: "/api/ai/deploy"
+        handler: admin-ai-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: POST
+        path: "/api/ai/deploy/component"
+        handler: admin-ai-api
+        middlewares: [admin-cors, admin-auth-middleware]
+
+      # === Dynamic Components API (authenticated) ===
+      - method: GET
+        path: "/api/dynamic/components"
+        handler: admin-dynamic-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: POST
+        path: "/api/dynamic/components"
+        handler: admin-dynamic-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: GET
+        path: "/api/dynamic/components/{id}"
+        handler: admin-dynamic-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: PUT
+        path: "/api/dynamic/components/{id}"
+        handler: admin-dynamic-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: DELETE
+        path: "/api/dynamic/components/{id}"
+        handler: admin-dynamic-api
+        middlewares: [admin-cors, admin-auth-middleware]
+
+      # === Schema API (authenticated) ===
+      - method: GET
+        path: "/api/schema"
+        handler: admin-schema-api
+        middlewares: [admin-cors, admin-auth-middleware]
+      - method: GET
+        path: "/api/v1/module-schemas"
+        handler: admin-schema-api
+        middlewares: [admin-cors, admin-auth-middleware]

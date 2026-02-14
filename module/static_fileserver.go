@@ -18,6 +18,7 @@ type StaticFileServer struct {
 	prefix      string
 	spaFallback bool
 	cacheMaxAge int
+	routerName  string // optional: name of the router to attach to
 }
 
 // NewStaticFileServer creates a new static file server module
@@ -45,6 +46,17 @@ func (s *StaticFileServer) Name() string {
 // Prefix returns the URL prefix for this file server
 func (s *StaticFileServer) Prefix() string {
 	return s.prefix
+}
+
+// RouterName returns the optional router name this file server should attach to.
+// An empty string means attach to the first available router.
+func (s *StaticFileServer) RouterName() string {
+	return s.routerName
+}
+
+// SetRouterName sets the router name this file server should attach to.
+func (s *StaticFileServer) SetRouterName(name string) {
+	s.routerName = name
 }
 
 // Init initializes the module
