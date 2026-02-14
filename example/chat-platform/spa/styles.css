@@ -1494,13 +1494,18 @@ input[type="datetime-local"]:focus {
 /* ========== Multi-Chat Layout ========== */
 .multi-chat-layout {
   display: flex;
-  height: calc(100vh - var(--nav-height));
+  height: 60vh;
+  max-height: calc(100vh - 220px);
+  min-height: 300px;
   overflow: hidden;
+  margin: 0 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
 }
 
 .multi-chat-list {
-  width: 280px;
-  min-width: 280px;
+  width: 240px;
+  min-width: 240px;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex;
@@ -1761,9 +1766,25 @@ input[type="datetime-local"]:focus {
   cursor: not-allowed;
 }
 
+/* Multi-Chat Page Header */
+.multi-chat-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 0.75rem 0;
+  margin: 0 0.75rem;
+}
+
+.multi-chat-page-header h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
 @media (max-width: 768px) {
   .multi-chat-layout {
     flex-direction: column;
+    height: auto;
+    max-height: calc(100vh - 200px);
   }
   .multi-chat-list {
     width: 100%;

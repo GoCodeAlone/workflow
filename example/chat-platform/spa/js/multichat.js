@@ -26,6 +26,10 @@ function renderMultiChat() {
   const user = api.getUser();
 
   return `
+    <div class="multi-chat-page-header">
+      <h2>Multi-Chat</h2>
+      <span class="text-muted" style="font-size:0.8rem">Up to ${MAX_PANELS} simultaneous conversations</span>
+    </div>
     <div class="multi-chat-layout">
       <div class="multi-chat-list" id="multi-chat-list">
         <div class="multi-chat-list-header">
@@ -44,7 +48,6 @@ function renderMultiChat() {
           <div class="empty-state">
             <h3>Multi-Chat View</h3>
             <p class="text-muted mt-1">Click conversations on the left to open them as panels.</p>
-            <p class="text-muted" style="font-size:0.8rem">Up to ${MAX_PANELS} simultaneous chats.</p>
           </div>
         </div>
       </div>
@@ -264,14 +267,19 @@ async function loadPanelMessages(convId) {
     const container = document.getElementById(`mc-msgs-${convId}`);
     if (!container) return;
 
-    if (messages.length === 0 && panelData.lastMessageCount === 0) {
-      if (container.querySelector('.spinner-container')) {
+    // On first load (spinner visible), always render even if empty
+    const isFirstLoad = container.querySelector('.spinner-container') || container.querySelector('.mc-no-msgs');
+
+    if (messages.length === 0) {
+      if (isFirstLoad || panelData.lastMessageCount === 0) {
         container.innerHTML = '<div class="mc-no-msgs">No messages yet</div>';
+        panelData.lastMessageCount = 0;
       }
       return;
     }
 
-    if (messages.length === panelData.lastMessageCount) return;
+    // Skip re-render if count unchanged (unless first load)
+    if (!isFirstLoad && messages.length === panelData.lastMessageCount) return;
     panelData.lastMessageCount = messages.length;
 
     const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
@@ -290,7 +298,7 @@ async function loadPanelMessages(convId) {
       `;
     }).join('');
 
-    if (wasAtBottom || panelData.lastMessageCount <= messages.length) {
+    if (wasAtBottom) {
       container.scrollTop = container.scrollHeight;
     }
   } catch (err) {
