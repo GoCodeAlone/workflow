@@ -540,6 +540,19 @@ h1, h2, h3, h4 {
   gap: 0.5rem;
 }
 
+.accept-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--info-bg, #e7f3ff);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+.accept-banner .btn { white-space: nowrap; }
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;

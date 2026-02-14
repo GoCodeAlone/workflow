@@ -131,7 +131,6 @@ modules:
       resourceName: conversations
       workflowType: "conversation-lifecycle"
       workflowEngine: "conversation-engine"
-      instanceIDPrefix: "conv-"
       instanceIDField: "id"
     dependsOn:
       - auth-middleware

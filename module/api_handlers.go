@@ -1016,10 +1016,16 @@ func (h *RESTAPIHandler) startWorkflowForResource(_ context.Context, resourceId 
 		return
 	}
 
-	// Build the instance ID
+	// Build the instance ID.
+	// For non-conversation handlers that bridge to conversations (webhooks, webchat),
+	// use the bridged conversation ID (conv-{resourceId}) so that conversations-api
+	// can later find the same state machine instance by the conversation's own ID.
 	instanceId := resourceId
 	if h.instanceIDPrefix != "" {
 		instanceId = h.instanceIDPrefix + resourceId
+	} else if h.resourceName != "conversations" && h.workflowType != "" {
+		// This handler bridges to a conversation — use the bridged conversation ID
+		instanceId = "conv-" + resourceId
 	}
 
 	// Create the workflow instance
@@ -1039,7 +1045,16 @@ func (h *RESTAPIHandler) startWorkflowForResource(_ context.Context, resourceId 
 		if transitionName == "" {
 			transitionName = "start_validation" // default convention
 		}
-		if err := smEngine.TriggerTransition(bgCtx, instanceId, transitionName, resource.Data); err != nil {
+		// Normalize field names for components that expect lowercase keys.
+		// Twilio webhooks send "Body" but components expect "body".
+		transitionData := make(map[string]any)
+		maps.Copy(transitionData, resource.Data)
+		if _, hasLower := transitionData["body"]; !hasLower {
+			if b, ok := transitionData["Body"].(string); ok {
+				transitionData["body"] = b
+			}
+		}
+		if err := smEngine.TriggerTransition(bgCtx, instanceId, transitionName, transitionData); err != nil {
 			h.logger.Warn(fmt.Sprintf("Failed to trigger initial transition '%s' for '%s': %v",
 				transitionName, instanceId, err))
 		} else {
@@ -1130,7 +1145,7 @@ func (h *RESTAPIHandler) bridgeToConversation(webhookId string, data map[string]
 
 	convoData := map[string]any{
 		"id":        convoId,
-		"state":     "queued",
+		"state":     "new",
 		"createdAt": time.Now().UTC().Format(time.RFC3339),
 	}
 
@@ -1907,6 +1922,11 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 		"state":      currentState,
 		"lastUpdate": lastUpdate,
 	})
+
+	// Sync resource state after auto-transitions complete (runs async).
+	// This ensures that auto-transitions (e.g., assigned→active) update
+	// the resource state in persistence after the HTTP response is sent.
+	go h.syncResourceStateFromEngine(instanceId, resourceId, smEngine)
 }
 
 // handleQueueHealth returns aggregated queue health data grouped by program.

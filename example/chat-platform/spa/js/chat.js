@@ -47,6 +47,10 @@ export function renderChat(conversationId, readOnly) {
             `}
           </div>
         </div>
+        <div id="chat-accept-banner" class="accept-banner hidden">
+          <span>This conversation is waiting in the queue.</span>
+          <button class="btn btn-primary btn-sm" id="chat-accept-btn">Accept Conversation</button>
+        </div>
         <div class="chat-messages" id="chat-messages">
           ${renderSpinner()}
         </div>
@@ -182,6 +186,33 @@ async function loadConversation(conversationId, readOnly) {
     const statusEl = document.getElementById('chat-status-badge');
     if (statusEl) {
       statusEl.innerHTML = renderStatusBadge(data.state || data.status || 'active');
+    }
+
+    // Show accept banner for queued/new conversations (responders only)
+    const acceptBanner = document.getElementById('chat-accept-banner');
+    const acceptBtn = document.getElementById('chat-accept-btn');
+    const convState = data.state || data.status || '';
+    if (acceptBanner && !readOnly && (convState === 'queued' || convState === 'new')) {
+      acceptBanner.classList.remove('hidden');
+      if (acceptBtn && !acceptBtn.dataset.wired) {
+        acceptBtn.dataset.wired = 'true';
+        acceptBtn.addEventListener('click', async () => {
+          try {
+            acceptBtn.disabled = true;
+            acceptBtn.textContent = 'Accepting...';
+            await api.post(`/api/conversations/${conversationId}/assign`, {});
+            showToast('Conversation accepted', 'success');
+            acceptBanner.classList.add('hidden');
+            loadConversation(conversationId, false);
+          } catch (err) {
+            showToast('Failed to accept: ' + err.message, 'error');
+            acceptBtn.disabled = false;
+            acceptBtn.textContent = 'Accept Conversation';
+          }
+        });
+      }
+    } else if (acceptBanner) {
+      acceptBanner.classList.add('hidden');
     }
 
     // Texter info
@@ -526,6 +557,8 @@ function showTagModal(conversationId) {
       await api.post(`/api/conversations/${conversationId}/tag`, { tags: checked });
       showToast('Tags applied', 'success');
       hideModal();
+      // Refresh sidebar to show updated tags
+      loadConversation(conversationId, false);
     } catch (err) {
       showToast('Failed to apply tags: ' + err.message, 'error');
     }
