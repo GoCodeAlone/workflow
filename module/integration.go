@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,6 +13,67 @@ import (
 
 	"github.com/CrisisTextLine/modular"
 )
+
+// isPrivateIP checks if an IP address belongs to a private/reserved range.
+// This helps prevent Server-Side Request Forgery (SSRF) attacks.
+func isPrivateIP(ip net.IP) bool {
+	privateRanges := []struct {
+		network string
+	}{
+		{"10.0.0.0/8"},
+		{"172.16.0.0/12"},
+		{"192.168.0.0/16"},
+		{"127.0.0.0/8"},
+		{"169.254.0.0/16"}, // Link-local / cloud metadata
+		{"0.0.0.0/8"},
+		{"::1/128"},   // IPv6 loopback
+		{"fc00::/7"},  // IPv6 private
+		{"fe80::/10"}, // IPv6 link-local
+	}
+
+	for _, r := range privateRanges {
+		_, cidr, err := net.ParseCIDR(r.network)
+		if err != nil {
+			continue
+		}
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// validateURL checks that a URL is safe to request (not targeting private/internal networks).
+func validateURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	// Only allow http and https schemes
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("unsupported URL scheme: %q (only http and https are allowed)", parsed.Scheme)
+	}
+
+	// Resolve hostname to check for private IPs
+	host := parsed.Hostname()
+	if host == "" {
+		return fmt.Errorf("URL has no host")
+	}
+
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("failed to resolve host %q: %w", host, err)
+	}
+
+	for _, ip := range ips {
+		if isPrivateIP(ip) {
+			return fmt.Errorf("request to private/internal IP address is not allowed: %s resolves to %s", host, ip)
+		}
+	}
+
+	return nil
+}
 
 // IntegrationConnector represents a connector to a third-party service
 type IntegrationConnector interface {
@@ -22,7 +84,7 @@ type IntegrationConnector interface {
 	Disconnect(ctx context.Context) error
 
 	// Execute performs an action on the external service
-	Execute(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error)
+	Execute(ctx context.Context, action string, params map[string]any) (map[string]any, error)
 
 	// GetName returns the name of the connector
 	GetName() string
@@ -33,17 +95,18 @@ type IntegrationConnector interface {
 
 // HTTPIntegrationConnector implements a connector using HTTP requests
 type HTTPIntegrationConnector struct {
-	name        string
-	baseURL     string
-	headers     map[string]string
-	authType    string
-	authToken   string
-	username    string
-	password    string
-	client      *http.Client
-	connected   bool
-	timeout     time.Duration
-	rateLimiter *time.Ticker
+	name            string
+	baseURL         string
+	headers         map[string]string
+	authType        string
+	authToken       string
+	username        string
+	password        string
+	client          *http.Client
+	connected       bool
+	timeout         time.Duration
+	rateLimiter     *time.Ticker
+	allowPrivateIPs bool // For testing/development - disables SSRF protection
 }
 
 // NewHTTPIntegrationConnector creates a new HTTP-based integration connector
@@ -86,6 +149,12 @@ func (c *HTTPIntegrationConnector) SetDefaultHeader(key, value string) {
 func (c *HTTPIntegrationConnector) SetTimeout(timeout time.Duration) {
 	c.timeout = timeout
 	c.client.Timeout = timeout
+}
+
+// SetAllowPrivateIPs enables or disables requests to private/internal IP addresses.
+// This should only be used for testing or trusted internal services.
+func (c *HTTPIntegrationConnector) SetAllowPrivateIPs(allow bool) {
+	c.allowPrivateIPs = allow
 }
 
 // SetRateLimit sets a rate limit for requests
@@ -135,7 +204,7 @@ func (c *HTTPIntegrationConnector) Disconnect(ctx context.Context) error {
 }
 
 // Execute performs an action on the external service
-func (c *HTTPIntegrationConnector) Execute(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error) {
+func (c *HTTPIntegrationConnector) Execute(ctx context.Context, action string, params map[string]any) (map[string]any, error) {
 	if !c.connected {
 		return nil, fmt.Errorf("connector not connected")
 	}
@@ -184,6 +253,13 @@ func (c *HTTPIntegrationConnector) Execute(ctx context.Context, action string, p
 		body = strings.NewReader(string(jsonData))
 	}
 
+	// Validate URL to prevent SSRF attacks (skip for trusted/test environments)
+	if !c.allowPrivateIPs {
+		if err := validateURL(reqURL); err != nil {
+			return nil, fmt.Errorf("SSRF protection: %w", err)
+		}
+	}
+
 	// Create request
 	req, err := http.NewRequestWithContext(ctx, method, reqURL, body)
 	if err != nil {
@@ -222,17 +298,17 @@ func (c *HTTPIntegrationConnector) Execute(ctx context.Context, action string, p
 	}
 
 	// Parse response as JSON
-	var result map[string]interface{}
+	var result map[string]any
 	if len(respBody) > 0 {
 		if err := json.Unmarshal(respBody, &result); err != nil {
 			// If not JSON, return the raw response
-			return map[string]interface{}{
+			return map[string]any{
 				"statusCode": resp.StatusCode,
 				"raw":        string(respBody),
 			}, nil
 		}
 	} else {
-		result = make(map[string]interface{})
+		result = make(map[string]any)
 	}
 
 	// Add status code to result
@@ -252,7 +328,7 @@ type WebhookIntegrationConnector struct {
 	path      string
 	port      int
 	server    *http.Server
-	handlers  map[string]func(context.Context, map[string]interface{}) error
+	handlers  map[string]func(context.Context, map[string]any) error
 	connected bool
 }
 
@@ -266,7 +342,7 @@ func NewWebhookIntegrationConnector(name, path string, port int) *WebhookIntegra
 		name:     name,
 		path:     path,
 		port:     port,
-		handlers: make(map[string]func(context.Context, map[string]interface{}) error),
+		handlers: make(map[string]func(context.Context, map[string]any) error),
 	}
 }
 
@@ -301,7 +377,7 @@ func (c *WebhookIntegrationConnector) Connect(ctx context.Context) error {
 		}
 
 		// Parse JSON
-		var payload map[string]interface{}
+		var payload map[string]any
 		if err := json.Unmarshal(body, &payload); err != nil {
 			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
 			return
@@ -339,8 +415,9 @@ func (c *WebhookIntegrationConnector) Connect(ctx context.Context) error {
 
 	// Create server
 	c.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", c.port),
-		Handler: mux,
+		Addr:              fmt.Sprintf(":%d", c.port),
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	// Start server in a goroutine
@@ -370,12 +447,12 @@ func (c *WebhookIntegrationConnector) IsConnected() bool {
 }
 
 // Execute is a no-op for webhook connectors (they are passive)
-func (c *WebhookIntegrationConnector) Execute(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error) {
-	return map[string]interface{}{"status": "webhook connectors do not support active execution"}, nil
+func (c *WebhookIntegrationConnector) Execute(ctx context.Context, action string, params map[string]any) (map[string]any, error) {
+	return map[string]any{"status": "webhook connectors do not support active execution"}, nil
 }
 
 // RegisterEventHandler registers a handler for a specific event type
-func (c *WebhookIntegrationConnector) RegisterEventHandler(eventType string, handler func(context.Context, map[string]interface{}) error) {
+func (c *WebhookIntegrationConnector) RegisterEventHandler(eventType string, handler func(context.Context, map[string]any) error) {
 	c.handlers[eventType] = handler
 }
 

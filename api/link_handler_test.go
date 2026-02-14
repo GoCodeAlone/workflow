@@ -98,7 +98,7 @@ func TestLinkHandler_Create_Success(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	body2 := decodeBody(t, w.Result())
-	data, _ := body2["data"].(map[string]interface{})
+	data, _ := body2["data"].(map[string]any)
 	if data["link_type"] != "dependency" {
 		t.Fatalf("expected link_type dependency, got %v", data["link_type"])
 	}

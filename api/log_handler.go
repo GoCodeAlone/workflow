@@ -125,7 +125,7 @@ func (h *LogHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					continue
 				}
-				fmt.Fprintf(w, "data: %s\n\n", data)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 				if l.CreatedAt.After(lastSeen) {
 					lastSeen = l.CreatedAt
 				}

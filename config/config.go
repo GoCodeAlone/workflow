@@ -10,19 +10,19 @@ import (
 
 // ModuleConfig represents a single module configuration
 type ModuleConfig struct {
-	Name      string                 `json:"name" yaml:"name"`
-	Type      string                 `json:"type" yaml:"type"`
-	Config    map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
-	DependsOn []string               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
-	Branches  map[string]string      `json:"branches,omitempty" yaml:"branches,omitempty"`
+	Name      string            `json:"name" yaml:"name"`
+	Type      string            `json:"type" yaml:"type"`
+	Config    map[string]any    `json:"config,omitempty" yaml:"config,omitempty"`
+	DependsOn []string          `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
+	Branches  map[string]string `json:"branches,omitempty" yaml:"branches,omitempty"`
 }
 
 // WorkflowConfig represents the overall configuration for the workflow engine
 type WorkflowConfig struct {
-	Modules   []ModuleConfig         `json:"modules" yaml:"modules"`
-	Workflows map[string]interface{} `json:"workflows" yaml:"workflows"`
-	Triggers  map[string]interface{} `json:"triggers" yaml:"triggers"`
-	ConfigDir string                 `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
+	Modules   []ModuleConfig `json:"modules" yaml:"modules"`
+	Workflows map[string]any `json:"workflows" yaml:"workflows"`
+	Triggers  map[string]any `json:"triggers" yaml:"triggers"`
+	ConfigDir string         `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
 }
 
 // ResolveRelativePath resolves a path relative to the config file's directory.
@@ -71,7 +71,7 @@ func LoadFromString(yamlContent string) (*WorkflowConfig, error) {
 func NewEmptyWorkflowConfig() *WorkflowConfig {
 	return &WorkflowConfig{
 		Modules:   make([]ModuleConfig, 0),
-		Workflows: make(map[string]interface{}),
-		Triggers:  make(map[string]interface{}),
+		Workflows: make(map[string]any),
+		Triggers:  make(map[string]any),
 	}
 }

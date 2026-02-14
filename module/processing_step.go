@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 
 // Executor is the interface that dynamic components satisfy.
 type Executor interface {
-	Execute(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error)
+	Execute(ctx context.Context, params map[string]any) (map[string]any, error)
 }
 
 // ProcessingStepConfig holds configuration for a processing step module.
@@ -143,10 +144,8 @@ func (ps *ProcessingStep) HandleTransition(ctx context.Context, event Transition
 	}
 
 	// Build params from event data
-	params := make(map[string]interface{})
-	for k, v := range event.Data {
-		params[k] = v
-	}
+	params := make(map[string]any)
+	maps.Copy(params, event.Data)
 	params["workflowId"] = event.WorkflowID
 	params["transitionId"] = event.TransitionID
 	params["fromState"] = event.FromState
@@ -183,7 +182,7 @@ func (ps *ProcessingStep) HandleTransition(ctx context.Context, event Transition
 
 	// All retries exhausted — permanent failure
 	ps.recordMetrics("failure", time.Since(startTime))
-	ps.fireTransition(ctx, event.WorkflowID, ps.config.CompensateTransition, map[string]interface{}{
+	ps.fireTransition(ctx, event.WorkflowID, ps.config.CompensateTransition, map[string]any{
 		"error": lastErr.Error(),
 	})
 
@@ -203,7 +202,7 @@ func (ps *ProcessingStep) calculateBackoff(attempt int) time.Duration {
 // Note: Handlers are called BEFORE TriggerTransition commits the state change.
 // The goroutine must wait briefly so the parent transition commits first;
 // otherwise it may see stale state and silently fail.
-func (ps *ProcessingStep) fireTransition(_ context.Context, workflowID, transition string, data map[string]interface{}) {
+func (ps *ProcessingStep) fireTransition(_ context.Context, workflowID, transition string, data map[string]any) {
 	if transition == "" || ps.smEngine == nil {
 		return
 	}

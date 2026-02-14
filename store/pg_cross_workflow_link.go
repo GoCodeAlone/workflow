@@ -62,7 +62,7 @@ func (s *PGCrossWorkflowLinkStore) Delete(ctx context.Context, id uuid.UUID) err
 
 func (s *PGCrossWorkflowLinkStore) List(ctx context.Context, f CrossWorkflowLinkFilter) ([]*CrossWorkflowLink, error) {
 	query := `SELECT * FROM cross_workflow_links WHERE 1=1`
-	args := []interface{}{}
+	args := []any{}
 	idx := 1
 
 	if f.SourceWorkflowID != nil {

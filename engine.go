@@ -29,14 +29,14 @@ type WorkflowHandler interface {
 	CanHandle(workflowType string) bool
 
 	// ConfigureWorkflow sets up the workflow from configuration
-	ConfigureWorkflow(app modular.Application, workflowConfig interface{}) error
+	ConfigureWorkflow(app modular.Application, workflowConfig any) error
 
 	// ExecuteWorkflow executes a workflow with the given action and input data
-	ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error)
+	ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) (map[string]any, error)
 }
 
 // ModuleFactory is a function that creates a module from a name and configuration
-type ModuleFactory func(name string, config map[string]interface{}) modular.Module
+type ModuleFactory func(name string, config map[string]any) modular.Module
 
 // StartStopModule extends the basic Module interface with lifecycle methods
 type StartStopModule interface {
@@ -156,14 +156,14 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					handler.SetStateFilter(stf)
 				}
 				// Dynamic field mapping (optional YAML override of default field names)
-				if fmCfg, ok := modCfg.Config["fieldMapping"].(map[string]interface{}); ok {
+				if fmCfg, ok := modCfg.Config["fieldMapping"].(map[string]any); ok {
 					override := module.FieldMappingFromConfig(fmCfg)
 					defaults := module.DefaultRESTFieldMapping()
 					defaults.Merge(override)
 					handler.SetFieldMapping(defaults)
 				}
 				// Custom sub-action to transition mapping
-				if tmCfg, ok := modCfg.Config["transitionMap"].(map[string]interface{}); ok {
+				if tmCfg, ok := modCfg.Config["transitionMap"].(map[string]any); ok {
 					tm := module.DefaultTransitionMap()
 					for action, trans := range tmCfg {
 						if t, ok := trans.(string); ok {
@@ -173,7 +173,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					handler.SetTransitionMap(tm)
 				}
 				// Custom summary fields
-				if sfCfg, ok := modCfg.Config["summaryFields"].([]interface{}); ok {
+				if sfCfg, ok := modCfg.Config["summaryFields"].([]any); ok {
 					fields := make([]string, 0, len(sfCfg))
 					for _, f := range sfCfg {
 						if s, ok := f.(string); ok {
@@ -217,7 +217,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "http.middleware.cors":
 				allowedOrigins := []string{"*"}                                       // default
 				allowedMethods := []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"} // default
-				if origins, ok := modCfg.Config["allowedOrigins"].([]interface{}); ok {
+				if origins, ok := modCfg.Config["allowedOrigins"].([]any); ok {
 					allowedOrigins = make([]string, len(origins))
 					for i, origin := range origins {
 						if str, ok := origin.(string); ok {
@@ -225,7 +225,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 						}
 					}
 				}
-				if methods, ok := modCfg.Config["allowedMethods"].([]interface{}); ok {
+				if methods, ok := modCfg.Config["allowedMethods"].([]any); ok {
 					allowedMethods = make([]string, len(methods))
 					for i, method := range methods {
 						if str, ok := method.(string); ok {
@@ -262,7 +262,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "http.simple_proxy":
 				e.logger.Debug("Loading simple reverse proxy module")
 				sp := module.NewSimpleProxy(modCfg.Name)
-				if targets, ok := modCfg.Config["targets"].(map[string]interface{}); ok {
+				if targets, ok := modCfg.Config["targets"].(map[string]any); ok {
 					ts := make(map[string]string, len(targets))
 					for prefix, backend := range targets {
 						if s, ok := backend.(string); ok {
@@ -313,6 +313,28 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "http.middleware.requestid":
 				e.logger.Debug("Loading request ID middleware module")
 				mod = module.NewRequestIDMiddleware(modCfg.Name)
+			case "http.middleware.securityheaders":
+				e.logger.Debug("Loading security headers middleware module")
+				secCfg := module.SecurityHeadersConfig{}
+				if v, ok := modCfg.Config["contentSecurityPolicy"].(string); ok {
+					secCfg.ContentSecurityPolicy = v
+				}
+				if v, ok := modCfg.Config["frameOptions"].(string); ok {
+					secCfg.FrameOptions = v
+				}
+				if v, ok := modCfg.Config["contentTypeOptions"].(string); ok {
+					secCfg.ContentTypeOptions = v
+				}
+				if v, ok := modCfg.Config["hstsMaxAge"].(int); ok {
+					secCfg.HSTSMaxAge = v
+				}
+				if v, ok := modCfg.Config["referrerPolicy"].(string); ok {
+					secCfg.ReferrerPolicy = v
+				}
+				if v, ok := modCfg.Config["permissionsPolicy"].(string); ok {
+					secCfg.PermissionsPolicy = v
+				}
+				mod = module.NewSecurityHeadersMiddleware(modCfg.Name, secCfg)
 			case "dynamic.component":
 				e.logger.Debug("Loading dynamic component module: " + modCfg.Name)
 				if e.dynamicRegistry == nil {
@@ -339,7 +361,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				// Always register the module name as a provided service so processing
 				// steps and other modules can look it up by name.
 				providesList := []string{modCfg.Name}
-				if provides, ok := modCfg.Config["provides"].([]interface{}); ok {
+				if provides, ok := modCfg.Config["provides"].([]any); ok {
 					for _, p := range provides {
 						if s, ok := p.(string); ok {
 							providesList = append(providesList, s)
@@ -347,7 +369,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					}
 				}
 				adapter.SetProvides(providesList)
-				if requires, ok := modCfg.Config["requires"].([]interface{}); ok {
+				if requires, ok := modCfg.Config["requires"].([]any); ok {
 					svcs := make([]string, 0, len(requires))
 					for _, r := range requires {
 						if s, ok := r.(string); ok {
@@ -395,7 +417,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "messaging.kafka":
 				e.logger.Debug("Loading Kafka broker module")
 				kb := module.NewKafkaBroker(modCfg.Name)
-				if brokers, ok := modCfg.Config["brokers"].([]interface{}); ok {
+				if brokers, ok := modCfg.Config["brokers"].([]any); ok {
 					bs := make([]string, 0, len(brokers))
 					for _, b := range brokers {
 						if s, ok := b.(string); ok {
@@ -646,7 +668,7 @@ func (e *StdEngine) Stop(ctx context.Context) error {
 }
 
 // TriggerWorkflow starts a workflow based on a trigger
-func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) error {
+func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) error {
 	startTime := time.Now()
 
 	// Find the appropriate workflow handler
@@ -702,7 +724,7 @@ func (e *StdEngine) recordWorkflowMetrics(workflowType, action, status string, d
 }
 
 // configureTriggers sets up all triggers from configuration
-func (e *StdEngine) configureTriggers(triggerConfigs map[string]interface{}) error {
+func (e *StdEngine) configureTriggers(triggerConfigs map[string]any) error {
 	if len(triggerConfigs) == 0 {
 		// No triggers configured, which is fine
 		return nil
@@ -762,7 +784,7 @@ func (e *StdEngine) GetApp() modular.Application {
 }
 
 // getStringConfig extracts a string value from a config map with a default.
-func getStringConfig(cfg map[string]interface{}, key, defaultVal string) string {
+func getStringConfig(cfg map[string]any, key, defaultVal string) string {
 	if v, ok := cfg[key].(string); ok {
 		return v
 	}
@@ -771,7 +793,7 @@ func getStringConfig(cfg map[string]interface{}, key, defaultVal string) string 
 
 // getIntConfig extracts an int value from a config map with a default.
 // Handles both int and float64 (YAML numbers are decoded as float64).
-func getIntConfig(cfg map[string]interface{}, key string, defaultVal int) int {
+func getIntConfig(cfg map[string]any, key string, defaultVal int) int {
 	if v, ok := cfg[key].(int); ok {
 		return v
 	}
@@ -788,5 +810,5 @@ type Engine interface {
 	BuildFromConfig(cfg *config.WorkflowConfig) error
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
-	TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) error
+	TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) error
 }

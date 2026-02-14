@@ -216,7 +216,7 @@ func TestKafkaBrokerHealthDiscoveredByHealthChecker(t *testing.T) {
 	}
 
 	// Verify kafka check appears in checks
-	checks, ok := resp["checks"].(map[string]interface{})
+	checks, ok := resp["checks"].(map[string]any)
 	if !ok {
 		t.Fatal("expected 'checks' field in response")
 	}
@@ -245,9 +245,9 @@ func httpTestRecorder() *httptest.ResponseRecorder {
 }
 
 // decodeJSONResponse decodes the recorder body into a map
-func decodeJSONResponse(t *testing.T, rec *httptest.ResponseRecorder) map[string]interface{} {
+func decodeJSONResponse(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 	t.Helper()
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}

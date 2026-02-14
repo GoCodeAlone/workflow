@@ -11,8 +11,8 @@ import (
 
 // MockApplication is a mock implementation of modular.Application for testing
 type MockApplication struct {
-	Services         map[string]interface{}
-	Config           map[string]interface{}
+	Services         map[string]any
+	Config           map[string]any
 	ConfigSectionMap map[string]modular.ConfigProvider
 	MockLogger       *MockLogger
 	Modules          map[string]modular.Module
@@ -21,20 +21,20 @@ type MockApplication struct {
 // NewMockApplication creates a new instance of a MockApplication
 func NewMockApplication() *MockApplication {
 	return &MockApplication{
-		Services:         make(map[string]interface{}),
-		Config:           make(map[string]interface{}),
+		Services:         make(map[string]any),
+		Config:           make(map[string]any),
 		ConfigSectionMap: make(map[string]modular.ConfigProvider),
 		MockLogger:       &MockLogger{},
 		Modules:          make(map[string]modular.Module),
 	}
 }
 
-func (a *MockApplication) RegisterService(name string, service interface{}) error {
+func (a *MockApplication) RegisterService(name string, service any) error {
 	a.Services[name] = service
 	return nil
 }
 
-func (a *MockApplication) GetService(name string, out interface{}) error {
+func (a *MockApplication) GetService(name string, out any) error {
 	service, exists := a.Services[name]
 	if !exists {
 		return fmt.Errorf("service %s not found", name)
@@ -42,7 +42,7 @@ func (a *MockApplication) GetService(name string, out interface{}) error {
 
 	// Use reflection to set the output pointer
 	outVal := reflect.ValueOf(out)
-	if outVal.Kind() != reflect.Ptr {
+	if outVal.Kind() != reflect.Pointer {
 		return fmt.Errorf("out parameter must be a pointer")
 	}
 
@@ -70,7 +70,7 @@ func (a *MockApplication) ConfigProvider() modular.ConfigProvider {
 	return &MockConfigProvider{Config: a.Config}
 }
 
-func (a *MockApplication) GetConfig() map[string]interface{} {
+func (a *MockApplication) GetConfig() map[string]any {
 	return a.Config
 }
 
@@ -180,7 +180,7 @@ func (a *MockApplication) OnConfigLoaded(hook func(modular.Application) error) {
 
 // MockConfigProvider is a mock implementation of modular.ConfigProvider for testing
 type MockConfigProvider struct {
-	Config map[string]interface{} // Changed from lowercase config to Config to match usage elsewhere
+	Config map[string]any // Changed from lowercase config to Config to match usage elsewhere
 }
 
 func (p *MockConfigProvider) GetConfig() any {
@@ -192,23 +192,23 @@ type MockLogger struct {
 	Messages []string
 }
 
-func (l *MockLogger) Debug(format string, args ...interface{}) {
+func (l *MockLogger) Debug(format string, args ...any) {
 	l.Messages = append(l.Messages, fmt.Sprintf(format, args...))
 }
 
-func (l *MockLogger) Info(format string, args ...interface{}) {
+func (l *MockLogger) Info(format string, args ...any) {
 	l.Messages = append(l.Messages, fmt.Sprintf(format, args...))
 }
 
-func (l *MockLogger) Warn(format string, args ...interface{}) {
+func (l *MockLogger) Warn(format string, args ...any) {
 	l.Messages = append(l.Messages, fmt.Sprintf(format, args...))
 }
 
-func (l *MockLogger) Error(format string, args ...interface{}) {
+func (l *MockLogger) Error(format string, args ...any) {
 	l.Messages = append(l.Messages, fmt.Sprintf(format, args...))
 }
 
-func (l *MockLogger) Fatal(format string, args ...interface{}) {
+func (l *MockLogger) Fatal(format string, args ...any) {
 	l.Messages = append(l.Messages, fmt.Sprintf(format, args...))
 }
 
@@ -216,7 +216,7 @@ func (l *MockLogger) Fatal(format string, args ...interface{}) {
 type WorkflowTriggerInfo struct {
 	WorkflowType string
 	Action       string
-	Data         map[string]interface{}
+	Data         map[string]any
 }
 
 // MockWorkflowEngine is a mock implementation of the WorkflowEngine interface
@@ -230,7 +230,7 @@ func NewMockWorkflowEngine() *MockWorkflowEngine {
 	}
 }
 
-func (e *MockWorkflowEngine) TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) error {
+func (e *MockWorkflowEngine) TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) error {
 	e.triggeredWorkflows = append(e.triggeredWorkflows, WorkflowTriggerInfo{
 		WorkflowType: workflowType,
 		Action:       action,

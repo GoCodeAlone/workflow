@@ -14,16 +14,16 @@ const StateTrackerName = "workflow.service.statetracker"
 
 // StateInfo represents state information for a resource
 type StateInfo struct {
-	ID            string                 `json:"id"`
-	ResourceType  string                 `json:"resourceType"`
-	CurrentState  string                 `json:"currentState"`
-	PreviousState string                 `json:"previousState,omitempty"`
-	LastUpdate    time.Time              `json:"lastUpdate"`
-	Data          map[string]interface{} `json:"data,omitempty"`
+	ID            string         `json:"id"`
+	ResourceType  string         `json:"resourceType"`
+	CurrentState  string         `json:"currentState"`
+	PreviousState string         `json:"previousState,omitempty"`
+	LastUpdate    time.Time      `json:"lastUpdate"`
+	Data          map[string]any `json:"data,omitempty"`
 }
 
 // StateChangeListener is a function that gets called when state changes
-type StateChangeListener func(previousState, newState string, resourceID string, data map[string]interface{})
+type StateChangeListener func(previousState, newState string, resourceID string, data map[string]any)
 
 // StateTracker provides a generic service for tracking state
 type StateTracker struct {
@@ -79,7 +79,7 @@ func (s *StateTracker) GetState(resourceType, resourceID string) (StateInfo, boo
 }
 
 // SetState updates the state for a resource
-func (s *StateTracker) SetState(resourceType, resourceID, state string, data map[string]interface{}) {
+func (s *StateTracker) SetState(resourceType, resourceID, state string, data map[string]any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -116,7 +116,7 @@ func (s *StateTracker) AddStateChangeListener(resourceType string, listener Stat
 }
 
 // notifyListeners calls all registered listeners for a resource type
-func (s *StateTracker) notifyListeners(resourceType, previousState, newState, resourceID string, data map[string]interface{}) {
+func (s *StateTracker) notifyListeners(resourceType, previousState, newState, resourceID string, data map[string]any) {
 	// Get the listeners - we need to copy the slice to avoid locking during callback
 	var listeners []StateChangeListener
 	if typeListeners, exists := s.listeners[resourceType]; exists {

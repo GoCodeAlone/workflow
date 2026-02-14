@@ -35,6 +35,7 @@ export function renderNav(user) {
   if (role === 'responder') {
     links = `
       ${navLink('#/responder', 'Dashboard')}
+      ${navLink('#/responder/multi', 'Multi-Chat')}
       ${navLink('#/queue', 'Queue')}
     `;
   } else if (role === 'supervisor') {

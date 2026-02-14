@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/CrisisTextLine/modular/modules/eventbus"
@@ -17,12 +18,12 @@ const (
 // EventBusTriggerSubscription defines a single subscription that the trigger
 // listens to on the EventBus and maps to a workflow execution.
 type EventBusTriggerSubscription struct {
-	Topic    string                 `json:"topic" yaml:"topic"`
-	Event    string                 `json:"event,omitempty" yaml:"event,omitempty"`
-	Workflow string                 `json:"workflow" yaml:"workflow"`
-	Action   string                 `json:"action" yaml:"action"`
-	Async    bool                   `json:"async,omitempty" yaml:"async,omitempty"`
-	Params   map[string]interface{} `json:"params,omitempty" yaml:"params,omitempty"`
+	Topic    string         `json:"topic" yaml:"topic"`
+	Event    string         `json:"event,omitempty" yaml:"event,omitempty"`
+	Workflow string         `json:"workflow" yaml:"workflow"`
+	Action   string         `json:"action" yaml:"action"`
+	Async    bool           `json:"async,omitempty" yaml:"async,omitempty"`
+	Params   map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
 }
 
 // EventBusTrigger implements the Trigger interface and starts workflows in
@@ -66,13 +67,13 @@ func (t *EventBusTrigger) Init(app modular.Application) error {
 
 // Configure parses the trigger config and resolves the EventBus and engine
 // services from the application.
-func (t *EventBusTrigger) Configure(app modular.Application, triggerConfig interface{}) error {
-	config, ok := triggerConfig.(map[string]interface{})
+func (t *EventBusTrigger) Configure(app modular.Application, triggerConfig any) error {
+	config, ok := triggerConfig.(map[string]any)
 	if !ok {
 		return fmt.Errorf("invalid eventbus trigger configuration format")
 	}
 
-	subsConfig, ok := config["subscriptions"].([]interface{})
+	subsConfig, ok := config["subscriptions"].([]any)
 	if !ok {
 		return fmt.Errorf("subscriptions not found in eventbus trigger configuration")
 	}
@@ -88,7 +89,7 @@ func (t *EventBusTrigger) Configure(app modular.Application, triggerConfig inter
 	var engine WorkflowEngine
 	engineNames := []string{"workflowEngine", "engine"}
 	for _, name := range engineNames {
-		var svc interface{}
+		var svc any
 		if err := app.GetService(name, &svc); err == nil && svc != nil {
 			if e, ok := svc.(WorkflowEngine); ok {
 				engine = e
@@ -103,7 +104,7 @@ func (t *EventBusTrigger) Configure(app modular.Application, triggerConfig inter
 
 	// Parse subscriptions.
 	for i, sc := range subsConfig {
-		subMap, ok := sc.(map[string]interface{})
+		subMap, ok := sc.(map[string]any)
 		if !ok {
 			return fmt.Errorf("invalid subscription configuration at index %d", i)
 		}
@@ -113,7 +114,7 @@ func (t *EventBusTrigger) Configure(app modular.Application, triggerConfig inter
 		workflow, _ := subMap["workflow"].(string)
 		action, _ := subMap["action"].(string)
 		async, _ := subMap["async"].(bool)
-		params, _ := subMap["params"].(map[string]interface{})
+		params, _ := subMap["params"].(map[string]any)
 
 		if topic == "" || workflow == "" || action == "" {
 			return fmt.Errorf("incomplete subscription at index %d: topic, workflow, and action are required", i)
@@ -184,14 +185,14 @@ func (t *EventBusTrigger) SetEventBusAndEngine(eb *eventbus.EventBusModule, engi
 func (t *EventBusTrigger) createHandler(sub EventBusTriggerSubscription) eventbus.EventHandler {
 	return func(ctx context.Context, ev eventbus.Event) error {
 		// Extract payload as map[string]interface{}.
-		data, ok := ev.Payload.(map[string]interface{})
+		data, ok := ev.Payload.(map[string]any)
 		if !ok {
 			// JSON round-trip for non-map payloads.
 			raw, err := json.Marshal(ev.Payload)
 			if err != nil {
 				return fmt.Errorf("failed to marshal event payload: %w", err)
 			}
-			data = make(map[string]interface{})
+			data = make(map[string]any)
 			if err := json.Unmarshal(raw, &data); err != nil {
 				return fmt.Errorf("failed to unmarshal event payload: %w", err)
 			}
@@ -209,9 +210,7 @@ func (t *EventBusTrigger) createHandler(sub EventBusTriggerSubscription) eventbu
 		}
 
 		// Merge static params.
-		for k, v := range sub.Params {
-			data[k] = v
-		}
+		maps.Copy(data, sub.Params)
 
 		return t.engine.TriggerWorkflow(ctx, sub.Workflow, sub.Action, data)
 	}

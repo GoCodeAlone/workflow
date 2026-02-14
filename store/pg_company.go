@@ -69,7 +69,7 @@ func (s *PGCompanyStore) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (s *PGCompanyStore) List(ctx context.Context, f CompanyFilter) ([]*Company, error) {
 	query := `SELECT * FROM companies WHERE 1=1`
-	args := []interface{}{}
+	args := []any{}
 	idx := 1
 
 	if f.OwnerID != nil {
@@ -129,7 +129,7 @@ func (s *PGCompanyStore) ListForUser(ctx context.Context, userID uuid.UUID) ([]*
 	return companies, rows.Err()
 }
 
-func (s *PGCompanyStore) scanOne(ctx context.Context, query string, args ...interface{}) (*Company, error) {
+func (s *PGCompanyStore) scanOne(ctx context.Context, query string, args ...any) (*Company, error) {
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query company: %w", err)

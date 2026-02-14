@@ -11,7 +11,7 @@ type Trigger interface {
 	modular.Stoppable
 
 	// Configure sets up the trigger from configuration
-	Configure(app modular.Application, triggerConfig interface{}) error
+	Configure(app modular.Application, triggerConfig any) error
 }
 
 // TriggerRegistry manages registered triggers and allows finding them by name

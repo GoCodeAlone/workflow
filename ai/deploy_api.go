@@ -67,7 +67,7 @@ func (h *DeployHandler) HandleDeploy(w http.ResponseWriter, r *http.Request) {
 
 	// Include the config if it was generated
 	if cfg != nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"status":     resp.Status,
 			"components": resp.Components,
 			"workflow":   cfg,

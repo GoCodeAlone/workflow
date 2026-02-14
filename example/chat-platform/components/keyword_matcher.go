@@ -40,6 +40,12 @@ var keywordDB = map[string]map[string]interface{}{
 		"subProgram": "general",
 		"response":   "Welcome to Wellness Chat. How can we support you today?",
 	},
+	"PARTNER": {
+		"programId":  "prog-004",
+		"action":     "route",
+		"subProgram": "general",
+		"response":   "Welcome to Partner Assist. A support specialist will be with you shortly.",
+	},
 }
 
 func Name() string {

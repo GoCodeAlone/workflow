@@ -38,7 +38,7 @@ func TestRateLimitMiddleware_Process_AllowsRequests(t *testing.T) {
 	}))
 
 	// First 5 requests should succeed (burst size)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.RemoteAddr = "192.168.1.1:1234"
 		rec := httptest.NewRecorder()
@@ -57,7 +57,7 @@ func TestRateLimitMiddleware_Process_RateLimits(t *testing.T) {
 	}))
 
 	// Exhaust burst
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.RemoteAddr = "192.168.1.1:1234"
 		rec := httptest.NewRecorder()

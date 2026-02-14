@@ -45,7 +45,7 @@ func (p *SimpleProxy) SetTargets(targets map[string]string) error {
 		rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, _ error) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadGateway)
-			json.NewEncoder(w).Encode(map[string]string{
+			_ = json.NewEncoder(w).Encode(map[string]string{
 				"error":   "backend unavailable",
 				"backend": backendHost,
 				"path":    r.URL.Path,

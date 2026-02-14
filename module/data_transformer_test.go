@@ -27,14 +27,14 @@ func TestDataTransformer_RegisterAndTransform(t *testing.T) {
 		Operations: []TransformOperation{
 			{
 				Type:   "extract",
-				Config: map[string]interface{}{"path": "user.name"},
+				Config: map[string]any{"path": "user.name"},
 			},
 		},
 	}
 	dt.RegisterPipeline(pipeline)
 
-	data := map[string]interface{}{
-		"user": map[string]interface{}{
+	data := map[string]any{
+		"user": map[string]any{
 			"name": "Alice",
 			"age":  30,
 		},
@@ -62,10 +62,10 @@ func TestDataTransformer_TransformPipelineNotFound(t *testing.T) {
 func TestDataTransformer_ExtractSimple(t *testing.T) {
 	dt := NewDataTransformer("t")
 	ops := []TransformOperation{
-		{Type: "extract", Config: map[string]interface{}{"path": "name"}},
+		{Type: "extract", Config: map[string]any{"path": "name"}},
 	}
 
-	data := map[string]interface{}{"name": "Bob", "age": 25}
+	data := map[string]any{"name": "Bob", "age": 25}
 	result, err := dt.TransformWithOps(context.Background(), ops, data)
 	if err != nil {
 		t.Fatalf("TransformWithOps failed: %v", err)
@@ -78,12 +78,12 @@ func TestDataTransformer_ExtractSimple(t *testing.T) {
 func TestDataTransformer_ExtractNested(t *testing.T) {
 	dt := NewDataTransformer("t")
 	ops := []TransformOperation{
-		{Type: "extract", Config: map[string]interface{}{"path": "user.address.city"}},
+		{Type: "extract", Config: map[string]any{"path": "user.address.city"}},
 	}
 
-	data := map[string]interface{}{
-		"user": map[string]interface{}{
-			"address": map[string]interface{}{
+	data := map[string]any{
+		"user": map[string]any{
+			"address": map[string]any{
 				"city":  "Portland",
 				"state": "OR",
 			},
@@ -102,14 +102,14 @@ func TestDataTransformer_ExtractNested(t *testing.T) {
 func TestDataTransformer_ExtractArrayIndex(t *testing.T) {
 	dt := NewDataTransformer("t")
 	ops := []TransformOperation{
-		{Type: "extract", Config: map[string]interface{}{"path": "items.1.name"}},
+		{Type: "extract", Config: map[string]any{"path": "items.1.name"}},
 	}
 
-	data := map[string]interface{}{
-		"items": []interface{}{
-			map[string]interface{}{"name": "first"},
-			map[string]interface{}{"name": "second"},
-			map[string]interface{}{"name": "third"},
+	data := map[string]any{
+		"items": []any{
+			map[string]any{"name": "first"},
+			map[string]any{"name": "second"},
+			map[string]any{"name": "third"},
 		},
 	}
 
@@ -125,10 +125,10 @@ func TestDataTransformer_ExtractArrayIndex(t *testing.T) {
 func TestDataTransformer_ExtractMissingKey(t *testing.T) {
 	dt := NewDataTransformer("t")
 	ops := []TransformOperation{
-		{Type: "extract", Config: map[string]interface{}{"path": "nonexistent"}},
+		{Type: "extract", Config: map[string]any{"path": "nonexistent"}},
 	}
 
-	data := map[string]interface{}{"name": "Alice"}
+	data := map[string]any{"name": "Alice"}
 	_, err := dt.TransformWithOps(context.Background(), ops, data)
 	if err == nil {
 		t.Fatal("expected error for missing key")
@@ -138,11 +138,11 @@ func TestDataTransformer_ExtractMissingKey(t *testing.T) {
 func TestDataTransformer_ExtractOutOfBounds(t *testing.T) {
 	dt := NewDataTransformer("t")
 	ops := []TransformOperation{
-		{Type: "extract", Config: map[string]interface{}{"path": "items.5"}},
+		{Type: "extract", Config: map[string]any{"path": "items.5"}},
 	}
 
-	data := map[string]interface{}{
-		"items": []interface{}{"a", "b"},
+	data := map[string]any{
+		"items": []any{"a", "b"},
 	}
 
 	_, err := dt.TransformWithOps(context.Background(), ops, data)
@@ -154,10 +154,10 @@ func TestDataTransformer_ExtractOutOfBounds(t *testing.T) {
 func TestDataTransformer_ExtractNoPath(t *testing.T) {
 	dt := NewDataTransformer("t")
 	ops := []TransformOperation{
-		{Type: "extract", Config: map[string]interface{}{}},
+		{Type: "extract", Config: map[string]any{}},
 	}
 
-	_, err := dt.TransformWithOps(context.Background(), ops, map[string]interface{}{})
+	_, err := dt.TransformWithOps(context.Background(), ops, map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing path config")
 	}
@@ -166,10 +166,10 @@ func TestDataTransformer_ExtractNoPath(t *testing.T) {
 func TestDataTransformer_ExtractNonNavigable(t *testing.T) {
 	dt := NewDataTransformer("t")
 	ops := []TransformOperation{
-		{Type: "extract", Config: map[string]interface{}{"path": "name.sub"}},
+		{Type: "extract", Config: map[string]any{"path": "name.sub"}},
 	}
 
-	data := map[string]interface{}{"name": "Alice"}
+	data := map[string]any{"name": "Alice"}
 	_, err := dt.TransformWithOps(context.Background(), ops, data)
 	if err == nil {
 		t.Fatal("expected error when navigating into non-map/slice type")
@@ -183,8 +183,8 @@ func TestDataTransformer_MapRenameFields(t *testing.T) {
 	ops := []TransformOperation{
 		{
 			Type: "map",
-			Config: map[string]interface{}{
-				"mappings": map[string]interface{}{
+			Config: map[string]any{
+				"mappings": map[string]any{
 					"first_name": "firstName",
 					"last_name":  "lastName",
 				},
@@ -192,7 +192,7 @@ func TestDataTransformer_MapRenameFields(t *testing.T) {
 		},
 	}
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"first_name": "Alice",
 		"last_name":  "Smith",
 		"age":        30,
@@ -203,7 +203,7 @@ func TestDataTransformer_MapRenameFields(t *testing.T) {
 		t.Fatalf("TransformWithOps failed: %v", err)
 	}
 
-	resultMap, ok := result.(map[string]interface{})
+	resultMap, ok := result.(map[string]any)
 	if !ok {
 		t.Fatalf("expected map result, got %T", result)
 	}
@@ -226,10 +226,10 @@ func TestDataTransformer_MapRenameFields(t *testing.T) {
 func TestDataTransformer_MapNoMappings(t *testing.T) {
 	dt := NewDataTransformer("t")
 	ops := []TransformOperation{
-		{Type: "map", Config: map[string]interface{}{}},
+		{Type: "map", Config: map[string]any{}},
 	}
 
-	_, err := dt.TransformWithOps(context.Background(), ops, map[string]interface{}{})
+	_, err := dt.TransformWithOps(context.Background(), ops, map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing mappings config")
 	}
@@ -238,8 +238,8 @@ func TestDataTransformer_MapNoMappings(t *testing.T) {
 func TestDataTransformer_MapNonMapInput(t *testing.T) {
 	dt := NewDataTransformer("t")
 	ops := []TransformOperation{
-		{Type: "map", Config: map[string]interface{}{
-			"mappings": map[string]interface{}{"a": "b"},
+		{Type: "map", Config: map[string]any{
+			"mappings": map[string]any{"a": "b"},
 		}},
 	}
 
@@ -256,13 +256,13 @@ func TestDataTransformer_FilterFields(t *testing.T) {
 	ops := []TransformOperation{
 		{
 			Type: "filter",
-			Config: map[string]interface{}{
-				"fields": []interface{}{"name", "email"},
+			Config: map[string]any{
+				"fields": []any{"name", "email"},
 			},
 		},
 	}
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"name":     "Alice",
 		"email":    "alice@example.com",
 		"password": "secret",
@@ -274,7 +274,7 @@ func TestDataTransformer_FilterFields(t *testing.T) {
 		t.Fatalf("TransformWithOps failed: %v", err)
 	}
 
-	resultMap, ok := result.(map[string]interface{})
+	resultMap, ok := result.(map[string]any)
 	if !ok {
 		t.Fatalf("expected map result, got %T", result)
 	}
@@ -296,10 +296,10 @@ func TestDataTransformer_FilterFields(t *testing.T) {
 func TestDataTransformer_FilterNoFields(t *testing.T) {
 	dt := NewDataTransformer("t")
 	ops := []TransformOperation{
-		{Type: "filter", Config: map[string]interface{}{}},
+		{Type: "filter", Config: map[string]any{}},
 	}
 
-	_, err := dt.TransformWithOps(context.Background(), ops, map[string]interface{}{})
+	_, err := dt.TransformWithOps(context.Background(), ops, map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing fields config")
 	}
@@ -308,8 +308,8 @@ func TestDataTransformer_FilterNoFields(t *testing.T) {
 func TestDataTransformer_FilterNonMapInput(t *testing.T) {
 	dt := NewDataTransformer("t")
 	ops := []TransformOperation{
-		{Type: "filter", Config: map[string]interface{}{
-			"fields": []interface{}{"name"},
+		{Type: "filter", Config: map[string]any{
+			"fields": []any{"name"},
 		}},
 	}
 
@@ -326,14 +326,14 @@ func TestDataTransformer_ConvertJsonToJson(t *testing.T) {
 	ops := []TransformOperation{
 		{
 			Type: "convert",
-			Config: map[string]interface{}{
+			Config: map[string]any{
 				"from": "json",
 				"to":   "json",
 			},
 		},
 	}
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"count": 42,
 		"name":  "test",
 	}
@@ -343,7 +343,7 @@ func TestDataTransformer_ConvertJsonToJson(t *testing.T) {
 		t.Fatalf("TransformWithOps failed: %v", err)
 	}
 
-	resultMap, ok := result.(map[string]interface{})
+	resultMap, ok := result.(map[string]any)
 	if !ok {
 		t.Fatalf("expected map result, got %T", result)
 	}
@@ -362,14 +362,14 @@ func TestDataTransformer_ConvertJsonToString(t *testing.T) {
 	ops := []TransformOperation{
 		{
 			Type: "convert",
-			Config: map[string]interface{}{
+			Config: map[string]any{
 				"from": "json",
 				"to":   "string",
 			},
 		},
 	}
 
-	data := map[string]interface{}{"key": "value"}
+	data := map[string]any{"key": "value"}
 
 	result, err := dt.TransformWithOps(context.Background(), ops, data)
 	if err != nil {
@@ -390,7 +390,7 @@ func TestDataTransformer_ConvertStringToJson(t *testing.T) {
 	ops := []TransformOperation{
 		{
 			Type: "convert",
-			Config: map[string]interface{}{
+			Config: map[string]any{
 				"from": "string",
 				"to":   "json",
 			},
@@ -402,7 +402,7 @@ func TestDataTransformer_ConvertStringToJson(t *testing.T) {
 		t.Fatalf("TransformWithOps failed: %v", err)
 	}
 
-	resultMap, ok := result.(map[string]interface{})
+	resultMap, ok := result.(map[string]any)
 	if !ok {
 		t.Fatalf("expected map result, got %T", result)
 	}
@@ -416,7 +416,7 @@ func TestDataTransformer_ConvertStringToJsonInvalid(t *testing.T) {
 	ops := []TransformOperation{
 		{
 			Type: "convert",
-			Config: map[string]interface{}{
+			Config: map[string]any{
 				"from": "string",
 				"to":   "json",
 			},
@@ -434,7 +434,7 @@ func TestDataTransformer_ConvertStringToJsonNotString(t *testing.T) {
 	ops := []TransformOperation{
 		{
 			Type: "convert",
-			Config: map[string]interface{}{
+			Config: map[string]any{
 				"from": "string",
 				"to":   "json",
 			},
@@ -452,7 +452,7 @@ func TestDataTransformer_ConvertUnsupported(t *testing.T) {
 	ops := []TransformOperation{
 		{
 			Type: "convert",
-			Config: map[string]interface{}{
+			Config: map[string]any{
 				"from": "xml",
 				"to":   "csv",
 			},
@@ -468,7 +468,7 @@ func TestDataTransformer_ConvertUnsupported(t *testing.T) {
 func TestDataTransformer_ConvertMissingConfig(t *testing.T) {
 	dt := NewDataTransformer("t")
 	ops := []TransformOperation{
-		{Type: "convert", Config: map[string]interface{}{}},
+		{Type: "convert", Config: map[string]any{}},
 	}
 
 	_, err := dt.TransformWithOps(context.Background(), ops, "data")
@@ -482,7 +482,7 @@ func TestDataTransformer_ConvertMissingConfig(t *testing.T) {
 func TestDataTransformer_UnknownOperation(t *testing.T) {
 	dt := NewDataTransformer("t")
 	ops := []TransformOperation{
-		{Type: "unknown_op", Config: map[string]interface{}{}},
+		{Type: "unknown_op", Config: map[string]any{}},
 	}
 
 	_, err := dt.TransformWithOps(context.Background(), ops, "data")
@@ -499,32 +499,32 @@ func TestDataTransformer_MultiStepPipeline(t *testing.T) {
 		// Step 1: Filter to only user and metadata
 		{
 			Type: "filter",
-			Config: map[string]interface{}{
-				"fields": []interface{}{"user", "metadata"},
+			Config: map[string]any{
+				"fields": []any{"user", "metadata"},
 			},
 		},
 		// Step 2: Extract user data
 		{
 			Type:   "extract",
-			Config: map[string]interface{}{"path": "user"},
+			Config: map[string]any{"path": "user"},
 		},
 		// Step 3: Rename fields
 		{
 			Type: "map",
-			Config: map[string]interface{}{
-				"mappings": map[string]interface{}{
+			Config: map[string]any{
+				"mappings": map[string]any{
 					"first_name": "firstName",
 				},
 			},
 		},
 	}
 
-	data := map[string]interface{}{
-		"user": map[string]interface{}{
+	data := map[string]any{
+		"user": map[string]any{
 			"first_name": "Alice",
 			"email":      "alice@example.com",
 		},
-		"metadata": map[string]interface{}{"version": "1.0"},
+		"metadata": map[string]any{"version": "1.0"},
 		"internal": "should be filtered",
 	}
 
@@ -533,7 +533,7 @@ func TestDataTransformer_MultiStepPipeline(t *testing.T) {
 		t.Fatalf("TransformWithOps failed: %v", err)
 	}
 
-	resultMap, ok := result.(map[string]interface{})
+	resultMap, ok := result.(map[string]any)
 	if !ok {
 		t.Fatalf("expected map result, got %T", result)
 	}
@@ -549,13 +549,13 @@ func TestDataTransformer_MultiStepPipeline(t *testing.T) {
 func TestDataTransformer_ContextCancellation(t *testing.T) {
 	dt := NewDataTransformer("t")
 	ops := []TransformOperation{
-		{Type: "extract", Config: map[string]interface{}{"path": "name"}},
+		{Type: "extract", Config: map[string]any{"path": "name"}},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	_, err := dt.TransformWithOps(ctx, ops, map[string]interface{}{"name": "Alice"})
+	_, err := dt.TransformWithOps(ctx, ops, map[string]any{"name": "Alice"})
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
 	}

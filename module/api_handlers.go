@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -23,10 +25,10 @@ var riskPatterns = map[string][]string{
 }
 
 // assessRiskLevel analyzes messages and returns the risk level and detected tags.
-func assessRiskLevel(messages []interface{}) (string, []string) {
+func assessRiskLevel(messages []any) (string, []string) {
 	var allText strings.Builder
 	for _, m := range messages {
-		msg, ok := m.(map[string]interface{})
+		msg, ok := m.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -76,10 +78,10 @@ func assessRiskLevel(messages []interface{}) (string, []string) {
 
 // RESTResource represents a simple in-memory resource store for REST APIs
 type RESTResource struct {
-	ID         string                 `json:"id"`
-	Data       map[string]interface{} `json:"data"`
-	State      string                 `json:"state,omitempty"`
-	LastUpdate string                 `json:"lastUpdate,omitempty"`
+	ID         string         `json:"id"`
+	Data       map[string]any `json:"data"`
+	State      string         `json:"state,omitempty"`
+	LastUpdate string         `json:"lastUpdate,omitempty"`
 }
 
 // RESTAPIHandler provides CRUD operations for a REST API
@@ -248,11 +250,11 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 		if config := configSection.GetConfig(); config != nil {
 			// Try to extract our module's configuration
 			// This is a bit verbose but handles nested module configurations
-			if modules, ok := config.(map[string]interface{})["modules"].([]interface{}); ok {
+			if modules, ok := config.(map[string]any)["modules"].([]any); ok {
 				for _, mod := range modules {
-					if m, ok := mod.(map[string]interface{}); ok {
+					if m, ok := mod.(map[string]any); ok {
 						if m["name"] == h.name {
-							if cfg, ok := m["config"].(map[string]interface{}); ok {
+							if cfg, ok := m["config"].(map[string]any); ok {
 								// Extract resource name
 								if rn, ok := cfg["resourceName"].(string); ok && rn != "" {
 									h.resourceName = rn
@@ -289,13 +291,13 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 								}
 
 								// Extract dynamic field mapping (merged on top of defaults)
-								if fmCfg, ok := cfg["fieldMapping"].(map[string]interface{}); ok {
+								if fmCfg, ok := cfg["fieldMapping"].(map[string]any); ok {
 									override := FieldMappingFromConfig(fmCfg)
 									h.fieldMapping.Merge(override)
 								}
 
 								// Extract custom transition map (merged on top of defaults)
-								if tmCfg, ok := cfg["transitionMap"].(map[string]interface{}); ok {
+								if tmCfg, ok := cfg["transitionMap"].(map[string]any); ok {
 									for action, trans := range tmCfg {
 										if t, ok := trans.(string); ok {
 											h.transitionMap[action] = t
@@ -304,7 +306,7 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 								}
 
 								// Extract custom summary fields (replaces defaults)
-								if sfCfg, ok := cfg["summaryFields"].([]interface{}); ok {
+								if sfCfg, ok := cfg["summaryFields"].([]any); ok {
 									fields := make([]string, 0, len(sfCfg))
 									for _, f := range sfCfg {
 										if s, ok := f.(string); ok {
@@ -324,10 +326,10 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 			// If workflowType is not set but we have a state machine configuration,
 			// try to extract the default workflow type from there
 			if h.workflowType == "" {
-				if statemachine, ok := config.(map[string]interface{})["workflows"].(map[string]interface{})["statemachine"]; ok {
-					if smConfig, ok := statemachine.(map[string]interface{}); ok {
-						if defs, ok := smConfig["definitions"].([]interface{}); ok && len(defs) > 0 {
-							if def, ok := defs[0].(map[string]interface{}); ok {
+				if statemachine, ok := config.(map[string]any)["workflows"].(map[string]any)["statemachine"]; ok {
+					if smConfig, ok := statemachine.(map[string]any); ok {
+						if defs, ok := smConfig["definitions"].([]any); ok && len(defs) > 0 {
+							if def, ok := defs[0].(map[string]any); ok {
 								if name, ok := def["name"].(string); ok && name != "" {
 									h.workflowType = name
 									h.logger.Info(fmt.Sprintf("Using default workflow type from state machine definition: %s", h.workflowType))
@@ -341,8 +343,8 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 			// If workflow engine is not set but we have a state machine configuration,
 			// try to extract the engine name from there
 			if h.workflowEngine == "" {
-				if statemachine, ok := config.(map[string]interface{})["workflows"].(map[string]interface{})["statemachine"]; ok {
-					if smConfig, ok := statemachine.(map[string]interface{}); ok {
+				if statemachine, ok := config.(map[string]any)["workflows"].(map[string]any)["statemachine"]; ok {
+					if smConfig, ok := statemachine.(map[string]any); ok {
 						if engine, ok := smConfig["engine"].(string); ok && engine != "" {
 							h.workflowEngine = engine
 							h.logger.Info(fmt.Sprintf("Using state machine engine from configuration: %s", h.workflowEngine))
@@ -355,7 +357,7 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 
 	// Wire persistence (optional)
 	if h.persistence == nil {
-		var ps interface{}
+		var ps any
 		if err := app.GetService("persistence", &ps); err == nil && ps != nil {
 			if store, ok := ps.(*PersistenceStore); ok {
 				h.persistence = store
@@ -525,25 +527,37 @@ func (h *RESTAPIHandler) handleGet(resourceId string, w http.ResponseWriter, r *
 
 	// Get a specific resource
 	if resource, ok := h.resources[resourceId]; ok {
-		// Try to get the latest state directly from the workflow engine
+		// Try to get the latest state and enrichment data from the workflow engine
 		if h.workflowEngine != "" {
 			instanceId := resourceId
 			if h.instanceIDPrefix != "" {
 				instanceId = h.instanceIDPrefix + resourceId
 			}
-			var engineSvc interface{}
+			var engineSvc any
 			if err := h.app.GetService(h.workflowEngine, &engineSvc); err == nil {
 				if smEngine, ok := engineSvc.(*StateMachineEngine); ok {
 					if instance, err := smEngine.GetInstance(instanceId); err == nil && instance != nil {
 						resource.State = instance.CurrentState
 						resource.LastUpdate = instance.LastUpdated.Format(time.RFC3339)
+						// Merge enrichment data from processing pipeline.
+						// Only set keys that don't already exist in the API handler's
+						// resource data, since the handler is authoritative for fields
+						// it manages directly (e.g., messages, tags, riskLevel).
+						for k, v := range instance.Data {
+							if k == "id" || k == "state" || k == "lastUpdate" {
+								continue
+							}
+							if _, exists := resource.Data[k]; !exists {
+								resource.Data[k] = v
+							}
+						}
 					}
 				}
 			}
 		}
 
 		// Also check state tracker for additional data enrichment
-		var stateTracker interface{}
+		var stateTracker any
 		_ = h.app.GetService(StateTrackerName, &stateTracker)
 		if stateTracker != nil {
 			if tracker, ok := stateTracker.(*StateTracker); ok {
@@ -553,10 +567,12 @@ func (h *RESTAPIHandler) handleGet(resourceId string, w http.ResponseWriter, r *
 						resource.State = stateInfo.CurrentState
 						resource.LastUpdate = stateInfo.LastUpdate.Format(time.RFC3339)
 					}
-					// Merge any data from the state tracker
+					// Merge data from the state tracker (only new keys)
 					if stateInfo.Data != nil {
 						for k, v := range stateInfo.Data {
-							resource.Data[k] = v
+							if _, exists := resource.Data[k]; !exists {
+								resource.Data[k] = v
+							}
 						}
 					}
 				}
@@ -586,10 +602,34 @@ func (h *RESTAPIHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
 	// If there's an authenticated user, filter resources to only show theirs
 	currentUserID := extractUserID(r)
 
+	// Extract affiliate/program filtering from query params and JWT claims
+	role, jwtAffiliateId, jwtProgramIds := extractAuthClaims(r)
+	queryAffiliateId := r.URL.Query().Get("affiliateId")
+	queryProgramId := r.URL.Query().Get("programId")
+	queryRole := r.URL.Query().Get("role")
+
+	// Determine effective filter values: query params take precedence, then JWT claims
+	filterAffiliateId := queryAffiliateId
+	if filterAffiliateId == "" && role != "admin" {
+		filterAffiliateId = jwtAffiliateId
+	}
+	var filterProgramIds []string
+	if queryProgramId != "" {
+		filterProgramIds = strings.Split(queryProgramId, ",")
+	} else if role != "admin" && len(jwtProgramIds) > 0 {
+		filterProgramIds = jwtProgramIds
+	}
+
+	// Role-based query param filter (e.g., ?role=responder filters users by role)
+	filterRole := queryRole
+
+	// Admin role bypasses affiliate/program filtering
+	isAdmin := role == "admin"
+
 	// Optionally get the state machine engine for live state lookup
 	var smEngine *StateMachineEngine
 	if h.workflowEngine != "" {
-		var engineSvc interface{}
+		var engineSvc any
 		if err := h.app.GetService(h.workflowEngine, &engineSvc); err == nil {
 			smEngine, _ = engineSvc.(*StateMachineEngine)
 		}
@@ -604,7 +644,8 @@ func (h *RESTAPIHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Enrich with live state from the workflow engine
+		// Enrich with live state and data from the workflow engine BEFORE filtering,
+		// so that fields added by processing steps (programId, affiliateId) are available.
 		if smEngine != nil {
 			instanceId := resource.ID
 			if h.instanceIDPrefix != "" {
@@ -613,6 +654,47 @@ func (h *RESTAPIHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
 			if instance, err := smEngine.GetInstance(instanceId); err == nil && instance != nil {
 				resource.State = instance.CurrentState
 				resource.LastUpdate = instance.LastUpdated.Format(time.RFC3339)
+				// Only set keys that don't already exist in the API handler's
+				// resource data, since the handler is authoritative for fields
+				// it manages directly (e.g., messages, tags, riskLevel).
+				for k, v := range instance.Data {
+					if k == "id" || k == "state" || k == "lastUpdate" {
+						continue
+					}
+					if _, exists := resource.Data[k]; !exists {
+						resource.Data[k] = v
+					}
+				}
+			}
+		}
+
+		// Apply affiliate filter (skip for admin).
+		// Resources without an affiliateId are excluded when a filter is active.
+		if !isAdmin && filterAffiliateId != "" {
+			resAffiliateId, _ := resource.Data["affiliateId"].(string)
+			if resAffiliateId != filterAffiliateId {
+				continue
+			}
+		}
+
+		// Apply program filter (skip for admin).
+		// Only filter resources that have a programId field (e.g., conversations).
+		// Resources without programId (e.g., users) are not filtered by program.
+		if !isAdmin && len(filterProgramIds) > 0 {
+			resProgramId, _ := resource.Data["programId"].(string)
+			if resProgramId != "" {
+				found := slices.Contains(filterProgramIds, resProgramId)
+				if !found {
+					continue
+				}
+			}
+		}
+
+		// Apply role query param filter (for user resources)
+		if filterRole != "" {
+			resRole, _ := resource.Data["role"].(string)
+			if resRole != "" && resRole != filterRole {
+				continue
 			}
 		}
 
@@ -633,7 +715,7 @@ func (h *RESTAPIHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
 	// For view handlers (sourceResourceName set), return summary with count
 	if h.sourceResourceName != "" {
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"totalQueued":   len(resources),
 			"count":         len(resources),
 			"conversations": resources,
@@ -651,7 +733,7 @@ func (h *RESTAPIHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
 // extractUserID extracts the authenticated user's ID from the request context.
 // Returns empty string if no auth claims are present.
 func extractUserID(r *http.Request) string {
-	claims, ok := r.Context().Value(authClaimsContextKey).(map[string]interface{})
+	claims, ok := r.Context().Value(authClaimsContextKey).(map[string]any)
 	if !ok {
 		return ""
 	}
@@ -661,9 +743,34 @@ func extractUserID(r *http.Request) string {
 	return ""
 }
 
+// extractAuthClaims extracts role, affiliateId, and programIds from the JWT claims
+// in the request context. Returns empty values if no auth claims are present.
+func extractAuthClaims(r *http.Request) (role, affiliateId string, programIds []string) {
+	claims, ok := r.Context().Value(authClaimsContextKey).(map[string]any)
+	if !ok {
+		return "", "", nil
+	}
+	role, _ = claims["role"].(string)
+	affiliateId, _ = claims["affiliateId"].(string)
+	if pids, ok := claims["programIds"].([]any); ok {
+		for _, pid := range pids {
+			if s, ok := pid.(string); ok {
+				programIds = append(programIds, s)
+			}
+		}
+	}
+	return role, affiliateId, programIds
+}
+
+// maxRequestBodySize is the maximum allowed request body size (1MB).
+const maxRequestBodySize = 1 << 20
+
 // handlePost handles POST requests for creating resources
 func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r *http.Request) {
-	var data map[string]interface{}
+	// Limit request body size to prevent denial-of-service
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	var data map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		if encErr := json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"}); encErr != nil {
@@ -704,15 +811,38 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 
 	// Assess risk level from initial message content if present
 	if bodyText := h.fieldMapping.ResolveString(data, "body"); bodyText != "" {
-		initialMsgs := []interface{}{map[string]interface{}{"body": bodyText}}
+		initialMsgs := []any{map[string]any{"body": bodyText}}
 		riskLevel, riskTags := assessRiskLevel(initialMsgs)
 		h.fieldMapping.SetValue(data, "riskLevel", riskLevel)
 		if len(riskTags) > 0 {
-			tagIfaces := make([]interface{}, len(riskTags))
+			tagIfaces := make([]any, len(riskTags))
 			for i, t := range riskTags {
 				tagIfaces[i] = t
 			}
 			h.fieldMapping.SetValue(data, "tags", tagIfaces)
+		}
+	}
+
+	// Initialize messages array if not present (ensures chat view works immediately)
+	if _, hasMessages := data["messages"]; !hasMessages {
+		data["messages"] = []any{}
+	}
+
+	// If this is a conversation resource and has a message body but no programId,
+	// try to resolve routing from the message content using dynamic components.
+	if h.resourceName == "conversations" {
+		if _, hasProgramId := data["programId"]; !hasProgramId {
+			// Extract message body from various field names
+			msgBody := ""
+			for _, field := range []string{"body", "Body", "message", "content"} {
+				if b, ok := data[field].(string); ok && b != "" {
+					msgBody = b
+					break
+				}
+			}
+			if msgBody != "" {
+				h.resolveConversationRouting(data, msgBody)
+			}
 		}
 	}
 
@@ -736,7 +866,7 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 
 	// Publish event if broker is available
 	if h.eventBroker != nil {
-		eventData, _ := json.Marshal(map[string]interface{}{
+		eventData, _ := json.Marshal(map[string]any{
 			"eventType": h.resourceName + ".created",
 			"resource":  resource,
 		})
@@ -761,12 +891,85 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 	}
 }
 
+// resolveConversationRouting sets programId, affiliateId, and programName on the
+// conversation data map by matching the message body against known keywords, then
+// falling back to shortcode and provider. This mirrors the routing logic in the
+// conversation-router dynamic component but runs synchronously at creation time
+// so the fields are persisted before the async workflow pipeline starts.
+func (h *RESTAPIHandler) resolveConversationRouting(data map[string]any, msgBody string) {
+	// Keyword -> programId mapping (mirrors conversation_router.go)
+	keywordProgram := map[string]string{
+		"HELLO": "prog-001", "HELP": "prog-001", "CRISIS": "prog-001",
+		"TEEN": "prog-002", "WELLNESS": "prog-003", "PARTNER": "prog-004",
+	}
+	// programId -> affiliateId
+	programAffiliate := map[string]string{
+		"prog-001": "aff-001", "prog-002": "aff-001",
+		"prog-003": "aff-002", "prog-004": "aff-003",
+	}
+	// programId -> display name
+	programName := map[string]string{
+		"prog-001": "Crisis Text Line", "prog-002": "Teen Support Line",
+		"prog-003": "Wellness Chat", "prog-004": "Partner Assist",
+	}
+	// shortCode -> programId
+	shortCodeProgram := map[string]string{
+		"741741": "prog-001", "741742": "prog-002",
+	}
+	// provider -> programId
+	providerProgram := map[string]string{
+		"twilio": "prog-001", "webchat": "prog-001",
+		"aws": "prog-003", "partner": "prog-004",
+	}
+
+	var resolvedProgram string
+
+	// 1. Keyword match (highest priority)
+	words := strings.Fields(msgBody)
+	if len(words) > 0 {
+		firstWord := strings.ToUpper(words[0])
+		if pid, ok := keywordProgram[firstWord]; ok {
+			resolvedProgram = pid
+		}
+	}
+
+	// 2. Shortcode match
+	if resolvedProgram == "" {
+		shortCode, _ := data["shortCode"].(string)
+		if shortCode == "" {
+			shortCode, _ = data["toNumber"].(string)
+		}
+		if pid, ok := shortCodeProgram[shortCode]; ok {
+			resolvedProgram = pid
+		}
+	}
+
+	// 3. Provider match
+	if resolvedProgram == "" {
+		provider, _ := data["provider"].(string)
+		if pid, ok := providerProgram[strings.ToLower(provider)]; ok {
+			resolvedProgram = pid
+		}
+	}
+
+	// 4. Default fallback
+	if resolvedProgram == "" {
+		resolvedProgram = "prog-001"
+	}
+
+	data["programId"] = resolvedProgram
+	data["affiliateId"] = programAffiliate[resolvedProgram]
+	if name, ok := programName[resolvedProgram]; ok {
+		data["programName"] = name
+	}
+}
+
 // startWorkflowForResource creates a workflow instance and triggers the initial transition
 // for a newly created resource. Uses background context for async processing since
 // the HTTP request context is cancelled when the handler returns.
 func (h *RESTAPIHandler) startWorkflowForResource(_ context.Context, resourceId string, resource RESTResource) {
 	// Find the state machine engine
-	var engineSvc interface{}
+	var engineSvc any
 	if err := h.app.GetService(h.workflowEngine, &engineSvc); err != nil {
 		h.logger.Warn(fmt.Sprintf("Workflow engine '%s' not found: %v", h.workflowEngine, err))
 		return
@@ -829,12 +1032,29 @@ func (h *RESTAPIHandler) syncResourceStateFromEngine(instanceId, resourceId stri
 	if res, exists := h.resources[resourceId]; exists {
 		res.State = instance.CurrentState
 		res.LastUpdate = instance.LastUpdated.Format(time.RFC3339)
+
+		// Merge enrichment data from the workflow instance back into the resource.
+		// This captures data added by processing steps (e.g., programId from keyword-matcher,
+		// affiliateId from conversation-router).
+		// Only set keys that don't already exist in the API handler's resource data,
+		// since the handler is authoritative for fields it manages directly
+		// (e.g., messages, tags, riskLevel).
+		for k, v := range instance.Data {
+			// Don't overwrite core fields that the resource already manages
+			if k == "id" || k == "state" || k == "lastUpdate" {
+				continue
+			}
+			if _, exists := res.Data[k]; !exists {
+				res.Data[k] = v
+			}
+		}
+
+		res.Data["state"] = res.State
+		res.Data["lastUpdate"] = res.LastUpdate
 		h.resources[resourceId] = res
 
 		// Write-through to persistence
 		if h.persistence != nil {
-			res.Data["state"] = res.State
-			res.Data["lastUpdate"] = res.LastUpdate
 			_ = h.persistence.SaveResource(h.resourceName, res.ID, res.Data)
 		}
 	}
@@ -851,7 +1071,10 @@ func (h *RESTAPIHandler) handlePut(resourceId string, w http.ResponseWriter, r *
 		return
 	}
 
-	var data map[string]interface{}
+	// Limit request body size to prevent denial-of-service
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	var data map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		if encErr := json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"}); encErr != nil {
@@ -892,7 +1115,7 @@ func (h *RESTAPIHandler) handlePut(resourceId string, w http.ResponseWriter, r *
 
 	// Existing implementation plus event publishing:
 	if h.eventBroker != nil {
-		eventData, _ := json.Marshal(map[string]interface{}{
+		eventData, _ := json.Marshal(map[string]any{
 			"eventType": h.resourceName + ".updated",
 			"resource":  h.resources[resourceId],
 		})
@@ -942,7 +1165,7 @@ func (h *RESTAPIHandler) handleDelete(resourceId string, w http.ResponseWriter, 
 
 	// Existing implementation plus event publishing:
 	if h.eventBroker != nil {
-		eventData, _ := json.Marshal(map[string]interface{}{
+		eventData, _ := json.Marshal(map[string]any{
 			"eventType":  h.resourceName + ".deleted",
 			"resourceId": resourceId,
 		})
@@ -969,9 +1192,9 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 
 	// Parse the transition request
 	var transitionRequest struct {
-		Transition   string                 `json:"transition"`
-		Data         map[string]interface{} `json:"data,omitempty"`
-		WorkflowType string                 `json:"workflowType,omitempty"` // Optional workflow type override
+		Transition   string         `json:"transition"`
+		Data         map[string]any `json:"data,omitempty"`
+		WorkflowType string         `json:"workflowType,omitempty"` // Optional workflow type override
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&transitionRequest); err != nil {
@@ -993,7 +1216,7 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 	}
 
 	// Prepare the workflow data
-	workflowData := make(map[string]interface{})
+	workflowData := make(map[string]any)
 
 	// Merge existing resource data
 	h.mu.RLock()
@@ -1010,15 +1233,11 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 	}
 
 	// Add resource data to workflow data
-	for k, v := range resource.Data {
-		workflowData[k] = v
-	}
+	maps.Copy(workflowData, resource.Data)
 
 	// Add custom transition data if provided
 	if transitionRequest.Data != nil {
-		for k, v := range transitionRequest.Data {
-			workflowData[k] = v
-		}
+		maps.Copy(workflowData, transitionRequest.Data)
 	}
 
 	// Determine the workflow type to use
@@ -1066,13 +1285,13 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 	workflowData["workflowType"] = workflowType // Workflow type
 
 	// Find the workflow engine to use
-	var engine interface{}
+	var engine any
 	var stateMachineEngine *StateMachineEngine
 	var isStateMachineEngine bool
 
 	// First, try to use the specifically configured engine if available
 	if h.workflowEngine != "" {
-		var engineSvc interface{}
+		var engineSvc any
 		if err := h.app.GetService(h.workflowEngine, &engineSvc); err == nil && engineSvc != nil {
 			engine = engineSvc
 			if sm, ok := engineSvc.(*StateMachineEngine); ok {
@@ -1087,13 +1306,13 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 
 	// If no specific engine was configured or found, try to find one from a connector
 	if engine == nil {
-		var stateConnector interface{}
+		var stateConnector any
 		if err := h.app.GetService(StateMachineStateConnectorName, &stateConnector); err == nil && stateConnector != nil {
 			if connector, ok := stateConnector.(*StateMachineStateConnector); ok {
 				// Get the engine name for this resource type
 				if engineName, found := connector.GetEngineForResourceType(h.resourceName); found {
 					// Get the state machine engine by name
-					var engineSvc interface{}
+					var engineSvc any
 					if err := h.app.GetService(engineName, &engineSvc); err == nil && engineSvc != nil {
 						engine = engineSvc
 						if sm, ok := engineSvc.(*StateMachineEngine); ok {
@@ -1165,7 +1384,7 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 			if err != nil {
 				h.logger.Error(fmt.Sprintf("Failed to create workflow instance: %s", err.Error()))
 				w.WriteHeader(http.StatusInternalServerError)
-				if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+				if encErr := json.NewEncoder(w).Encode(map[string]any{
 					"success":    false,
 					"error":      fmt.Sprintf("Failed to create workflow instance: %s", err.Error()),
 					"id":         resourceId,
@@ -1181,19 +1400,19 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 	}
 
 	// Try to trigger the workflow transition
-	var result map[string]interface{}
+	var result map[string]any
 	var err error
 
 	// Try different engine types
 	switch e := engine.(type) {
 	case interface {
-		TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) error
+		TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) error
 	}:
 		// Using the main workflow engine
 		h.logger.Info(fmt.Sprintf("Triggering workflow '%s' with action '%s' for instance '%s'",
 			workflowType, transitionRequest.Transition, instanceId))
 		err = e.TriggerWorkflow(r.Context(), "statemachine", transitionRequest.Transition, workflowData)
-		result = map[string]interface{}{
+		result = map[string]any{
 			"success":    err == nil,
 			"id":         resourceId,
 			"instanceId": instanceId,
@@ -1201,13 +1420,13 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 		}
 
 	case interface {
-		TriggerTransition(ctx context.Context, instanceID string, transitionID string, data map[string]interface{}) error
+		TriggerTransition(ctx context.Context, instanceID string, transitionID string, data map[string]any) error
 	}:
 		// Using the state machine engine directly
 		h.logger.Info(fmt.Sprintf("Triggering transition '%s' for instance '%s'",
 			transitionRequest.Transition, instanceId))
 		err = e.TriggerTransition(r.Context(), instanceId, transitionRequest.Transition, workflowData)
-		result = map[string]interface{}{
+		result = map[string]any{
 			"success":    err == nil,
 			"id":         resourceId,
 			"instanceId": instanceId,
@@ -1226,7 +1445,7 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 	if err != nil {
 		h.logger.Error(fmt.Sprintf("Transition failed: %s", err.Error()))
 		w.WriteHeader(http.StatusBadRequest)
-		if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success":    false,
 			"error":      err.Error(),
 			"id":         resourceId,
@@ -1257,7 +1476,7 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 			h.logger.Warn(fmt.Sprintf("Failed to get instance state: %s", err.Error()))
 		}
 	case interface {
-		GetWorkflowState(ctx context.Context, workflowType string, instanceID string) (map[string]interface{}, error)
+		GetWorkflowState(ctx context.Context, workflowType string, instanceID string) (map[string]any, error)
 	}:
 		// Try a more generic method
 		stateData, err := e.GetWorkflowState(r.Context(), workflowType, instanceId)
@@ -1273,7 +1492,7 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 
 	// If we couldn't get the state from the engine, try the state tracker
 	if currentState == "" {
-		var stateTracker interface{}
+		var stateTracker any
 		if err := h.app.GetService(StateTrackerName, &stateTracker); err == nil && stateTracker != nil {
 			if tracker, ok := stateTracker.(*StateTracker); ok {
 				if stateInfo, exists := tracker.GetState(h.resourceName, resourceId); exists {
@@ -1334,12 +1553,12 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 	}
 
 	// Parse request body for additional data
-	var body map[string]interface{}
+	var body map[string]any
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 	}
 	if body == nil {
-		body = make(map[string]interface{})
+		body = make(map[string]any)
 	}
 
 	// Attach the authenticated user's ID
@@ -1365,7 +1584,7 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 		}
 
 		// Build message record
-		msg := map[string]interface{}{
+		msg := map[string]any{
 			"body":      h.fieldMapping.ResolveString(body, "body"),
 			"direction": h.fieldMapping.ResolveString(body, "direction"),
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -1384,8 +1603,11 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 			msg["status"] = "delivered"
 		}
 
-		// Append to messages array
+		// Append to messages array (initialize if nil)
 		msgs := h.fieldMapping.ResolveSlice(resource.Data, "messages")
+		if msgs == nil {
+			msgs = []any{}
+		}
 		msgs = append(msgs, msg)
 		h.fieldMapping.SetValue(resource.Data, "messages", msgs)
 
@@ -1403,7 +1625,7 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 			for _, t := range riskTags {
 				tagSet[t] = true
 			}
-			allTags := make([]interface{}, 0, len(tagSet))
+			allTags := make([]any, 0, len(tagSet))
 			for t := range tagSet {
 				allTags = append(allTags, t)
 			}
@@ -1416,16 +1638,13 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 
 		// Persist
 		if h.persistence != nil {
-			_ = h.persistence.SaveResource(h.resourceName, resourceId, map[string]interface{}{
-				"id":         resource.ID,
-				"data":       resource.Data,
-				"state":      resource.State,
-				"lastUpdate": resource.LastUpdate,
-			})
+			h.fieldMapping.SetValue(resource.Data, "state", resource.State)
+			h.fieldMapping.SetValue(resource.Data, "lastUpdate", resource.LastUpdate)
+			_ = h.persistence.SaveResource(h.resourceName, resourceId, resource.Data)
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"messageId":      fmt.Sprintf("msg-%s-%d", resourceId, len(msgs)),
 			"conversationId": resourceId,
 			"direction":      h.fieldMapping.ResolveString(body, "direction"),
@@ -1465,7 +1684,7 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 	// Find the state machine engine
 	var smEngine *StateMachineEngine
 	if h.workflowEngine != "" {
-		var engineSvc interface{}
+		var engineSvc any
 		if err := h.app.GetService(h.workflowEngine, &engineSvc); err == nil {
 			smEngine, _ = engineSvc.(*StateMachineEngine)
 		}
@@ -1499,13 +1718,9 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 		return
 	}
 
-	workflowData := make(map[string]interface{})
-	for k, v := range resource.Data {
-		workflowData[k] = v
-	}
-	for k, v := range body {
-		workflowData[k] = v
-	}
+	workflowData := make(map[string]any)
+	maps.Copy(workflowData, resource.Data)
+	maps.Copy(workflowData, body)
 
 	// Ensure workflow instance exists
 	if _, err := smEngine.GetInstance(instanceId); err != nil {
@@ -1523,7 +1738,7 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 		h.logger.Error(fmt.Sprintf("Sub-action '%s' (transition '%s') failed for resource '%s': %v",
 			subAction, transitionName, resourceId, err))
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"success":    false,
 			"error":      err.Error(),
 			"action":     subAction,
@@ -1549,9 +1764,7 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 		res.LastUpdate = lastUpdate
 		res.Data["lastUpdate"] = lastUpdate
 		// Merge body data into the resource
-		for k, v := range body {
-			res.Data[k] = v
-		}
+		maps.Copy(res.Data, body)
 		h.resources[resourceId] = res
 
 		if h.persistence != nil {
@@ -1562,7 +1775,7 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 
 	// Publish event
 	if h.eventBroker != nil {
-		eventData, _ := json.Marshal(map[string]interface{}{
+		eventData, _ := json.Marshal(map[string]any{
 			"eventType":  h.resourceName + "." + subAction,
 			"resourceId": resourceId,
 			"action":     subAction,
@@ -1577,7 +1790,7 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 		subAction, resourceId, currentState))
 
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"success":    true,
 		"action":     subAction,
 		"transition": transitionName,
@@ -1588,10 +1801,25 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 }
 
 // handleQueueHealth returns aggregated queue health data grouped by program.
-func (h *RESTAPIHandler) handleQueueHealth(w http.ResponseWriter, _ *http.Request) {
+func (h *RESTAPIHandler) handleQueueHealth(w http.ResponseWriter, r *http.Request) {
 	h.syncFromPersistence()
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+
+	// Extract affiliate/program filtering
+	role, jwtAffiliateId, jwtProgramIds := extractAuthClaims(r)
+	queryAffiliateId := r.URL.Query().Get("affiliateId")
+	filterAffiliateId := queryAffiliateId
+	if filterAffiliateId == "" && role != "admin" {
+		filterAffiliateId = jwtAffiliateId
+	}
+	var filterProgramIds []string
+	if qp := r.URL.Query().Get("programId"); qp != "" {
+		filterProgramIds = strings.Split(qp, ",")
+	} else if role != "admin" && len(jwtProgramIds) > 0 {
+		filterProgramIds = jwtProgramIds
+	}
+	isAdmin := role == "admin"
 
 	type programStats struct {
 		ProgramID      string  `json:"programId"`
@@ -1615,7 +1843,21 @@ func (h *RESTAPIHandler) handleQueueHealth(w http.ResponseWriter, _ *http.Reques
 			continue
 		}
 
+		// Apply affiliate filter
+		resAffiliateId := h.fieldMapping.ResolveString(res.Data, "affiliateId")
+		if !isAdmin && filterAffiliateId != "" && resAffiliateId != "" && resAffiliateId != filterAffiliateId {
+			continue
+		}
+
 		pid := h.fieldMapping.ResolveString(res.Data, "programId")
+
+		// Apply program filter
+		if !isAdmin && len(filterProgramIds) > 0 && pid != "" {
+			found := slices.Contains(filterProgramIds, pid)
+			if !found {
+				continue
+			}
+		}
 		if pid == "" {
 			pid = "default"
 		}
@@ -1654,14 +1896,14 @@ func (h *RESTAPIHandler) handleQueueHealth(w http.ResponseWriter, _ *http.Reques
 	}
 
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"programs": result,
 		"alerts":   0,
 	})
 }
 
 // handleTagAction handles POST /tag — updates resource data without a state transition.
-func (h *RESTAPIHandler) handleTagAction(resourceId string, body map[string]interface{}, w http.ResponseWriter) {
+func (h *RESTAPIHandler) handleTagAction(resourceId string, body map[string]any, w http.ResponseWriter) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -1678,7 +1920,7 @@ func (h *RESTAPIHandler) handleTagAction(resourceId string, body map[string]inte
 		tags = append(tags, newTag)
 		h.fieldMapping.SetValue(res.Data, "tags", tags)
 	}
-	if newTags, ok := body["tags"].([]interface{}); ok {
+	if newTags, ok := body["tags"].([]any); ok {
 		tags = append(tags, newTags...)
 		h.fieldMapping.SetValue(res.Data, "tags", tags)
 	}
@@ -1691,7 +1933,7 @@ func (h *RESTAPIHandler) handleTagAction(resourceId string, body map[string]inte
 	}
 
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"success": true,
 		"id":      resourceId,
 		"tags":    tags,
@@ -1720,7 +1962,7 @@ func (h *RESTAPIHandler) handleSubActionGet(resourceId, subAction string, w http
 	switch subAction {
 	case "summary":
 		// Return the resource data plus any summary fields
-		summary := map[string]interface{}{
+		summary := map[string]any{
 			"id":         resourceId,
 			"state":      resource.State,
 			"lastUpdate": resource.LastUpdate,
@@ -1737,7 +1979,7 @@ func (h *RESTAPIHandler) handleSubActionGet(resourceId, subAction string, w http
 			if h.instanceIDPrefix != "" {
 				instanceId = h.instanceIDPrefix + resourceId
 			}
-			var engineSvc interface{}
+			var engineSvc any
 			if err := h.app.GetService(h.workflowEngine, &engineSvc); err == nil {
 				if smEngine, ok := engineSvc.(*StateMachineEngine); ok {
 					if instance, err := smEngine.GetInstance(instanceId); err == nil && instance != nil {
@@ -1764,9 +2006,9 @@ func (h *RESTAPIHandler) loadSeedData(path string) error {
 	}
 
 	var seeds []struct {
-		ID    string                 `json:"id"`
-		Data  map[string]interface{} `json:"data"`
-		State string                 `json:"state"`
+		ID    string         `json:"id"`
+		Data  map[string]any `json:"data"`
+		State string         `json:"state"`
 	}
 	if err := json.Unmarshal(data, &seeds); err != nil {
 		return fmt.Errorf("parsing seed file: %w", err)
@@ -1786,7 +2028,7 @@ func (h *RESTAPIHandler) loadSeedData(path string) error {
 			LastUpdate: time.Now().Format(time.RFC3339),
 		}
 		if resource.Data == nil {
-			resource.Data = make(map[string]interface{})
+			resource.Data = make(map[string]any)
 		}
 		h.resources[seed.ID] = resource
 	}
@@ -1803,7 +2045,7 @@ func (h *RESTAPIHandler) Start(ctx context.Context) error {
 	// This handles the case where the persistence module initializes after
 	// this module (e.g., alphabetical ordering without explicit dependsOn).
 	if h.persistence == nil && h.app != nil {
-		var ps interface{}
+		var ps any
 		if err := h.app.GetService("persistence", &ps); err == nil && ps != nil {
 			if store, ok := ps.(*PersistenceStore); ok {
 				h.persistence = store

@@ -87,7 +87,7 @@ func (b *EventBusBridge) SendMessage(topic string, message []byte) error {
 		return nil
 	}
 
-	var payload interface{}
+	var payload any
 	if err := json.Unmarshal(message, &payload); err != nil {
 		payload = message
 	}

@@ -30,16 +30,16 @@ func TestE2E_Negative_HTTPRouting(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "neg-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "neg-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "neg-router", Type: "http.router", DependsOn: []string{"neg-server"}},
-			{Name: "neg-handler", Type: "http.handler", DependsOn: []string{"neg-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
+			{Name: "neg-handler", Type: "http.handler", DependsOn: []string{"neg-router"}, Config: map[string]any{"contentType": "application/json"}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "neg-server",
 				"router": "neg-router",
-				"routes": []interface{}{
-					map[string]interface{}{
+				"routes": []any{
+					map[string]any{
 						"method":  "POST",
 						"path":    "/api/test",
 						"handler": "neg-handler",
@@ -47,7 +47,7 @@ func TestE2E_Negative_HTTPRouting(t *testing.T) {
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -59,8 +59,7 @@ func TestE2E_Negative_HTTPRouting(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -85,7 +84,7 @@ func TestE2E_Negative_HTTPRouting(t *testing.T) {
 			t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, string(body))
 		}
 
-		var result map[string]interface{}
+		var result map[string]any
 		if err := json.Unmarshal(body, &result); err != nil {
 			t.Fatalf("Failed to decode response as JSON: %v (body=%s)", err, string(body))
 		}
@@ -162,7 +161,7 @@ func TestE2E_Negative_HTTPRouting(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 
-		var result map[string]interface{}
+		var result map[string]any
 		if err := json.Unmarshal(body, &result); err != nil {
 			t.Fatalf("Response is not valid JSON: %v", err)
 		}
@@ -199,8 +198,7 @@ func TestE2E_Negative_OrderPipeline_DataRoundtrip(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -226,7 +224,7 @@ func TestE2E_Negative_OrderPipeline_DataRoundtrip(t *testing.T) {
 			t.Fatalf("Expected 201, got %d: %s", resp.StatusCode, string(body))
 		}
 
-		var created map[string]interface{}
+		var created map[string]any
 		if err := json.Unmarshal(body, &created); err != nil {
 			t.Fatalf("Failed to decode create response: %v", err)
 		}
@@ -251,7 +249,7 @@ func TestE2E_Negative_OrderPipeline_DataRoundtrip(t *testing.T) {
 			t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, string(body))
 		}
 
-		var fetched map[string]interface{}
+		var fetched map[string]any
 		if err := json.Unmarshal(body, &fetched); err != nil {
 			t.Fatalf("Failed to decode GET response: %v", err)
 		}
@@ -262,7 +260,7 @@ func TestE2E_Negative_OrderPipeline_DataRoundtrip(t *testing.T) {
 		}
 
 		// Verify the data field exists and contains our posted fields
-		data, ok := fetched["data"].(map[string]interface{})
+		data, ok := fetched["data"].(map[string]any)
 		if !ok {
 			t.Fatalf("Expected 'data' field in response, got %v", fetched)
 		}
@@ -312,7 +310,7 @@ func TestE2E_Negative_OrderPipeline_DataRoundtrip(t *testing.T) {
 		}
 
 		// Verify the error response has a meaningful error message
-		var errResp map[string]interface{}
+		var errResp map[string]any
 		if err := json.Unmarshal(body, &errResp); err == nil {
 			if errMsg, ok := errResp["error"].(string); ok {
 				if errMsg == "" {
@@ -357,9 +355,9 @@ func TestE2E_Negative_OrderPipeline_DataRoundtrip(t *testing.T) {
 		bodyA, _ := io.ReadAll(respGetA.Body)
 		respGetA.Body.Close()
 
-		var fetchedA map[string]interface{}
+		var fetchedA map[string]any
 		json.Unmarshal(bodyA, &fetchedA)
-		dataA, _ := fetchedA["data"].(map[string]interface{})
+		dataA, _ := fetchedA["data"].(map[string]any)
 
 		// Fetch order B
 		reqB, _ := http.NewRequest("GET", baseURL+"/api/orders/ORD-B", nil)
@@ -370,9 +368,9 @@ func TestE2E_Negative_OrderPipeline_DataRoundtrip(t *testing.T) {
 		bodyB, _ := io.ReadAll(respGetB.Body)
 		respGetB.Body.Close()
 
-		var fetchedB map[string]interface{}
+		var fetchedB map[string]any
 		json.Unmarshal(bodyB, &fetchedB)
-		dataB, _ := fetchedB["data"].(map[string]interface{})
+		dataB, _ := fetchedB["data"].(map[string]any)
 
 		// Verify A has Bob, B has Charlie
 		if dataA["customer"] != "Bob" {
@@ -405,8 +403,7 @@ func TestE2E_Negative_OrderPipeline_InvalidTransitions(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -431,7 +428,7 @@ func TestE2E_Negative_OrderPipeline_InvalidTransitions(t *testing.T) {
 	t.Run("invalid_transition_name_returns_400_with_error", func(t *testing.T) {
 		t.Logf("Proves: A non-existent transition 'fly_to_moon' is rejected with 400 and an error message")
 
-		transBody, _ := json.Marshal(map[string]interface{}{"transition": "fly_to_moon"})
+		transBody, _ := json.Marshal(map[string]any{"transition": "fly_to_moon"})
 		req, _ := http.NewRequest("PUT", baseURL+"/api/orders/ORD-TRANS-001/transition", bytes.NewReader(transBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req)
@@ -445,7 +442,7 @@ func TestE2E_Negative_OrderPipeline_InvalidTransitions(t *testing.T) {
 			t.Errorf("Expected 400 for invalid transition 'fly_to_moon', got %d: %s", resp.StatusCode, string(body))
 		}
 
-		var errResp map[string]interface{}
+		var errResp map[string]any
 		if err := json.Unmarshal(body, &errResp); err != nil {
 			t.Fatalf("Error response is not valid JSON: %v (body=%s)", err, string(body))
 		}
@@ -470,7 +467,7 @@ func TestE2E_Negative_OrderPipeline_InvalidTransitions(t *testing.T) {
 		t.Logf("Proves: Trying store_order from 'received' (needs 'validated') is rejected")
 
 		// The order is in "received" state, but store_order requires "validated"
-		transBody, _ := json.Marshal(map[string]interface{}{"transition": "store_order"})
+		transBody, _ := json.Marshal(map[string]any{"transition": "store_order"})
 		req, _ := http.NewRequest("PUT", baseURL+"/api/orders/ORD-TRANS-001/transition", bytes.NewReader(transBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req)
@@ -484,7 +481,7 @@ func TestE2E_Negative_OrderPipeline_InvalidTransitions(t *testing.T) {
 			t.Errorf("Expected 400 for wrong-from-state transition, got %d: %s", resp.StatusCode, string(body))
 		}
 
-		var errResp map[string]interface{}
+		var errResp map[string]any
 		if err := json.Unmarshal(body, &errResp); err == nil {
 			errMsg, _ := errResp["error"].(string)
 			if errMsg == "" {
@@ -503,7 +500,7 @@ func TestE2E_Negative_OrderPipeline_InvalidTransitions(t *testing.T) {
 		doTransition(t, client, baseURL, "ORD-TRANS-001", "send_notification")
 
 		// Now try to do any transition from "notified" (which is final)
-		transBody, _ := json.Marshal(map[string]interface{}{"transition": "validate_order"})
+		transBody, _ := json.Marshal(map[string]any{"transition": "validate_order"})
 		req, _ := http.NewRequest("PUT", baseURL+"/api/orders/ORD-TRANS-001/transition", bytes.NewReader(transBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req)
@@ -517,7 +514,7 @@ func TestE2E_Negative_OrderPipeline_InvalidTransitions(t *testing.T) {
 			t.Errorf("Expected 400 for transition from final state 'notified', got %d: %s", resp.StatusCode, string(body))
 		}
 
-		var errResp map[string]interface{}
+		var errResp map[string]any
 		if err := json.Unmarshal(body, &errResp); err == nil {
 			if errResp["error"] == nil || errResp["error"] == "" {
 				t.Errorf("Expected error message explaining final state rejection")
@@ -529,7 +526,7 @@ func TestE2E_Negative_OrderPipeline_InvalidTransitions(t *testing.T) {
 	t.Run("transition_on_nonexistent_order_returns_404", func(t *testing.T) {
 		t.Logf("Proves: Transitioning a non-existent order returns 404, not 200")
 
-		transBody, _ := json.Marshal(map[string]interface{}{"transition": "validate_order"})
+		transBody, _ := json.Marshal(map[string]any{"transition": "validate_order"})
 		req, _ := http.NewRequest("PUT", baseURL+"/api/orders/GHOST-ORDER-999/transition", bytes.NewReader(transBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req)
@@ -549,7 +546,7 @@ func TestE2E_Negative_OrderPipeline_InvalidTransitions(t *testing.T) {
 	t.Run("empty_transition_name_returns_400", func(t *testing.T) {
 		t.Logf("Proves: An empty transition name is rejected")
 
-		transBody, _ := json.Marshal(map[string]interface{}{"transition": ""})
+		transBody, _ := json.Marshal(map[string]any{"transition": ""})
 		req, _ := http.NewRequest("PUT", baseURL+"/api/orders/ORD-TRANS-001/transition", bytes.NewReader(transBody))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req)
@@ -576,10 +573,10 @@ func TestE2E_Negative_ConfigValidation(t *testing.T) {
 
 	initialCfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "init-mod", Type: "http.server", Config: map[string]interface{}{"address": ":9999"}},
+			{Name: "init-mod", Type: "http.server", Config: map[string]any{"address": ":9999"}},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	uiHandler := module.NewWorkflowUIHandler(initialCfg)
@@ -588,8 +585,8 @@ func TestE2E_Negative_ConfigValidation(t *testing.T) {
 		return nil
 	})
 
-	uiHandler.SetStatusFunc(func() map[string]interface{} {
-		return map[string]interface{}{
+	uiHandler.SetStatusFunc(func() map[string]any {
+		return map[string]any{
 			"status":      "running",
 			"moduleCount": 1,
 		}
@@ -638,18 +635,18 @@ func TestE2E_Negative_ConfigValidation(t *testing.T) {
 			t.Fatalf("Expected 200, got %d", resp.StatusCode)
 		}
 
-		var cfgResp map[string]interface{}
+		var cfgResp map[string]any
 		if err := json.Unmarshal(body, &cfgResp); err != nil {
 			t.Fatalf("Failed to decode config: %v", err)
 		}
 
-		modules, ok := cfgResp["modules"].([]interface{})
+		modules, ok := cfgResp["modules"].([]any)
 		if !ok || len(modules) != 1 {
 			t.Errorf("Expected 1 module in initial config, got %v", cfgResp["modules"])
 		}
 
 		if len(modules) == 1 {
-			mod, _ := modules[0].(map[string]interface{})
+			mod, _ := modules[0].(map[string]any)
 			if mod["name"] != "init-mod" {
 				t.Errorf("Expected module name 'init-mod', got %v", mod["name"])
 			}
@@ -694,12 +691,12 @@ func TestE2E_Negative_ConfigValidation(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 
-		var cfgResp map[string]interface{}
+		var cfgResp map[string]any
 		if err := json.Unmarshal(body, &cfgResp); err != nil {
 			t.Fatalf("Failed to decode config: %v", err)
 		}
 
-		modules, ok := cfgResp["modules"].([]interface{})
+		modules, ok := cfgResp["modules"].([]any)
 		if !ok {
 			t.Fatalf("Expected modules array in response")
 		}
@@ -709,8 +706,8 @@ func TestE2E_Negative_ConfigValidation(t *testing.T) {
 		}
 
 		// Verify exact module names
-		mod0, _ := modules[0].(map[string]interface{})
-		mod1, _ := modules[1].(map[string]interface{})
+		mod0, _ := modules[0].(map[string]any)
+		mod1, _ := modules[1].(map[string]any)
 
 		if mod0["name"] != "web-server" {
 			t.Errorf("Expected first module name 'web-server', got %v", mod0["name"])
@@ -739,7 +736,7 @@ func TestE2E_Negative_ConfigValidation(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 
-		var result map[string]interface{}
+		var result map[string]any
 		if err := json.Unmarshal(body, &result); err != nil {
 			t.Fatalf("Failed to decode validation result: %v", err)
 		}
@@ -763,7 +760,7 @@ func TestE2E_Negative_ConfigValidation(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 
-		var result map[string]interface{}
+		var result map[string]any
 		if err := json.Unmarshal(body, &result); err != nil {
 			t.Fatalf("Failed to decode validation result: %v", err)
 		}
@@ -772,7 +769,7 @@ func TestE2E_Negative_ConfigValidation(t *testing.T) {
 			t.Errorf("Expected valid=false for empty modules, got %v", result["valid"])
 		}
 
-		errors, ok := result["errors"].([]interface{})
+		errors, ok := result["errors"].([]any)
 		if !ok || len(errors) == 0 {
 			t.Errorf("Expected non-empty errors array, got %v", result["errors"])
 		}
@@ -796,7 +793,7 @@ func TestE2E_Negative_ConfigValidation(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 
-		var result map[string]interface{}
+		var result map[string]any
 		if err := json.Unmarshal(body, &result); err != nil {
 			t.Fatalf("Failed to decode validation result: %v", err)
 		}
@@ -805,7 +802,7 @@ func TestE2E_Negative_ConfigValidation(t *testing.T) {
 			t.Errorf("Expected valid=false for missing dependency, got %v", result["valid"])
 		}
 
-		errors, ok := result["errors"].([]interface{})
+		errors, ok := result["errors"].([]any)
 		if !ok || len(errors) == 0 {
 			t.Errorf("Expected errors mentioning missing dependency")
 		}
@@ -1050,7 +1047,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	t.Run("add_5_plus_3_equals_8", func(t *testing.T) {
 		t.Logf("Proves: The component actually computes 5+3=8, not a canned response")
 
-		result, err := comp.Execute(ctx, map[string]interface{}{
+		result, err := comp.Execute(ctx, map[string]any{
 			"op": "add",
 			"a":  float64(5),
 			"b":  float64(3),
@@ -1072,7 +1069,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	t.Run("multiply_4_times_7_equals_28", func(t *testing.T) {
 		t.Logf("Proves: The component computes 4*7=28, proving it runs different code paths")
 
-		result, err := comp.Execute(ctx, map[string]interface{}{
+		result, err := comp.Execute(ctx, map[string]any{
 			"op": "multiply",
 			"a":  float64(4),
 			"b":  float64(7),
@@ -1091,7 +1088,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	t.Run("subtract_10_minus_3_equals_7", func(t *testing.T) {
 		t.Logf("Proves: Yet another code path works correctly")
 
-		result, err := comp.Execute(ctx, map[string]interface{}{
+		result, err := comp.Execute(ctx, map[string]any{
 			"op": "subtract",
 			"a":  float64(10),
 			"b":  float64(3),
@@ -1110,7 +1107,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	t.Run("unknown_operation_returns_error", func(t *testing.T) {
 		t.Logf("Proves: Unknown operations return errors, not silent failures")
 
-		_, err := comp.Execute(ctx, map[string]interface{}{
+		_, err := comp.Execute(ctx, map[string]any{
 			"op": "unknown",
 			"a":  float64(1),
 			"b":  float64(2),
@@ -1129,10 +1126,10 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	t.Run("results_change_with_different_inputs", func(t *testing.T) {
 		t.Logf("Proves: Different inputs produce different results (not canned)")
 
-		result1, _ := comp.Execute(ctx, map[string]interface{}{
+		result1, _ := comp.Execute(ctx, map[string]any{
 			"op": "add", "a": float64(1), "b": float64(1),
 		})
-		result2, _ := comp.Execute(ctx, map[string]interface{}{
+		result2, _ := comp.Execute(ctx, map[string]any{
 			"op": "add", "a": float64(100), "b": float64(200),
 		})
 
@@ -1163,28 +1160,28 @@ func TestE2E_Negative_BrokerMessageVerification(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "brkv-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "brkv-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "brkv-router", Type: "http.router", DependsOn: []string{"brkv-server"}},
-			{Name: "brkv-handler", Type: "http.handler", DependsOn: []string{"brkv-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
+			{Name: "brkv-handler", Type: "http.handler", DependsOn: []string{"brkv-router"}, Config: map[string]any{"contentType": "application/json"}},
 			{Name: "brkv-broker", Type: "messaging.broker"},
 			{Name: "brkv-subscriber", Type: "messaging.handler", DependsOn: []string{"brkv-broker"}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "brkv-server",
 				"router": "brkv-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "GET", "path": "/api/health", "handler": "brkv-handler"},
+				"routes": []any{
+					map[string]any{"method": "GET", "path": "/api/health", "handler": "brkv-handler"},
 				},
 			},
-			"messaging": map[string]interface{}{
+			"messaging": map[string]any{
 				"broker": "brkv-broker",
-				"subscriptions": []interface{}{
-					map[string]interface{}{"topic": "test.topic.alpha", "handler": "brkv-subscriber"},
+				"subscriptions": []any{
+					map[string]any{"topic": "test.topic.alpha", "handler": "brkv-subscriber"},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -1197,8 +1194,7 @@ func TestE2E_Negative_BrokerMessageVerification(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -1252,7 +1248,7 @@ func TestE2E_Negative_BrokerMessageVerification(t *testing.T) {
 		}
 
 		// Parse and verify exact content
-		var receivedData map[string]interface{}
+		var receivedData map[string]any
 		if err := json.Unmarshal(received, &receivedData); err != nil {
 			t.Fatalf("Received message is not valid JSON: %v", err)
 		}
@@ -1264,7 +1260,7 @@ func TestE2E_Negative_BrokerMessageVerification(t *testing.T) {
 			t.Errorf("Expected timestamp='2024-01-01T00:00:00Z', got %v", receivedData["timestamp"])
 		}
 
-		nested, ok := receivedData["nested"].(map[string]interface{})
+		nested, ok := receivedData["nested"].(map[string]any)
 		if !ok {
 			t.Errorf("Expected nested object in received message")
 		} else if nested["deep"] != "data" {
@@ -1345,7 +1341,7 @@ func TestE2E_Negative_BrokerMessageVerification(t *testing.T) {
 
 		// Verify each message has the correct content
 		for i, msg := range messages {
-			var parsed map[string]interface{}
+			var parsed map[string]any
 			if err := json.Unmarshal([]byte(msg), &parsed); err != nil {
 				t.Errorf("Message %d is not valid JSON: %v", i+1, err)
 				continue
@@ -1425,7 +1421,7 @@ func TestE2E_Negative_WebhookPayloadVerification(t *testing.T) {
 		}
 
 		// Verify exact payload
-		var received map[string]interface{}
+		var received map[string]any
 		if err := json.Unmarshal(receivedPayloads[len(receivedPayloads)-1], &received); err != nil {
 			t.Fatalf("Received payload is not valid JSON: %v", err)
 		}
@@ -1443,7 +1439,7 @@ func TestE2E_Negative_WebhookPayloadVerification(t *testing.T) {
 			t.Errorf("Expected total=199.99, got %v", received["total"])
 		}
 
-		items, ok := received["items"].([]interface{})
+		items, ok := received["items"].([]any)
 		if !ok || len(items) != 3 {
 			t.Errorf("Expected 3 items, got %v", received["items"])
 		}
@@ -1575,9 +1571,9 @@ func TestE2E_Negative_WebhookPayloadVerification(t *testing.T) {
 func buildOrderPipelineCfg(addr string) *config.WorkflowConfig {
 	return &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "neg-order-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "neg-order-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "neg-order-router", Type: "http.router", DependsOn: []string{"neg-order-server"}},
-			{Name: "neg-order-api", Type: "api.handler", DependsOn: []string{"neg-order-router"}, Config: map[string]interface{}{
+			{Name: "neg-order-api", Type: "api.handler", DependsOn: []string{"neg-order-router"}, Config: map[string]any{
 				"resourceName":   "orders",
 				"workflowType":   "order-processing",
 				"workflowEngine": "neg-order-engine",
@@ -1585,48 +1581,48 @@ func buildOrderPipelineCfg(addr string) *config.WorkflowConfig {
 			{Name: "neg-order-engine", Type: "statemachine.engine", DependsOn: []string{"neg-order-api"}},
 			{Name: "neg-order-tracker", Type: "state.tracker", DependsOn: []string{"neg-order-engine"}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "neg-order-server",
 				"router": "neg-order-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "POST", "path": "/api/orders", "handler": "neg-order-api"},
-					map[string]interface{}{"method": "GET", "path": "/api/orders", "handler": "neg-order-api"},
-					map[string]interface{}{"method": "GET", "path": "/api/orders/{id}", "handler": "neg-order-api"},
-					map[string]interface{}{"method": "PUT", "path": "/api/orders/{id}", "handler": "neg-order-api"},
-					map[string]interface{}{"method": "PUT", "path": "/api/orders/{id}/transition", "handler": "neg-order-api"},
+				"routes": []any{
+					map[string]any{"method": "POST", "path": "/api/orders", "handler": "neg-order-api"},
+					map[string]any{"method": "GET", "path": "/api/orders", "handler": "neg-order-api"},
+					map[string]any{"method": "GET", "path": "/api/orders/{id}", "handler": "neg-order-api"},
+					map[string]any{"method": "PUT", "path": "/api/orders/{id}", "handler": "neg-order-api"},
+					map[string]any{"method": "PUT", "path": "/api/orders/{id}/transition", "handler": "neg-order-api"},
 				},
 			},
-			"statemachine": map[string]interface{}{
+			"statemachine": map[string]any{
 				"engine": "neg-order-engine",
-				"definitions": []interface{}{
-					map[string]interface{}{
+				"definitions": []any{
+					map[string]any{
 						"name":         "order-processing",
 						"description":  "Order processing workflow",
 						"initialState": "received",
-						"states": map[string]interface{}{
-							"received":  map[string]interface{}{"description": "Order received", "isFinal": false, "isError": false},
-							"validated": map[string]interface{}{"description": "Order validated", "isFinal": false, "isError": false},
-							"stored":    map[string]interface{}{"description": "Order stored", "isFinal": false, "isError": false},
-							"notified":  map[string]interface{}{"description": "Notification sent", "isFinal": true, "isError": false},
-							"failed":    map[string]interface{}{"description": "Order failed", "isFinal": true, "isError": true},
+						"states": map[string]any{
+							"received":  map[string]any{"description": "Order received", "isFinal": false, "isError": false},
+							"validated": map[string]any{"description": "Order validated", "isFinal": false, "isError": false},
+							"stored":    map[string]any{"description": "Order stored", "isFinal": false, "isError": false},
+							"notified":  map[string]any{"description": "Notification sent", "isFinal": true, "isError": false},
+							"failed":    map[string]any{"description": "Order failed", "isFinal": true, "isError": true},
 						},
-						"transitions": map[string]interface{}{
-							"validate_order":    map[string]interface{}{"fromState": "received", "toState": "validated"},
-							"store_order":       map[string]interface{}{"fromState": "validated", "toState": "stored"},
-							"send_notification": map[string]interface{}{"fromState": "stored", "toState": "notified"},
-							"fail_validation":   map[string]interface{}{"fromState": "received", "toState": "failed"},
+						"transitions": map[string]any{
+							"validate_order":    map[string]any{"fromState": "received", "toState": "validated"},
+							"store_order":       map[string]any{"fromState": "validated", "toState": "stored"},
+							"send_notification": map[string]any{"fromState": "stored", "toState": "notified"},
+							"fail_validation":   map[string]any{"fromState": "received", "toState": "failed"},
 						},
 					},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 }
 
 // mapKeys returns the keys of a map as a sorted string slice for test logging.
-func mapKeys(m map[string]interface{}) []string {
+func mapKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

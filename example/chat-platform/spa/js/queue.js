@@ -15,13 +15,16 @@ function clearRefresh() {
 
 function renderQueueHealth() {
   if (!requireAuth()) return '';
+  const user = api.getUser();
+  const isAdmin = user?.role === 'admin';
+  const affiliateName = isAdmin ? 'All Affiliates' : (user?.affiliateName || user?.affiliateId || '');
 
   return `
     <div class="page">
       <div class="page-header">
         <div>
-          <h1 class="page-title">Queue Health</h1>
-          <p class="page-subtitle">Real-time queue monitoring across all programs</p>
+          <h1 class="page-title">Queue Health${affiliateName ? ` <span style="font-size:0.6em;color:var(--text-muted);font-weight:normal">— ${escapeHtml(affiliateName)}</span>` : ''}</h1>
+          <p class="page-subtitle">Real-time queue monitoring${user?.role === 'admin' ? ' across all programs' : ' for your programs'}</p>
         </div>
       </div>
       <div class="metric-grid" id="queue-global-metrics">
@@ -58,7 +61,9 @@ function handleQueueHealth() {
 
 async function loadQueueData() {
   try {
-    const result = await api.get('/api/queue/health');
+    const user = api.getUser();
+    const affParam = user?.affiliateId ? `?affiliateId=${user.affiliateId}` : '';
+    const result = await api.get(`/api/queue/health${affParam}`);
     const health = result.data || result || {};
 
     const programs = health.programs || health.queues || [];

@@ -169,7 +169,7 @@ func TestComponentLifecycle(t *testing.T) {
 	}
 
 	// Execute
-	result, err := comp.Execute(ctx, map[string]interface{}{"name": "world"})
+	result, err := comp.Execute(ctx, map[string]any{"name": "world"})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Concurrent writes
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
@@ -350,7 +350,7 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Concurrent reads
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()

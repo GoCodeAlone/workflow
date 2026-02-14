@@ -17,9 +17,9 @@ const (
 
 // TopicHandlerConfig represents a topic handler configuration in messaging workflow
 type TopicHandlerConfig struct {
-	Topic   string                 `json:"topic" yaml:"topic"`
-	Handler string                 `json:"handler" yaml:"handler"`
-	Config  map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
+	Topic   string         `json:"topic" yaml:"topic"`
+	Handler string         `json:"handler" yaml:"handler"`
+	Config  map[string]any `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
 // MessagingWorkflowHandler handles message-based workflows
@@ -57,9 +57,9 @@ func (h *MessagingWorkflowHandler) CanHandle(workflowType string) bool {
 }
 
 // ConfigureWorkflow sets up the workflow from configuration
-func (h *MessagingWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig interface{}) error {
+func (h *MessagingWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig any) error {
 	// Convert the generic config to messaging-specific config
-	msgConfig, ok := workflowConfig.(map[string]interface{})
+	msgConfig, ok := workflowConfig.(map[string]any)
 	if !ok {
 		return fmt.Errorf("invalid messaging workflow configuration format")
 	}
@@ -81,7 +81,7 @@ func (h *MessagingWorkflowHandler) ConfigureWorkflow(app modular.Application, wo
 	if broker == nil {
 		// Find the standard name broker first (with namespace)
 		brokerName := h.namespace.FormatName(workflowmodule.InMemoryMessageBrokerName)
-		var brokerSvc interface{}
+		var brokerSvc any
 
 		err := app.GetService(brokerName, &brokerSvc)
 		if err == nil && brokerSvc != nil {
@@ -107,14 +107,14 @@ func (h *MessagingWorkflowHandler) ConfigureWorkflow(app modular.Application, wo
 	}
 
 	// Configure subscriptions
-	subscriptions, ok := msgConfig["subscriptions"].([]interface{})
+	subscriptions, ok := msgConfig["subscriptions"].([]any)
 	if !ok {
 		return fmt.Errorf("subscriptions not found in messaging workflow configuration")
 	}
 
 	consumer := broker.Consumer()
 	for i, sub := range subscriptions {
-		subMap, ok := sub.(map[string]interface{})
+		subMap, ok := sub.(map[string]any)
 		if !ok {
 			return fmt.Errorf("invalid subscription configuration at index %d", i)
 		}
@@ -132,7 +132,7 @@ func (h *MessagingWorkflowHandler) ConfigureWorkflow(app modular.Application, wo
 		}
 
 		// Get handler service by name
-		var handlerSvc interface{}
+		var handlerSvc any
 		_ = app.GetService(handlerName, &handlerSvc)
 		if handlerSvc == nil {
 			return fmt.Errorf("handler service '%s' not found for topic %s", handlerName, topic)
@@ -150,9 +150,9 @@ func (h *MessagingWorkflowHandler) ConfigureWorkflow(app modular.Application, wo
 	}
 
 	// Configure producers (optional)
-	if producers, ok := msgConfig["producers"].([]interface{}); ok {
+	if producers, ok := msgConfig["producers"].([]any); ok {
 		for i, prod := range producers {
-			prodMap, ok := prod.(map[string]interface{})
+			prodMap, ok := prod.(map[string]any)
 			if !ok {
 				return fmt.Errorf("invalid producer configuration at index %d", i)
 			}
@@ -173,7 +173,7 @@ func (h *MessagingWorkflowHandler) ConfigureWorkflow(app modular.Application, wo
 }
 
 // ExecuteWorkflow executes a workflow with the given action and input data
-func (h *MessagingWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
+func (h *MessagingWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) (map[string]any, error) {
 	// For messaging workflows, the action represents the broker:topic or just topic
 	// The data will be the message payload
 
@@ -211,7 +211,7 @@ func (h *MessagingWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflow
 			brokerName = h.namespace.ResolveDependency(brokerName)
 		}
 
-		var brokerSvc interface{}
+		var brokerSvc any
 		_ = app.GetService(brokerName, &brokerSvc)
 		if brokerSvc != nil {
 			if b, ok := brokerSvc.(workflowmodule.MessageBroker); ok {
@@ -282,7 +282,7 @@ func (h *MessagingWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflow
 	}
 
 	// Return success
-	return map[string]interface{}{
+	return map[string]any{
 		"success": true,
 		"broker":  broker.(modular.Module).Name(),
 		"topic":   topic,

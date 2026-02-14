@@ -106,10 +106,10 @@ type mockTriggerWorkflower struct {
 type triggerCall struct {
 	workflowType string
 	action       string
-	data         map[string]interface{}
+	data         map[string]any
 }
 
-func (m *mockTriggerWorkflower) TriggerWorkflow(_ context.Context, workflowType string, action string, data map[string]interface{}) error {
+func (m *mockTriggerWorkflower) TriggerWorkflow(_ context.Context, workflowType string, action string, data map[string]any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, triggerCall{workflowType, action, data})
@@ -162,7 +162,7 @@ func TestCrossWorkflowRouter_RefreshLinks_Success(t *testing.T) {
 			{ID: uuid.New(), SourceWorkflowID: uuid.New(), TargetWorkflowID: uuid.New(), LinkType: "workflow.orders.*"},
 		},
 	}
-	r := NewCrossWorkflowRouter(ls, func(_ uuid.UUID) (interface{}, bool) { return nil, false }, testRouterLogger())
+	r := NewCrossWorkflowRouter(ls, func(_ uuid.UUID) (any, bool) { return nil, false }, testRouterLogger())
 
 	if err := r.RefreshLinks(context.Background()); err != nil {
 		t.Fatalf("refresh failed: %v", err)
@@ -174,7 +174,7 @@ func TestCrossWorkflowRouter_RefreshLinks_Success(t *testing.T) {
 
 func TestCrossWorkflowRouter_RefreshLinks_Empty(t *testing.T) {
 	ls := &routerTestLinkStore{}
-	r := NewCrossWorkflowRouter(ls, func(_ uuid.UUID) (interface{}, bool) { return nil, false }, testRouterLogger())
+	r := NewCrossWorkflowRouter(ls, func(_ uuid.UUID) (any, bool) { return nil, false }, testRouterLogger())
 
 	if err := r.RefreshLinks(context.Background()); err != nil {
 		t.Fatalf("refresh failed: %v", err)
@@ -196,7 +196,7 @@ func TestCrossWorkflowRouter_RouteEvent_Match(t *testing.T) {
 		},
 	}
 
-	r := NewCrossWorkflowRouter(ls, func(id uuid.UUID) (interface{}, bool) {
+	r := NewCrossWorkflowRouter(ls, func(id uuid.UUID) (any, bool) {
 		if id == targetID {
 			return me, true
 		}
@@ -205,7 +205,7 @@ func TestCrossWorkflowRouter_RouteEvent_Match(t *testing.T) {
 
 	_ = r.RefreshLinks(context.Background())
 
-	err := r.RouteEvent(context.Background(), sourceID, "workflow.orders.created", map[string]interface{}{"key": "val"})
+	err := r.RouteEvent(context.Background(), sourceID, "workflow.orders.created", map[string]any{"key": "val"})
 	if err != nil {
 		t.Fatalf("route failed: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestCrossWorkflowRouter_RouteEvent_NoMatch(t *testing.T) {
 		},
 	}
 
-	r := NewCrossWorkflowRouter(ls, func(id uuid.UUID) (interface{}, bool) {
+	r := NewCrossWorkflowRouter(ls, func(id uuid.UUID) (any, bool) {
 		if id == targetID {
 			return me, true
 		}
@@ -260,7 +260,7 @@ func TestCrossWorkflowRouter_RouteEvent_MultipleTargets(t *testing.T) {
 		},
 	}
 
-	r := NewCrossWorkflowRouter(ls, func(id uuid.UUID) (interface{}, bool) {
+	r := NewCrossWorkflowRouter(ls, func(id uuid.UUID) (any, bool) {
 		switch id {
 		case target1ID:
 			return me1, true
@@ -291,7 +291,7 @@ func TestCrossWorkflowRouter_RouteEvent_TargetNotRunning(t *testing.T) {
 		},
 	}
 
-	r := NewCrossWorkflowRouter(ls, func(_ uuid.UUID) (interface{}, bool) {
+	r := NewCrossWorkflowRouter(ls, func(_ uuid.UUID) (any, bool) {
 		return nil, false // target not running
 	}, testRouterLogger())
 
@@ -313,7 +313,7 @@ func TestCrossWorkflowRouter_RouteEvent_NonTriggerableEngine(t *testing.T) {
 	}
 
 	// Return a value that does NOT implement triggerableEngine
-	r := NewCrossWorkflowRouter(ls, func(id uuid.UUID) (interface{}, bool) {
+	r := NewCrossWorkflowRouter(ls, func(id uuid.UUID) (any, bool) {
 		if id == targetID {
 			return &nonTriggerableEngine{}, true
 		}
@@ -331,7 +331,7 @@ func TestCrossWorkflowRouter_RouteEvent_NoLinks(t *testing.T) {
 	sourceID := uuid.New()
 	ls := &routerTestLinkStore{}
 
-	r := NewCrossWorkflowRouter(ls, func(_ uuid.UUID) (interface{}, bool) { return nil, false }, testRouterLogger())
+	r := NewCrossWorkflowRouter(ls, func(_ uuid.UUID) (any, bool) { return nil, false }, testRouterLogger())
 	_ = r.RefreshLinks(context.Background())
 
 	err := r.RouteEvent(context.Background(), sourceID, "workflow.orders.created", nil)
@@ -353,7 +353,7 @@ func TestCrossWorkflowRouter_RouteEvent_DifferentSource(t *testing.T) {
 		},
 	}
 
-	r := NewCrossWorkflowRouter(ls, func(id uuid.UUID) (interface{}, bool) {
+	r := NewCrossWorkflowRouter(ls, func(id uuid.UUID) (any, bool) {
 		if id == targetID {
 			return me, true
 		}
@@ -380,7 +380,7 @@ func TestCrossWorkflowRouter_ConcurrentRouting(t *testing.T) {
 		},
 	}
 
-	r := NewCrossWorkflowRouter(ls, func(id uuid.UUID) (interface{}, bool) {
+	r := NewCrossWorkflowRouter(ls, func(id uuid.UUID) (any, bool) {
 		if id == targetID {
 			return me, true
 		}
@@ -390,12 +390,10 @@ func TestCrossWorkflowRouter_ConcurrentRouting(t *testing.T) {
 	_ = r.RefreshLinks(context.Background())
 
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 20 {
+		wg.Go(func() {
 			_ = r.RouteEvent(context.Background(), sourceID, "workflow.orders.created", nil)
-		}()
+		})
 	}
 	wg.Wait()
 

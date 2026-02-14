@@ -179,7 +179,7 @@ async function loadConversation(conversationId, readOnly) {
         </div>
         <div class="sidebar-field">
           <span class="sidebar-field-label">Program</span>
-          <span class="sidebar-field-value">${escapeHtml(data.programId || 'N/A')}</span>
+          <span class="sidebar-field-value">${escapeHtml(data.programName || data.programId || 'N/A')}</span>
         </div>
         <div class="sidebar-field">
           <span class="sidebar-field-label">Provider</span>
@@ -258,12 +258,19 @@ async function loadMessages(conversationId) {
   }
 }
 
+const MAX_MESSAGE_LENGTH = 5000;
+
 async function sendMessage(conversationId) {
   const input = document.getElementById('chat-input');
   if (!input) return;
 
   const content = input.value.trim();
   if (!content) return;
+
+  if (content.length > MAX_MESSAGE_LENGTH) {
+    showToast(`Message too long (${content.length}/${MAX_MESSAGE_LENGTH} characters)`, 'warning');
+    return;
+  }
 
   const sendBtn = document.getElementById('chat-send-btn');
   if (sendBtn) sendBtn.disabled = true;
@@ -358,7 +365,9 @@ function handleAction(action, conversationId) {
 async function showTransferModal(conversationId) {
   let responders = [];
   try {
-    const result = await api.get('/api/users?role=responder');
+    const user = api.getUser();
+    const affParam = user?.affiliateId ? `&affiliateId=${user.affiliateId}` : '';
+    const result = await api.get(`/api/users?role=responder${affParam}`);
     responders = result.data || result || [];
   } catch (err) {
     showToast('Failed to load responders', 'error');

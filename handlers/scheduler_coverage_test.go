@@ -57,7 +57,7 @@ func TestSchedulerExecuteWorkflow_JobExecution(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	result, err := h.ExecuteWorkflow(ctx, "scheduler", "my-job", map[string]interface{}{})
+	result, err := h.ExecuteWorkflow(ctx, "scheduler", "my-job", map[string]any{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -82,8 +82,8 @@ func TestSchedulerExecuteWorkflow_JobExecutionWithParams(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	data := map[string]interface{}{
-		"params": map[string]interface{}{
+	data := map[string]any{
+		"params": map[string]any{
 			"key": "value",
 		},
 	}
@@ -109,7 +109,7 @@ func TestSchedulerExecuteWorkflow_JobExecutionError(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	result, err := h.ExecuteWorkflow(ctx, "scheduler", "my-job", map[string]interface{}{})
+	result, err := h.ExecuteWorkflow(ctx, "scheduler", "my-job", map[string]any{})
 	if err != nil {
 		t.Fatalf("expected no error from ExecuteWorkflow, got: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestSchedulerExecuteWorkflow_MessageHandler(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	_, err := h.ExecuteWorkflow(ctx, "scheduler", "my-handler", map[string]interface{}{
+	_, err := h.ExecuteWorkflow(ctx, "scheduler", "my-handler", map[string]any{
 		"key": "value",
 	})
 	if err != nil {
@@ -157,7 +157,7 @@ func TestSchedulerExecuteWorkflow_ColonSeparatedAction(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	_, err := h.ExecuteWorkflow(ctx, "scheduler", "my-sched:my-job", map[string]interface{}{})
+	_, err := h.ExecuteWorkflow(ctx, "scheduler", "my-sched:my-job", map[string]any{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestSchedulerExecuteWorkflow_SchedulerFromData(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	_, err := h.ExecuteWorkflow(ctx, "scheduler", "my-job", map[string]interface{}{
+	_, err := h.ExecuteWorkflow(ctx, "scheduler", "my-job", map[string]any{
 		"scheduler": "my-sched",
 	})
 	if err != nil {
@@ -190,7 +190,7 @@ func TestSchedulerExecuteWorkflow_NoAppContext(t *testing.T) {
 	h := NewSchedulerWorkflowHandler()
 	ctx := context.Background()
 
-	_, err := h.ExecuteWorkflow(ctx, "scheduler", "action", map[string]interface{}{})
+	_, err := h.ExecuteWorkflow(ctx, "scheduler", "action", map[string]any{})
 	if err == nil || err.Error() != "application context not available" {
 		t.Fatalf("expected app context error, got: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestSchedulerExecuteWorkflow_EmptyJobName(t *testing.T) {
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
 	// Use ":" to get empty job name after split
-	_, err := h.ExecuteWorkflow(ctx, "scheduler", "sched:", map[string]interface{}{})
+	_, err := h.ExecuteWorkflow(ctx, "scheduler", "sched:", map[string]any{})
 	if err == nil || err.Error() != "job name not specified" {
 		t.Fatalf("expected job name error, got: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestSchedulerExecuteWorkflow_SchedulerNotFound(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	_, err := h.ExecuteWorkflow(ctx, "scheduler", "missing-sched:my-job", map[string]interface{}{})
+	_, err := h.ExecuteWorkflow(ctx, "scheduler", "missing-sched:my-job", map[string]any{})
 	if err == nil {
 		t.Fatal("expected scheduler not found error")
 	}
@@ -229,7 +229,7 @@ func TestSchedulerExecuteWorkflow_JobNotFound(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	_, err := h.ExecuteWorkflow(ctx, "scheduler", "missing-job", map[string]interface{}{})
+	_, err := h.ExecuteWorkflow(ctx, "scheduler", "missing-job", map[string]any{})
 	if err == nil {
 		t.Fatal("expected job not found error")
 	}
@@ -244,7 +244,7 @@ func TestSchedulerExecuteWorkflow_HelperFallback(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	result, err := h.ExecuteWorkflow(ctx, "scheduler", "weird-svc", map[string]interface{}{})
+	result, err := h.ExecuteWorkflow(ctx, "scheduler", "weird-svc", map[string]any{})
 	if err != nil {
 		t.Fatalf("expected no error (helper fallback), got: %v", err)
 	}

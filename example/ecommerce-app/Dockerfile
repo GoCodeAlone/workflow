@@ -2,7 +2,7 @@
 # Build:   docker build -t workflow-store -f example/ecommerce-app/Dockerfile .
 # Run:     docker run -p 8080:8080 -e JWT_SECRET=your-secret workflow-store
 
-FROM golang:1.25-alpine AS builder
+FROM dhi.io/golang:1.26-alpine3.22-dev AS builder
 
 WORKDIR /build
 
@@ -14,11 +14,8 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o server ./cmd/server
 
-# --- Runtime stage ---
-FROM alpine:3.19
-
-RUN apk add --no-cache ca-certificates \
-    && adduser -D -u 1000 appuser
+# --- Runtime stage (distroless-style minimal image) ---
+FROM dhi.io/static:20250911-alpine3.22
 
 WORKDIR /app
 
@@ -32,10 +29,8 @@ COPY example/ecommerce-app/seed/           ./config/seed/
 COPY example/ecommerce-app/spa/            ./config/spa/
 COPY example/ecommerce-app/components/     ./config/components/
 
-# Create data directory for SQLite persistence
-RUN mkdir -p /app/data && chown appuser:appuser /app/data
-
-USER appuser
+# Run as nonroot user (UID 65532, pre-configured in dhi.io/static)
+USER nonroot
 
 EXPOSE 8080
 

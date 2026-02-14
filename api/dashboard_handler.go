@@ -141,7 +141,7 @@ func (h *DashboardHandler) Workflow(w http.ResponseWriter, r *http.Request) {
 		recentExecs = []*store.WorkflowExecution{}
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]interface{}{
+	WriteJSON(w, http.StatusOK, map[string]any{
 		"workflow":          wf,
 		"execution_counts":  execCounts,
 		"log_counts":        logCounts,

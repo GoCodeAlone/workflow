@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 )
@@ -38,7 +39,7 @@ func (s *StandardHTTPServer) Init(app modular.Application) error {
 	configSection, err := app.GetConfigSection("http")
 	if err == nil {
 		if config := configSection.GetConfig(); config != nil {
-			if cfg, ok := config.(map[string]interface{}); ok {
+			if cfg, ok := config.(map[string]any); ok {
 				if addr, ok := cfg["address"].(string); ok && addr != "" {
 					s.address = addr
 				}
@@ -67,8 +68,9 @@ func (s *StandardHTTPServer) Start(ctx context.Context) error {
 	}
 
 	s.server = &http.Server{
-		Addr:    s.address,
-		Handler: handler,
+		Addr:              s.address,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	// Start the server in a goroutine

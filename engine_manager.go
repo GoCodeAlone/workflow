@@ -70,7 +70,7 @@ func NewWorkflowEngineManager(wfStore store.WorkflowStore, linkStore store.Cross
 		engineBuilder: engineBuilder,
 	}
 
-	m.router = module.NewCrossWorkflowRouter(linkStore, func(id uuid.UUID) (interface{}, bool) {
+	m.router = module.NewCrossWorkflowRouter(linkStore, func(id uuid.UUID) (any, bool) {
 		m.mu.RLock()
 		defer m.mu.RUnlock()
 		me, ok := m.engines[id]

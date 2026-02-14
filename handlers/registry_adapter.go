@@ -18,17 +18,17 @@ func NewServiceRegistryAdapter(app modular.Application) *applicationServiceRegis
 }
 
 // GetService delegates to the application
-func (a *applicationServiceRegistryAdapter) GetService(name string, dest interface{}) error {
+func (a *applicationServiceRegistryAdapter) GetService(name string, dest any) error {
 	return a.application.GetService(name, dest)
 }
 
 // RegisterService delegates to the application
-func (a *applicationServiceRegistryAdapter) RegisterService(name string, service interface{}) error {
+func (a *applicationServiceRegistryAdapter) RegisterService(name string, service any) error {
 	return a.application.RegisterService(name, service)
 }
 
 // SvcRegistry delegates to the application's service registry
-func (a *applicationServiceRegistryAdapter) SvcRegistry() map[string]interface{} {
+func (a *applicationServiceRegistryAdapter) SvcRegistry() map[string]any {
 	return a.application.SvcRegistry()
 }
 

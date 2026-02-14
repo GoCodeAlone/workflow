@@ -638,7 +638,7 @@ func TestToolHandler_GetComponentSchema(t *testing.T) {
 	}
 
 	result, err := schemaTool.Handler(copilot.ToolInvocation{
-		Arguments: map[string]interface{}{"module_type": "http.server"},
+		Arguments: map[string]any{"module_type": "http.server"},
 	})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
@@ -670,7 +670,7 @@ func TestToolHandler_ValidateConfig(t *testing.T) {
     config:
       address: ":8080"`
 	result, err := validateTool.Handler(copilot.ToolInvocation{
-		Arguments: map[string]interface{}{"config_yaml": validYAML},
+		Arguments: map[string]any{"config_yaml": validYAML},
 	})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
@@ -698,7 +698,7 @@ func TestToolHandler_ValidateConfig_Invalid(t *testing.T) {
 
 	// Empty modules should be invalid
 	result, err := validateTool.Handler(copilot.ToolInvocation{
-		Arguments: map[string]interface{}{"config_yaml": "modules: []"},
+		Arguments: map[string]any{"config_yaml": "modules: []"},
 	})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
@@ -722,7 +722,7 @@ func TestToolHandler_GetExampleWorkflow(t *testing.T) {
 	}
 
 	result, err := exampleTool.Handler(copilot.ToolInvocation{
-		Arguments: map[string]interface{}{"category": "http"},
+		Arguments: map[string]any{"category": "http"},
 	})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
@@ -749,7 +749,7 @@ func TestToolHandler_GetExampleWorkflow_Unknown(t *testing.T) {
 	}
 
 	result, err := exampleTool.Handler(copilot.ToolInvocation{
-		Arguments: map[string]interface{}{"category": "nonexistent"},
+		Arguments: map[string]any{"category": "nonexistent"},
 	})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)

@@ -33,9 +33,10 @@ modules:
   - name: cors
     type: http.middleware.cors
     config:
-      allowedOrigins: ["*"]
+      allowedOrigins: ["http://gateway:8080", "http://localhost:8080", "https://localhost:8080"]
       allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
       allowedHeaders: ["Content-Type", "Authorization"]
+      maxAge: 3600
     dependsOn:
       - router
 
@@ -49,6 +50,14 @@ modules:
     config:
       requestsPerMinute: 300
       burstSize: 50
+    dependsOn:
+      - request-id
+
+  - name: auth-rate-limiter
+    type: http.middleware.ratelimit
+    config:
+      requestsPerMinute: 30
+      burstSize: 10
     dependsOn:
       - request-id
 
@@ -147,14 +156,14 @@ workflows:
     router: router
     server: web-server
     routes:
-      # --- Public: authentication ---
+      # --- Public: authentication (stricter rate limiting) ---
       - method: "POST"
         path: "/api/auth/login"
         handler: auth
         middlewares:
           - cors
           - request-id
-          - rate-limiter
+          - auth-rate-limiter
 
       - method: "POST"
         path: "/api/auth/register"
@@ -162,7 +171,7 @@ workflows:
         middlewares:
           - cors
           - request-id
-          - rate-limiter
+          - auth-rate-limiter
 
       # --- Protected: user profile ---
       - method: "GET"

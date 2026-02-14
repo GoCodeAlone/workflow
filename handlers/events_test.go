@@ -37,7 +37,7 @@ func TestEventWorkflowHandler_ConfigureWorkflow_InvalidFormat(t *testing.T) {
 func TestEventWorkflowHandler_ConfigureWorkflow_NoProcessor(t *testing.T) {
 	h := NewEventWorkflowHandler()
 	app := CreateMockApplication()
-	err := h.ConfigureWorkflow(app, map[string]interface{}{})
+	err := h.ConfigureWorkflow(app, map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing processor")
 	}
@@ -46,7 +46,7 @@ func TestEventWorkflowHandler_ConfigureWorkflow_NoProcessor(t *testing.T) {
 func TestEventWorkflowHandler_ConfigureWorkflow_ProcessorNotFound(t *testing.T) {
 	h := NewEventWorkflowHandler()
 	app := CreateMockApplication()
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"processor": "my-processor",
 	})
 	if err == nil {
@@ -57,7 +57,7 @@ func TestEventWorkflowHandler_ConfigureWorkflow_ProcessorNotFound(t *testing.T) 
 func TestEventWorkflowHandler_ExecuteWorkflow_NoAppContext(t *testing.T) {
 	h := NewEventWorkflowHandler()
 	ctx := context.Background()
-	_, err := h.ExecuteWorkflow(ctx, "event", "processor", map[string]interface{}{})
+	_, err := h.ExecuteWorkflow(ctx, "event", "processor", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing application context")
 	}
@@ -67,7 +67,7 @@ func TestEventWorkflowHandler_ExecuteWorkflow_ProcessorNotFound(t *testing.T) {
 	h := NewEventWorkflowHandler()
 	app := CreateMockApplication()
 	ctx := context.WithValue(context.Background(), applicationContextKey, app)
-	_, err := h.ExecuteWorkflow(ctx, "event", "my-processor", map[string]interface{}{})
+	_, err := h.ExecuteWorkflow(ctx, "event", "my-processor", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for processor not found")
 	}
@@ -78,7 +78,7 @@ func TestEventProcessorAdapter_HandleEvent_Map(t *testing.T) {
 	adapter := &EventProcessorAdapter{Processor: processor}
 
 	ctx := context.Background()
-	err := adapter.HandleEvent(ctx, map[string]interface{}{
+	err := adapter.HandleEvent(ctx, map[string]any{
 		"eventType": "test.event",
 		"sourceId":  "src-1",
 		"data":      "value",
@@ -93,7 +93,7 @@ func TestEventProcessorAdapter_HandleEvent_Bytes(t *testing.T) {
 	adapter := &EventProcessorAdapter{Processor: processor}
 
 	ctx := context.Background()
-	payload, _ := json.Marshal(map[string]interface{}{
+	payload, _ := json.Marshal(map[string]any{
 		"eventType": "test.event",
 		"sourceId":  "src-1",
 	})
@@ -163,7 +163,7 @@ func TestEventProcessorAdapter_HandleEvent_MapWithUserID(t *testing.T) {
 	adapter := &EventProcessorAdapter{Processor: processor}
 
 	ctx := context.Background()
-	err := adapter.HandleEvent(ctx, map[string]interface{}{
+	err := adapter.HandleEvent(ctx, map[string]any{
 		"userId": "user-123",
 		"data":   "value",
 	})

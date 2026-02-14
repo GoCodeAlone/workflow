@@ -149,7 +149,7 @@ func TestIAMHandler_CreateProvider_Success(t *testing.T) {
 	user := &store.User{ID: uuid.New(), Email: "iam@example.com", Active: true}
 	companyID := setupCompanyWithPerms(t, memberships, user.ID, store.RoleAdmin)
 
-	body := makeJSON(map[string]interface{}{
+	body := makeJSON(map[string]any{
 		"provider_type": "custom",
 		"name":          "My Provider",
 		"config":        map[string]string{"url": "https://example.com"},
@@ -171,7 +171,7 @@ func TestIAMHandler_CreateProvider_Unauthorized(t *testing.T) {
 	h, _, _, _, _ := newTestIAMHandler()
 	companyID := uuid.New()
 
-	body := makeJSON(map[string]interface{}{
+	body := makeJSON(map[string]any{
 		"provider_type": "custom", "name": "Provider",
 		"config": map[string]string{},
 	})
@@ -191,7 +191,7 @@ func TestIAMHandler_CreateProvider_Forbidden(t *testing.T) {
 	user := &store.User{ID: uuid.New(), Email: "iam@example.com", Active: true}
 	companyID := setupCompanyWithPerms(t, memberships, user.ID, store.RoleViewer) // Not admin
 
-	body := makeJSON(map[string]interface{}{
+	body := makeJSON(map[string]any{
 		"provider_type": "custom", "name": "Provider",
 		"config": map[string]string{},
 	})
@@ -213,7 +213,7 @@ func TestIAMHandler_CreateProvider_MissingName(t *testing.T) {
 	user := &store.User{ID: uuid.New(), Email: "iam@example.com", Active: true}
 	companyID := setupCompanyWithPerms(t, memberships, user.ID, store.RoleAdmin)
 
-	body := makeJSON(map[string]interface{}{
+	body := makeJSON(map[string]any{
 		"provider_type": "custom",
 		"config":        map[string]string{},
 	})
@@ -235,7 +235,7 @@ func TestIAMHandler_CreateProvider_MissingType(t *testing.T) {
 	user := &store.User{ID: uuid.New(), Email: "iam@example.com", Active: true}
 	companyID := setupCompanyWithPerms(t, memberships, user.ID, store.RoleAdmin)
 
-	body := makeJSON(map[string]interface{}{
+	body := makeJSON(map[string]any{
 		"name":   "Provider",
 		"config": map[string]string{},
 	})
@@ -366,7 +366,7 @@ func TestIAMHandler_UpdateProvider_NotFound(t *testing.T) {
 	user := &store.User{ID: uuid.New(), Email: "iam@example.com", Active: true}
 	fakeID := uuid.New()
 
-	body := makeJSON(map[string]interface{}{"name": "x"})
+	body := makeJSON(map[string]any{"name": "x"})
 	req := httptest.NewRequest("PUT", "/api/v1/iam/providers/"+fakeID.String(), body)
 	req.Header.Set("Content-Type", "application/json")
 	req.SetPathValue("id", fakeID.String())
@@ -392,7 +392,7 @@ func TestIAMHandler_UpdateProvider_Forbidden(t *testing.T) {
 		Name:      "Provider",
 	}
 
-	body := makeJSON(map[string]interface{}{"name": "New"})
+	body := makeJSON(map[string]any{"name": "New"})
 	req := httptest.NewRequest("PUT", "/api/v1/iam/providers/"+providerID.String(), body)
 	req.Header.Set("Content-Type", "application/json")
 	req.SetPathValue("id", providerID.String())
@@ -468,7 +468,7 @@ func TestIAMHandler_TestConnection_Success(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	body := decodeBody(t, w.Result())
-	data, _ := body["data"].(map[string]interface{})
+	data, _ := body["data"].(map[string]any)
 	// "custom" type has no registered provider, so success=false
 	if data["success"] != false {
 		t.Fatalf("expected success=false for unregistered provider type, got %v", data["success"])
@@ -505,7 +505,7 @@ func TestIAMHandler_CreateMapping_Success(t *testing.T) {
 	}
 
 	resourceID := uuid.New()
-	body := makeJSON(map[string]interface{}{
+	body := makeJSON(map[string]any{
 		"external_identifier": "group:engineers",
 		"resource_type":       "company",
 		"resource_id":         resourceID.String(),
@@ -537,7 +537,7 @@ func TestIAMHandler_CreateMapping_MissingFields(t *testing.T) {
 	}
 
 	// Missing external_identifier
-	body := makeJSON(map[string]interface{}{
+	body := makeJSON(map[string]any{
 		"resource_type": "company",
 		"resource_id":   uuid.New().String(),
 		"role":          "editor",

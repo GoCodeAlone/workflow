@@ -73,9 +73,9 @@ type message struct {
 }
 
 type toolDef struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	InputSchema map[string]interface{} `json:"input_schema"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"input_schema"`
 }
 
 type apiRequest struct {
@@ -158,7 +158,7 @@ func (c *Client) callWithToolLoop(ctx context.Context, system string, userConten
 		{Role: "user", Content: userMsg},
 	}
 
-	for i := 0; i < 10; i++ { // max 10 tool call rounds
+	for range 10 { // max 10 tool call rounds
 		resp, err := c.call(ctx, system, messages, apiTools)
 		if err != nil {
 			return "", err
@@ -180,16 +180,16 @@ func (c *Client) callWithToolLoop(ctx context.Context, system string, userConten
 		messages = append(messages, message{Role: "assistant", Content: assistantContent})
 
 		// Build tool result message content
-		var resultBlocks []map[string]interface{}
+		var resultBlocks []map[string]any
 		for _, block := range resp.Content {
 			if block.Type != "tool_use" {
 				continue
 			}
 			result, err := HandleToolCall(block.Name, block.Input)
 			if err != nil {
-				result = fmt.Sprintf(`{"error": "%s"}`, err.Error())
+				result = fmt.Sprintf(`{"error": %q}`, err.Error())
 			}
-			resultBlocks = append(resultBlocks, map[string]interface{}{
+			resultBlocks = append(resultBlocks, map[string]any{
 				"type":        "tool_result",
 				"tool_use_id": block.ID,
 				"content":     result,

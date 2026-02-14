@@ -161,15 +161,16 @@ func TestHTTPIntegrationConnector_ExecuteGET(t *testing.T) {
 			t.Errorf("expected query param key=value, got %q", r.URL.Query().Get("key"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": "ok"})
 	}))
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
+	c.SetAllowPrivateIPs(true)
 	ctx := context.Background()
 	_ = c.Connect(ctx)
 
-	result, err := c.Execute(ctx, "GET /data", map[string]interface{}{"key": "value"})
+	result, err := c.Execute(ctx, "GET /data", map[string]any{"key": "value"})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -186,18 +187,19 @@ func TestHTTPIntegrationConnector_ExecutePOST(t *testing.T) {
 		if r.Method != "POST" {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
-		var body map[string]interface{}
+		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "123", "name": body["name"]})
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "123", "name": body["name"]})
 	}))
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
+	c.SetAllowPrivateIPs(true)
 	ctx := context.Background()
 	_ = c.Connect(ctx)
 
-	result, err := c.Execute(ctx, "POST /items", map[string]interface{}{"name": "test-item"})
+	result, err := c.Execute(ctx, "POST /items", map[string]any{"name": "test-item"})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -214,11 +216,12 @@ func TestHTTPIntegrationConnector_ExecuteWithBasicAuth(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"auth": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"auth": "ok"})
 	}))
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
+	c.SetAllowPrivateIPs(true)
 	c.SetBasicAuth("admin", "secret")
 	ctx := context.Background()
 	_ = c.Connect(ctx)
@@ -240,11 +243,12 @@ func TestHTTPIntegrationConnector_ExecuteWithBearerAuth(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"auth": "bearer-ok"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"auth": "bearer-ok"})
 	}))
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
+	c.SetAllowPrivateIPs(true)
 	c.SetBearerAuth("my-token")
 	ctx := context.Background()
 	_ = c.Connect(ctx)
@@ -264,11 +268,12 @@ func TestHTTPIntegrationConnector_ExecuteCustomHeaders(t *testing.T) {
 			t.Errorf("expected X-Custom header, got %q", r.Header.Get("X-Custom"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
+	c.SetAllowPrivateIPs(true)
 	c.SetHeader("X-Custom", "my-value")
 	ctx := context.Background()
 	_ = c.Connect(ctx)
@@ -283,11 +288,12 @@ func TestHTTPIntegrationConnector_ExecuteErrorStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "not found"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "not found"})
 	}))
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
+	c.SetAllowPrivateIPs(true)
 	ctx := context.Background()
 	_ = c.Connect(ctx)
 
@@ -308,6 +314,7 @@ func TestHTTPIntegrationConnector_ExecuteNonJSONResponse(t *testing.T) {
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
+	c.SetAllowPrivateIPs(true)
 	ctx := context.Background()
 	_ = c.Connect(ctx)
 
@@ -327,6 +334,7 @@ func TestHTTPIntegrationConnector_ExecuteEmptyResponse(t *testing.T) {
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
+	c.SetAllowPrivateIPs(true)
 	ctx := context.Background()
 	_ = c.Connect(ctx)
 
@@ -375,7 +383,7 @@ func TestWebhookIntegrationConnector_Execute(t *testing.T) {
 func TestWebhookIntegrationConnector_RegisterEventHandler(t *testing.T) {
 	c := NewWebhookIntegrationConnector("webhook", "/hooks", 0)
 	called := false
-	c.RegisterEventHandler("test.event", func(ctx context.Context, data map[string]interface{}) error {
+	c.RegisterEventHandler("test.event", func(ctx context.Context, data map[string]any) error {
 		called = true
 		return nil
 	})
@@ -455,11 +463,12 @@ func TestStdIntegrationRegistry_StartAndStop(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test-conn", server.URL)
+	c.SetAllowPrivateIPs(true)
 	r.RegisterConnector(c)
 
 	if err := r.Start(); err != nil {
@@ -499,6 +508,6 @@ func (c *failingConnector) Connect(ctx context.Context) error {
 func (c *failingConnector) Disconnect(ctx context.Context) error { return nil }
 func (c *failingConnector) GetName() string                      { return c.name }
 func (c *failingConnector) IsConnected() bool                    { return false }
-func (c *failingConnector) Execute(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error) {
+func (c *failingConnector) Execute(ctx context.Context, action string, params map[string]any) (map[string]any, error) {
 	return nil, fmt.Errorf("not connected")
 }

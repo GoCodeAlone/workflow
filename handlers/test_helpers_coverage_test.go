@@ -54,7 +54,7 @@ func TestTestServiceRegistry_ConfigSections(t *testing.T) {
 
 func TestTestServiceRegistry_RegisterConfigSection(t *testing.T) {
 	r := NewTestServiceRegistry()
-	cp := &mock.ConfigProvider{ConfigData: map[string]interface{}{"key": "val"}}
+	cp := &mock.ConfigProvider{ConfigData: map[string]any{"key": "val"}}
 	r.RegisterConfigSection("test-section", cp)
 	if r.configSections["test-section"] != cp {
 		t.Error("expected config section to be registered")
@@ -63,7 +63,7 @@ func TestTestServiceRegistry_RegisterConfigSection(t *testing.T) {
 
 func TestTestServiceRegistry_GetConfigSection(t *testing.T) {
 	r := NewTestServiceRegistry()
-	cp := &mock.ConfigProvider{ConfigData: map[string]interface{}{}}
+	cp := &mock.ConfigProvider{ConfigData: map[string]any{}}
 	r.RegisterConfigSection("my-section", cp)
 	got, err := r.GetConfigSection("my-section")
 	if err != nil {
@@ -155,7 +155,7 @@ func TestTestServiceRegistry_OnConfigLoaded(t *testing.T) {
 
 func TestSetMockConfig(t *testing.T) {
 	r := NewTestServiceRegistry()
-	newCP := &mock.ConfigProvider{ConfigData: map[string]interface{}{"x": 1}}
+	newCP := &mock.ConfigProvider{ConfigData: map[string]any{"x": 1}}
 	r.SetMockConfig(newCP)
 	if r.config != newCP {
 		t.Error("expected config to be updated")

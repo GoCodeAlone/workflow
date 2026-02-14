@@ -40,7 +40,7 @@ func setupEventBusForBridge(t *testing.T) *eventbus.EventBusModule {
 // bridgeMockApp satisfies modular.Application for the eventbus module init.
 type bridgeMockApp struct {
 	configSections map[string]modular.ConfigProvider
-	services       map[string]interface{}
+	services       map[string]any
 	modules        map[string]modular.Module
 	logger         modular.Logger
 }
@@ -48,7 +48,7 @@ type bridgeMockApp struct {
 func newEventBusBridgeMockApp() *bridgeMockApp {
 	return &bridgeMockApp{
 		configSections: make(map[string]modular.ConfigProvider),
-		services:       make(map[string]interface{}),
+		services:       make(map[string]any),
 		modules:        make(map[string]modular.Module),
 		logger:         &noopLogger{},
 	}
@@ -185,7 +185,7 @@ func TestEventBusBridge_SendMessageThenReceiveViaEventBus(t *testing.T) {
 	}
 	defer func() { _ = sub.Cancel() }()
 
-	payload := map[string]interface{}{"hello": "world"}
+	payload := map[string]any{"hello": "world"}
 	msg, _ := json.Marshal(payload)
 	if err := bridge.SendMessage("test.send", msg); err != nil {
 		t.Fatalf("bridge.SendMessage: %v", err)
@@ -197,7 +197,7 @@ func TestEventBusBridge_SendMessageThenReceiveViaEventBus(t *testing.T) {
 			t.Fatalf("expected topic %q, got %q", "test.send", evt.Topic)
 		}
 		// The payload went through JSON unmarshal in SendMessage then was published.
-		payloadMap, ok := evt.Payload.(map[string]interface{})
+		payloadMap, ok := evt.Payload.(map[string]any)
 		if !ok {
 			t.Fatalf("expected map payload, got %T", evt.Payload)
 		}
@@ -220,14 +220,14 @@ func TestEventBusBridge_EventBusPublishThenReceiveViaBridge(t *testing.T) {
 	}
 
 	// Publish via the EventBus directly.
-	payload := map[string]interface{}{"foo": "bar"}
+	payload := map[string]any{"foo": "bar"}
 	if err := eb.Publish(context.Background(), "test.receive", payload); err != nil {
 		t.Fatalf("EventBus Publish: %v", err)
 	}
 
 	select {
 	case msg := <-handler.ch:
-		var got map[string]interface{}
+		var got map[string]any
 		if err := json.Unmarshal(msg, &got); err != nil {
 			t.Fatalf("unmarshal handler message: %v", err)
 		}
@@ -249,10 +249,10 @@ func TestEventBusBridge_JSONRoundTrip(t *testing.T) {
 		t.Fatalf("Subscribe: %v", err)
 	}
 
-	original := map[string]interface{}{
+	original := map[string]any{
 		"count":  float64(42),
 		"name":   "test",
-		"nested": map[string]interface{}{"a": float64(1)},
+		"nested": map[string]any{"a": float64(1)},
 	}
 	msg, _ := json.Marshal(original)
 
@@ -262,7 +262,7 @@ func TestEventBusBridge_JSONRoundTrip(t *testing.T) {
 
 	select {
 	case received := <-handler.ch:
-		var got map[string]interface{}
+		var got map[string]any
 		if err := json.Unmarshal(received, &got); err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
@@ -272,7 +272,7 @@ func TestEventBusBridge_JSONRoundTrip(t *testing.T) {
 		if got["name"] != "test" {
 			t.Fatalf("expected name=test, got %v", got["name"])
 		}
-		nested, ok := got["nested"].(map[string]interface{})
+		nested, ok := got["nested"].(map[string]any)
 		if !ok {
 			t.Fatalf("expected nested map, got %T", got["nested"])
 		}
@@ -395,7 +395,7 @@ func TestEventBusBridge_ConcurrentSubscribeUnsubscribe(t *testing.T) {
 	topics := 20
 
 	// Concurrently subscribe to many topics.
-	for i := 0; i < topics; i++ {
+	for i := range topics {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -409,7 +409,7 @@ func TestEventBusBridge_ConcurrentSubscribeUnsubscribe(t *testing.T) {
 	wg.Wait()
 
 	// Concurrently unsubscribe from all topics.
-	for i := 0; i < topics; i++ {
+	for i := range topics {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()

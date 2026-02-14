@@ -55,7 +55,7 @@ func TestIntegrationWorkflow(t *testing.T) {
 			}
 
 			// Parse the request body
-			var emailReq map[string]interface{}
+			var emailReq map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&emailReq); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				return
@@ -80,7 +80,9 @@ func TestIntegrationWorkflow(t *testing.T) {
 
 	// Pre-create and connect the HTTP connectors with the mock server URL
 	crmConnector := module.NewHTTPIntegrationConnector("crm-connector", mockServer.URL)
+	crmConnector.SetAllowPrivateIPs(true)
 	emailConnector := module.NewHTTPIntegrationConnector("email-connector", mockServer.URL)
+	emailConnector.SetAllowPrivateIPs(true)
 
 	// Set default headers
 	crmConnector.SetDefaultHeader("Content-Type", "application/json")
@@ -112,47 +114,49 @@ func TestIntegrationWorkflow(t *testing.T) {
 			{
 				Name: registryName,
 				Type: "integration.registry",
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"description": "Test integration registry",
 				},
 			},
 		},
-		Workflows: map[string]interface{}{
-			"integration": map[string]interface{}{
+		Workflows: map[string]any{
+			"integration": map[string]any{
 				"registry": registryName,
-				"connectors": []interface{}{
-					map[string]interface{}{
+				"connectors": []any{
+					map[string]any{
 						"name": "crm-connector",
 						"type": "http",
-						"config": map[string]interface{}{
-							"baseURL": mockServer.URL,
-							"headers": map[string]interface{}{
+						"config": map[string]any{
+							"baseURL":         mockServer.URL,
+							"allowPrivateIPs": true,
+							"headers": map[string]any{
 								"Content-Type": "application/json",
 							},
 						},
 					},
-					map[string]interface{}{
+					map[string]any{
 						"name": "email-connector",
 						"type": "http",
-						"config": map[string]interface{}{
-							"baseURL": mockServer.URL,
-							"headers": map[string]interface{}{
+						"config": map[string]any{
+							"baseURL":         mockServer.URL,
+							"allowPrivateIPs": true,
+							"headers": map[string]any{
 								"Content-Type": "application/json",
 							},
 						},
 					},
 				},
-				"steps": []interface{}{
-					map[string]interface{}{
+				"steps": []any{
+					map[string]any{
 						"name":      "get-customer",
 						"connector": "crm-connector",
 						"action":    "GET /customers/123",
 					},
-					map[string]interface{}{
+					map[string]any{
 						"name":      "send-email",
 						"connector": "email-connector",
 						"action":    "POST /send",
-						"input": map[string]interface{}{
+						"input": map[string]any{
 							"to":       "${get-customer.email}",
 							"subject":  "Test Email",
 							"template": "welcome",
@@ -164,7 +168,7 @@ func TestIntegrationWorkflow(t *testing.T) {
 	}
 
 	// Add the integration registry module factory to the engine
-	engine.AddModuleType("integration.registry", func(name string, config map[string]interface{}) modular.Module {
+	engine.AddModuleType("integration.registry", func(name string, config map[string]any) modular.Module {
 		// Return our already created and connected registry
 		return registryAdapter
 	})
@@ -210,14 +214,14 @@ func TestIntegrationWorkflow(t *testing.T) {
 				Name:      "send-email",
 				Connector: "email-connector",
 				Action:    "POST /send",
-				Input: map[string]interface{}{
+				Input: map[string]any{
 					"to":       "test@example.com",
 					"subject":  "Test Email",
 					"template": "welcome",
 				},
 			},
 		},
-		map[string]interface{}{},
+		map[string]any{},
 	)
 
 	if err != nil {
@@ -234,7 +238,7 @@ func TestIntegrationWorkflow(t *testing.T) {
 	}
 
 	// Get the first step result and check details
-	customerResult, ok := results["get-customer"].(map[string]interface{})
+	customerResult, ok := results["get-customer"].(map[string]any)
 	if !ok {
 		t.Fatalf("Expected customer result to be a map")
 	}
@@ -249,7 +253,7 @@ func TestIntegrationWorkflow(t *testing.T) {
 	}
 
 	// Check email result
-	emailResult, ok := results["send-email"].(map[string]interface{})
+	emailResult, ok := results["send-email"].(map[string]any)
 	if !ok {
 		t.Fatalf("Expected email result to be a map")
 	}
@@ -364,7 +368,7 @@ func (a *integrationRegistryAdapter) RequiresServices() []modular.ServiceDepende
 
 // MockIntegrationRegistry is a mock implementation of module.IntegrationRegistry for testing
 type MockIntegrationRegistry struct {
-	GetIntegrationFn func(name string) (interface{}, error)
+	GetIntegrationFn func(name string) (any, error)
 	registrations    map[string]module.IntegrationConnector
 	name             string
 }
@@ -414,7 +418,7 @@ func (r *MockIntegrationRegistry) RequiresServices() []modular.ServiceDependency
 }
 
 // GetIntegration returns an integration by name
-func (r *MockIntegrationRegistry) GetIntegration(name string) (interface{}, error) {
+func (r *MockIntegrationRegistry) GetIntegration(name string) (any, error) {
 	if r.GetIntegrationFn != nil {
 		return r.GetIntegrationFn(name)
 	}
@@ -434,16 +438,16 @@ func (r *MockIntegrationRegistry) GetConnector(name string) (module.IntegrationC
 	// Create a mock connector for testing
 	connector := &MockIntegrationConnector{
 		name: name,
-		executeFn: func(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error) {
+		executeFn: func(ctx context.Context, action string, params map[string]any) (map[string]any, error) {
 			switch action {
 			case "GET /customers/123":
-				return map[string]interface{}{
+				return map[string]any{
 					"id":    "123",
 					"name":  "Test Customer",
 					"email": "test@example.com",
 				}, nil
 			case "POST /send":
-				return map[string]interface{}{
+				return map[string]any{
 					"status": "sent",
 					"id":     "email-123",
 				}, nil
@@ -472,7 +476,7 @@ type MockIntegration struct {
 // MockIntegrationConnector is a mock implementation of module.IntegrationConnector
 type MockIntegrationConnector struct {
 	name      string
-	executeFn func(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error)
+	executeFn func(ctx context.Context, action string, params map[string]any) (map[string]any, error)
 	connected bool
 }
 
@@ -494,11 +498,11 @@ func (c *MockIntegrationConnector) IsConnected() bool {
 }
 
 // Execute implements module.IntegrationConnector
-func (c *MockIntegrationConnector) Execute(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error) {
+func (c *MockIntegrationConnector) Execute(ctx context.Context, action string, params map[string]any) (map[string]any, error) {
 	if c.executeFn != nil {
 		return c.executeFn(ctx, action, params)
 	}
-	return map[string]interface{}{"mock": true}, nil
+	return map[string]any{"mock": true}, nil
 }
 
 // GetName implements module.IntegrationConnector

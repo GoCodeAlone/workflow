@@ -137,7 +137,7 @@ func (s *PGWorkflowStore) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (s *PGWorkflowStore) List(ctx context.Context, f WorkflowFilter) ([]*WorkflowRecord, error) {
 	query := `SELECT * FROM workflows WHERE 1=1`
-	args := []interface{}{}
+	args := []any{}
 	idx := 1
 
 	if f.ProjectID != nil {
@@ -227,7 +227,7 @@ func (s *PGWorkflowStore) ListVersions(ctx context.Context, id uuid.UUID) ([]*Wo
 	return versions, rows.Err()
 }
 
-func (s *PGWorkflowStore) scanOne(ctx context.Context, query string, args ...interface{}) (*WorkflowRecord, error) {
+func (s *PGWorkflowStore) scanOne(ctx context.Context, query string, args ...any) (*WorkflowRecord, error) {
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query workflow: %w", err)

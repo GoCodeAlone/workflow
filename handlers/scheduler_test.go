@@ -43,15 +43,15 @@ func TestSchedulerWorkflow(t *testing.T) {
 			{
 				Name: "cron-scheduler",
 				Type: "scheduler.cron",
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"cronExpression": "* * * * *",
 				},
 			},
 		},
-		Workflows: map[string]interface{}{
-			"scheduler": map[string]interface{}{
-				"jobs": []interface{}{
-					map[string]interface{}{
+		Workflows: map[string]any{
+			"scheduler": map[string]any{
+				"jobs": []any{
+					map[string]any{
 						"scheduler": "cron-scheduler",
 						"job":       "test-job",
 					},
@@ -61,7 +61,7 @@ func TestSchedulerWorkflow(t *testing.T) {
 	}
 
 	// Add the cron scheduler module to the engine
-	engine.AddModuleType("scheduler.cron", func(name string, config map[string]interface{}) modular.Module {
+	engine.AddModuleType("scheduler.cron", func(name string, config map[string]any) modular.Module {
 		cronExpression := "* * * * *"
 		if expr, ok := config["cronExpression"].(string); ok {
 			cronExpression = expr

@@ -15,7 +15,7 @@ const (
 
 // ConfigProvider implements a mock config provider
 type ConfigProvider struct {
-	ConfigData map[string]interface{}
+	ConfigData map[string]any
 }
 
 // GetConfig implements the ConfigProvider interface
@@ -27,10 +27,10 @@ func (m *ConfigProvider) GetConfig() any {
 // This method fixes the "env: env: invalid structure" error that occurs with golobby config
 func (m *ConfigProvider) UpdateConfigWithProperEnvStructure() *ConfigProvider {
 	// Create a completely fresh config map without any env section
-	m.ConfigData = map[string]interface{}{
+	m.ConfigData = map[string]any{
 		// Basic sections needed by workflow tests
-		"modules":   []interface{}{},
-		"workflows": map[string]interface{}{},
+		"modules":   []any{},
+		"workflows": map[string]any{},
 	}
 
 	// Important: Do NOT include any "env" field at all
@@ -42,23 +42,23 @@ func (m *ConfigProvider) UpdateConfigWithProperEnvStructure() *ConfigProvider {
 // NewConfigProvider creates a new mock config provider with proper env structure
 func NewConfigProvider() *ConfigProvider {
 	cp := &ConfigProvider{
-		ConfigData: make(map[string]interface{}),
+		ConfigData: make(map[string]any),
 	}
 	return cp.UpdateConfigWithProperEnvStructure()
 }
 
 // WithWorkflow adds a workflow configuration to the mock config
-func (m *ConfigProvider) WithWorkflow(name string, config map[string]interface{}) *ConfigProvider {
+func (m *ConfigProvider) WithWorkflow(name string, config map[string]any) *ConfigProvider {
 	if m.ConfigData == nil {
-		m.ConfigData = make(map[string]interface{})
+		m.ConfigData = make(map[string]any)
 	}
 
 	// Ensure workflows section exists
 	if _, ok := m.ConfigData["workflows"]; !ok {
-		m.ConfigData["workflows"] = make(map[string]interface{})
+		m.ConfigData["workflows"] = make(map[string]any)
 	}
 
-	workflows := m.ConfigData["workflows"].(map[string]interface{})
+	workflows := m.ConfigData["workflows"].(map[string]any)
 
 	// Add the workflow config under its name
 	workflows[name] = config
@@ -72,7 +72,7 @@ type Logger struct {
 }
 
 // Debug implements the Logger interface
-func (m *Logger) Debug(msg string, args ...interface{}) {
+func (m *Logger) Debug(msg string, args ...any) {
 	if m.LogEntries == nil {
 		m.LogEntries = make([]string, 0)
 	}
@@ -80,7 +80,7 @@ func (m *Logger) Debug(msg string, args ...interface{}) {
 }
 
 // Info implements the Logger interface
-func (m *Logger) Info(msg string, args ...interface{}) {
+func (m *Logger) Info(msg string, args ...any) {
 	if m.LogEntries == nil {
 		m.LogEntries = make([]string, 0)
 	}
@@ -88,7 +88,7 @@ func (m *Logger) Info(msg string, args ...interface{}) {
 }
 
 // Error implements the Logger interface
-func (m *Logger) Error(msg string, args ...interface{}) {
+func (m *Logger) Error(msg string, args ...any) {
 	if m.LogEntries == nil {
 		m.LogEntries = make([]string, 0)
 	}
@@ -96,7 +96,7 @@ func (m *Logger) Error(msg string, args ...interface{}) {
 }
 
 // Warn implements the Logger interface
-func (m *Logger) Warn(msg string, args ...interface{}) {
+func (m *Logger) Warn(msg string, args ...any) {
 	if m.LogEntries == nil {
 		m.LogEntries = make([]string, 0)
 	}

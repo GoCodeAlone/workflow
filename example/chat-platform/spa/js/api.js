@@ -1,25 +1,25 @@
 const API_BASE = '';
 
 export function getToken() {
-  return localStorage.getItem('token');
+  return sessionStorage.getItem('token');
 }
 
 export function getUser() {
   try {
-    return JSON.parse(localStorage.getItem('user'));
+    return JSON.parse(sessionStorage.getItem('user'));
   } catch {
     return null;
   }
 }
 
 export function setAuth(token, user) {
-  localStorage.setItem('token', token);
-  localStorage.setItem('user', JSON.stringify(user));
+  sessionStorage.setItem('token', token);
+  sessionStorage.setItem('user', JSON.stringify(user));
 }
 
 export function clearAuth() {
-  localStorage.removeItem('token');
-  localStorage.removeItem('user');
+  sessionStorage.removeItem('token');
+  sessionStorage.removeItem('user');
 }
 
 export function isLoggedIn() {

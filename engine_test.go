@@ -3,11 +3,12 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
-
-	"reflect"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/config"
@@ -130,11 +131,11 @@ func TestEngineTriggerIntegration(t *testing.T) {
 	// Create a simple workflow config with triggers
 	cfg := &config.WorkflowConfig{
 		Modules:   []config.ModuleConfig{},
-		Workflows: map[string]interface{}{},
-		Triggers: map[string]interface{}{
-			"mock": map[string]interface{}{
+		Workflows: map[string]any{},
+		Triggers: map[string]any{
+			"mock": map[string]any{
 				"enabled": true,
-				"config": map[string]interface{}{
+				"config": map[string]any{
 					"test": "value",
 				},
 			},
@@ -202,7 +203,7 @@ func TestEngineTriggerWorkflow(t *testing.T) {
 
 	// Test triggering a workflow
 	ctx := context.Background()
-	data := map[string]interface{}{
+	data := map[string]any{
 		"param1": "value1",
 		"param2": 42,
 	}
@@ -224,21 +225,21 @@ func TestEngineTriggerWorkflow(t *testing.T) {
 
 // mockApplication implements modular.Application
 type mockApplication struct {
-	configs  map[string]interface{}
-	services map[string]interface{}
+	configs  map[string]any
+	services map[string]any
 	logger   *mockLogger
 	// Add configSections to store registered config sections
 	configSections map[string]modular.ConfigProvider
 	modules        map[string]modular.Module
 }
 
-func (a *mockApplication) Config(key string) interface{} {
+func (a *mockApplication) Config(key string) any {
 	return a.configs[key]
 }
 
-func (a *mockApplication) Inject(name string, service interface{}) {
+func (a *mockApplication) Inject(name string, service any) {
 	if a.services == nil {
-		a.services = make(map[string]interface{})
+		a.services = make(map[string]any)
 	}
 	a.services[name] = service
 }
@@ -247,12 +248,12 @@ func (a *mockApplication) Logger() modular.Logger {
 	return a.logger
 }
 
-func (a *mockApplication) Service(name string) (interface{}, bool) {
+func (a *mockApplication) Service(name string) (any, bool) {
 	svc, ok := a.services[name]
 	return svc, ok
 }
 
-func (a *mockApplication) Must(name string) interface{} {
+func (a *mockApplication) Must(name string) any {
 	svc, ok := a.services[name]
 	if !ok {
 		panic(fmt.Sprintf("Service %s not found", name))
@@ -265,7 +266,7 @@ func (a *mockApplication) Init() error {
 }
 
 // GetService retrieves a service by name and populates the out parameter if provided
-func (a *mockApplication) GetService(name string, out interface{}) error {
+func (a *mockApplication) GetService(name string, out any) error {
 	svc, ok := a.services[name]
 	if !ok {
 		return fmt.Errorf("service %s not found", name)
@@ -275,7 +276,7 @@ func (a *mockApplication) GetService(name string, out interface{}) error {
 	if out != nil {
 		// Get reflect values
 		outVal := reflect.ValueOf(out)
-		if outVal.Kind() != reflect.Ptr {
+		if outVal.Kind() != reflect.Pointer {
 			return fmt.Errorf("out parameter must be a pointer")
 		}
 
@@ -299,9 +300,9 @@ func (a *mockApplication) GetService(name string, out interface{}) error {
 }
 
 // RegisterService registers a service with the application
-func (a *mockApplication) RegisterService(name string, service interface{}) error {
+func (a *mockApplication) RegisterService(name string, service any) error {
 	if a.services == nil {
-		a.services = make(map[string]interface{})
+		a.services = make(map[string]any)
 	}
 
 	if _, exists := a.services[name]; exists {
@@ -315,7 +316,7 @@ func (a *mockApplication) RegisterService(name string, service interface{}) erro
 // SvcRegistry returns the service registry for this application
 func (a *mockApplication) SvcRegistry() modular.ServiceRegistry {
 	if a.services == nil {
-		a.services = make(map[string]interface{})
+		a.services = make(map[string]any)
 	}
 	return a.services
 }
@@ -437,18 +438,18 @@ func (a *mockApplication) OnConfigLoaded(hook func(modular.Application) error) {
 
 // mockConfigProvider implements the modular.ConfigProvider interface
 type mockConfigProvider struct {
-	configs map[string]interface{}
+	configs map[string]any
 }
 
-func (p *mockConfigProvider) GetConfig() interface{} {
+func (p *mockConfigProvider) GetConfig() any {
 	return p.configs
 }
 
 // newMockApplication creates a new mock application for testing
 func newMockApplication() *mockApplication {
 	return &mockApplication{
-		configs:        make(map[string]interface{}),
-		services:       make(map[string]interface{}),
+		configs:        make(map[string]any),
+		services:       make(map[string]any),
 		logger:         &mockLogger{},
 		configSections: make(map[string]modular.ConfigProvider),
 		modules:        make(map[string]modular.Module),
@@ -457,26 +458,35 @@ func newMockApplication() *mockApplication {
 
 // mockLogger implements modular.Logger
 type mockLogger struct {
+	mu   sync.Mutex
 	logs []string
 }
 
-func (l *mockLogger) Debug(format string, args ...interface{}) {
+func (l *mockLogger) Debug(format string, args ...any) {
+	l.mu.Lock()
 	l.logs = append(l.logs, fmt.Sprintf("[DEBUG] "+format, args...))
+	l.mu.Unlock()
 }
 
-func (l *mockLogger) Info(format string, args ...interface{}) {
+func (l *mockLogger) Info(format string, args ...any) {
+	l.mu.Lock()
 	l.logs = append(l.logs, fmt.Sprintf("[INFO] "+format, args...))
+	l.mu.Unlock()
 }
 
-func (l *mockLogger) Warn(format string, args ...interface{}) {
+func (l *mockLogger) Warn(format string, args ...any) {
+	l.mu.Lock()
 	l.logs = append(l.logs, fmt.Sprintf("[WARN] "+format, args...))
+	l.mu.Unlock()
 }
 
-func (l *mockLogger) Error(format string, args ...interface{}) {
+func (l *mockLogger) Error(format string, args ...any) {
+	l.mu.Lock()
 	l.logs = append(l.logs, fmt.Sprintf("[ERROR] "+format, args...))
+	l.mu.Unlock()
 }
 
-func (l *mockLogger) Fatal(format string, args ...interface{}) {
+func (l *mockLogger) Fatal(format string, args ...any) {
 	l.logs = append(l.logs, fmt.Sprintf("[FATAL] "+format, args...))
 }
 
@@ -509,7 +519,7 @@ func (t *mockTrigger) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (t *mockTrigger) Configure(app modular.Application, triggerConfig interface{}) error {
+func (t *mockTrigger) Configure(app modular.Application, triggerConfig any) error {
 	t.configuredCalled = true
 	return nil
 }
@@ -525,19 +535,14 @@ func (h *mockWorkflowHandler) Name() string {
 }
 
 func (h *mockWorkflowHandler) CanHandle(workflowType string) bool {
-	for _, wt := range h.handlesFor {
-		if wt == workflowType {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(h.handlesFor, workflowType)
 }
 
-func (h *mockWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig interface{}) error {
+func (h *mockWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig any) error {
 	return nil
 }
 
-func (h *mockWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
+func (h *mockWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) (map[string]any, error) {
 	return nil, nil
 }
 
@@ -546,17 +551,17 @@ func TestEngine_AddModuleType(t *testing.T) {
 	engine := NewStdEngine(app, app.Logger())
 
 	called := false
-	engine.AddModuleType("custom.module", func(name string, cfg map[string]interface{}) modular.Module {
+	engine.AddModuleType("custom.module", func(name string, cfg map[string]any) modular.Module {
 		called = true
 		return &mockModule{name: name}
 	})
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "my-custom", Type: "custom.module", Config: map[string]interface{}{}},
+			{Name: "my-custom", Type: "custom.module", Config: map[string]any{}},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	err := engine.BuildFromConfig(cfg)
@@ -572,24 +577,24 @@ func TestEngine_BuildFromConfig_BuiltinModules(t *testing.T) {
 	tests := []struct {
 		name       string
 		moduleType string
-		config     map[string]interface{}
+		config     map[string]any
 	}{
-		{"http-server", "http.server", map[string]interface{}{"address": ":8080"}},
-		{"http-router", "http.router", map[string]interface{}{}},
-		{"http-handler", "http.handler", map[string]interface{}{"contentType": "text/html"}},
-		{"api-handler", "api.handler", map[string]interface{}{"resourceName": "orders"}},
-		{"auth-mw", "http.middleware.auth", map[string]interface{}{"authType": "Bearer"}},
-		{"logging-mw", "http.middleware.logging", map[string]interface{}{"logLevel": "debug"}},
-		{"ratelimit-mw", "http.middleware.ratelimit", map[string]interface{}{"requestsPerMinute": 100.0, "burstSize": 20.0}},
-		{"cors-mw", "http.middleware.cors", map[string]interface{}{
-			"allowedOrigins": []interface{}{"http://localhost"},
-			"allowedMethods": []interface{}{"GET", "POST"},
+		{"http-server", "http.server", map[string]any{"address": ":8080"}},
+		{"http-router", "http.router", map[string]any{}},
+		{"http-handler", "http.handler", map[string]any{"contentType": "text/html"}},
+		{"api-handler", "api.handler", map[string]any{"resourceName": "orders"}},
+		{"auth-mw", "http.middleware.auth", map[string]any{"authType": "Bearer"}},
+		{"logging-mw", "http.middleware.logging", map[string]any{"logLevel": "debug"}},
+		{"ratelimit-mw", "http.middleware.ratelimit", map[string]any{"requestsPerMinute": 100.0, "burstSize": 20.0}},
+		{"cors-mw", "http.middleware.cors", map[string]any{
+			"allowedOrigins": []any{"http://localhost"},
+			"allowedMethods": []any{"GET", "POST"},
 		}},
-		{"broker", "messaging.broker", map[string]interface{}{}},
-		{"msg-handler", "messaging.handler", map[string]interface{}{}},
-		{"sm-engine", "statemachine.engine", map[string]interface{}{}},
-		{"tracker", "state.tracker", map[string]interface{}{}},
-		{"connector", "state.connector", map[string]interface{}{}},
+		{"broker", "messaging.broker", map[string]any{}},
+		{"msg-handler", "messaging.handler", map[string]any{}},
+		{"sm-engine", "statemachine.engine", map[string]any{}},
+		{"tracker", "state.tracker", map[string]any{}},
+		{"connector", "state.connector", map[string]any{}},
 	}
 
 	for _, tt := range tests {
@@ -601,8 +606,8 @@ func TestEngine_BuildFromConfig_BuiltinModules(t *testing.T) {
 				Modules: []config.ModuleConfig{
 					{Name: tt.name, Type: tt.moduleType, Config: tt.config},
 				},
-				Workflows: map[string]interface{}{},
-				Triggers:  map[string]interface{}{},
+				Workflows: map[string]any{},
+				Triggers:  map[string]any{},
 			}
 
 			err := engine.BuildFromConfig(cfg)
@@ -619,10 +624,10 @@ func TestEngine_BuildFromConfig_UnknownModuleType(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "unknown", Type: "nonexistent.type", Config: map[string]interface{}{}},
+			{Name: "unknown", Type: "nonexistent.type", Config: map[string]any{}},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	err := engine.BuildFromConfig(cfg)
@@ -637,10 +642,10 @@ func TestEngine_BuildFromConfig_NoHandlerForWorkflow(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{},
-		Workflows: map[string]interface{}{
-			"unknown-type": map[string]interface{}{},
+		Workflows: map[string]any{
+			"unknown-type": map[string]any{},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	err := engine.BuildFromConfig(cfg)
@@ -659,10 +664,10 @@ func TestEngine_BuildFromConfig_WithWorkflowHandler(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{},
-		Workflows: map[string]interface{}{
-			"my-workflow": map[string]interface{}{"key": "val"},
+		Workflows: map[string]any{
+			"my-workflow": map[string]any{"key": "val"},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	err := engine.BuildFromConfig(cfg)
@@ -677,9 +682,9 @@ func TestEngine_BuildFromConfig_TriggerNoHandler(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules:   []config.ModuleConfig{},
-		Workflows: map[string]interface{}{},
-		Triggers: map[string]interface{}{
-			"unknown-trigger": map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers: map[string]any{
+			"unknown-trigger": map[string]any{},
 		},
 	}
 
@@ -712,10 +717,10 @@ func TestEngine_BuildFromConfig_ModularModules(t *testing.T) {
 
 			cfg := &config.WorkflowConfig{
 				Modules: []config.ModuleConfig{
-					{Name: "test-" + modType, Type: modType, Config: map[string]interface{}{}},
+					{Name: "test-" + modType, Type: modType, Config: map[string]any{}},
 				},
-				Workflows: map[string]interface{}{},
-				Triggers:  map[string]interface{}{},
+				Workflows: map[string]any{},
+				Triggers:  map[string]any{},
 			}
 
 			err := engine.BuildFromConfig(cfg)
@@ -778,15 +783,15 @@ type errorMockWorkflowHandler struct {
 	executeErr   error
 }
 
-func (h *errorMockWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig interface{}) error {
+func (h *errorMockWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig any) error {
 	return h.configureErr
 }
 
-func (h *errorMockWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
+func (h *errorMockWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) (map[string]any, error) {
 	if h.executeErr != nil {
 		return nil, h.executeErr
 	}
-	return map[string]interface{}{"status": "ok"}, nil
+	return map[string]any{"status": "ok"}, nil
 }
 
 // errorMockApplication extends mockApplication with Stop that returns errors.
@@ -817,10 +822,10 @@ func TestEngine_BuildFromConfig_EventBusBridge(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "eb-bridge", Type: "messaging.broker.eventbus", Config: map[string]interface{}{}},
+			{Name: "eb-bridge", Type: "messaging.broker.eventbus", Config: map[string]any{}},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	err := engine.BuildFromConfig(cfg)
@@ -846,10 +851,10 @@ func TestEngine_BuildFromConfig_MetricsHealthRequestID(t *testing.T) {
 
 			cfg := &config.WorkflowConfig{
 				Modules: []config.ModuleConfig{
-					{Name: tt.name, Type: tt.moduleType, Config: map[string]interface{}{}},
+					{Name: tt.name, Type: tt.moduleType, Config: map[string]any{}},
 				},
-				Workflows: map[string]interface{}{},
-				Triggers:  map[string]interface{}{},
+				Workflows: map[string]any{},
+				Triggers:  map[string]any{},
 			}
 
 			err := engine.BuildFromConfig(cfg)
@@ -866,10 +871,10 @@ func TestEngine_BuildFromConfig_DynamicComponent_NoRegistry(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "dyn-comp", Type: "dynamic.component", Config: map[string]interface{}{}},
+			{Name: "dyn-comp", Type: "dynamic.component", Config: map[string]any{}},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	err := engine.BuildFromConfig(cfg)
@@ -890,10 +895,10 @@ func TestEngine_BuildFromConfig_DynamicComponent_NotFound(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "missing-comp", Type: "dynamic.component", Config: map[string]interface{}{}},
+			{Name: "missing-comp", Type: "dynamic.component", Config: map[string]any{}},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	err := engine.BuildFromConfig(cfg)
@@ -935,14 +940,14 @@ func Stop(ctx context.Context) error { return nil }
 			{
 				Name: "test-comp",
 				Type: "dynamic.component",
-				Config: map[string]interface{}{
-					"provides": []interface{}{"my-svc"},
-					"requires": []interface{}{"other-svc"},
+				Config: map[string]any{
+					"provides": []any{"my-svc"},
+					"requires": []any{"other-svc"},
 				},
 			},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	err = engine.BuildFromConfig(cfg)
@@ -960,15 +965,15 @@ func TestEngine_BuildFromConfig_DatabaseWorkflow(t *testing.T) {
 			{
 				Name: "wf-db",
 				Type: "database.workflow",
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"driver":       "sqlite3",
 					"dsn":          ":memory:",
 					"maxOpenConns": float64(10),
 				},
 			},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	err := engine.BuildFromConfig(cfg)
@@ -983,11 +988,11 @@ func TestEngine_BuildFromConfig_DataTransformerWebhook(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "transformer", Type: "data.transformer", Config: map[string]interface{}{}},
-			{Name: "webhook", Type: "webhook.sender", Config: map[string]interface{}{"maxRetries": float64(3)}},
+			{Name: "transformer", Type: "data.transformer", Config: map[string]any{}},
+			{Name: "webhook", Type: "webhook.sender", Config: map[string]any{"maxRetries": float64(3)}},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	err := engine.BuildFromConfig(cfg)
@@ -1005,14 +1010,14 @@ func TestEngine_BuildFromConfig_RateLimitIntConfig(t *testing.T) {
 			{
 				Name: "rl",
 				Type: "http.middleware.ratelimit",
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"requestsPerMinute": 120,
 					"burstSize":         25,
 				},
 			},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	err := engine.BuildFromConfig(cfg)
@@ -1028,10 +1033,10 @@ func TestEngine_BuildFromConfig_DefaultConfigs(t *testing.T) {
 
 		cfg := &config.WorkflowConfig{
 			Modules: []config.ModuleConfig{
-				{Name: "h1", Type: "http.handler", Config: map[string]interface{}{}},
+				{Name: "h1", Type: "http.handler", Config: map[string]any{}},
 			},
-			Workflows: map[string]interface{}{},
-			Triggers:  map[string]interface{}{},
+			Workflows: map[string]any{},
+			Triggers:  map[string]any{},
 		}
 
 		err := engine.BuildFromConfig(cfg)
@@ -1046,10 +1051,10 @@ func TestEngine_BuildFromConfig_DefaultConfigs(t *testing.T) {
 
 		cfg := &config.WorkflowConfig{
 			Modules: []config.ModuleConfig{
-				{Name: "a1", Type: "api.handler", Config: map[string]interface{}{}},
+				{Name: "a1", Type: "api.handler", Config: map[string]any{}},
 			},
-			Workflows: map[string]interface{}{},
-			Triggers:  map[string]interface{}{},
+			Workflows: map[string]any{},
+			Triggers:  map[string]any{},
 		}
 
 		err := engine.BuildFromConfig(cfg)
@@ -1073,10 +1078,10 @@ func TestEngine_BuildFromConfig_HandlerConfigureError(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{},
-		Workflows: map[string]interface{}{
-			"failing-workflow": map[string]interface{}{},
+		Workflows: map[string]any{
+			"failing-workflow": map[string]any{},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	err := engine.BuildFromConfig(cfg)
@@ -1146,7 +1151,7 @@ func TestEngine_TriggerWorkflow_WithEventEmitter(t *testing.T) {
 	// Create a no-op event emitter (no eventbus registered)
 	engine.eventEmitter = module.NewWorkflowEventEmitter(app)
 
-	err := engine.TriggerWorkflow(context.Background(), "test-wf", "act", map[string]interface{}{"key": "val"})
+	err := engine.TriggerWorkflow(context.Background(), "test-wf", "act", map[string]any{"key": "val"})
 	if err != nil {
 		t.Fatalf("TriggerWorkflow should succeed, got: %v", err)
 	}
@@ -1168,7 +1173,7 @@ func TestEngine_TriggerWorkflow_FailureWithEventEmitter(t *testing.T) {
 	// Create a no-op event emitter (no eventbus registered)
 	engine.eventEmitter = module.NewWorkflowEventEmitter(app)
 
-	err := engine.TriggerWorkflow(context.Background(), "fail-wf", "act", map[string]interface{}{})
+	err := engine.TriggerWorkflow(context.Background(), "fail-wf", "act", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error from failing handler")
 	}
@@ -1195,7 +1200,7 @@ func TestEngine_TriggerWorkflow_WithMetricsCollector(t *testing.T) {
 
 	engine.eventEmitter = module.NewWorkflowEventEmitter(app)
 
-	err := engine.TriggerWorkflow(context.Background(), "metrics-wf", "act", map[string]interface{}{})
+	err := engine.TriggerWorkflow(context.Background(), "metrics-wf", "act", map[string]any{})
 	if err != nil {
 		t.Fatalf("TriggerWorkflow should succeed, got: %v", err)
 	}

@@ -6,33 +6,33 @@ import (
 
 // ServiceAccessor provides methods for accessing services
 type ServiceAccessor interface {
-	Service(name string) interface{}
-	Services() map[string]interface{}
+	Service(name string) any
+	Services() map[string]any
 }
 
 // ApplicationHelper extends the modular.Application with useful service methods
 type ApplicationHelper struct {
 	app          modular.Application
-	serviceCache map[string]interface{}
+	serviceCache map[string]any
 }
 
 // NewApplicationHelper creates a helper for application service access
 func NewApplicationHelper(app modular.Application) *ApplicationHelper {
 	return &ApplicationHelper{
 		app:          app,
-		serviceCache: make(map[string]interface{}),
+		serviceCache: make(map[string]any),
 	}
 }
 
 // Service provides access to a named service
-func (h *ApplicationHelper) Service(name string) interface{} {
+func (h *ApplicationHelper) Service(name string) any {
 	// Check cache first
 	if svc, found := h.serviceCache[name]; found {
 		return svc
 	}
 
 	// Get service from app
-	var service interface{}
+	var service any
 	_ = h.app.GetService(name, &service)
 
 	// Cache it if found
@@ -44,7 +44,7 @@ func (h *ApplicationHelper) Service(name string) interface{} {
 }
 
 // Services returns all cached services
-func (h *ApplicationHelper) Services() map[string]interface{} {
+func (h *ApplicationHelper) Services() map[string]any {
 	return h.serviceCache
 }
 
@@ -58,7 +58,7 @@ func WithHelper(app modular.Application) *ApplicationHelper {
 }
 
 // GetService is a utility function to get services from an application
-func GetService(app modular.Application, name string) interface{} {
+func GetService(app modular.Application, name string) any {
 	// Use helper for consistent access
 	helper := WithHelper(app)
 	return helper.Service(name)

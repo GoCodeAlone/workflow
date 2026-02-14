@@ -67,7 +67,7 @@ func (s *PGSessionStore) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (s *PGSessionStore) List(ctx context.Context, f SessionFilter) ([]*Session, error) {
 	query := `SELECT * FROM sessions WHERE 1=1`
-	args := []interface{}{}
+	args := []any{}
 	idx := 1
 
 	if f.UserID != nil {
@@ -113,7 +113,7 @@ func (s *PGSessionStore) DeleteExpired(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
-func (s *PGSessionStore) scanOne(ctx context.Context, query string, args ...interface{}) (*Session, error) {
+func (s *PGSessionStore) scanOne(ctx context.Context, query string, args ...any) (*Session, error) {
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query session: %w", err)

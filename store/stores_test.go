@@ -15,10 +15,6 @@ import (
 
 func ctx() context.Context { return context.Background() }
 
-func ptrUUID(id uuid.UUID) *uuid.UUID { return &id }
-
-func ptrBool(v bool) *bool { return &v }
-
 func makeUser(email string) *User {
 	return &User{Email: email, DisplayName: "Test", Active: true}
 }
@@ -253,7 +249,7 @@ func TestMockUserStore_List_FilterByActive(t *testing.T) {
 	u2.Active = false
 	_ = s.Create(ctx(), u1)
 	_ = s.Create(ctx(), u2)
-	list, _ := s.List(ctx(), UserFilter{Active: ptrBool(true)})
+	list, _ := s.List(ctx(), UserFilter{Active: new(true)})
 	if len(list) != 1 {
 		t.Fatalf("expected 1 active, got %d", len(list))
 	}
@@ -261,7 +257,7 @@ func TestMockUserStore_List_FilterByActive(t *testing.T) {
 
 func TestMockUserStore_List_Pagination(t *testing.T) {
 	s := NewMockUserStore()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		_ = s.Create(ctx(), makeUser("pag"+string(rune('a'+i))+"@test.com"))
 	}
 	list, _ := s.List(ctx(), UserFilter{Pagination: Pagination{Offset: 2, Limit: 3}})
@@ -1121,7 +1117,7 @@ func TestMockMembershipStore_GetEffectiveRole_CompanyLevelDirect(t *testing.T) {
 
 func TestMockMembershipStore_GetEffectiveRole_NotFound(t *testing.T) {
 	s := NewMockMembershipStore()
-	_, err := s.GetEffectiveRole(ctx(), uuid.New(), uuid.New(), ptrUUID(uuid.New()))
+	_, err := s.GetEffectiveRole(ctx(), uuid.New(), uuid.New(), new(uuid.New()))
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
@@ -1260,7 +1256,7 @@ func TestMockCrossWorkflowLinkStore_List_All(t *testing.T) {
 
 func TestMockCrossWorkflowLinkStore_List_Pagination(t *testing.T) {
 	s := NewMockCrossWorkflowLinkStore()
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		_ = s.Create(ctx(), &CrossWorkflowLink{SourceWorkflowID: uuid.New(), TargetWorkflowID: uuid.New(), LinkType: "x", CreatedBy: uuid.New()})
 	}
 	list, _ := s.List(ctx(), CrossWorkflowLinkFilter{Pagination: Pagination{Offset: 1, Limit: 2}})
@@ -1509,7 +1505,7 @@ func TestMockExecutionStore_ListExecutions_FilterByUntil(t *testing.T) {
 
 func TestMockExecutionStore_ListExecutions_Pagination(t *testing.T) {
 	s := NewMockExecutionStore()
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		_ = s.CreateExecution(ctx(), &WorkflowExecution{WorkflowID: uuid.New(), Status: ExecutionStatusPending})
 	}
 	list, _ := s.ListExecutions(ctx(), ExecutionFilter{Pagination: Pagination{Offset: 1, Limit: 2}})
@@ -1714,7 +1710,7 @@ func TestMockLogStore_Query_FilterByDateRange(t *testing.T) {
 func TestMockLogStore_Query_Pagination(t *testing.T) {
 	s := NewMockLogStore()
 	wid := uuid.New()
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_ = s.Append(ctx(), &ExecutionLog{WorkflowID: wid, Level: LogLevelInfo, Message: "m"})
 	}
 	results, _ := s.Query(ctx(), LogFilter{Pagination: Pagination{Offset: 3, Limit: 4}})
@@ -1864,7 +1860,7 @@ func TestMockAuditStore_Query_FilterByDateRange(t *testing.T) {
 
 func TestMockAuditStore_Query_Pagination(t *testing.T) {
 	s := NewMockAuditStore()
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		_ = s.Record(ctx(), &AuditEntry{Action: "test", ResourceType: "x"})
 	}
 	results, _ := s.Query(ctx(), AuditFilter{Pagination: Pagination{Offset: 2, Limit: 3}})
@@ -2000,7 +1996,7 @@ func TestMockIAMStore_ListProviders_FilterByEnabled(t *testing.T) {
 	s := NewMockIAMStore()
 	_ = s.CreateProvider(ctx(), &IAMProviderConfig{CompanyID: uuid.New(), ProviderType: IAMProviderOIDC, Name: "on", Enabled: true})
 	_ = s.CreateProvider(ctx(), &IAMProviderConfig{CompanyID: uuid.New(), ProviderType: IAMProviderAWS, Name: "off", Enabled: false})
-	list, _ := s.ListProviders(ctx(), IAMProviderFilter{Enabled: ptrBool(true)})
+	list, _ := s.ListProviders(ctx(), IAMProviderFilter{Enabled: new(true)})
 	if len(list) != 1 {
 		t.Fatalf("expected 1, got %d", len(list))
 	}

@@ -69,7 +69,7 @@ func (s *PGProjectStore) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (s *PGProjectStore) List(ctx context.Context, f ProjectFilter) ([]*Project, error) {
 	query := `SELECT * FROM projects WHERE 1=1`
-	args := []interface{}{}
+	args := []any{}
 	idx := 1
 
 	if f.CompanyID != nil {
@@ -129,7 +129,7 @@ func (s *PGProjectStore) ListForUser(ctx context.Context, userID uuid.UUID) ([]*
 	return projects, rows.Err()
 }
 
-func (s *PGProjectStore) scanOne(ctx context.Context, query string, args ...interface{}) (*Project, error) {
+func (s *PGProjectStore) scanOne(ctx context.Context, query string, args ...any) (*Project, error) {
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query project: %w", err)

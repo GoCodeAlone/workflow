@@ -139,7 +139,7 @@ func TestAuthMiddleware(t *testing.T) {
 	// Create a test handler
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Get claims from context
-		claims, ok := r.Context().Value(authClaimsContextKey).(map[string]interface{})
+		claims, ok := r.Context().Value(authClaimsContextKey).(map[string]any)
 		if !ok {
 			t.Error("auth claims not found in request context")
 			return
@@ -159,7 +159,7 @@ func TestAuthMiddleware(t *testing.T) {
 	})
 
 	// Add valid tokens
-	auth.AddProvider(map[string]map[string]interface{}{
+	auth.AddProvider(map[string]map[string]any{
 		"test-token": {
 			"username": "testuser",
 			"role":     "admin",
@@ -198,8 +198,8 @@ func TestAuthMiddleware(t *testing.T) {
 }
 
 type minCfg struct {
-	Modules []interface{}          `json:"modules"`
-	Env     map[string]interface{} `json:"env"`
+	Modules []any          `json:"modules"`
+	Env     map[string]any `json:"env"`
 	App     struct {
 		Name    string `json:"name"`
 		Version string `json:"version"`
@@ -277,26 +277,26 @@ type mockLogger struct {
 	entries []string
 }
 
-func (l *mockLogger) Debug(message string, args ...interface{}) {
+func (l *mockLogger) Debug(message string, args ...any) {
 	l.entries = append(l.entries, fmt.Sprintf(message, args...))
 }
 
-func (l *mockLogger) Info(message string, args ...interface{}) {
+func (l *mockLogger) Info(message string, args ...any) {
 	l.entries = append(l.entries, fmt.Sprintf(message, args...))
 }
 
-func (l *mockLogger) Warning(message string, args ...interface{}) {
+func (l *mockLogger) Warning(message string, args ...any) {
 	l.entries = append(l.entries, fmt.Sprintf(message, args...))
 }
 
-func (l *mockLogger) Warn(message string, args ...interface{}) {
+func (l *mockLogger) Warn(message string, args ...any) {
 	l.entries = append(l.entries, fmt.Sprintf(message, args...))
 }
 
-func (l *mockLogger) Error(message string, args ...interface{}) {
+func (l *mockLogger) Error(message string, args ...any) {
 	l.entries = append(l.entries, fmt.Sprintf(message, args...))
 }
 
-func (l *mockLogger) Critical(message string, args ...interface{}) {
+func (l *mockLogger) Critical(message string, args ...any) {
 	l.entries = append(l.entries, fmt.Sprintf(message, args...))
 }

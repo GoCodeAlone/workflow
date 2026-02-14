@@ -74,7 +74,7 @@ func TestWorkflowDatabase_ExecuteWithoutOpen(t *testing.T) {
 
 func TestWorkflowDatabase_InsertRowEmpty(t *testing.T) {
 	db := NewWorkflowDatabase("test-db", DatabaseConfig{})
-	_, err := db.InsertRow(context.Background(), "users", map[string]interface{}{})
+	_, err := db.InsertRow(context.Background(), "users", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for empty data insert")
 	}
@@ -85,7 +85,7 @@ func TestWorkflowDatabase_InsertRowEmpty(t *testing.T) {
 
 func TestWorkflowDatabase_UpdateRowsEmpty(t *testing.T) {
 	db := NewWorkflowDatabase("test-db", DatabaseConfig{})
-	_, err := db.UpdateRows(context.Background(), "users", map[string]interface{}{}, "id = $1", 1)
+	_, err := db.UpdateRows(context.Background(), "users", map[string]any{}, "id = $1", 1)
 	if err == nil {
 		t.Fatal("expected error for empty data update")
 	}
@@ -97,13 +97,16 @@ func TestWorkflowDatabase_UpdateRowsEmpty(t *testing.T) {
 // Test SQL building functions
 
 func TestBuildInsertSQL(t *testing.T) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"name":  "Alice",
 		"email": "alice@example.com",
 		"age":   30,
 	}
 
-	sqlStr, values := BuildInsertSQL("users", data)
+	sqlStr, values, err := BuildInsertSQL("users", data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Keys are sorted: age, email, name
 	expectedSQL := "INSERT INTO users (age, email, name) VALUES ($1, $2, $3)"
@@ -126,7 +129,10 @@ func TestBuildInsertSQL(t *testing.T) {
 }
 
 func TestBuildInsertSQL_Empty(t *testing.T) {
-	sqlStr, values := BuildInsertSQL("users", map[string]interface{}{})
+	sqlStr, values, err := BuildInsertSQL("users", map[string]any{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if sqlStr != "" {
 		t.Errorf("expected empty SQL, got %q", sqlStr)
 	}
@@ -136,11 +142,14 @@ func TestBuildInsertSQL_Empty(t *testing.T) {
 }
 
 func TestBuildInsertSQL_SingleColumn(t *testing.T) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"name": "Bob",
 	}
 
-	sqlStr, values := BuildInsertSQL("users", data)
+	sqlStr, values, err := BuildInsertSQL("users", data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	expectedSQL := "INSERT INTO users (name) VALUES ($1)"
 	if sqlStr != expectedSQL {
 		t.Errorf("expected SQL:\n  %s\ngot:\n  %s", expectedSQL, sqlStr)
@@ -151,12 +160,15 @@ func TestBuildInsertSQL_SingleColumn(t *testing.T) {
 }
 
 func TestBuildUpdateSQL(t *testing.T) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"name":  "Bob",
 		"email": "bob@example.com",
 	}
 
-	sqlStr, values := BuildUpdateSQL("users", data, "id = $3", 42)
+	sqlStr, values, err := BuildUpdateSQL("users", data, "id = $3", 42)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Keys sorted: email, name
 	expectedSQL := "UPDATE users SET email = $1, name = $2 WHERE id = $3"
@@ -179,11 +191,14 @@ func TestBuildUpdateSQL(t *testing.T) {
 }
 
 func TestBuildUpdateSQL_NoWhere(t *testing.T) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"status": "active",
 	}
 
-	sqlStr, values := BuildUpdateSQL("users", data, "")
+	sqlStr, values, err := BuildUpdateSQL("users", data, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	expectedSQL := "UPDATE users SET status = $1"
 	if sqlStr != expectedSQL {
 		t.Errorf("expected SQL:\n  %s\ngot:\n  %s", expectedSQL, sqlStr)
@@ -194,7 +209,10 @@ func TestBuildUpdateSQL_NoWhere(t *testing.T) {
 }
 
 func TestBuildUpdateSQL_Empty(t *testing.T) {
-	sqlStr, values := BuildUpdateSQL("users", map[string]interface{}{}, "id = 1")
+	sqlStr, values, err := BuildUpdateSQL("users", map[string]any{}, "id = 1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if sqlStr != "" {
 		t.Errorf("expected empty SQL, got %q", sqlStr)
 	}
@@ -204,7 +222,10 @@ func TestBuildUpdateSQL_Empty(t *testing.T) {
 }
 
 func TestBuildDeleteSQL(t *testing.T) {
-	sqlStr, values := BuildDeleteSQL("users", "id = $1", 42)
+	sqlStr, values, err := BuildDeleteSQL("users", "id = $1", 42)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	expectedSQL := "DELETE FROM users WHERE id = $1"
 	if sqlStr != expectedSQL {
 		t.Errorf("expected SQL:\n  %s\ngot:\n  %s", expectedSQL, sqlStr)
@@ -215,7 +236,10 @@ func TestBuildDeleteSQL(t *testing.T) {
 }
 
 func TestBuildDeleteSQL_NoWhere(t *testing.T) {
-	sqlStr, values := BuildDeleteSQL("users", "")
+	sqlStr, values, err := BuildDeleteSQL("users", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	expectedSQL := "DELETE FROM users"
 	if sqlStr != expectedSQL {
 		t.Errorf("expected SQL:\n  %s\ngot:\n  %s", expectedSQL, sqlStr)
@@ -226,12 +250,62 @@ func TestBuildDeleteSQL_NoWhere(t *testing.T) {
 }
 
 func TestBuildDeleteSQL_MultipleArgs(t *testing.T) {
-	sqlStr, values := BuildDeleteSQL("orders", "status = $1 AND created_at < $2", "cancelled", "2024-01-01")
+	sqlStr, values, err := BuildDeleteSQL("orders", "status = $1 AND created_at < $2", "cancelled", "2024-01-01")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if !strings.Contains(sqlStr, "WHERE status = $1 AND created_at < $2") {
 		t.Errorf("unexpected SQL: %s", sqlStr)
 	}
 	if len(values) != 2 {
 		t.Fatalf("expected 2 values, got %d", len(values))
+	}
+}
+
+func TestBuildSQL_InvalidTableName(t *testing.T) {
+	// SQL injection attempt in table name
+	_, _, err := BuildInsertSQL("users; DROP TABLE users--", map[string]any{"name": "test"})
+	if err == nil {
+		t.Fatal("expected error for SQL injection in table name")
+	}
+	if !strings.Contains(err.Error(), "invalid table name") {
+		t.Errorf("expected 'invalid table name' error, got %q", err.Error())
+	}
+
+	_, _, err = BuildUpdateSQL("users; DROP TABLE users--", map[string]any{"name": "test"}, "id = $1", 1)
+	if err == nil {
+		t.Fatal("expected error for SQL injection in table name")
+	}
+
+	_, _, err = BuildDeleteSQL("users; DROP TABLE users--", "id = $1", 1)
+	if err == nil {
+		t.Fatal("expected error for SQL injection in table name")
+	}
+}
+
+func TestBuildSQL_InvalidColumnName(t *testing.T) {
+	_, _, err := BuildInsertSQL("users", map[string]any{"name; DROP TABLE users--": "test"})
+	if err == nil {
+		t.Fatal("expected error for SQL injection in column name")
+	}
+	if !strings.Contains(err.Error(), "invalid column name") {
+		t.Errorf("expected 'invalid column name' error, got %q", err.Error())
+	}
+}
+
+func TestValidateIdentifier(t *testing.T) {
+	valid := []string{"users", "user_roles", "schema1.users", "my_table_2", "_private"}
+	for _, id := range valid {
+		if err := validateIdentifier(id); err != nil {
+			t.Errorf("expected %q to be valid, got error: %v", id, err)
+		}
+	}
+
+	invalid := []string{"", "1starts_with_number", "has space", "semi;colon", "dash-name", "quote'inject", "paren(s)", "users--", "DROP TABLE"}
+	for _, id := range invalid {
+		if err := validateIdentifier(id); err == nil {
+			t.Errorf("expected %q to be invalid, but it was accepted", id)
+		}
 	}
 }
 
@@ -253,7 +327,7 @@ func TestDatabaseIntegrationConnector_ExecuteNotConnected(t *testing.T) {
 	db := NewWorkflowDatabase("test-db", DatabaseConfig{})
 	conn := NewDatabaseIntegrationConnector("db-conn", db)
 
-	_, err := conn.Execute(context.Background(), "query", map[string]interface{}{
+	_, err := conn.Execute(context.Background(), "query", map[string]any{
 		"sql": "SELECT 1",
 	})
 	if err == nil {
@@ -269,7 +343,7 @@ func TestDatabaseIntegrationConnector_ExecuteUnsupportedAction(t *testing.T) {
 	conn := NewDatabaseIntegrationConnector("db-conn", db)
 	conn.connected = true // bypass connection for unit testing
 
-	_, err := conn.Execute(context.Background(), "unknown_action", map[string]interface{}{})
+	_, err := conn.Execute(context.Background(), "unknown_action", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for unsupported action")
 	}
@@ -283,7 +357,7 @@ func TestDatabaseIntegrationConnector_QueryMissingSql(t *testing.T) {
 	conn := NewDatabaseIntegrationConnector("db-conn", db)
 	conn.connected = true
 
-	_, err := conn.Execute(context.Background(), "query", map[string]interface{}{})
+	_, err := conn.Execute(context.Background(), "query", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing sql parameter")
 	}
@@ -297,7 +371,7 @@ func TestDatabaseIntegrationConnector_ExecuteMissingSql(t *testing.T) {
 	conn := NewDatabaseIntegrationConnector("db-conn", db)
 	conn.connected = true
 
-	_, err := conn.Execute(context.Background(), "execute", map[string]interface{}{})
+	_, err := conn.Execute(context.Background(), "execute", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing sql parameter")
 	}
@@ -308,7 +382,7 @@ func TestDatabaseIntegrationConnector_InsertMissingTable(t *testing.T) {
 	conn := NewDatabaseIntegrationConnector("db-conn", db)
 	conn.connected = true
 
-	_, err := conn.Execute(context.Background(), "insert", map[string]interface{}{})
+	_, err := conn.Execute(context.Background(), "insert", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing table parameter")
 	}
@@ -322,7 +396,7 @@ func TestDatabaseIntegrationConnector_InsertMissingData(t *testing.T) {
 	conn := NewDatabaseIntegrationConnector("db-conn", db)
 	conn.connected = true
 
-	_, err := conn.Execute(context.Background(), "insert", map[string]interface{}{
+	_, err := conn.Execute(context.Background(), "insert", map[string]any{
 		"table": "users",
 	})
 	if err == nil {
@@ -338,7 +412,7 @@ func TestDatabaseIntegrationConnector_UpdateMissingTable(t *testing.T) {
 	conn := NewDatabaseIntegrationConnector("db-conn", db)
 	conn.connected = true
 
-	_, err := conn.Execute(context.Background(), "update", map[string]interface{}{})
+	_, err := conn.Execute(context.Background(), "update", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing table parameter")
 	}
@@ -349,7 +423,7 @@ func TestDatabaseIntegrationConnector_UpdateMissingData(t *testing.T) {
 	conn := NewDatabaseIntegrationConnector("db-conn", db)
 	conn.connected = true
 
-	_, err := conn.Execute(context.Background(), "update", map[string]interface{}{
+	_, err := conn.Execute(context.Background(), "update", map[string]any{
 		"table": "users",
 	})
 	if err == nil {
@@ -362,7 +436,7 @@ func TestDatabaseIntegrationConnector_DeleteMissingTable(t *testing.T) {
 	conn := NewDatabaseIntegrationConnector("db-conn", db)
 	conn.connected = true
 
-	_, err := conn.Execute(context.Background(), "delete", map[string]interface{}{})
+	_, err := conn.Execute(context.Background(), "delete", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing table parameter")
 	}
@@ -370,8 +444,8 @@ func TestDatabaseIntegrationConnector_DeleteMissingTable(t *testing.T) {
 
 func TestExtractArgs(t *testing.T) {
 	// Test with slice
-	params := map[string]interface{}{
-		"args": []interface{}{"a", "b", "c"},
+	params := map[string]any{
+		"args": []any{"a", "b", "c"},
 	}
 	args := extractArgs(params)
 	if len(args) != 3 {
@@ -379,7 +453,7 @@ func TestExtractArgs(t *testing.T) {
 	}
 
 	// Test with single value
-	params = map[string]interface{}{
+	params = map[string]any{
 		"args": "single",
 	}
 	args = extractArgs(params)
@@ -388,7 +462,7 @@ func TestExtractArgs(t *testing.T) {
 	}
 
 	// Test with no args
-	params = map[string]interface{}{}
+	params = map[string]any{}
 	args = extractArgs(params)
 	if args != nil {
 		t.Errorf("expected nil args, got %v", args)
@@ -413,38 +487,38 @@ func TestDatabaseIntegrationConnector_ActionDispatch(t *testing.T) {
 
 	actions := []struct {
 		action      string
-		params      map[string]interface{}
+		params      map[string]any
 		errContains string
 	}{
 		{
 			action:      "query",
-			params:      map[string]interface{}{"sql": "SELECT 1"},
+			params:      map[string]any{"sql": "SELECT 1"},
 			errContains: "database not open",
 		},
 		{
 			action:      "execute",
-			params:      map[string]interface{}{"sql": "UPDATE t SET x = 1"},
+			params:      map[string]any{"sql": "UPDATE t SET x = 1"},
 			errContains: "database not open",
 		},
 		{
 			action: "insert",
-			params: map[string]interface{}{
+			params: map[string]any{
 				"table": "t",
-				"data":  map[string]interface{}{"col": "val"},
+				"data":  map[string]any{"col": "val"},
 			},
 			errContains: "database not open",
 		},
 		{
 			action: "update",
-			params: map[string]interface{}{
+			params: map[string]any{
 				"table": "t",
-				"data":  map[string]interface{}{"col": "val"},
+				"data":  map[string]any{"col": "val"},
 			},
 			errContains: "database not open",
 		},
 		{
 			action: "delete",
-			params: map[string]interface{}{
+			params: map[string]any{
 				"table": "t",
 			},
 			errContains: "database not open",

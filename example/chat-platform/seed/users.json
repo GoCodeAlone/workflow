@@ -4,5 +4,7 @@
   {"id":"user-003","data":{"email":"responder3@example.com","name":"Sam Okafor","role":"responder","affiliateId":"aff-002","programIds":["prog-003"],"status":"active","maxConcurrent":4,"password":"demo123"},"state":"active"},
   {"id":"user-004","data":{"email":"supervisor1@example.com","name":"Dr. Maria Santos","role":"supervisor","affiliateId":"aff-001","programIds":["prog-001","prog-002"],"status":"active","password":"demo123"},"state":"active"},
   {"id":"user-005","data":{"email":"supervisor2@example.com","name":"Taylor Kim","role":"supervisor","affiliateId":"aff-002","programIds":["prog-003"],"status":"active","password":"demo123"},"state":"active"},
-  {"id":"user-006","data":{"email":"admin@example.com","name":"Admin User","role":"admin","affiliateId":"aff-001","programIds":[],"status":"active","password":"demo123"},"state":"active"}
+  {"id":"user-006","data":{"email":"admin@example.com","name":"Admin User","role":"admin","affiliateId":"aff-001","programIds":[],"status":"active","password":"demo123"},"state":"active"},
+  {"id":"user-007","data":{"email":"responder-eu@example.com","name":"Lukas Weber","role":"responder","affiliateId":"aff-003","programIds":["prog-004"],"status":"active","maxConcurrent":2,"password":"demo123"},"state":"active"},
+  {"id":"user-008","data":{"email":"supervisor-eu@example.com","name":"Dr. Elena Müller","role":"supervisor","affiliateId":"aff-003","programIds":["prog-004"],"status":"active","password":"demo123"},"state":"active"}
 ]

@@ -79,7 +79,7 @@ func (s *PGIAMStore) DeleteProvider(ctx context.Context, id uuid.UUID) error {
 func (s *PGIAMStore) ListProviders(ctx context.Context, f IAMProviderFilter) ([]*IAMProviderConfig, error) {
 	query := `SELECT id, company_id, provider_type, name, config, enabled, created_at, updated_at
 		FROM iam_provider_configs WHERE 1=1`
-	args := []interface{}{}
+	args := []any{}
 	idx := 1
 
 	if f.CompanyID != nil {
@@ -173,7 +173,7 @@ func (s *PGIAMStore) DeleteMapping(ctx context.Context, id uuid.UUID) error {
 func (s *PGIAMStore) ListMappings(ctx context.Context, f IAMRoleMappingFilter) ([]*IAMRoleMapping, error) {
 	query := `SELECT id, provider_id, external_identifier, resource_type, resource_id, role, created_at
 		FROM iam_role_mappings WHERE 1=1`
-	args := []interface{}{}
+	args := []any{}
 	idx := 1
 
 	if f.ProviderID != nil {

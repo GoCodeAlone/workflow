@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 
 	"github.com/CrisisTextLine/modular"
@@ -20,11 +21,11 @@ type HTTPTriggerConfig struct {
 
 // HTTPTriggerRoute represents a single HTTP route configuration
 type HTTPTriggerRoute struct {
-	Path     string                 `json:"path" yaml:"path"`
-	Method   string                 `json:"method" yaml:"method"`
-	Workflow string                 `json:"workflow" yaml:"workflow"`
-	Action   string                 `json:"action" yaml:"action"`
-	Params   map[string]interface{} `json:"params,omitempty" yaml:"params,omitempty"`
+	Path     string         `json:"path" yaml:"path"`
+	Method   string         `json:"method" yaml:"method"`
+	Workflow string         `json:"workflow" yaml:"workflow"`
+	Action   string         `json:"action" yaml:"action"`
+	Params   map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
 }
 
 // HTTPTrigger implements a trigger that starts workflows from HTTP requests
@@ -38,7 +39,7 @@ type HTTPTrigger struct {
 
 // WorkflowEngine defines the interface for triggering workflows
 type WorkflowEngine interface {
-	TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) error
+	TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) error
 }
 
 // NewHTTPTrigger creates a new HTTP trigger
@@ -102,15 +103,15 @@ func (t *HTTPTrigger) Stop(ctx context.Context) error {
 }
 
 // Configure sets up the trigger from configuration
-func (t *HTTPTrigger) Configure(app modular.Application, triggerConfig interface{}) error {
+func (t *HTTPTrigger) Configure(app modular.Application, triggerConfig any) error {
 	// Convert the generic config to HTTP trigger config
-	config, ok := triggerConfig.(map[string]interface{})
+	config, ok := triggerConfig.(map[string]any)
 	if !ok {
 		return fmt.Errorf("invalid HTTP trigger configuration format")
 	}
 
 	// Extract routes from configuration
-	routesConfig, ok := config["routes"].([]interface{})
+	routesConfig, ok := config["routes"].([]any)
 	if !ok {
 		return fmt.Errorf("routes not found in HTTP trigger configuration")
 	}
@@ -120,7 +121,7 @@ func (t *HTTPTrigger) Configure(app modular.Application, triggerConfig interface
 	routerNames := []string{"httpRouter", "api-router", "router"}
 
 	for _, name := range routerNames {
-		var svc interface{}
+		var svc any
 		if err := app.GetService(name, &svc); err == nil && svc != nil {
 			if r, ok := svc.(HTTPRouter); ok {
 				router = r
@@ -138,7 +139,7 @@ func (t *HTTPTrigger) Configure(app modular.Application, triggerConfig interface
 	engineNames := []string{"workflowEngine", "engine"}
 
 	for _, name := range engineNames {
-		var svc interface{}
+		var svc any
 		if err := app.GetService(name, &svc); err == nil && svc != nil {
 			if e, ok := svc.(WorkflowEngine); ok {
 				engine = e
@@ -157,7 +158,7 @@ func (t *HTTPTrigger) Configure(app modular.Application, triggerConfig interface
 
 	// Parse routes
 	for i, rc := range routesConfig {
-		routeMap, ok := rc.(map[string]interface{})
+		routeMap, ok := rc.(map[string]any)
 		if !ok {
 			return fmt.Errorf("invalid route configuration at index %d", i)
 		}
@@ -172,7 +173,7 @@ func (t *HTTPTrigger) Configure(app modular.Application, triggerConfig interface
 		}
 
 		// Get optional params
-		params, _ := routeMap["params"].(map[string]interface{})
+		params, _ := routeMap["params"].(map[string]any)
 
 		// Add the route
 		t.routes = append(t.routes, HTTPTriggerRoute{
@@ -201,7 +202,7 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 		ctx := r.Context()
 
 		// Extract data from the request to pass to the workflow
-		data := make(map[string]interface{})
+		data := make(map[string]any)
 
 		// Add URL params from context
 		for k, v := range params {
@@ -216,9 +217,7 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 		}
 
 		// Add any static params from the route configuration
-		for k, v := range route.Params {
-			data[k] = v
-		}
+		maps.Copy(data, route.Params)
 
 		// Call the workflow engine to trigger the workflow
 		err := t.engine.TriggerWorkflow(ctx, route.Workflow, route.Action, data)

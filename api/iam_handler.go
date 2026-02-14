@@ -299,7 +299,7 @@ func (h *IAMHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
 
 	provider, ok := h.resolver.GetProvider(p.ProviderType)
 	if !ok {
-		WriteJSON(w, http.StatusOK, map[string]interface{}{
+		WriteJSON(w, http.StatusOK, map[string]any{
 			"success": false,
 			"message": "no provider implementation registered for type: " + string(p.ProviderType),
 		})
@@ -307,14 +307,14 @@ func (h *IAMHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := provider.TestConnection(r.Context(), p.Config); err != nil {
-		WriteJSON(w, http.StatusOK, map[string]interface{}{
+		WriteJSON(w, http.StatusOK, map[string]any{
 			"success": false,
 			"message": err.Error(),
 		})
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]interface{}{
+	WriteJSON(w, http.StatusOK, map[string]any{
 		"success": true,
 		"message": "connection successful",
 	})

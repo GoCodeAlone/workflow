@@ -41,14 +41,16 @@ func NewStandardNamespace(prefix string, suffix string) *StandardNamespace {
 
 // FormatName formats a module name with the namespace prefix/suffix
 func (ns *StandardNamespace) FormatName(baseName string) string {
-	if ns.prefix != "" && ns.suffix != "" {
+	switch {
+	case ns.prefix != "" && ns.suffix != "":
 		return ns.prefix + "-" + baseName + "-" + ns.suffix
-	} else if ns.prefix != "" {
+	case ns.prefix != "":
 		return ns.prefix + "-" + baseName
-	} else if ns.suffix != "" {
+	case ns.suffix != "":
 		return baseName + "-" + ns.suffix
+	default:
+		return baseName
 	}
-	return baseName
 }
 
 // ResolveDependency formats a dependency name with the namespace prefix/suffix

@@ -345,7 +345,7 @@ func Init(services map[string]interface{}) error { return nil }
 	}
 
 	// Verify the provided service was registered
-	var svc interface{}
+	var svc any
 	if err := app.GetService("my-svc", &svc); err != nil {
 		t.Fatalf("expected 'my-svc' to be registered: %v", err)
 	}

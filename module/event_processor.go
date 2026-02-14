@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -11,24 +12,24 @@ import (
 
 // EventPattern defines a pattern for matching complex event sequences
 type EventPattern struct {
-	PatternID    string                 `json:"patternId" yaml:"patternId"`
-	EventTypes   []string               `json:"eventTypes" yaml:"eventTypes"`
-	WindowTime   time.Duration          `json:"windowTime" yaml:"windowTime"`
-	Condition    string                 `json:"condition" yaml:"condition"`
-	MinOccurs    int                    `json:"minOccurs" yaml:"minOccurs"`
-	MaxOccurs    int                    `json:"maxOccurs" yaml:"maxOccurs"`
-	OrderMatters bool                   `json:"orderMatters" yaml:"orderMatters"`
-	ExtraParams  map[string]interface{} `json:"extraParams,omitempty" yaml:"extraParams,omitempty"`
+	PatternID    string         `json:"patternId" yaml:"patternId"`
+	EventTypes   []string       `json:"eventTypes" yaml:"eventTypes"`
+	WindowTime   time.Duration  `json:"windowTime" yaml:"windowTime"`
+	Condition    string         `json:"condition" yaml:"condition"`
+	MinOccurs    int            `json:"minOccurs" yaml:"minOccurs"`
+	MaxOccurs    int            `json:"maxOccurs" yaml:"maxOccurs"`
+	OrderMatters bool           `json:"orderMatters" yaml:"orderMatters"`
+	ExtraParams  map[string]any `json:"extraParams,omitempty" yaml:"extraParams,omitempty"`
 }
 
 // EventData represents an event in the system
 type EventData struct {
-	EventType  string                 `json:"eventType"`
-	Timestamp  time.Time              `json:"timestamp"`
-	SourceID   string                 `json:"sourceId"`
-	CorrelID   string                 `json:"correlId,omitempty"`
-	Data       map[string]interface{} `json:"data,omitempty"`
-	RawMessage []byte                 `json:"-"`
+	EventType  string         `json:"eventType"`
+	Timestamp  time.Time      `json:"timestamp"`
+	SourceID   string         `json:"sourceId"`
+	CorrelID   string         `json:"correlId,omitempty"`
+	Data       map[string]any `json:"data,omitempty"`
+	RawMessage []byte         `json:"-"`
 }
 
 // PatternMatch represents a successful pattern match
@@ -212,12 +213,7 @@ func (p *EventProcessor) checkPatternMatch(events []EventData, pattern *EventPat
 
 // eventMatchesType checks if an event matches any of the specified types
 func (p *EventProcessor) eventMatchesType(event EventData, types []string) bool {
-	for _, t := range types {
-		if event.EventType == t {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(types, event.EventType)
 }
 
 // periodicCleanup removes old events from the buffer
@@ -239,7 +235,7 @@ func (p *EventProcessor) cleanupOldEvents() {
 	}
 
 	// Add some buffer time
-	maxWindow = maxWindow + (5 * time.Minute)
+	maxWindow += 5 * time.Minute
 	cutoffTime := time.Now().Add(-maxWindow)
 
 	p.bufferLock.Lock()
@@ -311,7 +307,7 @@ func (p *EventProcessor) SetError(err error) {
 
 // GetService implements the service functionality expected by handlers.
 // It follows the modular.Application interface signature
-func (p *EventProcessor) GetService(name string, out interface{}) error {
+func (p *EventProcessor) GetService(name string, out any) error {
 	// Get the service from the application context
 	if p.appContext != nil {
 		_ = p.appContext.GetService(name, out)
@@ -319,8 +315,7 @@ func (p *EventProcessor) GetService(name string, out interface{}) error {
 
 	if name == p.name && out != nil {
 		// If someone is asking for us by name, return ourselves
-		switch outPtr := out.(type) {
-		case **EventProcessor:
+		if outPtr, ok := out.(**EventProcessor); ok {
 			*outPtr = p
 		}
 	}
@@ -329,8 +324,8 @@ func (p *EventProcessor) GetService(name string, out interface{}) error {
 }
 
 // Service provides access to a named service
-func (p *EventProcessor) Service(name string) interface{} {
-	var result interface{}
+func (p *EventProcessor) Service(name string) any {
+	var result any
 	if err := p.GetService(name, &result); err != nil {
 		// Return nil if service not found - this is expected behavior
 		return nil
@@ -339,9 +334,9 @@ func (p *EventProcessor) Service(name string) interface{} {
 }
 
 // Services returns a map of all available services
-func (p *EventProcessor) Services() map[string]interface{} {
+func (p *EventProcessor) Services() map[string]any {
 	// Create a map of services that are registered
-	services := make(map[string]interface{})
+	services := make(map[string]any)
 	// Add self to the services map
 	services[p.name] = p
 	return services

@@ -79,7 +79,7 @@ func TestDeployComponent_WithSource(t *testing.T) {
 	}
 
 	// Verify it executes correctly
-	result, err := comp.Execute(context.Background(), map[string]interface{}{"name": "world"})
+	result, err := comp.Execute(context.Background(), map[string]any{"name": "world"})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -167,8 +167,8 @@ func TestGenerateAndDeploy(t *testing.T) {
 						{Name: "server", Type: "http.server"},
 						{Name: "greeter", Type: "test.greeter"},
 					},
-					Workflows: map[string]interface{}{},
-					Triggers:  map[string]interface{}{},
+					Workflows: map[string]any{},
+					Triggers:  map[string]any{},
 				},
 				Components: []ComponentSpec{
 					{
@@ -202,7 +202,7 @@ func TestGenerateAndDeploy(t *testing.T) {
 		t.Fatal("expected greeter component in registry")
 	}
 
-	result, err := comp.Execute(context.Background(), map[string]interface{}{"name": "deploy"})
+	result, err := comp.Execute(context.Background(), map[string]any{"name": "deploy"})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -231,10 +231,10 @@ func TestSaveConfig(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "server", Type: "http.server", Config: map[string]interface{}{"address": ":8080"}},
+			{Name: "server", Type: "http.server", Config: map[string]any{"address": ":8080"}},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	dir := t.TempDir()
@@ -276,8 +276,8 @@ func TestSaveConfig_SubDirectory(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules:   []config.ModuleConfig{},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	dir := t.TempDir()
@@ -303,8 +303,8 @@ func TestHandleDeploy_Valid(t *testing.T) {
 					Modules: []config.ModuleConfig{
 						{Name: "greeter", Type: "test.greeter"},
 					},
-					Workflows: map[string]interface{}{},
-					Triggers:  map[string]interface{}{},
+					Workflows: map[string]any{},
+					Triggers:  map[string]any{},
 				},
 				Components: []ComponentSpec{
 					{
@@ -331,7 +331,7 @@ func TestHandleDeploy_Valid(t *testing.T) {
 		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}

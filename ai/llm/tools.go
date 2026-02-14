@@ -9,9 +9,9 @@ import (
 
 // ToolDefinition describes a tool the LLM can call during workflow generation.
 type ToolDefinition struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	InputSchema map[string]interface{} `json:"input_schema"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"input_schema"`
 }
 
 // BuiltinModuleTypes returns the list of available module types and their descriptions.
@@ -50,18 +50,18 @@ func Tools() []ToolDefinition {
 		{
 			Name:        "list_components",
 			Description: "Lists all available built-in module types and their descriptions.",
-			InputSchema: map[string]interface{}{
+			InputSchema: map[string]any{
 				"type":       "object",
-				"properties": map[string]interface{}{},
+				"properties": map[string]any{},
 			},
 		},
 		{
 			Name:        "get_component_schema",
 			Description: "Returns the configuration schema for a specific module type.",
-			InputSchema: map[string]interface{}{
+			InputSchema: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"module_type": map[string]interface{}{
+				"properties": map[string]any{
+					"module_type": map[string]any{
 						"type":        "string",
 						"description": "The module type to get the schema for (e.g., 'http.server', 'messaging.broker')",
 					},
@@ -72,10 +72,10 @@ func Tools() []ToolDefinition {
 		{
 			Name:        "validate_config",
 			Description: "Validates a workflow configuration YAML string. Returns validation errors or confirms the config is valid.",
-			InputSchema: map[string]interface{}{
+			InputSchema: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"config_yaml": map[string]interface{}{
+				"properties": map[string]any{
+					"config_yaml": map[string]any{
 						"type":        "string",
 						"description": "The workflow configuration as a YAML string",
 					},
@@ -86,10 +86,10 @@ func Tools() []ToolDefinition {
 		{
 			Name:        "get_example_workflow",
 			Description: "Returns an example workflow configuration for a given category.",
-			InputSchema: map[string]interface{}{
+			InputSchema: map[string]any{
 				"type": "object",
-				"properties": map[string]interface{}{
-					"category": map[string]interface{}{
+				"properties": map[string]any{
+					"category": map[string]any{
 						"type":        "string",
 						"description": "The category of example: 'http', 'messaging', 'statemachine', 'event', 'trigger'",
 					},
@@ -132,41 +132,41 @@ func handleGetComponentSchema(input json.RawMessage) (string, error) {
 		return "", err
 	}
 
-	schemas := map[string]interface{}{
-		"http.server": map[string]interface{}{
+	schemas := map[string]any{
+		"http.server": map[string]any{
 			"address": "string - listen address (e.g., ':8080')",
 		},
-		"http.handler": map[string]interface{}{
+		"http.handler": map[string]any{
 			"contentType": "string - response content type (default: 'application/json')",
 		},
-		"api.handler": map[string]interface{}{
+		"api.handler": map[string]any{
 			"resourceName": "string - REST resource name",
 		},
-		"http.middleware.auth": map[string]interface{}{
+		"http.middleware.auth": map[string]any{
 			"secretKey": "string - JWT secret key",
 			"authType":  "string - auth type (default: 'Bearer')",
 		},
-		"http.middleware.logging": map[string]interface{}{
+		"http.middleware.logging": map[string]any{
 			"logLevel": "string - log level (default: 'info')",
 		},
-		"http.middleware.ratelimit": map[string]interface{}{
+		"http.middleware.ratelimit": map[string]any{
 			"requestsPerMinute": "int - max requests per minute (default: 60)",
 			"burstSize":         "int - burst size (default: 10)",
 		},
-		"http.middleware.cors": map[string]interface{}{
+		"http.middleware.cors": map[string]any{
 			"allowedOrigins": "[]string - allowed origins (default: ['*'])",
 			"allowedMethods": "[]string - allowed methods (default: ['GET','POST','PUT','DELETE','OPTIONS'])",
 		},
-		"messaging.broker": map[string]interface{}{
+		"messaging.broker": map[string]any{
 			"description": "string - broker description",
 		},
-		"messaging.handler": map[string]interface{}{
+		"messaging.handler": map[string]any{
 			"description": "string - handler description",
 		},
-		"statemachine.engine": map[string]interface{}{
+		"statemachine.engine": map[string]any{
 			"description": "string - engine description",
 		},
-		"event.processor": map[string]interface{}{
+		"event.processor": map[string]any{
 			"bufferSize":      "int - event buffer size",
 			"cleanupInterval": "string - cleanup interval duration",
 		},
@@ -197,7 +197,7 @@ func handleValidateConfig(input json.RawMessage) (string, error) {
 
 	var cfg config.WorkflowConfig
 	if err := yaml.Unmarshal([]byte(params.ConfigYAML), &cfg); err != nil {
-		return `{"valid": false, "error": "` + err.Error() + `"}`, nil
+		return `{"valid": false, "error": "` + err.Error() + `"}`, nil //nolint:nilerr // Returning validation error as JSON result, not Go error
 	}
 
 	var errors []string
@@ -231,7 +231,7 @@ func handleValidateConfig(input json.RawMessage) (string, error) {
 	}
 
 	if len(errors) > 0 {
-		result, _ := json.Marshal(map[string]interface{}{
+		result, _ := json.Marshal(map[string]any{
 			"valid":  false,
 			"errors": errors,
 		})

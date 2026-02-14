@@ -4,8 +4,8 @@ package module
 // ServiceRegistry defines the interface for registering and retrieving services
 type ServiceRegistry interface {
 	// GetService returns a service by name
-	GetService(name string, out interface{}) error
+	GetService(name string, out any) error
 
 	// RegisterService registers a service with the application
-	RegisterService(name string, service interface{}) error
+	RegisterService(name string, service any) error
 }

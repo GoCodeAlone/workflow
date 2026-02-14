@@ -21,21 +21,21 @@ type EventWorkflowConfig struct {
 
 // EventPatternConfig represents event pattern configuration
 type EventPatternConfig struct {
-	PatternID    string                 `json:"patternId" yaml:"patternId"`
-	EventTypes   []string               `json:"eventTypes" yaml:"eventTypes"`
-	WindowTime   string                 `json:"windowTime" yaml:"windowTime"`
-	Condition    string                 `json:"condition" yaml:"condition"`
-	MinOccurs    int                    `json:"minOccurs" yaml:"minOccurs"`
-	MaxOccurs    int                    `json:"maxOccurs" yaml:"maxOccurs"`
-	OrderMatters bool                   `json:"orderMatters" yaml:"orderMatters"`
-	ExtraParams  map[string]interface{} `json:"extraParams,omitempty" yaml:"extraParams,omitempty"`
+	PatternID    string         `json:"patternId" yaml:"patternId"`
+	EventTypes   []string       `json:"eventTypes" yaml:"eventTypes"`
+	WindowTime   string         `json:"windowTime" yaml:"windowTime"`
+	Condition    string         `json:"condition" yaml:"condition"`
+	MinOccurs    int            `json:"minOccurs" yaml:"minOccurs"`
+	MaxOccurs    int            `json:"maxOccurs" yaml:"maxOccurs"`
+	OrderMatters bool           `json:"orderMatters" yaml:"orderMatters"`
+	ExtraParams  map[string]any `json:"extraParams,omitempty" yaml:"extraParams,omitempty"`
 }
 
 // EventHandlerConfig represents event handler configuration
 type EventHandlerConfig struct {
-	PatternID string                 `json:"patternId" yaml:"patternId"`
-	Handler   string                 `json:"handler" yaml:"handler"`
-	Config    map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
+	PatternID string         `json:"patternId" yaml:"patternId"`
+	Handler   string         `json:"handler" yaml:"handler"`
+	Config    map[string]any `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
 // EventAdapterConfig represents an adapter between message broker and event processor
@@ -61,9 +61,9 @@ func (h *EventWorkflowHandler) CanHandle(workflowType string) bool {
 }
 
 // ConfigureWorkflow sets up the workflow from configuration
-func (h *EventWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig interface{}) error {
+func (h *EventWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig any) error {
 	// Convert the generic config to event-specific config
-	eventConfig, ok := workflowConfig.(map[string]interface{})
+	eventConfig, ok := workflowConfig.(map[string]any)
 	if !ok {
 		return fmt.Errorf("invalid event workflow configuration format")
 	}
@@ -82,14 +82,14 @@ func (h *EventWorkflowHandler) ConfigureWorkflow(app modular.Application, workfl
 	}
 
 	// Configure patterns
-	patternsConfig, _ := eventConfig["patterns"].([]interface{})
+	patternsConfig, _ := eventConfig["patterns"].([]any)
 	if len(patternsConfig) == 0 {
 		return fmt.Errorf("no patterns defined in event workflow")
 	}
 
 	// Add patterns to the processor
 	for i, pc := range patternsConfig {
-		patternMap, ok := pc.(map[string]interface{})
+		patternMap, ok := pc.(map[string]any)
 		if !ok {
 			return fmt.Errorf("invalid pattern configuration at index %d", i)
 		}
@@ -101,7 +101,7 @@ func (h *EventWorkflowHandler) ConfigureWorkflow(app modular.Application, workfl
 
 		// Extract event types
 		var eventTypes []string
-		eventTypesList, _ := patternMap["eventTypes"].([]interface{})
+		eventTypesList, _ := patternMap["eventTypes"].([]any)
 		for _, et := range eventTypesList {
 			if etStr, ok := et.(string); ok {
 				eventTypes = append(eventTypes, etStr)
@@ -119,7 +119,7 @@ func (h *EventWorkflowHandler) ConfigureWorkflow(app modular.Application, workfl
 		minOccurs, _ := patternMap["minOccurs"].(int)
 		maxOccurs, _ := patternMap["maxOccurs"].(int)
 		orderMatters, _ := patternMap["orderMatters"].(bool)
-		extraParams, _ := patternMap["extraParams"].(map[string]interface{})
+		extraParams, _ := patternMap["extraParams"].(map[string]any)
 
 		// Create the pattern
 		pattern := &module.EventPattern{
@@ -137,9 +137,9 @@ func (h *EventWorkflowHandler) ConfigureWorkflow(app modular.Application, workfl
 	}
 
 	// Configure handlers
-	handlersConfig, _ := eventConfig["handlers"].([]interface{})
+	handlersConfig, _ := eventConfig["handlers"].([]any)
 	for i, hc := range handlersConfig {
-		handlerMap, ok := hc.(map[string]interface{})
+		handlerMap, ok := hc.(map[string]any)
 		if !ok {
 			return fmt.Errorf("invalid handler configuration at index %d", i)
 		}
@@ -152,7 +152,7 @@ func (h *EventWorkflowHandler) ConfigureWorkflow(app modular.Application, workfl
 		}
 
 		// Get the handler service
-		var handlerSvc interface{}
+		var handlerSvc any
 		_ = app.GetService(handlerName, &handlerSvc)
 		if handlerSvc == nil {
 			return fmt.Errorf("handler service '%s' not found", handlerName)
@@ -176,9 +176,9 @@ func (h *EventWorkflowHandler) ConfigureWorkflow(app modular.Application, workfl
 	}
 
 	// Configure message broker adapters if any
-	adaptersConfig, _ := eventConfig["adapters"].([]interface{})
+	adaptersConfig, _ := eventConfig["adapters"].([]any)
 	for i, ac := range adaptersConfig {
-		adapterMap, ok := ac.(map[string]interface{})
+		adapterMap, ok := ac.(map[string]any)
 		if !ok {
 			return fmt.Errorf("invalid adapter configuration at index %d", i)
 		}
@@ -192,7 +192,7 @@ func (h *EventWorkflowHandler) ConfigureWorkflow(app modular.Application, workfl
 
 		// Get topics
 		var topics []string
-		topicsList, _ := adapterMap["topics"].([]interface{})
+		topicsList, _ := adapterMap["topics"].([]any)
 		for _, t := range topicsList {
 			if tStr, ok := t.(string); ok {
 				topics = append(topics, tStr)
@@ -200,7 +200,7 @@ func (h *EventWorkflowHandler) ConfigureWorkflow(app modular.Application, workfl
 		}
 
 		// Get the broker service
-		var brokerSvc interface{}
+		var brokerSvc any
 		_ = app.GetService(brokerName, &brokerSvc)
 		if brokerSvc == nil {
 			return fmt.Errorf("broker service '%s' not found", brokerName)
@@ -230,7 +230,7 @@ func (h *EventWorkflowHandler) ConfigureWorkflow(app modular.Application, workfl
 }
 
 // ExecuteWorkflow executes a workflow with the given action and input data
-func (h *EventWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
+func (h *EventWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) (map[string]any, error) {
 	// For event workflows, the action represents the event processor or a specific pattern
 	// Format: processor:pattern or just processor
 	processorName := action
@@ -299,7 +299,7 @@ func (h *EventWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType
 		return nil, fmt.Errorf("error processing event: %w", err)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"success":   true,
 		"eventType": eventType,
 		"sourceId":  sourceID,
@@ -312,7 +312,7 @@ func (h *EventWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType
 func (h *EventWorkflowHandler) adaptMessageHandler(msgHandler module.MessageHandler) module.EventHandler {
 	return module.NewFunctionHandler(func(ctx context.Context, match module.PatternMatch) error {
 		// Create a JSON payload from the pattern match
-		payload := []byte(fmt.Sprintf(`{"patternId": "%s", "eventsCount": %d}`, match.PatternID, len(match.Events)))
+		payload := fmt.Appendf(nil, `{"patternId": %q, "eventsCount": %d}`, match.PatternID, len(match.Events))
 		return msgHandler.HandleMessage(payload)
 	})
 }
@@ -321,7 +321,7 @@ func (h *EventWorkflowHandler) adaptMessageHandler(msgHandler module.MessageHand
 func (h *EventWorkflowHandler) createMessageToEventAdapter(processor *module.EventProcessor, eventType, sourceIdKey, correlIdKey string) module.MessageHandler {
 	return module.NewFunctionMessageHandler(func(message []byte) error {
 		// Parse message as JSON
-		var data map[string]interface{}
+		var data map[string]any
 		if err := json.Unmarshal(message, &data); err != nil {
 			return fmt.Errorf("failed to parse message as JSON: %w", err)
 		}
@@ -361,18 +361,18 @@ type EventProcessorAdapter struct {
 }
 
 // HandleEvent implements the expected interface for EventProcessor
-func (a *EventProcessorAdapter) HandleEvent(ctx context.Context, event interface{}) error {
+func (a *EventProcessorAdapter) HandleEvent(ctx context.Context, event any) error {
 	// Convert the event to EventData
 	eventData := module.EventData{
 		EventType: "generic.event",
 		Timestamp: time.Now(),
 		SourceID:  "unknown",
-		Data:      make(map[string]interface{}),
+		Data:      make(map[string]any),
 	}
 
 	// Try to extract data from different event formats
 	switch e := event.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		eventData.Data = e
 		// Try to extract event type and source ID if available
 		if eventType, ok := e["eventType"].(string); ok {
@@ -385,7 +385,7 @@ func (a *EventProcessorAdapter) HandleEvent(ctx context.Context, event interface
 		}
 	case []byte:
 		// Try to parse JSON
-		var data map[string]interface{}
+		var data map[string]any
 		if err := json.Unmarshal(e, &data); err != nil {
 			return fmt.Errorf("failed to parse event as JSON: %w", err)
 		}
@@ -393,15 +393,15 @@ func (a *EventProcessorAdapter) HandleEvent(ctx context.Context, event interface
 		eventData.RawMessage = e
 	case string:
 		// Try to parse JSON
-		var data map[string]interface{}
+		var data map[string]any
 		if err := json.Unmarshal([]byte(e), &data); err != nil {
 			return fmt.Errorf("failed to parse event as JSON: %w", err)
 		}
 		eventData.Data = data
 		eventData.RawMessage = []byte(e)
-	//case module.PatternMatch:
+	// case module.PatternMatch:
 	// This is a direct pattern match, forward it to any registered handlers
-	//return a.Processor.NotifyPatternMatch(ctx, e)
+	// return a.Processor.NotifyPatternMatch(ctx, e)
 	default:
 		return fmt.Errorf("unsupported event type: %T", event)
 	}

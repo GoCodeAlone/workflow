@@ -20,9 +20,9 @@ const (
 
 // ScheduledJobConfig represents a job scheduler configuration
 type ScheduledJobConfig struct {
-	Scheduler string                 `json:"scheduler" yaml:"scheduler"`
-	Job       string                 `json:"job" yaml:"job"`
-	Config    map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
+	Scheduler string         `json:"scheduler" yaml:"scheduler"`
+	Job       string         `json:"job" yaml:"job"`
+	Config    map[string]any `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
 // SchedulerWorkflowHandler handles scheduler-based workflows
@@ -39,15 +39,15 @@ func (h *SchedulerWorkflowHandler) CanHandle(workflowType string) bool {
 }
 
 // ConfigureWorkflow sets up the workflow from configuration
-func (h *SchedulerWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig interface{}) error {
+func (h *SchedulerWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig any) error {
 	// Convert the generic config to scheduler-specific config
-	schedConfig, ok := workflowConfig.(map[string]interface{})
+	schedConfig, ok := workflowConfig.(map[string]any)
 	if !ok {
 		return fmt.Errorf("invalid scheduler workflow configuration")
 	}
 
 	// Extract jobs from the configuration
-	jobConfigs, ok := schedConfig["jobs"].([]interface{})
+	jobConfigs, ok := schedConfig["jobs"].([]any)
 	if !ok {
 		return fmt.Errorf("jobs not found in scheduler workflow configuration")
 	}
@@ -70,7 +70,7 @@ func (h *SchedulerWorkflowHandler) ConfigureWorkflow(app modular.Application, wo
 
 	// Configure each scheduled job
 	for i, jc := range jobConfigs {
-		jobMap, ok := jc.(map[string]interface{})
+		jobMap, ok := jc.(map[string]any)
 		if !ok {
 			return fmt.Errorf("invalid job configuration at index %d", i)
 		}
@@ -89,7 +89,7 @@ func (h *SchedulerWorkflowHandler) ConfigureWorkflow(app modular.Application, wo
 		}
 
 		// Get job handler
-		var jobSvc interface{}
+		var jobSvc any
 		_ = app.GetService(jobName, &jobSvc)
 		if jobSvc == nil {
 			return fmt.Errorf("job handler service '%s' not found", jobName)
@@ -115,7 +115,7 @@ func (h *SchedulerWorkflowHandler) ConfigureWorkflow(app modular.Application, wo
 }
 
 // ExecuteWorkflow executes a workflow with the given action and input data
-func (h *SchedulerWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
+func (h *SchedulerWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) (map[string]any, error) {
 	// For scheduler workflows, the action represents either a scheduler:job or just a job name
 	// The data contains parameters for the job
 
@@ -158,7 +158,7 @@ func (h *SchedulerWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflow
 	}
 
 	// Directly get the job
-	var jobSvc interface{}
+	var jobSvc any
 	err := app.GetService(jobName, &jobSvc)
 	if err != nil || jobSvc == nil {
 		return nil, fmt.Errorf("job '%s' not found: %v", jobName, err)
@@ -166,13 +166,13 @@ func (h *SchedulerWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflow
 
 	// Try to execute the job
 	var execErr error
-	var result map[string]interface{}
+	var result map[string]any
 
 	if job, ok := jobSvc.(workflowmodule.Job); ok {
 		// Execute the job with the provided context
 		// If data contains a "params" field, add it to the context
 		execCtx := ctx
-		if params, ok := data["params"].(map[string]interface{}); ok {
+		if params, ok := data["params"].(map[string]any); ok {
 			// Create a context with the parameters
 			execCtx = context.WithValue(ctx, paramsContextKey, params)
 		}
@@ -180,7 +180,7 @@ func (h *SchedulerWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflow
 		execErr = job.Execute(execCtx)
 
 		// Prepare result
-		result = map[string]interface{}{
+		result = map[string]any{
 			"success": execErr == nil,
 			"job":     jobName,
 		}
@@ -199,7 +199,7 @@ func (h *SchedulerWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflow
 		execErr = mh.HandleMessage(payload)
 
 		// Prepare result
-		result = map[string]interface{}{
+		result = map[string]any{
 			"success":     execErr == nil,
 			"job":         jobName,
 			"handlerType": "messageHandler",
@@ -214,7 +214,7 @@ func (h *SchedulerWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflow
 		execErr = helper.TriggerJobExecution(ctx, jobName)
 
 		// Prepare result
-		result = map[string]interface{}{
+		result = map[string]any{
 			"success":     execErr == nil,
 			"job":         jobName,
 			"handlerType": "helper",

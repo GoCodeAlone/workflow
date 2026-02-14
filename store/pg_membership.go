@@ -62,7 +62,7 @@ func (s *PGMembershipStore) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (s *PGMembershipStore) List(ctx context.Context, f MembershipFilter) ([]*Membership, error) {
 	query := `SELECT * FROM memberships WHERE 1=1`
-	args := []interface{}{}
+	args := []any{}
 	idx := 1
 
 	if f.UserID != nil {
@@ -139,7 +139,7 @@ func (s *PGMembershipStore) GetEffectiveRole(ctx context.Context, userID, compan
 	return role, nil
 }
 
-func (s *PGMembershipStore) scanOne(ctx context.Context, query string, args ...interface{}) (*Membership, error) {
+func (s *PGMembershipStore) scanOne(ctx context.Context, query string, args ...any) (*Membership, error) {
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query membership: %w", err)

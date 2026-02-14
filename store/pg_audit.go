@@ -27,7 +27,7 @@ func (s *PGAuditStore) Record(ctx context.Context, e *AuditEntry) error {
 func (s *PGAuditStore) Query(ctx context.Context, f AuditFilter) ([]*AuditEntry, error) {
 	query := `SELECT id, user_id, action, resource_type, resource_id, details, ip_address, user_agent, created_at
 		FROM audit_log WHERE 1=1`
-	args := []interface{}{}
+	args := []any{}
 	idx := 1
 
 	if f.UserID != nil {

@@ -108,7 +108,7 @@ func TestStateMachineEngine_CreateWorkflow(t *testing.T) {
 		t.Fatalf("failed to register definition: %v", err)
 	}
 
-	instance, err := engine.CreateWorkflow("order-workflow", "order-1", map[string]interface{}{
+	instance, err := engine.CreateWorkflow("order-workflow", "order-1", map[string]any{
 		"customer": "alice",
 	})
 	if err != nil {
@@ -220,7 +220,7 @@ func TestStateMachineEngine_TriggerTransition_Valid(t *testing.T) {
 
 	_, _ = engine.CreateWorkflow("order-workflow", "order-1", nil)
 
-	err := engine.TriggerTransition(context.Background(), "order-1", "process", map[string]interface{}{
+	err := engine.TriggerTransition(context.Background(), "order-1", "process", map[string]any{
 		"processedBy": "worker-1",
 	})
 	if err != nil {
@@ -585,7 +585,7 @@ func TestStateMachineEngine_ConcurrentOperations(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Create multiple instances concurrently
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
@@ -637,7 +637,7 @@ func TestTriggerTransition_HandlerFailure_StateUnchanged(t *testing.T) {
 	}
 
 	// Attempt a transition — should fail because the handler returns an error
-	err = engine.TriggerTransition(context.Background(), "order-1", "process", map[string]interface{}{
+	err = engine.TriggerTransition(context.Background(), "order-1", "process", map[string]any{
 		"note": "should not persist",
 	})
 	if err == nil {

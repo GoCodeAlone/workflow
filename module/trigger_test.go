@@ -89,7 +89,7 @@ func (t *MockTrigger) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (t *MockTrigger) Configure(app modular.Application, cfg interface{}) error {
+func (t *MockTrigger) Configure(app modular.Application, cfg any) error {
 	t.configureCalled = true
 	return nil
 }

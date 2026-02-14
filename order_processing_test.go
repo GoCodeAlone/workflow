@@ -135,11 +135,11 @@ func TestOrderProcessingPipeline_EndToEnd(t *testing.T) {
 		Operations: []module.TransformOperation{
 			{
 				Type:   "filter",
-				Config: map[string]interface{}{"fields": []interface{}{"orderId", "customer", "total"}},
+				Config: map[string]any{"fields": []any{"orderId", "customer", "total"}},
 			},
 			{
 				Type:   "map",
-				Config: map[string]interface{}{"mappings": map[string]interface{}{"customer": "customerName"}},
+				Config: map[string]any{"mappings": map[string]any{"customer": "customerName"}},
 			},
 		},
 	})
@@ -160,7 +160,7 @@ func TestOrderProcessingPipeline_EndToEnd(t *testing.T) {
 	ctx := context.Background()
 
 	// Step 1: Transform the incoming order data
-	orderData := map[string]interface{}{
+	orderData := map[string]any{
 		"orderId":  "ORD-001",
 		"customer": "Alice",
 		"total":    99.99,
@@ -172,7 +172,7 @@ func TestOrderProcessingPipeline_EndToEnd(t *testing.T) {
 		t.Fatalf("Transform failed: %v", err)
 	}
 
-	transformedMap, ok := transformed.(map[string]interface{})
+	transformedMap, ok := transformed.(map[string]any)
 	if !ok {
 		t.Fatalf("Expected map result from transform, got %T", transformed)
 	}
@@ -186,7 +186,7 @@ func TestOrderProcessingPipeline_EndToEnd(t *testing.T) {
 	}
 
 	// Step 2: Create workflow instance and transition through states
-	instance, err := stateMachineEngine.CreateWorkflow("order-processing", "ORD-001", map[string]interface{}{
+	instance, err := stateMachineEngine.CreateWorkflow("order-processing", "ORD-001", map[string]any{
 		"orderId": "ORD-001",
 	})
 	if err != nil {
@@ -200,7 +200,7 @@ func TestOrderProcessingPipeline_EndToEnd(t *testing.T) {
 	tracker.SetState("order", "ORD-001", "received", nil)
 
 	// Transition: received -> validated
-	err = stateMachineEngine.TriggerTransition(ctx, "ORD-001", "validate_order", map[string]interface{}{
+	err = stateMachineEngine.TriggerTransition(ctx, "ORD-001", "validate_order", map[string]any{
 		"validated": true,
 	})
 	if err != nil {
@@ -309,7 +309,7 @@ func TestOrderProcessingPipeline_ErrorPath(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a workflow for an invalid order
-	instance, err := stateMachineEngine.CreateWorkflow("order-processing", "ORD-BAD", map[string]interface{}{
+	instance, err := stateMachineEngine.CreateWorkflow("order-processing", "ORD-BAD", map[string]any{
 		"orderId": "ORD-BAD",
 		"invalid": true,
 	})
@@ -322,7 +322,7 @@ func TestOrderProcessingPipeline_ErrorPath(t *testing.T) {
 	}
 
 	// Transition: received -> failed via fail_validation
-	err = stateMachineEngine.TriggerTransition(ctx, "ORD-BAD", "fail_validation", map[string]interface{}{
+	err = stateMachineEngine.TriggerTransition(ctx, "ORD-BAD", "fail_validation", map[string]any{
 		"reason": "Missing required fields",
 	})
 	if err != nil {
@@ -352,7 +352,7 @@ func TestOrderProcessingPipeline_ErrorPath(t *testing.T) {
 	}
 
 	// Track state in state tracker and verify
-	tracker.SetState("order", "ORD-BAD", "failed", map[string]interface{}{
+	tracker.SetState("order", "ORD-BAD", "failed", map[string]any{
 		"reason": "Missing required fields",
 	})
 
@@ -378,8 +378,8 @@ func TestOrderProcessingPipeline_TransformChain(t *testing.T) {
 			Operations: []module.TransformOperation{
 				{
 					Type: "map",
-					Config: map[string]interface{}{
-						"mappings": map[string]interface{}{
+					Config: map[string]any{
+						"mappings": map[string]any{
 							"cust_name": "customerName",
 							"cust_id":   "customerId",
 						},
@@ -387,14 +387,14 @@ func TestOrderProcessingPipeline_TransformChain(t *testing.T) {
 				},
 				{
 					Type: "filter",
-					Config: map[string]interface{}{
-						"fields": []interface{}{"customerName", "customerId", "total"},
+					Config: map[string]any{
+						"fields": []any{"customerName", "customerId", "total"},
 					},
 				},
 			},
 		})
 
-		input := map[string]interface{}{
+		input := map[string]any{
 			"cust_name": "Bob",
 			"cust_id":   "C-123",
 			"total":     49.99,
@@ -406,7 +406,7 @@ func TestOrderProcessingPipeline_TransformChain(t *testing.T) {
 			t.Fatalf("Transform failed: %v", err)
 		}
 
-		resultMap, ok := result.(map[string]interface{})
+		resultMap, ok := result.(map[string]any)
 		if !ok {
 			t.Fatalf("Expected map result, got %T", result)
 		}
@@ -434,20 +434,20 @@ func TestOrderProcessingPipeline_TransformChain(t *testing.T) {
 			Operations: []module.TransformOperation{
 				{
 					Type: "extract",
-					Config: map[string]interface{}{
+					Config: map[string]any{
 						"path": "order.customer",
 					},
 				},
 			},
 		})
 
-		input := map[string]interface{}{
-			"order": map[string]interface{}{
-				"customer": map[string]interface{}{
+		input := map[string]any{
+			"order": map[string]any{
+				"customer": map[string]any{
 					"name":  "Charlie",
 					"email": "charlie@example.com",
 				},
-				"items": []interface{}{"item1", "item2"},
+				"items": []any{"item1", "item2"},
 			},
 		}
 
@@ -456,7 +456,7 @@ func TestOrderProcessingPipeline_TransformChain(t *testing.T) {
 			t.Fatalf("Transform failed: %v", err)
 		}
 
-		resultMap, ok := result.(map[string]interface{})
+		resultMap, ok := result.(map[string]any)
 		if !ok {
 			t.Fatalf("Expected map result, got %T", result)
 		}
@@ -471,16 +471,16 @@ func TestOrderProcessingPipeline_TransformChain(t *testing.T) {
 			Operations: []module.TransformOperation{
 				{
 					Type:   "convert",
-					Config: map[string]interface{}{"from": "json", "to": "string"},
+					Config: map[string]any{"from": "json", "to": "string"},
 				},
 				{
 					Type:   "convert",
-					Config: map[string]interface{}{"from": "string", "to": "json"},
+					Config: map[string]any{"from": "string", "to": "json"},
 				},
 			},
 		})
 
-		input := map[string]interface{}{
+		input := map[string]any{
 			"orderId": "ORD-100",
 			"amount":  42.0,
 		}
@@ -490,7 +490,7 @@ func TestOrderProcessingPipeline_TransformChain(t *testing.T) {
 			t.Fatalf("Transform failed: %v", err)
 		}
 
-		resultMap, ok := result.(map[string]interface{})
+		resultMap, ok := result.(map[string]any)
 		if !ok {
 			t.Fatalf("Expected map result, got %T", result)
 		}
@@ -508,14 +508,14 @@ func TestOrderProcessingPipeline_TransformChain(t *testing.T) {
 			Operations: []module.TransformOperation{
 				{
 					Type: "filter",
-					Config: map[string]interface{}{
-						"fields": []interface{}{"orderId", "status"},
+					Config: map[string]any{
+						"fields": []any{"orderId", "status"},
 					},
 				},
 			},
 		})
 
-		input := map[string]interface{}{
+		input := map[string]any{
 			"orderId":    "ORD-200",
 			"status":     "received",
 			"creditCard": "4111-xxxx-xxxx-1111",
@@ -527,7 +527,7 @@ func TestOrderProcessingPipeline_TransformChain(t *testing.T) {
 			t.Fatalf("Transform failed: %v", err)
 		}
 
-		resultMap, ok := result.(map[string]interface{})
+		resultMap, ok := result.(map[string]any)
 		if !ok {
 			t.Fatalf("Expected map result, got %T", result)
 		}

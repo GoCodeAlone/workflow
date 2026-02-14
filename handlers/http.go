@@ -10,11 +10,11 @@ import (
 
 // HTTPRouteConfig represents a route configuration in HTTP workflow
 type HTTPRouteConfig struct {
-	Method      string                 `json:"method" yaml:"method"`
-	Path        string                 `json:"path" yaml:"path"`
-	Handler     string                 `json:"handler" yaml:"handler"`
-	Middlewares []string               `json:"middlewares,omitempty" yaml:"middlewares,omitempty"`
-	Config      map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
+	Method      string         `json:"method" yaml:"method"`
+	Path        string         `json:"path" yaml:"path"`
+	Handler     string         `json:"handler" yaml:"handler"`
+	Middlewares []string       `json:"middlewares,omitempty" yaml:"middlewares,omitempty"`
+	Config      map[string]any `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
 // HTTPWorkflowHandler handles HTTP-based workflows
@@ -31,15 +31,15 @@ func (h *HTTPWorkflowHandler) CanHandle(workflowType string) bool {
 }
 
 // ConfigureWorkflow sets up the workflow from configuration
-func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig interface{}) error {
+func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig any) error {
 	// Convert the generic config to HTTP-specific config
-	httpConfig, ok := workflowConfig.(map[string]interface{})
+	httpConfig, ok := workflowConfig.(map[string]any)
 	if !ok {
 		return fmt.Errorf("invalid HTTP workflow configuration format")
 	}
 
 	// Extract routes from the configuration
-	routesConfig, ok := httpConfig["routes"].([]interface{})
+	routesConfig, ok := httpConfig["routes"].([]any)
 	if !ok {
 		return fmt.Errorf("routes not found in HTTP workflow configuration")
 	}
@@ -120,7 +120,7 @@ func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 
 	// Configure each route
 	for i, rc := range routesConfig {
-		routeMap, ok := rc.(map[string]interface{})
+		routeMap, ok := rc.(map[string]any)
 		if !ok {
 			return fmt.Errorf("invalid route configuration at index %d", i)
 		}
@@ -142,7 +142,7 @@ func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 
 		// Process middleware if specified
 		var middlewares []workflowmodule.HTTPMiddleware
-		if middlewareNames, ok := routeMap["middlewares"].([]interface{}); ok {
+		if middlewareNames, ok := routeMap["middlewares"].([]any); ok {
 			for j, middlewareName := range middlewareNames {
 				mwName, ok := middlewareName.(string)
 				if !ok {
@@ -173,7 +173,7 @@ func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 }
 
 // ExecuteWorkflow executes a workflow with the given action and input data
-func (h *HTTPWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
+func (h *HTTPWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) (map[string]any, error) {
 	// For HTTP workflows, executing the workflow means making sure the server is running
 	// and optionally checking the status or running health checks.
 
@@ -219,7 +219,7 @@ func (h *HTTPWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType 
 
 	// Look for explicitly specified server and router names in the data
 	if explicit, ok := data["server"].(string); ok && explicit != "" {
-		var serverSvc interface{}
+		var serverSvc any
 		if err := app.GetService(explicit, &serverSvc); err == nil && serverSvc != nil {
 			if s, ok := serverSvc.(workflowmodule.HTTPServer); ok {
 				server = s
@@ -229,7 +229,7 @@ func (h *HTTPWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType 
 	}
 
 	if explicit, ok := data["router"].(string); ok && explicit != "" {
-		var routerSvc interface{}
+		var routerSvc any
 		if err := app.GetService(explicit, &routerSvc); err == nil && routerSvc != nil {
 			if r, ok := routerSvc.(workflowmodule.HTTPRouter); ok {
 				router = r
@@ -247,7 +247,7 @@ func (h *HTTPWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType 
 	}
 
 	// Execute the requested command
-	result := map[string]interface{}{
+	result := map[string]any{
 		"server": serverName,
 		"router": routerName,
 	}

@@ -30,10 +30,10 @@ type e2eMockTriggerWorkflower struct {
 type e2eTriggerCall struct {
 	workflowType string
 	action       string
-	data         map[string]interface{}
+	data         map[string]any
 }
 
-func (m *e2eMockTriggerWorkflower) TriggerWorkflow(_ context.Context, workflowType string, action string, data map[string]interface{}) error {
+func (m *e2eMockTriggerWorkflower) TriggerWorkflow(_ context.Context, workflowType string, action string, data map[string]any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, e2eTriggerCall{workflowType, action, data})
@@ -368,13 +368,13 @@ func TestMultiWorkflowE2E_CrossWorkflowRouting(t *testing.T) {
 	meB := &e2eMockManagedEngine{tw: twB}
 	meC := &e2eMockManagedEngine{tw: twC}
 
-	engines := map[uuid.UUID]interface{}{
+	engines := map[uuid.UUID]any{
 		f.workflowAID: meA,
 		f.workflowBID: meB,
 		f.workflowCID: meC,
 	}
 
-	router := module.NewCrossWorkflowRouter(f.linkStore, func(id uuid.UUID) (interface{}, bool) {
+	router := module.NewCrossWorkflowRouter(f.linkStore, func(id uuid.UUID) (any, bool) {
 		e, ok := engines[id]
 		return e, ok
 	}, discardLogger())
@@ -382,7 +382,7 @@ func TestMultiWorkflowE2E_CrossWorkflowRouting(t *testing.T) {
 	mustNoErr(t, router.RefreshLinks(ctx))
 
 	t.Run("OrderValidated_RoutesToB", func(t *testing.T) {
-		mustNoErr(t, router.RouteEvent(ctx, f.workflowAID, "order.validated", map[string]interface{}{"order_id": "ORD-001"}))
+		mustNoErr(t, router.RouteEvent(ctx, f.workflowAID, "order.validated", map[string]any{"order_id": "ORD-001"}))
 		if twB.callCount() != 1 {
 			t.Fatalf("expected 1 call to workflow B, got %d", twB.callCount())
 		}
@@ -395,14 +395,14 @@ func TestMultiWorkflowE2E_CrossWorkflowRouting(t *testing.T) {
 	})
 
 	t.Run("FulfillmentCompleted_RoutesToC", func(t *testing.T) {
-		mustNoErr(t, router.RouteEvent(ctx, f.workflowBID, "fulfillment.completed", map[string]interface{}{"order_id": "ORD-001"}))
+		mustNoErr(t, router.RouteEvent(ctx, f.workflowBID, "fulfillment.completed", map[string]any{"order_id": "ORD-001"}))
 		if twC.callCount() != 1 {
 			t.Fatalf("expected 1 call to workflow C, got %d", twC.callCount())
 		}
 	})
 
 	t.Run("FulfillmentShipped_RoutesToC", func(t *testing.T) {
-		mustNoErr(t, router.RouteEvent(ctx, f.workflowBID, "fulfillment.shipped", map[string]interface{}{"tracking": "TRK-123"}))
+		mustNoErr(t, router.RouteEvent(ctx, f.workflowBID, "fulfillment.shipped", map[string]any{"tracking": "TRK-123"}))
 		if twC.callCount() != 2 {
 			t.Fatalf("expected 2 total calls to workflow C, got %d", twC.callCount())
 		}
@@ -441,7 +441,7 @@ func TestMultiWorkflowE2E_DataFlowAndPersistence(t *testing.T) {
 	ctx := context.Background()
 	f := setupE2EFixture(t)
 
-	triggerData, _ := json.Marshal(map[string]interface{}{
+	triggerData, _ := json.Marshal(map[string]any{
 		"order_id": "ORD-001",
 		"customer": "john@example.com",
 		"total":    99.99,
@@ -485,7 +485,7 @@ func TestMultiWorkflowE2E_DataFlowAndPersistence(t *testing.T) {
 	}))
 
 	// Complete execution
-	outputData, _ := json.Marshal(map[string]interface{}{
+	outputData, _ := json.Marshal(map[string]any{
 		"order_id": "ORD-001",
 		"status":   "validated",
 	})
@@ -505,14 +505,14 @@ func TestMultiWorkflowE2E_DataFlowAndPersistence(t *testing.T) {
 	}
 
 	// Verify trigger data persisted
-	var triggerMap map[string]interface{}
+	var triggerMap map[string]any
 	mustNoErr(t, json.Unmarshal(exec.TriggerData, &triggerMap))
 	if triggerMap["order_id"] != "ORD-001" {
 		t.Fatal("trigger data order_id mismatch")
 	}
 
 	// Verify output data persisted
-	var outputMap map[string]interface{}
+	var outputMap map[string]any
 	mustNoErr(t, json.Unmarshal(exec.OutputData, &outputMap))
 	if outputMap["status"] != "validated" {
 		t.Fatal("output data status mismatch")
@@ -546,7 +546,7 @@ func TestMultiWorkflowE2E_ExecutionTracking(t *testing.T) {
 	ctx := context.Background()
 	f := setupE2EFixture(t)
 
-	triggerData, _ := json.Marshal(map[string]interface{}{"order_id": "ORD-TRACK"})
+	triggerData, _ := json.Marshal(map[string]any{"order_id": "ORD-TRACK"})
 
 	// Execution 1: completed successfully
 	exec1ID, err := f.tracker.StartExecution(ctx, f.workflowAID, "http", triggerData)
@@ -797,7 +797,7 @@ func TestMultiWorkflowE2E_StateQueryable(t *testing.T) {
 	}
 
 	// 2. Run an execution with steps and logs
-	triggerData, _ := json.Marshal(map[string]interface{}{"order_id": "ORD-QUERY"})
+	triggerData, _ := json.Marshal(map[string]any{"order_id": "ORD-QUERY"})
 	execID, err := f.tracker.StartExecution(ctx, f.workflowAID, "http", triggerData)
 	mustNoErr(t, err)
 
@@ -912,7 +912,7 @@ func TestMultiWorkflowE2E_StateQueryable(t *testing.T) {
 	t.Run("ExecutionOutput", func(t *testing.T) {
 		exec, err := f.executionStore.GetExecution(ctx, execID)
 		mustNoErr(t, err)
-		var out map[string]interface{}
+		var out map[string]any
 		mustNoErr(t, json.Unmarshal(exec.OutputData, &out))
 		if out["status"] != "processed" {
 			t.Fatalf("expected status=processed, got %v", out["status"])
@@ -926,7 +926,7 @@ func TestMultiWorkflowE2E_StateQueryable(t *testing.T) {
 		// 1. Original trigger data is queryable
 		exec, err := f.executionStore.GetExecution(ctx, execID)
 		mustNoErr(t, err)
-		var trigData map[string]interface{}
+		var trigData map[string]any
 		mustNoErr(t, json.Unmarshal(exec.TriggerData, &trigData))
 		if trigData["order_id"] != "ORD-QUERY" {
 			t.Fatal("trigger data not persisted correctly")
@@ -940,7 +940,7 @@ func TestMultiWorkflowE2E_StateQueryable(t *testing.T) {
 		}
 
 		// 3. Output reflects transformed state
-		var outData map[string]interface{}
+		var outData map[string]any
 		mustNoErr(t, json.Unmarshal(exec.OutputData, &outData))
 		if outData["status"] != "processed" {
 			t.Fatal("output state not persisted correctly")

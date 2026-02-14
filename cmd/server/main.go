@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow"
@@ -141,8 +142,8 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 		return nil
 	})
 
-	uiHandler.SetStatusFunc(func() map[string]interface{} {
-		return map[string]interface{}{
+	uiHandler.SetStatusFunc(func() map[string]any {
+		return map[string]any{
 			"status": "running",
 		}
 	})
@@ -175,8 +176,9 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 	}
 
 	server := &http.Server{
-		Addr:    mgmtAddr,
-		Handler: app.mux,
+		Addr:              mgmtAddr,
+		Handler:           app.mux,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	go func() {

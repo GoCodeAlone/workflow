@@ -129,7 +129,7 @@ func TestEventsHandler_List_WithExecutions(t *testing.T) {
 	user := &store.User{ID: uuid.New(), Email: "events@example.com", Active: true}
 	wf := setupWorkflowWithPerms(t, workflows, projects, memberships, user.ID, store.RoleViewer)
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		execID := uuid.New()
 		executions.executions[execID] = &store.WorkflowExecution{
 			ID:         execID,

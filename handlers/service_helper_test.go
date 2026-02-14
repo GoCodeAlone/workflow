@@ -34,7 +34,7 @@ func TestServiceHelper_Services(t *testing.T) {
 func TestServiceHelper_GetService(t *testing.T) {
 	app := CreateMockApplication()
 	helper := New(app)
-	var dest interface{}
+	var dest any
 	err := helper.GetService("something", &dest)
 	if err != nil {
 		t.Fatalf("GetService failed: %v", err)

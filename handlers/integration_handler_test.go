@@ -36,7 +36,7 @@ func TestIntegrationWorkflowHandler_CanHandle(t *testing.T) {
 
 func TestIntegrationWorkflowHandler_Init(t *testing.T) {
 	h := NewIntegrationWorkflowHandler()
-	registry := make(map[string]interface{})
+	registry := make(map[string]any)
 	err := h.Init(registry)
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -69,7 +69,7 @@ func TestIntegrationWorkflowHandler_ConfigureWorkflow_InvalidFormat(t *testing.T
 func TestIntegrationWorkflowHandler_ConfigureWorkflow_NoRegistry(t *testing.T) {
 	h := NewIntegrationWorkflowHandler()
 	app := CreateMockApplication()
-	err := h.ConfigureWorkflow(app, map[string]interface{}{})
+	err := h.ConfigureWorkflow(app, map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing registry")
 	}
@@ -78,7 +78,7 @@ func TestIntegrationWorkflowHandler_ConfigureWorkflow_NoRegistry(t *testing.T) {
 func TestIntegrationWorkflowHandler_ConfigureWorkflow_RegistryNotFound(t *testing.T) {
 	h := NewIntegrationWorkflowHandler()
 	app := CreateMockApplication()
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "my-registry",
 	})
 	if err == nil {
@@ -89,13 +89,14 @@ func TestIntegrationWorkflowHandler_ConfigureWorkflow_RegistryNotFound(t *testin
 func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": "ok"})
 	}))
 	defer server.Close()
 
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 	conn := module.NewHTTPIntegrationConnector("test-api", server.URL)
+	conn.SetAllowPrivateIPs(true)
 	_ = conn.Connect(context.Background())
 	registry.RegisterConnector(conn)
 
@@ -111,7 +112,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteIntegrationWorkflow failed: %v", err)
 	}
-	stepResult, ok := result["step1"].(map[string]interface{})
+	stepResult, ok := result["step1"].(map[string]any)
 	if !ok {
 		t.Fatal("expected step1 result")
 	}
@@ -140,13 +141,14 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_ConnectorNotFound
 
 func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_NotConnected(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": "ok"})
 	}))
 	defer server.Close()
 
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 	conn := module.NewHTTPIntegrationConnector("test-api", server.URL)
+	conn.SetAllowPrivateIPs(true)
 	// Not connecting - should auto-connect
 	registry.RegisterConnector(conn)
 
@@ -169,13 +171,14 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_NotConnected(t *t
 
 func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_VariableSubstitution(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"value": "test-data"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": "test-data"})
 	}))
 	defer server.Close()
 
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 	conn := module.NewHTTPIntegrationConnector("test-api", server.URL)
+	conn.SetAllowPrivateIPs(true)
 	_ = conn.Connect(context.Background())
 	registry.RegisterConnector(conn)
 
@@ -189,7 +192,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_VariableSubstitut
 			Name:      "step2",
 			Connector: "test-api",
 			Action:    "GET /next",
-			Input: map[string]interface{}{
+			Input: map[string]any{
 				"ref":    "${step1.value}",
 				"static": "plain-val",
 			},
@@ -206,13 +209,14 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_WithOnError(t *te
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "internal"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "internal"})
 	}))
 	defer server.Close()
 
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 	conn := module.NewHTTPIntegrationConnector("test-api", server.URL)
+	conn.SetAllowPrivateIPs(true)
 	_ = conn.Connect(context.Background())
 	registry.RegisterConnector(conn)
 
@@ -236,13 +240,14 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_WithOnError(t *te
 
 func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_WithOnSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
 	defer server.Close()
 
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 	conn := module.NewHTTPIntegrationConnector("test-api", server.URL)
+	conn.SetAllowPrivateIPs(true)
 	_ = conn.Connect(context.Background())
 	registry.RegisterConnector(conn)
 

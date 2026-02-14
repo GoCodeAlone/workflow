@@ -451,7 +451,7 @@ func TestExecutionHandler_Trigger_Success(t *testing.T) {
 	user := &store.User{ID: uuid.New(), Email: "exec@example.com", Active: true}
 	wf := setupWorkflowWithPerms(t, workflows, projects, memberships, user.ID, store.RoleEditor)
 
-	body := makeJSON(map[string]interface{}{
+	body := makeJSON(map[string]any{
 		"trigger_data": map[string]string{"key": "value"},
 	})
 	req := httptest.NewRequest("POST", "/api/v1/workflows/"+wf.ID.String()+"/trigger", body)
@@ -466,7 +466,7 @@ func TestExecutionHandler_Trigger_Success(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	resp := decodeBody(t, w.Result())
-	data, _ := resp["data"].(map[string]interface{})
+	data, _ := resp["data"].(map[string]any)
 	if data["trigger_type"] != "manual" {
 		t.Fatalf("expected trigger_type manual, got %v", data["trigger_type"])
 	}
@@ -476,7 +476,7 @@ func TestExecutionHandler_Trigger_Unauthorized(t *testing.T) {
 	h, _, _, _, _ := newTestExecutionHandler()
 	wfID := uuid.New()
 
-	body := makeJSON(map[string]interface{}{"trigger_data": nil})
+	body := makeJSON(map[string]any{"trigger_data": nil})
 	req := httptest.NewRequest("POST", "/api/v1/workflows/"+wfID.String()+"/trigger", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.SetPathValue("id", wfID.String())
@@ -493,7 +493,7 @@ func TestExecutionHandler_Trigger_Forbidden(t *testing.T) {
 	user := &store.User{ID: uuid.New(), Email: "exec@example.com", Active: true}
 	wf := setupWorkflowWithPerms(t, workflows, projects, memberships, user.ID, store.RoleViewer)
 
-	body := makeJSON(map[string]interface{}{"trigger_data": nil})
+	body := makeJSON(map[string]any{"trigger_data": nil})
 	req := httptest.NewRequest("POST", "/api/v1/workflows/"+wf.ID.String()+"/trigger", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.SetPathValue("id", wf.ID.String())
@@ -515,7 +515,7 @@ func TestExecutionHandler_Trigger_WorkflowNotFound(t *testing.T) {
 	// Delete the workflow after setting up perms
 	delete(workflows.workflows, wf.ID)
 
-	body := makeJSON(map[string]interface{}{"trigger_data": nil})
+	body := makeJSON(map[string]any{"trigger_data": nil})
 	req := httptest.NewRequest("POST", "/api/v1/workflows/"+wf.ID.String()+"/trigger", body)
 	req.Header.Set("Content-Type", "application/json")
 	req.SetPathValue("id", wf.ID.String())

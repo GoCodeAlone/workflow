@@ -58,16 +58,16 @@ func TestE2E_SimpleHTTPWorkflow(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "test-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "test-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "test-router", Type: "http.router", DependsOn: []string{"test-server"}},
-			{Name: "test-handler", Type: "http.handler", DependsOn: []string{"test-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
+			{Name: "test-handler", Type: "http.handler", DependsOn: []string{"test-router"}, Config: map[string]any{"contentType": "application/json"}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "test-server",
 				"router": "test-router",
-				"routes": []interface{}{
-					map[string]interface{}{
+				"routes": []any{
+					map[string]any{
 						"method":  "POST",
 						"path":    "/api/test",
 						"handler": "test-handler",
@@ -75,7 +75,7 @@ func TestE2E_SimpleHTTPWorkflow(t *testing.T) {
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -87,8 +87,7 @@ func TestE2E_SimpleHTTPWorkflow(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -109,7 +108,7 @@ func TestE2E_SimpleHTTPWorkflow(t *testing.T) {
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, string(body))
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
@@ -142,9 +141,9 @@ func TestE2E_OrderPipeline_FullExecution(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "order-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "order-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "order-router", Type: "http.router", DependsOn: []string{"order-server"}},
-			{Name: "order-api", Type: "api.handler", DependsOn: []string{"order-router"}, Config: map[string]interface{}{
+			{Name: "order-api", Type: "api.handler", DependsOn: []string{"order-router"}, Config: map[string]any{
 				"resourceName":   "orders",
 				"workflowType":   "order-processing",
 				"workflowEngine": "order-state-engine",
@@ -154,49 +153,49 @@ func TestE2E_OrderPipeline_FullExecution(t *testing.T) {
 			{Name: "order-broker", Type: "messaging.broker", DependsOn: []string{"order-state-tracker"}},
 			{Name: "notification-handler", Type: "messaging.handler", DependsOn: []string{"order-broker"}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "order-server",
 				"router": "order-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "POST", "path": "/api/orders", "handler": "order-api"},
-					map[string]interface{}{"method": "GET", "path": "/api/orders", "handler": "order-api"},
-					map[string]interface{}{"method": "GET", "path": "/api/orders/{id}", "handler": "order-api"},
-					map[string]interface{}{"method": "PUT", "path": "/api/orders/{id}", "handler": "order-api"},
-					map[string]interface{}{"method": "PUT", "path": "/api/orders/{id}/transition", "handler": "order-api"},
+				"routes": []any{
+					map[string]any{"method": "POST", "path": "/api/orders", "handler": "order-api"},
+					map[string]any{"method": "GET", "path": "/api/orders", "handler": "order-api"},
+					map[string]any{"method": "GET", "path": "/api/orders/{id}", "handler": "order-api"},
+					map[string]any{"method": "PUT", "path": "/api/orders/{id}", "handler": "order-api"},
+					map[string]any{"method": "PUT", "path": "/api/orders/{id}/transition", "handler": "order-api"},
 				},
 			},
-			"statemachine": map[string]interface{}{
+			"statemachine": map[string]any{
 				"engine": "order-state-engine",
-				"definitions": []interface{}{
-					map[string]interface{}{
+				"definitions": []any{
+					map[string]any{
 						"name":         "order-processing",
 						"description":  "Order processing workflow",
 						"initialState": "received",
-						"states": map[string]interface{}{
-							"received":  map[string]interface{}{"description": "Order received", "isFinal": false, "isError": false},
-							"validated": map[string]interface{}{"description": "Order validated", "isFinal": false, "isError": false},
-							"stored":    map[string]interface{}{"description": "Order stored", "isFinal": false, "isError": false},
-							"notified":  map[string]interface{}{"description": "Notification sent", "isFinal": true, "isError": false},
-							"failed":    map[string]interface{}{"description": "Order failed", "isFinal": true, "isError": true},
+						"states": map[string]any{
+							"received":  map[string]any{"description": "Order received", "isFinal": false, "isError": false},
+							"validated": map[string]any{"description": "Order validated", "isFinal": false, "isError": false},
+							"stored":    map[string]any{"description": "Order stored", "isFinal": false, "isError": false},
+							"notified":  map[string]any{"description": "Notification sent", "isFinal": true, "isError": false},
+							"failed":    map[string]any{"description": "Order failed", "isFinal": true, "isError": true},
 						},
-						"transitions": map[string]interface{}{
-							"validate_order":    map[string]interface{}{"fromState": "received", "toState": "validated"},
-							"store_order":       map[string]interface{}{"fromState": "validated", "toState": "stored"},
-							"send_notification": map[string]interface{}{"fromState": "stored", "toState": "notified"},
-							"fail_validation":   map[string]interface{}{"fromState": "received", "toState": "failed"},
+						"transitions": map[string]any{
+							"validate_order":    map[string]any{"fromState": "received", "toState": "validated"},
+							"store_order":       map[string]any{"fromState": "validated", "toState": "stored"},
+							"send_notification": map[string]any{"fromState": "stored", "toState": "notified"},
+							"fail_validation":   map[string]any{"fromState": "received", "toState": "failed"},
 						},
 					},
 				},
 			},
-			"messaging": map[string]interface{}{
+			"messaging": map[string]any{
 				"broker": "order-broker",
-				"subscriptions": []interface{}{
-					map[string]interface{}{"topic": "order.completed", "handler": "notification-handler"},
+				"subscriptions": []any{
+					map[string]any{"topic": "order.completed", "handler": "notification-handler"},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -210,8 +209,7 @@ func TestE2E_OrderPipeline_FullExecution(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -236,7 +234,7 @@ func TestE2E_OrderPipeline_FullExecution(t *testing.T) {
 		t.Fatalf("Expected 201 Created, got %d: %s", resp.StatusCode, string(body))
 	}
 
-	var created map[string]interface{}
+	var created map[string]any
 	if err := json.Unmarshal(body, &created); err != nil {
 		t.Fatalf("Failed to decode create response: %v", err)
 	}
@@ -274,7 +272,7 @@ func TestE2E_OrderPipeline_FullExecution(t *testing.T) {
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, string(body))
 	}
 
-	var order map[string]interface{}
+	var order map[string]any
 	if err := json.Unmarshal(body, &order); err != nil {
 		t.Fatalf("Failed to decode GET response: %v", err)
 	}
@@ -300,9 +298,9 @@ func TestE2E_OrderPipeline_ErrorPath(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "err-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "err-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "err-router", Type: "http.router", DependsOn: []string{"err-server"}},
-			{Name: "err-api", Type: "api.handler", DependsOn: []string{"err-router"}, Config: map[string]interface{}{
+			{Name: "err-api", Type: "api.handler", DependsOn: []string{"err-router"}, Config: map[string]any{
 				"resourceName":   "orders",
 				"workflowType":   "order-processing",
 				"workflowEngine": "err-engine",
@@ -310,34 +308,34 @@ func TestE2E_OrderPipeline_ErrorPath(t *testing.T) {
 			{Name: "err-engine", Type: "statemachine.engine", DependsOn: []string{"err-api"}},
 			{Name: "err-tracker", Type: "state.tracker", DependsOn: []string{"err-engine"}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "err-server",
 				"router": "err-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "POST", "path": "/api/orders", "handler": "err-api"},
-					map[string]interface{}{"method": "PUT", "path": "/api/orders/{id}/transition", "handler": "err-api"},
-					map[string]interface{}{"method": "GET", "path": "/api/orders/{id}", "handler": "err-api"},
+				"routes": []any{
+					map[string]any{"method": "POST", "path": "/api/orders", "handler": "err-api"},
+					map[string]any{"method": "PUT", "path": "/api/orders/{id}/transition", "handler": "err-api"},
+					map[string]any{"method": "GET", "path": "/api/orders/{id}", "handler": "err-api"},
 				},
 			},
-			"statemachine": map[string]interface{}{
+			"statemachine": map[string]any{
 				"engine": "err-engine",
-				"definitions": []interface{}{
-					map[string]interface{}{
+				"definitions": []any{
+					map[string]any{
 						"name":         "order-processing",
 						"initialState": "received",
-						"states": map[string]interface{}{
-							"received": map[string]interface{}{"isFinal": false, "isError": false},
-							"failed":   map[string]interface{}{"isFinal": true, "isError": true},
+						"states": map[string]any{
+							"received": map[string]any{"isFinal": false, "isError": false},
+							"failed":   map[string]any{"isFinal": true, "isError": true},
 						},
-						"transitions": map[string]interface{}{
-							"fail_validation": map[string]interface{}{"fromState": "received", "toState": "failed"},
+						"transitions": map[string]any{
+							"fail_validation": map[string]any{"fromState": "received", "toState": "failed"},
 						},
 					},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -350,8 +348,7 @@ func TestE2E_OrderPipeline_ErrorPath(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -375,7 +372,7 @@ func TestE2E_OrderPipeline_ErrorPath(t *testing.T) {
 	assertTransitionSuccess(t, transitionResp, "failed")
 
 	// Verify that further transitions are rejected
-	transBody, _ := json.Marshal(map[string]interface{}{"transition": "fail_validation"})
+	transBody, _ := json.Marshal(map[string]any{"transition": "fail_validation"})
 	req, _ := http.NewRequest("PUT", baseURL+"/api/orders/ORD-BAD/transition", bytes.NewReader(transBody))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err = client.Do(req)
@@ -401,28 +398,28 @@ func TestE2E_BrokerMessaging(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "msg-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "msg-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "msg-router", Type: "http.router", DependsOn: []string{"msg-server"}},
-			{Name: "msg-handler", Type: "http.handler", DependsOn: []string{"msg-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
+			{Name: "msg-handler", Type: "http.handler", DependsOn: []string{"msg-router"}, Config: map[string]any{"contentType": "application/json"}},
 			{Name: "msg-broker", Type: "messaging.broker"},
 			{Name: "msg-subscriber", Type: "messaging.handler", DependsOn: []string{"msg-broker"}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "msg-server",
 				"router": "msg-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "POST", "path": "/api/publish", "handler": "msg-handler"},
+				"routes": []any{
+					map[string]any{"method": "POST", "path": "/api/publish", "handler": "msg-handler"},
 				},
 			},
-			"messaging": map[string]interface{}{
+			"messaging": map[string]any{
 				"broker": "msg-broker",
-				"subscriptions": []interface{}{
-					map[string]interface{}{"topic": "test.events", "handler": "msg-subscriber"},
+				"subscriptions": []any{
+					map[string]any{"topic": "test.events", "handler": "msg-subscriber"},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -435,8 +432,7 @@ func TestE2E_BrokerMessaging(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -489,8 +485,8 @@ func TestE2E_ConfigPushAndReload(t *testing.T) {
 	// Start with a minimal config - just a handler on the management port
 	cfg := &config.WorkflowConfig{
 		Modules:   []config.ModuleConfig{},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	// Use the WorkflowUIHandler directly to test config push
@@ -509,8 +505,8 @@ func TestE2E_ConfigPushAndReload(t *testing.T) {
 		return nil
 	})
 
-	uiHandler.SetStatusFunc(func() map[string]interface{} {
-		return map[string]interface{}{
+	uiHandler.SetStatusFunc(func() map[string]any {
+		return map[string]any{
 			"status":      "running",
 			"moduleCount": 0,
 		}
@@ -602,7 +598,7 @@ func TestE2E_ConfigPushAndReload(t *testing.T) {
 	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 
-	var status map[string]interface{}
+	var status map[string]any
 	if err := json.Unmarshal(body, &status); err != nil {
 		t.Fatalf("Failed to decode status: %v", err)
 	}
@@ -620,7 +616,7 @@ func TestE2E_ConfigPushAndReload(t *testing.T) {
 	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 
-	var validation map[string]interface{}
+	var validation map[string]any
 	if err := json.Unmarshal(body, &validation); err != nil {
 		t.Fatalf("Failed to decode validation: %v", err)
 	}
@@ -635,9 +631,9 @@ func TestE2E_ConfigPushAndReload(t *testing.T) {
 // --- Helper functions ---
 
 // doTransition sends a PUT /api/orders/{id}/transition request and returns the parsed response.
-func doTransition(t *testing.T, client *http.Client, baseURL, orderID, transition string) map[string]interface{} {
+func doTransition(t *testing.T, client *http.Client, baseURL, orderID, transition string) map[string]any {
 	t.Helper()
-	transBody, _ := json.Marshal(map[string]interface{}{
+	transBody, _ := json.Marshal(map[string]any{
 		"transition": transition,
 	})
 	req, _ := http.NewRequest("PUT", baseURL+"/api/orders/"+orderID+"/transition",
@@ -655,7 +651,7 @@ func doTransition(t *testing.T, client *http.Client, baseURL, orderID, transitio
 		t.Fatalf("Expected 200 for transition '%s', got %d: %s", transition, resp.StatusCode, string(body))
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
 		t.Fatalf("Failed to decode transition response: %v", err)
 	}
@@ -663,7 +659,7 @@ func doTransition(t *testing.T, client *http.Client, baseURL, orderID, transitio
 }
 
 // assertTransitionSuccess verifies a transition response indicates success and the expected state.
-func assertTransitionSuccess(t *testing.T, resp map[string]interface{}, expectedState string) {
+func assertTransitionSuccess(t *testing.T, resp map[string]any, expectedState string) {
 	t.Helper()
 	if resp["success"] != true {
 		t.Errorf("Expected success=true, got %v (error: %v)", resp["success"], resp["error"])
@@ -739,20 +735,20 @@ func TestE2E_DynamicComponent_LoadAndExecute(t *testing.T) {
 	// Create a minimal engine with an HTTP server and the dynamic API
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "dyn-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "dyn-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "dyn-router", Type: "http.router", DependsOn: []string{"dyn-server"}},
-			{Name: "dyn-handler", Type: "http.handler", DependsOn: []string{"dyn-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
+			{Name: "dyn-handler", Type: "http.handler", DependsOn: []string{"dyn-router"}, Config: map[string]any{"contentType": "application/json"}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "dyn-server",
 				"router": "dyn-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "GET", "path": "/api/health", "handler": "dyn-handler"},
+				"routes": []any{
+					map[string]any{"method": "GET", "path": "/api/health", "handler": "dyn-handler"},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -765,8 +761,7 @@ func TestE2E_DynamicComponent_LoadAndExecute(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -841,7 +836,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 		t.Fatalf("Expected 201 Created, got %d: %s", resp.StatusCode, string(body))
 	}
 
-	var created map[string]interface{}
+	var created map[string]any
 	if err := json.Unmarshal(body, &created); err != nil {
 		t.Fatalf("Failed to decode create response: %v", err)
 	}
@@ -860,7 +855,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 
-	var components []map[string]interface{}
+	var components []map[string]any
 	if err := json.Unmarshal(body, &components); err != nil {
 		t.Fatalf("Failed to decode list response: %v", err)
 	}
@@ -883,7 +878,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 		t.Fatalf("Component Start failed: %v", err)
 	}
 
-	result, err := comp.Execute(context.Background(), map[string]interface{}{"name": "E2E"})
+	result, err := comp.Execute(context.Background(), map[string]any{"name": "E2E"})
 	if err != nil {
 		t.Fatalf("Component Execute failed: %v", err)
 	}
@@ -909,7 +904,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, string(body))
 	}
 
-	var detail map[string]interface{}
+	var detail map[string]any
 	if err := json.Unmarshal(body, &detail); err != nil {
 		t.Fatalf("Failed to decode detail response: %v", err)
 	}
@@ -988,7 +983,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 		t.Fatal("Component 'transformer' not found after create")
 	}
 
-	result, err := comp.Execute(context.Background(), map[string]interface{}{"input": "data"})
+	result, err := comp.Execute(context.Background(), map[string]any{"input": "data"})
 	if err != nil {
 		t.Fatalf("v1 Execute failed: %v", err)
 	}
@@ -1035,7 +1030,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 		t.Fatalf("Expected 200, got %d: %s", resp.StatusCode, string(body))
 	}
 
-	var updated map[string]interface{}
+	var updated map[string]any
 	if err := json.Unmarshal(body, &updated); err != nil {
 		t.Fatalf("Failed to decode update response: %v", err)
 	}
@@ -1048,7 +1043,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 		t.Fatal("Component 'transformer' not found after update")
 	}
 
-	result, err = comp.Execute(context.Background(), map[string]interface{}{"input": "data"})
+	result, err = comp.Execute(context.Background(), map[string]any{"input": "data"})
 	if err != nil {
 		t.Fatalf("v2 Execute failed: %v", err)
 	}
@@ -1366,24 +1361,24 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	// Build engine config that references the dynamic component
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "eng-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "eng-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "eng-router", Type: "http.router", DependsOn: []string{"eng-server"}},
-			{Name: "eng-handler", Type: "http.handler", DependsOn: []string{"eng-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
+			{Name: "eng-handler", Type: "http.handler", DependsOn: []string{"eng-router"}, Config: map[string]any{"contentType": "application/json"}},
 			// This module type is handled by the engine's "dynamic.component" case
-			{Name: "text-processor", Type: "dynamic.component", Config: map[string]interface{}{
+			{Name: "text-processor", Type: "dynamic.component", Config: map[string]any{
 				"componentId": "text-processor",
 			}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "eng-server",
 				"router": "eng-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "GET", "path": "/api/health", "handler": "eng-handler"},
+				"routes": []any{
+					map[string]any{"method": "GET", "path": "/api/health", "handler": "eng-handler"},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -1401,8 +1396,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 
 	// Step 2: Start the engine (this runs the full modular lifecycle on all modules)
 	t.Log("Step 2: Starting engine (full lifecycle)")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -1419,7 +1413,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 		t.Fatal("Dynamic component 'text-processor' not found in registry")
 	}
 
-	result, err := comp.Execute(ctx, map[string]interface{}{"text": "Hello World", "operation": "upper"})
+	result, err := comp.Execute(ctx, map[string]any{"text": "Hello World", "operation": "upper"})
 	if err != nil {
 		t.Fatalf("Execute(upper) failed: %v", err)
 	}
@@ -1428,7 +1422,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	}
 	t.Logf("  upper: %v -> %v", "Hello World", result["result"])
 
-	result, err = comp.Execute(ctx, map[string]interface{}{"text": "Hello World", "operation": "reverse"})
+	result, err = comp.Execute(ctx, map[string]any{"text": "Hello World", "operation": "reverse"})
 	if err != nil {
 		t.Fatalf("Execute(reverse) failed: %v", err)
 	}
@@ -1482,7 +1476,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 		t.Fatal("Dynamic component not found after reload")
 	}
 
-	result, err = comp.Execute(ctx, map[string]interface{}{"text": "Hello World"})
+	result, err = comp.Execute(ctx, map[string]any{"text": "Hello World"})
 	if err != nil {
 		t.Fatalf("v2 Execute failed: %v", err)
 	}
@@ -1517,8 +1511,8 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 		Modules: []config.ModuleConfig{
 			{Name: "orphan", Type: "dynamic.component"},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 	err = noRegistryEngine.BuildFromConfig(dynamicOnlyCfg)
 	if err == nil {
@@ -1612,31 +1606,31 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	// Build engine with both the dynamic component and a messaging broker
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "mp-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "mp-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "mp-router", Type: "http.router", DependsOn: []string{"mp-server"}},
-			{Name: "mp-handler", Type: "http.handler", DependsOn: []string{"mp-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
+			{Name: "mp-handler", Type: "http.handler", DependsOn: []string{"mp-router"}, Config: map[string]any{"contentType": "application/json"}},
 			{Name: "mp-broker", Type: "messaging.broker"},
-			{Name: "msg-processor", Type: "dynamic.component", Config: map[string]interface{}{
+			{Name: "msg-processor", Type: "dynamic.component", Config: map[string]any{
 				"componentId": "msg-processor",
 			}},
 			{Name: "msg-subscriber", Type: "messaging.handler", DependsOn: []string{"mp-broker"}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "mp-server",
 				"router": "mp-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "GET", "path": "/api/health", "handler": "mp-handler"},
+				"routes": []any{
+					map[string]any{"method": "GET", "path": "/api/health", "handler": "mp-handler"},
 				},
 			},
-			"messaging": map[string]interface{}{
+			"messaging": map[string]any{
 				"broker": "mp-broker",
-				"subscriptions": []interface{}{
-					map[string]interface{}{"topic": "process.requests", "handler": "msg-subscriber"},
+				"subscriptions": []any{
+					map[string]any{"topic": "process.requests", "handler": "msg-subscriber"},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -1650,8 +1644,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -1703,7 +1696,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	}
 
 	// Process the message using the dynamic component
-	result, err := comp.Execute(ctx, map[string]interface{}{"message": inputMsg})
+	result, err := comp.Execute(ctx, map[string]any{"message": inputMsg})
 	if err != nil {
 		t.Fatalf("Component Execute failed: %v", err)
 	}
@@ -1727,7 +1720,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	if len(receivedMsgs) == 0 {
 		t.Error("Expected results subscriber to receive processed message")
 	} else {
-		var received map[string]interface{}
+		var received map[string]any
 		if err := json.Unmarshal(receivedMsgs[0], &received); err != nil {
 			t.Errorf("Failed to parse received message: %v", err)
 		} else {
@@ -1742,7 +1735,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	// Step 3: Process a validate message
 	t.Log("Step 3: Processing validate message")
 	validateMsg := `{"action":"validate","data":"some-data"}`
-	result, err = comp.Execute(ctx, map[string]interface{}{"message": validateMsg})
+	result, err = comp.Execute(ctx, map[string]any{"message": validateMsg})
 	if err != nil {
 		t.Fatalf("Validate Execute failed: %v", err)
 	}
@@ -1754,7 +1747,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	// Step 4: Process an unknown action (echo)
 	t.Log("Step 4: Processing echo message")
 	echoMsg := `{"action":"unknown","data":"test-data"}`
-	result, err = comp.Execute(ctx, map[string]interface{}{"message": echoMsg})
+	result, err = comp.Execute(ctx, map[string]any{"message": echoMsg})
 	if err != nil {
 		t.Fatalf("Echo Execute failed: %v", err)
 	}
@@ -1765,7 +1758,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 
 	// Step 5: Verify error handling with bad input
 	t.Log("Step 5: Testing error handling with invalid input")
-	_, err = comp.Execute(ctx, map[string]interface{}{"message": "not-json"})
+	_, err = comp.Execute(ctx, map[string]any{"message": "not-json"})
 	if err == nil {
 		t.Error("Expected error for invalid JSON message")
 	} else {
@@ -1799,7 +1792,7 @@ func TestE2E_IntegrationWorkflow(t *testing.T) {
 	targetMux.HandleFunc("/customers/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"id":     "cust-123",
 			"name":   "Alice",
 			"status": "active",
@@ -1819,36 +1812,37 @@ func TestE2E_IntegrationWorkflow(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "int-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "int-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "int-router", Type: "http.router", DependsOn: []string{"int-server"}},
-			{Name: "int-handler", Type: "http.handler", DependsOn: []string{"int-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
+			{Name: "int-handler", Type: "http.handler", DependsOn: []string{"int-router"}, Config: map[string]any{"contentType": "application/json"}},
 			{Name: "int-registry", Type: "integration.registry"},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "int-server",
 				"router": "int-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "GET", "path": "/api/health", "handler": "int-handler"},
+				"routes": []any{
+					map[string]any{"method": "GET", "path": "/api/health", "handler": "int-handler"},
 				},
 			},
-			"integration": map[string]interface{}{
+			"integration": map[string]any{
 				"registry": "int-registry",
-				"connectors": []interface{}{
-					map[string]interface{}{
+				"connectors": []any{
+					map[string]any{
 						"name": "api-connector",
 						"type": "http",
-						"config": map[string]interface{}{
-							"baseURL":        targetURL,
-							"authType":       "bearer",
-							"token":          "test-token-123",
-							"headers":        map[string]interface{}{"Accept": "application/json"},
-							"timeoutSeconds": float64(10),
+						"config": map[string]any{
+							"baseURL":         targetURL,
+							"authType":        "bearer",
+							"token":           "test-token-123",
+							"headers":         map[string]any{"Accept": "application/json"},
+							"timeoutSeconds":  float64(10),
+							"allowPrivateIPs": true,
 						},
 					},
 				},
-				"steps": []interface{}{
-					map[string]interface{}{
+				"steps": []any{
+					map[string]any{
 						"name":      "fetch-customer",
 						"connector": "api-connector",
 						"action":    "GET /customers/cust-123",
@@ -1856,7 +1850,7 @@ func TestE2E_IntegrationWorkflow(t *testing.T) {
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -1864,7 +1858,7 @@ func TestE2E_IntegrationWorkflow(t *testing.T) {
 	engine := NewStdEngine(app, logger)
 
 	// Register the integration.registry module type factory
-	engine.AddModuleType("integration.registry", func(name string, cfg map[string]interface{}) modular.Module {
+	engine.AddModuleType("integration.registry", func(name string, cfg map[string]any) modular.Module {
 		return module.NewIntegrationRegistry(name)
 	})
 
@@ -1875,8 +1869,7 @@ func TestE2E_IntegrationWorkflow(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -1940,27 +1933,27 @@ func TestE2E_EventWorkflow(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "evt-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "evt-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "evt-router", Type: "http.router", DependsOn: []string{"evt-server"}},
-			{Name: "evt-handler", Type: "http.handler", DependsOn: []string{"evt-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
+			{Name: "evt-handler", Type: "http.handler", DependsOn: []string{"evt-router"}, Config: map[string]any{"contentType": "application/json"}},
 			{Name: "evt-processor", Type: "event.processor"},
 			{Name: "evt-broker", Type: "messaging.broker"},
 			{Name: "alert-handler", Type: "messaging.handler", DependsOn: []string{"evt-broker"}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "evt-server",
 				"router": "evt-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "POST", "path": "/api/events", "handler": "evt-handler"},
+				"routes": []any{
+					map[string]any{"method": "POST", "path": "/api/events", "handler": "evt-handler"},
 				},
 			},
-			"event": map[string]interface{}{
+			"event": map[string]any{
 				"processor": "evt-processor",
-				"patterns": []interface{}{
-					map[string]interface{}{
+				"patterns": []any{
+					map[string]any{
 						"patternId":    "login-failures",
-						"eventTypes":   []interface{}{"user.login.failed"},
+						"eventTypes":   []any{"user.login.failed"},
 						"windowTime":   "5m",
 						"condition":    "count",
 						"minOccurs":    float64(2),
@@ -1968,16 +1961,16 @@ func TestE2E_EventWorkflow(t *testing.T) {
 						"orderMatters": false,
 					},
 				},
-				"handlers": []interface{}{
-					map[string]interface{}{
+				"handlers": []any{
+					map[string]any{
 						"patternId": "login-failures",
 						"handler":   "alert-handler",
 					},
 				},
-				"adapters": []interface{}{
-					map[string]interface{}{
+				"adapters": []any{
+					map[string]any{
 						"broker":      "evt-broker",
-						"topics":      []interface{}{"user.login.failed"},
+						"topics":      []any{"user.login.failed"},
 						"eventType":   "user.login.failed",
 						"sourceIdKey": "userId",
 						"correlIdKey": "sessionId",
@@ -1985,7 +1978,7 @@ func TestE2E_EventWorkflow(t *testing.T) {
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -1993,7 +1986,7 @@ func TestE2E_EventWorkflow(t *testing.T) {
 	engine := NewStdEngine(app, logger)
 
 	// Register the event.processor module type factory
-	engine.AddModuleType("event.processor", func(name string, cfg map[string]interface{}) modular.Module {
+	engine.AddModuleType("event.processor", func(name string, cfg map[string]any) modular.Module {
 		return module.NewEventProcessor(name)
 	})
 
@@ -2005,8 +1998,7 @@ func TestE2E_EventWorkflow(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -2040,7 +2032,7 @@ func TestE2E_EventWorkflow(t *testing.T) {
 	}
 
 	// Send two login failure events (above the minOccurs=2 threshold)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		msg := fmt.Sprintf(`{"userId":"user-42","sessionId":"sess-abc","attempt":%d}`, i+1)
 		if err := broker.Producer().SendMessage("user.login.failed", []byte(msg)); err != nil {
 			t.Fatalf("SendMessage failed on attempt %d: %v", i+1, err)
@@ -2075,21 +2067,21 @@ func TestE2E_DataTransformer(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "dt-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "dt-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "dt-router", Type: "http.router", DependsOn: []string{"dt-server"}},
-			{Name: "dt-handler", Type: "http.handler", DependsOn: []string{"dt-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
+			{Name: "dt-handler", Type: "http.handler", DependsOn: []string{"dt-router"}, Config: map[string]any{"contentType": "application/json"}},
 			{Name: "dt-transformer", Type: "data.transformer"},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "dt-server",
 				"router": "dt-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "POST", "path": "/api/transform", "handler": "dt-handler"},
+				"routes": []any{
+					map[string]any{"method": "POST", "path": "/api/transform", "handler": "dt-handler"},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -2101,8 +2093,7 @@ func TestE2E_DataTransformer(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -2129,12 +2120,12 @@ func TestE2E_DataTransformer(t *testing.T) {
 		Operations: []module.TransformOperation{
 			{
 				Type:   "extract",
-				Config: map[string]interface{}{"path": "user"},
+				Config: map[string]any{"path": "user"},
 			},
 			{
 				Type: "map",
-				Config: map[string]interface{}{
-					"mappings": map[string]interface{}{
+				Config: map[string]any{
+					"mappings": map[string]any{
 						"firstName": "first_name",
 						"lastName":  "last_name",
 					},
@@ -2142,16 +2133,16 @@ func TestE2E_DataTransformer(t *testing.T) {
 			},
 			{
 				Type: "filter",
-				Config: map[string]interface{}{
-					"fields": []interface{}{"first_name", "last_name", "email"},
+				Config: map[string]any{
+					"fields": []any{"first_name", "last_name", "email"},
 				},
 			},
 		},
 	})
 
 	// Execute the transformation
-	input := map[string]interface{}{
-		"user": map[string]interface{}{
+	input := map[string]any{
+		"user": map[string]any{
 			"firstName": "Alice",
 			"lastName":  "Smith",
 			"email":     "alice@example.com",
@@ -2165,7 +2156,7 @@ func TestE2E_DataTransformer(t *testing.T) {
 		t.Fatalf("Transform failed: %v", err)
 	}
 
-	resultMap, ok := result.(map[string]interface{})
+	resultMap, ok := result.(map[string]any)
 	if !ok {
 		t.Fatalf("Expected map result, got %T", result)
 	}
@@ -2216,30 +2207,30 @@ func TestE2E_SchedulerWorkflow(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "sched-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "sched-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "sched-router", Type: "http.router", DependsOn: []string{"sched-server"}},
-			{Name: "sched-handler", Type: "http.handler", DependsOn: []string{"sched-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
-			{Name: "cron-scheduler", Type: "cron.scheduler", Config: map[string]interface{}{"expression": "* * * * *"}},
+			{Name: "sched-handler", Type: "http.handler", DependsOn: []string{"sched-router"}, Config: map[string]any{"contentType": "application/json"}},
+			{Name: "cron-scheduler", Type: "cron.scheduler", Config: map[string]any{"expression": "* * * * *"}},
 			{Name: "cleanup-job", Type: "test.job"},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "sched-server",
 				"router": "sched-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "GET", "path": "/api/health", "handler": "sched-handler"},
+				"routes": []any{
+					map[string]any{"method": "GET", "path": "/api/health", "handler": "sched-handler"},
 				},
 			},
-			"scheduler": map[string]interface{}{
-				"jobs": []interface{}{
-					map[string]interface{}{
+			"scheduler": map[string]any{
+				"jobs": []any{
+					map[string]any{
 						"scheduler": "cron-scheduler",
 						"job":       "cleanup-job",
 					},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -2247,7 +2238,7 @@ func TestE2E_SchedulerWorkflow(t *testing.T) {
 	engine := NewStdEngine(app, logger)
 
 	// Register the cron.scheduler module type factory
-	engine.AddModuleType("cron.scheduler", func(name string, cfg map[string]interface{}) modular.Module {
+	engine.AddModuleType("cron.scheduler", func(name string, cfg map[string]any) modular.Module {
 		expression := "* * * * *"
 		if expr, ok := cfg["expression"].(string); ok {
 			expression = expr
@@ -2256,7 +2247,7 @@ func TestE2E_SchedulerWorkflow(t *testing.T) {
 	})
 
 	// Register a test.job module type factory that tracks execution
-	engine.AddModuleType("test.job", func(name string, cfg map[string]interface{}) modular.Module {
+	engine.AddModuleType("test.job", func(name string, cfg map[string]any) modular.Module {
 		return &testJobModule{
 			name: name,
 			executeFn: func(ctx context.Context) error {
@@ -2275,8 +2266,7 @@ func TestE2E_SchedulerWorkflow(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -2365,22 +2355,22 @@ func TestE2E_MetricsAndHealthCheck(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "mh-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "mh-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "mh-router", Type: "http.router", DependsOn: []string{"mh-server"}},
-			{Name: "mh-handler", Type: "http.handler", DependsOn: []string{"mh-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
+			{Name: "mh-handler", Type: "http.handler", DependsOn: []string{"mh-router"}, Config: map[string]any{"contentType": "application/json"}},
 			{Name: "mh-metrics", Type: "metrics.collector"},
 			{Name: "mh-health", Type: "health.checker"},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "mh-server",
 				"router": "mh-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "GET", "path": "/api/data", "handler": "mh-handler"},
+				"routes": []any{
+					map[string]any{"method": "GET", "path": "/api/data", "handler": "mh-handler"},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -2392,8 +2382,7 @@ func TestE2E_MetricsAndHealthCheck(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -2434,7 +2423,7 @@ func TestE2E_MetricsAndHealthCheck(t *testing.T) {
 	// Step 4: Make some HTTP requests to generate traffic
 	t.Log("Step 4: Making HTTP requests to generate metrics")
 	client := &http.Client{Timeout: 5 * time.Second}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		resp, err := client.Get(baseURL + "/api/data")
 		if err != nil {
 			t.Fatalf("GET /api/data failed: %v", err)
@@ -2485,7 +2474,7 @@ func TestE2E_MetricsAndHealthCheck(t *testing.T) {
 	healthReq, _ := http.NewRequest("GET", "/health", nil)
 	hc.HealthHandler().ServeHTTP(healthRec, healthReq)
 
-	var healthResp map[string]interface{}
+	var healthResp map[string]any
 	if err := json.Unmarshal(healthRec.body.Bytes(), &healthResp); err != nil {
 		t.Fatalf("Failed to decode health response: %v", err)
 	}
@@ -2532,7 +2521,7 @@ func TestE2E_MetricsAndHealthCheck(t *testing.T) {
 	unhealthyReq, _ := http.NewRequest("GET", "/health", nil)
 	hc.HealthHandler().ServeHTTP(unhealthyRec, unhealthyReq)
 
-	var unhealthyResp map[string]interface{}
+	var unhealthyResp map[string]any
 	if err := json.Unmarshal(unhealthyRec.body.Bytes(), &unhealthyResp); err != nil {
 		t.Fatalf("Failed to decode unhealthy response: %v", err)
 	}
@@ -2558,21 +2547,21 @@ func TestE2E_EventBusBridge(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "eb-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "eb-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "eb-router", Type: "http.router", DependsOn: []string{"eb-server"}},
-			{Name: "eb-handler", Type: "http.handler", DependsOn: []string{"eb-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
+			{Name: "eb-handler", Type: "http.handler", DependsOn: []string{"eb-router"}, Config: map[string]any{"contentType": "application/json"}},
 			{Name: "eb-eventbus", Type: "eventbus.modular"},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "eb-server",
 				"router": "eb-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "GET", "path": "/api/ping", "handler": "eb-handler"},
+				"routes": []any{
+					map[string]any{"method": "GET", "path": "/api/ping", "handler": "eb-handler"},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -2592,8 +2581,7 @@ func TestE2E_EventBusBridge(t *testing.T) {
 		t.Fatalf("EventBusBridge.InitFromApp failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -2631,7 +2619,7 @@ func TestE2E_EventBusBridge(t *testing.T) {
 	if received == nil {
 		t.Error("Expected message delivery through EventBusBridge, but got nothing")
 	} else {
-		var parsed map[string]interface{}
+		var parsed map[string]any
 		if err := json.Unmarshal(received, &parsed); err != nil {
 			t.Errorf("Failed to parse received message: %v", err)
 		} else {
@@ -2654,7 +2642,7 @@ func TestE2E_EventBusBridge(t *testing.T) {
 	received = nil
 	mu.Unlock()
 
-	directPayload := map[string]interface{}{"source": "direct", "id": 123}
+	directPayload := map[string]any{"source": "direct", "id": 123}
 	if err := eb.Publish(context.Background(), "test.events", directPayload); err != nil {
 		t.Fatalf("Direct EventBus Publish failed: %v", err)
 	}
@@ -2729,21 +2717,21 @@ func TestE2E_WebhookSender(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "wh-server", Type: "http.server", Config: map[string]interface{}{"address": engineAddr}},
+			{Name: "wh-server", Type: "http.server", Config: map[string]any{"address": engineAddr}},
 			{Name: "wh-router", Type: "http.router", DependsOn: []string{"wh-server"}},
-			{Name: "wh-handler", Type: "http.handler", DependsOn: []string{"wh-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
-			{Name: "wh-sender", Type: "webhook.sender", Config: map[string]interface{}{"maxRetries": float64(2)}},
+			{Name: "wh-handler", Type: "http.handler", DependsOn: []string{"wh-router"}, Config: map[string]any{"contentType": "application/json"}},
+			{Name: "wh-sender", Type: "webhook.sender", Config: map[string]any{"maxRetries": float64(2)}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "wh-server",
 				"router": "wh-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "GET", "path": "/api/status", "handler": "wh-handler"},
+				"routes": []any{
+					map[string]any{"method": "GET", "path": "/api/status", "handler": "wh-handler"},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -2755,8 +2743,7 @@ func TestE2E_WebhookSender(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -2801,7 +2788,7 @@ func TestE2E_WebhookSender(t *testing.T) {
 		t.Fatalf("Expected 1 received payload, got %d", len(receivedPayloads))
 	}
 
-	var receivedData map[string]interface{}
+	var receivedData map[string]any
 	if err := json.Unmarshal(receivedPayloads[0], &receivedData); err != nil {
 		t.Fatalf("Failed to parse received payload: %v", err)
 	}
@@ -2881,21 +2868,21 @@ func TestE2E_SlackNotification_MockEndpoint(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "sl-server", Type: "http.server", Config: map[string]interface{}{"address": engineAddr}},
+			{Name: "sl-server", Type: "http.server", Config: map[string]any{"address": engineAddr}},
 			{Name: "sl-router", Type: "http.router", DependsOn: []string{"sl-server"}},
-			{Name: "sl-handler", Type: "http.handler", DependsOn: []string{"sl-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
+			{Name: "sl-handler", Type: "http.handler", DependsOn: []string{"sl-router"}, Config: map[string]any{"contentType": "application/json"}},
 			{Name: "sl-slack", Type: "notification.slack"},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "sl-server",
 				"router": "sl-router",
-				"routes": []interface{}{
-					map[string]interface{}{"method": "GET", "path": "/api/status", "handler": "sl-handler"},
+				"routes": []any{
+					map[string]any{"method": "GET", "path": "/api/status", "handler": "sl-handler"},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -2907,8 +2894,7 @@ func TestE2E_SlackNotification_MockEndpoint(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -2950,7 +2936,7 @@ func TestE2E_SlackNotification_MockEndpoint(t *testing.T) {
 		t.Fatalf("Expected 1 Slack payload, got %d", len(receivedPayloads))
 	}
 
-	var slackPayload map[string]interface{}
+	var slackPayload map[string]any
 	if err := json.Unmarshal(receivedPayloads[0], &slackPayload); err != nil {
 		t.Fatalf("Failed to parse Slack payload: %v", err)
 	}

@@ -64,8 +64,8 @@ services:
       context: ../..
       dockerfile: example/chat-platform/Dockerfile
     environment:
-      - JWT_SECRET=chat-platform-jwt-secret-change-in-production
-      - ENCRYPTION_KEY=chat-platform-encryption-key-32ch
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set}
     command: ["./server", "-config", "config/configs/api.yaml", "-mgmt-addr", ":9081"]
     volumes:
       - api-data:/app/data
@@ -83,8 +83,8 @@ services:
       context: ../..
       dockerfile: example/chat-platform/Dockerfile
     environment:
-      - JWT_SECRET=chat-platform-jwt-secret-change-in-production
-      - ENCRYPTION_KEY=chat-platform-encryption-key-32ch
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set}
     command: ["./server", "-config", "config/configs/conversation.yaml", "-mgmt-addr", ":9082"]
     volumes:
       - conversation-data:/app/data
@@ -116,9 +116,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards

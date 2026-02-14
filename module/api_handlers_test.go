@@ -505,7 +505,7 @@ func TestRESTAPIHandler_HandleTransition_WithStateMachineEngine(t *testing.T) {
 		t.Errorf("expected status %d, got %d; body: %s", http.StatusOK, w.Code, w.Body.String())
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -530,7 +530,7 @@ func TestRESTAPIHandler_HandleGet_WithStateTracker(t *testing.T) {
 	h.Handle(createW, createReq)
 
 	// Set state for the resource
-	tracker.SetState("orders", "order-1", "processing", map[string]interface{}{
+	tracker.SetState("orders", "order-1", "processing", map[string]any{
 		"priority": "high",
 	})
 
@@ -665,17 +665,17 @@ func TestRESTAPIHandler_Init_FullSetup(t *testing.T) {
 	app := CreateIsolatedApp(t)
 
 	// Register a workflow config section with module config containing workflowType
-	workflowCfg := map[string]interface{}{
-		"modules": []interface{}{
-			map[string]interface{}{
+	workflowCfg := map[string]any{
+		"modules": []any{
+			map[string]any{
 				"name": "full-handler",
-				"config": map[string]interface{}{
+				"config": map[string]any{
 					"resourceName": "items",
 					"workflowType": "item-workflow",
 				},
 			},
 		},
-		"workflows": map[string]interface{}{},
+		"workflows": map[string]any{},
 	}
 	app.RegisterConfigSection("workflow", modular.NewStdConfigProvider(workflowCfg))
 

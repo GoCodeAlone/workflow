@@ -38,7 +38,7 @@ func TestHealthChecker_HealthHandler_Healthy(t *testing.T) {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestHealthChecker_HealthHandler_Unhealthy(t *testing.T) {
 		t.Errorf("expected 503, got %d", rec.Code)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestHealthChecker_HealthHandler_Degraded(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestHealthChecker_PersistenceCheck_Healthy(t *testing.T) {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -218,8 +218,8 @@ func TestHealthChecker_PersistenceCheck_Healthy(t *testing.T) {
 		t.Errorf("expected status 'healthy', got %v", resp["status"])
 	}
 
-	checks := resp["checks"].(map[string]interface{})
-	psCheck := checks["persistence.store"].(map[string]interface{})
+	checks := resp["checks"].(map[string]any)
+	psCheck := checks["persistence.store"].(map[string]any)
 	if psCheck["status"] != "healthy" {
 		t.Errorf("expected persistence check status 'healthy', got %v", psCheck["status"])
 	}
@@ -246,7 +246,7 @@ func TestHealthChecker_PersistenceCheck_Degraded(t *testing.T) {
 		t.Errorf("expected 200 for degraded, got %d", rec.Code)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -255,8 +255,8 @@ func TestHealthChecker_PersistenceCheck_Degraded(t *testing.T) {
 		t.Errorf("expected overall status 'degraded', got %v", resp["status"])
 	}
 
-	checks := resp["checks"].(map[string]interface{})
-	psCheck := checks["persistence.store"].(map[string]interface{})
+	checks := resp["checks"].(map[string]any)
+	psCheck := checks["persistence.store"].(map[string]any)
 	if psCheck["status"] != "degraded" {
 		t.Errorf("expected persistence check status 'degraded', got %v", psCheck["status"])
 	}
@@ -278,7 +278,7 @@ func TestHealthChecker_PersistenceCheck_WithOtherChecks(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestHealthChecker_HealthHandler_NoChecks(t *testing.T) {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestHealthChecker_DiscoverHealthCheckables(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestHealthChecker_DiscoverHealthCheckables(t *testing.T) {
 		t.Errorf("expected status 'healthy', got %v", resp["status"])
 	}
 
-	checks, ok := resp["checks"].(map[string]interface{})
+	checks, ok := resp["checks"].(map[string]any)
 	if !ok {
 		t.Fatal("expected 'checks' field in response")
 	}
@@ -385,7 +385,7 @@ func TestHealthChecker_DiscoverHealthCheckables_Degraded(t *testing.T) {
 		t.Errorf("expected 200 for degraded status, got %d", rec.Code)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}

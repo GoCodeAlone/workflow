@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"strings"
 )
@@ -132,15 +133,13 @@ var piiFields = map[string]bool{
 
 // EncryptPIIFields encrypts known PII fields in a data map.
 // It handles nested "messages" arrays where each message may contain PII.
-func (e *FieldEncryptor) EncryptPIIFields(data map[string]interface{}) (map[string]interface{}, error) {
+func (e *FieldEncryptor) EncryptPIIFields(data map[string]any) (map[string]any, error) {
 	if !e.enabled || data == nil {
 		return data, nil
 	}
 
-	result := make(map[string]interface{}, len(data))
-	for k, v := range data {
-		result[k] = v
-	}
+	result := make(map[string]any, len(data))
+	maps.Copy(result, data)
 
 	// Encrypt top-level PII fields
 	for field := range piiFields {
@@ -160,18 +159,16 @@ func (e *FieldEncryptor) EncryptPIIFields(data map[string]interface{}) (map[stri
 	}
 
 	// Encrypt PII within messages array
-	if msgs, ok := result["messages"].([]interface{}); ok {
-		encMsgs := make([]interface{}, len(msgs))
+	if msgs, ok := result["messages"].([]any); ok {
+		encMsgs := make([]any, len(msgs))
 		for i, m := range msgs {
-			msg, ok := m.(map[string]interface{})
+			msg, ok := m.(map[string]any)
 			if !ok {
 				encMsgs[i] = m
 				continue
 			}
-			encMsg := make(map[string]interface{}, len(msg))
-			for k, v := range msg {
-				encMsg[k] = v
-			}
+			encMsg := make(map[string]any, len(msg))
+			maps.Copy(encMsg, msg)
 			for field := range piiFields {
 				val, ok := encMsg[field]
 				if !ok {
@@ -197,15 +194,13 @@ func (e *FieldEncryptor) EncryptPIIFields(data map[string]interface{}) (map[stri
 
 // DecryptPIIFields decrypts known PII fields in a data map.
 // Values without the "enc::" prefix are returned as-is (backward compatible).
-func (e *FieldEncryptor) DecryptPIIFields(data map[string]interface{}) (map[string]interface{}, error) {
+func (e *FieldEncryptor) DecryptPIIFields(data map[string]any) (map[string]any, error) {
 	if !e.enabled || data == nil {
 		return data, nil
 	}
 
-	result := make(map[string]interface{}, len(data))
-	for k, v := range data {
-		result[k] = v
-	}
+	result := make(map[string]any, len(data))
+	maps.Copy(result, data)
 
 	// Decrypt top-level PII fields
 	for field := range piiFields {
@@ -225,18 +220,16 @@ func (e *FieldEncryptor) DecryptPIIFields(data map[string]interface{}) (map[stri
 	}
 
 	// Decrypt PII within messages array
-	if msgs, ok := result["messages"].([]interface{}); ok {
-		decMsgs := make([]interface{}, len(msgs))
+	if msgs, ok := result["messages"].([]any); ok {
+		decMsgs := make([]any, len(msgs))
 		for i, m := range msgs {
-			msg, ok := m.(map[string]interface{})
+			msg, ok := m.(map[string]any)
 			if !ok {
 				decMsgs[i] = m
 				continue
 			}
-			decMsg := make(map[string]interface{}, len(msg))
-			for k, v := range msg {
-				decMsg[k] = v
-			}
+			decMsg := make(map[string]any, len(msg))
+			maps.Copy(decMsg, msg)
 			for field := range piiFields {
 				val, ok := decMsg[field]
 				if !ok {
@@ -288,8 +281,7 @@ func (e *FieldEncryptor) DecryptJSON(data []byte) ([]byte, error) {
 	// Check if this is an encrypted envelope
 	var envelope map[string]string
 	if err := json.Unmarshal(data, &envelope); err != nil {
-		// Not JSON or not our envelope — return as-is
-		return data, nil
+		return data, nil //nolint:nilerr // Not an encrypted envelope, return original data
 	}
 
 	encrypted, ok := envelope["_encrypted"]

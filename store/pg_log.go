@@ -28,7 +28,7 @@ func (s *PGLogStore) Append(ctx context.Context, l *ExecutionLog) error {
 func (s *PGLogStore) Query(ctx context.Context, f LogFilter) ([]*ExecutionLog, error) {
 	query := `SELECT id, workflow_id, execution_id, level, message, module_name, fields, created_at
 		FROM execution_logs WHERE 1=1`
-	args := []interface{}{}
+	args := []any{}
 	idx := 1
 
 	if f.WorkflowID != nil {

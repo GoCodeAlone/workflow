@@ -120,7 +120,7 @@ func TestWorkflowLifecycleEvent_JSON(t *testing.T) {
 		Action:       "create",
 		Status:       LifecycleStarted,
 		Timestamp:    time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-		Data:         map[string]interface{}{"key": "value"},
+		Data:         map[string]any{"key": "value"},
 	}
 	data, err := json.Marshal(ev)
 	if err != nil {
@@ -147,7 +147,7 @@ func TestStepLifecycleEvent_JSON(t *testing.T) {
 		Status:       LifecycleCompleted,
 		Timestamp:    time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		Duration:     500 * time.Millisecond,
-		Results:      map[string]interface{}{"ok": true},
+		Results:      map[string]any{"ok": true},
 	}
 	data, err := json.Marshal(ev)
 	if err != nil {
@@ -193,7 +193,7 @@ func TestEmitter_WorkflowStarted(t *testing.T) {
 	defer func() { _ = sub.Cancel() }()
 
 	emitter := NewWorkflowEventEmitter(app)
-	emitter.EmitWorkflowStarted(ctx, "order", "create", map[string]interface{}{"item": "widget"})
+	emitter.EmitWorkflowStarted(ctx, "order", "create", map[string]any{"item": "widget"})
 
 	// Give synchronous delivery a moment.
 	time.Sleep(50 * time.Millisecond)
@@ -216,7 +216,7 @@ func TestEmitter_WorkflowCompleted(t *testing.T) {
 	defer func() { _ = sub.Cancel() }()
 
 	emitter := NewWorkflowEventEmitter(app)
-	emitter.EmitWorkflowCompleted(ctx, "order", "create", 2*time.Second, map[string]interface{}{"count": 5})
+	emitter.EmitWorkflowCompleted(ctx, "order", "create", 2*time.Second, map[string]any{"count": 5})
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -282,7 +282,7 @@ func TestEmitter_StepCompleted(t *testing.T) {
 	defer func() { _ = sub.Cancel() }()
 
 	emitter := NewWorkflowEventEmitter(app)
-	emitter.EmitStepCompleted(ctx, "order", "validate", "http", "post", 100*time.Millisecond, map[string]interface{}{"valid": true})
+	emitter.EmitStepCompleted(ctx, "order", "validate", "http", "post", 100*time.Millisecond, map[string]any{"valid": true})
 
 	time.Sleep(50 * time.Millisecond)
 

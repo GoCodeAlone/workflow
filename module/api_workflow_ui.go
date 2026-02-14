@@ -21,7 +21,7 @@ type WorkflowUIHandler struct {
 	mu           sync.RWMutex
 	config       *config.WorkflowConfig
 	reloadFn     func(*config.WorkflowConfig) error
-	engineStatus func() map[string]interface{}
+	engineStatus func() map[string]any
 }
 
 // NewWorkflowUIHandler creates a new handler with an optional initial config.
@@ -38,7 +38,7 @@ func (h *WorkflowUIHandler) SetReloadFunc(fn func(*config.WorkflowConfig) error)
 }
 
 // SetStatusFunc sets the callback for getting engine status.
-func (h *WorkflowUIHandler) SetStatusFunc(fn func() map[string]interface{}) {
+func (h *WorkflowUIHandler) SetStatusFunc(fn func() map[string]any) {
 	h.engineStatus = fn
 }
 
@@ -260,7 +260,7 @@ func (h *WorkflowUIHandler) handleReload(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *WorkflowUIHandler) handleStatus(w http.ResponseWriter, _ *http.Request) {
-	status := map[string]interface{}{
+	status := map[string]any{
 		"status": "running",
 	}
 

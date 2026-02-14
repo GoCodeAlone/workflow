@@ -17,11 +17,15 @@ function clearRefresh() {
 function renderSupervisorDashboard() {
   if (!requireAuth()) return '';
 
+  const user = api.getUser();
+  const isAdmin = user?.role === 'admin';
+  const affiliateName = isAdmin ? 'All Affiliates' : (user?.affiliateName || user?.affiliateId || '');
+
   return `
     <div class="page">
       <div class="page-header">
         <div>
-          <h1 class="page-title">Supervisor Overview</h1>
+          <h1 class="page-title">Supervisor Overview${affiliateName ? ` <span style="font-size:0.6em;color:var(--text-muted);font-weight:normal">— ${escapeHtml(affiliateName)}</span>` : ''}</h1>
           <p class="page-subtitle">Monitor responders and conversations</p>
         </div>
       </div>
@@ -59,10 +63,12 @@ function handleSupervisorDashboard() {
 
 async function loadSupervisorData() {
   try {
+    const user = api.getUser();
+    const affParam = user?.affiliateId ? `&affiliateId=${user.affiliateId}` : '';
     const [usersResult, convosResult, healthResult] = await Promise.all([
-      api.get('/api/users?role=responder'),
-      api.get('/api/conversations?role=supervisor'),
-      api.get('/api/queue/health').catch(() => ({ data: {} }))
+      api.get(`/api/users?role=responder${affParam}`),
+      api.get(`/api/conversations?role=supervisor${affParam}`),
+      api.get(`/api/queue/health${affParam ? '?' + affParam.slice(1) : ''}`).catch(() => ({ data: {} }))
     ]);
 
     const responders = usersResult.data || usersResult || [];
@@ -189,9 +195,11 @@ function handleResponderDetail(responderId) {
 
 async function loadResponderDetail(responderId) {
   try {
+    const user = api.getUser();
+    const affParam = user?.affiliateId ? `&affiliateId=${user.affiliateId}` : '';
     const [usersResult, convosResult] = await Promise.all([
-      api.get('/api/users?role=responder'),
-      api.get('/api/conversations?role=supervisor')
+      api.get(`/api/users?role=responder${affParam}`),
+      api.get(`/api/conversations?role=supervisor${affParam}`)
     ]);
 
     const responders = usersResult.data || usersResult || [];

@@ -68,9 +68,12 @@ function handleDashboard() {
 
 async function loadDashboardData() {
   try {
+    const user = api.getUser();
+    const affParam = user?.affiliateId ? `&affiliateId=${user.affiliateId}` : '';
+    const progParam = user?.programIds?.length ? `&programId=${user.programIds.join(',')}` : '';
     const [convosResult, queueResult] = await Promise.all([
-      api.get('/api/conversations?role=responder'),
-      api.get('/api/queue')
+      api.get(`/api/conversations?role=responder${affParam}${progParam}`),
+      api.get(`/api/queue${affParam ? '?' + affParam.slice(1) : ''}`)
     ]);
 
     const conversations = convosResult.data || convosResult || [];
@@ -85,7 +88,6 @@ async function loadDashboardData() {
       return state === 'closed';
     });
 
-    const user = api.getUser();
     const maxConcurrent = user?.maxConcurrent || 3;
     const queueCount = queue.totalQueued || queue.count || 0;
 
@@ -102,7 +104,11 @@ async function loadDashboardData() {
     // Subtitle
     const subtitle = document.getElementById('dashboard-subtitle');
     if (subtitle) {
-      subtitle.textContent = `${active.length} of ${maxConcurrent} slots active`;
+      if (active.length >= maxConcurrent) {
+        subtitle.textContent = `${active.length} active — at capacity (max ${maxConcurrent})`;
+      } else {
+        subtitle.textContent = `${active.length} active, ${maxConcurrent - active.length} slots available`;
+      }
     }
 
     // Queue badge
@@ -134,6 +140,7 @@ async function loadDashboardData() {
           const tags = data.tags || [];
           const risk = data.riskLevel || 'low';
           const state = c.state || data.state || 'active';
+          const programName = data.programName || data.programId || '';
 
           return `
             <div class="conversation-card" data-conv-id="${escapeHtml(id)}">
@@ -141,6 +148,7 @@ async function loadDashboardData() {
                 <span class="conversation-card-id">${maskPhone(data.texterPhone || data.from)}</span>
                 <span class="conversation-card-time">${formatTime(time)}</span>
               </div>
+              ${programName ? `<div style="margin-bottom:0.25rem">${renderBadge(programName, 'info')}</div>` : ''}
               <div class="conversation-card-preview">${escapeHtml(lastMsg)}</div>
               <div class="conversation-card-footer">
                 <div class="conversation-card-tags">

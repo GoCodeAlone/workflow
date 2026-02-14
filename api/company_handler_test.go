@@ -115,7 +115,7 @@ func TestCompanyHandler_Create_Success(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	resp := decodeBody(t, w.Result())
-	data, _ := resp["data"].(map[string]interface{})
+	data, _ := resp["data"].(map[string]any)
 	if data["name"] != "Acme Corp" {
 		t.Fatalf("expected name Acme Corp, got %v", data["name"])
 	}
@@ -181,7 +181,7 @@ func TestCompanyHandler_Create_AutoSlug(t *testing.T) {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	resp := decodeBody(t, w.Result())
-	data, _ := resp["data"].(map[string]interface{})
+	data, _ := resp["data"].(map[string]any)
 	if data["slug"] != "my-company-name" {
 		t.Fatalf("expected auto-slug my-company-name, got %v", data["slug"])
 	}

@@ -11,11 +11,11 @@ type TestLogger struct {
 	Entries []string
 }
 
-func (l *TestLogger) Debug(msg string, args ...interface{}) {}
-func (l *TestLogger) Info(msg string, args ...interface{})  {}
-func (l *TestLogger) Warn(msg string, args ...interface{})  {}
-func (l *TestLogger) Error(msg string, args ...interface{}) {}
-func (l *TestLogger) Fatal(msg string, args ...interface{}) {}
+func (l *TestLogger) Debug(msg string, args ...any) {}
+func (l *TestLogger) Info(msg string, args ...any)  {}
+func (l *TestLogger) Warn(msg string, args ...any)  {}
+func (l *TestLogger) Error(msg string, args ...any) {}
+func (l *TestLogger) Fatal(msg string, args ...any) {}
 
 // NewTestApplication creates an isolated test application
 func NewTestApplication() (modular.Application, *TestLogger) {

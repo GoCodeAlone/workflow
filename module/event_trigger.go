@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	"github.com/CrisisTextLine/modular"
 )
@@ -20,11 +21,11 @@ type EventTriggerConfig struct {
 
 // EventTriggerSubscription represents a subscription to a message topic
 type EventTriggerSubscription struct {
-	Topic    string                 `json:"topic" yaml:"topic"`
-	Event    string                 `json:"event" yaml:"event"`
-	Workflow string                 `json:"workflow" yaml:"workflow"`
-	Action   string                 `json:"action" yaml:"action"`
-	Params   map[string]interface{} `json:"params,omitempty" yaml:"params,omitempty"`
+	Topic    string         `json:"topic" yaml:"topic"`
+	Event    string         `json:"event" yaml:"event"`
+	Workflow string         `json:"workflow" yaml:"workflow"`
+	Action   string         `json:"action" yaml:"action"`
+	Params   map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
 }
 
 // EventTrigger implements a trigger that starts workflows from messaging events
@@ -100,15 +101,15 @@ func (t *EventTrigger) Stop(ctx context.Context) error {
 }
 
 // Configure sets up the trigger from configuration
-func (t *EventTrigger) Configure(app modular.Application, triggerConfig interface{}) error {
+func (t *EventTrigger) Configure(app modular.Application, triggerConfig any) error {
 	// Convert the generic config to event trigger config
-	config, ok := triggerConfig.(map[string]interface{})
+	config, ok := triggerConfig.(map[string]any)
 	if !ok {
 		return fmt.Errorf("invalid event trigger configuration format")
 	}
 
 	// Extract subscriptions from configuration
-	subsConfig, ok := config["subscriptions"].([]interface{})
+	subsConfig, ok := config["subscriptions"].([]any)
 	if !ok {
 		return fmt.Errorf("subscriptions not found in event trigger configuration")
 	}
@@ -118,7 +119,7 @@ func (t *EventTrigger) Configure(app modular.Application, triggerConfig interfac
 	brokerNames := []string{"messageBroker", "eventBroker", "broker", "event-broker", "messaging.broker.eventbus"}
 
 	for _, name := range brokerNames {
-		var svc interface{}
+		var svc any
 		if err := app.GetService(name, &svc); err == nil && svc != nil {
 			if b, ok := svc.(MessageBroker); ok {
 				broker = b
@@ -136,7 +137,7 @@ func (t *EventTrigger) Configure(app modular.Application, triggerConfig interfac
 	engineNames := []string{"workflowEngine", "engine"}
 
 	for _, name := range engineNames {
-		var svc interface{}
+		var svc any
 		if err := app.GetService(name, &svc); err == nil && svc != nil {
 			if e, ok := svc.(WorkflowEngine); ok {
 				engine = e
@@ -155,7 +156,7 @@ func (t *EventTrigger) Configure(app modular.Application, triggerConfig interfac
 
 	// Parse subscriptions
 	for i, sc := range subsConfig {
-		subMap, ok := sc.(map[string]interface{})
+		subMap, ok := sc.(map[string]any)
 		if !ok {
 			return fmt.Errorf("invalid subscription configuration at index %d", i)
 		}
@@ -170,7 +171,7 @@ func (t *EventTrigger) Configure(app modular.Application, triggerConfig interfac
 		}
 
 		// Get optional params
-		params, _ := subMap["params"].(map[string]interface{})
+		params, _ := subMap["params"].(map[string]any)
 
 		// Add the subscription
 		t.subscriptions = append(t.subscriptions, EventTriggerSubscription{
@@ -196,7 +197,7 @@ func (t *EventTrigger) createHandler(sub EventTriggerSubscription) MessageHandle
 	// Create a handler function that will be called when a message is received
 	handlerFn := func(msg []byte) error {
 		// Parse the message
-		var eventData map[string]interface{}
+		var eventData map[string]any
 		if err := json.Unmarshal(msg, &eventData); err != nil {
 			return fmt.Errorf("failed to parse message: %w", err)
 		}
@@ -215,20 +216,16 @@ func (t *EventTrigger) createHandler(sub EventTriggerSubscription) MessageHandle
 		}
 
 		// Create the data to pass to the workflow
-		data := make(map[string]interface{})
+		data := make(map[string]any)
 
 		// Include all event data
-		for k, v := range eventData {
-			data[k] = v
-		}
+		maps.Copy(data, eventData)
 
 		// Include the original message
 		data["originalMessage"] = string(msg)
 
 		// Add any static params from the subscription configuration
-		for k, v := range sub.Params {
-			data[k] = v
-		}
+		maps.Copy(data, sub.Params)
 
 		// Call the workflow engine to trigger the workflow
 		ctx := context.Background()

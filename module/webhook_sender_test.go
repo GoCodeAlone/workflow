@@ -60,7 +60,7 @@ func TestWebhookSender_Init(t *testing.T) {
 }
 
 func TestWebhookSender_SendSuccess(t *testing.T) {
-	var receivedPayload map[string]interface{}
+	var receivedPayload map[string]any
 	var receivedHeaders http.Header
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +75,7 @@ func TestWebhookSender_SendSuccess(t *testing.T) {
 		InitialBackoff: time.Millisecond,
 	})
 
-	payload, _ := json.Marshal(map[string]interface{}{"event": "test", "data": "hello"})
+	payload, _ := json.Marshal(map[string]any{"event": "test", "data": "hello"})
 	headers := map[string]string{
 		"X-Webhook-ID": "wh-123",
 	}

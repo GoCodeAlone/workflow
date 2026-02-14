@@ -275,7 +275,7 @@ func TestMessagingModulesIntegration(t *testing.T) {
 
 	// Wait for messages to be processed with timeout
 	timeout := time.After(2 * time.Second)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case <-handler1Called:
 			// Handler 1 received the message

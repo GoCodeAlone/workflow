@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,20 +34,20 @@ type StateMachineDefinition struct {
 
 // StateMachineState represents a workflow state
 type StateMachineState struct {
-	Name        string                 `json:"name" yaml:"name"`
-	Description string                 `json:"description,omitempty" yaml:"description,omitempty"`
-	IsFinal     bool                   `json:"isFinal" yaml:"isFinal"`
-	IsError     bool                   `json:"isError" yaml:"isError"`
-	Data        map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	Name        string         `json:"name" yaml:"name"`
+	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
+	IsFinal     bool           `json:"isFinal" yaml:"isFinal"`
+	IsError     bool           `json:"isError" yaml:"isError"`
+	Data        map[string]any `json:"data,omitempty" yaml:"data,omitempty"`
 }
 
 // StateMachineTransition represents a transition between states
 type StateMachineTransition struct {
-	FromState     string                 `json:"fromState" yaml:"fromState"`
-	ToState       string                 `json:"toState" yaml:"toState"`
-	Condition     string                 `json:"condition,omitempty" yaml:"condition,omitempty"`
-	AutoTransform bool                   `json:"autoTransform" yaml:"autoTransform"`
-	Data          map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	FromState     string         `json:"fromState" yaml:"fromState"`
+	ToState       string         `json:"toState" yaml:"toState"`
+	Condition     string         `json:"condition,omitempty" yaml:"condition,omitempty"`
+	AutoTransform bool           `json:"autoTransform" yaml:"autoTransform"`
+	Data          map[string]any `json:"data,omitempty" yaml:"data,omitempty"`
 }
 
 // StateMachineHookConfig represents a hook configuration for state transitions
@@ -93,9 +94,9 @@ func (h *StateMachineWorkflowHandler) CanHandle(workflowType string) bool {
 }
 
 // ConfigureWorkflow sets up the workflow from configuration
-func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig interface{}) error {
+func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig any) error {
 	// Convert the generic config to state machine-specific config
-	smConfig, ok := workflowConfig.(map[string]interface{})
+	smConfig, ok := workflowConfig.(map[string]any)
 	if !ok {
 		return fmt.Errorf("invalid state machine workflow configuration")
 	}
@@ -107,7 +108,7 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 	}
 
 	// Find the state machine engine
-	var engineSvc interface{}
+	var engineSvc any
 	err := app.GetService(engineName, &engineSvc)
 	if err != nil {
 		return fmt.Errorf("state machine engine '%s' not found: %w", engineName, err)
@@ -120,11 +121,11 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 
 	// Get the custom state tracker name if specified in the engine module config
 	var stateTrackerName string
-	if engines, ok := smConfig["modules"].([]interface{}); ok {
+	if engines, ok := smConfig["modules"].([]any); ok {
 		for _, engineModule := range engines {
-			if engineConfig, ok := engineModule.(map[string]interface{}); ok {
+			if engineConfig, ok := engineModule.(map[string]any); ok {
 				if name, _ := engineConfig["name"].(string); name == engineName {
-					if config, ok := engineConfig["config"].(map[string]interface{}); ok {
+					if config, ok := engineConfig["config"].(map[string]any); ok {
 						if trackerRef, ok := config["stateTracker"].(string); ok && trackerRef != "" {
 							stateTrackerName = trackerRef
 							break
@@ -137,7 +138,7 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 
 	// Create or find a state tracker
 	var stateTracker *module.StateTracker
-	var stateTrackerSvc interface{}
+	var stateTrackerSvc any
 
 	if stateTrackerName != "" {
 		// Try to find the custom state tracker by name
@@ -176,7 +177,7 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 			}
 
 			// Register services from ProvidesServices (since app.Init already ran)
-			if svcAware, ok := interface{}(stateTracker).(modular.ServiceAware); ok {
+			if svcAware, ok := any(stateTracker).(modular.ServiceAware); ok {
 				for _, svc := range svcAware.ProvidesServices() {
 					_ = app.RegisterService(svc.Name, svc.Instance)
 				}
@@ -186,7 +187,7 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 
 	// Create a state connector if not already registered
 	var stateConnector *module.StateMachineStateConnector
-	var stateConnectorSvc interface{}
+	var stateConnectorSvc any
 	err = app.GetService(module.StateMachineStateConnectorName, &stateConnectorSvc)
 	if err == nil && stateConnectorSvc != nil {
 		// State connector already exists, use it
@@ -206,7 +207,7 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 		}
 
 		// Register services from ProvidesServices (since app.Init already ran)
-		if svcAware, ok := interface{}(stateConnector).(modular.ServiceAware); ok {
+		if svcAware, ok := any(stateConnector).(modular.ServiceAware); ok {
 			for _, svc := range svcAware.ProvidesServices() {
 				_ = app.RegisterService(svc.Name, svc.Instance)
 			}
@@ -214,9 +215,9 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 	}
 
 	// Process resource mappings if provided
-	if mappings, ok := smConfig["resourceMappings"].([]interface{}); ok {
+	if mappings, ok := smConfig["resourceMappings"].([]any); ok {
 		for _, mappingObj := range mappings {
-			if mapping, ok := mappingObj.(map[string]interface{}); ok {
+			if mapping, ok := mappingObj.(map[string]any); ok {
 				resourceType, _ := mapping["resourceType"].(string)
 				stateMachine, _ := mapping["stateMachine"].(string)
 				instanceIDKey, _ := mapping["instanceIDKey"].(string)
@@ -232,9 +233,9 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 		}
 	} else {
 		// Automatically create mappings based on workflow definitions
-		if definitions, ok := smConfig["definitions"].([]interface{}); ok {
+		if definitions, ok := smConfig["definitions"].([]any); ok {
 			for _, defObj := range definitions {
-				if def, ok := defObj.(map[string]interface{}); ok {
+				if def, ok := defObj.(map[string]any); ok {
 					name, _ := def["name"].(string)
 					if name != "" {
 						// Create a default mapping using the workflow name as resource type
@@ -247,14 +248,14 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 	}
 
 	// Process workflow definitions
-	definitions, ok := smConfig["definitions"].([]interface{})
+	definitions, ok := smConfig["definitions"].([]any)
 	if !ok {
 		return fmt.Errorf("workflow definitions not specified in configuration")
 	}
 
 	// Configure each workflow definition
 	for i, defObj := range definitions {
-		def, ok := defObj.(map[string]interface{})
+		def, ok := defObj.(map[string]any)
 		if !ok {
 			return fmt.Errorf("invalid workflow definition at index %d", i)
 		}
@@ -270,9 +271,9 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 
 		// Process states
 		states := make(map[string]module.StateMachineStateConfig)
-		if stateConfigs, ok := def["states"].(map[string]interface{}); ok {
+		if stateConfigs, ok := def["states"].(map[string]any); ok {
 			for stateID, stateObj := range stateConfigs {
-				stateMap, ok := stateObj.(map[string]interface{})
+				stateMap, ok := stateObj.(map[string]any)
 				if !ok {
 					return fmt.Errorf("invalid state configuration for state '%s'", stateID)
 				}
@@ -304,7 +305,7 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 				}
 
 				// Add custom data if provided
-				if stateData, ok := stateMap["data"].(map[string]interface{}); ok {
+				if stateData, ok := stateMap["data"].(map[string]any); ok {
 					stateConfig.Data = stateData
 				}
 
@@ -314,9 +315,9 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 
 		// Process transitions
 		transitions := make(map[string]module.StateMachineTransitionConfig)
-		if transitionConfigs, ok := def["transitions"].(map[string]interface{}); ok {
+		if transitionConfigs, ok := def["transitions"].(map[string]any); ok {
 			for transID, transObj := range transitionConfigs {
-				transMap, ok := transObj.(map[string]interface{})
+				transMap, ok := transObj.(map[string]any)
 				if !ok {
 					return fmt.Errorf("invalid transition configuration for transition '%s'", transID)
 				}
@@ -347,7 +348,7 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 				}
 
 				// Add custom data if provided
-				if transData, ok := transMap["data"].(map[string]interface{}); ok {
+				if transData, ok := transMap["data"].(map[string]any); ok {
 					transConfig.Data = transData
 				}
 
@@ -371,8 +372,8 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 	}
 
 	// Process transition hooks if any
-	var hooksConfig []interface{}
-	if hooks, ok := smConfig["hooks"].([]interface{}); ok && len(hooks) > 0 {
+	var hooksConfig []any
+	if hooks, ok := smConfig["hooks"].([]any); ok && len(hooks) > 0 {
 		hooksConfig = hooks
 		// Create a single composite handler for all hooks
 		compositeHandler := h.createCompositeTransitionHandler(app, hooks)
@@ -382,7 +383,7 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 	}
 
 	// Wire persistence (optional) — look up "persistence" from the service registry
-	var persistenceSvc interface{}
+	var persistenceSvc any
 	if err := app.GetService("persistence", &persistenceSvc); err == nil && persistenceSvc != nil {
 		if ps, ok := persistenceSvc.(*module.PersistenceStore); ok {
 			smEngine.SetPersistence(ps)
@@ -415,7 +416,7 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 // createCompositeTransitionHandler creates a handler that manages multiple hooks
 func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 	app modular.Application,
-	hooksConfig []interface{},
+	hooksConfig []any,
 ) module.TransitionHandler {
 	return module.NewFunctionTransitionHandler(func(ctx context.Context, event module.TransitionEvent) error {
 		// Get the workflow instance to determine its type
@@ -450,7 +451,7 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 		}
 
 		for i, hookConfig := range hooksConfig {
-			hookMap, ok := hookConfig.(map[string]interface{})
+			hookMap, ok := hookConfig.(map[string]any)
 			if !ok {
 				fmt.Printf("Invalid hook configuration at index %d\n", i)
 				continue
@@ -466,7 +467,7 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 			// Check for transition match
 			transMatch := false
 			var transitions []string
-			transList, _ := hookMap["transitions"].([]interface{})
+			transList, _ := hookMap["transitions"].([]any)
 			for _, t := range transList {
 				if tStr, ok := t.(string); ok {
 					transitions = append(transitions, tStr)
@@ -475,13 +476,8 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 
 			if len(transitions) == 0 {
 				transMatch = true // No restrictions
-			} else {
-				for _, t := range transitions {
-					if t == event.TransitionID {
-						transMatch = true
-						break
-					}
-				}
+			} else if slices.Contains(transitions, event.TransitionID) {
+				transMatch = true
 			}
 
 			if !transMatch {
@@ -491,7 +487,7 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 			// Check for from state match
 			fromMatch := false
 			var fromStates []string
-			fromList, _ := hookMap["fromStates"].([]interface{})
+			fromList, _ := hookMap["fromStates"].([]any)
 			for _, f := range fromList {
 				if fStr, ok := f.(string); ok {
 					fromStates = append(fromStates, fStr)
@@ -500,13 +496,8 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 
 			if len(fromStates) == 0 {
 				fromMatch = true // No restrictions
-			} else {
-				for _, f := range fromStates {
-					if f == event.FromState {
-						fromMatch = true
-						break
-					}
-				}
+			} else if slices.Contains(fromStates, event.FromState) {
+				fromMatch = true
 			}
 
 			if !fromMatch {
@@ -516,7 +507,7 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 			// Check for to state match
 			toMatch := false
 			var toStates []string
-			toList, _ := hookMap["toStates"].([]interface{})
+			toList, _ := hookMap["toStates"].([]any)
 			for _, t := range toList {
 				if tStr, ok := t.(string); ok {
 					toStates = append(toStates, tStr)
@@ -525,13 +516,8 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 
 			if len(toStates) == 0 {
 				toMatch = true // No restrictions
-			} else {
-				for _, t := range toStates {
-					if t == event.ToState {
-						toMatch = true
-						break
-					}
-				}
+			} else if slices.Contains(toStates, event.ToState) {
+				toMatch = true
 			}
 
 			if !toMatch {
@@ -550,7 +536,7 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 			}
 
 			// Get the handler service
-			var handlerSvc interface{}
+			var handlerSvc any
 			_ = app.GetService(handlerName, &handlerSvc)
 			if handlerSvc == nil {
 				fmt.Printf("Handler service '%s' not found\n", handlerName)
@@ -565,8 +551,8 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 				}
 			} else if msgHandler, ok := handlerSvc.(module.MessageHandler); ok {
 				// Adapt message handler
-				payload := []byte(fmt.Sprintf(`{"workflowId":"%s","instanceId":"%s","transition":"%s","fromState":"%s","toState":"%s"}`,
-					workflowType, event.WorkflowID, event.TransitionID, event.FromState, event.ToState))
+				payload := fmt.Appendf(nil, `{"workflowId":%q,"instanceId":%q,"transition":%q,"fromState":%q,"toState":%q}`,
+					workflowType, event.WorkflowID, event.TransitionID, event.FromState, event.ToState)
 				if err := msgHandler.HandleMessage(payload); err != nil {
 					return err
 				}
@@ -586,15 +572,15 @@ func (h *StateMachineWorkflowHandler) createCompositeTransitionHandler(
 // handler. Falls back to scanning transition definitions for auto-transform
 // targets that aren't final states.
 func (h *StateMachineWorkflowHandler) extractProcessingStates(
-	hooksConfig []interface{},
-	definitions []interface{},
+	hooksConfig []any,
+	definitions []any,
 ) []string {
 	stateSet := make(map[string]bool)
 
 	// Scan hooks for processing step handlers — the toStates of such hooks
 	// are intermediate processing states.
 	for _, hookObj := range hooksConfig {
-		hookMap, ok := hookObj.(map[string]interface{})
+		hookMap, ok := hookObj.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -609,7 +595,7 @@ func (h *StateMachineWorkflowHandler) extractProcessingStates(
 		}
 
 		// The toStates of this hook are processing states
-		if toStates, ok := hookMap["toStates"].([]interface{}); ok {
+		if toStates, ok := hookMap["toStates"].([]any); ok {
 			for _, s := range toStates {
 				if sStr, ok := s.(string); ok {
 					stateSet[sStr] = true
@@ -622,17 +608,17 @@ func (h *StateMachineWorkflowHandler) extractProcessingStates(
 	// Auto-transform transitions target intermediate states that may need recovery.
 	if len(stateSet) == 0 {
 		for _, defObj := range definitions {
-			def, ok := defObj.(map[string]interface{})
+			def, ok := defObj.(map[string]any)
 			if !ok {
 				continue
 			}
-			states, _ := def["states"].(map[string]interface{})
-			transitions, _ := def["transitions"].(map[string]interface{})
+			states, _ := def["states"].(map[string]any)
+			transitions, _ := def["transitions"].(map[string]any)
 			if transitions == nil {
 				continue
 			}
 			for _, transObj := range transitions {
-				transMap, ok := transObj.(map[string]interface{})
+				transMap, ok := transObj.(map[string]any)
 				if !ok {
 					continue
 				}
@@ -646,7 +632,7 @@ func (h *StateMachineWorkflowHandler) extractProcessingStates(
 				}
 				// Check that the target is not a final state
 				if states != nil {
-					if stateObj, ok := states[toState].(map[string]interface{}); ok {
+					if stateObj, ok := states[toState].(map[string]any); ok {
 						if isFinal, _ := stateObj["isFinal"].(bool); isFinal {
 							continue
 						}
@@ -665,7 +651,7 @@ func (h *StateMachineWorkflowHandler) extractProcessingStates(
 }
 
 // ExecuteWorkflow executes a workflow with the given action and input data
-func (h *StateMachineWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
+func (h *StateMachineWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) (map[string]any, error) {
 	// For state machine workflows, the action represents a transition to trigger
 	// and data should contain the workflow instance ID
 
@@ -701,7 +687,7 @@ func (h *StateMachineWorkflowHandler) ExecuteWorkflow(ctx context.Context, workf
 	}
 
 	// If no specific engine was provided, try to find one
-	var engineSvc interface{}
+	var engineSvc any
 	if engineName != "" {
 		// Apply namespace if needed
 		if h.namespace != nil {
@@ -744,7 +730,7 @@ func (h *StateMachineWorkflowHandler) ExecuteWorkflow(ctx context.Context, workf
 
 		// Return the instance without triggering a transition
 		if transitionName == "" {
-			result := map[string]interface{}{
+			result := map[string]any{
 				"instanceId":   instance.ID,
 				"currentState": instance.CurrentState,
 				"created":      true,
@@ -767,7 +753,7 @@ func (h *StateMachineWorkflowHandler) ExecuteWorkflow(ctx context.Context, workf
 	}
 
 	// Return the result
-	result := map[string]interface{}{
+	result := map[string]any{
 		"instanceId":   instanceID,
 		"currentState": instance.CurrentState,
 		"transition":   transitionName,

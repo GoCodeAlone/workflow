@@ -113,7 +113,7 @@ func TestEncryptDecryptPIIFields(t *testing.T) {
 	enc := NewFieldEncryptor("test-key-for-pii-fields")
 
 	t.Run("encrypts known PII fields", func(t *testing.T) {
-		data := map[string]interface{}{
+		data := map[string]any{
 			"name":    "John Doe",
 			"email":   "john@example.com",
 			"From":    "+15551234567",
@@ -149,7 +149,7 @@ func TestEncryptDecryptPIIFields(t *testing.T) {
 	})
 
 	t.Run("round-trip preserves data", func(t *testing.T) {
-		original := map[string]interface{}{
+		original := map[string]any{
 			"name":      "Jane Smith",
 			"email":     "jane@example.com",
 			"phone":     "+15559876543",
@@ -184,17 +184,17 @@ func TestEncryptDecryptPIIFields(t *testing.T) {
 	})
 
 	t.Run("encrypts messages array", func(t *testing.T) {
-		data := map[string]interface{}{
+		data := map[string]any{
 			"id":    "conv-3",
 			"state": "active",
-			"messages": []interface{}{
-				map[string]interface{}{
+			"messages": []any{
+				map[string]any{
 					"body":      "I feel terrible",
 					"from":      "texter",
 					"direction": "inbound",
 					"timestamp": "2026-01-01T00:00:00Z",
 				},
-				map[string]interface{}{
+				map[string]any{
 					"body":      "I hear you. Tell me more.",
 					"from":      "user-001",
 					"direction": "outbound",
@@ -208,9 +208,9 @@ func TestEncryptDecryptPIIFields(t *testing.T) {
 			t.Fatalf("encrypt failed: %v", err)
 		}
 
-		msgs := encrypted["messages"].([]interface{})
+		msgs := encrypted["messages"].([]any)
 		for i, m := range msgs {
-			msg := m.(map[string]interface{})
+			msg := m.(map[string]any)
 			body := msg["body"].(string)
 			if !strings.HasPrefix(body, encryptedPrefix) {
 				t.Errorf("message[%d].body should be encrypted", i)
@@ -220,7 +220,7 @@ func TestEncryptDecryptPIIFields(t *testing.T) {
 				t.Errorf("message[%d].from should be encrypted", i)
 			}
 			// direction and timestamp should be unchanged
-			if msg["direction"] != data["messages"].([]interface{})[i].(map[string]interface{})["direction"] {
+			if msg["direction"] != data["messages"].([]any)[i].(map[string]any)["direction"] {
 				t.Errorf("message[%d].direction should be unchanged", i)
 			}
 		}
@@ -230,11 +230,11 @@ func TestEncryptDecryptPIIFields(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decrypt failed: %v", err)
 		}
-		decMsgs := decrypted["messages"].([]interface{})
-		origMsgs := data["messages"].([]interface{})
+		decMsgs := decrypted["messages"].([]any)
+		origMsgs := data["messages"].([]any)
 		for i, m := range decMsgs {
-			msg := m.(map[string]interface{})
-			orig := origMsgs[i].(map[string]interface{})
+			msg := m.(map[string]any)
+			orig := origMsgs[i].(map[string]any)
 			if msg["body"] != orig["body"] {
 				t.Errorf("message[%d].body: got %q, want %q", i, msg["body"], orig["body"])
 			}
@@ -259,7 +259,7 @@ func TestEncryptDecryptJSON(t *testing.T) {
 	enc := NewFieldEncryptor("test-key-for-json-encryption")
 
 	t.Run("round-trip JSON payload", func(t *testing.T) {
-		original := map[string]interface{}{
+		original := map[string]any{
 			"conversationId": "conv-1",
 			"name":           "John Doe",
 			"phone":          "+15551234567",
@@ -286,7 +286,7 @@ func TestEncryptDecryptJSON(t *testing.T) {
 			t.Fatalf("decrypt JSON failed: %v", err)
 		}
 
-		var result map[string]interface{}
+		var result map[string]any
 		if err := json.Unmarshal(decrypted, &result); err != nil {
 			t.Fatalf("decrypted output should be valid JSON: %v", err)
 		}

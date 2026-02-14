@@ -12,7 +12,7 @@ import (
 
 // TestServiceRegistry provides a simple service registry for testing
 type TestServiceRegistry struct {
-	services       map[string]interface{}
+	services       map[string]any
 	config         modular.ConfigProvider
 	logger         modular.Logger
 	configSections map[string]modular.ConfigProvider
@@ -22,11 +22,11 @@ type TestServiceRegistry struct {
 func NewTestServiceRegistry() *TestServiceRegistry {
 	// Use the new mock.NewConfigProvider() function if it exists
 	// Otherwise, create and initialize a proper config provider
-	mockConfig := &mock.ConfigProvider{ConfigData: make(map[string]interface{})}
+	mockConfig := &mock.ConfigProvider{ConfigData: make(map[string]any)}
 	mockConfig.UpdateConfigWithProperEnvStructure()
 
 	return &TestServiceRegistry{
-		services:       make(map[string]interface{}),
+		services:       make(map[string]any),
 		configSections: make(map[string]modular.ConfigProvider),
 		config:         mockConfig,
 		logger:         &mock.Logger{LogEntries: make([]string, 0)},
@@ -34,12 +34,12 @@ func NewTestServiceRegistry() *TestServiceRegistry {
 }
 
 // GetService implements service retrieval for testing
-func (t *TestServiceRegistry) GetService(name string, dest interface{}) error {
+func (t *TestServiceRegistry) GetService(name string, dest any) error {
 	return nil // Simplified implementation for tests
 }
 
 // RegisterService implements service registration for testing
-func (t *TestServiceRegistry) RegisterService(name string, service interface{}) error {
+func (t *TestServiceRegistry) RegisterService(name string, service any) error {
 	t.services[name] = service
 	return nil
 }
@@ -222,14 +222,14 @@ func (h *SchedulerTestHelper) TriggerJobExecution(ctx context.Context, jobName s
 // MockEngine is a simplified engine for testing
 type MockEngine struct {
 	app      modular.Application
-	handlers map[string]interface{}
+	handlers map[string]any
 }
 
 // NewTestEngine creates a workflow engine for testing
 func NewTestEngine(app modular.Application) *MockEngine {
 	engine := &MockEngine{
 		app:      app,
-		handlers: make(map[string]interface{}),
+		handlers: make(map[string]any),
 	}
 
 	// Register workflow handlers
@@ -241,7 +241,7 @@ func NewTestEngine(app modular.Application) *MockEngine {
 }
 
 // RegisterHandler registers a handler with the mock engine
-func (e *MockEngine) RegisterHandler(name string, handler interface{}) {
+func (e *MockEngine) RegisterHandler(name string, handler any) {
 	e.handlers[name] = handler
 }
 
@@ -258,12 +258,12 @@ func (e *MockEngine) Stop(ctx context.Context) error {
 }
 
 // BuildFromConfig simulates building a workflow from config
-func (e *MockEngine) BuildFromConfig(cfg interface{}) error {
+func (e *MockEngine) BuildFromConfig(cfg any) error {
 	// Mock implementation that does nothing but succeed
 	return nil
 }
 
 // AddModuleType adds a module type to the mock engine
-func (e *MockEngine) AddModuleType(name string, creator interface{}) {
+func (e *MockEngine) AddModuleType(name string, creator any) {
 	// Mock implementation
 }

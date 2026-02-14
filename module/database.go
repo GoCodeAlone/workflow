@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -11,6 +13,17 @@ import (
 
 	"github.com/CrisisTextLine/modular"
 )
+
+// validIdentifier matches safe SQL identifiers (alphanumeric, underscore, dot for schema.table).
+var validIdentifier = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.]*$`)
+
+// validateIdentifier checks that a SQL identifier (table/column name) is safe.
+func validateIdentifier(name string) error {
+	if !validIdentifier.MatchString(name) {
+		return fmt.Errorf("invalid SQL identifier: %q", name)
+	}
+	return nil
+}
 
 // DatabaseConfig holds configuration for the workflow database module
 type DatabaseConfig struct {
@@ -24,9 +37,9 @@ type DatabaseConfig struct {
 
 // QueryResult represents the result of a query
 type QueryResult struct {
-	Columns []string                 `json:"columns"`
-	Rows    []map[string]interface{} `json:"rows"`
-	Count   int                      `json:"count"`
+	Columns []string         `json:"columns"`
+	Rows    []map[string]any `json:"rows"`
+	Count   int              `json:"count"`
 }
 
 // WorkflowDatabase wraps database/sql for workflow use
@@ -133,7 +146,7 @@ func (w *WorkflowDatabase) Ping(ctx context.Context) error {
 }
 
 // Query executes a query and returns structured results
-func (w *WorkflowDatabase) Query(ctx context.Context, sqlStr string, args ...interface{}) (*QueryResult, error) {
+func (w *WorkflowDatabase) Query(ctx context.Context, sqlStr string, args ...any) (*QueryResult, error) {
 	w.mu.RLock()
 	db := w.db
 	w.mu.RUnlock()
@@ -155,12 +168,12 @@ func (w *WorkflowDatabase) Query(ctx context.Context, sqlStr string, args ...int
 
 	result := &QueryResult{
 		Columns: columns,
-		Rows:    make([]map[string]interface{}, 0),
+		Rows:    make([]map[string]any, 0),
 	}
 
 	for rows.Next() {
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
+		values := make([]any, len(columns))
+		valuePtrs := make([]any, len(columns))
 		for i := range values {
 			valuePtrs[i] = &values[i]
 		}
@@ -169,7 +182,7 @@ func (w *WorkflowDatabase) Query(ctx context.Context, sqlStr string, args ...int
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		row := make(map[string]interface{})
+		row := make(map[string]any)
 		for i, col := range columns {
 			val := values[i]
 			// Convert byte slices to strings for readability
@@ -191,7 +204,7 @@ func (w *WorkflowDatabase) Query(ctx context.Context, sqlStr string, args ...int
 }
 
 // Execute executes a statement and returns rows affected
-func (w *WorkflowDatabase) Execute(ctx context.Context, sqlStr string, args ...interface{}) (int64, error) {
+func (w *WorkflowDatabase) Execute(ctx context.Context, sqlStr string, args ...any) (int64, error) {
 	w.mu.RLock()
 	db := w.db
 	w.mu.RUnlock()
@@ -214,9 +227,12 @@ func (w *WorkflowDatabase) Execute(ctx context.Context, sqlStr string, args ...i
 }
 
 // InsertRow builds and executes an INSERT statement
-func (w *WorkflowDatabase) InsertRow(ctx context.Context, table string, data map[string]interface{}) (int64, error) {
+func (w *WorkflowDatabase) InsertRow(ctx context.Context, table string, data map[string]any) (int64, error) {
 	if len(data) == 0 {
 		return 0, fmt.Errorf("no data to insert")
+	}
+	if err := validateIdentifier(table); err != nil {
+		return 0, fmt.Errorf("invalid table name: %w", err)
 	}
 
 	// Sort keys for deterministic SQL generation
@@ -228,9 +244,12 @@ func (w *WorkflowDatabase) InsertRow(ctx context.Context, table string, data map
 
 	columns := make([]string, len(keys))
 	placeholders := make([]string, len(keys))
-	values := make([]interface{}, len(keys))
+	values := make([]any, len(keys))
 
 	for i, k := range keys {
+		if err := validateIdentifier(k); err != nil {
+			return 0, fmt.Errorf("invalid column name: %w", err)
+		}
 		columns[i] = k
 		placeholders[i] = fmt.Sprintf("$%d", i+1)
 		values[i] = data[k]
@@ -246,9 +265,17 @@ func (w *WorkflowDatabase) InsertRow(ctx context.Context, table string, data map
 }
 
 // UpdateRows builds and executes an UPDATE statement
-func (w *WorkflowDatabase) UpdateRows(ctx context.Context, table string, data map[string]interface{}, where string, whereArgs ...interface{}) (int64, error) {
+func (w *WorkflowDatabase) UpdateRows(ctx context.Context, table string, data map[string]any, where string, whereArgs ...any) (int64, error) {
 	if len(data) == 0 {
 		return 0, fmt.Errorf("no data to update")
+	}
+	if err := validateIdentifier(table); err != nil {
+		return 0, fmt.Errorf("invalid table name: %w", err)
+	}
+
+	// Overflow check for allocation size
+	if len(data) > math.MaxInt-len(whereArgs) {
+		return 0, fmt.Errorf("too many parameters: data(%d) + whereArgs(%d) overflows", len(data), len(whereArgs))
 	}
 
 	// Sort keys for deterministic SQL generation
@@ -259,9 +286,12 @@ func (w *WorkflowDatabase) UpdateRows(ctx context.Context, table string, data ma
 	sort.Strings(keys)
 
 	setClauses := make([]string, len(keys))
-	values := make([]interface{}, 0, len(keys)+len(whereArgs))
+	values := make([]any, 0, len(keys)+len(whereArgs))
 
 	for i, k := range keys {
+		if err := validateIdentifier(k); err != nil {
+			return 0, fmt.Errorf("invalid column name: %w", err)
+		}
 		setClauses[i] = fmt.Sprintf("%s = $%d", k, i+1)
 		values = append(values, data[k])
 	}
@@ -280,7 +310,10 @@ func (w *WorkflowDatabase) UpdateRows(ctx context.Context, table string, data ma
 }
 
 // DeleteRows builds and executes a DELETE statement
-func (w *WorkflowDatabase) DeleteRows(ctx context.Context, table string, where string, whereArgs ...interface{}) (int64, error) {
+func (w *WorkflowDatabase) DeleteRows(ctx context.Context, table string, where string, whereArgs ...any) (int64, error) {
+	if err := validateIdentifier(table); err != nil {
+		return 0, fmt.Errorf("invalid table name: %w", err)
+	}
 	sqlStr := fmt.Sprintf("DELETE FROM %s", table)
 	if where != "" {
 		sqlStr += " WHERE " + where
@@ -288,10 +321,14 @@ func (w *WorkflowDatabase) DeleteRows(ctx context.Context, table string, where s
 	return w.Execute(ctx, sqlStr, whereArgs...)
 }
 
-// BuildInsertSQL builds an INSERT SQL string and returns it with values (exported for testing)
-func BuildInsertSQL(table string, data map[string]interface{}) (string, []interface{}) {
+// BuildInsertSQL builds an INSERT SQL string and returns it with values (exported for testing).
+// Returns an error if table or column names contain unsafe characters.
+func BuildInsertSQL(table string, data map[string]any) (string, []any, error) {
 	if len(data) == 0 {
-		return "", nil
+		return "", nil, nil
+	}
+	if err := validateIdentifier(table); err != nil {
+		return "", nil, fmt.Errorf("invalid table name: %w", err)
 	}
 
 	keys := make([]string, 0, len(data))
@@ -302,9 +339,12 @@ func BuildInsertSQL(table string, data map[string]interface{}) (string, []interf
 
 	columns := make([]string, len(keys))
 	placeholders := make([]string, len(keys))
-	values := make([]interface{}, len(keys))
+	values := make([]any, len(keys))
 
 	for i, k := range keys {
+		if err := validateIdentifier(k); err != nil {
+			return "", nil, fmt.Errorf("invalid column name: %w", err)
+		}
 		columns[i] = k
 		placeholders[i] = fmt.Sprintf("$%d", i+1)
 		values[i] = data[k]
@@ -316,13 +356,17 @@ func BuildInsertSQL(table string, data map[string]interface{}) (string, []interf
 		strings.Join(placeholders, ", "),
 	)
 
-	return sqlStr, values
+	return sqlStr, values, nil
 }
 
-// BuildUpdateSQL builds an UPDATE SQL string and returns it with values (exported for testing)
-func BuildUpdateSQL(table string, data map[string]interface{}, where string, whereArgs ...interface{}) (string, []interface{}) {
+// BuildUpdateSQL builds an UPDATE SQL string and returns it with values (exported for testing).
+// Returns an error if table or column names contain unsafe characters.
+func BuildUpdateSQL(table string, data map[string]any, where string, whereArgs ...any) (string, []any, error) {
 	if len(data) == 0 {
-		return "", nil
+		return "", nil, nil
+	}
+	if err := validateIdentifier(table); err != nil {
+		return "", nil, fmt.Errorf("invalid table name: %w", err)
 	}
 
 	keys := make([]string, 0, len(data))
@@ -332,9 +376,12 @@ func BuildUpdateSQL(table string, data map[string]interface{}, where string, whe
 	sort.Strings(keys)
 
 	setClauses := make([]string, len(keys))
-	values := make([]interface{}, 0, len(keys)+len(whereArgs))
+	values := make([]any, 0, len(keys)+len(whereArgs))
 
 	for i, k := range keys {
+		if err := validateIdentifier(k); err != nil {
+			return "", nil, fmt.Errorf("invalid column name: %w", err)
+		}
 		setClauses[i] = fmt.Sprintf("%s = $%d", k, i+1)
 		values = append(values, data[k])
 	}
@@ -349,18 +396,22 @@ func BuildUpdateSQL(table string, data map[string]interface{}, where string, whe
 		values = append(values, whereArgs...)
 	}
 
-	return sqlStr, values
+	return sqlStr, values, nil
 }
 
-// BuildDeleteSQL builds a DELETE SQL string (exported for testing)
-func BuildDeleteSQL(table string, where string, whereArgs ...interface{}) (string, []interface{}) {
+// BuildDeleteSQL builds a DELETE SQL string (exported for testing).
+// Returns an error if the table name contains unsafe characters.
+func BuildDeleteSQL(table string, where string, whereArgs ...any) (string, []any, error) {
+	if err := validateIdentifier(table); err != nil {
+		return "", nil, fmt.Errorf("invalid table name: %w", err)
+	}
 	sqlStr := fmt.Sprintf("DELETE FROM %s", table)
-	var values []interface{}
+	var values []any
 	if where != "" {
 		sqlStr += " WHERE " + where
 		values = whereArgs
 	}
-	return sqlStr, values
+	return sqlStr, values, nil
 }
 
 // DatabaseIntegrationConnector implements IntegrationConnector for database operations
@@ -405,7 +456,7 @@ func (c *DatabaseIntegrationConnector) IsConnected() bool {
 }
 
 // Execute dispatches to the appropriate WorkflowDatabase method based on action
-func (c *DatabaseIntegrationConnector) Execute(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error) {
+func (c *DatabaseIntegrationConnector) Execute(ctx context.Context, action string, params map[string]any) (map[string]any, error) {
 	if !c.connected {
 		return nil, fmt.Errorf("connector not connected")
 	}
@@ -421,7 +472,7 @@ func (c *DatabaseIntegrationConnector) Execute(ctx context.Context, action strin
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{
+		return map[string]any{
 			"columns": result.Columns,
 			"rows":    result.Rows,
 			"count":   result.Count,
@@ -437,7 +488,7 @@ func (c *DatabaseIntegrationConnector) Execute(ctx context.Context, action strin
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{
+		return map[string]any{
 			"rowsAffected": rowsAffected,
 		}, nil
 
@@ -446,7 +497,7 @@ func (c *DatabaseIntegrationConnector) Execute(ctx context.Context, action strin
 		if table == "" {
 			return nil, fmt.Errorf("table parameter required for insert action")
 		}
-		data, _ := params["data"].(map[string]interface{})
+		data, _ := params["data"].(map[string]any)
 		if len(data) == 0 {
 			return nil, fmt.Errorf("data parameter required for insert action")
 		}
@@ -454,7 +505,7 @@ func (c *DatabaseIntegrationConnector) Execute(ctx context.Context, action strin
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{
+		return map[string]any{
 			"rowsAffected": rowsAffected,
 		}, nil
 
@@ -463,7 +514,7 @@ func (c *DatabaseIntegrationConnector) Execute(ctx context.Context, action strin
 		if table == "" {
 			return nil, fmt.Errorf("table parameter required for update action")
 		}
-		data, _ := params["data"].(map[string]interface{})
+		data, _ := params["data"].(map[string]any)
 		if len(data) == 0 {
 			return nil, fmt.Errorf("data parameter required for update action")
 		}
@@ -473,7 +524,7 @@ func (c *DatabaseIntegrationConnector) Execute(ctx context.Context, action strin
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{
+		return map[string]any{
 			"rowsAffected": rowsAffected,
 		}, nil
 
@@ -488,7 +539,7 @@ func (c *DatabaseIntegrationConnector) Execute(ctx context.Context, action strin
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{
+		return map[string]any{
 			"rowsAffected": rowsAffected,
 		}, nil
 
@@ -498,15 +549,15 @@ func (c *DatabaseIntegrationConnector) Execute(ctx context.Context, action strin
 }
 
 // extractArgs extracts the "args" parameter as a slice of interface{}
-func extractArgs(params map[string]interface{}) []interface{} {
+func extractArgs(params map[string]any) []any {
 	argsRaw, ok := params["args"]
 	if !ok {
 		return nil
 	}
 	switch v := argsRaw.(type) {
-	case []interface{}:
+	case []any:
 		return v
 	default:
-		return []interface{}{v}
+		return []any{v}
 	}
 }

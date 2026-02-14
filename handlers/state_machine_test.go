@@ -133,7 +133,7 @@ func testExplicitRegistration(t *testing.T, engineName string) {
 	ctx := context.Background()
 
 	// Create a workflow instance
-	instance, err := stateMachine.CreateWorkflow("test-workflow", "order-123", map[string]interface{}{
+	instance, err := stateMachine.CreateWorkflow("test-workflow", "order-123", map[string]any{
 		"customer": "test-customer",
 		"amount":   99.99,
 	})
@@ -147,7 +147,7 @@ func testExplicitRegistration(t *testing.T, engineName string) {
 	}
 
 	// Trigger transition
-	err = stateMachine.TriggerTransition(ctx, "order-123", "submit_order", map[string]interface{}{
+	err = stateMachine.TriggerTransition(ctx, "order-123", "submit_order", map[string]any{
 		"validated": true,
 	})
 	if err != nil {
@@ -226,7 +226,7 @@ func testConfigRegistration(t *testing.T, engineName string, stateTrackerName st
 			{
 				Name: stateTrackerName,
 				Type: "workflow.statetracker",
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"description": "State tracker for tests",
 				},
 			},
@@ -234,52 +234,52 @@ func testConfigRegistration(t *testing.T, engineName string, stateTrackerName st
 			{
 				Name: stateMachineEngineName,
 				Type: "statemachine.engine",
-				Config: map[string]interface{}{
+				Config: map[string]any{
 					"description": "Order processing state machine",
 					// Connect to our state tracker service by name
 					"stateTracker": stateTrackerName,
 				},
 			},
 		},
-		Workflows: map[string]interface{}{
-			"statemachine": map[string]interface{}{
+		Workflows: map[string]any{
+			"statemachine": map[string]any{
 				"engine": stateMachineEngineName,
-				"definitions": []interface{}{
-					map[string]interface{}{
+				"definitions": []any{
+					map[string]any{
 						"name":         "test-workflow",
 						"description":  "Test order workflow",
 						"initialState": "new",
-						"states": map[string]interface{}{
-							"new": map[string]interface{}{
+						"states": map[string]any{
+							"new": map[string]any{
 								"description": "New order",
 								"isFinal":     false,
 								"isError":     false,
 							},
-							"validating": map[string]interface{}{
+							"validating": map[string]any{
 								"description": "Validating order",
 								"isFinal":     false,
 								"isError":     false,
 							},
-							"validated": map[string]interface{}{
+							"validated": map[string]any{
 								"description": "Order validated",
 								"isFinal":     true,
 								"isError":     false,
 							},
 						},
-						"transitions": map[string]interface{}{
-							"submit_order": map[string]interface{}{
+						"transitions": map[string]any{
+							"submit_order": map[string]any{
 								"fromState": "new",
 								"toState":   "validating",
 							},
-							"validate_order": map[string]interface{}{
+							"validate_order": map[string]any{
 								"fromState": "validating",
 								"toState":   "validated",
 							},
 						},
 					},
 				},
-				"hooks": []interface{}{
-					map[string]interface{}{
+				"hooks": []any{
+					map[string]any{
 						"workflowType": "test-workflow",
 						"transitions":  []string{"submit_order"},
 						"handler":      validationHandlerName,
@@ -290,7 +290,7 @@ func testConfigRegistration(t *testing.T, engineName string, stateTrackerName st
 	}
 
 	// Add state tracker module factory to the engine so it can create it during BuildFromConfig
-	engine.AddModuleType("workflow.statetracker", func(name string, config map[string]interface{}) modular.Module {
+	engine.AddModuleType("workflow.statetracker", func(name string, config map[string]any) modular.Module {
 		return module.NewStateTracker(name)
 	})
 
@@ -308,7 +308,7 @@ func testConfigRegistration(t *testing.T, engineName string, stateTrackerName st
 	}
 
 	// Get the state machine from the application
-	var stateMachineSvc interface{}
+	var stateMachineSvc any
 	err = app.GetService(stateMachineEngineName, &stateMachineSvc)
 	if err != nil {
 		t.Fatalf("Failed to get state machine service: %v", err)
@@ -320,7 +320,7 @@ func testConfigRegistration(t *testing.T, engineName string, stateTrackerName st
 	}
 
 	// Create a workflow instance
-	instance, err := stateMachine.CreateWorkflow("test-workflow", "order-123", map[string]interface{}{
+	instance, err := stateMachine.CreateWorkflow("test-workflow", "order-123", map[string]any{
 		"customer": "test-customer",
 		"amount":   99.99,
 	})
@@ -334,7 +334,7 @@ func testConfigRegistration(t *testing.T, engineName string, stateTrackerName st
 	}
 
 	// Trigger transition
-	err = stateMachine.TriggerTransition(ctx, "order-123", "submit_order", map[string]interface{}{
+	err = stateMachine.TriggerTransition(ctx, "order-123", "submit_order", map[string]any{
 		"validated": true,
 	})
 	if err != nil {

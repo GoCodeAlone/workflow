@@ -76,7 +76,7 @@ func (c *StateMachineStateConnector) Start(ctx context.Context) error {
 	}
 
 	// Find the state tracker service
-	var stateTrackerSvc interface{}
+	var stateTrackerSvc any
 	err := c.app.GetService(StateTrackerName, &stateTrackerSvc)
 	if err != nil || stateTrackerSvc == nil {
 		// Try to find by scanning all services
@@ -201,7 +201,7 @@ func (c *StateMachineStateConnector) UpdateResourceState(resourceType, resourceI
 }
 
 // GetResourceState gets the current state for a resource
-func (c *StateMachineStateConnector) GetResourceState(resourceType, resourceID string) (string, map[string]interface{}, error) {
+func (c *StateMachineStateConnector) GetResourceState(resourceType, resourceID string) (string, map[string]any, error) {
 	// Check if we have state info in the tracker
 	stateInfo, exists := c.stateTracker.GetState(resourceType, resourceID)
 	if exists {

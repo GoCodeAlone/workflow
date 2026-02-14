@@ -3,6 +3,7 @@ package module
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -32,7 +33,7 @@ func (fm *FieldMapping) Set(logical string, actual ...string) {
 
 // Resolve looks up a logical field name in data, trying each actual name in order.
 // Returns the value and true if found, or nil and false if no actual name matched.
-func (fm *FieldMapping) Resolve(data map[string]interface{}, logical string) (interface{}, bool) {
+func (fm *FieldMapping) Resolve(data map[string]any, logical string) (any, bool) {
 	names := fm.fieldNames(logical)
 	for _, name := range names {
 		if val, ok := data[name]; ok {
@@ -44,7 +45,7 @@ func (fm *FieldMapping) Resolve(data map[string]interface{}, logical string) (in
 
 // ResolveString resolves a logical field name to a string value.
 // Returns empty string if not found or not a string.
-func (fm *FieldMapping) ResolveString(data map[string]interface{}, logical string) string {
+func (fm *FieldMapping) ResolveString(data map[string]any, logical string) string {
 	val, ok := fm.Resolve(data, logical)
 	if !ok {
 		return ""
@@ -55,17 +56,17 @@ func (fm *FieldMapping) ResolveString(data map[string]interface{}, logical strin
 
 // ResolveSlice resolves a logical field name to a []interface{} value.
 // Returns nil if not found or not a slice.
-func (fm *FieldMapping) ResolveSlice(data map[string]interface{}, logical string) []interface{} {
+func (fm *FieldMapping) ResolveSlice(data map[string]any, logical string) []any {
 	val, ok := fm.Resolve(data, logical)
 	if !ok {
 		return nil
 	}
-	s, _ := val.([]interface{})
+	s, _ := val.([]any)
 	return s
 }
 
 // SetValue sets a value in data using the primary (first) field name for a logical field.
-func (fm *FieldMapping) SetValue(data map[string]interface{}, logical string, value interface{}) {
+func (fm *FieldMapping) SetValue(data map[string]any, logical string, value any) {
 	name := fm.Primary(logical)
 	data[name] = value
 }
@@ -99,9 +100,7 @@ func (fm *FieldMapping) Merge(other *FieldMapping) {
 	if other == nil {
 		return
 	}
-	for k, v := range other.fields {
-		fm.fields[k] = v
-	}
+	maps.Copy(fm.fields, other.fields)
 }
 
 // Clone returns a deep copy of the field mapping.
@@ -129,7 +128,7 @@ func (fm *FieldMapping) String() string {
 
 // FieldMappingFromConfig parses a field mapping from a config map.
 // The config format is: {"logicalName": ["actual1", "actual2"]} or {"logicalName": "actual1"}
-func FieldMappingFromConfig(cfg map[string]interface{}) *FieldMapping {
+func FieldMappingFromConfig(cfg map[string]any) *FieldMapping {
 	fm := NewFieldMapping()
 	if cfg == nil {
 		return fm
@@ -138,7 +137,7 @@ func FieldMappingFromConfig(cfg map[string]interface{}) *FieldMapping {
 		switch v := val.(type) {
 		case string:
 			fm.Set(key, v)
-		case []interface{}:
+		case []any:
 			names := make([]string, 0, len(v))
 			for _, item := range v {
 				if s, ok := item.(string); ok {

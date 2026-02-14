@@ -309,7 +309,7 @@ func (h *WorkflowHandler) Status(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]interface{}{
+	WriteJSON(w, http.StatusOK, map[string]any{
 		"id":      wf.ID,
 		"status":  wf.Status,
 		"version": wf.Version,

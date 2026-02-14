@@ -141,7 +141,7 @@ func TestHandleProviders(t *testing.T) {
 		t.Errorf("expected status 200, got %d", w.Code)
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}

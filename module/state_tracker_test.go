@@ -51,7 +51,7 @@ func TestStateTracker_GetState_NotFound(t *testing.T) {
 
 func TestStateTracker_SetAndGetState(t *testing.T) {
 	st := NewStateTracker("tracker")
-	data := map[string]interface{}{"amount": 100}
+	data := map[string]any{"amount": 100}
 	st.SetState("orders", "order-1", "pending", data)
 
 	info, exists := st.GetState("orders", "order-1")
@@ -107,7 +107,7 @@ func TestStateTracker_AddStateChangeListener(t *testing.T) {
 	var mu sync.Mutex
 	var events []string
 
-	st.AddStateChangeListener("orders", func(prev, next, resourceID string, data map[string]interface{}) {
+	st.AddStateChangeListener("orders", func(prev, next, resourceID string, data map[string]any) {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, prev+"->"+next+":"+resourceID)
@@ -149,7 +149,7 @@ func TestStateTracker_ListenerNotCalledWhenStateSame(t *testing.T) {
 	var mu sync.Mutex
 	callCount := 0
 
-	st.AddStateChangeListener("orders", func(prev, next, resourceID string, data map[string]interface{}) {
+	st.AddStateChangeListener("orders", func(prev, next, resourceID string, data map[string]any) {
 		mu.Lock()
 		defer mu.Unlock()
 		callCount++
@@ -173,7 +173,7 @@ func TestStateTracker_WildcardListener(t *testing.T) {
 	var mu sync.Mutex
 	var events []string
 
-	st.AddStateChangeListener("*", func(prev, next, resourceID string, data map[string]interface{}) {
+	st.AddStateChangeListener("*", func(prev, next, resourceID string, data map[string]any) {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, resourceID)
@@ -217,7 +217,7 @@ func TestStateTracker_ConcurrentAccess(t *testing.T) {
 	st := NewStateTracker("tracker")
 	var wg sync.WaitGroup
 
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

@@ -174,7 +174,7 @@ func (r *StandardHTTPRouter) RequiresServices() []modular.ServiceDependency {
 		deps = append(deps, modular.ServiceDependency{
 			Name:               serverName,
 			Required:           true,
-			SatisfiesInterface: reflect.TypeOf((*HTTPServer)(nil)).Elem(),
+			SatisfiesInterface: reflect.TypeFor[HTTPServer](),
 		})
 	}
 

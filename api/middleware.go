@@ -88,7 +88,7 @@ func (m *Middleware) authenticate(r *http.Request) (*store.User, error) {
 	}
 	tokenStr := parts[1]
 
-	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, jwt.ErrTokenSignatureInvalid
 		}

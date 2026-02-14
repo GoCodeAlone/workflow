@@ -64,7 +64,7 @@ func TestCopilotIntegration_ToolHandlersInvocable(t *testing.T) {
 		}
 
 		result, err := tool.Handler(copilot.ToolInvocation{
-			Arguments: map[string]interface{}{"module_type": "http.server"},
+			Arguments: map[string]any{"module_type": "http.server"},
 		})
 		if err != nil {
 			t.Fatalf("handler returned error: %v", err)
@@ -94,7 +94,7 @@ func TestCopilotIntegration_ToolHandlersInvocable(t *testing.T) {
       - httpServer`
 
 		result, err := tool.Handler(copilot.ToolInvocation{
-			Arguments: map[string]interface{}{"config_yaml": validYAML},
+			Arguments: map[string]any{"config_yaml": validYAML},
 		})
 		if err != nil {
 			t.Fatalf("handler returned error: %v", err)
@@ -114,7 +114,7 @@ func TestCopilotIntegration_ToolHandlersInvocable(t *testing.T) {
 		}
 
 		result, err := tool.Handler(copilot.ToolInvocation{
-			Arguments: map[string]interface{}{"config_yaml": "modules: []"},
+			Arguments: map[string]any{"config_yaml": "modules: []"},
 		})
 		if err != nil {
 			t.Fatalf("handler returned error: %v", err)
@@ -141,7 +141,7 @@ func TestCopilotIntegration_ToolHandlersInvocable(t *testing.T) {
 		for category, expectedContent := range categories {
 			t.Run(category, func(t *testing.T) {
 				result, err := tool.Handler(copilot.ToolInvocation{
-					Arguments: map[string]interface{}{"category": category},
+					Arguments: map[string]any{"category": category},
 				})
 				if err != nil {
 					t.Fatalf("handler returned error for category %q: %v", category, err)
@@ -165,7 +165,7 @@ func TestCopilotIntegration_ClientWithMockWrapper(t *testing.T) {
 		resp := ai.GenerateResponse{
 			Workflow: &config.WorkflowConfig{
 				Modules: []config.ModuleConfig{
-					{Name: "server", Type: "http.server", Config: map[string]interface{}{"address": ":8080"}},
+					{Name: "server", Type: "http.server", Config: map[string]any{"address": ":8080"}},
 					{Name: "router", Type: "http.router", DependsOn: []string{"server"}},
 				},
 			},

@@ -79,7 +79,7 @@ func (s *PGUserStore) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (s *PGUserStore) List(ctx context.Context, f UserFilter) ([]*User, error) {
 	query := `SELECT * FROM users WHERE 1=1`
-	args := []interface{}{}
+	args := []any{}
 	idx := 1
 
 	if f.Email != "" {
@@ -122,7 +122,7 @@ func (s *PGUserStore) List(ctx context.Context, f UserFilter) ([]*User, error) {
 	return users, rows.Err()
 }
 
-func (s *PGUserStore) scanOne(ctx context.Context, query string, args ...interface{}) (*User, error) {
+func (s *PGUserStore) scanOne(ctx context.Context, query string, args ...any) (*User, error) {
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query user: %w", err)

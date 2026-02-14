@@ -15,7 +15,7 @@ import (
 // It returns a pointer to the engine wrapper and whether it was found.
 // The concrete type is *workflow.ManagedEngine but we use interface{} here to
 // avoid a circular import between the workflow and module packages.
-type engineGetter func(uuid.UUID) (interface{}, bool)
+type engineGetter func(uuid.UUID) (any, bool)
 
 // triggerableEngine is implemented by any engine wrapper whose Engine field
 // exposes TriggerWorkflow. We use duck-typing via reflection-free interface
@@ -26,7 +26,7 @@ type triggerableEngine interface {
 
 // TriggerWorkflower is the subset of the engine interface needed for routing.
 type TriggerWorkflower interface {
-	TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) error
+	TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) error
 }
 
 // CrossWorkflowRouter routes events from one workflow to linked target workflows.
@@ -41,7 +41,7 @@ type CrossWorkflowRouter struct {
 // NewCrossWorkflowRouter creates a new router. The getEngine callback must return
 // a value whose concrete type has a field or method that provides a TriggerWorkflower.
 // In practice this is *workflow.ManagedEngine.
-func NewCrossWorkflowRouter(linkStore store.CrossWorkflowLinkStore, getEngine func(uuid.UUID) (interface{}, bool), logger *slog.Logger) *CrossWorkflowRouter {
+func NewCrossWorkflowRouter(linkStore store.CrossWorkflowLinkStore, getEngine func(uuid.UUID) (any, bool), logger *slog.Logger) *CrossWorkflowRouter {
 	return &CrossWorkflowRouter{
 		linkStore: linkStore,
 		getEngine: getEngine,
@@ -68,7 +68,7 @@ func (r *CrossWorkflowRouter) RefreshLinks(ctx context.Context) error {
 
 // RouteEvent checks if an event from a source workflow should be forwarded
 // to any target workflows based on configured links.
-func (r *CrossWorkflowRouter) RouteEvent(ctx context.Context, sourceWorkflowID uuid.UUID, eventType string, eventData interface{}) error {
+func (r *CrossWorkflowRouter) RouteEvent(ctx context.Context, sourceWorkflowID uuid.UUID, eventType string, eventData any) error {
 	r.mu.RLock()
 	links := r.links
 	r.mu.RUnlock()
@@ -101,7 +101,7 @@ func (r *CrossWorkflowRouter) RouteEvent(ctx context.Context, sourceWorkflowID u
 
 		// Try to trigger the workflow via duck-typing
 		if te, ok := engineIface.(triggerableEngine); ok {
-			data := map[string]interface{}{
+			data := map[string]any{
 				"source_workflow_id": sourceWorkflowID.String(),
 				"event_type":         eventType,
 				"event_data":         eventData,

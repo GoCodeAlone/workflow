@@ -42,7 +42,7 @@ func TestHTTPWorkflowHandler_ConfigureWorkflow_NoRoutes(t *testing.T) {
 	h := NewHTTPWorkflowHandler()
 	app := CreateMockApplication()
 
-	config := map[string]interface{}{
+	config := map[string]any{
 		"noRoutes": true,
 	}
 	err := h.ConfigureWorkflow(app, config)
@@ -55,9 +55,9 @@ func TestHTTPWorkflowHandler_ConfigureWorkflow_NoRouter(t *testing.T) {
 	h := NewHTTPWorkflowHandler()
 	app := CreateMockApplication()
 
-	config := map[string]interface{}{
-		"routes": []interface{}{
-			map[string]interface{}{
+	config := map[string]any{
+		"routes": []any{
+			map[string]any{
 				"method":  "GET",
 				"path":    "/api/test",
 				"handler": "testHandler",
@@ -74,10 +74,10 @@ func TestHTTPWorkflowHandler_ConfigureWorkflow_ExplicitRouterNotFound(t *testing
 	h := NewHTTPWorkflowHandler()
 	app := CreateMockApplication()
 
-	config := map[string]interface{}{
+	config := map[string]any{
 		"router": "nonexistent-router",
-		"routes": []interface{}{
-			map[string]interface{}{
+		"routes": []any{
+			map[string]any{
 				"method":  "GET",
 				"path":    "/api/test",
 				"handler": "testHandler",
@@ -97,9 +97,9 @@ func TestHTTPWorkflowHandler_ConfigureWorkflow_WithRouterNoServer(t *testing.T) 
 	router := workflowmodule.NewStandardHTTPRouter("router")
 	app.services["router"] = router
 
-	config := map[string]interface{}{
-		"routes": []interface{}{
-			map[string]interface{}{
+	config := map[string]any{
+		"routes": []any{
+			map[string]any{
 				"method":  "GET",
 				"path":    "/test",
 				"handler": "handler",
@@ -121,8 +121,8 @@ func TestHTTPWorkflowHandler_ConfigureWorkflow_InvalidRouteConfig(t *testing.T) 
 	app.services["router"] = router
 	app.services["server"] = server
 
-	config := map[string]interface{}{
-		"routes": []interface{}{
+	config := map[string]any{
+		"routes": []any{
 			"not a map", // invalid route
 		},
 	}
@@ -141,9 +141,9 @@ func TestHTTPWorkflowHandler_ConfigureWorkflow_IncompleteRoute(t *testing.T) {
 	app.services["router"] = router
 	app.services["server"] = server
 
-	config := map[string]interface{}{
-		"routes": []interface{}{
-			map[string]interface{}{
+	config := map[string]any{
+		"routes": []any{
+			map[string]any{
 				"method": "GET",
 				// missing path and handler
 			},
@@ -303,7 +303,7 @@ func TestHTTPWorkflowHandler_ExecuteWorkflow_ExplicitServerRouter(t *testing.T) 
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"server": "my-server",
 		"router": "my-router",
 	}

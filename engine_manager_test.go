@@ -438,17 +438,13 @@ func TestEngineManager_ConcurrentDeployStop(t *testing.T) {
 	m := NewWorkflowEngineManager(ws, ls, emTestLogger(), newTestEngineBuilder())
 
 	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 5 {
+		wg.Go(func() {
 			_ = m.DeployWorkflow(context.Background(), id)
-		}()
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			_ = m.StopWorkflow(context.Background(), id)
-		}()
+		})
 	}
 	wg.Wait()
 	// No panics or data races is the assertion (run with -race)

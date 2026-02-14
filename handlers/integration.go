@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -24,22 +25,22 @@ type IntegrationWorkflowConfig struct {
 
 // IntegrationConnector represents a connector configuration
 type IntegrationConnector struct {
-	Name   string                 `json:"name" yaml:"name"`
-	Type   string                 `json:"type" yaml:"type"`
-	Config map[string]interface{} `json:"config" yaml:"config"`
+	Name   string         `json:"name" yaml:"name"`
+	Type   string         `json:"type" yaml:"type"`
+	Config map[string]any `json:"config" yaml:"config"`
 }
 
 // IntegrationStep represents a step in an integration workflow
 type IntegrationStep struct {
-	Name       string                 `json:"name" yaml:"name"`
-	Connector  string                 `json:"connector" yaml:"connector"`
-	Action     string                 `json:"action" yaml:"action"`
-	Input      map[string]interface{} `json:"input,omitempty" yaml:"input,omitempty"`
-	Transform  string                 `json:"transform,omitempty" yaml:"transform,omitempty"`
-	OnSuccess  string                 `json:"onSuccess,omitempty" yaml:"onSuccess,omitempty"`
-	OnError    string                 `json:"onError,omitempty" yaml:"onError,omitempty"`
-	RetryCount int                    `json:"retryCount,omitempty" yaml:"retryCount,omitempty"`
-	RetryDelay string                 `json:"retryDelay,omitempty" yaml:"retryDelay,omitempty"`
+	Name       string         `json:"name" yaml:"name"`
+	Connector  string         `json:"connector" yaml:"connector"`
+	Action     string         `json:"action" yaml:"action"`
+	Input      map[string]any `json:"input,omitempty" yaml:"input,omitempty"`
+	Transform  string         `json:"transform,omitempty" yaml:"transform,omitempty"`
+	OnSuccess  string         `json:"onSuccess,omitempty" yaml:"onSuccess,omitempty"`
+	OnError    string         `json:"onError,omitempty" yaml:"onError,omitempty"`
+	RetryCount int            `json:"retryCount,omitempty" yaml:"retryCount,omitempty"`
+	RetryDelay string         `json:"retryDelay,omitempty" yaml:"retryDelay,omitempty"`
 }
 
 // IntegrationWorkflowHandler handles integration workflows
@@ -100,9 +101,9 @@ func (h *IntegrationWorkflowHandler) CanHandle(workflowType string) bool {
 }
 
 // ConfigureWorkflow sets up the workflow from configuration
-func (h *IntegrationWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig interface{}) error {
+func (h *IntegrationWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig any) error {
 	// Convert the generic config to integration-specific config
-	intConfig, ok := workflowConfig.(map[string]interface{})
+	intConfig, ok := workflowConfig.(map[string]any)
 	if !ok {
 		return fmt.Errorf("invalid integration workflow configuration format")
 	}
@@ -119,7 +120,7 @@ func (h *IntegrationWorkflowHandler) ConfigureWorkflow(app modular.Application, 
 	}
 
 	// Get the integration registry
-	var registrySvc interface{}
+	var registrySvc any
 	_ = app.GetService(registryName, &registrySvc)
 	if registrySvc == nil {
 		return fmt.Errorf("integration registry service '%s' not found", registryName)
@@ -131,13 +132,13 @@ func (h *IntegrationWorkflowHandler) ConfigureWorkflow(app modular.Application, 
 	}
 
 	// Configure connectors
-	connectorsConfig, _ := intConfig["connectors"].([]interface{})
+	connectorsConfig, _ := intConfig["connectors"].([]any)
 	if len(connectorsConfig) == 0 {
 		return fmt.Errorf("no connectors defined in integration workflow")
 	}
 
 	for i, cc := range connectorsConfig {
-		connMap, ok := cc.(map[string]interface{})
+		connMap, ok := cc.(map[string]any)
 		if !ok {
 			return fmt.Errorf("invalid connector configuration at index %d", i)
 		}
@@ -152,7 +153,7 @@ func (h *IntegrationWorkflowHandler) ConfigureWorkflow(app modular.Application, 
 			return fmt.Errorf("connector type not specified for connector '%s'", name)
 		}
 
-		config, _ := connMap["config"].(map[string]interface{})
+		config, _ := connMap["config"].(map[string]any)
 
 		// Create and configure the connector based on type
 		var connector module.IntegrationConnector
@@ -178,7 +179,7 @@ func (h *IntegrationWorkflowHandler) ConfigureWorkflow(app modular.Application, 
 			}
 
 			// Configure headers
-			headers, _ := config["headers"].(map[string]interface{})
+			headers, _ := config["headers"].(map[string]any)
 			for key, val := range headers {
 				if valStr, ok := val.(string); ok {
 					httpConn.SetHeader(key, valStr)
@@ -193,6 +194,11 @@ func (h *IntegrationWorkflowHandler) ConfigureWorkflow(app modular.Application, 
 			// Configure rate limiting
 			if rateLimit, ok := config["requestsPerMinute"].(float64); ok {
 				httpConn.SetRateLimit(int(rateLimit))
+			}
+
+			// Allow private IPs (for testing/internal services)
+			if allowPrivate, ok := config["allowPrivateIPs"].(bool); ok && allowPrivate {
+				httpConn.SetAllowPrivateIPs(true)
 			}
 
 			connector = httpConn
@@ -239,13 +245,13 @@ func (h *IntegrationWorkflowHandler) ConfigureWorkflow(app modular.Application, 
 	}
 
 	// Configure workflow steps
-	stepsConfig, _ := intConfig["steps"].([]interface{})
+	stepsConfig, _ := intConfig["steps"].([]any)
 	if len(stepsConfig) > 0 {
 		// Process steps configuration
 		// In a full implementation, we'd create a workflow executor that runs these steps
 		// For now, we'll just validate the configuration
 		for i, sc := range stepsConfig {
-			stepMap, ok := sc.(map[string]interface{})
+			stepMap, ok := sc.(map[string]any)
 			if !ok {
 				return fmt.Errorf("invalid step configuration at index %d", i)
 			}
@@ -281,16 +287,15 @@ func (h *IntegrationWorkflowHandler) ExecuteIntegrationWorkflow(
 	ctx context.Context,
 	registry module.IntegrationRegistry,
 	steps []IntegrationStep,
-	initialContext map[string]interface{},
-) (map[string]interface{}, error) {
-	results := make(map[string]interface{})
+	initialContext map[string]any,
+) (map[string]any, error) {
+	results := make(map[string]any)
 	// Add initial context values to results
-	for k, v := range initialContext {
-		results[k] = v
-	}
+	maps.Copy(results, initialContext)
 
 	// Execute steps sequentially
-	for _, step := range steps {
+	for i := range steps {
+		step := &steps[i]
 		stepStartTime := time.Now()
 		if h.eventEmitter != nil {
 			h.eventEmitter.EmitStepStarted(ctx, "integration", step.Name, step.Connector, step.Action)
@@ -318,7 +323,7 @@ func (h *IntegrationWorkflowHandler) ExecuteIntegrationWorkflow(
 		}
 
 		// Process input parameters - could handle variable substitution here
-		params := make(map[string]interface{})
+		params := make(map[string]any)
 		for k, v := range step.Input {
 			// Simple variable substitution from previous steps
 			if strVal, ok := v.(string); ok && len(strVal) > 3 && strVal[0:2] == "${" && strVal[len(strVal)-1] == '}' {
@@ -345,7 +350,7 @@ func (h *IntegrationWorkflowHandler) ExecuteIntegrationWorkflow(
 			if step.RetryCount > 0 {
 				// Simple retry implementation
 				var retryErr error
-				var retryResult map[string]interface{}
+				var retryResult map[string]any
 
 				// Parse retry delay
 				retryDelay := time.Second // Default 1 second
@@ -413,7 +418,7 @@ func (h *IntegrationWorkflowHandler) ExecuteIntegrationWorkflow(
 }
 
 // ExecuteWorkflow executes a workflow with the given action and input data
-func (h *IntegrationWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]interface{}) (map[string]interface{}, error) {
+func (h *IntegrationWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) (map[string]any, error) {
 	// For integration workflows, the action should specify which workflow to run
 	// Find the integration registry
 	registryName := action
@@ -437,9 +442,9 @@ func (h *IntegrationWorkflowHandler) ExecuteWorkflow(ctx context.Context, workfl
 
 	// Parse steps from the data if provided
 	var steps []IntegrationStep
-	if stepsData, ok := data["steps"].([]interface{}); ok {
+	if stepsData, ok := data["steps"].([]any); ok {
 		for i, stepData := range stepsData {
-			stepMap, ok := stepData.(map[string]interface{})
+			stepMap, ok := stepData.(map[string]any)
 			if !ok {
 				return nil, fmt.Errorf("invalid step data at index %d", i)
 			}
@@ -453,7 +458,7 @@ func (h *IntegrationWorkflowHandler) ExecuteWorkflow(ctx context.Context, workfl
 			}
 
 			// Extract optional fields if present
-			if input, ok := stepMap["input"].(map[string]interface{}); ok {
+			if input, ok := stepMap["input"].(map[string]any); ok {
 				step.Input = input
 			}
 			if transform, ok := stepMap["transform"].(string); ok {

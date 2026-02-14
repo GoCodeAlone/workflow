@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"strings"
@@ -17,12 +18,12 @@ import (
 
 // User represents a user in the in-memory store
 type User struct {
-	ID           string                 `json:"id"`
-	Email        string                 `json:"email"`
-	Name         string                 `json:"name"`
-	PasswordHash string                 `json:"-"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt    time.Time              `json:"createdAt"`
+	ID           string         `json:"id"`
+	Email        string         `json:"email"`
+	Name         string         `json:"name"`
+	PasswordHash string         `json:"-"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	CreatedAt    time.Time      `json:"createdAt"`
 }
 
 // JWTAuthModule handles JWT authentication with an in-memory user store
@@ -75,7 +76,7 @@ func (j *JWTAuthModule) Init(app modular.Application) error {
 	j.app = app
 
 	// Wire persistence (optional)
-	var ps interface{}
+	var ps any
 	if err := app.GetService("persistence", &ps); err == nil && ps != nil {
 		if store, ok := ps.(*PersistenceStore); ok {
 			j.persistence = store
@@ -86,15 +87,15 @@ func (j *JWTAuthModule) Init(app modular.Application) error {
 }
 
 // Authenticate implements AuthProvider
-func (j *JWTAuthModule) Authenticate(tokenStr string) (bool, map[string]interface{}, error) {
-	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+func (j *JWTAuthModule) Authenticate(tokenStr string) (bool, map[string]any, error) {
+	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return []byte(j.secret), nil
 	})
 	if err != nil {
-		return false, nil, nil
+		return false, nil, nil //nolint:nilerr // Invalid token is a failed auth, not an error
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
@@ -102,10 +103,8 @@ func (j *JWTAuthModule) Authenticate(tokenStr string) (bool, map[string]interfac
 		return false, nil, nil
 	}
 
-	result := make(map[string]interface{})
-	for k, v := range claims {
-		result[k] = v
-	}
+	result := make(map[string]any)
+	maps.Copy(result, claims)
 	return true, result, nil
 }
 
@@ -125,7 +124,7 @@ func (j *JWTAuthModule) Handle(w http.ResponseWriter, r *http.Request) {
 		j.handleUpdateProfile(w, r)
 	default:
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 	}
 }
 
@@ -137,13 +136,13 @@ func (j *JWTAuthModule) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
 		return
 	}
 
 	if req.Email == "" || req.Password == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "email and password are required"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "email and password are required"})
 		return
 	}
 
@@ -153,14 +152,14 @@ func (j *JWTAuthModule) handleRegister(w http.ResponseWriter, r *http.Request) {
 	// Check for duplicate email
 	if _, exists := j.users[req.Email]; exists {
 		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]string{"error": "email already registered"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "email already registered"})
 		return
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "failed to hash password"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to hash password"})
 		return
 	}
 
@@ -189,12 +188,12 @@ func (j *JWTAuthModule) handleRegister(w http.ResponseWriter, r *http.Request) {
 	token, err := j.generateToken(user)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "failed to generate token"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to generate token"})
 		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"token": token,
 		"user":  user,
 	})
@@ -207,7 +206,7 @@ func (j *JWTAuthModule) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
 		return
 	}
 
@@ -217,24 +216,24 @@ func (j *JWTAuthModule) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	if !exists {
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid credentials"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid credentials"})
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid credentials"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid credentials"})
 		return
 	}
 
 	token, err := j.generateToken(user)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "failed to generate token"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to generate token"})
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"token": token,
 		"user":  j.buildUserResponse(user),
 	})
@@ -244,18 +243,18 @@ func (j *JWTAuthModule) handleGetProfile(w http.ResponseWriter, r *http.Request)
 	user, err := j.extractUserFromRequest(r)
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
-	json.NewEncoder(w).Encode(j.buildUserResponse(user))
+	_ = json.NewEncoder(w).Encode(j.buildUserResponse(user))
 }
 
 func (j *JWTAuthModule) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 	user, err := j.extractUserFromRequest(r)
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -264,7 +263,7 @@ func (j *JWTAuthModule) handleUpdateProfile(w http.ResponseWriter, r *http.Reque
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body"})
 		return
 	}
 
@@ -286,7 +285,7 @@ func (j *JWTAuthModule) handleUpdateProfile(w http.ResponseWriter, r *http.Reque
 		})
 	}
 
-	json.NewEncoder(w).Encode(j.buildUserResponse(user))
+	_ = json.NewEncoder(w).Encode(j.buildUserResponse(user))
 }
 
 func (j *JWTAuthModule) extractUserFromRequest(r *http.Request) (*User, error) {
@@ -300,7 +299,7 @@ func (j *JWTAuthModule) extractUserFromRequest(r *http.Request) (*User, error) {
 		return nil, fmt.Errorf("bearer token required")
 	}
 
-	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
@@ -344,6 +343,12 @@ func (j *JWTAuthModule) generateToken(user *User) (string, error) {
 	if role, ok := user.Metadata["role"].(string); ok && role != "" {
 		claims["role"] = role
 	}
+	if affiliateId, ok := user.Metadata["affiliateId"].(string); ok && affiliateId != "" {
+		claims["affiliateId"] = affiliateId
+	}
+	if programIds, ok := user.Metadata["programIds"].([]any); ok && len(programIds) > 0 {
+		claims["programIds"] = programIds
+	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(j.secret))
@@ -351,16 +356,14 @@ func (j *JWTAuthModule) generateToken(user *User) (string, error) {
 
 // buildUserResponse creates a response map that flattens metadata fields to the
 // top level, so the SPA receives role, affiliateId, programIds, etc. directly.
-func (j *JWTAuthModule) buildUserResponse(user *User) map[string]interface{} {
-	resp := map[string]interface{}{
+func (j *JWTAuthModule) buildUserResponse(user *User) map[string]any {
+	resp := map[string]any{
 		"id":        user.ID,
 		"email":     user.Email,
 		"name":      user.Name,
 		"createdAt": user.CreatedAt,
 	}
-	for k, v := range user.Metadata {
-		resp[k] = v
-	}
+	maps.Copy(resp, user.Metadata)
 	return resp
 }
 
@@ -373,8 +376,8 @@ func (j *JWTAuthModule) loadSeedUsers(path string) error {
 	}
 
 	var seeds []struct {
-		ID   string                 `json:"id"`
-		Data map[string]interface{} `json:"data"`
+		ID   string         `json:"id"`
+		Data map[string]any `json:"data"`
 	}
 	if err := json.Unmarshal(data, &seeds); err != nil {
 		return fmt.Errorf("failed to parse seed file %s: %w", path, err)
@@ -404,7 +407,7 @@ func (j *JWTAuthModule) loadSeedUsers(path string) error {
 		name, _ := seed.Data["name"].(string)
 
 		// Build metadata from all non-auth fields
-		metadata := make(map[string]interface{})
+		metadata := make(map[string]any)
 		for k, v := range seed.Data {
 			switch k {
 			case "email", "name", "password":
@@ -450,7 +453,7 @@ func (j *JWTAuthModule) loadSeedUsers(path string) error {
 func (j *JWTAuthModule) Start(ctx context.Context) error {
 	// Late-bind persistence if it wasn't available during Init().
 	if j.persistence == nil && j.app != nil {
-		var ps interface{}
+		var ps any
 		if err := j.app.GetService("persistence", &ps); err == nil && ps != nil {
 			if store, ok := ps.(*PersistenceStore); ok {
 				j.persistence = store

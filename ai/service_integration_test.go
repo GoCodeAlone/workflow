@@ -61,7 +61,7 @@ func TestService_GenerateWorkflow_MockProvider(t *testing.T) {
 	svc := NewService()
 
 	expectedModules := []config.ModuleConfig{
-		{Name: "server", Type: "http.server", Config: map[string]interface{}{"address": ":8080"}},
+		{Name: "server", Type: "http.server", Config: map[string]any{"address": ":8080"}},
 		{Name: "router", Type: "http.router", DependsOn: []string{"server"}},
 		{Name: "handler", Type: "http.handler", DependsOn: []string{"router"}},
 	}

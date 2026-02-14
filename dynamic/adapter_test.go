@@ -87,7 +87,7 @@ func Init(services map[string]interface{}) error { return nil }
 	}
 
 	// Verify the service was registered
-	var svc interface{}
+	var svc any
 	if err := app.GetService("my-service", &svc); err != nil {
 		t.Fatalf("expected service 'my-service' to be registered: %v", err)
 	}
@@ -112,7 +112,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	}
 
 	adapter := NewModuleAdapter(comp)
-	result, err := adapter.Execute(context.Background(), map[string]interface{}{})
+	result, err := adapter.Execute(context.Background(), map[string]any{})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -186,8 +186,8 @@ func TestRegistry_ListNames_Empty(t *testing.T) {
 // testLogger is a simple logger for testing
 type testLogger struct{}
 
-func (l *testLogger) Debug(msg string, args ...interface{}) {}
-func (l *testLogger) Info(msg string, args ...interface{})  {}
-func (l *testLogger) Warn(msg string, args ...interface{})  {}
-func (l *testLogger) Error(msg string, args ...interface{}) {}
-func (l *testLogger) Fatal(msg string, args ...interface{}) {}
+func (l *testLogger) Debug(msg string, args ...any) {}
+func (l *testLogger) Info(msg string, args ...any)  {}
+func (l *testLogger) Warn(msg string, args ...any)  {}
+func (l *testLogger) Error(msg string, args ...any) {}
+func (l *testLogger) Fatal(msg string, args ...any) {}

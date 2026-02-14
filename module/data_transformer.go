@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,8 +14,8 @@ import (
 
 // TransformOperation defines a single transformation step
 type TransformOperation struct {
-	Type   string                 `json:"type" yaml:"type"` // "extract", "map", "convert", "filter"
-	Config map[string]interface{} `json:"config" yaml:"config"`
+	Type   string         `json:"type" yaml:"type"` // "extract", "map", "convert", "filter"
+	Config map[string]any `json:"config" yaml:"config"`
 }
 
 // TransformPipeline is a named sequence of operations
@@ -56,7 +57,7 @@ func (dt *DataTransformer) RegisterPipeline(pipeline *TransformPipeline) {
 }
 
 // Transform runs a named pipeline on the given data
-func (dt *DataTransformer) Transform(ctx context.Context, pipelineName string, data interface{}) (interface{}, error) {
+func (dt *DataTransformer) Transform(ctx context.Context, pipelineName string, data any) (any, error) {
 	dt.mu.RLock()
 	pipeline, exists := dt.pipelines[pipelineName]
 	dt.mu.RUnlock()
@@ -69,7 +70,7 @@ func (dt *DataTransformer) Transform(ctx context.Context, pipelineName string, d
 }
 
 // TransformWithOps runs a sequence of operations on the given data
-func (dt *DataTransformer) TransformWithOps(ctx context.Context, ops []TransformOperation, data interface{}) (interface{}, error) {
+func (dt *DataTransformer) TransformWithOps(ctx context.Context, ops []TransformOperation, data any) (any, error) {
 	current := data
 	for i, op := range ops {
 		select {
@@ -88,7 +89,7 @@ func (dt *DataTransformer) TransformWithOps(ctx context.Context, ops []Transform
 }
 
 // applyOperation applies a single transformation operation
-func (dt *DataTransformer) applyOperation(op TransformOperation, data interface{}) (interface{}, error) {
+func (dt *DataTransformer) applyOperation(op TransformOperation, data any) (any, error) {
 	switch op.Type {
 	case "extract":
 		return dt.opExtract(op.Config, data)
@@ -104,7 +105,7 @@ func (dt *DataTransformer) applyOperation(op TransformOperation, data interface{
 }
 
 // opExtract extracts a value using dot-notation path
-func (dt *DataTransformer) opExtract(config map[string]interface{}, data interface{}) (interface{}, error) {
+func (dt *DataTransformer) opExtract(config map[string]any, data any) (any, error) {
 	path, _ := config["path"].(string)
 	if path == "" {
 		return nil, fmt.Errorf("extract requires 'path' config")
@@ -114,19 +115,19 @@ func (dt *DataTransformer) opExtract(config map[string]interface{}, data interfa
 }
 
 // extractByPath navigates a nested structure using dot notation
-func extractByPath(data interface{}, path string) (interface{}, error) {
+func extractByPath(data any, path string) (any, error) {
 	parts := strings.Split(path, ".")
 	current := data
 
 	for _, part := range parts {
 		switch v := current.(type) {
-		case map[string]interface{}:
+		case map[string]any:
 			val, exists := v[part]
 			if !exists {
 				return nil, fmt.Errorf("key '%s' not found in path '%s'", part, path)
 			}
 			current = val
-		case []interface{}:
+		case []any:
 			idx, err := strconv.Atoi(part)
 			if err != nil {
 				return nil, fmt.Errorf("expected numeric index for array, got '%s'", part)
@@ -144,22 +145,20 @@ func extractByPath(data interface{}, path string) (interface{}, error) {
 }
 
 // opMap renames fields in a map
-func (dt *DataTransformer) opMap(config map[string]interface{}, data interface{}) (interface{}, error) {
-	mappingsRaw, _ := config["mappings"].(map[string]interface{})
+func (dt *DataTransformer) opMap(config map[string]any, data any) (any, error) {
+	mappingsRaw, _ := config["mappings"].(map[string]any)
 	if len(mappingsRaw) == 0 {
 		return nil, fmt.Errorf("map requires 'mappings' config")
 	}
 
-	dataMap, ok := data.(map[string]interface{})
+	dataMap, ok := data.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("map operation requires map[string]interface{} input, got %T", data)
 	}
 
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	// Copy all existing fields
-	for k, v := range dataMap {
-		result[k] = v
-	}
+	maps.Copy(result, dataMap)
 
 	// Apply mappings: rename oldName -> newName
 	for oldName, newNameRaw := range mappingsRaw {
@@ -177,13 +176,13 @@ func (dt *DataTransformer) opMap(config map[string]interface{}, data interface{}
 }
 
 // opFilter keeps only specified fields
-func (dt *DataTransformer) opFilter(config map[string]interface{}, data interface{}) (interface{}, error) {
-	fieldsRaw, _ := config["fields"].([]interface{})
+func (dt *DataTransformer) opFilter(config map[string]any, data any) (any, error) {
+	fieldsRaw, _ := config["fields"].([]any)
 	if len(fieldsRaw) == 0 {
 		return nil, fmt.Errorf("filter requires 'fields' config")
 	}
 
-	dataMap, ok := data.(map[string]interface{})
+	dataMap, ok := data.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("filter operation requires map[string]interface{} input, got %T", data)
 	}
@@ -195,7 +194,7 @@ func (dt *DataTransformer) opFilter(config map[string]interface{}, data interfac
 		}
 	}
 
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	for k, v := range dataMap {
 		if fields[k] {
 			result[k] = v
@@ -206,7 +205,7 @@ func (dt *DataTransformer) opFilter(config map[string]interface{}, data interfac
 }
 
 // opConvert converts between formats (json marshaling/unmarshaling)
-func (dt *DataTransformer) opConvert(config map[string]interface{}, data interface{}) (interface{}, error) {
+func (dt *DataTransformer) opConvert(config map[string]any, data any) (any, error) {
 	from, _ := config["from"].(string)
 	to, _ := config["to"].(string)
 
@@ -221,7 +220,7 @@ func (dt *DataTransformer) opConvert(config map[string]interface{}, data interfa
 		if err != nil {
 			return nil, fmt.Errorf("json marshal failed: %w", err)
 		}
-		var result interface{}
+		var result any
 		if err := json.Unmarshal(jsonBytes, &result); err != nil {
 			return nil, fmt.Errorf("json unmarshal failed: %w", err)
 		}
@@ -237,7 +236,7 @@ func (dt *DataTransformer) opConvert(config map[string]interface{}, data interfa
 		if !ok {
 			return nil, fmt.Errorf("expected string input for string->json conversion")
 		}
-		var result interface{}
+		var result any
 		if err := json.Unmarshal([]byte(str), &result); err != nil {
 			return nil, fmt.Errorf("json unmarshal failed: %w", err)
 		}

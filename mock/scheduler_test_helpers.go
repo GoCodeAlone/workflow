@@ -9,7 +9,7 @@ type TestScheduler struct {
 	SchedulerName     string // Changed from Name to SchedulerName to avoid conflict
 	CronExpression    string
 	JobsAdded         []string
-	JobFunctions      []interface{}
+	JobFunctions      []any
 	Started           bool
 	Stopped           bool
 	StartError        error
@@ -24,12 +24,12 @@ func NewTestScheduler(name, cronExpression string) *TestScheduler {
 		SchedulerName:  name, // Use SchedulerName instead of Name
 		CronExpression: cronExpression,
 		JobsAdded:      make([]string, 0),
-		JobFunctions:   make([]interface{}, 0),
+		JobFunctions:   make([]any, 0),
 	}
 }
 
 // Init initializes the scheduler
-func (s *TestScheduler) Init(registry map[string]interface{}) error {
+func (s *TestScheduler) Init(registry map[string]any) error {
 	s.InitializerCalled = true
 	return nil
 }
@@ -40,7 +40,7 @@ func (s *TestScheduler) Name() string {
 }
 
 // AddJob adds a job to the scheduler
-func (s *TestScheduler) AddJob(spec string, job interface{}) error {
+func (s *TestScheduler) AddJob(spec string, job any) error {
 	if s.AddJobError != nil {
 		return s.AddJobError
 	}

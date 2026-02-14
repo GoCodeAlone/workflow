@@ -15,7 +15,7 @@ func TestNewServiceRegistryAdapter(t *testing.T) {
 func TestServiceRegistryAdapter_GetService(t *testing.T) {
 	app := CreateMockApplication()
 	adapter := NewServiceRegistryAdapter(app)
-	var dest interface{}
+	var dest any
 	err := adapter.GetService("test", &dest)
 	if err != nil {
 		t.Fatalf("GetService failed: %v", err)

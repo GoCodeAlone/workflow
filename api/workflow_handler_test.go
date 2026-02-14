@@ -75,9 +75,9 @@ func TestWorkflowCreate(t *testing.T) {
 		if w.Code != http.StatusCreated {
 			t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 		}
-		var resp map[string]interface{}
+		var resp map[string]any
 		_ = json.NewDecoder(w.Result().Body).Decode(&resp)
-		data, _ := resp["data"].(map[string]interface{})
+		data, _ := resp["data"].(map[string]any)
 		if data["name"] != "My Workflow" {
 			t.Fatalf("expected name 'My Workflow', got %v", data["name"])
 		}
@@ -341,9 +341,9 @@ func TestWorkflowStatus(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	var resp map[string]interface{}
+	var resp map[string]any
 	_ = json.NewDecoder(w.Result().Body).Decode(&resp)
-	data, _ := resp["data"].(map[string]interface{})
+	data, _ := resp["data"].(map[string]any)
 	if data["status"] != "active" {
 		t.Fatalf("expected status active, got %v", data["status"])
 	}

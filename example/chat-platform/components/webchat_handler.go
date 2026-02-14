@@ -4,8 +4,9 @@ package component
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
-	"math/rand"
 	"sync"
 	"time"
 )
@@ -34,9 +35,16 @@ func Stop(ctx context.Context) error {
 	return nil
 }
 
-func Execute(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+func secureID(prefix string) string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based ID if crypto/rand fails
+		return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%s-%s", prefix, hex.EncodeToString(b))
+}
 
+func Execute(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
 	action, _ := params["action"].(string)
 	if action == "" {
 		return nil, fmt.Errorf("missing required parameter: action")
@@ -50,11 +58,11 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 			return nil, fmt.Errorf("receive requires 'message' parameter")
 		}
 		if sessionId == "" {
-			sessionId = fmt.Sprintf("ws-%d", r.Int63())
+			sessionId = secureID("ws")
 		}
 		metadata, _ := params["metadata"].(map[string]interface{})
 		msg := map[string]interface{}{
-			"id":        fmt.Sprintf("msg-%d", r.Int63()),
+			"id":        secureID("msg"),
 			"sessionId": sessionId,
 			"body":      message,
 			"sender":    "texter",
@@ -81,7 +89,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 			return nil, fmt.Errorf("send requires 'sessionId' and 'message' parameters")
 		}
 		msg := map[string]interface{}{
-			"id":        fmt.Sprintf("msg-%d", r.Int63()),
+			"id":        secureID("msg"),
 			"sessionId": sessionId,
 			"body":      message,
 			"sender":    "responder",

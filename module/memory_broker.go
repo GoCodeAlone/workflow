@@ -179,8 +179,8 @@ func (c *inMemoryConsumer) Unsubscribe(topic string) error {
 // noopLogger is a simple logger implementation that does nothing
 type noopLogger struct{}
 
-func (l *noopLogger) Debug(format string, args ...interface{}) {}
-func (l *noopLogger) Info(format string, args ...interface{})  {}
-func (l *noopLogger) Warn(format string, args ...interface{})  {}
-func (l *noopLogger) Error(format string, args ...interface{}) {}
-func (l *noopLogger) Fatal(format string, args ...interface{}) {}
+func (l *noopLogger) Debug(format string, args ...any) {}
+func (l *noopLogger) Info(format string, args ...any)  {}
+func (l *noopLogger) Warn(format string, args ...any)  {}
+func (l *noopLogger) Error(format string, args ...any) {}
+func (l *noopLogger) Fatal(format string, args ...any) {}

@@ -407,7 +407,7 @@ func TestWorkflowUIHandler_HandleStatus_Default(t *testing.T) {
 			{Name: "a", Type: "http.server"},
 			{Name: "b", Type: "http.router"},
 		},
-		Workflows: map[string]interface{}{"w1": nil},
+		Workflows: map[string]any{"w1": nil},
 	}
 	h := NewWorkflowUIHandler(cfg)
 	mux := http.NewServeMux()
@@ -421,7 +421,7 @@ func TestWorkflowUIHandler_HandleStatus_Default(t *testing.T) {
 		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
 		t.Fatalf("failed to decode: %v", err)
 	}
@@ -438,8 +438,8 @@ func TestWorkflowUIHandler_HandleStatus_Default(t *testing.T) {
 
 func TestWorkflowUIHandler_HandleStatus_WithStatusFunc(t *testing.T) {
 	h := NewWorkflowUIHandler(nil)
-	h.SetStatusFunc(func() map[string]interface{} {
-		return map[string]interface{}{
+	h.SetStatusFunc(func() map[string]any {
+		return map[string]any{
 			"status": "custom",
 			"uptime": "10m",
 		}
@@ -451,7 +451,7 @@ func TestWorkflowUIHandler_HandleStatus_WithStatusFunc(t *testing.T) {
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
 		t.Fatalf("failed to decode: %v", err)
 	}
@@ -548,7 +548,7 @@ func TestWorkflowUIHandler_SetStatusFunc(t *testing.T) {
 	if h.engineStatus != nil {
 		t.Error("expected nil engineStatus initially")
 	}
-	h.SetStatusFunc(func() map[string]interface{} { return nil })
+	h.SetStatusFunc(func() map[string]any { return nil })
 	if h.engineStatus == nil {
 		t.Error("expected non-nil engineStatus after set")
 	}

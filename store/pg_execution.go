@@ -71,7 +71,7 @@ func (s *PGExecutionStore) ListExecutions(ctx context.Context, f ExecutionFilter
 	query := `SELECT id, workflow_id, trigger_type, trigger_data, status,
 		output_data, error_message, error_stack, started_at, completed_at, duration_ms, metadata
 		FROM workflow_executions WHERE 1=1`
-	args := []interface{}{}
+	args := []any{}
 	idx := 1
 
 	if f.WorkflowID != nil {

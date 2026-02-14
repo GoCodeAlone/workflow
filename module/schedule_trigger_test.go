@@ -39,17 +39,17 @@ func TestScheduleTrigger(t *testing.T) {
 	}
 
 	// Configure the trigger
-	config := map[string]interface{}{
-		"jobs": []interface{}{
-			map[string]interface{}{
+	config := map[string]any{
+		"jobs": []any{
+			map[string]any{
 				"cron":     "*/5 * * * *", // Every 5 minutes
 				"workflow": "test-workflow",
 				"action":   "test-action",
-				"params": map[string]interface{}{
+				"params": map[string]any{
 					"batch_size": 100,
 				},
 			},
-			map[string]interface{}{
+			map[string]any{
 				"cron":     "0 0 * * *", // Daily at midnight
 				"workflow": "daily-workflow",
 				"action":   "daily-action",

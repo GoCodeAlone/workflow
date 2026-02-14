@@ -171,7 +171,7 @@ func TestStateMachineStateConnector_UpdateResourceState_Success(t *testing.T) {
 		},
 	}
 	_ = engine.RegisterDefinition(def)
-	_, _ = engine.CreateWorkflow("order-flow", "order-1", map[string]interface{}{"item": "widget"})
+	_, _ = engine.CreateWorkflow("order-flow", "order-1", map[string]any{"item": "widget"})
 	c.stateMachines["order-flow"] = engine
 
 	err := c.UpdateResourceState("orders", "order-1")
@@ -193,7 +193,7 @@ func TestStateMachineStateConnector_GetResourceState_FromTracker(t *testing.T) {
 	c.stateTracker = NewStateTracker("tracker")
 
 	// Manually set state in tracker
-	c.stateTracker.SetState("orders", "order-1", "shipped", map[string]interface{}{"carrier": "ups"})
+	c.stateTracker.SetState("orders", "order-1", "shipped", map[string]any{"carrier": "ups"})
 
 	state, data, err := c.GetResourceState("orders", "order-1")
 	if err != nil {

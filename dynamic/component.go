@@ -45,10 +45,10 @@ type DynamicComponent struct {
 
 	// Extracted function references from interpreted code
 	nameFunc    func() string
-	initFunc    func(map[string]interface{}) error
+	initFunc    func(map[string]any) error
 	startFunc   func(context.Context) error
 	stopFunc    func(context.Context) error
-	executeFunc func(context.Context, map[string]interface{}) (map[string]interface{}, error)
+	executeFunc func(context.Context, map[string]any) (map[string]any, error)
 }
 
 // NewDynamicComponent creates a new unloaded dynamic component.
@@ -75,7 +75,7 @@ func (dc *DynamicComponent) Name() string {
 }
 
 // Init satisfies modular.Module. It delegates to the interpreted Init function.
-func (dc *DynamicComponent) Init(services map[string]interface{}) error {
+func (dc *DynamicComponent) Init(services map[string]any) error {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 	if dc.initFunc != nil {
@@ -120,7 +120,7 @@ func (dc *DynamicComponent) Stop(ctx context.Context) error {
 }
 
 // Execute runs the interpreted Execute function.
-func (dc *DynamicComponent) Execute(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
+func (dc *DynamicComponent) Execute(ctx context.Context, params map[string]any) (map[string]any, error) {
 	dc.mu.RLock()
 	defer dc.mu.RUnlock()
 	if dc.executeFunc == nil {
@@ -190,7 +190,7 @@ func (dc *DynamicComponent) extractFunctions(i *interp.Interpreter) {
 
 	// Try to extract Init(map[string]interface{}) error
 	if v, err := i.Eval("component.Init"); err == nil {
-		if fn, ok := v.Interface().(func(map[string]interface{}) error); ok {
+		if fn, ok := v.Interface().(func(map[string]any) error); ok {
 			dc.initFunc = fn
 		}
 	}
@@ -215,7 +215,7 @@ func (dc *DynamicComponent) extractFunctions(i *interp.Interpreter) {
 		// The Yaegi interpreter may return the function with concrete types
 		// that match the signature but not as the exact Go type. Use reflection
 		// to adapt.
-		if execFn, ok := fn.(func(context.Context, map[string]interface{}) (map[string]interface{}, error)); ok {
+		if execFn, ok := fn.(func(context.Context, map[string]any) (map[string]any, error)); ok {
 			dc.executeFunc = execFn
 		} else {
 			dc.executeFunc = dc.makeExecuteAdapter(v)
@@ -225,11 +225,11 @@ func (dc *DynamicComponent) extractFunctions(i *interp.Interpreter) {
 
 // makeExecuteAdapter uses reflection to create an Execute adapter when the
 // Yaegi-returned function doesn't directly type-assert.
-func (dc *DynamicComponent) makeExecuteAdapter(v reflect.Value) func(context.Context, map[string]interface{}) (map[string]interface{}, error) {
+func (dc *DynamicComponent) makeExecuteAdapter(v reflect.Value) func(context.Context, map[string]any) (map[string]any, error) {
 	if !v.IsValid() || v.Kind() != reflect.Func {
 		return nil
 	}
-	return func(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
+	return func(ctx context.Context, params map[string]any) (map[string]any, error) {
 		results := v.Call([]reflect.Value{
 			reflect.ValueOf(ctx),
 			reflect.ValueOf(params),
@@ -237,9 +237,9 @@ func (dc *DynamicComponent) makeExecuteAdapter(v reflect.Value) func(context.Con
 		if len(results) != 2 {
 			return nil, fmt.Errorf("Execute returned %d values, expected 2", len(results))
 		}
-		var res map[string]interface{}
+		var res map[string]any
 		if !results[0].IsNil() {
-			res = results[0].Interface().(map[string]interface{})
+			res = results[0].Interface().(map[string]any)
 		}
 		var err error
 		if !results[1].IsNil() {
@@ -260,7 +260,7 @@ func (dc *DynamicComponent) safeCallName() (name string) {
 	return dc.nameFunc()
 }
 
-func (dc *DynamicComponent) safeCallInit(services map[string]interface{}) (err error) {
+func (dc *DynamicComponent) safeCallInit(services map[string]any) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic in Init: %v", r)
@@ -287,7 +287,7 @@ func (dc *DynamicComponent) safeCallStop(ctx context.Context) (err error) {
 	return dc.stopFunc(ctx)
 }
 
-func (dc *DynamicComponent) safeCallExecute(ctx context.Context, params map[string]interface{}) (result map[string]interface{}, err error) {
+func (dc *DynamicComponent) safeCallExecute(ctx context.Context, params map[string]any) (result map[string]any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			result = nil

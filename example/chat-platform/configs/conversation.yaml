@@ -38,9 +38,10 @@ modules:
   - name: cors
     type: http.middleware.cors
     config:
-      allowedOrigins: ["*"]
+      allowedOrigins: ["http://gateway:8080", "http://localhost:8080", "https://localhost:8080"]
       allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
       allowedHeaders: ["Content-Type", "Authorization"]
+      maxAge: 3600
     dependsOn:
       - router
 

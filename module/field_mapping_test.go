@@ -9,7 +9,7 @@ func TestFieldMapping_Set_And_Resolve(t *testing.T) {
 	fm := NewFieldMapping()
 	fm.Set("body", "body", "Body", "content")
 
-	data := map[string]interface{}{"Body": "hello"}
+	data := map[string]any{"Body": "hello"}
 
 	val, ok := fm.Resolve(data, "body")
 	if !ok {
@@ -24,7 +24,7 @@ func TestFieldMapping_Resolve_PrimaryFirst(t *testing.T) {
 	fm := NewFieldMapping()
 	fm.Set("body", "body", "Body", "content")
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"body":    "primary",
 		"Body":    "secondary",
 		"content": "tertiary",
@@ -43,7 +43,7 @@ func TestFieldMapping_Resolve_NotFound(t *testing.T) {
 	fm := NewFieldMapping()
 	fm.Set("body", "body", "Body")
 
-	data := map[string]interface{}{"content": "hello"}
+	data := map[string]any{"content": "hello"}
 
 	_, ok := fm.Resolve(data, "body")
 	if ok {
@@ -55,7 +55,7 @@ func TestFieldMapping_Resolve_NoMapping(t *testing.T) {
 	fm := NewFieldMapping()
 	// No mapping set for "body" — should fall back to using "body" as literal key
 
-	data := map[string]interface{}{"body": "hello"}
+	data := map[string]any{"body": "hello"}
 
 	val, ok := fm.Resolve(data, "body")
 	if !ok {
@@ -70,7 +70,7 @@ func TestFieldMapping_ResolveString(t *testing.T) {
 	fm := NewFieldMapping()
 	fm.Set("state", "state")
 
-	data := map[string]interface{}{"state": "active"}
+	data := map[string]any{"state": "active"}
 	got := fm.ResolveString(data, "state")
 	if got != "active" {
 		t.Errorf("expected 'active', got %q", got)
@@ -94,8 +94,8 @@ func TestFieldMapping_ResolveSlice(t *testing.T) {
 	fm := NewFieldMapping()
 	fm.Set("tags", "tags")
 
-	tags := []interface{}{"a", "b"}
-	data := map[string]interface{}{"tags": tags}
+	tags := []any{"a", "b"}
+	data := map[string]any{"tags": tags}
 
 	got := fm.ResolveSlice(data, "tags")
 	if len(got) != 2 {
@@ -113,7 +113,7 @@ func TestFieldMapping_SetValue(t *testing.T) {
 	fm := NewFieldMapping()
 	fm.Set("body", "body", "Body")
 
-	data := make(map[string]interface{})
+	data := make(map[string]any)
 	fm.SetValue(data, "body", "hello")
 
 	if data["body"] != "hello" {
@@ -127,7 +127,7 @@ func TestFieldMapping_SetValue(t *testing.T) {
 func TestFieldMapping_SetValue_NoMapping(t *testing.T) {
 	fm := NewFieldMapping()
 
-	data := make(map[string]interface{})
+	data := make(map[string]any)
 	fm.SetValue(data, "unmapped", "value")
 
 	if data["unmapped"] != "value" {
@@ -203,10 +203,10 @@ func TestFieldMapping_Clone(t *testing.T) {
 }
 
 func TestFieldMappingFromConfig(t *testing.T) {
-	cfg := map[string]interface{}{
-		"state": "status",                                    // single string
-		"body":  []interface{}{"content", "Body", "message"}, // string slice
-		"tags":  []string{"labels", "tags"},                  // native string slice
+	cfg := map[string]any{
+		"state": "status",                            // single string
+		"body":  []any{"content", "Body", "message"}, // string slice
+		"tags":  []string{"labels", "tags"},          // native string slice
 	}
 
 	fm := FieldMappingFromConfig(cfg)
@@ -228,7 +228,7 @@ func TestFieldMappingFromConfig_Nil(t *testing.T) {
 		t.Fatal("expected non-nil FieldMapping from nil config")
 	}
 	// Should work as pass-through
-	data := map[string]interface{}{"foo": "bar"}
+	data := map[string]any{"foo": "bar"}
 	val, ok := fm.Resolve(data, "foo")
 	if !ok || val != "bar" {
 		t.Error("expected pass-through resolution for empty mapping")
@@ -258,7 +258,7 @@ func TestFieldMapping_JSON_RoundTrip(t *testing.T) {
 	}
 
 	// Verify fallback resolution works after roundtrip
-	testData := map[string]interface{}{"Body": "hello"}
+	testData := map[string]any{"Body": "hello"}
 	val, ok := fm2.Resolve(testData, "body")
 	if !ok || val != "hello" {
 		t.Error("fallback resolution broken after JSON roundtrip")
@@ -280,7 +280,7 @@ func TestDefaultRESTFieldMapping(t *testing.T) {
 	}
 
 	// Verify body fallback chain works
-	data := map[string]interface{}{"content": "hello"}
+	data := map[string]any{"content": "hello"}
 	val, ok := fm.Resolve(data, "body")
 	if !ok || val != "hello" {
 		t.Error("expected body fallback chain to resolve 'content'")

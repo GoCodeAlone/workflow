@@ -173,7 +173,7 @@ func TestDashboardHandler_System_NoWorkflows(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	body := decodeBody(t, w.Result())
-	data, _ := body["data"].(map[string]interface{})
+	data, _ := body["data"].(map[string]any)
 	if data["total_workflows"] != float64(0) {
 		t.Fatalf("expected 0 workflows, got %v", data["total_workflows"])
 	}
@@ -207,7 +207,7 @@ func TestDashboardHandler_System_WithWorkflows(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	body := decodeBody(t, w.Result())
-	data, _ := body["data"].(map[string]interface{})
+	data, _ := body["data"].(map[string]any)
 	if data["total_workflows"] != float64(1) {
 		t.Fatalf("expected 1 workflow, got %v", data["total_workflows"])
 	}

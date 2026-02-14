@@ -256,7 +256,7 @@ func TestEventProcessor_ProcessEvent_MaxOccurs(t *testing.T) {
 	now := time.Now()
 
 	// 3 events exceed MaxOccurs - should NOT match after 3rd
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_ = ep.ProcessEvent(ctx, EventData{
 			EventType: "event",
 			Timestamp: now,
@@ -426,7 +426,7 @@ func TestEventProcessor_Init(t *testing.T) {
 	}
 
 	// Verify service was registered
-	var svc interface{}
+	var svc any
 	if err := app.GetService("test-ep", &svc); err != nil {
 		t.Fatalf("expected service to be registered: %v", err)
 	}

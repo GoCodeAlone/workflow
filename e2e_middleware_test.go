@@ -23,26 +23,26 @@ func TestE2E_Middleware_Auth(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "auth-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "auth-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "auth-router", Type: "http.router", DependsOn: []string{"auth-server"}},
-			{Name: "auth-handler", Type: "http.handler", DependsOn: []string{"auth-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
-			{Name: "auth-mw", Type: "http.middleware.auth", Config: map[string]interface{}{"authType": "Bearer"}},
+			{Name: "auth-handler", Type: "http.handler", DependsOn: []string{"auth-router"}, Config: map[string]any{"contentType": "application/json"}},
+			{Name: "auth-mw", Type: "http.middleware.auth", Config: map[string]any{"authType": "Bearer"}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "auth-server",
 				"router": "auth-router",
-				"routes": []interface{}{
-					map[string]interface{}{
+				"routes": []any{
+					map[string]any{
 						"method":      "GET",
 						"path":        "/api/protected",
 						"handler":     "auth-handler",
-						"middlewares": []interface{}{"auth-mw"},
+						"middlewares": []any{"auth-mw"},
 					},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -65,12 +65,11 @@ func TestE2E_Middleware_Auth(t *testing.T) {
 	if authMW == nil {
 		t.Fatal("AuthMiddleware not found in service registry")
 	}
-	authMW.AddProvider(map[string]map[string]interface{}{
+	authMW.AddProvider(map[string]map[string]any{
 		"valid-test-token": {"user": "testuser", "role": "admin"},
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -150,29 +149,29 @@ func TestE2E_Middleware_RateLimit(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "rl-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "rl-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "rl-router", Type: "http.router", DependsOn: []string{"rl-server"}},
-			{Name: "rl-handler", Type: "http.handler", DependsOn: []string{"rl-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
-			{Name: "rl-mw", Type: "http.middleware.ratelimit", Config: map[string]interface{}{
+			{Name: "rl-handler", Type: "http.handler", DependsOn: []string{"rl-router"}, Config: map[string]any{"contentType": "application/json"}},
+			{Name: "rl-mw", Type: "http.middleware.ratelimit", Config: map[string]any{
 				"requestsPerMinute": float64(60),
 				"burstSize":         float64(burstSize),
 			}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "rl-server",
 				"router": "rl-router",
-				"routes": []interface{}{
-					map[string]interface{}{
+				"routes": []any{
+					map[string]any{
 						"method":      "GET",
 						"path":        "/api/limited",
 						"handler":     "rl-handler",
-						"middlewares": []interface{}{"rl-mw"},
+						"middlewares": []any{"rl-mw"},
 					},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -184,8 +183,7 @@ func TestE2E_Middleware_RateLimit(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -198,7 +196,7 @@ func TestE2E_Middleware_RateLimit(t *testing.T) {
 
 	// Send burstSize+1 requests. The first burstSize should succeed (200),
 	// the next should be rate-limited (429).
-	for i := 0; i < burstSize; i++ {
+	for i := range burstSize {
 		resp, err := client.Get(baseURL + "/api/limited")
 		if err != nil {
 			t.Fatalf("Request %d failed: %v", i, err)
@@ -233,29 +231,29 @@ func TestE2E_Middleware_CORS(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "cors-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "cors-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "cors-router", Type: "http.router", DependsOn: []string{"cors-server"}},
-			{Name: "cors-handler", Type: "http.handler", DependsOn: []string{"cors-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
-			{Name: "cors-mw", Type: "http.middleware.cors", Config: map[string]interface{}{
-				"allowedOrigins": []interface{}{"http://allowed.example.com"},
-				"allowedMethods": []interface{}{"GET", "POST"},
+			{Name: "cors-handler", Type: "http.handler", DependsOn: []string{"cors-router"}, Config: map[string]any{"contentType": "application/json"}},
+			{Name: "cors-mw", Type: "http.middleware.cors", Config: map[string]any{
+				"allowedOrigins": []any{"http://allowed.example.com"},
+				"allowedMethods": []any{"GET", "POST"},
 			}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "cors-server",
 				"router": "cors-router",
-				"routes": []interface{}{
-					map[string]interface{}{
+				"routes": []any{
+					map[string]any{
 						"method":      "GET",
 						"path":        "/api/cors-test",
 						"handler":     "cors-handler",
-						"middlewares": []interface{}{"cors-mw"},
+						"middlewares": []any{"cors-mw"},
 					},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -267,8 +265,7 @@ func TestE2E_Middleware_CORS(t *testing.T) {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)
@@ -348,35 +345,35 @@ func TestE2E_Middleware_CORS(t *testing.T) {
 
 		pfCfg := &config.WorkflowConfig{
 			Modules: []config.ModuleConfig{
-				{Name: "pf-server", Type: "http.server", Config: map[string]interface{}{"address": pfAddr}},
+				{Name: "pf-server", Type: "http.server", Config: map[string]any{"address": pfAddr}},
 				{Name: "pf-router", Type: "http.router", DependsOn: []string{"pf-server"}},
-				{Name: "pf-handler", Type: "http.handler", DependsOn: []string{"pf-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
-				{Name: "pf-cors", Type: "http.middleware.cors", Config: map[string]interface{}{
-					"allowedOrigins": []interface{}{"http://allowed.example.com"},
-					"allowedMethods": []interface{}{"GET", "POST", "OPTIONS"},
+				{Name: "pf-handler", Type: "http.handler", DependsOn: []string{"pf-router"}, Config: map[string]any{"contentType": "application/json"}},
+				{Name: "pf-cors", Type: "http.middleware.cors", Config: map[string]any{
+					"allowedOrigins": []any{"http://allowed.example.com"},
+					"allowedMethods": []any{"GET", "POST", "OPTIONS"},
 				}},
 			},
-			Workflows: map[string]interface{}{
-				"http": map[string]interface{}{
+			Workflows: map[string]any{
+				"http": map[string]any{
 					"server": "pf-server",
 					"router": "pf-router",
-					"routes": []interface{}{
-						map[string]interface{}{
+					"routes": []any{
+						map[string]any{
 							"method":      "GET",
 							"path":        "/api/pf-test",
 							"handler":     "pf-handler",
-							"middlewares": []interface{}{"pf-cors"},
+							"middlewares": []any{"pf-cors"},
 						},
-						map[string]interface{}{
+						map[string]any{
 							"method":      "OPTIONS",
 							"path":        "/api/pf-test",
 							"handler":     "pf-handler",
-							"middlewares": []interface{}{"pf-cors"},
+							"middlewares": []any{"pf-cors"},
 						},
 					},
 				},
 			},
-			Triggers: map[string]interface{}{},
+			Triggers: map[string]any{},
 		}
 
 		pfLogger := &mockLogger{}
@@ -388,8 +385,7 @@ func TestE2E_Middleware_CORS(t *testing.T) {
 			t.Fatalf("BuildFromConfig failed: %v", err)
 		}
 
-		pfCtx, pfCancel := context.WithCancel(context.Background())
-		defer pfCancel()
+		pfCtx := t.Context()
 
 		if err := pfEngine.Start(pfCtx); err != nil {
 			t.Fatalf("Engine start failed: %v", err)
@@ -495,36 +491,36 @@ func TestE2E_Middleware_FullChain(t *testing.T) {
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "chain-server", Type: "http.server", Config: map[string]interface{}{"address": addr}},
+			{Name: "chain-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "chain-router", Type: "http.router", DependsOn: []string{"chain-server"}},
-			{Name: "chain-handler", Type: "http.handler", DependsOn: []string{"chain-router"}, Config: map[string]interface{}{"contentType": "application/json"}},
-			{Name: "chain-cors", Type: "http.middleware.cors", Config: map[string]interface{}{
-				"allowedOrigins": []interface{}{"http://app.example.com"},
-				"allowedMethods": []interface{}{"GET", "POST"},
+			{Name: "chain-handler", Type: "http.handler", DependsOn: []string{"chain-router"}, Config: map[string]any{"contentType": "application/json"}},
+			{Name: "chain-cors", Type: "http.middleware.cors", Config: map[string]any{
+				"allowedOrigins": []any{"http://app.example.com"},
+				"allowedMethods": []any{"GET", "POST"},
 			}},
-			{Name: "chain-rl", Type: "http.middleware.ratelimit", Config: map[string]interface{}{
+			{Name: "chain-rl", Type: "http.middleware.ratelimit", Config: map[string]any{
 				"requestsPerMinute": float64(60),
 				"burstSize":         float64(burstSize),
 			}},
-			{Name: "chain-auth", Type: "http.middleware.auth", Config: map[string]interface{}{"authType": "Bearer"}},
-			{Name: "chain-log", Type: "http.middleware.logging", Config: map[string]interface{}{"logLevel": "info"}},
+			{Name: "chain-auth", Type: "http.middleware.auth", Config: map[string]any{"authType": "Bearer"}},
+			{Name: "chain-log", Type: "http.middleware.logging", Config: map[string]any{"logLevel": "info"}},
 		},
-		Workflows: map[string]interface{}{
-			"http": map[string]interface{}{
+		Workflows: map[string]any{
+			"http": map[string]any{
 				"server": "chain-server",
 				"router": "chain-router",
-				"routes": []interface{}{
-					map[string]interface{}{
+				"routes": []any{
+					map[string]any{
 						"method":  "GET",
 						"path":    "/api/chained",
 						"handler": "chain-handler",
 						// Order: CORS first (outermost), then rate-limit, then auth, then logging (innermost)
-						"middlewares": []interface{}{"chain-cors", "chain-rl", "chain-auth", "chain-log"},
+						"middlewares": []any{"chain-cors", "chain-rl", "chain-auth", "chain-log"},
 					},
 				},
 			},
 		},
-		Triggers: map[string]interface{}{},
+		Triggers: map[string]any{},
 	}
 
 	logger := &mockLogger{}
@@ -547,12 +543,11 @@ func TestE2E_Middleware_FullChain(t *testing.T) {
 	if authMW == nil {
 		t.Fatal("AuthMiddleware not found in service registry")
 	}
-	authMW.AddProvider(map[string]map[string]interface{}{
+	authMW.AddProvider(map[string]map[string]any{
 		"chain-token": {"user": "chainuser"},
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("Engine start failed: %v", err)

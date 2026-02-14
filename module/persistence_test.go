@@ -50,7 +50,7 @@ func TestPersistence_WorkflowInstance_Roundtrip(t *testing.T) {
 		WorkflowType:  "order-workflow",
 		CurrentState:  "processing",
 		PreviousState: "new",
-		Data:          map[string]interface{}{"customer": "alice"},
+		Data:          map[string]any{"customer": "alice"},
 		StartTime:     now,
 		LastUpdated:   now,
 		Completed:     false,
@@ -98,7 +98,7 @@ func TestPersistence_WorkflowInstance_Upsert(t *testing.T) {
 		ID:           "wf-1",
 		WorkflowType: "order-workflow",
 		CurrentState: "new",
-		Data:         map[string]interface{}{},
+		Data:         map[string]any{},
 		StartTime:    now,
 		LastUpdated:  now,
 	}
@@ -131,7 +131,7 @@ func TestPersistence_WorkflowInstance_Upsert(t *testing.T) {
 func TestPersistence_Resource_Roundtrip(t *testing.T) {
 	ps := newTestPersistenceStore(t)
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"name":  "Widget",
 		"price": float64(9.99),
 		"state": "active",
@@ -164,10 +164,10 @@ func TestPersistence_Resource_Roundtrip(t *testing.T) {
 func TestPersistence_Resource_Upsert(t *testing.T) {
 	ps := newTestPersistenceStore(t)
 
-	if err := ps.SaveResource("products", "prod-1", map[string]interface{}{"name": "Old"}); err != nil {
+	if err := ps.SaveResource("products", "prod-1", map[string]any{"name": "Old"}); err != nil {
 		t.Fatalf("first save failed: %v", err)
 	}
-	if err := ps.SaveResource("products", "prod-1", map[string]interface{}{"name": "New"}); err != nil {
+	if err := ps.SaveResource("products", "prod-1", map[string]any{"name": "New"}); err != nil {
 		t.Fatalf("second save failed: %v", err)
 	}
 

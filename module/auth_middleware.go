@@ -23,7 +23,7 @@ type AuthMiddleware struct {
 
 // AuthProvider defines methods for authentication providers
 type AuthProvider interface {
-	Authenticate(token string) (bool, map[string]interface{}, error)
+	Authenticate(token string) (bool, map[string]any, error)
 }
 
 // NewAuthMiddleware creates a new authentication middleware
@@ -94,7 +94,7 @@ func (m *AuthMiddleware) RegisterProvider(provider AuthProvider) {
 }
 
 // AddProvider creates and registers a simple token-based auth provider
-func (m *AuthMiddleware) AddProvider(validTokens map[string]map[string]interface{}) {
+func (m *AuthMiddleware) AddProvider(validTokens map[string]map[string]any) {
 	m.RegisterProvider(&SimpleTokenProvider{
 		validTokens: validTokens,
 	})
@@ -112,11 +112,11 @@ func (m *AuthMiddleware) Stop(ctx context.Context) error {
 
 // SimpleTokenProvider implements a simple token-based auth provider
 type SimpleTokenProvider struct {
-	validTokens map[string]map[string]interface{}
+	validTokens map[string]map[string]any
 }
 
 // Authenticate checks if the token is valid and returns associated claims
-func (p *SimpleTokenProvider) Authenticate(token string) (bool, map[string]interface{}, error) {
+func (p *SimpleTokenProvider) Authenticate(token string) (bool, map[string]any, error) {
 	if claims, ok := p.validTokens[token]; ok {
 		return true, claims, nil
 	}

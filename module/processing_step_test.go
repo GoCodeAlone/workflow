@@ -16,11 +16,11 @@ type mockExecutor struct {
 }
 
 type executorResult struct {
-	result map[string]interface{}
+	result map[string]any
 	err    error
 }
 
-func (m *mockExecutor) Execute(_ context.Context, _ map[string]interface{}) (map[string]interface{}, error) {
+func (m *mockExecutor) Execute(_ context.Context, _ map[string]any) (map[string]any, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	idx := m.calls
@@ -46,10 +46,10 @@ type mockSMEngine struct {
 type smTriggerCall struct {
 	workflowID string
 	transition string
-	data       map[string]interface{}
+	data       map[string]any
 }
 
-func (m *mockSMEngine) recordTransition(workflowID, transition string, data map[string]interface{}) {
+func (m *mockSMEngine) recordTransition(workflowID, transition string, data map[string]any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.transitions = append(m.transitions, smTriggerCall{
@@ -106,7 +106,7 @@ func newTestProcessingStep(executor Executor, config ProcessingStepConfig) (*Pro
 func TestProcessingStep_SuccessOnFirstTry(t *testing.T) {
 	executor := &mockExecutor{
 		results: []executorResult{
-			{result: map[string]interface{}{"status": "ok"}, err: nil},
+			{result: map[string]any{"status": "ok"}, err: nil},
 		},
 	}
 
@@ -132,7 +132,7 @@ func TestProcessingStep_SuccessOnFirstTry(t *testing.T) {
 		FromState:    "pending",
 		ToState:      "processing",
 		Timestamp:    time.Now(),
-		Data:         map[string]interface{}{"order_id": "123"},
+		Data:         map[string]any{"order_id": "123"},
 	}
 
 	err = ps.HandleTransition(context.Background(), event)
@@ -165,7 +165,7 @@ func TestProcessingStep_RetryOnTransientError(t *testing.T) {
 		results: []executorResult{
 			{result: nil, err: fmt.Errorf("transient error 1")},
 			{result: nil, err: fmt.Errorf("transient error 2")},
-			{result: map[string]interface{}{"status": "ok"}, err: nil},
+			{result: map[string]any{"status": "ok"}, err: nil},
 		},
 	}
 
@@ -298,10 +298,10 @@ type slowMockExecutor struct {
 	delay time.Duration
 }
 
-func (s *slowMockExecutor) Execute(ctx context.Context, _ map[string]interface{}) (map[string]interface{}, error) {
+func (s *slowMockExecutor) Execute(ctx context.Context, _ map[string]any) (map[string]any, error) {
 	select {
 	case <-time.After(s.delay):
-		return map[string]interface{}{"status": "ok"}, nil
+		return map[string]any{"status": "ok"}, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}

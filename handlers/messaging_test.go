@@ -56,9 +56,9 @@ func TestMessagingWorkflowHandler_ConfigureWorkflow_NoBroker(t *testing.T) {
 	h := NewMessagingWorkflowHandler()
 	app := CreateMockApplication()
 
-	config := map[string]interface{}{
-		"subscriptions": []interface{}{
-			map[string]interface{}{
+	config := map[string]any{
+		"subscriptions": []any{
+			map[string]any{
 				"topic":   "events",
 				"handler": "myhandler",
 			},
@@ -77,7 +77,7 @@ func TestMessagingWorkflowHandler_ConfigureWorkflow_NoSubscriptions(t *testing.T
 	broker := workflowmodule.NewInMemoryMessageBroker("test-broker")
 	app.services["test-broker"] = broker
 
-	config := map[string]interface{}{
+	config := map[string]any{
 		"noSubscriptions": true,
 	}
 	err := h.ConfigureWorkflow(app, config)
@@ -93,8 +93,8 @@ func TestMessagingWorkflowHandler_ConfigureWorkflow_InvalidSubscription(t *testi
 	broker := workflowmodule.NewInMemoryMessageBroker("test-broker")
 	app.services["test-broker"] = broker
 
-	config := map[string]interface{}{
-		"subscriptions": []interface{}{
+	config := map[string]any{
+		"subscriptions": []any{
 			"not a map",
 		},
 	}
@@ -111,9 +111,9 @@ func TestMessagingWorkflowHandler_ConfigureWorkflow_IncompleteSubscription(t *te
 	broker := workflowmodule.NewInMemoryMessageBroker("test-broker")
 	app.services["test-broker"] = broker
 
-	config := map[string]interface{}{
-		"subscriptions": []interface{}{
-			map[string]interface{}{
+	config := map[string]any{
+		"subscriptions": []any{
+			map[string]any{
 				"topic": "events",
 				// missing handler
 			},
@@ -181,7 +181,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_SendMessage(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"message": "hello world",
 	}
 
@@ -223,8 +223,8 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_SendJSONMessage(t *testing.T) 
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
-	data := map[string]interface{}{
-		"message": map[string]interface{}{
+	data := map[string]any{
+		"message": map[string]any{
 			"key": "value",
 		},
 	}
@@ -240,7 +240,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_SendJSONMessage(t *testing.T) 
 	if received == nil {
 		t.Fatal("expected message")
 	}
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal(received, &parsed); err != nil {
 		t.Fatalf("received non-JSON: %s", string(received))
 	}
@@ -270,7 +270,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_SendDataAsPayload(t *testing.T
 	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	// No "message" field - should use entire data as payload
-	data := map[string]interface{}{
+	data := map[string]any{
 		"order_id": "123",
 		"status":   "created",
 	}
@@ -283,7 +283,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_SendDataAsPayload(t *testing.T
 	if received == nil {
 		t.Fatal("expected message")
 	}
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	_ = json.Unmarshal(received, &parsed)
 	if parsed["order_id"] != "123" {
 		t.Errorf("expected order_id='123', got '%v'", parsed["order_id"])
@@ -311,7 +311,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_BrokerTopicFormat(t *testing.T
 	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
 	// Use "broker:topic" format in action
-	data := map[string]interface{}{"message": "test"}
+	data := map[string]any{"message": "test"}
 	result, err := h.ExecuteWorkflow(ctx, "messaging", "mybroker:events", data)
 	if err != nil {
 		t.Fatalf("ExecuteWorkflow failed: %v", err)
@@ -344,7 +344,7 @@ func TestMessagingWorkflowHandler_ExecuteWorkflow_ByteMessage(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, app)
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"message": []byte("byte payload"),
 	}
 
@@ -376,8 +376,8 @@ func createMinimalBrokerApp(t *testing.T) modular.Application {
 
 type testBrokerLogger struct{}
 
-func (l *testBrokerLogger) Debug(msg string, args ...interface{}) {}
-func (l *testBrokerLogger) Info(msg string, args ...interface{})  {}
-func (l *testBrokerLogger) Warn(msg string, args ...interface{})  {}
-func (l *testBrokerLogger) Error(msg string, args ...interface{}) {}
-func (l *testBrokerLogger) Fatal(msg string, args ...interface{}) {}
+func (l *testBrokerLogger) Debug(msg string, args ...any) {}
+func (l *testBrokerLogger) Info(msg string, args ...any)  {}
+func (l *testBrokerLogger) Warn(msg string, args ...any)  {}
+func (l *testBrokerLogger) Error(msg string, args ...any) {}
+func (l *testBrokerLogger) Fatal(msg string, args ...any) {}

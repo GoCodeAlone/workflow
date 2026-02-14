@@ -144,14 +144,14 @@ func newTestAuthHandler() (*AuthHandler, *mockUserStore, *mockSessionStore) {
 	return h, users, sessions
 }
 
-func makeJSON(v interface{}) *bytes.Buffer {
+func makeJSON(v any) *bytes.Buffer {
 	b, _ := json.Marshal(v)
 	return bytes.NewBuffer(b)
 }
 
-func decodeBody(t *testing.T, resp *http.Response) map[string]interface{} {
+func decodeBody(t *testing.T, resp *http.Response) map[string]any {
 	t.Helper()
-	var body map[string]interface{}
+	var body map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestRegister(t *testing.T) {
 			t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 		}
 		body := decodeBody(t, w.Result())
-		data, _ := body["data"].(map[string]interface{})
+		data, _ := body["data"].(map[string]any)
 		if data["access_token"] == nil {
 			t.Fatal("expected access_token in response")
 		}
@@ -250,7 +250,7 @@ func TestLogin(t *testing.T) {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
 		body := decodeBody(t, w.Result())
-		data, _ := body["data"].(map[string]interface{})
+		data, _ := body["data"].(map[string]any)
 		if data["access_token"] == nil {
 			t.Fatal("expected access_token")
 		}
@@ -375,7 +375,7 @@ func TestMe(t *testing.T) {
 			t.Fatalf("expected 200, got %d", w.Code)
 		}
 		body := decodeBody(t, w.Result())
-		data, _ := body["data"].(map[string]interface{})
+		data, _ := body["data"].(map[string]any)
 		if data["email"] != "me@example.com" {
 			t.Fatalf("expected email me@example.com, got %v", data["email"])
 		}

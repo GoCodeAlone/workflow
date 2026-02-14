@@ -162,9 +162,9 @@ func (m *MockGenerator) GenerateWorkflow(ctx context.Context, req GenerateReques
 	return &GenerateResponse{
 		Workflow: &config.WorkflowConfig{
 			Modules: []config.ModuleConfig{
-				{Name: "test-server", Type: "http.server", Config: map[string]interface{}{"address": ":8080"}},
+				{Name: "test-server", Type: "http.server", Config: map[string]any{"address": ":8080"}},
 			},
-			Workflows: map[string]interface{}{},
+			Workflows: map[string]any{},
 		},
 		Explanation: "test workflow",
 	}, nil

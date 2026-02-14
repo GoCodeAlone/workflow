@@ -56,8 +56,7 @@ func TestCronScheduler_Init(t *testing.T) {
 func TestCronScheduler_StartStop(t *testing.T) {
 	s := NewCronScheduler("test", "* * * * *")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	err := s.Start(ctx)
 	if err != nil {

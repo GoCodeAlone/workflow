@@ -25,7 +25,7 @@ func registerUser(t *testing.T, j *JWTAuthModule, email, name, password string) 
 	if w.Code != http.StatusCreated {
 		t.Fatalf("register failed: status %d, body: %s", w.Code, w.Body.String())
 	}
-	var resp map[string]interface{}
+	var resp map[string]any
 	json.NewDecoder(w.Body).Decode(&resp)
 	return resp["token"].(string)
 }
@@ -57,12 +57,12 @@ func TestJWTAuth_Register(t *testing.T) {
 		t.Errorf("expected status %d, got %d; body: %s", http.StatusCreated, w.Code, w.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp["token"] == nil || resp["token"] == "" {
 		t.Error("expected token in response")
 	}
-	user := resp["user"].(map[string]interface{})
+	user := resp["user"].(map[string]any)
 	if user["email"] != "test@example.com" {
 		t.Errorf("expected email 'test@example.com', got %v", user["email"])
 	}
@@ -109,7 +109,7 @@ func TestJWTAuth_Login(t *testing.T) {
 		t.Errorf("expected status %d, got %d; body: %s", http.StatusOK, w.Code, w.Body.String())
 	}
 
-	var resp map[string]interface{}
+	var resp map[string]any
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp["token"] == nil || resp["token"] == "" {
 		t.Error("expected token in login response")

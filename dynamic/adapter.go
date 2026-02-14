@@ -31,9 +31,9 @@ func (a *ModuleAdapter) Name() string {
 // Init initializes the adapter by collecting required services and passing
 // them to the underlying component, then registering provided services.
 func (a *ModuleAdapter) Init(app modular.Application) error {
-	services := make(map[string]interface{})
+	services := make(map[string]any)
 	for _, svcName := range a.requires {
-		var svc interface{}
+		var svc any
 		if err := app.GetService(svcName, &svc); err == nil {
 			services[svcName] = svc
 		}
@@ -63,7 +63,7 @@ func (a *ModuleAdapter) SetRequires(services []string) {
 }
 
 // Execute delegates execution to the underlying component.
-func (a *ModuleAdapter) Execute(ctx context.Context, params map[string]interface{}) (map[string]interface{}, error) {
+func (a *ModuleAdapter) Execute(ctx context.Context, params map[string]any) (map[string]any, error) {
 	return a.component.Execute(ctx, params)
 }
 

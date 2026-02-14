@@ -24,9 +24,9 @@ func (m *mockGenerator) GenerateWorkflow(_ context.Context, _ ai.GenerateRequest
 	return &ai.GenerateResponse{
 		Workflow: &config.WorkflowConfig{
 			Modules: []config.ModuleConfig{
-				{Name: "test-server", Type: "http.server", Config: map[string]interface{}{"address": ":8080"}},
+				{Name: "test-server", Type: "http.server", Config: map[string]any{"address": ":8080"}},
 			},
-			Workflows: map[string]interface{}{},
+			Workflows: map[string]any{},
 		},
 		Explanation: "test workflow",
 	}, nil
@@ -113,7 +113,7 @@ func TestMuxRoutesRegistered(t *testing.T) {
 		name   string
 		method string
 		path   string
-		body   interface{}
+		body   any
 	}{
 		{"ai generate", http.MethodPost, "/api/ai/generate", ai.GenerateRequest{Intent: "test"}},
 		{"ai suggest", http.MethodPost, "/api/ai/suggest", map[string]string{"useCase": "test"}},
@@ -182,11 +182,11 @@ func TestBuildEngine_WithConfig(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "web-server", Type: "http.server", Config: map[string]interface{}{"address": ":9090"}},
-			{Name: "web-router", Type: "http.router", Config: map[string]interface{}{"prefix": "/api"}, DependsOn: []string{"web-server"}},
+			{Name: "web-server", Type: "http.server", Config: map[string]any{"address": ":9090"}},
+			{Name: "web-router", Type: "http.router", Config: map[string]any{"prefix": "/api"}, DependsOn: []string{"web-server"}},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	engine, loader, registry, err := buildEngine(cfg, logger)
@@ -239,14 +239,14 @@ func TestBuildMux_AllRoutesRegistered(t *testing.T) {
 		name   string
 		method string
 		path   string
-		body   interface{}
+		body   any
 	}{
 		{"ai providers", http.MethodGet, "/api/ai/providers", nil},
 		{"ai generate", http.MethodPost, "/api/ai/generate", ai.GenerateRequest{Intent: "test"}},
 		{"ai suggest", http.MethodPost, "/api/ai/suggest", map[string]string{"useCase": "test"}},
 		{"dynamic components", http.MethodGet, "/api/dynamic/components", nil},
 		{"workflow config", http.MethodGet, "/api/workflow/config", nil},
-		{"workflow validate", http.MethodPost, "/api/workflow/validate", map[string]interface{}{"modules": []interface{}{}}},
+		{"workflow validate", http.MethodPost, "/api/workflow/validate", map[string]any{"modules": []any{}}},
 		{"workflow modules", http.MethodGet, "/api/workflow/modules", nil},
 	}
 
@@ -553,8 +553,8 @@ func TestSetup_EngineError(t *testing.T) {
 		Modules: []config.ModuleConfig{
 			{Name: "bad", Type: "nonexistent.type"},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	_, err := setup(logger, cfg)
@@ -569,8 +569,8 @@ func TestBuildEngine_InvalidModuleType(t *testing.T) {
 		Modules: []config.ModuleConfig{
 			{Name: "bad-module", Type: "nonexistent.type.that.does.not.exist"},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	_, _, _, err := buildEngine(cfg, logger)
@@ -587,10 +587,10 @@ func TestSetup_WithModules(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
-			{Name: "srv", Type: "http.server", Config: map[string]interface{}{"address": ":7070"}},
+			{Name: "srv", Type: "http.server", Config: map[string]any{"address": ":7070"}},
 		},
-		Workflows: map[string]interface{}{},
-		Triggers:  map[string]interface{}{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
 	}
 
 	app, err := setup(logger, cfg)

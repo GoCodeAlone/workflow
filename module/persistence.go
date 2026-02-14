@@ -12,12 +12,12 @@ import (
 
 // UserRecord represents a user for persistence
 type UserRecord struct {
-	ID           string                 `json:"id"`
-	Email        string                 `json:"email"`
-	Name         string                 `json:"name"`
-	PasswordHash string                 `json:"-"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt    time.Time              `json:"createdAt"`
+	ID           string         `json:"id"`
+	Email        string         `json:"email"`
+	Name         string         `json:"name"`
+	PasswordHash string         `json:"-"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	CreatedAt    time.Time      `json:"createdAt"`
 }
 
 // PersistenceStore provides SQLite-backed persistence for workflow instances,
@@ -149,7 +149,7 @@ func (p *PersistenceStore) migrate() error {
 	}
 
 	// Idempotent migration: add metadata column to users if it doesn't exist
-	p.db.Exec(`ALTER TABLE users ADD COLUMN metadata TEXT DEFAULT '{}'`)
+	_, _ = p.db.Exec(`ALTER TABLE users ADD COLUMN metadata TEXT DEFAULT '{}'`)
 
 	return nil
 }
@@ -225,7 +225,7 @@ func (p *PersistenceStore) LoadWorkflowInstances(workflowType string) ([]*Workfl
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var instances []*WorkflowInstance
 	for rows.Next() {
@@ -288,7 +288,7 @@ func scanWorkflowInstance(rows *sql.Rows) (*WorkflowInstance, error) {
 
 // SaveResource upserts a resource. PII fields within the data map are encrypted
 // before writing to SQLite when ENCRYPTION_KEY is set.
-func (p *PersistenceStore) SaveResource(resourceType, id string, data map[string]interface{}) error {
+func (p *PersistenceStore) SaveResource(resourceType, id string, data map[string]any) error {
 	// Encrypt PII fields before persisting
 	dataToStore := data
 	if p.encryptor != nil && p.encryptor.Enabled() {
@@ -323,21 +323,21 @@ func (p *PersistenceStore) SaveResource(resourceType, id string, data map[string
 
 // LoadResources loads all resources for a given type, keyed by ID.
 // Encrypted PII fields are decrypted transparently on read.
-func (p *PersistenceStore) LoadResources(resourceType string) (map[string]map[string]interface{}, error) {
+func (p *PersistenceStore) LoadResources(resourceType string) (map[string]map[string]any, error) {
 	rows, err := p.db.Query(
 		`SELECT id, data FROM resources WHERE resource_type = ?`, resourceType)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
-	result := make(map[string]map[string]interface{})
+	result := make(map[string]map[string]any)
 	for rows.Next() {
 		var id, dataJSON string
 		if err := rows.Scan(&id, &dataJSON); err != nil {
 			return nil, err
 		}
-		var data map[string]interface{}
+		var data map[string]any
 		if err := json.Unmarshal([]byte(dataJSON), &data); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal resource data for %s: %w", id, err)
 		}
@@ -408,7 +408,7 @@ func (p *PersistenceStore) LoadUsers() ([]UserRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var users []UserRecord
 	for rows.Next() {

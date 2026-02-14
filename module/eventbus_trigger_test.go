@@ -12,7 +12,7 @@ import (
 type ebTriggerCall struct {
 	workflowType string
 	action       string
-	data         map[string]interface{}
+	data         map[string]any
 }
 
 type mockEBWorkflowEngine struct {
@@ -20,7 +20,7 @@ type mockEBWorkflowEngine struct {
 	triggered []ebTriggerCall
 }
 
-func (m *mockEBWorkflowEngine) TriggerWorkflow(_ context.Context, wfType, action string, data map[string]interface{}) error {
+func (m *mockEBWorkflowEngine) TriggerWorkflow(_ context.Context, wfType, action string, data map[string]any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.triggered = append(m.triggered, ebTriggerCall{wfType, action, data})
@@ -66,20 +66,20 @@ func TestEventBusTrigger_Configure(t *testing.T) {
 
 	trigger := NewEventBusTrigger()
 
-	config := map[string]interface{}{
-		"subscriptions": []interface{}{
-			map[string]interface{}{
+	config := map[string]any{
+		"subscriptions": []any{
+			map[string]any{
 				"topic":    "order.created",
 				"workflow": "order-pipeline",
 				"action":   "process",
 			},
-			map[string]interface{}{
+			map[string]any{
 				"topic":    "user.events",
 				"event":    "user.registered",
 				"workflow": "onboard",
 				"action":   "start",
 				"async":    true,
-				"params":   map[string]interface{}{"source": "eventbus"},
+				"params":   map[string]any{"source": "eventbus"},
 			},
 		},
 	}
@@ -121,7 +121,7 @@ func TestEventBusTrigger_Configure_InvalidFormat(t *testing.T) {
 
 func TestEventBusTrigger_Configure_MissingSubscriptions(t *testing.T) {
 	trigger := NewEventBusTrigger()
-	err := trigger.Configure(NewMockApplication(), map[string]interface{}{})
+	err := trigger.Configure(NewMockApplication(), map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing subscriptions")
 	}
@@ -149,7 +149,7 @@ func TestEventBusTrigger_StartAndPublish(t *testing.T) {
 	}
 
 	// Publish an event on the topic.
-	payload := map[string]interface{}{"key": "value"}
+	payload := map[string]any{"key": "value"}
 	if err := eb.Publish(ctx, "test.topic", payload); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestEventBusTrigger_EventTypeFiltering(t *testing.T) {
 	}
 
 	// Publish non-matching event type.
-	if err := eb.Publish(ctx, "events", map[string]interface{}{
+	if err := eb.Publish(ctx, "events", map[string]any{
 		"type": "order.cancelled",
 		"id":   "1",
 	}); err != nil {
@@ -208,7 +208,7 @@ func TestEventBusTrigger_EventTypeFiltering(t *testing.T) {
 	}
 
 	// Publish matching event type.
-	if err := eb.Publish(ctx, "events", map[string]interface{}{
+	if err := eb.Publish(ctx, "events", map[string]any{
 		"type": "order.placed",
 		"id":   "2",
 	}); err != nil {
@@ -249,7 +249,7 @@ func TestEventBusTrigger_EventTypeFilteringWithEventType(t *testing.T) {
 	}
 
 	// Publish with "eventType" field instead of "type".
-	if err := eb.Publish(ctx, "events", map[string]interface{}{
+	if err := eb.Publish(ctx, "events", map[string]any{
 		"eventType": "user.login",
 		"user":      "alice",
 	}); err != nil {
@@ -280,7 +280,7 @@ func TestEventBusTrigger_ParamsMerged(t *testing.T) {
 			Topic:    "test.params",
 			Workflow: "wf",
 			Action:   "act",
-			Params:   map[string]interface{}{"env": "production", "source": "trigger"},
+			Params:   map[string]any{"env": "production", "source": "trigger"},
 		},
 	}
 	trigger.SetEventBusAndEngine(eb, engine)
@@ -290,7 +290,7 @@ func TestEventBusTrigger_ParamsMerged(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	if err := eb.Publish(ctx, "test.params", map[string]interface{}{
+	if err := eb.Publish(ctx, "test.params", map[string]any{
 		"id": "42",
 	}); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -337,7 +337,7 @@ func TestEventBusTrigger_AsyncSubscription(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	if err := eb.Publish(ctx, "async.topic", map[string]interface{}{
+	if err := eb.Publish(ctx, "async.topic", map[string]any{
 		"msg": "hello",
 	}); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -387,7 +387,7 @@ func TestEventBusTrigger_StopCancelsSubscriptions(t *testing.T) {
 	}
 
 	// Publishing after stop should not trigger workflow (subscription was cancelled).
-	if err := eb.Publish(ctx, "stop.test", map[string]interface{}{"x": 1}); err != nil {
+	if err := eb.Publish(ctx, "stop.test", map[string]any{"x": 1}); err != nil {
 		t.Fatalf("Publish after stop: %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -445,9 +445,9 @@ func TestEventBusTrigger_Configure_Incomplete(t *testing.T) {
 	trigger := NewEventBusTrigger()
 
 	// Subscription with empty topic should fail
-	config := map[string]interface{}{
-		"subscriptions": []interface{}{
-			map[string]interface{}{
+	config := map[string]any{
+		"subscriptions": []any{
+			map[string]any{
 				"topic":    "",
 				"workflow": "wf",
 				"action":   "act",
@@ -473,8 +473,8 @@ func TestEventBusTrigger_Configure_InvalidEntry(t *testing.T) {
 	trigger := NewEventBusTrigger()
 
 	// Non-map subscription entry
-	config := map[string]interface{}{
-		"subscriptions": []interface{}{
+	config := map[string]any{
+		"subscriptions": []any{
 			"not a map",
 		},
 	}
@@ -490,9 +490,9 @@ func TestEventBusTrigger_Configure_NoEventBus(t *testing.T) {
 
 	trigger := NewEventBusTrigger()
 
-	config := map[string]interface{}{
-		"subscriptions": []interface{}{
-			map[string]interface{}{
+	config := map[string]any{
+		"subscriptions": []any{
+			map[string]any{
 				"topic":    "t",
 				"workflow": "wf",
 				"action":   "act",
@@ -512,9 +512,9 @@ func TestEventBusTrigger_Configure_NoEngine(t *testing.T) {
 
 	trigger := NewEventBusTrigger()
 
-	config := map[string]interface{}{
-		"subscriptions": []interface{}{
-			map[string]interface{}{
+	config := map[string]any{
+		"subscriptions": []any{
+			map[string]any{
 				"topic":    "t",
 				"workflow": "wf",
 				"action":   "act",

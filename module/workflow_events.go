@@ -29,28 +29,28 @@ func StepTopic(workflowType, stepName, lifecycle string) string {
 
 // WorkflowLifecycleEvent is the payload published for workflow-level lifecycle events.
 type WorkflowLifecycleEvent struct {
-	WorkflowType string                 `json:"workflowType"`
-	Action       string                 `json:"action"`
-	Status       string                 `json:"status"`
-	Timestamp    time.Time              `json:"timestamp"`
-	Duration     time.Duration          `json:"duration,omitempty"`
-	Data         map[string]interface{} `json:"data,omitempty"`
-	Error        string                 `json:"error,omitempty"`
-	Results      map[string]interface{} `json:"results,omitempty"`
+	WorkflowType string         `json:"workflowType"`
+	Action       string         `json:"action"`
+	Status       string         `json:"status"`
+	Timestamp    time.Time      `json:"timestamp"`
+	Duration     time.Duration  `json:"duration,omitempty"`
+	Data         map[string]any `json:"data,omitempty"`
+	Error        string         `json:"error,omitempty"`
+	Results      map[string]any `json:"results,omitempty"`
 }
 
 // StepLifecycleEvent is the payload published for step-level lifecycle events.
 type StepLifecycleEvent struct {
-	WorkflowType string                 `json:"workflowType"`
-	StepName     string                 `json:"stepName"`
-	Connector    string                 `json:"connector"`
-	Action       string                 `json:"action"`
-	Status       string                 `json:"status"`
-	Timestamp    time.Time              `json:"timestamp"`
-	Duration     time.Duration          `json:"duration,omitempty"`
-	Data         map[string]interface{} `json:"data,omitempty"`
-	Error        string                 `json:"error,omitempty"`
-	Results      map[string]interface{} `json:"results,omitempty"`
+	WorkflowType string         `json:"workflowType"`
+	StepName     string         `json:"stepName"`
+	Connector    string         `json:"connector"`
+	Action       string         `json:"action"`
+	Status       string         `json:"status"`
+	Timestamp    time.Time      `json:"timestamp"`
+	Duration     time.Duration  `json:"duration,omitempty"`
+	Data         map[string]any `json:"data,omitempty"`
+	Error        string         `json:"error,omitempty"`
+	Results      map[string]any `json:"results,omitempty"`
 }
 
 // WorkflowEventEmitter publishes workflow and step lifecycle events to the EventBus.
@@ -73,7 +73,7 @@ func NewWorkflowEventEmitter(app modular.Application) *WorkflowEventEmitter {
 }
 
 // EmitWorkflowStarted publishes a "started" lifecycle event for a workflow.
-func (e *WorkflowEventEmitter) EmitWorkflowStarted(ctx context.Context, workflowType, action string, data map[string]interface{}) {
+func (e *WorkflowEventEmitter) EmitWorkflowStarted(ctx context.Context, workflowType, action string, data map[string]any) {
 	if e.eventBus == nil {
 		return
 	}
@@ -88,7 +88,7 @@ func (e *WorkflowEventEmitter) EmitWorkflowStarted(ctx context.Context, workflow
 }
 
 // EmitWorkflowCompleted publishes a "completed" lifecycle event for a workflow.
-func (e *WorkflowEventEmitter) EmitWorkflowCompleted(ctx context.Context, workflowType, action string, duration time.Duration, results map[string]interface{}) {
+func (e *WorkflowEventEmitter) EmitWorkflowCompleted(ctx context.Context, workflowType, action string, duration time.Duration, results map[string]any) {
 	if e.eventBus == nil {
 		return
 	}
@@ -140,7 +140,7 @@ func (e *WorkflowEventEmitter) EmitStepStarted(ctx context.Context, workflowType
 }
 
 // EmitStepCompleted publishes a "completed" lifecycle event for a workflow step.
-func (e *WorkflowEventEmitter) EmitStepCompleted(ctx context.Context, workflowType, stepName, connector, action string, duration time.Duration, results map[string]interface{}) {
+func (e *WorkflowEventEmitter) EmitStepCompleted(ctx context.Context, workflowType, stepName, connector, action string, duration time.Duration, results map[string]any) {
 	if e.eventBus == nil {
 		return
 	}

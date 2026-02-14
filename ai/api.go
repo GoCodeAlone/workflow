@@ -94,12 +94,12 @@ func (h *Handler) HandleSuggest(w http.ResponseWriter, r *http.Request) {
 // HandleProviders handles GET /api/ai/providers
 func (h *Handler) HandleProviders(w http.ResponseWriter, r *http.Request) {
 	providers := h.service.Providers()
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"providers": providers,
 	})
 }
 
-func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)

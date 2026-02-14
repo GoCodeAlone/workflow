@@ -1,0 +1,48 @@
+version: "2"
+
+run:
+  timeout: 10m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gocritic
+    - gosec
+    - bodyclose
+    - nilerr
+  settings:
+    errcheck:
+      exclude-functions:
+        - (net/http.ResponseWriter).Write
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (io.Closer).Close
+    gosec:
+      excludes:
+        - G104 # Duplicates errcheck
+        - G304 # File inclusion from variable - expected for config/dynamic loading
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - hugeParam # Too noisy for map[string]interface{} patterns
+  exclusions:
+    rules:
+      # Exclude noisy linters from test files
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - gocritic
+    presets:
+      - std-error-handling
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

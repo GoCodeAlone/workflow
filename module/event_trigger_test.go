@@ -44,18 +44,18 @@ func TestEventTrigger(t *testing.T) {
 	}
 
 	// Configure the trigger
-	config := map[string]interface{}{
-		"subscriptions": []interface{}{
-			map[string]interface{}{
+	config := map[string]any{
+		"subscriptions": []any{
+			map[string]any{
 				"topic":    "user-events",
 				"event":    "user.created",
 				"workflow": "user-workflow",
 				"action":   "process-new-user",
-				"params": map[string]interface{}{
+				"params": map[string]any{
 					"priority": "high",
 				},
 			},
-			map[string]interface{}{
+			map[string]any{
 				"topic":    "system-events",
 				"workflow": "system-workflow",
 				"action":   "handle-event",
@@ -70,14 +70,14 @@ func TestEventTrigger(t *testing.T) {
 		t.Logf("Using direct broker/engine setup: %v", err)
 
 		// Extract subscriptions from configuration
-		subsConfig, ok := config["subscriptions"].([]interface{})
+		subsConfig, ok := config["subscriptions"].([]any)
 		if !ok {
 			t.Fatalf("Invalid subscriptions config")
 		}
 
 		// Parse subscriptions manually
 		for i, sc := range subsConfig {
-			subMap, ok := sc.(map[string]interface{})
+			subMap, ok := sc.(map[string]any)
 			if !ok {
 				t.Fatalf("Invalid subscription at index %d", i)
 			}
@@ -86,7 +86,7 @@ func TestEventTrigger(t *testing.T) {
 			event, _ := subMap["event"].(string)
 			workflow, _ := subMap["workflow"].(string)
 			action, _ := subMap["action"].(string)
-			params, _ := subMap["params"].(map[string]interface{})
+			params, _ := subMap["params"].(map[string]any)
 
 			trigger.subscriptions = append(trigger.subscriptions, EventTriggerSubscription{
 				Topic:    topic,
@@ -123,7 +123,7 @@ func TestEventTrigger(t *testing.T) {
 	}
 
 	// Test message handling for first subscription with matching event type
-	userEvent := map[string]interface{}{
+	userEvent := map[string]any{
 		"type":      "user.created",
 		"userId":    "123",
 		"timestamp": "2023-04-01T12:00:00Z",
@@ -157,7 +157,7 @@ func TestEventTrigger(t *testing.T) {
 	}
 
 	// Test message handling for first subscription with non-matching event type
-	otherEvent := map[string]interface{}{
+	otherEvent := map[string]any{
 		"type":      "user.deleted",
 		"userId":    "456",
 		"timestamp": "2023-04-01T13:00:00Z",
@@ -178,7 +178,7 @@ func TestEventTrigger(t *testing.T) {
 	}
 
 	// Test message handling for second subscription (no event type filter)
-	systemEvent := map[string]interface{}{
+	systemEvent := map[string]any{
 		"type":      "system.status",
 		"status":    "healthy",
 		"timestamp": "2023-04-01T14:00:00Z",
@@ -283,7 +283,7 @@ func (b *MockMessageBroker) simulateMessage(topic string, msg []byte) error {
 }
 
 // Helper function to get keys from a map for debugging
-func getMapKeys(m map[string]interface{}) []string {
+func getMapKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

@@ -34,14 +34,14 @@ func TestHTTPTrigger(t *testing.T) {
 	app.RegisterModule(trigger)
 
 	// Configure the trigger
-	config := map[string]interface{}{
-		"routes": []interface{}{
-			map[string]interface{}{
+	config := map[string]any{
+		"routes": []any{
+			map[string]any{
 				"path":     "/api/workflows/test",
 				"method":   "POST",
 				"workflow": "test-workflow",
 				"action":   "test-action",
-				"params": map[string]interface{}{
+				"params": map[string]any{
 					"static_param": "static_value",
 				},
 			},
@@ -134,7 +134,7 @@ func (r *MockHTTPRouter) Init(registry modular.ServiceRegistry) error {
 	return nil
 }
 
-func (r *MockHTTPRouter) Configure(app modular.Application, config map[string]interface{}) error {
+func (r *MockHTTPRouter) Configure(app modular.Application, config map[string]any) error {
 	return nil
 }
 

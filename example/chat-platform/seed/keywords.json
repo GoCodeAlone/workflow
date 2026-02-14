@@ -3,5 +3,6 @@
   {"id":"kw-002","data":{"programId":"prog-001","keyword":"HELP","action":"route","subProgram":"general","response":"Help is here. You'll be connected to a counselor shortly."},"state":"active"},
   {"id":"kw-003","data":{"programId":"prog-002","keyword":"TEEN","action":"route","subProgram":"teen-support","response":"Welcome to Teen Support. We're here for you."},"state":"active"},
   {"id":"kw-004","data":{"programId":"prog-001","keyword":"CRISIS","action":"route_priority","subProgram":"crisis-immediate","response":"We hear you. A counselor will be with you right away."},"state":"active"},
-  {"id":"kw-005","data":{"programId":"prog-003","keyword":"WELLNESS","action":"route","subProgram":"general","response":"Welcome to Wellness Chat. How can we support you today?"},"state":"active"}
+  {"id":"kw-005","data":{"programId":"prog-003","keyword":"WELLNESS","action":"route","subProgram":"general","response":"Welcome to Wellness Chat. How can we support you today?"},"state":"active"},
+  {"id":"kw-006","data":{"programId":"prog-004","keyword":"PARTNER","action":"route","subProgram":"general","response":"Welcome to Partner Assist. A support specialist will be with you shortly."},"state":"active"}
 ]

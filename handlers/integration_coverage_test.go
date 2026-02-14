@@ -15,7 +15,7 @@ import (
 
 // mockApp implements modular.Application with real GetService support
 type mockApp struct {
-	services       map[string]interface{}
+	services       map[string]any
 	config         modular.ConfigProvider
 	logger         modular.Logger
 	configSections map[string]modular.ConfigProvider
@@ -23,27 +23,27 @@ type mockApp struct {
 
 func newMockApp() *mockApp {
 	return &mockApp{
-		services:       make(map[string]interface{}),
-		config:         &mock.ConfigProvider{ConfigData: make(map[string]interface{})},
+		services:       make(map[string]any),
+		config:         &mock.ConfigProvider{ConfigData: make(map[string]any)},
 		logger:         &mock.Logger{LogEntries: make([]string, 0)},
 		configSections: make(map[string]modular.ConfigProvider),
 	}
 }
 
-func (a *mockApp) GetService(name string, target interface{}) error {
+func (a *mockApp) GetService(name string, target any) error {
 	svc, ok := a.services[name]
 	if !ok {
 		return nil
 	}
 	// Use reflect to set the target pointer
 	targetVal := reflect.ValueOf(target)
-	if targetVal.Kind() == reflect.Ptr && !targetVal.IsNil() {
+	if targetVal.Kind() == reflect.Pointer && !targetVal.IsNil() {
 		targetVal.Elem().Set(reflect.ValueOf(svc))
 	}
 	return nil
 }
 
-func (a *mockApp) RegisterService(name string, service interface{}) error {
+func (a *mockApp) RegisterService(name string, service any) error {
 	a.services[name] = service
 	return nil
 }
@@ -84,7 +84,7 @@ type controllableMockConnector struct {
 	connectErr   error
 	executeErr   error
 	executeCount int
-	executeFn    func(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error)
+	executeFn    func(ctx context.Context, action string, params map[string]any) (map[string]any, error)
 }
 
 func (c *controllableMockConnector) GetName() string { return c.name }
@@ -100,7 +100,7 @@ func (c *controllableMockConnector) Disconnect(ctx context.Context) error {
 	return nil
 }
 func (c *controllableMockConnector) IsConnected() bool { return c.connected }
-func (c *controllableMockConnector) Execute(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error) {
+func (c *controllableMockConnector) Execute(ctx context.Context, action string, params map[string]any) (map[string]any, error) {
 	c.executeCount++
 	if c.executeFn != nil {
 		return c.executeFn(ctx, action, params)
@@ -108,7 +108,7 @@ func (c *controllableMockConnector) Execute(ctx context.Context, action string, 
 	if c.executeErr != nil {
 		return nil, c.executeErr
 	}
-	return map[string]interface{}{"result": "ok"}, nil
+	return map[string]any{"result": "ok"}, nil
 }
 
 // --- ConfigureWorkflow Tests ---
@@ -119,20 +119,20 @@ func TestConfigureWorkflow_HTTPConnectorWithBasicAuth(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name": "api-conn",
 				"type": "http",
-				"config": map[string]interface{}{
+				"config": map[string]any{
 					"baseURL":           "http://example.com",
 					"authType":          "basic",
 					"username":          "user",
 					"password":          "pass",
 					"timeoutSeconds":    float64(10),
 					"requestsPerMinute": float64(60),
-					"headers": map[string]interface{}{
+					"headers": map[string]any{
 						"X-Custom": "value",
 					},
 				},
@@ -158,13 +158,13 @@ func TestConfigureWorkflow_HTTPConnectorWithBearerAuth(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name": "api-conn",
 				"type": "rest",
-				"config": map[string]interface{}{
+				"config": map[string]any{
 					"baseURL":  "http://example.com",
 					"authType": "bearer",
 					"token":    "my-token",
@@ -183,13 +183,13 @@ func TestConfigureWorkflow_HTTPConnectorTypeAPI(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name": "api-conn",
 				"type": "api",
-				"config": map[string]interface{}{
+				"config": map[string]any{
 					"baseURL": "http://example.com",
 				},
 			},
@@ -206,13 +206,13 @@ func TestConfigureWorkflow_WebhookConnector(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name": "webhook-conn",
 				"type": "webhook",
-				"config": map[string]interface{}{
+				"config": map[string]any{
 					"path": "/webhooks/test",
 					"port": float64(9090),
 				},
@@ -238,13 +238,13 @@ func TestConfigureWorkflow_WebhookConnectorDefaultPort(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name": "webhook-conn",
 				"type": "webhook",
-				"config": map[string]interface{}{
+				"config": map[string]any{
 					"path": "/hook",
 				},
 			},
@@ -261,13 +261,13 @@ func TestConfigureWorkflow_DatabaseConnector(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name": "db-conn",
 				"type": "database",
-				"config": map[string]interface{}{
+				"config": map[string]any{
 					"driver":       "sqlite3",
 					"dsn":          ":memory:",
 					"maxOpenConns": float64(10),
@@ -300,7 +300,7 @@ func TestConfigureWorkflow_NotAMap(t *testing.T) {
 func TestConfigureWorkflow_MissingRegistryName(t *testing.T) {
 	h := NewIntegrationWorkflowHandler()
 	app := newMockApp()
-	err := h.ConfigureWorkflow(app, map[string]interface{}{})
+	err := h.ConfigureWorkflow(app, map[string]any{})
 	if err == nil || !strings.Contains(err.Error(), "registry name not specified") {
 		t.Fatalf("expected missing registry error, got: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestConfigureWorkflow_MissingRegistryName(t *testing.T) {
 func TestConfigureWorkflow_RegistryServiceNotFound(t *testing.T) {
 	h := NewIntegrationWorkflowHandler()
 	app := newMockApp()
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "missing-registry",
 	})
 	if err == nil || !strings.Contains(err.Error(), "not found") {
@@ -321,7 +321,7 @@ func TestConfigureWorkflow_ServiceNotIntegrationRegistry(t *testing.T) {
 	h := NewIntegrationWorkflowHandler()
 	app := newMockApp()
 	app.services["bad-registry"] = "not-a-registry"
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "bad-registry",
 	})
 	if err == nil || !strings.Contains(err.Error(), "is not an IntegrationRegistry") {
@@ -335,9 +335,9 @@ func TestConfigureWorkflow_NoConnectors(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry":   "test-registry",
-		"connectors": []interface{}{},
+		"connectors": []any{},
 	})
 	if err == nil || !strings.Contains(err.Error(), "no connectors defined") {
 		t.Fatalf("expected no connectors error, got: %v", err)
@@ -350,10 +350,10 @@ func TestConfigureWorkflow_MissingConnectorName(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"type": "http",
 			},
 		},
@@ -369,10 +369,10 @@ func TestConfigureWorkflow_MissingConnectorType(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name": "my-conn",
 			},
 		},
@@ -388,10 +388,10 @@ func TestConfigureWorkflow_UnsupportedConnectorType(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name": "my-conn",
 				"type": "mqtt",
 			},
@@ -408,13 +408,13 @@ func TestConfigureWorkflow_MissingHTTPBaseURL(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name":   "api-conn",
 				"type":   "http",
-				"config": map[string]interface{}{},
+				"config": map[string]any{},
 			},
 		},
 	})
@@ -429,13 +429,13 @@ func TestConfigureWorkflow_MissingWebhookPath(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name":   "webhook-conn",
 				"type":   "webhook",
-				"config": map[string]interface{}{},
+				"config": map[string]any{},
 			},
 		},
 	})
@@ -450,13 +450,13 @@ func TestConfigureWorkflow_MissingDatabaseDriverDSN(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name":   "db-conn",
 				"type":   "database",
-				"config": map[string]interface{}{},
+				"config": map[string]any{},
 			},
 		},
 	})
@@ -471,9 +471,9 @@ func TestConfigureWorkflow_InvalidConnectorConfig(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
+		"connectors": []any{
 			"not-a-map",
 		},
 	})
@@ -488,19 +488,19 @@ func TestConfigureWorkflow_StepsMissingName(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name": "api-conn",
 				"type": "http",
-				"config": map[string]interface{}{
+				"config": map[string]any{
 					"baseURL": "http://example.com",
 				},
 			},
 		},
-		"steps": []interface{}{
-			map[string]interface{}{},
+		"steps": []any{
+			map[string]any{},
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "step name not specified") {
@@ -514,19 +514,19 @@ func TestConfigureWorkflow_StepsMissingConnector(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name": "api-conn",
 				"type": "http",
-				"config": map[string]interface{}{
+				"config": map[string]any{
 					"baseURL": "http://example.com",
 				},
 			},
 		},
-		"steps": []interface{}{
-			map[string]interface{}{
+		"steps": []any{
+			map[string]any{
 				"name": "step1",
 			},
 		},
@@ -542,19 +542,19 @@ func TestConfigureWorkflow_StepsMissingAction(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name": "api-conn",
 				"type": "http",
-				"config": map[string]interface{}{
+				"config": map[string]any{
 					"baseURL": "http://example.com",
 				},
 			},
 		},
-		"steps": []interface{}{
-			map[string]interface{}{
+		"steps": []any{
+			map[string]any{
 				"name":      "step1",
 				"connector": "api-conn",
 			},
@@ -571,19 +571,19 @@ func TestConfigureWorkflow_StepsConnectorNotFound(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name": "api-conn",
 				"type": "http",
-				"config": map[string]interface{}{
+				"config": map[string]any{
 					"baseURL": "http://example.com",
 				},
 			},
 		},
-		"steps": []interface{}{
-			map[string]interface{}{
+		"steps": []any{
+			map[string]any{
 				"name":      "step1",
 				"connector": "nonexistent",
 				"action":    "GET /data",
@@ -601,18 +601,18 @@ func TestConfigureWorkflow_InvalidStepConfig(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name": "api-conn",
 				"type": "http",
-				"config": map[string]interface{}{
+				"config": map[string]any{
 					"baseURL": "http://example.com",
 				},
 			},
 		},
-		"steps": []interface{}{
+		"steps": []any{
 			"not-a-map",
 		},
 	})
@@ -627,19 +627,19 @@ func TestConfigureWorkflow_ValidSteps(t *testing.T) {
 	registry := module.NewIntegrationRegistry("test-registry")
 	app.services["test-registry"] = registry
 
-	err := h.ConfigureWorkflow(app, map[string]interface{}{
+	err := h.ConfigureWorkflow(app, map[string]any{
 		"registry": "test-registry",
-		"connectors": []interface{}{
-			map[string]interface{}{
+		"connectors": []any{
+			map[string]any{
 				"name": "api-conn",
 				"type": "http",
-				"config": map[string]interface{}{
+				"config": map[string]any{
 					"baseURL": "http://example.com",
 				},
 			},
 		},
-		"steps": []interface{}{
-			map[string]interface{}{
+		"steps": []any{
+			map[string]any{
 				"name":      "step1",
 				"connector": "api-conn",
 				"action":    "GET /data",
@@ -661,12 +661,12 @@ func TestExecuteIntegrationWorkflow_RetrySuccess(t *testing.T) {
 	conn := &controllableMockConnector{
 		name:      "retry-conn",
 		connected: true,
-		executeFn: func(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error) {
+		executeFn: func(ctx context.Context, action string, params map[string]any) (map[string]any, error) {
 			callCount++
 			if callCount < 3 {
 				return nil, fmt.Errorf("temporary error")
 			}
-			return map[string]interface{}{"success": true}, nil
+			return map[string]any{"success": true}, nil
 		},
 	}
 	registry.RegisterConnector(conn)
@@ -685,7 +685,7 @@ func TestExecuteIntegrationWorkflow_RetrySuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected success after retries, got: %v", err)
 	}
-	stepResult, ok := result["retry-step"].(map[string]interface{})
+	stepResult, ok := result["retry-step"].(map[string]any)
 	if !ok {
 		t.Fatal("expected retry-step result")
 	}
@@ -766,12 +766,12 @@ func TestExecuteIntegrationWorkflow_RetryDefaultDelay(t *testing.T) {
 	conn := &controllableMockConnector{
 		name:      "retry-conn",
 		connected: true,
-		executeFn: func(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error) {
+		executeFn: func(ctx context.Context, action string, params map[string]any) (map[string]any, error) {
 			callCount++
 			if callCount == 1 {
 				return nil, fmt.Errorf("temporary error")
 			}
-			return map[string]interface{}{"ok": true}, nil
+			return map[string]any{"ok": true}, nil
 		},
 	}
 	registry.RegisterConnector(conn)
@@ -870,7 +870,7 @@ func TestExecuteIntegrationWorkflow_InitialContextValues(t *testing.T) {
 		},
 	}
 
-	initialCtx := map[string]interface{}{
+	initialCtx := map[string]any{
 		"key1": "value1",
 		"key2": "value2",
 	}
@@ -891,13 +891,13 @@ func TestExecuteIntegrationWorkflow_VariableSubstitutionResolved(t *testing.T) {
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 
-	var capturedParams map[string]interface{}
+	var capturedParams map[string]any
 	conn := &controllableMockConnector{
 		name:      "test-conn",
 		connected: true,
-		executeFn: func(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error) {
+		executeFn: func(ctx context.Context, action string, params map[string]any) (map[string]any, error) {
 			capturedParams = params
-			return map[string]interface{}{"val": "resolved"}, nil
+			return map[string]any{"val": "resolved"}, nil
 		},
 	}
 	registry.RegisterConnector(conn)
@@ -912,7 +912,7 @@ func TestExecuteIntegrationWorkflow_VariableSubstitutionResolved(t *testing.T) {
 			Name:      "step2",
 			Connector: "test-conn",
 			Action:    "action2",
-			Input: map[string]interface{}{
+			Input: map[string]any{
 				"ref":        "${step1}",
 				"unresolved": "${nonexistent}",
 				"static":     "plain",
@@ -956,12 +956,12 @@ func TestExecuteIntegrationWorkflow_MultiStepWithMock(t *testing.T) {
 	conn := &controllableMockConnector{
 		name:      "multi-conn",
 		connected: true,
-		executeFn: func(ctx context.Context, action string, params map[string]interface{}) (map[string]interface{}, error) {
+		executeFn: func(ctx context.Context, action string, params map[string]any) (map[string]any, error) {
 			switch action {
 			case "fetch":
-				return map[string]interface{}{"data": "fetched"}, nil
+				return map[string]any{"data": "fetched"}, nil
 			case "process":
-				return map[string]interface{}{"processed": true}, nil
+				return map[string]any{"processed": true}, nil
 			default:
 				return nil, fmt.Errorf("unknown action")
 			}
@@ -1002,12 +1002,12 @@ func TestExecuteWorkflow_WithSteps(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	data := map[string]interface{}{
-		"steps": []interface{}{
-			map[string]interface{}{
+	data := map[string]any{
+		"steps": []any{
+			map[string]any{
 				"connector": "test-conn",
 				"action":    "do-something",
-				"input":     map[string]interface{}{"key": "val"},
+				"input":     map[string]any{"key": "val"},
 			},
 		},
 	}
@@ -1035,7 +1035,7 @@ func TestExecuteWorkflow_SingleStepFromAction(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"connector": "my-conn",
 	}
 
@@ -1054,7 +1054,7 @@ func TestExecuteWorkflow_RegistryNotFound(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	_, err := h.ExecuteWorkflow(ctx, "integration", "missing-registry", map[string]interface{}{})
+	_, err := h.ExecuteWorkflow(ctx, "integration", "missing-registry", map[string]any{})
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected registry not found error, got: %v", err)
 	}
@@ -1067,7 +1067,7 @@ func TestExecuteWorkflow_NotIntegrationRegistry(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	_, err := h.ExecuteWorkflow(ctx, "integration", "bad-svc", map[string]interface{}{})
+	_, err := h.ExecuteWorkflow(ctx, "integration", "bad-svc", map[string]any{})
 	if err == nil || !strings.Contains(err.Error(), "is not an IntegrationRegistry") {
 		t.Fatalf("expected not IntegrationRegistry error, got: %v", err)
 	}
@@ -1086,7 +1086,7 @@ func TestExecuteWorkflow_NoStepsNoAction(t *testing.T) {
 	// so action remains "test-registry" and there are no steps... it would try single step path
 	// which needs "connector" in data. Let's test the "no steps and no action" path differently.
 	// We need the colon-split to produce an empty action.
-	_, err := h.ExecuteWorkflow(ctx, "integration", "test-registry:", map[string]interface{}{})
+	_, err := h.ExecuteWorkflow(ctx, "integration", "test-registry:", map[string]any{})
 	if err == nil || !strings.Contains(err.Error(), "no steps provided and no action specified") {
 		t.Fatalf("expected no steps/action error, got: %v", err)
 	}
@@ -1100,7 +1100,7 @@ func TestExecuteWorkflow_MissingConnectorInSingleStep(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		// No "connector" key
 	}
 
@@ -1124,12 +1124,12 @@ func TestExecuteWorkflow_StepsWithOptionalFields(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	data := map[string]interface{}{
-		"steps": []interface{}{
-			map[string]interface{}{
+	data := map[string]any{
+		"steps": []any{
+			map[string]any{
 				"connector":  "test-conn",
 				"action":     "do-something",
-				"input":      map[string]interface{}{"key": "val"},
+				"input":      map[string]any{"key": "val"},
 				"transform":  "jq .data",
 				"onSuccess":  "next",
 				"onError":    "handle",
@@ -1162,7 +1162,7 @@ func TestExecuteWorkflow_ColonSeparatedAction(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), applicationContextKey, modular.Application(app))
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"connector": "conn1",
 	}
 

@@ -87,6 +87,7 @@ func (h *OAuthHandler) Authorize(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   600,
 		HttpOnly: true,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -198,7 +199,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, tokenPair)
 }
 
-func fetchUserInfo(url, accessToken string) (map[string]interface{}, error) {
+func fetchUserInfo(url, accessToken string) (map[string]any, error) {
 	if url == "" {
 		return nil, fmt.Errorf("user info URL not configured")
 	}
@@ -214,19 +215,22 @@ func fetchUserInfo(url, accessToken string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("user info request returned %d (failed to read body: %v)", resp.StatusCode, err)
+		}
 		return nil, fmt.Errorf("user info request returned %d: %s", resp.StatusCode, body)
 	}
-	var info map[string]interface{}
+	var info map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
 		return nil, err
 	}
 	return info, nil
 }
 
-func extractOAuthID(info map[string]interface{}) string {
+func extractOAuthID(info map[string]any) string {
 	for _, key := range []string{"sub", "id", "user_id"} {
 		if v, ok := info[key]; ok {
 			return fmt.Sprintf("%v", v)

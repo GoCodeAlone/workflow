@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"maps"
 	"sync"
 	"time"
 
@@ -17,31 +18,31 @@ const (
 
 // State represents a workflow state
 type State struct {
-	Name        string                 `json:"name" yaml:"name"`
-	Description string                 `json:"description,omitempty" yaml:"description,omitempty"`
-	Data        map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
-	IsFinal     bool                   `json:"isFinal" yaml:"isFinal"`
-	IsError     bool                   `json:"isError" yaml:"isError"`
+	Name        string         `json:"name" yaml:"name"`
+	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
+	Data        map[string]any `json:"data,omitempty" yaml:"data,omitempty"`
+	IsFinal     bool           `json:"isFinal" yaml:"isFinal"`
+	IsError     bool           `json:"isError" yaml:"isError"`
 }
 
 // Transition defines a possible state transition
 type Transition struct {
-	Name          string                 `json:"name" yaml:"name"`
-	FromState     string                 `json:"fromState" yaml:"fromState"`
-	ToState       string                 `json:"toState" yaml:"toState"`
-	Condition     string                 `json:"condition,omitempty" yaml:"condition,omitempty"`
-	AutoTransform bool                   `json:"autoTransform" yaml:"autoTransform"`
-	Data          map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	Name          string         `json:"name" yaml:"name"`
+	FromState     string         `json:"fromState" yaml:"fromState"`
+	ToState       string         `json:"toState" yaml:"toState"`
+	Condition     string         `json:"condition,omitempty" yaml:"condition,omitempty"`
+	AutoTransform bool           `json:"autoTransform" yaml:"autoTransform"`
+	Data          map[string]any `json:"data,omitempty" yaml:"data,omitempty"`
 }
 
 // TransitionEvent represents a state transition event
 type TransitionEvent struct {
-	WorkflowID   string                 `json:"workflowId"`
-	TransitionID string                 `json:"transitionId"`
-	FromState    string                 `json:"fromState"`
-	ToState      string                 `json:"toState"`
-	Timestamp    time.Time              `json:"timestamp"`
-	Data         map[string]interface{} `json:"data,omitempty"`
+	WorkflowID   string         `json:"workflowId"`
+	TransitionID string         `json:"transitionId"`
+	FromState    string         `json:"fromState"`
+	ToState      string         `json:"toState"`
+	Timestamp    time.Time      `json:"timestamp"`
+	Data         map[string]any `json:"data,omitempty"`
 }
 
 // InstanceID returns the workflow instance ID
@@ -56,20 +57,20 @@ type TransitionHandler interface {
 }
 
 type TransitionTrigger interface {
-	TriggerTransition(ctx context.Context, workflowID, transitionName string, data map[string]interface{}) error
+	TriggerTransition(ctx context.Context, workflowID, transitionName string, data map[string]any) error
 }
 
 // WorkflowInstance represents an instance of a state machine workflow
 type WorkflowInstance struct {
-	ID            string                 `json:"id"`
-	WorkflowType  string                 `json:"workflowType"`
-	CurrentState  string                 `json:"currentState"`
-	PreviousState string                 `json:"previousState"`
-	Data          map[string]interface{} `json:"data"`
-	StartTime     time.Time              `json:"startTime"`
-	LastUpdated   time.Time              `json:"lastUpdated"`
-	Completed     bool                   `json:"completed"`
-	Error         string                 `json:"error,omitempty"`
+	ID            string         `json:"id"`
+	WorkflowType  string         `json:"workflowType"`
+	CurrentState  string         `json:"currentState"`
+	PreviousState string         `json:"previousState"`
+	Data          map[string]any `json:"data"`
+	StartTime     time.Time      `json:"startTime"`
+	LastUpdated   time.Time      `json:"lastUpdated"`
+	Completed     bool           `json:"completed"`
+	Error         string         `json:"error,omitempty"`
 }
 
 // StateMachineDefinition defines a state machine workflow
@@ -79,7 +80,7 @@ type StateMachineDefinition struct {
 	States       map[string]*State      `json:"states" yaml:"states"`
 	Transitions  map[string]*Transition `json:"transitions" yaml:"transitions"`
 	InitialState string                 `json:"initialState" yaml:"initialState"`
-	Data         map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	Data         map[string]any         `json:"data,omitempty" yaml:"data,omitempty"`
 }
 
 // StateMachineEngine implements a workflow state machine engine
@@ -181,11 +182,9 @@ func (e *StateMachineEngine) SetPersistence(ps *PersistenceStore) {
 // TrackGoroutine spawns a goroutine tracked by the engine's WaitGroup so
 // that Stop() can drain in-flight work before shutdown.
 func (e *StateMachineEngine) TrackGoroutine(fn func()) {
-	e.wg.Add(1)
-	go func() {
-		defer e.wg.Done()
+	e.wg.Go(func() {
 		fn()
-	}()
+	})
 }
 
 // LoadAllPersistedInstances loads workflow instances from persistence for all
@@ -272,7 +271,7 @@ func (e *StateMachineEngine) RecoverProcessingInstances(ctx context.Context, pro
 		currentState   string
 		workflowType   string
 		transitionName string
-		data           map[string]interface{}
+		data           map[string]any
 	}
 	var toRecover []recoveryItem
 
@@ -298,10 +297,8 @@ func (e *StateMachineEngine) RecoverProcessingInstances(ctx context.Context, pro
 			continue
 		}
 
-		dataCopy := make(map[string]interface{})
-		for k, v := range inst.Data {
-			dataCopy[k] = v
-		}
+		dataCopy := make(map[string]any)
+		maps.Copy(dataCopy, inst.Data)
 
 		toRecover = append(toRecover, recoveryItem{
 			instanceID:     inst.ID,
@@ -396,7 +393,7 @@ func (e *StateMachineEngine) HasTransitionHandler() bool {
 func (e *StateMachineEngine) CreateWorkflow(
 	workflowType string,
 	id string,
-	initialData map[string]interface{},
+	initialData map[string]any,
 ) (*WorkflowInstance, error) {
 	// Find the definition
 	e.mutex.RLock()
@@ -415,13 +412,11 @@ func (e *StateMachineEngine) CreateWorkflow(
 		CurrentState: def.InitialState,
 		StartTime:    now,
 		LastUpdated:  now,
-		Data:         make(map[string]interface{}),
+		Data:         make(map[string]any),
 	}
 
 	// Copy initial data
-	for k, v := range initialData {
-		instance.Data[k] = v
-	}
+	maps.Copy(instance.Data, initialData)
 
 	// Store the instance
 	e.mutex.Lock()
@@ -480,7 +475,7 @@ func (e *StateMachineEngine) TriggerTransition(
 	ctx context.Context,
 	workflowID string,
 	transitionName string,
-	data map[string]interface{},
+	data map[string]any,
 ) error {
 	// Get the workflow instance
 	e.mutex.Lock()
@@ -542,9 +537,7 @@ func (e *StateMachineEngine) TriggerTransition(
 	instance.LastUpdated = now
 
 	// Merge data if provided
-	for k, v := range data {
-		instance.Data[k] = v
-	}
+	maps.Copy(instance.Data, data)
 
 	// Check if the workflow is now in a final state
 	if state, ok := def.States[transition.ToState]; ok && state.IsFinal {
@@ -569,10 +562,8 @@ func (e *StateMachineEngine) TriggerTransition(
 		for autoName, autoTrans := range def.Transitions {
 			if autoTrans.AutoTransform && autoTrans.FromState == instance.CurrentState {
 				autoTransName := autoName
-				autoData := make(map[string]interface{})
-				for k, v := range instance.Data {
-					autoData[k] = v
-				}
+				autoData := make(map[string]any)
+				maps.Copy(autoData, instance.Data)
 				e.TrackGoroutine(func() {
 					_ = e.TriggerTransition(context.Background(), workflowID, autoTransName, autoData)
 				})
@@ -740,7 +731,7 @@ func (e *StateMachineEngine) RegisterWorkflow(def ExternalStateMachineDefinition
 		InitialState: def.InitialState,
 		States:       make(map[string]*State),
 		Transitions:  make(map[string]*Transition),
-		Data:         make(map[string]interface{}),
+		Data:         make(map[string]any),
 	}
 
 	// Process states
@@ -772,21 +763,21 @@ func (e *StateMachineEngine) RegisterWorkflow(def ExternalStateMachineDefinition
 
 // StateMachineStateConfig represents configuration for a state machine state
 type StateMachineStateConfig struct {
-	ID          string                 `json:"id" yaml:"id"`
-	Description string                 `json:"description,omitempty" yaml:"description,omitempty"`
-	IsFinal     bool                   `json:"isFinal" yaml:"isFinal"`
-	IsError     bool                   `json:"isError" yaml:"isError"`
-	Data        map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	ID          string         `json:"id" yaml:"id"`
+	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
+	IsFinal     bool           `json:"isFinal" yaml:"isFinal"`
+	IsError     bool           `json:"isError" yaml:"isError"`
+	Data        map[string]any `json:"data,omitempty" yaml:"data,omitempty"`
 }
 
 // StateMachineTransitionConfig represents configuration for a state transition
 type StateMachineTransitionConfig struct {
-	ID            string                 `json:"id" yaml:"id"`
-	FromState     string                 `json:"fromState" yaml:"fromState"`
-	ToState       string                 `json:"toState" yaml:"toState"`
-	Condition     string                 `json:"condition,omitempty" yaml:"condition,omitempty"`
-	AutoTransform bool                   `json:"autoTransform" yaml:"autoTransform"`
-	Data          map[string]interface{} `json:"data,omitempty" yaml:"data,omitempty"`
+	ID            string         `json:"id" yaml:"id"`
+	FromState     string         `json:"fromState" yaml:"fromState"`
+	ToState       string         `json:"toState" yaml:"toState"`
+	Condition     string         `json:"condition,omitempty" yaml:"condition,omitempty"`
+	AutoTransform bool           `json:"autoTransform" yaml:"autoTransform"`
+	Data          map[string]any `json:"data,omitempty" yaml:"data,omitempty"`
 }
 
 // ExternalStateMachineDefinition is used for registering state machines from configuration

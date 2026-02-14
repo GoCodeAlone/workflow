@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -20,10 +21,10 @@ type ScheduleTriggerConfig struct {
 
 // ScheduleTriggerJob represents a single scheduled job configuration
 type ScheduleTriggerJob struct {
-	Cron     string                 `json:"cron" yaml:"cron"`
-	Workflow string                 `json:"workflow" yaml:"workflow"`
-	Action   string                 `json:"action" yaml:"action"`
-	Params   map[string]interface{} `json:"params,omitempty" yaml:"params,omitempty"`
+	Cron     string         `json:"cron" yaml:"cron"`
+	Workflow string         `json:"workflow" yaml:"workflow"`
+	Action   string         `json:"action" yaml:"action"`
+	Params   map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
 }
 
 // ScheduleTrigger implements a trigger that starts workflows based on a schedule
@@ -102,15 +103,15 @@ func (t *ScheduleTrigger) Stop(ctx context.Context) error {
 }
 
 // Configure sets up the trigger from configuration
-func (t *ScheduleTrigger) Configure(app modular.Application, triggerConfig interface{}) error {
+func (t *ScheduleTrigger) Configure(app modular.Application, triggerConfig any) error {
 	// Convert the generic config to schedule trigger config
-	config, ok := triggerConfig.(map[string]interface{})
+	config, ok := triggerConfig.(map[string]any)
 	if !ok {
 		return fmt.Errorf("invalid schedule trigger configuration format")
 	}
 
 	// Extract jobs from configuration
-	jobsConfig, ok := config["jobs"].([]interface{})
+	jobsConfig, ok := config["jobs"].([]any)
 	if !ok {
 		return fmt.Errorf("jobs not found in schedule trigger configuration")
 	}
@@ -120,7 +121,7 @@ func (t *ScheduleTrigger) Configure(app modular.Application, triggerConfig inter
 	schedulerNames := []string{"cronScheduler", "scheduler"}
 
 	for _, name := range schedulerNames {
-		var svc interface{}
+		var svc any
 		if err := app.GetService(name, &svc); err == nil && svc != nil {
 			if s, ok := svc.(Scheduler); ok {
 				scheduler = s
@@ -138,7 +139,7 @@ func (t *ScheduleTrigger) Configure(app modular.Application, triggerConfig inter
 	engineNames := []string{"workflowEngine", "engine"}
 
 	for _, name := range engineNames {
-		var svc interface{}
+		var svc any
 		if err := app.GetService(name, &svc); err == nil && svc != nil {
 			if e, ok := svc.(WorkflowEngine); ok {
 				engine = e
@@ -157,7 +158,7 @@ func (t *ScheduleTrigger) Configure(app modular.Application, triggerConfig inter
 
 	// Parse jobs
 	for i, jc := range jobsConfig {
-		jobMap, ok := jc.(map[string]interface{})
+		jobMap, ok := jc.(map[string]any)
 		if !ok {
 			return fmt.Errorf("invalid job configuration at index %d", i)
 		}
@@ -171,7 +172,7 @@ func (t *ScheduleTrigger) Configure(app modular.Application, triggerConfig inter
 		}
 
 		// Get optional params
-		params, _ := jobMap["params"].(map[string]interface{})
+		params, _ := jobMap["params"].(map[string]any)
 
 		// Add the job
 		t.jobs = append(t.jobs, ScheduleTriggerJob{
@@ -189,15 +190,13 @@ func (t *ScheduleTrigger) Configure(app modular.Application, triggerConfig inter
 func (t *ScheduleTrigger) createJob(job ScheduleTriggerJob) Job {
 	return NewFunctionJob(func(ctx context.Context) error {
 		// Create the data to pass to the workflow
-		data := make(map[string]interface{})
+		data := make(map[string]any)
 
 		// Add current timestamp
 		data["trigger_time"] = time.Now().Format(time.RFC3339)
 
 		// Add any static params from the job configuration
-		for k, v := range job.Params {
-			data[k] = v
-		}
+		maps.Copy(data, job.Params)
 
 		// Call the workflow engine to trigger the workflow
 		return t.engine.TriggerWorkflow(ctx, job.Workflow, job.Action, data)

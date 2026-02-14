@@ -18,7 +18,7 @@ func NewCronScheduler() *CronScheduler {
 }
 
 // AddJob adds a job to the scheduler
-func (c *CronScheduler) AddJob(spec string, job interface{}) error {
+func (c *CronScheduler) AddJob(spec string, job any) error {
 	c.Jobs = append(c.Jobs, spec)
 	return nil
 }

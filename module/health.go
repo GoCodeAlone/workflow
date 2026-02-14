@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"sync"
 
@@ -88,9 +89,7 @@ func (h *HealthChecker) HealthHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		h.mu.RLock()
 		checks := make(map[string]HealthCheck, len(h.checks))
-		for k, v := range h.checks {
-			checks[k] = v
-		}
+		maps.Copy(checks, h.checks)
 		h.mu.RUnlock()
 
 		overallStatus := "healthy"
@@ -106,7 +105,7 @@ func (h *HealthChecker) HealthHandler() http.HandlerFunc {
 			}
 		}
 
-		resp := map[string]interface{}{
+		resp := map[string]any{
 			"status": overallStatus,
 			"checks": results,
 		}
@@ -126,9 +125,7 @@ func (h *HealthChecker) ReadyHandler() http.HandlerFunc {
 		h.mu.RLock()
 		started := h.started
 		checks := make(map[string]HealthCheck, len(h.checks))
-		for k, v := range h.checks {
-			checks[k] = v
-		}
+		maps.Copy(checks, h.checks)
 		h.mu.RUnlock()
 
 		if !started {

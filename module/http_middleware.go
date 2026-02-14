@@ -118,14 +118,6 @@ func (m *RateLimitMiddleware) Stop(ctx context.Context) error {
 	return nil
 }
 
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // LoggingMiddleware provides request logging
 type LoggingMiddleware struct {
 	name     string
