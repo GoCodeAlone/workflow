@@ -21,6 +21,7 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/schema"
 )
 
 // WorkflowHandler interface for handling different workflow types
@@ -101,6 +102,27 @@ func (e *StdEngine) AddModuleType(moduleType string, factory ModuleFactory) {
 
 // BuildFromConfig builds a workflow from configuration
 func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
+	// Validate configuration before building.
+	// Allow empty modules (the engine handles that gracefully) and pass
+	// registered custom module factory types so they are not rejected.
+	// Workflow and trigger type validation is skipped here because the
+	// engine dynamically resolves handlers and triggers at runtime.
+	valOpts := []schema.ValidationOption{
+		schema.WithAllowEmptyModules(),
+		schema.WithSkipWorkflowTypeCheck(),
+		schema.WithSkipTriggerTypeCheck(),
+	}
+	if len(e.moduleFactories) > 0 {
+		extra := make([]string, 0, len(e.moduleFactories))
+		for t := range e.moduleFactories {
+			extra = append(extra, t)
+		}
+		valOpts = append(valOpts, schema.WithExtraModuleTypes(extra...))
+	}
+	if err := schema.ValidateConfig(cfg, valOpts...); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
+	}
+
 	// Register all modules from config
 	for _, modCfg := range cfg.Modules {
 		// Create modules based on type

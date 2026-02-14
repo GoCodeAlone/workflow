@@ -21,6 +21,7 @@ import (
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/schema"
 )
 
 var (
@@ -79,6 +80,7 @@ func buildMux(aiSvc *ai.Service, deploySvc *ai.DeployService, loader *dynamic.Lo
 	ai.NewDeployHandler(deploySvc).RegisterRoutes(mux)
 	dynamic.NewAPIHandler(loader, registry).RegisterRoutes(mux)
 	uiHandler.RegisterRoutes(mux)
+	schema.RegisterRoutes(mux)
 	return mux
 }
 
