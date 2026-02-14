@@ -1,0 +1,99 @@
+groups:
+  - name: workflow-engine
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(workflow_executions_total{status="error"}[5m]))
+          / sum(rate(workflow_executions_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High workflow error rate ({{ $value | humanizePercentage }})"
+          description: >
+            More than 5% of workflow executions are failing over the last 5 minutes.
+            Current error rate: {{ $value | humanizePercentage }}.
+          runbook_url: "https://github.com/GoCodeAlone/workflow/blob/main/docs/RUNBOOKS.md#higherrorrate"
+
+      - alert: SlowWorkflows
+        expr: |
+          histogram_quantile(0.99, sum(rate(workflow_duration_seconds_bucket[5m])) by (le, workflow_type))
+          > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow workflow execution: {{ $labels.workflow_type }} p99 > 5s"
+          description: >
+            The p99 latency for workflow type "{{ $labels.workflow_type }}" has exceeded
+            5 seconds for 10 minutes. Current p99: {{ $value | humanizeDuration }}.
+          runbook_url: "https://github.com/GoCodeAlone/workflow/blob/main/docs/RUNBOOKS.md#slowworkflows"
+
+      - alert: QueueBacklog
+        expr: |
+          sum(active_workflows) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High number of active workflows ({{ $value }})"
+          description: >
+            The total number of concurrently active workflows has exceeded 100
+            for 5 minutes. This may indicate a backlog or stuck workflows.
+          runbook_url: "https://github.com/GoCodeAlone/workflow/blob/main/docs/RUNBOOKS.md#queuebacklog"
+
+      - alert: ComponentTimeout
+        expr: |
+          sum(rate(module_operations_total{status="timeout"}[5m])) by (module) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Module {{ $labels.module }} experiencing timeouts"
+          description: >
+            Module "{{ $labels.module }}" is reporting timeout errors at
+            {{ $value | humanize }} per second over the last 5 minutes.
+          runbook_url: "https://github.com/GoCodeAlone/workflow/blob/main/docs/RUNBOOKS.md#componenttimeout"
+
+      - alert: HighMemoryUsage
+        expr: |
+          process_resident_memory_bytes{job="workflow"}
+          / on() group_left() machine_memory_bytes > 0.85
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Workflow engine memory usage above 85%"
+          description: >
+            The workflow engine process is using more than 85% of available memory
+            ({{ $value | humanizePercentage }}). Risk of OOM kill.
+          runbook_url: "https://github.com/GoCodeAlone/workflow/blob/main/docs/RUNBOOKS.md#highmemoryusage"
+
+  - name: workflow-http
+    rules:
+      - alert: HighHTTPErrorRate
+        expr: |
+          sum(rate(http_requests_total{status_code=~"5.."}[5m]))
+          / sum(rate(http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High HTTP 5xx error rate ({{ $value | humanizePercentage }})"
+          description: >
+            More than 5% of HTTP requests are returning 5xx status codes.
+          runbook_url: "https://github.com/GoCodeAlone/workflow/blob/main/docs/RUNBOOKS.md#highhttperrorrate"
+
+      - alert: HighHTTPLatency
+        expr: |
+          histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+          > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP p99 latency above 2s"
+          description: >
+            The p99 HTTP request latency has exceeded 2 seconds for 10 minutes.
+            Current value: {{ $value | humanizeDuration }}.
+          runbook_url: "https://github.com/GoCodeAlone/workflow/blob/main/docs/RUNBOOKS.md#highhttplatency"

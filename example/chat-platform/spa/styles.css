@@ -1780,6 +1780,215 @@ input[type="datetime-local"]:focus {
   font-weight: 600;
 }
 
+/* ========== Direct Messages ========== */
+.dm-thread-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.dm-thread-item:hover {
+  background: var(--bg-hover);
+}
+
+.dm-thread-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.dm-thread-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+}
+
+.dm-thread-preview {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 0.15rem;
+}
+
+.dm-thread-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3rem;
+  margin-left: 1rem;
+  flex-shrink: 0;
+}
+
+.dm-thread-time {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+/* DM User Picker */
+.dm-user-picker {
+  padding: 1.25rem;
+}
+
+.dm-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.dm-picker-header h3 {
+  font-size: 1rem;
+}
+
+.dm-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.dm-picker-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.85rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.dm-picker-item:hover {
+  background: var(--bg-hover);
+}
+
+.dm-picker-name {
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+/* ========== Shared Resources Panel ========== */
+.resources-panel h4 {
+  margin-bottom: 0;
+}
+
+.resources-toggle {
+  cursor: pointer;
+  color: var(--accent-primary);
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  text-transform: none;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.resources-toggle:hover {
+  color: var(--accent-hover);
+}
+
+.resources-content {
+  margin-top: 0.5rem;
+}
+.resources-content.hidden {
+  display: none;
+}
+
+.resource-category {
+  margin-bottom: 0.75rem;
+}
+
+.resource-category-header {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.35rem;
+}
+
+.resource-item {
+  padding: 0.5rem;
+  border-radius: var(--radius);
+  transition: background var(--transition);
+  margin-bottom: 0.25rem;
+}
+.resource-item:hover {
+  background: var(--bg-hover);
+}
+
+.resource-item-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.15rem;
+}
+
+.resource-item-preview {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+  margin-bottom: 0.35rem;
+}
+
+.resource-item-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.resource-item-actions .btn-sm {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
+}
+
+/* ========== Transfer Handoff ========== */
+.transfer-handoff-banner {
+  background: var(--info-muted);
+  border: 1px solid rgba(76, 201, 240, 0.3);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+}
+
+.transfer-handoff-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.transfer-handoff-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--info);
+}
+
+.transfer-handoff-note {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(76, 201, 240, 0.15);
+  font-style: italic;
+}
+
+.transfer-handoff-time {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.message-bubble.transfer-indicator {
+  background: var(--info-muted);
+  border: 1px solid rgba(76, 201, 240, 0.3);
+  color: var(--info);
+  font-weight: 500;
+}
+
 @media (max-width: 768px) {
   .multi-chat-layout {
     flex-direction: column;

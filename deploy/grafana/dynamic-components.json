@@ -1,0 +1,186 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Dynamic component system: hot-reload events, component lifecycle, interpreter pool usage, and AI-generated component metrics.",
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Dynamic Component Count",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(module_operations_total{module=\"dynamic\", operation=\"register\"}) - sum(module_operations_total{module=\"dynamic\", operation=\"unregister\"})",
+          "legendFormat": "Components"
+        }
+      ]
+    },
+    {
+      "title": "Component Load Rate",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(module_operations_total{module=\"dynamic\", operation=\"load\"}[5m])) * 60",
+          "legendFormat": "Loads/min"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "opm"
+        }
+      }
+    },
+    {
+      "title": "Component Load Errors",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(module_operations_total{module=\"dynamic\", operation=\"load\", status=\"error\"}[5m])) * 60",
+          "legendFormat": "Errors/min"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "opm",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "AI Generation Success Rate",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(module_operations_total{module=\"ai\", operation=\"generate\", status=\"success\"}[5m])) / sum(rate(module_operations_total{module=\"ai\", operation=\"generate\"}[5m]))",
+          "legendFormat": "Success Rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.8 },
+              { "color": "green", "value": 0.95 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Dynamic Component Operations",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(module_operations_total{module=\"dynamic\"}[5m])) by (operation, status) * 60",
+          "legendFormat": "{{operation}} - {{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "opm"
+        }
+      }
+    },
+    {
+      "title": "Hot-Reload Events",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(module_operations_total{module=\"dynamic\", operation=~\"reload|file_change\"}[5m])) by (operation) * 60",
+          "legendFormat": "{{operation}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "opm"
+        }
+      }
+    },
+    {
+      "title": "AI Component Generation Latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(workflow_duration_seconds_bucket{workflow_type=\"ai_generate\"}[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(workflow_duration_seconds_bucket{workflow_type=\"ai_generate\"}[5m])) by (le))",
+          "legendFormat": "p50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "title": "Interpreter Pool Memory",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "expr": "go_memstats_alloc_bytes{job=\"workflow\"}",
+          "legendFormat": "Go Heap Alloc"
+        },
+        {
+          "expr": "go_memstats_sys_bytes{job=\"workflow\"}",
+          "legendFormat": "System Memory"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["workflow", "dynamic"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "title": "Dynamic Components",
+  "uid": "workflow-dynamic-components"
+}

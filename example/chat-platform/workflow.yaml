@@ -183,6 +183,25 @@ modules:
       - auth-middleware
       - persistence
 
+  # --- Direct Messaging (responder-to-responder, supervisor-to-responder) ---
+  - name: dm-api
+    type: api.handler
+    config:
+      resourceName: dm
+    dependsOn:
+      - auth-middleware
+      - persistence
+
+  # --- Shared Resources (canned responses / knowledge base) ---
+  - name: resources-api
+    type: api.handler
+    config:
+      resourceName: resources
+      seedFile: "./seed/canned-responses.json"
+    dependsOn:
+      - auth-middleware
+      - persistence
+
   # --- Conversation state machine ---
   - name: conversation-engine
     type: statemachine.engine
@@ -469,6 +488,8 @@ modules:
         - "conversation.followup.triggered"
         - "conversation.survey.completed"
         - "conversation.tag.updated"
+        - "dm.message.sent"
+        - "dm.message.received"
     dependsOn:
       - conversation-engine
 
@@ -948,6 +969,80 @@ workflows:
       - method: "GET"
         path: "/api/providers"
         handler: providers-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # === Direct Messaging (protected) ===
+      - method: "GET"
+        path: "/api/dm/threads"
+        handler: dm-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/dm/{peerId}"
+        handler: dm-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/dm/{peerId}"
+        handler: dm-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      # === Shared Resources (protected) ===
+      - method: "GET"
+        path: "/api/resources/canned-responses"
+        handler: resources-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "GET"
+        path: "/api/resources/canned-responses/{id}"
+        handler: resources-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "POST"
+        path: "/api/resources/canned-responses"
+        handler: resources-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "PUT"
+        path: "/api/resources/canned-responses/{id}"
+        handler: resources-api
+        middlewares:
+          - cors
+          - request-id
+          - rate-limiter
+          - auth-middleware
+
+      - method: "DELETE"
+        path: "/api/resources/canned-responses/{id}"
+        handler: resources-api
         middlewares:
           - cors
           - request-id

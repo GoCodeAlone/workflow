@@ -4,6 +4,7 @@ import {
   renderStatusBadge, renderRiskIndicator, formatTime, formatTimestamp,
   maskPhone, renderSpinner
 } from './components.js';
+import { renderResourcesPanel, wireResourcesPanel } from './resources.js';
 
 let pollInterval = null;
 let lastMessageCount = 0;
@@ -62,6 +63,10 @@ export function renderChat(conversationId, readOnly) {
         `}
       </div>
       <div class="chat-sidebar" id="chat-sidebar">
+        <div class="chat-sidebar-section" id="sidebar-transfer-info" style="display:none">
+          <h4>Transfer Info</h4>
+          <div id="sidebar-transfer-content"></div>
+        </div>
         <div class="chat-sidebar-section">
           <h4>Texter Info</h4>
           <div id="sidebar-texter-info">${renderSpinner()}</div>
@@ -79,6 +84,7 @@ export function renderChat(conversationId, readOnly) {
           <div class="ai-summary-toggle" id="ai-summary-toggle">&#9654; Load AI Summary</div>
           <div class="ai-summary-content hidden" id="ai-summary-content"></div>
         </div>
+        ${readOnly ? '' : renderResourcesPanel()}
       </div>
     </div>
   `;
@@ -138,6 +144,19 @@ export function handleChat(conversationId, readOnly) {
   const summaryToggle = document.getElementById('ai-summary-toggle');
   if (summaryToggle) {
     summaryToggle.addEventListener('click', () => loadAiSummary(conversationId));
+  }
+
+  // Wire shared resources panel (insert text into chat input)
+  if (!readOnly) {
+    wireResourcesPanel((text) => {
+      const chatInput = document.getElementById('chat-input');
+      if (chatInput) {
+        chatInput.value = text;
+        chatInput.style.height = 'auto';
+        chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+        chatInput.focus();
+      }
+    });
   }
 
   // Back button
@@ -203,6 +222,21 @@ async function loadConversation(conversationId, readOnly) {
       riskEl.innerHTML = renderRiskIndicator(data.riskLevel || 'low');
     }
 
+    // Transfer handoff info
+    const transferSection = document.getElementById('sidebar-transfer-info');
+    const transferContent = document.getElementById('sidebar-transfer-content');
+    if (transferSection && transferContent && data.transferredFrom) {
+      transferSection.style.display = '';
+      transferContent.innerHTML = `
+        <div class="transfer-handoff-banner">
+          <div class="transfer-handoff-label">Transferred from</div>
+          <div class="transfer-handoff-name">${escapeHtml(data.transferredFrom.name || data.transferredFrom.id || 'Unknown')}</div>
+          ${data.transferredFrom.note ? `<div class="transfer-handoff-note">${escapeHtml(data.transferredFrom.note)}</div>` : ''}
+          ${data.transferredFrom.timestamp ? `<div class="transfer-handoff-time">${formatTime(data.transferredFrom.timestamp)}</div>` : ''}
+        </div>
+      `;
+    }
+
     // Load messages
     await loadMessages(conversationId);
   } catch (err) {
@@ -234,6 +268,17 @@ async function loadMessages(conversationId) {
 
     container.innerHTML = messages.map(msg => {
       const dir = msg.direction || 'inbound';
+      if (msg.type === 'transfer' || (msg.type === 'system' && (msg.content || msg.body || '').toLowerCase().includes('transfer'))) {
+        const text = msg.content || msg.body;
+        return `
+          <div class="message-bubble system transfer-indicator">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:4px">
+              <polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/>
+            </svg>
+            ${escapeHtml(text)}
+          </div>
+        `;
+      }
       if (msg.type === 'system' || dir === 'system') {
         return `<div class="message-bubble system">${escapeHtml(msg.content || msg.body)}</div>`;
       }

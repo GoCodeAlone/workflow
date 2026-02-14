@@ -7,6 +7,8 @@ import { registerAdminRoutes } from './admin.js';
 import { registerQueueRoutes, clearRefresh as clearQueueRefresh } from './queue.js';
 import { renderChat, handleChat, clearPolling } from './chat.js';
 import { registerMultiChatRoutes, clearMultiChat } from './multichat.js';
+import { registerDmRoutes, clearDmPolling } from './dm.js';
+import { clearResourcesCache } from './resources.js';
 
 const routes = {};
 
@@ -21,6 +23,7 @@ registerSupervisorRoutes(registerRoute);
 registerAdminRoutes(registerRoute);
 registerQueueRoutes(registerRoute);
 registerMultiChatRoutes(registerRoute);
+registerDmRoutes(registerRoute);
 
 function matchRoute(hash) {
   const path = (hash || '#/login').slice(1).replace(/^\//, '');
@@ -58,6 +61,8 @@ function clearAllTimers() {
   clearSupervisorRefresh();
   clearQueueRefresh();
   clearMultiChat();
+  clearDmPolling();
+  clearResourcesCache();
 }
 
 function navigate() {
