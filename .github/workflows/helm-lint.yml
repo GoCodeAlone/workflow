@@ -1,0 +1,41 @@
+name: Helm Lint
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/helm/**'
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint Helm Chart
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Set up Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: 'v3.16.0'
+
+    - name: Lint chart
+      run: helm lint deploy/helm/workflow
+
+    - name: Template with defaults
+      run: helm template test-release deploy/helm/workflow
+
+    - name: Template with autoscaling
+      run: |
+        helm template test-release deploy/helm/workflow \
+          --set autoscaling.enabled=true \
+          --set ingress.enabled=true
+
+    - name: Template with monitoring
+      run: |
+        helm template test-release deploy/helm/workflow \
+          --set monitoring.enabled=true \
+          --set monitoring.serviceMonitor.enabled=true

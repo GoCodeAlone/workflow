@@ -62,6 +62,76 @@ func Name() string {
 	return "conversation-router"
 }
 
+func Contract() map[string]interface{} {
+	return map[string]interface{}{
+		"required_inputs": map[string]interface{}{},
+		"optional_inputs": map[string]interface{}{
+			"from": map[string]interface{}{
+				"type":        "string",
+				"description": "Sender phone number or identifier. Required for new conversations.",
+			},
+			"body": map[string]interface{}{
+				"type":        "string",
+				"description": "Message body text. Used for keyword-based routing.",
+			},
+			"provider": map[string]interface{}{
+				"type":        "string",
+				"description": "Message provider (twilio, webchat, aws, partner)",
+			},
+			"shortCode": map[string]interface{}{
+				"type":        "string",
+				"description": "Short code the message was sent to",
+			},
+			"programId": map[string]interface{}{
+				"type":        "string",
+				"description": "Explicit program ID override",
+			},
+			"affiliateId": map[string]interface{}{
+				"type":        "string",
+				"description": "Explicit affiliate ID override",
+			},
+			"responderId": map[string]interface{}{
+				"type":        "string",
+				"description": "Responder ID for assignment transitions",
+			},
+			"conversationId": map[string]interface{}{
+				"type":        "string",
+				"description": "Existing conversation ID for lookups",
+			},
+		},
+		"outputs": map[string]interface{}{
+			"conversationId": map[string]interface{}{
+				"type":        "string",
+				"description": "Assigned or existing conversation ID",
+			},
+			"programId": map[string]interface{}{
+				"type":        "string",
+				"description": "Resolved program ID",
+			},
+			"programName": map[string]interface{}{
+				"type":        "string",
+				"description": "Display name of the resolved program",
+			},
+			"affiliateId": map[string]interface{}{
+				"type":        "string",
+				"description": "Resolved affiliate ID",
+			},
+			"isNew": map[string]interface{}{
+				"type":        "bool",
+				"description": "Whether this is a new conversation",
+			},
+			"queuePosition": map[string]interface{}{
+				"type":        "int",
+				"description": "Position in the program queue (new conversations only)",
+			},
+			"status": map[string]interface{}{
+				"type":        "string",
+				"description": "Conversation status (queued, active)",
+			},
+		},
+	}
+}
+
 func Init(services map[string]interface{}) error {
 	return nil
 }

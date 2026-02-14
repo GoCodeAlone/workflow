@@ -14,6 +14,52 @@ func Name() string {
 	return "ai-summarizer"
 }
 
+func Contract() map[string]interface{} {
+	return map[string]interface{}{
+		"required_inputs": map[string]interface{}{},
+		"optional_inputs": map[string]interface{}{
+			"messages": map[string]interface{}{
+				"type":        "slice",
+				"description": "Array of message objects with 'body' fields to summarize. If empty, returns a placeholder summary.",
+			},
+			"transitionId": map[string]interface{}{
+				"type":        "string",
+				"description": "State machine transition ID for transition events",
+			},
+		},
+		"outputs": map[string]interface{}{
+			"summary": map[string]interface{}{
+				"type":        "string",
+				"description": "Generated text summary of the conversation",
+			},
+			"keyTopics": map[string]interface{}{
+				"type":        "slice",
+				"description": "Detected topic categories",
+			},
+			"riskLevel": map[string]interface{}{
+				"type":        "string",
+				"description": "Assessed risk level (low, high, critical)",
+			},
+			"sentiment": map[string]interface{}{
+				"type":        "string",
+				"description": "Overall sentiment (negative, neutral, positive)",
+			},
+			"suggestedTags": map[string]interface{}{
+				"type":        "slice",
+				"description": "Suggested tags based on detected topics",
+			},
+			"messageCount": map[string]interface{}{
+				"type":        "int",
+				"description": "Number of messages processed",
+			},
+			"generatedAt": map[string]interface{}{
+				"type":        "string",
+				"description": "ISO 8601 timestamp of when the summary was generated",
+			},
+		},
+	}
+}
+
 func Init(services map[string]interface{}) error {
 	return nil
 }

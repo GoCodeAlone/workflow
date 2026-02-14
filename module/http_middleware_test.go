@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // -- RateLimitMiddleware tests --
@@ -326,5 +327,238 @@ func TestMin(t *testing.T) {
 	}
 	if min(4, 4) != 4 {
 		t.Error("expected min(4, 4) = 4")
+	}
+}
+
+// -- Token-based rate limiting tests --
+
+func TestNewRateLimitMiddleware_DefaultStrategy(t *testing.T) {
+	m := NewRateLimitMiddleware("rl", 60, 10)
+	if m.Strategy() != RateLimitByIP {
+		t.Errorf("expected default strategy IP, got %q", m.Strategy())
+	}
+}
+
+func TestNewRateLimitMiddlewareWithStrategy_Token(t *testing.T) {
+	m := NewRateLimitMiddlewareWithStrategy("rl", 60, 10, RateLimitByToken)
+	if m.Strategy() != RateLimitByToken {
+		t.Errorf("expected strategy Token, got %q", m.Strategy())
+	}
+}
+
+func TestRateLimitMiddleware_TokenStrategy(t *testing.T) {
+	m := NewRateLimitMiddlewareWithStrategy("rl", 60, 1, RateLimitByToken)
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// First request with token A should pass
+	req1 := httptest.NewRequest("GET", "/test", nil)
+	req1.Header.Set("Authorization", "Bearer token-a")
+	req1.RemoteAddr = "192.168.1.1:1234"
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Errorf("token A first request: expected 200, got %d", rec1.Code)
+	}
+
+	// Second request with token A should be rate limited
+	req2 := httptest.NewRequest("GET", "/test", nil)
+	req2.Header.Set("Authorization", "Bearer token-a")
+	req2.RemoteAddr = "192.168.1.1:1234"
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Errorf("token A second request: expected 429, got %d", rec2.Code)
+	}
+
+	// Request with token B should pass (separate bucket)
+	req3 := httptest.NewRequest("GET", "/test", nil)
+	req3.Header.Set("Authorization", "Bearer token-b")
+	req3.RemoteAddr = "192.168.1.1:1234"
+	rec3 := httptest.NewRecorder()
+	handler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusOK {
+		t.Errorf("token B first request: expected 200, got %d", rec3.Code)
+	}
+}
+
+func TestRateLimitMiddleware_TokenStrategy_FallbackToIP(t *testing.T) {
+	m := NewRateLimitMiddlewareWithStrategy("rl", 60, 1, RateLimitByToken)
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Request with no token falls back to IP
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "10.0.0.1:5678"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("no token first request: expected 200, got %d", rec.Code)
+	}
+
+	// Same IP should be rate limited
+	req2 := httptest.NewRequest("GET", "/test", nil)
+	req2.RemoteAddr = "10.0.0.1:5678"
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Errorf("no token second request: expected 429, got %d", rec2.Code)
+	}
+}
+
+func TestRateLimitMiddleware_IPAndTokenStrategy(t *testing.T) {
+	m := NewRateLimitMiddlewareWithStrategy("rl", 60, 1, RateLimitByIPAndToken)
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// IP1 + token A
+	req1 := httptest.NewRequest("GET", "/test", nil)
+	req1.Header.Set("Authorization", "Bearer token-a")
+	req1.RemoteAddr = "10.0.0.1:1234"
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Errorf("ip1+tokenA: expected 200, got %d", rec1.Code)
+	}
+
+	// IP2 + same token A should pass (different combined key)
+	req2 := httptest.NewRequest("GET", "/test", nil)
+	req2.Header.Set("Authorization", "Bearer token-a")
+	req2.RemoteAddr = "10.0.0.2:1234"
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Errorf("ip2+tokenA: expected 200, got %d", rec2.Code)
+	}
+}
+
+func TestRateLimitMiddleware_RetryAfterHeader(t *testing.T) {
+	m := NewRateLimitMiddleware("rl", 60, 1)
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Exhaust burst
+	req1 := httptest.NewRequest("GET", "/test", nil)
+	req1.RemoteAddr = "192.168.1.1:1234"
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+
+	// Rate limited request should include Retry-After
+	req2 := httptest.NewRequest("GET", "/test", nil)
+	req2.RemoteAddr = "192.168.1.1:1234"
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", rec2.Code)
+	}
+	if rec2.Header().Get("Retry-After") != "60" {
+		t.Errorf("expected Retry-After header '60', got %q", rec2.Header().Get("Retry-After"))
+	}
+}
+
+func TestRateLimitMiddleware_XForwardedFor(t *testing.T) {
+	m := NewRateLimitMiddleware("rl", 60, 1)
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Request with X-Forwarded-For should use that IP
+	req1 := httptest.NewRequest("GET", "/test", nil)
+	req1.RemoteAddr = "127.0.0.1:1234"
+	req1.Header.Set("X-Forwarded-For", "203.0.113.50")
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Errorf("first request: expected 200, got %d", rec1.Code)
+	}
+
+	// Different X-Forwarded-For should be separate bucket
+	req2 := httptest.NewRequest("GET", "/test", nil)
+	req2.RemoteAddr = "127.0.0.1:1234"
+	req2.Header.Set("X-Forwarded-For", "203.0.113.51")
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Errorf("different forwarded IP: expected 200, got %d", rec2.Code)
+	}
+}
+
+func TestRateLimitMiddleware_SetTokenHeader(t *testing.T) {
+	m := NewRateLimitMiddlewareWithStrategy("rl", 60, 1, RateLimitByToken)
+	m.SetTokenHeader("X-API-Key")
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("X-API-Key", "my-key-123")
+	req.RemoteAddr = "10.0.0.1:1234"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("custom token header: expected 200, got %d", rec.Code)
+	}
+
+	// Same key should be limited
+	req2 := httptest.NewRequest("GET", "/test", nil)
+	req2.Header.Set("X-API-Key", "my-key-123")
+	req2.RemoteAddr = "10.0.0.1:1234"
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Errorf("custom token header repeated: expected 429, got %d", rec2.Code)
+	}
+}
+
+func TestRateLimitMiddleware_CleanupStaleClients(t *testing.T) {
+	m := NewRateLimitMiddleware("rl", 60, 10)
+
+	// Manually add a stale client
+	m.mu.Lock()
+	m.clients["ip:stale-client"] = &client{
+		tokens:        10,
+		lastTimestamp: time.Now().Add(-1 * time.Hour), // 1 hour old
+	}
+	m.clients["ip:fresh-client"] = &client{
+		tokens:        10,
+		lastTimestamp: time.Now(),
+	}
+	m.mu.Unlock()
+
+	m.cleanupStaleClients()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, exists := m.clients["ip:stale-client"]; exists {
+		t.Error("expected stale client to be cleaned up")
+	}
+	if _, exists := m.clients["ip:fresh-client"]; !exists {
+		t.Error("expected fresh client to still exist")
+	}
+}
+
+func TestRateLimitMiddleware_StartStop_Lifecycle(t *testing.T) {
+	m := NewRateLimitMiddleware("rl", 60, 10)
+
+	if err := m.Start(context.TODO()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Let cleanup run at least once
+	time.Sleep(10 * time.Millisecond)
+
+	if err := m.Stop(context.TODO()); err != nil {
+		t.Fatalf("Stop failed: %v", err)
 	}
 }

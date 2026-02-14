@@ -435,8 +435,8 @@ func TestSetup_EmptyConfig(t *testing.T) {
 	if app.engine == nil {
 		t.Fatal("expected non-nil engine")
 	}
-	if app.mux == nil {
-		t.Fatal("expected non-nil mux")
+	if app.handler == nil {
+		t.Fatal("expected non-nil handler")
 	}
 	if app.logger == nil {
 		t.Fatal("expected non-nil logger")
@@ -601,10 +601,10 @@ func TestSetup_WithModules(t *testing.T) {
 		t.Fatal("expected non-nil serverApp")
 	}
 
-	// Verify the mux has routes by testing one
+	// Verify the handler has routes by testing one
 	req := httptest.NewRequest(http.MethodGet, "/api/ai/providers", nil)
 	w := httptest.NewRecorder()
-	app.mux.ServeHTTP(w, req)
+	app.handler.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
 		t.Error("expected /api/ai/providers to be registered")
 	}

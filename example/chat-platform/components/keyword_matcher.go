@@ -52,6 +52,48 @@ func Name() string {
 	return "keyword-matcher"
 }
 
+func Contract() map[string]interface{} {
+	return map[string]interface{}{
+		"required_inputs": map[string]interface{}{
+			"body": map[string]interface{}{
+				"type":        "string",
+				"description": "Message body text to match keywords against. Accepts 'body', 'Body', or 'message' field names.",
+			},
+		},
+		"optional_inputs": map[string]interface{}{},
+		"outputs": map[string]interface{}{
+			"matched": map[string]interface{}{
+				"type":        "bool",
+				"description": "Whether the first word matched a known keyword",
+			},
+			"keyword": map[string]interface{}{
+				"type":        "string",
+				"description": "The normalized (uppercase) first word from the message",
+			},
+			"programId": map[string]interface{}{
+				"type":        "string",
+				"description": "Program ID associated with the matched keyword",
+			},
+			"subProgram": map[string]interface{}{
+				"type":        "string",
+				"description": "Sub-program name for the matched keyword",
+			},
+			"action": map[string]interface{}{
+				"type":        "string",
+				"description": "Routing action (route or route_priority)",
+			},
+			"autoResponse": map[string]interface{}{
+				"type":        "string",
+				"description": "Automatic response message for the matched keyword",
+			},
+			"timestamp": map[string]interface{}{
+				"type":        "string",
+				"description": "ISO 8601 timestamp of when matching occurred",
+			},
+		},
+	}
+}
+
 func Init(services map[string]interface{}) error {
 	return nil
 }

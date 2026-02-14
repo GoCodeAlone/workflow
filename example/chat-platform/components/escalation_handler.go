@@ -13,6 +13,65 @@ func Name() string {
 	return "escalation-handler"
 }
 
+func Contract() map[string]interface{} {
+	return map[string]interface{}{
+		"required_inputs": map[string]interface{}{},
+		"optional_inputs": map[string]interface{}{
+			"type": map[string]interface{}{
+				"type":        "string",
+				"description": "Escalation type: 'medical' or 'police'. If empty, treated as a system transition event.",
+			},
+			"conversationId": map[string]interface{}{
+				"type":        "string",
+				"description": "Conversation being escalated",
+			},
+			"urgency": map[string]interface{}{
+				"type":        "string",
+				"description": "Urgency level for the escalation",
+				"default":     "standard",
+			},
+			"location": map[string]interface{}{
+				"type":        "string",
+				"description": "Location of the texter (required for police escalation)",
+			},
+			"transitionId": map[string]interface{}{
+				"type":        "string",
+				"description": "State machine transition ID for system events",
+			},
+		},
+		"outputs": map[string]interface{}{
+			"escalationId": map[string]interface{}{
+				"type":        "string",
+				"description": "Unique escalation identifier",
+			},
+			"type": map[string]interface{}{
+				"type":        "string",
+				"description": "Type of escalation processed",
+			},
+			"status": map[string]interface{}{
+				"type":        "string",
+				"description": "Escalation status (contacted, dispatched, pending_location, processed)",
+			},
+			"contactedService": map[string]interface{}{
+				"type":        "string",
+				"description": "Name of the contacted emergency service",
+			},
+			"referenceNumber": map[string]interface{}{
+				"type":        "string",
+				"description": "Reference number for the escalation",
+			},
+			"instructions": map[string]interface{}{
+				"type":        "string",
+				"description": "Instructions for the responder",
+			},
+			"timestamp": map[string]interface{}{
+				"type":        "string",
+				"description": "ISO 8601 timestamp",
+			},
+		},
+	}
+}
+
 func Init(services map[string]interface{}) error {
 	return nil
 }

@@ -1,0 +1,19 @@
+{{- if and .Values.monitoring.enabled .Values.monitoring.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "workflow.fullname" . }}
+  labels:
+    {{- include "workflow.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "workflow.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: mgmt
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      path: /metrics
+{{- end }}

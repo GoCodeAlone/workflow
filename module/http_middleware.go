@@ -17,13 +17,29 @@ type HTTPMiddleware interface {
 	Process(next http.Handler) http.Handler
 }
 
+// RateLimitStrategy controls how clients are identified for rate limiting.
+type RateLimitStrategy string
+
+const (
+	// RateLimitByIP identifies clients by their IP address (default).
+	RateLimitByIP RateLimitStrategy = "ip"
+	// RateLimitByToken identifies clients by the Authorization header token.
+	RateLimitByToken RateLimitStrategy = "token"
+	// RateLimitByIPAndToken uses both IP and token for identification.
+	RateLimitByIPAndToken RateLimitStrategy = "ip_and_token"
+)
+
 // RateLimitMiddleware implements a rate limiting middleware
 type RateLimitMiddleware struct {
 	name              string
 	requestsPerMinute int
 	burstSize         int
+	strategy          RateLimitStrategy
+	tokenHeader       string // HTTP header to extract token from
 	clients           map[string]*client
 	mu                sync.Mutex
+	cleanupInterval   time.Duration
+	stopCleanup       chan struct{}
 }
 
 // client tracks the rate limiting state for a single client
@@ -32,14 +48,31 @@ type client struct {
 	lastTimestamp time.Time
 }
 
-// NewRateLimitMiddleware creates a new rate limiting middleware
+// NewRateLimitMiddleware creates a new rate limiting middleware with IP-based strategy.
 func NewRateLimitMiddleware(name string, requestsPerMinute, burstSize int) *RateLimitMiddleware {
 	return &RateLimitMiddleware{
 		name:              name,
 		requestsPerMinute: requestsPerMinute,
 		burstSize:         burstSize,
+		strategy:          RateLimitByIP,
+		tokenHeader:       "Authorization",
 		clients:           make(map[string]*client),
+		cleanupInterval:   5 * time.Minute,
+		stopCleanup:       make(chan struct{}),
 	}
+}
+
+// NewRateLimitMiddlewareWithStrategy creates a rate limiting middleware with
+// a specific client identification strategy.
+func NewRateLimitMiddlewareWithStrategy(name string, requestsPerMinute, burstSize int, strategy RateLimitStrategy) *RateLimitMiddleware {
+	m := NewRateLimitMiddleware(name, requestsPerMinute, burstSize)
+	m.strategy = strategy
+	return m
+}
+
+// SetTokenHeader sets a custom header name for token-based rate limiting.
+func (m *RateLimitMiddleware) SetTokenHeader(header string) {
+	m.tokenHeader = header
 }
 
 // Name returns the module name
@@ -52,20 +85,55 @@ func (m *RateLimitMiddleware) Init(app modular.Application) error {
 	return nil
 }
 
+// clientKey derives the rate limiting key from the request based on the
+// configured strategy.
+func (m *RateLimitMiddleware) clientKey(r *http.Request) string {
+	var ip string
+	clientIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(clientIP); err == nil {
+		ip = host
+	} else {
+		ip = clientIP
+	}
+
+	// Check X-Forwarded-For for proxied requests
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.SplitN(xff, ",", 2)
+		forwarded := strings.TrimSpace(parts[0])
+		if forwarded != "" {
+			ip = forwarded
+		}
+	}
+
+	switch m.strategy {
+	case RateLimitByToken:
+		token := r.Header.Get(m.tokenHeader)
+		if token != "" {
+			return "token:" + token
+		}
+		// Fall back to IP if no token
+		return "ip:" + ip
+	case RateLimitByIPAndToken:
+		token := r.Header.Get(m.tokenHeader)
+		if token != "" {
+			return "ip:" + ip + "|token:" + token
+		}
+		return "ip:" + ip
+	default: // RateLimitByIP
+		return "ip:" + ip
+	}
+}
+
 // Process implements middleware processing
 func (m *RateLimitMiddleware) Process(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Strip port from RemoteAddr to identify by IP only
-		clientIP := r.RemoteAddr
-		if host, _, err := net.SplitHostPort(clientIP); err == nil {
-			clientIP = host
-		}
+		key := m.clientKey(r)
 
 		m.mu.Lock()
-		c, exists := m.clients[clientIP]
+		c, exists := m.clients[key]
 		if !exists {
 			c = &client{tokens: m.burstSize, lastTimestamp: time.Now()}
-			m.clients[clientIP] = c
+			m.clients[key] = c
 		} else {
 			// Refill tokens based on elapsed time
 			elapsed := time.Since(c.lastTimestamp).Minutes()
@@ -79,6 +147,7 @@ func (m *RateLimitMiddleware) Process(next http.Handler) http.Handler {
 		// Check if request can proceed
 		if c.tokens <= 0 {
 			m.mu.Unlock()
+			w.Header().Set("Retry-After", "60")
 			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
@@ -89,6 +158,29 @@ func (m *RateLimitMiddleware) Process(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// cleanupStaleClients removes client entries that haven't been seen in over
+// twice the refill window. This prevents unbounded memory growth.
+func (m *RateLimitMiddleware) cleanupStaleClients() {
+	staleThreshold := 2 * time.Minute * time.Duration(max(1, m.burstSize/max(1, m.requestsPerMinute)))
+	if staleThreshold < 10*time.Minute {
+		staleThreshold = 10 * time.Minute
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for key, c := range m.clients {
+		if now.Sub(c.lastTimestamp) > staleThreshold {
+			delete(m.clients, key)
+		}
+	}
+}
+
+// Strategy returns the current rate limiting strategy.
+func (m *RateLimitMiddleware) Strategy() RateLimitStrategy {
+	return m.strategy
 }
 
 // ProvidesServices returns the services provided by this middleware
@@ -108,13 +200,32 @@ func (m *RateLimitMiddleware) RequiresServices() []modular.ServiceDependency {
 	return nil
 }
 
-// Start is a no-op for this middleware
-func (m *RateLimitMiddleware) Start(ctx context.Context) error {
+// Start begins the stale client cleanup goroutine.
+func (m *RateLimitMiddleware) Start(_ context.Context) error {
+	if m.cleanupInterval <= 0 {
+		return nil
+	}
+	go func() {
+		ticker := time.NewTicker(m.cleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				m.cleanupStaleClients()
+			case <-m.stopCleanup:
+				return
+			}
+		}
+	}()
 	return nil
 }
 
-// Stop is a no-op for this middleware
-func (m *RateLimitMiddleware) Stop(ctx context.Context) error {
+// Stop terminates the cleanup goroutine.
+func (m *RateLimitMiddleware) Stop(_ context.Context) error {
+	select {
+	case m.stopCleanup <- struct{}{}:
+	default:
+	}
 	return nil
 }
 

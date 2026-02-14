@@ -1,0 +1,95 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/gocodealong/workflow
+  pullPolicy: IfNotPresent
+  tag: ""  # defaults to Chart appVersion
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Deployment mode: "monolith" runs a single process, "distributed" runs
+# separate gateway/api/conversation deployments (requires Kafka).
+mode: monolith
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+service:
+  type: ClusterIP
+  port: 8080
+  mgmtPort: 8081
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: workflow.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Workflow engine configuration
+config:
+  # Inline YAML config (mounted as ConfigMap)
+  inline: ""
+  # Path to config file inside the container (if using an existing ConfigMap/volume)
+  path: ""
+
+# Environment variables passed to the container
+env:
+  WORKFLOW_ADDR: ":8080"
+  # WORKFLOW_AI_PROVIDER: ""
+  # WORKFLOW_AI_API_KEY: ""
+  # WORKFLOW_AI_MODEL: ""
+
+# Sensitive values from Kubernetes secrets
+envFromSecret: ""
+
+# Prometheus monitoring
+monitoring:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}

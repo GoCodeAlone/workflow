@@ -17,9 +17,11 @@ import (
 	"github.com/GoCodeAlone/workflow/ai"
 	copilotai "github.com/GoCodeAlone/workflow/ai/copilot"
 	"github.com/GoCodeAlone/workflow/ai/llm"
+	"github.com/GoCodeAlone/workflow/audit"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/handlers"
+	"github.com/GoCodeAlone/workflow/middleware"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/schema"
 )
@@ -102,9 +104,10 @@ func loadConfig(logger *slog.Logger) (*config.WorkflowConfig, error) {
 type serverApp struct {
 	engine        *workflow.StdEngine
 	engineManager *workflow.WorkflowEngineManager
-	mux           *http.ServeMux
-	mgmtAddr      string // management API listen address (AI, dynamic, UI)
+	handler       http.Handler // management API handler (mux + middleware)
+	mgmtAddr      string       // management API listen address (AI, dynamic, UI)
 	logger        *slog.Logger
+	auditLogger   *audit.Logger
 }
 
 // setup initializes all server components: engine, AI services, and HTTP mux.
@@ -152,8 +155,16 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 
 	pool := dynamic.NewInterpreterPool()
 	aiSvc, deploySvc := initAIService(logger, registry, pool)
-	app.mux = buildMux(aiSvc, deploySvc, loader, registry, uiHandler)
+	mux := buildMux(aiSvc, deploySvc, loader, registry, uiHandler)
+
+	// Wrap the mux with input validation middleware
+	validationCfg := middleware.DefaultValidationConfig()
+	app.handler = middleware.InputValidation(validationCfg, mux)
 	app.mgmtAddr = *mgmtAddr
+
+	// Initialize audit logger (writes structured JSON to stdout)
+	app.auditLogger = audit.NewLogger(os.Stdout)
+	app.auditLogger.LogConfigChange(context.Background(), "system", "server", "server started")
 
 	return app, nil
 }
@@ -179,7 +190,7 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 
 	server := &http.Server{
 		Addr:              mgmtAddr,
-		Handler:           app.mux,
+		Handler:           app.handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -210,8 +221,54 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 	return nil
 }
 
+// envOrFlag returns the environment variable value if set, otherwise the flag value.
+func envOrFlag(envKey string, flagVal *string) string {
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	if flagVal != nil {
+		return *flagVal
+	}
+	return ""
+}
+
+// applyEnvOverrides sets flag values from environment variables when the
+// corresponding flag was not explicitly provided on the command line.
+func applyEnvOverrides() {
+	envMap := map[string]string{
+		"config":          "WORKFLOW_CONFIG",
+		"addr":            "WORKFLOW_ADDR",
+		"anthropic-key":   "WORKFLOW_AI_API_KEY",
+		"anthropic-model": "WORKFLOW_AI_MODEL",
+		"jwt-secret":      "WORKFLOW_JWT_SECRET",
+	}
+
+	// Track which flags were explicitly set on the command line.
+	explicit := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) {
+		explicit[f.Name] = true
+	})
+
+	for flagName, envKey := range envMap {
+		if explicit[flagName] {
+			continue
+		}
+		if v := os.Getenv(envKey); v != "" {
+			_ = flag.Set(flagName, v)
+		}
+	}
+
+	// WORKFLOW_AI_PROVIDER selects the default provider but does not map
+	// directly to a single flag. We expose it as an env var for containers
+	// and read it in initAIService.
+
+	// WORKFLOW_ENCRYPTION_KEY is consumed directly via os.Getenv where
+	// needed (e.g. crypto middleware) and has no flag equivalent.
+}
+
 func main() {
 	flag.Parse()
+	applyEnvOverrides()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		AddSource: true,

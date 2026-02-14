@@ -44,11 +44,15 @@ type DynamicComponent struct {
 	interpreter *interp.Interpreter
 
 	// Extracted function references from interpreted code
-	nameFunc    func() string
-	initFunc    func(map[string]any) error
-	startFunc   func(context.Context) error
-	stopFunc    func(context.Context) error
-	executeFunc func(context.Context, map[string]any) (map[string]any, error)
+	nameFunc     func() string
+	initFunc     func(map[string]any) error
+	startFunc    func(context.Context) error
+	stopFunc     func(context.Context) error
+	executeFunc  func(context.Context, map[string]any) (map[string]any, error)
+	contractFunc func() *FieldContract
+
+	// Contract holds the field contract extracted from the component, if declared.
+	Contract *FieldContract
 }
 
 // NewDynamicComponent creates a new unloaded dynamic component.
@@ -119,12 +123,19 @@ func (dc *DynamicComponent) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Execute runs the interpreted Execute function.
+// Execute runs the interpreted Execute function. If the component declares a
+// field contract, inputs are validated and defaults applied before execution.
 func (dc *DynamicComponent) Execute(ctx context.Context, params map[string]any) (map[string]any, error) {
 	dc.mu.RLock()
 	defer dc.mu.RUnlock()
 	if dc.executeFunc == nil {
 		return nil, fmt.Errorf("component %q has no Execute function", dc.id)
+	}
+	if dc.Contract != nil {
+		if err := ValidateInputs(dc.Contract, params); err != nil {
+			return nil, fmt.Errorf("component %q: %w", dc.id, err)
+		}
+		params = ApplyDefaults(dc.Contract, params)
 	}
 	return dc.safeCallExecute(ctx, params)
 }
@@ -160,6 +171,11 @@ func (dc *DynamicComponent) LoadFromSource(source string) error {
 		dc.info.Name = dc.safeCallName()
 	}
 	dc.info.Error = ""
+
+	// Extract field contract if the component declares one
+	if dc.contractFunc != nil {
+		dc.Contract = dc.safeCallContract()
+	}
 
 	return nil
 }
@@ -219,6 +235,19 @@ func (dc *DynamicComponent) extractFunctions(i *interp.Interpreter) {
 			dc.executeFunc = execFn
 		} else {
 			dc.executeFunc = dc.makeExecuteAdapter(v)
+		}
+	}
+
+	// Try to extract Contract() *FieldContract
+	// Dynamic components use map-based contracts to avoid importing the dynamic package.
+	// The convention is: Contract() map[string]interface{} with keys
+	// "required_inputs", "optional_inputs", "outputs", each a map[string]interface{}
+	// where each value is a map with "type", "description", "default".
+	if v, err := i.Eval("component.Contract"); err == nil {
+		if fn, ok := v.Interface().(func() map[string]any); ok {
+			dc.contractFunc = func() *FieldContract {
+				return parseContractMap(fn())
+			}
 		}
 	}
 }
@@ -295,4 +324,64 @@ func (dc *DynamicComponent) safeCallExecute(ctx context.Context, params map[stri
 		}
 	}()
 	return dc.executeFunc(ctx, params)
+}
+
+func (dc *DynamicComponent) safeCallContract() (contract *FieldContract) {
+	defer func() {
+		if r := recover(); r != nil {
+			contract = nil
+		}
+	}()
+	return dc.contractFunc()
+}
+
+// parseContractMap converts a map[string]any returned by a dynamic component's
+// Contract() function into a typed FieldContract. The expected structure is:
+//
+//	{
+//	  "required_inputs": { "fieldName": {"type": "string", "description": "..."} },
+//	  "optional_inputs": { "fieldName": {"type": "int", "description": "...", "default": 0} },
+//	  "outputs":         { "fieldName": {"type": "string", "description": "..."} },
+//	}
+func parseContractMap(m map[string]any) *FieldContract {
+	if m == nil {
+		return nil
+	}
+	c := NewFieldContract()
+	if ri, ok := m["required_inputs"].(map[string]any); ok {
+		c.RequiredInputs = parseFieldSpecs(ri)
+	}
+	if oi, ok := m["optional_inputs"].(map[string]any); ok {
+		c.OptionalInputs = parseFieldSpecs(oi)
+	}
+	if out, ok := m["outputs"].(map[string]any); ok {
+		c.Outputs = parseFieldSpecs(out)
+	}
+	return c
+}
+
+func parseFieldSpecs(m map[string]any) map[string]FieldSpec {
+	specs := make(map[string]FieldSpec, len(m))
+	for name, val := range m {
+		specMap, ok := val.(map[string]any)
+		if !ok {
+			// Simple form: just the type string
+			if ts, ok := val.(string); ok {
+				specs[name] = FieldSpec{Type: FieldType(ts)}
+			}
+			continue
+		}
+		spec := FieldSpec{}
+		if t, ok := specMap["type"].(string); ok {
+			spec.Type = FieldType(t)
+		}
+		if d, ok := specMap["description"].(string); ok {
+			spec.Description = d
+		}
+		if def, ok := specMap["default"]; ok {
+			spec.Default = def
+		}
+		specs[name] = spec
+	}
+	return specs
 }
