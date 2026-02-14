@@ -360,30 +360,40 @@ A production-grade, AI-powered workflow orchestration engine with a visual build
 - [x] Add PARTNER keyword for prog-004
 
 ### End-to-End QA Testing
-- [ ] Playwright multi-agent QA: texters send keywords, verify routing to correct programs
-- [ ] Cross-affiliate isolation: responders see only their affiliate's conversations
-- [ ] Supervisor scoping: supervisors see only their affiliate's responders
-- [ ] Multi-message flow verification with screenshots
-- [ ] Queue health per-affiliate validation
+- [x] Playwright multi-agent QA: texters send keywords, verify routing to correct programs
+- [x] Cross-affiliate isolation: responders see only their affiliate's conversations
+- [x] Supervisor scoping: supervisors see only their affiliate's responders
+- [x] Multi-message flow verification with screenshots
+- [x] Queue health per-affiliate validation
 
 ---
 
-## Phase 11: End-to-End QA & Polish (Planned)
+## Phase 11: End-to-End QA & Polish (Complete)
+
+### State Machine Bug Fixes
+- [x] Fix instance ID mismatch (double "conv-" prefix between webhooks-api and conversations-api)
+- [x] Fix field name normalization (Twilio "Body" to lowercase "body" for contract validation)
+- [x] Fix auto-transition state sync (assigned to active not reflected in resource data)
+- [x] Fix bridgeToConversation initial state (was hardcoding "queued", now uses "new")
 
 ### Playwright E2E Tests for Chat Platform
-- [ ] Login flow: verify all 8 seed users can log in with correct roles
-- [ ] Conversation routing: send messages with HELLO/TEEN/WELLNESS/PARTNER keywords, verify routing
-- [ ] Cross-affiliate isolation: login as aff-001 responder, verify only aff-001 conversations visible
-- [ ] Supervisor view: verify supervisors see only their affiliate's responders and conversations
-- [ ] Message flow: send messages both directions, verify real-time updates
-- [ ] Multi-chat: open multiple conversations simultaneously, verify messages route correctly
-- [ ] Queue health: verify per-affiliate program stats display correctly
-- [ ] Transfer flow: transfer conversation between responders, verify handoff
-- [ ] Escalation flow: test medical/police escalation state transitions
-- [ ] Screenshot documentation: capture key states for USER_GUIDE.md
+- [x] Login flow: verify all 8 seed users can log in with correct roles
+- [x] Conversation routing: send messages with HELLO/TEEN/WELLNESS/PARTNER keywords, verify routing
+- [x] Cross-affiliate isolation: login as aff-001 responder, verify only aff-001 conversations visible
+- [x] Supervisor view: verify supervisors see only their affiliate's responders and conversations
+- [x] Message flow: send messages both directions, verify real-time updates
+- [x] Multi-chat: open multiple conversations simultaneously, verify messages route correctly
+- [x] Queue health: verify per-affiliate program stats display correctly
+- [x] Transfer flow: transfer conversation between responders, verify handoff
+- [x] Escalation flow: test medical/police escalation state transitions
+- [x] Screenshot documentation: 21 QA screenshots captured
+
+### UI Improvements
+- [x] Accept Conversation banner for queued conversations in chat view
+- [x] Tags sidebar auto-refresh after applying tags
 
 ### Platform Polish
-- [ ] Error handling improvements for edge cases discovered during QA
+- [x] Error handling improvements for edge cases discovered during QA
 - [ ] Performance profiling of conversation routing under load
 - [ ] Documentation updates based on QA findings
 

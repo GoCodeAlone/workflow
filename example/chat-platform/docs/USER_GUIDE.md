@@ -125,7 +125,12 @@ Responders handle live conversations with texters.
 
    ![Responder Dashboard](screenshots/responder-dashboard.png)
 
-3. **Pick from queue**: Click "Pick from Queue" to be assigned the next waiting conversation. The conversation transitions from `queued` to `assigned` and then to `active`.
+3. **Pick from queue / Accept conversation**: There are two ways to take on a conversation:
+   - **Pick from Queue**: Click "Pick from Queue" on the dashboard to be assigned the next waiting conversation.
+   - **Accept Conversation**: When viewing a queued conversation directly, a banner appears at the top with an "Accept Conversation" button. Clicking it assigns the conversation to you and auto-transitions it to "active" state.
+
+   **State machine flow**: Conversations follow this lifecycle:
+   `new` -> `queued` (auto via route_message) -> `assigned` (accept) -> `active` (auto via start_conversation) -> `transferred`/`escalated`/`wrap_up` -> `closed`
 
 4. **Chat view** (`#/responder/chat/:id`): The chat interface shows a message thread with timestamps, text input, and a sidebar with texter info (phone, program, provider), tags, risk assessment, and AI summary.
 
@@ -147,15 +152,15 @@ Responders handle live conversations with texters.
    | **Schedule Follow-up** | Schedule an automated follow-up check-in |
    | **Close Conversation** | Close the conversation after wrap-up |
 
-6. **Transfer flow**: Select a responder and optionally add context for the warm handoff.
+6. **Transfer flow**: From an active conversation, use Actions > Transfer. Select a target responder from the list and add an optional note providing context for the warm handoff. The conversation moves to the "transferred" state. The conversation must be in "active" state to initiate a transfer.
 
    ![Transfer Dialog](screenshots/responder-transfer.png)
 
-7. **Escalation flow**: Confirm escalation to medical or police services. The supervisor is notified and emergency services are contacted (simulated in demo mode).
+7. **Escalation flow**: Two escalation types are available: **Medical** (Escalate Medical) and **Police** (Escalate Police). Both require the conversation to be in "active" state. Confirm the escalation in the dialog; the supervisor is notified and emergency services are contacted (simulated in demo mode).
 
    ![Escalation Dialog](screenshots/responder-escalate.png)
 
-8. **Tagging**: Select relevant tags from the predefined list to categorize the conversation.
+8. **Tagging**: Available from Actions > Tag Conversation. Select from 18 predefined crisis support tags to categorize the conversation (e.g., anxiety, depression, self-harm, suicidal ideation, school-stress, etc.). Tags update immediately in the sidebar after applying.
 
    ![Tag Dialog](screenshots/responder-tags.png)
 
@@ -163,13 +168,13 @@ Responders handle live conversations with texters.
 
    ![Wrap Up Dialog](screenshots/responder-wrapup.png)
 
-10. **Multi-chat view** (`#/responder/multi-chat`): Handle multiple conversations simultaneously in a side-by-side split view. Each panel shows an independent chat with its own message input, and the conversation list sidebar lets you filter and select which conversations to display.
+10. **Multi-chat view** (`#/responder/multi-chat`): Handle up to 4 simultaneous conversations in a side-by-side split view. Each panel is independent with its own message input and conversation context. The conversation list sidebar lets you filter and select which conversations to display.
 
    ![Multi-Chat View](screenshots/responder-multi-chat.png)
 
 ### Supervisor
 
-Supervisors oversee responders and monitor platform health. Each supervisor sees only their own affiliate's responders and conversations.
+Supervisors oversee responders and monitor platform health. Each supervisor sees only their own affiliate's responders and conversations (cross-affiliate isolation is enforced at the API level).
 
 1. **Login**: Navigate to `http://localhost:8080` and log in with supervisor credentials. You will be redirected to `#/supervisor`.
 
@@ -179,7 +184,7 @@ Supervisors oversee responders and monitor platform health. Each supervisor sees
 
 3. **Responder detail** (`#/supervisor/responder/:id`): View a specific responder's active conversations and status.
 
-4. **Chat oversight** (`#/supervisor/chat/:id`): Read-only view of any conversation, including texter info, tags, risk assessment, and AI summary. Supervisors cannot send messages.
+4. **Chat oversight** (`#/supervisor/chat/:id`): Read-only view of any conversation, including texter info, tags, risk assessment, and AI summary. Supervisors cannot send messages; a read-only badge is displayed in the chat interface to indicate this restriction.
 
    ![Read-Only Chat](screenshots/supervisor-chat-readonly.png)
 
@@ -215,7 +220,12 @@ Admins configure the platform: affiliates, programs, users, keywords, and survey
 
 ### Multi-Affiliate Operation
 
-The platform supports multiple affiliates operating independently on the same infrastructure. Each affiliate has its own responders, supervisors, programs, and conversation data.
+The platform supports multiple affiliates operating independently on the same infrastructure. **Cross-affiliate isolation** is enforced: responders and supervisors only see data belonging to their own affiliate. Admin users have cross-affiliate visibility and can see everything.
+
+To verify cross-affiliate isolation:
+1. Log in as `responder1@example.com` (Crisis Support International) and note the conversations, queues, and responders visible.
+2. Log out and log in as `responder3@example.com` (Youth Mental Health Alliance) -- you will see a completely different set of conversations and queue data.
+3. Log in as `admin@example.com` to confirm that all affiliates' data is visible.
 
 **EU affiliate example** (Dr. Elena Muller, Global Wellness Network):
 

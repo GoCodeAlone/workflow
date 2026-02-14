@@ -34,9 +34,22 @@ Open http://localhost:8080 and log in with `responder1@example.com` / `demo123`.
 
 ### Conversation State Machine
 
-Conversations flow through: new -> queued -> assigned -> active -> wrap_up -> closed
+Conversations follow this lifecycle:
 
-With branches for: transferred, escalated_medical, escalated_police, follow_up_scheduled.
+```
+new -> queued (auto via route_message) -> assigned (accept) -> active (auto via start_conversation) -> wrap_up -> closed
+```
+
+With branches from "active" for: transferred, escalated_medical, escalated_police, follow_up_scheduled.
+
+**Key transitions:**
+- `new` -> `queued`: Automatic when `route_message` processes an inbound message and assigns it to a program queue.
+- `queued` -> `assigned`: Triggered when a responder clicks "Pick from Queue" on the dashboard or "Accept Conversation" on a queued conversation's banner.
+- `assigned` -> `active`: Automatic via `start_conversation` once a responder is assigned.
+- `active` -> `transferred`: Via Actions > Transfer (select target responder, add note).
+- `active` -> `escalated_medical` / `escalated_police`: Via Actions > Escalate Medical or Escalate Police.
+- `active` -> `wrap_up`: Via Actions > Wrap Up.
+- `wrap_up` -> `closed`: Via Actions > Close Conversation.
 
 ### Dynamic Components (18)
 
@@ -72,6 +85,31 @@ Three demo affiliates operate independently:
 - Global Wellness Network (EU-West)
 
 Each has its own responders, supervisors, programs, and data isolation.
+
+## Testing the Responder Workflow
+
+### Accept Conversation via Banner
+
+1. Simulate an inbound message (see "Simulating Conversations" below) to create a queued conversation.
+2. Log in as `responder1@example.com` / `demo123`.
+3. Navigate to the queued conversation directly (e.g., from the dashboard queue count).
+4. A banner appears at the top of the conversation view with an "Accept Conversation" button.
+5. Click the button -- the conversation is assigned to you and auto-transitions to "active" state.
+6. You can now send messages, transfer, escalate, tag, or wrap up the conversation.
+
+### Verifying Cross-Affiliate Isolation
+
+1. Log in as `responder1@example.com` (Crisis Support International). Note the conversations and queue data visible.
+2. Log out, then log in as `responder3@example.com` (Youth Mental Health Alliance). You should see a completely different set of conversations and queue data -- no overlap with the previous session.
+3. Log in as `supervisor1@example.com` (Crisis Support International). Verify you only see Crisis Support International responders and conversations.
+4. Log in as `supervisor2@example.com` (Youth Mental Health Alliance). Verify you only see Youth Mental Health Alliance data.
+5. Log in as `admin@example.com`. Verify that all affiliates' data is visible across the platform.
+
+### Testing Supervisor Read-Only Access
+
+1. Log in as `supervisor1@example.com` / `demo123`.
+2. Navigate to any active conversation via the supervisor overview.
+3. The chat view displays a read-only badge and the message input is disabled. Supervisors can observe but cannot send messages.
 
 ## Simulating Conversations
 
