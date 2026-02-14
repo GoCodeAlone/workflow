@@ -41,21 +41,56 @@ All demo accounts use the password `demo123`.
 | `supervisor1@example.com` | Dr. Maria Santos | Supervisor | Crisis Support International | Crisis Text Line, Teen Support Line |
 | `supervisor2@example.com` | Taylor Kim | Supervisor | Youth Mental Health Alliance | Wellness Chat |
 | `admin@example.com` | Admin User | Admin | Crisis Support International | All (admin access) |
+| `responder-eu@example.com` | Lukas Weber | Responder | Global Wellness Network | Partner Assist |
+| `supervisor-eu@example.com` | Dr. Elena Muller | Supervisor | Global Wellness Network | Partner Assist |
 
 ---
 
 ## Screenshots
 
-| Page | Screenshot |
+### Login
+
+![Login](screenshots/login.png)
+
+### Responder
+
+| View | Screenshot |
 |------|-----------|
-| Login | ![Login](screenshots/login.png) |
-| Responder Dashboard | ![Responder Dashboard](screenshots/responder-dashboard.png) |
-| Supervisor Dashboard | ![Supervisor Dashboard](screenshots/supervisor-dashboard.png) |
+| Dashboard | ![Responder Dashboard](screenshots/responder-dashboard.png) |
+| Chat View | ![Chat View](screenshots/responder-chat.png) |
+| Actions Menu | ![Actions](screenshots/responder-actions-menu.png) |
+| Transfer Dialog | ![Transfer](screenshots/responder-transfer.png) |
+| Escalation Dialog | ![Escalate](screenshots/responder-escalate.png) |
+| Tag Conversation | ![Tags](screenshots/responder-tags.png) |
+| Wrap Up | ![Wrap Up](screenshots/responder-wrapup.png) |
+
+### Supervisor
+
+| View | Screenshot |
+|------|-----------|
+| Overview | ![Supervisor Overview](screenshots/supervisor-overview.png) |
+| Read-Only Chat | ![Read-Only Chat](screenshots/supervisor-chat-readonly.png) |
 | Queue Health | ![Queue Health](screenshots/queue-health.png) |
-| Admin - Affiliates | ![Admin Affiliates](screenshots/admin-affiliates.png) |
-| Admin - Programs | ![Admin Programs](screenshots/admin-programs.png) |
-| Admin - Users | ![Admin Users](screenshots/admin-users.png) |
-| Webchat Widget | ![Webchat Widget](screenshots/webchat-widget.png) |
+
+### Admin
+
+| View | Screenshot |
+|------|-----------|
+| Affiliates | ![Affiliates](screenshots/admin-affiliates.png) |
+| Edit Affiliate | ![Edit Affiliate](screenshots/admin-affiliate-detail.png) |
+| Programs | ![Programs](screenshots/admin-programs.png) |
+| Users | ![Users](screenshots/admin-users.png) |
+
+### Multi-Affiliate (EU Region)
+
+| View | Screenshot |
+|------|-----------|
+| EU Supervisor | ![EU Supervisor](screenshots/eu-supervisor-overview.png) |
+| EU Queue Health | ![EU Queue](screenshots/eu-queue-health.png) |
+
+### Video Demo
+
+A video walkthrough of the responder workflow is available at [`docs/responder-demo.webm`](responder-demo.webm).
 
 ---
 
@@ -85,73 +120,107 @@ Responders handle live conversations with texters.
 
 1. **Login**: Navigate to `http://localhost:8080` and log in with responder credentials. You will be redirected to `#/responder`.
 
-![Responder Dashboard](screenshots/responder-dashboard.png)
+2. **Dashboard**: The responder dashboard shows active conversations with program badges and risk levels, queue count, and a "Pick from Queue" button.
 
-2. **Dashboard**: The responder dashboard shows:
-   - Active conversations you are handling
-   - Number of conversations in the queue
-   - A "Pick from Queue" button
+   ![Responder Dashboard](screenshots/responder-dashboard.png)
 
 3. **Pick from queue**: Click "Pick from Queue" to be assigned the next waiting conversation. The conversation transitions from `queued` to `assigned` and then to `active`.
 
-4. **Chat view** (`#/responder/chat/:id`): The chat interface shows:
-   - Message thread with timestamps
-   - Text input to send messages
-   - Texter info sidebar (provider, program, risk tags)
-   - Action buttons in the sidebar
+4. **Chat view** (`#/responder/chat/:id`): The chat interface shows a message thread with timestamps, text input, and a sidebar with texter info (phone, program, provider), tags, risk assessment, and AI summary.
 
-5. **Available actions**:
+   ![Chat View](screenshots/responder-chat.png)
+
+5. **Available actions**: Click the "Actions" dropdown to access conversation management tools.
+
+   ![Actions Menu](screenshots/responder-actions-menu.png)
 
    | Action | Description |
    |--------|-------------|
    | **Send message** | Type and send a message to the texter |
-   | **Transfer** | Transfer the conversation to another responder with an AI-generated summary |
-   | **Escalate** | Escalate to medical or police emergency services |
-   | **Tag** | Add tags/categories to the conversation (e.g., topic, risk level) |
-   | **Survey** | Send an entry or exit survey to the texter |
-   | **Wrap-up** | Begin closing the conversation, triggering exit survey and tag generation |
-   | **Close** | Close the conversation after wrap-up |
+   | **Transfer** | Transfer the conversation to another responder with an optional note |
+   | **Escalate Medical** | Escalate to on-call medical staff for clinical assessment |
+   | **Escalate Police** | Escalate to law enforcement for safety concerns |
+   | **Tag Conversation** | Add topic/risk tags (anxiety, depression, self-harm, suicidal ideation, etc.) |
+   | **Send Survey** | Send an entry or exit survey to the texter |
+   | **Wrap Up** | Begin closing the conversation, triggering exit survey |
+   | **Schedule Follow-up** | Schedule an automated follow-up check-in |
+   | **Close Conversation** | Close the conversation after wrap-up |
 
-6. **Transfer flow**: Click Transfer, select a reason. An AI summary is generated for the receiving responder. The conversation moves to `transferred` state until the new responder accepts.
+6. **Transfer flow**: Select a responder and optionally add context for the warm handoff.
 
-7. **Escalation flow**: Click Escalate, select type (Medical or Police), provide urgency level and location if available. The supervisor is notified, and emergency services are contacted (simulated in demo mode).
+   ![Transfer Dialog](screenshots/responder-transfer.png)
+
+7. **Escalation flow**: Confirm escalation to medical or police services. The supervisor is notified and emergency services are contacted (simulated in demo mode).
+
+   ![Escalation Dialog](screenshots/responder-escalate.png)
+
+8. **Tagging**: Select relevant tags from the predefined list to categorize the conversation.
+
+   ![Tag Dialog](screenshots/responder-tags.png)
+
+9. **Wrap-up**: Begin the wrap-up process. An exit survey is sent to the texter if configured.
+
+   ![Wrap Up Dialog](screenshots/responder-wrapup.png)
 
 ### Supervisor
 
-Supervisors oversee responders and monitor platform health.
+Supervisors oversee responders and monitor platform health. Each supervisor sees only their own affiliate's responders and conversations.
 
 1. **Login**: Navigate to `http://localhost:8080` and log in with supervisor credentials. You will be redirected to `#/supervisor`.
 
-![Supervisor Dashboard](screenshots/supervisor-dashboard.png)
+2. **Overview** (`#/supervisor`): The supervisor overview shows KPI cards (total queued, active conversations, online responders, alerts) and responder cards with workload progress bars, conversation counts, and risk-level tags.
 
-2. **Dashboard**: The supervisor dashboard shows:
-   - List of responders with their status (online/offline)
-   - Number of active conversations per responder
-   - Queue health metrics (depth, wait time)
+   ![Supervisor Overview](screenshots/supervisor-overview.png)
 
-3. **Responder detail** (`#/supervisor/responder/:id`): View a specific responder's active conversations.
+3. **Responder detail** (`#/supervisor/responder/:id`): View a specific responder's active conversations and status.
 
-4. **Chat oversight** (`#/supervisor/chat/:id`): Read-only view of any conversation, including an AI-generated summary. Supervisors cannot send messages.
+4. **Chat oversight** (`#/supervisor/chat/:id`): Read-only view of any conversation, including texter info, tags, risk assessment, and AI summary. Supervisors cannot send messages.
 
-5. **Queue health** (`#/queue`): View per-program queue depths, average wait times, and alert thresholds.
+   ![Read-Only Chat](screenshots/supervisor-chat-readonly.png)
+
+5. **Queue health** (`#/queue`): View per-program queue depths, average wait times, oldest message, and alert thresholds. Data is scoped to the supervisor's affiliate.
+
+   ![Queue Health](screenshots/queue-health.png)
 
 ### Admin
 
-Admins configure the platform: affiliates, programs, users, keywords, and surveys.
+Admins configure the platform: affiliates, programs, users, keywords, and surveys. Admins have cross-affiliate visibility.
 
 1. **Login**: Navigate to `http://localhost:8080` and log in with admin credentials. You will be redirected to `#/admin/affiliates`.
 
-![Admin Affiliates](screenshots/admin-affiliates.png)
+2. **Affiliates** (`#/admin/affiliates`): Create, view, and edit affiliate organizations. Each affiliate has a name, region, data retention policy, and contact email.
 
-2. **Affiliates** (`#/admin/affiliates`): Create, view, and edit affiliate organizations. Each affiliate has a name, region, data retention policy, and encryption key.
+   ![Admin Affiliates](screenshots/admin-affiliates.png)
 
-3. **Programs** (`#/admin/programs`): Create and configure programs within affiliates. Set providers (Twilio, AWS, partner, webchat), short codes, queue thresholds, and survey assignments.
+   Click "Edit" to modify affiliate details:
 
-4. **Users** (`#/admin/users`): Create and manage user accounts. Assign roles (responder, supervisor, admin), affiliate membership, and program access.
+   ![Edit Affiliate](screenshots/admin-affiliate-detail.png)
+
+3. **Programs** (`#/admin/programs`): Create and configure programs within affiliates. Set providers (Twilio, AWS, partner, webchat), short codes, and queue thresholds.
+
+   ![Admin Programs](screenshots/admin-programs.png)
+
+4. **Users** (`#/admin/users`): Create and manage user accounts. Assign roles (responder, supervisor, admin), affiliate membership, and program access. Roles are color-coded for quick identification.
+
+   ![Admin Users](screenshots/admin-users.png)
 
 5. **Keywords** (`#/admin/keywords`): Define keyword routing rules. Each keyword maps to a program and sub-program with an auto-response message.
 
 6. **Surveys** (`#/admin/surveys`): Create entry and exit survey templates with questions (scale, text, choice types).
+
+### Multi-Affiliate Operation
+
+The platform supports multiple affiliates operating independently on the same infrastructure. Each affiliate has its own responders, supervisors, programs, and conversation data.
+
+**EU affiliate example** (Dr. Elena Muller, Global Wellness Network):
+
+The EU supervisor sees only their affiliate's responder (Lukas Weber) and EU-specific queue data:
+
+![EU Supervisor Overview](screenshots/eu-supervisor-overview.png)
+
+Queue health is scoped to the affiliate's programs (default, Partner Assist):
+
+![EU Queue Health](screenshots/eu-queue-health.png)
 
 ---
 
@@ -432,8 +501,6 @@ curl -X POST http://localhost:8080/api/webhooks/partner \
 ## Webchat Widget Integration
 
 The webchat widget is a standalone HTML page that can be embedded in any website.
-
-![Webchat Widget](screenshots/webchat-widget.png)
 
 ### Direct Access
 

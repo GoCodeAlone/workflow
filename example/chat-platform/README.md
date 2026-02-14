@@ -88,12 +88,25 @@ curl -X POST http://localhost:8080/api/webhooks/twilio \
 
 ## Screenshots
 
-See the `docs/screenshots/` directory for UI screenshots of:
-- Responder chat interface
-- Supervisor dashboard
-- Admin configuration panels
-- Queue health monitoring
-- Webchat widget
+### Responder Dashboard
+![Responder Dashboard](docs/screenshots/responder-dashboard.png)
+
+### Responder Chat with Actions
+![Chat View](docs/screenshots/responder-chat.png) ![Actions Menu](docs/screenshots/responder-actions-menu.png)
+
+### Supervisor Overview
+![Supervisor Overview](docs/screenshots/supervisor-overview.png)
+
+### Queue Health Monitoring
+![Queue Health](docs/screenshots/queue-health.png)
+
+### Admin Configuration
+![Admin Users](docs/screenshots/admin-users.png)
+
+### Multi-Affiliate (EU Region)
+![EU Supervisor](docs/screenshots/eu-supervisor-overview.png)
+
+See [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) for a complete walkthrough with all 17 screenshots and a [video demo](docs/responder-demo.webm).
 
 ## Technology Stack
 
