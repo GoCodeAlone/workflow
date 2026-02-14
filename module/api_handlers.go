@@ -823,9 +823,38 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 		}
 	}
 
-	// Initialize messages array if not present (ensures chat view works immediately)
+	// Initialize messages array with the initial inbound message if present.
+	// This ensures the chat view shows the texter's first message immediately.
 	if _, hasMessages := data["messages"]; !hasMessages {
-		data["messages"] = []any{}
+		// Extract message body from various field names (webhooks use different casing)
+		bodyText := ""
+		for _, field := range []string{"body", "Body", "message", "content"} {
+			if b, ok := data[field].(string); ok && b != "" {
+				bodyText = b
+				break
+			}
+		}
+		if bodyText != "" {
+			from := ""
+			for _, field := range []string{"from", "From"} {
+				if f, ok := data[field].(string); ok && f != "" {
+					from = f
+					break
+				}
+			}
+			data["messages"] = []any{
+				map[string]any{
+					"body":      bodyText,
+					"direction": "inbound",
+					"from":      from,
+					"sender":    "texter",
+					"status":    "delivered",
+					"timestamp": time.Now().UTC().Format(time.RFC3339),
+				},
+			}
+		} else {
+			data["messages"] = []any{}
+		}
 	}
 
 	// If this is a conversation resource and has a message body but no programId,
@@ -862,6 +891,12 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 		h.fieldMapping.SetValue(resource.Data, "state", resource.State)
 		h.fieldMapping.SetValue(resource.Data, "lastUpdate", resource.LastUpdate)
 		_ = h.persistence.SaveResource(h.resourceName, resource.ID, resource.Data)
+	}
+
+	// Bridge: when a webhook/webchat handler creates a resource, also create a
+	// corresponding conversation resource so the SPA can list it via /api/conversations.
+	if h.resourceName != "conversations" && h.persistence != nil && h.workflowType != "" {
+		h.bridgeToConversation(resourceId, data)
 	}
 
 	// Publish event if broker is available
@@ -1057,6 +1092,80 @@ func (h *RESTAPIHandler) syncResourceStateFromEngine(instanceId, resourceId stri
 		if h.persistence != nil {
 			_ = h.persistence.SaveResource(h.resourceName, res.ID, res.Data)
 		}
+
+		// Update the bridged conversation resource's state from the engine.
+		// Only update the state field, not the full data (which was already
+		// set by bridgeToConversation with routing info, messages, etc.).
+		if h.resourceName != "conversations" && h.persistence != nil {
+			convoId := fmt.Sprintf("conv-%s", resourceId)
+			h.updateConversationState(convoId, res.State)
+		}
+	}
+}
+
+// updateConversationState updates just the state field of a bridged conversation resource.
+// Uses LoadResources to read the existing data, then updates the state and saves back.
+func (h *RESTAPIHandler) updateConversationState(convoId, newState string) {
+	if h.persistence == nil {
+		return
+	}
+	loaded, err := h.persistence.LoadResources("conversations")
+	if err != nil {
+		return
+	}
+	data, ok := loaded[convoId]
+	if !ok {
+		return
+	}
+	data["state"] = newState
+	data["lastUpdate"] = time.Now().UTC().Format(time.RFC3339)
+	_ = h.persistence.SaveResource("conversations", convoId, data)
+}
+
+// bridgeToConversation creates a conversation resource in the "conversations" persistence
+// store from webhook/webchat data. This bridges the gap between inbound handlers
+// (webhooks-api, webchat-api) and the conversations-api that the SPA reads from.
+func (h *RESTAPIHandler) bridgeToConversation(webhookId string, data map[string]any) {
+	convoId := fmt.Sprintf("conv-%s", webhookId)
+
+	convoData := map[string]any{
+		"id":        convoId,
+		"state":     "queued",
+		"createdAt": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// Copy key fields from the webhook data
+	for _, field := range []string{
+		"from", "From", "provider", "messages", "riskLevel", "tags",
+	} {
+		if v, ok := data[field]; ok {
+			convoData[field] = v
+		}
+	}
+
+	// Normalize: ensure "from" is set (Twilio sends "From")
+	if _, ok := convoData["from"]; !ok {
+		if f, ok := convoData["From"]; ok {
+			convoData["from"] = f
+		}
+	}
+
+	// Resolve routing (programId, affiliateId) from message content
+	bodyText := ""
+	for _, field := range []string{"body", "Body", "message", "content"} {
+		if b, ok := data[field].(string); ok && b != "" {
+			bodyText = b
+			break
+		}
+	}
+	if bodyText != "" {
+		h.resolveConversationRouting(convoData, bodyText)
+	}
+
+	convoData["lastUpdate"] = time.Now().UTC().Format(time.RFC3339)
+
+	if err := h.persistence.SaveResource("conversations", convoId, convoData); err != nil {
+		h.logger.Warn(fmt.Sprintf("Failed to bridge conversation '%s': %v", convoId, err))
 	}
 }
 

@@ -67,6 +67,7 @@ modules:
       secret: "${JWT_SECRET}"
       tokenExpiry: "24h"
       issuer: "chat-platform"
+      seedFile: "./seed/users.json"
     dependsOn:
       - rate-limiter
 
@@ -158,6 +159,7 @@ modules:
       resourceName: webhooks
       workflowType: "conversation-lifecycle"
       workflowEngine: "conversation-engine"
+      initialTransition: "route_message"
     dependsOn:
       - rate-limiter
       - persistence
@@ -168,6 +170,7 @@ modules:
       resourceName: webchat
       workflowType: "conversation-lifecycle"
       workflowEngine: "conversation-engine"
+      initialTransition: "route_message"
     dependsOn:
       - rate-limiter
       - persistence
