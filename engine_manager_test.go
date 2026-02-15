@@ -39,7 +39,8 @@ func (s *emMockWorkflowStore) Get(_ context.Context, id uuid.UUID) (*store.Workf
 	if !ok {
 		return nil, store.ErrNotFound
 	}
-	return r, nil
+	cp := *r
+	return &cp, nil
 }
 
 func (s *emMockWorkflowStore) GetBySlug(_ context.Context, _ uuid.UUID, _ string) (*store.WorkflowRecord, error) {

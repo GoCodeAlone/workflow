@@ -207,7 +207,8 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 		cfgPath := cfgPath
 		baseName := filepath.Base(cfgPath)
 		t.Run(baseName, func(t *testing.T) {
-			t.Parallel()
+			// Note: t.Parallel() removed because modular framework modules
+			// (chimux, EnvFeeder) have global state that races under -race.
 
 			// Skip aspirational configs with unimplemented types
 			if reason, ok := aspirationalConfigs[baseName]; ok {
@@ -240,6 +241,9 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 				Level: slog.LevelError, // suppress noisy output in tests
 			}))
 			app := modular.NewStdApplication(nil, logger)
+			if stdApp, ok := app.(*modular.StdApplication); ok {
+				stdApp.SetConfigFeeders([]modular.Feeder{}) // per-app feeders to avoid global EnvFeeder race
+			}
 			engine := NewStdEngine(app, logger)
 
 			engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
