@@ -705,7 +705,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "bucket", Label: "Bucket", Type: FieldTypeString, Required: true, Description: "GCS bucket name", Placeholder: "my-bucket"},
 			{Key: "project", Label: "GCP Project", Type: FieldTypeString, Description: "Google Cloud project ID", Placeholder: "my-project"},
-			{Key: "credentialsFile", Label: "Credentials File", Type: FieldTypeFilePath, Description: "Path to service account JSON key file", Placeholder: "credentials/gcs-key.json"},
+			{Key: "credentialsFile", Label: "Credentials File", Type: FieldTypeFilePath, Description: "Path to service account JSON key file", Placeholder: "credentials/gcs-key.json", Sensitive: true},
 		},
 	})
 
@@ -818,6 +818,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Validate",
 		Category:    "pipeline",
 		Description: "Validates pipeline data using JSON Schema or required fields check",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with current data to validate"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Validation result (pass-through on success, error on failure)"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "strategy", Label: "Strategy", Type: FieldTypeSelect, Options: []string{"json_schema", "required_fields"}, DefaultValue: "required_fields", Description: "Validation strategy to use"},
 			{Key: "schema", Label: "JSON Schema", Type: FieldTypeJSON, Description: "JSON Schema definition for validation (when strategy is json_schema)"},
@@ -830,6 +832,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Transform",
 		Category:    "pipeline",
 		Description: "Transforms pipeline data using extract, map, filter, and convert operations",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with data to transform"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Transformed data merged back into pipeline context"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "transformer", Label: "Transformer Service", Type: FieldTypeString, Description: "Name of a DataTransformer service to use", Placeholder: "my-transformer", InheritFrom: "dependency.name"},
 			{Key: "pipeline", Label: "Pipeline Name", Type: FieldTypeString, Description: "Named pipeline within the transformer", Placeholder: "normalize"},
@@ -842,6 +846,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Conditional",
 		Category:    "pipeline",
 		Description: "Routes to different pipeline steps based on a field value",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with field to evaluate for routing"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Routing decision with target step name"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "field", Label: "Field", Type: FieldTypeString, Required: true, Description: "Field path to evaluate for routing", Placeholder: "event_type"},
 			{Key: "routes", Label: "Routes", Type: FieldTypeMap, MapValueType: "string", Required: true, Description: "Map of field values to target step names"},
@@ -854,6 +860,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Publish Event",
 		Category:    "pipeline",
 		Description: "Publishes pipeline data to an EventBus topic or message broker",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with data to publish"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Publish confirmation with topic and message ID"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "topic", Label: "Topic", Type: FieldTypeString, Required: true, Description: "Topic name to publish to", Placeholder: "order.created"},
 			{Key: "payload", Label: "Payload", Type: FieldTypeJSON, Description: "Custom payload template (uses {{ .field }} expressions). Defaults to pipeline context."},
@@ -866,6 +874,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Set Values",
 		Category:    "pipeline",
 		Description: "Sets or overrides values in the pipeline context",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context to update with new values"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Updated pipeline context with set values"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "values", Label: "Values", Type: FieldTypeMap, MapValueType: "string", Required: true, Description: "Key-value pairs to set (values support {{ .field }} templates)"},
 		},
@@ -876,6 +886,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Log",
 		Category:    "pipeline",
 		Description: "Logs a message at a specified level during pipeline execution",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with data for message template resolution"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Pass-through result (logging is a side effect)"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "level", Label: "Level", Type: FieldTypeSelect, Options: []string{"debug", "info", "warn", "error"}, DefaultValue: "info", Description: "Log level"},
 			{Key: "message", Label: "Message", Type: FieldTypeString, Required: true, Description: "Message template (supports {{ .field }} expressions)", Placeholder: "Processing {{ .event_type }}"},
@@ -887,6 +899,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "HTTP Call",
 		Category:    "pipeline",
 		Description: "Makes an outbound HTTP request and returns the response",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with data for URL/body template resolution"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "HTTP response body parsed as JSON and merged into pipeline context"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "url", Label: "URL", Type: FieldTypeString, Required: true, Description: "Request URL (supports {{ .field }} templates)", Placeholder: "https://api.example.com/{{ .resource }}"},
 			{Key: "method", Label: "Method", Type: FieldTypeSelect, Options: []string{"GET", "POST", "PUT", "PATCH", "DELETE"}, DefaultValue: "GET", Description: "HTTP method"},

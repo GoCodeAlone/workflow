@@ -27,7 +27,26 @@ func NewWorkspaceHandler(wm *store.WorkspaceManager) *WorkspaceHandler {
 //	GET    /api/v1/workspaces/{project-id}/files        (list)
 //	GET    /api/v1/workspaces/{project-id}/files/{path} (download)
 //	DELETE /api/v1/workspaces/{project-id}/files/{path} (delete)
+//	POST   /api/v1/workspaces/{project-id}/mkdir        (create directory)
 func (h *WorkspaceHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request) {
+	// Check for mkdir endpoint first
+	if r.Method == http.MethodPost && isMkdirPath(r.URL.Path) {
+		projectID, ok := parseMkdirPath(r.URL.Path)
+		if !ok || projectID == "" {
+			writeWorkspaceJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid workspace path"})
+			return
+		}
+
+		storage, err := h.workspaces.StorageForProject(projectID)
+		if err != nil {
+			writeWorkspaceJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("storage error: %v", err)})
+			return
+		}
+
+		h.handleMkdir(w, r, storage)
+		return
+	}
+
 	// Extract project ID and file path from URL.
 	// Expected format: .../workspaces/{project-id}/files[/{path...}]
 	projectID, filePath, ok := parseWorkspacePath(r.URL.Path)
@@ -118,17 +137,43 @@ func (h *WorkspaceHandler) handleUploadFile(w http.ResponseWriter, r *http.Reque
 	writeWorkspaceJSON(w, http.StatusCreated, info)
 }
 
-func (h *WorkspaceHandler) handleDeleteFile(w http.ResponseWriter, _ *http.Request, storage *store.LocalStorage, filePath string) {
+func (h *WorkspaceHandler) handleDeleteFile(w http.ResponseWriter, r *http.Request, storage *store.LocalStorage, filePath string) {
 	if filePath == "" || filePath == "/" {
 		writeWorkspaceJSON(w, http.StatusBadRequest, map[string]string{"error": "file path required"})
 		return
 	}
 
-	if err := storage.Delete(nil, filePath); err != nil {
+	if err := storage.Delete(r.Context(), filePath); err != nil {
 		writeWorkspaceJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("delete failed: %v", err)})
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *WorkspaceHandler) handleMkdir(w http.ResponseWriter, r *http.Request, storage *store.LocalStorage) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeWorkspaceJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.Path == "" {
+		writeWorkspaceJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
+		return
+	}
+
+	if err := storage.MkdirAll(r.Context(), req.Path); err != nil {
+		writeWorkspaceJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("mkdir failed: %v", err)})
+		return
+	}
+
+	info, err := storage.Stat(r.Context(), req.Path)
+	if err != nil {
+		writeWorkspaceJSON(w, http.StatusCreated, map[string]string{"path": req.Path, "status": "created"})
+		return
+	}
+	writeWorkspaceJSON(w, http.StatusCreated, info)
 }
 
 // parseWorkspacePath extracts the project ID and file path from a URL path.
@@ -158,6 +203,34 @@ func parseWorkspacePath(urlPath string) (projectID, filePath string, ok bool) {
 		filePath = strings.TrimPrefix(afterFiles, "/")
 	}
 	return projectID, filePath, true
+}
+
+// isMkdirPath checks if the URL path targets the mkdir endpoint.
+func isMkdirPath(urlPath string) bool {
+	idx := strings.Index(urlPath, "/workspaces/")
+	if idx < 0 {
+		return false
+	}
+	rest := urlPath[idx+len("/workspaces/"):]
+	return strings.HasSuffix(rest, "/mkdir")
+}
+
+// parseMkdirPath extracts the project ID from a mkdir URL path.
+// Expected format: .../workspaces/{project-id}/mkdir
+func parseMkdirPath(urlPath string) (projectID string, ok bool) {
+	idx := strings.Index(urlPath, "/workspaces/")
+	if idx < 0 {
+		return "", false
+	}
+	rest := urlPath[idx+len("/workspaces/"):]
+	if !strings.HasSuffix(rest, "/mkdir") {
+		return "", false
+	}
+	projectID = rest[:len(rest)-len("/mkdir")]
+	if projectID == "" {
+		return "", false
+	}
+	return projectID, true
 }
 
 func writeWorkspaceJSON(w http.ResponseWriter, status int, v any) {

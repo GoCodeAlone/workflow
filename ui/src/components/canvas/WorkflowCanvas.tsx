@@ -67,11 +67,24 @@ export default function WorkflowCanvas() {
       const style = edgeStyles[edgeType];
       if (!style) return edge;
       const isAutoWire = edgeType === 'auto-wire';
+      const isMiddlewareChain = edgeType === 'middleware-chain';
+
+      // For middleware-chain edges, show chain order as a step number label
+      const chainOrder = isMiddlewareChain ? edgeData?.chainOrder : undefined;
+
       return {
         ...edge,
+        ...(chainOrder !== undefined
+          ? { label: `#${chainOrder}` }
+          : {}),
         style: { ...edge.style, stroke: style.stroke, strokeWidth: isAutoWire ? 1.5 : 2, strokeDasharray: style.strokeDasharray },
-        labelStyle: { fill: style.stroke, fontWeight: 600, fontSize: 11 },
-        labelBgStyle: { fill: '#1e1e2e', fillOpacity: 0.9 },
+        labelStyle: isMiddlewareChain
+          ? { fill: '#fab387', fontWeight: 700, fontSize: 14 }
+          : { fill: style.stroke, fontWeight: 600, fontSize: 11 },
+        labelBgStyle: isMiddlewareChain
+          ? { fill: '#1e1e2e', fillOpacity: 0.95, rx: 10, ry: 10 }
+          : { fill: '#1e1e2e', fillOpacity: 0.9 },
+        labelBgPadding: isMiddlewareChain ? [4, 4] as [number, number] : undefined,
         ...(isAutoWire ? { deletable: false, selectable: false, animated: false } : {}),
       };
     });

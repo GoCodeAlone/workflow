@@ -27,9 +27,10 @@ function makeEdge(
   edgeType: WorkflowEdgeType,
   label?: string,
   sourceHandle?: string,
+  chainOrder?: number,
 ): Edge {
   const id = `e-${edgeType}-${sourceId}-${targetId}${sourceHandle ? `-${sourceHandle}` : ''}`;
-  const data: WorkflowEdgeData = { edgeType, label };
+  const data: WorkflowEdgeData = { edgeType, label, ...(chainOrder !== undefined ? { chainOrder } : {}) };
   const edge: Edge = { id, source: sourceId, target: targetId, data };
   if (sourceHandle) {
     edge.sourceHandle = sourceHandle;
@@ -48,11 +49,11 @@ export function extractWorkflowEdges(
   const edges: Edge[] = [];
   const edgeSet = new Set<string>(); // dedup key: "source->target:type"
 
-  function addEdge(source: string, target: string, type: WorkflowEdgeType, label: string) {
+  function addEdge(source: string, target: string, type: WorkflowEdgeType, label: string, chainOrder?: number) {
     const key = `${source}->${target}:${type}`;
     if (!edgeSet.has(key)) {
       edgeSet.add(key);
-      edges.push(makeEdge(source, target, type, label));
+      edges.push(makeEdge(source, target, type, label, undefined, chainOrder));
     }
   }
 
@@ -84,15 +85,16 @@ export function extractWorkflowEdges(
               .filter((id): id is string => !!id);
 
             if (mwIds.length > 0) {
+              const chainLength = mwIds.length;
               // Router to first middleware
-              addEdge(routerId, mwIds[0], 'middleware-chain', 'middleware');
+              addEdge(routerId, mwIds[0], 'middleware-chain', 'middleware', 1);
               // Chain middlewares together
               for (let i = 0; i < mwIds.length - 1; i++) {
-                addEdge(mwIds[i], mwIds[i + 1], 'middleware-chain', 'chain');
+                addEdge(mwIds[i], mwIds[i + 1], 'middleware-chain', 'chain', i + 2);
               }
               // Last middleware to handler
               if (handlerId) {
-                addEdge(mwIds[mwIds.length - 1], handlerId, 'middleware-chain', 'handler');
+                addEdge(mwIds[mwIds.length - 1], handlerId, 'middleware-chain', 'handler', chainLength + 1);
               }
             }
           } else if (handlerId) {

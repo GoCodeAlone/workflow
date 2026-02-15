@@ -10,7 +10,7 @@ import type { ModuleCategory } from './workflow.ts';
 describe('workflow types', () => {
   describe('MODULE_TYPES', () => {
     it('has the expected number of module types', () => {
-      expect(MODULE_TYPES.length).toBe(55);
+      expect(MODULE_TYPES.length).toBe(63);
     });
 
     it('each module type has required fields', () => {

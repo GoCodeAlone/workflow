@@ -3,7 +3,6 @@ package workflow
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -152,6 +151,10 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 
 	// Register all modules from config
 	for _, modCfg := range cfg.Modules {
+		// Expand secret references in all string config values before module instantiation.
+		// This replaces ${vault:...}, ${aws-sm:...}, ${env:...}, and ${VAR_NAME} patterns.
+		expandConfigStrings(e.secretsResolver, modCfg.Config)
+
 		// Create modules based on type
 		var mod modular.Module
 
@@ -566,11 +569,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "auth.jwt":
 				secret := ""
 				if s, ok := modCfg.Config["secret"].(string); ok {
-					if expanded, err := e.secretsResolver.Expand(context.Background(), s); err == nil {
-						secret = expanded
-					} else {
-						secret = os.ExpandEnv(s)
-					}
+					secret = s
 				}
 				tokenExpiry := 24 * time.Hour
 				if te, ok := modCfg.Config["tokenExpiry"].(string); ok && te != "" {
@@ -609,11 +608,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					vm.SetAddress(addr)
 				}
 				if token, ok := modCfg.Config["token"].(string); ok {
-					if expanded, err := e.secretsResolver.Expand(context.Background(), token); err == nil {
-						vm.SetToken(expanded)
-					} else {
-						vm.SetToken(token)
-					}
+					vm.SetToken(token)
 				}
 				if mp, ok := modCfg.Config["mountPath"].(string); ok && mp != "" {
 					vm.SetMountPath(mp)
@@ -629,18 +624,10 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					am.SetRegion(region)
 				}
 				if akid, ok := modCfg.Config["accessKeyId"].(string); ok {
-					if expanded, err := e.secretsResolver.Expand(context.Background(), akid); err == nil {
-						am.SetAccessKeyID(expanded)
-					} else {
-						am.SetAccessKeyID(akid)
-					}
+					am.SetAccessKeyID(akid)
 				}
 				if sak, ok := modCfg.Config["secretAccessKey"].(string); ok {
-					if expanded, err := e.secretsResolver.Expand(context.Background(), sak); err == nil {
-						am.SetSecretAccessKey(expanded)
-					} else {
-						am.SetSecretAccessKey(sak)
-					}
+					am.SetSecretAccessKey(sak)
 				}
 				mod = am
 			case "storage.sqlite":
@@ -1240,4 +1227,33 @@ type Engine interface {
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
 	TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) error
+}
+
+// expandConfigStrings walks a config map and expands all ${...} secret
+// references in string values using the given MultiResolver. Errors are
+// silently ignored — if a reference cannot be resolved, the original value
+// is preserved, maintaining backward compatibility.
+func expandConfigStrings(resolver *secrets.MultiResolver, cfg map[string]any) {
+	if resolver == nil || cfg == nil {
+		return
+	}
+	ctx := context.Background()
+	for k, v := range cfg {
+		switch val := v.(type) {
+		case string:
+			if expanded, err := resolver.Expand(ctx, val); err == nil {
+				cfg[k] = expanded
+			}
+		case map[string]any:
+			expandConfigStrings(resolver, val)
+		case []any:
+			for i, item := range val {
+				if s, ok := item.(string); ok {
+					if expanded, err := resolver.Expand(ctx, s); err == nil {
+						val[i] = expanded
+					}
+				}
+			}
+		}
+	}
 }

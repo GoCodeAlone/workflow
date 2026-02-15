@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,16 @@ func (l *LocalStorage) resolve(path string) (string, error) {
 	return abs, nil
 }
 
+// detectContentType returns a MIME type based on file extension.
+func detectContentType(name string) string {
+	ext := filepath.Ext(name)
+	if ext == "" {
+		return ""
+	}
+	ct := mime.TypeByExtension(ext)
+	return ct
+}
+
 func (l *LocalStorage) List(_ context.Context, prefix string) ([]FileInfo, error) {
 	dir, err := l.resolve(prefix)
 	if err != nil {
@@ -65,13 +76,17 @@ func (l *LocalStorage) List(_ context.Context, prefix string) ([]FileInfo, error
 			continue
 		}
 		relPath := filepath.Join(prefix, entry.Name())
-		result = append(result, FileInfo{
+		fi := FileInfo{
 			Name:    entry.Name(),
 			Path:    relPath,
 			Size:    info.Size(),
 			ModTime: info.ModTime(),
 			IsDir:   entry.IsDir(),
-		})
+		}
+		if !entry.IsDir() {
+			fi.ContentType = detectContentType(entry.Name())
+		}
+		result = append(result, fi)
 	}
 	return result, nil
 }
@@ -127,11 +142,27 @@ func (l *LocalStorage) Stat(_ context.Context, path string) (FileInfo, error) {
 	if err != nil {
 		return FileInfo{}, fmt.Errorf("stat file: %w", err)
 	}
-	return FileInfo{
+	fi := FileInfo{
 		Name:    info.Name(),
 		Path:    path,
 		Size:    info.Size(),
 		ModTime: info.ModTime(),
 		IsDir:   info.IsDir(),
-	}, nil
+	}
+	if !info.IsDir() {
+		fi.ContentType = detectContentType(info.Name())
+	}
+	return fi, nil
+}
+
+// MkdirAll creates a directory path and all parents that do not exist.
+func (l *LocalStorage) MkdirAll(_ context.Context, path string) error {
+	abs, err := l.resolve(path)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(abs, 0o755); err != nil {
+		return fmt.Errorf("create directory: %w", err)
+	}
+	return nil
 }

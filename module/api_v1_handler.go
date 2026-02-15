@@ -13,9 +13,10 @@ import (
 // and workflows. It is wired into the modular engine via SetHandleFunc on an
 // admin-v1-api http.handler module.
 type V1APIHandler struct {
-	store     *V1Store
-	jwtSecret string
-	reloadFn  func(configYAML string) error // callback to reload engine with new admin config
+	store            *V1Store
+	jwtSecret        string
+	reloadFn         func(configYAML string) error // callback to reload engine with new admin config
+	workspaceHandler *WorkspaceHandler             // optional workspace file management handler
 }
 
 // NewV1APIHandler creates a new handler backed by the given store.
@@ -24,6 +25,11 @@ func NewV1APIHandler(store *V1Store, jwtSecret string) *V1APIHandler {
 		store:     store,
 		jwtSecret: jwtSecret,
 	}
+}
+
+// SetWorkspaceHandler sets the optional workspace file management handler.
+func (h *V1APIHandler) SetWorkspaceHandler(wh *WorkspaceHandler) {
+	h.workspaceHandler = wh
 }
 
 // SetReloadFunc sets the callback invoked when deploying the system workflow.
@@ -83,6 +89,10 @@ func (h *V1APIHandler) HandleV1(w http.ResponseWriter, r *http.Request) {
 		h.handleUpdateWorkflow(w, r)
 	case method == http.MethodDelete && matchPathExact(path, "/workflows/"):
 		h.handleDeleteWorkflow(w, r)
+
+	// --- Workspaces ---
+	case strings.Contains(path, "/workspaces/") && h.workspaceHandler != nil:
+		h.workspaceHandler.HandleWorkspace(w, r)
 
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})

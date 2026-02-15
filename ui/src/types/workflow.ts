@@ -187,6 +187,30 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     ioSignature: { inputs: [{ name: 'request', type: 'http.Request' }], outputs: [{ name: 'proxied', type: 'http.Response' }] },
   },
   {
+    type: 'http.simple_proxy',
+    label: 'Simple Proxy',
+    category: 'http',
+    defaultConfig: {},
+    configFields: [
+      { key: 'targets', label: 'Targets', type: 'map', mapValueType: 'string', description: 'Map of URL prefix to backend URL (e.g. /api -> http://localhost:3000)', placeholder: '/api=http://backend:8080' },
+    ],
+    ioSignature: { inputs: [{ name: 'request', type: 'http.Request' }], outputs: [{ name: 'proxied', type: 'http.Response' }] },
+  },
+  {
+    type: 'static.fileserver',
+    label: 'Static File Server',
+    category: 'http',
+    defaultConfig: { prefix: '/', spaFallback: true, cacheMaxAge: 3600 },
+    configFields: [
+      { key: 'root', label: 'Root Directory', type: 'string', required: true, description: 'Path to the directory containing static files', placeholder: './ui/dist' },
+      { key: 'prefix', label: 'URL Prefix', type: 'string', defaultValue: '/', description: 'URL path prefix to serve files under', placeholder: '/' },
+      { key: 'spaFallback', label: 'SPA Fallback', type: 'boolean', defaultValue: true, description: 'When enabled, serves index.html for unmatched paths (for single-page apps)' },
+      { key: 'cacheMaxAge', label: 'Cache Max-Age (sec)', type: 'number', defaultValue: 3600, description: 'Cache-Control max-age in seconds for static assets' },
+      { key: 'router', label: 'Router Name', type: 'string', description: 'Explicit router module name to register on (auto-detected if omitted)', placeholder: 'my-router', inheritFrom: 'dependency.name' },
+    ],
+    ioSignature: { inputs: [{ name: 'request', type: 'http.Request' }], outputs: [{ name: 'file', type: 'http.Response' }] },
+  },
+  {
     type: 'api.handler',
     label: 'API Handler',
     category: 'http',
@@ -300,6 +324,21 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     defaultConfig: {},
     configFields: [],
     ioSignature: { inputs: [{ name: 'state', type: 'State' }], outputs: [{ name: 'connected', type: 'State' }] },
+  },
+  {
+    type: 'processing.step',
+    label: 'Processing Step',
+    category: 'statemachine',
+    defaultConfig: { maxRetries: 2, retryBackoffMs: 1000, timeoutSeconds: 30 },
+    configFields: [
+      { key: 'componentId', label: 'Component ID', type: 'string', required: true, description: 'Service name of the component to execute', inheritFrom: 'dependency.name' },
+      { key: 'successTransition', label: 'Success Transition', type: 'string', description: 'State transition to trigger on success', placeholder: 'completed' },
+      { key: 'compensateTransition', label: 'Compensate Transition', type: 'string', description: 'State transition to trigger on failure for compensation', placeholder: 'failed' },
+      { key: 'maxRetries', label: 'Max Retries', type: 'number', defaultValue: 2, description: 'Maximum number of retry attempts' },
+      { key: 'retryBackoffMs', label: 'Retry Backoff (ms)', type: 'number', defaultValue: 1000, description: 'Base backoff duration in milliseconds between retries' },
+      { key: 'timeoutSeconds', label: 'Timeout (sec)', type: 'number', defaultValue: 30, description: 'Maximum execution time per attempt in seconds' },
+    ],
+    ioSignature: { inputs: [{ name: 'input', type: 'any' }], outputs: [{ name: 'result', type: 'any' }, { name: 'transition', type: 'string' }] },
   },
   // Conditional (branching nodes)
   {
@@ -446,6 +485,16 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     ],
     ioSignature: { inputs: [{ name: 'query', type: 'SQL' }], outputs: [{ name: 'result', type: 'Rows' }] },
   },
+  {
+    type: 'persistence.store',
+    label: 'Persistence Store',
+    category: 'database',
+    defaultConfig: { database: 'database' },
+    configFields: [
+      { key: 'database', label: 'Database Service', type: 'string', defaultValue: 'database', description: 'Name of the database module to use for storage', placeholder: 'database', inheritFrom: 'dependency.name' },
+    ],
+    ioSignature: { inputs: [{ name: 'data', type: 'any' }], outputs: [{ name: 'persistence', type: 'PersistenceStore' }] },
+  },
   // Observability
   {
     type: 'metrics.collector',
@@ -484,6 +533,35 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
       { key: 'headerName', label: 'Header Name', type: 'string', defaultValue: 'X-Request-ID' },
     ],
     ioSignature: { inputs: [{ name: 'request', type: 'http.Request' }], outputs: [{ name: 'tagged', type: 'http.Request' }] },
+  },
+  {
+    type: 'http.middleware.securityheaders',
+    label: 'Security Headers',
+    category: 'middleware',
+    defaultConfig: { frameOptions: 'DENY', contentTypeOptions: 'nosniff', hstsMaxAge: 31536000, referrerPolicy: 'strict-origin-when-cross-origin', permissionsPolicy: 'camera=(), microphone=(), geolocation=()' },
+    configFields: [
+      { key: 'contentSecurityPolicy', label: 'Content Security Policy', type: 'string', description: 'CSP header value', placeholder: "default-src 'self'", group: 'headers' },
+      { key: 'frameOptions', label: 'X-Frame-Options', type: 'select', options: ['DENY', 'SAMEORIGIN'], defaultValue: 'DENY', description: 'Controls whether the page can be embedded in frames', group: 'headers' },
+      { key: 'contentTypeOptions', label: 'X-Content-Type-Options', type: 'string', defaultValue: 'nosniff', description: 'Prevents MIME type sniffing', group: 'headers' },
+      { key: 'hstsMaxAge', label: 'HSTS Max-Age (sec)', type: 'number', defaultValue: 31536000, description: 'HTTP Strict Transport Security max-age in seconds', group: 'headers' },
+      { key: 'referrerPolicy', label: 'Referrer Policy', type: 'select', options: ['no-referrer', 'no-referrer-when-downgrade', 'origin', 'origin-when-cross-origin', 'same-origin', 'strict-origin', 'strict-origin-when-cross-origin', 'unsafe-url'], defaultValue: 'strict-origin-when-cross-origin', description: 'Controls the Referer header sent with requests', group: 'headers' },
+      { key: 'permissionsPolicy', label: 'Permissions Policy', type: 'string', defaultValue: 'camera=(), microphone=(), geolocation=()', description: 'Controls which browser features are allowed', group: 'headers' },
+    ],
+    ioSignature: { inputs: [{ name: 'request', type: 'http.Request' }], outputs: [{ name: 'secured', type: 'http.Request' }] },
+  },
+  {
+    type: 'auth.jwt',
+    label: 'JWT Auth',
+    category: 'middleware',
+    defaultConfig: { tokenExpiry: '24h', issuer: 'workflow' },
+    configFields: [
+      { key: 'secret', label: 'JWT Secret', type: 'string', required: true, description: 'Secret key for signing JWT tokens (supports $ENV_VAR expansion)', placeholder: '$JWT_SECRET', sensitive: true },
+      { key: 'tokenExpiry', label: 'Token Expiry', type: 'string', defaultValue: '24h', description: 'Token expiration duration (e.g. 1h, 24h, 7d)', placeholder: '24h' },
+      { key: 'issuer', label: 'Issuer', type: 'string', defaultValue: 'workflow', description: 'Token issuer claim', placeholder: 'workflow' },
+      { key: 'seedFile', label: 'Seed Users File', type: 'string', description: 'Path to JSON file with initial user accounts', placeholder: 'data/users.json' },
+      { key: 'responseFormat', label: 'Response Format', type: 'select', options: ['standard', 'oauth2'], description: 'Format of authentication response payloads' },
+    ],
+    ioSignature: { inputs: [{ name: 'credentials', type: 'Credentials' }], outputs: [{ name: 'auth', type: 'AuthService' }] },
   },
   // Integration additions
   {
@@ -661,6 +739,27 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     defaultConfig: {},
     configFields: [],
     ioSignature: { inputs: [{ name: 'credentials', type: 'Credentials' }], outputs: [{ name: 'user-store', type: 'UserStore' }] },
+  },
+  {
+    type: 'httpserver.modular',
+    label: 'Modular HTTP Server',
+    category: 'infrastructure',
+    defaultConfig: {},
+    configFields: [],
+    ioSignature: { inputs: [], outputs: [{ name: 'http-server', type: 'net.Listener' }] },
+  },
+  {
+    type: 'dynamic.component',
+    label: 'Dynamic Component',
+    category: 'infrastructure',
+    defaultConfig: {},
+    configFields: [
+      { key: 'componentId', label: 'Component ID', type: 'string', description: 'ID to look up in the dynamic component registry (defaults to module name)' },
+      { key: 'source', label: 'Source File', type: 'string', description: 'Path to Go source file to load dynamically', placeholder: 'components/my_processor.go' },
+      { key: 'provides', label: 'Provides Services', type: 'array', arrayItemType: 'string', description: 'Service names this component provides', placeholder: 'my-service' },
+      { key: 'requires', label: 'Requires Services', type: 'array', arrayItemType: 'string', description: 'Service names this component depends on', placeholder: 'database' },
+    ],
+    ioSignature: { inputs: [{ name: 'input', type: 'any' }], outputs: [{ name: 'output', type: 'any' }] },
   },
   {
     type: 'workflow.registry',

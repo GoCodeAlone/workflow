@@ -123,7 +123,10 @@ jobs:
     - name: Unit tests
       run: npm test -- --run
 
-  # Dynamically discover and test ALL example workflow configs
+  # Validate all example workflow configs at three levels:
+  # 1. YAML parsing (can it be loaded?)
+  # 2. Schema validation (correct types, required fields, valid references?)
+  # 3. Engine loading (can BuildFromConfig produce a working engine?)
   example-configs:
     name: Validate Example Configs
     runs-on: ubuntu-latest
@@ -140,83 +143,50 @@ jobs:
         go-version: '1.26'
         cache: true
 
-    - name: Build example runner
+    - name: YAML parsing — all configs loadable
+      run: go test -v -run TestExampleConfigsLoad -timeout 60s .
+
+    - name: Schema validation — types, fields, dependencies
+      run: go test -v -run TestExampleConfigsValidate -timeout 60s .
+
+    - name: Engine loading — BuildFromConfig + start/stop cycle
+      run: go test -v -run TestExampleConfigsBuildFromConfig -timeout 120s .
+
+    - name: Build example runner binary
       run: |
         cd example
         go build -o workflow-example ./...
 
-    - name: Discover and test all example configs
+    - name: Smoke test — run each config with timeout
       run: |
         cd example
-        failed=0
+        passed=0
+        warned=0
         total=0
 
-        # Discover all YAML configs dynamically
-        for config in *.yaml; do
+        for config in $(find . -name "*.yaml" \
+          -not -path "*/configs/*" -not -path "*/seed/*" -not -path "*/observability/*" \
+          -not -path "*/spa/*" -not -path "*/components/*" -not -path "*/node_modules/*" \
+          -not -path "*/e2e/*" -not -path "*/data/*" -not -path "*/.*" \
+          -not -name "docker-compose.yaml" -not -name "docker-compose.yml" | sort); do
           total=$((total + 1))
-          echo "==> Testing config: $config"
+          echo -n "  $config ... "
 
-          # Run with timeout - exit code 124 means timeout (expected for long-running servers)
-          if timeout 10s ./workflow-example -config "$config" 2>&1; then
-            echo "    OK (exited cleanly)"
-          elif [ $? -eq 124 ]; then
-            echo "    OK (timed out as expected for server configs)"
-          else
-            echo "    FAIL: config $config failed to start"
-            failed=$((failed + 1))
-          fi
+          # Run with timeout — exit 124 means timeout (expected for servers)
+          output=$(timeout 10s ./workflow-example -config "$config" 2>&1) && {
+            echo "OK (exited cleanly)"
+            passed=$((passed + 1))
+          } || {
+            rc=$?
+            if [ $rc -eq 124 ]; then
+              echo "OK (server timeout — expected)"
+              passed=$((passed + 1))
+            else
+              echo "WARN (exit $rc — may need runtime deps)"
+              warned=$((warned + 1))
+            fi
+          }
         done
 
         echo ""
-        echo "==> Results: $total configs tested, $failed failures"
-
-        if [ $failed -gt 0 ]; then
-          echo "FAIL: $failed config(s) failed to load"
-          exit 1
-        fi
-
-    - name: Validate nested example configs
-      run: |
-        cd example
-        failed=0
-
-        # Test configs in subdirectories (e.g., multi-workflow-ecommerce/)
-        for config in $(find . -mindepth 2 -name "*.yaml" \
-          -not -path "*/configs/*" -not -path "*/seed/*" -not -path "*/observability/*" \
-          -not -path "*/spa/*" -not -path "*/components/*" -not -path "*/node_modules/*" \
-          -not -path "*/e2e/*" -not -path "*/.*" -not -name "docker-compose.yaml" \
-          -not -name "docker-compose.yml"); do
-          dir=$(dirname "$config")
-          base=$(basename "$config")
-          echo "==> Testing nested config: $config"
-
-          # Try to load the config - these may fail if they need specific runtime deps
-          if timeout 10s ./workflow-example -config "$config" 2>&1; then
-            echo "    OK"
-          elif [ $? -eq 124 ]; then
-            echo "    OK (timed out)"
-          else
-            echo "    WARN: $config may require runtime dependencies"
-          fi
-        done
-
-  # Run the Go-level config validation test
-  config-validation:
-    name: Config Validation Test
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-    - name: Check out code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.26'
-        cache: true
-
-    - name: Run config validation tests
-      run: |
-        go test -v -run TestExampleConfigsLoad ./...
+        echo "Results: $total configs, $passed passed, $warned warnings"

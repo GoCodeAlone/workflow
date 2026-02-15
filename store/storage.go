@@ -8,11 +8,12 @@ import (
 
 // FileInfo describes metadata about a file in a storage provider.
 type FileInfo struct {
-	Name    string    `json:"name"`
-	Path    string    `json:"path"`
-	Size    int64     `json:"size"`
-	ModTime time.Time `json:"modTime"`
-	IsDir   bool      `json:"isDir"`
+	Name        string    `json:"name"`
+	Path        string    `json:"path"`
+	Size        int64     `json:"size"`
+	ModTime     time.Time `json:"modTime"`
+	IsDir       bool      `json:"isDir"`
+	ContentType string    `json:"contentType,omitempty"`
 }
 
 // StorageProvider defines the interface for file storage backends.
@@ -27,4 +28,6 @@ type StorageProvider interface {
 	Delete(ctx context.Context, path string) error
 	// Stat returns metadata for a file.
 	Stat(ctx context.Context, path string) (FileInfo, error)
+	// MkdirAll creates a directory path and all parents that do not exist.
+	MkdirAll(ctx context.Context, path string) error
 }
