@@ -57,7 +57,7 @@ export default function WorkflowCanvas() {
       'statemachine': { stroke: '#f59e0b' },
       'event': { stroke: '#ef4444' },
       'conditional': { stroke: '#22c55e' },
-      'auto-wire': { stroke: '#585b70', strokeDasharray: '3,3' },
+      'auto-wire': { stroke: '#585b70', strokeDasharray: '4 4' },
       'middleware-chain': { stroke: '#fab387', strokeDasharray: '6,3' },
     };
     return edges.map((edge) => {
@@ -72,7 +72,7 @@ export default function WorkflowCanvas() {
         style: { ...edge.style, stroke: style.stroke, strokeWidth: isAutoWire ? 1.5 : 2, strokeDasharray: style.strokeDasharray },
         labelStyle: { fill: style.stroke, fontWeight: 600, fontSize: 11 },
         labelBgStyle: { fill: '#1e1e2e', fillOpacity: 0.9 },
-        ...(isAutoWire ? { deletable: false, selectable: false } : {}),
+        ...(isAutoWire ? { deletable: false, selectable: false, animated: false } : {}),
       };
     });
   }, [edges]);

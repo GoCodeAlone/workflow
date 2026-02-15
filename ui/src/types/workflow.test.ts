@@ -10,7 +10,7 @@ import type { ModuleCategory } from './workflow.ts';
 describe('workflow types', () => {
   describe('MODULE_TYPES', () => {
     it('has the expected number of module types', () => {
-      expect(MODULE_TYPES.length).toBe(43);
+      expect(MODULE_TYPES.length).toBe(55);
     });
 
     it('each module type has required fields', () => {
@@ -48,7 +48,7 @@ describe('workflow types', () => {
         for (const field of mod.configFields) {
           expect(field.key).toBeTruthy();
           expect(field.label).toBeTruthy();
-          expect(['string', 'number', 'boolean', 'select', 'json', 'array', 'filepath']).toContain(field.type);
+          expect(['string', 'number', 'boolean', 'select', 'json', 'array', 'filepath', 'map']).toContain(field.type);
 
           if (field.type === 'select') {
             expect(Array.isArray(field.options)).toBe(true);
@@ -80,8 +80,8 @@ describe('workflow types', () => {
   });
 
   describe('CATEGORIES', () => {
-    it('has all 10 expected categories', () => {
-      expect(CATEGORIES).toHaveLength(10);
+    it('has all 11 expected categories', () => {
+      expect(CATEGORIES).toHaveLength(11);
     });
 
     it('contains all expected category keys', () => {
@@ -113,8 +113,8 @@ describe('workflow types', () => {
   });
 
   describe('CATEGORY_COLORS', () => {
-    it('has all 10 category colors', () => {
-      expect(Object.keys(CATEGORY_COLORS)).toHaveLength(10);
+    it('has all 11 category colors', () => {
+      expect(Object.keys(CATEGORY_COLORS)).toHaveLength(11);
     });
 
     it('all values are hex color strings', () => {

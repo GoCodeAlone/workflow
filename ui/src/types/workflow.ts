@@ -13,6 +13,7 @@ export interface WorkflowConfig {
   modules: ModuleConfig[];
   workflows: Record<string, unknown>;
   triggers: Record<string, unknown>;
+  pipelines?: Record<string, unknown>;
 }
 
 // Workflow section types for edge extraction
@@ -97,7 +98,8 @@ export type ModuleCategory =
   | 'infrastructure'
   | 'middleware'
   | 'database'
-  | 'observability';
+  | 'observability'
+  | 'pipeline';
 
 export interface ModuleTypeInfo {
   type: string;
@@ -135,6 +137,7 @@ export const CATEGORY_COLORS: Record<ModuleCategory, string> = {
   middleware: '#06b6d4',
   database: '#f97316',
   observability: '#84cc16',
+  pipeline: '#e879f9',
 };
 
 export const MODULE_TYPES: ModuleTypeInfo[] = [
@@ -669,6 +672,83 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     ],
     ioSignature: { inputs: [{ name: 'storageBackend', type: 'SQLiteStorage' }], outputs: [{ name: 'registry', type: 'WorkflowRegistry' }] },
   },
+  // Pipeline step types
+  {
+    type: 'step.validate',
+    label: 'Validate',
+    category: 'pipeline',
+    defaultConfig: { strategy: 'required_fields', required_fields: [] },
+    configFields: [
+      { key: 'strategy', label: 'Strategy', type: 'select', options: ['required_fields', 'json_schema'], defaultValue: 'required_fields', description: 'Validation strategy' },
+      { key: 'required_fields', label: 'Required Fields', type: 'array', arrayItemType: 'string', description: 'Fields that must be present in the pipeline context' },
+      { key: 'schema', label: 'JSON Schema', type: 'json', description: 'JSON Schema for json_schema strategy' },
+    ],
+  },
+  {
+    type: 'step.set',
+    label: 'Set Values',
+    category: 'pipeline',
+    defaultConfig: { values: {} },
+    configFields: [
+      { key: 'values', label: 'Values', type: 'map', mapValueType: 'string', description: 'Key-value pairs to set in the pipeline context (supports {{ template }} expressions)' },
+    ],
+  },
+  {
+    type: 'step.log',
+    label: 'Log',
+    category: 'pipeline',
+    defaultConfig: { level: 'info', message: '' },
+    configFields: [
+      { key: 'level', label: 'Level', type: 'select', options: ['debug', 'info', 'warn', 'error'], defaultValue: 'info' },
+      { key: 'message', label: 'Message', type: 'string', description: 'Log message (supports {{ template }} expressions)', required: true },
+    ],
+  },
+  {
+    type: 'step.conditional',
+    label: 'Conditional Route',
+    category: 'pipeline',
+    defaultConfig: { field: '', routes: {}, default: '' },
+    configFields: [
+      { key: 'field', label: 'Field', type: 'string', description: 'Field to evaluate (supports {{ template }} expressions)', required: true },
+      { key: 'routes', label: 'Routes', type: 'map', mapValueType: 'string', description: 'Map of field values to target step names' },
+      { key: 'default', label: 'Default Step', type: 'string', description: 'Step to route to when no match is found' },
+    ],
+  },
+  {
+    type: 'step.transform',
+    label: 'Transform',
+    category: 'pipeline',
+    defaultConfig: { transformer: '', pipeline: '' },
+    configFields: [
+      { key: 'transformer', label: 'Transformer Service', type: 'string', description: 'Name of the DataTransformer module to use' },
+      { key: 'pipeline', label: 'Pipeline Name', type: 'string', description: 'Named transformation pipeline within the transformer' },
+      { key: 'operations', label: 'Operations', type: 'json', description: 'Inline transformation operations (alternative to named pipeline)' },
+    ],
+  },
+  {
+    type: 'step.publish',
+    label: 'Publish Event',
+    category: 'pipeline',
+    defaultConfig: { topic: '', payload: {} },
+    configFields: [
+      { key: 'topic', label: 'Topic', type: 'string', description: 'Event topic to publish to (supports {{ template }} expressions)', required: true },
+      { key: 'payload', label: 'Payload', type: 'json', description: 'Event payload (supports {{ template }} expressions in string values)' },
+      { key: 'broker', label: 'Broker Service', type: 'string', description: 'Name of the messaging broker module (optional, uses EventBus by default)' },
+    ],
+  },
+  {
+    type: 'step.http_call',
+    label: 'HTTP Call',
+    category: 'pipeline',
+    defaultConfig: { url: '', method: 'GET' },
+    configFields: [
+      { key: 'url', label: 'URL', type: 'string', description: 'Request URL (supports {{ template }} expressions)', required: true },
+      { key: 'method', label: 'Method', type: 'select', options: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'], defaultValue: 'GET' },
+      { key: 'headers', label: 'Headers', type: 'map', mapValueType: 'string', description: 'Request headers' },
+      { key: 'body', label: 'Body', type: 'json', description: 'Request body (supports {{ template }} expressions in string values)' },
+      { key: 'timeout', label: 'Timeout', type: 'string', defaultValue: '30s', description: 'Request timeout' },
+    ],
+  },
 ];
 
 export const MODULE_TYPE_MAP: Record<string, ModuleTypeInfo> = Object.fromEntries(
@@ -686,6 +766,7 @@ export const CATEGORIES: { key: ModuleCategory; label: string }[] = [
   { key: 'infrastructure', label: 'Infrastructure' },
   { key: 'database', label: 'Database' },
   { key: 'observability', label: 'Observability' },
+  { key: 'pipeline', label: 'Pipeline Steps' },
 ];
 
 // Multi-workflow tab management

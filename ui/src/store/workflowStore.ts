@@ -70,9 +70,10 @@ interface WorkflowStore {
   updateNodeConfig: (id: string, config: Record<string, unknown>) => void;
   updateNodeName: (id: string, name: string) => void;
 
-  // Preserved workflow/trigger sections from imported config
+  // Preserved workflow/trigger/pipeline sections from imported config
   importedWorkflows: Record<string, unknown>;
   importedTriggers: Record<string, unknown>;
+  importedPipelines: Record<string, unknown>;
 
   exportToConfig: () => WorkflowConfig;
   importFromConfig: (config: WorkflowConfig) => void;
@@ -135,6 +136,7 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   // Preserved workflow/trigger sections from imported config
   importedWorkflows: {},
   importedTriggers: {},
+  importedPipelines: {},
 
   // Active v1 workflow record
   activeWorkflowRecord: null,
@@ -321,9 +323,9 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   exportToConfig: () => {
-    const { nodes, edges, importedWorkflows, importedTriggers } = get();
+    const { nodes, edges, importedWorkflows, importedTriggers, importedPipelines } = get();
     const config = nodesToConfig(nodes, edges);
-    // Merge back preserved workflow/trigger sections from the imported config.
+    // Merge back preserved workflow/trigger/pipeline sections from the imported config.
     // nodesToConfig reconstructs what it can from edges; the imported sections
     // fill in anything that couldn't be reconstructed (routes, subscriptions, etc.)
     if (Object.keys(config.workflows).length === 0 && Object.keys(importedWorkflows).length > 0) {
@@ -331,6 +333,9 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     }
     if (Object.keys(config.triggers).length === 0 && Object.keys(importedTriggers).length > 0) {
       config.triggers = importedTriggers;
+    }
+    if (Object.keys(importedPipelines).length > 0) {
+      config.pipelines = importedPipelines;
     }
     return config;
   },
@@ -344,12 +349,13 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       selectedNodeId: null,
       importedWorkflows: config.workflows ?? {},
       importedTriggers: config.triggers ?? {},
+      importedPipelines: config.pipelines ?? {},
     });
   },
 
   clearCanvas: () => {
     get().pushHistory();
-    set({ nodes: [], edges: [], selectedNodeId: null, nodeCounter: 0, importedWorkflows: {}, importedTriggers: {} });
+    set({ nodes: [], edges: [], selectedNodeId: null, nodeCounter: 0, importedWorkflows: {}, importedTriggers: {}, importedPipelines: {} });
   },
 
   // Connection drag state (smart connection UX)

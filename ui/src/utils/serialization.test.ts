@@ -366,6 +366,107 @@ describe('serialization', () => {
       expect(serverToRouter).toHaveLength(1);
     });
 
+    it('creates auto-wire edges from health.checker to first router', () => {
+      const config: WorkflowConfig = {
+        modules: [
+          { name: 'my-server', type: 'http.server' },
+          { name: 'my-router', type: 'http.router' },
+          { name: 'health', type: 'health.checker' },
+        ],
+        workflows: {},
+        triggers: {},
+      };
+
+      const { edges } = configToNodes(config);
+      const autoWireEdges = edges.filter((e) => (e.data as WorkflowEdgeData)?.edgeType === 'auto-wire');
+      expect(autoWireEdges).toHaveLength(1);
+      expect(autoWireEdges[0].target).toContain('http_router');
+      expect((autoWireEdges[0].data as WorkflowEdgeData).label).toBe('auto-wired');
+    });
+
+    it('creates auto-wire edges from metrics.collector to first router', () => {
+      const config: WorkflowConfig = {
+        modules: [
+          { name: 'my-server', type: 'http.server' },
+          { name: 'my-router', type: 'http.router' },
+          { name: 'metrics', type: 'metrics.collector' },
+        ],
+        workflows: {},
+        triggers: {},
+      };
+
+      const { edges } = configToNodes(config);
+      const autoWireEdges = edges.filter((e) => (e.data as WorkflowEdgeData)?.edgeType === 'auto-wire');
+      expect(autoWireEdges).toHaveLength(1);
+      expect(autoWireEdges[0].target).toContain('http_router');
+      expect((autoWireEdges[0].data as WorkflowEdgeData).label).toBe('auto-wired');
+    });
+
+    it('auto-wires to chimux.router when no http.router exists', () => {
+      const config: WorkflowConfig = {
+        modules: [
+          { name: 'my-server', type: 'http.server' },
+          { name: 'my-chi-router', type: 'chimux.router' },
+          { name: 'health', type: 'health.checker' },
+        ],
+        workflows: {},
+        triggers: {},
+      };
+
+      const { edges } = configToNodes(config);
+      const autoWireEdges = edges.filter((e) => (e.data as WorkflowEdgeData)?.edgeType === 'auto-wire');
+      expect(autoWireEdges).toHaveLength(1);
+      expect(autoWireEdges[0].target).toContain('chimux_router');
+    });
+
+    it('does not create auto-wire edges when no router exists', () => {
+      const config: WorkflowConfig = {
+        modules: [
+          { name: 'my-server', type: 'http.server' },
+          { name: 'health', type: 'health.checker' },
+        ],
+        workflows: {},
+        triggers: {},
+      };
+
+      const { edges } = configToNodes(config);
+      const autoWireEdges = edges.filter((e) => (e.data as WorkflowEdgeData)?.edgeType === 'auto-wire');
+      expect(autoWireEdges).toHaveLength(0);
+    });
+
+    it('auto-wires multiple observability modules to the same router', () => {
+      const config: WorkflowConfig = {
+        modules: [
+          { name: 'my-router', type: 'http.router' },
+          { name: 'health', type: 'health.checker' },
+          { name: 'metrics', type: 'metrics.collector' },
+        ],
+        workflows: {},
+        triggers: {},
+      };
+
+      const { edges } = configToNodes(config);
+      const autoWireEdges = edges.filter((e) => (e.data as WorkflowEdgeData)?.edgeType === 'auto-wire');
+      expect(autoWireEdges).toHaveLength(2);
+      // Both should target the same router
+      expect(autoWireEdges[0].target).toBe(autoWireEdges[1].target);
+    });
+
+    it('auto-wire edges are not serialized to config', () => {
+      const nodes: WorkflowNode[] = [
+        { id: 'rtr', type: 'httpRouterNode', position: { x: 0, y: 0 }, data: { moduleType: 'http.router', label: 'my-router', config: {} } },
+        { id: 'hc', type: 'infrastructureNode', position: { x: 0, y: 0 }, data: { moduleType: 'health.checker', label: 'health', config: {} } },
+      ];
+      const edges: Edge[] = [
+        { id: 'aw1', source: 'hc', target: 'rtr', data: { edgeType: 'auto-wire', label: 'auto-wired' } as WorkflowEdgeData },
+      ];
+
+      const config = nodesToConfig(nodes, edges);
+      // Auto-wire edges should not appear as dependencies
+      expect(config.modules[0].dependsOn).toBeUndefined();
+      expect(config.modules[1].dependsOn).toBeUndefined();
+    });
+
     it('uses defaultConfig when module config is missing', () => {
       const config: WorkflowConfig = {
         modules: [

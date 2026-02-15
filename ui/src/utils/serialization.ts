@@ -517,6 +517,7 @@ export function nodeComponentType(moduleType: string): string {
   if (moduleType === 'chimux.router') return 'httpRouterNode';
   if (moduleType === 'notification.slack' || moduleType === 'storage.s3') return 'integrationNode';
   if (moduleType === 'observability.otel') return 'infrastructureNode';
+  if (moduleType.startsWith('step.')) return 'integrationNode';
   return 'infrastructureNode';
 }
 
@@ -526,11 +527,15 @@ export function configToYaml(config: WorkflowConfig): string {
 
 export function parseYaml(text: string): WorkflowConfig {
   const parsed = yaml.load(text) as Record<string, unknown>;
-  return {
+  const config: WorkflowConfig = {
     modules: (parsed.modules ?? []) as ModuleConfig[],
     workflows: (parsed.workflows ?? {}) as Record<string, unknown>,
     triggers: (parsed.triggers ?? {}) as Record<string, unknown>,
   };
+  if (parsed.pipelines) {
+    config.pipelines = parsed.pipelines as Record<string, unknown>;
+  }
+  return config;
 }
 
 // Extract conditional branch points from state machine workflow definitions
