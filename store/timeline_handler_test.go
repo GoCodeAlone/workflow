@@ -47,7 +47,7 @@ func TestTimelineHandler_ListExecutions(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest("GET", "/api/v1/executions", nil)
+	req := httptest.NewRequest("GET", "/api/v1/admin/executions", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -77,7 +77,7 @@ func TestTimelineHandler_ListExecutions_FilterPipeline(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest("GET", "/api/v1/executions?pipeline=pipeline-a", nil)
+	req := httptest.NewRequest("GET", "/api/v1/admin/executions?pipeline=pipeline-a", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -99,7 +99,7 @@ func TestTimelineHandler_ListExecutions_Empty(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest("GET", "/api/v1/executions", nil)
+	req := httptest.NewRequest("GET", "/api/v1/admin/executions", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -124,7 +124,7 @@ func TestTimelineHandler_GetTimeline(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest("GET", "/api/v1/executions/"+execID.String()+"/timeline", nil)
+	req := httptest.NewRequest("GET", "/api/v1/admin/executions/"+execID.String()+"/timeline", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -154,7 +154,7 @@ func TestTimelineHandler_GetTimeline_NotFound(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest("GET", "/api/v1/executions/"+uuid.New().String()+"/timeline", nil)
+	req := httptest.NewRequest("GET", "/api/v1/admin/executions/"+uuid.New().String()+"/timeline", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -169,7 +169,7 @@ func TestTimelineHandler_GetTimeline_InvalidID(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest("GET", "/api/v1/executions/invalid-id/timeline", nil)
+	req := httptest.NewRequest("GET", "/api/v1/admin/executions/invalid-id/timeline", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -187,7 +187,7 @@ func TestTimelineHandler_GetEvents(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest("GET", "/api/v1/executions/"+execID.String()+"/events", nil)
+	req := httptest.NewRequest("GET", "/api/v1/admin/executions/"+execID.String()+"/events", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -212,7 +212,7 @@ func TestTimelineHandler_GetEvents_TypeFilter(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest("GET", "/api/v1/executions/"+execID.String()+"/events?type=step.started", nil)
+	req := httptest.NewRequest("GET", "/api/v1/admin/executions/"+execID.String()+"/events?type=step.started", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -240,7 +240,7 @@ func TestReplayHandler_ReplayExact(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"mode": "exact"}`
-	req := httptest.NewRequest("POST", "/api/v1/executions/"+execID.String()+"/replay", bytes.NewBufferString(body))
+	req := httptest.NewRequest("POST", "/api/v1/admin/executions/"+execID.String()+"/replay", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -286,7 +286,7 @@ func TestReplayHandler_ReplayWithFunc(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"mode": "exact"}`
-	req := httptest.NewRequest("POST", "/api/v1/executions/"+execID.String()+"/replay", bytes.NewBufferString(body))
+	req := httptest.NewRequest("POST", "/api/v1/admin/executions/"+execID.String()+"/replay", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -313,7 +313,7 @@ func TestReplayHandler_ReplayNotFound(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"mode": "exact"}`
-	req := httptest.NewRequest("POST", "/api/v1/executions/"+uuid.New().String()+"/replay", bytes.NewBufferString(body))
+	req := httptest.NewRequest("POST", "/api/v1/admin/executions/"+uuid.New().String()+"/replay", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -333,7 +333,7 @@ func TestReplayHandler_ReplayInvalidMode(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"mode": "invalid"}`
-	req := httptest.NewRequest("POST", "/api/v1/executions/"+execID.String()+"/replay", bytes.NewBufferString(body))
+	req := httptest.NewRequest("POST", "/api/v1/admin/executions/"+execID.String()+"/replay", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -353,7 +353,7 @@ func TestReplayHandler_ReplayDefaultMode(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	// Empty body - should default to exact
-	req := httptest.NewRequest("POST", "/api/v1/executions/"+execID.String()+"/replay", bytes.NewBufferString("{}"))
+	req := httptest.NewRequest("POST", "/api/v1/admin/executions/"+execID.String()+"/replay", bytes.NewBufferString("{}"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -380,7 +380,7 @@ func TestReplayHandler_GetReplayInfo(t *testing.T) {
 
 	// First create a replay
 	body := `{"mode": "exact"}`
-	req := httptest.NewRequest("POST", "/api/v1/executions/"+execID.String()+"/replay", bytes.NewBufferString(body))
+	req := httptest.NewRequest("POST", "/api/v1/admin/executions/"+execID.String()+"/replay", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -389,7 +389,7 @@ func TestReplayHandler_GetReplayInfo(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &result)
 
 	// Now get replay info for the new execution
-	req = httptest.NewRequest("GET", "/api/v1/executions/"+result.NewExecutionID.String()+"/replay", nil)
+	req = httptest.NewRequest("GET", "/api/v1/admin/executions/"+result.NewExecutionID.String()+"/replay", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -414,7 +414,7 @@ func TestReplayHandler_GetReplayInfo_NotReplay(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest("GET", "/api/v1/executions/"+execID.String()+"/replay", nil)
+	req := httptest.NewRequest("GET", "/api/v1/admin/executions/"+execID.String()+"/replay", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 

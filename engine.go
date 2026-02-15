@@ -1321,10 +1321,14 @@ func (e *StdEngine) configureRoutePipelines(cfg *config.WorkflowConfig) error {
 				continue
 			}
 
-			// Extract route name from path (last segment)
+			// Build route key from method + path for unique pipeline lookup.
+			// Using the full "METHOD /path" pattern avoids collisions when
+			// multiple routes share the same last segment (e.g.,
+			// POST /projects/{id}/workflows vs POST /workflows).
 			path, _ := routeMap["path"].(string)
-			routeName := lastRouteSegment(path)
-			pipelineName := handlerName + ":" + routeName
+			method, _ := routeMap["method"].(string)
+			routeKey := method + " " + path
+			pipelineName := handlerName + ":" + lastRouteSegment(path)
 
 			steps, err := e.buildPipelineSteps(pipelineName, stepCfgs)
 			if err != nil {
@@ -1345,8 +1349,8 @@ func (e *StdEngine) configureRoutePipelines(cfg *config.WorkflowConfig) error {
 			}
 
 			if setter, ok := svc.(RoutePipelineSetter); ok {
-				setter.SetRoutePipeline(routeName, pipeline)
-				e.logger.Info("Attached route pipeline", "handler", handlerName, "route", routeName, "steps", len(steps))
+				setter.SetRoutePipeline(routeKey, pipeline)
+				e.logger.Info("Attached route pipeline", "handler", handlerName, "route", routeKey, "steps", len(steps))
 			}
 		}
 	}

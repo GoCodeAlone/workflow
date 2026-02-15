@@ -23,20 +23,20 @@ func NewHandler(meter UsageMeter, provider BillingProvider) *Handler {
 
 // RegisterRoutes registers billing endpoints on the given mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/billing/plans", h.handleListPlans)
-	mux.HandleFunc("GET /api/v1/billing/usage", h.handleGetUsage)
-	mux.HandleFunc("POST /api/v1/billing/subscribe", h.handleSubscribe)
-	mux.HandleFunc("DELETE /api/v1/billing/subscribe", h.handleCancelSubscription)
-	mux.HandleFunc("POST /api/v1/billing/webhook", h.handleWebhook)
+	mux.HandleFunc("GET /api/v1/admin/billing/plans", h.handleListPlans)
+	mux.HandleFunc("GET /api/v1/admin/billing/usage", h.handleGetUsage)
+	mux.HandleFunc("POST /api/v1/admin/billing/subscribe", h.handleSubscribe)
+	mux.HandleFunc("DELETE /api/v1/admin/billing/subscribe", h.handleCancelSubscription)
+	mux.HandleFunc("POST /api/v1/admin/billing/webhook", h.handleWebhook)
 }
 
-// ---------- GET /api/v1/billing/plans ----------
+// ---------- GET /api/v1/admin/billing/plans ----------
 
 func (h *Handler) handleListPlans(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, AllPlans)
 }
 
-// ---------- GET /api/v1/billing/usage ----------
+// ---------- GET /api/v1/admin/billing/usage ----------
 
 func (h *Handler) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 	tenantID := r.URL.Query().Get("tenant_id")
@@ -79,7 +79,7 @@ func (h *Handler) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ---------- POST /api/v1/billing/subscribe ----------
+// ---------- POST /api/v1/admin/billing/subscribe ----------
 
 type subscribeRequest struct {
 	TenantID   string `json:"tenant_id"`
@@ -135,7 +135,7 @@ func (h *Handler) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---------- DELETE /api/v1/billing/subscribe ----------
+// ---------- DELETE /api/v1/admin/billing/subscribe ----------
 
 type cancelRequest struct {
 	SubscriptionID string `json:"subscription_id"`
@@ -160,7 +160,7 @@ func (h *Handler) handleCancelSubscription(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
 }
 
-// ---------- POST /api/v1/billing/webhook ----------
+// ---------- POST /api/v1/admin/billing/webhook ----------
 
 func (h *Handler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)

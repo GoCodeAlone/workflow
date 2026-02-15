@@ -30,13 +30,13 @@ func NewDLQHandler(store DLQStore, logger *slog.Logger) *DLQHandler {
 
 // RegisterRoutes registers the DLQ API routes on the given mux.
 func (h *DLQHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/dlq", h.handleList)
-	mux.HandleFunc("GET /api/v1/dlq/stats", h.handleStats)
-	mux.HandleFunc("GET /api/v1/dlq/{id}", h.handleGet)
-	mux.HandleFunc("POST /api/v1/dlq/{id}/retry", h.handleRetry)
-	mux.HandleFunc("POST /api/v1/dlq/{id}/discard", h.handleDiscard)
-	mux.HandleFunc("POST /api/v1/dlq/{id}/resolve", h.handleResolve)
-	mux.HandleFunc("DELETE /api/v1/dlq/purge", h.handlePurge)
+	mux.HandleFunc("GET /api/v1/admin/dlq", h.handleList)
+	mux.HandleFunc("GET /api/v1/admin/dlq/stats", h.handleStats)
+	mux.HandleFunc("GET /api/v1/admin/dlq/{id}", h.handleGet)
+	mux.HandleFunc("POST /api/v1/admin/dlq/{id}/retry", h.handleRetry)
+	mux.HandleFunc("POST /api/v1/admin/dlq/{id}/discard", h.handleDiscard)
+	mux.HandleFunc("POST /api/v1/admin/dlq/{id}/resolve", h.handleResolve)
+	mux.HandleFunc("DELETE /api/v1/admin/dlq/purge", h.handlePurge)
 }
 
 // ---------------------------------------------------------------------------

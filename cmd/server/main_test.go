@@ -189,7 +189,7 @@ func TestBuildEngine_WithConfig(t *testing.T) {
 		Triggers:  map[string]any{},
 	}
 
-	engine, loader, registry, err := buildEngine(cfg, logger)
+	engine, loader, registry, _, err := buildEngine(cfg, logger)
 	if err != nil {
 		t.Fatalf("buildEngine failed: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestBuildEngine_EmptyConfig(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	cfg := config.NewEmptyWorkflowConfig()
 
-	engine, loader, registry, err := buildEngine(cfg, logger)
+	engine, loader, registry, _, err := buildEngine(cfg, logger)
 	if err != nil {
 		t.Fatalf("buildEngine with empty config failed: %v", err)
 	}
@@ -540,7 +540,7 @@ func TestBuildEngine_InvalidModuleType(t *testing.T) {
 		Triggers:  map[string]any{},
 	}
 
-	_, _, _, err := buildEngine(cfg, logger)
+	_, _, _, _, err := buildEngine(cfg, logger)
 	if err == nil {
 		t.Fatal("expected error for invalid module type")
 	}

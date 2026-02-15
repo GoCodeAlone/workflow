@@ -25,12 +25,12 @@ func NewTimelineHandler(store EventStore, logger *slog.Logger) *TimelineHandler 
 
 // RegisterRoutes registers the timeline API routes on the given mux.
 func (h *TimelineHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/executions", h.listExecutions)
-	mux.HandleFunc("GET /api/v1/executions/{id}/timeline", h.getTimeline)
-	mux.HandleFunc("GET /api/v1/executions/{id}/events", h.getEvents)
+	mux.HandleFunc("GET /api/v1/admin/executions", h.listExecutions)
+	mux.HandleFunc("GET /api/v1/admin/executions/{id}/timeline", h.getTimeline)
+	mux.HandleFunc("GET /api/v1/admin/executions/{id}/events", h.getEvents)
 }
 
-// listExecutions handles GET /api/v1/executions
+// listExecutions handles GET /api/v1/admin/executions
 func (h *TimelineHandler) listExecutions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
@@ -72,7 +72,7 @@ func (h *TimelineHandler) listExecutions(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// getTimeline handles GET /api/v1/executions/{id}/timeline
+// getTimeline handles GET /api/v1/admin/executions/{id}/timeline
 func (h *TimelineHandler) getTimeline(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	if idStr == "" {
@@ -100,7 +100,7 @@ func (h *TimelineHandler) getTimeline(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, timeline)
 }
 
-// getEvents handles GET /api/v1/executions/{id}/events
+// getEvents handles GET /api/v1/admin/executions/{id}/events
 func (h *TimelineHandler) getEvents(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	if idStr == "" {
@@ -188,11 +188,11 @@ func NewReplayHandler(store EventStore, logger *slog.Logger) *ReplayHandler {
 
 // RegisterRoutes registers replay API routes.
 func (h *ReplayHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/v1/executions/{id}/replay", h.replayExecution)
-	mux.HandleFunc("GET /api/v1/executions/{id}/replay", h.getReplayInfo)
+	mux.HandleFunc("POST /api/v1/admin/executions/{id}/replay", h.replayExecution)
+	mux.HandleFunc("GET /api/v1/admin/executions/{id}/replay", h.getReplayInfo)
 }
 
-// replayExecution handles POST /api/v1/executions/{id}/replay
+// replayExecution handles POST /api/v1/admin/executions/{id}/replay
 func (h *ReplayHandler) replayExecution(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	if idStr == "" {
@@ -269,7 +269,7 @@ func (h *ReplayHandler) replayExecution(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusCreated, result)
 }
 
-// getReplayInfo handles GET /api/v1/executions/{id}/replay
+// getReplayInfo handles GET /api/v1/admin/executions/{id}/replay
 func (h *ReplayHandler) getReplayInfo(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	if idStr == "" {

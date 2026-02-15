@@ -40,20 +40,20 @@ func NewBackfillMockDiffHandler(
 // RegisterRoutes registers all backfill, mock, and diff API routes on the given mux.
 func (h *BackfillMockDiffHandler) RegisterRoutes(mux *http.ServeMux) {
 	// Backfill routes
-	mux.HandleFunc("GET /api/v1/backfill", h.handleBackfillList)
-	mux.HandleFunc("POST /api/v1/backfill", h.handleBackfillCreate)
-	mux.HandleFunc("GET /api/v1/backfill/{id}", h.handleBackfillGet)
-	mux.HandleFunc("POST /api/v1/backfill/{id}/cancel", h.handleBackfillCancel)
+	mux.HandleFunc("GET /api/v1/admin/backfill", h.handleBackfillList)
+	mux.HandleFunc("POST /api/v1/admin/backfill", h.handleBackfillCreate)
+	mux.HandleFunc("GET /api/v1/admin/backfill/{id}", h.handleBackfillGet)
+	mux.HandleFunc("POST /api/v1/admin/backfill/{id}/cancel", h.handleBackfillCancel)
 
 	// Mock routes
-	mux.HandleFunc("GET /api/v1/mocks", h.handleMockList)
-	mux.HandleFunc("POST /api/v1/mocks", h.handleMockSet)
-	mux.HandleFunc("DELETE /api/v1/mocks", h.handleMockClearAll)
-	mux.HandleFunc("GET /api/v1/mocks/{pipeline}", h.handleMockListPipeline)
-	mux.HandleFunc("DELETE /api/v1/mocks/{pipeline}/{step}", h.handleMockRemove)
+	mux.HandleFunc("GET /api/v1/admin/mocks", h.handleMockList)
+	mux.HandleFunc("POST /api/v1/admin/mocks", h.handleMockSet)
+	mux.HandleFunc("DELETE /api/v1/admin/mocks", h.handleMockClearAll)
+	mux.HandleFunc("GET /api/v1/admin/mocks/{pipeline}", h.handleMockListPipeline)
+	mux.HandleFunc("DELETE /api/v1/admin/mocks/{pipeline}/{step}", h.handleMockRemove)
 
 	// Diff routes
-	mux.HandleFunc("GET /api/v1/executions/diff", h.handleExecutionDiff)
+	mux.HandleFunc("GET /api/v1/admin/executions/diff", h.handleExecutionDiff)
 }
 
 // ---------------------------------------------------------------------------

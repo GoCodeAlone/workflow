@@ -12,9 +12,10 @@ import (
 
 // PipelineWorkflowHandler manages and executes pipeline-based workflows.
 type PipelineWorkflowHandler struct {
-	pipelines    map[string]*module.Pipeline
-	stepRegistry *module.StepRegistry
-	logger       *slog.Logger
+	pipelines     map[string]*module.Pipeline
+	stepRegistry  *module.StepRegistry
+	logger        *slog.Logger
+	eventRecorder module.EventRecorder
 }
 
 // NewPipelineWorkflowHandler creates a new PipelineWorkflowHandler.
@@ -32,6 +33,12 @@ func (h *PipelineWorkflowHandler) SetStepRegistry(registry *module.StepRegistry)
 // SetLogger sets the logger for pipeline execution.
 func (h *PipelineWorkflowHandler) SetLogger(logger *slog.Logger) {
 	h.logger = logger
+}
+
+// SetEventRecorder sets the event recorder for pipeline execution events.
+// When set, each pipeline execution will record events to this recorder.
+func (h *PipelineWorkflowHandler) SetEventRecorder(recorder module.EventRecorder) {
+	h.eventRecorder = recorder
 }
 
 // AddPipeline registers a named pipeline with the handler.
@@ -83,6 +90,11 @@ func (h *PipelineWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowT
 	// Set logger on pipeline if available
 	if h.logger != nil && pipeline.Logger == nil {
 		pipeline.Logger = h.logger
+	}
+
+	// Set event recorder on pipeline if available
+	if h.eventRecorder != nil && pipeline.EventRecorder == nil {
+		pipeline.EventRecorder = h.eventRecorder
 	}
 
 	pc, err := pipeline.Execute(ctx, data)

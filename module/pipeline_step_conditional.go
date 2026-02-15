@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/CrisisTextLine/modular"
 )
@@ -56,9 +57,11 @@ func (s *ConditionalStep) Name() string { return s.name }
 
 // Execute resolves the field value and determines the next step.
 func (s *ConditionalStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
-	// Use the template engine to resolve the field expression.
-	// Wrap the field in {{ }} so the engine evaluates it as a Go template path.
-	tmplExpr := "{{." + s.field + "}}"
+	// Build a template expression from the field path. If any segment
+	// contains a hyphen (e.g., "steps.get-company.found"), use the
+	// index function so Go's template parser doesn't treat '-' as
+	// subtraction.
+	tmplExpr := buildFieldTemplate(s.field)
 	resolved, err := s.tmpl.Resolve(tmplExpr, pc)
 	if err != nil {
 		return nil, fmt.Errorf("conditional step %q: failed to resolve field %q: %w", s.name, s.field, err)
@@ -81,4 +84,37 @@ func (s *ConditionalStep) Execute(_ context.Context, pc *PipelineContext) (*Step
 	}
 
 	return nil, fmt.Errorf("conditional step %q: value %q not found in routes and no default configured", s.name, resolved)
+}
+
+// buildFieldTemplate converts a dot-separated field path into a Go template
+// expression. If any segment contains characters that are invalid in Go
+// template identifiers (like hyphens), the entire path is built using
+// nested index calls. Otherwise, simple dot notation is used.
+//
+// Examples:
+//
+//	"steps.company.found"       -> "{{.steps.company.found}}"
+//	"steps.get-company.found"   -> "{{index . \"steps\" \"get-company\" \"found\"}}"
+func buildFieldTemplate(field string) string {
+	segments := strings.Split(field, ".")
+	needsIndex := false
+	for _, seg := range segments {
+		if strings.ContainsAny(seg, "-") {
+			needsIndex = true
+			break
+		}
+	}
+	if !needsIndex {
+		return "{{." + field + "}}"
+	}
+	// Build: {{index . "seg1" "seg2" "seg3"}}
+	var b strings.Builder
+	b.WriteString("{{index .")
+	for _, seg := range segments {
+		b.WriteString(" \"")
+		b.WriteString(seg)
+		b.WriteString("\"")
+	}
+	b.WriteString("}}")
+	return b.String()
 }

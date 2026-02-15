@@ -104,15 +104,22 @@ func (h *QueryHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	h.ServeHTTP(w, r)
 }
 
-// ServeHTTP implements the http.Handler interface. It extracts the query
-// name from the last path segment and dispatches to the registered function.
+// ServeHTTP implements the http.Handler interface. It looks up a route pipeline
+// by the full "METHOD /path" pattern (set by Go 1.22+ ServeMux), falling back
+// to the last path segment for backward compatibility with registered queries.
 // Dispatch chain: RegisteredQueryFunc -> RoutePipeline -> DelegateHandler -> 404
 func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	queryName := lastPathSegment(r.URL.Path)
+	// Use Go 1.22+ pattern for pipeline lookup (avoids last-segment collisions)
+	routeKey := r.Pattern
 
 	h.mu.RLock()
 	fn, exists := h.queries[queryName]
-	pipeline := h.routePipelines[queryName]
+	pipeline := h.routePipelines[routeKey]
+	if pipeline == nil {
+		// Fallback: try last-segment lookup for backward compatibility
+		pipeline = h.routePipelines[queryName]
+	}
 	h.mu.RUnlock()
 
 	if exists {

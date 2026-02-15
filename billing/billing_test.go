@@ -436,7 +436,7 @@ func setupHandler(t *testing.T) (*http.ServeMux, *InMemoryMeter, *MockBillingPro
 func TestHandler_ListPlans(t *testing.T) {
 	mux, _, _ := setupHandler(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/billing/plans", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/billing/plans", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -459,7 +459,7 @@ func TestHandler_GetUsage(t *testing.T) {
 	meter.SetPlan("tenant1", "starter")
 	_ = meter.RecordExecution(ctx, "tenant1", "pipeline-a")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/billing/usage?tenant_id=tenant1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/billing/usage?tenant_id=tenant1", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -486,7 +486,7 @@ func TestHandler_GetUsage(t *testing.T) {
 func TestHandler_GetUsage_MissingTenantID(t *testing.T) {
 	mux, _, _ := setupHandler(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/billing/usage", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/billing/usage", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -498,7 +498,7 @@ func TestHandler_GetUsage_MissingTenantID(t *testing.T) {
 func TestHandler_GetUsage_InvalidPeriod(t *testing.T) {
 	mux, _, _ := setupHandler(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/billing/usage?tenant_id=t1&period=bad", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/billing/usage?tenant_id=t1&period=bad", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -511,7 +511,7 @@ func TestHandler_Subscribe(t *testing.T) {
 	mux, _, _ := setupHandler(t)
 
 	body := `{"tenant_id":"t1","email":"a@b.com","plan_id":"starter"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/billing/subscribe", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/billing/subscribe", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -532,7 +532,7 @@ func TestHandler_Subscribe_UnknownPlan(t *testing.T) {
 	mux, _, _ := setupHandler(t)
 
 	body := `{"tenant_id":"t1","email":"a@b.com","plan_id":"nonexistent"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/billing/subscribe", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/billing/subscribe", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -545,7 +545,7 @@ func TestHandler_Subscribe_MissingFields(t *testing.T) {
 	mux, _, _ := setupHandler(t)
 
 	body := `{"tenant_id":"t1"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/billing/subscribe", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/billing/subscribe", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -561,7 +561,7 @@ func TestHandler_Subscribe_WithExistingCustomer(t *testing.T) {
 	cusID, _ := provider.CreateCustomer(ctx, "t1", "a@b.com")
 
 	body := fmt.Sprintf(`{"tenant_id":"t1","plan_id":"starter","customer_id":"%s"}`, cusID)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/billing/subscribe", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/billing/subscribe", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -578,7 +578,7 @@ func TestHandler_CancelSubscription(t *testing.T) {
 	subID, _ := provider.CreateSubscription(ctx, cusID, "starter")
 
 	body := fmt.Sprintf(`{"subscription_id":"%s"}`, subID)
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/billing/subscribe", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/billing/subscribe", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -591,7 +591,7 @@ func TestHandler_CancelSubscription_MissingID(t *testing.T) {
 	mux, _, _ := setupHandler(t)
 
 	body := `{}`
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/billing/subscribe", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/billing/subscribe", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -604,7 +604,7 @@ func TestHandler_Webhook(t *testing.T) {
 	mux, _, _ := setupHandler(t)
 
 	body := `{"type":"invoice.paid","data":{}}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/billing/webhook", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/billing/webhook", strings.NewReader(body))
 	req.Header.Set("Stripe-Signature", "t=123,v1=abc")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -624,7 +624,7 @@ func TestHandler_Webhook_ProviderError(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	body := `{"type":"test"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/billing/webhook", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/billing/webhook", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 

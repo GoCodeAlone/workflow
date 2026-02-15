@@ -12,12 +12,13 @@ import (
 
 // JSONResponseStep writes an HTTP JSON response with a custom status code and stops the pipeline.
 type JSONResponseStep struct {
-	name     string
-	status   int
-	headers  map[string]string
-	body     map[string]any
-	bodyFrom string
-	tmpl     *TemplateEngine
+	name      string
+	status    int
+	headers   map[string]string
+	body      map[string]any
+	bodyRaw   any // for non-map bodies (arrays, literals)
+	bodyFrom  string
+	tmpl      *TemplateEngine
 }
 
 // NewJSONResponseStepFactory returns a StepFactory that creates JSONResponseStep instances.
@@ -43,7 +44,14 @@ func NewJSONResponseStepFactory() StepFactory {
 			}
 		}
 
-		body, _ := config["body"].(map[string]any)
+		var body map[string]any
+		var bodyRaw any
+		if b, ok := config["body"].(map[string]any); ok {
+			body = b
+		} else if config["body"] != nil {
+			// Support non-map bodies like arrays or literals
+			bodyRaw = config["body"]
+		}
 		bodyFrom, _ := config["body_from"].(string)
 
 		return &JSONResponseStep{
@@ -51,6 +59,7 @@ func NewJSONResponseStepFactory() StepFactory {
 			status:   status,
 			headers:  headers,
 			body:     body,
+			bodyRaw:  bodyRaw,
 			bodyFrom: bodyFrom,
 			tmpl:     NewTemplateEngine(),
 		}, nil
@@ -63,16 +72,7 @@ func (s *JSONResponseStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 	w, ok := pc.Metadata["_http_response_writer"].(http.ResponseWriter)
 	if !ok {
 		// No response writer — return the body as output without writing HTTP
-		var responseBody any
-		if s.bodyFrom != "" {
-			responseBody = resolveBodyFrom(s.bodyFrom, pc)
-		} else if s.body != nil {
-			resolved, err := s.tmpl.ResolveMap(s.body, pc)
-			if err != nil {
-				return nil, fmt.Errorf("json_response step %q: failed to resolve body: %w", s.name, err)
-			}
-			responseBody = resolved
-		}
+		responseBody := s.resolveResponseBody(pc)
 		output := map[string]any{
 			"status": s.status,
 		}
@@ -83,16 +83,7 @@ func (s *JSONResponseStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 	}
 
 	// Determine response body
-	var responseBody any
-	if s.bodyFrom != "" {
-		responseBody = resolveBodyFrom(s.bodyFrom, pc)
-	} else if s.body != nil {
-		resolved, err := s.tmpl.ResolveMap(s.body, pc)
-		if err != nil {
-			return nil, fmt.Errorf("json_response step %q: failed to resolve body: %w", s.name, err)
-		}
-		responseBody = resolved
-	}
+	responseBody := s.resolveResponseBody(pc)
 
 	// Set headers
 	w.Header().Set("Content-Type", "application/json")
@@ -119,6 +110,24 @@ func (s *JSONResponseStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 		},
 		Stop: true,
 	}, nil
+}
+
+// resolveResponseBody determines the response body from the step configuration.
+func (s *JSONResponseStep) resolveResponseBody(pc *PipelineContext) any {
+	if s.bodyFrom != "" {
+		return resolveBodyFrom(s.bodyFrom, pc)
+	}
+	if s.body != nil {
+		resolved, err := s.tmpl.ResolveMap(s.body, pc)
+		if err != nil {
+			return s.body // fallback to unresolved
+		}
+		return resolved
+	}
+	if s.bodyRaw != nil {
+		return s.bodyRaw
+	}
+	return nil
 }
 
 // resolveBodyFrom resolves a dotted path like "steps.get-company.row" from the

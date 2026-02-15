@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -18,11 +20,14 @@ import (
 	copilotai "github.com/GoCodeAlone/workflow/ai/copilot"
 	"github.com/GoCodeAlone/workflow/ai/llm"
 	"github.com/GoCodeAlone/workflow/audit"
+	"github.com/GoCodeAlone/workflow/billing"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/schema"
+	evstore "github.com/GoCodeAlone/workflow/store"
+	_ "modernc.org/sqlite"
 )
 
 var (
@@ -45,7 +50,7 @@ var (
 )
 
 // buildEngine creates the workflow engine with all handlers registered and built from config.
-func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
+func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, *handlers.PipelineWorkflowHandler, error) {
 	app := modular.NewStdApplication(nil, logger)
 	engine := workflow.NewStdEngine(app, logger)
 
@@ -92,10 +97,10 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 
 	// Build engine from config
 	if err := engine.BuildFromConfig(cfg); err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to build workflow: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("failed to build workflow: %w", err)
 	}
 
-	return engine, loader, registry, nil
+	return engine, loader, registry, pipelineHandler, nil
 }
 
 // loadConfig loads a workflow configuration from the configured file path,
@@ -114,14 +119,17 @@ func loadConfig(logger *slog.Logger) (*config.WorkflowConfig, error) {
 
 // serverApp holds the components needed to run the server.
 type serverApp struct {
-	engine         *workflow.StdEngine
-	engineManager  *workflow.WorkflowEngineManager
-	logger         *slog.Logger
-	auditLogger    *audit.Logger
-	v1Store        *module.V1Store // v1 API SQLite store
-	cleanupDirs    []string        // temp directories to clean up on shutdown
-	cleanupFiles   []string        // temp files to clean up on shutdown
-	postStartFuncs []func() error  // functions to run after engine.Start
+	engine          *workflow.StdEngine
+	engineManager   *workflow.WorkflowEngineManager
+	pipelineHandler *handlers.PipelineWorkflowHandler
+	logger          *slog.Logger
+	auditLogger     *audit.Logger
+	v1Store         *module.V1Store           // v1 API SQLite store
+	eventStore      *evstore.SQLiteEventStore // execution event store
+	idempotencyDB   *sql.DB                   // idempotency store DB connection
+	cleanupDirs     []string                  // temp directories to clean up on shutdown
+	cleanupFiles    []string                  // temp files to clean up on shutdown
+	postStartFuncs  []func() error            // functions to run after engine.Start
 }
 
 // setup initializes all server components: engine, AI services, and HTTP mux.
@@ -137,11 +145,12 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 		return nil, fmt.Errorf("failed to set up admin: %w", err)
 	}
 
-	engine, loader, registry, err := buildEngine(cfg, logger)
+	engine, loader, registry, pipelineHandler, err := buildEngine(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build engine: %w", err)
 	}
 	app.engine = engine
+	app.pipelineHandler = pipelineHandler
 
 	// Initialize AI services and dynamic component pool
 	pool := dynamic.NewInterpreterPool()
@@ -202,7 +211,7 @@ func wireManagementHandler(logger *slog.Logger, engine *workflow.StdEngine, cfg 
 		if stopErr := app.engine.Stop(context.Background()); stopErr != nil {
 			logger.Warn("Error stopping engine during reload", "error", stopErr)
 		}
-		newEngine, _, _, buildErr := buildEngine(newCfg, logger)
+		newEngine, _, _, newPipelineHandler, buildErr := buildEngine(newCfg, logger)
 		if buildErr != nil {
 			return fmt.Errorf("failed to rebuild engine: %w", buildErr)
 		}
@@ -210,6 +219,7 @@ func wireManagementHandler(logger *slog.Logger, engine *workflow.StdEngine, cfg 
 			return fmt.Errorf("failed to start reloaded engine: %w", startErr)
 		}
 		app.engine = newEngine
+		app.pipelineHandler = newPipelineHandler
 		logger.Info("Engine reloaded successfully via admin")
 		return nil
 	})
@@ -350,6 +360,106 @@ func wireV1HandlerPostStart(logger *slog.Logger, engine *workflow.StdEngine, app
 		logger.Warn("Failed to register v1 service directly", "error", err)
 	}
 
+	// -----------------------------------------------------------------------
+	// Phase 1-2 stores and handlers: timeline, replay, DLQ, backfill/mock/diff, billing
+	// -----------------------------------------------------------------------
+
+	// Create SQLite event store for execution events
+	eventsDBPath := filepath.Join(*dataDir, "events.db")
+	eventStore, err := evstore.NewSQLiteEventStore(eventsDBPath)
+	if err != nil {
+		logger.Warn("Failed to create event store — timeline/replay/diff features disabled", "error", err)
+	} else {
+		app.eventStore = eventStore
+		logger.Info("Opened event store", "path", eventsDBPath)
+	}
+
+	// Create SQLite idempotency store (separate DB connection, same data dir)
+	idempotencyDBPath := filepath.Join(*dataDir, "idempotency.db")
+	idempotencyDSN := idempotencyDBPath + "?_journal_mode=WAL&_busy_timeout=5000"
+	idempotencyDB, err := sql.Open("sqlite", idempotencyDSN)
+	if err != nil {
+		logger.Warn("Failed to open idempotency DB", "error", err)
+	} else {
+		app.idempotencyDB = idempotencyDB
+		idempotencyStore, idErr := evstore.NewSQLiteIdempotencyStore(idempotencyDB)
+		if idErr != nil {
+			logger.Warn("Failed to create idempotency store", "error", idErr)
+		} else {
+			logger.Info("Opened idempotency store", "path", idempotencyDBPath)
+			_ = idempotencyStore // registered for future pipeline integration
+		}
+	}
+
+	// Wire EventRecorder adapter to the pipeline handler so pipeline
+	// executions emit events to the event store.
+	if eventStore != nil && app.pipelineHandler != nil {
+		recorder := evstore.NewEventRecorderAdapter(eventStore)
+		app.pipelineHandler.SetEventRecorder(recorder)
+		logger.Info("Wired EventRecorder to PipelineWorkflowHandler")
+	}
+
+	// Register Phase 1-2 service modules for delegate dispatch.
+	// Each handler gets an internal ServeMux so the CQRS delegate mechanism
+	// (which needs http.Handler) can route requests to the correct method.
+
+	if eventStore != nil {
+		// Timeline handler (execution list, timeline, events)
+		timelineHandler := evstore.NewTimelineHandler(eventStore, logger)
+		timelineMux := http.NewServeMux()
+		timelineHandler.RegisterRoutes(timelineMux)
+		engine.GetApp().RegisterModule(module.NewServiceModule("admin-timeline-mgmt", timelineMux))
+		if regErr := engine.GetApp().RegisterService("admin-timeline-mgmt", timelineMux); regErr != nil {
+			logger.Warn("Failed to register timeline service", "error", regErr)
+		}
+
+		// Replay handler
+		replayHandler := evstore.NewReplayHandler(eventStore, logger)
+		replayMux := http.NewServeMux()
+		replayHandler.RegisterRoutes(replayMux)
+		engine.GetApp().RegisterModule(module.NewServiceModule("admin-replay-mgmt", replayMux))
+		if regErr := engine.GetApp().RegisterService("admin-replay-mgmt", replayMux); regErr != nil {
+			logger.Warn("Failed to register replay service", "error", regErr)
+		}
+
+		// Backfill / Mock / Diff handler
+		backfillStore := evstore.NewInMemoryBackfillStore()
+		mockStore := evstore.NewInMemoryStepMockStore()
+		diffCalc := evstore.NewDiffCalculator(eventStore)
+		bmdHandler := evstore.NewBackfillMockDiffHandler(backfillStore, mockStore, diffCalc, logger)
+		bmdMux := http.NewServeMux()
+		bmdHandler.RegisterRoutes(bmdMux)
+		engine.GetApp().RegisterModule(module.NewServiceModule("admin-backfill-mgmt", bmdMux))
+		if regErr := engine.GetApp().RegisterService("admin-backfill-mgmt", bmdMux); regErr != nil {
+			logger.Warn("Failed to register backfill/mock/diff service", "error", regErr)
+		}
+
+		logger.Info("Registered timeline, replay, and backfill/mock/diff services")
+	}
+
+	// DLQ handler (in-memory store for now)
+	dlqStore := evstore.NewInMemoryDLQStore()
+	dlqHandler := evstore.NewDLQHandler(dlqStore, logger)
+	dlqMux := http.NewServeMux()
+	dlqHandler.RegisterRoutes(dlqMux)
+	engine.GetApp().RegisterModule(module.NewServiceModule("admin-dlq-mgmt", dlqMux))
+	if regErr := engine.GetApp().RegisterService("admin-dlq-mgmt", dlqMux); regErr != nil {
+		logger.Warn("Failed to register DLQ service", "error", regErr)
+	}
+
+	// Billing handler (mock provider + in-memory meter for now)
+	billingMeter := billing.NewInMemoryMeter()
+	billingProvider := billing.NewMockBillingProvider()
+	billingHandler := billing.NewHandler(billingMeter, billingProvider)
+	billingMux := http.NewServeMux()
+	billingHandler.RegisterRoutes(billingMux)
+	engine.GetApp().RegisterModule(module.NewServiceModule("admin-billing-mgmt", billingMux))
+	if regErr := engine.GetApp().RegisterService("admin-billing-mgmt", billingMux); regErr != nil {
+		logger.Warn("Failed to register billing service", "error", regErr)
+	}
+
+	logger.Info("Registered DLQ and billing services")
+
 	// Resolve delegates that couldn't be resolved during Init (because v1 wasn't registered yet)
 	for _, svc := range engine.GetApp().SvcRegistry() {
 		switch h := svc.(type) {
@@ -402,6 +512,20 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 	if app.v1Store != nil {
 		if err := app.v1Store.Close(); err != nil {
 			app.logger.Error("V1 store close error", "error", err)
+		}
+	}
+
+	// Close event store
+	if app.eventStore != nil {
+		if err := app.eventStore.Close(); err != nil {
+			app.logger.Error("Event store close error", "error", err)
+		}
+	}
+
+	// Close idempotency DB
+	if app.idempotencyDB != nil {
+		if err := app.idempotencyDB.Close(); err != nil {
+			app.logger.Error("Idempotency DB close error", "error", err)
 		}
 	}
 

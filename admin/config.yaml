@@ -11,6 +11,12 @@
 #     -config your-workflow.yaml --admin
 #
 # On first launch, visit the admin UI to create your admin account.
+#
+# Decomposition notes (see docs/ADMIN_CONFIG_DECOMPOSITION.md):
+# - Phase A: 16 domain-specific query/command modules consolidated into 2 generic handlers
+# - Phase B: V1 CRUD routes decomposed into pipeline primitives (db_query/db_exec)
+# - Phase C: Missing DB tables added, broken routes replaced with working pipelines
+# - Phase D: All remaining delegate steps given meaningful names
 
 modules:
   # --- HTTP Server (admin port) ---
@@ -68,69 +74,16 @@ modules:
       authType: Bearer
     dependsOn: [admin-auth]
 
-  # --- Engine Management (CQRS) ---
-  - name: admin-engine-queries
+  # --- Generic CQRS Handlers (Phase A: consolidated from 18 domain-specific modules) ---
+  - name: admin-queries
     type: api.query
-    config:
-      delegate: admin-engine-mgmt
     dependsOn: [admin-router]
 
-  - name: admin-engine-commands
+  - name: admin-commands
     type: api.command
-    config:
-      delegate: admin-engine-mgmt
     dependsOn: [admin-router]
-
-  # --- Schema API (read-only) ---
-  - name: admin-schema-queries
-    type: api.query
-    config:
-      delegate: admin-schema-mgmt
-    dependsOn: [admin-router]
-
-  # --- AI API (CQRS) ---
-  - name: admin-ai-queries
-    type: api.query
-    config:
-      delegate: admin-ai-mgmt
-    dependsOn: [admin-router]
-
-  - name: admin-ai-commands
-    type: api.command
-    config:
-      delegate: admin-ai-mgmt
-    dependsOn: [admin-router]
-
-  # --- Dynamic Components API (CQRS) ---
-  - name: admin-component-queries
-    type: api.query
-    config:
-      delegate: admin-component-mgmt
-    dependsOn: [admin-router]
-
-  - name: admin-component-commands
-    type: api.command
-    config:
-      delegate: admin-component-mgmt
-    dependsOn: [admin-router]
-
-  # --- v1 API (CQRS) ---
-  - name: admin-v1-queries
-    type: api.query
-    config:
-      delegate: admin-v1-mgmt
-    dependsOn: [admin-workflow-registry, admin-auth]
-
-  - name: admin-v1-commands
-    type: api.command
-    config:
-      delegate: admin-v1-mgmt
-    dependsOn: [admin-workflow-registry, admin-auth]
 
   # --- Static File Server (serves embedded React UI) ---
-  # The root path is injected at runtime from extracted embed.FS assets.
-  # The router field ensures this file server attaches to admin-router, not
-  # the primary workflow's router.
   - name: admin-ui
     type: static.fileserver
     config:
@@ -162,6 +115,11 @@ workflows:
     router: admin-router
     server: admin-server
     routes:
+      # ============================================================
+      # AUTH ROUTES (unauthenticated + authenticated)
+      # These use the admin-auth handler directly — no changes needed
+      # ============================================================
+
       # === Setup (unauthenticated) ===
       - method: GET
         path: "/api/v1/auth/setup-status"
@@ -218,236 +176,250 @@ workflows:
         handler: admin-auth
         middlewares: [admin-cors, admin-auth-middleware]
 
-      # === Engine Management Queries (authenticated) ===
+      # ============================================================
+      # ENGINE MANAGEMENT (Phase D: delegates with meaningful names)
+      # These require Go service logic — kept as delegates
+      # ============================================================
+
       - method: GET
         path: "/api/v1/admin/engine/config"
-        handler: admin-engine-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: get-engine-config
               type: step.delegate
               config:
                 service: admin-engine-mgmt
       - method: GET
         path: "/api/v1/admin/engine/status"
-        handler: admin-engine-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: get-engine-status
               type: step.delegate
               config:
                 service: admin-engine-mgmt
       - method: GET
         path: "/api/v1/admin/engine/modules"
-        handler: admin-engine-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: list-engine-modules
               type: step.delegate
               config:
                 service: admin-engine-mgmt
       - method: GET
         path: "/api/v1/admin/engine/services"
-        handler: admin-engine-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: list-engine-services
               type: step.delegate
               config:
                 service: admin-engine-mgmt
 
-      # === Engine Management Commands (authenticated) ===
       - method: PUT
         path: "/api/v1/admin/engine/config"
-        handler: admin-engine-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: update-engine-config
               type: step.delegate
               config:
                 service: admin-engine-mgmt
       - method: POST
         path: "/api/v1/admin/engine/validate"
-        handler: admin-engine-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: validate-engine-config
               type: step.delegate
               config:
                 service: admin-engine-mgmt
       - method: POST
         path: "/api/v1/admin/engine/reload"
-        handler: admin-engine-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: reload-engine
               type: step.delegate
               config:
                 service: admin-engine-mgmt
 
-      # === Schema Queries (authenticated) ===
+      # ============================================================
+      # SCHEMA API (Phase D: delegates with meaningful names)
+      # ============================================================
+
       - method: GET
         path: "/api/v1/admin/schemas"
-        handler: admin-schema-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: list-schemas
               type: step.delegate
               config:
                 service: admin-schema-mgmt
       - method: GET
         path: "/api/v1/admin/schemas/modules"
-        handler: admin-schema-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: list-module-schemas
               type: step.delegate
               config:
                 service: admin-schema-mgmt
 
-      # === AI Queries (authenticated) ===
+      # ============================================================
+      # AI API (Phase D: delegates with meaningful names)
+      # ============================================================
+
       - method: GET
         path: "/api/v1/admin/ai/providers"
-        handler: admin-ai-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: list-ai-providers
               type: step.delegate
               config:
                 service: admin-ai-mgmt
-
-      # === AI Commands (authenticated) ===
       - method: POST
         path: "/api/v1/admin/ai/generate"
-        handler: admin-ai-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: generate-workflow-from-intent
               type: step.delegate
               config:
                 service: admin-ai-mgmt
       - method: POST
         path: "/api/v1/admin/ai/component"
-        handler: admin-ai-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: generate-component
               type: step.delegate
               config:
                 service: admin-ai-mgmt
       - method: POST
         path: "/api/v1/admin/ai/suggest"
-        handler: admin-ai-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: suggest-improvements
               type: step.delegate
               config:
                 service: admin-ai-mgmt
       - method: POST
         path: "/api/v1/admin/ai/deploy"
-        handler: admin-ai-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: deploy-generated-workflow
               type: step.delegate
               config:
                 service: admin-ai-mgmt
       - method: POST
         path: "/api/v1/admin/ai/deploy/component"
-        handler: admin-ai-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: deploy-generated-component
               type: step.delegate
               config:
                 service: admin-ai-mgmt
 
-      # === Component Queries (authenticated) ===
+      # ============================================================
+      # DYNAMIC COMPONENTS (Phase D: delegates with meaningful names)
+      # ============================================================
+
       - method: GET
         path: "/api/v1/admin/components"
-        handler: admin-component-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: list-dynamic-components
               type: step.delegate
               config:
                 service: admin-component-mgmt
       - method: GET
         path: "/api/v1/admin/components/{id}"
-        handler: admin-component-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: get-dynamic-component
               type: step.delegate
               config:
                 service: admin-component-mgmt
-
-      # === Component Commands (authenticated) ===
       - method: POST
         path: "/api/v1/admin/components"
-        handler: admin-component-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: create-dynamic-component
               type: step.delegate
               config:
                 service: admin-component-mgmt
       - method: PUT
         path: "/api/v1/admin/components/{id}"
-        handler: admin-component-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: update-dynamic-component
               type: step.delegate
               config:
                 service: admin-component-mgmt
       - method: DELETE
         path: "/api/v1/admin/components/{id}"
-        handler: admin-component-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: delete-dynamic-component
               type: step.delegate
               config:
                 service: admin-component-mgmt
 
-      # === v1 API: Dashboard (authenticated) ===
+      # ============================================================
+      # V1 API: DASHBOARD (Phase D: delegate with meaningful name)
+      # ============================================================
+
       - method: GET
         path: "/api/v1/admin/dashboard"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: get-admin-dashboard
               type: step.delegate
               config:
                 service: admin-v1-mgmt
 
-      # === v1 API: Companies (authenticated, pipeline-native) ===
+      # ============================================================
+      # V1 API: COMPANIES (pipeline-native, handler name updated)
+      # ============================================================
+
       - method: GET
         path: "/api/v1/admin/companies"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
@@ -464,7 +436,7 @@ workflows:
                 body_from: "steps.list-companies.rows"
       - method: POST
         path: "/api/v1/admin/companies"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
@@ -506,7 +478,7 @@ workflows:
                   created_at: "{{ .steps.prepare.now }}"
       - method: GET
         path: "/api/v1/admin/companies/{id}"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
@@ -541,7 +513,7 @@ workflows:
                   error: "company not found"
       - method: GET
         path: "/api/v1/admin/companies/{id}/organizations"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
@@ -562,10 +534,13 @@ workflows:
                 status: 200
                 body_from: "steps.list-orgs.rows"
 
-      # === v1 API: Organizations (authenticated, pipeline-native) ===
+      # ============================================================
+      # V1 API: ORGANIZATIONS (pipeline-native)
+      # ============================================================
+
       - method: POST
         path: "/api/v1/admin/companies/{id}/organizations"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
@@ -608,9 +583,14 @@ workflows:
                   slug: "{{lower (index .steps \"parse-request\" \"body\" \"name\")}}"
                   parent_id: "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
                   created_at: "{{ .steps.prepare.now }}"
+
+      # ============================================================
+      # V1 API: PROJECTS (Phase B: POST decomposed into pipeline)
+      # ============================================================
+
       - method: GET
         path: "/api/v1/admin/organizations/{id}/projects"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
@@ -632,19 +612,58 @@ workflows:
                 body_from: "steps.list-projects.rows"
       - method: POST
         path: "/api/v1/admin/organizations/{id}/projects"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+                parse_body: true
+            - name: validate
+              type: step.validate
+              config:
+                strategy: required_fields
+                required_fields: [name]
+                source: "steps.parse-request.body"
+            - name: prepare
+              type: step.set
+              config:
+                values:
+                  id: "{{ uuidv4 }}"
+                  now: "{{ now }}"
+            - name: insert-project
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "INSERT INTO projects (id, company_id, name, slug, description, is_system, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, '{}', ?, ?)"
+                params:
+                  - "{{ .steps.prepare.id }}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  - "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  - "{{lower (index .steps \"parse-request\" \"body\" \"name\")}}"
+                  - "{{default \"\" (index .steps \"parse-request\" \"body\" \"description\")}}"
+                  - "{{ .steps.prepare.now }}"
+                  - "{{ .steps.prepare.now }}"
+            - name: respond
+              type: step.json_response
+              config:
+                status: 201
+                body:
+                  id: "{{ .steps.prepare.id }}"
+                  name: "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  slug: "{{lower (index .steps \"parse-request\" \"body\" \"name\")}}"
+                  company_id: "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  created_at: "{{ .steps.prepare.now }}"
 
-      # === v1 API: Projects (authenticated, pipeline-native) ===
+      # ============================================================
+      # V1 API: WORKFLOWS (Phase B: POST/PUT/deploy/stop decomposed)
+      # ============================================================
+
       - method: GET
         path: "/api/v1/admin/projects/{id}/workflows"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
@@ -666,19 +685,57 @@ workflows:
                 body_from: "steps.list-workflows.rows"
       - method: POST
         path: "/api/v1/admin/projects/{id}/workflows"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+                parse_body: true
+            - name: validate
+              type: step.validate
+              config:
+                strategy: required_fields
+                required_fields: [name]
+                source: "steps.parse-request.body"
+            - name: prepare
+              type: step.set
+              config:
+                values:
+                  id: "{{ uuidv4 }}"
+                  now: "{{ now }}"
+            - name: insert-workflow
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "INSERT INTO workflows (id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, 'draft', 0, '', '', ?, ?)"
+                params:
+                  - "{{ .steps.prepare.id }}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  - "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  - "{{lower (index .steps \"parse-request\" \"body\" \"name\")}}"
+                  - "{{default \"\" (index .steps \"parse-request\" \"body\" \"description\")}}"
+                  - "{{default \"\" (index .steps \"parse-request\" \"body\" \"config_yaml\")}}"
+                  - "{{ .steps.prepare.now }}"
+                  - "{{ .steps.prepare.now }}"
+            - name: respond
+              type: step.json_response
+              config:
+                status: 201
+                body:
+                  id: "{{ .steps.prepare.id }}"
+                  name: "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  slug: "{{lower (index .steps \"parse-request\" \"body\" \"name\")}}"
+                  project_id: "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  status: "draft"
+                  version: 1
+                  created_at: "{{ .steps.prepare.now }}"
 
-      # === v1 API: Workflows (authenticated, pipeline-native where possible) ===
       - method: GET
         path: "/api/v1/admin/workflows"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
@@ -695,17 +752,54 @@ workflows:
                 body_from: "steps.list-all-workflows.rows"
       - method: POST
         path: "/api/v1/admin/workflows"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                parse_body: true
+            - name: validate
+              type: step.validate
+              config:
+                strategy: required_fields
+                required_fields: [name, project_id]
+                source: "steps.parse-request.body"
+            - name: prepare
+              type: step.set
+              config:
+                values:
+                  id: "{{ uuidv4 }}"
+                  now: "{{ now }}"
+            - name: insert-workflow
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "INSERT INTO workflows (id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, 'draft', 0, '', '', ?, ?)"
+                params:
+                  - "{{ .steps.prepare.id }}"
+                  - "{{index .steps \"parse-request\" \"body\" \"project_id\"}}"
+                  - "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  - "{{lower (index .steps \"parse-request\" \"body\" \"name\")}}"
+                  - "{{default \"\" (index .steps \"parse-request\" \"body\" \"description\")}}"
+                  - "{{default \"\" (index .steps \"parse-request\" \"body\" \"config_yaml\")}}"
+                  - "{{ .steps.prepare.now }}"
+                  - "{{ .steps.prepare.now }}"
+            - name: respond
+              type: step.json_response
+              config:
+                status: 201
+                body:
+                  id: "{{ .steps.prepare.id }}"
+                  name: "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  project_id: "{{index .steps \"parse-request\" \"body\" \"project_id\"}}"
+                  status: "draft"
+                  version: 1
+                  created_at: "{{ .steps.prepare.now }}"
       - method: GET
         path: "/api/v1/admin/workflows/{id}"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
@@ -740,17 +834,77 @@ workflows:
                   error: "workflow not found"
       - method: PUT
         path: "/api/v1/admin/workflows/{id}"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+                parse_body: true
+            - name: check-exists
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, version, is_system FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: check-found
+              type: step.conditional
+              config:
+                field: "steps.check-exists.found"
+                routes:
+                  "false": not-found
+                default: prepare-update
+            - name: prepare-update
+              type: step.set
+              config:
+                values:
+                  now: "{{ now }}"
+                  version_id: "{{ uuidv4 }}"
+            - name: update-workflow
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "UPDATE workflows SET name=?, description=?, config_yaml=?, version=version+1, updated_by=?, updated_at=? WHERE id=?"
+                params:
+                  - "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  - "{{default \"\" (index .steps \"parse-request\" \"body\" \"description\")}}"
+                  - "{{default \"\" (index .steps \"parse-request\" \"body\" \"config_yaml\")}}"
+                  - ""
+                  - "{{index .steps \"prepare-update\" \"now\"}}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+            - name: save-version
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "INSERT INTO workflow_versions (id, workflow_id, version, config_yaml, created_by, created_at) SELECT ?, id, version, config_yaml, '', ? FROM workflows WHERE id = ?"
+                params:
+                  - "{{index .steps \"prepare-update\" \"version_id\"}}"
+                  - "{{index .steps \"prepare-update\" \"now\"}}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+            - name: get-updated
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.get-updated.row"
+            - name: not-found
+              type: step.json_response
+              config:
+                status: 404
+                body:
+                  error: "workflow not found"
       - method: DELETE
         path: "/api/v1/admin/workflows/{id}"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
@@ -793,7 +947,7 @@ workflows:
                   error: "workflow not found"
       - method: GET
         path: "/api/v1/admin/workflows/{id}/versions"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
@@ -805,262 +959,959 @@ workflows:
               type: step.db_query
               config:
                 database: admin-db
-                query: "SELECT id, workflow_id, version, config, created_at, created_by, comment FROM workflow_versions WHERE workflow_id = ? ORDER BY version DESC"
+                query: "SELECT id, workflow_id, version, config_yaml, created_at, created_by FROM workflow_versions WHERE workflow_id = ? ORDER BY version DESC"
                 params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
                 mode: list
             - name: respond
               type: step.json_response
               config:
                 status: 200
-                body_from: "steps.get-versions"
+                body_from: "steps.get-versions.rows"
       - method: POST
         path: "/api/v1/admin/workflows/{id}/deploy"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: set-now
+              type: step.set
+              config:
+                values:
+                  now: "{{ now }}"
+            - name: activate-workflow
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "UPDATE workflows SET status='active', updated_at=? WHERE id=?"
+                params:
+                  - "{{index .steps \"set-now\" \"now\"}}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+            - name: get-workflow
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.get-workflow.row"
       - method: POST
         path: "/api/v1/admin/workflows/{id}/stop"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: set-now
+              type: step.set
+              config:
+                values:
+                  now: "{{ now }}"
+            - name: stop-workflow
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "UPDATE workflows SET status='stopped', updated_at=? WHERE id=?"
+                params:
+                  - "{{index .steps \"set-now\" \"now\"}}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+            - name: get-workflow
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.get-workflow.row"
       - method: GET
         path: "/api/v1/admin/workflows/{id}/status"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: get-status
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, name, status, version, updated_at FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: check-found
+              type: step.conditional
+              config:
+                field: "steps.get-status.found"
+                routes:
+                  "false": not-found
+                default: respond
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.get-status.row"
+            - name: not-found
+              type: step.json_response
+              config:
+                status: 404
+                body:
+                  error: "workflow not found"
       - method: GET
         path: "/api/v1/admin/workflows/{id}/dashboard"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: get-workflow
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: get-execution-stats
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT COUNT(*) as total, SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed, SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed, SUM(CASE WHEN status='running' THEN 1 ELSE 0 END) as running FROM workflow_executions WHERE workflow_id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body:
+                  workflow: "{{index .steps \"get-workflow\" \"row\"}}"
+                  stats: "{{index .steps \"get-execution-stats\" \"row\"}}"
+
+      # ============================================================
+      # V1 API: EXECUTIONS (Phase C: decomposed with new tables)
+      # ============================================================
+
       - method: GET
         path: "/api/v1/admin/workflows/{id}/executions"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: list-executions
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, workflow_id, trigger_type, status, started_at, completed_at, duration_ms, error_message FROM workflow_executions WHERE workflow_id = ? ORDER BY started_at DESC LIMIT 100"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: list
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.list-executions.rows"
       - method: POST
         path: "/api/v1/admin/workflows/{id}/trigger"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+                parse_body: true
+            - name: prepare
+              type: step.set
+              config:
+                values:
+                  id: "{{ uuidv4 }}"
+                  now: "{{ now }}"
+            - name: insert-execution
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "INSERT INTO workflow_executions (id, workflow_id, trigger_type, trigger_data, status, started_at, metadata) VALUES (?, ?, 'manual', ?, 'pending', ?, '{}')"
+                params:
+                  - "{{ .steps.prepare.id }}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  - "{{default \"{}\" (index .steps \"parse-request\" \"body\")}}"
+                  - "{{ .steps.prepare.now }}"
+            - name: respond
+              type: step.json_response
+              config:
+                status: 202
+                body:
+                  id: "{{ .steps.prepare.id }}"
+                  workflow_id: "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  status: "pending"
+                  started_at: "{{ .steps.prepare.now }}"
+      - method: GET
+        path: "/api/v1/admin/executions/{id}"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: parse-request
+              type: step.request_parse
+              config:
+                path_params: [id]
+            - name: get-execution
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, workflow_id, trigger_type, trigger_data, status, output_data, error_message, started_at, completed_at, duration_ms, metadata FROM workflow_executions WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: check-found
+              type: step.conditional
+              config:
+                field: "steps.get-execution.found"
+                routes:
+                  "false": not-found
+                default: respond
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.get-execution.row"
+            - name: not-found
+              type: step.json_response
+              config:
+                status: 404
+                body:
+                  error: "execution not found"
+      - method: GET
+        path: "/api/v1/admin/executions/{id}/steps"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: parse-request
+              type: step.request_parse
+              config:
+                path_params: [id]
+            - name: list-steps
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, execution_id, step_name, step_type, status, error_message, started_at, completed_at, duration_ms, sequence_num FROM execution_steps WHERE execution_id = ? ORDER BY sequence_num ASC"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: list
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.list-steps.rows"
+      - method: POST
+        path: "/api/v1/admin/executions/{id}/cancel"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: parse-request
+              type: step.request_parse
+              config:
+                path_params: [id]
+            - name: set-now
+              type: step.set
+              config:
+                values:
+                  now: "{{ now }}"
+            - name: cancel-execution
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "UPDATE workflow_executions SET status='cancelled', completed_at=? WHERE id=? AND status IN ('pending','running')"
+                params:
+                  - "{{index .steps \"set-now\" \"now\"}}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body:
+                  id: "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  status: "cancelled"
+
+      # ============================================================
+      # V1 API: LOGS & EVENTS (Phase C: logs decomposed, streams delegated)
+      # ============================================================
+
       - method: GET
         path: "/api/v1/admin/workflows/{id}/logs"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: list-logs
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, workflow_id, execution_id, level, message, module_name, fields, created_at FROM execution_logs WHERE workflow_id = ? ORDER BY created_at DESC LIMIT 100"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: list
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.list-logs.rows"
       - method: GET
         path: "/api/v1/admin/workflows/{id}/logs/stream"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: stream-workflow-logs
               type: step.delegate
               config:
                 service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/workflows/{id}/events"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: list-events
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, workflow_id, execution_id, level, message, module_name, fields, created_at FROM execution_logs WHERE workflow_id = ? AND level = 'event' ORDER BY created_at DESC LIMIT 100"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: list
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.list-events.rows"
       - method: GET
         path: "/api/v1/admin/workflows/{id}/events/stream"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
-              config:
-                service: admin-v1-mgmt
-      - method: GET
-        path: "/api/v1/admin/workflows/{id}/permissions"
-        handler: admin-v1-queries
-        middlewares: [admin-cors, admin-auth-middleware]
-        pipeline:
-          steps:
-            - name: forward
-              type: step.delegate
-              config:
-                service: admin-v1-mgmt
-      - method: POST
-        path: "/api/v1/admin/workflows/{id}/permissions"
-        handler: admin-v1-commands
-        middlewares: [admin-cors, admin-auth-middleware]
-        pipeline:
-          steps:
-            - name: forward
+            - name: stream-workflow-events
               type: step.delegate
               config:
                 service: admin-v1-mgmt
 
-      # === v1 API: Executions (authenticated) ===
-      - method: GET
-        path: "/api/v1/admin/executions/{id}"
-        handler: admin-v1-queries
-        middlewares: [admin-cors, admin-auth-middleware]
-        pipeline:
-          steps:
-            - name: forward
-              type: step.delegate
-              config:
-                service: admin-v1-mgmt
-      - method: GET
-        path: "/api/v1/admin/executions/{id}/steps"
-        handler: admin-v1-queries
-        middlewares: [admin-cors, admin-auth-middleware]
-        pipeline:
-          steps:
-            - name: forward
-              type: step.delegate
-              config:
-                service: admin-v1-mgmt
-      - method: POST
-        path: "/api/v1/admin/executions/{id}/cancel"
-        handler: admin-v1-commands
-        middlewares: [admin-cors, admin-auth-middleware]
-        pipeline:
-          steps:
-            - name: forward
-              type: step.delegate
-              config:
-                service: admin-v1-mgmt
+      # ============================================================
+      # V1 API: PERMISSIONS (Phase C: stub until memberships wired)
+      # ============================================================
 
-      # === v1 API: Audit (authenticated) ===
+      - method: GET
+        path: "/api/v1/admin/workflows/{id}/permissions"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body: []
+      - method: POST
+        path: "/api/v1/admin/workflows/{id}/permissions"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: respond
+              type: step.json_response
+              config:
+                status: 501
+                body:
+                  error: "permission management not yet implemented"
+
+      # ============================================================
+      # V1 API: AUDIT (Phase C: decomposed with new table)
+      # ============================================================
+
       - method: GET
         path: "/api/v1/admin/audit"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: list-audit
+              type: step.db_query
               config:
-                service: admin-v1-mgmt
+                database: admin-db
+                query: "SELECT id, user_id, action, resource_type, resource_id, details, ip_address, created_at FROM audit_log ORDER BY created_at DESC LIMIT 100"
+                mode: list
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.list-audit.rows"
 
-      # === v1 API: IAM (authenticated) ===
+      # ============================================================
+      # V1 API: IAM (Phase C: decomposed with new tables)
+      # ============================================================
+
       - method: GET
         path: "/api/v1/admin/iam/providers/{id}"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: get-provider
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, company_id, provider_type, name, config, enabled, created_at, updated_at FROM iam_provider_configs WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: check-found
+              type: step.conditional
+              config:
+                field: "steps.get-provider.found"
+                routes:
+                  "false": not-found
+                default: respond
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.get-provider.row"
+            - name: not-found
+              type: step.json_response
+              config:
+                status: 404
+                body:
+                  error: "IAM provider not found"
       - method: POST
         path: "/api/v1/admin/iam/providers"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                parse_body: true
+            - name: validate
+              type: step.validate
+              config:
+                strategy: required_fields
+                required_fields: [name, provider_type, company_id]
+                source: "steps.parse-request.body"
+            - name: prepare
+              type: step.set
+              config:
+                values:
+                  id: "{{ uuidv4 }}"
+                  now: "{{ now }}"
+            - name: insert-provider
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "INSERT INTO iam_provider_configs (id, company_id, provider_type, name, config, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)"
+                params:
+                  - "{{ .steps.prepare.id }}"
+                  - "{{index .steps \"parse-request\" \"body\" \"company_id\"}}"
+                  - "{{index .steps \"parse-request\" \"body\" \"provider_type\"}}"
+                  - "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  - "{{default \"{}\" (index .steps \"parse-request\" \"body\" \"config\")}}"
+                  - "{{ .steps.prepare.now }}"
+                  - "{{ .steps.prepare.now }}"
+            - name: respond
+              type: step.json_response
+              config:
+                status: 201
+                body:
+                  id: "{{ .steps.prepare.id }}"
+                  name: "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  provider_type: "{{index .steps \"parse-request\" \"body\" \"provider_type\"}}"
+                  enabled: true
+                  created_at: "{{ .steps.prepare.now }}"
       - method: PUT
         path: "/api/v1/admin/iam/providers/{id}"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+                parse_body: true
+            - name: set-now
+              type: step.set
+              config:
+                values:
+                  now: "{{ now }}"
+            - name: update-provider
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "UPDATE iam_provider_configs SET name=?, config=?, enabled=?, updated_at=? WHERE id=?"
+                params:
+                  - "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  - "{{default \"{}\" (index .steps \"parse-request\" \"body\" \"config\")}}"
+                  - "{{default \"1\" (index .steps \"parse-request\" \"body\" \"enabled\")}}"
+                  - "{{index .steps \"set-now\" \"now\"}}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body:
+                  id: "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  updated_at: "{{index .steps \"set-now\" \"now\"}}"
       - method: DELETE
         path: "/api/v1/admin/iam/providers/{id}"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: delete-provider
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "DELETE FROM iam_provider_configs WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body:
+                  deleted: true
+                  id: "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
       - method: POST
         path: "/api/v1/admin/iam/providers/{id}/test"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: respond
+              type: step.json_response
               config:
-                service: admin-v1-mgmt
+                status: 200
+                body:
+                  status: "ok"
+                  message: "connection test not yet implemented"
       - method: GET
         path: "/api/v1/admin/iam/providers/{id}/mappings"
-        handler: admin-v1-queries
+        handler: admin-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: list-mappings
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, provider_id, external_identifier, resource_type, resource_id, role, created_at FROM iam_role_mappings WHERE provider_id = ? ORDER BY created_at DESC"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: list
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.list-mappings.rows"
       - method: POST
         path: "/api/v1/admin/iam/providers/{id}/mappings"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+                parse_body: true
+            - name: validate
+              type: step.validate
+              config:
+                strategy: required_fields
+                required_fields: [external_identifier, resource_type, resource_id, role]
+                source: "steps.parse-request.body"
+            - name: prepare
+              type: step.set
+              config:
+                values:
+                  id: "{{ uuidv4 }}"
+                  now: "{{ now }}"
+            - name: insert-mapping
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "INSERT INTO iam_role_mappings (id, provider_id, external_identifier, resource_type, resource_id, role, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+                params:
+                  - "{{ .steps.prepare.id }}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  - "{{index .steps \"parse-request\" \"body\" \"external_identifier\"}}"
+                  - "{{index .steps \"parse-request\" \"body\" \"resource_type\"}}"
+                  - "{{index .steps \"parse-request\" \"body\" \"resource_id\"}}"
+                  - "{{index .steps \"parse-request\" \"body\" \"role\"}}"
+                  - "{{ .steps.prepare.now }}"
+            - name: respond
+              type: step.json_response
+              config:
+                status: 201
+                body:
+                  id: "{{ .steps.prepare.id }}"
+                  provider_id: "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  role: "{{index .steps \"parse-request\" \"body\" \"role\"}}"
+                  created_at: "{{ .steps.prepare.now }}"
       - method: DELETE
         path: "/api/v1/admin/iam/mappings/{id}"
-        handler: admin-v1-commands
+        handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
+            - name: parse-request
+              type: step.request_parse
+              config:
+                path_params: [id]
+            - name: delete-mapping
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "DELETE FROM iam_role_mappings WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body:
+                  deleted: true
+                  id: "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+
+      # ============================================================
+      # TIMELINE / REPLAY API (Phase D: delegates with meaningful names)
+      # ============================================================
+
+      - method: GET
+        path: "/api/v1/admin/executions"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: list-all-executions
               type: step.delegate
               config:
-                service: admin-v1-mgmt
+                service: admin-timeline-mgmt
+      - method: GET
+        path: "/api/v1/admin/executions/{id}/timeline"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: get-execution-timeline
+              type: step.delegate
+              config:
+                service: admin-timeline-mgmt
+      - method: GET
+        path: "/api/v1/admin/executions/{id}/events"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: get-execution-events
+              type: step.delegate
+              config:
+                service: admin-timeline-mgmt
+      - method: POST
+        path: "/api/v1/admin/executions/{id}/replay"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: replay-execution
+              type: step.delegate
+              config:
+                service: admin-replay-mgmt
+      - method: GET
+        path: "/api/v1/admin/executions/{id}/replay"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: get-replay-history
+              type: step.delegate
+              config:
+                service: admin-replay-mgmt
 
-      # === OpenAPI Spec (unauthenticated, read-only) ===
+      # ============================================================
+      # DLQ API (Phase D: delegates with meaningful names)
+      # ============================================================
+
+      - method: GET
+        path: "/api/v1/admin/dlq"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: list-dlq-entries
+              type: step.delegate
+              config:
+                service: admin-dlq-mgmt
+      - method: GET
+        path: "/api/v1/admin/dlq/stats"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: get-dlq-stats
+              type: step.delegate
+              config:
+                service: admin-dlq-mgmt
+      - method: GET
+        path: "/api/v1/admin/dlq/{id}"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: get-dlq-entry
+              type: step.delegate
+              config:
+                service: admin-dlq-mgmt
+      - method: POST
+        path: "/api/v1/admin/dlq/{id}/retry"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: retry-dlq-entry
+              type: step.delegate
+              config:
+                service: admin-dlq-mgmt
+      - method: POST
+        path: "/api/v1/admin/dlq/{id}/discard"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: discard-dlq-entry
+              type: step.delegate
+              config:
+                service: admin-dlq-mgmt
+      - method: POST
+        path: "/api/v1/admin/dlq/{id}/resolve"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: resolve-dlq-entry
+              type: step.delegate
+              config:
+                service: admin-dlq-mgmt
+      - method: DELETE
+        path: "/api/v1/admin/dlq/purge"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: purge-resolved-dlq
+              type: step.delegate
+              config:
+                service: admin-dlq-mgmt
+
+      # ============================================================
+      # BACKFILL / MOCK / DIFF API (Phase D: delegates with meaningful names)
+      # ============================================================
+
+      - method: GET
+        path: "/api/v1/admin/backfill"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: list-backfills
+              type: step.delegate
+              config:
+                service: admin-backfill-mgmt
+      - method: POST
+        path: "/api/v1/admin/backfill"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: create-backfill
+              type: step.delegate
+              config:
+                service: admin-backfill-mgmt
+      - method: GET
+        path: "/api/v1/admin/backfill/{id}"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: get-backfill
+              type: step.delegate
+              config:
+                service: admin-backfill-mgmt
+      - method: POST
+        path: "/api/v1/admin/backfill/{id}/cancel"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: cancel-backfill
+              type: step.delegate
+              config:
+                service: admin-backfill-mgmt
+      - method: GET
+        path: "/api/v1/admin/mocks"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: list-mocks
+              type: step.delegate
+              config:
+                service: admin-backfill-mgmt
+      - method: POST
+        path: "/api/v1/admin/mocks"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: set-step-mock
+              type: step.delegate
+              config:
+                service: admin-backfill-mgmt
+      - method: DELETE
+        path: "/api/v1/admin/mocks"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: clear-all-mocks
+              type: step.delegate
+              config:
+                service: admin-backfill-mgmt
+      - method: GET
+        path: "/api/v1/admin/mocks/{pipeline}"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: list-pipeline-mocks
+              type: step.delegate
+              config:
+                service: admin-backfill-mgmt
+      - method: DELETE
+        path: "/api/v1/admin/mocks/{pipeline}/{step}"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: remove-step-mock
+              type: step.delegate
+              config:
+                service: admin-backfill-mgmt
+      - method: GET
+        path: "/api/v1/admin/executions/diff"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: compute-execution-diff
+              type: step.delegate
+              config:
+                service: admin-backfill-mgmt
+
+      # ============================================================
+      # BILLING API (Phase D: delegates with meaningful names)
+      # ============================================================
+
+      - method: GET
+        path: "/api/v1/admin/billing/plans"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: list-billing-plans
+              type: step.delegate
+              config:
+                service: admin-billing-mgmt
+      - method: GET
+        path: "/api/v1/admin/billing/usage"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: get-usage-report
+              type: step.delegate
+              config:
+                service: admin-billing-mgmt
+      - method: POST
+        path: "/api/v1/admin/billing/subscribe"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: create-subscription
+              type: step.delegate
+              config:
+                service: admin-billing-mgmt
+      - method: DELETE
+        path: "/api/v1/admin/billing/subscribe"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: cancel-subscription
+              type: step.delegate
+              config:
+                service: admin-billing-mgmt
+      - method: POST
+        path: "/api/v1/admin/billing/webhook"
+        handler: admin-commands
+        middlewares: [admin-cors]
+        pipeline:
+          steps:
+            - name: handle-billing-webhook
+              type: step.delegate
+              config:
+                service: admin-billing-mgmt
+
+      # ============================================================
+      # OPENAPI SPEC (unauthenticated, read-only)
+      # ============================================================
+
       - method: GET
         path: "/api/openapi.json"
         handler: admin-openapi

@@ -103,6 +103,85 @@ func (s *V1Store) initSchema() error {
 		created_at  TEXT NOT NULL,
 		FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
 	);
+
+	CREATE TABLE IF NOT EXISTS workflow_executions (
+		id            TEXT PRIMARY KEY,
+		workflow_id   TEXT NOT NULL,
+		trigger_type  TEXT NOT NULL DEFAULT 'manual',
+		trigger_data  TEXT DEFAULT '{}',
+		status        TEXT NOT NULL DEFAULT 'pending',
+		output_data   TEXT DEFAULT '{}',
+		error_message TEXT DEFAULT '',
+		started_at    TEXT NOT NULL,
+		completed_at  TEXT,
+		duration_ms   INTEGER DEFAULT 0,
+		metadata      TEXT DEFAULT '{}',
+		FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS execution_steps (
+		id            TEXT PRIMARY KEY,
+		execution_id  TEXT NOT NULL,
+		step_name     TEXT NOT NULL,
+		step_type     TEXT NOT NULL,
+		input_data    TEXT DEFAULT '{}',
+		output_data   TEXT DEFAULT '{}',
+		status        TEXT NOT NULL DEFAULT 'pending',
+		error_message TEXT DEFAULT '',
+		started_at    TEXT,
+		completed_at  TEXT,
+		duration_ms   INTEGER DEFAULT 0,
+		sequence_num  INTEGER NOT NULL,
+		metadata      TEXT DEFAULT '{}',
+		FOREIGN KEY (execution_id) REFERENCES workflow_executions(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS execution_logs (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		workflow_id  TEXT NOT NULL,
+		execution_id TEXT,
+		level        TEXT NOT NULL DEFAULT 'info',
+		message      TEXT NOT NULL,
+		module_name  TEXT DEFAULT '',
+		fields       TEXT DEFAULT '{}',
+		created_at   TEXT NOT NULL,
+		FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS audit_log (
+		id            INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id       TEXT,
+		action        TEXT NOT NULL,
+		resource_type TEXT NOT NULL,
+		resource_id   TEXT,
+		details       TEXT DEFAULT '{}',
+		ip_address    TEXT DEFAULT '',
+		user_agent    TEXT DEFAULT '',
+		created_at    TEXT NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS iam_provider_configs (
+		id            TEXT PRIMARY KEY,
+		company_id    TEXT NOT NULL,
+		provider_type TEXT NOT NULL,
+		name          TEXT NOT NULL,
+		config        TEXT NOT NULL DEFAULT '{}',
+		enabled       INTEGER DEFAULT 1,
+		created_at    TEXT NOT NULL,
+		updated_at    TEXT NOT NULL,
+		FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS iam_role_mappings (
+		id                  TEXT PRIMARY KEY,
+		provider_id         TEXT NOT NULL,
+		external_identifier TEXT NOT NULL,
+		resource_type       TEXT NOT NULL,
+		resource_id         TEXT NOT NULL,
+		role                TEXT NOT NULL,
+		created_at          TEXT NOT NULL,
+		FOREIGN KEY (provider_id) REFERENCES iam_provider_configs(id) ON DELETE CASCADE
+	);
 	`
 	_, err := s.db.Exec(schema)
 	return err
