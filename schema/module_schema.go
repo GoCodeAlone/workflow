@@ -810,4 +810,89 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "fieldMapping", Label: "Field Mapping", Type: FieldTypeMap, MapValueType: "string", Description: "Custom field name mapping between local workflow data and external API schemas", Group: "advanced"},
 		},
 	})
+
+	// ---- Pipeline Steps Category ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.validate",
+		Label:       "Validate",
+		Category:    "pipeline",
+		Description: "Validates pipeline data using JSON Schema or required fields check",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "strategy", Label: "Strategy", Type: FieldTypeSelect, Options: []string{"json_schema", "required_fields"}, DefaultValue: "required_fields", Description: "Validation strategy to use"},
+			{Key: "schema", Label: "JSON Schema", Type: FieldTypeJSON, Description: "JSON Schema definition for validation (when strategy is json_schema)"},
+			{Key: "required_fields", Label: "Required Fields", Type: FieldTypeArray, ArrayItemType: "string", Description: "List of required field names (when strategy is required_fields)"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.transform",
+		Label:       "Transform",
+		Category:    "pipeline",
+		Description: "Transforms pipeline data using extract, map, filter, and convert operations",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "transformer", Label: "Transformer Service", Type: FieldTypeString, Description: "Name of a DataTransformer service to use", Placeholder: "my-transformer"},
+			{Key: "pipeline", Label: "Pipeline Name", Type: FieldTypeString, Description: "Named pipeline within the transformer", Placeholder: "normalize"},
+			{Key: "operations", Label: "Operations", Type: FieldTypeJSON, Description: "Inline transformation operations (alternative to transformer+pipeline)"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.conditional",
+		Label:       "Conditional",
+		Category:    "pipeline",
+		Description: "Routes to different pipeline steps based on a field value",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "field", Label: "Field", Type: FieldTypeString, Required: true, Description: "Field path to evaluate for routing", Placeholder: "event_type"},
+			{Key: "routes", Label: "Routes", Type: FieldTypeMap, MapValueType: "string", Required: true, Description: "Map of field values to target step names"},
+			{Key: "default", Label: "Default Step", Type: FieldTypeString, Description: "Step name to route to when no match is found"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.publish",
+		Label:       "Publish Event",
+		Category:    "pipeline",
+		Description: "Publishes pipeline data to an EventBus topic or message broker",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "topic", Label: "Topic", Type: FieldTypeString, Required: true, Description: "Topic name to publish to", Placeholder: "order.created"},
+			{Key: "payload", Label: "Payload", Type: FieldTypeJSON, Description: "Custom payload template (uses {{ .field }} expressions). Defaults to pipeline context."},
+			{Key: "broker", Label: "Broker Service", Type: FieldTypeString, Description: "Message broker service name (optional, defaults to EventBus)"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.set",
+		Label:       "Set Values",
+		Category:    "pipeline",
+		Description: "Sets or overrides values in the pipeline context",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "values", Label: "Values", Type: FieldTypeMap, MapValueType: "string", Required: true, Description: "Key-value pairs to set (values support {{ .field }} templates)"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.log",
+		Label:       "Log",
+		Category:    "pipeline",
+		Description: "Logs a message at a specified level during pipeline execution",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "level", Label: "Level", Type: FieldTypeSelect, Options: []string{"debug", "info", "warn", "error"}, DefaultValue: "info", Description: "Log level"},
+			{Key: "message", Label: "Message", Type: FieldTypeString, Required: true, Description: "Message template (supports {{ .field }} expressions)", Placeholder: "Processing {{ .event_type }}"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.http_call",
+		Label:       "HTTP Call",
+		Category:    "pipeline",
+		Description: "Makes an outbound HTTP request and returns the response",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "url", Label: "URL", Type: FieldTypeString, Required: true, Description: "Request URL (supports {{ .field }} templates)", Placeholder: "https://api.example.com/{{ .resource }}"},
+			{Key: "method", Label: "Method", Type: FieldTypeSelect, Options: []string{"GET", "POST", "PUT", "PATCH", "DELETE"}, DefaultValue: "GET", Description: "HTTP method"},
+			{Key: "headers", Label: "Headers", Type: FieldTypeMap, MapValueType: "string", Description: "Request headers (values support templates)"},
+			{Key: "body", Label: "Body", Type: FieldTypeJSON, Description: "Request body (supports templates). For POST/PUT without body, sends pipeline context."},
+			{Key: "timeout", Label: "Timeout", Type: FieldTypeString, DefaultValue: "30s", Description: "Request timeout duration", Placeholder: "30s"},
+		},
+	})
 }

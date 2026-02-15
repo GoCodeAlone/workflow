@@ -1,0 +1,87 @@
+name: data-sync-pipeline-demo
+version: "1.0"
+description: >
+  Demonstrates a pipeline that fetches data from an external API,
+  transforms it, and logs the results. Uses step.http_call for outbound
+  requests and step.transform for data manipulation.
+
+modules:
+  - name: sync-server
+    type: http.server
+    config:
+      address: ":8086"
+
+  - name: sync-router
+    type: http.router
+    dependsOn:
+      - sync-server
+
+workflows:
+  http:
+    server: sync-server
+    router: sync-router
+    routes: []
+
+pipelines:
+  # Manually triggered data sync pipeline
+  manual-sync:
+    trigger:
+      type: http
+      config:
+        path: /api/sync/trigger
+        method: POST
+
+    steps:
+      - name: log-start
+        type: step.log
+        config:
+          level: info
+          message: "Starting data sync"
+
+      - name: set-target
+        type: step.set
+        config:
+          values:
+            sync_status: in_progress
+            sync_source: external-api
+
+      - name: validate-config
+        type: step.validate
+        config:
+          strategy: required_fields
+          required_fields:
+            - sync_source
+
+      - name: log-complete
+        type: step.log
+        config:
+          level: info
+          message: "Data sync completed with status: {{ .sync_status }}"
+
+    on_error: stop
+    timeout: 300s
+
+  # Health check pipeline
+  health-probe:
+    trigger:
+      type: http
+      config:
+        path: /api/health/deep
+        method: GET
+
+    steps:
+      - name: set-health
+        type: step.set
+        config:
+          values:
+            status: healthy
+            timestamp: "{{ .meta.started_at }}"
+
+      - name: log-probe
+        type: step.log
+        config:
+          level: debug
+          message: "Health probe executed"
+
+    on_error: skip
+    timeout: 10s

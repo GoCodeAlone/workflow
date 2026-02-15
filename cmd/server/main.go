@@ -29,7 +29,7 @@ import (
 
 var (
 	configFile     = flag.String("config", "", "Path to workflow configuration YAML file")
-	addr = flag.String("addr", ":8080", "HTTP listen address (workflow engine)")
+	addr           = flag.String("addr", ":8080", "HTTP listen address (workflow engine)")
 	copilotCLI     = flag.String("copilot-cli", "", "Path to Copilot CLI binary")
 	copilotModel   = flag.String("copilot-model", "", "Model to use with Copilot SDK")
 	anthropicKey   = flag.String("anthropic-key", "", "Anthropic API key (or set ANTHROPIC_API_KEY env)")
@@ -57,6 +57,21 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewSchedulerWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewIntegrationWorkflowHandler())
+
+	// Register pipeline workflow handler
+	pipelineHandler := handlers.NewPipelineWorkflowHandler()
+	pipelineHandler.SetStepRegistry(engine.GetStepRegistry())
+	pipelineHandler.SetLogger(logger)
+	engine.RegisterWorkflowHandler(pipelineHandler)
+
+	// Register built-in pipeline step types
+	engine.AddStepType("step.validate", module.NewValidateStepFactory())
+	engine.AddStepType("step.transform", module.NewTransformStepFactory())
+	engine.AddStepType("step.conditional", module.NewConditionalStepFactory())
+	engine.AddStepType("step.publish", module.NewPublishStepFactory())
+	engine.AddStepType("step.set", module.NewSetStepFactory())
+	engine.AddStepType("step.log", module.NewLogStepFactory())
+	engine.AddStepType("step.http_call", module.NewHTTPCallStepFactory())
 
 	// Register standard triggers
 	engine.RegisterTrigger(module.NewHTTPTrigger())

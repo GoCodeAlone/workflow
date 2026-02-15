@@ -23,6 +23,7 @@ import (
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/schema"
 	"github.com/GoCodeAlone/workflow/secrets"
+	"gopkg.in/yaml.v3"
 )
 
 // WorkflowHandler interface for handling different workflow types
@@ -35,6 +36,12 @@ type WorkflowHandler interface {
 
 	// ExecuteWorkflow executes a workflow with the given action and input data
 	ExecuteWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) (map[string]any, error)
+}
+
+// PipelineAdder is implemented by workflow handlers that can receive named pipelines.
+// This allows the engine to add pipelines without importing the handlers package.
+type PipelineAdder interface {
+	AddPipeline(name string, p *module.Pipeline)
 }
 
 // ModuleFactory is a function that creates a module from a name and configuration
@@ -60,6 +67,7 @@ type StdEngine struct {
 	dynamicLoader    *dynamic.Loader
 	eventEmitter     *module.WorkflowEventEmitter
 	secretsResolver  *secrets.MultiResolver
+	stepRegistry     *module.StepRegistry
 }
 
 // SetDynamicRegistry sets the dynamic component registry on the engine.
@@ -84,6 +92,7 @@ func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
 		triggers:         make([]module.Trigger, 0),
 		triggerRegistry:  module.NewTriggerRegistry(),
 		secretsResolver:  secrets.NewMultiResolver(),
+		stepRegistry:     module.NewStepRegistry(),
 	}
 }
 
@@ -106,6 +115,16 @@ func (e *StdEngine) RegisterTrigger(trigger module.Trigger) {
 // AddModuleType registers a factory function for a module type
 func (e *StdEngine) AddModuleType(moduleType string, factory ModuleFactory) {
 	e.moduleFactories[moduleType] = factory
+}
+
+// AddStepType registers a pipeline step factory for the given step type.
+func (e *StdEngine) AddStepType(stepType string, factory module.StepFactory) {
+	e.stepRegistry.Register(stepType, factory)
+}
+
+// GetStepRegistry returns the engine's pipeline step registry.
+func (e *StdEngine) GetStepRegistry() *module.StepRegistry {
+	return e.stepRegistry
 }
 
 // BuildFromConfig builds a workflow from configuration
@@ -915,6 +934,13 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		return fmt.Errorf("failed to configure triggers: %w", err)
 	}
 
+	// Configure pipelines (composable step-based workflows)
+	if len(cfg.Pipelines) > 0 {
+		if err := e.configurePipelines(cfg.Pipelines); err != nil {
+			return fmt.Errorf("failed to configure pipelines: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -1065,6 +1091,120 @@ func canHandleTrigger(trigger module.Trigger, triggerType string) bool {
 	default:
 		return false
 	}
+}
+
+// configurePipelines creates Pipeline objects from config and registers them
+// with the PipelineWorkflowHandler.
+func (e *StdEngine) configurePipelines(pipelineCfg map[string]any) error {
+	// Find the PipelineAdder among registered workflow handlers
+	var adder PipelineAdder
+	for _, handler := range e.workflowHandlers {
+		if a, ok := handler.(PipelineAdder); ok {
+			adder = a
+			break
+		}
+	}
+	if adder == nil {
+		return fmt.Errorf("no PipelineWorkflowHandler registered; cannot configure pipelines")
+	}
+
+	for pipelineName, rawCfg := range pipelineCfg {
+		// Marshal to YAML then unmarshal into PipelineConfig to leverage struct tags
+		yamlBytes, err := yaml.Marshal(rawCfg)
+		if err != nil {
+			return fmt.Errorf("pipeline %q: failed to marshal config: %w", pipelineName, err)
+		}
+		var pipeCfg config.PipelineConfig
+		if err := yaml.Unmarshal(yamlBytes, &pipeCfg); err != nil {
+			return fmt.Errorf("pipeline %q: failed to parse config: %w", pipelineName, err)
+		}
+
+		// Build steps
+		steps, err := e.buildPipelineSteps(pipelineName, pipeCfg.Steps)
+		if err != nil {
+			return fmt.Errorf("pipeline %q: %w", pipelineName, err)
+		}
+
+		// Build compensation steps
+		compSteps, err := e.buildPipelineSteps(pipelineName, pipeCfg.Compensation)
+		if err != nil {
+			return fmt.Errorf("pipeline %q compensation: %w", pipelineName, err)
+		}
+
+		// Parse error strategy
+		onError := module.ErrorStrategyStop
+		switch pipeCfg.OnError {
+		case "skip":
+			onError = module.ErrorStrategySkip
+		case "compensate":
+			onError = module.ErrorStrategyCompensate
+		}
+
+		// Parse timeout
+		var timeout time.Duration
+		if pipeCfg.Timeout != "" {
+			timeout, err = time.ParseDuration(pipeCfg.Timeout)
+			if err != nil {
+				return fmt.Errorf("pipeline %q: invalid timeout %q: %w", pipelineName, pipeCfg.Timeout, err)
+			}
+		}
+
+		pipeline := &module.Pipeline{
+			Name:         pipelineName,
+			Steps:        steps,
+			OnError:      onError,
+			Timeout:      timeout,
+			Compensation: compSteps,
+		}
+
+		adder.AddPipeline(pipelineName, pipeline)
+		e.logger.Info(fmt.Sprintf("Configured pipeline: %s (%d steps)", pipelineName, len(steps)))
+
+		// Create trigger from inline trigger config if present
+		if pipeCfg.Trigger.Type != "" {
+			triggerCfg := pipeCfg.Trigger.Config
+			if triggerCfg == nil {
+				triggerCfg = make(map[string]any)
+			}
+			// Inject the pipeline name as the workflow type for the trigger
+			triggerCfg["workflowType"] = "pipeline:" + pipelineName
+
+			// Find a matching trigger and configure it
+			for _, trigger := range e.triggers {
+				if canHandleTrigger(trigger, pipeCfg.Trigger.Type) {
+					if err := trigger.Configure(e.app, triggerCfg); err != nil {
+						return fmt.Errorf("pipeline %q trigger: %w", pipelineName, err)
+					}
+					break
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// buildPipelineSteps creates PipelineStep instances from step configurations.
+func (e *StdEngine) buildPipelineSteps(pipelineName string, stepCfgs []config.PipelineStepConfig) ([]module.PipelineStep, error) {
+	if len(stepCfgs) == 0 {
+		return nil, nil
+	}
+
+	steps := make([]module.PipelineStep, 0, len(stepCfgs))
+	for _, sc := range stepCfgs {
+		stepConfig := sc.Config
+		if stepConfig == nil {
+			stepConfig = make(map[string]any)
+		}
+
+		step, err := e.stepRegistry.Create(sc.Type, sc.Name, stepConfig, e.app)
+		if err != nil {
+			return nil, fmt.Errorf("step %q (type %s): %w", sc.Name, sc.Type, err)
+		}
+		steps = append(steps, step)
+	}
+
+	return steps, nil
 }
 
 // GetApp returns the underlying modular Application.

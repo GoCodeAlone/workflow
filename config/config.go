@@ -22,6 +22,7 @@ type WorkflowConfig struct {
 	Modules   []ModuleConfig `json:"modules" yaml:"modules"`
 	Workflows map[string]any `json:"workflows" yaml:"workflows"`
 	Triggers  map[string]any `json:"triggers" yaml:"triggers"`
+	Pipelines map[string]any `json:"pipelines,omitempty" yaml:"pipelines,omitempty"`
 	ConfigDir string         `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
 }
 
@@ -73,5 +74,6 @@ func NewEmptyWorkflowConfig() *WorkflowConfig {
 		Modules:   make([]ModuleConfig, 0),
 		Workflows: make(map[string]any),
 		Triggers:  make(map[string]any),
+		Pipelines: make(map[string]any),
 	}
 }

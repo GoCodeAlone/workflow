@@ -1,0 +1,132 @@
+name: webhook-pipeline-demo
+version: "1.0"
+description: >
+  Demonstrates the composable pipeline architecture.
+  A webhook endpoint receives JSON, validates it, transforms it, logs it,
+  and publishes an event. No monolithic handler needed.
+
+modules:
+  - name: webhook-server
+    type: http.server
+    config:
+      address: ":8085"
+
+  - name: webhook-router
+    type: http.router
+    dependsOn:
+      - webhook-server
+
+  - name: event-broker
+    type: messaging.broker
+
+workflows:
+  http:
+    server: webhook-server
+    router: webhook-router
+    routes: []
+
+pipelines:
+  # A simple webhook-to-event pipeline
+  stripe-payment:
+    trigger:
+      type: http
+      config:
+        path: /webhooks/stripe
+        method: POST
+
+    steps:
+      - name: validate-payload
+        type: step.validate
+        config:
+          strategy: required_fields
+          required_fields:
+            - type
+            - data
+
+      - name: extract-event
+        type: step.set
+        config:
+          values:
+            event_type: "{{ .type }}"
+            payload_id: "{{ .data.id }}"
+
+      - name: log-received
+        type: step.log
+        config:
+          level: info
+          message: "Received webhook: {{ .event_type }} for {{ .payload_id }}"
+
+      - name: route-by-type
+        type: step.conditional
+        config:
+          field: event_type
+          routes:
+            "payment_intent.succeeded": process-success
+            "payment_intent.failed": process-failure
+          default: log-unknown
+
+      - name: process-success
+        type: step.set
+        config:
+          values:
+            status: succeeded
+            processed: "true"
+
+      - name: process-failure
+        type: step.set
+        config:
+          values:
+            status: failed
+            processed: "true"
+
+      - name: log-unknown
+        type: step.log
+        config:
+          level: warn
+          message: "Unknown event type: {{ .event_type }}"
+
+    on_error: stop
+    timeout: 30s
+
+  # A data enrichment pipeline
+  order-enrichment:
+    trigger:
+      type: http
+      config:
+        path: /api/orders/enrich
+        method: POST
+
+    steps:
+      - name: validate-order
+        type: step.validate
+        config:
+          strategy: json_schema
+          schema:
+            type: object
+            required:
+              - customer_id
+              - items
+              - total
+            properties:
+              customer_id:
+                type: string
+              items:
+                type: array
+              total:
+                type: number
+
+      - name: normalize-fields
+        type: step.set
+        config:
+          values:
+            order_status: pending
+            created_at: "{{ .meta.started_at }}"
+
+      - name: log-order
+        type: step.log
+        config:
+          level: info
+          message: "Processing order for customer {{ .customer_id }}: ${{ .total }}"
+
+    on_error: stop
+    timeout: 60s
