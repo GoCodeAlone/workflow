@@ -774,7 +774,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Inputs:      []ServiceIODef{{Name: "storageBackend", Type: "SQLiteStorage", Description: "Optional shared SQLite storage service name"}},
 		Outputs:     []ServiceIODef{{Name: "registry", Type: "WorkflowRegistry", Description: "Workflow data registry service"}},
 		ConfigFields: []ConfigFieldDef{
-			{Key: "storageBackend", Label: "Storage Backend", Type: FieldTypeString, DefaultValue: "", Description: "Name of a storage.sqlite module to share its DB connection (leave empty for standalone DB)", Placeholder: "admin-db"},
+			{Key: "storageBackend", Label: "Storage Backend", Type: FieldTypeString, DefaultValue: "", Description: "Name of a storage.sqlite module to share its DB connection (leave empty for standalone DB)", Placeholder: "admin-db", InheritFrom: "dependency.name"},
 		},
 		DefaultConfig: map[string]any{"storageBackend": ""},
 	})
@@ -831,7 +831,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Category:    "pipeline",
 		Description: "Transforms pipeline data using extract, map, filter, and convert operations",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "transformer", Label: "Transformer Service", Type: FieldTypeString, Description: "Name of a DataTransformer service to use", Placeholder: "my-transformer"},
+			{Key: "transformer", Label: "Transformer Service", Type: FieldTypeString, Description: "Name of a DataTransformer service to use", Placeholder: "my-transformer", InheritFrom: "dependency.name"},
 			{Key: "pipeline", Label: "Pipeline Name", Type: FieldTypeString, Description: "Named pipeline within the transformer", Placeholder: "normalize"},
 			{Key: "operations", Label: "Operations", Type: FieldTypeJSON, Description: "Inline transformation operations (alternative to transformer+pipeline)"},
 		},
@@ -857,7 +857,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "topic", Label: "Topic", Type: FieldTypeString, Required: true, Description: "Topic name to publish to", Placeholder: "order.created"},
 			{Key: "payload", Label: "Payload", Type: FieldTypeJSON, Description: "Custom payload template (uses {{ .field }} expressions). Defaults to pipeline context."},
-			{Key: "broker", Label: "Broker Service", Type: FieldTypeString, Description: "Message broker service name (optional, defaults to EventBus)"},
+			{Key: "broker", Label: "Broker Service", Type: FieldTypeString, Description: "Message broker service name (optional, defaults to EventBus)", InheritFrom: "dependency.name"},
 		},
 	})
 

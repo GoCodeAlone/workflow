@@ -668,7 +668,7 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     category: 'infrastructure',
     defaultConfig: { storageBackend: '' },
     configFields: [
-      { key: 'storageBackend', label: 'Storage Backend', type: 'string', defaultValue: '', placeholder: 'admin-db', description: 'Name of a storage.sqlite module to share its DB connection' },
+      { key: 'storageBackend', label: 'Storage Backend', type: 'string', defaultValue: '', placeholder: 'admin-db', description: 'Name of a storage.sqlite module to share its DB connection', inheritFrom: 'dependency.name' },
     ],
     ioSignature: { inputs: [{ name: 'storageBackend', type: 'SQLiteStorage' }], outputs: [{ name: 'registry', type: 'WorkflowRegistry' }] },
   },
@@ -720,7 +720,7 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     category: 'pipeline',
     defaultConfig: { transformer: '', pipeline: '' },
     configFields: [
-      { key: 'transformer', label: 'Transformer Service', type: 'string', description: 'Name of the DataTransformer module to use' },
+      { key: 'transformer', label: 'Transformer Service', type: 'string', description: 'Name of the DataTransformer module to use', inheritFrom: 'dependency.name' },
       { key: 'pipeline', label: 'Pipeline Name', type: 'string', description: 'Named transformation pipeline within the transformer' },
       { key: 'operations', label: 'Operations', type: 'json', description: 'Inline transformation operations (alternative to named pipeline)' },
     ],
@@ -733,7 +733,7 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     configFields: [
       { key: 'topic', label: 'Topic', type: 'string', description: 'Event topic to publish to (supports {{ template }} expressions)', required: true },
       { key: 'payload', label: 'Payload', type: 'json', description: 'Event payload (supports {{ template }} expressions in string values)' },
-      { key: 'broker', label: 'Broker Service', type: 'string', description: 'Name of the messaging broker module (optional, uses EventBus by default)' },
+      { key: 'broker', label: 'Broker Service', type: 'string', description: 'Name of the messaging broker module (optional, uses EventBus by default)', inheritFrom: 'dependency.name' },
     ],
   },
   {

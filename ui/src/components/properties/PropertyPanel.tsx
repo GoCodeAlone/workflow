@@ -189,16 +189,20 @@ export default function PropertyPanel() {
             {fields.map((field) => {
               const inherited = inheritedValues[field.key];
               const isOverridden = overriddenFields.has(field.key);
-              const useInherited = inherited && !isOverridden && !node.data.config[field.key];
+              const hasExplicitValue = node.data.config[field.key] !== undefined
+                && node.data.config[field.key] !== ''
+                && node.data.config[field.key] !== null;
+              const useInherited = inherited && !isOverridden && !hasExplicitValue;
 
-              // Auto-fill inherited value if not overridden and field is empty
-              if (useInherited && inherited) {
-                const currentVal = node.data.config[field.key];
-                if (currentVal === undefined || currentVal === '' || currentVal === null) {
-                  // Will be auto-filled on display, actual config update happens on first render
-                  // We show the inherited value but don't force-write to config to avoid loops
-                }
-              }
+              // Resolve the effective value: explicit config > inherited > default
+              const effectiveValue = hasExplicitValue
+                ? node.data.config[field.key]
+                : (useInherited ? inherited?.value : node.data.config[field.key] ?? field.defaultValue);
+
+              // Style for inherited fields
+              const inheritedInputStyle = useInherited
+                ? { ...inputStyle, fontStyle: 'italic' as const, color: '#a6e3a1', opacity: 0.8 }
+                : inputStyle;
 
               return (
               <label key={field.key} style={{ display: 'block', marginBottom: 10 }}>
@@ -235,9 +239,9 @@ export default function PropertyPanel() {
                 </span>
                 {field.type === 'select' ? (
                   <select
-                    value={String(node.data.config[field.key] ?? field.defaultValue ?? '')}
+                    value={String(effectiveValue ?? '')}
                     onChange={(e) => handleFieldChange(field.key, e.target.value)}
-                    style={inputStyle}
+                    style={inheritedInputStyle}
                   >
                     <option value="">--</option>
                     {field.options?.map((opt) => (
@@ -249,16 +253,16 @@ export default function PropertyPanel() {
                 ) : field.type === 'number' ? (
                   <input
                     type="number"
-                    value={String(node.data.config[field.key] ?? field.defaultValue ?? '')}
+                    value={String(effectiveValue ?? '')}
                     onChange={(e) => handleFieldChange(field.key, Number(e.target.value))}
                     placeholder={field.placeholder}
-                    style={inputStyle}
+                    style={inheritedInputStyle}
                   />
                 ) : field.type === 'boolean' ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <input
                       type="checkbox"
-                      checked={Boolean(node.data.config[field.key] ?? field.defaultValue ?? false)}
+                      checked={Boolean(effectiveValue ?? false)}
                       onChange={(e) => handleFieldChange(field.key, e.target.checked)}
                     />
                     {field.description && (
@@ -268,7 +272,7 @@ export default function PropertyPanel() {
                 ) : field.type === 'array' ? (
                   <ArrayFieldEditor
                     label={field.label}
-                    value={(node.data.config[field.key] as unknown[]) ?? (field.defaultValue as unknown[]) ?? []}
+                    value={(effectiveValue as unknown[]) ?? []}
                     onChange={(val) => handleFieldChange(field.key, val)}
                     itemType={field.arrayItemType}
                     placeholder={field.placeholder}
@@ -276,7 +280,7 @@ export default function PropertyPanel() {
                 ) : field.type === 'map' ? (
                   <MapFieldEditor
                     label={field.label}
-                    value={(node.data.config[field.key] as Record<string, unknown>) ?? (field.defaultValue as Record<string, unknown>) ?? {}}
+                    value={(effectiveValue as Record<string, unknown>) ?? {}}
                     onChange={(val) => handleFieldChange(field.key, val)}
                     valueType={field.mapValueType}
                     placeholder={field.placeholder}
@@ -284,9 +288,9 @@ export default function PropertyPanel() {
                 ) : field.type === 'json' ? (
                   <textarea
                     value={
-                      typeof node.data.config[field.key] === 'string'
-                        ? (node.data.config[field.key] as string)
-                        : JSON.stringify(node.data.config[field.key] ?? '', null, 2)
+                      typeof effectiveValue === 'string'
+                        ? effectiveValue
+                        : JSON.stringify(effectiveValue ?? '', null, 2)
                     }
                     onChange={(e) => {
                       try {
@@ -297,28 +301,28 @@ export default function PropertyPanel() {
                     }}
                     rows={4}
                     placeholder={field.placeholder}
-                    style={{ ...inputStyle, resize: 'vertical', fontFamily: 'monospace' }}
+                    style={{ ...inheritedInputStyle, resize: 'vertical', fontFamily: 'monospace' }}
                   />
                 ) : field.type === 'filepath' ? (
                   <FilePicker
-                    value={String(node.data.config[field.key] ?? field.defaultValue ?? '')}
+                    value={String(effectiveValue ?? '')}
                     onChange={(val) => handleFieldChange(field.key, val)}
                     placeholder={field.placeholder}
                     description={field.description}
                   />
                 ) : field.sensitive ? (
                   <SensitiveFieldInput
-                    value={String(node.data.config[field.key] ?? field.defaultValue ?? '')}
+                    value={String(effectiveValue ?? '')}
                     onChange={(val) => handleFieldChange(field.key, val)}
                     placeholder={field.placeholder}
                   />
                 ) : (
                   <input
                     type="text"
-                    value={String(node.data.config[field.key] ?? (useInherited ? inherited?.value : field.defaultValue) ?? '')}
+                    value={String(effectiveValue ?? '')}
                     onChange={(e) => handleFieldChange(field.key, e.target.value)}
                     placeholder={field.placeholder}
-                    style={useInherited ? { ...inputStyle, fontStyle: 'italic', color: '#a6e3a1', opacity: 0.8 } : inputStyle}
+                    style={inheritedInputStyle}
                   />
                 )}
                 {field.description && field.type !== 'boolean' && (
