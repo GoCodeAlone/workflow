@@ -1031,4 +1031,17 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "body_from", Label: "Body From", Type: FieldTypeString, Description: "Dotted path to resolve body from step outputs (e.g., steps.get-company.row)", Placeholder: "steps.get-company.row"},
 		},
 	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.jq",
+		Label:       "JQ Transform",
+		Category:    "pipeline",
+		Description: "Applies JQ expressions to pipeline data for complex transformations (field access, pipes, map/select, object construction, arithmetic, conditionals)",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with data to transform using JQ expression"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "JQ expression result merged into pipeline context"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "expression", Label: "JQ Expression", Type: FieldTypeString, Required: true, Description: "JQ expression to apply (supports full JQ syntax: field access, pipes, map, select, object construction, arithmetic, conditionals)", Placeholder: "{name: .user.name, total: [.items[].price] | add}"},
+			{Key: "input_from", Label: "Input From", Type: FieldTypeString, Description: "Dotted path to resolve input from (e.g., steps.fetch.data). Defaults to full pipeline context.", Placeholder: "steps.fetch-orders.orders"},
+		},
+	})
 }

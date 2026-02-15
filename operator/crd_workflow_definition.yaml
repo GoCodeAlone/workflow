@@ -1,0 +1,97 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: workflowdefinitions.workflow.gocodalone.com
+spec:
+  group: workflow.gocodalone.com
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - name
+                - version
+                - configYAML
+              properties:
+                name:
+                  type: string
+                  description: Human-readable name for the workflow.
+                version:
+                  type: integer
+                  description: Monotonically increasing version number.
+                configYAML:
+                  type: string
+                  description: The workflow engine YAML configuration.
+                replicas:
+                  type: integer
+                  description: Number of desired replicas.
+                  default: 1
+                  minimum: 0
+                resources:
+                  type: object
+                  description: CPU and memory resource requirements.
+                  properties:
+                    cpuRequest:
+                      type: string
+                    cpuLimit:
+                      type: string
+                    memoryRequest:
+                      type: string
+                    memoryLimit:
+                      type: string
+                env:
+                  type: string
+                  description: Target environment (dev, staging, prod).
+                  enum:
+                    - dev
+                    - staging
+                    - prod
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum:
+                    - Pending
+                    - Running
+                    - Failed
+                    - Terminated
+                replicas:
+                  type: integer
+                readyReplicas:
+                  type: integer
+                message:
+                  type: string
+                lastTransition:
+                  type: string
+                  format: date-time
+                observedVersion:
+                  type: integer
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Replicas
+          type: integer
+          jsonPath: .status.readyReplicas
+        - name: Version
+          type: integer
+          jsonPath: .status.observedVersion
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+  scope: Namespaced
+  names:
+    plural: workflowdefinitions
+    singular: workflowdefinition
+    kind: WorkflowDefinition
+    shortNames:
+      - wfdef

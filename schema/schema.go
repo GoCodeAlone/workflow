@@ -82,6 +82,7 @@ func KnownModuleTypes() []string {
 		"step.db_query",
 		"step.delegate",
 		"step.http_call",
+		"step.jq",
 		"step.json_response",
 		"step.log",
 		"step.publish",

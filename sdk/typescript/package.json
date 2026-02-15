@@ -1,0 +1,37 @@
+{
+  "name": "@gocodalone/workflow-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript client SDK for the GoCodeAlone Workflow engine",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "workflow",
+    "sdk",
+    "sse",
+    "orchestration"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

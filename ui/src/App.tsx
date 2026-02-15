@@ -18,6 +18,9 @@ import WorkflowDashboard from './components/dashboard/WorkflowDashboard.tsx';
 import LogViewer from './components/logs/LogViewer.tsx';
 import EventInspector from './components/events/EventInspector.tsx';
 import IAMSettings from './components/iam/IAMSettings.tsx';
+import Marketplace from './components/marketplace/Marketplace.tsx';
+import Templates from './components/templates/Templates.tsx';
+import Environments from './components/environments/Environments.tsx';
 import WorkflowPickerBar from './components/shared/WorkflowPickerBar.tsx';
 import CollapsiblePanel from './components/layout/CollapsiblePanel.tsx';
 import useWorkflowStore from './store/workflowStore.ts';
@@ -254,6 +257,9 @@ function AppLayout() {
         {activeView === 'events' && (
           <ObservabilityView><EventInspector /></ObservabilityView>
         )}
+        {activeView === 'marketplace' && <Marketplace />}
+        {activeView === 'templates' && <Templates />}
+        {activeView === 'environments' && <Environments />}
         {activeView === 'settings' && <IAMSettings />}
       </div>
       <ToastContainer />

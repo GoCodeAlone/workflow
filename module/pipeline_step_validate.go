@@ -224,4 +224,3 @@ func checkJSONType(field string, val any, expected string) error {
 	}
 	return nil
 }
-

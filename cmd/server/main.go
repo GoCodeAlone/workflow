@@ -75,6 +75,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	engine.AddStepType("step.db_query", module.NewDBQueryStepFactory())
 	engine.AddStepType("step.db_exec", module.NewDBExecStepFactory())
 	engine.AddStepType("step.json_response", module.NewJSONResponseStepFactory())
+	engine.AddStepType("step.jq", module.NewJQStepFactory())
 
 	// Register standard triggers
 	engine.RegisterTrigger(module.NewHTTPTrigger())
