@@ -199,14 +199,6 @@ func (p *ConnectionPool) release(conn Conn) {
 	p.mu.Unlock()
 }
 
-// destroy removes a connection permanently (e.g., after a health check failure).
-func (p *ConnectionPool) destroy(conn Conn) {
-	p.totalOut.Add(-1)
-	_ = conn.Close()
-	<-p.sem
-	p.totalAll.Add(-1)
-}
-
 // Close shuts down the pool and closes all connections.
 func (p *ConnectionPool) Close() error {
 	p.mu.Lock()

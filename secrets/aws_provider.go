@@ -108,7 +108,7 @@ func (p *AWSSecretsManagerProvider) getSecretValue(ctx context.Context, secretID
 	endpoint := fmt.Sprintf("https://%s", host)
 
 	// Build the JSON request body
-	reqBody := fmt.Sprintf(`{"SecretId":"%s"}`, secretID)
+	reqBody := fmt.Sprintf(`{"SecretId":%q}`, secretID)
 
 	now := time.Now().UTC()
 

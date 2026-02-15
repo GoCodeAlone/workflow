@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -194,7 +195,10 @@ func (u *UserStore) LoadSeedFile(path string) error {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil // Silently skip missing seed files
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // Silently skip missing seed files
+		}
+		return fmt.Errorf("read seed file: %w", err)
 	}
 
 	var seeds []struct {

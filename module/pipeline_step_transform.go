@@ -63,21 +63,23 @@ func (s *TransformStep) Execute(ctx context.Context, pc *PipelineContext) (*Step
 	var result any
 	var err error
 
-	if s.transformer != "" {
+	switch {
+	case s.transformer != "":
 		// Look up the DataTransformer service
 		var dt *DataTransformer
 		if svcErr := s.app.GetService(s.transformer, &dt); svcErr != nil {
 			return nil, fmt.Errorf("transform step %q: service %q not found: %w", s.name, s.transformer, svcErr)
 		}
 
-		if s.pipeline != "" {
+		switch {
+		case s.pipeline != "":
 			result, err = dt.Transform(ctx, s.pipeline, pc.Current)
-		} else if len(s.operations) > 0 {
+		case len(s.operations) > 0:
 			result, err = dt.TransformWithOps(ctx, s.operations, pc.Current)
-		} else {
+		default:
 			return nil, fmt.Errorf("transform step %q: transformer service specified but no pipeline or operations", s.name)
 		}
-	} else {
+	default:
 		// Use a temporary DataTransformer for inline operations
 		dt := NewDataTransformer(s.name + ".inline")
 		result, err = dt.TransformWithOps(ctx, s.operations, pc.Current)

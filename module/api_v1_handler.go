@@ -385,18 +385,6 @@ func (h *V1APIHandler) requireAuth(w http.ResponseWriter, r *http.Request) *user
 	return claims
 }
 
-func (h *V1APIHandler) requireAdmin(w http.ResponseWriter, r *http.Request) *userClaims {
-	claims := h.requireAuth(w, r)
-	if claims == nil {
-		return nil
-	}
-	if claims.Role != "admin" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
-		return nil
-	}
-	return claims
-}
-
 // --- JSON helpers ---
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -427,9 +415,9 @@ func (h *V1APIHandler) listCompanies(w http.ResponseWriter, r *http.Request) {
 	// Filter: non-admins don't see system companies
 	if claims.Role != "admin" {
 		filtered := make([]V1Company, 0, len(companies))
-		for _, c := range companies {
-			if !c.IsSystem {
-				filtered = append(filtered, c)
+		for i := range companies {
+			if !companies[i].IsSystem {
+				filtered = append(filtered, companies[i])
 			}
 		}
 		companies = filtered
@@ -702,9 +690,9 @@ func (h *V1APIHandler) listAllWorkflows(w http.ResponseWriter, r *http.Request) 
 	// Filter system workflows for non-admins
 	if claims.Role != "admin" {
 		filtered := make([]V1Workflow, 0, len(wfs))
-		for _, wf := range wfs {
-			if !wf.IsSystem {
-				filtered = append(filtered, wf)
+		for i := range wfs {
+			if !wfs[i].IsSystem {
+				filtered = append(filtered, wfs[i])
 			}
 		}
 		wfs = filtered
@@ -910,20 +898,20 @@ func (h *V1APIHandler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	// Filter system workflows for non-admins
 	if claims.Role != "admin" {
 		filtered := make([]V1Workflow, 0, len(wfs))
-		for _, wf := range wfs {
-			if !wf.IsSystem {
-				filtered = append(filtered, wf)
+		for i := range wfs {
+			if !wfs[i].IsSystem {
+				filtered = append(filtered, wfs[i])
 			}
 		}
 		wfs = filtered
 	}
 
 	summaries := make([]dashboardSummary, 0, len(wfs))
-	for _, wf := range wfs {
+	for i := range wfs {
 		summaries = append(summaries, dashboardSummary{
-			WorkflowID:   wf.ID,
-			WorkflowName: wf.Name,
-			Status:       wf.Status,
+			WorkflowID:   wfs[i].ID,
+			WorkflowName: wfs[i].Name,
+			Status:       wfs[i].Status,
 			Executions:   map[string]int{},
 			LogCounts:    map[string]int{},
 		})

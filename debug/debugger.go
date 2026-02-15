@@ -67,8 +67,6 @@ type Debugger struct {
 	pauseCh  chan struct{} // closed when debugger should pause
 	resumeCh chan struct{} // closed when debugger should resume
 
-	// hooks called before each step; return true to pause
-	beforeStep func(step string, stepType BreakpointType, data map[string]any) bool
 }
 
 // New creates a new Debugger.

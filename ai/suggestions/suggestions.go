@@ -214,9 +214,10 @@ func buildUserPrompt(messages []Message) string {
 	b.WriteString("Conversation transcript:\n\n")
 	for _, msg := range messages {
 		role := msg.Role
-		if role == "texter" {
+		switch role {
+		case "texter":
 			role = "Texter"
-		} else if role == "counselor" {
+		case "counselor":
 			role = "Counselor"
 		}
 		b.WriteString(fmt.Sprintf("[%s] %s: %s\n", msg.Timestamp.Format("15:04"), role, msg.Body))

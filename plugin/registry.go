@@ -183,5 +183,5 @@ func SaveManifest(path string, manifest *PluginManifest) error {
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
 	}
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0600)
 }

@@ -22,7 +22,7 @@ func NewLocalStorage(root string) (*LocalStorage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve root path: %w", err)
 	}
-	if err := os.MkdirAll(abs, 0o755); err != nil {
+	if err := os.MkdirAll(abs, 0o750); err != nil {
 		return nil, fmt.Errorf("create root directory: %w", err)
 	}
 	return &LocalStorage{root: abs}, nil
@@ -108,7 +108,7 @@ func (l *LocalStorage) Put(_ context.Context, path string, reader io.Reader) err
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
 		return fmt.Errorf("create parent directories: %w", err)
 	}
 	f, err := os.Create(abs)
@@ -161,7 +161,7 @@ func (l *LocalStorage) MkdirAll(_ context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(abs, 0o755); err != nil {
+	if err := os.MkdirAll(abs, 0o750); err != nil {
 		return fmt.Errorf("create directory: %w", err)
 	}
 	return nil

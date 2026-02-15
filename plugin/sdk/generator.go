@@ -71,7 +71,7 @@ func (g *TemplateGenerator) Generate(opts GenerateOptions) error {
 	}
 
 	// Create output directory
-	if err := os.MkdirAll(opts.OutputDir, 0755); err != nil {
+	if err := os.MkdirAll(opts.OutputDir, 0750); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
 
@@ -84,7 +84,7 @@ func (g *TemplateGenerator) Generate(opts GenerateOptions) error {
 	// Write component skeleton
 	componentPath := filepath.Join(opts.OutputDir, opts.Name+".go")
 	source := generateComponentSource(opts)
-	if err := os.WriteFile(componentPath, []byte(source), 0644); err != nil {
+	if err := os.WriteFile(componentPath, []byte(source), 0600); err != nil {
 		return fmt.Errorf("write component: %w", err)
 	}
 

@@ -51,7 +51,7 @@ func collectYAMLFiles(t *testing.T) []string {
 			}
 			return nil
 		}
-		if !(strings.HasSuffix(info.Name(), ".yaml") || strings.HasSuffix(info.Name(), ".yml")) {
+		if !strings.HasSuffix(info.Name(), ".yaml") && !strings.HasSuffix(info.Name(), ".yml") {
 			return nil
 		}
 		if skipFiles[info.Name()] {
@@ -272,7 +272,7 @@ func TestRegression_SchemaGeneration(t *testing.T) {
 	if s.Type != "object" {
 		t.Errorf("schema type should be 'object', got %q", s.Type)
 	}
-	if s.Properties == nil || len(s.Properties) == 0 {
+	if len(s.Properties) == 0 {
 		t.Error("schema has no properties")
 	}
 	if _, ok := s.Properties["modules"]; !ok {

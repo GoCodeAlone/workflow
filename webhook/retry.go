@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"math"
-	mrand "math/rand/v2"
 	"net/http"
-	"sync"
 	"time"
 )
 
@@ -67,7 +66,6 @@ type RetryManager struct {
 	config RetryConfig
 	client *http.Client
 	store  *DeadLetterStore
-	mu     sync.Mutex
 }
 
 // NewRetryManager creates a new RetryManager with the given config and dead letter store.
@@ -214,13 +212,21 @@ func (rm *RetryManager) backoff(attempt int) time.Duration {
 		base = float64(rm.config.MaxBackoff)
 	}
 	if rm.config.JitterFraction > 0 {
-		jitter := base * rm.config.JitterFraction * (mrand.Float64()*2 - 1)
+		jitter := base * rm.config.JitterFraction * (cryptoFloat64()*2 - 1)
 		base += jitter
 		if base < 0 {
 			base = 0
 		}
 	}
 	return time.Duration(base)
+}
+
+// cryptoFloat64 returns a cryptographically random float64 in [0.0, 1.0).
+func cryptoFloat64() float64 {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	// Use top 53 bits for a uniform float64 in [0, 1)
+	return float64(binary.BigEndian.Uint64(b[:])>>(64-53)) / float64(1<<53)
 }
 
 func generateID() (string, error) {

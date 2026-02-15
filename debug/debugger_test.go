@@ -280,7 +280,7 @@ func TestMultipleBreakpoints(t *testing.T) {
 	}
 
 	shouldPause, _ = d.CheckBreakpoint("module-c", BreakOnModule)
-	if !shouldPause {
-		// module-c has no breakpoint
+	if shouldPause {
+		t.Error("expected no pause on module-c (no breakpoint set)")
 	}
 }

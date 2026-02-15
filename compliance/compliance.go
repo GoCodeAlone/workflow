@@ -76,9 +76,9 @@ type InMemoryCollector struct {
 // CollectEvents filters events within the given time range.
 func (c *InMemoryCollector) CollectEvents(_ context.Context, start, end time.Time) ([]audit.Event, error) {
 	var filtered []audit.Event
-	for _, e := range c.Events {
-		if !e.Timestamp.Before(start) && !e.Timestamp.After(end) {
-			filtered = append(filtered, e)
+	for i := range c.Events {
+		if !c.Events[i].Timestamp.Before(start) && !c.Events[i].Timestamp.After(end) {
+			filtered = append(filtered, c.Events[i])
 		}
 	}
 	return filtered, nil
@@ -143,10 +143,10 @@ func summarizeAuditTrail(events []audit.Event) AuditTrailSummary {
 	s := AuditTrailSummary{
 		EventsByType: make(map[string]int),
 	}
-	for _, e := range events {
+	for i := range events {
 		s.TotalEvents++
-		s.EventsByType[string(e.Type)]++
-		switch e.Type {
+		s.EventsByType[string(events[i].Type)]++
+		switch events[i].Type {
 		case audit.EventAuthFailure:
 			s.AuthFailures++
 		case audit.EventDataAccess:
@@ -161,20 +161,21 @@ func summarizeAuditTrail(events []audit.Event) AuditTrailSummary {
 func (g *Generator) evaluateControls(trail AuditTrailSummary) []Control {
 	var controls []Control
 
-	// --- SOC2 Controls ---
-	controls = append(controls, g.checkEncryption(FrameworkSOC2, "SOC2-CC6.1"))
-	controls = append(controls, g.checkAuditLogging(trail, FrameworkSOC2, "SOC2-CC7.2"))
-	controls = append(controls, g.checkAccessControl(FrameworkSOC2, "SOC2-CC6.3"))
-	controls = append(controls, g.checkAuthFailures(trail, FrameworkSOC2, "SOC2-CC6.6"))
-	controls = append(controls, g.checkTLS(FrameworkSOC2, "SOC2-CC6.7"))
-
-	// --- HIPAA Controls ---
-	controls = append(controls, g.checkEncryption(FrameworkHIPAA, "HIPAA-164.312(a)(2)(iv)"))
-	controls = append(controls, g.checkAuditLogging(trail, FrameworkHIPAA, "HIPAA-164.312(b)"))
-	controls = append(controls, g.checkAccessControl(FrameworkHIPAA, "HIPAA-164.312(a)(1)"))
-	controls = append(controls, g.checkDataAccess(trail, FrameworkHIPAA, "HIPAA-164.312(d)"))
-	controls = append(controls, g.checkBackup(FrameworkHIPAA, "HIPAA-164.308(a)(7)(ii)(A)"))
-	controls = append(controls, g.checkRetention(FrameworkHIPAA, "HIPAA-164.530(j)(2)"))
+	controls = append(controls,
+		// SOC2 Controls
+		g.checkEncryption(FrameworkSOC2, "SOC2-CC6.1"),
+		g.checkAuditLogging(trail, FrameworkSOC2, "SOC2-CC7.2"),
+		g.checkAccessControl(FrameworkSOC2, "SOC2-CC6.3"),
+		g.checkAuthFailures(trail, FrameworkSOC2, "SOC2-CC6.6"),
+		g.checkTLS(FrameworkSOC2, "SOC2-CC6.7"),
+		// HIPAA Controls
+		g.checkEncryption(FrameworkHIPAA, "HIPAA-164.312(a)(2)(iv)"),
+		g.checkAuditLogging(trail, FrameworkHIPAA, "HIPAA-164.312(b)"),
+		g.checkAccessControl(FrameworkHIPAA, "HIPAA-164.312(a)(1)"),
+		g.checkDataAccess(trail, FrameworkHIPAA, "HIPAA-164.312(d)"),
+		g.checkBackup(FrameworkHIPAA, "HIPAA-164.308(a)(7)(ii)(A)"),
+		g.checkRetention(FrameworkHIPAA, "HIPAA-164.530(j)(2)"),
+	)
 
 	return controls
 }
@@ -311,13 +312,14 @@ func (g *Generator) checkRetention(fw Framework, id string) Control {
 		Description: "Data retention policy meets minimum requirements (6 years for HIPAA)",
 	}
 	minDays := 365 * 6 // HIPAA requires 6-year retention
-	if g.config.RetentionDays >= minDays {
+	switch {
+	case g.config.RetentionDays >= minDays:
 		c.Status = StatusPass
 		c.Details = fmt.Sprintf("Retention set to %d days (%d years)", g.config.RetentionDays, g.config.RetentionDays/365)
-	} else if g.config.RetentionDays > 0 {
+	case g.config.RetentionDays > 0:
 		c.Status = StatusWarning
 		c.Details = fmt.Sprintf("Retention set to %d days, minimum recommended is %d days", g.config.RetentionDays, minDays)
-	} else {
+	default:
 		c.Status = StatusFail
 		c.Details = "No retention policy configured"
 	}

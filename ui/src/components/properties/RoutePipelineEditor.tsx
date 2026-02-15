@@ -280,7 +280,7 @@ export default function RoutePipelineEditor({ steps, onChange }: RoutePipelineEd
             style={{ ...formInputStyle, flex: 1 }}
             autoFocus
             onKeyDown={(e) => {
-              if (e.key === 'Enter') isEdit ? handleEditSave() : handleAdd();
+              if (e.key === 'Enter') { if (isEdit) { handleEditSave(); } else { handleAdd(); } }
               if (e.key === 'Escape') resetForm();
             }}
           />

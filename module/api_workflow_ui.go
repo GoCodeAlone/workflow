@@ -34,14 +34,14 @@ func ExtractUIAssets(destDir string) error {
 		target := filepath.Join(destDir, rel)
 
 		if d.IsDir() {
-			return os.MkdirAll(target, 0755)
+			return os.MkdirAll(target, 0750)
 		}
 
 		data, err := uiAssets.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read embedded file %s: %w", path, err)
 		}
-		return os.WriteFile(target, data, 0644)
+		return os.WriteFile(target, data, 0600)
 	})
 }
 
@@ -280,7 +280,7 @@ func (h *WorkflowUIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 		}
 	case http.MethodPut:
 		switch seg {
@@ -289,7 +289,7 @@ func (h *WorkflowUIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 		}
 	case http.MethodPost:
 		switch seg {
@@ -300,12 +300,12 @@ func (h *WorkflowUIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 		}
 	default:
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 	}
 }
 

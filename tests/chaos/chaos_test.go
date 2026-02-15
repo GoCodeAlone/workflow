@@ -64,7 +64,6 @@ type chaosWorkflowHandler struct {
 	name         string
 	failRate     float64 // 0.0 to 1.0 chance of failure
 	delay        time.Duration
-	mu           sync.Mutex
 	execCount    int64
 	failCount    int64
 	successCount int64

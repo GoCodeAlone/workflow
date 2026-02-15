@@ -124,11 +124,10 @@ func BenchmarkPoolContention(b *testing.B) {
 
 			b.RunParallel(func(pb *testing.PB) {
 				// Each goroutine picks a component based on its index
-				var idx int
 				var mu sync.Mutex
+				var idx int
 				mu.Lock()
 				localIdx := idx % numWorkers
-				idx++
 				mu.Unlock()
 
 				comp := components[localIdx]

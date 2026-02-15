@@ -208,9 +208,9 @@ func (e *AlertEngine) GetAlerts(filter AlertFilter) []Alert {
 	defer e.mu.RUnlock()
 
 	var result []Alert
-	for _, a := range e.alerts {
-		if filter.matches(a) {
-			result = append(result, a)
+	for i := range e.alerts {
+		if filter.matches(e.alerts[i]) {
+			result = append(result, e.alerts[i])
 		}
 	}
 	return result

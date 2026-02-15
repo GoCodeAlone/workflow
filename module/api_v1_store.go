@@ -21,7 +21,7 @@ type V1Store struct {
 // OpenV1Store opens (or creates) a SQLite database at dbPath and initializes the schema.
 func OpenV1Store(dbPath string) (*V1Store, error) {
 	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
 
@@ -183,13 +183,6 @@ func toSlug(name string) string {
 		s = "untitled"
 	}
 	return s
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 // --- Companies ---

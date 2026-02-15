@@ -73,9 +73,7 @@ func (h *PipelineWorkflowHandler) ConfigureWorkflow(app modular.Application, wor
 func (h *PipelineWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowType string, _ string, data map[string]any) (map[string]any, error) {
 	// Resolve pipeline name
 	name := workflowType
-	if strings.HasPrefix(name, "pipeline:") {
-		name = strings.TrimPrefix(name, "pipeline:")
-	}
+	name = strings.TrimPrefix(name, "pipeline:")
 
 	pipeline, ok := h.pipelines[name]
 	if !ok {

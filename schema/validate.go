@@ -226,32 +226,32 @@ func validateModuleConfig(mod config.ModuleConfig, prefix string, errs *Validati
 	// Schema-driven validation for required fields
 	s := schemaRegistry.Get(mod.Type)
 	if s != nil {
-		for _, field := range s.ConfigFields {
-			if !field.Required {
+		for i := range s.ConfigFields {
+			if !s.ConfigFields[i].Required {
 				continue
 			}
-			fieldPath := prefix + ".config." + field.Key
+			fieldPath := prefix + ".config." + s.ConfigFields[i].Key
 			if mod.Config == nil {
 				*errs = append(*errs, &ValidationError{
 					Path:    fieldPath,
-					Message: fmt.Sprintf("required config field %q is missing (no config section)", field.Key),
+					Message: fmt.Sprintf("required config field %q is missing (no config section)", s.ConfigFields[i].Key),
 				})
 				continue
 			}
-			v, ok := mod.Config[field.Key]
+			v, ok := mod.Config[s.ConfigFields[i].Key]
 			if !ok {
 				*errs = append(*errs, &ValidationError{
 					Path:    fieldPath,
-					Message: fmt.Sprintf("required config field %q is missing", field.Key),
+					Message: fmt.Sprintf("required config field %q is missing", s.ConfigFields[i].Key),
 				})
 				continue
 			}
 			// Check non-empty for string fields
-			if field.Type == FieldTypeString || field.Type == FieldTypeDuration || field.Type == FieldTypeSelect {
+			if s.ConfigFields[i].Type == FieldTypeString || s.ConfigFields[i].Type == FieldTypeDuration || s.ConfigFields[i].Type == FieldTypeSelect {
 				if str, ok := v.(string); ok && str == "" {
 					*errs = append(*errs, &ValidationError{
 						Path:    fieldPath,
-						Message: fmt.Sprintf("required config field %q must be a non-empty string", field.Key),
+						Message: fmt.Sprintf("required config field %q must be a non-empty string", s.ConfigFields[i].Key),
 					})
 				}
 			}
@@ -287,32 +287,6 @@ func validateModuleConfig(mod config.ModuleConfig, prefix string, errs *Validati
 				}
 			}
 		}
-	}
-}
-
-// requireStringConfig checks that a key exists in the config map and is a non-empty string.
-func requireStringConfig(cfg map[string]any, key, prefix string, errs *ValidationErrors) {
-	if cfg == nil {
-		*errs = append(*errs, &ValidationError{
-			Path:    prefix + ".config." + key,
-			Message: fmt.Sprintf("required config field %q is missing (no config section)", key),
-		})
-		return
-	}
-	v, ok := cfg[key]
-	if !ok {
-		*errs = append(*errs, &ValidationError{
-			Path:    prefix + ".config." + key,
-			Message: fmt.Sprintf("required config field %q is missing", key),
-		})
-		return
-	}
-	s, ok := v.(string)
-	if !ok || s == "" {
-		*errs = append(*errs, &ValidationError{
-			Path:    prefix + ".config." + key,
-			Message: fmt.Sprintf("required config field %q must be a non-empty string", key),
-		})
 	}
 }
 
