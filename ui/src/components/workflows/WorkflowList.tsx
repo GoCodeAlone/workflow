@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
   apiListWorkflows,
   apiCreateWorkflow,
@@ -26,22 +26,20 @@ export default function WorkflowList({ projectId, projectName, onOpenWorkflow }:
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const wfs = await apiListWorkflows(projectId);
-      setWorkflows(wfs || []);
-    } catch {
-      // ignore
-    }
-    setLoading(false);
-  }, [projectId]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    apiListWorkflows(projectId)
+      .then((wfs) => {
+        if (!cancelled) setWorkflows(wfs || []);
+      })
+      .catch(() => {/* ignore */})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   const handleCreate = async () => {
     if (!newName.trim()) return;

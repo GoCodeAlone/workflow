@@ -1,11 +1,52 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import useWorkflowStore from '../../store/workflowStore.ts';
 import useModuleSchemaStore from '../../store/moduleSchemaStore.ts';
 import { CATEGORY_COLORS } from '../../types/workflow.ts';
-import type { ConfigFieldDef, IOPort } from '../../types/workflow.ts';
+import type { ConfigFieldDef, IOPort, WorkflowEdgeData } from '../../types/workflow.ts';
+import ArrayFieldEditor from './ArrayFieldEditor.tsx';
+import MapFieldEditor from './MapFieldEditor.tsx';
+import MiddlewareChainEditor from './MiddlewareChainEditor.tsx';
+import FilePicker from './FilePicker.tsx';
+
+// Resolve inherited value for a field based on incoming edges.
+// inheritFrom pattern: "{edgeType}.{sourceField}" where sourceField is "name" (source node label)
+// or a config key on the source node.
+function resolveInheritedValue(
+  field: ConfigFieldDef,
+  nodeId: string,
+  edges: { source: string; target: string; data?: unknown }[],
+  nodes: { id: string; data: { label: string; config: Record<string, unknown> } }[],
+): { value: unknown; sourceName: string } | null {
+  if (!field.inheritFrom) return null;
+  const dotIdx = field.inheritFrom.indexOf('.');
+  if (dotIdx < 0) return null;
+  const edgeType = field.inheritFrom.slice(0, dotIdx);
+  const sourceField = field.inheritFrom.slice(dotIdx + 1);
+  if (!edgeType || !sourceField) return null;
+
+  for (const edge of edges) {
+    if (edge.target !== nodeId) continue;
+    const edgeData = edge.data as WorkflowEdgeData | undefined;
+    const type = edgeData?.edgeType ?? 'dependency';
+    if (type !== edgeType) continue;
+
+    const sourceNode = nodes.find((n) => n.id === edge.source);
+    if (!sourceNode) continue;
+
+    if (sourceField === 'name') {
+      return { value: sourceNode.data.label, sourceName: sourceNode.data.label };
+    }
+    const val = sourceNode.data.config[sourceField];
+    if (val !== undefined) {
+      return { value: val, sourceName: sourceNode.data.label };
+    }
+  }
+  return null;
+}
 
 export default function PropertyPanel() {
   const nodes = useWorkflowStore((s) => s.nodes);
+  const edges = useWorkflowStore((s) => s.edges);
   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
   const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig);
   const updateNodeName = useWorkflowStore((s) => s.updateNodeName);
@@ -21,19 +62,51 @@ export default function PropertyPanel() {
   }, [schemasLoaded, fetchSchemas]);
 
   const node = nodes.find((n) => n.id === selectedNodeId);
+
+  const info = node ? moduleTypeMap[node.data.moduleType] : undefined;
+  const fields: ConfigFieldDef[] = useMemo(() => info?.configFields ?? [], [info]);
+
+  // Compute inherited values for fields with inheritFrom
+  const inheritedValues = useMemo(() => {
+    const result: Record<string, { value: unknown; sourceName: string }> = {};
+    if (!node) return result;
+    for (const field of fields) {
+      if (!field.inheritFrom) continue;
+      const resolved = resolveInheritedValue(field, node.id, edges, nodes);
+      if (resolved) {
+        result[field.key] = resolved;
+      }
+    }
+    return result;
+  }, [node, fields, edges, nodes]);
+
+  // Track which inherited fields have been overridden by the user
+  const [overriddenFields, setOverriddenFields] = useState<Set<string>>(new Set());
+
+  const handleFieldChange = (key: string, value: unknown) => {
+    // Mark field as overridden if it has inheritance
+    if (inheritedValues[key]) {
+      setOverriddenFields((prev) => new Set(prev).add(key));
+    }
+    if (node) {
+      updateNodeConfig(node.id, { [key]: value });
+    }
+  };
+
   if (!node) {
     return (
       <div
         style={{
-          width: 280,
+          width: '100%',
           background: '#181825',
-          borderLeft: '1px solid #313244',
           padding: 16,
           color: '#585b70',
           fontSize: 13,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
+          height: '100%',
+          boxSizing: 'border-box',
         }}
       >
         Select a node to edit its properties
@@ -41,20 +114,13 @@ export default function PropertyPanel() {
     );
   }
 
-  const info = moduleTypeMap[node.data.moduleType];
   const color = info ? CATEGORY_COLORS[info.category] : '#64748b';
-  const fields: ConfigFieldDef[] = info?.configFields ?? [];
-
-  const handleFieldChange = (key: string, value: unknown) => {
-    updateNodeConfig(node.id, { [key]: value });
-  };
 
   return (
     <div
       style={{
-        width: 280,
+        width: '100%',
         background: '#181825',
-        borderLeft: '1px solid #313244',
         overflowY: 'auto',
         height: '100%',
         fontSize: 12,
@@ -120,11 +186,52 @@ export default function PropertyPanel() {
             <span style={{ color: '#a6adc8', fontSize: 11, display: 'block', marginBottom: 8, fontWeight: 600 }}>
               Configuration
             </span>
-            {fields.map((field) => (
+            {fields.map((field) => {
+              const inherited = inheritedValues[field.key];
+              const isOverridden = overriddenFields.has(field.key);
+              const useInherited = inherited && !isOverridden && !node.data.config[field.key];
+
+              // Auto-fill inherited value if not overridden and field is empty
+              if (useInherited && inherited) {
+                const currentVal = node.data.config[field.key];
+                if (currentVal === undefined || currentVal === '' || currentVal === null) {
+                  // Will be auto-filled on display, actual config update happens on first render
+                  // We show the inherited value but don't force-write to config to avoid loops
+                }
+              }
+
+              return (
               <label key={field.key} style={{ display: 'block', marginBottom: 10 }}>
-                <span style={{ color: '#a6adc8', fontSize: 11, display: 'block', marginBottom: 3 }}>
-                  {field.label}
-                  {field.required && <span style={{ color: '#f38ba8', marginLeft: 2 }}>*</span>}
+                <span style={{ color: '#a6adc8', fontSize: 11, display: 'flex', alignItems: 'center', marginBottom: 3, gap: 4 }}>
+                  <span>
+                    {field.label}
+                    {field.required && <span style={{ color: '#f38ba8', marginLeft: 2 }}>*</span>}
+                  </span>
+                  {inherited && !isOverridden && (
+                    <span
+                      style={{ color: '#a6e3a1', fontSize: 9, cursor: 'pointer' }}
+                      title={`Click to override inherited value from ${inherited.sourceName}`}
+                      onClick={() => setOverriddenFields((prev) => new Set(prev).add(field.key))}
+                    >
+                      inherited from {inherited.sourceName}
+                    </span>
+                  )}
+                  {inherited && isOverridden && (
+                    <span
+                      style={{ color: '#fab387', fontSize: 9, cursor: 'pointer' }}
+                      title="Click to restore inherited value"
+                      onClick={() => {
+                        setOverriddenFields((prev) => {
+                          const next = new Set(prev);
+                          next.delete(field.key);
+                          return next;
+                        });
+                        updateNodeConfig(node.id, { [field.key]: undefined });
+                      }}
+                    >
+                      overridden
+                    </span>
+                  )}
                 </span>
                 {field.type === 'select' ? (
                   <select
@@ -158,6 +265,22 @@ export default function PropertyPanel() {
                       <span style={{ color: '#585b70', fontSize: 10 }}>{field.description}</span>
                     )}
                   </div>
+                ) : field.type === 'array' ? (
+                  <ArrayFieldEditor
+                    label={field.label}
+                    value={(node.data.config[field.key] as unknown[]) ?? (field.defaultValue as unknown[]) ?? []}
+                    onChange={(val) => handleFieldChange(field.key, val)}
+                    itemType={field.arrayItemType}
+                    placeholder={field.placeholder}
+                  />
+                ) : field.type === 'map' ? (
+                  <MapFieldEditor
+                    label={field.label}
+                    value={(node.data.config[field.key] as Record<string, unknown>) ?? (field.defaultValue as Record<string, unknown>) ?? {}}
+                    onChange={(val) => handleFieldChange(field.key, val)}
+                    valueType={field.mapValueType}
+                    placeholder={field.placeholder}
+                  />
                 ) : field.type === 'json' ? (
                   <textarea
                     value={
@@ -176,20 +299,34 @@ export default function PropertyPanel() {
                     placeholder={field.placeholder}
                     style={{ ...inputStyle, resize: 'vertical', fontFamily: 'monospace' }}
                   />
+                ) : field.type === 'filepath' ? (
+                  <FilePicker
+                    value={String(node.data.config[field.key] ?? field.defaultValue ?? '')}
+                    onChange={(val) => handleFieldChange(field.key, val)}
+                    placeholder={field.placeholder}
+                    description={field.description}
+                  />
+                ) : field.sensitive ? (
+                  <SensitiveFieldInput
+                    value={String(node.data.config[field.key] ?? field.defaultValue ?? '')}
+                    onChange={(val) => handleFieldChange(field.key, val)}
+                    placeholder={field.placeholder}
+                  />
                 ) : (
                   <input
                     type="text"
-                    value={String(node.data.config[field.key] ?? field.defaultValue ?? '')}
+                    value={String(node.data.config[field.key] ?? (useInherited ? inherited?.value : field.defaultValue) ?? '')}
                     onChange={(e) => handleFieldChange(field.key, e.target.value)}
                     placeholder={field.placeholder}
-                    style={inputStyle}
+                    style={useInherited ? { ...inputStyle, fontStyle: 'italic', color: '#a6e3a1', opacity: 0.8 } : inputStyle}
                   />
                 )}
                 {field.description && field.type !== 'boolean' && (
                   <span style={{ color: '#585b70', fontSize: 10, display: 'block', marginTop: 2 }}>{field.description}</span>
                 )}
               </label>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -240,6 +377,15 @@ export default function PropertyPanel() {
           />
         )}
 
+        {/* Middleware chain editor for router nodes */}
+        {(node.data.moduleType === 'http.router' || node.data.moduleType === 'chimux.router') && (
+          <MiddlewareChainEditor
+            nodeId={node.id}
+            middlewareChain={(node.data.config?.middlewareChain as string[]) ?? []}
+            onChange={(chain) => updateNodeConfig(node.id, { middlewareChain: chain })}
+          />
+        )}
+
         {/* Delete */}
         <button
           onClick={() => {
@@ -260,6 +406,48 @@ export default function PropertyPanel() {
           Delete Node
         </button>
       </div>
+    </div>
+  );
+}
+
+function SensitiveFieldInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  placeholder?: string;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        type={visible ? 'text' : 'password'}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        style={{ ...inputStyle, paddingRight: 30 }}
+      />
+      <button
+        type="button"
+        onClick={() => setVisible((v) => !v)}
+        style={{
+          position: 'absolute',
+          right: 4,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          background: 'none',
+          border: 'none',
+          color: '#585b70',
+          cursor: 'pointer',
+          fontSize: 11,
+          padding: '2px 4px',
+        }}
+        title={visible ? 'Hide value' : 'Show value'}
+      >
+        {visible ? 'hide' : 'show'}
+      </button>
     </div>
   );
 }

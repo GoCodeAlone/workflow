@@ -30,7 +30,7 @@ async function dragModuleToCanvas(
   // Dispatch drag events programmatically using evaluate
   // The palette items set 'application/workflow-module-type' on drag
   // We need to find the moduleType from the label
-  const moduleType = await page.evaluate((label: string) => {
+  await page.evaluate((label: string) => {
     // Look through all draggable elements to find the one with matching text
     const elements = document.querySelectorAll('[draggable="true"]');
     for (const el of elements) {

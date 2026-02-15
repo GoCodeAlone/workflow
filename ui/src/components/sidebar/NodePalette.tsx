@@ -11,7 +11,6 @@ export default function NodePalette() {
   const [search, setSearch] = useState('');
 
   const addNode = useWorkflowStore((s) => s.addNode);
-  const nodes = useWorkflowStore((s) => s.nodes);
   const moduleTypes = useModuleSchemaStore((s) => s.moduleTypes);
   const fetchSchemas = useModuleSchemaStore((s) => s.fetchSchemas);
   const schemasLoaded = useModuleSchemaStore((s) => s.loaded);
@@ -76,9 +75,8 @@ export default function NodePalette() {
       onMouseDown={stopPropagation}
       onDoubleClick={stopPropagation}
       style={{
-        width: 240,
+        width: '100%',
         background: '#181825',
-        borderRight: '1px solid #313244',
         overflowY: 'auto',
         height: '100%',
         padding: '8px 0',

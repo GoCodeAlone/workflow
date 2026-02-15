@@ -36,6 +36,22 @@ modules:
       requestsPerMinute: 120
       burstSize: 20
 
+  # --- Data Layer ---
+  - name: admin-db
+    type: storage.sqlite
+    config:
+      dbPath: "data/workflow.db"
+
+  - name: admin-workflow-registry
+    type: workflow.registry
+    config:
+      storageBackend: "admin-db"
+    dependsOn: [admin-db]
+
+  - name: admin-user-store
+    type: auth.user-store
+    dependsOn: [admin-db]
+
   # --- Auth ---
   - name: admin-auth
     type: auth.jwt
@@ -44,6 +60,7 @@ modules:
       tokenExpiry: "24h"
       issuer: "workflow-admin"
       responseFormat: "v1"
+    dependsOn: [admin-user-store]
 
   - name: admin-auth-middleware
     type: http.middleware.auth
@@ -54,22 +71,27 @@ modules:
   # --- Management API ---
   - name: admin-management
     type: http.handler
+    dependsOn: [admin-router]
 
   # --- v1 API (companies, projects, workflows) ---
   - name: admin-v1-api
     type: http.handler
+    dependsOn: [admin-workflow-registry, admin-auth]
 
   # --- AI API ---
   - name: admin-ai-api
     type: http.handler
+    dependsOn: [admin-router]
 
   # --- Dynamic Components API ---
   - name: admin-dynamic-api
     type: http.handler
+    dependsOn: [admin-router]
 
   # --- Schema API ---
   - name: admin-schema-api
     type: http.handler
+    dependsOn: [admin-router]
 
   # --- Static File Server (serves embedded React UI) ---
   # The root path is injected at runtime from extracted embed.FS assets.
@@ -78,10 +100,20 @@ modules:
   - name: admin-ui
     type: static.fileserver
     config:
+      root: "../module/ui_dist"
       prefix: "/"
       spaFallback: true
       cacheMaxAge: 3600
       router: admin-router
+    dependsOn: [admin-router]
+
+  # --- OpenAPI ---
+  - name: admin-openapi
+    type: openapi.generator
+    config:
+      title: "Workflow Admin API"
+      version: "1.0.0"
+      description: "Auto-generated OpenAPI spec from the workflow admin routes"
     dependsOn: [admin-router]
 
   # --- Observability ---
@@ -311,3 +343,13 @@ workflows:
         path: "/api/v1/module-schemas"
         handler: admin-schema-api
         middlewares: [admin-cors, admin-auth-middleware]
+
+      # === OpenAPI Spec (unauthenticated, read-only) ===
+      - method: GET
+        path: "/api/openapi.json"
+        handler: admin-openapi
+        middlewares: [admin-cors]
+      - method: GET
+        path: "/api/openapi.yaml"
+        handler: admin-openapi
+        middlewares: [admin-cors]

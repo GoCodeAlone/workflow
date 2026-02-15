@@ -6,6 +6,7 @@ import {
   apiListPermissions,
   apiShareWorkflow,
   type ApiWorkflowRecord,
+  type ApiWorkflowVersion,
   type ApiMembership,
 } from '../../utils/api.ts';
 
@@ -21,21 +22,12 @@ export default function WorkflowSettings({ workflow, onClose, onDeleted, onUpdat
   const [description, setDescription] = useState(workflow.description || '');
   const [saving, setSaving] = useState(false);
 
-  const [versions, setVersions] = useState<ApiWorkflowRecord[]>([]);
+  const [versions, setVersions] = useState<ApiWorkflowVersion[]>([]);
   const [permissions, setPermissions] = useState<ApiMembership[]>([]);
   const [shareUserId, setShareUserId] = useState('');
   const [shareRole, setShareRole] = useState('viewer');
 
   const [activeTab, setActiveTab] = useState<'general' | 'sharing' | 'versions' | 'danger'>('general');
-
-  const loadVersions = useCallback(async () => {
-    try {
-      const v = await apiListVersions(workflow.id);
-      setVersions(v || []);
-    } catch {
-      // ignore
-    }
-  }, [workflow.id]);
 
   const loadPermissions = useCallback(async () => {
     try {
@@ -47,9 +39,15 @@ export default function WorkflowSettings({ workflow, onClose, onDeleted, onUpdat
   }, [workflow.id]);
 
   useEffect(() => {
-    loadVersions();
-    loadPermissions();
-  }, [loadVersions, loadPermissions]);
+    let cancelled = false;
+    apiListVersions(workflow.id)
+      .then((v) => { if (!cancelled) setVersions(v || []); })
+      .catch(() => {/* ignore */});
+    apiListPermissions(workflow.id)
+      .then((p) => { if (!cancelled) setPermissions(p || []); })
+      .catch(() => {/* ignore */});
+    return () => { cancelled = true; };
+  }, [workflow.id]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -286,9 +284,9 @@ export default function WorkflowSettings({ workflow, onClose, onDeleted, onUpdat
                 >
                   <span style={{ fontWeight: 600, color: '#89b4fa', minWidth: 30 }}>v{v.version}</span>
                   <span style={{ flex: 1, color: '#a6adc8' }}>
-                    {new Date(v.updated_at).toLocaleString()}
+                    {new Date(v.created_at).toLocaleString()}
                   </span>
-                  <span style={{ color: '#6c7086', fontSize: 11 }}>{v.status}</span>
+                  <span style={{ color: '#6c7086', fontSize: 11 }}>{v.created_by}</span>
                 </div>
               ))}
             </div>

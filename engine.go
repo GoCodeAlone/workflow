@@ -22,6 +22,7 @@ import (
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/schema"
+	"github.com/GoCodeAlone/workflow/secrets"
 )
 
 // WorkflowHandler interface for handling different workflow types
@@ -58,6 +59,7 @@ type StdEngine struct {
 	dynamicRegistry  *dynamic.ComponentRegistry
 	dynamicLoader    *dynamic.Loader
 	eventEmitter     *module.WorkflowEventEmitter
+	secretsResolver  *secrets.MultiResolver
 }
 
 // SetDynamicRegistry sets the dynamic component registry on the engine.
@@ -81,7 +83,13 @@ func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
 		modules:          make([]modular.Module, 0),
 		triggers:         make([]module.Trigger, 0),
 		triggerRegistry:  module.NewTriggerRegistry(),
+		secretsResolver:  secrets.NewMultiResolver(),
 	}
+}
+
+// SecretsResolver returns the engine's multi-provider secrets resolver.
+func (e *StdEngine) SecretsResolver() *secrets.MultiResolver {
+	return e.secretsResolver
 }
 
 // RegisterWorkflowHandler adds a workflow handler to the engine
@@ -332,6 +340,19 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "health.checker":
 				e.logger.Debug("Loading health checker module")
 				mod = module.NewHealthChecker(modCfg.Name)
+			case "log.collector":
+				e.logger.Debug("Loading log collector module")
+				lcCfg := module.LogCollectorConfig{}
+				if v, ok := modCfg.Config["logLevel"].(string); ok {
+					lcCfg.LogLevel = v
+				}
+				if v, ok := modCfg.Config["outputFormat"].(string); ok {
+					lcCfg.OutputFormat = v
+				}
+				if v, ok := modCfg.Config["retentionDays"].(int); ok {
+					lcCfg.RetentionDays = v
+				}
+				mod = module.NewLogCollector(modCfg.Name, lcCfg)
 			case "http.middleware.requestid":
 				e.logger.Debug("Loading request ID middleware module")
 				mod = module.NewRequestIDMiddleware(modCfg.Name)
@@ -432,7 +453,37 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				mod = module.NewSlackNotification(modCfg.Name)
 			case "storage.s3":
 				e.logger.Debug("Loading S3 storage module")
-				mod = module.NewS3Storage(modCfg.Name)
+				s3Mod := module.NewS3Storage(modCfg.Name)
+				if bucket, ok := modCfg.Config["bucket"].(string); ok {
+					s3Mod.SetBucket(bucket)
+				}
+				if region, ok := modCfg.Config["region"].(string); ok {
+					s3Mod.SetRegion(region)
+				}
+				if endpoint, ok := modCfg.Config["endpoint"].(string); ok {
+					s3Mod.SetEndpoint(endpoint)
+				}
+				mod = s3Mod
+			case "storage.local":
+				e.logger.Debug("Loading local storage module")
+				rootDir := "./data/storage"
+				if rd, ok := modCfg.Config["rootDir"].(string); ok {
+					rootDir = cfg.ResolveRelativePath(rd)
+				}
+				mod = module.NewLocalStorageModule(modCfg.Name, rootDir)
+			case "storage.gcs":
+				e.logger.Debug("Loading GCS storage module")
+				gcsMod := module.NewGCSStorage(modCfg.Name)
+				if bucket, ok := modCfg.Config["bucket"].(string); ok {
+					gcsMod.SetBucket(bucket)
+				}
+				if project, ok := modCfg.Config["project"].(string); ok {
+					gcsMod.SetProject(project)
+				}
+				if creds, ok := modCfg.Config["credentialsFile"].(string); ok {
+					gcsMod.SetCredentialsFile(cfg.ResolveRelativePath(creds))
+				}
+				mod = gcsMod
 			case "messaging.nats":
 				e.logger.Debug("Loading NATS broker module")
 				mod = module.NewNATSBroker(modCfg.Name)
@@ -496,7 +547,11 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 			case "auth.jwt":
 				secret := ""
 				if s, ok := modCfg.Config["secret"].(string); ok {
-					secret = os.ExpandEnv(s)
+					if expanded, err := e.secretsResolver.Expand(context.Background(), s); err == nil {
+						secret = expanded
+					} else {
+						secret = os.ExpandEnv(s)
+					}
 				}
 				tokenExpiry := 24 * time.Hour
 				if te, ok := modCfg.Config["tokenExpiry"].(string); ok && te != "" {
@@ -528,6 +583,106 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					TimeoutSeconds:       getIntConfig(modCfg.Config, "timeoutSeconds", 30),
 				}
 				mod = module.NewProcessingStep(modCfg.Name, stepConfig)
+			case "secrets.vault":
+				e.logger.Debug("Loading Vault secrets provider module")
+				vm := module.NewSecretsVaultModule(modCfg.Name)
+				if addr, ok := modCfg.Config["address"].(string); ok {
+					vm.SetAddress(addr)
+				}
+				if token, ok := modCfg.Config["token"].(string); ok {
+					if expanded, err := e.secretsResolver.Expand(context.Background(), token); err == nil {
+						vm.SetToken(expanded)
+					} else {
+						vm.SetToken(token)
+					}
+				}
+				if mp, ok := modCfg.Config["mountPath"].(string); ok && mp != "" {
+					vm.SetMountPath(mp)
+				}
+				if ns, ok := modCfg.Config["namespace"].(string); ok && ns != "" {
+					vm.SetNamespace(ns)
+				}
+				mod = vm
+			case "secrets.aws":
+				e.logger.Debug("Loading AWS Secrets Manager module")
+				am := module.NewSecretsAWSModule(modCfg.Name)
+				if region, ok := modCfg.Config["region"].(string); ok && region != "" {
+					am.SetRegion(region)
+				}
+				if akid, ok := modCfg.Config["accessKeyId"].(string); ok {
+					if expanded, err := e.secretsResolver.Expand(context.Background(), akid); err == nil {
+						am.SetAccessKeyID(expanded)
+					} else {
+						am.SetAccessKeyID(akid)
+					}
+				}
+				if sak, ok := modCfg.Config["secretAccessKey"].(string); ok {
+					if expanded, err := e.secretsResolver.Expand(context.Background(), sak); err == nil {
+						am.SetSecretAccessKey(expanded)
+					} else {
+						am.SetSecretAccessKey(sak)
+					}
+				}
+				mod = am
+			case "storage.sqlite":
+				e.logger.Debug("Loading SQLite storage module: " + modCfg.Name)
+				dbPath := "data/workflow.db"
+				if p, ok := modCfg.Config["dbPath"].(string); ok && p != "" {
+					dbPath = cfg.ResolveRelativePath(p)
+				}
+				sqliteStorage := module.NewSQLiteStorage(modCfg.Name, dbPath)
+				if mc, ok := modCfg.Config["maxConnections"].(float64); ok && mc > 0 {
+					sqliteStorage.SetMaxConnections(int(mc))
+				}
+				if wal, ok := modCfg.Config["walMode"].(bool); ok {
+					sqliteStorage.SetWALMode(wal)
+				}
+				mod = sqliteStorage
+			case "auth.user-store":
+				e.logger.Debug("Loading user store module: " + modCfg.Name)
+				mod = module.NewUserStore(modCfg.Name)
+			case "workflow.registry":
+				e.logger.Debug("Loading workflow registry module: " + modCfg.Name)
+				storageBackend := ""
+				if sb, ok := modCfg.Config["storageBackend"].(string); ok && sb != "" {
+					storageBackend = sb
+				}
+				mod = module.NewWorkflowRegistry(modCfg.Name, storageBackend)
+			case "openapi.generator":
+				e.logger.Debug("Loading OpenAPI generator module")
+				genConfig := module.OpenAPIGeneratorConfig{}
+				if title, ok := modCfg.Config["title"].(string); ok {
+					genConfig.Title = title
+				}
+				if version, ok := modCfg.Config["version"].(string); ok {
+					genConfig.Version = version
+				}
+				if desc, ok := modCfg.Config["description"].(string); ok {
+					genConfig.Description = desc
+				}
+				if servers, ok := modCfg.Config["servers"].([]any); ok {
+					for _, s := range servers {
+						if str, ok := s.(string); ok {
+							genConfig.Servers = append(genConfig.Servers, str)
+						}
+					}
+				}
+				mod = module.NewOpenAPIGenerator(modCfg.Name, genConfig)
+			case "openapi.consumer":
+				e.logger.Debug("Loading OpenAPI consumer module")
+				consConfig := module.OpenAPIConsumerConfig{}
+				if specURL, ok := modCfg.Config["specUrl"].(string); ok {
+					consConfig.SpecURL = specURL
+				}
+				if specFile, ok := modCfg.Config["specFile"].(string); ok {
+					consConfig.SpecFile = cfg.ResolveRelativePath(specFile)
+				}
+				consumer := module.NewOpenAPIConsumer(modCfg.Name, consConfig)
+				if fmCfg, ok := modCfg.Config["fieldMapping"].(map[string]any); ok {
+					override := module.FieldMappingFromConfig(fmCfg)
+					consumer.SetFieldMapping(override)
+				}
+				mod = consumer
 			default:
 				e.logger.Warn("Unknown module type: " + modCfg.Type)
 				return fmt.Errorf("unknown module type: %s", modCfg.Type)
@@ -729,6 +884,29 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					break
 				}
 			}
+		}
+	}
+
+	// Wire log collector endpoint on any available router (only if not already configured)
+	for _, svc := range e.app.SvcRegistry() {
+		if lc, ok := svc.(*module.LogCollector); ok {
+			for _, routerSvc := range e.app.SvcRegistry() {
+				if router, ok := routerSvc.(*module.StandardHTTPRouter); ok {
+					if !router.HasRoute("GET", "/logs") {
+						router.AddRoute("GET", "/logs", &module.LogHTTPHandler{Handler: lc.LogHandler()})
+						e.logger.Debug("Registered log collector endpoint on router")
+					}
+					break
+				}
+			}
+		}
+	}
+
+	// Wire OpenAPI generators: build spec from workflow route definitions
+	for _, svc := range e.app.SvcRegistry() {
+		if gen, ok := svc.(*module.OpenAPIGenerator); ok {
+			gen.BuildSpec(cfg.Workflows)
+			e.logger.Debug("Built OpenAPI spec for generator: " + gen.Name())
 		}
 	}
 

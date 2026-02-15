@@ -31,7 +31,7 @@ async function addNodesViaStore(page: Page, count: number): Promise<number> {
     // Access the Zustand store from the window (exposed by ReactFlow internals
     // or the app). If the store is not directly available we fall back to
     // dispatching custom events.
-    const store = (window as any).__zustandStore ?? (window as any).__workflowStore;
+    const store = (window as unknown as Record<string, unknown>).__zustandStore ?? (window as unknown as Record<string, unknown>).__workflowStore;
 
     if (store) {
       const state = store.getState();
@@ -291,7 +291,7 @@ test.describe('Performance - 50+ Nodes', () => {
       const added = await page.evaluate(
         ({ batchNum, batchSize }: { batchNum: number; batchSize: number }) => {
           const store =
-            (window as any).__zustandStore ?? (window as any).__workflowStore;
+            (window as unknown as Record<string, unknown>).__zustandStore ?? (window as unknown as Record<string, unknown>).__workflowStore;
           if (!store) return 0;
 
           const state = store.getState();

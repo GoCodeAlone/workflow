@@ -574,7 +574,7 @@ triggers: {}`;
   test('P6-31: Import all 30 module types via large workflow', async ({ page }) => {
     // Build a YAML with all module types from COMPLETE_MODULE_TYPE_MAP
     const entries = Object.entries(COMPLETE_MODULE_TYPE_MAP);
-    const modules = entries.map(([label, type], i) => {
+    const modules = entries.map(([label, type]) => {
       const name = label.toLowerCase().replace(/\s+/g, '-');
       return `  - name: ${name}\n    type: ${type}`;
     });

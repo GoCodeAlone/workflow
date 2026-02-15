@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useState, useMemo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { CATEGORY_COLORS } from '../../types/workflow.ts';
 import type { ModuleCategory, IOPort } from '../../types/workflow.ts';
@@ -75,6 +75,8 @@ export default function BaseNode({
 }: BaseNodeProps) {
   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
   const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
+  const connectingFrom = useWorkflowStore((s) => s.connectingFrom);
+  const compatibleNodeIds = useWorkflowStore((s) => s.compatibleNodeIds);
   const moduleTypeMap = useModuleSchemaStore((s) => s.moduleTypeMap);
   const info = moduleTypeMap[moduleType];
   const category: ModuleCategory = info?.category ?? 'infrastructure';
@@ -82,29 +84,87 @@ export default function BaseNode({
   const isSelected = selectedNodeId === id;
   const ioSig = info?.ioSignature;
 
+  // Connection drag highlighting
+  const isDragging = connectingFrom !== null;
+  const isSource = connectingFrom?.nodeId === id;
+  const isCompatible = isDragging && !isSource && compatibleNodeIds.includes(id);
+  const isIncompatible = isDragging && !isSource && !compatibleNodeIds.includes(id);
+
+  const nodeStyle = useMemo(() => {
+    const base: React.CSSProperties = {
+      background: '#1e1e2e',
+      border: `2px solid ${isSelected ? '#fff' : color}`,
+      borderRadius: 8,
+      padding: 0,
+      minWidth: 180,
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: 12,
+      color: '#cdd6f4',
+      boxShadow: isSelected
+        ? `0 0 0 2px ${color}40, 0 4px 12px rgba(0,0,0,0.4)`
+        : '0 2px 8px rgba(0,0,0,0.3)',
+      cursor: 'pointer',
+      transition: 'opacity 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease, filter 0.3s ease',
+    };
+
+    if (isSource) {
+      base.boxShadow = `0 0 0 2px ${color}60, 0 4px 16px rgba(0,0,0,0.4)`;
+    } else if (isCompatible) {
+      base.border = `2px solid #22c55e`;
+      base.boxShadow = `0 0 0 2px rgba(34, 197, 94, 0.3), 0 0 12px rgba(34, 197, 94, 0.2)`;
+    } else if (isIncompatible) {
+      base.opacity = 0.35;
+      base.filter = 'saturate(0.3)';
+    }
+
+    return base;
+  }, [isSelected, color, isSource, isCompatible, isIncompatible]);
+
+  const targetHandleStyle = useMemo(() => {
+    const base: React.CSSProperties = {
+      background: color,
+      width: 10,
+      height: 10,
+      border: '2px solid #1e1e2e',
+      transition: 'width 0.2s ease, height 0.2s ease, box-shadow 0.2s ease',
+    };
+    if (isCompatible && connectingFrom?.handleType === 'source') {
+      base.width = 14;
+      base.height = 14;
+      base.boxShadow = `0 0 8px rgba(34, 197, 94, 0.6)`;
+      base.background = '#22c55e';
+    }
+    return base;
+  }, [color, isCompatible, connectingFrom?.handleType]);
+
+  const sourceHandleStyle = useMemo(() => {
+    const base: React.CSSProperties = {
+      background: color,
+      width: 10,
+      height: 10,
+      border: '2px solid #1e1e2e',
+      transition: 'width 0.2s ease, height 0.2s ease, box-shadow 0.2s ease',
+    };
+    if (isCompatible && connectingFrom?.handleType === 'target') {
+      base.width = 14;
+      base.height = 14;
+      base.boxShadow = `0 0 8px rgba(34, 197, 94, 0.6)`;
+      base.background = '#22c55e';
+    }
+    return base;
+  }, [color, isCompatible, connectingFrom?.handleType]);
+
   return (
     <div
       onClick={() => setSelectedNode(id)}
-      style={{
-        background: '#1e1e2e',
-        border: `2px solid ${isSelected ? '#fff' : color}`,
-        borderRadius: 8,
-        padding: 0,
-        minWidth: 180,
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: 12,
-        color: '#cdd6f4',
-        boxShadow: isSelected
-          ? `0 0 0 2px ${color}40, 0 4px 12px rgba(0,0,0,0.4)`
-          : '0 2px 8px rgba(0,0,0,0.3)',
-        cursor: 'pointer',
-      }}
+      className={isCompatible ? 'connection-compatible' : undefined}
+      style={nodeStyle}
     >
       {hasInput && (
         <Handle
           type="target"
           position={Position.Top}
-          style={{ background: color, width: 10, height: 10, border: '2px solid #1e1e2e' }}
+          style={targetHandleStyle}
         />
       )}
 
@@ -154,7 +214,7 @@ export default function BaseNode({
         <Handle
           type="source"
           position={Position.Bottom}
-          style={{ background: color, width: 10, height: 10, border: '2px solid #1e1e2e' }}
+          style={sourceHandleStyle}
         />
       )}
     </div>

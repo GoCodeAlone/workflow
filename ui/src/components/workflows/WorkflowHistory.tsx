@@ -16,7 +16,6 @@ export default function WorkflowHistory({ workflowId, workflowName, onClose, onR
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     apiListVersions(workflowId)
       .then((data) => {
         if (!cancelled) setVersions(data);

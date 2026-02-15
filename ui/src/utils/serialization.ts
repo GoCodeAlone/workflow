@@ -14,6 +14,7 @@ import type {
 } from '../types/workflow.ts';
 import { MODULE_TYPE_MAP as STATIC_MODULE_TYPE_MAP } from '../types/workflow.ts';
 import useModuleSchemaStore from '../store/moduleSchemaStore.ts';
+import { layoutNodes } from './autoLayout.ts';
 
 function getModuleTypeMap() {
   const store = useModuleSchemaStore.getState();
@@ -57,16 +58,27 @@ export function extractWorkflowEdges(
     if (http.routes) {
       for (const route of http.routes) {
         const handlerId = nameToId[route.handler];
-        if (routerId && handlerId) {
-          edges.push(makeEdge(routerId, handlerId, 'http-route', `${route.method} ${route.path}`));
-        }
-        if (route.middlewares) {
-          for (const mw of route.middlewares) {
-            const mwId = nameToId[mw];
-            if (mwId && handlerId) {
-              edges.push(makeEdge(mwId, handlerId, 'http-route', 'middleware'));
+        if (route.middlewares && route.middlewares.length > 0 && routerId) {
+          // Build ordered middleware chain: router -> mw1 -> mw2 -> ... -> handler
+          const mwIds = route.middlewares
+            .map((mw) => nameToId[mw])
+            .filter((id): id is string => !!id);
+
+          if (mwIds.length > 0) {
+            // Router to first middleware
+            edges.push(makeEdge(routerId, mwIds[0], 'middleware-chain', `${route.method} ${route.path} [1]`));
+            // Chain middlewares together
+            for (let i = 0; i < mwIds.length - 1; i++) {
+              edges.push(makeEdge(mwIds[i], mwIds[i + 1], 'middleware-chain', `[${i + 2}]`));
+            }
+            // Last middleware to handler
+            if (handlerId) {
+              edges.push(makeEdge(mwIds[mwIds.length - 1], handlerId, 'middleware-chain', `[${mwIds.length + 1}] handler`));
             }
           }
+        } else if (routerId && handlerId) {
+          // No middleware — direct route edge
+          edges.push(makeEdge(routerId, handlerId, 'http-route', `${route.method} ${route.path}`));
         }
       }
     }
@@ -128,76 +140,6 @@ export function extractWorkflowEdges(
   return edges;
 }
 
-function topologicalLayout(
-  nodes: WorkflowNode[],
-  edges: Edge[],
-): void {
-  const X_SPACING = 300;
-  const Y_SPACING = 150;
-  const X_OFFSET = 50;
-  const Y_OFFSET = 50;
-
-  const nodeIds = new Set(nodes.map((n) => n.id));
-  const inDegree: Record<string, number> = {};
-  const adj: Record<string, string[]> = {};
-
-  for (const n of nodes) {
-    inDegree[n.id] = 0;
-    adj[n.id] = [];
-  }
-
-  for (const e of edges) {
-    if (nodeIds.has(e.source) && nodeIds.has(e.target)) {
-      inDegree[e.target] = (inDegree[e.target] ?? 0) + 1;
-      adj[e.source].push(e.target);
-    }
-  }
-
-  // BFS by layers
-  const layers: string[][] = [];
-  let queue = nodes.filter((n) => inDegree[n.id] === 0).map((n) => n.id);
-
-  const visited = new Set<string>();
-  while (queue.length > 0) {
-    layers.push([...queue]);
-    const next: string[] = [];
-    for (const id of queue) {
-      visited.add(id);
-      for (const child of adj[id]) {
-        inDegree[child]--;
-        if (inDegree[child] === 0 && !visited.has(child)) {
-          next.push(child);
-        }
-      }
-    }
-    queue = next;
-  }
-
-  // Any nodes not placed (cycles) go in a final layer
-  const remaining = nodes.filter((n) => !visited.has(n.id)).map((n) => n.id);
-  if (remaining.length > 0) {
-    layers.push(remaining);
-  }
-
-  // Assign positions: each layer is a column (left to right)
-  const posMap: Record<string, { x: number; y: number }> = {};
-  for (let col = 0; col < layers.length; col++) {
-    const layer = layers[col];
-    for (let row = 0; row < layer.length; row++) {
-      posMap[layer[row]] = {
-        x: col * X_SPACING + X_OFFSET,
-        y: row * Y_SPACING + Y_OFFSET,
-      };
-    }
-  }
-
-  for (const node of nodes) {
-    if (posMap[node.id]) {
-      node.position = posMap[node.id];
-    }
-  }
-}
-
 export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowConfig {
   // Filter out synthesized conditional nodes
   const realNodes = nodes.filter((n) => !n.data.synthesized);
@@ -206,6 +148,7 @@ export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowCon
   const httpRouteEdges: Edge[] = [];
   const messagingEdges: Edge[] = [];
   const conditionalEdges: Edge[] = [];
+  const middlewareChainEdges: Edge[] = [];
 
   for (const edge of edges) {
     const edgeData = edge.data as WorkflowEdgeData | undefined;
@@ -219,6 +162,12 @@ export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowCon
         break;
       case 'conditional':
         conditionalEdges.push(edge);
+        break;
+      case 'middleware-chain':
+        middlewareChainEdges.push(edge);
+        break;
+      case 'auto-wire':
+        // Auto-wire edges are computed, not serialized
         break;
       default:
         dependencyEdges.push(edge);
@@ -283,7 +232,7 @@ export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowCon
   const workflows: Record<string, unknown> = {};
 
   // Reconstruct HTTP workflows
-  if (httpRouteEdges.length > 0) {
+  if (httpRouteEdges.length > 0 || middlewareChainEdges.length > 0) {
     const idToName: Record<string, string> = {};
     for (const n of nodes) idToName[n.id] = n.data.label;
 
@@ -301,16 +250,81 @@ export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowCon
         router: idToName[serverRouterEdge.target],
       };
 
-      if (routerRouteEdges.length > 0) {
-        httpConfig.routes = routerRouteEdges.map((e) => {
-          const label = (e.data as WorkflowEdgeData)?.label ?? 'GET /';
-          const parts = label.split(' ', 2);
-          return {
-            method: parts[0],
-            path: parts[1] ?? '/',
-            handler: idToName[e.target],
-          };
+      // Reconstruct routes from both http-route and middleware-chain edges
+      const routes: Array<{ method: string; path: string; handler: string; middlewares?: string[] }> = [];
+
+      // Direct routes (no middleware)
+      for (const e of routerRouteEdges) {
+        const label = (e.data as WorkflowEdgeData)?.label ?? 'GET /';
+        const parts = label.split(' ', 2);
+        routes.push({
+          method: parts[0],
+          path: parts[1] ?? '/',
+          handler: idToName[e.target],
         });
+      }
+
+      // Reconstruct middleware chain routes: walk chain edges from router
+      // Group chain edges by their starting route label
+      if (middlewareChainEdges.length > 0) {
+        // Find chain starts: edges from the router node
+        const routerId = serverRouterEdge.target;
+        const chainStarts = middlewareChainEdges.filter((e) => e.source === routerId);
+
+        for (const startEdge of chainStarts) {
+          const label = (startEdge.data as WorkflowEdgeData)?.label ?? '';
+          // Extract method/path from label like "GET /api [1]"
+          const routeMatch = label.match(/^(\S+)\s+(\S+)/);
+          const method = routeMatch?.[1] ?? 'GET';
+          const path = routeMatch?.[2] ?? '/';
+
+          // Walk the chain to collect ordered middleware names
+          const middlewares: string[] = [];
+          let currentId = startEdge.target;
+          const visited = new Set<string>();
+
+          while (currentId && !visited.has(currentId)) {
+            visited.add(currentId);
+            const nodeName = idToName[currentId];
+            const nodeObj = nodes.find((n) => n.id === currentId);
+            const isMiddleware = nodeObj?.data.moduleType?.startsWith('http.middleware.');
+
+            if (isMiddleware && nodeName) {
+              middlewares.push(nodeName);
+            }
+
+            // Find next edge in chain from currentId
+            const nextEdge = middlewareChainEdges.find(
+              (e) => e.source === currentId && e.id !== startEdge.id,
+            );
+            if (nextEdge) {
+              // Check if the target is the handler (last in chain)
+              const targetNode = nodes.find((n) => n.id === nextEdge.target);
+              const targetIsMiddleware = targetNode?.data.moduleType?.startsWith('http.middleware.');
+              if (!targetIsMiddleware && targetNode) {
+                // This is the handler
+                routes.push({
+                  method,
+                  path,
+                  handler: idToName[nextEdge.target],
+                  ...(middlewares.length > 0 ? { middlewares } : {}),
+                });
+                break;
+              }
+              currentId = nextEdge.target;
+            } else {
+              // End of chain without explicit handler
+              if (middlewares.length > 0) {
+                routes.push({ method, path, handler: '', middlewares });
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      if (routes.length > 0) {
+        httpConfig.routes = routes;
       }
 
       workflows.http = httpConfig;
@@ -411,9 +425,34 @@ export function configToNodes(config: WorkflowConfig): {
     }
   }
 
-  // Apply topological layout only when no saved positions exist
+  // Auto-wire edges: observability modules auto-wire to the first router
+  const autoWireTypes = new Set(['health.checker', 'metrics.collector', 'log.collector']);
+  const routerTypes = new Set(['http.router', 'chimux.router']);
+  const firstRouter = config.modules.find((m) => routerTypes.has(m.type));
+  if (firstRouter) {
+    const routerId = nameToId[firstRouter.name];
+    if (routerId) {
+      for (const mod of config.modules) {
+        if (autoWireTypes.has(mod.type)) {
+          const modId = nameToId[mod.name];
+          if (modId) {
+            const key = `${modId}->${routerId}`;
+            if (!existingPairs.has(key)) {
+              edges.push(makeEdge(modId, routerId, 'auto-wire', 'auto-wired'));
+              existingPairs.add(key);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Apply dagre layout only when no saved positions exist
   if (!hasPositions) {
-    topologicalLayout(nodes, edges);
+    const laid = layoutNodes(nodes, edges);
+    for (let i = 0; i < nodes.length; i++) {
+      nodes[i].position = laid[i].position;
+    }
   }
 
   return { nodes, edges };

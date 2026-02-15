@@ -26,7 +26,9 @@ type User struct {
 	CreatedAt    time.Time      `json:"createdAt"`
 }
 
-// JWTAuthModule handles JWT authentication with an in-memory user store
+// JWTAuthModule handles JWT authentication with an in-memory user store.
+// When an auth.user-store service is available, it delegates user CRUD to it;
+// otherwise it uses its own internal map for backward compatibility.
 type JWTAuthModule struct {
 	name           string
 	secret         string
@@ -34,11 +36,12 @@ type JWTAuthModule struct {
 	issuer         string
 	seedFile       string
 	responseFormat string           // "standard" (default) or "v1" (access_token/refresh_token)
-	users          map[string]*User // keyed by email
+	users          map[string]*User // keyed by email (used when no external userStore)
 	mu             sync.RWMutex
 	nextID         int
 	app            modular.Application
 	persistence    *PersistenceStore // optional write-through backend
+	userStore      *UserStore        // optional external user store (from auth.user-store module)
 }
 
 // NewJWTAuthModule creates a new JWT auth module
@@ -83,6 +86,14 @@ func (j *JWTAuthModule) Init(app modular.Application) error {
 		return fmt.Errorf("jwt secret is required")
 	}
 	j.app = app
+
+	// Wire external user store (optional — from auth.user-store module)
+	for _, svc := range app.SvcRegistry() {
+		if us, ok := svc.(*UserStore); ok {
+			j.userStore = us
+			break
+		}
+	}
 
 	// Wire persistence (optional)
 	var ps any
@@ -158,6 +169,14 @@ func (j *JWTAuthModule) Handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (j *JWTAuthModule) handleRegister(w http.ResponseWriter, r *http.Request) {
+	// Self-registration is only allowed when no users exist (initial setup).
+	// After setup, new users must be created by an admin via the user management API.
+	if j.userCount() > 0 {
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "registration is disabled; contact an administrator"})
+		return
+	}
+
 	var req struct {
 		Email    string `json:"email"`
 		Name     string `json:"name"`
@@ -175,43 +194,61 @@ func (j *JWTAuthModule) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	j.mu.Lock()
-	defer j.mu.Unlock()
+	var user *User
+	if j.userStore != nil {
+		var err error
+		user, err = j.userStore.CreateUser(req.Email, req.Name, req.Password, nil)
+		if err != nil {
+			if strings.Contains(err.Error(), "already exists") {
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "email already registered"})
+			} else {
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			}
+			return
+		}
+	} else {
+		j.mu.Lock()
 
-	// Check for duplicate email
-	if _, exists := j.users[req.Email]; exists {
-		w.WriteHeader(http.StatusConflict)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "email already registered"})
-		return
-	}
+		// Check for duplicate email
+		if _, exists := j.users[req.Email]; exists {
+			j.mu.Unlock()
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "email already registered"})
+			return
+		}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to hash password"})
-		return
-	}
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			j.mu.Unlock()
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to hash password"})
+			return
+		}
 
-	user := &User{
-		ID:           fmt.Sprintf("%d", j.nextID),
-		Email:        req.Email,
-		Name:         req.Name,
-		PasswordHash: string(hash),
-		CreatedAt:    time.Now(),
-	}
-	j.nextID++
-	j.users[req.Email] = user
+		user = &User{
+			ID:           fmt.Sprintf("%d", j.nextID),
+			Email:        req.Email,
+			Name:         req.Name,
+			PasswordHash: string(hash),
+			CreatedAt:    time.Now(),
+		}
+		j.nextID++
+		j.users[req.Email] = user
+		j.mu.Unlock()
 
-	// Write-through to persistence
-	if j.persistence != nil {
-		_ = j.persistence.SaveUser(UserRecord{
-			ID:           user.ID,
-			Email:        user.Email,
-			Name:         user.Name,
-			PasswordHash: user.PasswordHash,
-			Metadata:     user.Metadata,
-			CreatedAt:    user.CreatedAt,
-		})
+		// Write-through to persistence
+		if j.persistence != nil {
+			_ = j.persistence.SaveUser(UserRecord{
+				ID:           user.ID,
+				Email:        user.Email,
+				Name:         user.Name,
+				PasswordHash: user.PasswordHash,
+				Metadata:     user.Metadata,
+				CreatedAt:    user.CreatedAt,
+			})
+		}
 	}
 
 	token, err := j.generateToken(user)
@@ -254,9 +291,7 @@ func (j *JWTAuthModule) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	j.mu.RLock()
-	user, exists := j.users[req.Email]
-	j.mu.RUnlock()
+	user, exists := j.lookupUser(req.Email)
 
 	if !exists {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -378,10 +413,7 @@ func (j *JWTAuthModule) extractUserFromRequest(r *http.Request) (*User, error) {
 		return nil, fmt.Errorf("email not found in token")
 	}
 
-	j.mu.RLock()
-	user, exists := j.users[email]
-	j.mu.RUnlock()
-
+	user, exists := j.lookupUser(email)
 	if !exists {
 		return nil, fmt.Errorf("user not found")
 	}
@@ -490,10 +522,7 @@ func (j *JWTAuthModule) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	j.mu.RLock()
-	user, exists := j.users[email]
-	j.mu.RUnlock()
-
+	user, exists := j.lookupUser(email)
 	if !exists {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
@@ -528,20 +557,18 @@ func (j *JWTAuthModule) handleLogout(w http.ResponseWriter, _ *http.Request) {
 
 // handleSetupStatus returns whether the system needs initial setup (no users exist).
 func (j *JWTAuthModule) handleSetupStatus(w http.ResponseWriter, _ *http.Request) {
-	j.mu.RLock()
-	userCount := len(j.users)
-	j.mu.RUnlock()
+	count := j.userCount()
 
-	// Also check persistence if in-memory is empty
-	if userCount == 0 && j.persistence != nil {
+	// Also check persistence if in-memory is empty and no external store
+	if count == 0 && j.userStore == nil && j.persistence != nil {
 		if users, err := j.persistence.LoadUsers(); err == nil {
-			userCount = len(users)
+			count = len(users)
 		}
 	}
 
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"needsSetup": userCount == 0,
-		"userCount":  userCount,
+		"needsSetup": count == 0,
+		"userCount":  count,
 	})
 }
 
@@ -564,18 +591,15 @@ func (j *JWTAuthModule) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	j.mu.Lock()
-	defer j.mu.Unlock()
-
-	// Verify no users exist (in-memory)
-	if len(j.users) > 0 {
+	// Verify no users exist
+	if j.userCount() > 0 {
 		w.WriteHeader(http.StatusForbidden)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "setup already completed"})
 		return
 	}
 
-	// Also verify persistence has no users
-	if j.persistence != nil {
+	// Also verify persistence has no users (when not using external store)
+	if j.userStore == nil && j.persistence != nil {
 		if users, err := j.persistence.LoadUsers(); err == nil && len(users) > 0 {
 			w.WriteHeader(http.StatusForbidden)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "setup already completed"})
@@ -583,34 +607,50 @@ func (j *JWTAuthModule) handleSetup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to hash password"})
-		return
-	}
+	meta := map[string]any{"role": "admin"}
+	var user *User
 
-	user := &User{
-		ID:           fmt.Sprintf("%d", j.nextID),
-		Email:        req.Email,
-		Name:         req.Name,
-		PasswordHash: string(hash),
-		Metadata:     map[string]any{"role": "admin"},
-		CreatedAt:    time.Now(),
-	}
-	j.nextID++
-	j.users[req.Email] = user
+	if j.userStore != nil {
+		var err error
+		user, err = j.userStore.CreateUser(req.Email, req.Name, req.Password, meta)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+	} else {
+		j.mu.Lock()
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			j.mu.Unlock()
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to hash password"})
+			return
+		}
 
-	// Write-through to persistence
-	if j.persistence != nil {
-		_ = j.persistence.SaveUser(UserRecord{
-			ID:           user.ID,
-			Email:        user.Email,
-			Name:         user.Name,
-			PasswordHash: user.PasswordHash,
-			Metadata:     user.Metadata,
-			CreatedAt:    user.CreatedAt,
-		})
+		user = &User{
+			ID:           fmt.Sprintf("%d", j.nextID),
+			Email:        req.Email,
+			Name:         req.Name,
+			PasswordHash: string(hash),
+			Metadata:     meta,
+			CreatedAt:    time.Now(),
+		}
+		j.nextID++
+		j.users[req.Email] = user
+		j.mu.Unlock()
+
+		// Write-through to persistence
+		if j.persistence != nil {
+			_ = j.persistence.SaveUser(UserRecord{
+				ID:           user.ID,
+				Email:        user.Email,
+				Name:         user.Name,
+				PasswordHash: user.PasswordHash,
+				Metadata:     user.Metadata,
+				CreatedAt:    user.CreatedAt,
+			})
+		}
 	}
 
 	token, err := j.generateToken(user)
@@ -657,12 +697,11 @@ func (j *JWTAuthModule) handleListUsers(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	j.mu.RLock()
-	users := make([]map[string]any, 0, len(j.users))
-	for _, u := range j.users {
+	all := j.allUsers()
+	users := make([]map[string]any, 0, len(all))
+	for _, u := range all {
 		users = append(users, j.buildUserResponse(u))
 	}
-	j.mu.RUnlock()
 
 	_ = json.NewEncoder(w).Encode(users)
 }
@@ -704,6 +743,26 @@ func (j *JWTAuthModule) handleCreateUser(w http.ResponseWriter, r *http.Request)
 		req.Role = "user"
 	}
 
+	meta := map[string]any{"role": req.Role}
+
+	if j.userStore != nil {
+		// Delegate to external user store
+		user, err := j.userStore.CreateUser(req.Email, req.Name, req.Password, meta)
+		if err != nil {
+			if strings.Contains(err.Error(), "already exists") {
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "email already registered"})
+			} else {
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			}
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(j.buildUserResponse(user))
+		return
+	}
+
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
@@ -725,7 +784,7 @@ func (j *JWTAuthModule) handleCreateUser(w http.ResponseWriter, r *http.Request)
 		Email:        req.Email,
 		Name:         req.Name,
 		PasswordHash: string(hash),
-		Metadata:     map[string]any{"role": req.Role},
+		Metadata:     meta,
 		CreatedAt:    time.Now(),
 	}
 	j.nextID++
@@ -777,33 +836,31 @@ func (j *JWTAuthModule) handleDeleteUser(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	j.mu.Lock()
-	defer j.mu.Unlock()
-
-	// Find the user to delete
-	var targetEmail string
-	for email, u := range j.users {
-		if u.ID == userID {
-			targetEmail = email
-			break
-		}
-	}
-
-	if targetEmail == "" {
+	target, found := j.lookupUserByID(userID)
+	if !found {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
 		return
 	}
 
 	// Prevent deleting the last admin
-	target := j.users[targetEmail]
 	if j.isAdmin(target) && j.countAdmins() <= 1 {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "cannot delete the last admin"})
 		return
 	}
 
-	delete(j.users, targetEmail)
+	if j.userStore != nil {
+		if err := j.userStore.DeleteUser(userID); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+	} else {
+		j.mu.Lock()
+		delete(j.users, target.Email)
+		j.mu.Unlock()
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -849,19 +906,8 @@ func (j *JWTAuthModule) handleUpdateUserRole(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	j.mu.Lock()
-	defer j.mu.Unlock()
-
-	// Find the target user
-	var target *User
-	for _, u := range j.users {
-		if u.ID == userID {
-			target = u
-			break
-		}
-	}
-
-	if target == nil {
+	target, found := j.lookupUserByID(userID)
+	if !found {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "user not found"})
 		return
@@ -879,16 +925,23 @@ func (j *JWTAuthModule) handleUpdateUserRole(w http.ResponseWriter, r *http.Requ
 	}
 	target.Metadata["role"] = req.Role
 
-	// Write-through to persistence
-	if j.persistence != nil {
-		_ = j.persistence.SaveUser(UserRecord{
-			ID:           target.ID,
-			Email:        target.Email,
-			Name:         target.Name,
-			PasswordHash: target.PasswordHash,
-			Metadata:     target.Metadata,
-			CreatedAt:    target.CreatedAt,
-		})
+	if j.userStore != nil {
+		_ = j.userStore.UpdateUserMetadata(target.ID, target.Metadata)
+	} else {
+		j.mu.Lock()
+		j.users[target.Email] = target
+		j.mu.Unlock()
+		// Write-through to persistence
+		if j.persistence != nil {
+			_ = j.persistence.SaveUser(UserRecord{
+				ID:           target.ID,
+				Email:        target.Email,
+				Name:         target.Name,
+				PasswordHash: target.PasswordHash,
+				Metadata:     target.Metadata,
+				CreatedAt:    target.CreatedAt,
+			})
+		}
 	}
 
 	_ = json.NewEncoder(w).Encode(j.buildUserResponse(target))
@@ -906,12 +959,62 @@ func (j *JWTAuthModule) isAdmin(user *User) bool {
 // countAdmins returns the number of admin users.
 func (j *JWTAuthModule) countAdmins() int {
 	count := 0
-	for _, u := range j.users {
+	for _, u := range j.allUsers() {
 		if j.isAdmin(u) {
 			count++
 		}
 	}
 	return count
+}
+
+// --- User access delegation methods ---
+// These methods delegate to the external UserStore when available,
+// falling back to the internal map for backward compatibility.
+
+func (j *JWTAuthModule) lookupUser(email string) (*User, bool) {
+	if j.userStore != nil {
+		return j.userStore.GetUser(email)
+	}
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	u, ok := j.users[email]
+	return u, ok
+}
+
+func (j *JWTAuthModule) lookupUserByID(id string) (*User, bool) {
+	if j.userStore != nil {
+		return j.userStore.GetUserByID(id)
+	}
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	for _, u := range j.users {
+		if u.ID == id {
+			return u, true
+		}
+	}
+	return nil, false
+}
+
+func (j *JWTAuthModule) allUsers() []*User {
+	if j.userStore != nil {
+		return j.userStore.ListUsers()
+	}
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	result := make([]*User, 0, len(j.users))
+	for _, u := range j.users {
+		result = append(result, u)
+	}
+	return result
+}
+
+func (j *JWTAuthModule) userCount() int {
+	if j.userStore != nil {
+		return j.userStore.UserCount()
+	}
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	return len(j.users)
 }
 
 // extractPathParam extracts the value after a prefix in a URL path.
@@ -1078,6 +1181,10 @@ func (j *JWTAuthModule) RequiresServices() []modular.ServiceDependency {
 		{
 			Name:     "persistence",
 			Required: false, // Optional dependency
+		},
+		{
+			Name:     "auth.user-store",
+			Required: false, // Optional — when present, delegates user CRUD
 		},
 	}
 }

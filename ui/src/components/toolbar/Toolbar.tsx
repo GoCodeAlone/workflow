@@ -26,6 +26,7 @@ export default function Toolbar() {
   const viewLevel = useWorkflowStore((s) => s.viewLevel);
   const setViewLevel = useWorkflowStore((s) => s.setViewLevel);
   const autoGroupOrphans = useWorkflowStore((s) => s.autoGroupOrphans);
+  const autoLayout = useWorkflowStore((s) => s.autoLayout);
   const activeWorkflowRecord = useWorkflowStore((s) => s.activeWorkflowRecord);
   const setActiveWorkflowRecord = useWorkflowStore((s) => s.setActiveWorkflowRecord);
 
@@ -205,6 +206,11 @@ export default function Toolbar() {
       <ToolbarButton
         label={viewLevel === 'component' ? 'Container View' : 'Component View'}
         onClick={() => setViewLevel(viewLevel === 'component' ? 'container' : 'component')}
+        disabled={nodes.length === 0}
+      />
+      <ToolbarButton
+        label="Auto Layout"
+        onClick={autoLayout}
         disabled={nodes.length === 0}
       />
       <ToolbarButton

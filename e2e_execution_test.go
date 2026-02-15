@@ -2871,7 +2871,7 @@ func TestE2E_SlackNotification_MockEndpoint(t *testing.T) {
 			{Name: "sl-server", Type: "http.server", Config: map[string]any{"address": engineAddr}},
 			{Name: "sl-router", Type: "http.router", DependsOn: []string{"sl-server"}},
 			{Name: "sl-handler", Type: "http.handler", DependsOn: []string{"sl-router"}, Config: map[string]any{"contentType": "application/json"}},
-			{Name: "sl-slack", Type: "notification.slack"},
+			{Name: "sl-slack", Type: "notification.slack", Config: map[string]any{"webhookURL": "http://placeholder"}},
 		},
 		Workflows: map[string]any{
 			"http": map[string]any{

@@ -19,10 +19,12 @@ import LogViewer from './components/logs/LogViewer.tsx';
 import EventInspector from './components/events/EventInspector.tsx';
 import IAMSettings from './components/iam/IAMSettings.tsx';
 import WorkflowPickerBar from './components/shared/WorkflowPickerBar.tsx';
+import CollapsiblePanel from './components/layout/CollapsiblePanel.tsx';
 import useWorkflowStore from './store/workflowStore.ts';
 import useAuthStore from './store/authStore.ts';
 import useObservabilityStore from './store/observabilityStore.ts';
 import useModuleSchemaStore from './store/moduleSchemaStore.ts';
+import useUILayoutStore, { PANEL_WIDTH_LIMITS } from './store/uiLayoutStore.ts';
 import { parseYaml } from './utils/serialization.ts';
 import type { ApiProject, ApiWorkflowRecord } from './utils/api.ts';
 
@@ -37,6 +39,15 @@ function EditorView() {
   const activeTabId = useWorkflowStore((s) => s.activeTabId);
   const setSelectedWorkflowId = useObservabilityStore((s) => s.setSelectedWorkflowId);
 
+  const projectSwitcherCollapsed = useUILayoutStore((s) => s.projectSwitcherCollapsed);
+  const nodePaletteCollapsed = useUILayoutStore((s) => s.nodePaletteCollapsed);
+  const propertyPanelCollapsed = useUILayoutStore((s) => s.propertyPanelCollapsed);
+  const toggleProjectSwitcher = useUILayoutStore((s) => s.toggleProjectSwitcher);
+  const toggleNodePalette = useUILayoutStore((s) => s.toggleNodePalette);
+  const togglePropertyPanel = useUILayoutStore((s) => s.togglePropertyPanel);
+  const panelWidths = useUILayoutStore((s) => s.panelWidths);
+  const setPanelWidth = useUILayoutStore((s) => s.setPanelWidth);
+
   const nodes = useWorkflowStore((s) => s.nodes);
   const [selectedProject, setSelectedProject] = useState<ApiProject | null>(null);
 
@@ -44,6 +55,29 @@ function EditorView() {
   useEffect(() => {
     setSelectedWorkflowId(activeWorkflowRecord?.id ?? null);
   }, [activeWorkflowRecord, setSelectedWorkflowId]);
+
+  // Keyboard shortcuts: Ctrl+1/2/3 toggle panels
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const target = e.target as HTMLElement;
+      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT';
+      if (isInput) return;
+
+      if (e.key === '1') {
+        e.preventDefault();
+        toggleProjectSwitcher();
+      } else if (e.key === '2') {
+        e.preventDefault();
+        toggleNodePalette();
+      } else if (e.key === '3') {
+        e.preventDefault();
+        togglePropertyPanel();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [toggleProjectSwitcher, toggleNodePalette, togglePropertyPanel]);
 
   // Show editor canvas when a v1 workflow is active OR when nodes are on the canvas
   // (e.g. loaded via "Load Server" or "Import" which don't set activeWorkflowRecord)
@@ -69,17 +103,23 @@ function EditorView() {
     renameTab(activeTabId, wf.name);
   }, [clearCanvas, importFromConfig, setActiveWorkflowRecord, renameTab, activeTabId]);
 
-  const handleBackToProjects = useCallback(() => {
-    clearCanvas();
-    setActiveWorkflowRecord(null);
-  }, [clearCanvas, setActiveWorkflowRecord]);
-
   return (
     <>
-      <ProjectSwitcher
-        selectedProjectId={selectedProject?.id ?? null}
-        onSelectProject={handleSelectProject}
-      />
+      <CollapsiblePanel
+        collapsed={projectSwitcherCollapsed}
+        onToggle={toggleProjectSwitcher}
+        side="left"
+        panelName="Projects"
+        width={panelWidths.projectSwitcher}
+        onResize={(w) => setPanelWidth('projectSwitcher', w)}
+        minWidth={PANEL_WIDTH_LIMITS.projectSwitcher.min}
+        maxWidth={PANEL_WIDTH_LIMITS.projectSwitcher.max}
+      >
+        <ProjectSwitcher
+          selectedProjectId={selectedProject?.id ?? null}
+          onSelectProject={handleSelectProject}
+        />
+      </CollapsiblePanel>
 
       {subview === 'projects' && selectedProject && (
         <WorkflowList
@@ -107,26 +147,33 @@ function EditorView() {
 
       {subview === 'editor' && (
         <>
-          <NodePalette />
+          <CollapsiblePanel
+            collapsed={nodePaletteCollapsed}
+            onToggle={toggleNodePalette}
+            side="left"
+            panelName="Module Palette"
+            width={panelWidths.nodePalette}
+            onResize={(w) => setPanelWidth('nodePalette', w)}
+            minWidth={PANEL_WIDTH_LIMITS.nodePalette.min}
+            maxWidth={PANEL_WIDTH_LIMITS.nodePalette.max}
+          >
+            <NodePalette />
+          </CollapsiblePanel>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ padding: '4px 8px', background: '#181825', borderBottom: '1px solid #313244' }}>
-              <button
-                onClick={handleBackToProjects}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#89b4fa',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  padding: '2px 6px',
-                }}
-              >
-                &larr; Back to workflows
-              </button>
-            </div>
             <WorkflowCanvas />
           </div>
-          <PropertyPanel />
+          <CollapsiblePanel
+            collapsed={propertyPanelCollapsed}
+            onToggle={togglePropertyPanel}
+            side="right"
+            panelName="Properties"
+            width={panelWidths.propertyPanel}
+            onResize={(w) => setPanelWidth('propertyPanel', w)}
+            minWidth={PANEL_WIDTH_LIMITS.propertyPanel.min}
+            maxWidth={PANEL_WIDTH_LIMITS.propertyPanel.max}
+          >
+            <PropertyPanel />
+          </CollapsiblePanel>
           {showAIPanel && <AICopilotPanel />}
           {showComponentBrowser && <ComponentBrowser />}
         </>

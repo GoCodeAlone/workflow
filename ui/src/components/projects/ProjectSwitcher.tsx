@@ -53,8 +53,23 @@ export default function ProjectSwitcher({ selectedProjectId, onSelectProject }: 
   }, []);
 
   useEffect(() => {
-    loadCompanies();
-  }, [loadCompanies]);
+    let cancelled = false;
+    apiListCompanies()
+      .then((list) => {
+        if (!cancelled) {
+          setCompanies(
+            (list || []).map((c) => ({
+              company: c,
+              orgs: [],
+              expanded: false,
+              loading: false,
+            })),
+          );
+        }
+      })
+      .catch(() => {/* ignore */});
+    return () => { cancelled = true; };
+  }, []);
 
   const toggleCompany = async (idx: number) => {
     const updated = [...companies];
@@ -145,15 +160,14 @@ export default function ProjectSwitcher({ selectedProjectId, onSelectProject }: 
   return (
     <div
       style={{
-        width: 200,
-        minWidth: 200,
+        width: '100%',
         background: '#181825',
-        borderRight: '1px solid #313244',
         overflowY: 'auto',
         fontSize: 13,
         color: '#cdd6f4',
         display: 'flex',
         flexDirection: 'column',
+        height: '100%',
       }}
     >
       <div

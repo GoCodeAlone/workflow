@@ -3,6 +3,7 @@ import useObservabilityStore from '../../store/observabilityStore.ts';
 import { apiListCompanies, type ApiCompany } from '../../utils/api.ts';
 import type { IAMProviderType, IAMRoleMapping } from '../../types/observability.ts';
 import UserManagement from '../settings/UserManagement.tsx';
+import SecretsSettings from '../settings/SecretsSettings.tsx';
 
 const PROVIDER_TYPE_COLORS: Record<string, string> = {
   aws_iam: '#fab387',
@@ -603,6 +604,13 @@ export default function IAMSettings() {
       {/* User Management Section */}
       <div style={{ marginBottom: 32 }}>
         <UserManagement />
+      </div>
+
+      <div style={{ height: 1, background: '#45475a', marginBottom: 24 }} />
+
+      {/* Secrets Management Section */}
+      <div style={{ marginBottom: 32 }}>
+        <SecretsSettings />
       </div>
 
       <div style={{ height: 1, background: '#45475a', marginBottom: 24 }} />

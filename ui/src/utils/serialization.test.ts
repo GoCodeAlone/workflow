@@ -262,7 +262,7 @@ describe('serialization', () => {
       expect(nodes[1].data.moduleType).toBe('http.router');
     });
 
-    it('uses topological layout (nodes with no deps at x=50)', () => {
+    it('uses dagre layout (dependent node placed to the right)', () => {
       const config: WorkflowConfig = {
         modules: [
           { name: 'A', type: 'http.server' },
@@ -274,10 +274,8 @@ describe('serialization', () => {
 
       const { nodes } = configToNodes(config);
 
-      // A has no deps -> column 0
-      expect(nodes[0].position.x).toBe(50);
-      // B depends on A -> column 1
-      expect(nodes[1].position.x).toBe(350);
+      // A should be to the left of B (LR ranking)
+      expect(nodes[0].position.x).toBeLessThan(nodes[1].position.x);
     });
 
     it('places independent nodes in the same column', () => {
@@ -293,15 +291,13 @@ describe('serialization', () => {
 
       const { nodes } = configToNodes(config);
 
-      // All independent, so all in column 0
-      expect(nodes[0].position.x).toBe(50);
-      expect(nodes[1].position.x).toBe(50);
-      expect(nodes[2].position.x).toBe(50);
+      // All independent, so all in same column (same x)
+      expect(nodes[0].position.x).toBe(nodes[1].position.x);
+      expect(nodes[1].position.x).toBe(nodes[2].position.x);
 
-      // Spaced vertically
-      expect(nodes[0].position.y).toBe(50);
-      expect(nodes[1].position.y).toBe(200);
-      expect(nodes[2].position.y).toBe(350);
+      // Spaced vertically — each should be below the previous
+      expect(nodes[0].position.y).toBeLessThan(nodes[1].position.y);
+      expect(nodes[1].position.y).toBeLessThan(nodes[2].position.y);
     });
 
     it('creates dependency edges from dependsOn', () => {
@@ -409,7 +405,7 @@ describe('serialization', () => {
     });
   });
 
-  describe('topological layout', () => {
+  describe('dagre layout', () => {
     it('produces correct column ordering for a linear chain', () => {
       const config: WorkflowConfig = {
         modules: [
@@ -423,10 +419,9 @@ describe('serialization', () => {
 
       const { nodes } = configToNodes(config);
 
-      // A -> column 0, B -> column 1, C -> column 2
-      expect(nodes[0].position.x).toBe(50);
-      expect(nodes[1].position.x).toBe(350);
-      expect(nodes[2].position.x).toBe(650);
+      // A -> B -> C: each column further right
+      expect(nodes[0].position.x).toBeLessThan(nodes[1].position.x);
+      expect(nodes[1].position.x).toBeLessThan(nodes[2].position.x);
     });
 
     it('handles diamond dependency pattern', () => {
@@ -443,13 +438,13 @@ describe('serialization', () => {
 
       const { nodes } = configToNodes(config);
 
-      // Root -> col 0
-      expect(nodes[0].position.x).toBe(50);
-      // Left and Right -> col 1
-      expect(nodes[1].position.x).toBe(350);
-      expect(nodes[2].position.x).toBe(350);
-      // Join -> col 2
-      expect(nodes[3].position.x).toBe(650);
+      // Root is leftmost
+      expect(nodes[0].position.x).toBeLessThan(nodes[1].position.x);
+      expect(nodes[0].position.x).toBeLessThan(nodes[2].position.x);
+      // Left and Right are in the same column (same x)
+      expect(nodes[1].position.x).toBe(nodes[2].position.x);
+      // Join is to the right of Left and Right
+      expect(nodes[3].position.x).toBeGreaterThan(nodes[1].position.x);
     });
   });
 

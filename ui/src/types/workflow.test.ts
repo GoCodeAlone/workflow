@@ -10,7 +10,7 @@ import type { ModuleCategory } from './workflow.ts';
 describe('workflow types', () => {
   describe('MODULE_TYPES', () => {
     it('has the expected number of module types', () => {
-      expect(MODULE_TYPES.length).toBe(38);
+      expect(MODULE_TYPES.length).toBe(43);
     });
 
     it('each module type has required fields', () => {
@@ -48,7 +48,7 @@ describe('workflow types', () => {
         for (const field of mod.configFields) {
           expect(field.key).toBeTruthy();
           expect(field.label).toBeTruthy();
-          expect(['string', 'number', 'boolean', 'select', 'json']).toContain(field.type);
+          expect(['string', 'number', 'boolean', 'select', 'json', 'array', 'filepath']).toContain(field.type);
 
           if (field.type === 'select') {
             expect(Array.isArray(field.options)).toBe(true);

@@ -79,11 +79,12 @@ export interface ConditionalNodeData {
 }
 
 // Edge type classification
-export type WorkflowEdgeType = 'dependency' | 'http-route' | 'messaging-subscription' | 'statemachine' | 'event' | 'conditional';
+export type WorkflowEdgeType = 'dependency' | 'http-route' | 'messaging-subscription' | 'statemachine' | 'event' | 'conditional' | 'auto-wire' | 'middleware-chain';
 
 export interface WorkflowEdgeData extends Record<string, unknown> {
   edgeType: WorkflowEdgeType;
   label?: string;
+  chainOrder?: number;
 }
 
 export type ModuleCategory =
@@ -110,13 +111,17 @@ export interface ModuleTypeInfo {
 export interface ConfigFieldDef {
   key: string;
   label: string;
-  type: 'string' | 'number' | 'boolean' | 'select' | 'json';
+  type: 'string' | 'number' | 'boolean' | 'select' | 'json' | 'array' | 'map' | 'filepath';
   options?: string[];
   defaultValue?: unknown;
   description?: string;
   placeholder?: string;
   required?: boolean;
   group?: string;
+  arrayItemType?: string; // element type for array fields ("string", "number")
+  mapValueType?: string;  // value type for map fields ("string", "number")
+  inheritFrom?: string;   // "{edgeType}.{sourceField}" pattern for config inheritance from connected nodes
+  sensitive?: boolean;    // when true, render as password input with visibility toggle
 }
 
 export const CATEGORY_COLORS: Record<ModuleCategory, string> = {
@@ -226,10 +231,10 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     type: 'http.middleware.cors',
     label: 'CORS Middleware',
     category: 'middleware',
-    defaultConfig: { allowOrigins: ['*'] },
+    defaultConfig: { allowedOrigins: ['*'], allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'] },
     configFields: [
-      { key: 'allowOrigins', label: 'Allowed Origins', type: 'string', defaultValue: '*' },
-      { key: 'allowMethods', label: 'Allowed Methods', type: 'string', defaultValue: 'GET,POST,PUT,DELETE' },
+      { key: 'allowedOrigins', label: 'Allowed Origins', type: 'array', arrayItemType: 'string', defaultValue: ['*'], description: 'Allowed origins' },
+      { key: 'allowedMethods', label: 'Allowed Methods', type: 'array', arrayItemType: 'string', defaultValue: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], description: 'Allowed HTTP methods' },
     ],
     ioSignature: { inputs: [{ name: 'request', type: 'http.Request' }], outputs: [{ name: 'cors', type: 'http.Request' }] },
   },
@@ -313,7 +318,7 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     defaultConfig: { expression: '', cases: [] },
     configFields: [
       { key: 'expression', label: 'Switch Expression', type: 'string' },
-      { key: 'cases', label: 'Cases', type: 'json' },
+      { key: 'cases', label: 'Cases', type: 'array', arrayItemType: 'string' },
     ],
     ioSignature: { inputs: [{ name: 'input', type: 'any' }], outputs: [{ name: 'default', type: 'any' }] },
   },
@@ -324,7 +329,7 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     defaultConfig: { expression: '', outputs: [] },
     configFields: [
       { key: 'expression', label: 'Expression', type: 'string' },
-      { key: 'outputs', label: 'Output Labels', type: 'json' },
+      { key: 'outputs', label: 'Output Labels', type: 'array', arrayItemType: 'string' },
     ],
     ioSignature: { inputs: [{ name: 'input', type: 'any' }], outputs: [{ name: 'result', type: 'any' }] },
   },
@@ -456,6 +461,18 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     ioSignature: { inputs: [], outputs: [{ name: 'status', type: 'HealthStatus' }] },
   },
   {
+    type: 'log.collector',
+    label: 'Log Collector',
+    category: 'observability',
+    defaultConfig: { logLevel: 'info', outputFormat: 'json', retentionDays: 7 },
+    configFields: [
+      { key: 'logLevel', label: 'Log Level', type: 'select', options: ['debug', 'info', 'warn', 'error'], defaultValue: 'info', description: 'Minimum log level to collect' },
+      { key: 'outputFormat', label: 'Output Format', type: 'select', options: ['json', 'text'], defaultValue: 'json', description: 'Format for log output' },
+      { key: 'retentionDays', label: 'Retention Days', type: 'number', defaultValue: 7, description: 'Number of days to retain log entries' },
+    ],
+    ioSignature: { inputs: [{ name: 'logs', type: 'LogEntry[]' }], outputs: [] },
+  },
+  {
     type: 'http.middleware.requestid',
     label: 'Request ID Middleware',
     category: 'middleware',
@@ -528,9 +545,9 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     type: 'messaging.kafka',
     label: 'Kafka Broker',
     category: 'messaging',
-    defaultConfig: { brokers: 'localhost:9092' },
+    defaultConfig: { brokers: ['localhost:9092'] },
     configFields: [
-      { key: 'brokers', label: 'Brokers', type: 'string', defaultValue: 'localhost:9092' },
+      { key: 'brokers', label: 'Brokers', type: 'array', arrayItemType: 'string', defaultValue: ['localhost:9092'], placeholder: 'localhost:9092' },
       { key: 'groupID', label: 'Group ID', type: 'string' },
     ],
     ioSignature: { inputs: [{ name: 'message', type: '[]byte' }], outputs: [{ name: 'message', type: '[]byte' }] },
@@ -545,6 +562,112 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
       { key: 'serviceName', label: 'Service Name', type: 'string', defaultValue: 'workflow' },
     ],
     ioSignature: { inputs: [{ name: 'spans', type: 'Span[]' }], outputs: [{ name: 'exported', type: 'boolean' }] },
+  },
+  // Storage
+  {
+    type: 'storage.local',
+    label: 'Local Storage',
+    category: 'integration',
+    defaultConfig: { rootDir: './data/storage' },
+    configFields: [
+      { key: 'rootDir', label: 'Root Directory', type: 'string', defaultValue: './data/storage' },
+    ],
+    ioSignature: { inputs: [{ name: 'data', type: '[]byte' }], outputs: [{ name: 'storage', type: 'StorageProvider' }] },
+  },
+  {
+    type: 'storage.gcs',
+    label: 'GCS Storage',
+    category: 'integration',
+    defaultConfig: {},
+    configFields: [
+      { key: 'bucket', label: 'Bucket', type: 'string', required: true },
+      { key: 'project', label: 'GCP Project', type: 'string' },
+      { key: 'credentialsFile', label: 'Credentials File', type: 'filepath' },
+    ],
+    ioSignature: { inputs: [{ name: 'data', type: '[]byte' }], outputs: [{ name: 'storage', type: 'StorageProvider' }] },
+  },
+  // Secrets
+  {
+    type: 'secrets.vault',
+    label: 'Vault Secrets',
+    category: 'infrastructure',
+    defaultConfig: { mountPath: 'secret' },
+    configFields: [
+      { key: 'address', label: 'Vault Address', type: 'string', required: true, placeholder: 'https://vault.example.com:8200' },
+      { key: 'token', label: 'Vault Token', type: 'string', required: true, placeholder: '${VAULT_TOKEN}', sensitive: true },
+      { key: 'mountPath', label: 'Mount Path', type: 'string', defaultValue: 'secret', placeholder: 'secret' },
+      { key: 'namespace', label: 'Namespace', type: 'string', placeholder: 'admin' },
+    ],
+    ioSignature: { inputs: [], outputs: [{ name: 'secrets', type: 'SecretProvider' }] },
+  },
+  {
+    type: 'secrets.aws',
+    label: 'AWS Secrets Manager',
+    category: 'infrastructure',
+    defaultConfig: { region: 'us-east-1' },
+    configFields: [
+      { key: 'region', label: 'AWS Region', type: 'string', defaultValue: 'us-east-1', placeholder: 'us-east-1' },
+      { key: 'accessKeyId', label: 'Access Key ID', type: 'string', placeholder: '${AWS_ACCESS_KEY_ID}', sensitive: true },
+      { key: 'secretAccessKey', label: 'Secret Access Key', type: 'string', placeholder: '${AWS_SECRET_ACCESS_KEY}', sensitive: true },
+    ],
+    ioSignature: { inputs: [], outputs: [{ name: 'secrets', type: 'SecretProvider' }] },
+  },
+  // OpenAPI
+  {
+    type: 'openapi.generator',
+    label: 'OpenAPI Generator',
+    category: 'integration',
+    defaultConfig: { title: 'Workflow API', version: '1.0.0' },
+    configFields: [
+      { key: 'title', label: 'API Title', type: 'string', defaultValue: 'Workflow API', placeholder: 'My API' },
+      { key: 'version', label: 'API Version', type: 'string', defaultValue: '1.0.0', placeholder: '1.0.0' },
+      { key: 'description', label: 'Description', type: 'string', placeholder: 'API generated from workflow routes' },
+      { key: 'servers', label: 'Server URLs', type: 'array', arrayItemType: 'string', placeholder: 'http://localhost:8080' },
+    ],
+    ioSignature: { inputs: [{ name: 'routes', type: 'RouteConfig' }], outputs: [{ name: 'spec', type: 'OpenAPISpec' }] },
+  },
+  {
+    type: 'openapi.consumer',
+    label: 'OpenAPI Consumer',
+    category: 'integration',
+    defaultConfig: {},
+    configFields: [
+      { key: 'specUrl', label: 'Spec URL', type: 'string', placeholder: 'https://api.example.com/openapi.json' },
+      { key: 'specFile', label: 'Spec File', type: 'filepath', placeholder: 'specs/external-api.json' },
+      { key: 'fieldMapping', label: 'Field Mapping', type: 'map', mapValueType: 'string', description: 'Custom field name mapping between local and external schemas', group: 'advanced' },
+    ],
+    ioSignature: { inputs: [{ name: 'spec', type: 'OpenAPISpec' }], outputs: [{ name: 'client', type: 'ExternalAPIClient' }] },
+  },
+  // Admin Infrastructure
+  {
+    type: 'storage.sqlite',
+    label: 'SQLite Storage',
+    category: 'database',
+    defaultConfig: { dbPath: 'data/workflow.db', maxConnections: 5, walMode: true },
+    configFields: [
+      { key: 'dbPath', label: 'Database Path', type: 'string', defaultValue: 'data/workflow.db', placeholder: 'data/workflow.db' },
+      { key: 'maxConnections', label: 'Max Connections', type: 'number', defaultValue: 5 },
+      { key: 'walMode', label: 'WAL Mode', type: 'boolean', defaultValue: true },
+    ],
+    ioSignature: { inputs: [], outputs: [{ name: 'database', type: 'sql.DB' }] },
+  },
+  {
+    type: 'auth.user-store',
+    label: 'User Store',
+    category: 'infrastructure',
+    defaultConfig: {},
+    configFields: [],
+    ioSignature: { inputs: [{ name: 'credentials', type: 'Credentials' }], outputs: [{ name: 'user-store', type: 'UserStore' }] },
+  },
+  {
+    type: 'workflow.registry',
+    label: 'Workflow Registry',
+    category: 'infrastructure',
+    defaultConfig: { storageBackend: '' },
+    configFields: [
+      { key: 'storageBackend', label: 'Storage Backend', type: 'string', defaultValue: '', placeholder: 'admin-db', description: 'Name of a storage.sqlite module to share its DB connection' },
+    ],
+    ioSignature: { inputs: [{ name: 'storageBackend', type: 'SQLiteStorage' }], outputs: [{ name: 'registry', type: 'WorkflowRegistry' }] },
   },
 ];
 

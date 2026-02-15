@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { dragModuleToCanvas, connectNodes, waitForNodeCount, screenshotStep } from './helpers';
+import { dragModuleToCanvas, waitForNodeCount, screenshotStep } from './helpers';
 
 test.describe('Deep Edge Cases', () => {
   test.beforeEach(async ({ page }) => {

@@ -59,3 +59,29 @@ html, body, #root {
     opacity: 1;
   }
 }
+
+/* Connection compatibility highlighting */
+@keyframes compatible-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3), 0 0 12px rgba(34, 197, 94, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.4), 0 0 18px rgba(34, 197, 94, 0.25);
+  }
+}
+
+.connection-compatible {
+  animation: compatible-pulse 1.5s ease-in-out infinite;
+}
+
+/* Connection picklist entrance */
+@keyframes picklist-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

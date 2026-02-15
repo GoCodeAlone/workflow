@@ -7,11 +7,10 @@ export default function WorkflowPickerBar() {
   const selectedWorkflowId = useObservabilityStore((s) => s.selectedWorkflowId);
   const setSelectedWorkflowId = useObservabilityStore((s) => s.setSelectedWorkflowId);
   const [workflows, setWorkflows] = useState<ApiWorkflowRecord[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     apiListWorkflows()
       .then((data) => {
         if (!cancelled) setWorkflows(data);

@@ -158,8 +158,6 @@ test.describe('Multi-Workflow Tab Management', () => {
     }
 
     const firstTabName = tabNameSpans.first();
-    const originalName = await firstTabName.textContent();
-
     // Double-click to start editing
     await firstTabName.dblclick();
     await page.waitForTimeout(200);

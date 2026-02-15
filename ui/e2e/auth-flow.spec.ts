@@ -195,7 +195,7 @@ test.describe('Authentication Flow', () => {
 
     // The button should briefly show "Please wait..." (isLoading state)
     // Note: this may be very brief if the network request fails fast
-    const loadingVisible = await page.getByText('Please wait...').isVisible({ timeout: 2000 }).catch(() => false);
+    await page.getByText('Please wait...').isVisible({ timeout: 2000 }).catch(() => false);
 
     // Even if we don't catch the loading state (it may pass too quickly),
     // verify the form still works after the request completes/fails

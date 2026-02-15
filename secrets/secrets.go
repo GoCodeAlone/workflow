@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -178,10 +179,17 @@ type VaultConfig struct {
 	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
 }
 
-// VaultProvider is a stub implementation of a HashiCorp Vault secret provider.
-// It validates configuration but does not make real Vault API calls.
+// VaultProvider implements a HashiCorp Vault secret provider.
+// When created with NewVaultProviderHTTP, it uses the Vault HTTP API.
+// When created with NewVaultProvider, it acts as a stub.
 type VaultProvider struct {
-	config VaultConfig
+	config     VaultConfig
+	httpClient HTTPClient
+}
+
+// HTTPClient is an interface for HTTP requests (allows testing).
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
 }
 
 // NewVaultProvider creates a new Vault provider stub.
@@ -200,12 +208,14 @@ func NewVaultProvider(cfg VaultConfig) (*VaultProvider, error) {
 
 func (p *VaultProvider) Name() string { return "vault" }
 
-func (p *VaultProvider) Get(_ context.Context, key string) (string, error) {
+func (p *VaultProvider) Get(ctx context.Context, key string) (string, error) {
 	if key == "" {
 		return "", ErrInvalidKey
 	}
-	// Stub: in production this would call the Vault HTTP API
-	// GET /v1/{mount_path}/data/{key}
+	if p.httpClient != nil {
+		return p.GetFromVault(ctx, key)
+	}
+	// Stub: in production use NewVaultProviderHTTP for real API calls
 	return "", fmt.Errorf("%w: vault provider is a stub", ErrUnsupported)
 }
 

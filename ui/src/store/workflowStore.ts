@@ -13,6 +13,7 @@ import type { WorkflowConfig, WorkflowTab, CrossWorkflowLink } from '../types/wo
 import { MODULE_TYPE_MAP as STATIC_MODULE_TYPE_MAP } from '../types/workflow.ts';
 import useModuleSchemaStore from './moduleSchemaStore.ts';
 import { nodesToConfig, configToNodes, nodeComponentType } from '../utils/serialization.ts';
+import { layoutNodes } from '../utils/autoLayout.ts';
 import { autoGroupOrphanedNodes } from '../utils/grouping.ts';
 import type { Toast } from '../components/toast/ToastContainer.tsx';
 import type { ApiWorkflowRecord } from '../utils/api.ts';
@@ -90,8 +91,23 @@ interface WorkflowStore {
   renameTab: (tabId: string, name: string) => void;
   duplicateTab: (tabId: string) => void;
   autoGroupOrphans: () => void;
+  autoLayout: () => void;
   addCrossWorkflowLink: (link: CrossWorkflowLink) => void;
   removeCrossWorkflowLink: (linkId: string) => void;
+
+  // Connection drag state (smart connection UX)
+  connectingFrom: {
+    nodeId: string;
+    handleId: string | null;
+    handleType: 'source' | 'target';
+    outputTypes: string[];
+  } | null;
+  compatibleNodeIds: string[];
+  connectionPicklist: { x: number; y: number } | null;
+  setConnectingFrom: (info: WorkflowStore['connectingFrom']) => void;
+  setCompatibleNodeIds: (ids: string[]) => void;
+  showConnectionPicklist: (position: { x: number; y: number }) => void;
+  hideConnectionPicklist: () => void;
 }
 
 let toastIdCounter = 0;
@@ -225,10 +241,55 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       },
     };
 
+    const currentNodes = get().nodes;
     set({
-      nodes: [...get().nodes, newNode],
+      nodes: [...currentNodes, newNode],
       nodeCounter: counter,
     });
+
+    // Auto-associate middleware with routers
+    if (moduleType.startsWith('http.middleware.')) {
+      const routers = currentNodes.filter(
+        (n) => n.data.moduleType === 'http.router' || n.data.moduleType === 'chimux.router',
+      );
+      if (routers.length === 1) {
+        // Single router — auto-add to its middleware chain
+        const router = routers[0];
+        const chain = (router.data.config?.middlewareChain as string[]) ?? [];
+        set({
+          nodes: get().nodes.map((n) =>
+            n.id === router.id
+              ? { ...n, data: { ...n.data, config: { ...n.data.config, middlewareChain: [...chain, newNode.data.label] } } }
+              : n,
+          ),
+        });
+      } else if (routers.length > 1) {
+        // Multiple routers — find nearest by position
+        let nearest = routers[0];
+        let minDist = Infinity;
+        for (const r of routers) {
+          const dx = r.position.x - position.x;
+          const dy = r.position.y - position.y;
+          const dist = dx * dx + dy * dy;
+          if (dist < minDist) {
+            minDist = dist;
+            nearest = r;
+          }
+        }
+        const chain = (nearest.data.config?.middlewareChain as string[]) ?? [];
+        set({
+          nodes: get().nodes.map((n) =>
+            n.id === nearest.id
+              ? { ...n, data: { ...n.data, config: { ...n.data.config, middlewareChain: [...chain, newNode.data.label] } } }
+              : n,
+          ),
+        });
+        get().addToast(
+          `Auto-associated "${newNode.data.label}" with nearest router "${nearest.data.label}"`,
+          'info',
+        );
+      }
+    }
   },
 
   removeNode: (id) => {
@@ -289,6 +350,15 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     get().pushHistory();
     set({ nodes: [], edges: [], selectedNodeId: null, nodeCounter: 0, importedWorkflows: {}, importedTriggers: {} });
   },
+
+  // Connection drag state (smart connection UX)
+  connectingFrom: null,
+  compatibleNodeIds: [],
+  connectionPicklist: null,
+  setConnectingFrom: (info) => set({ connectingFrom: info }),
+  setCompatibleNodeIds: (ids) => set({ compatibleNodeIds: ids }),
+  showConnectionPicklist: (position) => set({ connectionPicklist: position }),
+  hideConnectionPicklist: () => set({ connectionPicklist: null, connectingFrom: null, compatibleNodeIds: [] }),
 
   // Tab actions
   addTab: () => {
@@ -426,6 +496,14 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     get().pushHistory();
     const result = autoGroupOrphanedNodes(nodes, edges);
     set({ nodes: result.nodes as WorkflowNode[], edges: result.edges });
+  },
+
+  autoLayout: () => {
+    const { nodes, edges } = get();
+    if (nodes.length === 0) return;
+    get().pushHistory();
+    const laid = layoutNodes(nodes, edges);
+    set({ nodes: laid });
   },
 
   addCrossWorkflowLink: (link) => {

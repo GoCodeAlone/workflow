@@ -1,6 +1,13 @@
 import { create } from 'zustand';
-import type { ModuleTypeInfo, ConfigFieldDef, ModuleCategory } from '../types/workflow.ts';
+import type { ModuleTypeInfo, ConfigFieldDef, ModuleCategory, IOSignature } from '../types/workflow.ts';
 import { MODULE_TYPES, MODULE_TYPE_MAP as STATIC_MODULE_TYPE_MAP } from '../types/workflow.ts';
+
+// Shape of a server-side I/O port definition
+interface ServerIODef {
+  name: string;
+  type: string;
+  description?: string;
+}
 
 // Shape of a server-side module schema (from /api/v1/module-schemas)
 interface ServerModuleSchema {
@@ -8,6 +15,8 @@ interface ServerModuleSchema {
   label: string;
   category: string;
   description?: string;
+  inputs?: ServerIODef[];
+  outputs?: ServerIODef[];
   configFields: ServerConfigField[];
   defaultConfig?: Record<string, unknown>;
 }
@@ -22,6 +31,10 @@ interface ServerConfigField {
   options?: string[];
   placeholder?: string;
   group?: string;
+  arrayItemType?: string;
+  mapValueType?: string;
+  inheritFrom?: string;
+  sensitive?: boolean;
 }
 
 interface ModuleSchemaState {
@@ -51,10 +64,14 @@ function mapFieldType(serverType: string): ConfigFieldDef['type'] {
       return 'boolean';
     case 'select':
       return 'select';
-    case 'json':
     case 'array':
+      return 'array';
     case 'map':
+      return 'map';
+    case 'json':
       return 'json';
+    case 'filepath':
+      return 'filepath';
     default:
       return 'string';
   }
@@ -72,7 +89,22 @@ function convertFields(serverFields: ServerConfigField[]): ConfigFieldDef[] {
     placeholder: f.placeholder,
     required: f.required,
     group: f.group,
+    arrayItemType: f.arrayItemType,
+    mapValueType: f.mapValueType,
+    inheritFrom: f.inheritFrom,
+    sensitive: f.sensitive,
   }));
+}
+
+/** Convert server I/O definitions to an IOSignature for UI rendering */
+function convertIOSignature(inputs?: ServerIODef[], outputs?: ServerIODef[]): IOSignature | undefined {
+  const ins = inputs ?? [];
+  const outs = outputs ?? [];
+  if (ins.length === 0 && outs.length === 0) return undefined;
+  return {
+    inputs: ins.map((p) => ({ name: p.name, type: p.type })),
+    outputs: outs.map((p) => ({ name: p.name, type: p.type })),
+  };
 }
 
 const VALID_CATEGORIES: ModuleCategory[] = [
@@ -104,12 +136,14 @@ function mergeSchemas(
     seen.add(staticType.type);
     const server = serverSchemas[staticType.type];
     if (server) {
+      const serverIO = convertIOSignature(server.inputs, server.outputs);
       merged.push({
         ...staticType,
         label: server.label || staticType.label,
         category: normalizeCategory(server.category || staticType.category),
         configFields: server.configFields.length > 0 ? convertFields(server.configFields) : staticType.configFields,
         defaultConfig: server.defaultConfig ?? staticType.defaultConfig,
+        ioSignature: serverIO ?? staticType.ioSignature,
       });
     } else {
       merged.push(staticType);
@@ -125,6 +159,7 @@ function mergeSchemas(
         category: normalizeCategory(server.category),
         configFields: convertFields(server.configFields),
         defaultConfig: server.defaultConfig ?? {},
+        ioSignature: convertIOSignature(server.inputs, server.outputs),
       });
     }
   }

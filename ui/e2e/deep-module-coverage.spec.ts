@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { dragModuleToCanvas, waitForNodeCount, screenshotStep, COMPLETE_MODULE_TYPE_MAP } from './helpers';
+import { dragModuleToCanvas, waitForNodeCount, screenshotStep } from './helpers';
 
 test.describe('Deep Module Coverage', () => {
   test.beforeEach(async ({ page }) => {
