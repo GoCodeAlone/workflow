@@ -46,91 +46,106 @@ export function extractWorkflowEdges(
   nameToId: Record<string, string>,
 ): Edge[] {
   const edges: Edge[] = [];
+  const edgeSet = new Set<string>(); // dedup key: "source->target:type"
 
-  // HTTP workflow edges
-  const http = workflows.http as HTTPWorkflowConfig | undefined;
-  if (http) {
-    const serverId = nameToId[http.server];
-    const routerId = nameToId[http.router];
-    if (serverId && routerId) {
-      edges.push(makeEdge(serverId, routerId, 'http-route', 'http'));
+  function addEdge(source: string, target: string, type: WorkflowEdgeType, label: string) {
+    const key = `${source}->${target}:${type}`;
+    if (!edgeSet.has(key)) {
+      edgeSet.add(key);
+      edges.push(makeEdge(source, target, type, label));
     }
-    if (http.routes) {
-      for (const route of http.routes) {
-        const handlerId = nameToId[route.handler];
-        if (route.middlewares && route.middlewares.length > 0 && routerId) {
-          // Build ordered middleware chain: router -> mw1 -> mw2 -> ... -> handler
-          const mwIds = route.middlewares
-            .map((mw) => nameToId[mw])
-            .filter((id): id is string => !!id);
+  }
 
-          if (mwIds.length > 0) {
-            // Router to first middleware
-            edges.push(makeEdge(routerId, mwIds[0], 'middleware-chain', `${route.method} ${route.path} [1]`));
-            // Chain middlewares together
-            for (let i = 0; i < mwIds.length - 1; i++) {
-              edges.push(makeEdge(mwIds[i], mwIds[i + 1], 'middleware-chain', `[${i + 2}]`));
+  // Detect workflow types by their properties, not key names.
+  // This handles configs like "http-admin", "http-api", "messaging-orders", etc.
+  for (const [, wfValue] of Object.entries(workflows)) {
+    const wf = wfValue as Record<string, unknown>;
+    if (!wf || typeof wf !== 'object') continue;
+
+    // HTTP workflow: has router + routes
+    if ('router' in wf && 'routes' in wf) {
+      const http = wf as unknown as HTTPWorkflowConfig;
+      const serverId = http.server ? nameToId[http.server] : undefined;
+      const routerId = nameToId[http.router];
+
+      if (serverId && routerId) {
+        addEdge(serverId, routerId, 'http-route', 'http');
+      }
+
+      if (http.routes && routerId) {
+        // Collect unique middleware chains and direct routes.
+        // Many routes share the same middleware set — deduplicate edges.
+        for (const route of http.routes) {
+          const handlerId = nameToId[route.handler];
+
+          if (route.middlewares && route.middlewares.length > 0) {
+            const mwIds = route.middlewares
+              .map((mw) => nameToId[mw])
+              .filter((id): id is string => !!id);
+
+            if (mwIds.length > 0) {
+              // Router to first middleware
+              addEdge(routerId, mwIds[0], 'middleware-chain', 'middleware');
+              // Chain middlewares together
+              for (let i = 0; i < mwIds.length - 1; i++) {
+                addEdge(mwIds[i], mwIds[i + 1], 'middleware-chain', 'chain');
+              }
+              // Last middleware to handler
+              if (handlerId) {
+                addEdge(mwIds[mwIds.length - 1], handlerId, 'middleware-chain', 'handler');
+              }
             }
-            // Last middleware to handler
-            if (handlerId) {
-              edges.push(makeEdge(mwIds[mwIds.length - 1], handlerId, 'middleware-chain', `[${mwIds.length + 1}] handler`));
-            }
-          }
-        } else if (routerId && handlerId) {
-          // No middleware — direct route edge
-          edges.push(makeEdge(routerId, handlerId, 'http-route', `${route.method} ${route.path}`));
-        }
-      }
-    }
-  }
-
-  // Messaging workflow edges
-  const messaging = workflows.messaging as MessagingWorkflowConfig | undefined;
-  if (messaging) {
-    const brokerId = nameToId[messaging.broker];
-    if (messaging.subscriptions) {
-      for (const sub of messaging.subscriptions) {
-        const handlerId = nameToId[sub.handler];
-        if (brokerId && handlerId) {
-          edges.push(makeEdge(brokerId, handlerId, 'messaging-subscription', `topic: ${sub.topic}`));
-        }
-      }
-    }
-  }
-
-  // State machine workflow edges
-  const sm = workflows.statemachine as StateMachineWorkflowConfig | undefined;
-  if (sm) {
-    const engineId = nameToId[sm.engine];
-    if (sm.definitions && engineId) {
-      for (const def of sm.definitions) {
-        // Link engine to any referenced modules by definition name
-        const defModId = nameToId[def.name];
-        if (defModId) {
-          edges.push(makeEdge(engineId, defModId, 'statemachine', def.name));
-        }
-      }
-    }
-  }
-
-  // Event workflow edges
-  const evt = workflows.event as EventWorkflowConfig | undefined;
-  if (evt) {
-    const processorId = nameToId[evt.processor];
-    if (processorId) {
-      if (evt.handlers) {
-        for (const h of evt.handlers) {
-          const hId = nameToId[h];
-          if (hId) {
-            edges.push(makeEdge(processorId, hId, 'event', 'handler'));
+          } else if (handlerId) {
+            // No middleware — direct route edge
+            addEdge(routerId, handlerId, 'http-route', `${route.method} ${route.path}`);
           }
         }
       }
-      if (evt.adapters) {
-        for (const a of evt.adapters) {
-          const aId = nameToId[a];
-          if (aId) {
-            edges.push(makeEdge(processorId, aId, 'event', 'adapter'));
+    }
+
+    // Messaging workflow: has broker + subscriptions
+    if ('broker' in wf && 'subscriptions' in wf) {
+      const messaging = wf as unknown as MessagingWorkflowConfig;
+      const brokerId = nameToId[messaging.broker];
+      if (messaging.subscriptions) {
+        for (const sub of messaging.subscriptions) {
+          const handlerId = nameToId[sub.handler];
+          if (brokerId && handlerId) {
+            addEdge(brokerId, handlerId, 'messaging-subscription', `topic: ${sub.topic}`);
+          }
+        }
+      }
+    }
+
+    // State machine workflow: has engine + definitions
+    if ('engine' in wf && 'definitions' in wf) {
+      const sm = wf as unknown as StateMachineWorkflowConfig;
+      const engineId = nameToId[sm.engine];
+      if (sm.definitions && engineId) {
+        for (const def of sm.definitions) {
+          const defModId = nameToId[def.name];
+          if (defModId) {
+            addEdge(engineId, defModId, 'statemachine', def.name);
+          }
+        }
+      }
+    }
+
+    // Event workflow: has processor
+    if ('processor' in wf) {
+      const evt = wf as unknown as EventWorkflowConfig;
+      const processorId = nameToId[evt.processor];
+      if (processorId) {
+        if (evt.handlers) {
+          for (const h of evt.handlers) {
+            const hId = nameToId[h];
+            if (hId) addEdge(processorId, hId, 'event', 'handler');
+          }
+        }
+        if (evt.adapters) {
+          for (const a of evt.adapters) {
+            const aId = nameToId[a];
+            if (aId) addEdge(processorId, aId, 'event', 'adapter');
           }
         }
       }
