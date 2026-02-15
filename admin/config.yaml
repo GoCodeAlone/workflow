@@ -223,266 +223,630 @@ workflows:
         path: "/api/v1/admin/engine/config"
         handler: admin-engine-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-engine-mgmt
       - method: GET
         path: "/api/v1/admin/engine/status"
         handler: admin-engine-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-engine-mgmt
       - method: GET
         path: "/api/v1/admin/engine/modules"
         handler: admin-engine-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-engine-mgmt
+      - method: GET
+        path: "/api/v1/admin/engine/services"
+        handler: admin-engine-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-engine-mgmt
 
       # === Engine Management Commands (authenticated) ===
       - method: PUT
         path: "/api/v1/admin/engine/config"
         handler: admin-engine-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-engine-mgmt
       - method: POST
         path: "/api/v1/admin/engine/validate"
         handler: admin-engine-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-engine-mgmt
       - method: POST
         path: "/api/v1/admin/engine/reload"
         handler: admin-engine-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-engine-mgmt
 
       # === Schema Queries (authenticated) ===
       - method: GET
         path: "/api/v1/admin/schemas"
         handler: admin-schema-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-schema-mgmt
       - method: GET
         path: "/api/v1/admin/schemas/modules"
         handler: admin-schema-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-schema-mgmt
 
       # === AI Queries (authenticated) ===
       - method: GET
         path: "/api/v1/admin/ai/providers"
         handler: admin-ai-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-ai-mgmt
 
       # === AI Commands (authenticated) ===
       - method: POST
         path: "/api/v1/admin/ai/generate"
         handler: admin-ai-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-ai-mgmt
       - method: POST
         path: "/api/v1/admin/ai/component"
         handler: admin-ai-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-ai-mgmt
       - method: POST
         path: "/api/v1/admin/ai/suggest"
         handler: admin-ai-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-ai-mgmt
       - method: POST
         path: "/api/v1/admin/ai/deploy"
         handler: admin-ai-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-ai-mgmt
       - method: POST
         path: "/api/v1/admin/ai/deploy/component"
         handler: admin-ai-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-ai-mgmt
 
       # === Component Queries (authenticated) ===
       - method: GET
         path: "/api/v1/admin/components"
         handler: admin-component-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-component-mgmt
       - method: GET
         path: "/api/v1/admin/components/{id}"
         handler: admin-component-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-component-mgmt
 
       # === Component Commands (authenticated) ===
       - method: POST
         path: "/api/v1/admin/components"
         handler: admin-component-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-component-mgmt
       - method: PUT
         path: "/api/v1/admin/components/{id}"
         handler: admin-component-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-component-mgmt
       - method: DELETE
         path: "/api/v1/admin/components/{id}"
         handler: admin-component-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-component-mgmt
 
       # === v1 API: Dashboard (authenticated) ===
       - method: GET
         path: "/api/v1/admin/dashboard"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
 
       # === v1 API: Companies (authenticated) ===
       - method: GET
         path: "/api/v1/admin/companies"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: POST
         path: "/api/v1/admin/companies"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/companies/{id}"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/companies/{id}/organizations"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
 
       # === v1 API: Organizations (authenticated) ===
       - method: POST
         path: "/api/v1/admin/companies/{id}/organizations"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/organizations/{id}/projects"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: POST
         path: "/api/v1/admin/organizations/{id}/projects"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
 
       # === v1 API: Projects (authenticated) ===
       - method: GET
         path: "/api/v1/admin/projects/{id}/workflows"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: POST
         path: "/api/v1/admin/projects/{id}/workflows"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
 
       # === v1 API: Workflows (authenticated) ===
       - method: GET
         path: "/api/v1/admin/workflows"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: POST
         path: "/api/v1/admin/workflows"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/workflows/{id}"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: PUT
         path: "/api/v1/admin/workflows/{id}"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: DELETE
         path: "/api/v1/admin/workflows/{id}"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/workflows/{id}/versions"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: POST
         path: "/api/v1/admin/workflows/{id}/deploy"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: POST
         path: "/api/v1/admin/workflows/{id}/stop"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/workflows/{id}/status"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/workflows/{id}/dashboard"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/workflows/{id}/executions"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: POST
         path: "/api/v1/admin/workflows/{id}/trigger"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/workflows/{id}/logs"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/workflows/{id}/logs/stream"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/workflows/{id}/events"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/workflows/{id}/events/stream"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/workflows/{id}/permissions"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: POST
         path: "/api/v1/admin/workflows/{id}/permissions"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
 
       # === v1 API: Executions (authenticated) ===
       - method: GET
         path: "/api/v1/admin/executions/{id}"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/executions/{id}/steps"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: POST
         path: "/api/v1/admin/executions/{id}/cancel"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
 
       # === v1 API: Audit (authenticated) ===
       - method: GET
         path: "/api/v1/admin/audit"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
 
       # === v1 API: IAM (authenticated) ===
       - method: GET
         path: "/api/v1/admin/iam/providers/{id}"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: POST
         path: "/api/v1/admin/iam/providers"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: PUT
         path: "/api/v1/admin/iam/providers/{id}"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: DELETE
         path: "/api/v1/admin/iam/providers/{id}"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: POST
         path: "/api/v1/admin/iam/providers/{id}/test"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/iam/providers/{id}/mappings"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: POST
         path: "/api/v1/admin/iam/providers/{id}/mappings"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
       - method: DELETE
         path: "/api/v1/admin/iam/mappings/{id}"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: forward
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
 
       # === OpenAPI Spec (unauthenticated, read-only) ===
       - method: GET

@@ -70,6 +70,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	engine.AddStepType("step.set", module.NewSetStepFactory())
 	engine.AddStepType("step.log", module.NewLogStepFactory())
 	engine.AddStepType("step.http_call", module.NewHTTPCallStepFactory())
+	engine.AddStepType("step.delegate", module.NewDelegateStepFactory())
 
 	// Register standard triggers
 	engine.RegisterTrigger(module.NewHTTPTrigger())

@@ -2,7 +2,9 @@ package module
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 )
@@ -14,13 +16,15 @@ const (
 
 // InMemoryMessageBroker provides a simple in-memory implementation of MessageBroker
 type InMemoryMessageBroker struct {
-	name          string
-	namespace     ModuleNamespaceProvider
-	subscriptions map[string][]MessageHandler
-	mu            sync.RWMutex
-	producer      *inMemoryProducer
-	consumer      *inMemoryConsumer
-	logger        modular.Logger
+	name            string
+	namespace       ModuleNamespaceProvider
+	subscriptions   map[string][]MessageHandler
+	mu              sync.RWMutex
+	producer        *inMemoryProducer
+	consumer        *inMemoryConsumer
+	logger          modular.Logger
+	maxQueueSize    int
+	deliveryTimeout time.Duration
 }
 
 // NewInMemoryMessageBroker creates a new in-memory message broker
@@ -39,10 +43,12 @@ func NewInMemoryMessageBrokerWithNamespace(name string, namespace ModuleNamespac
 	formattedName := namespace.FormatName(name)
 
 	broker := &InMemoryMessageBroker{
-		name:          formattedName,
-		namespace:     namespace,
-		subscriptions: make(map[string][]MessageHandler),
-		logger:        &noopLogger{}, // Initialize with a no-op logger until Init is called
+		name:            formattedName,
+		namespace:       namespace,
+		subscriptions:   make(map[string][]MessageHandler),
+		logger:          &noopLogger{}, // Initialize with a no-op logger until Init is called
+		maxQueueSize:    10000,
+		deliveryTimeout: 30 * time.Second,
 	}
 	broker.producer = &inMemoryProducer{broker: broker}
 	broker.consumer = &inMemoryConsumer{broker: broker}
@@ -97,6 +103,26 @@ func (b *InMemoryMessageBroker) Stop(ctx context.Context) error {
 	return nil
 }
 
+// SetMaxQueueSize sets the maximum message queue size per topic.
+func (b *InMemoryMessageBroker) SetMaxQueueSize(n int) {
+	b.maxQueueSize = n
+}
+
+// SetDeliveryTimeout sets the message delivery timeout.
+func (b *InMemoryMessageBroker) SetDeliveryTimeout(d time.Duration) {
+	b.deliveryTimeout = d
+}
+
+// MaxQueueSize returns the configured maximum queue size per topic.
+func (b *InMemoryMessageBroker) MaxQueueSize() int {
+	return b.maxQueueSize
+}
+
+// DeliveryTimeout returns the configured delivery timeout.
+func (b *InMemoryMessageBroker) DeliveryTimeout() time.Duration {
+	return b.deliveryTimeout
+}
+
 // ProvidesServices returns a list of services provided by this module
 func (b *InMemoryMessageBroker) ProvidesServices() []modular.ServiceProvider {
 	return []modular.ServiceProvider{
@@ -138,6 +164,11 @@ func (p *inMemoryProducer) SendMessage(topic string, message []byte) error {
 	if !exists {
 		p.broker.logger.Warn("No subscribers for ", "topic", topic)
 		return nil // No subscribers for this topic
+	}
+
+	// Enforce maxQueueSize: reject if subscribers exceed the limit
+	if p.broker.maxQueueSize > 0 && len(handlers) > p.broker.maxQueueSize {
+		return fmt.Errorf("topic %q exceeds max queue size %d", topic, p.broker.maxQueueSize)
 	}
 
 	// Deliver message to all subscribers

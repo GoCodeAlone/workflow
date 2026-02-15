@@ -27,11 +27,12 @@ type StateChangeListener func(previousState, newState string, resourceID string,
 
 // StateTracker provides a generic service for tracking state
 type StateTracker struct {
-	name      string
-	states    map[string]StateInfo             // key is resourceType:resourceID
-	listeners map[string][]StateChangeListener // key is resourceType
-	mu        sync.RWMutex
-	app       modular.Application
+	name          string
+	states        map[string]StateInfo             // key is resourceType:resourceID
+	listeners     map[string][]StateChangeListener // key is resourceType
+	mu            sync.RWMutex
+	app           modular.Application
+	retentionDays int // state history retention in days
 }
 
 // NewStateTracker creates a new state tracker service
@@ -41,9 +42,10 @@ func NewStateTracker(name string) *StateTracker {
 	}
 
 	return &StateTracker{
-		name:      name,
-		states:    make(map[string]StateInfo),
-		listeners: make(map[string][]StateChangeListener),
+		name:          name,
+		states:        make(map[string]StateInfo),
+		listeners:     make(map[string][]StateChangeListener),
+		retentionDays: 30,
 	}
 }
 
@@ -132,6 +134,16 @@ func (s *StateTracker) notifyListeners(resourceType, previousState, newState, re
 	for _, listener := range listeners {
 		go listener(previousState, newState, resourceID, data)
 	}
+}
+
+// SetRetentionDays sets the state history retention in days.
+func (s *StateTracker) SetRetentionDays(days int) {
+	s.retentionDays = days
+}
+
+// RetentionDays returns the configured retention period in days.
+func (s *StateTracker) RetentionDays() int {
+	return s.retentionDays
 }
 
 // ProvidesServices returns the services provided by this module

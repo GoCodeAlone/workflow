@@ -380,9 +380,10 @@ export default function PropertyPanel() {
         {/* Handler Routes */}
         {(node.data.handlerRoutes || node.data.moduleType === 'api.query' || node.data.moduleType === 'api.command') && (
           <HandlerRoutesEditor
-            routes={(node.data.handlerRoutes ?? []) as Array<{ method: string; path: string; middlewares?: string[] }>}
+            routes={(node.data.handlerRoutes ?? []) as Array<{ method: string; path: string; middlewares?: string[]; pipeline?: { steps: Array<{ name: string; type: string; config?: Record<string, unknown> }> } }>}
             nodeId={node.id}
             color={color}
+            delegate={String((node.data.config as Record<string, unknown>)?.delegate ?? '')}
           />
         )}
 
@@ -583,6 +584,7 @@ function HandlerRoutesEditor({
   routes,
   nodeId,
   color,
+  delegate,
 }: {
   routes: Array<{
     method: string;
@@ -592,6 +594,7 @@ function HandlerRoutesEditor({
   }>;
   nodeId: string;
   color: string;
+  delegate?: string;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [adding, setAdding] = useState(false);
@@ -902,9 +905,26 @@ function HandlerRoutesEditor({
                         ))}
                       </div>
                     </div>
-                  ) : (
+                  ) : (route.pipeline?.steps?.length ?? 0) > 0 ? (
                     <RoutePipelineEditor
                       steps={route.pipeline?.steps ?? []}
+                      onChange={(steps) => {
+                        const updated = routes.map((r, idx) =>
+                          idx === i ? { ...r, pipeline: steps.length > 0 ? { steps } : undefined } : r
+                        );
+                        updateHandlerRoutes(nodeId, updated);
+                      }}
+                    />
+                  ) : delegate ? (
+                    <div style={{ fontSize: 10, color: '#585b70', padding: '2px 0', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ color: '#f9e2af', fontSize: 9, padding: '1px 4px', borderRadius: 3, background: '#f9e2af15' }}>
+                        delegate
+                      </span>
+                      <span style={{ color: '#a6adc8' }}>{delegate}</span>
+                    </div>
+                  ) : (
+                    <RoutePipelineEditor
+                      steps={[]}
                       onChange={(steps) => {
                         const updated = routes.map((r, idx) =>
                           idx === i ? { ...r, pipeline: steps.length > 0 ? { steps } : undefined } : r

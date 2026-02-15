@@ -326,13 +326,17 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	// ---- Messaging Category ----
 
 	r.Register(&ModuleSchema{
-		Type:         "messaging.broker",
-		Label:        "In-Memory Message Broker",
-		Category:     "messaging",
-		Description:  "Simple in-memory message broker for local pub/sub",
-		Inputs:       []ServiceIODef{{Name: "message", Type: "[]byte", Description: "Message to publish"}},
-		Outputs:      []ServiceIODef{{Name: "message", Type: "[]byte", Description: "Delivered message to subscriber"}},
-		ConfigFields: []ConfigFieldDef{},
+		Type:        "messaging.broker",
+		Label:       "In-Memory Message Broker",
+		Category:    "messaging",
+		Description: "Simple in-memory message broker for local pub/sub",
+		Inputs:      []ServiceIODef{{Name: "message", Type: "[]byte", Description: "Message to publish"}},
+		Outputs:     []ServiceIODef{{Name: "message", Type: "[]byte", Description: "Delivered message to subscriber"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "maxQueueSize", Label: "Max Queue Size", Type: FieldTypeNumber, DefaultValue: 10000, Description: "Maximum message queue size per topic"},
+			{Key: "deliveryTimeout", Label: "Delivery Timeout", Type: FieldTypeDuration, DefaultValue: "30s", Description: "Message delivery timeout", Placeholder: "30s"},
+		},
+		DefaultConfig: map[string]any{"maxQueueSize": 10000, "deliveryTimeout": "30s"},
 	})
 
 	r.Register(&ModuleSchema{
@@ -384,23 +388,30 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	// ---- State Machine Category ----
 
 	r.Register(&ModuleSchema{
-		Type:         "statemachine.engine",
-		Label:        "State Machine Engine",
-		Category:     "statemachine",
-		Description:  "Manages workflow state transitions and lifecycle",
-		Inputs:       []ServiceIODef{{Name: "event", Type: "Event", Description: "Event triggering a state transition"}},
-		Outputs:      []ServiceIODef{{Name: "transition", Type: "Transition", Description: "Completed state transition result"}},
-		ConfigFields: []ConfigFieldDef{},
+		Type:        "statemachine.engine",
+		Label:       "State Machine Engine",
+		Category:    "statemachine",
+		Description: "Manages workflow state transitions and lifecycle",
+		Inputs:      []ServiceIODef{{Name: "event", Type: "Event", Description: "Event triggering a state transition"}},
+		Outputs:     []ServiceIODef{{Name: "transition", Type: "Transition", Description: "Completed state transition result"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "maxInstances", Label: "Max Instances", Type: FieldTypeNumber, DefaultValue: 1000, Description: "Maximum concurrent workflow instances"},
+			{Key: "instanceTTL", Label: "Instance TTL", Type: FieldTypeDuration, DefaultValue: "24h", Description: "TTL for idle workflow instances", Placeholder: "24h"},
+		},
+		DefaultConfig: map[string]any{"maxInstances": 1000, "instanceTTL": "24h"},
 	})
 
 	r.Register(&ModuleSchema{
-		Type:         "state.tracker",
-		Label:        "State Tracker",
-		Category:     "statemachine",
-		Description:  "Tracks and persists workflow instance state",
-		Inputs:       []ServiceIODef{{Name: "state", Type: "State", Description: "State update to track"}},
-		Outputs:      []ServiceIODef{{Name: "tracked", Type: "State", Description: "Tracked state with persistence"}},
-		ConfigFields: []ConfigFieldDef{},
+		Type:        "state.tracker",
+		Label:       "State Tracker",
+		Category:    "statemachine",
+		Description: "Tracks and persists workflow instance state",
+		Inputs:      []ServiceIODef{{Name: "state", Type: "State", Description: "State update to track"}},
+		Outputs:     []ServiceIODef{{Name: "tracked", Type: "State", Description: "Tracked state with persistence"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "retentionDays", Label: "Retention Days", Type: FieldTypeNumber, DefaultValue: 30, Description: "State history retention in days"},
+		},
+		DefaultConfig: map[string]any{"retentionDays": 30},
 	})
 
 	r.Register(&ModuleSchema{
@@ -948,6 +959,18 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "headers", Label: "Headers", Type: FieldTypeMap, MapValueType: "string", Description: "Request headers (values support templates)"},
 			{Key: "body", Label: "Body", Type: FieldTypeJSON, Description: "Request body (supports templates). For POST/PUT without body, sends pipeline context."},
 			{Key: "timeout", Label: "Timeout", Type: FieldTypeString, DefaultValue: "30s", Description: "Request timeout duration", Placeholder: "30s"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.delegate",
+		Label:       "Delegate",
+		Category:    "pipeline",
+		Description: "Forwards the request to a named service implementing http.Handler",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with HTTP request metadata"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Delegate service handles the full HTTP response"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "service", Label: "Service", Type: FieldTypeString, Required: true, Description: "Name of the service to delegate to (must implement http.Handler)", Placeholder: "my-service", InheritFrom: "dependency.name"},
 		},
 	})
 }

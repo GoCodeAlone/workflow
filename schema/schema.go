@@ -78,6 +78,7 @@ func KnownModuleTypes() []string {
 		"statemachine.engine",
 		"static.fileserver",
 		"step.conditional",
+		"step.delegate",
 		"step.http_call",
 		"step.log",
 		"step.publish",

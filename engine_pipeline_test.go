@@ -22,6 +22,7 @@ func setupPipelineEngine(t *testing.T) (*StdEngine, *handlers.PipelineWorkflowHa
 	engine.AddStepType("step.set", module.NewSetStepFactory())
 	engine.AddStepType("step.log", module.NewLogStepFactory())
 	engine.AddStepType("step.conditional", module.NewConditionalStepFactory())
+	engine.AddStepType("step.delegate", module.NewDelegateStepFactory())
 
 	// Register the pipeline handler
 	pipelineHandler := handlers.NewPipelineWorkflowHandler()

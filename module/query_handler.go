@@ -137,11 +137,23 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"queryName": queryName,
 			"query":     r.URL.Query(),
 		}
+		// Inject HTTP context so delegate steps can forward directly
+		pipeline.Metadata = map[string]any{
+			"_http_request":         r,
+			"_http_response_writer": w,
+		}
 		pc, err := pipeline.Execute(r.Context(), triggerData)
 		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			// Only write error if response wasn't already handled by a delegate step
+			if pc == nil || pc.Metadata["_response_handled"] != true {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			}
+			return
+		}
+		// If response was handled by a delegate step, don't write again
+		if pc.Metadata["_response_handled"] == true {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

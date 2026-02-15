@@ -94,6 +94,8 @@ type StateMachineEngine struct {
 	mutex             sync.RWMutex
 	persistence       *PersistenceStore // optional write-through backend
 	wg                sync.WaitGroup    // tracks in-flight goroutines
+	maxInstances      int               // maximum concurrent workflow instances
+	instanceTTL       time.Duration     // TTL for idle workflow instances
 }
 
 // NewStateMachineEngine creates a new state machine engine
@@ -117,6 +119,8 @@ func NewStateMachineEngineWithNamespace(name string, namespace ModuleNamespacePr
 		definitions:     make(map[string]*StateMachineDefinition),
 		instances:       make(map[string]*WorkflowInstance),
 		instancesByType: make(map[string][]string),
+		maxInstances:    1000,
+		instanceTTL:     24 * time.Hour,
 	}
 }
 
@@ -185,6 +189,26 @@ func (e *StateMachineEngine) TrackGoroutine(fn func()) {
 	e.wg.Go(func() {
 		fn()
 	})
+}
+
+// SetMaxInstances sets the maximum number of concurrent workflow instances.
+func (e *StateMachineEngine) SetMaxInstances(n int) {
+	e.maxInstances = n
+}
+
+// SetInstanceTTL sets the TTL for idle workflow instances.
+func (e *StateMachineEngine) SetInstanceTTL(d time.Duration) {
+	e.instanceTTL = d
+}
+
+// MaxInstances returns the configured maximum number of concurrent instances.
+func (e *StateMachineEngine) MaxInstances() int {
+	return e.maxInstances
+}
+
+// InstanceTTL returns the configured TTL for idle instances.
+func (e *StateMachineEngine) InstanceTTL() time.Duration {
+	return e.instanceTTL
 }
 
 // LoadAllPersistedInstances loads workflow instances from persistence for all
@@ -398,10 +422,16 @@ func (e *StateMachineEngine) CreateWorkflow(
 	// Find the definition
 	e.mutex.RLock()
 	def, ok := e.definitions[workflowType]
+	instanceCount := len(e.instances)
 	e.mutex.RUnlock()
 
 	if !ok {
 		return nil, fmt.Errorf("workflow type '%s' not found", workflowType)
+	}
+
+	// Enforce maxInstances limit
+	if e.maxInstances > 0 && instanceCount >= e.maxInstances {
+		return nil, fmt.Errorf("maximum concurrent instances (%d) reached", e.maxInstances)
 	}
 
 	// Create the instance

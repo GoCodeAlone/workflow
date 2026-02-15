@@ -42,61 +42,271 @@ func (h *V1APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.HandleV1(w, r)
 }
 
-// HandleV1 dispatches v1 API requests based on method and path.
+// HandleV1 dispatches v1 API requests by parsing path segments and delegating
+// to resource-specific handlers. Each handler is self-contained and manages
+// its own HTTP method routing.
 func (h *V1APIHandler) HandleV1(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	path := r.URL.Path
-	method := r.Method
 
-	switch {
-	// --- Companies ---
-	case method == http.MethodGet && strings.HasSuffix(path, "/companies") && !strings.Contains(path, "/organizations"):
-		h.handleListCompanies(w, r)
-	case method == http.MethodPost && strings.HasSuffix(path, "/companies"):
-		h.handleCreateCompany(w, r)
-	case method == http.MethodGet && matchPath(path, "/companies/", "/organizations"):
-		h.handleListOrganizations(w, r)
-	case method == http.MethodPost && matchPath(path, "/companies/", "/organizations"):
-		h.handleCreateOrganization(w, r)
-	case method == http.MethodGet && matchPathExact(path, "/companies/"):
-		h.handleGetCompany(w, r)
-
-	// --- Projects ---
-	case method == http.MethodGet && matchPath(path, "/organizations/", "/projects"):
-		h.handleListProjects(w, r)
-	case method == http.MethodPost && matchPath(path, "/organizations/", "/projects"):
-		h.handleCreateProject(w, r)
-
-	// --- Workflows (nested under projects) ---
-	case method == http.MethodGet && matchPath(path, "/projects/", "/workflows"):
-		h.handleListWorkflowsByProject(w, r)
-	case method == http.MethodPost && matchPath(path, "/projects/", "/workflows"):
-		h.handleCreateWorkflow(w, r)
-
-	// --- Dashboard ---
-	case method == http.MethodGet && strings.HasSuffix(path, "/dashboard") && !strings.Contains(path, "/workflows/"):
-		h.handleDashboard(w, r)
-
-	// --- Workflows (direct) ---
-	case method == http.MethodGet && strings.HasSuffix(path, "/workflows") && !strings.Contains(path, "/projects/"):
-		h.handleListAllWorkflows(w, r)
-	case method == http.MethodGet && matchPath(path, "/workflows/", "/versions"):
-		h.handleListVersions(w, r)
-	case method == http.MethodPost && matchPath(path, "/workflows/", "/deploy"):
-		h.handleDeployWorkflow(w, r)
-	case method == http.MethodPost && matchPath(path, "/workflows/", "/stop"):
-		h.handleStopWorkflow(w, r)
-	case method == http.MethodGet && matchPathExact(path, "/workflows/"):
-		h.handleGetWorkflow(w, r)
-	case method == http.MethodPut && matchPathExact(path, "/workflows/"):
-		h.handleUpdateWorkflow(w, r)
-	case method == http.MethodDelete && matchPathExact(path, "/workflows/"):
-		h.handleDeleteWorkflow(w, r)
-
-	// --- Workspaces ---
-	case strings.Contains(path, "/workspaces/") && h.workspaceHandler != nil:
+	// Workspaces: delegate entirely to the workspace handler.
+	if strings.Contains(path, "/workspaces/") && h.workspaceHandler != nil {
 		h.workspaceHandler.HandleWorkspace(w, r)
+		return
+	}
+
+	// Parse path segments after the last "/v1/" prefix (or "/admin/").
+	// Typical paths:
+	//   /api/v1/companies
+	//   /api/v1/companies/{id}
+	//   /api/v1/companies/{id}/organizations
+	//   /api/v1/organizations/{id}/projects
+	//   /api/v1/projects/{id}/workflows
+	//   /api/v1/workflows
+	//   /api/v1/workflows/{id}
+	//   /api/v1/workflows/{id}/versions
+	//   /api/v1/workflows/{id}/deploy
+	//   /api/v1/workflows/{id}/stop
+	//   /api/v1/dashboard
+	segments := parsePathSegments(path)
+
+	if len(segments) == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+
+	// Dispatch based on the first resource segment.
+	switch segments[0] {
+	case "companies":
+		h.handleCompanies(w, r, segments[1:])
+	case "organizations":
+		h.handleOrganizations(w, r, segments[1:])
+	case "projects":
+		h.handleProjects(w, r, segments[1:])
+	case "workflows":
+		h.handleWorkflows(w, r, segments[1:])
+	case "dashboard":
+		h.handleDashboard(w, r)
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	}
+}
+
+// parsePathSegments extracts the meaningful path segments after the API prefix.
+// It finds the last occurrence of a known resource keyword and returns from
+// that point onward. For example:
+//
+//	"/api/v1/companies/abc/organizations" -> ["companies", "abc", "organizations"]
+//	"/api/v1/workflows/xyz/deploy"        -> ["workflows", "xyz", "deploy"]
+//	"/api/v1/dashboard"                   -> ["dashboard"]
+func parsePathSegments(path string) []string {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+
+	// Walk backwards to find the first resource keyword — this is the
+	// start of the resource path we care about.
+	resources := map[string]bool{
+		"companies": true, "organizations": true,
+		"projects": true, "workflows": true, "dashboard": true,
+	}
+
+	startIdx := -1
+	for i, p := range parts {
+		if resources[p] {
+			startIdx = i
+			break
+		}
+	}
+	if startIdx < 0 {
+		return nil
+	}
+	return parts[startIdx:]
+}
+
+// --- handleCompanies dispatches company-level operations ---
+//
+// Handles:
+//
+//	GET    /companies          -> list companies
+//	POST   /companies          -> create company
+//	GET    /companies/{id}     -> get company
+//	GET    /companies/{id}/organizations  -> list orgs (delegates)
+//	POST   /companies/{id}/organizations  -> create org (delegates)
+func (h *V1APIHandler) handleCompanies(w http.ResponseWriter, r *http.Request, rest []string) {
+	switch {
+	// /companies (no ID)
+	case len(rest) == 0:
+		switch r.Method {
+		case http.MethodGet:
+			h.listCompanies(w, r)
+		case http.MethodPost:
+			h.createCompany(w, r)
+		default:
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		}
+
+	// /companies/{id}
+	case len(rest) == 1:
+		switch r.Method {
+		case http.MethodGet:
+			h.getCompany(w, r, rest[0])
+		default:
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		}
+
+	// /companies/{id}/organizations[/...]
+	case len(rest) >= 2 && rest[1] == "organizations":
+		companyID := rest[0]
+		h.handleCompanyOrganizations(w, r, companyID, rest[2:])
+
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	}
+}
+
+// handleCompanyOrganizations handles organization operations nested under a company.
+//
+// Handles:
+//
+//	GET    /companies/{companyID}/organizations  -> list orgs
+//	POST   /companies/{companyID}/organizations  -> create org
+func (h *V1APIHandler) handleCompanyOrganizations(w http.ResponseWriter, r *http.Request, companyID string, rest []string) {
+	if len(rest) != 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		h.listOrganizations(w, r, companyID)
+	case http.MethodPost:
+		h.createOrganization(w, r, companyID)
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	}
+}
+
+// --- handleOrganizations dispatches organization-level operations ---
+//
+// Handles:
+//
+//	GET    /organizations/{id}/projects  -> list projects
+//	POST   /organizations/{id}/projects  -> create project
+func (h *V1APIHandler) handleOrganizations(w http.ResponseWriter, r *http.Request, rest []string) {
+	if len(rest) < 2 || rest[1] != "projects" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+
+	orgID := rest[0]
+	remaining := rest[2:]
+
+	if len(remaining) != 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		h.listProjects(w, r, orgID)
+	case http.MethodPost:
+		h.createProject(w, r, orgID)
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	}
+}
+
+// --- handleProjects dispatches project-level operations ---
+//
+// Handles:
+//
+//	GET    /projects/{id}/workflows  -> list workflows by project
+//	POST   /projects/{id}/workflows  -> create workflow
+func (h *V1APIHandler) handleProjects(w http.ResponseWriter, r *http.Request, rest []string) {
+	if len(rest) < 2 || rest[1] != "workflows" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+
+	projectID := rest[0]
+	remaining := rest[2:]
+
+	if len(remaining) != 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		h.listWorkflowsByProject(w, r, projectID)
+	case http.MethodPost:
+		h.createWorkflow(w, r, projectID)
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	}
+}
+
+// --- handleWorkflows dispatches workflow-level operations ---
+//
+// Handles:
+//
+//	GET    /workflows             -> list all workflows
+//	GET    /workflows/{id}        -> get workflow
+//	PUT    /workflows/{id}        -> update workflow
+//	DELETE /workflows/{id}        -> delete workflow
+//	GET    /workflows/{id}/versions -> list versions
+//	POST   /workflows/{id}/deploy   -> deploy workflow
+//	POST   /workflows/{id}/stop     -> stop workflow
+func (h *V1APIHandler) handleWorkflows(w http.ResponseWriter, r *http.Request, rest []string) {
+	switch {
+	// /workflows (no ID)
+	case len(rest) == 0:
+		if r.Method == http.MethodGet {
+			h.listAllWorkflows(w, r)
+		} else {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		}
+
+	// /workflows/{id}
+	case len(rest) == 1:
+		workflowID := rest[0]
+		switch r.Method {
+		case http.MethodGet:
+			h.getWorkflow(w, r, workflowID)
+		case http.MethodPut:
+			h.updateWorkflow(w, r, workflowID)
+		case http.MethodDelete:
+			h.deleteWorkflow(w, r, workflowID)
+		default:
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		}
+
+	// /workflows/{id}/{action}
+	case len(rest) == 2:
+		workflowID := rest[0]
+		action := rest[1]
+		switch action {
+		case "versions":
+			if r.Method == http.MethodGet {
+				h.listVersions(w, r, workflowID)
+			} else {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			}
+		case "deploy":
+			if r.Method == http.MethodPost {
+				h.deployWorkflow(w, r, workflowID)
+			} else {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			}
+		case "stop":
+			if r.Method == http.MethodPost {
+				h.stopWorkflow(w, r, workflowID)
+			} else {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			}
+		default:
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		}
 
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -187,43 +397,6 @@ func (h *V1APIHandler) requireAdmin(w http.ResponseWriter, r *http.Request) *use
 	return claims
 }
 
-// --- Path helpers ---
-
-// matchPath checks if path contains prefix + id + suffix pattern.
-func matchPath(path, prefix, suffix string) bool {
-	idx := strings.Index(path, prefix)
-	if idx < 0 {
-		return false
-	}
-	rest := path[idx+len(prefix):]
-	return strings.HasSuffix(rest, suffix)
-}
-
-// matchPathExact checks if path ends with prefix + id (no trailing path segments beyond the id).
-func matchPathExact(path, prefix string) bool {
-	idx := strings.Index(path, prefix)
-	if idx < 0 {
-		return false
-	}
-	rest := path[idx+len(prefix):]
-	// rest should be the ID only — no slashes
-	return rest != "" && !strings.Contains(rest, "/")
-}
-
-// extractID extracts the path parameter after the given prefix.
-// e.g. extractID("/api/v1/companies/abc-123/organizations", "/companies/") returns "abc-123"
-func extractID(path, prefix string) string {
-	idx := strings.Index(path, prefix)
-	if idx < 0 {
-		return ""
-	}
-	rest := path[idx+len(prefix):]
-	if slashIdx := strings.Index(rest, "/"); slashIdx >= 0 {
-		return rest[:slashIdx]
-	}
-	return rest
-}
-
 // --- JSON helpers ---
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -235,9 +408,11 @@ func decodeBody(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
-// --- Companies ---
+// =============================================================================
+// Company operations
+// =============================================================================
 
-func (h *V1APIHandler) handleListCompanies(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) listCompanies(w http.ResponseWriter, r *http.Request) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
@@ -266,7 +441,7 @@ func (h *V1APIHandler) handleListCompanies(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, companies)
 }
 
-func (h *V1APIHandler) handleCreateCompany(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) createCompany(w http.ResponseWriter, r *http.Request) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
@@ -293,13 +468,12 @@ func (h *V1APIHandler) handleCreateCompany(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusCreated, c)
 }
 
-func (h *V1APIHandler) handleGetCompany(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) getCompany(w http.ResponseWriter, r *http.Request, id string) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
 	}
 
-	id := extractID(r.URL.Path, "/companies/")
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "company ID required"})
 		return
@@ -319,15 +493,16 @@ func (h *V1APIHandler) handleGetCompany(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, c)
 }
 
-// --- Organizations ---
+// =============================================================================
+// Organization operations
+// =============================================================================
 
-func (h *V1APIHandler) handleListOrganizations(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) listOrganizations(w http.ResponseWriter, r *http.Request, companyID string) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
 	}
 
-	companyID := extractID(r.URL.Path, "/companies/")
 	if companyID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "company ID required"})
 		return
@@ -344,13 +519,12 @@ func (h *V1APIHandler) handleListOrganizations(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, orgs)
 }
 
-func (h *V1APIHandler) handleCreateOrganization(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) createOrganization(w http.ResponseWriter, r *http.Request, companyID string) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
 	}
 
-	companyID := extractID(r.URL.Path, "/companies/")
 	if companyID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "company ID required"})
 		return
@@ -388,15 +562,16 @@ func (h *V1APIHandler) handleCreateOrganization(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusCreated, org)
 }
 
-// --- Projects ---
+// =============================================================================
+// Project operations
+// =============================================================================
 
-func (h *V1APIHandler) handleListProjects(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) listProjects(w http.ResponseWriter, r *http.Request, orgID string) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
 	}
 
-	orgID := extractID(r.URL.Path, "/organizations/")
 	if orgID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "organization ID required"})
 		return
@@ -413,13 +588,12 @@ func (h *V1APIHandler) handleListProjects(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, projects)
 }
 
-func (h *V1APIHandler) handleCreateProject(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) createProject(w http.ResponseWriter, r *http.Request, orgID string) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
 	}
 
-	orgID := extractID(r.URL.Path, "/organizations/")
 	if orgID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "organization ID required"})
 		return
@@ -447,15 +621,16 @@ func (h *V1APIHandler) handleCreateProject(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusCreated, proj)
 }
 
-// --- Workflows ---
+// =============================================================================
+// Workflow operations
+// =============================================================================
 
-func (h *V1APIHandler) handleListWorkflowsByProject(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) listWorkflowsByProject(w http.ResponseWriter, r *http.Request, projectID string) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
 	}
 
-	projectID := extractID(r.URL.Path, "/projects/")
 	if projectID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project ID required"})
 		return
@@ -472,13 +647,12 @@ func (h *V1APIHandler) handleListWorkflowsByProject(w http.ResponseWriter, r *ht
 	writeJSON(w, http.StatusOK, wfs)
 }
 
-func (h *V1APIHandler) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) createWorkflow(w http.ResponseWriter, r *http.Request, projectID string) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
 	}
 
-	projectID := extractID(r.URL.Path, "/projects/")
 	if projectID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project ID required"})
 		return
@@ -512,7 +686,7 @@ func (h *V1APIHandler) handleCreateWorkflow(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusCreated, wf)
 }
 
-func (h *V1APIHandler) handleListAllWorkflows(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) listAllWorkflows(w http.ResponseWriter, r *http.Request) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
@@ -542,13 +716,12 @@ func (h *V1APIHandler) handleListAllWorkflows(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, wfs)
 }
 
-func (h *V1APIHandler) handleGetWorkflow(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) getWorkflow(w http.ResponseWriter, r *http.Request, id string) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
 	}
 
-	id := extractID(r.URL.Path, "/workflows/")
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workflow ID required"})
 		return
@@ -568,13 +741,12 @@ func (h *V1APIHandler) handleGetWorkflow(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, wf)
 }
 
-func (h *V1APIHandler) handleUpdateWorkflow(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) updateWorkflow(w http.ResponseWriter, r *http.Request, id string) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
 	}
 
-	id := extractID(r.URL.Path, "/workflows/")
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workflow ID required"})
 		return
@@ -614,13 +786,12 @@ func (h *V1APIHandler) handleUpdateWorkflow(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, wf)
 }
 
-func (h *V1APIHandler) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) deleteWorkflow(w http.ResponseWriter, r *http.Request, id string) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
 	}
 
-	id := extractID(r.URL.Path, "/workflows/")
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workflow ID required"})
 		return
@@ -638,13 +809,12 @@ func (h *V1APIHandler) handleDeleteWorkflow(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *V1APIHandler) handleDeployWorkflow(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) deployWorkflow(w http.ResponseWriter, r *http.Request, id string) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
 	}
 
-	id := extractID(r.URL.Path, "/workflows/")
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workflow ID required"})
 		return
@@ -678,13 +848,12 @@ func (h *V1APIHandler) handleDeployWorkflow(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, updated)
 }
 
-func (h *V1APIHandler) handleStopWorkflow(w http.ResponseWriter, r *http.Request) {
+func (h *V1APIHandler) stopWorkflow(w http.ResponseWriter, r *http.Request, id string) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
 	}
 
-	id := extractID(r.URL.Path, "/workflows/")
 	if id == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workflow ID required"})
 		return
@@ -709,7 +878,9 @@ func (h *V1APIHandler) handleStopWorkflow(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, updated)
 }
 
-// --- Dashboard ---
+// =============================================================================
+// Dashboard
+// =============================================================================
 
 type dashboardSummary struct {
 	WorkflowID   string         `json:"workflow_id"`
@@ -765,13 +936,16 @@ func (h *V1APIHandler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *V1APIHandler) handleListVersions(w http.ResponseWriter, r *http.Request) {
+// =============================================================================
+// Versions
+// =============================================================================
+
+func (h *V1APIHandler) listVersions(w http.ResponseWriter, r *http.Request, workflowID string) {
 	claims := h.requireAuth(w, r)
 	if claims == nil {
 		return
 	}
 
-	workflowID := extractID(r.URL.Path, "/workflows/")
 	if workflowID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workflow ID required"})
 		return

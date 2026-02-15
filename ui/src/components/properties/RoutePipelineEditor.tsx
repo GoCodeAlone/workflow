@@ -19,6 +19,7 @@ const STEP_TYPES = [
   { value: 'log', label: 'Log' },
   { value: 'publish', label: 'Publish Event' },
   { value: 'http_call', label: 'HTTP Call' },
+  { value: 'delegate', label: 'Delegate' },
 ];
 
 export default function RoutePipelineEditor({ steps, onChange }: RoutePipelineEditorProps) {

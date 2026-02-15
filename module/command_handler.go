@@ -144,11 +144,21 @@ func (h *CommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
 			triggerData["body"] = body
 		}
+		// Inject HTTP context so delegate steps can forward directly
+		pipeline.Metadata = map[string]any{
+			"_http_request":         r,
+			"_http_response_writer": w,
+		}
 		pc, err := pipeline.Execute(r.Context(), triggerData)
 		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			if pc == nil || pc.Metadata["_response_handled"] != true {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			}
+			return
+		}
+		if pc.Metadata["_response_handled"] == true {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

@@ -309,7 +309,16 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				mod = module.NewCORSMiddleware(modCfg.Name, allowedOrigins, allowedMethods)
 			case "messaging.broker":
 				e.logger.Debug("Loading messaging broker module")
-				mod = module.NewInMemoryMessageBroker(modCfg.Name)
+				broker := module.NewInMemoryMessageBroker(modCfg.Name)
+				if maxQ, ok := modCfg.Config["maxQueueSize"].(float64); ok {
+					broker.SetMaxQueueSize(int(maxQ))
+				}
+				if timeout, ok := modCfg.Config["deliveryTimeout"].(string); ok {
+					if d, err := time.ParseDuration(timeout); err == nil {
+						broker.SetDeliveryTimeout(d)
+					}
+				}
+				mod = broker
 			case "messaging.broker.eventbus":
 				e.logger.Debug("Loading EventBus bridge module")
 				mod = module.NewEventBusBridge(modCfg.Name)
@@ -318,10 +327,23 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				mod = module.NewSimpleMessageHandler(modCfg.Name)
 			case "statemachine.engine":
 				e.logger.Debug("Loading state machine engine module")
-				mod = module.NewStateMachineEngine(modCfg.Name)
+				smEngine := module.NewStateMachineEngine(modCfg.Name)
+				if maxInst, ok := modCfg.Config["maxInstances"].(float64); ok {
+					smEngine.SetMaxInstances(int(maxInst))
+				}
+				if ttl, ok := modCfg.Config["instanceTTL"].(string); ok {
+					if d, err := time.ParseDuration(ttl); err == nil {
+						smEngine.SetInstanceTTL(d)
+					}
+				}
+				mod = smEngine
 			case "state.tracker":
 				e.logger.Debug("Loading state tracker module")
-				mod = module.NewStateTracker(modCfg.Name)
+				tracker := module.NewStateTracker(modCfg.Name)
+				if rd, ok := modCfg.Config["retentionDays"].(float64); ok {
+					tracker.SetRetentionDays(int(rd))
+				}
+				mod = tracker
 			case "state.connector":
 				e.logger.Debug("Loading state machine connector module")
 				mod = module.NewStateMachineStateConnector(modCfg.Name)

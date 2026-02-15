@@ -36,14 +36,12 @@ export default function DelegateServicePicker({
       }));
   }, [nodes, currentNodeId]);
 
-  // Server services implementing http.Handler
+  // Server-registered services (any service can be a delegate target)
   const serverServices = useMemo(() => {
-    return services
-      .filter((s) => s.implements.includes('http.Handler'))
-      .map((s) => ({
-        name: s.name,
-        source: 'server' as const,
-      }));
+    return services.map((s) => ({
+      name: s.name,
+      source: 'server' as const,
+    }));
   }, [services]);
 
   // Combine and deduplicate

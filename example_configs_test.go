@@ -257,6 +257,7 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 			engine.AddStepType("step.set", module.NewSetStepFactory())
 			engine.AddStepType("step.log", module.NewLogStepFactory())
 			engine.AddStepType("step.http_call", module.NewHTTPCallStepFactory())
+			engine.AddStepType("step.delegate", module.NewDelegateStepFactory())
 
 			if err := engine.BuildFromConfig(wfCfg); err != nil {
 				t.Errorf("BuildFromConfig failed for %s: %v", cfgPath, err)

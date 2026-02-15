@@ -24,6 +24,9 @@ type Pipeline struct {
 	Timeout      time.Duration
 	Compensation []PipelineStep
 	Logger       *slog.Logger
+	// Metadata is pre-seeded metadata merged into the PipelineContext.
+	// Used to pass HTTP context (request/response) for delegate steps.
+	Metadata map[string]any
 }
 
 // Execute runs the pipeline from trigger data.
@@ -35,10 +38,15 @@ func (p *Pipeline) Execute(ctx context.Context, triggerData map[string]any) (*Pi
 		defer cancel()
 	}
 
-	pc := NewPipelineContext(triggerData, map[string]any{
+	md := map[string]any{
 		"pipeline":   p.Name,
 		"started_at": time.Now().UTC().Format(time.RFC3339),
-	})
+	}
+	// Merge pre-seeded metadata (e.g., HTTP context for delegate steps)
+	for k, v := range p.Metadata {
+		md[k] = v
+	}
+	pc := NewPipelineContext(triggerData, md)
 
 	logger := p.Logger
 	if logger == nil {
