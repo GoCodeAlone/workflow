@@ -223,69 +223,42 @@ func TestBuildEngine_EmptyConfig(t *testing.T) {
 	}
 }
 
-func TestBuildMux_AllRoutesRegistered(t *testing.T) {
-	svc := ai.NewService()
-	svc.RegisterGenerator(ai.ProviderAnthropic, &mockGenerator{})
+func TestCQRSWiring_QueryHandlerDelegateDispatches(t *testing.T) {
+	// Test that a QueryHandler correctly dispatches to its delegate
+	qh := module.NewQueryHandler("test-queries")
+	called := false
+	qh.SetDelegateHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
 
-	pool := dynamic.NewInterpreterPool()
-	registry := dynamic.NewComponentRegistry()
-	loader := dynamic.NewLoader(pool, registry)
-	deploy := ai.NewDeployService(svc, registry, pool)
-	cfg := config.NewEmptyWorkflowConfig()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/engine/config", nil)
+	w := httptest.NewRecorder()
+	qh.ServeHTTP(w, req)
 
-	mux := buildMux(svc, deploy, loader, registry, module.NewWorkflowUIHandler(cfg))
-
-	tests := []struct {
-		name   string
-		method string
-		path   string
-		body   any
-	}{
-		{"ai providers", http.MethodGet, "/api/ai/providers", nil},
-		{"ai generate", http.MethodPost, "/api/ai/generate", ai.GenerateRequest{Intent: "test"}},
-		{"ai suggest", http.MethodPost, "/api/ai/suggest", map[string]string{"useCase": "test"}},
-		{"dynamic components", http.MethodGet, "/api/dynamic/components", nil},
-		{"workflow config", http.MethodGet, "/api/workflow/config", nil},
-		{"workflow validate", http.MethodPost, "/api/workflow/validate", map[string]any{"modules": []any{}}},
-		{"workflow modules", http.MethodGet, "/api/workflow/modules", nil},
+	if !called {
+		t.Error("expected delegate to be called")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var req *http.Request
-			if tt.body != nil {
-				body, _ := json.Marshal(tt.body)
-				req = httptest.NewRequest(tt.method, tt.path, bytes.NewReader(body))
-				req.Header.Set("Content-Type", "application/json")
-			} else {
-				req = httptest.NewRequest(tt.method, tt.path, nil)
-			}
-			w := httptest.NewRecorder()
-			mux.ServeHTTP(w, req)
-
-			if w.Code == http.StatusNotFound {
-				t.Errorf("route %s %s returned 404, expected a registered handler", tt.method, tt.path)
-			}
-		})
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
 	}
 }
 
-func TestBuildMux_StaticFilesFallback(t *testing.T) {
-	svc := ai.NewService()
-	pool := dynamic.NewInterpreterPool()
-	registry := dynamic.NewComponentRegistry()
-	loader := dynamic.NewLoader(pool, registry)
-	deploy := ai.NewDeployService(svc, registry, pool)
-	cfg := config.NewEmptyWorkflowConfig()
+func TestCQRSWiring_CommandHandlerDelegateDispatches(t *testing.T) {
+	// Test that a CommandHandler correctly dispatches to its delegate
+	ch := module.NewCommandHandler("test-commands")
+	ch.SetDelegateHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"reloaded":true}`))
+	}))
 
-	mux := buildMux(svc, deploy, loader, registry, module.NewWorkflowUIHandler(cfg))
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/engine/reload", nil)
 	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
+	ch.ServeHTTP(w, req)
 
-	if w.Code == http.StatusNotFound {
-		t.Error("GET / returned 404, expected static file server response")
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
 	}
 }
 
@@ -322,13 +295,10 @@ func TestIntegration_GenerateEndpoint(t *testing.T) {
 	svc := ai.NewService()
 	svc.RegisterGenerator(ai.ProviderAnthropic, &mockGenerator{})
 
-	pool := dynamic.NewInterpreterPool()
-	registry := dynamic.NewComponentRegistry()
-	loader := dynamic.NewLoader(pool, registry)
-	deploy := ai.NewDeployService(svc, registry, pool)
-	cfg := config.NewEmptyWorkflowConfig()
-
-	mux := buildMux(svc, deploy, loader, registry, module.NewWorkflowUIHandler(cfg))
+	// Test using the AI handler directly (routes are wired through engine CQRS modules in production)
+	handler := ai.NewHandler(svc)
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
 
 	body, _ := json.Marshal(ai.GenerateRequest{Intent: "Create a REST API"})
 	req := httptest.NewRequest(http.MethodPost, "/api/ai/generate", bytes.NewReader(body))
@@ -434,9 +404,6 @@ func TestSetup_EmptyConfig(t *testing.T) {
 	}
 	if app.engine == nil {
 		t.Fatal("expected non-nil engine")
-	}
-	if app.handler == nil {
-		t.Fatal("expected non-nil handler")
 	}
 	if app.logger == nil {
 		t.Fatal("expected non-nil logger")
@@ -600,12 +567,7 @@ func TestSetup_WithModules(t *testing.T) {
 	if app == nil {
 		t.Fatal("expected non-nil serverApp")
 	}
-
-	// Verify the handler has routes by testing one
-	req := httptest.NewRequest(http.MethodGet, "/api/ai/providers", nil)
-	w := httptest.NewRecorder()
-	app.handler.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Error("expected /api/ai/providers to be registered")
+	if app.engine == nil {
+		t.Fatal("expected non-nil engine")
 	}
 }

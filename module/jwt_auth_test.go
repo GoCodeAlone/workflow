@@ -68,18 +68,20 @@ func TestJWTAuth_Register(t *testing.T) {
 	}
 }
 
-func TestJWTAuth_RegisterDuplicateEmail(t *testing.T) {
+func TestJWTAuth_RegisterDisabledAfterSetup(t *testing.T) {
 	j := setupJWTAuth(t)
 
-	registerUser(t, j, "dup@example.com", "User1", "pass1")
+	// First registration succeeds (setup mode — no users exist)
+	registerUser(t, j, "admin@example.com", "Admin", "pass1")
 
-	body := `{"email":"dup@example.com","name":"User2","password":"pass2"}`
+	// Second registration is blocked — self-registration is disabled after setup
+	body := `{"email":"user2@example.com","name":"User2","password":"pass2"}`
 	req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewBufferString(body))
 	w := httptest.NewRecorder()
 	j.Handle(w, req)
 
-	if w.Code != http.StatusConflict {
-		t.Errorf("expected status %d for duplicate, got %d", http.StatusConflict, w.Code)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected status %d (registration disabled after setup), got %d", http.StatusForbidden, w.Code)
 	}
 }
 

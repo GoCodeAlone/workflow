@@ -9,7 +9,7 @@ interface ServerIODef {
   description?: string;
 }
 
-// Shape of a server-side module schema (from /api/v1/module-schemas)
+// Shape of a server-side module schema (from /api/v1/admin/schemas/modules)
 interface ServerModuleSchema {
   type: string;
   label: string;
@@ -37,6 +37,13 @@ interface ServerConfigField {
   sensitive?: boolean;
 }
 
+/** Shape of a service from the services API */
+export interface ServiceInfo {
+  name: string;
+  type: string;
+  implements: string[];
+}
+
 interface ModuleSchemaState {
   /** Whether schemas have been loaded from the server */
   loaded: boolean;
@@ -48,8 +55,14 @@ interface ModuleSchemaState {
   moduleTypes: ModuleTypeInfo[];
   /** Merged MODULE_TYPE_MAP */
   moduleTypeMap: Record<string, ModuleTypeInfo>;
+  /** Available services from the engine */
+  services: ServiceInfo[];
+  /** Whether services have been loaded */
+  servicesLoaded: boolean;
   /** Fetch schemas from server and merge with static definitions */
   fetchSchemas: () => Promise<void>;
+  /** Fetch available services from the engine */
+  fetchServices: () => Promise<void>;
 }
 
 /** Map server field types to UI field types */
@@ -174,6 +187,8 @@ const useModuleSchemaStore = create<ModuleSchemaState>((set, get) => ({
   serverSchemas: {},
   moduleTypes: MODULE_TYPES,
   moduleTypeMap: STATIC_MODULE_TYPE_MAP,
+  services: [],
+  servicesLoaded: false,
 
   fetchSchemas: async () => {
     if (get().loading) return;
@@ -184,7 +199,7 @@ const useModuleSchemaStore = create<ModuleSchemaState>((set, get) => ({
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-      const res = await fetch('/api/v1/module-schemas', { headers });
+      const res = await fetch('/api/v1/admin/schemas/modules', { headers });
       if (!res.ok) {
         console.warn('Failed to fetch module schemas, using static defaults');
         set({ loading: false, loaded: true });
@@ -203,6 +218,30 @@ const useModuleSchemaStore = create<ModuleSchemaState>((set, get) => ({
     } catch (e) {
       console.warn('Error fetching module schemas:', e);
       set({ loading: false, loaded: true });
+    }
+  },
+  fetchServices: async () => {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      // Try the engine management endpoint first, then workflow endpoint
+      let res = await fetch('/api/v1/admin/engine/services', { headers });
+      if (!res.ok) {
+        res = await fetch('/api/workflow/services', { headers });
+      }
+      if (!res.ok) {
+        console.warn('Failed to fetch services');
+        set({ servicesLoaded: true });
+        return;
+      }
+      const services: ServiceInfo[] = await res.json();
+      set({ services, servicesLoaded: true });
+    } catch (e) {
+      console.warn('Error fetching services:', e);
+      set({ servicesLoaded: true });
     }
   },
 }));

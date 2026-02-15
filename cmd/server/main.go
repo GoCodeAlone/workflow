@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"github.com/CrisisTextLine/modular"
@@ -189,10 +187,8 @@ func mergeAdminConfig(logger *slog.Logger, cfg *config.WorkflowConfig, app *serv
 	return nil
 }
 
-// wireManagementHandler wires all admin API handlers into their respective
-// http.handler modules in the engine's service registry. Each handler module
-// is defined in admin/config.yaml and routes are dispatched by the engine's
-// router — no custom dispatching logic needed.
+// wireManagementHandler registers admin service objects as ServiceModules
+// so that CQRS handlers can resolve them via their delegate config.
 func wireManagementHandler(logger *slog.Logger, engine *workflow.StdEngine, cfg *config.WorkflowConfig, app *serverApp, aiSvc *ai.Service, deploySvc *ai.DeployService, loader *dynamic.Loader, registry *dynamic.ComponentRegistry) {
 	// Workflow management handler (config, reload, validate, status)
 	mgmtHandler := module.NewWorkflowUIHandler(cfg)
@@ -214,64 +210,60 @@ func wireManagementHandler(logger *slog.Logger, engine *workflow.StdEngine, cfg 
 	mgmtHandler.SetStatusFunc(func() map[string]any {
 		return map[string]any{"status": "running"}
 	})
+	mgmtHandler.SetServiceRegistry(func() map[string]any {
+		return app.engine.App().SvcRegistry()
+	})
 
-	// AI handler (generate, component, suggest, providers, deploy)
+	// AI handlers (combined into a single http.Handler)
 	aiH := ai.NewHandler(aiSvc)
 	deployH := ai.NewDeployHandler(deploySvc)
-	aiDispatch := func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/ai/generate"):
-			aiH.HandleGenerate(w, r)
-		case strings.HasSuffix(r.URL.Path, "/ai/component"):
-			aiH.HandleComponent(w, r)
-		case strings.HasSuffix(r.URL.Path, "/ai/suggest"):
-			aiH.HandleSuggest(w, r)
-		case strings.HasSuffix(r.URL.Path, "/ai/providers"):
-			aiH.HandleProviders(w, r)
-		case strings.HasSuffix(r.URL.Path, "/ai/deploy/component"):
-			deployH.HandleDeployComponent(w, r)
-		case strings.HasSuffix(r.URL.Path, "/ai/deploy"):
-			deployH.HandleDeploy(w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	}
+	combinedAI := ai.NewCombinedHandler(aiH, deployH)
 
 	// Dynamic components handler
 	dynH := dynamic.NewAPIHandler(loader, registry)
-	dynDispatch := func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		if strings.HasPrefix(path, "/api/dynamic/components/") {
-			dynH.HandleComponentByID(w, r)
-		} else {
-			dynH.HandleComponents(w, r)
+
+	// Schema handler
+	schemaSvc := schema.NewSchemaService()
+
+	// Register service modules — these are resolved by delegate config in admin/config.yaml
+	svcModules := map[string]any{
+		"admin-engine-mgmt":    mgmtHandler,
+		"admin-schema-mgmt":    schemaSvc,
+		"admin-ai-mgmt":        combinedAI,
+		"admin-component-mgmt": dynH,
+	}
+	for name, svc := range svcModules {
+		engine.GetApp().RegisterModule(module.NewServiceModule(name, svc))
+		if err := engine.GetApp().RegisterService(name, svc); err != nil {
+			logger.Warn("Failed to register service directly", "name", name, "error", err)
 		}
 	}
 
-	// Wire each handler to its named module in the service registry
-	handlers := map[string]func(http.ResponseWriter, *http.Request){
-		"admin-management":  mgmtHandler.HandleManagement,
-		"admin-ai-api":      aiDispatch,
-		"admin-dynamic-api": dynDispatch,
-		"admin-schema-api":  schema.HandleSchemaAPI,
-	}
-
+	// Re-resolve delegates on CQRS handlers now that services are available
 	for _, svc := range engine.GetApp().SvcRegistry() {
-		h, ok := svc.(*module.SimpleHTTPHandler)
-		if !ok {
-			continue
+		switch h := svc.(type) {
+		case *module.QueryHandler:
+			h.ResolveDelegatePostStart()
+		case *module.CommandHandler:
+			h.ResolveDelegatePostStart()
 		}
-		if fn, exists := handlers[h.Name()]; exists {
-			h.SetHandleFunc(fn)
-			logger.Info("Wired handler", "module", h.Name())
+	}
+	logger.Info("Registered admin service modules for delegate dispatch")
+
+	// Enrich OpenAPI spec via the service registry
+	for _, svc := range engine.GetApp().SvcRegistry() {
+		if gen, ok := svc.(*module.OpenAPIGenerator); ok {
+			module.RegisterAdminSchemas(gen)
+			gen.ApplySchemas()
+			logger.Info("Registered typed OpenAPI schemas", "module", gen.Name())
 		}
 	}
 }
 
 // wireV1Handler registers a post-start hook that discovers the WorkflowRegistry
 // from the engine's service registry and wires the V1APIHandler to the
-// admin-v1-api http.handler module. This must run after engine.Start so that
-// the WorkflowRegistry's V1Store is initialized.
+// admin-v1-queries and admin-v1-commands CQRS modules. This must run after
+// engine.Start so that the WorkflowRegistry's V1Store is initialized.
 func wireV1Handler(logger *slog.Logger, engine *workflow.StdEngine, app *serverApp) {
 	app.postStartFuncs = append(app.postStartFuncs, func() error {
 		return wireV1HandlerPostStart(logger, engine, app)
@@ -280,7 +272,8 @@ func wireV1Handler(logger *slog.Logger, engine *workflow.StdEngine, app *serverA
 
 // wireV1HandlerPostStart is called after engine.Start. It looks up the
 // WorkflowRegistry from the service registry, gets its V1Store, and wires
-// the V1APIHandler to the admin-v1-api http.handler module.
+// the V1APIHandler as fallback on the admin-v1-queries and admin-v1-commands
+// CQRS handler modules.
 func wireV1HandlerPostStart(logger *slog.Logger, engine *workflow.StdEngine, app *serverApp) error {
 	// Resolve JWT secret from flag or env
 	secret := envOrFlag("JWT_SECRET", jwtSecret)
@@ -342,17 +335,26 @@ func wireV1HandlerPostStart(logger *slog.Logger, engine *workflow.StdEngine, app
 		return nil
 	})
 
-	// Find the admin-v1-api http.handler and inject the handler function
-	for _, svc := range engine.GetApp().SvcRegistry() {
-		h, ok := svc.(*module.SimpleHTTPHandler)
-		if !ok || h.Name() != "admin-v1-api" {
-			continue
-		}
-		h.SetHandleFunc(v1Handler.HandleV1)
-		logger.Info("Wired admin-v1-api handler to V1APIHandler")
-		return nil
+	// Register V1 handler as a service module so delegate config can resolve it.
+	engine.GetApp().RegisterModule(module.NewServiceModule("admin-v1-mgmt", v1Handler))
+
+	// Re-initialize the newly registered module so it's in the service registry.
+	// Then resolve delegates on any CQRS handlers that were waiting for it.
+	if err := engine.GetApp().RegisterService("admin-v1-mgmt", v1Handler); err != nil {
+		logger.Warn("Failed to register v1 service directly", "error", err)
 	}
-	logger.Warn("Admin enabled but admin-v1-api handler not found in service registry")
+
+	// Resolve delegates that couldn't be resolved during Init (because v1 wasn't registered yet)
+	for _, svc := range engine.GetApp().SvcRegistry() {
+		switch h := svc.(type) {
+		case *module.QueryHandler:
+			h.ResolveDelegatePostStart()
+		case *module.CommandHandler:
+			h.ResolveDelegatePostStart()
+		}
+	}
+
+	logger.Info("Registered admin-v1-mgmt service for delegate dispatch")
 	return nil
 }
 

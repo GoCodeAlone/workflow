@@ -6,9 +6,30 @@ import (
 	"maps"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 )
+
+// HealthCheckerConfig holds configuration for the HealthChecker module.
+type HealthCheckerConfig struct {
+	HealthPath   string        `yaml:"healthPath" json:"healthPath"`
+	ReadyPath    string        `yaml:"readyPath" json:"readyPath"`
+	LivePath     string        `yaml:"livePath" json:"livePath"`
+	CheckTimeout time.Duration `yaml:"checkTimeout" json:"checkTimeout"`
+	AutoDiscover bool          `yaml:"autoDiscover" json:"autoDiscover"`
+}
+
+// DefaultHealthCheckerConfig returns the default configuration.
+func DefaultHealthCheckerConfig() HealthCheckerConfig {
+	return HealthCheckerConfig{
+		HealthPath:   "/healthz",
+		ReadyPath:    "/readyz",
+		LivePath:     "/livez",
+		CheckTimeout: 5 * time.Second,
+		AutoDiscover: true,
+	}
+}
 
 // HealthCheckResult represents the result of a health check.
 type HealthCheckResult struct {
@@ -28,6 +49,7 @@ type HealthCheckable interface {
 // HealthChecker provides /health, /ready, /live HTTP endpoints.
 type HealthChecker struct {
 	name    string
+	config  HealthCheckerConfig
 	checks  map[string]HealthCheck
 	mu      sync.RWMutex
 	started bool
@@ -38,9 +60,39 @@ type HealthChecker struct {
 func NewHealthChecker(name string) *HealthChecker {
 	return &HealthChecker{
 		name:   name,
+		config: DefaultHealthCheckerConfig(),
 		checks: make(map[string]HealthCheck),
 	}
 }
+
+// SetConfig applies configuration to the health checker.
+func (h *HealthChecker) SetConfig(cfg HealthCheckerConfig) {
+	if cfg.HealthPath != "" {
+		h.config.HealthPath = cfg.HealthPath
+	}
+	if cfg.ReadyPath != "" {
+		h.config.ReadyPath = cfg.ReadyPath
+	}
+	if cfg.LivePath != "" {
+		h.config.LivePath = cfg.LivePath
+	}
+	if cfg.CheckTimeout > 0 {
+		h.config.CheckTimeout = cfg.CheckTimeout
+	}
+	h.config.AutoDiscover = cfg.AutoDiscover
+}
+
+// HealthPath returns the configured health endpoint path.
+func (h *HealthChecker) HealthPath() string { return h.config.HealthPath }
+
+// ReadyPath returns the configured readiness endpoint path.
+func (h *HealthChecker) ReadyPath() string { return h.config.ReadyPath }
+
+// LivePath returns the configured liveness endpoint path.
+func (h *HealthChecker) LivePath() string { return h.config.LivePath }
+
+// AutoDiscover returns whether auto-discovery of HealthCheckable services is enabled.
+func (h *HealthChecker) AutoDiscover() bool { return h.config.AutoDiscover }
 
 // Name returns the module name.
 func (h *HealthChecker) Name() string {
@@ -56,7 +108,7 @@ func (h *HealthChecker) Init(app modular.Application) error {
 // DiscoverHealthCheckables scans the service registry for services implementing
 // HealthCheckable and auto-registers them as health checks.
 func (h *HealthChecker) DiscoverHealthCheckables() {
-	if h.app == nil {
+	if h.app == nil || !h.config.AutoDiscover {
 		return
 	}
 	for name, svc := range h.app.SvcRegistry() {
@@ -90,13 +142,21 @@ func (h *HealthChecker) HealthHandler() http.HandlerFunc {
 		h.mu.RLock()
 		checks := make(map[string]HealthCheck, len(h.checks))
 		maps.Copy(checks, h.checks)
+		timeout := h.config.CheckTimeout
 		h.mu.RUnlock()
+
+		ctx := r.Context()
+		if timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, timeout)
+			defer cancel()
+		}
 
 		overallStatus := "healthy"
 		results := make(map[string]HealthCheckResult)
 
 		for name, check := range checks {
-			result := check(r.Context())
+			result := check(ctx)
 			results[name] = result
 			if result.Status == "unhealthy" {
 				overallStatus = "unhealthy"

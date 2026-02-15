@@ -35,6 +35,28 @@ func HandleSchemaAPI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// SchemaService wraps the schema handlers as an http.Handler for delegate dispatch.
+type SchemaService struct{}
+
+// NewSchemaService creates a new SchemaService.
+func NewSchemaService() *SchemaService {
+	return &SchemaService{}
+}
+
+// ServeHTTP implements http.Handler for config-driven delegate dispatch.
+func (s *SchemaService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	seg := r.URL.Path
+	seg = strings.TrimRight(seg, "/")
+	last := seg[strings.LastIndex(seg, "/")+1:]
+
+	switch last {
+	case "modules":
+		HandleGetModuleSchemas(w, r)
+	default:
+		HandleGetSchema(w, r)
+	}
+}
+
 // moduleSchemaRegistry is the singleton registry used by the handler.
 var moduleSchemaRegistry = NewModuleSchemaRegistry()
 

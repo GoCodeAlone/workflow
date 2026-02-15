@@ -7,6 +7,8 @@ import ArrayFieldEditor from './ArrayFieldEditor.tsx';
 import MapFieldEditor from './MapFieldEditor.tsx';
 import MiddlewareChainEditor from './MiddlewareChainEditor.tsx';
 import FilePicker from './FilePicker.tsx';
+import DelegateServicePicker from './DelegateServicePicker.tsx';
+import RoutePipelineEditor from './RoutePipelineEditor.tsx';
 
 // Resolve inherited value for a field based on incoming edges.
 // inheritFrom pattern: "{edgeType}.{sourceField}" where sourceField is "name" (source node label)
@@ -310,6 +312,14 @@ export default function PropertyPanel() {
                     placeholder={field.placeholder}
                     description={field.description}
                   />
+                ) : field.key === 'delegate' && field.inheritFrom === 'dependency.name' ? (
+                  <DelegateServicePicker
+                    value={String(effectiveValue ?? '')}
+                    onChange={(val) => handleFieldChange(field.key, val)}
+                    placeholder={field.placeholder}
+                    nodes={nodes}
+                    currentNodeId={node.id}
+                  />
                 ) : field.sensitive ? (
                   <SensitiveFieldInput
                     value={String(effectiveValue ?? '')}
@@ -368,8 +378,12 @@ export default function PropertyPanel() {
         )}
 
         {/* Handler Routes */}
-        {node.data.handlerRoutes && node.data.handlerRoutes.length > 0 && (
-          <HandlerRoutesSection routes={node.data.handlerRoutes as Array<{ method: string; path: string; middlewares?: string[] }>} color={color} />
+        {(node.data.handlerRoutes || node.data.moduleType === 'api.query' || node.data.moduleType === 'api.command') && (
+          <HandlerRoutesEditor
+            routes={(node.data.handlerRoutes ?? []) as Array<{ method: string; path: string; middlewares?: string[] }>}
+            nodeId={node.id}
+            color={color}
+          />
         )}
 
         {/* Conditional-specific UI */}
@@ -565,19 +579,135 @@ const HTTP_METHOD_COLORS: Record<string, string> = {
   HEAD: '#585b70',    // overlay
 };
 
-function HandlerRoutesSection({
+function HandlerRoutesEditor({
   routes,
+  nodeId,
   color,
 }: {
-  routes: Array<{ method: string; path: string; middlewares?: string[] }>;
+  routes: Array<{
+    method: string;
+    path: string;
+    middlewares?: string[];
+    pipeline?: { steps: Array<{ name: string; type: string; config?: Record<string, unknown> }> };
+  }>;
+  nodeId: string;
   color: string;
 }) {
   const [expanded, setExpanded] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [editIdx, setEditIdx] = useState<number | null>(null);
+  const [newMethod, setNewMethod] = useState('GET');
+  const [newPath, setNewPath] = useState('');
+  const [newMiddlewares, setNewMiddlewares] = useState('');
+  const updateHandlerRoutes = useWorkflowStore((s) => s.updateHandlerRoutes);
+  const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
+  const nodes = useWorkflowStore((s) => s.nodes);
+  const edges = useWorkflowStore((s) => s.edges);
+
+  // Available middleware nodes on canvas
+  const availableMiddleware = nodes
+    .filter((n) => n.data.moduleType.startsWith('http.middleware.'))
+    .map((n) => n.data.label);
+
+  // Detect pipeline-flow chain from this handler node
+  const pipelineChain = useMemo(() => {
+    const chain: Array<{ id: string; label: string; type: string }> = [];
+    const pipelineEdges = edges.filter(
+      (e) => (e.data as Record<string, unknown> | undefined)?.edgeType === 'pipeline-flow',
+    );
+    if (pipelineEdges.length === 0) return chain;
+
+    // Find the first step connected from this handler
+    const firstEdge = pipelineEdges.find((e) => e.source === nodeId);
+    if (!firstEdge) return chain;
+
+    // Build adjacency for step-to-step
+    const nextStep = new Map<string, string>();
+    for (const e of pipelineEdges) {
+      if (e.source !== nodeId) {
+        nextStep.set(e.source, e.target);
+      }
+    }
+
+    // Walk the chain
+    let currentId: string | undefined = firstEdge.target;
+    const visited = new Set<string>();
+    while (currentId && !visited.has(currentId)) {
+      visited.add(currentId);
+      const node = nodes.find((n) => n.id === currentId);
+      if (node && node.data.moduleType.startsWith('step.')) {
+        chain.push({ id: node.id, label: node.data.label, type: node.data.moduleType });
+      }
+      currentId = nextStep.get(currentId);
+    }
+
+    return chain;
+  }, [nodeId, edges, nodes]);
+
+  const handleDelete = (idx: number) => {
+    updateHandlerRoutes(nodeId, routes.filter((_, i) => i !== idx));
+  };
+
+  const handleAdd = () => {
+    if (!newPath.trim()) return;
+    const mws = newMiddlewares.trim()
+      ? newMiddlewares.split(',').map((s) => s.trim()).filter(Boolean)
+      : undefined;
+    const route: { method: string; path: string; middlewares?: string[] } = {
+      method: newMethod,
+      path: newPath.trim(),
+    };
+    if (mws && mws.length > 0) route.middlewares = mws;
+    updateHandlerRoutes(nodeId, [...routes, route]);
+    setNewMethod('GET');
+    setNewPath('');
+    setNewMiddlewares('');
+    setAdding(false);
+  };
+
+  const handleEditSave = () => {
+    if (editIdx === null || !newPath.trim()) return;
+    const mws = newMiddlewares.trim()
+      ? newMiddlewares.split(',').map((s) => s.trim()).filter(Boolean)
+      : undefined;
+    const updated = routes.map((r, i) => {
+      if (i !== editIdx) return r;
+      const route: { method: string; path: string; middlewares?: string[] } = {
+        method: newMethod,
+        path: newPath.trim(),
+      };
+      if (mws && mws.length > 0) route.middlewares = mws;
+      return route;
+    });
+    updateHandlerRoutes(nodeId, updated);
+    setEditIdx(null);
+    setNewMethod('GET');
+    setNewPath('');
+    setNewMiddlewares('');
+  };
+
+  const startEdit = (idx: number) => {
+    const r = routes[idx];
+    setEditIdx(idx);
+    setNewMethod(r.method);
+    setNewPath(r.path);
+    setNewMiddlewares(r.middlewares?.join(', ') ?? '');
+    setAdding(false);
+  };
+
+  const cancelEdit = () => {
+    setEditIdx(null);
+    setAdding(false);
+    setNewMethod('GET');
+    setNewPath('');
+    setNewMiddlewares('');
+  };
+
+  const methods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'];
 
   return (
     <div style={{ marginBottom: 16 }}>
       <div
-        onClick={() => setExpanded((v) => !v)}
         style={{
           color: '#a6adc8',
           fontSize: 11,
@@ -585,15 +715,16 @@ function HandlerRoutesSection({
           alignItems: 'center',
           marginBottom: 8,
           fontWeight: 600,
-          cursor: 'pointer',
-          userSelect: 'none',
           gap: 4,
         }}
       >
-        <span style={{ fontSize: 9, transition: 'transform 0.15s', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+        <span
+          onClick={() => setExpanded((v) => !v)}
+          style={{ fontSize: 9, cursor: 'pointer', transition: 'transform 0.15s', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+        >
           &#9654;
         </span>
-        <span>Routes</span>
+        <span onClick={() => setExpanded((v) => !v)} style={{ cursor: 'pointer', userSelect: 'none' }}>Routes</span>
         <span
           style={{
             background: `${color}30`,
@@ -607,6 +738,23 @@ function HandlerRoutesSection({
         >
           {routes.length}
         </span>
+        <button
+          onClick={() => { setAdding(true); setEditIdx(null); setNewMethod('GET'); setNewPath(''); setNewMiddlewares(''); }}
+          style={{
+            marginLeft: 'auto',
+            background: '#313244',
+            border: '1px solid #45475a',
+            borderRadius: 4,
+            color: '#a6e3a1',
+            cursor: 'pointer',
+            fontSize: 10,
+            padding: '1px 6px',
+            fontWeight: 600,
+          }}
+          title="Add route"
+        >
+          +
+        </button>
       </div>
       {expanded && (
         <div
@@ -615,67 +763,237 @@ function HandlerRoutesSection({
             border: '1px solid #313244',
             borderRadius: 6,
             padding: '6px 0',
-            maxHeight: 300,
+            maxHeight: 400,
             overflowY: 'auto',
           }}
         >
           {routes.map((route, i) => {
             const methodColor = HTTP_METHOD_COLORS[route.method] ?? '#cdd6f4';
+            if (editIdx === i) {
+              return (
+                <div key={`edit-${i}`} style={{ padding: '6px 10px', borderBottom: '1px solid #1e1e2e' }}>
+                  <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+                    <select
+                      value={newMethod}
+                      onChange={(e) => setNewMethod(e.target.value)}
+                      style={{ ...routeInputStyle, width: 70, flexShrink: 0 }}
+                    >
+                      {methods.map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                    <input
+                      value={newPath}
+                      onChange={(e) => setNewPath(e.target.value)}
+                      placeholder="/api/..."
+                      style={{ ...routeInputStyle, flex: 1 }}
+                    />
+                  </div>
+                  <input
+                    value={newMiddlewares}
+                    onChange={(e) => setNewMiddlewares(e.target.value)}
+                    placeholder={`Middleware (comma-sep)${availableMiddleware.length > 0 ? ': ' + availableMiddleware.join(', ') : ''}`}
+                    style={{ ...routeInputStyle, width: '100%', marginBottom: 4, fontSize: 10 }}
+                  />
+                  <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                    <button onClick={cancelEdit} style={routeCancelBtnStyle}>Cancel</button>
+                    <button onClick={handleEditSave} style={routeSaveBtnStyle}>Save</button>
+                  </div>
+                </div>
+              );
+            }
             return (
               <div
                 key={`${route.method}-${route.path}-${i}`}
-                style={{
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: 8,
-                  padding: '3px 10px',
-                  fontSize: 11,
-                  borderBottom: i < routes.length - 1 ? '1px solid #1e1e2e' : undefined,
-                }}
+                style={{ borderBottom: i < routes.length - 1 ? '1px solid #1e1e2e' : undefined }}
               >
-                <span
+                <div
                   style={{
-                    color: methodColor,
-                    fontWeight: 700,
-                    fontSize: 10,
-                    fontFamily: 'ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, monospace',
-                    minWidth: 48,
-                    textAlign: 'right',
-                  }}
-                >
-                  {route.method}
-                </span>
-                <span
-                  style={{
-                    color: '#cdd6f4',
-                    fontFamily: 'ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, monospace',
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    gap: 8,
+                    padding: '3px 10px',
                     fontSize: 11,
-                    wordBreak: 'break-all',
                   }}
                 >
-                  {route.path}
-                </span>
-                {route.middlewares && route.middlewares.length > 0 && (
                   <span
                     style={{
-                      color: '#585b70',
-                      fontSize: 9,
-                      marginLeft: 'auto',
+                      color: methodColor,
+                      fontWeight: 700,
+                      fontSize: 10,
+                      fontFamily: 'ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, monospace',
+                      minWidth: 48,
+                      textAlign: 'right',
                       flexShrink: 0,
                     }}
-                    title={route.middlewares.join(', ')}
                   >
-                    +{route.middlewares.length} mw
+                    {route.method}
                   </span>
-                )}
+                  <span
+                    style={{
+                      color: '#cdd6f4',
+                      fontFamily: 'ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, monospace',
+                      fontSize: 11,
+                      wordBreak: 'break-all',
+                      flex: 1,
+                    }}
+                  >
+                    {route.path}
+                  </span>
+                  {route.middlewares && route.middlewares.length > 0 && (
+                    <span
+                      style={{ color: '#585b70', fontSize: 9, flexShrink: 0 }}
+                      title={route.middlewares.join(', ')}
+                    >
+                      +{route.middlewares.length} mw
+                    </span>
+                  )}
+                  {route.pipeline && route.pipeline.steps.length > 0 && (
+                    <span
+                      style={{ color: '#e879f9', fontSize: 9, flexShrink: 0 }}
+                      title={route.pipeline.steps.map((s) => s.name).join(' \u2192 ')}
+                    >
+                      {route.pipeline.steps.length} step{route.pipeline.steps.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => startEdit(i)}
+                    style={{ background: 'none', border: 'none', color: '#585b70', cursor: 'pointer', fontSize: 10, padding: '0 2px', flexShrink: 0 }}
+                    title="Edit route"
+                  >
+                    &#9998;
+                  </button>
+                  <button
+                    onClick={() => handleDelete(i)}
+                    style={{ background: 'none', border: 'none', color: '#f38ba8', cursor: 'pointer', fontSize: 10, padding: '0 2px', flexShrink: 0 }}
+                    title="Delete route"
+                  >
+                    x
+                  </button>
+                </div>
+                <div style={{ padding: '0 10px 4px' }}>
+                  {pipelineChain.length > 0 ? (
+                    <div style={{ marginTop: 4 }}>
+                      <div style={{ fontSize: 10, color: '#585b70', marginBottom: 2 }}>
+                        Pipeline (canvas)
+                      </div>
+                      <div style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        alignItems: 'center',
+                        gap: 2,
+                        fontSize: 10,
+                      }}>
+                        {pipelineChain.map((step, si) => (
+                          <span key={step.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                            {si > 0 && <span style={{ color: '#585b70' }}>{'\u2192'}</span>}
+                            <span
+                              onClick={() => setSelectedNode(step.id)}
+                              style={{
+                                color: '#e879f9',
+                                cursor: 'pointer',
+                                padding: '1px 4px',
+                                borderRadius: 3,
+                                background: '#e879f910',
+                              }}
+                              title={`Click to select ${step.type} node`}
+                            >
+                              {step.label}
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <RoutePipelineEditor
+                      steps={route.pipeline?.steps ?? []}
+                      onChange={(steps) => {
+                        const updated = routes.map((r, idx) =>
+                          idx === i ? { ...r, pipeline: steps.length > 0 ? { steps } : undefined } : r
+                        );
+                        updateHandlerRoutes(nodeId, updated);
+                      }}
+                    />
+                  )}
+                </div>
               </div>
             );
           })}
+
+          {adding && (
+            <div style={{ padding: '6px 10px', borderTop: routes.length > 0 ? '1px solid #313244' : undefined }}>
+              <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+                <select
+                  value={newMethod}
+                  onChange={(e) => setNewMethod(e.target.value)}
+                  style={{ ...routeInputStyle, width: 70, flexShrink: 0 }}
+                >
+                  {methods.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <input
+                  value={newPath}
+                  onChange={(e) => setNewPath(e.target.value)}
+                  placeholder="/api/..."
+                  style={{ ...routeInputStyle, flex: 1 }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') cancelEdit(); }}
+                  autoFocus
+                />
+              </div>
+              <input
+                value={newMiddlewares}
+                onChange={(e) => setNewMiddlewares(e.target.value)}
+                placeholder={`Middleware (comma-sep)${availableMiddleware.length > 0 ? ': ' + availableMiddleware.join(', ') : ''}`}
+                style={{ ...routeInputStyle, width: '100%', marginBottom: 4, fontSize: 10 }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') cancelEdit(); }}
+              />
+              <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                <button onClick={cancelEdit} style={routeCancelBtnStyle}>Cancel</button>
+                <button onClick={handleAdd} style={routeSaveBtnStyle}>Add</button>
+              </div>
+            </div>
+          )}
+
+          {routes.length === 0 && !adding && (
+            <div style={{ padding: '8px 10px', color: '#585b70', fontSize: 11, textAlign: 'center' }}>
+              No routes. Click + to add one.
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
+
+const routeInputStyle: React.CSSProperties = {
+  padding: '4px 6px',
+  background: '#1e1e2e',
+  border: '1px solid #313244',
+  borderRadius: 4,
+  color: '#cdd6f4',
+  fontSize: 11,
+  outline: 'none',
+  boxSizing: 'border-box',
+  fontFamily: 'ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, monospace',
+};
+
+const routeCancelBtnStyle: React.CSSProperties = {
+  background: 'none',
+  border: '1px solid #45475a',
+  borderRadius: 4,
+  color: '#585b70',
+  cursor: 'pointer',
+  fontSize: 10,
+  padding: '2px 8px',
+};
+
+const routeSaveBtnStyle: React.CSSProperties = {
+  background: '#313244',
+  border: '1px solid #45475a',
+  borderRadius: 4,
+  color: '#a6e3a1',
+  cursor: 'pointer',
+  fontSize: 10,
+  padding: '2px 8px',
+  fontWeight: 600,
+};
 
 const inputStyle: React.CSSProperties = {
   width: '100%',

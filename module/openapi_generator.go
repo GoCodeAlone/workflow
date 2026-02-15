@@ -86,12 +86,17 @@ type OpenAPIMediaType struct {
 
 // OpenAPISchema is a minimal JSON Schema subset for OpenAPI.
 type OpenAPISchema struct {
-	Type        string                    `json:"type,omitempty" yaml:"type,omitempty"`
-	Format      string                    `json:"format,omitempty" yaml:"format,omitempty"`
-	Description string                    `json:"description,omitempty" yaml:"description,omitempty"`
-	Properties  map[string]*OpenAPISchema `json:"properties,omitempty" yaml:"properties,omitempty"`
-	Items       *OpenAPISchema            `json:"items,omitempty" yaml:"items,omitempty"`
-	Required    []string                  `json:"required,omitempty" yaml:"required,omitempty"`
+	Ref                  string                    `json:"$ref,omitempty" yaml:"$ref,omitempty"`
+	Type                 string                    `json:"type,omitempty" yaml:"type,omitempty"`
+	Format               string                    `json:"format,omitempty" yaml:"format,omitempty"`
+	Description          string                    `json:"description,omitempty" yaml:"description,omitempty"`
+	Properties           map[string]*OpenAPISchema `json:"properties,omitempty" yaml:"properties,omitempty"`
+	Items                *OpenAPISchema            `json:"items,omitempty" yaml:"items,omitempty"`
+	Required             []string                  `json:"required,omitempty" yaml:"required,omitempty"`
+	Enum                 []string                  `json:"enum,omitempty" yaml:"enum,omitempty"`
+	AdditionalProperties *OpenAPISchema            `json:"additionalProperties,omitempty" yaml:"additionalProperties,omitempty"`
+	Nullable             bool                      `json:"nullable,omitempty" yaml:"nullable,omitempty"`
+	Example              any                       `json:"example,omitempty" yaml:"example,omitempty"`
 }
 
 // OpenAPIComponents holds reusable schema components.
@@ -112,11 +117,22 @@ type OpenAPIGeneratorConfig struct {
 // OpenAPIGenerator is a module that scans workflow route definitions and
 // generates an OpenAPI 3.0 specification, serving it at configurable endpoints.
 type OpenAPIGenerator struct {
-	name   string
-	config OpenAPIGeneratorConfig
-	app    modular.Application
-	spec   *OpenAPISpec
-	mu     sync.RWMutex
+	name       string
+	config     OpenAPIGeneratorConfig
+	app        modular.Application
+	spec       *OpenAPISpec
+	mu         sync.RWMutex
+	opSchemas  map[string]*operationSchemaOverride // key: "METHOD path"
+	compSchema map[string]*OpenAPISchema           // component schemas to add
+}
+
+// operationSchemaOverride holds request/response schema overrides for a specific operation.
+type operationSchemaOverride struct {
+	RequestSchema  *OpenAPISchema
+	ResponseSchema *OpenAPISchema
+	Summary        string
+	Description    string
+	Tags           []string
 }
 
 // NewOpenAPIGenerator creates a new OpenAPI generator module.
@@ -535,4 +551,133 @@ func (g *OpenAPIGenerator) SortedPaths() []string {
 	}
 	sort.Strings(paths)
 	return paths
+}
+
+// --- Schema Registration API ---
+
+// RegisterComponentSchema adds a named schema to the components/schemas section.
+// Call this before BuildSpec or after BuildSpec to add reusable schemas.
+func (g *OpenAPIGenerator) RegisterComponentSchema(name string, schema *OpenAPISchema) {
+	if g.compSchema == nil {
+		g.compSchema = make(map[string]*OpenAPISchema)
+	}
+	g.compSchema[name] = schema
+}
+
+// SetOperationSchema sets request/response schemas for a specific operation.
+// The method and path must match what appears in the workflow route definitions.
+func (g *OpenAPIGenerator) SetOperationSchema(method, path string, req, resp *OpenAPISchema) {
+	key := strings.ToUpper(method) + " " + path
+	if g.opSchemas == nil {
+		g.opSchemas = make(map[string]*operationSchemaOverride)
+	}
+	override := g.opSchemas[key]
+	if override == nil {
+		override = &operationSchemaOverride{}
+		g.opSchemas[key] = override
+	}
+	if req != nil {
+		override.RequestSchema = req
+	}
+	if resp != nil {
+		override.ResponseSchema = resp
+	}
+}
+
+// SchemaRef returns an OpenAPISchema that is a $ref to a component schema.
+func SchemaRef(name string) *OpenAPISchema {
+	return &OpenAPISchema{Ref: "#/components/schemas/" + name}
+}
+
+// SchemaArray returns a schema for an array of the given item schema.
+func SchemaArray(items *OpenAPISchema) *OpenAPISchema {
+	return &OpenAPISchema{Type: "array", Items: items}
+}
+
+// ApplySchemas applies all registered component schemas and operation schema
+// overrides to the current spec. Call this after BuildSpec.
+func (g *OpenAPIGenerator) ApplySchemas() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.spec == nil {
+		return
+	}
+
+	// Add component schemas
+	if len(g.compSchema) > 0 {
+		if g.spec.Components == nil {
+			g.spec.Components = &OpenAPIComponents{
+				Schemas: make(map[string]*OpenAPISchema),
+			}
+		}
+		if g.spec.Components.Schemas == nil {
+			g.spec.Components.Schemas = make(map[string]*OpenAPISchema)
+		}
+		for name, schema := range g.compSchema {
+			g.spec.Components.Schemas[name] = schema
+		}
+	}
+
+	// Apply operation schema overrides
+	for key, override := range g.opSchemas {
+		parts := strings.SplitN(key, " ", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		method := strings.ToLower(parts[0])
+		path := parts[1]
+
+		pathItem, exists := g.spec.Paths[path]
+		if !exists {
+			continue
+		}
+
+		var op *OpenAPIOperation
+		switch method {
+		case "get":
+			op = pathItem.Get
+		case "post":
+			op = pathItem.Post
+		case "put":
+			op = pathItem.Put
+		case "delete":
+			op = pathItem.Delete
+		case "patch":
+			op = pathItem.Patch
+		}
+		if op == nil {
+			continue
+		}
+
+		if override.RequestSchema != nil && op.RequestBody != nil {
+			if op.RequestBody.Content == nil {
+				op.RequestBody.Content = make(map[string]*OpenAPIMediaType)
+			}
+			op.RequestBody.Content["application/json"] = &OpenAPIMediaType{
+				Schema: override.RequestSchema,
+			}
+		}
+
+		if override.ResponseSchema != nil {
+			op.Responses["200"] = &OpenAPIResponse{
+				Description: "Successful response",
+				Content: map[string]*OpenAPIMediaType{
+					"application/json": {
+						Schema: override.ResponseSchema,
+					},
+				},
+			}
+		}
+
+		if override.Summary != "" {
+			op.Summary = override.Summary
+		}
+		if override.Description != "" {
+			op.Summary = override.Description
+		}
+		if len(override.Tags) > 0 {
+			op.Tags = override.Tags
+		}
+	}
 }

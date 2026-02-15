@@ -637,6 +637,13 @@ func (s *V1Store) EnsureSystemHierarchy(ownerID, adminConfigYAML string) (compan
 	// Check if system hierarchy already exists
 	existing, sysErr := s.GetSystemWorkflow()
 	if sysErr == nil && existing != nil {
+		// Update config_yaml if it has changed (e.g., after a CQRS decomposition)
+		if adminConfigYAML != "" && existing.ConfigYAML != adminConfigYAML {
+			_, _ = s.db.Exec(
+				`UPDATE workflows SET config_yaml = ?, updated_at = ? WHERE id = ?`,
+				adminConfigYAML, nowStr(), existing.ID,
+			)
+		}
 		// Already exists — return existing IDs
 		proj, _ := s.GetProject(existing.ProjectID)
 		if proj != nil {

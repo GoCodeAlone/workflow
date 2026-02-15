@@ -157,6 +157,61 @@ export function extractWorkflowEdges(
   return edges;
 }
 
+/**
+ * Build pipeline chains from pipeline-flow edges.
+ * Returns a map of handler node ID -> ordered list of step nodes in the chain.
+ */
+function buildPipelineChains(pipelineFlowEdges: Edge[], nodes: WorkflowNode[]): Map<string, WorkflowNode[]> {
+  const chains = new Map<string, WorkflowNode[]>();
+  if (pipelineFlowEdges.length === 0) return chains;
+
+  const nodeMap = new Map<string, WorkflowNode>();
+  for (const n of nodes) nodeMap.set(n.id, n);
+
+  // Find chain starts: edges where source is a handler (api.query, api.command), not a step.* node
+  const handlerTypes = new Set(['api.query', 'api.command']);
+  const chainStarts: Edge[] = [];
+  const stepToStep: Edge[] = [];
+
+  for (const edge of pipelineFlowEdges) {
+    const sourceNode = nodeMap.get(edge.source);
+    if (sourceNode && handlerTypes.has(sourceNode.data.moduleType)) {
+      chainStarts.push(edge);
+    } else {
+      stepToStep.push(edge);
+    }
+  }
+
+  // Build adjacency: source -> target for step-to-step edges
+  const nextStep = new Map<string, string>();
+  for (const edge of stepToStep) {
+    nextStep.set(edge.source, edge.target);
+  }
+
+  // Walk each chain from handler
+  for (const startEdge of chainStarts) {
+    const handlerId = startEdge.source;
+    const chain: WorkflowNode[] = [];
+    let currentId: string | undefined = startEdge.target;
+    const visited = new Set<string>();
+
+    while (currentId && !visited.has(currentId)) {
+      visited.add(currentId);
+      const node = nodeMap.get(currentId);
+      if (node && node.data.moduleType.startsWith('step.')) {
+        chain.push(node);
+      }
+      currentId = nextStep.get(currentId);
+    }
+
+    if (chain.length > 0) {
+      chains.set(handlerId, chain);
+    }
+  }
+
+  return chains;
+}
+
 export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowConfig {
   // Filter out synthesized conditional nodes
   const realNodes = nodes.filter((n) => !n.data.synthesized);
@@ -166,6 +221,7 @@ export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowCon
   const messagingEdges: Edge[] = [];
   const conditionalEdges: Edge[] = [];
   const middlewareChainEdges: Edge[] = [];
+  const pipelineFlowEdges: Edge[] = [];
 
   for (const edge of edges) {
     const edgeData = edge.data as WorkflowEdgeData | undefined;
@@ -183,12 +239,26 @@ export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowCon
       case 'middleware-chain':
         middlewareChainEdges.push(edge);
         break;
+      case 'pipeline-flow':
+        pipelineFlowEdges.push(edge);
+        break;
       case 'auto-wire':
         // Auto-wire edges are computed, not serialized
         break;
       default:
         dependencyEdges.push(edge);
         break;
+    }
+  }
+
+  // Build pipeline chains from pipeline-flow edges
+  // Returns map of handler node ID -> ordered list of step nodes
+  const pipelineChains = buildPipelineChains(pipelineFlowEdges, nodes);
+  // Step nodes that are part of pipeline-flow chains (excluded from top-level modules)
+  const pipelineStepNodeIds = new Set<string>();
+  for (const chain of pipelineChains.values()) {
+    for (const stepNode of chain) {
+      pipelineStepNodeIds.add(stepNode.id);
     }
   }
 
@@ -216,7 +286,7 @@ export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowCon
     }
   }
 
-  const modules: ModuleConfig[] = realNodes.map((node) => {
+  const modules: ModuleConfig[] = realNodes.filter((n) => !pipelineStepNodeIds.has(n.id)).map((node) => {
     const mod: ModuleConfig = {
       name: node.data.label,
       type: node.data.moduleType,
@@ -340,8 +410,75 @@ export function nodesToConfig(nodes: WorkflowNode[], edges: Edge[]): WorkflowCon
         }
       }
 
-      if (routes.length > 0) {
-        httpConfig.routes = routes;
+      // Merge handlerRoutes from nodes: node-level edits take priority over edge-reconstructed routes
+      const nodeRouteEntries: Array<{
+        method: string;
+        path: string;
+        handler: string;
+        middlewares?: string[];
+        pipeline?: { steps: Array<{ name: string; type: string; config?: Record<string, unknown> }> };
+      }> = [];
+      const handlersWithNodeRoutes = new Set<string>();
+      for (const n of nodes) {
+        const hr = n.data.handlerRoutes as Array<{
+          method: string;
+          path: string;
+          middlewares?: string[];
+          pipeline?: { steps: Array<{ name: string; type: string; config?: Record<string, unknown> }> };
+        }> | undefined;
+        if (hr && hr.length > 0) {
+          handlersWithNodeRoutes.add(n.data.label);
+          for (const r of hr) {
+            const entry: typeof nodeRouteEntries[number] = {
+              method: r.method,
+              path: r.path,
+              handler: n.data.label,
+            };
+            if (r.middlewares && r.middlewares.length > 0) entry.middlewares = r.middlewares;
+            if (r.pipeline && r.pipeline.steps.length > 0) entry.pipeline = r.pipeline;
+            nodeRouteEntries.push(entry);
+          }
+        }
+      }
+      // Attach pipeline steps from pipeline-flow edge chains to handler routes
+      for (const n of nodes) {
+        const chain = pipelineChains.get(n.id);
+        if (!chain || chain.length === 0) continue;
+        const pipelineSteps = chain.map((stepNode) => ({
+          name: stepNode.data.label,
+          type: stepNode.data.moduleType.replace('step.', ''),
+          ...(stepNode.data.config && Object.keys(stepNode.data.config).length > 0 ? { config: stepNode.data.config } : {}),
+        }));
+        // Check if this handler already has node-level routes
+        const existingEntries = nodeRouteEntries.filter((e) => e.handler === n.data.label);
+        if (existingEntries.length > 0) {
+          // Attach pipeline to existing routes (pipeline-flow chain overrides inline pipeline)
+          for (const entry of existingEntries) {
+            entry.pipeline = { steps: pipelineSteps };
+          }
+        } else {
+          // Check edge-reconstructed routes for this handler
+          const edgeRoutes = routes.filter((r) => r.handler === n.data.label);
+          if (edgeRoutes.length > 0) {
+            handlersWithNodeRoutes.add(n.data.label);
+            for (const r of edgeRoutes) {
+              nodeRouteEntries.push({
+                ...r,
+                pipeline: { steps: pipelineSteps },
+              });
+            }
+          }
+        }
+      }
+
+      // Keep edge-reconstructed routes for handlers without node-level overrides, then append node-level routes
+      const finalRoutes = [
+        ...routes.filter((r) => !handlersWithNodeRoutes.has(r.handler)),
+        ...nodeRouteEntries,
+      ];
+
+      if (finalRoutes.length > 0) {
+        httpConfig.routes = finalRoutes;
       }
 
       workflows.http = httpConfig;
@@ -442,11 +579,51 @@ export function configToNodes(config: WorkflowConfig): {
           if (!routesByHandler[route.handler]) {
             routesByHandler[route.handler] = [];
           }
-          routesByHandler[route.handler].push({
+          const routeEntry: {
+            method: string;
+            path: string;
+            middlewares?: string[];
+            pipeline?: { steps: Array<{ name: string; type: string; config?: Record<string, unknown> }> };
+          } = {
             method: route.method,
             path: route.path,
-            ...(route.middlewares && route.middlewares.length > 0 ? { middlewares: route.middlewares } : {}),
-          });
+          };
+          if (route.middlewares && route.middlewares.length > 0) routeEntry.middlewares = route.middlewares;
+          if ((route as Record<string, unknown>).pipeline) {
+            const pipelineCfg = (route as Record<string, unknown>).pipeline as {
+              steps?: Array<{ name: string; type: string; config?: Record<string, unknown> }>;
+            };
+            if (pipelineCfg.steps && pipelineCfg.steps.length > 0) {
+              routeEntry.pipeline = { steps: pipelineCfg.steps };
+            }
+          }
+          routesByHandler[route.handler].push(routeEntry);
+        }
+      }
+    }
+  }
+
+  // Aggregate unique middleware per router from route definitions
+  const middlewareByRouter: Record<string, string[]> = {};
+  for (const [, wfValue] of Object.entries(config.workflows)) {
+    const wf = wfValue as Record<string, unknown>;
+    if (!wf || typeof wf !== 'object') continue;
+    if ('router' in wf && 'routes' in wf) {
+      const http = wf as unknown as HTTPWorkflowConfig;
+      const routerName = http.router;
+      if (!routerName) continue;
+      const seen = new Set(middlewareByRouter[routerName] ?? []);
+      if (http.routes) {
+        for (const route of http.routes) {
+          if (route.middlewares) {
+            for (const mw of route.middlewares) {
+              if (!seen.has(mw)) {
+                seen.add(mw);
+                if (!middlewareByRouter[routerName]) middlewareByRouter[routerName] = [];
+                middlewareByRouter[routerName].push(mw);
+              }
+            }
+          }
         }
       }
     }
@@ -457,6 +634,54 @@ export function configToNodes(config: WorkflowConfig): {
     const routes = routesByHandler[node.data.label];
     if (routes && routes.length > 0) {
       node.data.handlerRoutes = routes;
+    }
+
+    // Set router middleware chain from aggregated route middleware
+    const routerMw = middlewareByRouter[node.data.label];
+    if (routerMw && routerMw.length > 0) {
+      node.data.config = { ...node.data.config, middlewareChain: routerMw };
+    }
+  }
+
+  // Create step nodes and pipeline-flow edges from route pipeline configs
+  const handlerTypes = new Set(['api.query', 'api.command']);
+  let stepNodeCounter = 0;
+  for (const node of nodes) {
+    if (!handlerTypes.has(node.data.moduleType)) continue;
+    const routes = routesByHandler[node.data.label];
+    if (!routes) continue;
+
+    for (const route of routes) {
+      const routeEntry = route as { pipeline?: { steps: Array<{ name: string; type: string; config?: Record<string, unknown> }> } };
+      if (!routeEntry.pipeline?.steps || routeEntry.pipeline.steps.length === 0) continue;
+
+      let prevNodeId = node.id;
+      for (let si = 0; si < routeEntry.pipeline.steps.length; si++) {
+        const step = routeEntry.pipeline.steps[si];
+        stepNodeCounter++;
+        const stepModuleType = step.type.startsWith('step.') ? step.type : `step.${step.type}`;
+        const stepNodeId = `pipeline_step_${stepNodeCounter}`;
+        const stepInfo = getModuleTypeMap()[stepModuleType];
+
+        const stepNode: WorkflowNode = {
+          id: stepNodeId,
+          type: nodeComponentType(stepModuleType),
+          position: {
+            x: node.position.x + 250,
+            y: node.position.y + (si + 1) * 100,
+          },
+          data: {
+            moduleType: stepModuleType,
+            label: step.name,
+            config: step.config ?? (stepInfo ? { ...stepInfo.defaultConfig } : {}),
+          },
+        };
+        nodes.push(stepNode);
+
+        // Create pipeline-flow edge from previous node to this step
+        edges.push(makeEdge(prevNodeId, stepNodeId, 'pipeline-flow', undefined, undefined, si + 1));
+        prevNodeId = stepNodeId;
+      }
     }
   }
 

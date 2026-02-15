@@ -9,9 +9,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// V1APIHandler handles the /api/v1/ CRUD endpoints for companies, projects,
-// and workflows. It is wired into the modular engine via SetHandleFunc on an
-// admin-v1-api http.handler module.
+// V1APIHandler handles the /api/v1/admin/ CRUD endpoints for companies, projects,
+// and workflows. It is wired as a fallback on the admin-v1-queries and
+// admin-v1-commands CQRS handler modules.
 type V1APIHandler struct {
 	store            *V1Store
 	jwtSecret        string
@@ -37,8 +37,12 @@ func (h *V1APIHandler) SetReloadFunc(fn func(configYAML string) error) {
 	h.reloadFn = fn
 }
 
+// ServeHTTP implements http.Handler for config-driven delegate dispatch.
+func (h *V1APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.HandleV1(w, r)
+}
+
 // HandleV1 dispatches v1 API requests based on method and path.
-// This is the function wired via SimpleHTTPHandler.SetHandleFunc.
 func (h *V1APIHandler) HandleV1(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 

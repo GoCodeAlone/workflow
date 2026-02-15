@@ -15,6 +15,7 @@ import useModuleSchemaStore from './moduleSchemaStore.ts';
 import { nodesToConfig, configToNodes, nodeComponentType } from '../utils/serialization.ts';
 import { layoutNodes } from '../utils/autoLayout.ts';
 import { autoGroupOrphanedNodes } from '../utils/grouping.ts';
+import { isPipelineFlowConnection } from '../utils/connectionCompatibility.ts';
 import type { Toast } from '../components/toast/ToastContainer.tsx';
 import type { ApiWorkflowRecord } from '../utils/api.ts';
 
@@ -22,7 +23,12 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   moduleType: string;
   label: string;
   config: Record<string, unknown>;
-  handlerRoutes?: Array<{ method: string; path: string; middlewares?: string[] }>;
+  handlerRoutes?: Array<{
+    method: string;
+    path: string;
+    middlewares?: string[];
+    pipeline?: { steps: Array<{ name: string; type: string; config?: Record<string, unknown> }> };
+  }>;
 }
 
 export type WorkflowNode = Node<WorkflowNodeData>;
@@ -69,6 +75,12 @@ interface WorkflowStore {
   removeNode: (id: string) => void;
   updateNodeConfig: (id: string, config: Record<string, unknown>) => void;
   updateNodeName: (id: string, name: string) => void;
+  updateHandlerRoutes: (nodeId: string, routes: Array<{
+    method: string;
+    path: string;
+    middlewares?: string[];
+    pipeline?: { steps: Array<{ name: string; type: string; config?: Record<string, unknown> }> };
+  }>) => void;
 
   // Preserved workflow/trigger/pipeline sections from imported config
   importedWorkflows: Record<string, unknown>;
@@ -220,7 +232,31 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   onConnect: (connection) => {
     get().pushHistory();
-    set({ edges: rfAddEdge(connection, get().edges) });
+    const { source, target } = connection;
+    const nodes = get().nodes;
+    const sourceNode = nodes.find((n) => n.id === source);
+    const targetNode = nodes.find((n) => n.id === target);
+
+    // Auto-detect pipeline-flow edge type
+    if (sourceNode && targetNode && isPipelineFlowConnection(sourceNode.data.moduleType, targetNode.data.moduleType)) {
+      // Count existing pipeline-flow edges from the same source to determine chain order
+      const existingPipelineEdges = get().edges.filter(
+        (e) => (e.data as Record<string, unknown> | undefined)?.edgeType === 'pipeline-flow'
+      );
+      const chainOrder = existingPipelineEdges.length + 1;
+      const edgeId = `e-pipeline-flow-${source}-${target}`;
+      const edge: Edge = {
+        id: edgeId,
+        source: source!,
+        target: target!,
+        sourceHandle: connection.sourceHandle ?? undefined,
+        targetHandle: connection.targetHandle ?? undefined,
+        data: { edgeType: 'pipeline-flow' as const, chainOrder },
+      };
+      set({ edges: [...get().edges, edge] });
+    } else {
+      set({ edges: rfAddEdge(connection, get().edges) });
+    }
   },
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
@@ -318,6 +354,15 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     set({
       nodes: get().nodes.map((n) =>
         n.id === id ? { ...n, data: { ...n.data, label: name } } : n
+      ),
+    });
+  },
+
+  updateHandlerRoutes: (nodeId, routes) => {
+    get().pushHistory();
+    set({
+      nodes: get().nodes.map((n) =>
+        n.id === nodeId ? { ...n, data: { ...n.data, handlerRoutes: routes } } : n
       ),
     });
   },

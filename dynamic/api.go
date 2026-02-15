@@ -33,6 +33,20 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/dynamic/components/", h.HandleComponentByID)
 }
 
+// ServeHTTP implements http.Handler for config-driven delegate dispatch.
+// It routes to HandleComponents or HandleComponentByID based on the path.
+func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	seg := r.URL.Path
+	seg = strings.TrimRight(seg, "/")
+	last := seg[strings.LastIndex(seg, "/")+1:]
+
+	if last == "components" {
+		h.HandleComponents(w, r)
+	} else {
+		h.HandleComponentByID(w, r)
+	}
+}
+
 // HandleComponents handles GET/POST /api/dynamic/components.
 func (h *APIHandler) HandleComponents(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -45,11 +59,14 @@ func (h *APIHandler) HandleComponents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleComponentByID handles GET/PUT/DELETE /api/dynamic/components/{id}.
+// HandleComponentByID handles GET/PUT/DELETE for a component by ID.
+// The ID is extracted as the last path segment, making this work with any
+// URL prefix (e.g. /api/dynamic/components/{id} or /api/v1/admin/components/{id}).
 func (h *APIHandler) HandleComponentByID(w http.ResponseWriter, r *http.Request) {
-	// Extract ID from path: /api/dynamic/components/{id}
-	id := strings.TrimPrefix(r.URL.Path, "/api/dynamic/components/")
-	if id == "" {
+	// Extract ID as last path segment (works with any URL prefix)
+	path := strings.TrimRight(r.URL.Path, "/")
+	id := path[strings.LastIndex(path, "/")+1:]
+	if id == "" || id == "components" {
 		http.Error(w, "component id required", http.StatusBadRequest)
 		return
 	}

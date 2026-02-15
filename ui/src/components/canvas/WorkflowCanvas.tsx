@@ -16,6 +16,7 @@ import '@xyflow/react/dist/style.css';
 import { nodeTypes } from '../nodes/index.ts';
 import useWorkflowStore from '../../store/workflowStore.ts';
 import useModuleSchemaStore from '../../store/moduleSchemaStore.ts';
+import useUILayoutStore from '../../store/uiLayoutStore.ts';
 import { saveWorkflowConfig } from '../../utils/api.ts';
 import type { WorkflowEdgeData } from '../../types/workflow.ts';
 import { computeContainerView } from '../../utils/grouping.ts';
@@ -46,6 +47,9 @@ export default function WorkflowCanvas() {
 
   const moduleTypeMap = useModuleSchemaStore((s) => s.moduleTypeMap);
 
+  const propertyPanelCollapsed = useUILayoutStore((s) => s.propertyPanelCollapsed);
+  const setPropertyPanelCollapsed = useUILayoutStore((s) => s.setPropertyPanelCollapsed);
+
   const { screenToFlowPosition } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -59,6 +63,7 @@ export default function WorkflowCanvas() {
       'conditional': { stroke: '#22c55e' },
       'auto-wire': { stroke: '#585b70', strokeDasharray: '4 4' },
       'middleware-chain': { stroke: '#fab387', strokeDasharray: '6,3' },
+      'pipeline-flow': { stroke: '#e879f9' },
     };
     return edges.map((edge) => {
       const edgeData = edge.data as WorkflowEdgeData | undefined;
@@ -68,9 +73,10 @@ export default function WorkflowCanvas() {
       if (!style) return edge;
       const isAutoWire = edgeType === 'auto-wire';
       const isMiddlewareChain = edgeType === 'middleware-chain';
+      const isPipelineFlow = edgeType === 'pipeline-flow';
 
-      // For middleware-chain edges, show chain order as a step number label
-      const chainOrder = isMiddlewareChain ? edgeData?.chainOrder : undefined;
+      // For middleware-chain and pipeline-flow edges, show chain order as a step number label
+      const chainOrder = (isMiddlewareChain || isPipelineFlow) ? edgeData?.chainOrder : undefined;
 
       return {
         ...edge,
@@ -78,13 +84,13 @@ export default function WorkflowCanvas() {
           ? { label: `#${chainOrder}` }
           : {}),
         style: { ...edge.style, stroke: style.stroke, strokeWidth: isAutoWire ? 1.5 : 2, strokeDasharray: style.strokeDasharray },
-        labelStyle: isMiddlewareChain
-          ? { fill: '#fab387', fontWeight: 700, fontSize: 14 }
+        labelStyle: (isMiddlewareChain || isPipelineFlow)
+          ? { fill: style.stroke, fontWeight: 700, fontSize: 14 }
           : { fill: style.stroke, fontWeight: 600, fontSize: 11 },
-        labelBgStyle: isMiddlewareChain
+        labelBgStyle: (isMiddlewareChain || isPipelineFlow)
           ? { fill: '#1e1e2e', fillOpacity: 0.95, rx: 10, ry: 10 }
           : { fill: '#1e1e2e', fillOpacity: 0.9 },
-        labelBgPadding: isMiddlewareChain ? [4, 4] as [number, number] : undefined,
+        labelBgPadding: (isMiddlewareChain || isPipelineFlow) ? [4, 4] as [number, number] : undefined,
         ...(isAutoWire ? { deletable: false, selectable: false, animated: false } : {}),
       };
     });
@@ -126,6 +132,16 @@ export default function WorkflowCanvas() {
       onConnect(connection);
     },
     [onConnect]
+  );
+
+  const handleNodeDoubleClick = useCallback(
+    (_event: React.MouseEvent, node: { id: string }) => {
+      setSelectedNode(node.id);
+      if (propertyPanelCollapsed) {
+        setPropertyPanelCollapsed(false);
+      }
+    },
+    [setSelectedNode, propertyPanelCollapsed, setPropertyPanelCollapsed]
   );
 
   const handlePaneClick = useCallback(() => {
@@ -339,6 +355,7 @@ export default function WorkflowCanvas() {
         onConnectEnd={handleConnectEnd}
         isValidConnection={isValidConnection}
         onPaneClick={handlePaneClick}
+        onNodeDoubleClick={handleNodeDoubleClick}
         nodeTypes={nodeTypes}
         fitView
         proOptions={{ hideAttribution: true }}

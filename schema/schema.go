@@ -27,7 +27,9 @@ type Schema struct {
 // the workflow engine's BuildFromConfig.
 func KnownModuleTypes() []string {
 	return []string{
+		"api.command",
 		"api.handler",
+		"api.query",
 		"auth.jwt",
 		"auth.modular",
 		"auth.user-store",

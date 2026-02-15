@@ -3,6 +3,7 @@ package ai
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 // Handler provides HTTP handlers for the AI service API.
@@ -21,6 +22,45 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/ai/component", h.HandleComponent)
 	mux.HandleFunc("POST /api/ai/suggest", h.HandleSuggest)
 	mux.HandleFunc("GET /api/ai/providers", h.HandleProviders)
+}
+
+// ServeHTTP implements http.Handler for config-driven delegate dispatch.
+// It handles both query (GET) and command (POST) operations for AI,
+// dispatching based on the last path segment.
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	seg := lastSeg(r.URL.Path)
+
+	switch r.Method {
+	case http.MethodGet:
+		switch seg {
+		case "providers":
+			h.HandleProviders(w, r)
+		default:
+			writeError(w, http.StatusNotFound, "not found")
+		}
+	case http.MethodPost:
+		switch seg {
+		case "generate":
+			h.HandleGenerate(w, r)
+		case "component":
+			h.HandleComponent(w, r)
+		case "suggest":
+			h.HandleSuggest(w, r)
+		default:
+			writeError(w, http.StatusNotFound, "not found")
+		}
+	default:
+		writeError(w, http.StatusNotFound, "not found")
+	}
+}
+
+// lastSeg extracts the last non-empty segment from a URL path.
+func lastSeg(path string) string {
+	path = strings.TrimRight(path, "/")
+	if idx := strings.LastIndex(path, "/"); idx >= 0 {
+		return path[idx+1:]
+	}
+	return path
 }
 
 // HandleGenerate handles POST /api/ai/generate

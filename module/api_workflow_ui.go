@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -46,6 +45,13 @@ func ExtractUIAssets(destDir string) error {
 	})
 }
 
+// ServiceInfo describes a registered service for API responses.
+type ServiceInfo struct {
+	Name       string   `json:"name"`
+	Type       string   `json:"type"`
+	Implements []string `json:"implements"`
+}
+
 // WorkflowUIHandler serves the workflow editor UI and provides API endpoints
 // for managing workflow configurations.
 type WorkflowUIHandler struct {
@@ -53,6 +59,7 @@ type WorkflowUIHandler struct {
 	config       *config.WorkflowConfig
 	reloadFn     func(*config.WorkflowConfig) error
 	engineStatus func() map[string]any
+	svcRegistry  func() map[string]any
 }
 
 // NewWorkflowUIHandler creates a new handler with an optional initial config.
@@ -73,11 +80,17 @@ func (h *WorkflowUIHandler) SetStatusFunc(fn func() map[string]any) {
 	h.engineStatus = fn
 }
 
+// SetServiceRegistry sets the callback for accessing the service registry.
+func (h *WorkflowUIHandler) SetServiceRegistry(fn func() map[string]any) {
+	h.svcRegistry = fn
+}
+
 // RegisterRoutes registers all workflow UI routes on the given mux.
 func (h *WorkflowUIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workflow/config", h.handleGetConfig)
 	mux.HandleFunc("PUT /api/workflow/config", h.handlePutConfig)
 	mux.HandleFunc("GET /api/workflow/modules", h.handleGetModules)
+	mux.HandleFunc("GET /api/workflow/services", h.handleGetServices)
 	mux.HandleFunc("POST /api/workflow/validate", h.handleValidate)
 	mux.HandleFunc("POST /api/workflow/reload", h.handleReload)
 	mux.HandleFunc("GET /api/workflow/status", h.handleStatus)
@@ -247,31 +260,90 @@ var availableModules = []moduleTypeDef{
 	}},
 }
 
+// ServeHTTP implements http.Handler for config-driven delegate dispatch.
+// It handles both query (GET) and command (PUT/POST) operations for engine
+// management, dispatching based on the last path segment.
+func (h *WorkflowUIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	seg := lastPathSegment(r.URL.Path)
+
+	switch r.Method {
+	case http.MethodGet:
+		switch seg {
+		case "config":
+			h.handleGetConfig(w, r)
+		case "status":
+			h.handleStatus(w, r)
+		case "modules":
+			h.handleGetModules(w, r)
+		case "services":
+			h.handleGetServices(w, r)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		}
+	case http.MethodPut:
+		switch seg {
+		case "config":
+			h.handlePutConfig(w, r)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		}
+	case http.MethodPost:
+		switch seg {
+		case "validate":
+			h.handleValidate(w, r)
+		case "reload":
+			h.handleReload(w, r)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		}
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+	}
+}
+
 // HandleManagement dispatches management API requests to the appropriate
 // handler based on the request path. This is intended to be used as a
 // handler function for an http.handler module via SetHandleFunc.
 func (h *WorkflowUIHandler) HandleManagement(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
+	h.ServeHTTP(w, r)
+}
 
-	w.Header().Set("Content-Type", "application/json")
+// HandleGetConfig serves the workflow configuration (GET /engine/config).
+func (h *WorkflowUIHandler) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
+	h.handleGetConfig(w, r)
+}
 
-	switch {
-	case r.Method == http.MethodGet && strings.HasSuffix(path, "/workflow/config"):
-		h.handleGetConfig(w, r)
-	case r.Method == http.MethodPut && strings.HasSuffix(path, "/workflow/config"):
-		h.handlePutConfig(w, r)
-	case r.Method == http.MethodGet && strings.HasSuffix(path, "/workflow/modules"):
-		h.handleGetModules(w, r)
-	case r.Method == http.MethodPost && strings.HasSuffix(path, "/workflow/validate"):
-		h.handleValidate(w, r)
-	case r.Method == http.MethodPost && strings.HasSuffix(path, "/workflow/reload"):
-		h.handleReload(w, r)
-	case r.Method == http.MethodGet && strings.HasSuffix(path, "/workflow/status"):
-		h.handleStatus(w, r)
-	default:
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
-	}
+// HandlePutConfig updates the workflow configuration (PUT /engine/config).
+func (h *WorkflowUIHandler) HandlePutConfig(w http.ResponseWriter, r *http.Request) {
+	h.handlePutConfig(w, r)
+}
+
+// HandleGetModules lists available module types (GET /engine/modules).
+func (h *WorkflowUIHandler) HandleGetModules(w http.ResponseWriter, r *http.Request) {
+	h.handleGetModules(w, r)
+}
+
+// HandleValidate validates a workflow configuration (POST /engine/validate).
+func (h *WorkflowUIHandler) HandleValidate(w http.ResponseWriter, r *http.Request) {
+	h.handleValidate(w, r)
+}
+
+// HandleReload reloads the engine with the current configuration (POST /engine/reload).
+func (h *WorkflowUIHandler) HandleReload(w http.ResponseWriter, r *http.Request) {
+	h.handleReload(w, r)
+}
+
+// HandleStatus returns the engine status (GET /engine/status).
+func (h *WorkflowUIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
+	h.handleStatus(w, r)
 }
 
 func init() {
@@ -285,6 +357,35 @@ func (h *WorkflowUIHandler) handleGetModulesImpl(w http.ResponseWriter, _ *http.
 	if err := json.NewEncoder(w).Encode(availableModules); err != nil {
 		http.Error(w, "failed to encode modules", http.StatusInternalServerError)
 	}
+}
+
+// handleGetServices returns all registered services with their interface info.
+func (h *WorkflowUIHandler) handleGetServices(w http.ResponseWriter, _ *http.Request) {
+	services := make([]ServiceInfo, 0)
+
+	if h.svcRegistry != nil {
+		for name, svc := range h.svcRegistry() {
+			info := ServiceInfo{
+				Name:       name,
+				Type:       "service",
+				Implements: []string{},
+			}
+			if _, ok := svc.(http.Handler); ok {
+				info.Implements = append(info.Implements, "http.Handler")
+			}
+			services = append(services, info)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(services); err != nil {
+		http.Error(w, "failed to encode services", http.StatusInternalServerError)
+	}
+}
+
+// HandleGetServices serves the services list (GET /engine/services).
+func (h *WorkflowUIHandler) HandleGetServices(w http.ResponseWriter, r *http.Request) {
+	h.handleGetServices(w, r)
 }
 
 type validationResult struct {

@@ -202,6 +202,34 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		DefaultConfig: map[string]any{"resourceName": "resources"},
 	})
 
+	// ---- CQRS API Category ----
+
+	r.Register(&ModuleSchema{
+		Type:        "api.query",
+		Label:       "Query Handler",
+		Category:    "http",
+		Description: "Dispatches GET requests to named read-only query functions",
+		Inputs:      []ServiceIODef{{Name: "request", Type: "http.Request", Description: "HTTP GET request to dispatch"}},
+		Outputs:     []ServiceIODef{{Name: "response", Type: "JSON", Description: "JSON query result"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "delegate", Label: "Delegate Service", Type: FieldTypeString, Description: "Name of a service (implementing http.Handler) to delegate unmatched requests to", Placeholder: "my-service-name", InheritFrom: "dependency.name"},
+			{Key: "routes", Label: "Route Pipelines", Type: FieldTypeJSON, Description: "Per-route processing pipelines with composable steps (validate, transform, http_call, etc.)", Group: "routes"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "api.command",
+		Label:       "Command Handler",
+		Category:    "http",
+		Description: "Dispatches POST/PUT/DELETE requests to named state-changing command functions",
+		Inputs:      []ServiceIODef{{Name: "request", Type: "http.Request", Description: "HTTP request for state-changing operation"}},
+		Outputs:     []ServiceIODef{{Name: "response", Type: "JSON", Description: "JSON command result"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "delegate", Label: "Delegate Service", Type: FieldTypeString, Description: "Name of a service (implementing http.Handler) to delegate unmatched requests to", Placeholder: "my-service-name", InheritFrom: "dependency.name"},
+			{Key: "routes", Label: "Route Pipelines", Type: FieldTypeJSON, Description: "Per-route processing pipelines with composable steps (validate, transform, http_call, etc.)", Group: "routes"},
+		},
+	})
+
 	// ---- Middleware Category ----
 
 	r.Register(&ModuleSchema{
@@ -452,7 +480,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Category:     "events",
 		Description:  "CrisisTextLine/modular event logging module",
 		Inputs:       []ServiceIODef{{Name: "event", Type: "CloudEvent", Description: "CloudEvent to log"}},
-		Outputs:      []ServiceIODef{{Name: "logged", Type: "LogEntry", Description: "Logged event record"}},
+		Outputs:      []ServiceIODef{{Name: "logged", Type: "[]LogEntry", Description: "Logged event records"}},
 		ConfigFields: []ConfigFieldDef{},
 	})
 
@@ -520,21 +548,34 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	// ---- Observability Category ----
 
 	r.Register(&ModuleSchema{
-		Type:         "metrics.collector",
-		Label:        "Metrics Collector",
-		Category:     "observability",
-		Description:  "Collects and exposes application metrics",
-		Outputs:      []ServiceIODef{{Name: "metrics", Type: "prometheus.Metrics", Description: "Prometheus metrics endpoint"}},
-		ConfigFields: []ConfigFieldDef{},
+		Type:        "metrics.collector",
+		Label:       "Metrics Collector",
+		Category:    "observability",
+		Description: "Collects and exposes application metrics",
+		Outputs:     []ServiceIODef{{Name: "metrics", Type: "prometheus.Metrics", Description: "Prometheus metrics endpoint"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "namespace", Label: "Namespace", Type: FieldTypeString, DefaultValue: "workflow", Description: "Prometheus metric namespace prefix", Placeholder: "workflow"},
+			{Key: "subsystem", Label: "Subsystem", Type: FieldTypeString, Description: "Prometheus metric subsystem", Placeholder: "api"},
+			{Key: "metricsPath", Label: "Metrics Path", Type: FieldTypeString, DefaultValue: "/metrics", Description: "Endpoint path for Prometheus scraping", Placeholder: "/metrics"},
+			{Key: "enabledMetrics", Label: "Enabled Metrics", Type: FieldTypeArray, ArrayItemType: "string", DefaultValue: []string{"workflow", "http", "module", "active_workflows"}, Description: "Which metric groups to register (workflow, http, module, active_workflows)"},
+		},
+		DefaultConfig: map[string]any{"namespace": "workflow", "metricsPath": "/metrics", "enabledMetrics": []string{"workflow", "http", "module", "active_workflows"}},
 	})
 
 	r.Register(&ModuleSchema{
-		Type:         "health.checker",
-		Label:        "Health Checker",
-		Category:     "observability",
-		Description:  "Health check endpoint for liveness/readiness probes",
-		Outputs:      []ServiceIODef{{Name: "health", Type: "HealthStatus", Description: "Health check status endpoint"}},
-		ConfigFields: []ConfigFieldDef{},
+		Type:        "health.checker",
+		Label:       "Health Checker",
+		Category:    "observability",
+		Description: "Health check endpoint for liveness/readiness probes",
+		Outputs:     []ServiceIODef{{Name: "health", Type: "HealthStatus", Description: "Health check status endpoint"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "healthPath", Label: "Health Path", Type: FieldTypeString, DefaultValue: "/healthz", Description: "Health check endpoint path", Placeholder: "/healthz"},
+			{Key: "readyPath", Label: "Ready Path", Type: FieldTypeString, DefaultValue: "/readyz", Description: "Readiness probe endpoint path", Placeholder: "/readyz"},
+			{Key: "livePath", Label: "Live Path", Type: FieldTypeString, DefaultValue: "/livez", Description: "Liveness probe endpoint path", Placeholder: "/livez"},
+			{Key: "checkTimeout", Label: "Check Timeout", Type: FieldTypeDuration, DefaultValue: "5s", Description: "Per-check timeout duration", Placeholder: "5s"},
+			{Key: "autoDiscover", Label: "Auto-Discover", Type: FieldTypeBool, DefaultValue: true, Description: "Automatically discover HealthCheckable services"},
+		},
+		DefaultConfig: map[string]any{"healthPath": "/healthz", "readyPath": "/readyz", "livePath": "/livez", "checkTimeout": "5s", "autoDiscover": true},
 	})
 
 	r.Register(&ModuleSchema{

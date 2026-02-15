@@ -6,11 +6,13 @@ import type { WorkflowNode } from '../store/workflowStore.ts';
  * they can connect to (beyond exact match).
  */
 const COERCION_RULES: Record<string, string[]> = {
-  'http.Request': ['any'],
+  // Data types
+  'http.Request': ['any', 'PipelineContext'],
   'http.Response': ['any', 'JSON', '[]byte'],
   'JSON': ['any', '[]byte', 'string'],
   '[]byte': ['any', 'string'],
   'Event': ['any', '[]byte', 'JSON'],
+  'CloudEvent': ['any', 'Event', '[]byte', 'JSON'],
   'Transition': ['any', 'Event'],
   'State': ['any'],
   'string': ['any'],
@@ -22,9 +24,41 @@ const COERCION_RULES: Record<string, string[]> = {
   'Rows': ['any', 'JSON'],
   'HealthStatus': ['any', 'JSON'],
   'Metric[]': ['any'],
+  'LogEntry': ['any', 'JSON'],
   'LogEntry[]': ['any'],
+  '[]LogEntry': ['any'],
   'Span[]': ['any'],
+  'Command': ['any', 'PipelineContext'],
+  'RouteConfig': ['any', 'JSON'],
+  'OpenAPISpec': ['any', 'JSON'],
+  'SlackResponse': ['any', 'JSON'],
+  'SQLiteStorage': ['any', 'sql.DB'],
+  'func()': ['any'],
+
+  // Pipeline types
+  'PipelineContext': ['any', 'StepResult', 'PipelineContext'],
+  'StepResult': ['any', 'PipelineContext', 'StepResult'],
+
+  // Service/provider types (output by infrastructure modules, consumed by dependents)
+  'prometheus.Metrics': ['any'],
+  'net.Listener': ['any'],
+  'Scheduler': ['any'],
+  'AuthService': ['any'],
+  'EventBus': ['any'],
+  'Cache': ['any'],
+  'http.Client': ['any'],
+  'sql.DB': ['any'],
+  'SchemaValidator': ['any'],
   'StorageProvider': ['any'],
+  'SecretProvider': ['any'],
+  'PersistenceStore': ['any'],
+  'WorkflowRegistry': ['any'],
+  'ExternalAPIClient': ['any'],
+  'FileStore': ['any', 'StorageProvider'],
+  'ObjectStore': ['any', 'StorageProvider'],
+  'UserStore': ['any'],
+  'trace.Span': ['any'],
+  'trace.Tracer': ['any'],
 };
 
 /**
@@ -126,6 +160,20 @@ export function getCompatibleNodes(
   }
 
   return ids;
+}
+
+/**
+ * Determine if a connection between two module types should use the 'pipeline-flow' edge type.
+ * Pipeline-flow applies when:
+ * - Both source and target are step.* modules (step-to-step chaining)
+ * - Source is a CQRS handler (api.query, api.command) and target is a step.* module
+ */
+export function isPipelineFlowConnection(sourceModuleType: string, targetModuleType: string): boolean {
+  const isSourceStep = sourceModuleType.startsWith('step.');
+  const isTargetStep = targetModuleType.startsWith('step.');
+  const isSourceHandler = sourceModuleType === 'api.query' || sourceModuleType === 'api.command';
+
+  return (isSourceStep && isTargetStep) || (isSourceHandler && isTargetStep);
 }
 
 /**

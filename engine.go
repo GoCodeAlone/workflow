@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -67,6 +68,11 @@ type StdEngine struct {
 	eventEmitter     *module.WorkflowEventEmitter
 	secretsResolver  *secrets.MultiResolver
 	stepRegistry     *module.StepRegistry
+}
+
+// App returns the underlying modular.Application.
+func (e *StdEngine) App() modular.Application {
+	return e.app
 }
 
 // SetDynamicRegistry sets the dynamic component registry on the engine.
@@ -182,6 +188,20 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				}
 				e.logger.Debug("Loading standard HTTP handler module with content type: " + contentType)
 				mod = module.NewSimpleHTTPHandler(modCfg.Name, contentType)
+			case "api.query":
+				e.logger.Debug("Loading query handler module: " + modCfg.Name)
+				qh := module.NewQueryHandler(modCfg.Name)
+				if delegate, ok := modCfg.Config["delegate"].(string); ok && delegate != "" {
+					qh.SetDelegate(delegate)
+				}
+				mod = qh
+			case "api.command":
+				e.logger.Debug("Loading command handler module: " + modCfg.Name)
+				ch := module.NewCommandHandler(modCfg.Name)
+				if delegate, ok := modCfg.Config["delegate"].(string); ok && delegate != "" {
+					ch.SetDelegate(delegate)
+				}
+				mod = ch
 			case "api.handler":
 				resourceName := "resources"
 				if rn, ok := modCfg.Config["resourceName"].(string); ok {
@@ -358,10 +378,51 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				mod = jsonschema.NewModule()
 			case "metrics.collector":
 				e.logger.Debug("Loading metrics collector module")
-				mod = module.NewMetricsCollector(modCfg.Name)
+				mcCfg := module.DefaultMetricsCollectorConfig()
+				if v, ok := modCfg.Config["namespace"].(string); ok {
+					mcCfg.Namespace = v
+				}
+				if v, ok := modCfg.Config["subsystem"].(string); ok {
+					mcCfg.Subsystem = v
+				}
+				if v, ok := modCfg.Config["metricsPath"].(string); ok {
+					mcCfg.MetricsPath = v
+				}
+				if v, ok := modCfg.Config["enabledMetrics"].([]any); ok {
+					enabled := make([]string, 0, len(v))
+					for _, item := range v {
+						if s, ok := item.(string); ok {
+							enabled = append(enabled, s)
+						}
+					}
+					if len(enabled) > 0 {
+						mcCfg.EnabledMetrics = enabled
+					}
+				}
+				mod = module.NewMetricsCollectorWithConfig(modCfg.Name, mcCfg)
 			case "health.checker":
 				e.logger.Debug("Loading health checker module")
-				mod = module.NewHealthChecker(modCfg.Name)
+				hcMod := module.NewHealthChecker(modCfg.Name)
+				hcCfg := module.HealthCheckerConfig{AutoDiscover: true}
+				if v, ok := modCfg.Config["healthPath"].(string); ok {
+					hcCfg.HealthPath = v
+				}
+				if v, ok := modCfg.Config["readyPath"].(string); ok {
+					hcCfg.ReadyPath = v
+				}
+				if v, ok := modCfg.Config["livePath"].(string); ok {
+					hcCfg.LivePath = v
+				}
+				if v, ok := modCfg.Config["checkTimeout"].(string); ok {
+					if d, err := time.ParseDuration(v); err == nil {
+						hcCfg.CheckTimeout = d
+					}
+				}
+				if v, ok := modCfg.Config["autoDiscover"].(bool); ok {
+					hcCfg.AutoDiscover = v
+				}
+				hcMod.SetConfig(hcCfg)
+				mod = hcMod
 			case "log.collector":
 				e.logger.Debug("Loading log collector module")
 				lcCfg := module.LogCollectorConfig{}
@@ -751,6 +812,11 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		}
 	}
 
+	// Wire route-level pipelines from HTTP workflow route configs
+	if err := e.configureRoutePipelines(cfg); err != nil {
+		return fmt.Errorf("failed to configure route pipelines: %w", err)
+	}
+
 	// Build lookup maps from config for intelligent static file server wiring.
 	routerNames := make(map[string]bool)      // set of router module names
 	serverToRouter := make(map[string]string) // server name → router name (via router's dependsOn)
@@ -866,11 +932,14 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 
 			for _, routerSvc := range e.app.SvcRegistry() {
 				if router, ok := routerSvc.(*module.StandardHTTPRouter); ok {
-					if !router.HasRoute("GET", "/healthz") {
-						router.AddRoute("GET", "/healthz", &module.HealthHTTPHandler{Handler: hc.HealthHandler()})
-						router.AddRoute("GET", "/readyz", &module.HealthHTTPHandler{Handler: hc.ReadyHandler()})
-						router.AddRoute("GET", "/livez", &module.HealthHTTPHandler{Handler: hc.LiveHandler()})
-						e.logger.Debug("Registered health check endpoints on router")
+					healthPath := hc.HealthPath()
+					readyPath := hc.ReadyPath()
+					livePath := hc.LivePath()
+					if !router.HasRoute("GET", healthPath) {
+						router.AddRoute("GET", healthPath, &module.HealthHTTPHandler{Handler: hc.HealthHandler()})
+						router.AddRoute("GET", readyPath, &module.HealthHTTPHandler{Handler: hc.ReadyHandler()})
+						router.AddRoute("GET", livePath, &module.HealthHTTPHandler{Handler: hc.LiveHandler()})
+						e.logger.Debug("Registered health check endpoints on router: " + healthPath + ", " + readyPath + ", " + livePath)
 					}
 					break
 				}
@@ -881,11 +950,12 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	// Wire metrics collector endpoint on any available router (only if not already configured)
 	for _, svc := range e.app.SvcRegistry() {
 		if mc, ok := svc.(*module.MetricsCollector); ok {
+			metricsPath := mc.MetricsPath()
 			for _, routerSvc := range e.app.SvcRegistry() {
 				if router, ok := routerSvc.(*module.StandardHTTPRouter); ok {
-					if !router.HasRoute("GET", "/metrics") {
-						router.AddRoute("GET", "/metrics", &module.MetricsHTTPHandler{Handler: mc.Handler()})
-						e.logger.Debug("Registered metrics endpoint on router")
+					if !router.HasRoute("GET", metricsPath) {
+						router.AddRoute("GET", metricsPath, &module.MetricsHTTPHandler{Handler: mc.Handler()})
+						e.logger.Debug("Registered metrics endpoint on router: " + metricsPath)
 					}
 					break
 				}
@@ -1184,6 +1254,114 @@ func (e *StdEngine) configurePipelines(pipelineCfg map[string]any) error {
 }
 
 // buildPipelineSteps creates PipelineStep instances from step configurations.
+// RoutePipelineSetter is implemented by handlers (QueryHandler, CommandHandler) that support per-route pipelines.
+type RoutePipelineSetter interface {
+	SetRoutePipeline(routePath string, pipeline *module.Pipeline)
+}
+
+// configureRoutePipelines scans HTTP workflow routes for inline pipeline steps
+// and attaches them to the appropriate CQRS handlers.
+func (e *StdEngine) configureRoutePipelines(cfg *config.WorkflowConfig) error {
+	for _, workflowConfig := range cfg.Workflows {
+		httpConfig, ok := workflowConfig.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		routesConfig, ok := httpConfig["routes"].([]any)
+		if !ok {
+			continue
+		}
+
+		for _, rc := range routesConfig {
+			routeMap, ok := rc.(map[string]any)
+			if !ok {
+				continue
+			}
+
+			handlerName, _ := routeMap["handler"].(string)
+			if handlerName == "" {
+				continue
+			}
+
+			// Check for inline pipeline steps on this route
+			var stepCfgs []config.PipelineStepConfig
+
+			if pipelineCfg, ok := routeMap["pipeline"].(map[string]any); ok {
+				if stepsRaw, ok := pipelineCfg["steps"].([]any); ok {
+					stepCfgs = parseRoutePipelineSteps(stepsRaw)
+				}
+			} else if stepsRaw, ok := routeMap["steps"].([]any); ok {
+				stepCfgs = parseRoutePipelineSteps(stepsRaw)
+			}
+
+			if len(stepCfgs) == 0 {
+				continue
+			}
+
+			// Extract route name from path (last segment)
+			path, _ := routeMap["path"].(string)
+			routeName := lastRouteSegment(path)
+			pipelineName := handlerName + ":" + routeName
+
+			steps, err := e.buildPipelineSteps(pipelineName, stepCfgs)
+			if err != nil {
+				return fmt.Errorf("route pipeline %q: %w", pipelineName, err)
+			}
+
+			pipeline := &module.Pipeline{
+				Name:  pipelineName,
+				Steps: steps,
+			}
+
+			// Find the handler service and attach the pipeline
+			svc, ok := e.app.SvcRegistry()[handlerName]
+			if !ok {
+				e.logger.Warn("Handler service not found for route pipeline", "handler", handlerName)
+				continue
+			}
+
+			if setter, ok := svc.(RoutePipelineSetter); ok {
+				setter.SetRoutePipeline(routeName, pipeline)
+				e.logger.Info("Attached route pipeline", "handler", handlerName, "route", routeName, "steps", len(steps))
+			}
+		}
+	}
+	return nil
+}
+
+// parseRoutePipelineSteps converts raw YAML step configs to PipelineStepConfig.
+func parseRoutePipelineSteps(stepsRaw []any) []config.PipelineStepConfig {
+	var cfgs []config.PipelineStepConfig
+	for _, stepRaw := range stepsRaw {
+		stepMap, ok := stepRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := stepMap["name"].(string)
+		stepType, _ := stepMap["type"].(string)
+		stepConfig, _ := stepMap["config"].(map[string]any)
+		if name == "" || stepType == "" {
+			continue
+		}
+		cfgs = append(cfgs, config.PipelineStepConfig{
+			Name:   name,
+			Type:   stepType,
+			Config: stepConfig,
+		})
+	}
+	return cfgs
+}
+
+// lastRouteSegment extracts the last segment of a URL path.
+func lastRouteSegment(path string) string {
+	path = strings.TrimRight(path, "/")
+	if idx := strings.LastIndex(path, "/"); idx >= 0 {
+		return path[idx+1:]
+	}
+	return path
+}
+
 func (e *StdEngine) buildPipelineSteps(pipelineName string, stepCfgs []config.PipelineStepConfig) ([]module.PipelineStep, error) {
 	if len(stepCfgs) == 0 {
 		return nil, nil

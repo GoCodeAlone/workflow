@@ -3,6 +3,7 @@ package ai
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 // DeployHandler provides HTTP handlers for the AI deploy API.
@@ -19,6 +20,19 @@ func NewDeployHandler(deploy *DeployService) *DeployHandler {
 func (h *DeployHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/ai/deploy", h.HandleDeploy)
 	mux.HandleFunc("POST /api/ai/deploy/component", h.HandleDeployComponent)
+}
+
+// ServeHTTP implements http.Handler for config-driven delegate dispatch.
+func (h *DeployHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	switch {
+	case strings.HasSuffix(path, "/deploy/component"):
+		h.HandleDeployComponent(w, r)
+	case strings.HasSuffix(path, "/deploy"):
+		h.HandleDeploy(w, r)
+	default:
+		writeError(w, http.StatusNotFound, "not found")
+	}
 }
 
 // deployRequest is the request body for POST /api/ai/deploy.

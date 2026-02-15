@@ -83,6 +83,19 @@ export default function BaseNode({
   const color = CATEGORY_COLORS[category];
   const isSelected = selectedNodeId === id;
   const ioSig = info?.ioSignature;
+  const edges = useWorkflowStore((s) => s.edges);
+
+  // Pipeline chain position: find if this node is a target of a pipeline-flow edge
+  const pipelinePosition = useMemo(() => {
+    if (!moduleType.startsWith('step.')) return null;
+    for (const edge of edges) {
+      const edgeData = edge.data as Record<string, unknown> | undefined;
+      if (edgeData?.edgeType === 'pipeline-flow' && edge.target === id) {
+        return (edgeData.chainOrder as number) ?? null;
+      }
+    }
+    return null;
+  }, [moduleType, edges, id]);
 
   // Connection drag highlighting
   const isDragging = connectingFrom !== null;
@@ -180,6 +193,26 @@ export default function BaseNode({
         }}
       >
         <span style={{ fontSize: 16 }}>{icon}</span>
+        {pipelinePosition !== null && (
+          <span
+            style={{
+              width: 18,
+              height: 18,
+              borderRadius: '50%',
+              background: '#e879f930',
+              color: '#e879f9',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 10,
+              fontWeight: 700,
+              flexShrink: 0,
+            }}
+            title={`Pipeline step #${pipelinePosition}`}
+          >
+            {pipelinePosition}
+          </span>
+        )}
         <span style={{ fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {label}
         </span>
