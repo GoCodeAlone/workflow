@@ -2,15 +2,24 @@ import type { NodeProps } from '@xyflow/react';
 import type { WorkflowNode } from '../../store/workflowStore.ts';
 import BaseNode from './BaseNode.tsx';
 
+function routePreview(data: WorkflowNode['data']): string {
+  const routes = data.handlerRoutes;
+  if (!routes || routes.length === 0) {
+    return (data.config?.prefix as string) || (data.config?.path as string) || '/';
+  }
+  const methods = [...new Set(routes.map((r) => r.method))];
+  return `${routes.length} route${routes.length !== 1 ? 's' : ''} (${methods.join(', ')})`;
+}
+
 export default function HTTPRouterNode({ id, data }: NodeProps<WorkflowNode>) {
-  const prefix = (data.config?.prefix as string) || '/';
+  const preview = routePreview(data);
   return (
     <BaseNode
       id={id}
       label={data.label}
       moduleType={data.moduleType}
       icon={<RouterIcon />}
-      preview={prefix}
+      preview={preview}
     />
   );
 }

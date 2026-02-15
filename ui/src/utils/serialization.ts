@@ -428,6 +428,36 @@ export function configToNodes(config: WorkflowConfig): {
     }
   });
 
+  // Build routes-by-handler map from HTTP workflows
+  const routesByHandler: Record<string, Array<{ method: string; path: string; middlewares?: string[] }>> = {};
+  for (const [, wfValue] of Object.entries(config.workflows)) {
+    const wf = wfValue as Record<string, unknown>;
+    if (!wf || typeof wf !== 'object') continue;
+    if ('router' in wf && 'routes' in wf) {
+      const http = wf as unknown as HTTPWorkflowConfig;
+      if (http.routes) {
+        for (const route of http.routes) {
+          if (!routesByHandler[route.handler]) {
+            routesByHandler[route.handler] = [];
+          }
+          routesByHandler[route.handler].push({
+            method: route.method,
+            path: route.path,
+            ...(route.middlewares && route.middlewares.length > 0 ? { middlewares: route.middlewares } : {}),
+          });
+        }
+      }
+    }
+  }
+
+  // Attach handlerRoutes to matching nodes
+  for (const node of nodes) {
+    const routes = routesByHandler[node.data.label];
+    if (routes && routes.length > 0) {
+      node.data.handlerRoutes = routes;
+    }
+  }
+
   // Workflow edges
   const workflowEdges = extractWorkflowEdges(config.workflows, nameToId);
   // Deduplicate: don't add workflow edge if an identical source-target already exists

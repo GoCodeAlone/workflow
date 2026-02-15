@@ -22,6 +22,7 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   moduleType: string;
   label: string;
   config: Record<string, unknown>;
+  handlerRoutes?: Array<{ method: string; path: string; middlewares?: string[] }>;
 }
 
 export type WorkflowNode = Node<WorkflowNodeData>;

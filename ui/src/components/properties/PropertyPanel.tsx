@@ -363,6 +363,11 @@ export default function PropertyPanel() {
           </div>
         )}
 
+        {/* Handler Routes */}
+        {node.data.handlerRoutes && node.data.handlerRoutes.length > 0 && (
+          <HandlerRoutesSection routes={node.data.handlerRoutes as Array<{ method: string; path: string; middlewares?: string[] }>} color={color} />
+        )}
+
         {/* Conditional-specific UI */}
         {node.data.moduleType === 'conditional.switch' && (
           <ConditionalCasesEditor
@@ -542,6 +547,128 @@ function ConditionalOutputsEditor({ outputs, onChange }: { outputs: string[]; on
           +
         </button>
       </div>
+    </div>
+  );
+}
+
+const HTTP_METHOD_COLORS: Record<string, string> = {
+  GET: '#a6e3a1',     // green
+  POST: '#89b4fa',    // blue
+  PUT: '#fab387',     // peach/orange
+  DELETE: '#f38ba8',  // red
+  PATCH: '#cba6f7',   // mauve
+  OPTIONS: '#585b70', // overlay
+  HEAD: '#585b70',    // overlay
+};
+
+function HandlerRoutesSection({
+  routes,
+  color,
+}: {
+  routes: Array<{ method: string; path: string; middlewares?: string[] }>;
+  color: string;
+}) {
+  const [expanded, setExpanded] = useState(true);
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div
+        onClick={() => setExpanded((v) => !v)}
+        style={{
+          color: '#a6adc8',
+          fontSize: 11,
+          display: 'flex',
+          alignItems: 'center',
+          marginBottom: 8,
+          fontWeight: 600,
+          cursor: 'pointer',
+          userSelect: 'none',
+          gap: 4,
+        }}
+      >
+        <span style={{ fontSize: 9, transition: 'transform 0.15s', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+          &#9654;
+        </span>
+        <span>Routes</span>
+        <span
+          style={{
+            background: `${color}30`,
+            color,
+            padding: '1px 6px',
+            borderRadius: 8,
+            fontSize: 10,
+            fontWeight: 500,
+            marginLeft: 4,
+          }}
+        >
+          {routes.length}
+        </span>
+      </div>
+      {expanded && (
+        <div
+          style={{
+            background: '#11111b',
+            border: '1px solid #313244',
+            borderRadius: 6,
+            padding: '6px 0',
+            maxHeight: 300,
+            overflowY: 'auto',
+          }}
+        >
+          {routes.map((route, i) => {
+            const methodColor = HTTP_METHOD_COLORS[route.method] ?? '#cdd6f4';
+            return (
+              <div
+                key={`${route.method}-${route.path}-${i}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 8,
+                  padding: '3px 10px',
+                  fontSize: 11,
+                  borderBottom: i < routes.length - 1 ? '1px solid #1e1e2e' : undefined,
+                }}
+              >
+                <span
+                  style={{
+                    color: methodColor,
+                    fontWeight: 700,
+                    fontSize: 10,
+                    fontFamily: 'ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, monospace',
+                    minWidth: 48,
+                    textAlign: 'right',
+                  }}
+                >
+                  {route.method}
+                </span>
+                <span
+                  style={{
+                    color: '#cdd6f4',
+                    fontFamily: 'ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, monospace',
+                    fontSize: 11,
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {route.path}
+                </span>
+                {route.middlewares && route.middlewares.length > 0 && (
+                  <span
+                    style={{
+                      color: '#585b70',
+                      fontSize: 9,
+                      marginLeft: 'auto',
+                      flexShrink: 0,
+                    }}
+                    title={route.middlewares.join(', ')}
+                  >
+                    +{route.middlewares.length} mw
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
