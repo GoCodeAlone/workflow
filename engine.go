@@ -1332,8 +1332,9 @@ func (e *StdEngine) configureRoutePipelines(cfg *config.WorkflowConfig) error {
 			}
 
 			pipeline := &module.Pipeline{
-				Name:  pipelineName,
-				Steps: steps,
+				Name:         pipelineName,
+				Steps:        steps,
+				RoutePattern: path,
 			}
 
 			// Find the handler service and attach the pipeline

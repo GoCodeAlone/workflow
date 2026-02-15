@@ -27,6 +27,9 @@ type Pipeline struct {
 	// Metadata is pre-seeded metadata merged into the PipelineContext.
 	// Used to pass HTTP context (request/response) for delegate steps.
 	Metadata map[string]any
+	// RoutePattern is the original route path pattern (e.g., "/api/v1/admin/companies/{id}")
+	// used by step.request_parse for path parameter extraction.
+	RoutePattern string
 }
 
 // Execute runs the pipeline from trigger data.

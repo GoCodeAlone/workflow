@@ -973,4 +973,62 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "service", Label: "Service", Type: FieldTypeString, Required: true, Description: "Name of the service to delegate to (must implement http.Handler)", Placeholder: "my-service", InheritFrom: "dependency.name"},
 		},
 	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.request_parse",
+		Label:       "Request Parse",
+		Category:    "pipeline",
+		Description: "Parses HTTP request path parameters, query parameters, and body from pipeline metadata",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with _http_request and _route_pattern metadata"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Parsed path_params, query, and body maps"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "path_params", Label: "Path Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Parameter names to extract from URL path (e.g., id, companyId)"},
+			{Key: "query_params", Label: "Query Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Query string parameter names to extract"},
+			{Key: "parse_body", Label: "Parse Body", Type: FieldTypeBool, Description: "Whether to parse the JSON request body"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.db_query",
+		Label:       "Database Query",
+		Category:    "pipeline",
+		Description: "Executes a parameterized SQL SELECT query against a named database service",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context for template parameter resolution"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Query results as rows/count (list mode) or row/found (single mode)"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "database", Label: "Database", Type: FieldTypeString, Required: true, Description: "Name of the database service (must implement DBProvider)", Placeholder: "admin-db", InheritFrom: "dependency.name"},
+			{Key: "query", Label: "SQL Query", Type: FieldTypeString, Required: true, Description: "Parameterized SQL SELECT query (use ? for placeholders, no template expressions allowed)", Placeholder: "SELECT id, name FROM companies WHERE id = ?"},
+			{Key: "params", Label: "Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Template-resolved parameter values for ? placeholders in query"},
+			{Key: "mode", Label: "Mode", Type: FieldTypeSelect, Options: []string{"list", "single"}, DefaultValue: "list", Description: "Result mode: 'list' returns rows/count, 'single' returns row/found"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.db_exec",
+		Label:       "Database Execute",
+		Category:    "pipeline",
+		Description: "Executes a parameterized SQL INSERT/UPDATE/DELETE against a named database service",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context for template parameter resolution"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Execution result with affected_rows and last_id"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "database", Label: "Database", Type: FieldTypeString, Required: true, Description: "Name of the database service (must implement DBProvider)", Placeholder: "admin-db", InheritFrom: "dependency.name"},
+			{Key: "query", Label: "SQL Statement", Type: FieldTypeString, Required: true, Description: "Parameterized SQL INSERT/UPDATE/DELETE statement (use ? for placeholders)", Placeholder: "INSERT INTO companies (id, name) VALUES (?, ?)"},
+			{Key: "params", Label: "Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Template-resolved parameter values for ? placeholders"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.json_response",
+		Label:       "JSON Response",
+		Category:    "pipeline",
+		Description: "Writes an HTTP JSON response with custom status code and stops the pipeline",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with _http_response_writer metadata"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Response status (always sets Stop: true)"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "status", Label: "Status Code", Type: FieldTypeNumber, DefaultValue: "200", Description: "HTTP status code for the response"},
+			{Key: "headers", Label: "Headers", Type: FieldTypeMap, MapValueType: "string", Description: "Additional response headers"},
+			{Key: "body", Label: "Body", Type: FieldTypeJSON, Description: "Response body as JSON (supports template expressions)"},
+			{Key: "body_from", Label: "Body From", Type: FieldTypeString, Description: "Dotted path to resolve body from step outputs (e.g., steps.get-company.row)", Placeholder: "steps.get-company.row"},
+		},
+	})
 }

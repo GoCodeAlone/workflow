@@ -71,6 +71,10 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	engine.AddStepType("step.log", module.NewLogStepFactory())
 	engine.AddStepType("step.http_call", module.NewHTTPCallStepFactory())
 	engine.AddStepType("step.delegate", module.NewDelegateStepFactory())
+	engine.AddStepType("step.request_parse", module.NewRequestParseStepFactory())
+	engine.AddStepType("step.db_query", module.NewDBQueryStepFactory())
+	engine.AddStepType("step.db_exec", module.NewDBExecStepFactory())
+	engine.AddStepType("step.json_response", module.NewJSONResponseStepFactory())
 
 	// Register standard triggers
 	engine.RegisterTrigger(module.NewHTTPTrigger())

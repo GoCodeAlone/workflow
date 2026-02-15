@@ -119,7 +119,7 @@ func (h *CommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -149,12 +149,15 @@ func (h *CommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"_http_request":         r,
 			"_http_response_writer": w,
 		}
+		if pipeline.RoutePattern != "" {
+			pipeline.Metadata["_route_pattern"] = pipeline.RoutePattern
+		}
 		pc, err := pipeline.Execute(r.Context(), triggerData)
 		if err != nil {
 			if pc == nil || pc.Metadata["_response_handled"] != true {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			}
 			return
 		}
@@ -175,7 +178,7 @@ func (h *CommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotFound)
-	json.NewEncoder(w).Encode(map[string]string{"error": "unknown command: " + commandName})
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": "unknown command: " + commandName})
 }
 
 // ProvidesServices returns a list of services provided by this module.

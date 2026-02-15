@@ -444,69 +444,192 @@ workflows:
               config:
                 service: admin-v1-mgmt
 
-      # === v1 API: Companies (authenticated) ===
+      # === v1 API: Companies (authenticated, pipeline-native) ===
       - method: GET
         path: "/api/v1/admin/companies"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: list-companies
+              type: step.db_query
               config:
-                service: admin-v1-mgmt
+                database: admin-db
+                query: "SELECT id, name, slug, owner_id, parent_id, is_system, metadata, created_at, updated_at FROM companies WHERE parent_id IS NULL ORDER BY created_at ASC"
+                mode: list
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.list-companies.rows"
       - method: POST
         path: "/api/v1/admin/companies"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                parse_body: true
+            - name: validate
+              type: step.validate
+              config:
+                strategy: required_fields
+                required_fields: [name]
+                source: "steps.parse-request.body"
+            - name: prepare
+              type: step.set
+              config:
+                values:
+                  id: "{{ uuidv4 }}"
+                  now: "{{ now }}"
+            - name: insert
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "INSERT INTO companies (id, name, slug, owner_id, parent_id, is_system, metadata, created_at, updated_at) VALUES (?, ?, ?, '', NULL, 0, '{}', ?, ?)"
+                params:
+                  - "{{ .steps.prepare.id }}"
+                  - "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  - "{{lower (index .steps \"parse-request\" \"body\" \"name\")}}"
+                  - "{{ .steps.prepare.now }}"
+                  - "{{ .steps.prepare.now }}"
+            - name: respond
+              type: step.json_response
+              config:
+                status: 201
+                body:
+                  id: "{{ .steps.prepare.id }}"
+                  name: "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  slug: "{{lower (index .steps \"parse-request\" \"body\" \"name\")}}"
+                  created_at: "{{ .steps.prepare.now }}"
       - method: GET
         path: "/api/v1/admin/companies/{id}"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: get-company
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, name, slug, owner_id, parent_id, is_system, metadata, created_at, updated_at FROM companies WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: check-found
+              type: step.conditional
+              config:
+                field: "steps.get-company.found"
+                routes:
+                  "false": not-found
+                default: respond
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.get-company.row"
+            - name: not-found
+              type: step.json_response
+              config:
+                status: 404
+                body:
+                  error: "company not found"
       - method: GET
         path: "/api/v1/admin/companies/{id}/organizations"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: list-orgs
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, name, slug, owner_id, parent_id, is_system, metadata, created_at, updated_at FROM companies WHERE parent_id = ? ORDER BY created_at ASC"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: list
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.list-orgs.rows"
 
-      # === v1 API: Organizations (authenticated) ===
+      # === v1 API: Organizations (authenticated, pipeline-native) ===
       - method: POST
         path: "/api/v1/admin/companies/{id}/organizations"
         handler: admin-v1-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+                parse_body: true
+            - name: validate
+              type: step.validate
+              config:
+                strategy: required_fields
+                required_fields: [name]
+                source: "steps.parse-request.body"
+            - name: prepare
+              type: step.set
+              config:
+                values:
+                  id: "{{ uuidv4 }}"
+                  now: "{{ now }}"
+            - name: insert
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "INSERT INTO companies (id, name, slug, owner_id, parent_id, is_system, metadata, created_at, updated_at) VALUES (?, ?, ?, '', ?, 0, '{}', ?, ?)"
+                params:
+                  - "{{ .steps.prepare.id }}"
+                  - "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  - "{{lower (index .steps \"parse-request\" \"body\" \"name\")}}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  - "{{ .steps.prepare.now }}"
+                  - "{{ .steps.prepare.now }}"
+            - name: respond
+              type: step.json_response
+              config:
+                status: 201
+                body:
+                  id: "{{ .steps.prepare.id }}"
+                  name: "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  slug: "{{lower (index .steps \"parse-request\" \"body\" \"name\")}}"
+                  parent_id: "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  created_at: "{{ .steps.prepare.now }}"
       - method: GET
         path: "/api/v1/admin/organizations/{id}/projects"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: list-projects
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, company_id, name, slug, description, is_system, metadata, created_at, updated_at FROM projects WHERE company_id = ? ORDER BY created_at ASC"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: list
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.list-projects.rows"
       - method: POST
         path: "/api/v1/admin/organizations/{id}/projects"
         handler: admin-v1-commands
@@ -518,17 +641,29 @@ workflows:
               config:
                 service: admin-v1-mgmt
 
-      # === v1 API: Projects (authenticated) ===
+      # === v1 API: Projects (authenticated, pipeline-native) ===
       - method: GET
         path: "/api/v1/admin/projects/{id}/workflows"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: list-workflows
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at FROM workflows WHERE project_id = ? ORDER BY created_at DESC"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: list
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.list-workflows.rows"
       - method: POST
         path: "/api/v1/admin/projects/{id}/workflows"
         handler: admin-v1-commands
@@ -540,17 +675,24 @@ workflows:
               config:
                 service: admin-v1-mgmt
 
-      # === v1 API: Workflows (authenticated) ===
+      # === v1 API: Workflows (authenticated, pipeline-native where possible) ===
       - method: GET
         path: "/api/v1/admin/workflows"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: list-all-workflows
+              type: step.db_query
               config:
-                service: admin-v1-mgmt
+                database: admin-db
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at FROM workflows ORDER BY created_at DESC"
+                mode: list
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.list-all-workflows.rows"
       - method: POST
         path: "/api/v1/admin/workflows"
         handler: admin-v1-commands
@@ -567,10 +709,35 @@ workflows:
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: get-workflow
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: check-found
+              type: step.conditional
+              config:
+                field: "steps.get-workflow.found"
+                routes:
+                  "false": not-found
+                default: respond
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.get-workflow.row"
+            - name: not-found
+              type: step.json_response
+              config:
+                status: 404
+                body:
+                  error: "workflow not found"
       - method: PUT
         path: "/api/v1/admin/workflows/{id}"
         handler: admin-v1-commands
@@ -587,20 +754,65 @@ workflows:
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: check-exists
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, is_system FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: check-found
+              type: step.conditional
+              config:
+                field: "steps.check-exists.found"
+                routes:
+                  "false": not-found
+                default: delete
+            - name: delete
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "DELETE FROM workflows WHERE id = ? AND is_system = 0"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body:
+                  deleted: true
+                  id: "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+            - name: not-found
+              type: step.json_response
+              config:
+                status: 404
+                body:
+                  error: "workflow not found"
       - method: GET
         path: "/api/v1/admin/workflows/{id}/versions"
         handler: admin-v1-queries
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: forward
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: get-versions
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, workflow_id, version, config, created_at, created_by, comment FROM workflow_versions WHERE workflow_id = ? ORDER BY version DESC"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: list
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.get-versions"
       - method: POST
         path: "/api/v1/admin/workflows/{id}/deploy"
         handler: admin-v1-commands

@@ -2,9 +2,13 @@ package module
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"text/template"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 // TemplateEngine resolves {{ .field }} expressions against a PipelineContext.
@@ -43,7 +47,7 @@ func (te *TemplateEngine) Resolve(tmplStr string, pc *PipelineContext) (string, 
 		return tmplStr, nil
 	}
 
-	t, err := template.New("").Option("missingkey=zero").Parse(tmplStr)
+	t, err := template.New("").Funcs(templateFuncMap()).Option("missingkey=zero").Parse(tmplStr)
 	if err != nil {
 		return "", fmt.Errorf("template parse error: %w", err)
 	}
@@ -87,5 +91,39 @@ func (te *TemplateEngine) resolveValue(v any, pc *PipelineContext) (any, error) 
 		return resolved, nil
 	default:
 		return v, nil
+	}
+}
+
+// templateFuncMap returns the function map available in pipeline templates.
+func templateFuncMap() template.FuncMap {
+	return template.FuncMap{
+		// uuidv4 generates a new UUID v4 string.
+		"uuidv4": func() string {
+			return uuid.New().String()
+		},
+		// now returns the current time in RFC3339 format (UTC).
+		"now": func() string {
+			return time.Now().UTC().Format(time.RFC3339)
+		},
+		// lower converts a string to lowercase.
+		"lower": strings.ToLower,
+		// default returns the fallback value if the primary value is empty.
+		"default": func(fallback, val any) any {
+			if val == nil {
+				return fallback
+			}
+			if s, ok := val.(string); ok && s == "" {
+				return fallback
+			}
+			return val
+		},
+		// json marshals a value to a JSON string.
+		"json": func(v any) string {
+			b, err := json.Marshal(v)
+			if err != nil {
+				return "{}"
+			}
+			return string(b)
+		},
 	}
 }

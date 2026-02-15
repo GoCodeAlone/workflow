@@ -312,7 +312,7 @@ export default function PropertyPanel() {
                     placeholder={field.placeholder}
                     description={field.description}
                   />
-                ) : field.key === 'delegate' && field.inheritFrom === 'dependency.name' ? (
+                ) : field.inheritFrom === 'dependency.name' ? (
                   <DelegateServicePicker
                     value={String(effectiveValue ?? '')}
                     onChange={(val) => handleFieldChange(field.key, val)}

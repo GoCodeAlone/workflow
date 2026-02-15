@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built on Modular](https://img.shields.io/badge/Built%20on-CrisisTextLine%2Fmodular-green)](https://github.com/CrisisTextLine/modular)
 
-A production-grade, configuration-driven workflow orchestration engine built on [CrisisTextLine/modular](https://github.com/CrisisTextLine/modular) v1.11.11. Define entire applications in YAML -- from API servers to multi-service chat platforms -- with 48 module types, dynamic hot-reload, AI-powered generation, and a visual builder UI.
+A production-grade, configuration-driven workflow orchestration engine built on [CrisisTextLine/modular](https://github.com/CrisisTextLine/modular) v1.11.11. Define entire applications in YAML -- from API servers to multi-service chat platforms -- with 65+ module types, dynamic hot-reload, AI-powered generation, and a visual builder UI.
 
 ## What It Does
 
@@ -44,19 +44,20 @@ workflows:
 
 ## Features
 
-### 48 Module Types Across 10 Categories
+### 65+ Module Types Across 10 Categories
 
 | Category | Count | Types |
 |----------|-------|-------|
-| **HTTP** | 10 | http.server, http.router, http.handler, http.middleware.{auth, cors, logging, ratelimit, requestid}, http.proxy, http.simple_proxy |
+| **HTTP** | 10 | http.server, http.router, http.handler, http.middleware.{auth, cors, logging, ratelimit, requestid, securityheaders}, http.proxy, http.simple_proxy |
 | **Messaging** | 6 | messaging.broker, messaging.broker.eventbus, messaging.handler, messaging.nats, messaging.kafka, notification.slack |
 | **State Machine** | 4 | statemachine.engine, state.tracker, state.connector, processing.step |
+| **Pipeline Steps** | 12 | step.validate, step.transform, step.conditional, step.set, step.log, step.publish, step.http_call, step.delegate, step.request_parse, step.db_query, step.db_exec, step.json_response |
+| **API & CQRS** | 3 | api.handler, api.command, api.query |
 | **Modular Framework** | 10 | httpserver, httpclient, chimux, scheduler, auth, eventbus, cache, database, eventlogger, jsonschema |
-| **Storage/Persistence** | 4 | database.workflow, persistence.store, storage.s3, static.fileserver |
-| **Observability** | 3 | metrics.collector, health.checker, observability.otel |
-| **Data/Integration** | 4 | data.transformer, api.handler, webhook.sender, dynamic.component |
-| **Auth** | 2 | auth.jwt, auth.modular |
-| **Reverse Proxy** | 2 | reverseproxy, http.proxy |
+| **Storage/Persistence** | 8 | database.workflow, persistence.store, storage.s3, storage.gcs, storage.local, storage.sqlite, static.fileserver, database.modular |
+| **Observability** | 5 | metrics.collector, health.checker, observability.otel, log.collector, eventlogger.modular |
+| **Auth** | 3 | auth.jwt, auth.modular, auth.user-store |
+| **Other** | 6 | data.transformer, webhook.sender, dynamic.component, secrets.vault, secrets.aws, workflow.registry |
 | **Triggers** | 5 | http, schedule, event, eventbus, mock |
 
 ### Security
@@ -92,7 +93,7 @@ Hybrid AI integration with two providers:
 
 ### Visual Workflow Builder (ReactFlow UI)
 
-- Drag-and-drop node palette with all 48 module types across categorized sections
+- Drag-and-drop node palette with all 65+ module types across categorized sections
 - Property panel for node configuration with type-specific fields
 - YAML import/export with round-trip fidelity
 - Undo/redo, validation (local + server), Zustand state management
@@ -210,7 +211,7 @@ cmd/server/          Server binary, HTTP mux, graceful shutdown
   main.go            Entry point with CLI flags and AI provider init
 
 config/              YAML config structs (WorkflowConfig, ModuleConfig)
-module/              48 built-in module implementations
+module/              65+ built-in module implementations
 handlers/            5 workflow handler types:
                        HTTP, Messaging, StateMachine, Scheduler, Integration
 dynamic/             Yaegi-based hot-reload system
@@ -226,7 +227,7 @@ mock/                Test helpers and mock implementations
 
 **Core flow:**
 1. `StdEngine` loads YAML config via `BuildFromConfig()`
-2. Each module definition is matched to a factory (48 built-in types) and instantiated
+2. Each module definition is matched to a factory (65+ built-in types) and instantiated
 3. Modules register with the modular `Application` (dependency injection, service registry)
 4. Workflow handlers (HTTP, Messaging, StateMachine, Scheduler, Integration) configure workflows
 5. Triggers (HTTP endpoints, EventBus subscriptions, cron schedules) start the system

@@ -15,6 +15,7 @@ type ValidateStep struct {
 	strategy       string
 	requiredFields []string
 	schema         map[string]any
+	source         string // optional dotted path to validate (e.g. "steps.parse-request.body")
 }
 
 // NewValidateStepFactory returns a StepFactory that creates ValidateStep instances.
@@ -25,9 +26,12 @@ func NewValidateStepFactory() StepFactory {
 			strategy = "required_fields"
 		}
 
+		source, _ := config["source"].(string)
+
 		step := &ValidateStep{
 			name:     name,
 			strategy: strategy,
+			source:   source,
 		}
 
 		switch strategy {
@@ -74,11 +78,51 @@ func (s *ValidateStep) Execute(_ context.Context, pc *PipelineContext) (*StepRes
 	}
 }
 
-// executeRequiredFields checks that every listed field exists in pc.Current.
+// resolveSource returns the data map to validate. If source is empty, returns
+// pc.Current. Otherwise, resolves a dotted path like "steps.parse-request.body"
+// into the appropriate nested map from the pipeline context.
+func (s *ValidateStep) resolveSource(pc *PipelineContext) map[string]any {
+	if s.source == "" {
+		return pc.Current
+	}
+
+	// Use the template engine's data structure for resolution
+	data := map[string]any{
+		"steps": func() map[string]any {
+			result := make(map[string]any)
+			for k, v := range pc.StepOutputs {
+				result[k] = v
+			}
+			return result
+		}(),
+	}
+
+	// Walk the dotted path
+	parts := strings.Split(s.source, ".")
+	current := data
+	for _, part := range parts {
+		val, ok := current[part]
+		if !ok {
+			return nil
+		}
+		nested, ok := val.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = nested
+	}
+	return current
+}
+
+// executeRequiredFields checks that every listed field exists in the source data.
 func (s *ValidateStep) executeRequiredFields(pc *PipelineContext) (*StepResult, error) {
+	data := s.resolveSource(pc)
+	if data == nil {
+		return nil, fmt.Errorf("validate step %q: source %q resolved to nil", s.name, s.source)
+	}
 	var missing []string
 	for _, field := range s.requiredFields {
-		if _, exists := pc.Current[field]; !exists {
+		if _, exists := data[field]; !exists {
 			missing = append(missing, field)
 		}
 	}
@@ -88,8 +132,12 @@ func (s *ValidateStep) executeRequiredFields(pc *PipelineContext) (*StepResult, 
 	return &StepResult{Output: map[string]any{}}, nil
 }
 
-// executeJSONSchema performs a basic type/required/properties check against pc.Current.
+// executeJSONSchema performs a basic type/required/properties check against the source data.
 func (s *ValidateStep) executeJSONSchema(pc *PipelineContext) (*StepResult, error) {
+	data := s.resolveSource(pc)
+	if data == nil {
+		return nil, fmt.Errorf("validate step %q: source %q resolved to nil", s.name, s.source)
+	}
 	// Check required fields from the schema
 	if requiredRaw, ok := s.schema["required"]; ok {
 		requiredList, ok := requiredRaw.([]any)
@@ -102,7 +150,7 @@ func (s *ValidateStep) executeJSONSchema(pc *PipelineContext) (*StepResult, erro
 			if !ok {
 				continue
 			}
-			if _, exists := pc.Current[field]; !exists {
+			if _, exists := data[field]; !exists {
 				missing = append(missing, field)
 			}
 		}
@@ -118,7 +166,7 @@ func (s *ValidateStep) executeJSONSchema(pc *PipelineContext) (*StepResult, erro
 			return nil, fmt.Errorf("validate step %q: schema 'properties' must be a map", s.name)
 		}
 		for field, specRaw := range props {
-			val, exists := pc.Current[field]
+			val, exists := data[field]
 			if !exists {
 				// Not required, skip
 				continue
@@ -176,3 +224,4 @@ func checkJSONType(field string, val any, expected string) error {
 	}
 	return nil
 }
+
