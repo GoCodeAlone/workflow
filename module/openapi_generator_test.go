@@ -15,6 +15,47 @@ func TestOpenAPIGeneratorName(t *testing.T) {
 	}
 }
 
+func TestOpenAPIGeneratorProvidesServices(t *testing.T) {
+	g := NewOpenAPIGenerator("my-openapi", OpenAPIGeneratorConfig{})
+	providers := g.ProvidesServices()
+	if len(providers) != 1 {
+		t.Fatalf("expected 1 service provider, got %d", len(providers))
+	}
+	if providers[0].Name != "my-openapi" {
+		t.Errorf("expected provider name 'my-openapi', got %q", providers[0].Name)
+	}
+	if providers[0].Instance != g {
+		t.Error("expected provider instance to be the generator itself")
+	}
+}
+
+func TestOpenAPIGeneratorRequiresServices(t *testing.T) {
+	g := NewOpenAPIGenerator("gen", OpenAPIGeneratorConfig{})
+	deps := g.RequiresServices()
+	if deps != nil {
+		t.Errorf("expected nil dependencies, got %v", deps)
+	}
+}
+
+func TestOpenAPIHTTPHandler(t *testing.T) {
+	called := false
+	handler := &OpenAPIHTTPHandler{Handler: func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/openapi.json", nil)
+	handler.Handle(w, r)
+
+	if !called {
+		t.Error("expected handler to be called")
+	}
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
 func TestOpenAPIGeneratorDefaults(t *testing.T) {
 	g := NewOpenAPIGenerator("gen", OpenAPIGeneratorConfig{})
 	if g.config.Title != "Workflow API" {

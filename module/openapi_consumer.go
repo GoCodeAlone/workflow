@@ -333,6 +333,22 @@ func (c *OpenAPIConsumer) CallOperation(ctx context.Context, operationID string,
 	return result, nil
 }
 
+// ProvidesServices returns the services provided by this module.
+func (c *OpenAPIConsumer) ProvidesServices() []modular.ServiceProvider {
+	return []modular.ServiceProvider{
+		{
+			Name:        c.name,
+			Description: "OpenAPI consumer providing typed HTTP client for external API operations",
+			Instance:    c,
+		},
+	}
+}
+
+// RequiresServices returns services required by this module.
+func (c *OpenAPIConsumer) RequiresServices() []modular.ServiceDependency {
+	return nil
+}
+
 // ServeOperations serves the list of available operations as JSON.
 func (c *OpenAPIConsumer) ServeOperations(w http.ResponseWriter, _ *http.Request) {
 	ops := c.ListOperations()

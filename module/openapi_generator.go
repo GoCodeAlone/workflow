@@ -413,6 +413,32 @@ func (g *OpenAPIGenerator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.Handle(w, r)
 }
 
+// ProvidesServices returns the services provided by this module.
+func (g *OpenAPIGenerator) ProvidesServices() []modular.ServiceProvider {
+	return []modular.ServiceProvider{
+		{
+			Name:        g.name,
+			Description: "OpenAPI 3.0 spec generator serving at /api/openapi.json and /api/openapi.yaml",
+			Instance:    g,
+		},
+	}
+}
+
+// RequiresServices returns services required by this module.
+func (g *OpenAPIGenerator) RequiresServices() []modular.ServiceDependency {
+	return nil
+}
+
+// OpenAPIHTTPHandler adapts the OpenAPIGenerator to the HTTPHandler interface.
+type OpenAPIHTTPHandler struct {
+	Handler http.HandlerFunc
+}
+
+// Handle implements the HTTPHandler interface.
+func (h *OpenAPIHTTPHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	h.Handler(w, r)
+}
+
 // --- OpenAPI Spec from Route Definitions ---
 
 // RouteDefinition is a simplified route for external spec building.

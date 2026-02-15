@@ -17,6 +17,28 @@ func TestOpenAPIConsumerName(t *testing.T) {
 	}
 }
 
+func TestOpenAPIConsumerProvidesServices(t *testing.T) {
+	c := NewOpenAPIConsumer("my-consumer", OpenAPIConsumerConfig{})
+	providers := c.ProvidesServices()
+	if len(providers) != 1 {
+		t.Fatalf("expected 1 service provider, got %d", len(providers))
+	}
+	if providers[0].Name != "my-consumer" {
+		t.Errorf("expected provider name 'my-consumer', got %q", providers[0].Name)
+	}
+	if providers[0].Instance != c {
+		t.Error("expected provider instance to be the consumer itself")
+	}
+}
+
+func TestOpenAPIConsumerRequiresServices(t *testing.T) {
+	c := NewOpenAPIConsumer("consumer", OpenAPIConsumerConfig{})
+	deps := c.RequiresServices()
+	if deps != nil {
+		t.Errorf("expected nil dependencies, got %v", deps)
+	}
+}
+
 func TestOpenAPIConsumerLoadFromFile(t *testing.T) {
 	// Create a temp spec file
 	spec := OpenAPISpec{

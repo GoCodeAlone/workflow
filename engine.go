@@ -908,11 +908,23 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		}
 	}
 
-	// Wire OpenAPI generators: build spec from workflow route definitions
+	// Wire OpenAPI generators: build spec from workflow route definitions and register endpoints
 	for _, svc := range e.app.SvcRegistry() {
 		if gen, ok := svc.(*module.OpenAPIGenerator); ok {
 			gen.BuildSpec(cfg.Workflows)
 			e.logger.Debug("Built OpenAPI spec for generator: " + gen.Name())
+
+			// Auto-wire /api/openapi.json and /api/openapi.yaml on the first available router
+			for _, routerSvc := range e.app.SvcRegistry() {
+				if router, ok := routerSvc.(*module.StandardHTTPRouter); ok {
+					if !router.HasRoute("GET", "/api/openapi.json") {
+						router.AddRoute("GET", "/api/openapi.json", &module.OpenAPIHTTPHandler{Handler: gen.ServeJSON})
+						router.AddRoute("GET", "/api/openapi.yaml", &module.OpenAPIHTTPHandler{Handler: gen.ServeYAML})
+						e.logger.Debug("Registered OpenAPI spec endpoints on router")
+					}
+					break
+				}
+			}
 		}
 	}
 
