@@ -24,6 +24,8 @@ vi.mock('../../utils/api.ts', () => ({
   apiDeleteIAMRoleMapping: vi.fn(),
   createLogStream: vi.fn(),
   createEventStream: vi.fn(),
+  apiFetchRuntimeInstances: vi.fn().mockResolvedValue({ instances: [], total: 0 }),
+  apiStopRuntimeInstance: vi.fn().mockResolvedValue({ status: 'stopped' }),
 }));
 
 import { apiFetchDashboard } from '../../utils/api.ts';
