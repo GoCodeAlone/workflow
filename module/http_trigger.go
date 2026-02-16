@@ -116,7 +116,7 @@ func (t *HTTPTrigger) Configure(app modular.Application, triggerConfig any) erro
 		return fmt.Errorf("routes not found in HTTP trigger configuration")
 	}
 
-	// Find the HTTP router
+	// Find the HTTP router — try well-known names first, then scan all services
 	var router HTTPRouter
 	routerNames := []string{"httpRouter", "api-router", "router"}
 
@@ -129,18 +129,34 @@ func (t *HTTPTrigger) Configure(app modular.Application, triggerConfig any) erro
 			}
 		}
 	}
+	if router == nil {
+		for _, svc := range app.SvcRegistry() {
+			if r, ok := svc.(HTTPRouter); ok {
+				router = r
+				break
+			}
+		}
+	}
 
 	if router == nil {
 		return fmt.Errorf("HTTP router not found")
 	}
 
-	// Find the workflow engine
+	// Find the workflow engine — try well-known names first, then scan
 	var engine WorkflowEngine
 	engineNames := []string{"workflowEngine", "engine"}
 
 	for _, name := range engineNames {
 		var svc any
 		if err := app.GetService(name, &svc); err == nil && svc != nil {
+			if e, ok := svc.(WorkflowEngine); ok {
+				engine = e
+				break
+			}
+		}
+	}
+	if engine == nil {
+		for _, svc := range app.SvcRegistry() {
 			if e, ok := svc.(WorkflowEngine); ok {
 				engine = e
 				break

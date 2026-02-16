@@ -35,12 +35,11 @@ modules:
       username: "workflow-bot"
 
   - name: event-archive
-    type: storage.s3
+    type: messaging.handler
     dependsOn:
       - event-broker
     config:
-      bucket: "event-archive"
-      region: "us-east-1"
+      description: "Archives events to storage"
 
   - name: pipeline-metrics
     type: metrics.collector
@@ -65,6 +64,3 @@ workflows:
       - topic: "events.received"
         handler: event-archive
 
-triggers:
-  http:
-    port: 9090

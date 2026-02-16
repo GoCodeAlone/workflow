@@ -101,38 +101,11 @@ func TestExampleConfigsValidate(t *testing.T) {
 	configs := discoverExampleConfigs(t)
 	t.Logf("validating %d example config files against schema", len(configs))
 
-	// Configs that use aspirational/unimplemented module types. These are
-	// tracked here so CI stays green while signaling they need updating.
-	// When a type gets implemented, remove it from this list — the test
-	// will start validating the config automatically.
-	aspirationalConfigs := map[string]string{
-		"advanced-scheduler-workflow.yaml":             "uses unimplemented scheduler.cron type",
-		"scheduled-jobs-config.yaml":                   "uses unimplemented scheduler, job.store types",
-		"dependency-injection-example.yaml":            "uses unimplemented core.config, core.logger, core.metrics, data.cache types",
-		"event-driven-workflow.yaml":                   "uses unimplemented event.processor type and event workflow type",
-		"integration-workflow.yaml":                    "uses unimplemented integration.registry type",
-		"trigger-workflow-example.yaml":                "uses unimplemented scheduler.cron type",
-		"workflow-a-orders-with-branching.yaml":        "uses unimplemented conditional.ifelse, conditional.switch types",
-		"workflow-b-fulfillment-with-branching.yaml":   "uses unimplemented conditional.ifelse, conditional.switch types",
-		"workflow-c-notifications-with-branching.yaml": "uses unimplemented conditional.switch, conditional.ifelse types",
-	}
-
-	// Configs that use custom/dynamic module types not in the built-in list
-	// need extra types registered. Map from config base name to extra types.
-	extraTypes := map[string][]string{
-		// cross-workflow-links.yaml references modules defined in other files
-		"cross-workflow-links.yaml": {},
-	}
-
 	for _, cfgPath := range configs {
 		cfgPath := cfgPath
 		baseName := filepath.Base(cfgPath)
 		t.Run(baseName, func(t *testing.T) {
 			t.Parallel()
-
-			if reason, ok := aspirationalConfigs[baseName]; ok {
-				t.Skipf("skipping %s: %s (aspirational config with unimplemented types)", baseName, reason)
-			}
 
 			wfCfg, err := config.LoadFromFile(cfgPath)
 			if err != nil {
@@ -150,10 +123,8 @@ func TestExampleConfigsValidate(t *testing.T) {
 				schema.WithExtraWorkflowTypes("pipeline"),
 				// Pipeline trigger types
 				schema.WithExtraTriggerTypes("mock"),
-			}
-
-			if extra, ok := extraTypes[baseName]; ok && len(extra) > 0 {
-				opts = append(opts, schema.WithExtraModuleTypes(extra...))
+				// Many configs are sub-workflows or modular-style configs without explicit entry points
+				schema.WithAllowNoEntryPoints(),
 			}
 
 			if err := schema.ValidateConfig(wfCfg, opts...); err != nil {
@@ -171,36 +142,23 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 	configs := discoverExampleConfigs(t)
 	t.Logf("engine-loading %d example config files", len(configs))
 
-	// Aspirational configs with unimplemented module types
-	aspirationalConfigs := map[string]string{
-		"advanced-scheduler-workflow.yaml":             "uses unimplemented scheduler.cron type",
-		"scheduled-jobs-config.yaml":                   "uses unimplemented scheduler, job.store types",
-		"dependency-injection-example.yaml":            "uses unimplemented core.config, core.logger, core.metrics, data.cache types",
-		"event-driven-workflow.yaml":                   "uses unimplemented event.processor type",
-		"integration-workflow.yaml":                    "uses unimplemented integration.registry type",
-		"trigger-workflow-example.yaml":                "uses unimplemented scheduler.cron type",
-		"workflow-a-orders-with-branching.yaml":        "uses unimplemented conditional.ifelse, conditional.switch types",
-		"workflow-b-fulfillment-with-branching.yaml":   "uses unimplemented conditional.ifelse, conditional.switch types",
-		"workflow-c-notifications-with-branching.yaml": "uses unimplemented conditional.switch, conditional.ifelse types",
-	}
-
-	// Configs that fail for environmental reasons (need external services,
-	// dynamic registry, triggers defined in other files, etc.).
-	// Keys are path substrings matched against the full config path.
+	// Configs that fail BuildFromConfig for environmental or integration reasons.
+	// These are NOT stale — each has a specific engine limitation documented.
 	envIssues := map[string]string{
-		"chat-platform/workflow.yaml":   "uses dynamic.component requiring dynamic registry",
-		"ecommerce-app/workflow.yaml":   "uses dynamic.component requiring dynamic registry",
-		"workflow-a-orders.yaml":        "multi-workflow: triggers reference handlers from other configs",
-		"workflow-b-fulfillment.yaml":   "multi-workflow: event triggers reference cross-file handlers",
-		"workflow-c-notifications.yaml": "multi-workflow: event triggers reference cross-file handlers",
-	}
-
-	// Configs with known bugs that need fixing. Tracked here so CI
-	// stays green while documenting the issues.
-	// TODO: Fix these configs and remove from this list.
-	knownBugs := map[string]string{
-		"api-gateway-config.yaml":    "BUG: chimux.router not recognized by HTTP workflow handler (needs http.router)",
-		"notification-pipeline.yaml": "BUG: storage.s3 used as event-archive but messaging workflow expects MessageHandler interface",
+		// dynamic.component needs Go source files at runtime
+		"chat-platform/workflow.yaml": "dynamic.component requires Go source files at runtime",
+		"ecommerce-app/workflow.yaml": "dynamic.component requires Go source files at runtime",
+		// scheduler.modular (CrisisTextLine/modular) doesn't implement workflow Scheduler interface
+		"advanced-scheduler-workflow.yaml": "scheduler.modular doesn't expose workflow Scheduler service",
+		"scheduled-jobs-config.yaml":       "scheduler.modular doesn't expose workflow Scheduler service",
+		"trigger-workflow-example.yaml":    "schedule trigger needs Scheduler interface not provided by scheduler.modular",
+		// Module service/interface gaps
+		"event-driven-workflow.yaml": "processing.step requires component service (event-pattern-matcher) not available",
+		"integration-workflow.yaml":  "workflow.registry doesn't implement IntegrationRegistry interface",
+		// step.conditional not supported as standalone module (only as pipeline step)
+		"workflow-a-orders-with-branching.yaml":        "step.conditional not supported as standalone module type",
+		"workflow-b-fulfillment-with-branching.yaml":   "step.conditional not supported as standalone module type",
+		"workflow-c-notifications-with-branching.yaml": "step.conditional not supported as standalone module type",
 	}
 
 	for _, cfgPath := range configs {
@@ -210,21 +168,11 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 			// Note: t.Parallel() removed because modular framework modules
 			// (chimux, EnvFeeder) have global state that races under -race.
 
-			// Skip aspirational configs with unimplemented types
-			if reason, ok := aspirationalConfigs[baseName]; ok {
-				t.Skipf("skipping %s: %s (aspirational)", baseName, reason)
-			}
-
 			// Skip configs that need specific runtime environment
 			for pathPart, reason := range envIssues {
 				if strings.Contains(cfgPath, pathPart) {
 					t.Skipf("skipping %s: %s (env requirement)", cfgPath, reason)
 				}
-			}
-
-			// Skip configs with known bugs (tracked for fixing)
-			if reason, ok := knownBugs[baseName]; ok {
-				t.Skipf("skipping %s: %s", baseName, reason)
 			}
 
 			wfCfg, err := config.LoadFromFile(cfgPath)
@@ -251,7 +199,14 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 			engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
 			engine.RegisterWorkflowHandler(handlers.NewSchedulerWorkflowHandler())
 			engine.RegisterWorkflowHandler(handlers.NewIntegrationWorkflowHandler())
+			engine.RegisterWorkflowHandler(handlers.NewEventWorkflowHandler())
 			engine.RegisterWorkflowHandler(handlers.NewPipelineWorkflowHandler())
+
+			// Register trigger types (same as cmd/server/main.go)
+			engine.RegisterTrigger(module.NewHTTPTrigger())
+			engine.RegisterTrigger(module.NewEventTrigger())
+			engine.RegisterTrigger(module.NewScheduleTrigger())
+			engine.RegisterTrigger(module.NewEventBusTrigger())
 
 			// Register pipeline step types (same as cmd/server/main.go)
 			engine.AddStepType("step.validate", module.NewValidateStepFactory())

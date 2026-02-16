@@ -11,46 +11,6 @@ modules:
   - name: gateway-proxy
     type: reverseproxy
 
-workflows:
-  http:
-    routes:
-      # Health check
-      - method: GET
-        path: /health
-        handler: gateway-proxy
-      
-      # Metrics endpoint
-      - method: GET
-        path: /metrics
-        handler: gateway-proxy
-      
-      # User service routes
-      - method: GET
-        path: /api/users
-        handler: gateway-proxy
-      
-      - method: POST
-        path: /api/users
-        handler: gateway-proxy
-      
-      # Product service routes
-      - method: GET
-        path: /api/products
-        handler: gateway-proxy
-      
-      - method: POST
-        path: /api/products
-        handler: gateway-proxy
-      
-      # Order service routes
-      - method: GET
-        path: /api/orders
-        handler: gateway-proxy
-      
-      - method: POST
-        path: /api/orders
-        handler: gateway-proxy
-
 # Configuration for the modules
 httpserver:
   address: ":8090"

@@ -3,7 +3,7 @@ modules:
   - name: config-provider
     type: static.fileserver
     config:
-      root: "./config"
+      root: "."
   
   - name: logger-service
     type: log.collector
@@ -100,6 +100,21 @@ modules:
     dependsOn:
       - order-service
       - logger-service
+
+  # Messaging infrastructure
+  - name: message-broker
+    type: messaging.broker
+
+  # Event handlers for messaging subscriptions
+  - name: audit-handler
+    type: messaging.handler
+    config:
+      description: "Handles audit logging for events"
+
+  - name: notification-handler
+    type: messaging.handler
+    config:
+      description: "Handles notification delivery for events"
 
 workflows:
   http:

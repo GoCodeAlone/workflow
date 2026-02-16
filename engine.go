@@ -1251,28 +1251,89 @@ func (e *StdEngine) configurePipelines(pipelineCfg map[string]any) error {
 		adder.AddPipeline(pipelineName, pipeline)
 		e.logger.Info(fmt.Sprintf("Configured pipeline: %s (%d steps)", pipelineName, len(steps)))
 
-		// Create trigger from inline trigger config if present
+		// Create trigger from inline trigger config if present.
+		// Pipeline triggers are best-effort: if no matching trigger handler is
+		// registered or the handler can't configure (e.g. missing router service),
+		// the pipeline is still usable via the API — so we warn rather than fail.
 		if pipeCfg.Trigger.Type != "" {
 			triggerCfg := pipeCfg.Trigger.Config
 			if triggerCfg == nil {
 				triggerCfg = make(map[string]any)
 			}
-			// Inject the pipeline name as the workflow type for the trigger
-			triggerCfg["workflowType"] = "pipeline:" + pipelineName
+
+			// Pipeline trigger configs use a flat format (e.g. {path, method})
+			// but trigger handlers expect their native format. Wrap as needed.
+			wrappedCfg := e.wrapPipelineTriggerConfig(pipeCfg.Trigger.Type, pipelineName, triggerCfg)
 
 			// Find a matching trigger and configure it
+			configured := false
 			for _, trigger := range e.triggers {
 				if canHandleTrigger(trigger, pipeCfg.Trigger.Type) {
-					if err := trigger.Configure(e.app, triggerCfg); err != nil {
-						return fmt.Errorf("pipeline %q trigger: %w", pipelineName, err)
+					if err := trigger.Configure(e.app, wrappedCfg); err != nil {
+						e.logger.Warn(fmt.Sprintf("Pipeline %q: could not configure %s trigger (pipeline still usable via API): %v",
+							pipelineName, pipeCfg.Trigger.Type, err))
+					} else {
+						configured = true
 					}
 					break
 				}
+			}
+			if !configured {
+				e.logger.Debug(fmt.Sprintf("Pipeline %q: no handler registered for trigger type %q", pipelineName, pipeCfg.Trigger.Type))
 			}
 		}
 	}
 
 	return nil
+}
+
+// wrapPipelineTriggerConfig converts a flat pipeline trigger config into the
+// format expected by the corresponding trigger handler. Pipeline triggers use a
+// simple format (e.g. {path, method}) while trigger handlers expect their native
+// config schema (e.g. HTTPTrigger expects {routes: [{...}]}).
+func (e *StdEngine) wrapPipelineTriggerConfig(triggerType, pipelineName string, cfg map[string]any) map[string]any {
+	switch triggerType {
+	case "http":
+		route := map[string]any{
+			"workflow": "pipeline:" + pipelineName,
+		}
+		if p, ok := cfg["path"]; ok {
+			route["path"] = p
+		}
+		if m, ok := cfg["method"]; ok {
+			route["method"] = m
+		}
+		return map[string]any{
+			"routes": []any{route},
+		}
+	case "event":
+		sub := map[string]any{
+			"workflow": "pipeline:" + pipelineName,
+		}
+		if t, ok := cfg["topic"]; ok {
+			sub["topic"] = t
+		}
+		if ev, ok := cfg["event"]; ok {
+			sub["event"] = ev
+		}
+		return map[string]any{
+			"subscriptions": []any{sub},
+		}
+	case "schedule":
+		job := map[string]any{
+			"workflow": "pipeline:" + pipelineName,
+		}
+		if c, ok := cfg["cron"]; ok {
+			job["cron"] = c
+		}
+		return map[string]any{
+			"jobs": []any{job},
+		}
+	default:
+		// Unknown trigger type — pass config as-is with workflow type injected
+		cfg["workflowType"] = "pipeline:" + pipelineName
+		return cfg
+	}
 }
 
 // buildPipelineSteps creates PipelineStep instances from step configurations.

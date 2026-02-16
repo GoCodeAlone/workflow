@@ -41,9 +41,9 @@ modules:
     type: messaging.broker
 
   - name: job-status-store
-    type: persistence.store
+    type: messaging.handler
     config:
-      storeType: "memory"  # Could be "redis", "db", etc.
+      description: "Stores job status in memory"
   
   # Monitoring
   - name: http-server

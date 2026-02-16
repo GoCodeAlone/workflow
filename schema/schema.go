@@ -123,6 +123,7 @@ func KnownTriggerTypes() []string {
 // KnownWorkflowTypes returns all built-in workflow handler type identifiers.
 func KnownWorkflowTypes() []string {
 	return []string{
+		"event",
 		"http",
 		"messaging",
 		"statemachine",

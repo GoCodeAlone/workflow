@@ -114,7 +114,7 @@ func (t *EventTrigger) Configure(app modular.Application, triggerConfig any) err
 		return fmt.Errorf("subscriptions not found in event trigger configuration")
 	}
 
-	// Find the message broker
+	// Find the message broker — try well-known names first, then scan all services
 	var broker MessageBroker
 	brokerNames := []string{"messageBroker", "eventBroker", "broker", "event-broker", "messaging.broker.eventbus"}
 
@@ -127,18 +127,34 @@ func (t *EventTrigger) Configure(app modular.Application, triggerConfig any) err
 			}
 		}
 	}
+	if broker == nil {
+		for _, svc := range app.SvcRegistry() {
+			if b, ok := svc.(MessageBroker); ok {
+				broker = b
+				break
+			}
+		}
+	}
 
 	if broker == nil {
 		return fmt.Errorf("message broker not found")
 	}
 
-	// Find the workflow engine
+	// Find the workflow engine — try well-known names first, then scan
 	var engine WorkflowEngine
 	engineNames := []string{"workflowEngine", "engine"}
 
 	for _, name := range engineNames {
 		var svc any
 		if err := app.GetService(name, &svc); err == nil && svc != nil {
+			if e, ok := svc.(WorkflowEngine); ok {
+				engine = e
+				break
+			}
+		}
+	}
+	if engine == nil {
+		for _, svc := range app.SvcRegistry() {
 			if e, ok := svc.(WorkflowEngine); ok {
 				engine = e
 				break

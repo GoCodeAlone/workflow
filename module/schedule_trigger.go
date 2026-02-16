@@ -116,7 +116,7 @@ func (t *ScheduleTrigger) Configure(app modular.Application, triggerConfig any) 
 		return fmt.Errorf("jobs not found in schedule trigger configuration")
 	}
 
-	// Find the scheduler
+	// Find the scheduler — try well-known names first, then scan all services
 	var scheduler Scheduler
 	schedulerNames := []string{"cronScheduler", "scheduler"}
 
@@ -129,18 +129,34 @@ func (t *ScheduleTrigger) Configure(app modular.Application, triggerConfig any) 
 			}
 		}
 	}
+	if scheduler == nil {
+		for _, svc := range app.SvcRegistry() {
+			if s, ok := svc.(Scheduler); ok {
+				scheduler = s
+				break
+			}
+		}
+	}
 
 	if scheduler == nil {
 		return fmt.Errorf("scheduler not found")
 	}
 
-	// Find the workflow engine
+	// Find the workflow engine — try well-known names first, then scan
 	var engine WorkflowEngine
 	engineNames := []string{"workflowEngine", "engine"}
 
 	for _, name := range engineNames {
 		var svc any
 		if err := app.GetService(name, &svc); err == nil && svc != nil {
+			if e, ok := svc.(WorkflowEngine); ok {
+				engine = e
+				break
+			}
+		}
+	}
+	if engine == nil {
+		for _, svc := range app.SvcRegistry() {
 			if e, ok := svc.(WorkflowEngine); ok {
 				engine = e
 				break
