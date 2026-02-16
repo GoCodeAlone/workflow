@@ -1045,4 +1045,192 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "input_from", Label: "Input From", Type: FieldTypeString, Description: "Dotted path to resolve input from (e.g., steps.fetch.data). Defaults to full pipeline context.", Placeholder: "steps.fetch-orders.orders"},
 		},
 	})
+
+	// ---- CI/CD Pipeline Steps Category ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.shell_exec",
+		Label:       "Shell Exec",
+		Category:    "cicd",
+		Description: "Executes shell commands inside a Docker container, optionally collecting output artifacts",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with execution metadata"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Command outputs and collected artifacts"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "image", Label: "Docker Image", Type: FieldTypeString, Required: true, Description: "Docker image to run commands in", Placeholder: "ubuntu:22.04"},
+			{Key: "commands", Label: "Commands", Type: FieldTypeArray, ArrayItemType: "string", Required: true, Description: "Shell commands to execute sequentially"},
+			{Key: "work_dir", Label: "Working Directory", Type: FieldTypeString, Description: "Working directory inside the container", Placeholder: "/workspace"},
+			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, Description: "Maximum execution time for all commands", Placeholder: "5m"},
+			{Key: "env", Label: "Environment Variables", Type: FieldTypeMap, MapValueType: "string", Description: "Environment variables to set in the container"},
+			{Key: "artifacts_out", Label: "Output Artifacts", Type: FieldTypeJSON, Description: "Artifacts to collect after execution (array of {key, path})"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.artifact_pull",
+		Label:       "Artifact Pull",
+		Category:    "cicd",
+		Description: "Retrieves an artifact from a previous execution, URL, or S3 and writes it to a destination path",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with artifact store metadata"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Downloaded artifact metadata (source, key, dest, size)"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "source", Label: "Source", Type: FieldTypeSelect, Options: []string{"previous_execution", "url", "s3"}, Required: true, Description: "Artifact source type"},
+			{Key: "dest", Label: "Destination Path", Type: FieldTypeString, Required: true, Description: "Local file path to write the artifact to", Placeholder: "/workspace/artifact.tar.gz"},
+			{Key: "key", Label: "Artifact Key", Type: FieldTypeString, Description: "Artifact key (required for previous_execution and s3 sources)"},
+			{Key: "execution_id", Label: "Execution ID", Type: FieldTypeString, Description: "Execution ID to pull from (defaults to current execution)"},
+			{Key: "url", Label: "URL", Type: FieldTypeString, Description: "URL to download artifact from (required for url source)", Placeholder: "https://example.com/artifact.tar.gz"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.artifact_push",
+		Label:       "Artifact Push",
+		Category:    "cicd",
+		Description: "Reads a local file and stores it in the artifact store with a checksum",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with artifact store metadata"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Stored artifact metadata (key, size, checksum)"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "source_path", Label: "Source Path", Type: FieldTypeString, Required: true, Description: "Local file path to read and push", Placeholder: "/workspace/build/output.tar.gz"},
+			{Key: "key", Label: "Artifact Key", Type: FieldTypeString, Required: true, Description: "Unique key for the artifact in the store", Placeholder: "build-output"},
+			{Key: "dest", Label: "Destination", Type: FieldTypeString, DefaultValue: "artifact_store", Description: "Destination store identifier"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.docker_build",
+		Label:       "Docker Build",
+		Category:    "cicd",
+		Description: "Builds a Docker image from a context directory and Dockerfile using the Docker SDK",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Built image ID and tags"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "context", Label: "Build Context", Type: FieldTypeString, Required: true, Description: "Path to the Docker build context directory", Placeholder: "."},
+			{Key: "dockerfile", Label: "Dockerfile", Type: FieldTypeString, DefaultValue: "Dockerfile", Description: "Path to Dockerfile relative to context"},
+			{Key: "tags", Label: "Image Tags", Type: FieldTypeArray, ArrayItemType: "string", Description: "Tags for the built image", Placeholder: "myapp:latest"},
+			{Key: "build_args", Label: "Build Args", Type: FieldTypeMap, MapValueType: "string", Description: "Docker build arguments"},
+			{Key: "cache_from", Label: "Cache From", Type: FieldTypeArray, ArrayItemType: "string", Description: "Images to use as cache sources"},
+		},
+		DefaultConfig: map[string]any{"dockerfile": "Dockerfile"},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.docker_push",
+		Label:       "Docker Push",
+		Category:    "cicd",
+		Description: "Pushes a Docker image to a remote registry",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Push result with image digest"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "image", Label: "Image", Type: FieldTypeString, Required: true, Description: "Image name to push", Placeholder: "myapp:latest"},
+			{Key: "registry", Label: "Registry", Type: FieldTypeString, Description: "Registry hostname (prepended to image name)", Placeholder: "ghcr.io/myorg"},
+			{Key: "auth_provider", Label: "Auth Provider", Type: FieldTypeString, Description: "Authentication provider for the registry"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.docker_run",
+		Label:       "Docker Run",
+		Category:    "cicd",
+		Description: "Runs a command inside a Docker container using the sandbox",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Container exit code, stdout, and stderr"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "image", Label: "Docker Image", Type: FieldTypeString, Required: true, Description: "Docker image to run", Placeholder: "alpine:latest"},
+			{Key: "command", Label: "Command", Type: FieldTypeArray, ArrayItemType: "string", Description: "Command to execute in the container"},
+			{Key: "env", Label: "Environment Variables", Type: FieldTypeMap, MapValueType: "string", Description: "Environment variables for the container"},
+			{Key: "wait_for_exit", Label: "Wait For Exit", Type: FieldTypeBool, DefaultValue: true, Description: "Whether to wait for the container to exit"},
+			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, Description: "Maximum execution time", Placeholder: "5m"},
+		},
+		DefaultConfig: map[string]any{"wait_for_exit": true},
+	})
+
+	// ---- Security Scan Steps Category ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.scan_sast",
+		Label:       "SAST Scan",
+		Category:    "security",
+		Description: "Runs a SAST (Static Application Security Testing) scanner and evaluates findings against a severity gate",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Scan result with findings and gate evaluation"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "scanner", Label: "Scanner", Type: FieldTypeString, Required: true, Description: "SAST scanner to use (e.g., semgrep)", Placeholder: "semgrep"},
+			{Key: "image", Label: "Scanner Image", Type: FieldTypeString, DefaultValue: "semgrep/semgrep:latest", Description: "Docker image for the scanner"},
+			{Key: "source_path", Label: "Source Path", Type: FieldTypeString, DefaultValue: "/workspace", Description: "Path to source code to scan"},
+			{Key: "rules", Label: "Rules", Type: FieldTypeArray, ArrayItemType: "string", Description: "Scanner rule configurations"},
+			{Key: "fail_on_severity", Label: "Fail on Severity", Type: FieldTypeSelect, Options: []string{"critical", "high", "medium", "low", "info"}, DefaultValue: "error", Description: "Minimum severity level to fail the gate"},
+			{Key: "output_format", Label: "Output Format", Type: FieldTypeSelect, Options: []string{"sarif", "json"}, DefaultValue: "sarif", Description: "Scan output format"},
+		},
+		DefaultConfig: map[string]any{"image": "semgrep/semgrep:latest", "source_path": "/workspace", "fail_on_severity": "error", "output_format": "sarif"},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.scan_container",
+		Label:       "Container Scan",
+		Category:    "security",
+		Description: "Runs a container vulnerability scanner (e.g., Trivy) against a target image",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Scan result with vulnerabilities and gate evaluation"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "scanner", Label: "Scanner", Type: FieldTypeString, DefaultValue: "trivy", Description: "Container scanner to use"},
+			{Key: "image", Label: "Scanner Image", Type: FieldTypeString, DefaultValue: "aquasec/trivy:latest", Description: "Docker image for the scanner"},
+			{Key: "target_image", Label: "Target Image", Type: FieldTypeString, Required: true, Description: "Docker image to scan for vulnerabilities", Placeholder: "myapp:latest"},
+			{Key: "severity_threshold", Label: "Severity Threshold", Type: FieldTypeSelect, Options: []string{"CRITICAL", "HIGH", "MEDIUM", "LOW"}, DefaultValue: "HIGH", Description: "Minimum severity to report"},
+			{Key: "ignore_unfixed", Label: "Ignore Unfixed", Type: FieldTypeBool, Description: "Skip vulnerabilities without available fixes"},
+			{Key: "output_format", Label: "Output Format", Type: FieldTypeSelect, Options: []string{"sarif", "json"}, DefaultValue: "sarif", Description: "Scan output format"},
+		},
+		DefaultConfig: map[string]any{"scanner": "trivy", "image": "aquasec/trivy:latest", "severity_threshold": "HIGH", "output_format": "sarif"},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.scan_deps",
+		Label:       "Dependency Scan",
+		Category:    "security",
+		Description: "Runs a dependency vulnerability scanner (e.g., Grype) against source code",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Scan result with dependency vulnerabilities and gate evaluation"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "scanner", Label: "Scanner", Type: FieldTypeString, DefaultValue: "grype", Description: "Dependency scanner to use"},
+			{Key: "image", Label: "Scanner Image", Type: FieldTypeString, DefaultValue: "anchore/grype:latest", Description: "Docker image for the scanner"},
+			{Key: "source_path", Label: "Source Path", Type: FieldTypeString, DefaultValue: "/workspace", Description: "Path to source code to scan for dependencies"},
+			{Key: "fail_on_severity", Label: "Fail on Severity", Type: FieldTypeSelect, Options: []string{"critical", "high", "medium", "low", "info"}, DefaultValue: "high", Description: "Minimum severity level to fail the gate"},
+			{Key: "output_format", Label: "Output Format", Type: FieldTypeSelect, Options: []string{"sarif", "json"}, DefaultValue: "sarif", Description: "Scan output format"},
+		},
+		DefaultConfig: map[string]any{"scanner": "grype", "image": "anchore/grype:latest", "source_path": "/workspace", "fail_on_severity": "high", "output_format": "sarif"},
+	})
+
+	// ---- Deployment Steps Category ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.deploy",
+		Label:       "Deploy",
+		Category:    "deployment",
+		Description: "Executes a deployment through a cloud provider using a specified strategy (rolling, blue-green, canary)",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with deploy executor metadata"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Deployment result with deploy ID, status, and provider info"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "environment", Label: "Environment", Type: FieldTypeString, Required: true, Description: "Target deployment environment", Placeholder: "production"},
+			{Key: "strategy", Label: "Strategy", Type: FieldTypeSelect, Options: []string{"rolling", "blue_green", "canary"}, Required: true, Description: "Deployment strategy to use"},
+			{Key: "image", Label: "Image", Type: FieldTypeString, Required: true, Description: "Docker image to deploy", Placeholder: "myapp:v1.2.3"},
+			{Key: "provider", Label: "Provider", Type: FieldTypeSelect, Options: []string{"aws", "gcp", "azure", "digitalocean"}, Description: "Cloud provider to deploy to"},
+			{Key: "rollback_on_failure", Label: "Rollback on Failure", Type: FieldTypeBool, Description: "Automatically rollback if deployment fails"},
+			{Key: "health_check", Label: "Health Check", Type: FieldTypeJSON, Description: "Health check configuration (path, interval, timeout, thresholds)"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.gate",
+		Label:       "Approval Gate",
+		Category:    "deployment",
+		Description: "Implements an approval gate supporting manual, automated, and scheduled gate types",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context for condition evaluation"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Gate result (passed/failed with reason)"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "type", Label: "Gate Type", Type: FieldTypeSelect, Options: []string{"manual", "automated", "scheduled"}, Required: true, Description: "Type of approval gate"},
+			{Key: "approvers", Label: "Approvers", Type: FieldTypeArray, ArrayItemType: "string", Description: "List of approver identifiers (for manual gates)"},
+			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, DefaultValue: "24h", Description: "Maximum time to wait for approval", Placeholder: "24h"},
+			{Key: "auto_approve_conditions", Label: "Auto-Approve Conditions", Type: FieldTypeArray, ArrayItemType: "string", Description: "Conditions for automated approval (key.path == value format)"},
+			{Key: "schedule", Label: "Schedule Window", Type: FieldTypeJSON, Description: "Time window for scheduled gates (weekdays, start_hour, end_hour)"},
+		},
+		DefaultConfig: map[string]any{"timeout": "24h"},
+	})
 }

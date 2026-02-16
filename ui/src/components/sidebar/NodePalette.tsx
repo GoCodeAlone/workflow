@@ -1,4 +1,5 @@
 import { type DragEvent, type MouseEvent, useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useReactFlow } from '@xyflow/react';
 import { CATEGORIES, CATEGORY_COLORS } from '../../types/workflow.ts';
 import type { ModuleCategory } from '../../types/workflow.ts';
 import useWorkflowStore from '../../store/workflowStore.ts';
@@ -28,19 +29,41 @@ export default function NodePalette() {
     event.dataTransfer.effectAllowed = 'move';
   };
 
+  const { getViewport } = useReactFlow();
+
   // Debounce guard: prevent rapid double-fire from double-click adding two nodes
   const lastAddTime = useRef(0);
+  const addCountRef = useRef(0);
   const addNodeOnce = useCallback((moduleType: string) => {
     const now = Date.now();
     if (now - lastAddTime.current < 400) return; // ignore rapid re-fires
     lastAddTime.current = now;
-    const count = useWorkflowStore.getState().nodes.length;
+
+    // Place new node in the center of the current viewport with a slight
+    // offset so consecutive adds don't stack exactly on top of each other.
+    const viewport = getViewport();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    // Convert viewport center from screen coords to flow coords:
+    // flow_x = (screen_x - viewport.x) / viewport.zoom
+    const centerFlowX = (viewportWidth / 2 - viewport.x) / viewport.zoom;
+    const centerFlowY = (viewportHeight / 2 - viewport.y) / viewport.zoom;
+
+    // Apply a small spiral-like offset so consecutive nodes don't overlap
+    const seq = addCountRef.current++;
+    const col = seq % 4;
+    const row = Math.floor(seq / 4) % 4;
+    const offsetX = (col - 1.5) * 60;
+    const offsetY = (row - 1.5) * 50;
+
     const position = {
-      x: 300 + (count % 4) * 250,
-      y: 100 + Math.floor(count / 4) * 150,
+      x: Math.round(centerFlowX + offsetX),
+      y: Math.round(centerFlowY + offsetY),
     };
+
     addNode(moduleType, position);
-  }, [addNode]);
+  }, [addNode, getViewport]);
 
   const onDoubleClick = (e: MouseEvent, moduleType: string) => {
     e.stopPropagation();

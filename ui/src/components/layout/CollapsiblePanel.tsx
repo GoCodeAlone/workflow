@@ -99,14 +99,22 @@ export default function CollapsiblePanel({
     </span>
   );
 
+  // Prevent click/mousedown events on the panel from propagating to
+  // sibling components (e.g. AppNav) that may sit at the same flex level.
+  const stopPropagation = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+  }, []);
+
   return (
     <div
+      onClick={stopPropagation}
+      onMouseDown={stopPropagation}
       style={{
         display: 'flex',
         flexDirection: side === 'left' ? 'row' : 'row-reverse',
         height: '100%',
         position: 'relative',
-        zIndex: 5,
+        zIndex: 12,
         flexShrink: 0,
       }}
     >

@@ -1,294 +1,366 @@
-import { useState, useCallback } from 'react';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type EnvName = 'development' | 'staging' | 'production';
-type EnvStatus = 'healthy' | 'degraded' | 'down';
-
-interface DeployedWorkflow {
-  id: string;
-  name: string;
-  version: string;
-  deployedAt: string;
-  status: 'running' | 'stopped' | 'error';
-}
-
-interface Environment {
-  name: EnvName;
-  label: string;
-  status: EnvStatus;
-  workflows: DeployedWorkflow[];
-  lastDeployment: string;
-}
-
-interface PromotionRecord {
-  id: string;
-  workflowName: string;
-  fromEnv: EnvName;
-  toEnv: EnvName;
-  version: string;
-  promotedBy: string;
-  promotedAt: string;
-  status: 'success' | 'failed' | 'rolled-back';
-}
+import { useState, useEffect, useCallback } from 'react';
+import useEnvironmentStore from '../../store/environmentStore.ts';
+import type { Environment } from '../../store/environmentStore.ts';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const ENV_STATUS_COLORS: Record<EnvStatus, string> = {
-  healthy: '#a6e3a1',
-  degraded: '#f9e2af',
-  down: '#f38ba8',
-};
-
-const WORKFLOW_STATUS_COLORS: Record<string, string> = {
-  running: '#a6e3a1',
-  stopped: '#6c7086',
+const STATUS_COLORS: Record<string, string> = {
+  active: '#a6e3a1',
+  provisioning: '#f9e2af',
   error: '#f38ba8',
+  decommissioned: '#6c7086',
 };
 
-const PROMOTION_STATUS_COLORS: Record<string, string> = {
-  success: '#a6e3a1',
-  failed: '#f38ba8',
-  'rolled-back': '#f9e2af',
+const PROVIDERS = ['aws', 'gcp', 'azure', 'digitalocean'] as const;
+type Provider = (typeof PROVIDERS)[number];
+
+const PROVIDER_LABELS: Record<Provider, string> = {
+  aws: 'AWS',
+  gcp: 'Google Cloud',
+  azure: 'Azure',
+  digitalocean: 'DigitalOcean',
 };
 
-const INITIAL_ENVIRONMENTS: Environment[] = [
-  {
-    name: 'development',
-    label: 'Development',
-    status: 'healthy',
-    lastDeployment: '2026-02-15T10:30:00Z',
-    workflows: [
-      { id: 'dev-1', name: 'REST API Gateway', version: '1.5.0', deployedAt: '2026-02-15T10:30:00Z', status: 'running' },
-      { id: 'dev-2', name: 'Event Pipeline', version: '2.1.0-beta', deployedAt: '2026-02-15T09:15:00Z', status: 'running' },
-      { id: 'dev-3', name: 'Chat Application', version: '0.8.0-alpha', deployedAt: '2026-02-14T16:45:00Z', status: 'running' },
-      { id: 'dev-4', name: 'Data ETL Pipeline', version: '1.3.0-rc1', deployedAt: '2026-02-14T14:20:00Z', status: 'error' },
-      { id: 'dev-5', name: 'Webhook Processor', version: '1.1.0', deployedAt: '2026-02-13T11:00:00Z', status: 'running' },
-    ],
-  },
-  {
-    name: 'staging',
-    label: 'Staging',
-    status: 'degraded',
-    lastDeployment: '2026-02-14T18:00:00Z',
-    workflows: [
-      { id: 'stg-1', name: 'REST API Gateway', version: '1.4.2', deployedAt: '2026-02-14T18:00:00Z', status: 'running' },
-      { id: 'stg-2', name: 'Event Pipeline', version: '2.0.1', deployedAt: '2026-02-13T14:30:00Z', status: 'running' },
-      { id: 'stg-3', name: 'Webhook Processor', version: '1.0.3', deployedAt: '2026-02-12T10:00:00Z', status: 'running' },
-      { id: 'stg-4', name: 'Data ETL Pipeline', version: '1.2.0', deployedAt: '2026-02-11T09:00:00Z', status: 'error' },
-    ],
-  },
-  {
-    name: 'production',
-    label: 'Production',
-    status: 'healthy',
-    lastDeployment: '2026-02-12T14:00:00Z',
-    workflows: [
-      { id: 'prod-1', name: 'REST API Gateway', version: '1.4.0', deployedAt: '2026-02-12T14:00:00Z', status: 'running' },
-      { id: 'prod-2', name: 'Event Pipeline', version: '2.0.0', deployedAt: '2026-02-10T16:00:00Z', status: 'running' },
-      { id: 'prod-3', name: 'Webhook Processor', version: '1.0.2', deployedAt: '2026-02-08T11:30:00Z', status: 'running' },
-    ],
-  },
-];
+interface ProviderFieldDef {
+  key: string;
+  label: string;
+  sensitive: boolean;
+  target: 'config' | 'secrets';
+  placeholder?: string;
+}
 
-const INITIAL_HISTORY: PromotionRecord[] = [
-  { id: 'h1', workflowName: 'REST API Gateway', fromEnv: 'staging', toEnv: 'production', version: '1.4.0', promotedBy: 'admin', promotedAt: '2026-02-12T14:00:00Z', status: 'success' },
-  { id: 'h2', workflowName: 'Event Pipeline', fromEnv: 'staging', toEnv: 'production', version: '2.0.0', promotedBy: 'admin', promotedAt: '2026-02-10T16:00:00Z', status: 'success' },
-  { id: 'h3', workflowName: 'Data ETL Pipeline', fromEnv: 'development', toEnv: 'staging', version: '1.2.0', promotedBy: 'dev-lead', promotedAt: '2026-02-11T09:00:00Z', status: 'success' },
-  { id: 'h4', workflowName: 'REST API Gateway', fromEnv: 'development', toEnv: 'staging', version: '1.4.2', promotedBy: 'dev-lead', promotedAt: '2026-02-14T18:00:00Z', status: 'success' },
-  { id: 'h5', workflowName: 'Chat Application', fromEnv: 'development', toEnv: 'staging', version: '0.7.0', promotedBy: 'dev-lead', promotedAt: '2026-02-09T12:00:00Z', status: 'failed' },
-  { id: 'h6', workflowName: 'Webhook Processor', fromEnv: 'staging', toEnv: 'production', version: '1.0.2', promotedBy: 'admin', promotedAt: '2026-02-08T11:30:00Z', status: 'success' },
-  { id: 'h7', workflowName: 'Event Pipeline', fromEnv: 'development', toEnv: 'staging', version: '1.9.0', promotedBy: 'dev-lead', promotedAt: '2026-02-07T10:00:00Z', status: 'rolled-back' },
-];
-
-const ENV_ORDER: EnvName[] = ['development', 'staging', 'production'];
+const PROVIDER_FIELDS: Record<Provider, ProviderFieldDef[]> = {
+  aws: [
+    { key: 'region', label: 'Region', sensitive: false, target: 'config', placeholder: 'us-east-1' },
+    { key: 'access_key_id', label: 'Access Key ID', sensitive: true, target: 'secrets' },
+    { key: 'secret_access_key', label: 'Secret Access Key', sensitive: true, target: 'secrets' },
+  ],
+  gcp: [
+    { key: 'project_id', label: 'Project ID', sensitive: false, target: 'config', placeholder: 'my-project-123' },
+    { key: 'region', label: 'Region', sensitive: false, target: 'config', placeholder: 'us-central1' },
+    { key: 'credentials_json', label: 'Credentials JSON', sensitive: true, target: 'secrets' },
+  ],
+  azure: [
+    { key: 'subscription_id', label: 'Subscription ID', sensitive: false, target: 'config' },
+    { key: 'tenant_id', label: 'Tenant ID', sensitive: false, target: 'config' },
+    { key: 'client_id', label: 'Client ID', sensitive: false, target: 'config' },
+    { key: 'client_secret', label: 'Client Secret', sensitive: true, target: 'secrets' },
+  ],
+  digitalocean: [
+    { key: 'region', label: 'Region', sensitive: false, target: 'config', placeholder: 'nyc3' },
+    { key: 'api_token', label: 'API Token', sensitive: true, target: 'secrets' },
+  ],
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function formatDate(iso: string): string {
+  if (!iso) return '-';
   const d = new Date(iso);
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-function getNextEnv(env: EnvName): EnvName | null {
-  const idx = ENV_ORDER.indexOf(env);
-  return idx < ENV_ORDER.length - 1 ? ENV_ORDER[idx + 1] : null;
 }
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function StatusIndicator({ status }: { status: EnvStatus }) {
-  const color = ENV_STATUS_COLORS[status];
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-      <span
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          background: color,
-          display: 'inline-block',
-          boxShadow: `0 0 6px ${color}66`,
-        }}
-      />
-      <span style={{ fontSize: 11, color, fontWeight: 600, textTransform: 'capitalize' }}>{status}</span>
-    </span>
-  );
-}
-
-function WorkflowStatusBadge({ status }: { status: string }) {
-  const color = WORKFLOW_STATUS_COLORS[status] || '#6c7086';
+function StatusBadge({ status }: { status: string }) {
+  const color = STATUS_COLORS[status] || '#6c7086';
   return (
     <span
       style={{
-        display: 'inline-block',
-        padding: '1px 6px',
-        borderRadius: 3,
-        fontSize: 10,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '2px 8px',
+        borderRadius: 4,
+        fontSize: 11,
         fontWeight: 600,
         background: color + '22',
         color,
         textTransform: 'capitalize',
       }}
     >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: color,
+          display: 'inline-block',
+        }}
+      />
       {status}
     </span>
   );
 }
 
-function EnvironmentColumn({
-  env,
-  onPromote,
-}: {
-  env: Environment;
-  onPromote: (workflow: DeployedWorkflow, from: EnvName) => void;
-}) {
-  const nextEnv = getNextEnv(env.name);
-
+function Spinner() {
   return (
     <div
       style={{
         flex: 1,
-        minWidth: 280,
-        background: '#313244',
-        borderRadius: 8,
-        border: '1px solid #45475a',
         display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#a6adc8',
+        fontSize: 14,
+        padding: 40,
       }}
     >
-      {/* Column header */}
-      <div
+      Loading environments...
+    </div>
+  );
+}
+
+function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  return (
+    <div
+      style={{
+        background: '#f38ba822',
+        border: '1px solid #f38ba844',
+        borderRadius: 6,
+        padding: '10px 16px',
+        marginBottom: 16,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        fontSize: 13,
+        color: '#f38ba8',
+      }}
+    >
+      <span>{message}</span>
+      <button
+        onClick={onDismiss}
         style={{
-          padding: '12px 16px',
-          background: '#181825',
-          borderBottom: '1px solid #45475a',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
+          background: 'none',
+          border: 'none',
+          color: '#f38ba8',
+          cursor: 'pointer',
+          fontSize: 16,
+          padding: '0 4px',
         }}
       >
-        <div>
-          <div style={{ color: '#cdd6f4', fontWeight: 600, fontSize: 14 }}>{env.label}</div>
-          <div style={{ fontSize: 11, color: '#6c7086', marginTop: 2 }}>
-            Last deploy: {formatDate(env.lastDeployment)}
-          </div>
-        </div>
-        <StatusIndicator status={env.status} />
-      </div>
+        x
+      </button>
+    </div>
+  );
+}
 
-      {/* Workflow list */}
-      <div style={{ flex: 1, overflow: 'auto', padding: 8 }}>
-        {env.workflows.map((wf) => (
-          <div
-            key={wf.id}
-            style={{
-              padding: '10px 12px',
-              borderRadius: 6,
-              background: '#1e1e2e',
-              marginBottom: 6,
-              border: '1px solid transparent',
-              transition: 'border-color 0.15s',
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#45475a')}
-            onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'transparent')}
+// ---------------------------------------------------------------------------
+// Environment Form (create / edit)
+// ---------------------------------------------------------------------------
+
+interface EnvFormData {
+  name: string;
+  workflow_id: string;
+  provider: Provider;
+  region: string;
+  config: Record<string, string>;
+  secrets: Record<string, string>;
+}
+
+function emptyFormData(): EnvFormData {
+  return { name: '', workflow_id: '', provider: 'aws', region: '', config: {}, secrets: {} };
+}
+
+function formDataFromEnv(env: Environment): EnvFormData {
+  const provider = (PROVIDERS.includes(env.provider as Provider) ? env.provider : 'aws') as Provider;
+  const config: Record<string, string> = {};
+  const secrets: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env.config ?? {})) config[k] = String(v);
+  for (const [k, v] of Object.entries(env.secrets ?? {})) secrets[k] = String(v);
+  return {
+    name: env.name,
+    workflow_id: env.workflow_id,
+    provider,
+    region: env.region,
+    config,
+    secrets,
+  };
+}
+
+function EnvironmentFormModal({
+  initial,
+  title,
+  onSave,
+  onCancel,
+  saving,
+}: {
+  initial: EnvFormData;
+  title: string;
+  onSave: (data: EnvFormData) => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  const [form, setForm] = useState<EnvFormData>(initial);
+
+  const fields = PROVIDER_FIELDS[form.provider] || [];
+
+  const setField = (key: string, value: string) => setForm((f) => ({ ...f, [key]: value }));
+
+  const setProviderField = (field: ProviderFieldDef, value: string) => {
+    setForm((f) => {
+      if (field.target === 'secrets') {
+        return { ...f, secrets: { ...f.secrets, [field.key]: value } };
+      }
+      return { ...f, config: { ...f.config, [field.key]: value } };
+    });
+  };
+
+  const getProviderFieldValue = (field: ProviderFieldDef): string => {
+    if (field.target === 'secrets') return form.secrets[field.key] || '';
+    return form.config[field.key] || '';
+  };
+
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: '#1e1e2e',
+          border: '1px solid #45475a',
+          borderRadius: 12,
+          padding: 24,
+          width: '90%',
+          maxWidth: 520,
+          maxHeight: '80vh',
+          overflowY: 'auto',
+        }}
+      >
+        <h3 style={{ color: '#cdd6f4', margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>
+          {title}
+        </h3>
+
+        {/* Name */}
+        <FormField label="Name" required>
+          <input
+            value={form.name}
+            onChange={(e) => setField('name', e.target.value)}
+            placeholder="production-us-east"
+            style={inputStyle}
+          />
+        </FormField>
+
+        {/* Workflow ID */}
+        <FormField label="Workflow ID" required>
+          <input
+            value={form.workflow_id}
+            onChange={(e) => setField('workflow_id', e.target.value)}
+            placeholder="workflow-uuid"
+            style={inputStyle}
+          />
+        </FormField>
+
+        {/* Provider */}
+        <FormField label="Provider" required>
+          <select
+            value={form.provider}
+            onChange={(e) => setField('provider', e.target.value)}
+            style={inputStyle}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <span style={{ color: '#cdd6f4', fontSize: 13, fontWeight: 500 }}>{wf.name}</span>
-              <WorkflowStatusBadge status={wf.status} />
+            {PROVIDERS.map((p) => (
+              <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>
+            ))}
+          </select>
+        </FormField>
+
+        {/* Region (top-level) */}
+        <FormField label="Region">
+          <input
+            value={form.region}
+            onChange={(e) => setField('region', e.target.value)}
+            placeholder="us-east-1"
+            style={inputStyle}
+          />
+        </FormField>
+
+        {/* Provider-specific fields */}
+        {fields.length > 0 && (
+          <div style={{ marginTop: 12, padding: '12px 0', borderTop: '1px solid #45475a' }}>
+            <div style={{ fontSize: 12, color: '#a6adc8', fontWeight: 600, marginBottom: 8 }}>
+              {PROVIDER_LABELS[form.provider]} Configuration
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: 11, color: '#6c7086' }}>
-                <span style={{ color: '#89b4fa', fontWeight: 500 }}>v{wf.version}</span>
-                <span style={{ margin: '0 6px' }}>|</span>
-                {formatDate(wf.deployedAt)}
-              </div>
-              {nextEnv && (
-                <button
-                  onClick={() => onPromote(wf, env.name)}
-                  title={`Promote to ${nextEnv}`}
-                  style={{
-                    padding: '2px 8px',
-                    borderRadius: 3,
-                    border: '1px solid #45475a',
-                    fontSize: 10,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    background: 'transparent',
-                    color: '#89b4fa',
-                    transition: 'background 0.15s',
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = '#89b4fa22')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                >
-                  Promote
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-        {env.workflows.length === 0 && (
-          <div style={{ color: '#6c7086', fontSize: 12, textAlign: 'center', padding: 20 }}>
-            No workflows deployed
+            {fields.map((field) => (
+              <FormField key={field.key} label={field.label} sensitive={field.sensitive}>
+                <input
+                  value={getProviderFieldValue(field)}
+                  onChange={(e) => setProviderField(field, e.target.value)}
+                  placeholder={field.placeholder}
+                  type={field.sensitive ? 'password' : 'text'}
+                  style={inputStyle}
+                />
+              </FormField>
+            ))}
           </div>
         )}
-      </div>
 
-      {/* Summary footer */}
-      <div
-        style={{
-          padding: '8px 16px',
-          borderTop: '1px solid #45475a',
-          background: '#181825',
-          fontSize: 11,
-          color: '#6c7086',
-        }}
-      >
-        {env.workflows.length} workflow{env.workflows.length !== 1 ? 's' : ''} deployed
+        {/* Actions */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <button onClick={onCancel} style={cancelBtnStyle} disabled={saving}>
+            Cancel
+          </button>
+          <button
+            onClick={() => onSave(form)}
+            style={primaryBtnStyle}
+            disabled={saving || !form.name || !form.workflow_id}
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-function PromotionConfirmDialog({
-  workflow,
-  fromEnv,
-  toEnv,
+function FormField({
+  label,
+  required,
+  sensitive,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  sensitive?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <label style={{ display: 'block', fontSize: 12, color: '#a6adc8', marginBottom: 4 }}>
+        {label}
+        {required && <span style={{ color: '#f38ba8', marginLeft: 2 }}>*</span>}
+        {sensitive && <span style={{ color: '#f9e2af', marginLeft: 6, fontSize: 10 }}>sensitive</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Delete Confirm Dialog
+// ---------------------------------------------------------------------------
+
+function DeleteConfirmDialog({
+  envName,
   onConfirm,
   onCancel,
 }: {
-  workflow: DeployedWorkflow;
-  fromEnv: string;
-  toEnv: string;
+  envName: string;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -313,83 +385,97 @@ function PromotionConfirmDialog({
           borderRadius: 12,
           padding: 24,
           width: '90%',
-          maxWidth: 440,
+          maxWidth: 400,
         }}
       >
         <h3 style={{ color: '#cdd6f4', margin: '0 0 12px', fontSize: 16, fontWeight: 600 }}>
-          Confirm Promotion
+          Delete Environment
         </h3>
-        <p style={{ color: '#a6adc8', fontSize: 13, lineHeight: 1.5, marginBottom: 8 }}>
-          You are about to promote:
+        <p style={{ color: '#a6adc8', fontSize: 13, lineHeight: 1.5, marginBottom: 16 }}>
+          Are you sure you want to delete <strong style={{ color: '#cdd6f4' }}>{envName}</strong>?
+          This action cannot be undone.
         </p>
-        <div
-          style={{
-            background: '#313244',
-            borderRadius: 6,
-            padding: 12,
-            marginBottom: 16,
-          }}
-        >
-          <div style={{ color: '#cdd6f4', fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{workflow.name}</div>
-          <div style={{ fontSize: 12, color: '#6c7086' }}>
-            Version <span style={{ color: '#89b4fa' }}>v{workflow.version}</span>
-          </div>
-          <div style={{ fontSize: 12, color: '#6c7086', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ textTransform: 'capitalize' }}>{fromEnv}</span>
-            <span style={{ color: '#89b4fa' }}>&rarr;</span>
-            <span style={{ textTransform: 'capitalize', fontWeight: 600, color: '#f9e2af' }}>{toEnv}</span>
-          </div>
-        </div>
-
-        {toEnv === 'production' && (
-          <div
-            style={{
-              background: '#f38ba822',
-              border: '1px solid #f38ba844',
-              borderRadius: 6,
-              padding: 10,
-              marginBottom: 16,
-              fontSize: 12,
-              color: '#f38ba8',
-              lineHeight: 1.4,
-            }}
-          >
-            Warning: You are promoting to production. This action will affect live traffic.
-          </div>
-        )}
-
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button
-            onClick={onCancel}
-            style={{
-              padding: '8px 20px',
-              borderRadius: 6,
-              border: '1px solid #45475a',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
-              background: 'transparent',
-              color: '#a6adc8',
-            }}
-          >
-            Cancel
-          </button>
+          <button onClick={onCancel} style={cancelBtnStyle}>Cancel</button>
           <button
             onClick={onConfirm}
-            style={{
-              padding: '8px 24px',
-              borderRadius: 6,
-              border: 'none',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
-              background: toEnv === 'production' ? '#f9e2af' : '#89b4fa',
-              color: '#1e1e2e',
-            }}
+            style={{ ...primaryBtnStyle, background: '#f38ba8' }}
           >
-            Promote
+            Delete
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Environment Card
+// ---------------------------------------------------------------------------
+
+function EnvironmentCard({
+  env,
+  onEdit,
+  onDelete,
+  onTest,
+}: {
+  env: Environment;
+  onEdit: (env: Environment) => void;
+  onDelete: (env: Environment) => void;
+  onTest: (env: Environment) => void;
+}) {
+  return (
+    <div
+      style={{
+        background: '#313244',
+        borderRadius: 8,
+        border: '1px solid #45475a',
+        padding: 16,
+        transition: 'border-color 0.15s',
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#89b4fa')}
+      onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#45475a')}
+    >
+      {/* Header row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div>
+          <div style={{ color: '#cdd6f4', fontWeight: 600, fontSize: 15 }}>{env.name}</div>
+          <div style={{ fontSize: 11, color: '#6c7086', marginTop: 2 }}>
+            {PROVIDER_LABELS[env.provider as Provider] || env.provider}
+            {env.region ? ` / ${env.region}` : ''}
+          </div>
+        </div>
+        <StatusBadge status={env.status} />
+      </div>
+
+      {/* Details */}
+      <div style={{ fontSize: 12, color: '#a6adc8', marginBottom: 12, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        <span>
+          <span style={{ color: '#6c7086' }}>Workflow: </span>
+          <span style={{ color: '#89b4fa', fontFamily: 'monospace', fontSize: 11 }}>{env.workflow_id}</span>
+        </span>
+        <span>
+          <span style={{ color: '#6c7086' }}>Created: </span>{formatDate(env.created_at)}
+        </span>
+        <span>
+          <span style={{ color: '#6c7086' }}>Updated: </span>{formatDate(env.updated_at)}
+        </span>
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={() => onTest(env)} style={smallBtnStyle}>
+          Test Connection
+        </button>
+        <button onClick={() => onEdit(env)} style={smallBtnStyle}>
+          Edit
+        </button>
+        <button
+          onClick={() => onDelete(env)}
+          style={{ ...smallBtnStyle, color: '#f38ba8', borderColor: '#f38ba844' }}
+        >
+          Delete
+        </button>
       </div>
     </div>
   );
@@ -400,61 +486,99 @@ function PromotionConfirmDialog({
 // ---------------------------------------------------------------------------
 
 export default function Environments() {
-  const [environments, setEnvironments] = useState<Environment[]>(INITIAL_ENVIRONMENTS);
-  const [history, setHistory] = useState<PromotionRecord[]>(INITIAL_HISTORY);
-  const [promotionTarget, setPromotionTarget] = useState<{
-    workflow: DeployedWorkflow;
-    fromEnv: EnvName;
-    toEnv: EnvName;
-  } | null>(null);
+  const environments = useEnvironmentStore((s) => s.environments);
+  const loading = useEnvironmentStore((s) => s.loading);
+  const error = useEnvironmentStore((s) => s.error);
+  const fetchEnvironments = useEnvironmentStore((s) => s.fetchEnvironments);
+  const createEnvironment = useEnvironmentStore((s) => s.createEnvironment);
+  const updateEnvironment = useEnvironmentStore((s) => s.updateEnvironment);
+  const deleteEnvironment = useEnvironmentStore((s) => s.deleteEnvironment);
+  const testConnection = useEnvironmentStore((s) => s.testConnection);
 
-  const handlePromote = useCallback((workflow: DeployedWorkflow, fromEnv: EnvName) => {
-    const toEnv = getNextEnv(fromEnv);
-    if (!toEnv) return;
-    setPromotionTarget({ workflow, fromEnv, toEnv });
-  }, []);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingEnv, setEditingEnv] = useState<Environment | null>(null);
+  const [deletingEnv, setDeletingEnv] = useState<Environment | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [testResult, setTestResult] = useState<{ envId: string; success: boolean; message: string } | null>(null);
+  const [filterProvider, setFilterProvider] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
 
-  const confirmPromotion = useCallback(() => {
-    if (!promotionTarget) return;
-    const { workflow, fromEnv, toEnv } = promotionTarget;
+  useEffect(() => {
+    fetchEnvironments();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Add workflow to target environment
-    setEnvironments((prev) =>
-      prev.map((env) => {
-        if (env.name !== toEnv) return env;
-        const now = new Date().toISOString();
-        // Replace existing workflow with same name or add new
-        const existingIdx = env.workflows.findIndex((w) => w.name === workflow.name);
-        const newWf: DeployedWorkflow = {
-          id: `${toEnv.slice(0, 3)}-${Date.now()}`,
-          name: workflow.name,
-          version: workflow.version,
-          deployedAt: now,
-          status: 'running',
-        };
-        const workflows =
-          existingIdx >= 0
-            ? env.workflows.map((w, i) => (i === existingIdx ? newWf : w))
-            : [...env.workflows, newWf];
-        return { ...env, workflows, lastDeployment: now };
-      }),
-    );
+  const handleCreate = useCallback(async (data: EnvFormData) => {
+    setSaving(true);
+    try {
+      await createEnvironment({
+        name: data.name,
+        workflow_id: data.workflow_id,
+        provider: data.provider,
+        region: data.region,
+        config: data.config,
+        secrets: data.secrets,
+      });
+      setShowCreateForm(false);
+    } catch {
+      // error is set in the store
+    } finally {
+      setSaving(false);
+    }
+  }, [createEnvironment]);
 
-    // Add to history
-    const record: PromotionRecord = {
-      id: `h-${Date.now()}`,
-      workflowName: workflow.name,
-      fromEnv,
-      toEnv,
-      version: workflow.version,
-      promotedBy: 'admin',
-      promotedAt: new Date().toISOString(),
-      status: 'success',
-    };
-    setHistory((prev) => [record, ...prev]);
+  const handleUpdate = useCallback(async (data: EnvFormData) => {
+    if (!editingEnv) return;
+    setSaving(true);
+    try {
+      await updateEnvironment(editingEnv.id, {
+        name: data.name,
+        workflow_id: data.workflow_id,
+        provider: data.provider,
+        region: data.region,
+        config: data.config,
+        secrets: data.secrets,
+      });
+      setEditingEnv(null);
+    } catch {
+      // error is set in the store
+    } finally {
+      setSaving(false);
+    }
+  }, [editingEnv, updateEnvironment]);
 
-    setPromotionTarget(null);
-  }, [promotionTarget]);
+  const handleDelete = useCallback(async () => {
+    if (!deletingEnv) return;
+    try {
+      await deleteEnvironment(deletingEnv.id);
+      setDeletingEnv(null);
+    } catch {
+      // error is set in the store
+    }
+  }, [deletingEnv, deleteEnvironment]);
+
+  const handleTest = useCallback(async (env: Environment) => {
+    setTestResult(null);
+    try {
+      const result = await testConnection(env.id);
+      setTestResult({ envId: env.id, success: result.success, message: result.message });
+    } catch (e) {
+      setTestResult({ envId: env.id, success: false, message: e instanceof Error ? e.message : 'Test failed' });
+    }
+  }, [testConnection]);
+
+  const handleRefresh = useCallback(() => {
+    const filter: Record<string, string> = {};
+    if (filterProvider) filter.provider = filterProvider;
+    if (filterStatus) filter.status = filterStatus;
+    fetchEnvironments(Object.keys(filter).length > 0 ? filter : undefined);
+  }, [fetchEnvironments, filterProvider, filterStatus]);
+
+  // Apply client-side filter for immediate feedback
+  const filtered = environments.filter((env) => {
+    if (filterProvider && env.provider !== filterProvider) return false;
+    if (filterStatus && env.status !== filterStatus) return false;
+    return true;
+  });
 
   return (
     <div
@@ -465,110 +589,199 @@ export default function Environments() {
         padding: 24,
       }}
     >
-      <h2 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 20, fontWeight: 600 }}>
-        Environment Promotion
-      </h2>
-      <p style={{ color: '#6c7086', fontSize: 13, margin: '0 0 20px' }}>
-        Manage deployments across environments and promote workflows from dev to production.
-      </p>
-
-      {/* Environment columns */}
-      <div style={{ display: 'flex', gap: 16, marginBottom: 32, minHeight: 300 }}>
-        {environments.map((env) => (
-          <EnvironmentColumn key={env.name} env={env} onPromote={handlePromote} />
-        ))}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+        <div>
+          <h2 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 20, fontWeight: 600 }}>
+            Environments
+          </h2>
+          <p style={{ color: '#6c7086', fontSize: 13, margin: 0 }}>
+            Manage deployment targets and cloud provider configurations.
+          </p>
+        </div>
+        <button
+          onClick={() => setShowCreateForm(true)}
+          style={primaryBtnStyle}
+        >
+          + Create Environment
+        </button>
       </div>
 
-      {/* Promotion arrows between columns (visual hint) */}
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginBottom: 24 }}>
-        <span style={{ fontSize: 12, color: '#6c7086' }}>
-          Development
-          <span style={{ color: '#89b4fa', margin: '0 8px' }}>&rarr;</span>
-          Staging
-          <span style={{ color: '#89b4fa', margin: '0 8px' }}>&rarr;</span>
-          Production
+      {error && <ErrorBanner message={error} onDismiss={() => useEnvironmentStore.setState({ error: null })} />}
+
+      {testResult && (
+        <div
+          style={{
+            background: testResult.success ? '#a6e3a122' : '#f38ba822',
+            border: `1px solid ${testResult.success ? '#a6e3a144' : '#f38ba844'}`,
+            borderRadius: 6,
+            padding: '10px 16px',
+            marginBottom: 16,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: 13,
+            color: testResult.success ? '#a6e3a1' : '#f38ba8',
+          }}
+        >
+          <span>Connection test: {testResult.message}</span>
+          <button
+            onClick={() => setTestResult(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: testResult.success ? '#a6e3a1' : '#f38ba8',
+              cursor: 'pointer',
+              fontSize: 16,
+              padding: '0 4px',
+            }}
+          >
+            x
+          </button>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
+        <select
+          value={filterProvider}
+          onChange={(e) => setFilterProvider(e.target.value)}
+          style={{ ...inputStyle, width: 160, marginBottom: 0 }}
+        >
+          <option value="">All Providers</option>
+          {PROVIDERS.map((p) => (
+            <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>
+          ))}
+        </select>
+        <select
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(e.target.value)}
+          style={{ ...inputStyle, width: 160, marginBottom: 0 }}
+        >
+          <option value="">All Statuses</option>
+          <option value="active">Active</option>
+          <option value="provisioning">Provisioning</option>
+          <option value="error">Error</option>
+          <option value="decommissioned">Decommissioned</option>
+        </select>
+        <button onClick={handleRefresh} style={smallBtnStyle}>
+          Refresh
+        </button>
+        <span style={{ fontSize: 12, color: '#6c7086', marginLeft: 8 }}>
+          {filtered.length} environment{filtered.length !== 1 ? 's' : ''}
         </span>
       </div>
 
-      {/* Deployment history */}
-      <h3 style={{ color: '#cdd6f4', fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Deployment History</h3>
-      <div style={{ background: '#313244', borderRadius: 8, overflow: 'hidden' }}>
-        {/* Table header */}
+      {/* Content */}
+      {loading && environments.length === 0 ? (
+        <Spinner />
+      ) : filtered.length === 0 ? (
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: '2fr 1fr 1.5fr 1fr 1fr 1fr',
-            padding: '10px 16px',
-            background: '#181825',
-            fontSize: 11,
-            color: '#a6adc8',
-            fontWeight: 600,
+            color: '#6c7086',
+            fontSize: 14,
+            textAlign: 'center',
+            padding: 40,
+            background: '#313244',
+            borderRadius: 8,
           }}
         >
-          <span>Workflow</span>
-          <span>Version</span>
-          <span>Promotion</span>
-          <span>By</span>
-          <span>Date</span>
-          <span>Status</span>
+          {environments.length === 0
+            ? 'No environments yet. Create one to get started.'
+            : 'No environments match the current filters.'}
         </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: 16 }}>
+          {filtered.map((env) => (
+            <EnvironmentCard
+              key={env.id}
+              env={env}
+              onEdit={setEditingEnv}
+              onDelete={setDeletingEnv}
+              onTest={handleTest}
+            />
+          ))}
+        </div>
+      )}
 
-        {/* Table body */}
-        {history.map((record, i) => (
-          <div
-            key={record.id}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '2fr 1fr 1.5fr 1fr 1fr 1fr',
-              padding: '8px 16px',
-              borderBottom: i < history.length - 1 ? '1px solid #45475a' : 'none',
-              fontSize: 13,
-              background: i % 2 === 0 ? 'transparent' : '#181825',
-              alignItems: 'center',
-            }}
-          >
-            <span style={{ color: '#cdd6f4' }}>{record.workflowName}</span>
-            <span style={{ color: '#89b4fa', fontSize: 12 }}>v{record.version}</span>
-            <span style={{ color: '#a6adc8', fontSize: 12, textTransform: 'capitalize' }}>
-              {record.fromEnv} &rarr; {record.toEnv}
-            </span>
-            <span style={{ color: '#a6adc8', fontSize: 12 }}>{record.promotedBy}</span>
-            <span style={{ color: '#6c7086', fontSize: 12 }}>{formatDate(record.promotedAt)}</span>
-            <span>
-              <span
-                style={{
-                  display: 'inline-block',
-                  padding: '1px 6px',
-                  borderRadius: 3,
-                  fontSize: 10,
-                  fontWeight: 600,
-                  background: (PROMOTION_STATUS_COLORS[record.status] || '#6c7086') + '22',
-                  color: PROMOTION_STATUS_COLORS[record.status] || '#6c7086',
-                  textTransform: 'capitalize',
-                }}
-              >
-                {record.status}
-              </span>
-            </span>
-          </div>
-        ))}
-        {history.length === 0 && (
-          <div style={{ color: '#6c7086', fontSize: 13, padding: 20, textAlign: 'center' }}>
-            No deployment history.
-          </div>
-        )}
-      </div>
+      {/* Create dialog */}
+      {showCreateForm && (
+        <EnvironmentFormModal
+          initial={emptyFormData()}
+          title="Create Environment"
+          onSave={handleCreate}
+          onCancel={() => setShowCreateForm(false)}
+          saving={saving}
+        />
+      )}
 
-      {/* Promotion confirmation dialog */}
-      {promotionTarget && (
-        <PromotionConfirmDialog
-          workflow={promotionTarget.workflow}
-          fromEnv={promotionTarget.fromEnv}
-          toEnv={promotionTarget.toEnv}
-          onConfirm={confirmPromotion}
-          onCancel={() => setPromotionTarget(null)}
+      {/* Edit dialog */}
+      {editingEnv && (
+        <EnvironmentFormModal
+          initial={formDataFromEnv(editingEnv)}
+          title={`Edit: ${editingEnv.name}`}
+          onSave={handleUpdate}
+          onCancel={() => setEditingEnv(null)}
+          saving={saving}
+        />
+      )}
+
+      {/* Delete confirm dialog */}
+      {deletingEnv && (
+        <DeleteConfirmDialog
+          envName={deletingEnv.name}
+          onConfirm={handleDelete}
+          onCancel={() => setDeletingEnv(null)}
         />
       )}
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Shared styles
+// ---------------------------------------------------------------------------
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '8px 10px',
+  borderRadius: 6,
+  border: '1px solid #45475a',
+  background: '#313244',
+  color: '#cdd6f4',
+  fontSize: 13,
+  outline: 'none',
+  boxSizing: 'border-box',
+};
+
+const primaryBtnStyle: React.CSSProperties = {
+  padding: '8px 20px',
+  borderRadius: 6,
+  border: 'none',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+  background: '#89b4fa',
+  color: '#1e1e2e',
+};
+
+const cancelBtnStyle: React.CSSProperties = {
+  padding: '8px 20px',
+  borderRadius: 6,
+  border: '1px solid #45475a',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+  background: 'transparent',
+  color: '#a6adc8',
+};
+
+const smallBtnStyle: React.CSSProperties = {
+  padding: '4px 12px',
+  borderRadius: 4,
+  border: '1px solid #45475a',
+  fontSize: 11,
+  fontWeight: 600,
+  cursor: 'pointer',
+  background: 'transparent',
+  color: '#89b4fa',
+};

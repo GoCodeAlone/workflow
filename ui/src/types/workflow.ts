@@ -99,7 +99,10 @@ export type ModuleCategory =
   | 'middleware'
   | 'database'
   | 'observability'
-  | 'pipeline';
+  | 'pipeline'
+  | 'cicd'
+  | 'security'
+  | 'deployment';
 
 export interface ModuleTypeInfo {
   type: string;
@@ -138,6 +141,9 @@ export const CATEGORY_COLORS: Record<ModuleCategory, string> = {
   database: '#f97316',
   observability: '#84cc16',
   pipeline: '#e879f9',
+  cicd: '#f472b6',
+  security: '#fb923c',
+  deployment: '#34d399',
 };
 
 export const MODULE_TYPES: ModuleTypeInfo[] = [
@@ -866,6 +872,9 @@ export const CATEGORIES: { key: ModuleCategory; label: string }[] = [
   { key: 'database', label: 'Database' },
   { key: 'observability', label: 'Observability' },
   { key: 'pipeline', label: 'Pipeline Steps' },
+  { key: 'cicd', label: 'CI/CD' },
+  { key: 'security', label: 'Security' },
+  { key: 'deployment', label: 'Deployment' },
 ];
 
 // Multi-workflow tab management

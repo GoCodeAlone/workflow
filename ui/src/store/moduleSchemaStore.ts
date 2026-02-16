@@ -125,7 +125,7 @@ function convertIOSignature(inputs?: ServerIODef[], outputs?: ServerIODef[]): IO
 const VALID_CATEGORIES: ModuleCategory[] = [
   'http', 'messaging', 'statemachine', 'events', 'integration',
   'scheduling', 'infrastructure', 'middleware', 'database', 'observability',
-  'pipeline',
+  'pipeline', 'cicd', 'security', 'deployment',
 ];
 
 function normalizeCategory(cat: string): ModuleCategory {

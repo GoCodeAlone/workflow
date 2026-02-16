@@ -323,7 +323,7 @@ function AppLayout() {
       {activeView === 'editor' && <Toolbar />}
       {activeView === 'editor' && <ValidationBar />}
       {(activeView === 'editor' || hasWorkflowOpen) && <WorkflowTabs />}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', isolation: 'isolate' }}>
         <AppNav />
         {activeView === 'editor' && <EditorView />}
         {activeView === 'dashboard' && <SystemDashboard />}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -22,12 +23,18 @@ import (
 	"github.com/GoCodeAlone/workflow/audit"
 	"github.com/GoCodeAlone/workflow/billing"
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/deploy"
 	"github.com/GoCodeAlone/workflow/dynamic"
+	"github.com/GoCodeAlone/workflow/environment"
 	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/plugin/docmanager"
 	"github.com/GoCodeAlone/workflow/plugin/storebrowser"
+	"github.com/GoCodeAlone/workflow/provider/aws"
+	"github.com/GoCodeAlone/workflow/provider/azure"
+	"github.com/GoCodeAlone/workflow/provider/digitalocean"
+	"github.com/GoCodeAlone/workflow/provider/gcp"
 	"github.com/GoCodeAlone/workflow/schema"
 	evstore "github.com/GoCodeAlone/workflow/store"
 	_ "modernc.org/sqlite"
@@ -84,6 +91,19 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	engine.AddStepType("step.db_exec", module.NewDBExecStepFactory())
 	engine.AddStepType("step.json_response", module.NewJSONResponseStepFactory())
 	engine.AddStepType("step.jq", module.NewJQStepFactory())
+
+	// Register CI/CD pipeline step types
+	engine.AddStepType("step.shell_exec", module.NewShellExecStepFactory())
+	engine.AddStepType("step.artifact_pull", module.NewArtifactPullStepFactory())
+	engine.AddStepType("step.artifact_push", module.NewArtifactPushStepFactory())
+	engine.AddStepType("step.docker_build", module.NewDockerBuildStepFactory())
+	engine.AddStepType("step.docker_push", module.NewDockerPushStepFactory())
+	engine.AddStepType("step.docker_run", module.NewDockerRunStepFactory())
+	engine.AddStepType("step.scan_sast", module.NewScanSASTStepFactory())
+	engine.AddStepType("step.scan_container", module.NewScanContainerStepFactory())
+	engine.AddStepType("step.scan_deps", module.NewScanDepsStepFactory())
+	engine.AddStepType("step.deploy", module.NewDeployStepFactory())
+	engine.AddStepType("step.gate", module.NewGateStepFactory())
 
 	// Register standard triggers
 	engine.RegisterTrigger(module.NewHTTPTrigger())
@@ -438,6 +458,20 @@ func wireV1HandlerPostStart(logger *slog.Logger, engine *workflow.StdEngine, app
 		}
 
 		logger.Info("Registered timeline, replay, and backfill/mock/diff services")
+	} else {
+		// Register stub handlers so delegate routes return 503 instead of 500
+		// ("service not found in registry"). The admin/config.yaml always
+		// defines routes for these services; without stubs the delegate step
+		// errors out with a hard 500 because the service name is missing.
+		stubMsg := "event store unavailable — timeline/replay/backfill features disabled"
+		for _, name := range []string{"admin-timeline-mgmt", "admin-replay-mgmt", "admin-backfill-mgmt"} {
+			stub := featureDisabledHandler(stubMsg)
+			engine.GetApp().RegisterModule(module.NewServiceModule(name, stub))
+			if regErr := engine.GetApp().RegisterService(name, stub); regErr != nil {
+				logger.Warn("Failed to register stub service", "name", name, "error", regErr)
+			}
+		}
+		logger.Info("Registered stub handlers for timeline/replay/backfill (event store unavailable)")
 	}
 
 	// DLQ handler (in-memory store for now)
@@ -486,6 +520,81 @@ func wireV1HandlerPostStart(logger *slog.Logger, engine *workflow.StdEngine, app
 	}
 
 	logger.Info("Registered native plugins", "count", len(nativeReg.List()))
+
+	// -----------------------------------------------------------------------
+	// CI/CD Platform: Environment, Deploy, Cloud Providers, Plugin Registry
+	// -----------------------------------------------------------------------
+
+	// Environment management (SQLite-backed store + HTTP handler)
+	envDBPath := filepath.Join(*dataDir, "environments.db")
+	envStore, envErr := environment.NewSQLiteStore(envDBPath)
+	if envErr != nil {
+		logger.Warn("Failed to create environment store — environment management disabled", "error", envErr)
+		// Register stub so delegate routes return 503 instead of 500
+		stub := featureDisabledHandler("environment store unavailable — environment management disabled")
+		engine.GetApp().RegisterModule(module.NewServiceModule("admin-env-mgmt", stub))
+		if regErr := engine.GetApp().RegisterService("admin-env-mgmt", stub); regErr != nil {
+			logger.Warn("Failed to register stub environment service", "error", regErr)
+		}
+	} else {
+		envHandler := environment.NewHandler(envStore)
+		envMux := http.NewServeMux()
+		envHandler.RegisterRoutes(envMux)
+		engine.GetApp().RegisterModule(module.NewServiceModule("admin-env-mgmt", envMux))
+		if regErr := engine.GetApp().RegisterService("admin-env-mgmt", envMux); regErr != nil {
+			logger.Warn("Failed to register environment service", "error", regErr)
+		}
+		logger.Info("Registered environment management service", "path", envDBPath)
+	}
+
+	// Deploy executor with strategy registry
+	strategyReg := deploy.NewStrategyRegistry(logger)
+	deployExecutor := deploy.NewExecutor(strategyReg)
+
+	// Cloud provider plugins
+	awsProvider := aws.NewAWSProvider(aws.AWSConfig{})
+	gcpProvider := gcp.NewGCPProvider(gcp.GCPConfig{})
+	azureProvider := azure.NewAzureProvider(azure.AzureConfig{})
+	doProvider := digitalocean.NewDOProvider(digitalocean.DOConfig{})
+
+	// Register providers with deploy executor
+	deployExecutor.RegisterProvider("aws", awsProvider)
+	deployExecutor.RegisterProvider("gcp", gcpProvider)
+	deployExecutor.RegisterProvider("azure", azureProvider)
+	deployExecutor.RegisterProvider("digitalocean", doProvider)
+
+	// Register cloud provider plugins with native registry
+	nativeReg.Register(awsProvider)
+	nativeReg.Register(gcpProvider)
+	nativeReg.Register(azureProvider)
+	nativeReg.Register(doProvider)
+
+	// Register provider routes on the admin mux
+	adminMux := http.NewServeMux()
+	awsProvider.RegisterRoutes(adminMux)
+	gcpProvider.RegisterRoutes(adminMux)
+	azureProvider.RegisterRoutes(adminMux)
+	doProvider.RegisterRoutes(adminMux)
+	engine.GetApp().RegisterModule(module.NewServiceModule("admin-cloud-providers", adminMux))
+	if regErr := engine.GetApp().RegisterService("admin-cloud-providers", adminMux); regErr != nil {
+		logger.Warn("Failed to register cloud providers service", "error", regErr)
+	}
+
+	logger.Info("Registered cloud providers", "providers", []string{"aws", "gcp", "azure", "digitalocean"})
+
+	// Plugin composite registry (local + remote)
+	pluginLocalReg := plugin.NewLocalRegistry()
+	pluginRemoteReg := plugin.NewRemoteRegistry("https://plugins.workflow.dev")
+	compositeReg := plugin.NewCompositeRegistry(pluginLocalReg, pluginRemoteReg)
+	pluginHandler := plugin.NewRegistryHandler(compositeReg)
+	pluginMux := http.NewServeMux()
+	pluginHandler.RegisterRoutes(pluginMux)
+	engine.GetApp().RegisterModule(module.NewServiceModule("admin-plugin-registry", pluginMux))
+	if regErr := engine.GetApp().RegisterService("admin-plugin-registry", pluginMux); regErr != nil {
+		logger.Warn("Failed to register plugin registry service", "error", regErr)
+	}
+
+	logger.Info("Registered plugin composite registry (local + remote)")
 
 	// Wire execution tracking on CQRS handlers so pipeline executions are
 	// recorded in the V1Store's workflow_executions / execution_steps tables.
@@ -745,4 +854,20 @@ func initAIService(logger *slog.Logger, registry *dynamic.ComponentRegistry, poo
 
 	deploy := ai.NewDeployService(svc, registry, pool)
 	return svc, deploy
+}
+
+// featureDisabledHandler returns an http.Handler that responds with 503
+// Service Unavailable and a JSON body explaining which feature is disabled.
+// This is used as a stub for delegate services whose backing stores failed to
+// initialize, preventing the delegate step from returning a hard 500 error
+// ("service not found in registry").
+func featureDisabledHandler(reason string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":  reason,
+			"status": "service_unavailable",
+		})
+	})
 }

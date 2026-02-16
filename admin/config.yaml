@@ -2008,6 +2008,121 @@ workflows:
                 service: admin-native-plugins
 
       # ============================================================
+      # ENVIRONMENTS (CI/CD Platform)
+      # ============================================================
+
+      - method: GET
+        path: "/api/v1/admin/environments"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: list-environments
+              type: step.delegate
+              config:
+                service: admin-env-mgmt
+      - method: POST
+        path: "/api/v1/admin/environments"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: create-environment
+              type: step.delegate
+              config:
+                service: admin-env-mgmt
+      - method: GET
+        path: "/api/v1/admin/environments/{id}"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: get-environment
+              type: step.delegate
+              config:
+                service: admin-env-mgmt
+      - method: PUT
+        path: "/api/v1/admin/environments/{id}"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: update-environment
+              type: step.delegate
+              config:
+                service: admin-env-mgmt
+      - method: DELETE
+        path: "/api/v1/admin/environments/{id}"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: delete-environment
+              type: step.delegate
+              config:
+                service: admin-env-mgmt
+      - method: POST
+        path: "/api/v1/admin/environments/{id}/test"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: test-environment-connection
+              type: step.delegate
+              config:
+                service: admin-env-mgmt
+
+      # ============================================================
+      # CLOUD PROVIDERS (CI/CD Platform)
+      # ============================================================
+
+      - method: GET
+        path: "/api/v1/providers/{provider}/status"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: provider-status
+              type: step.delegate
+              config:
+                service: admin-cloud-providers
+      - method: GET
+        path: "/api/v1/providers/{provider}/regions"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: provider-regions
+              type: step.delegate
+              config:
+                service: admin-cloud-providers
+
+      # ============================================================
+      # PLUGIN REGISTRY (CI/CD Platform — remote install/search)
+      # ============================================================
+
+      - method: GET
+        path: "/api/v1/admin/plugins/registry/search"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: search-plugin-registry
+              type: step.delegate
+              config:
+                service: admin-plugin-registry
+      - method: POST
+        path: "/api/v1/admin/plugins/registry/install"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: install-plugin
+              type: step.delegate
+              config:
+                service: admin-plugin-registry
+
+      # ============================================================
       # OPENAPI SPEC (unauthenticated, read-only)
       # ============================================================
 
