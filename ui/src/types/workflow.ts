@@ -113,7 +113,7 @@ export interface ModuleTypeInfo {
 export interface ConfigFieldDef {
   key: string;
   label: string;
-  type: 'string' | 'number' | 'boolean' | 'select' | 'json' | 'array' | 'map' | 'filepath';
+  type: 'string' | 'number' | 'boolean' | 'select' | 'json' | 'array' | 'map' | 'filepath' | 'sql';
   options?: string[];
   defaultValue?: unknown;
   description?: string;

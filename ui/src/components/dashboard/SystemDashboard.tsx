@@ -1,5 +1,6 @@
 import { useEffect, useCallback } from 'react';
 import useObservabilityStore from '../../store/observabilityStore.ts';
+import useWorkflowStore from '../../store/workflowStore.ts';
 import type { WorkflowDashSummary } from '../../types/observability.ts';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -95,6 +96,9 @@ function WorkflowCard({
 export default function SystemDashboard() {
   const { systemDashboard, dashboardLoading, fetchSystemDashboard, setActiveView, setSelectedWorkflowId } =
     useObservabilityStore();
+  const setActiveWorkflowRecord = useWorkflowStore((s) => s.setActiveWorkflowRecord);
+  const renameTab = useWorkflowStore((s) => s.renameTab);
+  const activeTabId = useWorkflowStore((s) => s.activeTabId);
 
   useEffect(() => {
     fetchSystemDashboard();
@@ -102,15 +106,19 @@ export default function SystemDashboard() {
     return () => clearInterval(interval);
   }, [fetchSystemDashboard]);
 
+  const summaries = systemDashboard?.workflow_summaries ?? [];
+
   const handleWorkflowClick = useCallback(
     (wfId: string) => {
+      const wf = summaries.find((s) => s.workflow_id === wfId);
+      const workflowName = wf?.workflow_name ?? wfId;
       setSelectedWorkflowId(wfId);
+      renameTab(activeTabId, workflowName);
+      setActiveWorkflowRecord({ id: wfId, name: workflowName } as any);
       setActiveView('executions');
     },
-    [setActiveView, setSelectedWorkflowId],
+    [setActiveView, setSelectedWorkflowId, summaries, renameTab, activeTabId, setActiveWorkflowRecord],
   );
-
-  const summaries = systemDashboard?.workflow_summaries ?? [];
 
   const totalActive = summaries.filter((s) => s.status === 'active').length;
   const totalExecs = summaries.reduce(

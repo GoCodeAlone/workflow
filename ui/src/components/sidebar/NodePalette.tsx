@@ -81,7 +81,8 @@ export default function NodePalette() {
         height: '100%',
         padding: '8px 0',
         position: 'relative',
-        zIndex: 2,
+        zIndex: 15,
+        pointerEvents: 'auto',
       }}
     >
       <div

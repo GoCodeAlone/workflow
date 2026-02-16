@@ -41,6 +41,8 @@ type validationOpts struct {
 	extraWorkflowTypes    []string
 	extraTriggerTypes     []string
 	allowEmptyModules     bool
+	allowNoEntryPoints    bool
+	skipModuleTypeCheck   bool
 	skipWorkflowTypeCheck bool
 	skipTriggerTypeCheck  bool
 }
@@ -71,6 +73,22 @@ func WithExtraTriggerTypes(types ...string) ValidationOption {
 func WithAllowEmptyModules() ValidationOption {
 	return func(o *validationOpts) {
 		o.allowEmptyModules = true
+	}
+}
+
+// WithAllowNoEntryPoints disables the check that requires at least one entry
+// point (trigger, HTTP route, messaging subscription, or scheduler job).
+func WithAllowNoEntryPoints() ValidationOption {
+	return func(o *validationOpts) {
+		o.allowNoEntryPoints = true
+	}
+}
+
+// WithSkipModuleTypeCheck disables validation of module type identifiers.
+// Useful for validating configs that use custom or placeholder module types.
+func WithSkipModuleTypeCheck() ValidationOption {
+	return func(o *validationOpts) {
+		o.skipModuleTypeCheck = true
 	}
 }
 
@@ -123,13 +141,19 @@ func ValidateConfig(cfg *config.WorkflowConfig, opts ...ValidationOption) error 
 				Path:    prefix + ".name",
 				Message: "module name is required",
 			})
-		} else {
+		} else if !strings.HasPrefix(mod.Type, "step.") {
+			// Only check uniqueness for non-pipeline-step modules
 			if firstIdx, exists := seenNames[mod.Name]; exists {
 				errs = append(errs, &ValidationError{
 					Path:    prefix + ".name",
 					Message: fmt.Sprintf("duplicate module name %q (first defined at modules[%d])", mod.Name, firstIdx),
 				})
 			} else {
+				seenNames[mod.Name] = i
+			}
+		} else {
+			// For step.* modules, still track name for dependency resolution
+			if _, exists := seenNames[mod.Name]; !exists {
 				seenNames[mod.Name] = i
 			}
 		}
@@ -140,7 +164,7 @@ func ValidateConfig(cfg *config.WorkflowConfig, opts ...ValidationOption) error 
 				Path:    prefix + ".type",
 				Message: "module type is required",
 			})
-		} else if !knownTypes[mod.Type] {
+		} else if !o.skipModuleTypeCheck && !knownTypes[mod.Type] {
 			errs = append(errs, &ValidationError{
 				Path:    prefix + ".type",
 				Message: fmt.Sprintf("unknown module type %q", mod.Type),
@@ -208,6 +232,11 @@ func ValidateConfig(cfg *config.WorkflowConfig, opts ...ValidationOption) error 
 				})
 			}
 		}
+	}
+
+	// Check for entry points (unless in lenient mode or explicitly allowed)
+	if !o.allowEmptyModules && !o.allowNoEntryPoints {
+		checkEntryPoints(cfg, &errs)
 	}
 
 	if len(errs) > 0 {
@@ -288,6 +317,55 @@ func validateModuleConfig(mod config.ModuleConfig, prefix string, errs *Validati
 			}
 		}
 	}
+}
+
+// checkEntryPoints validates that the config has at least one entry point:
+// triggers, HTTP routes, messaging subscriptions, or scheduler jobs.
+func checkEntryPoints(cfg *config.WorkflowConfig, errs *ValidationErrors) {
+	// Triggers count as entry points
+	if len(cfg.Triggers) > 0 {
+		return
+	}
+
+	// Check workflow sections for entry points
+	if cfg.Workflows != nil {
+		// HTTP routes
+		if httpWF, ok := cfg.Workflows["http"]; ok {
+			if m, ok := httpWF.(map[string]any); ok {
+				if routes, ok := m["routes"]; ok {
+					if arr, ok := routes.([]any); ok && len(arr) > 0 {
+						return
+					}
+				}
+			}
+		}
+
+		// Messaging subscriptions
+		if msgWF, ok := cfg.Workflows["messaging"]; ok {
+			if m, ok := msgWF.(map[string]any); ok {
+				if subs, ok := m["subscriptions"]; ok {
+					if arr, ok := subs.([]any); ok && len(arr) > 0 {
+						return
+					}
+				}
+			}
+		}
+
+		// Scheduler jobs
+		if schedWF, ok := cfg.Workflows["scheduler"]; ok {
+			if m, ok := schedWF.(map[string]any); ok {
+				if jobs, ok := m["jobs"]; ok {
+					if arr, ok := jobs.([]any); ok && len(arr) > 0 {
+						return
+					}
+				}
+			}
+		}
+	}
+
+	*errs = append(*errs, &ValidationError{
+		Message: "config has no entry points (no triggers, HTTP routes, messaging subscriptions, or scheduler jobs); add entry points or set allow_no_entry_points for embeddable sub-workflows",
+	})
 }
 
 func makeSet(items []string) map[string]bool {

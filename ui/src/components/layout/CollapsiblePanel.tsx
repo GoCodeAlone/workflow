@@ -106,6 +106,8 @@ export default function CollapsiblePanel({
         flexDirection: side === 'left' ? 'row' : 'row-reverse',
         height: '100%',
         position: 'relative',
+        zIndex: 5,
+        flexShrink: 0,
       }}
     >
       {/* Panel content */}

@@ -25,6 +25,9 @@ import (
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/plugin"
+	"github.com/GoCodeAlone/workflow/plugin/docmanager"
+	"github.com/GoCodeAlone/workflow/plugin/storebrowser"
 	"github.com/GoCodeAlone/workflow/schema"
 	evstore "github.com/GoCodeAlone/workflow/store"
 	_ "modernc.org/sqlite"
@@ -459,6 +462,50 @@ func wireV1HandlerPostStart(logger *slog.Logger, engine *workflow.StdEngine, app
 	}
 
 	logger.Info("Registered DLQ and billing services")
+
+	// Native plugin registry
+	nativeReg := plugin.NewNativeRegistry()
+
+	// Store Browser plugin — needs the V1Store's DB, event store, and DLQ store
+	if store != nil {
+		sbPlugin := storebrowser.New(store.DB(), eventStore, dlqStore)
+		nativeReg.Register(sbPlugin)
+	}
+
+	// Doc Manager plugin — needs the V1Store's DB for the workflow_docs table
+	if store != nil {
+		dmPlugin := docmanager.New(store.DB())
+		nativeReg.Register(dmPlugin)
+	}
+
+	// Plugin discovery + route handler
+	nativeHandler := plugin.NewNativeHandler(nativeReg)
+	engine.GetApp().RegisterModule(module.NewServiceModule("admin-native-plugins", nativeHandler))
+	if regErr := engine.GetApp().RegisterService("admin-native-plugins", nativeHandler); regErr != nil {
+		logger.Warn("Failed to register native plugins service", "error", regErr)
+	}
+
+	logger.Info("Registered native plugins", "count", len(nativeReg.List()))
+
+	// Wire execution tracking on CQRS handlers so pipeline executions are
+	// recorded in the V1Store's workflow_executions / execution_steps tables.
+	workflowID := ""
+	if sysWf, sysErr := store.GetSystemWorkflow(); sysErr == nil && sysWf != nil {
+		workflowID = sysWf.ID
+	}
+	tracker := &module.ExecutionTracker{
+		Store:      store,
+		WorkflowID: workflowID,
+	}
+	for _, svc := range engine.GetApp().SvcRegistry() {
+		switch h := svc.(type) {
+		case *module.QueryHandler:
+			h.SetExecutionTracker(tracker)
+		case *module.CommandHandler:
+			h.SetExecutionTracker(tracker)
+		}
+	}
+	logger.Info("Wired execution tracker to CQRS handlers", "workflow_id", workflowID)
 
 	// Resolve delegates that couldn't be resolved during Init (because v1 wasn't registered yet)
 	for _, svc := range engine.GetApp().SvcRegistry() {

@@ -1,17 +1,17 @@
 modules:
   # Job schedulers
   - name: daily-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 0 * * *" # Daily at midnight
-  
+
   - name: hourly-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "0 * * * *" # Every hour
 
   - name: minute-scheduler
-    type: scheduler
+    type: scheduler.modular
     config:
       cronExpression: "* * * * *" # Every minute
   
@@ -41,7 +41,7 @@ modules:
     type: messaging.broker
 
   - name: job-status-store
-    type: job.store
+    type: persistence.store
     config:
       storeType: "memory"  # Could be "redis", "db", etc.
   

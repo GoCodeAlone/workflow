@@ -151,7 +151,9 @@ func validMinimalConfig() *config.WorkflowConfig {
 			{Name: "my-router", Type: "http.router"},
 		},
 		Workflows: map[string]any{},
-		Triggers:  map[string]any{},
+		Triggers: map[string]any{
+			"http": map[string]any{"port": 8080},
+		},
 	}
 }
 
@@ -258,6 +260,9 @@ func TestValidateConfig_DependsOnValid(t *testing.T) {
 			{Name: "server", Type: "http.server", Config: map[string]any{"address": ":8080"}},
 			{Name: "router", Type: "http.router", DependsOn: []string{"server"}},
 		},
+		Triggers: map[string]any{
+			"http": map[string]any{"port": 8080},
+		},
 	}
 	if err := ValidateConfig(cfg); err != nil {
 		t.Errorf("expected valid, got: %v", err)
@@ -347,6 +352,9 @@ func TestValidateConfig_HTTPServer_ValidAddress(t *testing.T) {
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
 			{Name: "srv", Type: "http.server", Config: map[string]any{"address": ":9090"}},
+		},
+		Triggers: map[string]any{
+			"http": map[string]any{"port": 9090},
 		},
 	}
 	if err := ValidateConfig(cfg); err != nil {
@@ -521,6 +529,9 @@ func TestValidateConfig_WithExtraModuleTypes(t *testing.T) {
 		Modules: []config.ModuleConfig{
 			{Name: "custom", Type: "my.custom.module"},
 		},
+		Triggers: map[string]any{
+			"http": map[string]any{"port": 8080},
+		},
 	}
 	// Without option, should fail
 	if err := ValidateConfig(cfg); err == nil {
@@ -540,6 +551,9 @@ func TestValidateConfig_WithExtraWorkflowTypes(t *testing.T) {
 		Workflows: map[string]any{
 			"custom_workflow": map[string]any{},
 		},
+		Triggers: map[string]any{
+			"http": map[string]any{"port": 8080},
+		},
 	}
 	if err := ValidateConfig(cfg); err == nil {
 		t.Fatal("expected error for custom workflow type")
@@ -558,6 +572,8 @@ func TestValidateConfig_WithExtraTriggerTypes(t *testing.T) {
 			"custom_trigger": map[string]any{},
 		},
 	}
+	// custom_trigger is unknown but still counts as an entry point;
+	// the error here is about the unknown trigger type, not missing entry points.
 	if err := ValidateConfig(cfg); err == nil {
 		t.Fatal("expected error for custom trigger type")
 	}
@@ -586,6 +602,9 @@ func TestValidateConfig_WithSkipWorkflowTypeCheck(t *testing.T) {
 		Workflows: map[string]any{
 			"totally-custom": map[string]any{},
 		},
+		Triggers: map[string]any{
+			"http": map[string]any{"port": 8080},
+		},
 	}
 	if err := ValidateConfig(cfg); err == nil {
 		t.Fatal("expected error without skip option")
@@ -604,6 +623,7 @@ func TestValidateConfig_WithSkipTriggerTypeCheck(t *testing.T) {
 			"totally-custom": map[string]any{},
 		},
 	}
+	// totally-custom is unknown but still counts as an entry point
 	if err := ValidateConfig(cfg); err == nil {
 		t.Fatal("expected error without skip option")
 	}
@@ -624,6 +644,7 @@ func TestValidateConfig_CombinedOptions(t *testing.T) {
 			"custom-trig": map[string]any{},
 		},
 	}
+	// custom-trig counts as an entry point (len > 0)
 	err := ValidateConfig(cfg,
 		WithExtraModuleTypes("my.type"),
 		WithSkipWorkflowTypeCheck(),
@@ -631,6 +652,122 @@ func TestValidateConfig_CombinedOptions(t *testing.T) {
 	)
 	if err != nil {
 		t.Errorf("expected valid with combined options, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Entry point validation tests
+// ---------------------------------------------------------------------------
+
+func TestValidateConfig_WithTriggers_HasEntryPoints(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "r", Type: "http.router"},
+		},
+		Workflows: map[string]any{},
+		Triggers: map[string]any{
+			"http": map[string]any{"port": 8080},
+		},
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Errorf("expected valid (has triggers), got: %v", err)
+	}
+}
+
+func TestValidateConfig_WithHTTPRoutes_HasEntryPoints(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "r", Type: "http.router"},
+		},
+		Workflows: map[string]any{
+			"http": map[string]any{
+				"routes": []any{
+					map[string]any{"path": "/api", "method": "GET"},
+				},
+			},
+		},
+		Triggers: map[string]any{},
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Errorf("expected valid (has HTTP routes), got: %v", err)
+	}
+}
+
+func TestValidateConfig_WithMessagingSubscriptions_HasEntryPoints(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "b", Type: "messaging.broker"},
+		},
+		Workflows: map[string]any{
+			"messaging": map[string]any{
+				"subscriptions": []any{
+					map[string]any{"topic": "events"},
+				},
+			},
+		},
+		Triggers: map[string]any{},
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Errorf("expected valid (has messaging subscriptions), got: %v", err)
+	}
+}
+
+func TestValidateConfig_WithSchedulerJobs_HasEntryPoints(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "r", Type: "http.router"},
+		},
+		Workflows: map[string]any{
+			"scheduler": map[string]any{
+				"jobs": []any{
+					map[string]any{"name": "cleanup", "cron": "0 * * * *"},
+				},
+			},
+		},
+		Triggers: map[string]any{},
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Errorf("expected valid (has scheduler jobs), got: %v", err)
+	}
+}
+
+func TestValidateConfig_NoEntryPoints_Fails(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "r", Type: "http.router"},
+		},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+	}
+	err := ValidateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for config with no entry points")
+	}
+	assertContains(t, err.Error(), "config has no entry points")
+}
+
+func TestValidateConfig_NoEntryPoints_WithAllowNoEntryPoints(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "r", Type: "http.router"},
+		},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+	}
+	if err := ValidateConfig(cfg, WithAllowNoEntryPoints()); err != nil {
+		t.Errorf("expected valid with WithAllowNoEntryPoints, got: %v", err)
+	}
+}
+
+func TestValidateConfig_EmptyModules_SkipsEntryPointCheck(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules:   nil,
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+	}
+	// WithAllowEmptyModules should also skip entry point check
+	if err := ValidateConfig(cfg, WithAllowEmptyModules()); err != nil {
+		t.Errorf("expected valid with WithAllowEmptyModules (should skip entry point check), got: %v", err)
 	}
 }
 

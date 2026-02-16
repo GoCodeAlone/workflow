@@ -3,7 +3,7 @@ modules:
   - name: order-server
     type: http.server
     config:
-      port: 8080
+      address: ":8080"
 
   - name: order-router
     type: http.router
@@ -21,9 +21,13 @@ modules:
 
   # Validate request body
   - name: validate-body
-    type: conditional.ifelse
+    type: step.conditional
     config:
       expression: "request.body != null && request.body.items.length > 0"
+      field: "valid"
+      routes:
+        "true": "validate-amount"
+        "false": "reject-empty"
     dependsOn:
       - order-api
     branches:
@@ -39,9 +43,13 @@ modules:
 
   # Check order amount for routing
   - name: validate-amount
-    type: conditional.ifelse
+    type: step.conditional
     config:
       expression: "order.total > 0 && order.total < 100000"
+      field: "valid"
+      routes:
+        "true": "route-by-priority"
+        "false": "reject-amount"
     branches:
       "true": route-by-priority
       "false": reject-amount
@@ -55,9 +63,14 @@ modules:
 
   # Route by priority level
   - name: route-by-priority
-    type: conditional.switch
+    type: step.conditional
     config:
       expression: "order.priority"
+      field: "priority"
+      routes:
+        "express": "express-handler"
+        "standard": "standard-handler"
+        "bulk": "bulk-handler"
       cases:
         - express
         - standard

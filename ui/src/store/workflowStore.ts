@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import {
   type Node,
   type Edge,
@@ -109,6 +110,11 @@ interface WorkflowStore {
   addCrossWorkflowLink: (link: CrossWorkflowLink) => void;
   removeCrossWorkflowLink: (linkId: string) => void;
 
+  // Validation errors (transient, not persisted)
+  validationErrors: Array<{ nodeId?: string; message: string }>;
+  setValidationErrors: (errors: Array<{ nodeId?: string; message: string }>) => void;
+  clearValidationErrors: () => void;
+
   // Connection drag state (smart connection UX)
   connectingFrom: {
     nodeId: string;
@@ -139,7 +145,9 @@ function makeDefaultTab(id: string, name: string): WorkflowTab {
   };
 }
 
-const useWorkflowStore = create<WorkflowStore>((set, get) => ({
+const useWorkflowStore = create<WorkflowStore>()(
+  persist(
+  (set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
@@ -403,6 +411,11 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     set({ nodes: [], edges: [], selectedNodeId: null, nodeCounter: 0, importedWorkflows: {}, importedTriggers: {}, importedPipelines: {} });
   },
 
+  // Validation errors (transient, not persisted)
+  validationErrors: [],
+  setValidationErrors: (errors) => set({ validationErrors: errors }),
+  clearValidationErrors: () => set({ validationErrors: [] }),
+
   // Connection drag state (smart connection UX)
   connectingFrom: null,
   compatibleNodeIds: [],
@@ -567,6 +580,21 @@ const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       crossWorkflowLinks: get().crossWorkflowLinks.filter((l) => l.id !== linkId),
     });
   },
-}));
+}),
+  {
+    name: 'workflow-store',
+    partialize: (state) => ({
+      nodes: state.nodes,
+      edges: state.edges,
+      nodeCounter: state.nodeCounter,
+      importedWorkflows: state.importedWorkflows,
+      importedTriggers: state.importedTriggers,
+      importedPipelines: state.importedPipelines,
+      activeWorkflowRecord: state.activeWorkflowRecord,
+      tabs: state.tabs,
+      activeTabId: state.activeTabId,
+    }),
+  },
+));
 
 export default useWorkflowStore;

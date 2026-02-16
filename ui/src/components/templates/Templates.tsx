@@ -1,4 +1,7 @@
 import { useState, useMemo } from 'react';
+import useWorkflowStore from '../../store/workflowStore.ts';
+import useObservabilityStore from '../../store/observabilityStore.ts';
+import { parseYaml } from '../../utils/serialization.ts';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1757,6 +1760,12 @@ export default function Templates() {
   const [tagFilter, setTagFilter] = useState<string>('All');
   const [usedTemplates, setUsedTemplates] = useState<Set<string>>(new Set());
 
+  const importFromConfig = useWorkflowStore((s) => s.importFromConfig);
+  const clearCanvas = useWorkflowStore((s) => s.clearCanvas);
+  const addToast = useWorkflowStore((s) => s.addToast);
+  const nodes = useWorkflowStore((s) => s.nodes);
+  const setActiveView = useObservabilityStore((s) => s.setActiveView);
+
   const filtered = useMemo(() => {
     return MOCK_TEMPLATES.filter((t) => {
       const matchesComplexity = complexityFilter === 'All' || t.complexity === complexityFilter;
@@ -1766,8 +1775,19 @@ export default function Templates() {
   }, [complexityFilter, tagFilter]);
 
   const handleUse = (template: Template) => {
-    setUsedTemplates((prev) => new Set(prev).add(template.id));
-    setSelectedTemplate(null);
+    if (nodes.length > 0 && !window.confirm('This will replace your current workflow. Any unsaved changes will be lost. Continue?')) return;
+    try {
+      const config = parseYaml(template.yaml);
+      clearCanvas();
+      importFromConfig(config);
+      setUsedTemplates((prev) => new Set(prev).add(template.id));
+      setSelectedTemplate(null);
+      setActiveView('editor');
+      addToast(`Template "${template.name}" loaded`, 'success');
+    } catch (e) {
+      console.error('Failed to load template:', e);
+      addToast('Failed to load template', 'error');
+    }
   };
 
   return (

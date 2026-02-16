@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import useWorkflowStore from '../../store/workflowStore.ts';
 import useModuleSchemaStore from '../../store/moduleSchemaStore.ts';
 import { CATEGORY_COLORS } from '../../types/workflow.ts';
@@ -7,8 +7,10 @@ import ArrayFieldEditor from './ArrayFieldEditor.tsx';
 import MapFieldEditor from './MapFieldEditor.tsx';
 import MiddlewareChainEditor from './MiddlewareChainEditor.tsx';
 import FilePicker from './FilePicker.tsx';
+import SqlEditor from './SqlEditor.tsx';
 import DelegateServicePicker from './DelegateServicePicker.tsx';
 import RoutePipelineEditor from './RoutePipelineEditor.tsx';
+import FieldPicker from './FieldPicker.tsx';
 
 // Resolve inherited value for a field based on incoming edges.
 // inheritFrom pattern: "{edgeType}.{sourceField}" where sourceField is "name" (source node label)
@@ -68,6 +70,39 @@ export default function PropertyPanel() {
   const info = node ? moduleTypeMap[node.data.moduleType] : undefined;
   const fields: ConfigFieldDef[] = useMemo(() => info?.configFields ?? [], [info]);
 
+  // Compute preceding steps for pipeline step nodes (for FieldPicker)
+  const precedingSteps = useMemo(() => {
+    if (!node || !node.data.moduleType.startsWith('step.')) return [];
+    const pipelineEdges = edges.filter(
+      (e) => (e.data as Record<string, unknown> | undefined)?.edgeType === 'pipeline-flow',
+    );
+    if (pipelineEdges.length === 0) return [];
+
+    // Build reverse adjacency: target -> source
+    const prevStep = new Map<string, string>();
+    for (const e of pipelineEdges) {
+      prevStep.set(e.target, e.source);
+    }
+
+    // Walk backwards from current node
+    const result: Array<{ name: string; type: string; config?: Record<string, unknown> }> = [];
+    let currentId: string | undefined = prevStep.get(node.id);
+    const visited = new Set<string>();
+    while (currentId && !visited.has(currentId)) {
+      visited.add(currentId);
+      const n = nodes.find((nd) => nd.id === currentId);
+      if (n && n.data.moduleType.startsWith('step.')) {
+        result.unshift({
+          name: n.data.label,
+          type: n.data.moduleType,
+          config: n.data.config as Record<string, unknown> | undefined,
+        });
+      }
+      currentId = prevStep.get(currentId);
+    }
+    return result;
+  }, [node, edges, nodes]);
+
   // Compute inherited values for fields with inheritFrom
   const inheritedValues = useMemo(() => {
     const result: Record<string, { value: unknown; sourceName: string }> = {};
@@ -85,6 +120,9 @@ export default function PropertyPanel() {
   // Track which inherited fields have been overridden by the user
   const [overriddenFields, setOverriddenFields] = useState<Set<string>>(new Set());
 
+  // Track refs to input elements for cursor-position insertion
+  const fieldInputRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | null>>({});
+
   const handleFieldChange = (key: string, value: unknown) => {
     // Mark field as overridden if it has inheritance
     if (inheritedValues[key]) {
@@ -94,6 +132,23 @@ export default function PropertyPanel() {
       updateNodeConfig(node.id, { [key]: value });
     }
   };
+
+  const insertAtCursor = useCallback((fieldKey: string, expr: string, currentValue: string) => {
+    const el = fieldInputRefs.current[fieldKey];
+    if (el) {
+      const start = el.selectionStart ?? currentValue.length;
+      const end = el.selectionEnd ?? start;
+      const newVal = currentValue.slice(0, start) + expr + currentValue.slice(end);
+      handleFieldChange(fieldKey, newVal);
+      requestAnimationFrame(() => {
+        el.focus();
+        const pos = start + expr.length;
+        el.selectionStart = el.selectionEnd = pos;
+      });
+    } else {
+      handleFieldChange(fieldKey, currentValue + expr);
+    }
+  }, [handleFieldChange]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!node) {
     return (
@@ -312,6 +367,22 @@ export default function PropertyPanel() {
                     placeholder={field.placeholder}
                     description={field.description}
                   />
+                ) : field.type === 'sql' ? (
+                  <div>
+                    {precedingSteps.length > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+                        <FieldPicker
+                          precedingSteps={precedingSteps}
+                          onSelect={(expr) => insertAtCursor(field.key, expr, String(effectiveValue ?? ''))}
+                        />
+                      </div>
+                    )}
+                    <SqlEditor
+                      value={String(effectiveValue ?? '')}
+                      onChange={(val) => handleFieldChange(field.key, val)}
+                      placeholder={field.placeholder}
+                    />
+                  </div>
                 ) : field.inheritFrom === 'dependency.name' ? (
                   <DelegateServicePicker
                     value={String(effectiveValue ?? '')}
@@ -326,6 +397,21 @@ export default function PropertyPanel() {
                     onChange={(val) => handleFieldChange(field.key, val)}
                     placeholder={field.placeholder}
                   />
+                ) : precedingSteps.length > 0 && node.data.moduleType.startsWith('step.') ? (
+                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <input
+                      ref={(el) => { fieldInputRefs.current[field.key] = el; }}
+                      type="text"
+                      value={String(effectiveValue ?? '')}
+                      onChange={(e) => handleFieldChange(field.key, e.target.value)}
+                      placeholder={field.placeholder}
+                      style={{ ...inheritedInputStyle, flex: 1 }}
+                    />
+                    <FieldPicker
+                      precedingSteps={precedingSteps}
+                      onSelect={(expr) => insertAtCursor(field.key, expr, String(effectiveValue ?? ''))}
+                    />
+                  </div>
                 ) : (
                   <input
                     type="text"
@@ -648,6 +734,7 @@ function HandlerRoutesEditor({
   }, [nodeId, edges, nodes]);
 
   const handleDelete = (idx: number) => {
+    if (!window.confirm('Delete this route?')) return;
     updateHandlerRoutes(nodeId, routes.filter((_, i) => i !== idx));
   };
 
@@ -675,11 +762,13 @@ function HandlerRoutesEditor({
       : undefined;
     const updated = routes.map((r, i) => {
       if (i !== editIdx) return r;
-      const route: { method: string; path: string; middlewares?: string[] } = {
+      const route: typeof routes[number] = {
         method: newMethod,
         path: newPath.trim(),
       };
       if (mws && mws.length > 0) route.middlewares = mws;
+      // Preserve existing pipeline steps when editing route method/path/middleware
+      if (r.pipeline && r.pipeline.steps.length > 0) route.pipeline = r.pipeline;
       return route;
     });
     updateHandlerRoutes(nodeId, updated);

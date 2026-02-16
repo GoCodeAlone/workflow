@@ -12,13 +12,13 @@ import (
 
 // JSONResponseStep writes an HTTP JSON response with a custom status code and stops the pipeline.
 type JSONResponseStep struct {
-	name      string
-	status    int
-	headers   map[string]string
-	body      map[string]any
-	bodyRaw   any // for non-map bodies (arrays, literals)
-	bodyFrom  string
-	tmpl      *TemplateEngine
+	name     string
+	status   int
+	headers  map[string]string
+	body     map[string]any
+	bodyRaw  any // for non-map bodies (arrays, literals)
+	bodyFrom string
+	tmpl     *TemplateEngine
 }
 
 // NewJSONResponseStepFactory returns a StepFactory that creates JSONResponseStep instances.

@@ -17,9 +17,15 @@ modules:
 
   # Route by event category
   - name: route-event-type
-    type: conditional.switch
+    type: step.conditional
     config:
       expression: "event.category"
+      field: "category"
+      routes:
+        "order": "order-notifications"
+        "fulfillment": "fulfillment-notifications"
+        "payment": "payment-notifications"
+        "system": "system-alerts"
       cases:
         - order
         - fulfillment
@@ -35,9 +41,15 @@ modules:
 
   # Order notification sub-routing
   - name: order-notifications
-    type: conditional.switch
+    type: step.conditional
     config:
       expression: "event.type"
+      field: "type"
+      routes:
+        "order.created": "email-confirmation"
+        "order.confirmed": "email-confirmation"
+        "order.cancelled": "send-cancellation"
+        "order.failed": "alert-ops-team"
       cases:
         - order.created
         - order.confirmed
@@ -51,18 +63,26 @@ modules:
 
   # Fulfillment notification decisions
   - name: fulfillment-notifications
-    type: conditional.ifelse
+    type: step.conditional
     config:
       expression: "event.type == 'fulfillment.shipped'"
+      field: "shipped"
+      routes:
+        "true": "send-tracking"
+        "false": "log-fulfillment-event"
     branches:
       "true": send-tracking
       "false": log-fulfillment-event
 
   # Payment notification decisions
   - name: payment-notifications
-    type: conditional.ifelse
+    type: step.conditional
     config:
       expression: "event.data.payment_success == true"
+      field: "payment_success"
+      routes:
+        "true": "send-receipt"
+        "false": "send-payment-failure"
     branches:
       "true": send-receipt
       "false": send-payment-failure
@@ -79,11 +99,13 @@ modules:
     type: notification.slack
     config:
       channel: "#order-updates"
+      webhookURL: "https://hooks.slack.com/placeholder"
 
   - name: send-cancellation
     type: notification.slack
     config:
       channel: "#order-cancellations"
+      webhookURL: "https://hooks.slack.com/placeholder"
 
   - name: alert-ops-team
     type: webhook.sender
@@ -95,6 +117,7 @@ modules:
     type: notification.slack
     config:
       channel: "#shipping-updates"
+      webhookURL: "https://hooks.slack.com/placeholder"
 
   - name: log-fulfillment-event
     type: data.transformer
@@ -105,6 +128,7 @@ modules:
     type: notification.slack
     config:
       channel: "#payments"
+      webhookURL: "https://hooks.slack.com/placeholder"
 
   - name: send-payment-failure
     type: webhook.sender

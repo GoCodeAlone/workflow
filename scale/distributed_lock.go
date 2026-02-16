@@ -236,7 +236,7 @@ func hashToInt64(key string) int64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(key))
 	v := h.Sum64() & 0x7FFFFFFFFFFFFFFF // Clear sign bit; always <= math.MaxInt64.
-	return int64(v)                      //nolint:gosec // masked to non-negative range
+	return int64(v)                     //nolint:gosec // masked to non-negative range
 }
 
 // --- RedisLock ---

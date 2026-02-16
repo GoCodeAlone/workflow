@@ -85,6 +85,8 @@ function mapFieldType(serverType: string): ConfigFieldDef['type'] {
       return 'json';
     case 'filepath':
       return 'filepath';
+    case 'sql':
+      return 'sql';
     default:
       return 'string';
   }

@@ -33,6 +33,8 @@ export default function DelegateServicePicker({
       .map((n) => ({
         name: (n.data as { label: string }).label,
         source: 'canvas' as const,
+        type: (n.data as { moduleType?: string }).moduleType || '',
+        implements: [] as string[],
       }));
   }, [nodes, currentNodeId]);
 
@@ -41,13 +43,15 @@ export default function DelegateServicePicker({
     return services.map((s) => ({
       name: s.name,
       source: 'server' as const,
+      type: s.type || '',
+      implements: s.implements || [],
     }));
   }, [services]);
 
   // Combine and deduplicate
   const allServices = useMemo(() => {
     const seen = new Set<string>();
-    const result: { name: string; source: 'canvas' | 'server' }[] = [];
+    const result: { name: string; source: 'canvas' | 'server'; type: string; implements: string[] }[] = [];
     for (const s of [...canvasServices, ...serverServices]) {
       if (!seen.has(s.name)) {
         seen.add(s.name);
@@ -124,8 +128,8 @@ export default function DelegateServicePicker({
                   color: value === svc.name ? '#a6e3a1' : '#cdd6f4',
                   background: value === svc.name ? '#313244' : 'transparent',
                   display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
+                  flexDirection: 'column',
+                  gap: 2,
                 }}
                 onMouseEnter={(e) => {
                   (e.currentTarget as HTMLDivElement).style.background = '#313244';
@@ -135,18 +139,43 @@ export default function DelegateServicePicker({
                     value === svc.name ? '#313244' : 'transparent';
                 }}
               >
-                <span
-                  style={{
-                    fontSize: 9,
-                    padding: '1px 4px',
-                    borderRadius: 3,
-                    background: svc.source === 'canvas' ? '#45475a' : '#313244',
-                    color: svc.source === 'canvas' ? '#89b4fa' : '#a6adc8',
-                  }}
-                >
-                  {svc.source === 'canvas' ? 'node' : 'svc'}
-                </span>
-                {svc.name}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span
+                    style={{
+                      fontSize: 9,
+                      padding: '1px 4px',
+                      borderRadius: 3,
+                      background: svc.source === 'canvas' ? '#45475a' : '#313244',
+                      color: svc.source === 'canvas' ? '#89b4fa' : '#a6adc8',
+                    }}
+                  >
+                    {svc.source === 'canvas' ? 'node' : 'svc'}
+                  </span>
+                  {svc.name}
+                </div>
+                {(svc.type || svc.implements.length > 0) && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingLeft: 2 }}>
+                    {svc.type && (
+                      <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#585b70' }}>
+                        {svc.type}
+                      </span>
+                    )}
+                    {svc.implements.map((iface) => (
+                      <span
+                        key={iface}
+                        style={{
+                          fontSize: 8,
+                          padding: '0 3px',
+                          borderRadius: 2,
+                          background: '#45475a',
+                          color: '#a6adc8',
+                        }}
+                      >
+                        {iface}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             ))
           )}

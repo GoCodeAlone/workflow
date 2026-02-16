@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import useWorkflowStore from '../../store/workflowStore.ts';
+import useObservabilityStore from '../../store/observabilityStore.ts';
 
 export default function WorkflowTabs() {
   const tabs = useWorkflowStore((s) => s.tabs);
@@ -9,6 +10,10 @@ export default function WorkflowTabs() {
   const switchTab = useWorkflowStore((s) => s.switchTab);
   const renameTab = useWorkflowStore((s) => s.renameTab);
   const duplicateTab = useWorkflowStore((s) => s.duplicateTab);
+  const clearCanvas = useWorkflowStore((s) => s.clearCanvas);
+  const setActiveWorkflowRecord = useWorkflowStore((s) => s.setActiveWorkflowRecord);
+  const setActiveView = useObservabilityStore((s) => s.setActiveView);
+  const setSelectedWorkflowId = useObservabilityStore((s) => s.setSelectedWorkflowId);
 
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
@@ -148,28 +153,36 @@ export default function WorkflowTabs() {
                   {tab.dirty ? ' *' : ''}
                 </span>
               )}
-              {tabs.length > 1 && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (tabs.length <= 1) {
+                    // Closing last tab — clear canvas and return to dashboard
+                    clearCanvas();
+                    setActiveWorkflowRecord(null);
+                    setSelectedWorkflowId(null);
+                    renameTab(activeTabId, 'Workflow 1');
+                    setActiveView('dashboard');
+                  } else {
                     closeTab(tab.id);
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#585b70',
-                    cursor: 'pointer',
-                    fontSize: 12,
-                    padding: '0 2px',
-                    lineHeight: 1,
-                    opacity: 0.6,
-                  }}
-                  onMouseEnter={(e) => { (e.target as HTMLElement).style.opacity = '1'; (e.target as HTMLElement).style.color = '#f38ba8'; }}
-                  onMouseLeave={(e) => { (e.target as HTMLElement).style.opacity = '0.6'; (e.target as HTMLElement).style.color = '#585b70'; }}
-                >
-                  x
-                </button>
-              )}
+                  }
+                }}
+                title="Close workflow"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#585b70',
+                  cursor: 'pointer',
+                  fontSize: 12,
+                  padding: '0 2px',
+                  lineHeight: 1,
+                  opacity: 0.6,
+                }}
+                onMouseEnter={(e) => { (e.target as HTMLElement).style.opacity = '1'; (e.target as HTMLElement).style.color = '#f38ba8'; }}
+                onMouseLeave={(e) => { (e.target as HTMLElement).style.opacity = '0.6'; (e.target as HTMLElement).style.color = '#585b70'; }}
+              >
+                x
+              </button>
             </div>
           );
         })}
@@ -239,16 +252,20 @@ export default function WorkflowTabs() {
               setContextMenu(null);
             }}
           />
-          {tabs.length > 1 && (
-            <ContextMenuItem
-              label="Close"
-              onClick={() => {
+          <ContextMenuItem
+            label="Close"
+            onClick={() => {
+              if (tabs.length <= 1) {
+                clearCanvas();
+                setActiveWorkflowRecord(null);
+                setActiveView('dashboard');
+              } else {
                 closeTab(contextMenu.tabId);
-                setContextMenu(null);
-              }}
-              danger
-            />
-          )}
+              }
+              setContextMenu(null);
+            }}
+            danger
+          />
         </div>
       )}
     </div>

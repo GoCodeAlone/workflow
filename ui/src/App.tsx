@@ -21,12 +21,15 @@ import IAMSettings from './components/iam/IAMSettings.tsx';
 import Marketplace from './components/marketplace/Marketplace.tsx';
 import Templates from './components/templates/Templates.tsx';
 import Environments from './components/environments/Environments.tsx';
+import StoreBrowserPage from './components/storebrowser/StoreBrowserPage.tsx';
+import DocsPage from './components/docmanager/DocsPage.tsx';
 import WorkflowPickerBar from './components/shared/WorkflowPickerBar.tsx';
 import CollapsiblePanel from './components/layout/CollapsiblePanel.tsx';
 import useWorkflowStore from './store/workflowStore.ts';
 import useAuthStore from './store/authStore.ts';
 import useObservabilityStore from './store/observabilityStore.ts';
 import useModuleSchemaStore from './store/moduleSchemaStore.ts';
+import usePluginStore from './store/pluginStore.ts';
 import useUILayoutStore, { PANEL_WIDTH_LIMITS } from './store/uiLayoutStore.ts';
 import { parseYaml } from './utils/serialization.ts';
 import type { ApiProject, ApiWorkflowRecord } from './utils/api.ts';
@@ -55,8 +58,11 @@ function EditorView() {
   const [selectedProject, setSelectedProject] = useState<ApiProject | null>(null);
 
   // Sync activeWorkflowRecord to observability selectedWorkflowId
+  // Only set (not clear) — clearing is handled by explicit close actions
   useEffect(() => {
-    setSelectedWorkflowId(activeWorkflowRecord?.id ?? null);
+    if (activeWorkflowRecord?.id) {
+      setSelectedWorkflowId(activeWorkflowRecord.id);
+    }
   }, [activeWorkflowRecord, setSelectedWorkflowId]);
 
   // Keyboard shortcuts: Ctrl+1/2/3 toggle panels
@@ -162,7 +168,7 @@ function EditorView() {
           >
             <NodePalette />
           </CollapsiblePanel>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', zIndex: 0 }}>
             <WorkflowCanvas />
           </div>
           <CollapsiblePanel
@@ -230,8 +236,78 @@ function ExecutionsView() {
   );
 }
 
+function ValidationBar() {
+  const validationErrors = useWorkflowStore((s) => s.validationErrors);
+  const clearValidationErrors = useWorkflowStore((s) => s.clearValidationErrors);
+  const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
+
+  if (validationErrors.length === 0) return null;
+
+  return (
+    <div style={{
+      background: '#f38ba822',
+      borderBottom: '1px solid #f38ba8',
+      padding: '4px 16px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      fontSize: 12,
+      color: '#f38ba8',
+      maxHeight: 80,
+      overflowY: 'auto',
+    }}>
+      <span style={{ fontWeight: 600, flexShrink: 0 }}>
+        {validationErrors.length} error{validationErrors.length !== 1 ? 's' : ''}:
+      </span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', flex: 1 }}>
+        {validationErrors.map((err, i) => (
+          <span
+            key={i}
+            onClick={() => err.nodeId && setSelectedNode(err.nodeId)}
+            style={{
+              cursor: err.nodeId ? 'pointer' : 'default',
+              textDecoration: err.nodeId ? 'underline' : 'none',
+            }}
+          >
+            {err.message}
+          </span>
+        ))}
+      </div>
+      <button
+        onClick={clearValidationErrors}
+        style={{
+          background: 'none',
+          border: 'none',
+          color: '#f38ba8',
+          cursor: 'pointer',
+          fontSize: 14,
+          padding: '0 4px',
+          flexShrink: 0,
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 function AppLayout() {
   const activeView = useObservabilityStore((s) => s.activeView);
+  const setActiveView = useObservabilityStore((s) => s.setActiveView);
+  const activeWorkflowRecord = useWorkflowStore((s) => s.activeWorkflowRecord);
+  const nodes = useWorkflowStore((s) => s.nodes);
+  const selectedWorkflowId = useObservabilityStore((s) => s.selectedWorkflowId);
+
+  // A workflow is "open" if it's loaded in the editor OR selected for observability
+  const hasWorkflowOpen = !!(activeWorkflowRecord || nodes.length > 0 || selectedWorkflowId);
+
+  // Redirect to dashboard when on a workflow-specific view but no workflow context
+  useEffect(() => {
+    const workflowViews = new Set(['executions', 'logs', 'events']);
+    if (!hasWorkflowOpen && workflowViews.has(activeView)) {
+      setActiveView('dashboard');
+    }
+  }, [hasWorkflowOpen, activeView, setActiveView]);
 
   return (
     <div
@@ -244,9 +320,10 @@ function AppLayout() {
         fontFamily: 'system-ui, -apple-system, sans-serif',
       }}
     >
-      <Toolbar />
-      {activeView === 'editor' && <WorkflowTabs />}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      {activeView === 'editor' && <Toolbar />}
+      {activeView === 'editor' && <ValidationBar />}
+      {(activeView === 'editor' || hasWorkflowOpen) && <WorkflowTabs />}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
         <AppNav />
         {activeView === 'editor' && <EditorView />}
         {activeView === 'dashboard' && <SystemDashboard />}
@@ -261,6 +338,8 @@ function AppLayout() {
         {activeView === 'templates' && <Templates />}
         {activeView === 'environments' && <Environments />}
         {activeView === 'settings' && <IAMSettings />}
+        {activeView === 'store-browser' && <StoreBrowserPage />}
+        {activeView === 'docs' && <DocsPage />}
       </div>
       <ToastContainer />
     </div>
@@ -269,6 +348,7 @@ function AppLayout() {
 
 function AuthenticatedApp() {
   const { isAuthenticated, loadUser, setTokenFromCallback, setupRequired, setupLoading, checkSetupStatus } = useAuthStore();
+  const [tokenValidated, setTokenValidated] = useState(false);
 
   useEffect(() => {
     // Check for OAuth callback tokens in URL
@@ -279,15 +359,19 @@ function AuthenticatedApp() {
       setTokenFromCallback(token, refreshToken);
       // Clean URL
       window.history.replaceState({}, '', window.location.pathname);
+      setTokenValidated(true);
     } else if (isAuthenticated) {
-      loadUser();
+      // Validate existing token by loading user profile
+      loadUser().then(() => setTokenValidated(true));
+    } else {
+      setTokenValidated(true);
     }
     // Check setup status on mount
     checkSetupStatus();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Still checking setup status
-  if (setupRequired === null || setupLoading) {
+  // Still checking setup status or validating token
+  if (setupRequired === null || setupLoading || !tokenValidated) {
     return (
       <div
         style={{
@@ -322,10 +406,16 @@ function AuthenticatedApp() {
 function AuthenticatedContent() {
   const fetchSchemas = useModuleSchemaStore((s) => s.fetchSchemas);
   const schemasLoaded = useModuleSchemaStore((s) => s.loaded);
+  const fetchPlugins = usePluginStore((s) => s.fetchPlugins);
+  const pluginsLoaded = usePluginStore((s) => s.loaded);
 
   useEffect(() => {
     if (!schemasLoaded) fetchSchemas();
   }, [schemasLoaded, fetchSchemas]);
+
+  useEffect(() => {
+    if (!pluginsLoaded) fetchPlugins();
+  }, [pluginsLoaded, fetchPlugins]);
 
   return (
     <ReactFlowProvider>

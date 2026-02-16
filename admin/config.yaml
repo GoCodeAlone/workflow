@@ -990,6 +990,24 @@ workflows:
                 params:
                   - "{{index .steps \"set-now\" \"now\"}}"
                   - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+            - name: record-deploy
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "INSERT INTO workflow_executions (id, workflow_id, trigger_type, status, started_at, completed_at, duration_ms) VALUES (?, ?, 'deploy', 'completed', ?, ?, 0)"
+                params:
+                  - "{{ uuidv4 }}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  - "{{index .steps \"set-now\" \"now\"}}"
+                  - "{{index .steps \"set-now\" \"now\"}}"
+            - name: audit-deploy
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "INSERT INTO audit_log (action, resource_type, resource_id, details, created_at) VALUES ('deploy', 'workflow', ?, '{}', ?)"
+                params:
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  - "{{index .steps \"set-now\" \"now\"}}"
             - name: get-workflow
               type: step.db_query
               config:
@@ -1025,6 +1043,24 @@ workflows:
                 params:
                   - "{{index .steps \"set-now\" \"now\"}}"
                   - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+            - name: record-stop
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "INSERT INTO workflow_executions (id, workflow_id, trigger_type, status, started_at, completed_at, duration_ms) VALUES (?, ?, 'stop', 'completed', ?, ?, 0)"
+                params:
+                  - "{{ uuidv4 }}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  - "{{index .steps \"set-now\" \"now\"}}"
+                  - "{{index .steps \"set-now\" \"now\"}}"
+            - name: audit-stop
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "INSERT INTO audit_log (action, resource_type, resource_id, details, created_at) VALUES ('stop', 'workflow', ?, '{}', ?)"
+                params:
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+                  - "{{index .steps \"set-now\" \"now\"}}"
             - name: get-workflow
               type: step.db_query
               config:
@@ -1157,6 +1193,14 @@ workflows:
                   - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
                   - "{{default \"{}\" (index .steps \"parse-request\" \"body\")}}"
                   - "{{ .steps.prepare.now }}"
+            - name: complete-execution
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "UPDATE workflow_executions SET status='completed', completed_at=?, duration_ms=0 WHERE id=?"
+                params:
+                  - "{{ .steps.prepare.now }}"
+                  - "{{ .steps.prepare.id }}"
             - name: respond
               type: step.json_response
               config:
@@ -1907,6 +1951,61 @@ workflows:
               type: step.delegate
               config:
                 service: admin-billing-mgmt
+
+      # ============================================================
+      # NATIVE PLUGINS (Phase D: delegates with meaningful names)
+      # ============================================================
+
+      - method: GET
+        path: "/api/v1/admin/plugins"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: list-native-plugins
+              type: step.delegate
+              config:
+                service: admin-native-plugins
+      - method: GET
+        path: "/api/v1/admin/plugins/{name}/{path...}"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: plugin-query
+              type: step.delegate
+              config:
+                service: admin-native-plugins
+      - method: POST
+        path: "/api/v1/admin/plugins/{name}/{path...}"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: plugin-command
+              type: step.delegate
+              config:
+                service: admin-native-plugins
+      - method: PUT
+        path: "/api/v1/admin/plugins/{name}/{path...}"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: plugin-update
+              type: step.delegate
+              config:
+                service: admin-native-plugins
+      - method: DELETE
+        path: "/api/v1/admin/plugins/{name}/{path...}"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: plugin-delete
+              type: step.delegate
+              config:
+                service: admin-native-plugins
 
       # ============================================================
       # OPENAPI SPEC (unauthenticated, read-only)

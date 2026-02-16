@@ -13,6 +13,7 @@ const (
 	FieldTypeArray    ConfigFieldType = "array"
 	FieldTypeMap      ConfigFieldType = "map"
 	FieldTypeFilePath ConfigFieldType = "filepath"
+	FieldTypeSQL      ConfigFieldType = "sql"
 )
 
 // ConfigFieldDef describes a single configuration field for a module type.
@@ -997,7 +998,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Query results as rows/count (list mode) or row/found (single mode)"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "database", Label: "Database", Type: FieldTypeString, Required: true, Description: "Name of the database service (must implement DBProvider)", Placeholder: "admin-db", InheritFrom: "dependency.name"},
-			{Key: "query", Label: "SQL Query", Type: FieldTypeString, Required: true, Description: "Parameterized SQL SELECT query (use ? for placeholders, no template expressions allowed)", Placeholder: "SELECT id, name FROM companies WHERE id = ?"},
+			{Key: "query", Label: "SQL Query", Type: FieldTypeSQL, Required: true, Description: "Parameterized SQL SELECT query (use ? for placeholders, no template expressions allowed)", Placeholder: "SELECT id, name FROM companies WHERE id = ?"},
 			{Key: "params", Label: "Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Template-resolved parameter values for ? placeholders in query"},
 			{Key: "mode", Label: "Mode", Type: FieldTypeSelect, Options: []string{"list", "single"}, DefaultValue: "list", Description: "Result mode: 'list' returns rows/count, 'single' returns row/found"},
 		},
@@ -1012,7 +1013,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Execution result with affected_rows and last_id"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "database", Label: "Database", Type: FieldTypeString, Required: true, Description: "Name of the database service (must implement DBProvider)", Placeholder: "admin-db", InheritFrom: "dependency.name"},
-			{Key: "query", Label: "SQL Statement", Type: FieldTypeString, Required: true, Description: "Parameterized SQL INSERT/UPDATE/DELETE statement (use ? for placeholders)", Placeholder: "INSERT INTO companies (id, name) VALUES (?, ?)"},
+			{Key: "query", Label: "SQL Statement", Type: FieldTypeSQL, Required: true, Description: "Parameterized SQL INSERT/UPDATE/DELETE statement (use ? for placeholders)", Placeholder: "INSERT INTO companies (id, name) VALUES (?, ?)"},
 			{Key: "params", Label: "Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Template-resolved parameter values for ? placeholders"},
 		},
 	})

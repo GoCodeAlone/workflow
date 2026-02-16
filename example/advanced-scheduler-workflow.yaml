@@ -4,17 +4,17 @@
 modules:
   # Define schedulers with different cron patterns
   - name: minutely-scheduler
-    type: scheduler.cron
+    type: scheduler.modular
     config:
       cronExpression: "* * * * *" # Run every minute
 
   - name: hourly-scheduler
-    type: scheduler.cron
+    type: scheduler.modular
     config:
       cronExpression: "0 * * * *" # Run at the start of every hour
 
   - name: daily-scheduler
-    type: scheduler.cron
+    type: scheduler.modular
     config:
       cronExpression: "0 0 * * *" # Run at midnight every day
 

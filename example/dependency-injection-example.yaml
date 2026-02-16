@@ -1,24 +1,24 @@
 modules:
   # Core services
   - name: config-provider
-    type: core.config
+    type: static.fileserver
     config:
-      sourcePath: "./config"
+      root: "./config"
   
   - name: logger-service
-    type: core.logger
+    type: log.collector
     config:
       level: "info"
       format: "json"
   
   - name: metrics-service
-    type: core.metrics
+    type: metrics.collector
     config:
       collectInterval: 10
 
   # Data services
   - name: cache-service
-    type: data.cache
+    type: cache.modular
     config:
       backend: "memory"
       maxSize: 1000
@@ -27,7 +27,7 @@ modules:
       - logger-service
 
   - name: database-service
-    type: data.database
+    type: database.modular
     config:
       connectionString: "postgres://localhost:5432/appdb"
     dependsOn:
@@ -36,21 +36,21 @@ modules:
   
   # Business logic services
   - name: user-service
-    type: business.service
+    type: http.handler
     dependsOn:
       - database-service
       - cache-service
       - logger-service
   
   - name: product-service
-    type: business.service
+    type: http.handler
     dependsOn:
       - database-service
       - cache-service
       - logger-service
 
   - name: order-service
-    type: business.service
+    type: http.handler
     dependsOn:
       - database-service
       - cache-service
@@ -69,7 +69,7 @@ modules:
       - metrics-service
   
   - name: grpc-server
-    type: grpc.server
+    type: http.server  # Originally grpc.server - using HTTP as gRPC is not yet supported
     config:
       address: ":9090"
     dependsOn:

@@ -128,4 +128,4 @@ export interface AuditFilter {
   until?: string;
 }
 
-export type ActiveView = 'editor' | 'dashboard' | 'executions' | 'logs' | 'events' | 'settings' | 'marketplace' | 'templates' | 'environments';
+export type ActiveView = 'editor' | 'dashboard' | 'executions' | 'logs' | 'events' | 'settings' | 'marketplace' | 'templates' | 'environments' | 'store-browser' | 'docs';

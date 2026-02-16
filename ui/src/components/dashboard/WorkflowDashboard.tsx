@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import useObservabilityStore from '../../store/observabilityStore.ts';
 import type { WorkflowExecution, ExecutionStep } from '../../types/observability.ts';
 
@@ -231,11 +231,26 @@ export default function WorkflowDashboard() {
     setActiveView('dashboard');
   }, [setActiveView, setSelectedWorkflowId]);
 
-  const wfName = workflowDashboard?.workflow?.name ?? selectedWorkflowId ?? 'Workflow';
+  const wfName = workflowDashboard?.workflow?.name ?? 'Workflow';
   const wfStatus = workflowDashboard?.workflow?.status ?? '';
-  const execCounts = workflowDashboard?.execution_counts ?? {};
-  const totalExecs = Object.values(execCounts).reduce((a, b) => a + b, 0);
-  const completedCount = execCounts['completed'] ?? 0;
+
+  // Compute execution counts: prefer dashboard data, fall back to counting local executions
+  const dashCounts = workflowDashboard?.execution_counts ?? {};
+  const dashTotal = Object.values(dashCounts).reduce((a, b) => a + b, 0);
+
+  const localCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const exec of executions) {
+      counts[exec.status] = (counts[exec.status] ?? 0) + 1;
+    }
+    return counts;
+  }, [executions]);
+  const localTotal = executions.length;
+
+  const totalExecs = dashTotal > 0 ? dashTotal : localTotal;
+  const completedCount = dashTotal > 0
+    ? (dashCounts['completed'] ?? 0)
+    : (localCounts['completed'] ?? 0);
   const successRate = totalExecs > 0 ? ((completedCount / totalExecs) * 100).toFixed(0) : '-';
 
   return (

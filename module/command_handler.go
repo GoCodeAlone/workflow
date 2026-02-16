@@ -1,8 +1,10 @@
 package module
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"sync"
 
@@ -18,13 +20,14 @@ type CommandFunc func(ctx context.Context, r *http.Request) (any, error)
 // composable per-route processing. A delegate service can be configured
 // to handle requests that don't match any registered command name.
 type CommandHandler struct {
-	name            string
-	delegate        string // service name to resolve as http.Handler
-	delegateHandler http.Handler
-	app             modular.Application
-	commands        map[string]CommandFunc
-	routePipelines  map[string]*Pipeline
-	mu              sync.RWMutex
+	name             string
+	delegate         string // service name to resolve as http.Handler
+	delegateHandler  http.Handler
+	app              modular.Application
+	commands         map[string]CommandFunc
+	routePipelines   map[string]*Pipeline
+	executionTracker *ExecutionTracker
+	mu               sync.RWMutex
 }
 
 // NewCommandHandler creates a new CommandHandler with the given name.
@@ -57,6 +60,11 @@ func (h *CommandHandler) SetDelegate(name string) {
 // SetDelegateHandler directly sets the HTTP handler used for delegation.
 func (h *CommandHandler) SetDelegateHandler(handler http.Handler) {
 	h.delegateHandler = handler
+}
+
+// SetExecutionTracker sets the execution tracker for recording pipeline executions.
+func (h *CommandHandler) SetExecutionTracker(t *ExecutionTracker) {
+	h.executionTracker = t
 }
 
 // Init initializes the command handler and resolves the delegate service.
@@ -146,10 +154,16 @@ func (h *CommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"path":        r.URL.Path,
 			"commandName": commandName,
 		}
-		// Parse request body into trigger data
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
-			triggerData["body"] = body
+		// Buffer the request body so it can be read by both trigger data parsing
+		// and downstream delegate steps that forward the original request.
+		bodyBytes, _ := io.ReadAll(r.Body)
+		if len(bodyBytes) > 0 {
+			var body map[string]any
+			if json.Unmarshal(bodyBytes, &body) == nil {
+				triggerData["body"] = body
+			}
+			// Restore the body so delegate steps can re-read it
+			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		}
 		// Inject HTTP context so delegate steps can forward directly
 		pipeline.Metadata = map[string]any{
@@ -159,7 +173,13 @@ func (h *CommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if pipeline.RoutePattern != "" {
 			pipeline.Metadata["_route_pattern"] = pipeline.RoutePattern
 		}
-		pc, err := pipeline.Execute(r.Context(), triggerData)
+		var pc *PipelineContext
+		var err error
+		if h.executionTracker != nil {
+			pc, err = h.executionTracker.TrackPipelineExecution(r.Context(), pipeline, triggerData, r)
+		} else {
+			pc, err = pipeline.Execute(r.Context(), triggerData)
+		}
 		if err != nil {
 			if pc == nil || pc.Metadata["_response_handled"] != true {
 				w.Header().Set("Content-Type", "application/json")

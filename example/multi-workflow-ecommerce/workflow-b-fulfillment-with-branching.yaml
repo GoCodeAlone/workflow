@@ -15,9 +15,13 @@ modules:
 
   # Check inventory availability
   - name: check-inventory
-    type: conditional.ifelse
+    type: step.conditional
     config:
       expression: "inventory.available(order.items) == true"
+      field: "available"
+      routes:
+        "true": "check-shipping"
+        "false": "backorder-handler"
     dependsOn:
       - fulfillment-handler
     branches:
@@ -33,9 +37,14 @@ modules:
 
   # Check shipping destination
   - name: check-shipping
-    type: conditional.switch
+    type: step.conditional
     config:
       expression: "order.shipping.region"
+      field: "region"
+      routes:
+        "domestic": "domestic-shipper"
+        "international": "international-shipper"
+        "restricted": "reject-restricted"
       cases:
         - domestic
         - international
@@ -74,9 +83,15 @@ modules:
       - international-shipper
 
   - name: check-response
-    type: conditional.switch
+    type: step.conditional
     config:
       expression: "response.statusCode"
+      field: "statusCode"
+      routes:
+        "200": "process-shipment"
+        "403": "auth-failure-handler"
+        "429": "rate-limit-handler"
+        "500": "server-error-handler"
       cases:
         - "200"
         - "403"

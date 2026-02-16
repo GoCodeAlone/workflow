@@ -4,7 +4,7 @@
 modules:
   # Integration registry
   - name: integration-registry
-    type: integration.registry
+    type: workflow.registry
     config:
       description: "Registry for third-party service connectors"
 

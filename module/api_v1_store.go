@@ -49,6 +49,11 @@ func (s *V1Store) Close() error {
 	return s.db.Close()
 }
 
+// DB returns the underlying *sql.DB connection.
+func (s *V1Store) DB() *sql.DB {
+	return s.db
+}
+
 func (s *V1Store) initSchema() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS companies (
@@ -784,4 +789,88 @@ func (s *V1Store) EnsureSystemHierarchy(ownerID, adminConfigYAML string) (compan
 	}
 
 	return companyID, orgID, projectID, workflowID, nil
+}
+
+// --- Execution Tracking ---
+
+// InsertExecution creates a new workflow execution record.
+func (s *V1Store) InsertExecution(id, workflowID, triggerType, status string, startedAt time.Time) error {
+	_, err := s.db.Exec(
+		"INSERT INTO workflow_executions (id, workflow_id, trigger_type, status, started_at) VALUES (?, ?, ?, ?, ?)",
+		id, workflowID, triggerType, status, startedAt.UTC().Format(time.RFC3339),
+	)
+	return err
+}
+
+// CompleteExecution updates an execution record to completed or failed.
+func (s *V1Store) CompleteExecution(id, status string, completedAt time.Time, durationMs int64, errorMsg string) error {
+	_, err := s.db.Exec(
+		"UPDATE workflow_executions SET status = ?, completed_at = ?, duration_ms = ?, error_message = ? WHERE id = ?",
+		status, completedAt.UTC().Format(time.RFC3339), durationMs, errorMsg, id,
+	)
+	return err
+}
+
+// InsertExecutionStep creates a new execution step record.
+func (s *V1Store) InsertExecutionStep(id, executionID, stepName, stepType, status string, seqNum int, startedAt time.Time) error {
+	_, err := s.db.Exec(
+		"INSERT INTO execution_steps (id, execution_id, step_name, step_type, status, sequence_num, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		id, executionID, stepName, stepType, status, seqNum, startedAt.UTC().Format(time.RFC3339),
+	)
+	return err
+}
+
+// CompleteExecutionStep updates a step record to completed or failed.
+func (s *V1Store) CompleteExecutionStep(id, status string, completedAt time.Time, durationMs int64, errorMsg string) error {
+	_, err := s.db.Exec(
+		"UPDATE execution_steps SET status = ?, completed_at = ?, duration_ms = ?, error_message = ? WHERE id = ?",
+		status, completedAt.UTC().Format(time.RFC3339), durationMs, errorMsg, id,
+	)
+	return err
+}
+
+// CountExecutionsByWorkflow returns execution counts grouped by status for a workflow.
+func (s *V1Store) CountExecutionsByWorkflow(workflowID string) (map[string]int, error) {
+	rows, err := s.db.Query(
+		"SELECT status, COUNT(*) FROM workflow_executions WHERE workflow_id = ? GROUP BY status",
+		workflowID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, err
+		}
+		counts[status] = count
+	}
+	return counts, rows.Err()
+}
+
+// CountLogsByWorkflow returns log counts grouped by level for a workflow.
+func (s *V1Store) CountLogsByWorkflow(workflowID string) (map[string]int, error) {
+	rows, err := s.db.Query(
+		"SELECT level, COUNT(*) FROM execution_logs WHERE workflow_id = ? GROUP BY level",
+		workflowID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var level string
+		var count int
+		if err := rows.Scan(&level, &count); err != nil {
+			return nil, err
+		}
+		counts[level] = count
+	}
+	return counts, rows.Err()
 }

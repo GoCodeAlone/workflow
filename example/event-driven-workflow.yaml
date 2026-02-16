@@ -10,8 +10,9 @@ modules:
 
   # Event processor for complex pattern matching
   - name: event-processor
-    type: event.processor
+    type: processing.step
     config:
+      componentId: "event-pattern-matcher"
       bufferSize: 1000
       cleanupInterval: "5m"
 

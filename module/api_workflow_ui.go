@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -453,18 +454,24 @@ func (h *WorkflowUIHandler) handleValidate(w http.ResponseWriter, r *http.Reques
 		errors = append(errors, "workflow has no modules")
 	}
 
+	// Check duplicate names only among non-pipeline-step modules.
+	// Pipeline steps (step.*) can share names across different pipelines.
 	names := make(map[string]bool)
+	allNames := make(map[string]bool)
 	for _, mod := range cfg.Modules {
+		allNames[mod.Name] = true
 		if mod.Name == "" {
 			errors = append(errors, fmt.Sprintf("module of type %s has no name", mod.Type))
 		}
-		if names[mod.Name] {
-			errors = append(errors, fmt.Sprintf("duplicate module name: %s", mod.Name))
+		if !strings.HasPrefix(mod.Type, "step.") {
+			if names[mod.Name] {
+				errors = append(errors, fmt.Sprintf("duplicate module name: %s", mod.Name))
+			}
+			names[mod.Name] = true
 		}
-		names[mod.Name] = true
 
 		for _, dep := range mod.DependsOn {
-			if !names[dep] {
+			if !allNames[dep] {
 				// Check if the dependency exists anywhere in the modules list
 				found := false
 				for _, m := range cfg.Modules {

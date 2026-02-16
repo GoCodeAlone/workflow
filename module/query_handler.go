@@ -19,13 +19,14 @@ type QueryFunc func(ctx context.Context, r *http.Request) (any, error)
 // composable per-route processing. A delegate service can be configured
 // to handle requests that don't match any registered query name.
 type QueryHandler struct {
-	name            string
-	delegate        string // service name to resolve as http.Handler
-	delegateHandler http.Handler
-	app             modular.Application
-	queries         map[string]QueryFunc
-	routePipelines  map[string]*Pipeline
-	mu              sync.RWMutex
+	name             string
+	delegate         string // service name to resolve as http.Handler
+	delegateHandler  http.Handler
+	app              modular.Application
+	queries          map[string]QueryFunc
+	routePipelines   map[string]*Pipeline
+	executionTracker *ExecutionTracker
+	mu               sync.RWMutex
 }
 
 // NewQueryHandler creates a new QueryHandler with the given name.
@@ -58,6 +59,11 @@ func (h *QueryHandler) SetDelegate(name string) {
 // SetDelegateHandler directly sets the HTTP handler used for delegation.
 func (h *QueryHandler) SetDelegateHandler(handler http.Handler) {
 	h.delegateHandler = handler
+}
+
+// SetExecutionTracker sets the execution tracker for recording pipeline executions.
+func (h *QueryHandler) SetExecutionTracker(t *ExecutionTracker) {
+	h.executionTracker = t
 }
 
 // Init initializes the query handler and resolves the delegate service.
@@ -152,7 +158,13 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if pipeline.RoutePattern != "" {
 			pipeline.Metadata["_route_pattern"] = pipeline.RoutePattern
 		}
-		pc, err := pipeline.Execute(r.Context(), triggerData)
+		var pc *PipelineContext
+		var err error
+		if h.executionTracker != nil {
+			pc, err = h.executionTracker.TrackPipelineExecution(r.Context(), pipeline, triggerData, r)
+		} else {
+			pc, err = pipeline.Execute(r.Context(), triggerData)
+		}
 		if err != nil {
 			// Only write error if response wasn't already handled by a delegate step
 			if pc == nil || pc.Metadata["_response_handled"] != true {

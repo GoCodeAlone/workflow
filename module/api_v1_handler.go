@@ -908,12 +908,20 @@ func (h *V1APIHandler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	summaries := make([]dashboardSummary, 0, len(wfs))
 	for i := range wfs {
+		execCounts, _ := h.store.CountExecutionsByWorkflow(wfs[i].ID)
+		logCounts, _ := h.store.CountLogsByWorkflow(wfs[i].ID)
+		if execCounts == nil {
+			execCounts = map[string]int{}
+		}
+		if logCounts == nil {
+			logCounts = map[string]int{}
+		}
 		summaries = append(summaries, dashboardSummary{
 			WorkflowID:   wfs[i].ID,
 			WorkflowName: wfs[i].Name,
 			Status:       wfs[i].Status,
-			Executions:   map[string]int{},
-			LogCounts:    map[string]int{},
+			Executions:   execCounts,
+			LogCounts:    logCounts,
 		})
 	}
 

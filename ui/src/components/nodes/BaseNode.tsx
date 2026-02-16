@@ -85,6 +85,16 @@ export default function BaseNode({
   const ioSig = info?.ioSignature;
   const edges = useWorkflowStore((s) => s.edges);
 
+  // Auto-generate preview for step.delegate nodes showing the target service
+  const nodeConfig = useWorkflowStore((s) => {
+    if (moduleType !== 'step.delegate') return null;
+    const node = s.nodes.find((n) => n.id === id);
+    return (node?.data?.config?.service as string) || null;
+  });
+  const effectivePreview = preview ?? (
+    nodeConfig ? `\u2192 ${nodeConfig}` : undefined
+  );
+
   // Pipeline chain position: find if this node is a target of a pipeline-flow edge
   const pipelinePosition = useMemo(() => {
     if (!moduleType.startsWith('step.')) return null;
@@ -97,6 +107,14 @@ export default function BaseNode({
     return null;
   }, [moduleType, edges, id]);
 
+  // Validation error highlighting
+  const validationErrors = useWorkflowStore((s) => s.validationErrors);
+  const nodeErrors = useMemo(
+    () => validationErrors.filter((e) => e.nodeId === id),
+    [validationErrors, id],
+  );
+  const hasError = nodeErrors.length > 0;
+
   // Connection drag highlighting
   const isDragging = connectingFrom !== null;
   const isSource = connectingFrom?.nodeId === id;
@@ -104,18 +122,21 @@ export default function BaseNode({
   const isIncompatible = isDragging && !isSource && !compatibleNodeIds.includes(id);
 
   const nodeStyle = useMemo(() => {
+    const borderColor = hasError ? '#f38ba8' : isSelected ? '#fff' : color;
     const base: React.CSSProperties = {
       background: '#1e1e2e',
-      border: `2px solid ${isSelected ? '#fff' : color}`,
+      border: `2px solid ${borderColor}`,
       borderRadius: 8,
       padding: 0,
       minWidth: 180,
       fontFamily: 'system-ui, sans-serif',
       fontSize: 12,
       color: '#cdd6f4',
-      boxShadow: isSelected
-        ? `0 0 0 2px ${color}40, 0 4px 12px rgba(0,0,0,0.4)`
-        : '0 2px 8px rgba(0,0,0,0.3)',
+      boxShadow: hasError
+        ? `0 0 0 2px rgba(243, 139, 168, 0.3), 0 4px 12px rgba(0,0,0,0.4)`
+        : isSelected
+          ? `0 0 0 2px ${color}40, 0 4px 12px rgba(0,0,0,0.4)`
+          : '0 2px 8px rgba(0,0,0,0.3)',
       cursor: 'pointer',
       transition: 'opacity 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease, filter 0.3s ease',
     };
@@ -131,7 +152,7 @@ export default function BaseNode({
     }
 
     return base;
-  }, [isSelected, color, isSource, isCompatible, isIncompatible]);
+  }, [isSelected, color, isSource, isCompatible, isIncompatible, hasError]);
 
   const targetHandleStyle = useMemo(() => {
     const base: React.CSSProperties = {
@@ -216,6 +237,26 @@ export default function BaseNode({
         <span style={{ fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {label}
         </span>
+        {hasError && (
+          <span
+            style={{
+              width: 18,
+              height: 18,
+              borderRadius: '50%',
+              background: '#f38ba830',
+              color: '#f38ba8',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 10,
+              fontWeight: 700,
+              flexShrink: 0,
+            }}
+            title={nodeErrors.map((e) => e.message).join('\n')}
+          >
+            {nodeErrors.length}
+          </span>
+        )}
       </div>
 
       <div style={{ padding: '6px 10px' }}>
@@ -234,8 +275,17 @@ export default function BaseNode({
         >
           {moduleType}
         </span>
-        {preview && (
-          <div style={{ marginTop: 4, color: '#a6adc8', fontSize: 11 }}>{preview}</div>
+        {effectivePreview && (
+          <div style={{ marginTop: 4, color: '#a6adc8', fontSize: 11 }}>
+            {moduleType === 'step.delegate' && !preview ? (
+              <>
+                <span style={{ color: '#585b70' }}>{'\u2192'} </span>
+                <span style={{ color: '#bac2de' }}>{nodeConfig}</span>
+              </>
+            ) : (
+              effectivePreview
+            )}
+          </div>
         )}
         {children}
         {ioSig && ioSig.outputs.length > 0 && (

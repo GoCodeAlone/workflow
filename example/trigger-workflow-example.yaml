@@ -22,7 +22,7 @@ modules:
 
   # Scheduler for timed operations
   - name: cron-scheduler
-    type: scheduler.cron
+    type: scheduler.modular
   
   # API handlers
   - name: users-api

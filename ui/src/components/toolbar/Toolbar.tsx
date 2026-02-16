@@ -2,7 +2,6 @@ import { useState } from 'react';
 import useWorkflowStore from '../../store/workflowStore.ts';
 import { configToYaml, parseYaml } from '../../utils/serialization.ts';
 import {
-  saveWorkflowConfig,
   getWorkflowConfig,
   validateWorkflow,
   apiUpdateWorkflow,
@@ -15,6 +14,8 @@ export default function Toolbar() {
   const clearCanvas = useWorkflowStore((s) => s.clearCanvas);
   const nodes = useWorkflowStore((s) => s.nodes);
   const addToast = useWorkflowStore((s) => s.addToast);
+  const setValidationErrors = useWorkflowStore((s) => s.setValidationErrors);
+  const clearValidationErrors = useWorkflowStore((s) => s.clearValidationErrors);
   const undo = useWorkflowStore((s) => s.undo);
   const redo = useWorkflowStore((s) => s.redo);
   const undoStack = useWorkflowStore((s) => s.undoStack);
@@ -82,45 +83,78 @@ export default function Toolbar() {
   };
 
   const handleSave = async () => {
+    if (!activeWorkflowRecord) {
+      addToast('No workflow selected. Load or create a workflow first, then save.', 'warning');
+      return;
+    }
     const config = exportToConfig();
     try {
-      if (activeWorkflowRecord) {
-        // Save to v1 API workflow record
-        const yaml = configToYaml(config);
-        const updated = await apiUpdateWorkflow(activeWorkflowRecord.id, {
-          name: activeWorkflowRecord.name,
-          config_yaml: yaml,
-        });
-        setActiveWorkflowRecord(updated);
-        addToast(`Saved v${updated.version}`, 'success');
-      } else {
-        // Legacy: save to management API
-        await saveWorkflowConfig(config);
-        addToast('Workflow saved to server', 'success');
-      }
+      const yaml = configToYaml(config);
+      const updated = await apiUpdateWorkflow(activeWorkflowRecord.id, {
+        name: activeWorkflowRecord.name,
+        config_yaml: yaml,
+      });
+      setActiveWorkflowRecord(updated);
+      addToast(`Saved v${updated.version}`, 'success');
     } catch (e) {
       addToast(`Save failed: ${(e as Error).message}`, 'error');
     }
   };
 
   const handleValidate = async () => {
+    clearValidationErrors();
     const config = exportToConfig();
+    const currentNodes = nodes;
+
+    // Helper: try to find a node whose label appears in an error message
+    const findNodeForError = (errorMsg: string): string | undefined => {
+      for (const node of currentNodes) {
+        if (node.data.label && errorMsg.includes(node.data.label)) {
+          return node.id;
+        }
+      }
+      return undefined;
+    };
 
     // Client-side validation first
     const localErrors: string[] = [];
     if (config.modules.length === 0) {
       localErrors.push('Workflow has no modules');
     }
-    const names = config.modules.map((m) => m.name);
-    const dupes = names.filter((n, i) => names.indexOf(n) !== i);
+    // Only check duplicate names among non-pipeline-step modules.
+    // Pipeline steps (step.*) can share names across different pipelines.
+    const topLevelModules = config.modules.filter((m) => !m.type.startsWith('step.'));
+    const topLevelNames = topLevelModules.map((m) => m.name);
+    const dupes = topLevelNames.filter((n, i) => topLevelNames.indexOf(n) !== i);
     if (dupes.length > 0) {
-      localErrors.push(`Duplicate module names: ${dupes.join(', ')}`);
+      const uniqueDupes = [...new Set(dupes)];
+      localErrors.push(`Duplicate module names: ${uniqueDupes.join(', ')}`);
+    }
+    // Check per-pipeline step name uniqueness via workflow routes
+    if (config.workflows) {
+      for (const [wfName, wfConfig] of Object.entries(config.workflows)) {
+        const wf = wfConfig as { routes?: Array<{ method?: string; path?: string; pipeline?: { steps?: Array<{ name: string }> } }> };
+        if (wf.routes) {
+          for (const route of wf.routes) {
+            if (route.pipeline?.steps) {
+              const stepNames = route.pipeline.steps.map((s) => s.name);
+              const stepDupes = stepNames.filter((n, i) => stepNames.indexOf(n) !== i);
+              if (stepDupes.length > 0) {
+                const uniqueStepDupes = [...new Set(stepDupes)];
+                const routeLabel = `${route.method ?? '?'} ${route.path ?? '/'}`;
+                localErrors.push(`Duplicate step names in ${wfName} route ${routeLabel}: ${uniqueStepDupes.join(', ')}`);
+              }
+            }
+          }
+        }
+      }
     }
     for (const mod of config.modules) {
       if (!mod.name.trim()) localErrors.push(`Module of type ${mod.type} has no name`);
       if (mod.dependsOn) {
+        const allNames = config.modules.map((m) => m.name);
         for (const dep of mod.dependsOn) {
-          if (!names.includes(dep)) {
+          if (!allNames.includes(dep)) {
             localErrors.push(`${mod.name} depends on unknown module: ${dep}`);
           }
         }
@@ -128,9 +162,12 @@ export default function Toolbar() {
     }
 
     if (localErrors.length > 0) {
-      for (const err of localErrors) {
-        addToast(err, 'error');
-      }
+      const mapped = localErrors.map((msg) => ({
+        message: msg,
+        nodeId: findNodeForError(msg),
+      }));
+      setValidationErrors(mapped);
+      addToast(`${localErrors.length} validation error${localErrors.length !== 1 ? 's' : ''} found`, 'error');
       return;
     }
 
@@ -138,17 +175,22 @@ export default function Toolbar() {
     try {
       const result = await validateWorkflow(config);
       if (result.valid) {
+        clearValidationErrors();
         addToast('Workflow is valid', 'success');
       } else {
+        const allErrors: Array<{ nodeId?: string; message: string }> = [];
         for (const err of result.errors) {
-          addToast(err, 'error');
+          allErrors.push({ message: err, nodeId: findNodeForError(err) });
         }
         for (const warn of result.warnings) {
-          addToast(warn, 'warning');
+          allErrors.push({ message: warn, nodeId: findNodeForError(warn) });
         }
+        setValidationErrors(allErrors);
+        addToast(`${allErrors.length} validation error${allErrors.length !== 1 ? 's' : ''} found`, 'error');
       }
     } catch {
       // Server not available, use local result
+      clearValidationErrors();
       addToast('Workflow is valid (local check only)', 'info');
     }
   };
