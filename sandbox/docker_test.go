@@ -173,11 +173,11 @@ func TestBuildHostConfig(t *testing.T) {
 
 	hc := sb.buildHostConfig()
 
-	if hc.Resources.Memory != 256*1024*1024 {
-		t.Fatalf("unexpected memory: %d", hc.Resources.Memory)
+	if hc.Memory != 256*1024*1024 {
+		t.Fatalf("unexpected memory: %d", hc.Memory)
 	}
-	if hc.Resources.NanoCPUs != 2_000_000_000 {
-		t.Fatalf("unexpected NanoCPUs: %d", hc.Resources.NanoCPUs)
+	if hc.NanoCPUs != 2_000_000_000 {
+		t.Fatalf("unexpected NanoCPUs: %d", hc.NanoCPUs)
 	}
 	if len(hc.Mounts) != 1 {
 		t.Fatalf("expected 1 mount, got %d", len(hc.Mounts))
@@ -194,11 +194,11 @@ func TestBuildHostConfig_NoLimits(t *testing.T) {
 
 	hc := sb.buildHostConfig()
 
-	if hc.Resources.Memory != 0 {
-		t.Fatalf("expected 0 memory, got %d", hc.Resources.Memory)
+	if hc.Memory != 0 {
+		t.Fatalf("expected 0 memory, got %d", hc.Memory)
 	}
-	if hc.Resources.NanoCPUs != 0 {
-		t.Fatalf("expected 0 NanoCPUs, got %d", hc.Resources.NanoCPUs)
+	if hc.NanoCPUs != 0 {
+		t.Fatalf("expected 0 NanoCPUs, got %d", hc.NanoCPUs)
 	}
 	if len(hc.Mounts) != 0 {
 		t.Fatalf("expected 0 mounts, got %d", len(hc.Mounts))

@@ -165,7 +165,10 @@ func (h *handler) tableRows(w http.ResponseWriter, r *http.Request) {
 		orderClause = fmt.Sprintf(" ORDER BY %s %s", sortCol, order)
 	}
 
-	query := fmt.Sprintf("SELECT * FROM %s%s LIMIT ? OFFSET ?", tableName, orderClause)
+	// tableName is validated against the allowlist returned by getValidTables() above,
+	// and orderClause uses a column validated against getTableColumns(). Both are safe
+	// from injection. Parameters are bound via ? placeholders.
+	query := fmt.Sprintf("SELECT * FROM %s%s LIMIT ? OFFSET ?", tableName, orderClause) //nolint:gosec // tableName and orderClause are validated against DB schema above
 	rows, err := h.db.QueryContext(r.Context(), query, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("query rows: %v", err))

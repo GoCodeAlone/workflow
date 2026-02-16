@@ -115,20 +115,6 @@ func (s *ScanContainerStep) buildCommand() []string {
 	return args
 }
 
-// getConfigString is a helper to extract a string from config with a default value.
-func getConfigString(config map[string]any, key, defaultVal string) string {
-	if v, ok := config[key].(string); ok && v != "" {
-		return v
-	}
-	return defaultVal
-}
-
-// getConfigBool is a helper to extract a bool from config.
-func getConfigBool(config map[string]any, key string) bool {
-	v, _ := config[key].(bool)
-	return v
-}
-
 // validateSeverity checks that a severity string is valid.
 func validateSeverity(severity string) error {
 	switch strings.ToLower(severity) {

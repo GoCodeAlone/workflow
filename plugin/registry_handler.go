@@ -50,7 +50,7 @@ func (h *RegistryHandler) handleListInstalled(w http.ResponseWriter, r *http.Req
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(plugins)
+	_ = json.NewEncoder(w).Encode(plugins)
 }
 
 // handleSearch searches both local and remote registries.
@@ -87,7 +87,7 @@ func (h *RegistryHandler) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // installRequest is the JSON body for plugin installation.
@@ -127,7 +127,7 @@ func (h *RegistryHandler) handleInstall(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":  "installed",
 		"name":    req.Name,
 		"version": req.Version,
@@ -152,7 +152,7 @@ func (h *RegistryHandler) handleUninstall(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status": "uninstalled",
 		"name":   name,
 	})

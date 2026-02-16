@@ -31,7 +31,7 @@ type SQLiteStore struct {
 // environments table if it does not already exist.
 func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	if dir := filepath.Dir(dbPath); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, fmt.Errorf("create data directory: %w", err)
 		}
 	}

@@ -559,10 +559,11 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	}
 
 	// Enable all registered plugins so their routes are active
-	for _, info := range pluginMgr.AllPlugins() {
-		if !info.Enabled {
-			if err := pluginMgr.Enable(info.Name); err != nil {
-				logger.Warn("Failed to enable plugin", "plugin", info.Name, "error", err)
+	allPlugins := pluginMgr.AllPlugins()
+	for i := range allPlugins {
+		if !allPlugins[i].Enabled {
+			if err := pluginMgr.Enable(allPlugins[i].Name); err != nil {
+				logger.Warn("Failed to enable plugin", "plugin", allPlugins[i].Name, "error", err)
 			}
 		}
 	}

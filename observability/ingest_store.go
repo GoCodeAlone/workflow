@@ -35,7 +35,7 @@ func (s *V1IngestStore) IngestExecutions(_ context.Context, instance string, ite
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare(
 		`INSERT OR IGNORE INTO workflow_executions (id, workflow_id, trigger_type, status, triggered_by, error_message, started_at, completed_at, duration_ms, metadata)
@@ -46,17 +46,17 @@ func (s *V1IngestStore) IngestExecutions(_ context.Context, instance string, ite
 	}
 	defer stmt.Close()
 
-	for _, exec := range items {
+	for i := range items {
 		completedAt := ""
-		if !exec.CompletedAt.IsZero() {
-			completedAt = exec.CompletedAt.UTC().Format(time.RFC3339)
+		if !items[i].CompletedAt.IsZero() {
+			completedAt = items[i].CompletedAt.UTC().Format(time.RFC3339)
 		}
 		meta := `{"source_instance":"` + instance + `"}`
 		_, _ = stmt.Exec(
-			exec.ID, exec.WorkflowID, exec.TriggerType, exec.Status,
-			exec.TriggeredBy, exec.ErrorMessage,
-			exec.StartedAt.UTC().Format(time.RFC3339), completedAt,
-			exec.DurationMs, meta,
+			items[i].ID, items[i].WorkflowID, items[i].TriggerType, items[i].Status,
+			items[i].TriggeredBy, items[i].ErrorMessage,
+			items[i].StartedAt.UTC().Format(time.RFC3339), completedAt,
+			items[i].DurationMs, meta,
 		)
 	}
 	return tx.Commit()
@@ -68,7 +68,7 @@ func (s *V1IngestStore) IngestLogs(_ context.Context, _ string, items []LogRepor
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare(
 		`INSERT INTO execution_logs (workflow_id, execution_id, level, message, module_name, fields, created_at)
@@ -94,7 +94,7 @@ func (s *V1IngestStore) IngestEvents(_ context.Context, _ string, items []EventR
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare(
 		`INSERT INTO execution_logs (workflow_id, execution_id, level, message, module_name, fields, created_at)

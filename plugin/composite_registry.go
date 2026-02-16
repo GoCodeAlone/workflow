@@ -67,8 +67,10 @@ func (c *CompositeRegistry) Search(ctx context.Context, query string) ([]*Plugin
 	if c.remote != nil {
 		remoteResults, err := c.remote.Search(ctx, query)
 		if err != nil {
-			// Log but don't fail — local results are still valid
-			return results, nil
+			// Remote search failed — return local results only.
+			// This is intentional: local results are still valid even when the
+			// remote registry is unreachable, so we swallow the error.
+			return results, nil //nolint:nilerr // intentionally returning nil; local results are sufficient
 		}
 		for _, m := range remoteResults {
 			if !seen[m.Name] {

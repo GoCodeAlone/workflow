@@ -71,14 +71,6 @@ func NewDockerSandbox(config SandboxConfig) (*DockerSandbox, error) {
 	}, nil
 }
 
-// newDockerSandboxWithClient creates a DockerSandbox with an injected client (for testing).
-func newDockerSandboxWithClient(cli *client.Client, config SandboxConfig) *DockerSandbox {
-	return &DockerSandbox{
-		client: cli,
-		config: config,
-	}
-}
-
 // Exec creates a container, runs the given command, captures output, and removes the container.
 func (s *DockerSandbox) Exec(ctx context.Context, cmd []string) (*ExecResult, error) {
 	if len(cmd) == 0 {
@@ -288,7 +280,7 @@ func (s *DockerSandbox) Close() error {
 
 // ensureImage pulls the image if it is not available locally.
 func (s *DockerSandbox) ensureImage(ctx context.Context) error {
-	_, _, err := s.client.ImageInspectWithRaw(ctx, s.config.Image)
+	_, err := s.client.ImageInspect(ctx, s.config.Image)
 	if err == nil {
 		return nil // Image already present
 	}
@@ -322,11 +314,11 @@ func (s *DockerSandbox) buildHostConfig() *container.HostConfig {
 
 	// Resource limits
 	if s.config.MemoryLimit > 0 {
-		hc.Resources.Memory = s.config.MemoryLimit
+		hc.Memory = s.config.MemoryLimit
 	}
 	if s.config.CPULimit > 0 {
 		// Docker uses NanoCPUs (1 CPU = 1e9 NanoCPUs)
-		hc.Resources.NanoCPUs = int64(s.config.CPULimit * 1e9)
+		hc.NanoCPUs = int64(s.config.CPULimit * 1e9)
 	}
 
 	// Mounts

@@ -108,7 +108,7 @@ func (s *ArtifactPullStep) Execute(ctx context.Context, pc *PipelineContext) (*S
 	defer reader.Close()
 
 	// Ensure destination directory exists
-	if err := os.MkdirAll(filepath.Dir(s.dest), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(s.dest), 0o750); err != nil {
 		return nil, fmt.Errorf("artifact_pull step %q: failed to create dest directory: %w", s.name, err)
 	}
 

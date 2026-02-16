@@ -102,9 +102,7 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints b
 		opts = append(opts, schema.WithAllowEmptyModules())
 	}
 	if skipUnknownTypes {
-		opts = append(opts, schema.WithSkipModuleTypeCheck())
-		opts = append(opts, schema.WithSkipWorkflowTypeCheck())
-		opts = append(opts, schema.WithSkipTriggerTypeCheck())
+		opts = append(opts, schema.WithSkipModuleTypeCheck(), schema.WithSkipWorkflowTypeCheck(), schema.WithSkipTriggerTypeCheck())
 	} else {
 		// Still skip workflow/trigger type checks by default (dynamic dispatch)
 		opts = append(opts, schema.WithSkipWorkflowTypeCheck(), schema.WithSkipTriggerTypeCheck())

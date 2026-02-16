@@ -308,11 +308,12 @@ func (t *ExecutionTracker) TrackPipelineExecution(
 	// If the pipeline already has an EventRecorder (e.g., from PipelineWorkflowHandler),
 	// chain to that. Otherwise, chain to the EventStoreRecorder if available.
 	// IMPORTANT: Never chain to ourselves — that causes infinite recursion.
-	if pipeline.EventRecorder != nil && pipeline.EventRecorder != EventRecorder(t) {
+	switch {
+	case pipeline.EventRecorder != nil && pipeline.EventRecorder != EventRecorder(t):
 		t.chained = pipeline.EventRecorder
-	} else if t.EventStoreRecorder != nil && t.EventStoreRecorder != EventRecorder(t) {
+	case t.EventStoreRecorder != nil && t.EventStoreRecorder != EventRecorder(t):
 		t.chained = t.EventStoreRecorder
-	} else {
+	default:
 		t.chained = nil
 	}
 	pipeline.EventRecorder = t

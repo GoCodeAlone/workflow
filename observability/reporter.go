@@ -335,11 +335,11 @@ func (h *IngestHandler) handleIngestExecutions(w http.ResponseWriter, r *http.Re
 	}
 	if err := h.store.IngestExecutions(r.Context(), payload.Instance, payload.Items); err != nil {
 		h.logger.Warn("Failed to ingest executions", "error", err)
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]int{"accepted": len(payload.Items)})
+	_ = json.NewEncoder(w).Encode(map[string]int{"accepted": len(payload.Items)})
 }
 
 func (h *IngestHandler) handleIngestLogs(w http.ResponseWriter, r *http.Request) {
@@ -353,11 +353,11 @@ func (h *IngestHandler) handleIngestLogs(w http.ResponseWriter, r *http.Request)
 	}
 	if err := h.store.IngestLogs(r.Context(), payload.Instance, payload.Items); err != nil {
 		h.logger.Warn("Failed to ingest logs", "error", err)
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]int{"accepted": len(payload.Items)})
+	_ = json.NewEncoder(w).Encode(map[string]int{"accepted": len(payload.Items)})
 }
 
 func (h *IngestHandler) handleIngestEvents(w http.ResponseWriter, r *http.Request) {
@@ -371,16 +371,16 @@ func (h *IngestHandler) handleIngestEvents(w http.ResponseWriter, r *http.Reques
 	}
 	if err := h.store.IngestEvents(r.Context(), payload.Instance, payload.Items); err != nil {
 		h.logger.Warn("Failed to ingest events", "error", err)
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]int{"accepted": len(payload.Items)})
+	_ = json.NewEncoder(w).Encode(map[string]int{"accepted": len(payload.Items)})
 }
 
 func (h *IngestHandler) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (h *IngestHandler) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -400,7 +400,7 @@ func (h *IngestHandler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("Failed to register instance", "error", err)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "registered"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "registered"})
 }
 
 func (h *IngestHandler) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
@@ -420,5 +420,5 @@ func (h *IngestHandler) handleHeartbeat(w http.ResponseWriter, r *http.Request) 
 		h.logger.Warn("Failed to heartbeat", "error", err)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }

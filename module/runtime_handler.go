@@ -36,7 +36,7 @@ func (h *RuntimeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.listInstances(w)
 	case r.Method == http.MethodPost && strings.HasSuffix(path, "/stop"):
 		id := extractID(path, "/stop")
-		h.stopInstance(w, id)
+		h.stopInstance(w, r, id)
 	default:
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 	}
@@ -50,7 +50,7 @@ func (h *RuntimeHandler) handleList(w http.ResponseWriter, _ *http.Request) {
 func (h *RuntimeHandler) handleStop(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	id := r.PathValue("id")
-	h.stopInstance(w, id)
+	h.stopInstance(w, r, id)
 }
 
 func (h *RuntimeHandler) listInstances(w http.ResponseWriter) {
@@ -59,19 +59,19 @@ func (h *RuntimeHandler) listInstances(w http.ResponseWriter) {
 		"instances": instances,
 		"total":     len(instances),
 	}
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func (h *RuntimeHandler) stopInstance(w http.ResponseWriter, id string) {
+func (h *RuntimeHandler) stopInstance(w http.ResponseWriter, r *http.Request, id string) {
 	if id == "" {
 		http.Error(w, `{"error":"missing instance id"}`, http.StatusBadRequest)
 		return
 	}
-	if err := h.manager.StopWorkflow(nil, id); err != nil {
+	if err := h.manager.StopWorkflow(r.Context(), id); err != nil {
 		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusNotFound)
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
 }
 
 // extractID pulls the segment before the given suffix from a URL path.

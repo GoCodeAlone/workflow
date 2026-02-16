@@ -136,12 +136,13 @@ func ValidateConfig(cfg *config.WorkflowConfig, opts ...ValidationOption) error 
 		prefix := fmt.Sprintf("modules[%d]", i)
 
 		// name is required
-		if mod.Name == "" {
+		switch {
+		case mod.Name == "":
 			errs = append(errs, &ValidationError{
 				Path:    prefix + ".name",
 				Message: "module name is required",
 			})
-		} else if !strings.HasPrefix(mod.Type, "step.") {
+		case !strings.HasPrefix(mod.Type, "step."):
 			// Only check uniqueness for non-pipeline-step modules
 			if firstIdx, exists := seenNames[mod.Name]; exists {
 				errs = append(errs, &ValidationError{
@@ -151,7 +152,7 @@ func ValidateConfig(cfg *config.WorkflowConfig, opts ...ValidationOption) error 
 			} else {
 				seenNames[mod.Name] = i
 			}
-		} else {
+		default:
 			// For step.* modules, still track name for dependency resolution
 			if _, exists := seenNames[mod.Name]; !exists {
 				seenNames[mod.Name] = i

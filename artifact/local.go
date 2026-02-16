@@ -39,7 +39,7 @@ func (s *LocalStore) artifactPath(executionID, key string) string {
 func (s *LocalStore) Put(_ context.Context, executionID, key string, reader io.Reader) error {
 	path := s.artifactPath(executionID, key)
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("failed to create artifact directory: %w", err)
 	}
 
