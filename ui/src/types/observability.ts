@@ -128,4 +128,6 @@ export interface AuditFilter {
   until?: string;
 }
 
-export type ActiveView = 'editor' | 'dashboard' | 'executions' | 'logs' | 'events' | 'settings' | 'marketplace' | 'templates' | 'environments' | 'store-browser' | 'docs';
+// ActiveView is a string to support dynamic plugin page IDs.
+// Known built-in views are listed for reference but any plugin can register new ones.
+export type ActiveView = string;

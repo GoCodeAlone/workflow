@@ -140,19 +140,51 @@ func loadConfig(logger *slog.Logger) (*config.WorkflowConfig, error) {
 	return config.NewEmptyWorkflowConfig(), nil
 }
 
-// serverApp holds the components needed to run the server.
+// serverApp holds all components needed to run the server. Persistent resources
+// (stores, handlers, muxes) are stored here so they survive engine reloads.
+// Only the engine itself (modules, handlers, triggers) is recreated on reload.
 type serverApp struct {
 	engine          *workflow.StdEngine
 	engineManager   *workflow.WorkflowEngineManager
 	pipelineHandler *handlers.PipelineWorkflowHandler
 	logger          *slog.Logger
 	auditLogger     *audit.Logger
-	v1Store         *module.V1Store           // v1 API SQLite store
-	eventStore      *evstore.SQLiteEventStore // execution event store
-	idempotencyDB   *sql.DB                   // idempotency store DB connection
-	cleanupDirs     []string                  // temp directories to clean up on shutdown
-	cleanupFiles    []string                  // temp files to clean up on shutdown
-	postStartFuncs  []func() error            // functions to run after engine.Start
+	cleanupDirs     []string       // temp directories to clean up on shutdown
+	cleanupFiles    []string       // temp files to clean up on shutdown
+	postStartFuncs  []func() error // functions to run after engine.Start
+
+	// -----------------------------------------------------------------------
+	// Persistent stores — opened once, survive reloads
+	// -----------------------------------------------------------------------
+	v1Store       *module.V1Store           // v1 API SQLite store
+	eventStore    *evstore.SQLiteEventStore // execution event store
+	idempotencyDB *sql.DB                   // idempotency store DB connection
+	envStore      *environment.SQLiteStore  // environment management store
+
+	// -----------------------------------------------------------------------
+	// Management service handlers — created once at startup, survive reloads.
+	// These are http.Handlers or service objects that get registered with each
+	// new Application instance after engine reload.
+	// -----------------------------------------------------------------------
+
+	// Pre-start services (registered before engine.Start)
+	mgmtHandler *module.WorkflowUIHandler // engine config/reload/status
+	schemaSvc   *schema.SchemaService     // module schema browsing
+	combinedAI  http.Handler              // AI generation + deploy
+	dynHandler  http.Handler              // dynamic components API
+
+	// Post-start services (registered after engine.Start, need V1Store)
+	v1Handler        *module.V1APIHandler     // V1 API handler (dashboard)
+	timelineMux      http.Handler             // timeline handler mux
+	replayMux        http.Handler             // replay handler mux
+	backfillMux      http.Handler             // backfill/mock/diff handler mux
+	dlqMux           http.Handler             // DLQ handler mux
+	billingMux       http.Handler             // billing handler mux
+	nativeHandler    http.Handler             // native plugin handler
+	envMux           http.Handler             // environment management mux
+	cloudMux         http.Handler             // cloud providers mux
+	pluginRegMux     http.Handler             // plugin registry mux
+	executionTracker *module.ExecutionTracker // execution tracking for CQRS
 }
 
 // setup initializes all server components: engine, AI services, and HTTP mux.
@@ -179,9 +211,19 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 	pool := dynamic.NewInterpreterPool()
 	aiSvc, deploySvc := initAIService(logger, registry, pool)
 
-	// Wire all handlers through the engine's admin config modules.
-	wireManagementHandler(logger, engine, cfg, app, aiSvc, deploySvc, loader, registry)
-	wireV1Handler(logger, engine, app)
+	// Create all management handlers (once, stored on serverApp).
+	initManagementHandlers(logger, engine, cfg, app, aiSvc, deploySvc, loader, registry)
+
+	// Register management services with the initial engine.
+	registerManagementServices(logger, app)
+
+	// Set up post-start hook to initialize stores and register post-start services.
+	app.postStartFuncs = append(app.postStartFuncs, func() error {
+		if err := app.initStores(logger); err != nil {
+			return err
+		}
+		return app.registerPostStartServices(logger)
+	})
 
 	// Initialize audit logger (writes structured JSON to stdout)
 	app.auditLogger = audit.NewLogger(os.Stdout)
@@ -225,26 +267,14 @@ func mergeAdminConfig(logger *slog.Logger, cfg *config.WorkflowConfig, app *serv
 	return nil
 }
 
-// wireManagementHandler registers admin service objects as ServiceModules
-// so that CQRS handlers can resolve them via their delegate config.
-func wireManagementHandler(logger *slog.Logger, engine *workflow.StdEngine, cfg *config.WorkflowConfig, app *serverApp, aiSvc *ai.Service, deploySvc *ai.DeployService, loader *dynamic.Loader, registry *dynamic.ComponentRegistry) {
+// initManagementHandlers creates all management service handlers and stores
+// them on the serverApp struct. These handlers are created once and persist
+// across engine reloads. Only the service registrations need to be refreshed.
+func initManagementHandlers(logger *slog.Logger, engine *workflow.StdEngine, cfg *config.WorkflowConfig, app *serverApp, aiSvc *ai.Service, deploySvc *ai.DeployService, loader *dynamic.Loader, registry *dynamic.ComponentRegistry) {
 	// Workflow management handler (config, reload, validate, status)
 	mgmtHandler := module.NewWorkflowUIHandler(cfg)
 	mgmtHandler.SetReloadFunc(func(newCfg *config.WorkflowConfig) error {
-		if stopErr := app.engine.Stop(context.Background()); stopErr != nil {
-			logger.Warn("Error stopping engine during reload", "error", stopErr)
-		}
-		newEngine, _, _, newPipelineHandler, buildErr := buildEngine(newCfg, logger)
-		if buildErr != nil {
-			return fmt.Errorf("failed to rebuild engine: %w", buildErr)
-		}
-		if startErr := newEngine.Start(context.Background()); startErr != nil {
-			return fmt.Errorf("failed to start reloaded engine: %w", startErr)
-		}
-		app.engine = newEngine
-		app.pipelineHandler = newPipelineHandler
-		logger.Info("Engine reloaded successfully via admin")
-		return nil
+		return app.reloadEngine(newCfg)
 	})
 	mgmtHandler.SetStatusFunc(func() map[string]any {
 		return map[string]any{"status": "running"}
@@ -252,24 +282,33 @@ func wireManagementHandler(logger *slog.Logger, engine *workflow.StdEngine, cfg 
 	mgmtHandler.SetServiceRegistry(func() map[string]any {
 		return app.engine.App().SvcRegistry()
 	})
+	app.mgmtHandler = mgmtHandler
 
 	// AI handlers (combined into a single http.Handler)
 	aiH := ai.NewHandler(aiSvc)
 	deployH := ai.NewDeployHandler(deploySvc)
-	combinedAI := ai.NewCombinedHandler(aiH, deployH)
+	app.combinedAI = ai.NewCombinedHandler(aiH, deployH)
 
 	// Dynamic components handler
-	dynH := dynamic.NewAPIHandler(loader, registry)
+	app.dynHandler = dynamic.NewAPIHandler(loader, registry)
 
 	// Schema handler
-	schemaSvc := schema.NewSchemaService()
+	app.schemaSvc = schema.NewSchemaService()
+}
+
+// registerManagementServices registers the pre-start management service handlers
+// with the current engine's Application. This is called at startup and again
+// after each engine reload. It is idempotent — the new Application starts with
+// an empty service registry, so there are no duplicate registration errors.
+func registerManagementServices(logger *slog.Logger, app *serverApp) {
+	engine := app.engine
 
 	// Register service modules — these are resolved by delegate config in admin/config.yaml
 	svcModules := map[string]any{
-		"admin-engine-mgmt":    mgmtHandler,
-		"admin-schema-mgmt":    schemaSvc,
-		"admin-ai-mgmt":        combinedAI,
-		"admin-component-mgmt": dynH,
+		"admin-engine-mgmt":    app.mgmtHandler,
+		"admin-schema-mgmt":    app.schemaSvc,
+		"admin-ai-mgmt":        app.combinedAI,
+		"admin-component-mgmt": app.dynHandler,
 	}
 	for name, svc := range svcModules {
 		engine.GetApp().RegisterModule(module.NewServiceModule(name, svc))
@@ -299,26 +338,21 @@ func wireManagementHandler(logger *slog.Logger, engine *workflow.StdEngine, cfg 
 	}
 }
 
-// wireV1Handler registers a post-start hook that discovers the WorkflowRegistry
-// from the engine's service registry and wires the V1APIHandler to the
-// admin-v1-queries and admin-v1-commands CQRS modules. This must run after
-// engine.Start so that the WorkflowRegistry's V1Store is initialized.
-func wireV1Handler(logger *slog.Logger, engine *workflow.StdEngine, app *serverApp) {
-	app.postStartFuncs = append(app.postStartFuncs, func() error {
-		return wireV1HandlerPostStart(logger, engine, app)
-	})
-}
+// initStores opens all persistent databases and creates service handlers.
+// This is called once after the first engine.Start. The stores and handlers
+// are stored on serverApp and survive engine reloads.
+func (app *serverApp) initStores(logger *slog.Logger) error {
+	engine := app.engine
 
-// wireV1HandlerPostStart is called after engine.Start. It looks up the
-// WorkflowRegistry from the service registry, gets its V1Store, and wires
-// the V1APIHandler as fallback on the admin-v1-queries and admin-v1-commands
-// CQRS handler modules.
-func wireV1HandlerPostStart(logger *slog.Logger, engine *workflow.StdEngine, app *serverApp) error {
 	// Resolve JWT secret from flag or env
 	secret := envOrFlag("JWT_SECRET", jwtSecret)
 	if secret == "" {
 		logger.Warn("v1 API handler: no JWT secret configured; auth will fail")
 	}
+
+	// -----------------------------------------------------------------------
+	// V1Store — the main workflow/company/project data store
+	// -----------------------------------------------------------------------
 
 	// Discover the WorkflowRegistry from the service registry
 	var store *module.V1Store
@@ -368,23 +402,16 @@ func wireV1HandlerPostStart(logger *slog.Logger, engine *workflow.StdEngine, app
 		}
 	}
 
+	// Create V1 API handler
 	v1Handler := module.NewV1APIHandler(store, secret)
 	v1Handler.SetReloadFunc(func(configYAML string) error {
 		logger.Info("System workflow deploy requested — engine reload not yet wired for v1 deploy")
 		return nil
 	})
-
-	// Register V1 handler as a service module so delegate config can resolve it.
-	engine.GetApp().RegisterModule(module.NewServiceModule("admin-v1-mgmt", v1Handler))
-
-	// Re-initialize the newly registered module so it's in the service registry.
-	// Then resolve delegates on any CQRS handlers that were waiting for it.
-	if err := engine.GetApp().RegisterService("admin-v1-mgmt", v1Handler); err != nil {
-		logger.Warn("Failed to register v1 service directly", "error", err)
-	}
+	app.v1Handler = v1Handler
 
 	// -----------------------------------------------------------------------
-	// Phase 1-2 stores and handlers: timeline, replay, DLQ, backfill/mock/diff, billing
+	// Event store, idempotency store
 	// -----------------------------------------------------------------------
 
 	// Create SQLite event store for execution events
@@ -414,36 +441,22 @@ func wireV1HandlerPostStart(logger *slog.Logger, engine *workflow.StdEngine, app
 		}
 	}
 
-	// Wire EventRecorder adapter to the pipeline handler so pipeline
-	// executions emit events to the event store.
-	if eventStore != nil && app.pipelineHandler != nil {
-		recorder := evstore.NewEventRecorderAdapter(eventStore)
-		app.pipelineHandler.SetEventRecorder(recorder)
-		logger.Info("Wired EventRecorder to PipelineWorkflowHandler")
-	}
-
-	// Register Phase 1-2 service modules for delegate dispatch.
-	// Each handler gets an internal ServeMux so the CQRS delegate mechanism
-	// (which needs http.Handler) can route requests to the correct method.
+	// -----------------------------------------------------------------------
+	// Timeline, replay, backfill handlers
+	// -----------------------------------------------------------------------
 
 	if eventStore != nil {
 		// Timeline handler (execution list, timeline, events)
 		timelineHandler := evstore.NewTimelineHandler(eventStore, logger)
 		timelineMux := http.NewServeMux()
 		timelineHandler.RegisterRoutes(timelineMux)
-		engine.GetApp().RegisterModule(module.NewServiceModule("admin-timeline-mgmt", timelineMux))
-		if regErr := engine.GetApp().RegisterService("admin-timeline-mgmt", timelineMux); regErr != nil {
-			logger.Warn("Failed to register timeline service", "error", regErr)
-		}
+		app.timelineMux = timelineMux
 
 		// Replay handler
 		replayHandler := evstore.NewReplayHandler(eventStore, logger)
 		replayMux := http.NewServeMux()
 		replayHandler.RegisterRoutes(replayMux)
-		engine.GetApp().RegisterModule(module.NewServiceModule("admin-replay-mgmt", replayMux))
-		if regErr := engine.GetApp().RegisterService("admin-replay-mgmt", replayMux); regErr != nil {
-			logger.Warn("Failed to register replay service", "error", regErr)
-		}
+		app.replayMux = replayMux
 
 		// Backfill / Mock / Diff handler
 		backfillStore := evstore.NewInMemoryBackfillStore()
@@ -452,104 +465,68 @@ func wireV1HandlerPostStart(logger *slog.Logger, engine *workflow.StdEngine, app
 		bmdHandler := evstore.NewBackfillMockDiffHandler(backfillStore, mockStore, diffCalc, logger)
 		bmdMux := http.NewServeMux()
 		bmdHandler.RegisterRoutes(bmdMux)
-		engine.GetApp().RegisterModule(module.NewServiceModule("admin-backfill-mgmt", bmdMux))
-		if regErr := engine.GetApp().RegisterService("admin-backfill-mgmt", bmdMux); regErr != nil {
-			logger.Warn("Failed to register backfill/mock/diff service", "error", regErr)
-		}
+		app.backfillMux = bmdMux
 
-		logger.Info("Registered timeline, replay, and backfill/mock/diff services")
+		logger.Info("Created timeline, replay, and backfill/mock/diff handlers")
 	} else {
-		// Register stub handlers so delegate routes return 503 instead of 500
-		// ("service not found in registry"). The admin/config.yaml always
-		// defines routes for these services; without stubs the delegate step
-		// errors out with a hard 500 because the service name is missing.
+		// Create stub handlers so delegate routes return 503 instead of 500
 		stubMsg := "event store unavailable — timeline/replay/backfill features disabled"
-		for _, name := range []string{"admin-timeline-mgmt", "admin-replay-mgmt", "admin-backfill-mgmt"} {
-			stub := featureDisabledHandler(stubMsg)
-			engine.GetApp().RegisterModule(module.NewServiceModule(name, stub))
-			if regErr := engine.GetApp().RegisterService(name, stub); regErr != nil {
-				logger.Warn("Failed to register stub service", "name", name, "error", regErr)
-			}
-		}
-		logger.Info("Registered stub handlers for timeline/replay/backfill (event store unavailable)")
+		app.timelineMux = featureDisabledHandler(stubMsg)
+		app.replayMux = featureDisabledHandler(stubMsg)
+		app.backfillMux = featureDisabledHandler(stubMsg)
+		logger.Info("Created stub handlers for timeline/replay/backfill (event store unavailable)")
 	}
 
-	// DLQ handler (in-memory store for now)
+	// -----------------------------------------------------------------------
+	// DLQ handler
+	// -----------------------------------------------------------------------
+
 	dlqStore := evstore.NewInMemoryDLQStore()
 	dlqHandler := evstore.NewDLQHandler(dlqStore, logger)
 	dlqMux := http.NewServeMux()
 	dlqHandler.RegisterRoutes(dlqMux)
-	engine.GetApp().RegisterModule(module.NewServiceModule("admin-dlq-mgmt", dlqMux))
-	if regErr := engine.GetApp().RegisterService("admin-dlq-mgmt", dlqMux); regErr != nil {
-		logger.Warn("Failed to register DLQ service", "error", regErr)
-	}
+	app.dlqMux = dlqMux
 
-	// Billing handler (mock provider + in-memory meter for now)
+	// -----------------------------------------------------------------------
+	// Billing handler
+	// -----------------------------------------------------------------------
+
 	billingMeter := billing.NewInMemoryMeter()
 	billingProvider := billing.NewMockBillingProvider()
 	billingHandler := billing.NewHandler(billingMeter, billingProvider)
 	billingMux := http.NewServeMux()
 	billingHandler.RegisterRoutes(billingMux)
-	engine.GetApp().RegisterModule(module.NewServiceModule("admin-billing-mgmt", billingMux))
-	if regErr := engine.GetApp().RegisterService("admin-billing-mgmt", billingMux); regErr != nil {
-		logger.Warn("Failed to register billing service", "error", regErr)
+	app.billingMux = billingMux
+
+	logger.Info("Created DLQ and billing handlers")
+
+	// -----------------------------------------------------------------------
+	// Native plugins
+	// -----------------------------------------------------------------------
+
+	// Use the V1Store's DB for the PluginManager so plugin state is persisted
+	// alongside workflow data (avoids a separate DB file).
+	var pluginDB *sql.DB
+	if store != nil {
+		pluginDB = store.DB()
 	}
-
-	logger.Info("Registered DLQ and billing services")
-
-	// Native plugin registry
-	nativeReg := plugin.NewNativeRegistry()
+	pluginMgr := plugin.NewPluginManager(pluginDB, logger)
 
 	// Store Browser plugin — needs the V1Store's DB, event store, and DLQ store
 	if store != nil {
 		sbPlugin := storebrowser.New(store.DB(), eventStore, dlqStore)
-		nativeReg.Register(sbPlugin)
+		if err := pluginMgr.Register(sbPlugin); err != nil {
+			logger.Warn("Failed to register store-browser plugin", "error", err)
+		}
 	}
 
 	// Doc Manager plugin — needs the V1Store's DB for the workflow_docs table
 	if store != nil {
 		dmPlugin := docmanager.New(store.DB())
-		nativeReg.Register(dmPlugin)
-	}
-
-	// Plugin discovery + route handler
-	nativeHandler := plugin.NewNativeHandler(nativeReg)
-	engine.GetApp().RegisterModule(module.NewServiceModule("admin-native-plugins", nativeHandler))
-	if regErr := engine.GetApp().RegisterService("admin-native-plugins", nativeHandler); regErr != nil {
-		logger.Warn("Failed to register native plugins service", "error", regErr)
-	}
-
-	logger.Info("Registered native plugins", "count", len(nativeReg.List()))
-
-	// -----------------------------------------------------------------------
-	// CI/CD Platform: Environment, Deploy, Cloud Providers, Plugin Registry
-	// -----------------------------------------------------------------------
-
-	// Environment management (SQLite-backed store + HTTP handler)
-	envDBPath := filepath.Join(*dataDir, "environments.db")
-	envStore, envErr := environment.NewSQLiteStore(envDBPath)
-	if envErr != nil {
-		logger.Warn("Failed to create environment store — environment management disabled", "error", envErr)
-		// Register stub so delegate routes return 503 instead of 500
-		stub := featureDisabledHandler("environment store unavailable — environment management disabled")
-		engine.GetApp().RegisterModule(module.NewServiceModule("admin-env-mgmt", stub))
-		if regErr := engine.GetApp().RegisterService("admin-env-mgmt", stub); regErr != nil {
-			logger.Warn("Failed to register stub environment service", "error", regErr)
+		if err := pluginMgr.Register(dmPlugin); err != nil {
+			logger.Warn("Failed to register doc-manager plugin", "error", err)
 		}
-	} else {
-		envHandler := environment.NewHandler(envStore)
-		envMux := http.NewServeMux()
-		envHandler.RegisterRoutes(envMux)
-		engine.GetApp().RegisterModule(module.NewServiceModule("admin-env-mgmt", envMux))
-		if regErr := engine.GetApp().RegisterService("admin-env-mgmt", envMux); regErr != nil {
-			logger.Warn("Failed to register environment service", "error", regErr)
-		}
-		logger.Info("Registered environment management service", "path", envDBPath)
 	}
-
-	// Deploy executor with strategy registry
-	strategyReg := deploy.NewStrategyRegistry(logger)
-	deployExecutor := deploy.NewExecutor(strategyReg)
 
 	// Cloud provider plugins
 	awsProvider := aws.NewAWSProvider(aws.AWSConfig{})
@@ -557,66 +534,152 @@ func wireV1HandlerPostStart(logger *slog.Logger, engine *workflow.StdEngine, app
 	azureProvider := azure.NewAzureProvider(azure.AzureConfig{})
 	doProvider := digitalocean.NewDOProvider(digitalocean.DOConfig{})
 
-	// Register providers with deploy executor
+	// Deploy executor with strategy registry
+	strategyReg := deploy.NewStrategyRegistry(logger)
+	deployExecutor := deploy.NewExecutor(strategyReg)
 	deployExecutor.RegisterProvider("aws", awsProvider)
 	deployExecutor.RegisterProvider("gcp", gcpProvider)
 	deployExecutor.RegisterProvider("azure", azureProvider)
 	deployExecutor.RegisterProvider("digitalocean", doProvider)
 
-	// Register cloud provider plugins with native registry
-	nativeReg.Register(awsProvider)
-	nativeReg.Register(gcpProvider)
-	nativeReg.Register(azureProvider)
-	nativeReg.Register(doProvider)
-
-	// Register provider routes on the admin mux
-	adminMux := http.NewServeMux()
-	awsProvider.RegisterRoutes(adminMux)
-	gcpProvider.RegisterRoutes(adminMux)
-	azureProvider.RegisterRoutes(adminMux)
-	doProvider.RegisterRoutes(adminMux)
-	engine.GetApp().RegisterModule(module.NewServiceModule("admin-cloud-providers", adminMux))
-	if regErr := engine.GetApp().RegisterService("admin-cloud-providers", adminMux); regErr != nil {
-		logger.Warn("Failed to register cloud providers service", "error", regErr)
+	// Register cloud provider plugins with PluginManager
+	for _, p := range []plugin.NativePlugin{awsProvider, gcpProvider, azureProvider, doProvider} {
+		if err := pluginMgr.Register(p); err != nil {
+			logger.Warn("Failed to register cloud provider plugin", "plugin", p.Name(), "error", err)
+		}
 	}
 
-	logger.Info("Registered cloud providers", "providers", []string{"aws", "gcp", "azure", "digitalocean"})
+	// Enable all registered plugins so their routes are active
+	for _, info := range pluginMgr.AllPlugins() {
+		if !info.Enabled {
+			if err := pluginMgr.Enable(info.Name); err != nil {
+				logger.Warn("Failed to enable plugin", "plugin", info.Name, "error", err)
+			}
+		}
+	}
 
-	// Plugin composite registry (local + remote)
+	// Plugin discovery + route handler (backed by PluginManager)
+	nativeHandler := plugin.NewNativeHandler(pluginMgr)
+	app.nativeHandler = nativeHandler
+
+	// Register provider routes on the cloud mux
+	cloudMux := http.NewServeMux()
+	awsProvider.RegisterRoutes(cloudMux)
+	gcpProvider.RegisterRoutes(cloudMux)
+	azureProvider.RegisterRoutes(cloudMux)
+	doProvider.RegisterRoutes(cloudMux)
+	app.cloudMux = cloudMux
+
+	logger.Info("Registered cloud providers", "providers", []string{"aws", "gcp", "azure", "digitalocean"})
+	logger.Info("Registered native plugins", "count", len(pluginMgr.AllPlugins()))
+
+	// -----------------------------------------------------------------------
+	// Environment management
+	// -----------------------------------------------------------------------
+
+	envDBPath := filepath.Join(*dataDir, "environments.db")
+	envStore, envErr := environment.NewSQLiteStore(envDBPath)
+	if envErr != nil {
+		logger.Warn("Failed to create environment store — environment management disabled", "error", envErr)
+		app.envMux = featureDisabledHandler("environment store unavailable — environment management disabled")
+	} else {
+		app.envStore = envStore
+		envHandler := environment.NewHandler(envStore)
+		envMux := http.NewServeMux()
+		envHandler.RegisterRoutes(envMux)
+		app.envMux = envMux
+		logger.Info("Registered environment management service", "path", envDBPath)
+	}
+
+	// -----------------------------------------------------------------------
+	// Plugin composite registry
+	// -----------------------------------------------------------------------
+
 	pluginLocalReg := plugin.NewLocalRegistry()
 	pluginRemoteReg := plugin.NewRemoteRegistry("https://plugins.workflow.dev")
 	compositeReg := plugin.NewCompositeRegistry(pluginLocalReg, pluginRemoteReg)
 	pluginHandler := plugin.NewRegistryHandler(compositeReg)
 	pluginMux := http.NewServeMux()
 	pluginHandler.RegisterRoutes(pluginMux)
-	engine.GetApp().RegisterModule(module.NewServiceModule("admin-plugin-registry", pluginMux))
-	if regErr := engine.GetApp().RegisterService("admin-plugin-registry", pluginMux); regErr != nil {
-		logger.Warn("Failed to register plugin registry service", "error", regErr)
-	}
+	app.pluginRegMux = pluginMux
 
 	logger.Info("Registered plugin composite registry (local + remote)")
 
-	// Wire execution tracking on CQRS handlers so pipeline executions are
-	// recorded in the V1Store's workflow_executions / execution_steps tables.
+	// -----------------------------------------------------------------------
+	// Execution tracker
+	// -----------------------------------------------------------------------
+
 	workflowID := ""
 	if sysWf, sysErr := store.GetSystemWorkflow(); sysErr == nil && sysWf != nil {
 		workflowID = sysWf.ID
 	}
-	tracker := &module.ExecutionTracker{
+	app.executionTracker = &module.ExecutionTracker{
 		Store:      store,
 		WorkflowID: workflowID,
 	}
-	for _, svc := range engine.GetApp().SvcRegistry() {
-		switch h := svc.(type) {
-		case *module.QueryHandler:
-			h.SetExecutionTracker(tracker)
-		case *module.CommandHandler:
-			h.SetExecutionTracker(tracker)
+
+	return nil
+}
+
+// registerPostStartServices registers all post-start service handlers with
+// the current engine's Application. This is called after engine.Start and
+// after each engine reload. The handlers themselves persist across reloads;
+// only the Application's service registry is re-populated.
+func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
+	engine := app.engine
+
+	// Wire EventRecorder adapter to the pipeline handler so pipeline
+	// executions emit events to the event store.
+	if app.eventStore != nil && app.pipelineHandler != nil {
+		recorder := evstore.NewEventRecorderAdapter(app.eventStore)
+		app.pipelineHandler.SetEventRecorder(recorder)
+		logger.Info("Wired EventRecorder to PipelineWorkflowHandler")
+	}
+
+	// Register V1 handler
+	if app.v1Handler != nil {
+		engine.GetApp().RegisterModule(module.NewServiceModule("admin-v1-mgmt", app.v1Handler))
+		if err := engine.GetApp().RegisterService("admin-v1-mgmt", app.v1Handler); err != nil {
+			logger.Warn("Failed to register v1 service", "error", err)
 		}
 	}
-	logger.Info("Wired execution tracker to CQRS handlers", "workflow_id", workflowID)
 
-	// Resolve delegates that couldn't be resolved during Init (because v1 wasn't registered yet)
+	// Register all delegate service modules with the new Application
+	delegateServices := map[string]http.Handler{
+		"admin-timeline-mgmt":   app.timelineMux,
+		"admin-replay-mgmt":     app.replayMux,
+		"admin-backfill-mgmt":   app.backfillMux,
+		"admin-dlq-mgmt":        app.dlqMux,
+		"admin-billing-mgmt":    app.billingMux,
+		"admin-native-plugins":  app.nativeHandler,
+		"admin-env-mgmt":        app.envMux,
+		"admin-cloud-providers": app.cloudMux,
+		"admin-plugin-registry": app.pluginRegMux,
+	}
+	for name, handler := range delegateServices {
+		if handler == nil {
+			continue
+		}
+		engine.GetApp().RegisterModule(module.NewServiceModule(name, handler))
+		if regErr := engine.GetApp().RegisterService(name, handler); regErr != nil {
+			logger.Warn("Failed to register service", "name", name, "error", regErr)
+		}
+	}
+
+	// Wire execution tracking on CQRS handlers
+	if app.executionTracker != nil {
+		for _, svc := range engine.GetApp().SvcRegistry() {
+			switch h := svc.(type) {
+			case *module.QueryHandler:
+				h.SetExecutionTracker(app.executionTracker)
+			case *module.CommandHandler:
+				h.SetExecutionTracker(app.executionTracker)
+			}
+		}
+		logger.Info("Wired execution tracker to CQRS handlers", "workflow_id", app.executionTracker.WorkflowID)
+	}
+
+	// Resolve delegates that couldn't be resolved during Init
 	for _, svc := range engine.GetApp().SvcRegistry() {
 		switch h := svc.(type) {
 		case *module.QueryHandler:
@@ -626,7 +689,49 @@ func wireV1HandlerPostStart(logger *slog.Logger, engine *workflow.StdEngine, app
 		}
 	}
 
-	logger.Info("Registered admin-v1-mgmt service for delegate dispatch")
+	logger.Info("Registered all post-start services for delegate dispatch")
+	return nil
+}
+
+// reloadEngine stops the current engine, builds a new one from the given config,
+// starts it, and re-registers all persistent services with the new Application.
+// This preserves all stores, handlers, and database connections across reloads.
+func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
+	logger := app.logger
+
+	// Stop the current engine
+	if stopErr := app.engine.Stop(context.Background()); stopErr != nil {
+		logger.Warn("Error stopping engine during reload", "error", stopErr)
+	}
+
+	// Build and start a new engine
+	newEngine, _, _, newPipelineHandler, buildErr := buildEngine(newCfg, logger)
+	if buildErr != nil {
+		return fmt.Errorf("failed to rebuild engine: %w", buildErr)
+	}
+
+	// Update the serverApp references BEFORE registering services,
+	// since registerManagementServices reads app.engine.
+	app.engine = newEngine
+	app.pipelineHandler = newPipelineHandler
+
+	// Re-register pre-start management services with the new Application
+	registerManagementServices(logger, app)
+
+	// Start the new engine
+	if startErr := newEngine.Start(context.Background()); startErr != nil {
+		return fmt.Errorf("failed to start reloaded engine: %w", startErr)
+	}
+
+	// Re-register post-start services (stores already initialized, just need
+	// to be re-registered with the new Application's service registry).
+	if app.v1Store != nil {
+		if regErr := app.registerPostStartServices(logger); regErr != nil {
+			return fmt.Errorf("failed to re-register post-start services: %w", regErr)
+		}
+	}
+
+	logger.Info("Engine reloaded successfully — all services preserved")
 	return nil
 }
 
@@ -682,6 +787,13 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 	if app.idempotencyDB != nil {
 		if err := app.idempotencyDB.Close(); err != nil {
 			app.logger.Error("Idempotency DB close error", "error", err)
+		}
+	}
+
+	// Close environment store
+	if app.envStore != nil {
+		if err := app.envStore.Close(); err != nil {
+			app.logger.Error("Environment store close error", "error", err)
 		}
 	}
 

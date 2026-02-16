@@ -48,6 +48,10 @@ func (p *AWSProvider) UIPages() []plugin.UIPageDef {
 	}
 }
 
+func (p *AWSProvider) Dependencies() []plugin.PluginDependency { return nil }
+func (p *AWSProvider) OnEnable(_ plugin.PluginContext) error    { return nil }
+func (p *AWSProvider) OnDisable(_ plugin.PluginContext) error   { return nil }
+
 func (p *AWSProvider) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/providers/aws/status", p.handleStatus)
 	mux.HandleFunc("/api/v1/providers/aws/regions", p.handleListRegions)

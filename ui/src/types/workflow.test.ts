@@ -80,8 +80,8 @@ describe('workflow types', () => {
   });
 
   describe('CATEGORIES', () => {
-    it('has all 11 expected categories', () => {
-      expect(CATEGORIES).toHaveLength(11);
+    it('has all 14 expected categories', () => {
+      expect(CATEGORIES).toHaveLength(14);
     });
 
     it('contains all expected category keys', () => {
@@ -96,6 +96,10 @@ describe('workflow types', () => {
       expect(keys).toContain('infrastructure');
       expect(keys).toContain('database');
       expect(keys).toContain('observability');
+      expect(keys).toContain('pipeline');
+      expect(keys).toContain('cicd');
+      expect(keys).toContain('security');
+      expect(keys).toContain('deployment');
     });
 
     it('each category has a key and label', () => {
@@ -113,8 +117,8 @@ describe('workflow types', () => {
   });
 
   describe('CATEGORY_COLORS', () => {
-    it('has all 11 category colors', () => {
-      expect(Object.keys(CATEGORY_COLORS)).toHaveLength(11);
+    it('has all 14 category colors', () => {
+      expect(Object.keys(CATEGORY_COLORS)).toHaveLength(14);
     });
 
     it('all values are hex color strings', () => {

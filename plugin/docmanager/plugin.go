@@ -29,6 +29,10 @@ func (p *Plugin) Description() string {
 	return "Create and manage markdown documentation for workflows"
 }
 
+func (p *Plugin) Dependencies() []plugin.PluginDependency {
+	return nil
+}
+
 func (p *Plugin) UIPages() []plugin.UIPageDef {
 	return []plugin.UIPageDef{
 		{ID: "docs", Label: "Documentation", Icon: "book", Category: "docs"},
@@ -38,3 +42,6 @@ func (p *Plugin) UIPages() []plugin.UIPageDef {
 func (p *Plugin) RegisterRoutes(mux *http.ServeMux) {
 	p.h.registerRoutes(mux)
 }
+
+func (p *Plugin) OnEnable(_ plugin.PluginContext) error  { return nil }
+func (p *Plugin) OnDisable(_ plugin.PluginContext) error { return nil }

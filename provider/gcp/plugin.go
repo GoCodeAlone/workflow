@@ -45,6 +45,10 @@ func (p *GCPProvider) UIPages() []plugin.UIPageDef {
 	}
 }
 
+func (p *GCPProvider) Dependencies() []plugin.PluginDependency { return nil }
+func (p *GCPProvider) OnEnable(_ plugin.PluginContext) error    { return nil }
+func (p *GCPProvider) OnDisable(_ plugin.PluginContext) error   { return nil }
+
 func (p *GCPProvider) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/providers/gcp/status", p.handleStatus)
 	mux.HandleFunc("/api/v1/providers/gcp/regions", p.handleListRegions)

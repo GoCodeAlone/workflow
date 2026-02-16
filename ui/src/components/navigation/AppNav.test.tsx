@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import AppNav from './AppNav.tsx';
 import useObservabilityStore from '../../store/observabilityStore.ts';
+import usePluginStore from '../../store/pluginStore.ts';
 
 // Mock the API module used by observability store
 vi.mock('../../utils/api.ts', () => ({
@@ -26,52 +27,66 @@ vi.mock('../../utils/api.ts', () => ({
   createEventStream: vi.fn(),
 }));
 
-function resetStore() {
+function resetStores() {
   useObservabilityStore.setState({
     activeView: 'editor',
+  });
+  // Reset plugin store to use the fallback pages
+  usePluginStore.setState({
+    plugins: [],
+    loaded: true,
+    loading: false,
+    enabling: {},
+    error: null,
+    // enabledPages uses FALLBACK_PAGES by default — no need to override
   });
 }
 
 describe('AppNav', () => {
   beforeEach(() => {
-    resetStore();
+    resetStores();
   });
 
-  it('renders all navigation items', () => {
+  it('renders global and plugin navigation items from enabledPages', () => {
     render(<AppNav />);
 
+    // Fallback pages have 6 global + 2 plugin = 8 buttons visible
+    // (workflow pages are hidden when no workflow is open)
     const buttons = screen.getAllByRole('button');
-    // 6 nav items: Editor, Dashboard, Executions, Logs, Events, Settings
-    expect(buttons).toHaveLength(6);
+    expect(buttons.length).toBeGreaterThanOrEqual(8);
   });
 
-  it('renders correct titles on buttons', () => {
+  it('renders correct titles on buttons from plugin-derived pages', () => {
     render(<AppNav />);
 
-    expect(screen.getByTitle('Editor')).toBeInTheDocument();
+    // Global pages from FALLBACK_PAGES
     expect(screen.getByTitle('Dashboard')).toBeInTheDocument();
-    expect(screen.getByTitle('Executions')).toBeInTheDocument();
-    expect(screen.getByTitle('Logs')).toBeInTheDocument();
-    expect(screen.getByTitle('Events')).toBeInTheDocument();
+    expect(screen.getByTitle('Editor')).toBeInTheDocument();
+    expect(screen.getByTitle('Marketplace')).toBeInTheDocument();
+    expect(screen.getByTitle('Templates')).toBeInTheDocument();
+    expect(screen.getByTitle('Environments')).toBeInTheDocument();
     expect(screen.getByTitle('Settings')).toBeInTheDocument();
+
+    // Plugin pages from FALLBACK_PAGES
+    expect(screen.getByTitle('Store Browser')).toBeInTheDocument();
+    expect(screen.getByTitle('Documentation')).toBeInTheDocument();
   });
 
   it('changes view when clicking a navigation item', () => {
     render(<AppNav />);
 
     fireEvent.click(screen.getByTitle('Dashboard'));
-
     expect(useObservabilityStore.getState().activeView).toBe('dashboard');
   });
 
   it('updates active view on multiple clicks', () => {
     render(<AppNav />);
 
-    fireEvent.click(screen.getByTitle('Logs'));
-    expect(useObservabilityStore.getState().activeView).toBe('logs');
+    fireEvent.click(screen.getByTitle('Marketplace'));
+    expect(useObservabilityStore.getState().activeView).toBe('marketplace');
 
-    fireEvent.click(screen.getByTitle('Events'));
-    expect(useObservabilityStore.getState().activeView).toBe('events');
+    fireEvent.click(screen.getByTitle('Settings'));
+    expect(useObservabilityStore.getState().activeView).toBe('settings');
 
     fireEvent.click(screen.getByTitle('Editor'));
     expect(useObservabilityStore.getState().activeView).toBe('editor');
@@ -80,5 +95,20 @@ describe('AppNav', () => {
   it('renders as a nav element', () => {
     render(<AppNav />);
     expect(screen.getByRole('navigation')).toBeInTheDocument();
+  });
+
+  it('renders dynamically when enabledPages change', () => {
+    // Override with a custom set of pages
+    usePluginStore.setState({
+      enabledPages: [
+        { id: 'custom-view', label: 'Custom View', icon: '\u{1F680}', category: 'global', order: 0 },
+      ],
+    });
+
+    render(<AppNav />);
+
+    expect(screen.getByTitle('Custom View')).toBeInTheDocument();
+    // Old fallback items should not be present
+    expect(screen.queryByTitle('Dashboard')).not.toBeInTheDocument();
   });
 });

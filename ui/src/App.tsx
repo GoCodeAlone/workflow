@@ -1,4 +1,4 @@
-import { Component, type ReactNode, useEffect, useState, useCallback } from 'react';
+import { Component, type ReactNode, useEffect, useMemo, useState, useCallback } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import NodePalette from './components/sidebar/NodePalette.tsx';
 import WorkflowCanvas from './components/canvas/WorkflowCanvas.tsx';
@@ -30,6 +30,7 @@ import useAuthStore from './store/authStore.ts';
 import useObservabilityStore from './store/observabilityStore.ts';
 import useModuleSchemaStore from './store/moduleSchemaStore.ts';
 import usePluginStore from './store/pluginStore.ts';
+import type { UIPageDef } from './store/pluginStore.ts';
 import useUILayoutStore, { PANEL_WIDTH_LIMITS } from './store/uiLayoutStore.ts';
 import { parseYaml } from './utils/serialization.ts';
 import type { ApiProject, ApiWorkflowRecord } from './utils/api.ts';
@@ -297,17 +298,23 @@ function AppLayout() {
   const activeWorkflowRecord = useWorkflowStore((s) => s.activeWorkflowRecord);
   const nodes = useWorkflowStore((s) => s.nodes);
   const selectedWorkflowId = useObservabilityStore((s) => s.selectedWorkflowId);
+  const enabledPages = usePluginStore((s) => s.enabledPages);
 
   // A workflow is "open" if it's loaded in the editor OR selected for observability
   const hasWorkflowOpen = !!(activeWorkflowRecord || nodes.length > 0 || selectedWorkflowId);
 
+  // Build set of workflow-category page IDs dynamically from plugin state
+  const workflowViewIds = useMemo(
+    () => new Set(enabledPages.filter((p: UIPageDef) => p.category === 'workflow').map((p: UIPageDef) => p.id)),
+    [enabledPages],
+  );
+
   // Redirect to dashboard when on a workflow-specific view but no workflow context
   useEffect(() => {
-    const workflowViews = new Set(['executions', 'logs', 'events']);
-    if (!hasWorkflowOpen && workflowViews.has(activeView)) {
+    if (!hasWorkflowOpen && workflowViewIds.has(activeView)) {
       setActiveView('dashboard');
     }
-  }, [hasWorkflowOpen, activeView, setActiveView]);
+  }, [hasWorkflowOpen, activeView, setActiveView, workflowViewIds]);
 
   return (
     <div

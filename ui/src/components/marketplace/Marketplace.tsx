@@ -1,25 +1,46 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import useMarketplaceStore, { type MarketplacePlugin } from '../../store/marketplaceStore';
+import { useState, useMemo, useCallback } from 'react';
+import usePluginStore, { type PluginInfo } from '../../store/pluginStore';
+import useMarketplaceStore from '../../store/marketplaceStore';
 
 // ---------------------------------------------------------------------------
-// Constants
+// Helpers
 // ---------------------------------------------------------------------------
 
-const CATEGORY_COLORS: Record<string, string> = {
-  Connectors: '#89b4fa',
-  Transforms: '#a6e3a1',
-  Middleware: '#fab387',
-  Storage: '#f9e2af',
-  AI: '#cba6f7',
-  Monitoring: '#f38ba8',
-};
+/** Given a plugin and the full plugin list, return names of plugins that depend on it. */
+function getDependents(pluginName: string, allPlugins: PluginInfo[]): string[] {
+  return allPlugins
+    .filter((p) => p.dependencies?.includes(pluginName))
+    .map((p) => p.name);
+}
+
+/** Given a plugin, return its dependency names. */
+function getDependencies(plugin: PluginInfo): string[] {
+  return plugin.dependencies ?? [];
+}
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function CategoryBadge({ category }: { category: string }) {
-  const color = CATEGORY_COLORS[category] || '#89b4fa';
+function DependencyBadge({ name, enabled }: { name: string; enabled: boolean }) {
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '1px 6px',
+        borderRadius: 3,
+        fontSize: 10,
+        background: enabled ? '#a6e3a122' : '#45475a',
+        color: enabled ? '#a6e3a1' : '#a6adc8',
+        border: `1px solid ${enabled ? '#a6e3a144' : '#585b70'}`,
+      }}
+    >
+      {name}
+    </span>
+  );
+}
+
+function StatusBadge({ enabled }: { enabled: boolean }) {
   return (
     <span
       style={{
@@ -28,44 +49,29 @@ function CategoryBadge({ category }: { category: string }) {
         borderRadius: 4,
         fontSize: 10,
         fontWeight: 600,
-        background: color + '22',
-        color,
+        background: enabled ? '#a6e3a122' : '#45475a',
+        color: enabled ? '#a6e3a1' : '#a6adc8',
       }}
     >
-      {category}
-    </span>
-  );
-}
-
-function TagBadge({ tag }: { tag: string }) {
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        padding: '1px 6px',
-        borderRadius: 3,
-        fontSize: 10,
-        background: '#45475a',
-        color: '#a6adc8',
-      }}
-    >
-      {tag}
+      {enabled ? 'Enabled' : 'Disabled'}
     </span>
   );
 }
 
 function PluginCard({
   plugin,
-  onAction,
+  allPlugins,
+  onToggle,
   actionLoading,
   onClick,
 }: {
-  plugin: MarketplacePlugin;
-  onAction: (plugin: MarketplacePlugin) => void;
+  plugin: PluginInfo;
+  allPlugins: PluginInfo[];
+  onToggle: (plugin: PluginInfo) => void;
   actionLoading: boolean;
-  onClick: (plugin: MarketplacePlugin) => void;
+  onClick: (plugin: PluginInfo) => void;
 }) {
-  const tags = plugin.tags || [];
+  const deps = getDependencies(plugin);
   return (
     <div
       onClick={() => onClick(plugin)}
@@ -87,10 +93,10 @@ function PluginCard({
         <div>
           <div style={{ color: '#cdd6f4', fontWeight: 600, fontSize: 14 }}>{plugin.name}</div>
           <div style={{ fontSize: 11, color: '#6c7086', marginTop: 2 }}>
-            v{plugin.version} by {plugin.author}
+            v{plugin.version}
           </div>
         </div>
-        {tags.length > 0 && <CategoryBadge category={tags[0]} />}
+        <StatusBadge enabled={plugin.enabled} />
       </div>
 
       <div style={{ fontSize: 12, color: '#a6adc8', lineHeight: 1.4, flex: 1 }}>
@@ -99,18 +105,22 @@ function PluginCard({
           : plugin.description}
       </div>
 
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-        {tags.map((tag) => (
-          <TagBadge key={tag} tag={tag} />
-        ))}
-      </div>
+      {deps.length > 0 && (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 10, color: '#6c7086' }}>deps:</span>
+          {deps.map((d) => {
+            const depPlugin = allPlugins.find((p) => p.name === d);
+            return <DependencyBadge key={d} name={d} enabled={depPlugin?.enabled ?? false} />;
+          })}
+        </div>
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 4 }}>
         <button
           disabled={actionLoading}
           onClick={(e) => {
             e.stopPropagation();
-            onAction(plugin);
+            onToggle(plugin);
           }}
           style={{
             padding: '4px 14px',
@@ -120,11 +130,11 @@ function PluginCard({
             fontWeight: 600,
             cursor: actionLoading ? 'wait' : 'pointer',
             opacity: actionLoading ? 0.6 : 1,
-            background: plugin.installed ? '#f38ba822' : '#89b4fa',
-            color: plugin.installed ? '#f38ba8' : '#1e1e2e',
+            background: plugin.enabled ? '#f38ba822' : '#89b4fa',
+            color: plugin.enabled ? '#f38ba8' : '#1e1e2e',
           }}
         >
-          {actionLoading ? '...' : plugin.installed ? 'Uninstall' : 'Install'}
+          {actionLoading ? '...' : plugin.enabled ? 'Disable' : 'Enable'}
         </button>
       </div>
     </div>
@@ -133,16 +143,24 @@ function PluginCard({
 
 function PluginDetailModal({
   plugin,
+  allPlugins,
   onClose,
-  onAction,
+  onToggle,
   actionLoading,
 }: {
-  plugin: MarketplacePlugin;
+  plugin: PluginInfo;
+  allPlugins: PluginInfo[];
   onClose: () => void;
-  onAction: (plugin: MarketplacePlugin) => void;
+  onToggle: (plugin: PluginInfo) => void;
   actionLoading: boolean;
 }) {
-  const tags = plugin.tags || [];
+  const deps = getDependencies(plugin);
+  const dependents = getDependents(plugin.name, allPlugins);
+  const enabledDependents = dependents.filter((d) => {
+    const p = allPlugins.find((pl) => pl.name === d);
+    return p?.enabled;
+  });
+
   return (
     <div
       onClick={onClose}
@@ -174,7 +192,7 @@ function PluginDetailModal({
           <div>
             <h2 style={{ color: '#cdd6f4', margin: 0, fontSize: 20, fontWeight: 600 }}>{plugin.name}</h2>
             <div style={{ fontSize: 12, color: '#6c7086', marginTop: 4 }}>
-              v{plugin.version} by {plugin.author}
+              v{plugin.version}
             </div>
           </div>
           <button
@@ -193,34 +211,76 @@ function PluginDetailModal({
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
-          <span
-            style={{
-              padding: '3px 10px',
-              borderRadius: 4,
-              fontSize: 11,
-              fontWeight: 600,
-              background: plugin.installed ? '#a6e3a122' : '#45475a',
-              color: plugin.installed ? '#a6e3a1' : '#a6adc8',
-            }}
-          >
-            {plugin.installed ? 'Installed' : 'Available'}
-          </span>
-        </div>
-
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 16 }}>
-          {tags.map((tag) => (
-            <TagBadge key={tag} tag={tag} />
-          ))}
+          <StatusBadge enabled={plugin.enabled} />
         </div>
 
         {/* Description */}
         <h3 style={{ color: '#cdd6f4', fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Description</h3>
         <p style={{ color: '#a6adc8', fontSize: 13, lineHeight: 1.6, marginBottom: 20 }}>{plugin.description}</p>
 
+        {/* Dependencies */}
+        {deps.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <h3 style={{ color: '#cdd6f4', fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Dependencies</h3>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {deps.map((d) => {
+                const depPlugin = allPlugins.find((p) => p.name === d);
+                return <DependencyBadge key={d} name={d} enabled={depPlugin?.enabled ?? false} />;
+              })}
+            </div>
+            {!plugin.enabled && deps.some((d) => !allPlugins.find((p) => p.name === d)?.enabled) && (
+              <div style={{ fontSize: 11, color: '#f9e2af', marginTop: 6 }}>
+                Enabling this plugin will also enable its disabled dependencies.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Dependents (relevant when disabling) */}
+        {plugin.enabled && enabledDependents.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <h3 style={{ color: '#cdd6f4', fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Enabled Dependents</h3>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {enabledDependents.map((d) => (
+                <DependencyBadge key={d} name={d} enabled={true} />
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: '#f38ba8', marginTop: 6 }}>
+              Disabling this plugin may also disable the plugins listed above.
+            </div>
+          </div>
+        )}
+
+        {/* UI Pages */}
+        {(plugin.uiPages?.length ?? 0) > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <h3 style={{ color: '#cdd6f4', fontSize: 14, fontWeight: 600, marginBottom: 8 }}>UI Pages</h3>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {plugin.uiPages.map((page) => (
+                <span
+                  key={page.id}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    fontSize: 11,
+                    background: '#45475a',
+                    color: '#cdd6f4',
+                  }}
+                >
+                  <span>{page.icon}</span> {page.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <button
             disabled={actionLoading}
-            onClick={() => onAction(plugin)}
+            onClick={() => onToggle(plugin)}
             style={{
               padding: '8px 24px',
               borderRadius: 6,
@@ -229,11 +289,11 @@ function PluginDetailModal({
               fontWeight: 600,
               cursor: actionLoading ? 'wait' : 'pointer',
               opacity: actionLoading ? 0.6 : 1,
-              background: plugin.installed ? '#f38ba822' : '#89b4fa',
-              color: plugin.installed ? '#f38ba8' : '#1e1e2e',
+              background: plugin.enabled ? '#f38ba822' : '#89b4fa',
+              color: plugin.enabled ? '#f38ba8' : '#1e1e2e',
             }}
           >
-            {actionLoading ? '...' : plugin.installed ? 'Uninstall' : 'Install'}
+            {actionLoading ? '...' : plugin.enabled ? 'Disable' : 'Enable'}
           </button>
         </div>
       </div>
@@ -242,85 +302,61 @@ function PluginDetailModal({
 }
 
 // ---------------------------------------------------------------------------
-// Main component
+// Main Marketplace component
 // ---------------------------------------------------------------------------
 
 export default function Marketplace() {
   const {
-    plugins: installed,
-    searchResults,
-    loading,
-    searching,
-    installing,
-    error,
-    fetchInstalled,
-    search,
-    install,
-    uninstall,
-    clearError,
-  } = useMarketplaceStore();
+    plugins,
+    enabling,
+    error: pluginError,
+    enablePlugin,
+    disablePlugin,
+    clearError: clearPluginError,
+  } = usePluginStore();
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedPlugin, setSelectedPlugin] = useState<MarketplacePlugin | null>(null);
-  const [view, setView] = useState<'installed' | 'available'>('installed');
-  const searchTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const { searchQuery, setSearchQuery } = useMarketplaceStore();
+  const [selectedPlugin, setSelectedPlugin] = useState<PluginInfo | null>(null);
+  const [view, setView] = useState<'enabled' | 'available'>('enabled');
 
-  // Load installed plugins on mount
-  useEffect(() => {
-    fetchInstalled();
-  }, [fetchInstalled]);
+  const error = pluginError;
+  const clearError = clearPluginError;
 
-  // Debounced search
-  const handleSearchChange = useCallback(
-    (value: string) => {
-      setSearchQuery(value);
-      if (searchTimer.current) clearTimeout(searchTimer.current);
-      searchTimer.current = setTimeout(() => {
-        search(value);
-      }, 300);
-    },
-    [search],
-  );
-
-  // Trigger initial search when switching to available tab
-  useEffect(() => {
-    if (view === 'available' && searchResults.length === 0) {
-      search(searchQuery);
-    }
-  }, [view, search, searchQuery, searchResults.length]);
-
-  const handleAction = useCallback(
-    (plugin: MarketplacePlugin) => {
-      if (plugin.installed) {
-        uninstall(plugin.name);
+  const handleToggle = useCallback(
+    (plugin: PluginInfo) => {
+      if (plugin.enabled) {
+        disablePlugin(plugin.name);
       } else {
-        install(plugin.name, plugin.version);
+        enablePlugin(plugin.name);
       }
-      // Update selected plugin state if modal is open
-      setSelectedPlugin((prev) => {
-        if (prev && prev.name === plugin.name) {
-          return { ...prev, installed: !prev.installed };
-        }
-        return prev;
-      });
     },
-    [install, uninstall],
+    [enablePlugin, disablePlugin],
   );
 
-  // Filter displayed plugins based on view
+  // Split plugins into enabled vs disabled
+  const { enabledPlugins, disabledPlugins } = useMemo(() => {
+    const enabled = plugins.filter((p) => p.enabled);
+    const disabled = plugins.filter((p) => !p.enabled);
+    return { enabledPlugins: enabled, disabledPlugins: disabled };
+  }, [plugins]);
+
+  // Filter by search
   const displayedPlugins = useMemo(() => {
-    if (view === 'installed') {
-      if (!searchQuery) return installed;
-      const q = searchQuery.toLowerCase();
-      return installed.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.description?.toLowerCase().includes(q) ||
-          p.tags?.some((t) => t.toLowerCase().includes(q)),
-      );
-    }
-    return searchResults;
-  }, [view, installed, searchResults, searchQuery]);
+    const source = view === 'enabled' ? enabledPlugins : disabledPlugins;
+    if (!searchQuery) return source;
+    const q = searchQuery.toLowerCase();
+    return source.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.description?.toLowerCase().includes(q),
+    );
+  }, [view, enabledPlugins, disabledPlugins, searchQuery]);
+
+  // Keep selectedPlugin in sync with latest plugin data
+  const currentSelectedPlugin = useMemo(() => {
+    if (!selectedPlugin) return null;
+    return plugins.find((p) => p.name === selectedPlugin.name) ?? selectedPlugin;
+  }, [selectedPlugin, plugins]);
 
   return (
     <div
@@ -333,7 +369,7 @@ export default function Marketplace() {
     >
       <h2 style={{ color: '#cdd6f4', margin: '0 0 4px', fontSize: 20, fontWeight: 600 }}>Plugin Marketplace</h2>
       <p style={{ color: '#6c7086', fontSize: 13, margin: '0 0 20px' }}>
-        Browse and install modules to extend your workflow engine.
+        Enable and disable plugins to customize your workflow engine.
       </p>
 
       {/* Error banner */}
@@ -362,7 +398,7 @@ export default function Marketplace() {
 
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid #45475a' }}>
-        {(['installed', 'available'] as const).map((tab) => (
+        {(['enabled', 'available'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setView(tab)}
@@ -375,10 +411,9 @@ export default function Marketplace() {
               fontSize: 13,
               fontWeight: 600,
               cursor: 'pointer',
-              textTransform: 'capitalize',
             }}
           >
-            {tab} {tab === 'installed' && `(${installed.length})`}
+            {tab === 'enabled' ? `Enabled (${enabledPlugins.length})` : `Available (${disabledPlugins.length})`}
           </button>
         ))}
       </div>
@@ -387,9 +422,9 @@ export default function Marketplace() {
       <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
         <input
           type="text"
-          placeholder={view === 'installed' ? 'Filter installed plugins...' : 'Search available plugins...'}
+          placeholder={view === 'enabled' ? 'Filter enabled plugins...' : 'Search available plugins...'}
           value={searchQuery}
-          onChange={(e) => handleSearchChange(e.target.value)}
+          onChange={(e) => setSearchQuery(e.target.value)}
           style={{
             flex: 1,
             minWidth: 200,
@@ -404,56 +439,47 @@ export default function Marketplace() {
         />
       </div>
 
-      {/* Loading state */}
-      {(loading || searching) && (
-        <div style={{ color: '#6c7086', fontSize: 13, textAlign: 'center', padding: 40 }}>
-          Loading...
-        </div>
-      )}
-
       {/* Summary */}
-      {!loading && !searching && (
-        <div style={{ fontSize: 12, color: '#6c7086', marginBottom: 12 }}>
-          Showing {displayedPlugins.length} plugin{displayedPlugins.length !== 1 ? 's' : ''}
-          {searchQuery && <> matching &quot;{searchQuery}&quot;</>}
-        </div>
-      )}
+      <div style={{ fontSize: 12, color: '#6c7086', marginBottom: 12 }}>
+        Showing {displayedPlugins.length} plugin{displayedPlugins.length !== 1 ? 's' : ''}
+        {searchQuery && <> matching &quot;{searchQuery}&quot;</>}
+      </div>
 
       {/* Plugin grid */}
-      {!loading && !searching && (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-            gap: 12,
-          }}
-        >
-          {displayedPlugins.map((plugin) => (
-            <PluginCard
-              key={plugin.name}
-              plugin={plugin}
-              onAction={handleAction}
-              actionLoading={!!installing[plugin.name]}
-              onClick={setSelectedPlugin}
-            />
-          ))}
-          {displayedPlugins.length === 0 && (
-            <div style={{ color: '#6c7086', fontSize: 13, gridColumn: '1 / -1', padding: 40, textAlign: 'center' }}>
-              {view === 'installed'
-                ? 'No plugins installed yet.'
-                : 'No plugins found. Try a different search term.'}
-            </div>
-          )}
-        </div>
-      )}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+          gap: 12,
+        }}
+      >
+        {displayedPlugins.map((plugin) => (
+          <PluginCard
+            key={plugin.name}
+            plugin={plugin}
+            allPlugins={plugins}
+            onToggle={handleToggle}
+            actionLoading={!!enabling[plugin.name]}
+            onClick={setSelectedPlugin}
+          />
+        ))}
+        {displayedPlugins.length === 0 && (
+          <div style={{ color: '#6c7086', fontSize: 13, gridColumn: '1 / -1', padding: 40, textAlign: 'center' }}>
+            {view === 'enabled'
+              ? 'No plugins enabled yet.'
+              : 'No available plugins to enable.'}
+          </div>
+        )}
+      </div>
 
       {/* Detail modal */}
-      {selectedPlugin && (
+      {currentSelectedPlugin && (
         <PluginDetailModal
-          plugin={selectedPlugin}
+          plugin={currentSelectedPlugin}
+          allPlugins={plugins}
           onClose={() => setSelectedPlugin(null)}
-          onAction={handleAction}
-          actionLoading={!!installing[selectedPlugin.name]}
+          onToggle={handleToggle}
+          actionLoading={!!enabling[currentSelectedPlugin.name]}
         />
       )}
     </div>

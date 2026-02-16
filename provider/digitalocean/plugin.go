@@ -44,6 +44,10 @@ func (p *DOProvider) UIPages() []plugin.UIPageDef {
 	}
 }
 
+func (p *DOProvider) Dependencies() []plugin.PluginDependency { return nil }
+func (p *DOProvider) OnEnable(_ plugin.PluginContext) error    { return nil }
+func (p *DOProvider) OnDisable(_ plugin.PluginContext) error   { return nil }
+
 func (p *DOProvider) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/providers/digitalocean/status", p.handleStatus)
 	mux.HandleFunc("/api/v1/providers/digitalocean/regions", p.handleListRegions)
