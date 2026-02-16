@@ -15,15 +15,16 @@ import (
 )
 
 // PluginInfo is the JSON representation of a plugin for API responses.
+// JSON field names use camelCase to match the TypeScript UI conventions.
 type PluginInfo struct {
 	Name         string             `json:"name"`
 	Version      string             `json:"version"`
 	Description  string             `json:"description"`
 	Enabled      bool               `json:"enabled"`
-	UIPages      []UIPageDef        `json:"ui_pages"`
+	UIPages      []UIPageDef        `json:"uiPages"`
 	Dependencies []PluginDependency `json:"dependencies"`
-	EnabledAt    string             `json:"enabled_at,omitempty"`
-	DisabledAt   string             `json:"disabled_at,omitempty"`
+	EnabledAt    string             `json:"enabledAt,omitempty"`
+	DisabledAt   string             `json:"disabledAt,omitempty"`
 }
 
 // PluginManager handles plugin registration, dependency resolution, lifecycle management,
@@ -283,6 +284,20 @@ func (pm *PluginManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle enable/disable management actions
+	subPath := ""
+	if len(parts) == 2 {
+		subPath = parts[1]
+	}
+	if subPath == "enable" && r.Method == http.MethodPost {
+		pm.handleEnable(w, pluginName)
+		return
+	}
+	if subPath == "disable" && r.Method == http.MethodPost {
+		pm.handleDisable(w, pluginName)
+		return
+	}
+
 	pm.mu.RLock()
 	_, registered := pm.plugins[pluginName]
 	isEnabled := pm.enabled[pluginName]
@@ -309,6 +324,38 @@ func (pm *PluginManager) handleListPlugins(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(plugins)
+}
+
+// handleEnable enables a plugin (and its dependencies) via POST.
+func (pm *PluginManager) handleEnable(w http.ResponseWriter, pluginName string) {
+	if err := pm.Enable(pluginName); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"name":    pluginName,
+		"enabled": true,
+	})
+}
+
+// handleDisable disables a plugin (and its dependents) via POST.
+func (pm *PluginManager) handleDisable(w http.ResponseWriter, pluginName string) {
+	if err := pm.Disable(pluginName); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"name":    pluginName,
+		"enabled": false,
+	})
 }
 
 // initDB creates the plugin_state table if it doesn't exist.

@@ -117,6 +117,7 @@ func (s *V1Store) initSchema() error {
 		status        TEXT NOT NULL DEFAULT 'pending',
 		output_data   TEXT DEFAULT '{}',
 		error_message TEXT DEFAULT '',
+		triggered_by  TEXT DEFAULT '',
 		started_at    TEXT NOT NULL,
 		completed_at  TEXT,
 		duration_ms   INTEGER DEFAULT 0,
@@ -189,7 +190,14 @@ func (s *V1Store) initSchema() error {
 	);
 	`
 	_, err := s.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migration: add triggered_by column if it doesn't exist (for existing databases)
+	_, _ = s.db.Exec("ALTER TABLE workflow_executions ADD COLUMN triggered_by TEXT DEFAULT ''")
+
+	return nil
 }
 
 // --- Types ---
@@ -794,10 +802,10 @@ func (s *V1Store) EnsureSystemHierarchy(ownerID, adminConfigYAML string) (compan
 // --- Execution Tracking ---
 
 // InsertExecution creates a new workflow execution record.
-func (s *V1Store) InsertExecution(id, workflowID, triggerType, status string, startedAt time.Time) error {
+func (s *V1Store) InsertExecution(id, workflowID, triggerType, status, triggeredBy string, startedAt time.Time) error {
 	_, err := s.db.Exec(
-		"INSERT INTO workflow_executions (id, workflow_id, trigger_type, status, started_at) VALUES (?, ?, ?, ?, ?)",
-		id, workflowID, triggerType, status, startedAt.UTC().Format(time.RFC3339),
+		"INSERT INTO workflow_executions (id, workflow_id, trigger_type, status, triggered_by, started_at) VALUES (?, ?, ?, ?, ?, ?)",
+		id, workflowID, triggerType, status, triggeredBy, startedAt.UTC().Format(time.RFC3339),
 	)
 	return err
 }
@@ -825,6 +833,15 @@ func (s *V1Store) CompleteExecutionStep(id, status string, completedAt time.Time
 	_, err := s.db.Exec(
 		"UPDATE execution_steps SET status = ?, completed_at = ?, duration_ms = ?, error_message = ? WHERE id = ?",
 		status, completedAt.UTC().Format(time.RFC3339), durationMs, errorMsg, id,
+	)
+	return err
+}
+
+// InsertLog inserts a log entry into the execution_logs table.
+func (s *V1Store) InsertLog(workflowID, executionID, level, message, moduleName, fields string, createdAt time.Time) error {
+	_, err := s.db.Exec(
+		"INSERT INTO execution_logs (workflow_id, execution_id, level, message, module_name, fields, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		workflowID, executionID, level, message, moduleName, fields, createdAt.UTC().Format(time.RFC3339),
 	)
 	return err
 }

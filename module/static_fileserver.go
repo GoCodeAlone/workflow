@@ -61,16 +61,22 @@ func (s *StaticFileServer) SetRouterName(name string) {
 
 // Init initializes the module
 func (s *StaticFileServer) Init(app modular.Application) error {
-	// Validate root path exists
+	// Validate root path exists, creating it if needed (for build pipeline workflows
+	// where the output directory is created by a build step after engine init)
 	absRoot, err := filepath.Abs(s.root)
 	if err != nil {
 		return fmt.Errorf("invalid root path %q: %w", s.root, err)
 	}
 	info, err := os.Stat(absRoot)
 	if err != nil {
-		return fmt.Errorf("root path %q does not exist: %w", absRoot, err)
-	}
-	if !info.IsDir() {
+		if os.IsNotExist(err) {
+			if mkErr := os.MkdirAll(absRoot, 0750); mkErr != nil {
+				return fmt.Errorf("root path %q does not exist and could not be created: %w", absRoot, mkErr)
+			}
+		} else {
+			return fmt.Errorf("root path %q: %w", absRoot, err)
+		}
+	} else if !info.IsDir() {
 		return fmt.Errorf("root path %q is not a directory", absRoot)
 	}
 	s.root = absRoot
@@ -109,13 +115,31 @@ func (s *StaticFileServer) Handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", s.cacheMaxAge))
 
 	// Check if file exists
-	_, err = os.Stat(fullPath)
+	info, err := os.Stat(fullPath)
 	if os.IsNotExist(err) {
 		if s.spaFallback {
 			// Serve index.html for SPA routing
 			indexPath := filepath.Join(s.root, "index.html")
 			if _, indexErr := os.Stat(indexPath); indexErr == nil {
 				http.ServeFile(w, r, indexPath)
+				return
+			}
+		}
+		http.NotFound(w, r)
+		return
+	}
+
+	// If the path is a directory, serve its index.html (SPA entry point)
+	if err == nil && info.IsDir() {
+		indexPath := filepath.Join(fullPath, "index.html")
+		if _, indexErr := os.Stat(indexPath); indexErr == nil {
+			http.ServeFile(w, r, indexPath)
+			return
+		}
+		if s.spaFallback {
+			rootIndex := filepath.Join(s.root, "index.html")
+			if _, rootErr := os.Stat(rootIndex); rootErr == nil {
+				http.ServeFile(w, r, rootIndex)
 				return
 			}
 		}

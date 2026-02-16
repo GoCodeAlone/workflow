@@ -1,0 +1,80 @@
+# UI Build & Serve Pipeline
+#
+# Demonstrates using step.build_ui to build a React/Vite UI from source,
+# then serving the built assets via static.fileserver.
+#
+# This enables config-driven UI builds without CLI commands — the workflow
+# engine handles npm install, npm run build, and artifact serving automatically.
+#
+# Usage:
+#   go run ./cmd/server -config example/ui-build-and-serve.yaml
+#   # Then POST to /api/build-ui to trigger the build
+#   curl -X POST http://localhost:9090/api/build-ui
+#   # After build completes, the UI is served at http://localhost:9090/
+
+name: ui-build-and-serve
+version: "1.0"
+description: >
+  Pipeline-driven UI build and static file serving. Builds the React/Vite
+  UI from source and serves the resulting artifacts via static.fileserver,
+  all without manual CLI commands.
+
+modules:
+  # HTTP server to serve the built UI and accept build triggers
+  - name: ui-server
+    type: http.server
+    config:
+      address: ":9090"
+
+  # Router for the UI server
+  - name: ui-router
+    type: http.router
+    dependsOn:
+      - ui-server
+
+  # Command handler for build operations
+  - name: build-commands
+    type: api.command
+    dependsOn:
+      - ui-router
+    config:
+      service_name: build-commands
+
+  # Static file server for the built UI assets
+  - name: ui-static
+    type: static.fileserver
+    dependsOn:
+      - ui-router
+    config:
+      root: "./ui_built"
+      prefix: "/"
+      spa: true
+      cache_max_age: 3600
+      security_headers: true
+
+workflows:
+  http:
+    server: ui-server
+    router: ui-router
+    routes:
+      # Build trigger route — POST to this to build the UI from source
+      - path: /api/build-ui
+        method: POST
+        handler: build-commands
+        pipeline:
+          steps:
+            - name: build-ui-assets
+              type: step.build_ui
+              config:
+                source_dir: "../ui"
+                output_dir: "./ui_built"
+                install_cmd: "npm install --silent"
+                build_cmd: "npm run build"
+                timeout: "5m"
+            - name: respond-success
+              type: step.json_response
+              config:
+                status: 200
+                body:
+                  status: "success"
+                  message: "UI build complete"

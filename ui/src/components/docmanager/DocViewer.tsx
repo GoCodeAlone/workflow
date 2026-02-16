@@ -17,7 +17,7 @@ function renderMarkdown(text: string): string {
   let inList = false;
 
   for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
+    const line = lines[i];
 
     if (line.includes('<pre ') || line.includes('</pre>')) {
       if (inList) { result.push('</ul>'); inList = false; }

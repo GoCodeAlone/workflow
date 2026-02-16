@@ -14,6 +14,7 @@ export interface WorkflowExecution {
   output_data?: unknown;
   error_message?: string;
   error_stack?: string;
+  triggered_by?: string;
   started_at: string;
   completed_at?: string;
   duration_ms?: number;

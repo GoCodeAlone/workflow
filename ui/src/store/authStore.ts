@@ -184,7 +184,10 @@ const useAuthStore = create<AuthStore>((set, get) => ({
 
   loadUser: async () => {
     try {
-      const user = await authFetch<User>('/auth/me');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      const user = await authFetch<User>('/auth/me', { signal: controller.signal });
+      clearTimeout(timer);
       set({ user });
     } catch (err) {
       // If 401/403, token is invalid — force logout to show login screen
@@ -192,6 +195,7 @@ const useAuthStore = create<AuthStore>((set, get) => ({
       if (msg.includes('401') || msg.includes('403') || msg.includes('user not found') || msg.includes('Unauthorized')) {
         get().logout();
       }
+      // On network error/timeout, keep current auth state (token might still be valid)
     }
   },
 
@@ -213,10 +217,16 @@ const useAuthStore = create<AuthStore>((set, get) => ({
   checkSetupStatus: async () => {
     set({ setupLoading: true });
     try {
-      const data = await authFetch<{ needsSetup: boolean; userCount: number }>('/auth/setup-status');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
+      const data = await authFetch<{ needsSetup: boolean; userCount: number }>(
+        '/auth/setup-status',
+        { signal: controller.signal },
+      );
+      clearTimeout(timer);
       set({ setupRequired: data.needsSetup, setupLoading: false });
     } catch {
-      // If the endpoint isn't available, assume setup is not required
+      // If the endpoint isn't available or times out, assume setup is not required
       set({ setupRequired: false, setupLoading: false });
     }
   },

@@ -12,13 +12,20 @@ export interface UIPageDef {
   order: number;    // sort order within category
 }
 
+export interface PluginDependency {
+  name: string;
+  minVersion: string;
+}
+
 export interface PluginInfo {
   name: string;
   version: string;
   description: string;
   enabled: boolean;
-  dependencies: string[];
+  dependencies: PluginDependency[];
   uiPages: UIPageDef[];
+  enabledAt?: string;
+  disabledAt?: string;
 }
 
 // ---------------------------------------------------------------------------

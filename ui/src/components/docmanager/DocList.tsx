@@ -1,5 +1,7 @@
-import { useEffect } from 'react';
-import useDocManagerStore, { type Doc } from '../../store/docManagerStore.ts';
+import { useEffect, useState, useMemo } from 'react';
+import useDocManagerStore, { type Doc, buildCategoryTree } from '../../store/docManagerStore.ts';
+import { apiListWorkflows, type ApiWorkflowRecord } from '../../utils/api.ts';
+import CategoryTree from './CategoryTree.tsx';
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -41,21 +43,30 @@ export default function DocList({ onNew }: { onNew: () => void }) {
   const fetchCategories = useDocManagerStore((s) => s.fetchCategories);
   const fetchDoc = useDocManagerStore((s) => s.fetchDoc);
 
+  const [workflows, setWorkflows] = useState<ApiWorkflowRecord[]>([]);
+
   useEffect(() => {
     fetchDocs();
     fetchCategories();
+    apiListWorkflows().then(setWorkflows).catch(() => setWorkflows([]));
   }, [fetchDocs, fetchCategories]);
 
   useEffect(() => {
     fetchDocs();
   }, [filters, fetchDocs]);
 
+  const categoryTree = useMemo(() => buildCategoryTree(categories), [categories]);
+
   const handleSearch = (value: string) => {
     setFilter('search', value);
   };
 
-  const handleCategoryFilter = (value: string) => {
-    setFilter('category', value);
+  const handleCategoryFilter = (fullPath: string) => {
+    setFilter('category', fullPath);
+  };
+
+  const handleWorkflowFilter = (value: string) => {
+    setFilter('workflow_id', value);
   };
 
   const handleSelect = (doc: Doc) => {
@@ -105,23 +116,36 @@ export default function DocList({ onNew }: { onNew: () => void }) {
           style={{ ...inputStyle, marginBottom: 6 }}
         />
 
-        {/* Category filter */}
+        {/* Workflow filter */}
         <select
-          value={filters.category ?? ''}
-          onChange={(e) => handleCategoryFilter(e.target.value)}
-          style={selectStyle}
+          value={filters.workflow_id ?? ''}
+          onChange={(e) => handleWorkflowFilter(e.target.value)}
+          style={{ ...selectStyle, marginBottom: 6 }}
         >
-          <option value="">All categories</option>
-          {categories.map((cat) => (
-            <option key={cat} value={cat}>
-              {cat}
+          <option value="">All workflows</option>
+          {workflows.map((wf) => (
+            <option key={wf.id} value={wf.id}>
+              {wf.name}
             </option>
           ))}
         </select>
       </div>
 
+      {/* Category tree */}
+      <div style={{ borderTop: '1px solid #313244', padding: '6px 0' }}>
+        <div style={{ padding: '2px 12px 4px', color: '#6c7086', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          Categories
+        </div>
+        <CategoryTree
+          tree={categoryTree}
+          docs={docs}
+          selectedCategory={filters.category ?? ''}
+          onSelect={handleCategoryFilter}
+        />
+      </div>
+
       {/* Doc list */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0', borderTop: '1px solid #313244' }}>
         {loading ? (
           <div style={{ color: '#6c7086', fontSize: 12, padding: 16, textAlign: 'center' }}>
             Loading...

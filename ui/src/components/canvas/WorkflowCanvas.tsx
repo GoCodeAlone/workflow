@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import {
   ReactFlow,
   Background,
@@ -6,8 +6,10 @@ import {
   MiniMap,
   BackgroundVariant,
   useReactFlow,
+  applyNodeChanges,
   type Connection,
   type Edge,
+  type Node as RFNode,
   type OnConnectStart,
   type OnConnectEnd,
   type IsValidConnection,
@@ -20,8 +22,21 @@ import useUILayoutStore from '../../store/uiLayoutStore.ts';
 import { saveWorkflowConfig } from '../../utils/api.ts';
 import type { WorkflowEdgeData } from '../../types/workflow.ts';
 import { computeContainerView } from '../../utils/grouping.ts';
-import { isTypeCompatible, getOutputTypes, getInputTypes, getCompatibleNodes } from '../../utils/connectionCompatibility.ts';
+import { isTypeCompatible, getOutputTypes, getInputTypes, getCompatibleNodes, canAcceptIncoming, canAcceptOutgoing } from '../../utils/connectionCompatibility.ts';
+import { findSnapCandidate } from '../../utils/snapToConnect.ts';
 import ConnectionPicklist from './ConnectionPicklist.tsx';
+import DeletableEdge from './DeletableEdge.tsx';
+import EdgeContextMenu from './EdgeContextMenu.tsx';
+import NodeContextMenu from './NodeContextMenu.tsx';
+
+const edgeTypes = { deletable: DeletableEdge };
+
+interface ContextMenuState {
+  type: 'edge' | 'node';
+  x: number;
+  y: number;
+  id: string;
+}
 
 export default function WorkflowCanvas() {
   const nodes = useWorkflowStore((s) => s.nodes);
@@ -32,6 +47,9 @@ export default function WorkflowCanvas() {
   const addNode = useWorkflowStore((s) => s.addNode);
   const setSelectedNode = useWorkflowStore((s) => s.setSelectedNode);
   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
+  const selectedEdgeId = useWorkflowStore((s) => s.selectedEdgeId);
+  const setSelectedEdge = useWorkflowStore((s) => s.setSelectedEdge);
+  const removeEdge = useWorkflowStore((s) => s.removeEdge);
   const removeNode = useWorkflowStore((s) => s.removeNode);
   const undo = useWorkflowStore((s) => s.undo);
   const redo = useWorkflowStore((s) => s.redo);
@@ -44,46 +62,80 @@ export default function WorkflowCanvas() {
   const hideConnectionPicklist = useWorkflowStore((s) => s.hideConnectionPicklist);
   const connectionPicklist = useWorkflowStore((s) => s.connectionPicklist);
   const connectingFrom = useWorkflowStore((s) => s.connectingFrom);
+  const setSnapTargetId = useWorkflowStore((s) => s.setSnapTargetId);
+  const pushHistory = useWorkflowStore((s) => s.pushHistory);
 
   const moduleTypeMap = useModuleSchemaStore((s) => s.moduleTypeMap);
 
   const propertyPanelCollapsed = useUILayoutStore((s) => s.propertyPanelCollapsed);
   const setPropertyPanelCollapsed = useUILayoutStore((s) => s.setPropertyPanelCollapsed);
 
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, getViewport } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   const styledEdges: Edge[] = useMemo(() => {
-    const edgeStyles: Record<string, { stroke: string; strokeDasharray?: string }> = {
-      'dependency': { stroke: '#585b70', strokeDasharray: '5,5' },
-      'http-route': { stroke: '#3b82f6' },
-      'messaging-subscription': { stroke: '#8b5cf6' },
-      'statemachine': { stroke: '#f59e0b' },
-      'event': { stroke: '#ef4444' },
-      'conditional': { stroke: '#22c55e' },
-      'auto-wire': { stroke: '#585b70', strokeDasharray: '4 4' },
-      'middleware-chain': { stroke: '#fab387', strokeDasharray: '6,3' },
-      'pipeline-flow': { stroke: '#e879f9' },
+    // Clean solid lines with opacity/thickness differentiation instead of dashes
+    const edgeStyles: Record<string, { stroke: string; strokeWidth: number; opacity?: number }> = {
+      'dependency':              { stroke: '#585b70', strokeWidth: 1.5, opacity: 0.4 },
+      'http-route':              { stroke: '#3b82f6', strokeWidth: 2.5 },
+      'messaging-subscription':  { stroke: '#8b5cf6', strokeWidth: 2.5 },
+      'statemachine':            { stroke: '#f59e0b', strokeWidth: 2.5 },
+      'event':                   { stroke: '#ef4444', strokeWidth: 2 },
+      'conditional':             { stroke: '#22c55e', strokeWidth: 2 },
+      'auto-wire':               { stroke: '#45475a', strokeWidth: 1, opacity: 0.3 },
+      'middleware-chain':        { stroke: '#fab387', strokeWidth: 2.5 },
+      'pipeline-flow':           { stroke: '#e879f9', strokeWidth: 3 },
     };
     return edges.map((edge) => {
       const edgeData = edge.data as WorkflowEdgeData | undefined;
       const edgeType = edgeData?.edgeType;
-      if (!edgeType) return edge;
+      const isAutoWire = edgeType === 'auto-wire';
+      const isSelected = edge.id === selectedEdgeId && !isAutoWire;
+
+      if (!edgeType) {
+        // Untyped edge — apply selected styling if applicable
+        if (isSelected) {
+          const baseStroke = (edge.style?.stroke as string) || '#585b70';
+          return {
+            ...edge,
+            type: 'deletable',
+            style: {
+              ...edge.style,
+              strokeWidth: ((edge.style?.strokeWidth as number) || 2) + 1.5,
+              opacity: 1,
+              filter: `drop-shadow(0 0 4px ${baseStroke})`,
+            },
+          };
+        }
+        return { ...edge, type: 'deletable' };
+      }
       const style = edgeStyles[edgeType];
       if (!style) return edge;
-      const isAutoWire = edgeType === 'auto-wire';
       const isMiddlewareChain = edgeType === 'middleware-chain';
       const isPipelineFlow = edgeType === 'pipeline-flow';
 
       // For middleware-chain and pipeline-flow edges, show chain order as a step number label
       const chainOrder = (isMiddlewareChain || isPipelineFlow) ? edgeData?.chainOrder : undefined;
 
+      // Selected edge: increase strokeWidth, add glow, full opacity
+      const edgeStrokeWidth = isSelected ? style.strokeWidth + 1.5 : style.strokeWidth;
+      const edgeOpacity = isSelected ? 1 : (style.opacity ?? 1);
+      const edgeFilter = isSelected ? `drop-shadow(0 0 4px ${style.stroke})` : undefined;
+
       return {
         ...edge,
+        ...(!isAutoWire ? { type: 'deletable' as const } : {}),
         ...(chainOrder !== undefined
           ? { label: `#${chainOrder}` }
           : {}),
-        style: { ...edge.style, stroke: style.stroke, strokeWidth: isAutoWire ? 1.5 : 2, strokeDasharray: style.strokeDasharray },
+        style: {
+          ...edge.style,
+          stroke: style.stroke,
+          strokeWidth: edgeStrokeWidth,
+          opacity: edgeOpacity,
+          filter: edgeFilter,
+        },
         labelStyle: (isMiddlewareChain || isPipelineFlow)
           ? { fill: style.stroke, fontWeight: 700, fontSize: 14 }
           : { fill: style.stroke, fontWeight: 600, fontSize: 11 },
@@ -94,7 +146,7 @@ export default function WorkflowCanvas() {
         ...(isAutoWire ? { deletable: false, selectable: false, animated: false } : {}),
       };
     });
-  }, [edges]);
+  }, [edges, selectedEdgeId]);
 
   const { nodes: displayNodes, edges: displayEdges } = useMemo(() => {
     if (viewLevel === 'container' && nodes.length > 0) {
@@ -144,13 +196,43 @@ export default function WorkflowCanvas() {
     [setSelectedNode, propertyPanelCollapsed, setPropertyPanelCollapsed]
   );
 
+  const handleEdgeClick = useCallback((_event: React.MouseEvent, edge: Edge) => {
+    const edgeData = edge.data as WorkflowEdgeData | undefined;
+    if (edgeData?.edgeType === 'auto-wire') return; // auto-wire not selectable
+    setSelectedEdge(edge.id);
+  }, [setSelectedEdge]);
+
   const handlePaneClick = useCallback(() => {
     setSelectedNode(null);
+    setSelectedEdge(null);
+    setContextMenu(null);
     // Close picklist on pane click if not clicking within it
     if (connectionPicklist) {
       hideConnectionPicklist();
     }
-  }, [setSelectedNode, connectionPicklist, hideConnectionPicklist]);
+  }, [setSelectedNode, setSelectedEdge, connectionPicklist, hideConnectionPicklist]);
+
+  const handleEdgeContextMenu = useCallback(
+    (event: React.MouseEvent, edge: Edge) => {
+      event.preventDefault();
+      const edgeData = edge.data as WorkflowEdgeData | undefined;
+      if (edgeData?.edgeType === 'auto-wire') return;
+      setContextMenu({ type: 'edge', x: event.clientX, y: event.clientY, id: edge.id });
+    },
+    []
+  );
+
+  const handleNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: RFNode) => {
+      event.preventDefault();
+      setContextMenu({ type: 'node', x: event.clientX, y: event.clientY, id: node.id });
+    },
+    []
+  );
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
 
   // onConnectStart: identify source node's types and highlight compatible targets
   const handleConnectStart: OnConnectStart = useCallback(
@@ -254,9 +336,16 @@ export default function WorkflowCanvas() {
 
       if (outputTypes.length === 0 || inputTypes.length === 0) return true;
 
-      return outputTypes.some((outType) =>
+      const typesMatch = outputTypes.some((outType) =>
         inputTypes.some((inType) => isTypeCompatible(outType, inType)),
       );
+      if (!typesMatch) return false;
+
+      // Enforce connection limits
+      if (!canAcceptOutgoing(source, existingEdges, moduleTypeMap, sourceNode.data.moduleType)) return false;
+      if (!canAcceptIncoming(target, existingEdges, moduleTypeMap, targetNode.data.moduleType)) return false;
+
+      return true;
     },
     [nodes, moduleTypeMap]
   );
@@ -267,13 +356,20 @@ export default function WorkflowCanvas() {
       const target = e.target as HTMLElement;
       const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT';
 
-      if ((e.key === 'Delete' || e.key === 'Backspace') && !isInput && selectedNodeId) {
-        e.preventDefault();
-        removeNode(selectedNodeId);
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !isInput) {
+        if (selectedNodeId) {
+          e.preventDefault();
+          removeNode(selectedNodeId);
+        } else if (selectedEdgeId) {
+          e.preventDefault();
+          removeEdge(selectedEdgeId);
+        }
       }
 
       if (e.key === 'Escape') {
         setSelectedNode(null);
+        setSelectedEdge(null);
+        setContextMenu(null);
         hideConnectionPicklist();
       }
 
@@ -298,7 +394,72 @@ export default function WorkflowCanvas() {
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedNodeId, removeNode, setSelectedNode, undo, redo, exportToConfig, addToast, hideConnectionPicklist]);
+  }, [selectedNodeId, selectedEdgeId, removeNode, removeEdge, setSelectedNode, setSelectedEdge, undo, redo, exportToConfig, addToast, hideConnectionPicklist]);
+
+  // Snap-to-connect: detect proximity during drag
+  // Uses getState() for fresh nodes/edges to avoid stale closures during rapid drag events
+  const handleNodeDrag = useCallback(
+    (_event: React.MouseEvent, node: RFNode) => {
+      const { zoom } = getViewport();
+      const state = useWorkflowStore.getState();
+      const schemas = useModuleSchemaStore.getState().moduleTypeMap;
+      const candidate = findSnapCandidate(
+        node.id,
+        node.position,
+        state.nodes,
+        state.edges,
+        schemas,
+        zoom,
+      );
+      setSnapTargetId(candidate ? candidate.targetNodeId : null);
+    },
+    [getViewport, setSnapTargetId]
+  );
+
+  // Snap-to-connect: finalize on drag stop
+  // Uses getState() for fresh state; onConnect already calls pushHistory internally
+  const handleNodeDragStop = useCallback(
+    (_event: React.MouseEvent, node: RFNode) => {
+      const { zoom } = getViewport();
+      const state = useWorkflowStore.getState();
+      const schemas = useModuleSchemaStore.getState().moduleTypeMap;
+      const candidate = findSnapCandidate(
+        node.id,
+        node.position,
+        state.nodes,
+        state.edges,
+        schemas,
+        zoom,
+      );
+
+      if (candidate) {
+        // Push history BEFORE position change so undo captures pre-snap state
+        pushHistory();
+
+        // Move dragged node to snapped position
+        const positionChange = {
+          id: node.id,
+          type: 'position' as const,
+          position: candidate.snappedPosition,
+        };
+        const freshNodes = useWorkflowStore.getState().nodes;
+        const updatedNodes = applyNodeChanges([positionChange], freshNodes);
+        useWorkflowStore.setState({ nodes: updatedNodes });
+
+        // Auto-create edge (source = top node, target = bottom node)
+        // onConnect also calls pushHistory internally, so undo requires 2 steps
+        onConnect({
+          source: candidate.sourceNodeId,
+          target: candidate.targetForEdge,
+          sourceHandle: null,
+          targetHandle: null,
+        });
+      }
+
+      setSnapTargetId(null);
+    },
+    [getViewport, pushHistory, onConnect, setSnapTargetId]
+  );
 
   // Handle picklist node creation
   const handlePicklistSelect = useCallback(
@@ -354,14 +515,20 @@ export default function WorkflowCanvas() {
         onConnectStart={handleConnectStart}
         onConnectEnd={handleConnectEnd}
         isValidConnection={isValidConnection}
+        onNodeDrag={handleNodeDrag}
+        onNodeDragStop={handleNodeDragStop}
+        onEdgeClick={handleEdgeClick}
+        onEdgeContextMenu={handleEdgeContextMenu}
+        onNodeContextMenu={handleNodeContextMenu}
         onPaneClick={handlePaneClick}
         onNodeDoubleClick={handleNodeDoubleClick}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         fitView
         proOptions={{ hideAttribution: true }}
         defaultEdgeOptions={{
-          type: 'smoothstep',
-          animated: true,
+          type: 'deletable',
+          animated: false,
           style: { stroke: '#585b70', strokeWidth: 2 },
         }}
         style={{ background: '#1e1e2e' }}
@@ -384,6 +551,22 @@ export default function WorkflowCanvas() {
           connectingFrom={connectingFrom}
           onSelect={handlePicklistSelect}
           onClose={hideConnectionPicklist}
+        />
+      )}
+      {contextMenu?.type === 'edge' && (
+        <EdgeContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          edgeId={contextMenu.id}
+          onClose={closeContextMenu}
+        />
+      )}
+      {contextMenu?.type === 'node' && (
+        <NodeContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          nodeId={contextMenu.id}
+          onClose={closeContextMenu}
         />
       )}
     </div>

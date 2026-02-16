@@ -11,7 +11,6 @@ export default function HTTPServerNode({ id, data }: NodeProps<WorkflowNode>) {
       moduleType={data.moduleType}
       icon={<HttpIcon />}
       preview={addr}
-      hasInput={false}
     />
   );
 }

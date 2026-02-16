@@ -270,6 +270,12 @@ export default function ExecutionDetail() {
               <div style={{ color: '#a6adc8', fontSize: 11 }}>Trigger</div>
               <div style={{ color: '#cdd6f4', fontSize: 13 }}>{selectedExecution.trigger_type}</div>
             </div>
+            {selectedExecution.triggered_by && (
+              <div>
+                <div style={{ color: '#a6adc8', fontSize: 11 }}>Triggered By</div>
+                <div style={{ color: '#cdd6f4', fontSize: 13 }}>{selectedExecution.triggered_by}</div>
+              </div>
+            )}
             <div>
               <div style={{ color: '#a6adc8', fontSize: 11 }}>Status</div>
               <StatusBadge status={selectedExecution.status} />

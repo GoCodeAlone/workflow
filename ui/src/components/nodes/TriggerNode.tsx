@@ -9,7 +9,6 @@ export default function TriggerNode({ id, data }: NodeProps<WorkflowNode>) {
       label={data.label}
       moduleType={data.moduleType}
       icon={<TriggerIcon />}
-      hasInput={false}
     />
   );
 }

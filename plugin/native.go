@@ -8,8 +8,8 @@ import (
 
 // PluginDependency declares a dependency on another plugin.
 type PluginDependency struct {
-	Name       string // required plugin name
-	MinVersion string // semver constraint, empty = any version
+	Name       string `json:"name"`       // required plugin name
+	MinVersion string `json:"minVersion"` // semver constraint, empty = any version
 }
 
 // PluginContext provides shared resources to plugins during lifecycle events.

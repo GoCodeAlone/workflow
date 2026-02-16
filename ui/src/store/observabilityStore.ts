@@ -107,7 +107,7 @@ let pendingLogs: ExecutionLog[] = [];
 let pendingEvents: WorkflowEvent[] = [];
 
 const useObservabilityStore = create<ObservabilityStore>((set, get) => ({
-  activeView: 'editor',
+  activeView: 'dashboard',
   selectedWorkflowId: null,
 
   systemDashboard: null,

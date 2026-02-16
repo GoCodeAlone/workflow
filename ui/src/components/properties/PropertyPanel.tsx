@@ -123,7 +123,7 @@ export default function PropertyPanel() {
   // Track refs to input elements for cursor-position insertion
   const fieldInputRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | null>>({});
 
-  const handleFieldChange = (key: string, value: unknown) => {
+  const handleFieldChange = useCallback((key: string, value: unknown) => {
     // Mark field as overridden if it has inheritance
     if (inheritedValues[key]) {
       setOverriddenFields((prev) => new Set(prev).add(key));
@@ -131,7 +131,7 @@ export default function PropertyPanel() {
     if (node) {
       updateNodeConfig(node.id, { [key]: value });
     }
-  };
+  }, [inheritedValues, node, updateNodeConfig]);
 
   const insertAtCursor = useCallback((fieldKey: string, expr: string, currentValue: string) => {
     const el = fieldInputRefs.current[fieldKey];
@@ -148,7 +148,7 @@ export default function PropertyPanel() {
     } else {
       handleFieldChange(fieldKey, currentValue + expr);
     }
-  }, [handleFieldChange]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [handleFieldChange]);
 
   if (!node) {
     return (

@@ -41,6 +41,11 @@ func (h *handler) ensureTable() {
 	)`,
 		`CREATE INDEX IF NOT EXISTS idx_workflow_docs_workflow_id ON workflow_docs(workflow_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_workflow_docs_category ON workflow_docs(category)`,
+		`CREATE TABLE IF NOT EXISTS doc_categories (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL UNIQUE,
+		created_at TEXT NOT NULL
+	)`,
 	}
 
 	for _, stmt := range stmts {
@@ -59,6 +64,7 @@ func (h *handler) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/docs", h.handleDocs)
 	mux.HandleFunc("/docs/", h.handleDocByID)
 	mux.HandleFunc("/categories", h.handleCategories)
+	mux.HandleFunc("/categories/", h.handleCategoryByName)
 }
 
 // docSummary is the JSON representation for list responses (no content).
@@ -278,12 +284,18 @@ func (h *handler) deleteDoc(w http.ResponseWriter, id string) {
 }
 
 func (h *handler) handleCategories(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		h.listCategories(w)
+	case http.MethodPost:
+		h.createCategory(w, r)
+	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
 	}
+}
 
-	rows, err := h.db.Query(`SELECT DISTINCT category FROM workflow_docs WHERE category != '' ORDER BY category`)
+func (h *handler) listCategories(w http.ResponseWriter) {
+	rows, err := h.db.Query(`SELECT name FROM doc_categories UNION SELECT DISTINCT category FROM workflow_docs WHERE category != '' ORDER BY name`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to query categories: "+err.Error())
 		return
@@ -301,6 +313,60 @@ func (h *handler) handleCategories(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSONResponse(w, http.StatusOK, categories)
+}
+
+type createCategoryRequest struct {
+	Name string `json:"name"`
+}
+
+func (h *handler) createCategory(w http.ResponseWriter, r *http.Request) {
+	var req createCategoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	id := uuid.New().String()
+
+	h.mu.Lock()
+	_, err := h.db.Exec(`INSERT INTO doc_categories (id, name, created_at) VALUES (?, ?, ?)`, id, req.Name, now)
+	h.mu.Unlock()
+
+	if err != nil {
+		writeError(w, http.StatusConflict, "category already exists or insert failed: "+err.Error())
+		return
+	}
+
+	writeJSONResponse(w, http.StatusCreated, map[string]string{"id": id, "name": req.Name, "created_at": now})
+}
+
+func (h *handler) handleCategoryByName(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/categories/")
+	if name == "" {
+		http.Error(w, "category name required", http.StatusBadRequest)
+		return
+	}
+
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	h.mu.Lock()
+	_, err := h.db.Exec(`DELETE FROM doc_categories WHERE name = ?`, name)
+	h.mu.Unlock()
+
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete category: "+err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeJSONResponse(w http.ResponseWriter, status int, data any) {

@@ -79,6 +79,7 @@ func KnownModuleTypes() []string {
 		"static.fileserver",
 		"step.artifact_pull",
 		"step.artifact_push",
+		"step.build_ui",
 		"step.conditional",
 		"step.db_exec",
 		"step.db_query",

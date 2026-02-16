@@ -69,7 +69,8 @@ const useEnvironmentStore = create<EnvironmentStore>((set, get) => ({
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `Failed to fetch environments (${res.status})`);
       }
-      const environments: Environment[] = await res.json();
+      const data = await res.json();
+      const environments: Environment[] = Array.isArray(data) ? data : [];
       set({ environments, loading: false });
     } catch (e) {
       set({ loading: false, error: e instanceof Error ? e.message : String(e) });
@@ -141,19 +142,15 @@ const useEnvironmentStore = create<EnvironmentStore>((set, get) => ({
   },
 
   testConnection: async (id: string) => {
-    try {
-      const res = await fetch(`/api/v1/admin/environments/${id}/test`, {
-        method: 'POST',
-        headers: authHeaders(),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Test failed (${res.status})`);
-      }
-      return await res.json() as ConnectionTestResult;
-    } catch (e) {
-      throw e;
+    const res = await fetch(`/api/v1/admin/environments/${id}/test`, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Test failed (${res.status})`);
     }
+    return await res.json() as ConnectionTestResult;
   },
 
   setSelectedEnvironment: (env: Environment | null) => {

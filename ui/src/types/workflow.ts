@@ -111,6 +111,8 @@ export interface ModuleTypeInfo {
   defaultConfig: Record<string, unknown>;
   configFields: ConfigFieldDef[];
   ioSignature?: IOSignature;
+  maxIncoming?: number | null;  // null/undefined=unlimited, 0=none, N=limit
+  maxOutgoing?: number | null;
 }
 
 export interface ConfigFieldDef {
@@ -159,6 +161,7 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
       { key: 'writeTimeout', label: 'Write Timeout', type: 'string', defaultValue: '30s' },
     ],
     ioSignature: { inputs: [], outputs: [{ name: 'request', type: 'http.Request' }] },
+    maxIncoming: 0,
   },
   {
     type: 'http.router',
@@ -392,6 +395,7 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
       { key: 'cron', label: 'Cron Expression', type: 'string' },
     ],
     ioSignature: { inputs: [], outputs: [{ name: 'tick', type: 'Time' }] },
+    maxIncoming: 0,
   },
   // Infrastructure
   {
@@ -444,6 +448,7 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
       { key: 'output', label: 'Output', type: 'select', options: ['stdout', 'file', 'database'] },
     ],
     ioSignature: { inputs: [{ name: 'event', type: 'Event' }], outputs: [] },
+    maxOutgoing: 0,
   },
   {
     type: 'httpclient.modular',
@@ -509,6 +514,7 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     defaultConfig: {},
     configFields: [],
     ioSignature: { inputs: [{ name: 'metrics', type: 'Metric[]' }], outputs: [] },
+    maxOutgoing: 0,
   },
   {
     type: 'health.checker',
@@ -529,6 +535,7 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
       { key: 'retentionDays', label: 'Retention Days', type: 'number', defaultValue: 7, description: 'Number of days to retain log entries' },
     ],
     ioSignature: { inputs: [{ name: 'logs', type: 'LogEntry[]' }], outputs: [] },
+    maxOutgoing: 0,
   },
   {
     type: 'http.middleware.requestid',
@@ -753,6 +760,7 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     defaultConfig: {},
     configFields: [],
     ioSignature: { inputs: [], outputs: [{ name: 'http-server', type: 'net.Listener' }] },
+    maxIncoming: 0,
   },
   {
     type: 'dynamic.component',

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import FieldPicker from './FieldPicker.tsx';
 
 interface PipelineStep {
@@ -101,6 +101,51 @@ function getStepPreview(step: PipelineStep): string {
   return '';
 }
 
+// Puzzle-piece SVG connector dimensions
+const NOTCH_WIDTH = 20;
+const NOTCH_HEIGHT = 6;
+const CARD_HEIGHT = 38;
+
+/** SVG puzzle-piece notch (indent at top of card) */
+function PuzzleNotch({ color, prevColor }: { color: string; prevColor: string }) {
+  // Gradient from previous step's color to this step's color
+  const gradId = `notch-grad-${color}-${prevColor}`.replace(/#/g, '');
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', height: NOTCH_HEIGHT, marginTop: -1, position: 'relative', zIndex: 1 }}>
+      <svg width={NOTCH_WIDTH + 8} height={NOTCH_HEIGHT} viewBox={`0 0 ${NOTCH_WIDTH + 8} ${NOTCH_HEIGHT}`} style={{ display: 'block' }}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={prevColor} stopOpacity={0.6} />
+            <stop offset="100%" stopColor={color} stopOpacity={0.6} />
+          </linearGradient>
+        </defs>
+        <path
+          d={`M0,0 L${(NOTCH_WIDTH + 8 - NOTCH_WIDTH) / 2},0 L${(NOTCH_WIDTH + 8 - NOTCH_WIDTH) / 2 + 2},${NOTCH_HEIGHT} L${(NOTCH_WIDTH + 8 + NOTCH_WIDTH) / 2 - 2},${NOTCH_HEIGHT} L${(NOTCH_WIDTH + 8 + NOTCH_WIDTH) / 2},0 L${NOTCH_WIDTH + 8},0`}
+          fill="none"
+          stroke={`url(#${gradId})`}
+          strokeWidth={2}
+        />
+      </svg>
+    </div>
+  );
+}
+
+/** SVG puzzle-piece tab (protrusion at bottom of card) */
+function PuzzleTab({ color }: { color: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', height: NOTCH_HEIGHT, marginBottom: -1, position: 'relative', zIndex: 2 }}>
+      <svg width={NOTCH_WIDTH + 8} height={NOTCH_HEIGHT} viewBox={`0 0 ${NOTCH_WIDTH + 8} ${NOTCH_HEIGHT}`} style={{ display: 'block' }}>
+        <path
+          d={`M${(NOTCH_WIDTH + 8 - NOTCH_WIDTH) / 2},0 L${(NOTCH_WIDTH + 8 - NOTCH_WIDTH) / 2 + 2},${NOTCH_HEIGHT} L${(NOTCH_WIDTH + 8 + NOTCH_WIDTH) / 2 - 2},${NOTCH_HEIGHT} L${(NOTCH_WIDTH + 8 + NOTCH_WIDTH) / 2},0`}
+          fill={color + '30'}
+          stroke={color + '60'}
+          strokeWidth={1}
+        />
+      </svg>
+    </div>
+  );
+}
+
 export default function RoutePipelineEditor({ steps, onChange }: RoutePipelineEditorProps) {
   const [expanded, setExpanded] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -108,6 +153,8 @@ export default function RoutePipelineEditor({ steps, onChange }: RoutePipelineEd
   const [stepName, setStepName] = useState('');
   const [stepType, setStepType] = useState('validate');
   const [stepConfig, setStepConfig] = useState('');
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const configTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const insertAtCursor = (text: string) => {
@@ -161,25 +208,10 @@ export default function RoutePipelineEditor({ steps, onChange }: RoutePipelineEd
     onChange(steps.filter((_, i) => i !== idx));
   };
 
-  const handleMoveUp = (idx: number) => {
-    if (idx === 0) return;
-    const next = [...steps];
-    [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
-    onChange(next);
-  };
-
-  const handleMoveDown = (idx: number) => {
-    if (idx >= steps.length - 1) return;
-    const next = [...steps];
-    [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
-    onChange(next);
-  };
-
   const startEdit = (idx: number) => {
     const s = steps[idx];
     setEditIdx(idx);
     setStepName(s.name);
-    // Strip 'step.' prefix so the value matches STEP_TYPES dropdown values
     const normalizedType = s.type.startsWith('step.') ? s.type.slice(5) : s.type;
     setStepType(normalizedType);
     setStepConfig(s.config ? JSON.stringify(s.config, null, 2) : '');
@@ -198,6 +230,47 @@ export default function RoutePipelineEditor({ steps, onChange }: RoutePipelineEd
     const normalized = type.startsWith('step.') ? type.slice(5) : type;
     return STEP_TYPES.find((t) => t.value === normalized)?.label ?? type;
   };
+
+  // --- Drag and drop handlers ---
+  const handleDragStart = useCallback((e: React.DragEvent, idx: number) => {
+    setDragIdx(idx);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(idx));
+    // Make the drag image semi-transparent
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = '0.5';
+    }
+  }, []);
+
+  const handleDragEnd = useCallback((e: React.DragEvent) => {
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = '1';
+    }
+    setDragIdx(null);
+    setDragOverIdx(null);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent, idx: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverIdx(idx);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent, dropIdx: number) => {
+    e.preventDefault();
+    const fromIdx = dragIdx;
+    if (fromIdx === null || fromIdx === dropIdx) {
+      setDragIdx(null);
+      setDragOverIdx(null);
+      return;
+    }
+    const next = [...steps];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(dropIdx, 0, moved);
+    onChange(next);
+    setDragIdx(null);
+    setDragOverIdx(null);
+  }, [dragIdx, steps, onChange]);
 
   return (
     <div style={{ marginTop: 4 }}>
@@ -267,10 +340,27 @@ export default function RoutePipelineEditor({ steps, onChange }: RoutePipelineEd
             background: '#181825',
             border: '1px solid #313244',
             borderRadius: 6,
-            padding: 6,
+            padding: '6px 6px 6px 10px',
+            position: 'relative',
           }}
         >
-          {/* Step cards */}
+          {/* Vertical flow line on left */}
+          {steps.length > 1 && (
+            <div
+              style={{
+                position: 'absolute',
+                left: 12,
+                top: CARD_HEIGHT / 2 + 6,
+                bottom: adding ? 60 : CARD_HEIGHT / 2 + 6,
+                width: 2,
+                background: 'linear-gradient(to bottom, #a6e3a140, #f38ba840)',
+                borderRadius: 1,
+                zIndex: 0,
+              }}
+            />
+          )}
+
+          {/* Step cards with puzzle connectors */}
           {steps.map((step, i) => {
             const role = getStepRole(step.type);
             const color = ROLE_COLORS[role];
@@ -279,43 +369,44 @@ export default function RoutePipelineEditor({ steps, onChange }: RoutePipelineEd
             const preview = getStepPreview(step);
             const isFirst = i === 0;
             const isLast = i === steps.length - 1;
+            const prevRole = i > 0 ? getStepRole(steps[i - 1].type) : role;
+            const prevColor = i > 0 ? ROLE_COLORS[prevRole] : color;
+            const isDragging = dragIdx === i;
+            const isDragOver = dragOverIdx === i && dragIdx !== i;
 
             if (editIdx === i) {
               return (
-                <div key={`edit-${i}`}>
-                  {!isFirst && (
-                    <div style={{ display: 'flex', justifyContent: 'center' }}>
-                      <div style={{ width: 2, height: 6, background: color + '60' }} />
-                    </div>
-                  )}
+                <div key={`edit-${i}`} style={{ position: 'relative', zIndex: 1 }}>
+                  {!isFirst && <PuzzleNotch color={color} prevColor={prevColor} />}
                   <div
                     style={{
                       background: '#1e1e2e',
                       borderLeft: `3px solid ${color}`,
-                      borderRadius: isFirst && isLast ? 6 : isFirst ? '6px 6px 0 0' : isLast ? '0 0 6px 6px' : 0,
+                      borderRadius: 6,
                       padding: 6,
+                      marginLeft: 12,
                     }}
                   >
                     {renderForm(true)}
                   </div>
+                  {!isLast && <PuzzleTab color={color} />}
                 </div>
               );
             }
 
             return (
-              <div key={`${step.name}-${i}`}>
-                {/* Connector line between cards */}
-                {!isFirst && (
-                  <div style={{ display: 'flex', justifyContent: 'center' }}>
-                    <div
-                      style={{
-                        width: 2,
-                        height: 6,
-                        background: color + '60',
-                      }}
-                    />
-                  </div>
-                )}
+              <div
+                key={`${step.name}-${i}`}
+                style={{ position: 'relative', zIndex: 1 }}
+                draggable
+                onDragStart={(e) => handleDragStart(e, i)}
+                onDragEnd={handleDragEnd}
+                onDragOver={(e) => handleDragOver(e, i)}
+                onDrop={(e) => handleDrop(e, i)}
+              >
+                {/* Puzzle connector between cards */}
+                {!isFirst && <PuzzleNotch color={color} prevColor={prevColor} />}
+
                 {/* Step card */}
                 <div
                   style={{
@@ -323,35 +414,88 @@ export default function RoutePipelineEditor({ steps, onChange }: RoutePipelineEd
                     alignItems: 'center',
                     gap: 6,
                     padding: '4px 6px',
-                    background: '#1e1e2e',
+                    minHeight: CARD_HEIGHT,
+                    background: isDragOver
+                      ? '#313244'
+                      : isDragging
+                        ? '#1e1e2e80'
+                        : '#1e1e2e',
                     borderLeft: `3px solid ${color}`,
+                    borderTop: isFirst ? `1px solid ${color}40` : undefined,
+                    borderBottom: isLast ? `1px solid ${color}40` : undefined,
+                    borderRight: `1px solid ${color}20`,
                     borderRadius: isFirst && isLast
                       ? 6
                       : isFirst
-                        ? '6px 6px 0 0'
+                        ? '6px 6px 2px 2px'
                         : isLast
-                          ? '0 0 6px 6px'
-                          : 0,
-                    marginTop: isFirst ? 0 : -1,
+                          ? '2px 2px 6px 6px'
+                          : '2px',
+                    marginLeft: 12,
                     position: 'relative',
-                    transition: 'background 0.15s',
+                    transition: 'background 0.15s, box-shadow 0.15s',
+                    boxShadow: isDragOver
+                      ? `0 0 0 1px ${color}60, 0 2px 8px ${color}20`
+                      : isDragging
+                        ? '0 4px 12px rgba(0,0,0,0.4)'
+                        : 'none',
+                    cursor: 'grab',
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = '#242438'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = '#1e1e2e'; }}
+                  onMouseEnter={(e) => {
+                    if (!isDragging) e.currentTarget.style.background = '#242438';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isDragging) e.currentTarget.style.background = '#1e1e2e';
+                  }}
                 >
+                  {/* Flow dot on the vertical line */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: -16,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: color,
+                      border: '2px solid #181825',
+                      zIndex: 2,
+                    }}
+                  />
+
+                  {/* Drag handle */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 1,
+                      cursor: 'grab',
+                      opacity: 0.3,
+                      flexShrink: 0,
+                      padding: '0 2px',
+                    }}
+                    title="Drag to reorder"
+                  >
+                    <div style={{ width: 6, height: 1.5, background: '#585b70', borderRadius: 1 }} />
+                    <div style={{ width: 6, height: 1.5, background: '#585b70', borderRadius: 1 }} />
+                    <div style={{ width: 6, height: 1.5, background: '#585b70', borderRadius: 1 }} />
+                  </div>
+
                   {/* Role icon + indicator */}
                   <div
                     style={{
-                      width: 18,
-                      height: 18,
-                      borderRadius: 4,
+                      width: 20,
+                      height: 20,
+                      borderRadius: 5,
                       background: color + '20',
                       color: color,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      fontSize: 9,
+                      fontSize: 10,
                       flexShrink: 0,
+                      border: `1px solid ${color}30`,
                     }}
                     title={roleLabel}
                   >
@@ -406,36 +550,14 @@ export default function RoutePipelineEditor({ steps, onChange }: RoutePipelineEd
                   {/* Action buttons */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
                     <button
-                      onClick={() => handleMoveUp(i)}
-                      disabled={i === 0}
-                      style={{
-                        ...iconBtnStyle,
-                        opacity: i === 0 ? 0.25 : 0.5,
-                      }}
-                      title="Move up"
-                    >
-                      &#9650;
-                    </button>
-                    <button
-                      onClick={() => handleMoveDown(i)}
-                      disabled={i >= steps.length - 1}
-                      style={{
-                        ...iconBtnStyle,
-                        opacity: i >= steps.length - 1 ? 0.25 : 0.5,
-                      }}
-                      title="Move down"
-                    >
-                      &#9660;
-                    </button>
-                    <button
-                      onClick={() => startEdit(i)}
+                      onClick={(e) => { e.stopPropagation(); startEdit(i); }}
                       style={{ ...iconBtnStyle, opacity: 0.5 }}
                       title="Edit step"
                     >
                       &#9998;
                     </button>
                     <button
-                      onClick={() => handleDelete(i)}
+                      onClick={(e) => { e.stopPropagation(); handleDelete(i); }}
                       style={{ ...iconBtnStyle, color: '#f38ba8', opacity: 0.6 }}
                       title="Delete step"
                     >
@@ -443,6 +565,9 @@ export default function RoutePipelineEditor({ steps, onChange }: RoutePipelineEd
                     </button>
                   </div>
                 </div>
+
+                {/* Puzzle tab at bottom */}
+                {!isLast && <PuzzleTab color={color} />}
               </div>
             );
           })}
@@ -453,6 +578,7 @@ export default function RoutePipelineEditor({ steps, onChange }: RoutePipelineEd
                 padding: 6,
                 borderTop: steps.length > 0 ? '1px solid #313244' : undefined,
                 marginTop: steps.length > 0 ? 6 : 0,
+                marginLeft: 12,
               }}
             >
               {renderForm(false)}
@@ -470,7 +596,6 @@ export default function RoutePipelineEditor({ steps, onChange }: RoutePipelineEd
   );
 
   function renderForm(isEdit: boolean) {
-    // Compute preceding steps for the field picker
     const stepIdx = isEdit && editIdx !== null ? editIdx : steps.length;
     const preceding = steps.slice(0, stepIdx).map((s) => ({
       name: s.name,

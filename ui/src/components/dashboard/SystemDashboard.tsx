@@ -1,7 +1,8 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useMemo, useState } from 'react';
 import useObservabilityStore from '../../store/observabilityStore.ts';
 import useWorkflowStore from '../../store/workflowStore.ts';
 import type { WorkflowDashSummary } from '../../types/observability.ts';
+import { apiFetchRuntimeInstances, apiStopRuntimeInstance, type RuntimeInstanceResponse, type ApiWorkflowRecord } from '../../utils/api.ts';
 
 const STATUS_COLORS: Record<string, string> = {
   draft: '#6c7086',
@@ -100,13 +101,23 @@ export default function SystemDashboard() {
   const renameTab = useWorkflowStore((s) => s.renameTab);
   const activeTabId = useWorkflowStore((s) => s.activeTabId);
 
+  const [runtimeInstances, setRuntimeInstances] = useState<RuntimeInstanceResponse[]>([]);
+
   useEffect(() => {
     fetchSystemDashboard();
-    const interval = setInterval(fetchSystemDashboard, 10000);
+    apiFetchRuntimeInstances()
+      .then((r) => setRuntimeInstances(r.instances ?? []))
+      .catch(() => {});
+    const interval = setInterval(() => {
+      fetchSystemDashboard();
+      apiFetchRuntimeInstances()
+        .then((r) => setRuntimeInstances(r.instances ?? []))
+        .catch(() => {});
+    }, 10000);
     return () => clearInterval(interval);
   }, [fetchSystemDashboard]);
 
-  const summaries = systemDashboard?.workflow_summaries ?? [];
+  const summaries = useMemo(() => systemDashboard?.workflow_summaries ?? [], [systemDashboard]);
 
   const handleWorkflowClick = useCallback(
     (wfId: string) => {
@@ -114,7 +125,7 @@ export default function SystemDashboard() {
       const workflowName = wf?.workflow_name ?? wfId;
       setSelectedWorkflowId(wfId);
       renameTab(activeTabId, workflowName);
-      setActiveWorkflowRecord({ id: wfId, name: workflowName } as any);
+      setActiveWorkflowRecord({ id: wfId, name: workflowName } as Pick<ApiWorkflowRecord, 'id' | 'name'> as ApiWorkflowRecord);
       setActiveView('executions');
     },
     [setActiveView, setSelectedWorkflowId, summaries, renameTab, activeTabId, setActiveWorkflowRecord],
@@ -178,6 +189,62 @@ export default function SystemDashboard() {
           <div style={{ color: '#6c7086', fontSize: 13, gridColumn: '1 / -1' }}>No workflows found.</div>
         )}
       </div>
+
+      {/* Runtime Instances */}
+      {runtimeInstances.length > 0 && (
+        <>
+          <h3 style={{ color: '#cdd6f4', fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
+            Runtime Instances ({runtimeInstances.length})
+          </h3>
+          <div style={{ background: '#313244', borderRadius: 8, overflow: 'hidden', marginBottom: 24 }}>
+            {runtimeInstances.map((inst, i) => (
+              <div
+                key={inst.id}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '10px 16px',
+                  borderBottom: i < runtimeInstances.length - 1 ? '1px solid #45475a' : 'none',
+                }}
+              >
+                <div>
+                  <span style={{ color: '#cdd6f4', fontSize: 13, fontWeight: 600 }}>{inst.name}</span>
+                  <div style={{ fontSize: 11, color: '#6c7086', marginTop: 2 }}>{inst.config_path}</div>
+                  {inst.error && (
+                    <div style={{ fontSize: 11, color: '#f38ba8', marginTop: 2 }}>{inst.error}</div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <StatusBadge status={inst.status} />
+                  {inst.status === 'running' && (
+                    <button
+                      onClick={() =>
+                        apiStopRuntimeInstance(inst.id).then(() =>
+                          apiFetchRuntimeInstances()
+                            .then((r) => setRuntimeInstances(r.instances ?? []))
+                            .catch(() => {}),
+                        )
+                      }
+                      style={{
+                        background: '#f38ba822',
+                        color: '#f38ba8',
+                        border: '1px solid #f38ba844',
+                        borderRadius: 4,
+                        padding: '2px 8px',
+                        fontSize: 11,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Stop
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Error Summary */}
       {errorSummary.length > 0 && (

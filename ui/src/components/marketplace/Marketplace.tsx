@@ -9,13 +9,13 @@ import useMarketplaceStore from '../../store/marketplaceStore';
 /** Given a plugin and the full plugin list, return names of plugins that depend on it. */
 function getDependents(pluginName: string, allPlugins: PluginInfo[]): string[] {
   return allPlugins
-    .filter((p) => p.dependencies?.includes(pluginName))
+    .filter((p) => p.dependencies?.some((d) => d.name === pluginName))
     .map((p) => p.name);
 }
 
 /** Given a plugin, return its dependency names. */
 function getDependencies(plugin: PluginInfo): string[] {
-  return plugin.dependencies ?? [];
+  return (plugin.dependencies ?? []).map((d) => d.name);
 }
 
 // ---------------------------------------------------------------------------

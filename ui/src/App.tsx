@@ -355,7 +355,15 @@ function AppLayout() {
 
 function AuthenticatedApp() {
   const { isAuthenticated, loadUser, setTokenFromCallback, setupRequired, setupLoading, checkSetupStatus } = useAuthStore();
-  const [tokenValidated, setTokenValidated] = useState(false);
+
+  // Determine synchronously whether token validation is needed:
+  // Only the `isAuthenticated` path (no OAuth callback) needs async validation via loadUser.
+  const needsAsyncValidation = (() => {
+    const params = new URLSearchParams(window.location.search);
+    return !params.get('token') && isAuthenticated;
+  })();
+
+  const [tokenValidated, setTokenValidated] = useState(!needsAsyncValidation);
 
   useEffect(() => {
     // Check for OAuth callback tokens in URL
@@ -366,12 +374,9 @@ function AuthenticatedApp() {
       setTokenFromCallback(token, refreshToken);
       // Clean URL
       window.history.replaceState({}, '', window.location.pathname);
-      setTokenValidated(true);
     } else if (isAuthenticated) {
       // Validate existing token by loading user profile
       loadUser().then(() => setTokenValidated(true));
-    } else {
-      setTokenValidated(true);
     }
     // Check setup status on mount
     checkSetupStatus();

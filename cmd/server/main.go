@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/CrisisTextLine/modular"
@@ -28,6 +29,8 @@ import (
 	"github.com/GoCodeAlone/workflow/environment"
 	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/observability"
+	"github.com/GoCodeAlone/workflow/observability/tracing"
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/plugin/docmanager"
 	"github.com/GoCodeAlone/workflow/plugin/storebrowser"
@@ -55,8 +58,9 @@ var (
 	adminPassword = flag.String("admin-password", "", "Initial admin user password (first-run bootstrap)")
 
 	// v1 API flags
-	dataDir      = flag.String("data-dir", "./data", "Directory for SQLite database and persistent data")
-	restoreAdmin = flag.Bool("restore-admin", false, "Restore admin config to embedded default on startup")
+	dataDir       = flag.String("data-dir", "./data", "Directory for SQLite database and persistent data")
+	restoreAdmin  = flag.Bool("restore-admin", false, "Restore admin config to embedded default on startup")
+	loadWorkflows = flag.String("load-workflows", "", "Comma-separated paths to workflow YAML files or directories to load alongside admin")
 )
 
 // buildEngine creates the workflow engine with all handlers registered and built from config.
@@ -104,6 +108,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	engine.AddStepType("step.scan_deps", module.NewScanDepsStepFactory())
 	engine.AddStepType("step.deploy", module.NewDeployStepFactory())
 	engine.AddStepType("step.gate", module.NewGateStepFactory())
+	engine.AddStepType("step.build_ui", module.NewBuildUIStepFactory())
 
 	// Register standard triggers
 	engine.RegisterTrigger(module.NewHTTPTrigger())
@@ -185,6 +190,10 @@ type serverApp struct {
 	cloudMux         http.Handler             // cloud providers mux
 	pluginRegMux     http.Handler             // plugin registry mux
 	executionTracker *module.ExecutionTracker // execution tracking for CQRS
+	runtimeManager   *module.RuntimeManager   // filesystem-loaded workflow instances
+	runtimeMux       http.Handler             // runtime instances API
+	ingestMux        http.Handler             // ingest API for remote workers
+	reporter         *observability.Reporter  // reporter for sending data to admin (when worker)
 }
 
 // setup initializes all server components: engine, AI services, and HTTP mux.
@@ -616,6 +625,65 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	app.executionTracker = &module.ExecutionTracker{
 		Store:      store,
 		WorkflowID: workflowID,
+		Tracer:     tracing.NewWorkflowTracer(nil), // uses global OTEL provider
+	}
+
+	// -----------------------------------------------------------------------
+	// Ingest handler — receives observability data from remote workers
+	// -----------------------------------------------------------------------
+
+	ingestStore := observability.NewV1IngestStore(store.DB())
+	ingestHandler := observability.NewIngestHandler(ingestStore, logger)
+	ingestMux := http.NewServeMux()
+	ingestHandler.RegisterRoutes(ingestMux)
+	app.ingestMux = ingestMux
+	logger.Info("Registered ingest handler for remote worker observability")
+
+	// -----------------------------------------------------------------------
+	// Reporter — if WORKFLOW_ADMIN_URL is set, report to admin server
+	// -----------------------------------------------------------------------
+
+	if reporter := observability.ReporterFromEnv(logger); reporter != nil {
+		app.reporter = reporter
+		reporter.Start(context.Background())
+		logger.Info("Started observability reporter", "admin_url", os.Getenv("WORKFLOW_ADMIN_URL"))
+	}
+
+	// -----------------------------------------------------------------------
+	// Runtime manager — load workflows from --load-workflows flag
+	// -----------------------------------------------------------------------
+
+	// Always create a RuntimeManager (returns empty list when no workflows loaded)
+	runtimeBuilder := func(cfg *config.WorkflowConfig, lg *slog.Logger) (func(context.Context) error, error) {
+		eng, _, _, _, buildErr := buildEngine(cfg, lg)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		if startErr := eng.Start(context.Background()); startErr != nil {
+			return nil, startErr
+		}
+		return func(ctx context.Context) error {
+			return eng.Stop(ctx)
+		}, nil
+	}
+
+	rm := module.NewRuntimeManager(store, runtimeBuilder, logger)
+	app.runtimeManager = rm
+
+	// Create runtime handler
+	runtimeHandler := module.NewRuntimeHandler(rm)
+	app.runtimeMux = runtimeHandler
+
+	if *loadWorkflows != "" {
+		// Parse comma-separated paths
+		paths := strings.Split(*loadWorkflows, ",")
+		for i := range paths {
+			paths[i] = strings.TrimSpace(paths[i])
+		}
+
+		if loadErr := rm.LoadFromPaths(context.Background(), paths); loadErr != nil {
+			logger.Warn("Some workflows failed to load", "error", loadErr)
+		}
 	}
 
 	return nil
@@ -655,6 +723,8 @@ func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 		"admin-env-mgmt":        app.envMux,
 		"admin-cloud-providers": app.cloudMux,
 		"admin-plugin-registry": app.pluginRegMux,
+		"admin-ingest-mgmt":     app.ingestMux,
+		"admin-runtime-mgmt":    app.runtimeMux,
 	}
 	for name, handler := range delegateServices {
 		if handler == nil {
@@ -668,6 +738,13 @@ func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 
 	// Wire execution tracking on CQRS handlers
 	if app.executionTracker != nil {
+		// Also wire the event store recorder so CQRS pipelines emit events
+		// to the event store (used by store browser and timeline features).
+		if app.eventStore != nil {
+			app.executionTracker.EventStoreRecorder = evstore.NewEventRecorderAdapter(app.eventStore)
+			logger.Info("Wired EventStoreRecorder to execution tracker")
+		}
+
 		for _, svc := range engine.GetApp().SvcRegistry() {
 			switch h := svc.(type) {
 			case *module.QueryHandler:
@@ -758,6 +835,17 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 	// Wait for context cancellation
 	<-ctx.Done()
 
+	// Stop observability reporter (final flush)
+	if app.reporter != nil {
+		app.reporter.Stop()
+		app.logger.Info("Stopped observability reporter")
+	}
+
+	if app.runtimeManager != nil {
+		if err := app.runtimeManager.StopAll(context.Background()); err != nil {
+			app.logger.Error("Runtime manager shutdown error", "error", err)
+		}
+	}
 	if app.engineManager != nil {
 		if err := app.engineManager.StopAll(context.Background()); err != nil {
 			app.logger.Error("Engine manager shutdown error", "error", err)
@@ -829,6 +917,7 @@ func applyEnvOverrides() {
 		"anthropic-model": "WORKFLOW_AI_MODEL",
 		"jwt-secret":      "WORKFLOW_JWT_SECRET",
 		"data-dir":        "WORKFLOW_DATA_DIR",
+		"load-workflows":  "WORKFLOW_LOAD_WORKFLOWS",
 	}
 
 	// Track which flags were explicitly set on the command line.

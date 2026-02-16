@@ -545,3 +545,25 @@ export function apiCreateIAMRoleMapping(providerId: string, data: Partial<IAMRol
 export function apiDeleteIAMRoleMapping(mappingId: string): Promise<void> {
   return v1Fetch<void>(`/admin/iam/mappings/${encodeURIComponent(mappingId)}`, { method: 'DELETE' });
 }
+
+// --- Runtime Instances ---
+
+export interface RuntimeInstanceResponse {
+  id: string;
+  name: string;
+  config_path: string;
+  work_dir: string;
+  status: string;
+  started_at: string;
+  error?: string;
+}
+
+export function apiFetchRuntimeInstances(): Promise<{ instances: RuntimeInstanceResponse[]; total: number }> {
+  return v1Fetch<{ instances: RuntimeInstanceResponse[]; total: number }>('/admin/runtime/instances');
+}
+
+export function apiStopRuntimeInstance(instanceId: string): Promise<{ status: string }> {
+  return v1Fetch<{ status: string }>(`/admin/runtime/instances/${encodeURIComponent(instanceId)}/stop`, {
+    method: 'POST',
+  });
+}

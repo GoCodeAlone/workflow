@@ -68,6 +68,7 @@ type StdEngine struct {
 	eventEmitter     *module.WorkflowEventEmitter
 	secretsResolver  *secrets.MultiResolver
 	stepRegistry     *module.StepRegistry
+	configDir        string // directory of the config file, for resolving relative paths
 }
 
 // App returns the underlying modular.Application.
@@ -154,6 +155,9 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	if err := schema.ValidateConfig(cfg, valOpts...); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
 	}
+
+	// Store config directory for consistent path resolution in pipeline steps
+	e.configDir = cfg.ConfigDir
 
 	// Register all modules from config
 	for _, modCfg := range cfg.Modules {
@@ -1460,6 +1464,12 @@ func (e *StdEngine) buildPipelineSteps(pipelineName string, stepCfgs []config.Pi
 		stepConfig := sc.Config
 		if stepConfig == nil {
 			stepConfig = make(map[string]any)
+		}
+
+		// Inject config directory so steps can resolve relative paths
+		// consistently with module configs (relative to config file, not CWD).
+		if e.configDir != "" {
+			stepConfig["_config_dir"] = e.configDir
 		}
 
 		step, err := e.stepRegistry.Create(sc.Type, sc.Name, stepConfig, e.app)

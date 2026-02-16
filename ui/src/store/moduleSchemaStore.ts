@@ -19,6 +19,8 @@ interface ServerModuleSchema {
   outputs?: ServerIODef[];
   configFields: ServerConfigField[];
   defaultConfig?: Record<string, unknown>;
+  maxIncoming?: number | null;
+  maxOutgoing?: number | null;
 }
 
 interface ServerConfigField {
@@ -160,6 +162,8 @@ function mergeSchemas(
         configFields: server.configFields.length > 0 ? convertFields(server.configFields) : staticType.configFields,
         defaultConfig: server.defaultConfig ?? staticType.defaultConfig,
         ioSignature: serverIO ?? staticType.ioSignature,
+        maxIncoming: server.maxIncoming ?? staticType.maxIncoming,
+        maxOutgoing: server.maxOutgoing ?? staticType.maxOutgoing,
       });
     } else {
       merged.push(staticType);
@@ -176,6 +180,8 @@ function mergeSchemas(
         configFields: convertFields(server.configFields),
         defaultConfig: server.defaultConfig ?? {},
         ioSignature: convertIOSignature(server.inputs, server.outputs),
+        maxIncoming: server.maxIncoming,
+        maxOutgoing: server.maxOutgoing,
       });
     }
   }

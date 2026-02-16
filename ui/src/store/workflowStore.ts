@@ -43,6 +43,7 @@ interface WorkflowStore {
   nodes: WorkflowNode[];
   edges: Edge[];
   selectedNodeId: string | null;
+  selectedEdgeId: string | null;
   nodeCounter: number;
 
   // Toast notifications
@@ -72,6 +73,8 @@ interface WorkflowStore {
   onConnect: OnConnect;
 
   setSelectedNode: (id: string | null) => void;
+  setSelectedEdge: (id: string | null) => void;
+  removeEdge: (id: string) => void;
   addNode: (type: string, position: { x: number; y: number }) => void;
   removeNode: (id: string) => void;
   updateNodeConfig: (id: string, config: Record<string, unknown>) => void;
@@ -128,6 +131,10 @@ interface WorkflowStore {
   setCompatibleNodeIds: (ids: string[]) => void;
   showConnectionPicklist: (position: { x: number; y: number }) => void;
   hideConnectionPicklist: () => void;
+
+  // Snap-to-connect state
+  snapTargetId: string | null;
+  setSnapTargetId: (id: string | null) => void;
 }
 
 let toastIdCounter = 0;
@@ -151,6 +158,7 @@ const useWorkflowStore = create<WorkflowStore>()(
   nodes: [],
   edges: [],
   selectedNodeId: null,
+  selectedEdgeId: null,
   nodeCounter: 0,
 
   // Preserved workflow/trigger sections from imported config
@@ -267,7 +275,17 @@ const useWorkflowStore = create<WorkflowStore>()(
     }
   },
 
-  setSelectedNode: (id) => set({ selectedNodeId: id }),
+  setSelectedNode: (id) => set({ selectedNodeId: id, selectedEdgeId: null }),
+
+  setSelectedEdge: (id) => set({ selectedEdgeId: id, selectedNodeId: null }),
+
+  removeEdge: (id) => {
+    get().pushHistory();
+    set({
+      edges: get().edges.filter((e) => e.id !== id),
+      selectedEdgeId: get().selectedEdgeId === id ? null : get().selectedEdgeId,
+    });
+  },
 
   addNode: (moduleType, position) => {
     const schemaMap = useModuleSchemaStore.getState().moduleTypeMap;
@@ -408,7 +426,7 @@ const useWorkflowStore = create<WorkflowStore>()(
 
   clearCanvas: () => {
     get().pushHistory();
-    set({ nodes: [], edges: [], selectedNodeId: null, nodeCounter: 0, importedWorkflows: {}, importedTriggers: {}, importedPipelines: {} });
+    set({ nodes: [], edges: [], selectedNodeId: null, selectedEdgeId: null, nodeCounter: 0, importedWorkflows: {}, importedTriggers: {}, importedPipelines: {} });
   },
 
   // Validation errors (transient, not persisted)
@@ -424,6 +442,10 @@ const useWorkflowStore = create<WorkflowStore>()(
   setCompatibleNodeIds: (ids) => set({ compatibleNodeIds: ids }),
   showConnectionPicklist: (position) => set({ connectionPicklist: position }),
   hideConnectionPicklist: () => set({ connectionPicklist: null, connectingFrom: null, compatibleNodeIds: [] }),
+
+  // Snap-to-connect state
+  snapTargetId: null,
+  setSnapTargetId: (id) => set({ snapTargetId: id }),
 
   // Tab actions
   addTab: () => {
@@ -453,6 +475,7 @@ const useWorkflowStore = create<WorkflowStore>()(
       undoStack: [],
       redoStack: [],
       selectedNodeId: null,
+      selectedEdgeId: null,
       nodeCounter: 0,
     });
   },
@@ -475,6 +498,7 @@ const useWorkflowStore = create<WorkflowStore>()(
         undoStack: nextTab.undoStack as HistoryEntry[],
         redoStack: nextTab.redoStack as HistoryEntry[],
         selectedNodeId: null,
+        selectedEdgeId: null,
       });
     } else {
       set({ tabs: newTabs });
@@ -509,6 +533,7 @@ const useWorkflowStore = create<WorkflowStore>()(
       undoStack: newTab.undoStack as HistoryEntry[],
       redoStack: newTab.redoStack as HistoryEntry[],
       selectedNodeId: null,
+      selectedEdgeId: null,
     });
   },
 

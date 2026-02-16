@@ -50,6 +50,8 @@ type ModuleSchema struct {
 	Outputs       []ServiceIODef   `json:"outputs,omitempty"`
 	ConfigFields  []ConfigFieldDef `json:"configFields"`
 	DefaultConfig map[string]any   `json:"defaultConfig,omitempty"`
+	MaxIncoming   *int             `json:"maxIncoming,omitempty"` // nil=unlimited, 0=none, N=limit
+	MaxOutgoing   *int             `json:"maxOutgoing,omitempty"`
 }
 
 // ModuleSchemaRegistry holds all known module configuration schemas.
@@ -92,6 +94,8 @@ func (r *ModuleSchemaRegistry) AllMap() map[string]*ModuleSchema {
 	return out
 }
 
+func intPtr(v int) *int { return &v }
+
 func (r *ModuleSchemaRegistry) registerBuiltins() {
 	// ---- HTTP Category ----
 
@@ -105,6 +109,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "address", Label: "Listen Address", Type: FieldTypeString, Required: true, Description: "Host:port to listen on (e.g. :8080, 0.0.0.0:80)", DefaultValue: ":8080", Placeholder: ":8080"},
 		},
 		DefaultConfig: map[string]any{"address": ":8080"},
+		MaxIncoming:   intPtr(0),
 	})
 
 	r.Register(&ModuleSchema{
@@ -434,6 +439,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Description:  "CrisisTextLine/modular HTTP server module (use config feeders for settings)",
 		Outputs:      []ServiceIODef{{Name: "http-server", Type: "net.Listener", Description: "HTTP server accepting connections"}},
 		ConfigFields: []ConfigFieldDef{},
+		MaxIncoming:  intPtr(0),
 	})
 
 	r.Register(&ModuleSchema{
@@ -444,6 +450,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Inputs:       []ServiceIODef{{Name: "job", Type: "func()", Description: "Job function to schedule"}},
 		Outputs:      []ServiceIODef{{Name: "scheduler", Type: "Scheduler", Description: "Scheduler service for registering cron jobs"}},
 		ConfigFields: []ConfigFieldDef{},
+		MaxIncoming:  intPtr(0),
 	})
 
 	r.Register(&ModuleSchema{
@@ -1232,5 +1239,23 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "schedule", Label: "Schedule Window", Type: FieldTypeJSON, Description: "Time window for scheduled gates (weekdays, start_hour, end_hour)"},
 		},
 		DefaultConfig: map[string]any{"timeout": "24h"},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.build_ui",
+		Label:       "Build UI",
+		Category:    "deployment",
+		Description: "Executes a UI build pipeline natively (npm install + build), producing static assets for static.fileserver",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with build parameters"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Build result with output path and file count"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "source_dir", Label: "Source Directory", Type: FieldTypeString, Required: true, Description: "UI source directory containing package.json", Placeholder: "ui"},
+			{Key: "output_dir", Label: "Output Directory", Type: FieldTypeString, Required: true, Description: "Where to place built assets (for static.fileserver root)", Placeholder: "ui_dist"},
+			{Key: "install_cmd", Label: "Install Command", Type: FieldTypeString, DefaultValue: "npm install --silent", Description: "Dependency install command"},
+			{Key: "build_cmd", Label: "Build Command", Type: FieldTypeString, DefaultValue: "npm run build", Description: "Build command to generate static assets"},
+			{Key: "env", Label: "Environment Variables", Type: FieldTypeJSON, Description: "Extra environment variables for the build process"},
+			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, DefaultValue: "5m", Description: "Maximum time for the build", Placeholder: "5m"},
+		},
+		DefaultConfig: map[string]any{"install_cmd": "npm install --silent", "build_cmd": "npm run build", "timeout": "5m"},
 	})
 }

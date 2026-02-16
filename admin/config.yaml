@@ -2123,6 +2123,96 @@ workflows:
                 service: admin-plugin-registry
 
       # ============================================================
+      # OBSERVABILITY INGEST (unauthenticated — used by remote workers)
+      # ============================================================
+
+      - method: POST
+        path: "/api/v1/admin/ingest/executions"
+        handler: admin-commands
+        middlewares: [admin-cors]
+        pipeline:
+          steps:
+            - name: ingest-executions
+              type: step.delegate
+              config:
+                service: admin-ingest-mgmt
+      - method: POST
+        path: "/api/v1/admin/ingest/logs"
+        handler: admin-commands
+        middlewares: [admin-cors]
+        pipeline:
+          steps:
+            - name: ingest-logs
+              type: step.delegate
+              config:
+                service: admin-ingest-mgmt
+      - method: POST
+        path: "/api/v1/admin/ingest/events"
+        handler: admin-commands
+        middlewares: [admin-cors]
+        pipeline:
+          steps:
+            - name: ingest-events
+              type: step.delegate
+              config:
+                service: admin-ingest-mgmt
+      - method: GET
+        path: "/api/v1/admin/ingest/health"
+        handler: admin-queries
+        middlewares: [admin-cors]
+        pipeline:
+          steps:
+            - name: ingest-health
+              type: step.delegate
+              config:
+                service: admin-ingest-mgmt
+      - method: POST
+        path: "/api/v1/admin/instances/register"
+        handler: admin-commands
+        middlewares: [admin-cors]
+        pipeline:
+          steps:
+            - name: instance-register
+              type: step.delegate
+              config:
+                service: admin-ingest-mgmt
+      - method: POST
+        path: "/api/v1/admin/instances/heartbeat"
+        handler: admin-commands
+        middlewares: [admin-cors]
+        pipeline:
+          steps:
+            - name: instance-heartbeat
+              type: step.delegate
+              config:
+                service: admin-ingest-mgmt
+
+      # ============================================================
+      # RUNTIME INSTANCES (authenticated — manage loaded workflows)
+      # ============================================================
+
+      - method: GET
+        path: "/api/v1/admin/runtime/instances"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: list-runtime-instances
+              type: step.delegate
+              config:
+                service: admin-runtime-mgmt
+      - method: POST
+        path: "/api/v1/admin/runtime/instances/{id}/stop"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: stop-runtime-instance
+              type: step.delegate
+              config:
+                service: admin-runtime-mgmt
+
+      # ============================================================
       # OPENAPI SPEC (unauthenticated, read-only)
       # ============================================================
 

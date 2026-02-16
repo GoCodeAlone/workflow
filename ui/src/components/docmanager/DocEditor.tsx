@@ -19,7 +19,7 @@ function renderMarkdown(text: string): string {
   let inList = false;
 
   for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
+    const line = lines[i];
 
     // Skip lines inside pre blocks (already handled)
     if (line.includes('<pre ') || line.includes('</pre>')) {

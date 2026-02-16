@@ -4,6 +4,7 @@ import { CATEGORY_COLORS } from '../../types/workflow.ts';
 import type { ModuleCategory, IOPort } from '../../types/workflow.ts';
 import useWorkflowStore from '../../store/workflowStore.ts';
 import useModuleSchemaStore from '../../store/moduleSchemaStore.ts';
+import { countIncoming, countOutgoing } from '../../utils/connectionCompatibility.ts';
 
 interface BaseNodeProps {
   id: string;
@@ -14,6 +15,52 @@ interface BaseNodeProps {
   hasInput?: boolean;
   hasOutput?: boolean;
   children?: ReactNode;
+}
+
+/** Puzzle-piece tab shape rendered as an SVG at the bottom of a node */
+function PuzzleTabHandle({ color }: { color: string }) {
+  return (
+    <div style={{
+      position: 'absolute',
+      bottom: -8,
+      left: '50%',
+      transform: 'translateX(-50%)',
+      zIndex: 5,
+      pointerEvents: 'none',
+    }}>
+      <svg width="28" height="8" viewBox="0 0 28 8">
+        <path
+          d="M4,0 L6,8 L22,8 L24,0"
+          fill={color + '40'}
+          stroke={color}
+          strokeWidth={1.5}
+        />
+      </svg>
+    </div>
+  );
+}
+
+/** Puzzle-piece notch shape rendered as an SVG at the top of a node */
+function PuzzleNotchHandle({ color }: { color: string }) {
+  return (
+    <div style={{
+      position: 'absolute',
+      top: -8,
+      left: '50%',
+      transform: 'translateX(-50%)',
+      zIndex: 5,
+      pointerEvents: 'none',
+    }}>
+      <svg width="28" height="8" viewBox="0 0 28 8">
+        <path
+          d="M4,8 L6,0 L22,0 L24,8"
+          fill={color + '20'}
+          stroke={color + '60'}
+          strokeWidth={1.5}
+        />
+      </svg>
+    </div>
+  );
 }
 
 function IOPortList({ ports, direction, color }: { ports: IOPort[]; direction: 'in' | 'out'; color: string }) {
@@ -69,8 +116,8 @@ export default function BaseNode({
   moduleType,
   icon,
   preview,
-  hasInput = true,
-  hasOutput = true,
+  hasInput: hasInputProp,
+  hasOutput: hasOutputProp,
   children,
 }: BaseNodeProps) {
   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
@@ -84,6 +131,23 @@ export default function BaseNode({
   const isSelected = selectedNodeId === id;
   const ioSig = info?.ioSignature;
   const edges = useWorkflowStore((s) => s.edges);
+
+  // Derive hasInput/hasOutput from schema limits, with prop override
+  const hasInput = hasInputProp ?? (info?.maxIncoming !== 0 && !moduleType.startsWith('trigger.'));
+  const hasOutput = hasOutputProp ?? (info?.maxOutgoing !== 0);
+
+  // Compute handle saturation (connection limit reached)
+  const isInputSaturated = useMemo(() => {
+    const limit = info?.maxIncoming;
+    if (limit === undefined || limit === null || limit === 0) return false;
+    return countIncoming(id, edges) >= limit;
+  }, [info?.maxIncoming, id, edges]);
+
+  const isOutputSaturated = useMemo(() => {
+    const limit = info?.maxOutgoing;
+    if (limit === undefined || limit === null || limit === 0) return false;
+    return countOutgoing(id, edges) >= limit;
+  }, [info?.maxOutgoing, id, edges]);
 
   // Auto-generate preview for step.delegate nodes showing the target service
   const nodeConfig = useWorkflowStore((s) => {
@@ -121,6 +185,10 @@ export default function BaseNode({
   const isCompatible = isDragging && !isSource && compatibleNodeIds.includes(id);
   const isIncompatible = isDragging && !isSource && !compatibleNodeIds.includes(id);
 
+  // Snap-to-connect highlighting
+  const snapTargetId = useWorkflowStore((s) => s.snapTargetId);
+  const isSnapTarget = snapTargetId === id;
+
   const nodeStyle = useMemo(() => {
     const borderColor = hasError ? '#f38ba8' : isSelected ? '#fff' : color;
     const base: React.CSSProperties = {
@@ -141,7 +209,10 @@ export default function BaseNode({
       transition: 'opacity 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease, filter 0.3s ease',
     };
 
-    if (isSource) {
+    if (isSnapTarget) {
+      base.border = '2px solid #22c55e';
+      base.boxShadow = '0 0 0 3px rgba(34, 197, 94, 0.4), 0 0 20px rgba(34, 197, 94, 0.3)';
+    } else if (isSource) {
       base.boxShadow = `0 0 0 2px ${color}60, 0 4px 16px rgba(0,0,0,0.4)`;
     } else if (isCompatible) {
       base.border = `2px solid #22c55e`;
@@ -152,7 +223,7 @@ export default function BaseNode({
     }
 
     return base;
-  }, [isSelected, color, isSource, isCompatible, isIncompatible, hasError]);
+  }, [isSelected, color, isSource, isCompatible, isIncompatible, isSnapTarget, hasError]);
 
   const targetHandleStyle = useMemo(() => {
     const base: React.CSSProperties = {
@@ -160,16 +231,19 @@ export default function BaseNode({
       width: 10,
       height: 10,
       border: '2px solid #1e1e2e',
-      transition: 'width 0.2s ease, height 0.2s ease, box-shadow 0.2s ease',
+      transition: 'width 0.2s ease, height 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease',
     };
-    if (isCompatible && connectingFrom?.handleType === 'source') {
+    if (isInputSaturated) {
+      base.opacity = 0.3;
+      base.background = '#585b70';
+    } else if (isCompatible && connectingFrom?.handleType === 'source') {
       base.width = 14;
       base.height = 14;
       base.boxShadow = `0 0 8px rgba(34, 197, 94, 0.6)`;
       base.background = '#22c55e';
     }
     return base;
-  }, [color, isCompatible, connectingFrom?.handleType]);
+  }, [color, isCompatible, connectingFrom?.handleType, isInputSaturated]);
 
   const sourceHandleStyle = useMemo(() => {
     const base: React.CSSProperties = {
@@ -177,29 +251,41 @@ export default function BaseNode({
       width: 10,
       height: 10,
       border: '2px solid #1e1e2e',
-      transition: 'width 0.2s ease, height 0.2s ease, box-shadow 0.2s ease',
+      transition: 'width 0.2s ease, height 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease',
     };
-    if (isCompatible && connectingFrom?.handleType === 'target') {
+    if (isOutputSaturated) {
+      base.opacity = 0.3;
+      base.background = '#585b70';
+    } else if (isCompatible && connectingFrom?.handleType === 'target') {
       base.width = 14;
       base.height = 14;
       base.boxShadow = `0 0 8px rgba(34, 197, 94, 0.6)`;
       base.background = '#22c55e';
     }
     return base;
-  }, [color, isCompatible, connectingFrom?.handleType]);
+  }, [color, isCompatible, connectingFrom?.handleType, isOutputSaturated]);
 
   return (
     <div
       onClick={() => setSelectedNode(id)}
-      className={isCompatible ? 'connection-compatible' : undefined}
+      className={isSnapTarget ? 'snap-target-glow' : isCompatible ? 'connection-compatible' : undefined}
       style={nodeStyle}
     >
       {hasInput && (
-        <Handle
-          type="target"
-          position={Position.Top}
-          style={targetHandleStyle}
-        />
+        <>
+          <Handle
+            type="target"
+            position={Position.Top}
+            style={{
+              ...targetHandleStyle,
+              width: 20,
+              height: 6,
+              borderRadius: '0 0 4px 4px',
+              top: -3,
+            }}
+          />
+          <PuzzleNotchHandle color={color} />
+        </>
       )}
 
       <div
@@ -294,11 +380,20 @@ export default function BaseNode({
       </div>
 
       {hasOutput && (
-        <Handle
-          type="source"
-          position={Position.Bottom}
-          style={sourceHandleStyle}
-        />
+        <>
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            style={{
+              ...sourceHandleStyle,
+              width: 20,
+              height: 6,
+              borderRadius: '4px 4px 0 0',
+              bottom: -3,
+            }}
+          />
+          <PuzzleTabHandle color={color} />
+        </>
       )}
     </div>
   );

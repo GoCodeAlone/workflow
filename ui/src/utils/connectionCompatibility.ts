@@ -1,3 +1,4 @@
+import type { Edge } from '@xyflow/react';
 import type { ModuleTypeInfo, IOPort } from '../types/workflow.ts';
 import type { WorkflowNode } from '../store/workflowStore.ts';
 
@@ -196,4 +197,52 @@ export function getPrimaryInputType(info: ModuleTypeInfo | undefined): string {
   if (inputs.length === 0) return '';
   if (inputs.length === 1) return inputs[0].type;
   return inputs.map((i) => i.type).join(' | ');
+}
+
+/**
+ * Count the number of incoming edges to a node.
+ */
+export function countIncoming(nodeId: string, edges: Edge[]): number {
+  return edges.filter((e) => e.target === nodeId).length;
+}
+
+/**
+ * Count the number of outgoing edges from a node.
+ */
+export function countOutgoing(nodeId: string, edges: Edge[]): number {
+  return edges.filter((e) => e.source === nodeId).length;
+}
+
+/**
+ * Check if a node can accept another incoming connection based on its schema limit.
+ * Returns true if unlimited or under the limit.
+ */
+export function canAcceptIncoming(
+  nodeId: string,
+  edges: Edge[],
+  moduleTypeMap: Record<string, ModuleTypeInfo>,
+  moduleType: string,
+): boolean {
+  const info = moduleTypeMap[moduleType];
+  const limit = info?.maxIncoming;
+  if (limit === undefined || limit === null) return true; // unlimited
+  if (limit === 0) return false;
+  return countIncoming(nodeId, edges) < limit;
+}
+
+/**
+ * Check if a node can accept another outgoing connection based on its schema limit.
+ * Returns true if unlimited or under the limit.
+ */
+export function canAcceptOutgoing(
+  nodeId: string,
+  edges: Edge[],
+  moduleTypeMap: Record<string, ModuleTypeInfo>,
+  moduleType: string,
+): boolean {
+  const info = moduleTypeMap[moduleType];
+  const limit = info?.maxOutgoing;
+  if (limit === undefined || limit === null) return true; // unlimited
+  if (limit === 0) return false;
+  return countOutgoing(nodeId, edges) < limit;
 }

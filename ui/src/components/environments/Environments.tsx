@@ -574,7 +574,7 @@ export default function Environments() {
   }, [fetchEnvironments, filterProvider, filterStatus]);
 
   // Apply client-side filter for immediate feedback
-  const filtered = environments.filter((env) => {
+  const filtered = (Array.isArray(environments) ? environments : []).filter((env) => {
     if (filterProvider && env.provider !== filterProvider) return false;
     if (filterStatus && env.status !== filterStatus) return false;
     return true;

@@ -36,6 +36,31 @@ export interface Doc {
   updated_at: string;
 }
 
+export interface CategoryTreeNode {
+  name: string;
+  fullPath: string;
+  children: CategoryTreeNode[];
+}
+
+export function buildCategoryTree(categories: string[]): CategoryTreeNode[] {
+  const root: CategoryTreeNode[] = [];
+  for (const cat of categories) {
+    const parts = cat.split('/');
+    let current = root;
+    let pathSoFar = '';
+    for (const part of parts) {
+      pathSoFar = pathSoFar ? `${pathSoFar}/${part}` : part;
+      let existing = current.find((n) => n.name === part);
+      if (!existing) {
+        existing = { name: part, fullPath: pathSoFar, children: [] };
+        current.push(existing);
+      }
+      current = existing.children;
+    }
+  }
+  return root;
+}
+
 interface DocManagerStore {
   // Doc list
   docs: Doc[];
@@ -54,6 +79,8 @@ interface DocManagerStore {
   updateDoc: (id: string, doc: { title?: string; content?: string; category?: string }) => Promise<void>;
   deleteDoc: (id: string) => Promise<void>;
   fetchCategories: () => Promise<void>;
+  createCategory: (name: string) => Promise<void>;
+  deleteCategory: (name: string) => Promise<void>;
 
   // Editor state
   editorContent: string;
@@ -139,6 +166,21 @@ const useDocManagerStore = create<DocManagerStore>((set, get) => ({
     } catch {
       set({ categories: [] });
     }
+  },
+
+  createCategory: async (name) => {
+    await docFetch<{ id: string; name: string; created_at: string }>(`${PLUGIN_BASE}/categories`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+    await get().fetchCategories();
+  },
+
+  deleteCategory: async (name) => {
+    await docFetch<void>(`${PLUGIN_BASE}/categories/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+    await get().fetchCategories();
   },
 
   setEditorContent: (content) => {

@@ -677,3 +677,95 @@ func TestManagerWithoutDB(t *testing.T) {
 		t.Fatalf("RestoreState: %v", err)
 	}
 }
+
+// --- NativeHandler list endpoint ---
+
+func TestNativeHandlerListPlugins(t *testing.T) {
+	pm := newTestManager(t)
+	a := newSimplePlugin("alpha-plugin", "1.0.0", "Alpha")
+	b := newSimplePlugin("beta-plugin", "2.0.0", "Beta")
+
+	for _, p := range []NativePlugin{a, b} {
+		if err := pm.Register(p); err != nil {
+			t.Fatalf("Register: %v", err)
+		}
+		if err := pm.Enable(p.Name()); err != nil {
+			t.Fatalf("Enable: %v", err)
+		}
+	}
+
+	handler := NewNativeHandler(pm)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/plugins", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	// Log the raw JSON for debugging field names
+	raw := w.Body.String()
+	t.Logf("Raw JSON response: %s", raw)
+
+	var plugins []PluginInfo
+	if err := json.Unmarshal([]byte(raw), &plugins); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(plugins) != 2 {
+		t.Errorf("got %d plugins, want 2", len(plugins))
+	}
+	for _, p := range plugins {
+		t.Logf("Plugin: name=%q version=%q enabled=%v uiPages=%d deps=%d",
+			p.Name, p.Version, p.Enabled, len(p.UIPages), len(p.Dependencies))
+	}
+}
+
+func TestNativeHandlerEnableDisable(t *testing.T) {
+	pm := newTestManager(t)
+	p := newSimplePlugin("test-plugin", "1.0.0", "Test Plugin")
+
+	if err := pm.Register(p); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	handler := NewNativeHandler(pm)
+
+	// Plugin is registered but not enabled
+	if pm.IsEnabled("test-plugin") {
+		t.Fatal("plugin should not be enabled initially")
+	}
+
+	// Enable via HTTP
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/plugins/test-plugin/enable", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("enable: got status %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if !pm.IsEnabled("test-plugin") {
+		t.Error("plugin should be enabled after enable request")
+	}
+
+	// Disable via HTTP
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/plugins/test-plugin/disable", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("disable: got status %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if pm.IsEnabled("test-plugin") {
+		t.Error("plugin should be disabled after disable request")
+	}
+
+	// Enable non-existent plugin
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/plugins/nonexistent/enable", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("enable nonexistent: got status %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}

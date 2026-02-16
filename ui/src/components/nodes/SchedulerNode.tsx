@@ -13,7 +13,6 @@ export default function SchedulerNode({ id, data }: NodeProps<WorkflowNode>) {
       moduleType={data.moduleType}
       icon={<ClockIcon />}
       preview={preview}
-      hasInput={false}
     />
   );
 }
