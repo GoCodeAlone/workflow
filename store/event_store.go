@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -426,6 +428,11 @@ type SQLiteEventStore struct {
 // NewSQLiteEventStore creates a new SQLiteEventStore using the given database path.
 // It opens the database and creates the required table if it does not exist.
 func NewSQLiteEventStore(dbPath string) (*SQLiteEventStore, error) {
+	if dir := filepath.Dir(dbPath); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("create data directory: %w", err)
+		}
+	}
 	dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
