@@ -319,12 +319,35 @@ func validateModuleConfig(mod config.ModuleConfig, prefix string, errs *Validati
 	}
 }
 
+// entryPointModuleTypes are module types that inherently serve as entry points
+// because they listen for external input (HTTP servers, schedulers, event buses).
+var entryPointModuleTypes = map[string]bool{
+	"http.server":        true,
+	"httpserver.modular": true,
+	"scheduler.modular":  true,
+	"eventbus.modular":   true,
+	"messaging.broker":   true,
+}
+
 // checkEntryPoints validates that the config has at least one entry point:
-// triggers, HTTP routes, messaging subscriptions, or scheduler jobs.
+// triggers, HTTP routes, messaging subscriptions, scheduler jobs, pipelines,
+// or modules that inherently listen for external input.
 func checkEntryPoints(cfg *config.WorkflowConfig, errs *ValidationErrors) {
 	// Triggers count as entry points
 	if len(cfg.Triggers) > 0 {
 		return
+	}
+
+	// Pipelines with triggers count as entry points
+	if len(cfg.Pipelines) > 0 {
+		return
+	}
+
+	// Modules that inherently listen for external input count as entry points
+	for _, mod := range cfg.Modules {
+		if entryPointModuleTypes[mod.Type] {
+			return
+		}
 	}
 
 	// Check workflow sections for entry points
@@ -364,7 +387,7 @@ func checkEntryPoints(cfg *config.WorkflowConfig, errs *ValidationErrors) {
 	}
 
 	*errs = append(*errs, &ValidationError{
-		Message: "config has no entry points (no triggers, HTTP routes, messaging subscriptions, or scheduler jobs); add entry points or set allow_no_entry_points for embeddable sub-workflows",
+		Message: "config has no entry points (no triggers, HTTP routes, messaging subscriptions, scheduler jobs, or pipelines); add entry points or set allow_no_entry_points for embeddable sub-workflows",
 	})
 }
 

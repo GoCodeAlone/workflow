@@ -49,8 +49,8 @@ func (p *AzureProvider) UIPages() []plugin.UIPageDef {
 }
 
 func (p *AzureProvider) Dependencies() []plugin.PluginDependency { return nil }
-func (p *AzureProvider) OnEnable(_ plugin.PluginContext) error    { return nil }
-func (p *AzureProvider) OnDisable(_ plugin.PluginContext) error   { return nil }
+func (p *AzureProvider) OnEnable(_ plugin.PluginContext) error   { return nil }
+func (p *AzureProvider) OnDisable(_ plugin.PluginContext) error  { return nil }
 
 func (p *AzureProvider) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/providers/azure/status", p.handleStatus)

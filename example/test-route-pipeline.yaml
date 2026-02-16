@@ -12,55 +12,64 @@ workflows:
   http:
     router: router
     server: api-server
-    routes:
-      - method: POST
+    routes: []
+
+pipelines:
+  create-order:
+    trigger:
+      type: http
+      config:
         path: /api/orders
-        handler: router
-        pipeline:
-          steps:
-            - name: parse-body
-              type: step.request_parse
-              config:
-                fields: ["user_id", "amount", "items"]
-            - name: set-defaults
-              type: step.set
-              config:
-                values:
-                  status: "pending"
-                  created_at: "{{now}}"
-            - name: save-order
-              type: step.db_exec
-              config:
-                database: main-db
-                sql: "INSERT INTO orders (user_id, amount, status) VALUES ($1, $2, $3)"
-                params: ["{{parse-body.user_id}}", "{{parse-body.amount}}", "{{set-defaults.status}}"]
-            - name: respond
-              type: step.json_response
-              config:
-                status: 201
-                body:
-                  message: "Order created"
-      - method: GET
+        method: POST
+    steps:
+      - name: parse-body
+        type: step.request_parse
+        config:
+          fields: ["user_id", "amount", "items"]
+      - name: set-defaults
+        type: step.set
+        config:
+          values:
+            status: "pending"
+            created_at: "{{now}}"
+      - name: save-order
+        type: step.db_exec
+        config:
+          database: main-db
+          query: "INSERT INTO orders (user_id, amount, status) VALUES ($1, $2, $3)"
+          params: ["{{parse-body.user_id}}", "{{parse-body.amount}}", "{{set-defaults.status}}"]
+      - name: respond
+        type: step.json_response
+        config:
+          status: 201
+          body:
+            message: "Order created"
+
+  list-orders:
+    trigger:
+      type: http
+      config:
         path: /api/orders
-        handler: router
-        pipeline:
-          steps:
-            - name: fetch-orders
-              type: step.db_query
-              config:
-                database: main-db
-                sql: "SELECT * FROM orders"
-            - name: respond
-              type: step.json_response
-              config:
-                status: 200
-      - method: DELETE
+        method: GET
+    steps:
+      - name: fetch-orders
+        type: step.db_query
+        config:
+          database: main-db
+          query: "SELECT * FROM orders"
+      - name: respond
+        type: step.json_response
+        config:
+          status: 200
+
+  delete-order:
+    trigger:
+      type: http
+      config:
         path: /api/orders/{id}
-        handler: router
-        middlewares: [auth]
-        pipeline:
-          steps:
-            - name: delete-order
-              type: step.delegate
-              config:
-                service: order-service
+        method: DELETE
+    steps:
+      - name: delete-order
+        type: step.delegate
+        config:
+          service: order-service

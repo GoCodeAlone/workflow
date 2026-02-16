@@ -854,6 +854,155 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
       { key: 'timeout', label: 'Timeout', type: 'string', defaultValue: '30s', description: 'Request timeout' },
     ],
   },
+
+  // ---- CI/CD Pipeline Steps ----
+  {
+    type: 'step.shell_exec',
+    label: 'Shell Exec',
+    category: 'cicd',
+    defaultConfig: { image: 'ubuntu:22.04', commands: [] },
+    configFields: [
+      { key: 'image', label: 'Docker Image', type: 'string', required: true, description: 'Docker image to run commands in' },
+      { key: 'commands', label: 'Commands', type: 'array', description: 'Shell commands to execute sequentially' },
+      { key: 'work_dir', label: 'Working Directory', type: 'string', description: 'Working directory inside the container' },
+      { key: 'timeout', label: 'Timeout', type: 'string', description: 'Maximum execution time for all commands' },
+      { key: 'env', label: 'Environment Variables', type: 'map', mapValueType: 'string', description: 'Environment variables to set in the container' },
+      { key: 'artifacts_out', label: 'Output Artifacts', type: 'json', description: 'Artifacts to collect after execution' },
+    ],
+  },
+  {
+    type: 'step.artifact_pull',
+    label: 'Artifact Pull',
+    category: 'cicd',
+    defaultConfig: { source: 'previous_execution', dest: '' },
+    configFields: [
+      { key: 'source', label: 'Source', type: 'select', options: ['previous_execution', 'url', 's3'], required: true, description: 'Artifact source type' },
+      { key: 'dest', label: 'Destination Path', type: 'string', required: true, description: 'Local file path to write the artifact to' },
+      { key: 'key', label: 'Artifact Key', type: 'string', description: 'Artifact key (required for previous_execution and s3 sources)' },
+      { key: 'execution_id', label: 'Execution ID', type: 'string', description: 'Execution ID to pull from (defaults to current execution)' },
+      { key: 'url', label: 'URL', type: 'string', description: 'URL to download artifact from (required for url source)' },
+    ],
+  },
+  {
+    type: 'step.artifact_push',
+    label: 'Artifact Push',
+    category: 'cicd',
+    defaultConfig: { source_path: '', key: '', dest: 'artifact_store' },
+    configFields: [
+      { key: 'source_path', label: 'Source Path', type: 'string', required: true, description: 'Local file path to read and push' },
+      { key: 'key', label: 'Artifact Key', type: 'string', required: true, description: 'Unique key for the artifact in the store' },
+      { key: 'dest', label: 'Destination', type: 'string', description: 'Destination store identifier' },
+    ],
+  },
+  {
+    type: 'step.docker_build',
+    label: 'Docker Build',
+    category: 'cicd',
+    defaultConfig: { context: '.', dockerfile: 'Dockerfile' },
+    configFields: [
+      { key: 'context', label: 'Build Context', type: 'string', required: true, description: 'Path to the Docker build context directory' },
+      { key: 'dockerfile', label: 'Dockerfile', type: 'string', description: 'Path to Dockerfile relative to context' },
+      { key: 'tags', label: 'Image Tags', type: 'array', description: 'Tags for the built image' },
+      { key: 'build_args', label: 'Build Args', type: 'map', mapValueType: 'string', description: 'Docker build arguments' },
+      { key: 'cache_from', label: 'Cache From', type: 'array', description: 'Images to use as cache sources' },
+    ],
+  },
+  {
+    type: 'step.docker_push',
+    label: 'Docker Push',
+    category: 'cicd',
+    defaultConfig: { image: '' },
+    configFields: [
+      { key: 'image', label: 'Image', type: 'string', required: true, description: 'Image name to push' },
+      { key: 'registry', label: 'Registry', type: 'string', description: 'Registry hostname (prepended to image name)' },
+      { key: 'auth_provider', label: 'Auth Provider', type: 'string', description: 'Authentication provider for the registry' },
+    ],
+  },
+  {
+    type: 'step.docker_run',
+    label: 'Docker Run',
+    category: 'cicd',
+    defaultConfig: { image: '', wait_for_exit: true },
+    configFields: [
+      { key: 'image', label: 'Docker Image', type: 'string', required: true, description: 'Docker image to run' },
+      { key: 'command', label: 'Command', type: 'array', description: 'Command to execute in the container' },
+      { key: 'env', label: 'Environment Variables', type: 'map', mapValueType: 'string', description: 'Environment variables for the container' },
+      { key: 'wait_for_exit', label: 'Wait For Exit', type: 'boolean', description: 'Whether to wait for the container to exit' },
+      { key: 'timeout', label: 'Timeout', type: 'string', description: 'Maximum execution time' },
+    ],
+  },
+
+  // ---- Security Scan Steps ----
+  {
+    type: 'step.scan_sast',
+    label: 'SAST Scan',
+    category: 'security',
+    defaultConfig: { scanner: 'semgrep', image: 'semgrep/semgrep:latest', source_path: '/workspace', fail_on_severity: 'error', output_format: 'sarif' },
+    configFields: [
+      { key: 'scanner', label: 'Scanner', type: 'string', required: true, description: 'SAST scanner to use (e.g., semgrep)' },
+      { key: 'image', label: 'Scanner Image', type: 'string', description: 'Docker image for the scanner' },
+      { key: 'source_path', label: 'Source Path', type: 'string', description: 'Path to source code to scan' },
+      { key: 'rules', label: 'Rules', type: 'array', description: 'Scanner rule configurations' },
+      { key: 'fail_on_severity', label: 'Fail on Severity', type: 'select', options: ['critical', 'high', 'medium', 'low', 'info'], description: 'Minimum severity level to fail the gate' },
+      { key: 'output_format', label: 'Output Format', type: 'select', options: ['sarif', 'json'], description: 'Scan output format' },
+    ],
+  },
+  {
+    type: 'step.scan_container',
+    label: 'Container Scan',
+    category: 'security',
+    defaultConfig: { scanner: 'trivy', image: 'aquasec/trivy:latest', severity_threshold: 'HIGH', output_format: 'sarif' },
+    configFields: [
+      { key: 'scanner', label: 'Scanner', type: 'string', description: 'Container scanner to use' },
+      { key: 'image', label: 'Scanner Image', type: 'string', description: 'Docker image for the scanner' },
+      { key: 'target_image', label: 'Target Image', type: 'string', required: true, description: 'Docker image to scan for vulnerabilities' },
+      { key: 'severity_threshold', label: 'Severity Threshold', type: 'select', options: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'], description: 'Minimum severity to report' },
+      { key: 'ignore_unfixed', label: 'Ignore Unfixed', type: 'boolean', description: 'Skip vulnerabilities without available fixes' },
+      { key: 'output_format', label: 'Output Format', type: 'select', options: ['sarif', 'json'], description: 'Scan output format' },
+    ],
+  },
+  {
+    type: 'step.scan_deps',
+    label: 'Dependency Scan',
+    category: 'security',
+    defaultConfig: { scanner: 'grype', image: 'anchore/grype:latest', source_path: '/workspace', fail_on_severity: 'high', output_format: 'sarif' },
+    configFields: [
+      { key: 'scanner', label: 'Scanner', type: 'string', description: 'Dependency scanner to use' },
+      { key: 'image', label: 'Scanner Image', type: 'string', description: 'Docker image for the scanner' },
+      { key: 'source_path', label: 'Source Path', type: 'string', description: 'Path to source code to scan for dependencies' },
+      { key: 'fail_on_severity', label: 'Fail on Severity', type: 'select', options: ['critical', 'high', 'medium', 'low', 'info'], description: 'Minimum severity level to fail the gate' },
+      { key: 'output_format', label: 'Output Format', type: 'select', options: ['sarif', 'json'], description: 'Scan output format' },
+    ],
+  },
+
+  // ---- Deployment Steps ----
+  {
+    type: 'step.deploy',
+    label: 'Deploy',
+    category: 'deployment',
+    defaultConfig: { environment: '', strategy: 'rolling', image: '' },
+    configFields: [
+      { key: 'environment', label: 'Environment', type: 'string', required: true, description: 'Target deployment environment' },
+      { key: 'strategy', label: 'Strategy', type: 'select', options: ['rolling', 'blue_green', 'canary'], required: true, description: 'Deployment strategy to use' },
+      { key: 'image', label: 'Image', type: 'string', required: true, description: 'Docker image to deploy' },
+      { key: 'provider', label: 'Provider', type: 'select', options: ['aws', 'gcp', 'azure', 'digitalocean'], description: 'Cloud provider to deploy to' },
+      { key: 'rollback_on_failure', label: 'Rollback on Failure', type: 'boolean', description: 'Automatically rollback if deployment fails' },
+      { key: 'health_check', label: 'Health Check', type: 'json', description: 'Health check configuration (path, interval, timeout, thresholds)' },
+    ],
+  },
+  {
+    type: 'step.gate',
+    label: 'Approval Gate',
+    category: 'deployment',
+    defaultConfig: { type: 'manual', timeout: '24h' },
+    configFields: [
+      { key: 'type', label: 'Gate Type', type: 'select', options: ['manual', 'automated', 'scheduled'], required: true, description: 'Type of approval gate' },
+      { key: 'approvers', label: 'Approvers', type: 'array', description: 'List of approver identifiers (for manual gates)' },
+      { key: 'timeout', label: 'Timeout', type: 'string', description: 'Maximum time to wait for approval' },
+      { key: 'auto_approve_conditions', label: 'Auto-Approve Conditions', type: 'array', description: 'Conditions for automated approval' },
+      { key: 'schedule', label: 'Schedule Window', type: 'json', description: 'Time window for scheduled gates (weekdays, start_hour, end_hour)' },
+    ],
+  },
 ];
 
 export const MODULE_TYPE_MAP: Record<string, ModuleTypeInfo> = Object.fromEntries(

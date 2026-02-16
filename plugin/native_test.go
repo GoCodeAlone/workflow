@@ -677,4 +677,3 @@ func TestManagerWithoutDB(t *testing.T) {
 		t.Fatalf("RestoreState: %v", err)
 	}
 }
-

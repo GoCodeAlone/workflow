@@ -52,22 +52,19 @@ describe('WorkflowTabs', () => {
     expect(tabs).toHaveLength(2);
   });
 
-  it('shows close button only when multiple tabs exist', () => {
+  it('shows close button on tabs', () => {
     const { container } = render(<WorkflowTabs />);
 
-    // With only 1 tab, no close button
-    const closeButtons = container.querySelectorAll('button');
-    const closeTexts = Array.from(closeButtons).filter((b) => b.textContent === 'x');
-    expect(closeTexts).toHaveLength(0);
+    // Close button is always visible (with 1 tab it returns to dashboard)
+    const closeButtons = container.querySelectorAll('button[title="Close workflow"]');
+    expect(closeButtons.length).toBeGreaterThan(0);
 
-    // Add a second tab
+    // Add a second tab — should still have close buttons
     fireEvent.click(screen.getByText('+'));
 
-    // Re-render with new state (rerender picks up store changes via Zustand)
     const { container: container2 } = render(<WorkflowTabs />);
-    const closeButtons2 = container2.querySelectorAll('button');
-    const closeTexts2 = Array.from(closeButtons2).filter((b) => b.textContent === 'x');
-    expect(closeTexts2.length).toBeGreaterThan(0);
+    const closeButtons2 = container2.querySelectorAll('button[title="Close workflow"]');
+    expect(closeButtons2.length).toBeGreaterThan(0);
   });
 
   it('closes a tab when clicking x', () => {

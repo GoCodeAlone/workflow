@@ -387,7 +387,8 @@ func TestRegression_ValidateConfig_StrictMode(t *testing.T) {
 		Triggers:  map[string]any{},
 	}
 
-	err := schema.ValidateConfig(cfg)
+	// Use WithAllowNoEntryPoints — this test validates type checking, not entry point requirements.
+	err := schema.ValidateConfig(cfg, schema.WithAllowNoEntryPoints())
 	if err != nil {
 		t.Errorf("strict validation failed for valid config: %v", err)
 	}
