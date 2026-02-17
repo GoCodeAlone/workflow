@@ -137,6 +137,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	engine.RegisterTrigger(module.NewEventTrigger())
 	engine.RegisterTrigger(module.NewScheduleTrigger())
 	engine.RegisterTrigger(module.NewEventBusTrigger())
+	engine.RegisterTrigger(module.NewReconciliationTrigger())
 
 	// Set up dynamic component system
 	pool := dynamic.NewInterpreterPool()
