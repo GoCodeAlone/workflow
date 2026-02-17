@@ -1,0 +1,80 @@
+# Platform Deploy from Template
+# Demonstrates using a platform template to deploy a microservice
+# with parameter overrides for replicas and a custom image.
+
+name: "deploy-order-api"
+description: "Deploy the order API using the microservice template"
+
+modules:
+  - name: "platform-ctx"
+    type: "platform.context"
+    config:
+      org: "acme-corp"
+      environment: "production"
+      tier: 3
+
+  - name: "http-server"
+    type: "http.server"
+    config:
+      address: ":8080"
+
+  - name: "router"
+    type: "http.router"
+    dependsOn:
+      - http-server
+
+platform:
+  org: "acme-corp"
+  environment: "production"
+  provider:
+    name: "mock"
+    config: {}
+  templates:
+    - name: "microservice"
+      version: "1.0.0"
+      description: "Standard microservice with container runtime, database, and health check"
+      tier: 3
+      parameters:
+        - name: "app_name"
+          type: "string"
+          required: true
+          validation: "^[a-z][a-z0-9-]*$"
+        - name: "image"
+          type: "string"
+          required: true
+        - name: "replicas"
+          type: "int"
+          default: 3
+        - name: "memory"
+          type: "string"
+          default: "512Mi"
+        - name: "cpu"
+          type: "string"
+          default: "500m"
+      capabilities:
+        - name: "${app_name}"
+          type: "container_runtime"
+          properties:
+            image: "${image}"
+            replicas: "${replicas}"
+            memory: "${memory}"
+            cpu: "${cpu}"
+            ports:
+              - container_port: 8080
+                protocol: "tcp"
+            health_check:
+              path: "/health"
+              interval: "10s"
+              timeout: "5s"
+        - name: "${app_name}-db"
+          type: "database"
+          properties:
+            engine: "postgresql"
+            connection_pool_size: 10
+            storage: "10Gi"
+
+workflows:
+  http:
+    server: http-server
+    router: router
+    routes: []

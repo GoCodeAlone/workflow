@@ -875,6 +875,27 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					gw.SetAuth(ac)
 				}
 				mod = gw
+			case "platform.provider":
+				e.logger.Debug("Loading platform provider module: " + modCfg.Name)
+				providerName := ""
+				if pn, ok := modCfg.Config["name"].(string); ok {
+					providerName = pn
+				}
+				svcName := "platform.provider"
+				if providerName != "" {
+					svcName = "platform.provider." + providerName
+				}
+				mod = module.NewServiceModule(modCfg.Name, map[string]any{
+					"provider_name": providerName,
+					"service_name":  svcName,
+					"config":        modCfg.Config,
+				})
+			case "platform.resource":
+				e.logger.Debug("Loading platform resource module: " + modCfg.Name)
+				mod = module.NewServiceModule(modCfg.Name, modCfg.Config)
+			case "platform.context":
+				e.logger.Debug("Loading platform context module: " + modCfg.Name)
+				mod = module.NewServiceModule(modCfg.Name, modCfg.Config)
 			default:
 				e.logger.Warn("Unknown module type: " + modCfg.Type)
 				return fmt.Errorf("unknown module type: %s", modCfg.Type)

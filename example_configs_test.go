@@ -238,6 +238,7 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 			engine.AddStepType("step.build_ui", module.NewBuildUIStepFactory())
 			engine.AddStepType("step.rate_limit", module.NewRateLimitStepFactory())
 			engine.AddStepType("step.circuit_breaker", module.NewCircuitBreakerStepFactory())
+			engine.AddStepType("step.platform_template", module.NewPlatformTemplateStepFactory())
 
 			if err := engine.BuildFromConfig(wfCfg); err != nil {
 				t.Errorf("BuildFromConfig failed for %s: %v", cfgPath, err)

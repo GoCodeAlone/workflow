@@ -102,7 +102,8 @@ export type ModuleCategory =
   | 'pipeline'
   | 'cicd'
   | 'security'
-  | 'deployment';
+  | 'deployment'
+  | 'platform';
 
 export interface ModuleTypeInfo {
   type: string;
@@ -146,6 +147,7 @@ export const CATEGORY_COLORS: Record<ModuleCategory, string> = {
   cicd: '#f472b6',
   security: '#fb923c',
   deployment: '#34d399',
+  platform: '#0ea5e9',
 };
 
 export const MODULE_TYPES: ModuleTypeInfo[] = [
@@ -982,6 +984,107 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
       { key: 'group_from', label: 'Group From', type: 'string', description: 'Template expression to extract group identifier from context', placeholder: '{{.request.group}}' },
     ],
   },
+  // Platform
+  {
+    type: 'platform.provider',
+    label: 'Platform Provider',
+    category: 'platform',
+    defaultConfig: { name: 'aws' },
+    configFields: [
+      { key: 'name', label: 'Provider Name', type: 'string', required: true, description: 'Provider identifier (e.g., aws, docker-compose)', placeholder: 'aws' },
+      { key: 'config', label: 'Provider Config', type: 'json', description: 'Provider-specific configuration' },
+    ],
+    ioSignature: { inputs: [], outputs: [{ name: 'provider', type: 'platform.Provider' }] },
+    maxIncoming: 0,
+  },
+  {
+    type: 'platform.resource',
+    label: 'Platform Resource',
+    category: 'platform',
+    defaultConfig: { tier: 'application' },
+    configFields: [
+      { key: 'name', label: 'Resource Name', type: 'string', required: true, description: 'Unique resource identifier', placeholder: 'web-cluster' },
+      { key: 'type', label: 'Capability Type', type: 'string', required: true, description: 'Abstract capability type', placeholder: 'container_runtime' },
+      { key: 'tier', label: 'Tier', type: 'select', options: ['infrastructure', 'shared_primitive', 'application'], defaultValue: 'application' },
+    ],
+    ioSignature: { inputs: [{ name: 'provider', type: 'platform.Provider' }], outputs: [{ name: 'output', type: 'ResourceOutput' }] },
+  },
+  {
+    type: 'platform.context',
+    label: 'Platform Context',
+    category: 'platform',
+    defaultConfig: { tier: 'application' },
+    configFields: [
+      { key: 'org', label: 'Organization', type: 'string', required: true, placeholder: 'acme-corp' },
+      { key: 'environment', label: 'Environment', type: 'string', required: true, placeholder: 'production' },
+      { key: 'tier', label: 'Tier', type: 'select', options: ['infrastructure', 'shared_primitive', 'application'], defaultValue: 'application' },
+    ],
+    ioSignature: { inputs: [], outputs: [{ name: 'context', type: 'PlatformContext' }] },
+    maxIncoming: 0,
+  },
+  {
+    type: 'step.platform_plan',
+    label: 'Platform Plan',
+    category: 'pipeline',
+    defaultConfig: {},
+    configFields: [
+      { key: 'provider_service', label: 'Provider Service', type: 'string', description: 'Service name for the platform provider' },
+      { key: 'resources_from', label: 'Resources From', type: 'string', defaultValue: 'resource_declarations' },
+      { key: 'tier', label: 'Tier', type: 'select', options: ['1', '2', '3'], defaultValue: '3' },
+      { key: 'dry_run', label: 'Dry Run', type: 'boolean', defaultValue: 'false' },
+    ],
+  },
+  {
+    type: 'step.platform_apply',
+    label: 'Platform Apply',
+    category: 'pipeline',
+    defaultConfig: {},
+    configFields: [
+      { key: 'provider_service', label: 'Provider Service', type: 'string' },
+      { key: 'plan_from', label: 'Plan From', type: 'string', defaultValue: 'platform_plan' },
+    ],
+  },
+  {
+    type: 'step.platform_destroy',
+    label: 'Platform Destroy',
+    category: 'pipeline',
+    defaultConfig: {},
+    configFields: [
+      { key: 'provider_service', label: 'Provider Service', type: 'string' },
+      { key: 'resources_from', label: 'Resources From', type: 'string', defaultValue: 'applied_resources' },
+    ],
+  },
+  {
+    type: 'step.drift_check',
+    label: 'Drift Check',
+    category: 'pipeline',
+    defaultConfig: {},
+    configFields: [
+      { key: 'provider_service', label: 'Provider Service', type: 'string' },
+      { key: 'resources_from', label: 'Resources From', type: 'string', defaultValue: 'applied_resources' },
+    ],
+  },
+  {
+    type: 'step.constraint_check',
+    label: 'Constraint Check',
+    category: 'pipeline',
+    defaultConfig: {},
+    configFields: [
+      { key: 'constraints', label: 'Constraints', type: 'json', description: 'Constraint definitions' },
+      { key: 'resources_from', label: 'Resources From', type: 'string', defaultValue: 'resource_declarations' },
+    ],
+  },
+  {
+    type: 'step.platform_template',
+    label: 'Platform Template',
+    category: 'pipeline',
+    defaultConfig: {},
+    configFields: [
+      { key: 'template_name', label: 'Template Name', type: 'string', required: true },
+      { key: 'template_version', label: 'Template Version', type: 'string' },
+      { key: 'parameters', label: 'Parameters', type: 'json', description: 'Template parameter values' },
+    ],
+  },
 ];
 
 export const MODULE_TYPE_MAP: Record<string, ModuleTypeInfo> = Object.fromEntries(
@@ -1003,6 +1106,7 @@ export const CATEGORIES: { key: ModuleCategory; label: string }[] = [
   { key: 'cicd', label: 'CI/CD' },
   { key: 'security', label: 'Security' },
   { key: 'deployment', label: 'Deployment' },
+  { key: 'platform', label: 'Platform' },
 ];
 
 // Multi-workflow tab management

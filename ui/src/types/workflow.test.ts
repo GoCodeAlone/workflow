@@ -10,7 +10,7 @@ import type { ModuleCategory } from './workflow.ts';
 describe('workflow types', () => {
   describe('MODULE_TYPES', () => {
     it('has the expected number of module types', () => {
-      expect(MODULE_TYPES.length).toBe(70);
+      expect(MODULE_TYPES.length).toBe(79);
     });
 
     it('each module type has required fields', () => {
@@ -80,8 +80,8 @@ describe('workflow types', () => {
   });
 
   describe('CATEGORIES', () => {
-    it('has all 14 expected categories', () => {
-      expect(CATEGORIES).toHaveLength(14);
+    it('has all 15 expected categories', () => {
+      expect(CATEGORIES).toHaveLength(15);
     });
 
     it('contains all expected category keys', () => {
@@ -117,8 +117,8 @@ describe('workflow types', () => {
   });
 
   describe('CATEGORY_COLORS', () => {
-    it('has all 14 category colors', () => {
-      expect(Object.keys(CATEGORY_COLORS)).toHaveLength(14);
+    it('has all 15 category colors', () => {
+      expect(Object.keys(CATEGORY_COLORS)).toHaveLength(15);
     });
 
     it('all values are hex color strings', () => {

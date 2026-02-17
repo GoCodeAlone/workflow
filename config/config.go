@@ -23,6 +23,7 @@ type WorkflowConfig struct {
 	Workflows map[string]any `json:"workflows" yaml:"workflows"`
 	Triggers  map[string]any `json:"triggers" yaml:"triggers"`
 	Pipelines map[string]any `json:"pipelines,omitempty" yaml:"pipelines,omitempty"`
+	Platform  map[string]any `json:"platform,omitempty" yaml:"platform,omitempty"`
 	ConfigDir string         `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
 }
 

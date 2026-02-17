@@ -74,6 +74,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewSchedulerWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewIntegrationWorkflowHandler())
+	engine.RegisterWorkflowHandler(handlers.NewPlatformWorkflowHandler())
 
 	// Register pipeline workflow handler
 	pipelineHandler := handlers.NewPipelineWorkflowHandler()
@@ -113,6 +114,9 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	// Register gateway pipeline step types
 	engine.AddStepType("step.rate_limit", module.NewRateLimitStepFactory())
 	engine.AddStepType("step.circuit_breaker", module.NewCircuitBreakerStepFactory())
+
+	// Register platform pipeline step types
+	engine.AddStepType("step.platform_template", module.NewPlatformTemplateStepFactory())
 
 	// Register plugin workflow step type
 	workflowRegistry := plugin.NewPluginWorkflowRegistry()

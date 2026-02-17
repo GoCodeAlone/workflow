@@ -1388,4 +1388,123 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "group_from", Label: "Group From", Type: FieldTypeString, Description: "Template expression to extract group identifier from context", Placeholder: "{{.request.group}}"},
 		},
 	})
+
+	// ---- Platform Category ----
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.provider",
+		Label:       "Platform Provider",
+		Category:    "platform",
+		Description: "Infrastructure provider for the platform abstraction layer (e.g., AWS, Docker Compose, GCP)",
+		Outputs:     []ServiceIODef{{Name: "provider", Type: "platform.Provider", Description: "Infrastructure provider instance"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "name", Label: "Provider Name", Type: FieldTypeString, Required: true, Description: "Provider identifier (e.g., aws, docker-compose, gcp)", Placeholder: "aws"},
+			{Key: "config", Label: "Provider Config", Type: FieldTypeMap, MapValueType: "string", Description: "Provider-specific configuration (credentials, region, etc.)"},
+			{Key: "tiers", Label: "Tier Configuration", Type: FieldTypeJSON, Description: "Three-tier infrastructure layout (infrastructure, shared_primitives, application)"},
+		},
+		MaxIncoming: intPtr(0),
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.resource",
+		Label:       "Platform Resource",
+		Category:    "platform",
+		Description: "A capability-based resource declaration managed by the platform abstraction layer",
+		Inputs:      []ServiceIODef{{Name: "provider", Type: "platform.Provider", Description: "The infrastructure provider managing this resource"}},
+		Outputs:     []ServiceIODef{{Name: "output", Type: "platform.ResourceOutput", Description: "Provisioned resource outputs (endpoint, credentials, properties)"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "name", Label: "Resource Name", Type: FieldTypeString, Required: true, Description: "Unique identifier for this resource within its tier", Placeholder: "web-cluster"},
+			{Key: "type", Label: "Capability Type", Type: FieldTypeString, Required: true, Description: "Abstract capability type (e.g., container_runtime, database, message_queue)", Placeholder: "container_runtime"},
+			{Key: "tier", Label: "Infrastructure Tier", Type: FieldTypeSelect, Options: []string{"infrastructure", "shared_primitive", "application"}, DefaultValue: "application", Description: "Which infrastructure tier this resource belongs to"},
+			{Key: "capabilities", Label: "Capabilities", Type: FieldTypeJSON, Description: "Provider-agnostic capability properties (replicas, memory, ports, etc.)"},
+			{Key: "constraints", Label: "Constraints", Type: FieldTypeJSON, Description: "Hard limits imposed by parent tiers"},
+		},
+		DefaultConfig: map[string]any{"tier": "application"},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.context",
+		Label:       "Platform Context",
+		Category:    "platform",
+		Description: "Hierarchical context for platform operations carrying org, environment, and tier information",
+		Outputs:     []ServiceIODef{{Name: "context", Type: "platform.PlatformContext", Description: "Resolved platform context with parent tier outputs and constraints"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "org", Label: "Organization", Type: FieldTypeString, Required: true, Description: "Organization identifier", Placeholder: "acme-corp"},
+			{Key: "environment", Label: "Environment", Type: FieldTypeString, Required: true, Description: "Deployment environment (e.g., production, staging, dev)", Placeholder: "production"},
+			{Key: "tier", Label: "Tier", Type: FieldTypeSelect, Options: []string{"infrastructure", "shared_primitive", "application"}, DefaultValue: "application", Description: "Infrastructure tier for this context"},
+		},
+		DefaultConfig: map[string]any{"tier": "application"},
+		MaxIncoming:   intPtr(0),
+	})
+
+	// ---- Platform Pipeline Steps ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.platform_plan",
+		Label:       "Platform Plan",
+		Category:    "pipeline_steps",
+		Description: "Generates an execution plan by mapping capability declarations through a platform provider",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider_service", Label: "Provider Service", Type: FieldTypeString, Description: "Service name to look up the platform provider"},
+			{Key: "resources_from", Label: "Resources From", Type: FieldTypeString, Description: "Key in pipeline context containing resource declarations", DefaultValue: "resource_declarations"},
+			{Key: "tier", Label: "Tier", Type: FieldTypeSelect, Options: []string{"1", "2", "3"}, DefaultValue: "3", Description: "Infrastructure tier for this plan"},
+			{Key: "dry_run", Label: "Dry Run", Type: FieldTypeBool, DefaultValue: "false", Description: "If true, plan only without preparing for apply"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.platform_apply",
+		Label:       "Platform Apply",
+		Category:    "pipeline_steps",
+		Description: "Applies a previously generated platform plan to provision or update resources",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider_service", Label: "Provider Service", Type: FieldTypeString, Description: "Service name to look up the platform provider"},
+			{Key: "plan_from", Label: "Plan From", Type: FieldTypeString, Description: "Key in pipeline context containing the plan to apply", DefaultValue: "platform_plan"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.platform_destroy",
+		Label:       "Platform Destroy",
+		Category:    "pipeline_steps",
+		Description: "Destroys platform resources in reverse dependency order",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider_service", Label: "Provider Service", Type: FieldTypeString, Description: "Service name to look up the platform provider"},
+			{Key: "resources_from", Label: "Resources From", Type: FieldTypeString, Description: "Key in pipeline context containing resources to destroy", DefaultValue: "applied_resources"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.drift_check",
+		Label:       "Drift Check",
+		Category:    "pipeline_steps",
+		Description: "Compares desired vs actual resource state to detect configuration drift",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider_service", Label: "Provider Service", Type: FieldTypeString, Description: "Service name to look up the platform provider"},
+			{Key: "resources_from", Label: "Resources From", Type: FieldTypeString, Description: "Key in pipeline context containing resources to check", DefaultValue: "applied_resources"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.constraint_check",
+		Label:       "Constraint Check",
+		Category:    "pipeline_steps",
+		Description: "Validates resource specs against tier constraints before provisioning",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "constraints", Label: "Constraints", Type: FieldTypeJSON, Description: "List of constraint definitions (field, operator, value)"},
+			{Key: "resources_from", Label: "Resources From", Type: FieldTypeString, Description: "Key in pipeline context containing resources to validate", DefaultValue: "resource_declarations"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.platform_template",
+		Label:       "Platform Template",
+		Category:    "pipeline_steps",
+		Description: "Resolves a platform template with parameters to produce resource declarations",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "template_name", Label: "Template Name", Type: FieldTypeString, Required: true, Description: "Name of the template to resolve"},
+			{Key: "template_version", Label: "Template Version", Type: FieldTypeString, Description: "Specific version to use (empty for latest)"},
+			{Key: "parameters", Label: "Parameters", Type: FieldTypeMap, MapValueType: "string", Description: "Template parameter values"},
+		},
+	})
 }

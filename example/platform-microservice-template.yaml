@@ -1,0 +1,83 @@
+# Platform Template: Standard Microservice
+# Defines a reusable microservice deployment template with container runtime,
+# database connection, and health check capabilities.
+#
+# Parameters:
+#   app_name  (string, required) - Service name
+#   image     (string, required) - Container image
+#   replicas  (int, default: 3)  - Number of replicas
+#   memory    (string, default: "512Mi") - Memory limit
+#   cpu       (string, default: "500m")  - CPU limit
+
+name: "platform-microservice-template"
+description: "Defines a reusable microservice deployment template"
+
+modules:
+  - name: "template-registry"
+    type: "platform.context"
+    config:
+      org: "acme-corp"
+      environment: "production"
+      tier: 3
+
+platform:
+  org: "acme-corp"
+  environment: "production"
+  templates:
+    - name: "microservice"
+      version: "1.0.0"
+      description: "Standard microservice with container runtime, database, and health check"
+      tier: 3
+      parameters:
+        - name: "app_name"
+          type: "string"
+          required: true
+          description: "The name of the microservice"
+          validation: "^[a-z][a-z0-9-]*$"
+        - name: "image"
+          type: "string"
+          required: true
+          description: "Container image to deploy"
+        - name: "replicas"
+          type: "int"
+          default: 3
+          description: "Number of replicas"
+        - name: "memory"
+          type: "string"
+          default: "512Mi"
+          description: "Memory limit per instance"
+        - name: "cpu"
+          type: "string"
+          default: "500m"
+          description: "CPU limit per instance"
+
+      capabilities:
+        - name: "${app_name}"
+          type: "container_runtime"
+          properties:
+            image: "${image}"
+            replicas: "${replicas}"
+            memory: "${memory}"
+            cpu: "${cpu}"
+            ports:
+              - container_port: 8080
+                protocol: "tcp"
+            health_check:
+              path: "/health"
+              interval: "10s"
+              timeout: "5s"
+
+        - name: "${app_name}-db"
+          type: "database"
+          properties:
+            engine: "postgresql"
+            connection_pool_size: 10
+            storage: "10Gi"
+
+      outputs:
+        - name: "service_endpoint"
+          value: "${app_name}.endpoint"
+        - name: "database_endpoint"
+          value: "${app_name}-db.endpoint"
+
+workflows: {}
