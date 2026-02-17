@@ -19,6 +19,33 @@ type handler struct {
 	dlqStore   store.DLQStore
 }
 
+// sanitizeReadOnlyQuery enforces that only a single, simple SELECT statement
+// without comments or statement separators is allowed. It returns a trimmed,
+// normalized query string or an error if the query is not considered safe.
+func sanitizeReadOnlyQuery(q string) (string, error) {
+	trimmed := strings.TrimSpace(q)
+	if trimmed == "" {
+		return "", fmt.Errorf("query is empty")
+	}
+
+	upper := strings.ToUpper(trimmed)
+
+	// Only allow SELECT statements.
+	if !strings.HasPrefix(upper, "SELECT ") && upper != "SELECT" {
+		return "", fmt.Errorf("only SELECT statements are allowed")
+	}
+
+	// Disallow common ways to chain multiple statements or hide extra SQL.
+	if strings.Contains(trimmed, ";") {
+		return "", fmt.Errorf("multiple statements are not allowed")
+	}
+	if strings.Contains(upper, "--") || strings.Contains(upper, "/*") || strings.Contains(upper, "*/") {
+		return "", fmt.Errorf("SQL comments are not allowed")
+	}
+
+	return trimmed, nil
+}
+
 func (h *handler) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /tables", h.listTables)
 	mux.HandleFunc("GET /tables/{name}/schema", h.tableSchema)
@@ -222,6 +249,12 @@ func (h *handler) execQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	safeQuery, err := sanitizeReadOnlyQuery(q)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	// Execute in a read-only transaction.
 	tx, err := h.db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -230,7 +263,7 @@ func (h *handler) execQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	rows, err := tx.QueryContext(r.Context(), q)
+	rows, err := tx.QueryContext(r.Context(), safeQuery)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("query error: %v", err))
 		return
