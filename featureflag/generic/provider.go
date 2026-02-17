@@ -127,10 +127,10 @@ func (p *Provider) AllFlags(ctx context.Context, evalCtx featureflag.EvaluationC
 		return nil, err
 	}
 	result := make([]featureflag.FlagValue, 0, len(flags))
-	for _, f := range flags {
-		val, evalErr := p.Evaluate(ctx, f.Key, evalCtx)
+	for i := range flags {
+		val, evalErr := p.Evaluate(ctx, flags[i].Key, evalCtx)
 		if evalErr != nil {
-			p.logger.Warn("failed to evaluate flag in AllFlags", "key", f.Key, "error", evalErr)
+			p.logger.Warn("failed to evaluate flag in AllFlags", "key", flags[i].Key, "error", evalErr)
 			continue
 		}
 		result = append(result, val)

@@ -140,15 +140,16 @@ func (s *AIExtractStep) executeWithTools(ctx context.Context, provider ai.AIProv
 	}
 
 	// Extract data from tool calls
-	if len(resp.ToolCalls) > 0 {
+	switch {
+	case len(resp.ToolCalls) > 0:
 		output["extracted"] = resp.ToolCalls[0].Input
 		output["method"] = "tool_use"
-	} else if resp.Content != "" {
+	case resp.Content != "":
 		// Model responded with text instead of tool call; try parsing as JSON
 		extracted := parseExtraction(resp.Content)
 		output["extracted"] = extracted
 		output["method"] = "text_parse"
-	} else {
+	default:
 		output["extracted"] = map[string]any{}
 		output["method"] = "empty"
 	}
