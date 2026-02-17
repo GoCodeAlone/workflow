@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from 'react';
+import { useCallback, useEffect, useReducer, useState } from 'react';
 import type { UIPageDef } from '../../store/pluginStore.ts';
 
 // ---------------------------------------------------------------------------
