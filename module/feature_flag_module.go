@@ -3,6 +3,8 @@ package module
 import (
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -43,6 +45,12 @@ func NewFeatureFlagModule(name string, cfg FeatureFlagModuleConfig) (*FeatureFla
 		dbPath := cfg.DBPath
 		if dbPath == "" {
 			dbPath = "data/featureflags.db"
+		}
+		// Ensure parent directory exists for the SQLite file.
+		if dir := filepath.Dir(dbPath); dir != "" && dir != "." {
+			if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+				return nil, fmt.Errorf("feature flag module %q: failed to create db directory %q: %w", name, dir, mkErr)
+			}
 		}
 		store, err = generic.NewStore(dbPath)
 		if err != nil {
