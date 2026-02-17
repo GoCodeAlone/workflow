@@ -17,6 +17,11 @@ func NewRegistryHandler(registry *CompositeRegistry) *RegistryHandler {
 	return &RegistryHandler{registry: registry}
 }
 
+// isSafePathComponent returns true if s does not contain path separators or parent directory references.
+func isSafePathComponent(s string) bool {
+	return s != "" && !strings.Contains(s, "/") && !strings.Contains(s, "\\") && !strings.Contains(s, "..")
+}
+
 // RegisterRoutes registers plugin management HTTP routes on the given mux.
 func (h *RegistryHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/admin/plugins", h.handleListInstalled)
@@ -110,6 +115,10 @@ func (h *RegistryHandler) handleInstall(w http.ResponseWriter, r *http.Request) 
 	}
 	if req.Version == "" {
 		http.Error(w, "version is required", http.StatusBadRequest)
+		return
+	}
+	if !isSafePathComponent(req.Name) || !isSafePathComponent(req.Version) {
+		http.Error(w, "invalid plugin name or version", http.StatusBadRequest)
 		return
 	}
 

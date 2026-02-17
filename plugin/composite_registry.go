@@ -6,9 +6,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/GoCodeAlone/workflow/dynamic"
 )
+
+// pluginsBaseDir is the local directory under which all plugins are stored.
+var pluginsBaseDir = filepath.Join("data", "plugins")
 
 // CompositeRegistry combines a local registry with a remote registry,
 // searching both and allowing installation from the remote into local.
@@ -102,6 +106,20 @@ func (c *CompositeRegistry) Install(ctx context.Context, name, version string) e
 		return fmt.Errorf("get manifest for %s@%s: %w", name, version, err)
 	}
 
+	// Resolve and validate local plugin directory to prevent directory traversal.
+	absBaseDir, err := filepath.Abs(pluginsBaseDir)
+	if err != nil {
+		return fmt.Errorf("resolve plugins base directory: %w", err)
+	}
+	pluginDir := filepath.Join(absBaseDir, name)
+	absPluginDir, err := filepath.Abs(pluginDir)
+	if err != nil {
+		return fmt.Errorf("resolve plugin directory: %w", err)
+	}
+	if !strings.HasPrefix(absPluginDir, absBaseDir+string(os.PathSeparator)) && absPluginDir != absBaseDir {
+		return fmt.Errorf("invalid plugin name %q", name)
+	}
+
 	// Download plugin archive
 	reader, err := c.remote.Download(ctx, name, version)
 	if err != nil {
@@ -110,7 +128,6 @@ func (c *CompositeRegistry) Install(ctx context.Context, name, version string) e
 	defer reader.Close()
 
 	// Save to a local directory
-	pluginDir := filepath.Join("data", "plugins", name)
 	if err := os.MkdirAll(pluginDir, 0750); err != nil {
 		return fmt.Errorf("create plugin directory: %w", err)
 	}
