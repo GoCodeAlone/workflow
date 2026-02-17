@@ -98,17 +98,17 @@ describe('workflowStore', () => {
       expect(getStore().nodes[0].type).toBe('schedulerNode');
     });
 
-    it('maps event types to eventNode component', () => {
+    it('maps notification.slack to integrationNode component', () => {
       act(() => {
-        getStore().addNode('eventbus.modular', { x: 0, y: 0 });
+        getStore().addNode('notification.slack', { x: 0, y: 0 });
       });
 
-      expect(getStore().nodes[0].type).toBe('eventNode');
+      expect(getStore().nodes[0].type).toBe('integrationNode');
     });
 
-    it('maps httpclient to integrationNode component', () => {
+    it('maps step types to integrationNode component', () => {
       act(() => {
-        getStore().addNode('httpclient.modular', { x: 0, y: 0 });
+        getStore().addNode('step.validate', { x: 0, y: 0 });
       });
 
       expect(getStore().nodes[0].type).toBe('integrationNode');

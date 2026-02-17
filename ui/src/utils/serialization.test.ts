@@ -402,23 +402,6 @@ describe('serialization', () => {
       expect((autoWireEdges[0].data as WorkflowEdgeData).label).toBe('auto-wired');
     });
 
-    it('auto-wires to chimux.router when no http.router exists', () => {
-      const config: WorkflowConfig = {
-        modules: [
-          { name: 'my-server', type: 'http.server' },
-          { name: 'my-chi-router', type: 'chimux.router' },
-          { name: 'health', type: 'health.checker' },
-        ],
-        workflows: {},
-        triggers: {},
-      };
-
-      const { edges } = configToNodes(config);
-      const autoWireEdges = edges.filter((e) => (e.data as WorkflowEdgeData)?.edgeType === 'auto-wire');
-      expect(autoWireEdges).toHaveLength(1);
-      expect(autoWireEdges[0].target).toContain('chimux_router');
-    });
-
     it('does not create auto-wire edges when no router exists', () => {
       const config: WorkflowConfig = {
         modules: [
@@ -487,8 +470,8 @@ describe('serialization', () => {
           { name: 'Broker', type: 'messaging.broker' },
           { name: 'SM', type: 'statemachine.engine' },
           { name: 'Sched', type: 'scheduler.modular' },
-          { name: 'EvtBus', type: 'eventbus.modular' },
-          { name: 'Client', type: 'httpclient.modular' },
+          { name: 'Slack', type: 'notification.slack' },
+          { name: 'Step', type: 'step.validate' },
           { name: 'DB', type: 'database.modular' },
         ],
         workflows: {},
@@ -500,7 +483,7 @@ describe('serialization', () => {
       expect(nodes[1].type).toBe('messagingNode');
       expect(nodes[2].type).toBe('stateMachineNode');
       expect(nodes[3].type).toBe('schedulerNode');
-      expect(nodes[4].type).toBe('eventNode');
+      expect(nodes[4].type).toBe('integrationNode');
       expect(nodes[5].type).toBe('integrationNode');
       expect(nodes[6].type).toBe('infrastructureNode');
     });

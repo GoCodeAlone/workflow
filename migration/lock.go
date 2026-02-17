@@ -75,5 +75,5 @@ func hashLockKey(key string) int64 {
 		h ^= uint64(key[i])
 		h *= 1099511628211 // FNV prime
 	}
-	return int64(h)
+	return int64(h & 0x7FFFFFFFFFFFFFFF) //nolint:gosec // intentional truncation for advisory lock key
 }

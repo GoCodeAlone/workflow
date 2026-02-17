@@ -940,6 +940,48 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
       { key: 'schedule', label: 'Schedule Window', type: 'json', description: 'Time window for scheduled gates (weekdays, start_hour, end_hour)' },
     ],
   },
+
+  // ---- Feature Flags ----
+  {
+    type: 'featureflag.service',
+    label: 'Feature Flag Service',
+    category: 'infrastructure',
+    defaultConfig: { provider: 'generic', cache_ttl: '1m', sse_enabled: true },
+    configFields: [
+      { key: 'provider', label: 'Provider', type: 'select', options: ['generic', 'launchdarkly'], defaultValue: 'generic', description: 'Feature flag backend provider' },
+      { key: 'cache_ttl', label: 'Cache TTL', type: 'string', defaultValue: '1m', description: 'Duration to cache flag evaluations', placeholder: '1m' },
+      { key: 'sse_enabled', label: 'SSE Enabled', type: 'boolean', defaultValue: true, description: 'Enable Server-Sent Events for real-time flag change notifications' },
+      { key: 'store_path', label: 'Store Path', type: 'string', description: 'Path for the flag definition store (file-based provider)', placeholder: 'data/flags.json' },
+      { key: 'launchdarkly_sdk_key', label: 'LaunchDarkly SDK Key', type: 'string', sensitive: true, description: 'LaunchDarkly server-side SDK key (required when provider is launchdarkly)', group: 'LaunchDarkly' },
+    ],
+    ioSignature: { inputs: [], outputs: [{ name: 'featureflag.Service', type: 'featureflag.Service' }] },
+    maxIncoming: 0,
+  },
+  {
+    type: 'step.feature_flag',
+    label: 'Feature Flag Check',
+    category: 'pipeline',
+    defaultConfig: { output_key: 'flag_value' },
+    configFields: [
+      { key: 'flag', label: 'Flag Key', type: 'string', required: true, description: 'Feature flag key to evaluate', placeholder: 'feature.my-flag' },
+      { key: 'user_from', label: 'User From', type: 'string', description: 'Template expression to extract user identifier from context', placeholder: '{{.request.user_id}}' },
+      { key: 'group_from', label: 'Group From', type: 'string', description: 'Template expression to extract group identifier from context', placeholder: '{{.request.group}}' },
+      { key: 'output_key', label: 'Output Key', type: 'string', defaultValue: 'flag_value', description: 'Key to store the flag value in pipeline context', placeholder: 'flag_value' },
+    ],
+  },
+  {
+    type: 'step.ff_gate',
+    label: 'Feature Flag Gate',
+    category: 'pipeline',
+    defaultConfig: {},
+    configFields: [
+      { key: 'flag', label: 'Flag Key', type: 'string', required: true, description: 'Feature flag key to evaluate', placeholder: 'feature.my-flag' },
+      { key: 'on_enabled', label: 'On Enabled', type: 'string', description: 'Branch or step to execute when flag is enabled' },
+      { key: 'on_disabled', label: 'On Disabled', type: 'string', description: 'Branch or step to execute when flag is disabled' },
+      { key: 'user_from', label: 'User From', type: 'string', description: 'Template expression to extract user identifier from context', placeholder: '{{.request.user_id}}' },
+      { key: 'group_from', label: 'Group From', type: 'string', description: 'Template expression to extract group identifier from context', placeholder: '{{.request.group}}' },
+    ],
+  },
 ];
 
 export const MODULE_TYPE_MAP: Record<string, ModuleTypeInfo> = Object.fromEntries(

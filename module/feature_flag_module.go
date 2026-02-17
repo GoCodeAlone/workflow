@@ -48,7 +48,7 @@ func NewFeatureFlagModule(name string, cfg FeatureFlagModuleConfig) (*FeatureFla
 		}
 		// Ensure parent directory exists for the SQLite file.
 		if dir := filepath.Dir(dbPath); dir != "" && dir != "." {
-			if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+			if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
 				return nil, fmt.Errorf("feature flag module %q: failed to create db directory %q: %w", name, dir, mkErr)
 			}
 		}

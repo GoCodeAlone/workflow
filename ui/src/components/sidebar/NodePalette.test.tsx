@@ -18,10 +18,16 @@ describe('NodePalette', () => {
     expect(screen.getByText('Modules')).toBeInTheDocument();
   });
 
-  it('renders all categories', () => {
+  it('renders all categories that have modules', () => {
     renderPalette();
 
-    for (const cat of CATEGORIES) {
+    // Only categories with at least one module type are rendered
+    const categoriesWithModules = CATEGORIES.filter((cat) =>
+      MODULE_TYPES.some((t) => t.category === cat.key),
+    );
+    expect(categoriesWithModules.length).toBeGreaterThan(0);
+
+    for (const cat of categoriesWithModules) {
       const matches = screen.getAllByText(cat.label);
       expect(matches.length).toBeGreaterThanOrEqual(1);
     }
@@ -33,12 +39,10 @@ describe('NodePalette', () => {
     fireEvent.click(screen.getByText('Middleware'));
     fireEvent.click(screen.getByText('Messaging'));
     fireEvent.click(screen.getByText('Scheduling'));
-    fireEvent.click(screen.getByText('Events'));
 
     expect(screen.getByText('Auth Middleware')).toBeInTheDocument();
     expect(screen.getByText('Message Broker')).toBeInTheDocument();
     expect(screen.getByText('Scheduler')).toBeInTheDocument();
-    expect(screen.getByText('Event Logger')).toBeInTheDocument();
     expect(screen.getByText('Rate Limiter')).toBeInTheDocument();
     expect(screen.getByText('CORS Middleware')).toBeInTheDocument();
   });
