@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -152,7 +153,14 @@ func (s *FileStateStore) GetPlan(_ context.Context, planID string) (*platform.Pl
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	path := filepath.Join(s.baseDir, "plans", "plan-"+planID+".json")
+	// Validate planID to prevent path traversal and unexpected file access.
+	// Plan IDs are expected to be simple identifiers, not paths.
+	if strings.Contains(planID, "/") || strings.Contains(planID, "\\") || strings.Contains(planID, "..") {
+		return nil, fmt.Errorf("invalid plan ID %q", planID)
+	}
+
+	dir := filepath.Join(s.baseDir, "plans")
+	path := filepath.Join(dir, "plan-"+planID+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
