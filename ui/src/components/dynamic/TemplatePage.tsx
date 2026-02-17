@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useReducer } from 'react';
 import type { UIPageDef } from '../../store/pluginStore.ts';
 
 // ---------------------------------------------------------------------------
@@ -161,14 +161,27 @@ function DetailView({ data }: { data: Record<string, unknown> }) {
 // ---------------------------------------------------------------------------
 
 export default function TemplatePage({ page }: TemplatePageProps) {
-  const [data, setData] = useState<unknown>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  type FetchState = { data: unknown; loading: boolean; error: string | null };
+  type FetchAction =
+    | { type: 'start' }
+    | { type: 'success'; data: unknown }
+    | { type: 'error'; error: string };
+
+  const [state, dispatch] = useReducer(
+    (prev: FetchState, action: FetchAction): FetchState => {
+      switch (action.type) {
+        case 'start': return { ...prev, loading: true, error: null };
+        case 'success': return { data: action.data, loading: false, error: null };
+        case 'error': return { ...prev, loading: false, error: action.error };
+      }
+    },
+    { data: null, loading: false, error: null },
+  );
+  const { data, loading, error } = state;
 
   useEffect(() => {
     if (!page.apiEndpoint) return;
-    setLoading(true);
-    setError(null);
+    dispatch({ type: 'start' });
 
     const token = localStorage.getItem('auth_token');
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -179,9 +192,8 @@ export default function TemplatePage({ page }: TemplatePageProps) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
-      .then(setData)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to fetch data'))
-      .finally(() => setLoading(false));
+      .then((d) => dispatch({ type: 'success', data: d }))
+      .catch((e) => dispatch({ type: 'error', error: e instanceof Error ? e.message : 'Failed to fetch data' }));
   }, [page.apiEndpoint]);
 
   if (loading) {
