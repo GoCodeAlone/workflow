@@ -64,6 +64,7 @@ func runRun(args []string) error {
 	engine.RegisterTrigger(module.NewEventTrigger())
 	engine.RegisterTrigger(module.NewScheduleTrigger())
 	engine.RegisterTrigger(module.NewEventBusTrigger())
+	engine.RegisterTrigger(module.NewReconciliationTrigger())
 
 	pool := dynamic.NewInterpreterPool()
 	registry := dynamic.NewComponentRegistry()

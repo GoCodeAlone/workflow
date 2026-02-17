@@ -1300,6 +1300,8 @@ func canHandleTrigger(trigger module.Trigger, triggerType string) bool {
 		return trigger.Name() == module.EventTriggerName
 	case "eventbus":
 		return trigger.Name() == module.EventBusTriggerName
+	case "reconciliation":
+		return trigger.Name() == module.ReconciliationTriggerName
 	case "mock":
 		// For tests - match the name of the trigger
 		return trigger.Name() == "mock.trigger"
