@@ -1,3 +1,10 @@
+requires:
+  plugins:
+    - name: messaging
+    - name: modular-compat
+    - name: observability
+    - name: workflow-plugin-http
+
 modules:
   # Core services
   - name: config-provider

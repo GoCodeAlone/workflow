@@ -220,182 +220,182 @@ func (cf *ComposeFile) MarshalYAML() (string, error) {
 }
 
 func writeService(b *strings.Builder, name string, svc *ComposeService, indent string) {
-	fmt.Fprintf(b,"%s%s:\n", indent, name)
+	fmt.Fprintf(b, "%s%s:\n", indent, name)
 	inner := indent + "  "
 
-	fmt.Fprintf(b,"%simage: %s\n", inner, svc.Image)
+	fmt.Fprintf(b, "%simage: %s\n", inner, svc.Image)
 
 	if svc.ContainerName != "" {
-		fmt.Fprintf(b,"%scontainer_name: %s\n", inner, svc.ContainerName)
+		fmt.Fprintf(b, "%scontainer_name: %s\n", inner, svc.ContainerName)
 	}
 
 	if svc.Command != "" {
-		fmt.Fprintf(b,"%scommand: %s\n", inner, svc.Command)
+		fmt.Fprintf(b, "%scommand: %s\n", inner, svc.Command)
 	}
 
 	if svc.Restart != "" {
-		fmt.Fprintf(b,"%srestart: %s\n", inner, svc.Restart)
+		fmt.Fprintf(b, "%srestart: %s\n", inner, svc.Restart)
 	}
 
 	if len(svc.Ports) > 0 {
-		fmt.Fprintf(b,"%sports:\n", inner)
+		fmt.Fprintf(b, "%sports:\n", inner)
 		for _, p := range svc.Ports {
-			fmt.Fprintf(b,"%s  - \"%s\"\n", inner, p)
+			fmt.Fprintf(b, "%s  - \"%s\"\n", inner, p)
 		}
 	}
 
 	if len(svc.Environment) > 0 {
-		fmt.Fprintf(b,"%senvironment:\n", inner)
+		fmt.Fprintf(b, "%senvironment:\n", inner)
 		for _, k := range sortedStringKeys(svc.Environment) {
-			fmt.Fprintf(b,"%s  %s: \"%s\"\n", inner, k, svc.Environment[k])
+			fmt.Fprintf(b, "%s  %s: \"%s\"\n", inner, k, svc.Environment[k])
 		}
 	}
 
 	if len(svc.Volumes) > 0 {
-		fmt.Fprintf(b,"%svolumes:\n", inner)
+		fmt.Fprintf(b, "%svolumes:\n", inner)
 		for _, v := range svc.Volumes {
-			fmt.Fprintf(b,"%s  - %s\n", inner, v)
+			fmt.Fprintf(b, "%s  - %s\n", inner, v)
 		}
 	}
 
 	if len(svc.Networks) > 0 {
-		fmt.Fprintf(b,"%snetworks:\n", inner)
+		fmt.Fprintf(b, "%snetworks:\n", inner)
 		for _, n := range svc.Networks {
-			fmt.Fprintf(b,"%s  - %s\n", inner, n)
+			fmt.Fprintf(b, "%s  - %s\n", inner, n)
 		}
 	}
 
 	if len(svc.DependsOn) > 0 {
-		fmt.Fprintf(b,"%sdepends_on:\n", inner)
+		fmt.Fprintf(b, "%sdepends_on:\n", inner)
 		for _, d := range svc.DependsOn {
-			fmt.Fprintf(b,"%s  - %s\n", inner, d)
+			fmt.Fprintf(b, "%s  - %s\n", inner, d)
 		}
 	}
 
 	if svc.Deploy != nil {
-		fmt.Fprintf(b,"%sdeploy:\n", inner)
+		fmt.Fprintf(b, "%sdeploy:\n", inner)
 		depInner := inner + "  "
 		if svc.Deploy.Replicas > 0 {
-			fmt.Fprintf(b,"%sreplicas: %d\n", depInner, svc.Deploy.Replicas)
+			fmt.Fprintf(b, "%sreplicas: %d\n", depInner, svc.Deploy.Replicas)
 		}
 		if svc.Deploy.Resources != nil {
-			fmt.Fprintf(b,"%sresources:\n", depInner)
+			fmt.Fprintf(b, "%sresources:\n", depInner)
 			resInner := depInner + "  "
 			if svc.Deploy.Resources.Limits != nil {
-				fmt.Fprintf(b,"%slimits:\n", resInner)
+				fmt.Fprintf(b, "%slimits:\n", resInner)
 				limInner := resInner + "  "
 				if svc.Deploy.Resources.Limits.CPUs != "" {
-					fmt.Fprintf(b,"%scpus: \"%s\"\n", limInner, svc.Deploy.Resources.Limits.CPUs)
+					fmt.Fprintf(b, "%scpus: \"%s\"\n", limInner, svc.Deploy.Resources.Limits.CPUs)
 				}
 				if svc.Deploy.Resources.Limits.Memory != "" {
-					fmt.Fprintf(b,"%smemory: %s\n", limInner, svc.Deploy.Resources.Limits.Memory)
+					fmt.Fprintf(b, "%smemory: %s\n", limInner, svc.Deploy.Resources.Limits.Memory)
 				}
 			}
 			if svc.Deploy.Resources.Reservations != nil {
-				fmt.Fprintf(b,"%sreservations:\n", resInner)
+				fmt.Fprintf(b, "%sreservations:\n", resInner)
 				resrInner := resInner + "  "
 				if svc.Deploy.Resources.Reservations.CPUs != "" {
-					fmt.Fprintf(b,"%scpus: \"%s\"\n", resrInner, svc.Deploy.Resources.Reservations.CPUs)
+					fmt.Fprintf(b, "%scpus: \"%s\"\n", resrInner, svc.Deploy.Resources.Reservations.CPUs)
 				}
 				if svc.Deploy.Resources.Reservations.Memory != "" {
-					fmt.Fprintf(b,"%smemory: %s\n", resrInner, svc.Deploy.Resources.Reservations.Memory)
+					fmt.Fprintf(b, "%smemory: %s\n", resrInner, svc.Deploy.Resources.Reservations.Memory)
 				}
 			}
 		}
 	}
 
 	if svc.Healthcheck != nil {
-		fmt.Fprintf(b,"%shealthcheck:\n", inner)
+		fmt.Fprintf(b, "%shealthcheck:\n", inner)
 		hcInner := inner + "  "
 		if len(svc.Healthcheck.Test) > 0 {
-			fmt.Fprintf(b,"%stest: [", hcInner)
+			fmt.Fprintf(b, "%stest: [", hcInner)
 			for i, t := range svc.Healthcheck.Test {
 				if i > 0 {
 					b.WriteString(", ")
 				}
-				fmt.Fprintf(b,"\"%s\"", t)
+				fmt.Fprintf(b, "\"%s\"", t)
 			}
 			b.WriteString("]\n")
 		}
 		if svc.Healthcheck.Interval != "" {
-			fmt.Fprintf(b,"%sinterval: %s\n", hcInner, svc.Healthcheck.Interval)
+			fmt.Fprintf(b, "%sinterval: %s\n", hcInner, svc.Healthcheck.Interval)
 		}
 		if svc.Healthcheck.Timeout != "" {
-			fmt.Fprintf(b,"%stimeout: %s\n", hcInner, svc.Healthcheck.Timeout)
+			fmt.Fprintf(b, "%stimeout: %s\n", hcInner, svc.Healthcheck.Timeout)
 		}
 		if svc.Healthcheck.Retries > 0 {
-			fmt.Fprintf(b,"%sretries: %d\n", hcInner, svc.Healthcheck.Retries)
+			fmt.Fprintf(b, "%sretries: %d\n", hcInner, svc.Healthcheck.Retries)
 		}
 		if svc.Healthcheck.StartPeriod != "" {
-			fmt.Fprintf(b,"%sstart_period: %s\n", hcInner, svc.Healthcheck.StartPeriod)
+			fmt.Fprintf(b, "%sstart_period: %s\n", hcInner, svc.Healthcheck.StartPeriod)
 		}
 	}
 
 	if len(svc.Labels) > 0 {
-		fmt.Fprintf(b,"%slabels:\n", inner)
+		fmt.Fprintf(b, "%slabels:\n", inner)
 		for _, k := range sortedStringKeys(svc.Labels) {
-			fmt.Fprintf(b,"%s  %s: \"%s\"\n", inner, k, svc.Labels[k])
+			fmt.Fprintf(b, "%s  %s: \"%s\"\n", inner, k, svc.Labels[k])
 		}
 	}
 }
 
 func writeNetwork(b *strings.Builder, name string, net *ComposeNetwork, indent string) {
-	fmt.Fprintf(b,"%s%s:\n", indent, name)
+	fmt.Fprintf(b, "%s%s:\n", indent, name)
 	inner := indent + "  "
 
 	if net.Driver != "" {
-		fmt.Fprintf(b,"%sdriver: %s\n", inner, net.Driver)
+		fmt.Fprintf(b, "%sdriver: %s\n", inner, net.Driver)
 	}
 	if net.External {
-		fmt.Fprintf(b,"%sexternal: true\n", inner)
+		fmt.Fprintf(b, "%sexternal: true\n", inner)
 	}
 	if net.IPAM != nil {
-		fmt.Fprintf(b,"%sipam:\n", inner)
+		fmt.Fprintf(b, "%sipam:\n", inner)
 		ipamInner := inner + "  "
 		if net.IPAM.Driver != "" {
-			fmt.Fprintf(b,"%sdriver: %s\n", ipamInner, net.IPAM.Driver)
+			fmt.Fprintf(b, "%sdriver: %s\n", ipamInner, net.IPAM.Driver)
 		}
 		if len(net.IPAM.Config) > 0 {
-			fmt.Fprintf(b,"%sconfig:\n", ipamInner)
+			fmt.Fprintf(b, "%sconfig:\n", ipamInner)
 			for _, c := range net.IPAM.Config {
-				fmt.Fprintf(b,"%s  - subnet: %s\n", ipamInner, c.Subnet)
+				fmt.Fprintf(b, "%s  - subnet: %s\n", ipamInner, c.Subnet)
 			}
 		}
 	}
 	if len(net.Labels) > 0 {
-		fmt.Fprintf(b,"%slabels:\n", inner)
+		fmt.Fprintf(b, "%slabels:\n", inner)
 		for _, k := range sortedStringKeys(net.Labels) {
-			fmt.Fprintf(b,"%s  %s: \"%s\"\n", inner, k, net.Labels[k])
+			fmt.Fprintf(b, "%s  %s: \"%s\"\n", inner, k, net.Labels[k])
 		}
 	}
 	if len(net.DriverOpts) > 0 {
-		fmt.Fprintf(b,"%sdriver_opts:\n", inner)
+		fmt.Fprintf(b, "%sdriver_opts:\n", inner)
 		for _, k := range sortedStringKeys(net.DriverOpts) {
-			fmt.Fprintf(b,"%s  %s: \"%s\"\n", inner, k, net.DriverOpts[k])
+			fmt.Fprintf(b, "%s  %s: \"%s\"\n", inner, k, net.DriverOpts[k])
 		}
 	}
 }
 
 func writeVolume(b *strings.Builder, name string, vol *ComposeVolume, indent string) {
-	fmt.Fprintf(b,"%s%s:\n", indent, name)
+	fmt.Fprintf(b, "%s%s:\n", indent, name)
 	inner := indent + "  "
 
 	if vol.Driver != "" {
-		fmt.Fprintf(b,"%sdriver: %s\n", inner, vol.Driver)
+		fmt.Fprintf(b, "%sdriver: %s\n", inner, vol.Driver)
 	}
 	if vol.External {
-		fmt.Fprintf(b,"%sexternal: true\n", inner)
+		fmt.Fprintf(b, "%sexternal: true\n", inner)
 	}
 	if len(vol.Labels) > 0 {
-		fmt.Fprintf(b,"%slabels:\n", inner)
+		fmt.Fprintf(b, "%slabels:\n", inner)
 		for _, k := range sortedStringKeys(vol.Labels) {
-			fmt.Fprintf(b,"%s  %s: \"%s\"\n", inner, k, vol.Labels[k])
+			fmt.Fprintf(b, "%s  %s: \"%s\"\n", inner, k, vol.Labels[k])
 		}
 	}
 	if len(vol.DriverOpts) > 0 {
-		fmt.Fprintf(b,"%sdriver_opts:\n", inner)
+		fmt.Fprintf(b, "%sdriver_opts:\n", inner)
 		for _, k := range sortedStringKeys(vol.DriverOpts) {
-			fmt.Fprintf(b,"%s  %s: \"%s\"\n", inner, k, vol.DriverOpts[k])
+			fmt.Fprintf(b, "%s  %s: \"%s\"\n", inner, k, vol.DriverOpts[k])
 		}
 	}
 }

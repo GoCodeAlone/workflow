@@ -1,3 +1,7 @@
+requires:
+  plugins:
+    - name: messaging
+
 modules:
   - name: event-broker
     type: messaging.broker

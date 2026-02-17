@@ -73,6 +73,11 @@ func (r *ModuleSchemaRegistry) Register(s *ModuleSchema) {
 	r.schemas[s.Type] = s
 }
 
+// Unregister removes a module schema by type. Intended for cleanup during testing.
+func (r *ModuleSchemaRegistry) Unregister(moduleType string) {
+	delete(r.schemas, moduleType)
+}
+
 // Get returns the schema for a module type, or nil if not found.
 func (r *ModuleSchemaRegistry) Get(moduleType string) *ModuleSchema {
 	return r.schemas[moduleType]

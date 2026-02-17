@@ -152,6 +152,7 @@ func TestExpandConfigStrings_NilConfig(t *testing.T) {
 func TestEngine_SecretsResolver_Available(t *testing.T) {
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
 
 	resolver := engine.SecretsResolver()
 	if resolver == nil {
@@ -169,6 +170,7 @@ func TestEngine_SecretsResolver_Integration(t *testing.T) {
 
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
@@ -200,6 +202,7 @@ func TestEngine_SecretsResolver_Integration(t *testing.T) {
 func TestEngine_SecretsResolver_CustomProviderRegistration(t *testing.T) {
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
 
 	// Register a custom provider before building
 	engine.SecretsResolver().Register("custom", &mockSecretProvider{
@@ -240,6 +243,7 @@ func TestEngine_SecretsResolver_MixedExpansion(t *testing.T) {
 
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
 
 	engine.SecretsResolver().Register("vault", &mockSecretProvider{
 		secrets: map[string]string{

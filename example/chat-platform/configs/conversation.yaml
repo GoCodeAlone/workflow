@@ -18,6 +18,17 @@
 #   -> (responder actions: transfer, escalate, wrap-up)
 #   -> begin_wrap_up -> wrap_up -> close_from_wrap_up -> closed
 
+requires:
+  plugins:
+    - name: ai
+    - name: api
+    - name: auth
+    - name: messaging
+    - name: observability
+    - name: statemachine
+    - name: storage
+    - name: workflow-plugin-http
+
 modules:
   # --- HTTP infrastructure ---
   - name: web-server

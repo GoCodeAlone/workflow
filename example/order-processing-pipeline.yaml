@@ -8,6 +8,14 @@
 #   -> order-broker -> notification-handler
 #   with order-metrics and order-health providing observability
 
+requires:
+  plugins:
+    - name: api
+    - name: messaging
+    - name: observability
+    - name: statemachine
+    - name: workflow-plugin-http
+
 modules:
   # --- HTTP layer ---
   - name: order-server

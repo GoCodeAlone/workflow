@@ -1,6 +1,12 @@
 # Notification Pipeline Example
 # HTTP endpoint receives events, broker distributes to Slack + S3 archival
 
+requires:
+  plugins:
+    - name: messaging
+    - name: observability
+    - name: workflow-plugin-http
+
 modules:
   - name: webhook-server
     type: http.server

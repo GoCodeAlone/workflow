@@ -11,6 +11,8 @@
 
 name: "platform-microservice-template"
 description: "Defines a reusable microservice deployment template"
+requires:
+  plugins: []  # Uses only built-in platform module types
 
 modules:
   - name: "template-registry"

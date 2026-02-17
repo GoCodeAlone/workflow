@@ -1,6 +1,12 @@
 # Event-Driven Workflow Example Configuration
 # This demonstrates complex event pattern processing with multiple event types
 
+requires:
+  plugins:
+    - name: api
+    - name: messaging
+    - name: workflow-plugin-http
+
 modules:
   # Message broker for receiving events
   - name: event-broker

@@ -1,0 +1,180 @@
+package http
+
+import (
+	"github.com/CrisisTextLine/modular"
+	"github.com/CrisisTextLine/modular/modules/reverseproxy/v2"
+	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/plugin"
+)
+
+// moduleFactories returns factory functions for all HTTP module types.
+func moduleFactories() map[string]plugin.ModuleFactory {
+	return map[string]plugin.ModuleFactory{
+		"http.server":  httpServerFactory,
+		"http.router":  httpRouterFactory,
+		"http.handler": httpHandlerFactory,
+
+		"http.proxy":        httpProxyFactory,
+		"reverseproxy":      httpProxyFactory,
+		"http.simple_proxy": httpSimpleProxyFactory,
+
+		"static.fileserver": staticFileServerFactory,
+
+		"http.middleware.auth":            authMiddlewareFactory,
+		"http.middleware.logging":         loggingMiddlewareFactory,
+		"http.middleware.ratelimit":       rateLimitMiddlewareFactory,
+		"http.middleware.cors":            corsMiddlewareFactory,
+		"http.middleware.requestid":       requestIDMiddlewareFactory,
+		"http.middleware.securityheaders": securityHeadersMiddlewareFactory,
+	}
+}
+
+func httpServerFactory(name string, cfg map[string]any) modular.Module {
+	address := ""
+	if addr, ok := cfg["address"].(string); ok {
+		address = addr
+	}
+	return module.NewStandardHTTPServer(name, address)
+}
+
+func httpRouterFactory(name string, _ map[string]any) modular.Module {
+	return module.NewStandardHTTPRouter(name)
+}
+
+func httpHandlerFactory(name string, cfg map[string]any) modular.Module {
+	contentType := "application/json"
+	if ct, ok := cfg["contentType"].(string); ok {
+		contentType = ct
+	}
+	return module.NewSimpleHTTPHandler(name, contentType)
+}
+
+func httpProxyFactory(_ string, _ map[string]any) modular.Module {
+	return reverseproxy.NewModule()
+}
+
+func httpSimpleProxyFactory(name string, cfg map[string]any) modular.Module {
+	sp := module.NewSimpleProxy(name)
+	if targets, ok := cfg["targets"].(map[string]any); ok {
+		ts := make(map[string]string, len(targets))
+		for prefix, backend := range targets {
+			if s, ok := backend.(string); ok {
+				ts[prefix] = s
+			}
+		}
+		// Ignore error here — validation happens at Init time
+		_ = sp.SetTargets(ts)
+	}
+	return sp
+}
+
+func staticFileServerFactory(name string, cfg map[string]any) modular.Module {
+	root := ""
+	if r, ok := cfg["root"].(string); ok {
+		root = r
+	}
+	prefix := "/"
+	if p, ok := cfg["prefix"].(string); ok && p != "" {
+		prefix = p
+	}
+	spaFallback := true
+	if sf, ok := cfg["spaFallback"].(bool); ok {
+		spaFallback = sf
+	}
+	cacheMaxAge := 3600
+	if cma, ok := cfg["cacheMaxAge"].(int); ok {
+		cacheMaxAge = cma
+	} else if cma, ok := cfg["cacheMaxAge"].(float64); ok {
+		cacheMaxAge = int(cma)
+	}
+	routerName := ""
+	if rn, ok := cfg["router"].(string); ok {
+		routerName = rn
+	}
+	sfs := module.NewStaticFileServer(name, root, prefix, spaFallback, cacheMaxAge)
+	if routerName != "" {
+		sfs.SetRouterName(routerName)
+	}
+	return sfs
+}
+
+func authMiddlewareFactory(name string, cfg map[string]any) modular.Module {
+	authType := "Bearer"
+	if at, ok := cfg["authType"].(string); ok {
+		authType = at
+	}
+	return module.NewAuthMiddleware(name, authType)
+}
+
+func loggingMiddlewareFactory(name string, cfg map[string]any) modular.Module {
+	logLevel := "info"
+	if ll, ok := cfg["logLevel"].(string); ok {
+		logLevel = ll
+	}
+	return module.NewLoggingMiddleware(name, logLevel)
+}
+
+func rateLimitMiddlewareFactory(name string, cfg map[string]any) modular.Module {
+	requestsPerMinute := 60
+	burstSize := 10
+	if rpm, ok := cfg["requestsPerMinute"].(int); ok {
+		requestsPerMinute = rpm
+	} else if rpm, ok := cfg["requestsPerMinute"].(float64); ok {
+		requestsPerMinute = int(rpm)
+	}
+	if bs, ok := cfg["burstSize"].(int); ok {
+		burstSize = bs
+	} else if bs, ok := cfg["burstSize"].(float64); ok {
+		burstSize = int(bs)
+	}
+	return module.NewRateLimitMiddleware(name, requestsPerMinute, burstSize)
+}
+
+func corsMiddlewareFactory(name string, cfg map[string]any) modular.Module {
+	allowedOrigins := []string{"*"}
+	allowedMethods := []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
+	if origins, ok := cfg["allowedOrigins"].([]any); ok {
+		allowedOrigins = make([]string, len(origins))
+		for i, origin := range origins {
+			if str, ok := origin.(string); ok {
+				allowedOrigins[i] = str
+			}
+		}
+	}
+	if methods, ok := cfg["allowedMethods"].([]any); ok {
+		allowedMethods = make([]string, len(methods))
+		for i, method := range methods {
+			if str, ok := method.(string); ok {
+				allowedMethods[i] = str
+			}
+		}
+	}
+	return module.NewCORSMiddleware(name, allowedOrigins, allowedMethods)
+}
+
+func requestIDMiddlewareFactory(name string, _ map[string]any) modular.Module {
+	return module.NewRequestIDMiddleware(name)
+}
+
+func securityHeadersMiddlewareFactory(name string, cfg map[string]any) modular.Module {
+	secCfg := module.SecurityHeadersConfig{}
+	if v, ok := cfg["contentSecurityPolicy"].(string); ok {
+		secCfg.ContentSecurityPolicy = v
+	}
+	if v, ok := cfg["frameOptions"].(string); ok {
+		secCfg.FrameOptions = v
+	}
+	if v, ok := cfg["contentTypeOptions"].(string); ok {
+		secCfg.ContentTypeOptions = v
+	}
+	if v, ok := cfg["hstsMaxAge"].(int); ok {
+		secCfg.HSTSMaxAge = v
+	}
+	if v, ok := cfg["referrerPolicy"].(string); ok {
+		secCfg.ReferrerPolicy = v
+	}
+	if v, ok := cfg["permissionsPolicy"].(string); ok {
+		secCfg.PermissionsPolicy = v
+	}
+	return module.NewSecurityHeadersMiddleware(name, secCfg)
+}

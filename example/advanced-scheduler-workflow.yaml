@@ -1,6 +1,11 @@
 # Advanced Scheduler Workflow Example Configuration
 # This demonstrates a more complex scheduler workflow with multiple jobs and schedules
 
+requires:
+  plugins:
+    - name: messaging
+    - name: modular-compat
+
 modules:
   # Define schedulers with different cron patterns
   - name: minutely-scheduler

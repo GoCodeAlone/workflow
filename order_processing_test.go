@@ -44,6 +44,12 @@ func TestOrderProcessingPipeline_BuildFromConfig(t *testing.T) {
 
 	engine := NewStdEngine(app, logger)
 
+	for _, p := range allPlugins() {
+		if err := engine.LoadPlugin(p); err != nil {
+			t.Fatalf("LoadPlugin(%s) failed: %v", p.Name(), err)
+		}
+	}
+
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
@@ -69,6 +75,7 @@ func TestOrderProcessingPipeline_BuildFromConfig(t *testing.T) {
 func TestOrderProcessingPipeline_EndToEnd(t *testing.T) {
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
 
 	// Create individual modules directly for end-to-end testing
 	stateMachineEngine := module.NewStateMachineEngine("order-state-engine")

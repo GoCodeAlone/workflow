@@ -5,6 +5,12 @@ description: >
   A webhook endpoint receives JSON, validates it, transforms it, logs it,
   and publishes an event. No monolithic handler needed.
 
+requires:
+  plugins:
+    - name: messaging
+    - name: pipeline-steps
+    - name: workflow-plugin-http
+
 modules:
   - name: webhook-server
     type: http.server

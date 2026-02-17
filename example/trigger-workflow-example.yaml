@@ -1,3 +1,11 @@
+requires:
+  plugins:
+    - name: api
+    - name: messaging
+    - name: modular-compat
+    - name: statemachine
+    - name: workflow-plugin-http
+
 modules:
   # HTTP infrastructure
   - name: api-http-server

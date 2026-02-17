@@ -34,6 +34,21 @@ import (
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/plugin/docmanager"
 	"github.com/GoCodeAlone/workflow/plugin/storebrowser"
+	pluginai "github.com/GoCodeAlone/workflow/plugins/ai"
+	pluginapi "github.com/GoCodeAlone/workflow/plugins/api"
+	pluginauth "github.com/GoCodeAlone/workflow/plugins/auth"
+	plugincicd "github.com/GoCodeAlone/workflow/plugins/cicd"
+	pluginff "github.com/GoCodeAlone/workflow/plugins/featureflags"
+	pluginhttp "github.com/GoCodeAlone/workflow/plugins/http"
+	pluginintegration "github.com/GoCodeAlone/workflow/plugins/integration"
+	pluginmessaging "github.com/GoCodeAlone/workflow/plugins/messaging"
+	pluginmodcompat "github.com/GoCodeAlone/workflow/plugins/modularcompat"
+	pluginobs "github.com/GoCodeAlone/workflow/plugins/observability"
+	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
+	pluginscheduler "github.com/GoCodeAlone/workflow/plugins/scheduler"
+	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
+	pluginsm "github.com/GoCodeAlone/workflow/plugins/statemachine"
+	pluginstorage "github.com/GoCodeAlone/workflow/plugins/storage"
 	"github.com/GoCodeAlone/workflow/provider/aws"
 	"github.com/GoCodeAlone/workflow/provider/azure"
 	"github.com/GoCodeAlone/workflow/provider/digitalocean"
@@ -68,75 +83,42 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	app := modular.NewStdApplication(nil, logger)
 	engine := workflow.NewStdEngine(app, logger)
 
-	// Register standard workflow handlers
-	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewSchedulerWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewIntegrationWorkflowHandler())
+	// Load all engine plugins — each registers its module factories, step factories,
+	// trigger factories, and workflow handlers via engine.LoadPlugin.
+	plugins := []plugin.EnginePlugin{
+		pluginhttp.New(),
+		pluginobs.New(),
+		pluginmessaging.New(),
+		pluginsm.New(),
+		pluginauth.New(),
+		pluginstorage.New(),
+		pluginapi.New(),
+		pluginpipeline.New(),
+		plugincicd.New(),
+		pluginff.New(),
+		pluginsecrets.New(),
+		pluginmodcompat.New(),
+		pluginscheduler.New(),
+		pluginintegration.New(),
+		pluginai.New(),
+	}
+	for _, p := range plugins {
+		if err := engine.LoadPlugin(p); err != nil {
+			log.Fatalf("Failed to load plugin %s: %v", p.Name(), err)
+		}
+	}
+
+	// Register handlers and steps not covered by plugins
 	engine.RegisterWorkflowHandler(handlers.NewPlatformWorkflowHandler())
 
-	// Register pipeline workflow handler
 	pipelineHandler := handlers.NewPipelineWorkflowHandler()
 	pipelineHandler.SetStepRegistry(engine.GetStepRegistry())
 	pipelineHandler.SetLogger(logger)
 	engine.RegisterWorkflowHandler(pipelineHandler)
 
-	// Register built-in pipeline step types
-	engine.AddStepType("step.validate", module.NewValidateStepFactory())
-	engine.AddStepType("step.transform", module.NewTransformStepFactory())
-	engine.AddStepType("step.conditional", module.NewConditionalStepFactory())
-	engine.AddStepType("step.publish", module.NewPublishStepFactory())
-	engine.AddStepType("step.set", module.NewSetStepFactory())
-	engine.AddStepType("step.log", module.NewLogStepFactory())
-	engine.AddStepType("step.http_call", module.NewHTTPCallStepFactory())
-	engine.AddStepType("step.delegate", module.NewDelegateStepFactory())
-	engine.AddStepType("step.request_parse", module.NewRequestParseStepFactory())
-	engine.AddStepType("step.db_query", module.NewDBQueryStepFactory())
-	engine.AddStepType("step.db_exec", module.NewDBExecStepFactory())
-	engine.AddStepType("step.json_response", module.NewJSONResponseStepFactory())
-	engine.AddStepType("step.jq", module.NewJQStepFactory())
-
-	// Register CI/CD pipeline step types
-	engine.AddStepType("step.shell_exec", module.NewShellExecStepFactory())
-	engine.AddStepType("step.artifact_pull", module.NewArtifactPullStepFactory())
-	engine.AddStepType("step.artifact_push", module.NewArtifactPushStepFactory())
-	engine.AddStepType("step.docker_build", module.NewDockerBuildStepFactory())
-	engine.AddStepType("step.docker_push", module.NewDockerPushStepFactory())
-	engine.AddStepType("step.docker_run", module.NewDockerRunStepFactory())
-	engine.AddStepType("step.scan_sast", module.NewScanSASTStepFactory())
-	engine.AddStepType("step.scan_container", module.NewScanContainerStepFactory())
-	engine.AddStepType("step.scan_deps", module.NewScanDepsStepFactory())
-	engine.AddStepType("step.deploy", module.NewDeployStepFactory())
-	engine.AddStepType("step.gate", module.NewGateStepFactory())
-	engine.AddStepType("step.build_ui", module.NewBuildUIStepFactory())
-
-	// Register gateway pipeline step types
-	engine.AddStepType("step.rate_limit", module.NewRateLimitStepFactory())
-	engine.AddStepType("step.circuit_breaker", module.NewCircuitBreakerStepFactory())
-
-	// Register platform pipeline step types
 	engine.AddStepType("step.platform_template", module.NewPlatformTemplateStepFactory())
 
-	// Register plugin workflow step type
-	workflowRegistry := plugin.NewPluginWorkflowRegistry()
-	stepBuilder := func(pipelineName string, _ *config.WorkflowConfig, _ modular.Application) (*module.Pipeline, error) {
-		p := &module.Pipeline{Name: pipelineName}
-		return p, nil
-	}
-	engine.AddStepType("step.sub_workflow", module.NewSubWorkflowStepFactory(workflowRegistry, stepBuilder))
-
-	// Register AI pipeline step types
-	aiRegistry := ai.NewAIModelRegistry()
-	engine.AddStepType("step.ai_complete", module.NewAICompleteStepFactory(aiRegistry))
-	engine.AddStepType("step.ai_classify", module.NewAIClassifyStepFactory(aiRegistry))
-	engine.AddStepType("step.ai_extract", module.NewAIExtractStepFactory(aiRegistry))
-
-	// Register standard triggers
-	engine.RegisterTrigger(module.NewHTTPTrigger())
-	engine.RegisterTrigger(module.NewEventTrigger())
-	engine.RegisterTrigger(module.NewScheduleTrigger())
-	engine.RegisterTrigger(module.NewEventBusTrigger())
+	// Register reconciliation trigger (not provided by any plugin)
 	engine.RegisterTrigger(module.NewReconciliationTrigger())
 
 	// Set up dynamic component system

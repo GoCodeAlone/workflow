@@ -13,6 +13,17 @@
 #   -> [event: order.paid via Kafka] -> start_shipping -> shipping
 #   -> [shipping-service] -> shipping_confirmed -> shipped -> delivered
 
+requires:
+  plugins:
+    - name: ai
+    - name: api
+    - name: auth
+    - name: messaging
+    - name: observability
+    - name: statemachine
+    - name: storage
+    - name: workflow-plugin-http
+
 modules:
   # --- HTTP infrastructure ---
   - name: web-server

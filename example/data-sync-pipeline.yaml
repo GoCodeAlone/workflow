@@ -5,6 +5,11 @@ description: >
   transforms it, and logs the results. Uses step.http_call for outbound
   requests and step.transform for data manipulation.
 
+requires:
+  plugins:
+    - name: pipeline-steps
+    - name: workflow-plugin-http
+
 modules:
   - name: sync-server
     type: http.server

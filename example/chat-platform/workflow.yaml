@@ -21,6 +21,17 @@
 #                      GET/POST /api/keywords/*, GET/POST /api/surveys/*
 # Observability: GET /healthz, GET /metrics
 
+requires:
+  plugins:
+    - name: ai
+    - name: api
+    - name: auth
+    - name: messaging
+    - name: observability
+    - name: statemachine
+    - name: storage
+    - name: workflow-plugin-http
+
 modules:
   # --- HTTP infrastructure ---
   - name: web-server

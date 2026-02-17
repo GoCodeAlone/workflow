@@ -9,6 +9,11 @@
 #   - fulfillment.delivered -> Send delivery confirmation to customer
 #   - fulfillment.completed -> Send summary to operations team
 
+requires:
+  plugins:
+    - name: messaging
+    - name: observability
+
 modules:
   # --- Messaging layer ---
   - name: notification-broker

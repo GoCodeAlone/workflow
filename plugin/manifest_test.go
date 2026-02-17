@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/dynamic"
@@ -292,5 +293,135 @@ func TestLoadManifestInvalidJSON(t *testing.T) {
 	_, err := LoadManifest(path)
 	if err == nil {
 		t.Error("expected error for invalid JSON")
+	}
+}
+
+func TestManifestEngineFieldsRoundTrip(t *testing.T) {
+	m := &PluginManifest{
+		Name:        "engine-plugin",
+		Version:     "2.0.0",
+		Author:      "Test",
+		Description: "Engine plugin with all fields",
+		Capabilities: []CapabilityDecl{
+			{Name: "http-server", Role: "provider", Priority: 10},
+			{Name: "message-broker", Role: "consumer"},
+		},
+		ModuleTypes:   []string{"http.server", "http.client"},
+		StepTypes:     []string{"step.validate", "step.transform"},
+		TriggerTypes:  []string{"http", "cron"},
+		WorkflowTypes: []string{"http", "messaging"},
+		WiringHooks:   []string{"wire-metrics", "wire-logging"},
+	}
+
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var loaded PluginManifest
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// Capabilities
+	if len(loaded.Capabilities) != 2 {
+		t.Fatalf("Capabilities len = %d, want 2", len(loaded.Capabilities))
+	}
+	if loaded.Capabilities[0].Name != "http-server" {
+		t.Errorf("Capabilities[0].Name = %q, want %q", loaded.Capabilities[0].Name, "http-server")
+	}
+	if loaded.Capabilities[0].Role != "provider" {
+		t.Errorf("Capabilities[0].Role = %q, want %q", loaded.Capabilities[0].Role, "provider")
+	}
+	if loaded.Capabilities[0].Priority != 10 {
+		t.Errorf("Capabilities[0].Priority = %d, want %d", loaded.Capabilities[0].Priority, 10)
+	}
+	if loaded.Capabilities[1].Name != "message-broker" {
+		t.Errorf("Capabilities[1].Name = %q, want %q", loaded.Capabilities[1].Name, "message-broker")
+	}
+	if loaded.Capabilities[1].Priority != 0 {
+		t.Errorf("Capabilities[1].Priority = %d, want %d", loaded.Capabilities[1].Priority, 0)
+	}
+
+	// ModuleTypes
+	if len(loaded.ModuleTypes) != 2 || loaded.ModuleTypes[0] != "http.server" || loaded.ModuleTypes[1] != "http.client" {
+		t.Errorf("ModuleTypes = %v, want [http.server http.client]", loaded.ModuleTypes)
+	}
+
+	// StepTypes
+	if len(loaded.StepTypes) != 2 || loaded.StepTypes[0] != "step.validate" {
+		t.Errorf("StepTypes = %v, want [step.validate step.transform]", loaded.StepTypes)
+	}
+
+	// TriggerTypes
+	if len(loaded.TriggerTypes) != 2 || loaded.TriggerTypes[0] != "http" {
+		t.Errorf("TriggerTypes = %v, want [http cron]", loaded.TriggerTypes)
+	}
+
+	// WorkflowTypes
+	if len(loaded.WorkflowTypes) != 2 || loaded.WorkflowTypes[0] != "http" {
+		t.Errorf("WorkflowTypes = %v, want [http messaging]", loaded.WorkflowTypes)
+	}
+
+	// WiringHooks
+	if len(loaded.WiringHooks) != 2 || loaded.WiringHooks[0] != "wire-metrics" {
+		t.Errorf("WiringHooks = %v, want [wire-metrics wire-logging]", loaded.WiringHooks)
+	}
+}
+
+func TestManifestEngineFieldsOmitEmpty(t *testing.T) {
+	m := &PluginManifest{
+		Name:        "basic-plugin",
+		Version:     "1.0.0",
+		Author:      "Test",
+		Description: "No engine fields",
+	}
+
+	data, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	raw := string(data)
+	for _, field := range []string{"capabilities", "moduleTypes", "stepTypes", "triggerTypes", "workflowTypes", "wiringHooks"} {
+		if strings.Contains(raw, field) {
+			t.Errorf("expected field %q to be omitted from JSON when empty, got: %s", field, raw)
+		}
+	}
+}
+
+func TestManifestEngineFieldsLoadFromFile(t *testing.T) {
+	dir := t.TempDir()
+	m := &PluginManifest{
+		Name:         "file-engine-plugin",
+		Version:      "1.0.0",
+		Author:       "Test",
+		Description:  "Test file load with engine fields",
+		ModuleTypes:  []string{"custom.module"},
+		TriggerTypes: []string{"custom.trigger"},
+		Capabilities: []CapabilityDecl{
+			{Name: "storage", Role: "provider", Priority: 5},
+		},
+	}
+
+	data, _ := json.MarshalIndent(m, "", "  ")
+	path := filepath.Join(dir, "plugin.json")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadManifest(path)
+	if err != nil {
+		t.Fatalf("LoadManifest error: %v", err)
+	}
+
+	if len(loaded.ModuleTypes) != 1 || loaded.ModuleTypes[0] != "custom.module" {
+		t.Errorf("ModuleTypes = %v, want [custom.module]", loaded.ModuleTypes)
+	}
+	if len(loaded.TriggerTypes) != 1 || loaded.TriggerTypes[0] != "custom.trigger" {
+		t.Errorf("TriggerTypes = %v, want [custom.trigger]", loaded.TriggerTypes)
+	}
+	if len(loaded.Capabilities) != 1 || loaded.Capabilities[0].Name != "storage" {
+		t.Errorf("Capabilities = %v, want [{storage provider 5}]", loaded.Capabilities)
 	}
 }

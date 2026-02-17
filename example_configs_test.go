@@ -161,6 +161,8 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 		"workflow-a-orders-with-branching.yaml":        "step.conditional not supported as standalone module type",
 		"workflow-b-fulfillment-with-branching.yaml":   "step.conditional not supported as standalone module type",
 		"workflow-c-notifications-with-branching.yaml": "step.conditional not supported as standalone module type",
+		// feature_flag step requires featureflag.service module to be initialized first
+		"feature-flag-workflow.yaml": "step.feature_flag requires featureflag.service module loaded before pipeline configuration",
 	}
 
 	for _, cfgPath := range configs {
@@ -195,6 +197,13 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 				stdApp.SetConfigFeeders([]modular.Feeder{}) // per-app feeders to avoid global EnvFeeder race
 			}
 			engine := NewStdEngine(app, logger)
+
+			// Load all extracted plugins
+			for _, p := range allPlugins() {
+				if err := engine.LoadPlugin(p); err != nil {
+					t.Fatalf("LoadPlugin(%s) failed: %v", p.Name(), err)
+				}
+			}
 
 			engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 			engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())

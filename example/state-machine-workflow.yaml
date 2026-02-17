@@ -1,6 +1,13 @@
 # State Machine Workflow Example Configuration
 # This demonstrates a workflow that tracks explicit states and transitions
 
+requires:
+  plugins:
+    - name: api
+    - name: messaging
+    - name: statemachine
+    - name: workflow-plugin-http
+
 modules:
   # State machine engine
   - name: order-processor

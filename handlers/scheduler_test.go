@@ -23,6 +23,7 @@ func TestSchedulerWorkflow(t *testing.T) {
 
 	// Create workflow engine
 	engine := workflow.NewStdEngine(app, &mock.Logger{LogEntries: make([]string, 0)})
+	loadAllPlugins(t, engine)
 
 	// Register workflow handlers
 	engine.RegisterWorkflowHandler(NewSchedulerWorkflowHandler())

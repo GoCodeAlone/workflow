@@ -2,6 +2,12 @@
 # Demonstrates feature flag evaluation and gating in pipelines.
 # Uses the featureflag.service module with the built-in generic provider.
 
+requires:
+  plugins:
+    - name: feature-flags
+    - name: pipeline-steps
+    - name: workflow-plugin-http
+
 modules:
   - name: http-server
     type: http.server

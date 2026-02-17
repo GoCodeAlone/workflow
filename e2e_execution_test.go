@@ -81,6 +81,7 @@ func TestE2E_SimpleHTTPWorkflow(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {
@@ -201,6 +202,7 @@ func TestE2E_OrderPipeline_FullExecution(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
@@ -341,6 +343,7 @@ func TestE2E_OrderPipeline_ErrorPath(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
 
@@ -425,6 +428,7 @@ func TestE2E_BrokerMessaging(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
 
@@ -754,6 +758,7 @@ func TestE2E_DynamicComponent_LoadAndExecute(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 	engine.SetDynamicRegistry(registry)
 
@@ -1384,6 +1389,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.SetDynamicRegistry(registry)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
@@ -1506,6 +1512,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 		modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger),
 		logger,
 	)
+	loadAllPlugins(t, noRegistryEngine)
 	// Don't call SetDynamicRegistry
 	dynamicOnlyCfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
@@ -1636,6 +1643,7 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.SetDynamicRegistry(registry)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
@@ -1856,6 +1864,7 @@ func TestE2E_IntegrationWorkflow(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 
 	// Register the integration.registry module type factory
 	engine.AddModuleType("integration.registry", func(name string, cfg map[string]any) modular.Module {
@@ -1984,6 +1993,7 @@ func TestE2E_EventWorkflow(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 
 	// Register the event.processor module type factory
 	engine.AddModuleType("event.processor", func(name string, cfg map[string]any) modular.Module {
@@ -2087,6 +2097,7 @@ func TestE2E_DataTransformer(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {
@@ -2236,6 +2247,7 @@ func TestE2E_SchedulerWorkflow(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 
 	// Register the cron.scheduler module type factory
 	engine.AddModuleType("cron.scheduler", func(name string, cfg map[string]any) modular.Module {
@@ -2376,6 +2388,13 @@ func TestE2E_MetricsAndHealthCheck(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+
+	for _, p := range allPlugins() {
+		if err := engine.LoadPlugin(p); err != nil {
+			t.Fatalf("LoadPlugin(%s) failed: %v", p.Name(), err)
+		}
+	}
+
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {
@@ -2567,6 +2586,7 @@ func TestE2E_EventBusBridge(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	// Register the EventBus module BEFORE BuildFromConfig so it goes through
@@ -2736,6 +2756,7 @@ func TestE2E_WebhookSender(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {
@@ -2887,6 +2908,7 @@ func TestE2E_SlackNotification_MockEndpoint(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {

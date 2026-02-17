@@ -16,6 +16,7 @@ func setupPipelineEngine(t *testing.T) (*StdEngine, *handlers.PipelineWorkflowHa
 
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
 
 	// Register built-in step types
 	engine.AddStepType("step.validate", module.NewValidateStepFactory())
@@ -127,7 +128,13 @@ func TestPipeline_ConfigurePipelines_CreatesStepsFromRegistry(t *testing.T) {
 }
 
 func TestPipeline_ConfigurePipelines_InlineHTTPTrigger(t *testing.T) {
-	engine, pipelineHandler := setupPipelineEngine(t)
+	// Use a minimal engine without plugins to avoid trigger collisions
+	// (plugin triggers would shadow the mock trigger below).
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	engine.AddStepType("step.set", module.NewSetStepFactory())
+	pipelineHandler := handlers.NewPipelineWorkflowHandler()
+	engine.RegisterWorkflowHandler(pipelineHandler)
 
 	// Register a mock trigger that responds to "http" type
 	mt := &mockTrigger{
@@ -174,7 +181,12 @@ func TestPipeline_ConfigurePipelines_InlineHTTPTrigger(t *testing.T) {
 }
 
 func TestPipeline_ConfigurePipelines_InlineEventTrigger(t *testing.T) {
-	engine, pipelineHandler := setupPipelineEngine(t)
+	// Use a minimal engine without plugins to avoid trigger collisions.
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	engine.AddStepType("step.log", module.NewLogStepFactory())
+	pipelineHandler := handlers.NewPipelineWorkflowHandler()
+	engine.RegisterWorkflowHandler(pipelineHandler)
 
 	// Register a mock trigger that responds to "event" type
 	mt := &mockTrigger{
@@ -392,6 +404,7 @@ func TestPipeline_ConfigurePipelines_NoPipelineHandler(t *testing.T) {
 	// Create an engine without registering a PipelineWorkflowHandler
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
 
 	pipelineCfg := map[string]any{
 		"orphan-pipeline": map[string]any{

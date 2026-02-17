@@ -7,6 +7,14 @@
 #   -> order-transformer -> order-state-engine -> order-state-tracker
 #   -> order-broker (emits order.validated / order.failed)
 
+requires:
+  plugins:
+    - name: api
+    - name: messaging
+    - name: observability
+    - name: statemachine
+    - name: workflow-plugin-http
+
 modules:
   # --- HTTP layer ---
   - name: order-server

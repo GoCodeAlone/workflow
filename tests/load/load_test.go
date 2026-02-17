@@ -141,8 +141,7 @@ func TestLoad_SustainedThroughput(t *testing.T) {
 
 func TestLoad_ConcurrentAPISimulation(t *testing.T) {
 	engine := newLoadEngine(t)
-	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
+	loadAllPlugins(t, engine)
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
@@ -275,6 +274,7 @@ func TestLoad_StateMachineThroughput(t *testing.T) {
 	logger := &testLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := workflow.NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
 
 	cfg := &config.WorkflowConfig{

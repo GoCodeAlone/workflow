@@ -5,6 +5,10 @@
 name: "deploy-order-api"
 description: "Deploy the order API using the microservice template"
 
+requires:
+  plugins:
+    - name: workflow-plugin-http
+
 modules:
   - name: "platform-ctx"
     type: "platform.context"

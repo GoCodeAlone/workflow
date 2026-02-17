@@ -48,6 +48,7 @@ func TestE2E_Middleware_Auth(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {
@@ -177,6 +178,7 @@ func TestE2E_Middleware_RateLimit(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {
@@ -259,6 +261,7 @@ func TestE2E_Middleware_CORS(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {
@@ -379,6 +382,7 @@ func TestE2E_Middleware_CORS(t *testing.T) {
 		pfLogger := &mockLogger{}
 		pfApp := modular.NewStdApplication(modular.NewStdConfigProvider(nil), pfLogger)
 		pfEngine := NewStdEngine(pfApp, pfLogger)
+		loadAllPlugins(t, pfEngine)
 		pfEngine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 		if err := pfEngine.BuildFromConfig(pfCfg); err != nil {
@@ -526,6 +530,7 @@ func TestE2E_Middleware_FullChain(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {

@@ -12,6 +12,22 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/plugin"
+	pluginai "github.com/GoCodeAlone/workflow/plugins/ai"
+	pluginapi "github.com/GoCodeAlone/workflow/plugins/api"
+	pluginauth "github.com/GoCodeAlone/workflow/plugins/auth"
+	plugincicd "github.com/GoCodeAlone/workflow/plugins/cicd"
+	pluginff "github.com/GoCodeAlone/workflow/plugins/featureflags"
+	pluginhttp "github.com/GoCodeAlone/workflow/plugins/http"
+	pluginintegration "github.com/GoCodeAlone/workflow/plugins/integration"
+	pluginmessaging "github.com/GoCodeAlone/workflow/plugins/messaging"
+	pluginmodcompat "github.com/GoCodeAlone/workflow/plugins/modularcompat"
+	pluginobs "github.com/GoCodeAlone/workflow/plugins/observability"
+	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
+	pluginscheduler "github.com/GoCodeAlone/workflow/plugins/scheduler"
+	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
+	pluginsm "github.com/GoCodeAlone/workflow/plugins/statemachine"
+	pluginstorage "github.com/GoCodeAlone/workflow/plugins/storage"
 )
 
 // testLogger is a simple logger for integration tests.
@@ -55,10 +71,35 @@ func newTestApp(t *testing.T) (modular.Application, *testLogger) {
 }
 
 // newTestEngine creates an engine with all standard workflow handlers registered.
+func integrationPlugins() []plugin.EnginePlugin {
+	return []plugin.EnginePlugin{
+		pluginhttp.New(),
+		pluginobs.New(),
+		pluginmessaging.New(),
+		pluginsm.New(),
+		pluginauth.New(),
+		pluginstorage.New(),
+		pluginapi.New(),
+		pluginpipeline.New(),
+		plugincicd.New(),
+		pluginff.New(),
+		pluginsecrets.New(),
+		pluginmodcompat.New(),
+		pluginscheduler.New(),
+		pluginintegration.New(),
+		pluginai.New(),
+	}
+}
+
 func newTestEngine(t *testing.T) (*workflow.StdEngine, modular.Application, *testLogger) {
 	t.Helper()
 	app, logger := newTestApp(t)
 	engine := workflow.NewStdEngine(app, logger)
+	for _, p := range integrationPlugins() {
+		if err := engine.LoadPlugin(p); err != nil {
+			t.Fatalf("LoadPlugin(%s) failed: %v", p.Name(), err)
+		}
+	}
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())

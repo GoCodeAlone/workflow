@@ -1,3 +1,9 @@
+requires:
+  plugins:
+    - name: messaging
+    - name: modular-compat
+    - name: workflow-plugin-http
+
 modules:
   # Modular scheduler - much more robust than custom scheduler
   - name: job-scheduler

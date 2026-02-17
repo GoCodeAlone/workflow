@@ -1,3 +1,7 @@
+requires:
+  plugins:
+    - name: workflow-plugin-http
+
 modules:
   - name: api-http-server
     type: http.server

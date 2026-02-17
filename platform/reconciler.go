@@ -149,7 +149,7 @@ func (r *Reconciler) Start(ctx context.Context) error {
 						drift.DriftType, drift.ContextPath, drift.ResourceName, drift.ResourceType)
 				}
 				for i := range result.CrossTierImpacts {
-				impact := &result.CrossTierImpacts[i]
+					impact := &result.CrossTierImpacts[i]
 					r.logger.Printf("[reconciler]   cross-tier impact: %s/%s affects %d downstream resources",
 						impact.SourceDrift.ContextPath, impact.SourceDrift.ResourceName, len(impact.AffectedResources))
 				}

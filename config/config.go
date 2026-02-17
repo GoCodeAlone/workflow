@@ -17,14 +17,27 @@ type ModuleConfig struct {
 	Branches  map[string]string `json:"branches,omitempty" yaml:"branches,omitempty"`
 }
 
+// RequiresConfig declares what capabilities and plugins a workflow needs.
+type RequiresConfig struct {
+	Capabilities []string            `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+	Plugins      []PluginRequirement `json:"plugins,omitempty" yaml:"plugins,omitempty"`
+}
+
+// PluginRequirement specifies a required plugin with optional version constraint.
+type PluginRequirement struct {
+	Name    string `json:"name" yaml:"name"`
+	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+}
+
 // WorkflowConfig represents the overall configuration for the workflow engine
 type WorkflowConfig struct {
-	Modules   []ModuleConfig `json:"modules" yaml:"modules"`
-	Workflows map[string]any `json:"workflows" yaml:"workflows"`
-	Triggers  map[string]any `json:"triggers" yaml:"triggers"`
-	Pipelines map[string]any `json:"pipelines,omitempty" yaml:"pipelines,omitempty"`
-	Platform  map[string]any `json:"platform,omitempty" yaml:"platform,omitempty"`
-	ConfigDir string         `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
+	Modules   []ModuleConfig  `json:"modules" yaml:"modules"`
+	Workflows map[string]any  `json:"workflows" yaml:"workflows"`
+	Triggers  map[string]any  `json:"triggers" yaml:"triggers"`
+	Pipelines map[string]any  `json:"pipelines,omitempty" yaml:"pipelines,omitempty"`
+	Platform  map[string]any  `json:"platform,omitempty" yaml:"platform,omitempty"`
+	Requires  *RequiresConfig `json:"requires,omitempty" yaml:"requires,omitempty"`
+	ConfigDir string          `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
 }
 
 // ResolveRelativePath resolves a path relative to the config file's directory.

@@ -53,6 +53,7 @@ func TestE2E_Negative_HTTPRouting(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {
@@ -191,6 +192,7 @@ func TestE2E_Negative_OrderPipeline_DataRoundtrip(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
 
@@ -396,6 +398,7 @@ func TestE2E_Negative_OrderPipeline_InvalidTransitions(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
 
@@ -1187,6 +1190,7 @@ func TestE2E_Negative_BrokerMessageVerification(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
 

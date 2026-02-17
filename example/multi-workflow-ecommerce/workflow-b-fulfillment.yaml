@@ -8,6 +8,13 @@
 #   -> fulfillment-transformer -> fulfillment-state-engine
 #   -> fulfillment-state-tracker -> fulfillment-webhook (external warehouse API)
 
+requires:
+  plugins:
+    - name: api
+    - name: messaging
+    - name: observability
+    - name: statemachine
+
 modules:
   # --- Messaging layer ---
   - name: fulfillment-broker

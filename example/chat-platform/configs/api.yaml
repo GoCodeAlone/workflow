@@ -13,6 +13,14 @@
 # No state machine, no dynamic components, no Kafka.
 # Persistence via SQLite for all platform data.
 
+requires:
+  plugins:
+    - name: api
+    - name: auth
+    - name: observability
+    - name: storage
+    - name: workflow-plugin-http
+
 modules:
   # --- HTTP infrastructure ---
   - name: web-server

@@ -212,6 +212,7 @@ func testConfigRegistration(t *testing.T, engineName string, stateTrackerName st
 
 	// Create a clean workflow engine for this test
 	engine := workflow.NewStdEngine(app, &mock.Logger{LogEntries: make([]string, 0)})
+	loadAllPlugins(t, engine)
 
 	// Register workflow handlers - this should be done BEFORE any configuration
 	engine.RegisterWorkflowHandler(NewStateMachineWorkflowHandler())

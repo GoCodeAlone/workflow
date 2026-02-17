@@ -55,6 +55,7 @@ func TestE2E_Negative_Auth_TokenContentPropagation(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {
@@ -381,6 +382,7 @@ func TestE2E_Negative_RateLimit_RecoveryAfterWindow(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {
@@ -508,6 +510,7 @@ func TestE2E_Negative_CORS_MethodEnforcement(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {
@@ -835,6 +838,7 @@ func TestE2E_Negative_FullChain_OrderVerification(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {
@@ -1059,6 +1063,7 @@ func TestE2E_Negative_Auth_ErrorResponses(t *testing.T) {
 	logger := &mockLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
 	if err := engine.BuildFromConfig(cfg); err != nil {

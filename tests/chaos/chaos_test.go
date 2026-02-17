@@ -52,6 +52,7 @@ func newChaosEngine(t *testing.T) (*workflow.StdEngine, modular.Application) {
 	logger := &testLogger{}
 	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 	engine := workflow.NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
 	engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
@@ -207,6 +208,7 @@ func TestChaos_ConcurrentModuleRegistration(t *testing.T) {
 			// Each goroutine creates its own isolated app and engine
 			app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 			engine := workflow.NewStdEngine(app, logger)
+			loadAllPlugins(t, engine)
 			engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 			engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
 
@@ -380,6 +382,7 @@ func TestChaos_RapidLifecycleCycles(t *testing.T) {
 			logger := &testLogger{}
 			app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
 			engine := workflow.NewStdEngine(app, logger)
+			loadAllPlugins(t, engine)
 			engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
 
 			cfg := &config.WorkflowConfig{

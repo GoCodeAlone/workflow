@@ -1,3 +1,8 @@
+requires:
+  plugins:
+    - name: messaging
+    - name: workflow-plugin-http
+
 modules:
   # HTTP infrastructure modules
   - name: httpServer

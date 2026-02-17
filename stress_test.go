@@ -50,6 +50,7 @@ func (h *stressWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowTyp
 func TestConcurrentWorkflowExecution(t *testing.T) {
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
 
 	handler := &stressWorkflowHandler{
 		handlesTypes: []string{"concurrent-wf"},
@@ -97,8 +98,9 @@ func TestConcurrentWorkflowExecution(t *testing.T) {
 func TestMixedWorkflowTypes(t *testing.T) {
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
 
-	workflowTypes := []string{"http-wf", "messaging-wf", "statemachine-wf"}
+	workflowTypes := []string{"stress-http", "stress-messaging", "stress-statemachine"}
 
 	for _, wfType := range workflowTypes {
 		engine.RegisterWorkflowHandler(&stressWorkflowHandler{
@@ -157,6 +159,7 @@ func TestResourceCleanup(t *testing.T) {
 
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
 
 	handler := &stressWorkflowHandler{
 		handlesTypes: []string{"cleanup-wf"},
@@ -201,6 +204,7 @@ func TestResourceCleanup(t *testing.T) {
 func TestHighThroughput(t *testing.T) {
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
 
 	handler := &stressWorkflowHandler{
 		handlesTypes: []string{"throughput-wf"},
@@ -260,6 +264,7 @@ func TestHighThroughput(t *testing.T) {
 func TestConcurrentWorkflowWithCancellation(t *testing.T) {
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
 
 	// Handler with a small delay so we can cancel mid-flight
 	handler := &stressWorkflowHandler{

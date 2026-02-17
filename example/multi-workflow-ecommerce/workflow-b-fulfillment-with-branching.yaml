@@ -1,3 +1,11 @@
+requires:
+  plugins:
+    - name: api
+    - name: messaging
+    - name: observability
+    - name: statemachine
+    - name: workflow-plugin-http
+
 modules:
   # Receive order events
   - name: fulfillment-broker

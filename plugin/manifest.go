@@ -22,6 +22,21 @@ type PluginManifest struct {
 	Contract     *dynamic.FieldContract `json:"contract,omitempty" yaml:"contract,omitempty"`
 	Tags         []string               `json:"tags,omitempty" yaml:"tags,omitempty"`
 	Repository   string                 `json:"repository,omitempty" yaml:"repository,omitempty"`
+
+	// Engine plugin declarations
+	Capabilities  []CapabilityDecl `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+	ModuleTypes   []string         `json:"moduleTypes,omitempty" yaml:"moduleTypes,omitempty"`
+	StepTypes     []string         `json:"stepTypes,omitempty" yaml:"stepTypes,omitempty"`
+	TriggerTypes  []string         `json:"triggerTypes,omitempty" yaml:"triggerTypes,omitempty"`
+	WorkflowTypes []string         `json:"workflowTypes,omitempty" yaml:"workflowTypes,omitempty"`
+	WiringHooks   []string         `json:"wiringHooks,omitempty" yaml:"wiringHooks,omitempty"`
+}
+
+// CapabilityDecl declares a capability relationship for a plugin in the manifest.
+type CapabilityDecl struct {
+	Name     string `json:"name" yaml:"name"`
+	Role     string `json:"role" yaml:"role"` // "provider" or "consumer"
+	Priority int    `json:"priority,omitempty" yaml:"priority,omitempty"`
 }
 
 // Dependency declares a versioned dependency on another plugin.

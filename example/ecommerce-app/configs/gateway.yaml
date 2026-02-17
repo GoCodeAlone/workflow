@@ -9,6 +9,11 @@
 #
 # No business logic — pure routing and static file serving.
 
+requires:
+  plugins:
+    - name: observability
+    - name: workflow-plugin-http
+
 modules:
   # --- HTTP infrastructure ---
   - name: web-server

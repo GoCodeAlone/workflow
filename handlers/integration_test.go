@@ -27,6 +27,7 @@ func TestIntegrationWorkflow(t *testing.T) {
 
 	// Create workflow engine
 	engine := workflow.NewStdEngine(app, mockLogger)
+	loadAllPlugins(t, engine)
 
 	// Register workflow handlers
 	engine.RegisterWorkflowHandler(NewIntegrationWorkflowHandler())

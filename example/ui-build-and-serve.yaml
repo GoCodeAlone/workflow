@@ -19,6 +19,12 @@ description: >
   UI from source and serves the resulting artifacts via static.fileserver,
   all without manual CLI commands.
 
+requires:
+  plugins:
+    - name: api
+    - name: pipeline-steps
+    - name: workflow-plugin-http
+
 modules:
   # HTTP server to serve the built UI and accept build triggers
   - name: ui-server

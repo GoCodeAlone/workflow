@@ -1,6 +1,12 @@
 # Integration Workflow Example Configuration
 # This demonstrates integration with third-party services with connectors
 
+requires:
+  plugins:
+    - name: api
+    - name: messaging
+    - name: workflow-plugin-http
+
 modules:
   # Integration registry
   - name: integration-registry

@@ -1,3 +1,7 @@
+requires:
+  plugins:
+    - name: workflow-plugin-http
+
 modules:
   # HTTP server for the gateway
   - name: gateway-server
