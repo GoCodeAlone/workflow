@@ -263,6 +263,13 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		return fmt.Errorf("config validation failed: %w", err)
 	}
 
+	// Validate plugin requirements if declared
+	if cfg.Requires != nil {
+		if err := e.validateRequirements(cfg.Requires); err != nil {
+			return fmt.Errorf("requirements check failed: %w", err)
+		}
+	}
+
 	// Store config directory for consistent path resolution in pipeline steps
 	e.configDir = cfg.ConfigDir
 
