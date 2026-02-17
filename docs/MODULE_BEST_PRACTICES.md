@@ -91,14 +91,14 @@ Use these standard type names in `ServiceIODef.Type` for consistency:
 |------|-------------|-----------------|
 | `http.Request` | Incoming or outgoing HTTP request | `http.server`, `http.router`, all middleware |
 | `http.Response` | HTTP response | `http.handler`, `http.proxy` |
-| `http.Client` | HTTP client for outbound calls | `httpclient.modular` |
-| `net.Listener` | Network listener / server | `httpserver.modular` |
-| `sql.DB` | SQL database connection pool | `database.modular`, `database.workflow`, `storage.sqlite` |
-| `EventBus` | In-process event bus (pub/sub) | `eventbus.modular` |
-| `CloudEvent` | CloudEvents-formatted event | `eventbus.modular`, `eventlogger.modular` |
+| `http.Client` | HTTP client for outbound calls | `step.http_call` |
+| `net.Listener` | Network listener / server | `http.server` |
+| `sql.DB` | SQL database connection pool | `database.workflow`, `storage.sqlite`, `database.modular` |
+| `EventBus` | In-process event bus (pub/sub) | `messaging.broker.eventbus` |
+| `CloudEvent` | CloudEvents-formatted event | `messaging.broker.eventbus` |
 | `Event` | Generic event | `statemachine.engine`, `messaging.broker.eventbus` |
 | `[]byte` | Raw byte message payload | `messaging.broker`, `messaging.nats`, `messaging.kafka` |
-| `AuthService` | Authentication/authorization service | `auth.jwt`, `auth.modular` |
+| `AuthService` | Authentication/authorization service | `auth.jwt`, `auth.user-store` |
 | `Credentials` | Login credentials or token | `auth.jwt`, `auth.user-store` |
 | `UserStore` | User storage service | `auth.user-store` |
 | `DataStore` | Generic data persistence service | `persistence.store` |
@@ -107,17 +107,18 @@ Use these standard type names in `ServiceIODef.Type` for consistency:
 | `HealthStatus` | Health check status | `health.checker` |
 | `Scheduler` | Cron job scheduler service | `scheduler.modular` |
 | `Cache` | Key-value cache service | `cache.modular` |
-| `SchemaValidator` | JSON Schema validation service | `jsonschema.modular` |
+| `SchemaValidator` | JSON Schema validation service | `schema/` internal package |
 | `WorkflowRegistry` | Workflow data registry | `workflow.registry` |
 | `ObjectStore` | S3/GCS-compatible object storage | `storage.s3`, `storage.gcs` |
 | `FileStore` | Local filesystem storage | `storage.local` |
+| `FlagValue` | Feature flag evaluation result | `featureflag.service`, `step.feature_flag`, `step.ff_gate` |
 | `PipelineContext` | Pipeline execution context | All `step.*` modules |
 | `StepResult` | Pipeline step execution result | All `step.*` modules |
 | `Transition` | State machine transition result | `statemachine.engine` |
 | `trace.Tracer` | OpenTelemetry tracer | `observability.otel` |
 | `OpenAPISpec` | OpenAPI 3.0 specification | `openapi.generator`, `openapi.consumer` |
 | `ExternalAPIClient` | Typed HTTP client from OpenAPI spec | `openapi.consumer` |
-| `JSON` | Arbitrary JSON data | `api.handler`, `jsonschema.modular` |
+| `JSON` | Arbitrary JSON data | `api.handler`, `data.transformer` |
 | `any` | Untyped data (use sparingly) | `data.transformer`, `dynamic.component` |
 
 ---
@@ -263,10 +264,10 @@ Module types follow the `{category}.{specific}` pattern with dots as separators:
 | `storage.{backend}` | `storage.sqlite`, `storage.s3`, `storage.gcs`, `storage.local` |
 | `database.{scope}` | `database.modular`, `database.workflow` |
 | `messaging.{type}` | `messaging.broker`, `messaging.nats`, `messaging.kafka` |
-| `auth.{mechanism}` | `auth.jwt`, `auth.modular`, `auth.user-store` |
+| `auth.{mechanism}` | `auth.jwt`, `auth.user-store` |
 | `secrets.{provider}` | `secrets.vault`, `secrets.aws` |
-| `step.{action}` | `step.validate`, `step.transform`, `step.publish`, `step.set`, `step.log`, `step.http_call`, `step.conditional` |
-| `{framework}.modular` | `httpserver.modular`, `scheduler.modular`, `eventbus.modular` (CrisisTextLine/modular wrappers) |
+| `step.{action}` | `step.validate`, `step.transform`, `step.publish`, `step.set`, `step.log`, `step.http_call`, `step.conditional`, `step.feature_flag`, `step.ff_gate` |
+| `{framework}.modular` | `scheduler.modular`, `cache.modular`, `database.modular` (CrisisTextLine/modular wrappers, deprecated) |
 
 ### Module Instance Names
 

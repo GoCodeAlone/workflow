@@ -110,6 +110,24 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	engine.AddStepType("step.gate", module.NewGateStepFactory())
 	engine.AddStepType("step.build_ui", module.NewBuildUIStepFactory())
 
+	// Register gateway pipeline step types
+	engine.AddStepType("step.rate_limit", module.NewRateLimitStepFactory())
+	engine.AddStepType("step.circuit_breaker", module.NewCircuitBreakerStepFactory())
+
+	// Register plugin workflow step type
+	workflowRegistry := plugin.NewPluginWorkflowRegistry()
+	stepBuilder := func(pipelineName string, _ *config.WorkflowConfig, _ modular.Application) (*module.Pipeline, error) {
+		p := &module.Pipeline{Name: pipelineName}
+		return p, nil
+	}
+	engine.AddStepType("step.sub_workflow", module.NewSubWorkflowStepFactory(workflowRegistry, stepBuilder))
+
+	// Register AI pipeline step types
+	aiRegistry := ai.NewAIModelRegistry()
+	engine.AddStepType("step.ai_complete", module.NewAICompleteStepFactory(aiRegistry))
+	engine.AddStepType("step.ai_classify", module.NewAIClassifyStepFactory(aiRegistry))
+	engine.AddStepType("step.ai_extract", module.NewAIExtractStepFactory(aiRegistry))
+
 	// Register standard triggers
 	engine.RegisterTrigger(module.NewHTTPTrigger())
 	engine.RegisterTrigger(module.NewEventTrigger())

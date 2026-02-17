@@ -1,96 +1,103 @@
-# Workflow Engine Examples: Custom vs Modular Modules
+# Workflow Engine Examples
 
-This directory demonstrates the two approaches for building applications with the Workflow Engine:
+This directory demonstrates various approaches for building applications with the Workflow Engine.
 
-## 🔧 **Custom Module Approach** (Simple & Fast)
-Perfect for prototyping, learning, and simple applications.
+## Workflow-Native Module Approach (Recommended)
+
+All application components are configured using workflow-native module types. This is the simplest and most consistent approach.
 
 **Examples:**
 - `simple-workflow-config.yaml` - Basic HTTP server with routing
-- `api-server-config.yaml` - REST API with custom handlers  
+- `api-server-config.yaml` - REST API with custom handlers
 - `event-processor-config.yaml` - Simple event processing
+- `realtime-messaging-modular-config.yaml` - Real-time messaging with EventBus bridge
+- `api-gateway-config.yaml` - API gateway with reverse proxy
+- `api-gateway-modular-config.yaml` - API gateway with reverse proxy (alternate config)
 
 **Benefits:**
-- Easy YAML-based configuration
+- Easy YAML-based configuration with inline config blocks
 - Built-in workflow routing system
-- Great for rapid prototyping
+- Great for rapid prototyping and production use
 - Simple JSON response handlers
 
-## 🚀 **Modular v1.3.9 Approach** (Production-Ready)
-Enterprise-grade modules with advanced features.
+## Modular Framework Modules (Deprecated)
+
+A few CrisisTextLine/modular framework modules are still supported but may be replaced by workflow-native equivalents in the future:
+
+- `scheduler.modular` - CrisisTextLine/modular scheduler for cron-based job execution
+- `cache.modular` - CrisisTextLine/modular caching module
+- `database.modular` - CrisisTextLine/modular database module
+- `reverseproxy` - CrisisTextLine/modular reverse proxy (not deprecated)
 
 **Examples:**
-- `api-gateway-modular-config.yaml` - Production API gateway with reverse proxy
 - `scheduled-jobs-modular-config.yaml` - Advanced job scheduling with cron
 
-**Benefits:**
-- Production-ready with TLS, metrics, circuit breakers
-- Advanced features (load balancing, caching, pub/sub)
-- Better performance and reliability
-- Tenant-aware multi-tenancy support
+## Available Module Types
 
-## 🎯 **Hybrid Approach** (Best of Both)
-Combine custom and Modular modules as needed.
+### HTTP
+- `http.server` - HTTP server that listens on a network address
+- `http.router` - Routes HTTP requests to handlers
+- `http.handler` - Handles HTTP requests and produces responses
+- `http.proxy` / `reverseproxy` - Reverse proxy
+- `http.simple_proxy` - Simple prefix-based reverse proxy
+- `static.fileserver` - Serves static files with optional SPA fallback
+- `http.middleware.auth` - Authentication middleware
+- `http.middleware.logging` - Request logging middleware
+- `http.middleware.ratelimit` - Rate limiting middleware
+- `http.middleware.cors` - CORS headers middleware
+- `http.middleware.requestid` - Request ID middleware
+- `http.middleware.securityheaders` - Security headers middleware
 
-**Examples:**
-- `api-gateway-config.yaml` - Uses both custom middleware and reverse proxy
+### API
+- `api.query` - CQRS query handler
+- `api.command` - CQRS command handler
+- `api.handler` - REST API handler
+- `api.gateway` - API gateway with routing, rate limiting, CORS, auth
 
-## 📊 **Feature Comparison**
-
-| Feature | Custom Modules | Modular Modules |
-|---------|----------------|-----------------|
-| **Learning Curve** | ⭐⭐⭐⭐⭐ Easy | ⭐⭐⭐ Moderate |
-| **Configuration** | YAML workflows | Module configs |
-| **Performance** | ⭐⭐⭐ Good | ⭐⭐⭐⭐⭐ Excellent |
-| **Features** | ⭐⭐ Basic | ⭐⭐⭐⭐⭐ Advanced |
-| **Production Ready** | ⭐⭐ Limited | ⭐⭐⭐⭐⭐ Full |
-| **Extensibility** | ⭐⭐⭐ Good | ⭐⭐⭐⭐⭐ Excellent |
-
-## 🚀 **Getting Started**
-
-### Test Custom Modules
-```bash
-go run main.go -config simple-workflow-config.yaml
-curl http://localhost:8080/health
-```
-
-### Test Modular Modules  
-```bash
-go run main.go -config api-gateway-modular-config.yaml
-# Full API gateway with reverse proxy running on port 8080
-```
-
-### Test Advanced Scheduling
-```bash
-go run main.go -config scheduled-jobs-modular-config.yaml
-# Production scheduler with eventbus integration
-```
-
-## 📚 **Module Reference**
-
-### Available Custom Module Types
-- `http.server` - Basic HTTP server
-- `http.router` - Request routing  
-- `http.handler` - Simple JSON handlers
-- `http.middleware.auth` - Basic authentication
-- `http.middleware.logging` - Request logging
-- `http.middleware.ratelimit` - Rate limiting
-- `http.middleware.cors` - CORS headers
+### Messaging
 - `messaging.broker` - In-memory message broker
+- `messaging.broker.eventbus` - EventBus bridge for pub/sub
 - `messaging.handler` - Message handlers
+- `messaging.nats` - NATS broker
+- `messaging.kafka` - Kafka broker
 
-### Available Modular Module Types
-- `reverseproxy` - Production reverse proxy with load balancing
-- `httpserver.modular` - Enterprise HTTP server with TLS
-- `scheduler.modular` - Advanced cron job scheduling
-- `auth.modular` - JWT/OAuth authentication
-- `eventbus.modular` - Pub/sub messaging system
-- `cache.modular` - Multi-backend caching
-- `chimux.router` - Chi router with middleware
+### State Machine
+- `statemachine.engine` - State machine engine
+- `state.tracker` - State tracking
+- `state.connector` - State machine connector
 
-Choose the approach that best fits your needs!
+### Storage & Database
+- `storage.sqlite` - SQLite storage
+- `storage.local` - Local filesystem storage
+- `storage.s3` - S3 storage
+- `storage.gcs` - GCS storage
+- `database.workflow` - SQL database for workflow state
+- `persistence.store` - Persistence store
 
----
+### Observability
+- `metrics.collector` - Prometheus-compatible metrics
+- `health.checker` - Health check endpoints
+- `log.collector` - Log collection
+- `observability.otel` - OpenTelemetry tracing
+
+### Feature Flags
+- `featureflag.service` - Feature flag management with generic or LaunchDarkly provider
+- `step.feature_flag` - Pipeline step to evaluate a feature flag
+- `step.ff_gate` - Pipeline step combining flag evaluation with conditional routing
+
+### Other
+- `auth.jwt` - JWT authentication
+- `auth.user-store` - User store
+- `data.transformer` - Data transformation
+- `webhook.sender` - Webhook sending
+- `notification.slack` - Slack notifications
+- `dynamic.component` - Yaegi hot-reload components
+- `processing.step` - Processing steps
+- `secrets.vault` - HashiCorp Vault secrets
+- `secrets.aws` - AWS Secrets Manager
+- `openapi.generator` - OpenAPI spec generation
+- `openapi.consumer` - OpenAPI spec consumption
+- `workflow.registry` - Workflow registry
 
 ## Legacy Examples
 
@@ -101,9 +108,8 @@ The following examples demonstrate various workflow patterns:
 - `event-driven-workflow.yaml` - Complex event pattern detection
 - `event-processor-config.yaml` - Basic event processing
 
-### Integration & APIs  
+### Integration & APIs
 - `integration-workflow.yaml` - Third-party service integration
-- `api-gateway-config.yaml` - API gateway with authentication
 - `sms-chat-config.yaml` - SMS-based messaging workflow
 
 ### Scheduling & Jobs
@@ -111,12 +117,15 @@ The following examples demonstrate various workflow patterns:
 - `scheduled-jobs-config.yaml` - Recurring task management
 - `data-pipeline-config.yaml` - Data processing workflows
 
+### Feature Flags
+- `feature-flag-workflow.yaml` - Feature flag evaluation and gating in pipelines
+
 ### Patterns & Examples
 - `multi-workflow-config.yaml` - Multiple parallel workflows
 - `dependency-injection-example.yaml` - Service injection patterns
 - `trigger-workflow-example.yaml` - Event trigger demonstrations
 
-### Running Legacy Examples
+## Running Examples
 
 Option 1: Specify configuration file
 ```bash

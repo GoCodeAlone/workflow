@@ -696,16 +696,9 @@ func TestEngine_BuildFromConfig_TriggerNoHandler(t *testing.T) {
 
 func TestEngine_BuildFromConfig_ModularModules(t *testing.T) {
 	modularTypes := []string{
-		"httpserver.modular",
 		"scheduler.modular",
-		"auth.modular",
-		"eventbus.modular",
 		"cache.modular",
-		"chimux.router",
-		"eventlogger.modular",
-		"httpclient.modular",
 		"database.modular",
-		"jsonschema.modular",
 		"http.proxy",
 		"reverseproxy",
 	}

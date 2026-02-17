@@ -7,15 +7,8 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/modules/auth"
 	"github.com/CrisisTextLine/modular/modules/cache"
-	"github.com/CrisisTextLine/modular/modules/chimux"
 	"github.com/CrisisTextLine/modular/modules/database/v2"
-	"github.com/CrisisTextLine/modular/modules/eventbus"
-	"github.com/CrisisTextLine/modular/modules/eventlogger"
-	"github.com/CrisisTextLine/modular/modules/httpclient"
-	"github.com/CrisisTextLine/modular/modules/httpserver"
-	"github.com/CrisisTextLine/modular/modules/jsonschema"
 	"github.com/CrisisTextLine/modular/modules/reverseproxy/v2"
 	"github.com/CrisisTextLine/modular/modules/scheduler"
 	"github.com/GoCodeAlone/workflow/config"
@@ -372,36 +365,42 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					}
 				}
 				mod = sp
-			case "httpserver.modular":
-				e.logger.Debug("Loading Modular HTTP server module")
-				mod = httpserver.NewHTTPServerModule()
+			// Deprecated: scheduler.modular may be replaced by workflow-native equivalents in future
 			case "scheduler.modular":
 				e.logger.Debug("Loading Modular scheduler module")
 				mod = scheduler.NewModule()
-			case "auth.modular":
-				e.logger.Debug("Loading Modular auth module")
-				mod = auth.NewModule()
-			case "eventbus.modular":
-				e.logger.Debug("Loading Modular eventbus module")
-				mod = eventbus.NewModule()
+			// Deprecated: cache.modular may be replaced by workflow-native equivalents in future
 			case "cache.modular":
 				e.logger.Debug("Loading Modular cache module")
 				mod = cache.NewModule()
-			case "chimux.router":
-				e.logger.Debug("Loading Chi router module")
-				mod = chimux.NewChiMuxModule()
-			case "eventlogger.modular":
-				e.logger.Debug("Loading Modular event logger module")
-				mod = eventlogger.NewModule()
-			case "httpclient.modular":
-				e.logger.Debug("Loading Modular HTTP client module")
-				mod = httpclient.NewHTTPClientModule()
+			// Deprecated: database.modular may be replaced by workflow-native equivalents in future
 			case "database.modular":
 				e.logger.Debug("Loading Modular database module")
 				mod = database.NewModule()
-			case "jsonschema.modular":
-				e.logger.Debug("Loading Modular JSON schema module")
-				mod = jsonschema.NewModule()
+			case "featureflag.service":
+				e.logger.Debug("Loading feature flag service module")
+				ffCfg := module.FeatureFlagModuleConfig{}
+				if v, ok := modCfg.Config["provider"].(string); ok {
+					ffCfg.Provider = v
+				}
+				if v, ok := modCfg.Config["cache_ttl"].(string); ok {
+					ffCfg.CacheTTL = v
+				}
+				if v, ok := modCfg.Config["sse_enabled"].(bool); ok {
+					ffCfg.SSEEnabled = v
+				}
+				if v, ok := modCfg.Config["db_path"].(string); ok {
+					ffCfg.DBPath = v
+				}
+				ffMod, ffErr := module.NewFeatureFlagModule(modCfg.Name, ffCfg)
+				if ffErr != nil {
+					return fmt.Errorf("failed to create feature flag module %q: %w", modCfg.Name, ffErr)
+				}
+				mod = ffMod
+
+				// Register FF step types now that we have the service
+				e.AddStepType("step.feature_flag", module.NewFeatureFlagStepFactory(ffMod.Service()))
+				e.AddStepType("step.ff_gate", module.NewFFGateStepFactory(ffMod.Service()))
 			case "metrics.collector":
 				e.logger.Debug("Loading metrics collector module")
 				mcCfg := module.DefaultMetricsCollectorConfig()
@@ -776,6 +775,106 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 					consumer.SetFieldMapping(override)
 				}
 				mod = consumer
+			case "api.gateway":
+				e.logger.Debug("Loading API gateway module: " + modCfg.Name)
+				gw := module.NewAPIGateway(modCfg.Name)
+				// Parse routes
+				if routesCfg, ok := modCfg.Config["routes"].([]any); ok {
+					var routes []module.GatewayRoute
+					for _, rc := range routesCfg {
+						if rm, ok := rc.(map[string]any); ok {
+							route := module.GatewayRoute{}
+							if v, ok := rm["pathPrefix"].(string); ok {
+								route.PathPrefix = v
+							}
+							if v, ok := rm["backend"].(string); ok {
+								route.Backend = v
+							}
+							if v, ok := rm["stripPrefix"].(bool); ok {
+								route.StripPrefix = v
+							}
+							if v, ok := rm["auth"].(bool); ok {
+								route.Auth = v
+							}
+							if v, ok := rm["timeout"].(string); ok {
+								route.Timeout = v
+							}
+							if methods, ok := rm["methods"].([]any); ok {
+								for _, m := range methods {
+									if s, ok := m.(string); ok {
+										route.Methods = append(route.Methods, s)
+									}
+								}
+							}
+							if rlCfg, ok := rm["rateLimit"].(map[string]any); ok {
+								rl := &module.RateLimitConfig{}
+								if v, ok := rlCfg["requestsPerMinute"].(float64); ok {
+									rl.RequestsPerMinute = int(v)
+								}
+								if v, ok := rlCfg["burstSize"].(float64); ok {
+									rl.BurstSize = int(v)
+								}
+								route.RateLimit = rl
+							}
+							routes = append(routes, route)
+						}
+					}
+					if err := gw.SetRoutes(routes); err != nil {
+						return fmt.Errorf("api.gateway %q: %w", modCfg.Name, err)
+					}
+				}
+				// Global rate limit
+				if glCfg, ok := modCfg.Config["globalRateLimit"].(map[string]any); ok {
+					rl := &module.RateLimitConfig{}
+					if v, ok := glCfg["requestsPerMinute"].(float64); ok {
+						rl.RequestsPerMinute = int(v)
+					}
+					if v, ok := glCfg["burstSize"].(float64); ok {
+						rl.BurstSize = int(v)
+					}
+					gw.SetGlobalRateLimit(rl)
+				}
+				// CORS
+				if corsCfg, ok := modCfg.Config["cors"].(map[string]any); ok {
+					cors := &module.CORSConfig{}
+					if origins, ok := corsCfg["allowOrigins"].([]any); ok {
+						for _, o := range origins {
+							if s, ok := o.(string); ok {
+								cors.AllowOrigins = append(cors.AllowOrigins, s)
+							}
+						}
+					}
+					if methods, ok := corsCfg["allowMethods"].([]any); ok {
+						for _, m := range methods {
+							if s, ok := m.(string); ok {
+								cors.AllowMethods = append(cors.AllowMethods, s)
+							}
+						}
+					}
+					if headers, ok := corsCfg["allowHeaders"].([]any); ok {
+						for _, h := range headers {
+							if s, ok := h.(string); ok {
+								cors.AllowHeaders = append(cors.AllowHeaders, s)
+							}
+						}
+					}
+					if v, ok := corsCfg["maxAge"].(float64); ok {
+						cors.MaxAge = int(v)
+					}
+					gw.SetCORS(cors)
+				}
+				// Auth
+				if authCfg, ok := modCfg.Config["auth"].(map[string]any); ok {
+					ac := &module.AuthConfig{}
+					if v, ok := authCfg["type"].(string); ok {
+						ac.Type = v
+					}
+					if v, ok := authCfg["header"].(string); ok {
+						ac.Header = v
+					}
+					gw.SetAuth(ac)
+				}
+				mod = gw
 			default:
 				e.logger.Warn("Unknown module type: " + modCfg.Type)
 				return fmt.Errorf("unknown module type: %s", modCfg.Type)

@@ -699,7 +699,7 @@ export function configToNodes(config: WorkflowConfig): {
 
   // Auto-wire edges: observability modules auto-wire to the first router
   const autoWireTypes = new Set(['health.checker', 'metrics.collector', 'log.collector']);
-  const routerTypes = new Set(['http.router', 'chimux.router']);
+  const routerTypes = new Set(['http.router']);
   const firstRouter = config.modules.find((m) => routerTypes.has(m.type));
   if (firstRouter) {
     const routerId = nameToId[firstRouter.name];
@@ -739,9 +739,6 @@ export function nodeComponentType(moduleType: string): string {
   if (moduleType.startsWith('messaging.')) return 'messagingNode';
   if (moduleType.startsWith('statemachine.') || moduleType.startsWith('state.')) return 'stateMachineNode';
   if (moduleType === 'scheduler.modular') return 'schedulerNode';
-  if (moduleType === 'eventlogger.modular' || moduleType === 'eventbus.modular') return 'eventNode';
-  if (moduleType === 'httpclient.modular') return 'integrationNode';
-  if (moduleType === 'chimux.router') return 'httpRouterNode';
   if (moduleType === 'notification.slack' || moduleType === 'storage.s3') return 'integrationNode';
   if (moduleType === 'observability.otel') return 'infrastructureNode';
   if (moduleType.startsWith('step.')) return 'integrationNode';

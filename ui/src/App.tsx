@@ -21,8 +21,10 @@ import IAMSettings from './components/iam/IAMSettings.tsx';
 import Marketplace from './components/marketplace/Marketplace.tsx';
 import Templates from './components/templates/Templates.tsx';
 import Environments from './components/environments/Environments.tsx';
+import FlagManager from './components/featureflags/FlagManager.tsx';
 import StoreBrowserPage from './components/storebrowser/StoreBrowserPage.tsx';
 import DocsPage from './components/docmanager/DocsPage.tsx';
+import TemplatePage from './components/dynamic/TemplatePage.tsx';
 import WorkflowPickerBar from './components/shared/WorkflowPickerBar.tsx';
 import CollapsiblePanel from './components/layout/CollapsiblePanel.tsx';
 import useWorkflowStore from './store/workflowStore.ts';
@@ -344,9 +346,22 @@ function AppLayout() {
         {activeView === 'marketplace' && <Marketplace />}
         {activeView === 'templates' && <Templates />}
         {activeView === 'environments' && <Environments />}
+        {activeView === 'feature-flags' && <FlagManager />}
         {activeView === 'settings' && <IAMSettings />}
         {activeView === 'store-browser' && <StoreBrowserPage />}
         {activeView === 'docs' && <DocsPage />}
+        {/* Template-based dynamic pages from plugins */}
+        {(() => {
+          const builtinViews = new Set([
+            'editor', 'dashboard', 'executions', 'logs', 'events',
+            'marketplace', 'templates', 'environments', 'feature-flags',
+            'settings', 'store-browser', 'docs',
+          ]);
+          if (builtinViews.has(activeView)) return null;
+          const page = enabledPages.find((p: UIPageDef) => p.id === activeView && p.template);
+          if (!page) return null;
+          return <TemplatePage page={page} />;
+        })()}
       </div>
       <ToastContainer />
     </div>
@@ -420,6 +435,8 @@ function AuthenticatedContent() {
   const schemasLoaded = useModuleSchemaStore((s) => s.loaded);
   const fetchPlugins = usePluginStore((s) => s.fetchPlugins);
   const pluginsLoaded = usePluginStore((s) => s.loaded);
+  const setUserAccess = usePluginStore((s) => s.setUserAccess);
+  const user = useAuthStore((s) => s.user);
 
   useEffect(() => {
     if (!schemasLoaded) fetchSchemas();
@@ -428,6 +445,13 @@ function AuthenticatedContent() {
   useEffect(() => {
     if (!pluginsLoaded) fetchPlugins();
   }, [pluginsLoaded, fetchPlugins]);
+
+  // Sync user role/permissions to plugin store for permission-gated navigation
+  useEffect(() => {
+    if (user) {
+      setUserAccess(user.role);
+    }
+  }, [user, setUserAccess]);
 
   return (
     <ReactFlowProvider>

@@ -488,7 +488,7 @@ export default function PropertyPanel() {
         )}
 
         {/* Middleware chain editor for router nodes */}
-        {(node.data.moduleType === 'http.router' || node.data.moduleType === 'chimux.router') && (
+        {node.data.moduleType === 'http.router' && (
           <MiddlewareChainEditor
             nodeId={node.id}
             middlewareChain={(node.data.config?.middlewareChain as string[]) ?? []}

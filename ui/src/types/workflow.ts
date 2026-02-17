@@ -399,26 +399,6 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
   },
   // Infrastructure
   {
-    type: 'auth.modular',
-    label: 'Auth Service',
-    category: 'infrastructure',
-    defaultConfig: {},
-    configFields: [
-      { key: 'provider', label: 'Provider', type: 'select', options: ['jwt', 'oauth2', 'apikey'] },
-    ],
-    ioSignature: { inputs: [{ name: 'credentials', type: 'Credentials' }], outputs: [{ name: 'token', type: 'Token' }] },
-  },
-  {
-    type: 'eventbus.modular',
-    label: 'Event Bus',
-    category: 'infrastructure',
-    defaultConfig: {},
-    configFields: [
-      { key: 'bufferSize', label: 'Buffer Size', type: 'number', defaultValue: 1024 },
-    ],
-    ioSignature: { inputs: [{ name: 'event', type: 'Event' }], outputs: [{ name: 'event', type: 'Event' }] },
-  },
-  {
     type: 'cache.modular',
     label: 'Cache',
     category: 'infrastructure',
@@ -430,38 +410,6 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     ioSignature: { inputs: [{ name: 'key', type: 'string' }], outputs: [{ name: 'value', type: 'any' }] },
   },
   {
-    type: 'chimux.router',
-    label: 'Chi Mux Router',
-    category: 'http',
-    defaultConfig: {},
-    configFields: [
-      { key: 'prefix', label: 'Path Prefix', type: 'string' },
-    ],
-    ioSignature: { inputs: [{ name: 'request', type: 'http.Request' }], outputs: [{ name: 'routed', type: 'http.Request' }] },
-  },
-  {
-    type: 'eventlogger.modular',
-    label: 'Event Logger',
-    category: 'events',
-    defaultConfig: {},
-    configFields: [
-      { key: 'output', label: 'Output', type: 'select', options: ['stdout', 'file', 'database'] },
-    ],
-    ioSignature: { inputs: [{ name: 'event', type: 'Event' }], outputs: [] },
-    maxOutgoing: 0,
-  },
-  {
-    type: 'httpclient.modular',
-    label: 'HTTP Client',
-    category: 'integration',
-    defaultConfig: {},
-    configFields: [
-      { key: 'baseURL', label: 'Base URL', type: 'string' },
-      { key: 'timeout', label: 'Timeout', type: 'string', defaultValue: '30s' },
-    ],
-    ioSignature: { inputs: [{ name: 'request', type: 'http.Request' }], outputs: [{ name: 'response', type: 'http.Response' }] },
-  },
-  {
     type: 'database.modular',
     label: 'Database',
     category: 'infrastructure',
@@ -471,16 +419,6 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
       { key: 'dsn', label: 'DSN', type: 'string' },
     ],
     ioSignature: { inputs: [{ name: 'query', type: 'SQL' }], outputs: [{ name: 'result', type: 'Rows' }] },
-  },
-  {
-    type: 'jsonschema.modular',
-    label: 'JSON Schema Validator',
-    category: 'infrastructure',
-    defaultConfig: {},
-    configFields: [
-      { key: 'schema', label: 'Schema', type: 'json' },
-    ],
-    ioSignature: { inputs: [{ name: 'data', type: 'JSON' }], outputs: [{ name: 'validated', type: 'JSON' }] },
   },
   // Database
   {
@@ -752,15 +690,6 @@ export const MODULE_TYPES: ModuleTypeInfo[] = [
     defaultConfig: {},
     configFields: [],
     ioSignature: { inputs: [{ name: 'credentials', type: 'Credentials' }], outputs: [{ name: 'user-store', type: 'UserStore' }] },
-  },
-  {
-    type: 'httpserver.modular',
-    label: 'Modular HTTP Server',
-    category: 'infrastructure',
-    defaultConfig: {},
-    configFields: [],
-    ioSignature: { inputs: [], outputs: [{ name: 'http-server', type: 'net.Listener' }] },
-    maxIncoming: 0,
   },
   {
     type: 'dynamic.component',

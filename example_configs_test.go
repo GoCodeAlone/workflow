@@ -153,8 +153,10 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 		"scheduled-jobs-config.yaml":       "scheduler.modular doesn't expose workflow Scheduler service",
 		"trigger-workflow-example.yaml":    "schedule trigger needs Scheduler interface not provided by scheduler.modular",
 		// Module service/interface gaps
-		"event-driven-workflow.yaml": "processing.step requires component service (event-pattern-matcher) not available",
-		"integration-workflow.yaml":  "workflow.registry doesn't implement IntegrationRegistry interface",
+		"api-gateway-config.yaml":         "reverseproxy module requires chimux.router (routerService interface) which was removed",
+		"api-gateway-modular-config.yaml": "reverseproxy module requires chimux.router (routerService interface) which was removed",
+		"event-driven-workflow.yaml":      "processing.step requires component service (event-pattern-matcher) not available",
+		"integration-workflow.yaml":       "workflow.registry doesn't implement IntegrationRegistry interface",
 		// step.conditional not supported as standalone module (only as pipeline step)
 		"workflow-a-orders-with-branching.yaml":        "step.conditional not supported as standalone module type",
 		"workflow-b-fulfillment-with-branching.yaml":   "step.conditional not supported as standalone module type",
@@ -234,6 +236,8 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 			engine.AddStepType("step.deploy", module.NewDeployStepFactory())
 			engine.AddStepType("step.gate", module.NewGateStepFactory())
 			engine.AddStepType("step.build_ui", module.NewBuildUIStepFactory())
+			engine.AddStepType("step.rate_limit", module.NewRateLimitStepFactory())
+			engine.AddStepType("step.circuit_breaker", module.NewCircuitBreakerStepFactory())
 
 			if err := engine.BuildFromConfig(wfCfg); err != nil {
 				t.Errorf("BuildFromConfig failed for %s: %v", cfgPath, err)

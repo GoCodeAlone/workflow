@@ -30,12 +30,9 @@ The engine builds workflows from YAML config with three top-level sections:
 - http.middleware.logging: Logging middleware with logLevel config
 - http.middleware.ratelimit: Rate limiter with requestsPerMinute and burstSize
 - http.middleware.cors: CORS middleware with allowedOrigins and allowedMethods
-- chimux.router: Chi-based HTTP router
-- httpserver.modular: Modular HTTP server module
-- httpclient.modular: HTTP client module for outbound requests
-
 ### Messaging
 - messaging.broker: In-memory message broker
+- messaging.broker.eventbus: EventBus bridge for pub/sub
 - messaging.handler: Message handler for topic subscriptions
 
 ### State Machine
@@ -47,13 +44,9 @@ The engine builds workflows from YAML config with three top-level sections:
 - event.processor: Complex event pattern matching with bufferSize and cleanupInterval
 
 ### Infrastructure
-- scheduler.modular: Cron-based scheduler
-- eventbus.modular: Event bus for pub/sub
-- eventlogger.modular: Event logger
-- cache.modular: Cache module
-- database.modular: Database module
-- auth.modular: Auth module
-- jsonschema.modular: JSON schema validation
+- scheduler.modular: Cron-based scheduler (deprecated)
+- cache.modular: Cache module (deprecated)
+- database.modular: Database module (deprecated)
 - reverseproxy / http.proxy: Reverse proxy
 
 ## Workflow Types
@@ -342,10 +335,8 @@ The built-in module types are:
 - messaging.broker, messaging.handler
 - statemachine.engine, state.tracker, state.connector
 - event.processor
-- httpserver.modular, httpclient.modular, chimux.router
-- scheduler.modular, eventbus.modular, eventlogger.modular
-- cache.modular, database.modular, auth.modular, jsonschema.modular
-- reverseproxy, http.proxy
+- scheduler.modular, cache.modular, database.modular
+- reverseproxy, http.proxy, messaging.broker.eventbus
 
 For each non-built-in type, return a JSON array of ComponentSpec objects with name, type, description, and interface fields.
 Leave goCode empty - it will be generated separately.`, strings.Join(moduleTypes, "\n- "))

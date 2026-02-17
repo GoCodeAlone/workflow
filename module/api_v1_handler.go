@@ -13,10 +13,11 @@ import (
 // and workflows. It is wired as a fallback on the admin-v1-queries and
 // admin-v1-commands CQRS handler modules.
 type V1APIHandler struct {
-	store            *V1Store
-	jwtSecret        string
-	reloadFn         func(configYAML string) error // callback to reload engine with new admin config
-	workspaceHandler *WorkspaceHandler             // optional workspace file management handler
+	store              *V1Store
+	jwtSecret          string
+	reloadFn           func(configYAML string) error // callback to reload engine with new admin config
+	workspaceHandler   *WorkspaceHandler             // optional workspace file management handler
+	featureFlagService FeatureFlagAdmin              // optional feature flag admin service
 }
 
 // NewV1APIHandler creates a new handler backed by the given store.
@@ -88,6 +89,8 @@ func (h *V1APIHandler) HandleV1(w http.ResponseWriter, r *http.Request) {
 		h.handleWorkflows(w, r, segments[1:])
 	case "dashboard":
 		h.handleDashboard(w, r)
+	case "feature-flags":
+		h.handleFeatureFlags(w, r, segments[1:])
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
@@ -108,6 +111,7 @@ func parsePathSegments(path string) []string {
 	resources := map[string]bool{
 		"companies": true, "organizations": true,
 		"projects": true, "workflows": true, "dashboard": true,
+		"feature-flags": true,
 	}
 
 	startIdx := -1

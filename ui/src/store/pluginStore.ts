@@ -10,6 +10,10 @@ export interface UIPageDef {
   icon: string;     // emoji or icon identifier
   category: string; // "global" | "workflow" | "plugin"
   order: number;    // sort order within category
+  requiredRole?: string;       // minimum role: "viewer", "editor", "admin", "operator"
+  requiredPermission?: string; // specific permission key, e.g. "plugins.manage"
+  apiEndpoint?: string;        // JSON data source for template-based pages
+  template?: string;           // predefined template: "data-table", "chart-dashboard", "form", "detail-view"
 }
 
 export interface PluginDependency {
@@ -39,8 +43,9 @@ const FALLBACK_PAGES: UIPageDef[] = [
   { id: 'editor',       label: 'Editor',        icon: '\u{1F4DD}', category: 'global', order: 1 },
   { id: 'marketplace',  label: 'Marketplace',   icon: '\u{1F6D2}', category: 'global', order: 2 },
   { id: 'templates',    label: 'Templates',     icon: '\u{1F4C4}', category: 'global', order: 3 },
-  { id: 'environments', label: 'Environments',  icon: '\u2601\uFE0F',  category: 'global', order: 4 },
-  { id: 'settings',     label: 'Settings',      icon: '\u2699\uFE0F',  category: 'global', order: 5 },
+  { id: 'environments',   label: 'Environments',  icon: '\u2601\uFE0F',  category: 'global', order: 4 },
+  { id: 'feature-flags',  label: 'Feature Flags', icon: '\u{1F6A9}', category: 'global', order: 5 },
+  { id: 'settings',       label: 'Settings',      icon: '\u2699\uFE0F',  category: 'global', order: 6 },
   // Plugin pages
   { id: 'store-browser', label: 'Store Browser',  icon: '\u{1F5C4}\uFE0F',  category: 'plugin', order: 0 },
   { id: 'docs',          label: 'Documentation',  icon: '\u{1F4D6}', category: 'plugin', order: 1 },
@@ -49,6 +54,33 @@ const FALLBACK_PAGES: UIPageDef[] = [
   { id: 'logs',       label: 'Logs',       icon: '\u{1F4C3}', category: 'workflow', order: 1 },
   { id: 'events',     label: 'Events',     icon: '\u26A1',    category: 'workflow', order: 2 },
 ];
+
+// ---------------------------------------------------------------------------
+// Role hierarchy for permission checks
+// ---------------------------------------------------------------------------
+
+const ROLE_HIERARCHY: Record<string, number> = {
+  viewer: 0,
+  operator: 1,
+  editor: 2,
+  admin: 3,
+};
+
+/** Check if a user's role meets the minimum required role. */
+function meetsRoleRequirement(userRole: string | undefined, requiredRole: string | undefined): boolean {
+  if (!requiredRole) return true; // no requirement = everyone can see
+  if (!userRole) return false;    // no role = can't meet any requirement
+  const userLevel = ROLE_HIERARCHY[userRole] ?? -1;
+  const requiredLevel = ROLE_HIERARCHY[requiredRole] ?? 999;
+  return userLevel >= requiredLevel;
+}
+
+/** Check if a user has a specific permission. */
+function hasPermission(userPermissions: string[] | undefined, requiredPermission: string | undefined): boolean {
+  if (!requiredPermission) return true; // no requirement = everyone can see
+  if (!userPermissions || userPermissions.length === 0) return false;
+  return userPermissions.includes(requiredPermission) || userPermissions.includes('*');
+}
 
 // ---------------------------------------------------------------------------
 // Store
@@ -61,12 +93,17 @@ interface PluginStore {
   enabling: Record<string, boolean>;
   error: string | null;
 
+  /** User role and permissions for filtering pages. */
+  userRole: string | undefined;
+  userPermissions: string[];
+
   /** All UI pages from enabled plugins, sorted by order within category. */
   enabledPages: UIPageDef[];
 
   fetchPlugins: () => Promise<void>;
   enablePlugin: (name: string) => Promise<void>;
   disablePlugin: (name: string) => Promise<void>;
+  setUserAccess: (role: string | undefined, permissions?: string[]) => void;
   clearError: () => void;
 }
 
@@ -79,17 +116,24 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
-/** Derive enabledPages from current plugin list, falling back to FALLBACK_PAGES. */
-function deriveEnabledPages(plugins: PluginInfo[]): UIPageDef[] {
+/** Derive enabledPages from current plugin list, falling back to FALLBACK_PAGES.
+ *  Filters pages by user role and permissions when provided. */
+function deriveEnabledPages(
+  plugins: PluginInfo[],
+  userRole?: string,
+  userPermissions?: string[],
+): UIPageDef[] {
   const enabledPlugins = plugins.filter((p) => p.enabled);
   const pagesFromPlugins = enabledPlugins.flatMap((p) => p.uiPages ?? []);
 
-  if (pagesFromPlugins.length > 0) {
-    return pagesFromPlugins;
-  }
+  const pages = pagesFromPlugins.length > 0 ? pagesFromPlugins : FALLBACK_PAGES;
 
-  // TEMPORARY: Use fallback when backend returns no UI pages yet.
-  return FALLBACK_PAGES;
+  // Filter by role and permissions
+  return pages.filter((page) => {
+    if (!meetsRoleRequirement(userRole, page.requiredRole)) return false;
+    if (!hasPermission(userPermissions, page.requiredPermission)) return false;
+    return true;
+  });
 }
 
 const usePluginStore = create<PluginStore>((set, get) => ({
@@ -98,6 +142,8 @@ const usePluginStore = create<PluginStore>((set, get) => ({
   loaded: false,
   enabling: {},
   error: null,
+  userRole: undefined,
+  userPermissions: [],
   enabledPages: FALLBACK_PAGES,
 
   fetchPlugins: async () => {
@@ -107,19 +153,22 @@ const usePluginStore = create<PluginStore>((set, get) => ({
       const res = await fetch('/api/v1/admin/plugins', { headers: authHeaders() });
       if (!res.ok) {
         console.warn('Failed to fetch plugins, using fallback navigation');
-        set({ loading: false, loaded: true, enabledPages: FALLBACK_PAGES });
+        const { userRole, userPermissions } = get();
+        set({ loading: false, loaded: true, enabledPages: deriveEnabledPages([], userRole, userPermissions) });
         return;
       }
       const plugins: PluginInfo[] = await res.json();
+      const { userRole, userPermissions } = get();
       set({
         plugins,
         loaded: true,
         loading: false,
-        enabledPages: deriveEnabledPages(plugins),
+        enabledPages: deriveEnabledPages(plugins, userRole, userPermissions),
       });
     } catch (e) {
       console.warn('Error fetching plugins:', e);
-      set({ loading: false, loaded: true, enabledPages: FALLBACK_PAGES });
+      const { userRole, userPermissions } = get();
+      set({ loading: false, loaded: true, enabledPages: deriveEnabledPages([], userRole, userPermissions) });
     }
   },
 
@@ -167,8 +216,17 @@ const usePluginStore = create<PluginStore>((set, get) => ({
     }
   },
 
+  setUserAccess: (role, permissions = []) => {
+    const { plugins } = get();
+    set({
+      userRole: role,
+      userPermissions: permissions,
+      enabledPages: deriveEnabledPages(plugins, role, permissions),
+    });
+  },
+
   clearError: () => set({ error: null }),
 }));
 
-export { FALLBACK_PAGES };
+export { FALLBACK_PAGES, meetsRoleRequirement, hasPermission };
 export default usePluginStore;

@@ -13,6 +13,8 @@ var commands = map[string]func([]string) error{
 	"run":      runRun,
 	"plugin":   runPlugin,
 	"schema":   runSchema,
+	"manifest": runManifest,
+	"migrate":  runMigrate,
 }
 
 func usage() {
@@ -27,6 +29,8 @@ Commands:
   run        Run a workflow engine from a config file
   plugin     Plugin management (init, docs)
   schema     Generate JSON Schema for workflow configs
+  manifest   Analyze config and report infrastructure requirements
+  migrate    Manage database schema migrations
 
 Run 'wfctl <command> -h' for command-specific help.
 `, version)

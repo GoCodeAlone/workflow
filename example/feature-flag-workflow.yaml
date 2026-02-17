@@ -1,0 +1,102 @@
+# Feature Flag Workflow Example
+# Demonstrates feature flag evaluation and gating in pipelines.
+# Uses the featureflag.service module with the built-in generic provider.
+
+modules:
+  - name: http-server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: router
+    type: http.router
+    config: {}
+
+  - name: feature-flags
+    type: featureflag.service
+    config:
+      provider: generic
+      cache_ttl: "30s"
+      sse_enabled: true
+      db_path: "data/featureflags.db"
+
+workflows:
+  http:
+    server: http-server
+    router: router
+    routes: []
+
+pipelines:
+  # Pipeline that evaluates a feature flag and routes based on result
+  feature-gated-api:
+    trigger:
+      type: http
+      config:
+        method: POST
+        path: /api/process
+        router: router
+
+    steps:
+      - name: parse-request
+        type: step.request_parse
+        config: {}
+
+      - name: check-new-algorithm
+        type: step.feature_flag
+        config:
+          flag: new-algorithm
+          user_from: "{{.body.user_id}}"
+          output_key: algorithm_flag
+
+      - name: route-by-flag
+        type: step.ff_gate
+        config:
+          flag: premium-features
+          user_from: "{{.body.user_id}}"
+          on_enabled: premium-response
+          on_disabled: standard-response
+
+      - name: premium-response
+        type: step.set
+        config:
+          values:
+            tier: premium
+            message: "You have access to premium features"
+
+      - name: standard-response
+        type: step.set
+        config:
+          values:
+            tier: standard
+            message: "Standard features enabled"
+
+      - name: respond
+        type: step.json_response
+        config:
+          status: 200
+
+  # Simple flag check endpoint
+  feature-flag-check:
+    trigger:
+      type: http
+      config:
+        method: GET
+        path: /api/flags/check
+        router: router
+
+    steps:
+      - name: parse-params
+        type: step.request_parse
+        config: {}
+
+      - name: evaluate-flag
+        type: step.feature_flag
+        config:
+          flag: "{{.query.flag}}"
+          user_from: "{{.query.user}}"
+          output_key: flag_result
+
+      - name: respond
+        type: step.json_response
+        config:
+          status: 200

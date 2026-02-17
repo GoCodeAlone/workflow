@@ -2550,7 +2550,7 @@ func TestE2E_EventBusBridge(t *testing.T) {
 			{Name: "eb-server", Type: "http.server", Config: map[string]any{"address": addr}},
 			{Name: "eb-router", Type: "http.router", DependsOn: []string{"eb-server"}},
 			{Name: "eb-handler", Type: "http.handler", DependsOn: []string{"eb-router"}, Config: map[string]any{"contentType": "application/json"}},
-			{Name: "eb-eventbus", Type: "eventbus.modular"},
+			{Name: "eb-eventbus", Type: "messaging.broker.eventbus"},
 		},
 		Workflows: map[string]any{
 			"http": map[string]any{
@@ -2569,17 +2569,19 @@ func TestE2E_EventBusBridge(t *testing.T) {
 	engine := NewStdEngine(app, logger)
 	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
 
+	// Register the EventBus module BEFORE BuildFromConfig so it goes through
+	// the full modular lifecycle (Init). Previously the engine created this
+	// via "eventbus.modular", but that type has been removed.
+	ebMod := eventbus.NewModule().(*eventbus.EventBusModule)
+	app.RegisterModule(ebMod)
+
 	if err := engine.BuildFromConfig(cfg); err != nil {
 		t.Fatalf("BuildFromConfig failed: %v", err)
 	}
 
 	// Create the bridge and connect it to the EventBus after initialization.
-	// The bridge's Init() writes directly to the SvcRegistry map, which gets
-	// overwritten by the enhanced registry; so we wire it up manually.
 	bridge := module.NewEventBusBridge("eb-bridge")
-	if err := bridge.InitFromApp(app); err != nil {
-		t.Fatalf("EventBusBridge.InitFromApp failed: %v", err)
-	}
+	bridge.SetEventBus(ebMod)
 
 	ctx := t.Context()
 
@@ -2633,10 +2635,7 @@ func TestE2E_EventBusBridge(t *testing.T) {
 
 	// Step 3: Publish directly through the EventBus and verify bridge subscriber receives it
 	t.Log("Step 3: Publishing directly through EventBus module")
-	var eb *eventbus.EventBusModule
-	if err := app.GetService(eventbus.ServiceName, &eb); err != nil {
-		t.Fatalf("EventBus service not found: %v", err)
-	}
+	eb := ebMod
 
 	mu.Lock()
 	received = nil

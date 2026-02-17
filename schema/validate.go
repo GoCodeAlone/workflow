@@ -323,11 +323,9 @@ func validateModuleConfig(mod config.ModuleConfig, prefix string, errs *Validati
 // entryPointModuleTypes are module types that inherently serve as entry points
 // because they listen for external input (HTTP servers, schedulers, event buses).
 var entryPointModuleTypes = map[string]bool{
-	"http.server":        true,
-	"httpserver.modular": true,
-	"scheduler.modular":  true,
-	"eventbus.modular":   true,
-	"messaging.broker":   true,
+	"http.server":       true,
+	"scheduler.modular": true,
+	"messaging.broker":  true,
 }
 
 // checkEntryPoints validates that the config has at least one entry point:

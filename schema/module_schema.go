@@ -1,5 +1,7 @@
 package schema
 
+import "sort"
+
 // ConfigFieldType represents the type of a configuration field.
 type ConfigFieldType string
 
@@ -92,6 +94,18 @@ func (r *ModuleSchemaRegistry) AllMap() map[string]*ModuleSchema {
 		out[k] = v
 	}
 	return out
+}
+
+// Types returns a sorted list of all registered module type identifiers.
+// This is the dynamic equivalent of KnownModuleTypes — it includes both
+// built-in types and any types registered at runtime by plugins.
+func (r *ModuleSchemaRegistry) Types() []string {
+	types := make([]string, 0, len(r.schemas))
+	for t := range r.schemas {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+	return types
 }
 
 func intPtr(v int) *int { return &v }
@@ -433,16 +447,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	// ---- Infrastructure / Modular Framework Category ----
 
 	r.Register(&ModuleSchema{
-		Type:         "httpserver.modular",
-		Label:        "Modular HTTP Server",
-		Category:     "infrastructure",
-		Description:  "CrisisTextLine/modular HTTP server module (use config feeders for settings)",
-		Outputs:      []ServiceIODef{{Name: "http-server", Type: "net.Listener", Description: "HTTP server accepting connections"}},
-		ConfigFields: []ConfigFieldDef{},
-		MaxIncoming:  intPtr(0),
-	})
-
-	r.Register(&ModuleSchema{
 		Type:         "scheduler.modular",
 		Label:        "Scheduler",
 		Category:     "scheduling",
@@ -451,26 +455,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Outputs:      []ServiceIODef{{Name: "scheduler", Type: "Scheduler", Description: "Scheduler service for registering cron jobs"}},
 		ConfigFields: []ConfigFieldDef{},
 		MaxIncoming:  intPtr(0),
-	})
-
-	r.Register(&ModuleSchema{
-		Type:         "auth.modular",
-		Label:        "Auth Service",
-		Category:     "infrastructure",
-		Description:  "CrisisTextLine/modular authentication service module",
-		Inputs:       []ServiceIODef{{Name: "credentials", Type: "Credentials", Description: "User credentials to authenticate"}},
-		Outputs:      []ServiceIODef{{Name: "auth-service", Type: "AuthService", Description: "Authentication and authorization service"}},
-		ConfigFields: []ConfigFieldDef{},
-	})
-
-	r.Register(&ModuleSchema{
-		Type:         "eventbus.modular",
-		Label:        "Event Bus",
-		Category:     "events",
-		Description:  "CrisisTextLine/modular in-process event bus for pub/sub",
-		Inputs:       []ServiceIODef{{Name: "event", Type: "CloudEvent", Description: "CloudEvent to publish"}},
-		Outputs:      []ServiceIODef{{Name: "eventbus", Type: "EventBus", Description: "In-process event bus for pub/sub"}},
-		ConfigFields: []ConfigFieldDef{},
 	})
 
 	r.Register(&ModuleSchema{
@@ -484,52 +468,12 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	})
 
 	r.Register(&ModuleSchema{
-		Type:         "chimux.router",
-		Label:        "Chi Mux Router",
-		Category:     "http",
-		Description:  "CrisisTextLine/modular Chi-based HTTP router",
-		Inputs:       []ServiceIODef{{Name: "request", Type: "http.Request", Description: "HTTP request to route via Chi mux"}},
-		Outputs:      []ServiceIODef{{Name: "routed", Type: "http.Request", Description: "Routed HTTP request dispatched to handler"}},
-		ConfigFields: []ConfigFieldDef{},
-	})
-
-	r.Register(&ModuleSchema{
-		Type:         "eventlogger.modular",
-		Label:        "Event Logger",
-		Category:     "events",
-		Description:  "CrisisTextLine/modular event logging module",
-		Inputs:       []ServiceIODef{{Name: "event", Type: "CloudEvent", Description: "CloudEvent to log"}},
-		Outputs:      []ServiceIODef{{Name: "logged", Type: "[]LogEntry", Description: "Logged event records"}},
-		ConfigFields: []ConfigFieldDef{},
-	})
-
-	r.Register(&ModuleSchema{
-		Type:         "httpclient.modular",
-		Label:        "HTTP Client",
-		Category:     "integration",
-		Description:  "CrisisTextLine/modular HTTP client for outbound requests",
-		Inputs:       []ServiceIODef{{Name: "request", Type: "http.Request", Description: "Outbound HTTP request to send"}},
-		Outputs:      []ServiceIODef{{Name: "http-client", Type: "http.Client", Description: "HTTP client for making outbound requests"}},
-		ConfigFields: []ConfigFieldDef{},
-	})
-
-	r.Register(&ModuleSchema{
 		Type:         "database.modular",
 		Label:        "Database",
 		Category:     "database",
 		Description:  "CrisisTextLine/modular database module (use config feeders for driver/DSN)",
 		Inputs:       []ServiceIODef{{Name: "query", Type: "SQL", Description: "SQL query to execute"}},
 		Outputs:      []ServiceIODef{{Name: "database", Type: "sql.DB", Description: "Database connection pool"}},
-		ConfigFields: []ConfigFieldDef{},
-	})
-
-	r.Register(&ModuleSchema{
-		Type:         "jsonschema.modular",
-		Label:        "JSON Schema Validator",
-		Category:     "infrastructure",
-		Description:  "CrisisTextLine/modular JSON Schema validation module",
-		Inputs:       []ServiceIODef{{Name: "document", Type: "JSON", Description: "JSON document to validate"}},
-		Outputs:      []ServiceIODef{{Name: "validator", Type: "SchemaValidator", Description: "JSON Schema validation service"}},
 		ConfigFields: []ConfigFieldDef{},
 	})
 
@@ -1257,5 +1201,191 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, DefaultValue: "5m", Description: "Maximum time for the build", Placeholder: "5m"},
 		},
 		DefaultConfig: map[string]any{"install_cmd": "npm install --silent", "build_cmd": "npm run build", "timeout": "5m"},
+	})
+
+	// -----------------------------------------------------------------------
+	// API Gateway module
+	// -----------------------------------------------------------------------
+
+	r.Register(&ModuleSchema{
+		Type:        "api.gateway",
+		Label:       "API Gateway",
+		Category:    "http",
+		Description: "Composable API gateway combining routing, auth, rate limiting, CORS, and reverse proxying into a single module",
+		Inputs:      []ServiceIODef{{Name: "http_request", Type: "http.Request", Description: "Incoming HTTP request"}},
+		Outputs:     []ServiceIODef{{Name: "http_response", Type: "http.Response", Description: "Proxied response from backend"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "routes", Label: "Routes", Type: FieldTypeJSON, Required: true, Description: "Array of route definitions with pathPrefix, backend, methods, rateLimit, auth, timeout"},
+			{Key: "globalRateLimit", Label: "Global Rate Limit", Type: FieldTypeJSON, Description: "Global rate limit applied to all routes (requestsPerMinute, burstSize)"},
+			{Key: "cors", Label: "CORS Config", Type: FieldTypeJSON, Description: "CORS settings (allowOrigins, allowMethods, allowHeaders, maxAge)"},
+			{Key: "auth", Label: "Auth Config", Type: FieldTypeJSON, Description: "Authentication settings (type: bearer/api_key/basic, header)"},
+		},
+	})
+
+	// -----------------------------------------------------------------------
+	// Gateway & resilience pipeline steps
+	// -----------------------------------------------------------------------
+
+	r.Register(&ModuleSchema{
+		Type:        "step.rate_limit",
+		Label:       "Rate Limit",
+		Category:    "resilience",
+		Description: "Enforces rate limiting using a token bucket algorithm, rejecting requests that exceed the limit",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with request data"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Pass-through on success, error when rate limited"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "requests_per_minute", Label: "Requests/Min", Type: FieldTypeNumber, Required: true, Description: "Maximum requests per minute", Placeholder: "60"},
+			{Key: "burst_size", Label: "Burst Size", Type: FieldTypeNumber, Description: "Maximum burst size (defaults to requests_per_minute)"},
+			{Key: "key_from", Label: "Key Template", Type: FieldTypeString, Description: "Template for per-client rate limit key (e.g. {{.client_ip}})"},
+		},
+		DefaultConfig: map[string]any{"requests_per_minute": 60},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.circuit_breaker",
+		Label:       "Circuit Breaker",
+		Category:    "resilience",
+		Description: "Implements the circuit breaker pattern, tracking failures per service and preventing calls when the circuit is open",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Pass-through when closed, error when open"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "service", Label: "Service Name", Type: FieldTypeString, Required: true, Description: "Service identifier for circuit tracking"},
+			{Key: "failure_threshold", Label: "Failure Threshold", Type: FieldTypeNumber, DefaultValue: "5", Description: "Consecutive failures before opening circuit"},
+			{Key: "success_threshold", Label: "Success Threshold", Type: FieldTypeNumber, DefaultValue: "2", Description: "Consecutive successes in half-open before closing"},
+			{Key: "timeout", Label: "Recovery Timeout", Type: FieldTypeDuration, DefaultValue: "30s", Description: "Time to wait before trying half-open"},
+		},
+		DefaultConfig: map[string]any{"failure_threshold": 5, "success_threshold": 2, "timeout": "30s"},
+	})
+
+	// -----------------------------------------------------------------------
+	// Plugin workflow composition step
+	// -----------------------------------------------------------------------
+
+	r.Register(&ModuleSchema{
+		Type:        "step.sub_workflow",
+		Label:       "Sub-Workflow",
+		Category:    "composition",
+		Description: "Invokes a registered plugin workflow as a sub-workflow with input/output mapping",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with input data"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Sub-workflow execution result with mapped outputs"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "workflow", Label: "Workflow", Type: FieldTypeString, Required: true, Description: "Qualified workflow name (plugin:workflow-name)", Placeholder: "my-plugin:payment-flow"},
+			{Key: "input_mapping", Label: "Input Mapping", Type: FieldTypeJSON, Description: "Map of sub-workflow input keys to template expressions"},
+			{Key: "output_mapping", Label: "Output Mapping", Type: FieldTypeJSON, Description: "Map of parent context keys to sub-workflow output paths"},
+			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, DefaultValue: "30s", Description: "Maximum execution time for the sub-workflow"},
+		},
+		DefaultConfig: map[string]any{"timeout": "30s"},
+	})
+
+	// -----------------------------------------------------------------------
+	// AI pipeline steps
+	// -----------------------------------------------------------------------
+
+	r.Register(&ModuleSchema{
+		Type:        "step.ai_complete",
+		Label:       "AI Complete",
+		Category:    "ai",
+		Description: "Sends a prompt to an AI provider and returns the completion text",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with input text"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Completion text and token usage metadata"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "AI provider name (or 'auto' for registry default)", Placeholder: "anthropic"},
+			{Key: "model", Label: "Model", Type: FieldTypeString, Description: "Model identifier", Placeholder: "claude-sonnet-4-20250514"},
+			{Key: "system_prompt", Label: "System Prompt", Type: FieldTypeString, Description: "System prompt to guide the AI"},
+			{Key: "input_from", Label: "Input From", Type: FieldTypeString, Description: "Template expression for input text (e.g. {{.steps.parse.body.text}})"},
+			{Key: "max_tokens", Label: "Max Tokens", Type: FieldTypeNumber, DefaultValue: "1024", Description: "Maximum output tokens"},
+			{Key: "temperature", Label: "Temperature", Type: FieldTypeNumber, Description: "Sampling temperature (0.0 - 1.0)"},
+		},
+		DefaultConfig: map[string]any{"max_tokens": 1024, "temperature": 0.7},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.ai_classify",
+		Label:       "AI Classify",
+		Category:    "ai",
+		Description: "Classifies input text into one of the provided categories using an AI provider",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with input text"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Classification result with category and confidence"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "AI provider name"},
+			{Key: "model", Label: "Model", Type: FieldTypeString, Description: "Model identifier"},
+			{Key: "categories", Label: "Categories", Type: FieldTypeArray, ArrayItemType: "string", Required: true, Description: "List of classification categories"},
+			{Key: "input_from", Label: "Input From", Type: FieldTypeString, Description: "Template expression for input text"},
+			{Key: "max_tokens", Label: "Max Tokens", Type: FieldTypeNumber, DefaultValue: "256", Description: "Maximum output tokens"},
+			{Key: "temperature", Label: "Temperature", Type: FieldTypeNumber, Description: "Sampling temperature"},
+		},
+		DefaultConfig: map[string]any{"max_tokens": 256, "temperature": 0.3},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.ai_extract",
+		Label:       "AI Extract",
+		Category:    "ai",
+		Description: "Extracts structured data from input text using an AI provider with a defined schema",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with input text"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Extracted structured data matching the schema"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "AI provider name"},
+			{Key: "model", Label: "Model", Type: FieldTypeString, Description: "Model identifier"},
+			{Key: "schema", Label: "Extraction Schema", Type: FieldTypeJSON, Required: true, Description: "JSON schema defining the fields to extract"},
+			{Key: "input_from", Label: "Input From", Type: FieldTypeString, Description: "Template expression for input text"},
+			{Key: "max_tokens", Label: "Max Tokens", Type: FieldTypeNumber, DefaultValue: "1024", Description: "Maximum output tokens"},
+			{Key: "temperature", Label: "Temperature", Type: FieldTypeNumber, Description: "Sampling temperature"},
+		},
+		DefaultConfig: map[string]any{"max_tokens": 1024, "temperature": 0.3},
+	})
+
+	// ---- Feature Flags ----
+
+	r.Register(&ModuleSchema{
+		Type:        "featureflag.service",
+		Label:       "Feature Flag Service",
+		Category:    "infrastructure",
+		Description: "Feature flag management service with targeting rules, overrides, and real-time SSE updates",
+		Outputs:     []ServiceIODef{{Name: "featureflag.Service", Type: "featureflag.Service", Description: "Feature flag evaluation service"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Label: "Provider", Type: FieldTypeSelect, Options: []string{"generic", "launchdarkly"}, DefaultValue: "generic", Description: "Feature flag backend provider"},
+			{Key: "cache_ttl", Label: "Cache TTL", Type: FieldTypeDuration, DefaultValue: "1m", Description: "Duration to cache flag evaluations", Placeholder: "1m"},
+			{Key: "sse_enabled", Label: "SSE Enabled", Type: FieldTypeBool, DefaultValue: true, Description: "Enable Server-Sent Events for real-time flag change notifications"},
+			{Key: "store_path", Label: "Store Path", Type: FieldTypeString, Description: "Path for the flag definition store (file-based provider)", Placeholder: "data/flags.json"},
+			{Key: "launchdarkly_sdk_key", Label: "LaunchDarkly SDK Key", Type: FieldTypeString, Sensitive: true, Description: "LaunchDarkly server-side SDK key (required when provider is launchdarkly)", Group: "LaunchDarkly"},
+		},
+		DefaultConfig: map[string]any{"provider": "generic", "cache_ttl": "1m", "sse_enabled": true},
+		MaxIncoming:   intPtr(0),
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.feature_flag",
+		Label:       "Feature Flag Check",
+		Category:    "steps",
+		Description: "Evaluates a feature flag and stores the result in the pipeline context",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with user/group info"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Flag evaluation result"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "flag", Label: "Flag Key", Type: FieldTypeString, Required: true, Description: "Feature flag key to evaluate", Placeholder: "feature.my-flag"},
+			{Key: "user_from", Label: "User From", Type: FieldTypeString, Description: "Template expression to extract user identifier from context", Placeholder: "{{.request.user_id}}"},
+			{Key: "group_from", Label: "Group From", Type: FieldTypeString, Description: "Template expression to extract group identifier from context", Placeholder: "{{.request.group}}"},
+			{Key: "output_key", Label: "Output Key", Type: FieldTypeString, DefaultValue: "flag_value", Description: "Key to store the flag value in pipeline context", Placeholder: "flag_value"},
+		},
+		DefaultConfig: map[string]any{"output_key": "flag_value"},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.ff_gate",
+		Label:       "Feature Flag Gate",
+		Category:    "steps",
+		Description: "Gates pipeline execution based on a feature flag evaluation — routes to different branches when enabled vs disabled",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with user/group info"}},
+		Outputs: []ServiceIODef{
+			{Name: "enabled", Type: "PipelineContext", Description: "Output when flag is enabled"},
+			{Name: "disabled", Type: "PipelineContext", Description: "Output when flag is disabled"},
+		},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "flag", Label: "Flag Key", Type: FieldTypeString, Required: true, Description: "Feature flag key to evaluate", Placeholder: "feature.my-flag"},
+			{Key: "on_enabled", Label: "On Enabled", Type: FieldTypeString, Description: "Branch or step to execute when flag is enabled"},
+			{Key: "on_disabled", Label: "On Disabled", Type: FieldTypeString, Description: "Branch or step to execute when flag is disabled"},
+			{Key: "user_from", Label: "User From", Type: FieldTypeString, Description: "Template expression to extract user identifier from context", Placeholder: "{{.request.user_id}}"},
+			{Key: "group_from", Label: "Group From", Type: FieldTypeString, Description: "Template expression to extract group identifier from context", Placeholder: "{{.request.group}}"},
+		},
 	})
 }

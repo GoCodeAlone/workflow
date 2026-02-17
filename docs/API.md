@@ -634,6 +634,246 @@ curl http://localhost:8081/api/workflow/status
 
 ---
 
+### Feature Flags
+
+Feature flag management endpoints require authentication and a configured `featureflag.service` module.
+
+#### GET /api/v1/admin/feature-flags
+
+List all feature flag definitions.
+
+| Field | Value |
+|-------|-------|
+| Auth required | Yes |
+
+**Response** (200 OK):
+
+```json
+[
+  {
+    "key": "new-pricing-engine",
+    "type": "boolean",
+    "description": "Enable the new pricing engine",
+    "enabled": true,
+    "default_val": "false",
+    "tags": ["backend"],
+    "percentage": 0,
+    "created_at": "2026-02-16T10:00:00Z",
+    "updated_at": "2026-02-16T10:00:00Z"
+  }
+]
+```
+
+```bash
+curl http://localhost:8081/api/v1/admin/feature-flags \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+#### POST /api/v1/admin/feature-flags
+
+Create a new feature flag.
+
+| Field | Value |
+|-------|-------|
+| Auth required | Yes |
+
+**Request body**:
+
+```json
+{
+  "key": "new-pricing-engine",
+  "type": "boolean",
+  "description": "Enable the new pricing engine",
+  "enabled": true,
+  "default_val": "false",
+  "tags": ["backend"],
+  "percentage": 0
+}
+```
+
+**Response** (201 Created): The created flag object.
+
+**Status codes**: 201 Created, 400 Bad Request
+
+```bash
+curl -X POST http://localhost:8081/api/v1/admin/feature-flags \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"key": "new-pricing-engine", "type": "boolean", "enabled": true, "default_val": "false"}'
+```
+
+---
+
+#### GET /api/v1/admin/feature-flags/{key}
+
+Get a specific feature flag by key.
+
+| Field | Value |
+|-------|-------|
+| Auth required | Yes |
+
+**Response** (200 OK): Flag object.
+
+**Status codes**: 200 OK, 404 Not Found
+
+```bash
+curl http://localhost:8081/api/v1/admin/feature-flags/new-pricing-engine \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+#### PUT /api/v1/admin/feature-flags/{key}
+
+Update an existing feature flag.
+
+| Field | Value |
+|-------|-------|
+| Auth required | Yes |
+
+**Request body**: Flag object with updated fields.
+
+**Response** (200 OK): Updated flag object.
+
+**Status codes**: 200 OK, 400 Bad Request
+
+```bash
+curl -X PUT http://localhost:8081/api/v1/admin/feature-flags/new-pricing-engine \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"key": "new-pricing-engine", "enabled": false}'
+```
+
+---
+
+#### DELETE /api/v1/admin/feature-flags/{key}
+
+Delete a feature flag and its associated rules and overrides.
+
+| Field | Value |
+|-------|-------|
+| Auth required | Yes |
+
+**Response** (200 OK):
+
+```json
+{
+  "status": "deleted"
+}
+```
+
+**Status codes**: 200 OK, 500 Internal Server Error
+
+```bash
+curl -X DELETE http://localhost:8081/api/v1/admin/feature-flags/new-pricing-engine \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+#### PUT /api/v1/admin/feature-flags/{key}/overrides
+
+Set user or group overrides for a feature flag.
+
+| Field | Value |
+|-------|-------|
+| Auth required | Yes |
+
+**Request body**:
+
+```json
+{
+  "overrides": [
+    {
+      "scope": "user",
+      "scope_key": "user-123",
+      "value": "true"
+    },
+    {
+      "scope": "group",
+      "scope_key": "beta-testers",
+      "value": "true"
+    }
+  ]
+}
+```
+
+**Response** (200 OK): Updated flag with overrides.
+
+**Status codes**: 200 OK, 400 Bad Request
+
+```bash
+curl -X PUT http://localhost:8081/api/v1/admin/feature-flags/new-pricing-engine/overrides \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"overrides": [{"scope": "user", "scope_key": "user-123", "value": "true"}]}'
+```
+
+---
+
+#### GET /api/v1/admin/feature-flags/{key}/evaluate
+
+Evaluate a feature flag for a specific user and/or group context.
+
+| Field | Value |
+|-------|-------|
+| Auth required | Yes |
+
+**Query parameters**:
+
+| Parameter | Description |
+|-----------|-------------|
+| `user` | User ID for evaluation context |
+| `group` | Group name for evaluation context |
+
+**Response** (200 OK):
+
+```json
+{
+  "value": {
+    "key": "new-pricing-engine",
+    "value": true,
+    "type": "boolean",
+    "source": "override",
+    "reason": "user override matched"
+  }
+}
+```
+
+**Status codes**: 200 OK, 400 Bad Request
+
+```bash
+curl "http://localhost:8081/api/v1/admin/feature-flags/new-pricing-engine/evaluate?user=user-123" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+#### GET /api/v1/admin/feature-flags/stream
+
+SSE (Server-Sent Events) stream for real-time feature flag change notifications.
+
+| Field | Value |
+|-------|-------|
+| Auth required | Yes |
+| Content-Type | `text/event-stream` |
+
+**Event format**:
+
+```
+event: flag.updated
+data: {"key":"new-pricing-engine","value":true}
+```
+
+```bash
+curl -N http://localhost:8081/api/v1/admin/feature-flags/stream \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
 ## Workflow Engine Endpoints (port 8080)
 
 The workflow engine port serves endpoints defined by the YAML configuration. The following endpoints are provided by built-in module types. All paths below assume the default gateway at `http://localhost:8080`.

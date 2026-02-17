@@ -22,11 +22,15 @@ type PluginContext struct {
 
 // UIPageDef describes a UI page contributed by a plugin.
 type UIPageDef struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Icon     string `json:"icon"`
-	Category string `json:"category"` // "global", "workflow", "plugin"
-	Order    int    `json:"order"`
+	ID                 string `json:"id"`
+	Label              string `json:"label"`
+	Icon               string `json:"icon"`
+	Category           string `json:"category"` // "global", "workflow", "plugin"
+	Order              int    `json:"order"`
+	RequiredRole       string `json:"requiredRole,omitempty"`       // minimum role: "viewer", "editor", "admin", "operator"
+	RequiredPermission string `json:"requiredPermission,omitempty"` // specific permission key, e.g. "plugins.manage"
+	APIEndpoint        string `json:"apiEndpoint,omitempty"`        // JSON data source for template pages
+	Template           string `json:"template,omitempty"`           // predefined template: "data-table", "chart-dashboard", "form", "detail-view"
 }
 
 // NativePlugin is a compiled-in plugin that provides HTTP handlers, UI page metadata,

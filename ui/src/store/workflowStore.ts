@@ -315,7 +315,7 @@ const useWorkflowStore = create<WorkflowStore>()(
     // Auto-associate middleware with routers
     if (moduleType.startsWith('http.middleware.')) {
       const routers = currentNodes.filter(
-        (n) => n.data.moduleType === 'http.router' || n.data.moduleType === 'chimux.router',
+        (n) => n.data.moduleType === 'http.router',
       );
       if (routers.length === 1) {
         // Single router — auto-add to its middleware chain

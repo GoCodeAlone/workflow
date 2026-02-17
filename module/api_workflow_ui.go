@@ -211,32 +211,13 @@ var availableModules = []moduleTypeDef{
 		{Key: "interval", Label: "Interval", Type: "string", DefaultValue: "1m"},
 		{Key: "cron", Label: "Cron Expression", Type: "string"},
 	}},
-	{Type: "auth.modular", Label: "Auth Service", Category: "infrastructure", ConfigFields: []configFieldSchema{
-		{Key: "provider", Label: "Provider", Type: "select", Options: []string{"jwt", "oauth2", "apikey"}},
-	}},
-	{Type: "eventbus.modular", Label: "Event Bus", Category: "infrastructure", ConfigFields: []configFieldSchema{
-		{Key: "bufferSize", Label: "Buffer Size", Type: "number", DefaultValue: 1024},
-	}},
 	{Type: "cache.modular", Label: "Cache", Category: "infrastructure", ConfigFields: []configFieldSchema{
 		{Key: "provider", Label: "Provider", Type: "select", Options: []string{"memory", "redis"}},
 		{Key: "ttl", Label: "TTL", Type: "string", DefaultValue: "5m"},
 	}},
-	{Type: "chimux.router", Label: "Chi Mux Router", Category: "http", ConfigFields: []configFieldSchema{
-		{Key: "prefix", Label: "Path Prefix", Type: "string"},
-	}},
-	{Type: "eventlogger.modular", Label: "Event Logger", Category: "events", ConfigFields: []configFieldSchema{
-		{Key: "output", Label: "Output", Type: "select", Options: []string{"stdout", "file", "database"}},
-	}},
-	{Type: "httpclient.modular", Label: "HTTP Client", Category: "integration", ConfigFields: []configFieldSchema{
-		{Key: "baseURL", Label: "Base URL", Type: "string"},
-		{Key: "timeout", Label: "Timeout", Type: "string", DefaultValue: "30s"},
-	}},
 	{Type: "database.modular", Label: "Database", Category: "infrastructure", ConfigFields: []configFieldSchema{
 		{Key: "driver", Label: "Driver", Type: "select", Options: []string{"postgres", "mysql", "sqlite"}},
 		{Key: "dsn", Label: "DSN", Type: "string"},
-	}},
-	{Type: "jsonschema.modular", Label: "JSON Schema Validator", Category: "infrastructure", ConfigFields: []configFieldSchema{
-		{Key: "schema", Label: "Schema", Type: "json"},
 	}},
 	{Type: "notification.slack", Label: "Slack Notification", Category: "integration", ConfigFields: []configFieldSchema{
 		{Key: "webhookURL", Label: "Webhook URL", Type: "string"},
