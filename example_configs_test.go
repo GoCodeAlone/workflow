@@ -209,6 +209,7 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 			engine.RegisterTrigger(module.NewEventTrigger())
 			engine.RegisterTrigger(module.NewScheduleTrigger())
 			engine.RegisterTrigger(module.NewEventBusTrigger())
+			engine.RegisterTrigger(module.NewReconciliationTrigger())
 
 			// Register pipeline step types (same as cmd/server/main.go)
 			engine.AddStepType("step.validate", module.NewValidateStepFactory())
