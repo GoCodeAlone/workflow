@@ -6,9 +6,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/GoCodeAlone/workflow/dynamic"
 )
+
+// pluginsBaseDir is the local directory under which all plugins are stored.
+// All plugin-related files must remain within this directory.
+var pluginsBaseDir = filepath.Join("data", "plugins")
 
 // CompositeRegistry combines a local registry with a remote registry,
 // searching both and allowing installation from the remote into local.
@@ -105,18 +110,31 @@ func (c *CompositeRegistry) Install(ctx context.Context, name, version string) e
 	// Download plugin archive
 	reader, err := c.remote.Download(ctx, name, version)
 	if err != nil {
+	// Resolve and validate local plugin directory to prevent directory traversal.
+	absBaseDir, err := filepath.Abs(pluginsBaseDir)
+	if err != nil {
+		return fmt.Errorf("resolve plugins base directory: %w", err)
+	}
+	pluginDir := filepath.Join(absBaseDir, name)
+	absPluginDir, err := filepath.Abs(pluginDir)
+	if err != nil {
+		return fmt.Errorf("resolve plugin directory: %w", err)
+	}
+	if !strings.HasPrefix(absPluginDir, absBaseDir+string(os.PathSeparator)) && absPluginDir != absBaseDir {
+		return fmt.Errorf("invalid plugin name %q", name)
+	}
+
 		return fmt.Errorf("download %s@%s: %w", name, version, err)
 	}
 	defer reader.Close()
 
 	// Save to a local directory
-	pluginDir := filepath.Join("data", "plugins", name)
-	if err := os.MkdirAll(pluginDir, 0750); err != nil {
+	if err := os.MkdirAll(absPluginDir, 0750); err != nil {
 		return fmt.Errorf("create plugin directory: %w", err)
 	}
 
 	// Save the archive
-	archivePath := filepath.Join(pluginDir, fmt.Sprintf("%s-%s.tar.gz", name, version))
+	archivePath := filepath.Join(absPluginDir, fmt.Sprintf("%s-%s.tar.gz", name, version))
 	f, err := os.Create(archivePath)
 	if err != nil {
 		return fmt.Errorf("create archive file: %w", err)
@@ -128,13 +146,13 @@ func (c *CompositeRegistry) Install(ctx context.Context, name, version string) e
 	f.Close()
 
 	// Save manifest
-	manifestPath := filepath.Join(pluginDir, "plugin.json")
+	manifestPath := filepath.Join(absPluginDir, "plugin.json")
 	if err := SaveManifest(manifestPath, manifest); err != nil {
 		return fmt.Errorf("save manifest: %w", err)
 	}
 
 	// Register in local registry (without a component — will be loaded separately)
-	if err := c.local.Register(manifest, nil, pluginDir); err != nil {
+	if err := c.local.Register(manifest, nil, absPluginDir); err != nil {
 		return fmt.Errorf("register installed plugin: %w", err)
 	}
 
