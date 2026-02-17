@@ -145,9 +145,10 @@ func (h *handler) tableRows(w http.ResponseWriter, r *http.Request) {
 
 	// Validate sort column if provided.
 	sortCol := r.URL.Query().Get("sort")
-	order := strings.ToUpper(r.URL.Query().Get("order"))
-	if order != "DESC" {
-		order = "ASC"
+	orderParam := strings.ToUpper(r.URL.Query().Get("order"))
+	order := "ASC"
+	if orderParam == "DESC" {
+		order = "DESC"
 	}
 
 	orderClause := ""
