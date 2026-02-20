@@ -34,9 +34,10 @@ modules:
       - logger-service
 
   - name: database-service
-    type: database.modular
+    type: database.workflow
     config:
-      connectionString: "postgres://localhost:5432/appdb"
+      driver: "sqlite"
+      dsn: ":memory:"
     dependsOn:
       - config-provider
       - logger-service

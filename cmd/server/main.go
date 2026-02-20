@@ -33,6 +33,7 @@ import (
 	"github.com/GoCodeAlone/workflow/observability"
 	"github.com/GoCodeAlone/workflow/observability/tracing"
 	"github.com/GoCodeAlone/workflow/plugin"
+	pluginexternal "github.com/GoCodeAlone/workflow/plugin/external"
 	"github.com/GoCodeAlone/workflow/plugin/docmanager"
 	"github.com/GoCodeAlone/workflow/plugin/storebrowser"
 	pluginai "github.com/GoCodeAlone/workflow/plugins/ai"
@@ -108,6 +109,31 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	for _, p := range plugins {
 		if err := engine.LoadPlugin(p); err != nil {
 			log.Fatalf("Failed to load plugin %s: %v", p.Name(), err)
+		}
+	}
+
+	// Discover and load external plugins from data/plugins/ directory.
+	// External plugins run as separate processes communicating over gRPC.
+	// Failures are non-fatal — the engine works fine with only builtin plugins.
+	extPluginDir := filepath.Join(*dataDir, "plugins")
+	extMgr := pluginexternal.NewExternalPluginManager(extPluginDir, log.Default())
+	discovered, discoverErr := extMgr.DiscoverPlugins()
+	if discoverErr != nil {
+		logger.Warn("Failed to discover external plugins", "error", discoverErr)
+	}
+	if len(discovered) > 0 {
+		logger.Info("Discovered external plugins", "count", len(discovered), "plugins", discovered)
+		for _, name := range discovered {
+			adapter, loadErr := extMgr.LoadPlugin(name)
+			if loadErr != nil {
+				logger.Warn("Failed to load external plugin", "plugin", name, "error", loadErr)
+				continue
+			}
+			if err := engine.LoadPlugin(adapter); err != nil {
+				logger.Warn("Failed to register external plugin", "plugin", name, "error", err)
+				continue
+			}
+			logger.Info("Loaded external plugin", "plugin", name)
 		}
 	}
 
@@ -656,6 +682,22 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 		app.envMux = envMux
 		logger.Info("Registered environment management service", "path", envDBPath)
 	}
+
+	// -----------------------------------------------------------------------
+	// External plugin management handler
+	// -----------------------------------------------------------------------
+
+	extPluginDir2 := filepath.Join(*dataDir, "plugins")
+	extPluginMgr := pluginexternal.NewExternalPluginManager(extPluginDir2, log.Default())
+	extPluginHandler := pluginexternal.NewPluginHandler(extPluginMgr)
+	extPluginMux := http.NewServeMux()
+	extPluginHandler.RegisterRoutes(extPluginMux)
+
+	engine.GetApp().RegisterModule(module.NewServiceModule("admin-external-plugins", extPluginMux))
+	if regErr := engine.GetApp().RegisterService("admin-external-plugins", extPluginMux); regErr != nil {
+		logger.Warn("Failed to register external plugin service", "error", regErr)
+	}
+	logger.Info("Registered external plugin management API")
 
 	// -----------------------------------------------------------------------
 	// Plugin composite registry

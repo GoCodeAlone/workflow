@@ -318,3 +318,40 @@ This is pre-alpha. No backwards compatibility needed.
 6. Remove all hard-coded service registrations from main.go
 7. Remove old wireV1HandlerPostStart and wireManagementHandler functions
 8. Add --plugins flag for deployment configuration
+
+## External Plugins (gRPC-based)
+
+In addition to the **native plugins** described above (compiled into the binary), the engine supports **external plugins** that run as separate OS processes communicating via gRPC. External plugins extend the engine with new module types, step types, and trigger types without recompiling.
+
+### How External Plugins Relate to Native Plugins
+
+Native plugins (this document) handle admin functionality: UI pages, routes, lifecycle hooks, and dependency management via the `NativePlugin` / `PluginManager` system. External plugins handle engine extensibility: new module types and pipeline step types via the `EnginePlugin` / `EnginePluginManager` system.
+
+Both systems coexist:
+
+| Aspect | Native Plugins | External Plugins |
+|--------|---------------|-----------------|
+| Interface | `NativePlugin` | `EnginePlugin` (via `ExternalPluginAdapter`) |
+| Manager | `PluginManager` (SQLite-backed state) | `EnginePluginManager` (in-memory) |
+| Communication | Direct Go calls | gRPC over Unix socket |
+| Purpose | Admin UI, routes, services | Module types, step types, schemas |
+| Deployment | Compiled into binary | Separate binary in `data/plugins/` |
+
+### External Plugin Discovery
+
+External plugins are placed in `data/plugins/{name}/` with a `plugin.json` manifest and a matching binary. The engine discovers them on startup and exposes management endpoints:
+
+- `GET /api/v1/plugins/external` -- list available
+- `GET /api/v1/plugins/external/loaded` -- list loaded
+- `POST /api/v1/plugins/external/{name}/load` -- load
+- `POST /api/v1/plugins/external/{name}/unload` -- unload
+- `POST /api/v1/plugins/external/{name}/reload` -- reload
+
+### Integration with Admin Plugins
+
+An admin native plugin (e.g., `marketplace` or a future `plugin-manager` plugin) can provide UI for managing external plugins -- listing available plugins, loading/unloading them, and monitoring their health. The admin plugin would call the external plugin API endpoints internally.
+
+### Further Reading
+
+- [PLUGIN_ARCHITECTURE.md](PLUGIN_ARCHITECTURE.md) -- technical architecture of the external plugin system (gRPC protocol, lifecycle, process isolation, security)
+- [PLUGIN_DEVELOPMENT_GUIDE.md](PLUGIN_DEVELOPMENT_GUIDE.md) -- developer guide for building external plugins (SDK, examples, testing, deployment)

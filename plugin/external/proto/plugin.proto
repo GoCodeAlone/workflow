@@ -1,0 +1,194 @@
+syntax = "proto3";
+
+package workflow.plugin.v1;
+
+option go_package = "github.com/GoCodeAlone/workflow/plugin/external/proto";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/empty.proto";
+
+// PluginService is implemented by the plugin process and called by the host.
+service PluginService {
+  // GetManifest returns the plugin's metadata.
+  rpc GetManifest(google.protobuf.Empty) returns (Manifest);
+
+  // GetModuleTypes returns the module type names this plugin provides.
+  rpc GetModuleTypes(google.protobuf.Empty) returns (TypeList);
+
+  // GetStepTypes returns the step type names this plugin provides.
+  rpc GetStepTypes(google.protobuf.Empty) returns (TypeList);
+
+  // GetTriggerTypes returns the trigger type names this plugin provides.
+  rpc GetTriggerTypes(google.protobuf.Empty) returns (TypeList);
+
+  // GetModuleSchemas returns UI schema definitions for the plugin's module types.
+  rpc GetModuleSchemas(google.protobuf.Empty) returns (ModuleSchemaList);
+
+  // CreateModule instantiates a module of the given type.
+  rpc CreateModule(CreateModuleRequest) returns (HandleResponse);
+
+  // InitModule initializes a previously created module.
+  rpc InitModule(HandleRequest) returns (ErrorResponse);
+
+  // StartModule starts a previously initialized module.
+  rpc StartModule(HandleRequest) returns (ErrorResponse);
+
+  // StopModule stops a running module.
+  rpc StopModule(HandleRequest) returns (ErrorResponse);
+
+  // DestroyModule destroys a module and releases its resources.
+  rpc DestroyModule(HandleRequest) returns (ErrorResponse);
+
+  // CreateStep instantiates a pipeline step of the given type.
+  rpc CreateStep(CreateStepRequest) returns (HandleResponse);
+
+  // ExecuteStep runs a pipeline step with the given context.
+  rpc ExecuteStep(ExecuteStepRequest) returns (ExecuteStepResponse);
+
+  // DestroyStep destroys a step and releases its resources.
+  rpc DestroyStep(HandleRequest) returns (ErrorResponse);
+
+  // InvokeService calls a named method on a module's service interface.
+  rpc InvokeService(InvokeServiceRequest) returns (InvokeServiceResponse);
+}
+
+// EngineCallbackService is implemented by the host and called by the plugin.
+service EngineCallbackService {
+  // TriggerWorkflow fires a workflow trigger from the plugin side.
+  rpc TriggerWorkflow(TriggerWorkflowRequest) returns (ErrorResponse);
+
+  // GetService checks if a named service exists in the host registry.
+  rpc GetService(GetServiceRequest) returns (GetServiceResponse);
+
+  // Log sends a log entry from the plugin to the host logger.
+  rpc Log(LogRequest) returns (google.protobuf.Empty);
+}
+
+// Manifest describes the plugin's metadata.
+message Manifest {
+  string name = 1;
+  string version = 2;
+  string author = 3;
+  string description = 4;
+}
+
+// TypeList is a list of type name strings.
+message TypeList {
+  repeated string types = 1;
+}
+
+// ModuleSchemaList contains UI schema definitions.
+message ModuleSchemaList {
+  repeated ModuleSchema schemas = 1;
+}
+
+// ModuleSchema describes a module type for the UI.
+message ModuleSchema {
+  string type = 1;
+  string label = 2;
+  string category = 3;
+  string description = 4;
+  repeated ServiceIODef inputs = 5;
+  repeated ServiceIODef outputs = 6;
+  repeated ConfigFieldDef config_fields = 7;
+}
+
+// ServiceIODef describes a service input or output.
+message ServiceIODef {
+  string name = 1;
+  string type = 2;
+  string description = 3;
+}
+
+// ConfigFieldDef describes a configuration field for the UI.
+message ConfigFieldDef {
+  string name = 1;
+  string type = 2;
+  string description = 3;
+  string default_value = 4;
+  bool required = 5;
+  repeated string options = 6;
+}
+
+// CreateModuleRequest asks the plugin to instantiate a module.
+message CreateModuleRequest {
+  string type = 1;
+  string name = 2;
+  google.protobuf.Struct config = 3;
+}
+
+// CreateStepRequest asks the plugin to instantiate a pipeline step.
+message CreateStepRequest {
+  string type = 1;
+  string name = 2;
+  google.protobuf.Struct config = 3;
+}
+
+// HandleResponse returns a handle ID for a created resource.
+message HandleResponse {
+  string handle_id = 1;
+  string error = 2;
+}
+
+// HandleRequest identifies a resource by its handle.
+message HandleRequest {
+  string handle_id = 1;
+}
+
+// ErrorResponse returns an optional error message.
+message ErrorResponse {
+  string error = 1;
+}
+
+// ExecuteStepRequest runs a step with pipeline context data.
+message ExecuteStepRequest {
+  string handle_id = 1;
+  google.protobuf.Struct trigger_data = 2;
+  map<string, google.protobuf.Struct> step_outputs = 3;
+  google.protobuf.Struct current = 4;
+  google.protobuf.Struct metadata = 5;
+}
+
+// ExecuteStepResponse returns the step result.
+message ExecuteStepResponse {
+  google.protobuf.Struct output = 1;
+  string error = 2;
+  bool stop_pipeline = 3;
+}
+
+// InvokeServiceRequest calls a method on a module service.
+message InvokeServiceRequest {
+  string handle_id = 1;
+  string method = 2;
+  google.protobuf.Struct args = 3;
+}
+
+// InvokeServiceResponse returns the service method result.
+message InvokeServiceResponse {
+  google.protobuf.Struct result = 1;
+  string error = 2;
+}
+
+// TriggerWorkflowRequest fires a trigger from the plugin.
+message TriggerWorkflowRequest {
+  string trigger_type = 1;
+  string action = 2;
+  google.protobuf.Struct data = 3;
+}
+
+// GetServiceRequest asks if a named service exists on the host.
+message GetServiceRequest {
+  string name = 1;
+}
+
+// GetServiceResponse indicates whether the service was found.
+message GetServiceResponse {
+  bool found = 1;
+}
+
+// LogRequest sends a log entry to the host.
+message LogRequest {
+  string level = 1;
+  string message = 2;
+  google.protobuf.Struct fields = 3;
+}
