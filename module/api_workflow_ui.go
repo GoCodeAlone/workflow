@@ -215,10 +215,6 @@ var availableModules = []moduleTypeDef{
 		{Key: "provider", Label: "Provider", Type: "select", Options: []string{"memory", "redis"}},
 		{Key: "ttl", Label: "TTL", Type: "string", DefaultValue: "5m"},
 	}},
-	{Type: "database.modular", Label: "Database", Category: "infrastructure", ConfigFields: []configFieldSchema{
-		{Key: "driver", Label: "Driver", Type: "select", Options: []string{"postgres", "mysql", "sqlite"}},
-		{Key: "dsn", Label: "DSN", Type: "string"},
-	}},
 	{Type: "notification.slack", Label: "Slack Notification", Category: "integration", ConfigFields: []configFieldSchema{
 		{Key: "webhookURL", Label: "Webhook URL", Type: "string"},
 		{Key: "channel", Label: "Channel", Type: "string"},

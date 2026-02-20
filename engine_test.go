@@ -707,7 +707,6 @@ func TestEngine_BuildFromConfig_ModularModules(t *testing.T) {
 	modularTypes := []string{
 		"scheduler.modular",
 		"cache.modular",
-		"database.modular",
 		"http.proxy",
 		"reverseproxy",
 	}

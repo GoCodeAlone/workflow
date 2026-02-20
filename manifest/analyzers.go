@@ -175,7 +175,6 @@ func addTopic(m *WorkflowManifest, topic string) {
 
 func isDatabase(moduleType string) bool {
 	return moduleType == "database.workflow" ||
-		moduleType == "database.modular" ||
 		moduleType == "storage.sqlite" ||
 		moduleType == "persistence.store"
 }
@@ -225,13 +224,8 @@ func analyzeDatabase(mod config.ModuleConfig, m *WorkflowManifest) {
 	}
 
 	// Default driver labels for known types
-	if req.Driver == "" {
-		switch mod.Type {
-		case "database.modular":
-			req.Driver = "configured via feeder"
-		case "persistence.store":
-			req.Driver = "delegates to database module"
-		}
+	if req.Driver == "" && mod.Type == "persistence.store" {
+		req.Driver = "delegates to database module"
 	}
 
 	// Rough capacity estimate

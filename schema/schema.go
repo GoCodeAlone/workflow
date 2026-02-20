@@ -59,7 +59,6 @@ var coreModuleTypes = []string{
 	"auth.user-store",
 	"cache.modular",
 	"data.transformer",
-	"database.modular",
 	"database.workflow",
 	"dynamic.component",
 	"featureflag.service",

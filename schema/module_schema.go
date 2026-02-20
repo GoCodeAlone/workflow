@@ -472,16 +472,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{},
 	})
 
-	r.Register(&ModuleSchema{
-		Type:         "database.modular",
-		Label:        "Database",
-		Category:     "database",
-		Description:  "CrisisTextLine/modular database module (use config feeders for driver/DSN)",
-		Inputs:       []ServiceIODef{{Name: "query", Type: "SQL", Description: "SQL query to execute"}},
-		Outputs:      []ServiceIODef{{Name: "database", Type: "sql.DB", Description: "Database connection pool"}},
-		ConfigFields: []ConfigFieldDef{},
-	})
-
 	// ---- Database Category ----
 
 	r.Register(&ModuleSchema{

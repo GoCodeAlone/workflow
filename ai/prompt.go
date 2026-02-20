@@ -46,7 +46,6 @@ The engine builds workflows from YAML config with three top-level sections:
 ### Infrastructure
 - scheduler.modular: Cron-based scheduler (deprecated)
 - cache.modular: Cache module (deprecated)
-- database.modular: Database module (deprecated)
 - reverseproxy / http.proxy: Reverse proxy
 
 ## Workflow Types
@@ -335,7 +334,7 @@ The built-in module types are:
 - messaging.broker, messaging.handler
 - statemachine.engine, state.tracker, state.connector
 - event.processor
-- scheduler.modular, cache.modular, database.modular
+- scheduler.modular, cache.modular
 - reverseproxy, http.proxy, messaging.broker.eventbus
 
 For each non-built-in type, return a JSON array of ComponentSpec objects with name, type, description, and interface fields.

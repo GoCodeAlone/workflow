@@ -32,7 +32,6 @@ var BuiltinModuleTypes = map[string]string{
 	"event.processor":           "Complex event pattern processor",
 	"scheduler.modular":         "Cron-based scheduler",
 	"cache.modular":             "Cache module",
-	"database.modular":          "Database module",
 	"messaging.broker.eventbus": "EventBus bridge for pub/sub",
 	"reverseproxy":              "Reverse proxy",
 	"http.proxy":                "Reverse proxy (alias)",
