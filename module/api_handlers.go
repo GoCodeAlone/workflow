@@ -676,10 +676,11 @@ func (h *RESTAPIHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Apply affiliate filter (skip for admin).
-		// Resources without an affiliateId are excluded when a filter is active.
+		// Only filter resources that have an affiliateId field (e.g., conversations).
+		// Resources without affiliateId (e.g., keywords, affiliates, surveys) are not filtered.
 		if !isAdmin && filterAffiliateId != "" {
 			resAffiliateId, _ := resource.Data["affiliateId"].(string)
-			if resAffiliateId != filterAffiliateId {
+			if resAffiliateId != "" && resAffiliateId != filterAffiliateId {
 				continue
 			}
 		}
