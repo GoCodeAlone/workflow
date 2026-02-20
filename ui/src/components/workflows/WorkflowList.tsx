@@ -6,12 +6,13 @@ import {
   apiDeployWorkflow,
   apiStopWorkflow,
   apiLoadWorkflowFromPath,
+  apiListAllProjects,
   type ApiWorkflowRecord,
 } from '../../utils/api.ts';
 
 interface WorkflowListProps {
-  projectId: string;
-  projectName: string;
+  projectId?: string;
+  projectName?: string;
   onOpenWorkflow: (wf: ApiWorkflowRecord) => void;
 }
 
@@ -26,6 +27,7 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
 
 export default function WorkflowList({ projectId, projectName, onOpenWorkflow }: WorkflowListProps) {
   const [workflows, setWorkflows] = useState<ApiWorkflowRecord[]>([]);
+  const [projectMap, setProjectMap] = useState<Map<string, string>>(new Map());
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -33,8 +35,10 @@ export default function WorkflowList({ projectId, projectName, onOpenWorkflow }:
   const [actionInProgress, setActionInProgress] = useState<Record<string, string>>({}); // id -> "deploying"|"stopping"
   const [actionError, setActionError] = useState<Record<string, string>>({}); // id -> error message
 
+  // Fetch workflows — all or filtered by project
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
     apiListWorkflows(projectId)
       .then((wfs) => {
         if (!cancelled) setWorkflows(wfs || []);
@@ -46,8 +50,32 @@ export default function WorkflowList({ projectId, projectName, onOpenWorkflow }:
     return () => { cancelled = true; };
   }, [projectId]);
 
+  // Fetch all projects for the name lookup map (only when showing all workflows)
+  useEffect(() => {
+    if (projectId) return; // filtered by project — we already have projectName
+    let cancelled = false;
+    apiListAllProjects()
+      .then((projects) => {
+        if (!cancelled) {
+          const map = new Map<string, string>();
+          for (const p of (projects || [])) {
+            map.set(p.id, p.name);
+          }
+          setProjectMap(map);
+        }
+      })
+      .catch(() => {/* ignore */});
+    return () => { cancelled = true; };
+  }, [projectId]);
+
   const handleCreate = async () => {
     if (!newName.trim()) return;
+    if (!projectId) {
+      setActionError((prev) => ({ ...prev, _global: 'Select a project from the sidebar before creating a workflow.' }));
+      setCreating(false);
+      setNewName('');
+      return;
+    }
     try {
       const wf = await apiCreateWorkflow(projectId, { name: newName });
       setWorkflows((prev) => [wf, ...prev]);
@@ -85,6 +113,10 @@ export default function WorkflowList({ projectId, projectName, onOpenWorkflow }:
   };
 
   const handleLoadFromPath = async () => {
+    if (!projectId) {
+      setActionError((prev) => ({ ...prev, _global: 'Select a project from the sidebar before loading from server path.' }));
+      return;
+    }
     const serverPath = window.prompt('Enter server-local path to a workflow YAML file or directory:');
     if (!serverPath) return;
     try {
@@ -109,6 +141,9 @@ export default function WorkflowList({ projectId, projectName, onOpenWorkflow }:
     w.name.toLowerCase().includes(filter.toLowerCase()),
   );
 
+  const showProjectColumn = !projectId;
+  const headerTitle = projectName || 'All Workflows';
+
   return (
     <div
       style={{
@@ -131,7 +166,7 @@ export default function WorkflowList({ projectId, projectName, onOpenWorkflow }:
         }}
       >
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, flex: 1 }}>
-          {projectName}
+          {headerTitle}
         </h2>
         <input
           type="text"
@@ -243,6 +278,9 @@ export default function WorkflowList({ projectId, projectName, onOpenWorkflow }:
           const error = actionError[wf.id];
           const displayStatus = inProgress || wf.status;
           const statusStyle = STATUS_COLORS[displayStatus] || STATUS_COLORS.draft;
+          const resolvedProjectName = showProjectColumn
+            ? (projectMap.get(wf.project_id) || 'Unknown')
+            : null;
           return (
             <div key={wf.id}>
               <div
@@ -295,6 +333,24 @@ export default function WorkflowList({ projectId, projectName, onOpenWorkflow }:
                     {!!wf.is_system && ' \u00B7 Admin Configuration'}
                   </div>
                 </div>
+
+                {/* Project name column (only in "All Workflows" view) */}
+                {showProjectColumn && resolvedProjectName && (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      color: '#a6adc8',
+                      maxWidth: 140,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                    }}
+                    title={resolvedProjectName}
+                  >
+                    {resolvedProjectName}
+                  </span>
+                )}
 
                 {/* Status badge */}
                 <span

@@ -13,7 +13,7 @@ import useAuthStore from '../../store/authStore.ts';
 
 interface ProjectSwitcherProps {
   selectedProjectId: string | null;
-  onSelectProject: (project: ApiProject) => void;
+  onSelectProject: (project: ApiProject | null) => void;
 }
 
 interface OrgNode {
@@ -170,6 +170,26 @@ export default function ProjectSwitcher({ selectedProjectId, onSelectProject }: 
         height: '100%',
       }}
     >
+      {/* "All Workflows" quick-access item */}
+      <div
+        onClick={() => onSelectProject(null)}
+        style={{
+          padding: '8px 12px',
+          borderBottom: '1px solid #313244',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          background: selectedProjectId === null ? 'rgba(137, 180, 250, 0.10)' : 'transparent',
+          color: selectedProjectId === null ? '#89b4fa' : '#cdd6f4',
+          fontWeight: 500,
+          fontSize: 13,
+        }}
+      >
+        <span style={{ fontSize: 14 }}>{'\u{1F4CB}'}</span>
+        All Workflows
+      </div>
+
       <div
         style={{
           padding: '8px 12px',
@@ -233,7 +253,9 @@ export default function ProjectSwitcher({ selectedProjectId, onSelectProject }: 
       )}
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        {companies.filter((c) => !c.company.is_system || userRole === 'admin').map((compNode, ci) => (
+        {companies.map((compNode, ci) => {
+          if (compNode.company.is_system && userRole !== 'admin') return null;
+          return (
           <div key={compNode.company.id}>
             <div
               style={{
@@ -347,7 +369,8 @@ export default function ProjectSwitcher({ selectedProjectId, onSelectProject }: 
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
 
         {companies.length === 0 && (
           <div style={{ padding: '16px 12px', color: '#6c7086', fontSize: 12, textAlign: 'center' }}>

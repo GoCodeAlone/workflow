@@ -95,7 +95,7 @@ function EditorView() {
   // (e.g. loaded via "Load Server" or "Import" which don't set activeWorkflowRecord)
   const subview = (activeWorkflowRecord || nodes.length > 0) ? 'editor' : 'projects';
 
-  const handleSelectProject = useCallback((project: ApiProject) => {
+  const handleSelectProject = useCallback((project: ApiProject | null) => {
     setSelectedProject(project);
   }, []);
 
@@ -133,28 +133,12 @@ function EditorView() {
         />
       </CollapsiblePanel>
 
-      {subview === 'projects' && selectedProject && (
+      {subview === 'projects' && (
         <WorkflowList
-          projectId={selectedProject.id}
-          projectName={selectedProject.name}
+          projectId={selectedProject?.id}
+          projectName={selectedProject?.name}
           onOpenWorkflow={handleOpenWorkflow}
         />
-      )}
-
-      {subview === 'projects' && !selectedProject && (
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#6c7086',
-            fontSize: 14,
-            background: '#1e1e2e',
-          }}
-        >
-          Select a project from the sidebar to view its workflows.
-        </div>
       )}
 
       {subview === 'editor' && (

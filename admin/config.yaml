@@ -657,6 +657,25 @@ workflows:
                   company_id: "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
                   created_at: "{{ .steps.prepare.now }}"
 
+      # V1 API: PROJECTS (flat listing — all projects across all orgs)
+      - method: GET
+        path: "/api/v1/admin/projects"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: list-all-projects
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, company_id, name, slug, description, is_system, metadata, created_at, updated_at FROM projects ORDER BY created_at ASC"
+                mode: list
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.list-all-projects.rows"
+
       # ============================================================
       # V1 API: WORKFLOWS (Phase B: POST/PUT/deploy/stop decomposed)
       # ============================================================

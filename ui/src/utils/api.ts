@@ -295,6 +295,10 @@ export function apiListProjects(orgId: string): Promise<ApiProject[]> {
   return v1Fetch<ApiProject[]>(`/admin/organizations/${encodeURIComponent(orgId)}/projects`);
 }
 
+export function apiListAllProjects(): Promise<ApiProject[]> {
+  return v1Fetch<ApiProject[]>('/admin/projects');
+}
+
 export function apiCreateProject(orgId: string, name: string, slug?: string): Promise<ApiProject> {
   return v1Fetch<ApiProject>(`/admin/organizations/${encodeURIComponent(orgId)}/projects`, {
     method: 'POST',
