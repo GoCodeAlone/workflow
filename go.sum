@@ -16,8 +16,8 @@ github.com/CrisisTextLine/modular/modules/scheduler v0.4.0 h1:PDYAD+hL7E6mM7YJey
 github.com/CrisisTextLine/modular/modules/scheduler v0.4.0/go.mod h1:ULpROdMxp2/3OeUFTjDtLd3cqYVf4gyu90j6C+jjgQY=
 github.com/DataDog/datadog-go/v5 v5.4.0 h1:Ea3eXUVwrVV28F/fo3Dr3aa+TL/Z7Xi6SUPKW8L99aI=
 github.com/DataDog/datadog-go/v5 v5.4.0/go.mod h1:K9kcYBlxkcPP8tvvjZZKs/m1edNAUFzBbdpTUKfCsuw=
-github.com/GoCodeAlone/go-plugin v0.0.0-20260220090033-ba72e8611b9d h1:/FftttIEtnWTvcVzhUN87HYtrLWLXF4Y7DAEn+Yew3I=
-github.com/GoCodeAlone/go-plugin v0.0.0-20260220090033-ba72e8611b9d/go.mod h1:HbGQRZUIa+jbDfjsaZIMJYvrz+LnxL0mJpggfynSTMk=
+github.com/GoCodeAlone/go-plugin v0.0.0-20260220090904-b4c35f0e4271 h1:/oxxpYJ41BuK+/5Gp9c+0PHybyNFWeBHyCzkSVLCoMk=
+github.com/GoCodeAlone/go-plugin v0.0.0-20260220090904-b4c35f0e4271/go.mod h1:HbGQRZUIa+jbDfjsaZIMJYvrz+LnxL0mJpggfynSTMk=
 github.com/IBM/sarama v1.46.3 h1:njRsX6jNlnR+ClJ8XmkO+CM4unbrNr/2vB5KK6UA+IE=
 github.com/IBM/sarama v1.46.3/go.mod h1:GTUYiF9DMOZVe3FwyGT+dtSPceGFIgA+sPc5u6CBwko=
 github.com/Microsoft/go-winio v0.5.0 h1:Elr9Wn+sGKPlkaBvwu4mTrxtmOp3F3yV9qhaHbXGjwU=

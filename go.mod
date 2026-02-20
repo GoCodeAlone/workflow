@@ -9,7 +9,7 @@ require (
 	github.com/CrisisTextLine/modular/modules/eventbus v1.6.0
 	github.com/CrisisTextLine/modular/modules/reverseproxy/v2 v2.2.0
 	github.com/CrisisTextLine/modular/modules/scheduler v0.4.0
-	github.com/GoCodeAlone/go-plugin v0.0.0-20260220090033-ba72e8611b9d
+	github.com/GoCodeAlone/go-plugin v0.0.0-20260220090904-b4c35f0e4271
 	github.com/IBM/sarama v1.46.3
 	github.com/aws/aws-sdk-go-v2 v1.41.1
 	github.com/aws/aws-sdk-go-v2/config v1.32.7
