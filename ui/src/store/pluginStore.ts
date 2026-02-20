@@ -44,7 +44,6 @@ const FALLBACK_PAGES: UIPageDef[] = [
   { id: 'marketplace',  label: 'Marketplace',   icon: '\u{1F6D2}', category: 'global', order: 2 },
   { id: 'templates',    label: 'Templates',     icon: '\u{1F4C4}', category: 'global', order: 3 },
   { id: 'environments',   label: 'Environments',  icon: '\u2601\uFE0F',  category: 'global', order: 4 },
-  { id: 'feature-flags',  label: 'Feature Flags', icon: '\u{1F6A9}', category: 'global', order: 5 },
   { id: 'settings',       label: 'Settings',      icon: '\u2699\uFE0F',  category: 'global', order: 6 },
   // Plugin pages
   { id: 'store-browser', label: 'Store Browser',  icon: '\u{1F5C4}\uFE0F',  category: 'plugin', order: 0 },

@@ -38,6 +38,14 @@ func New() *Plugin {
 	}
 }
 
+// UIPages returns the UI page definitions for this plugin.
+// The feature-flags nav item only appears when this plugin is enabled.
+func (p *Plugin) UIPages() []plugin.UIPageDef {
+	return []plugin.UIPageDef{
+		{ID: "feature-flags", Label: "Feature Flags", Icon: "flag", Category: "global", Order: 5},
+	}
+}
+
 // Capabilities returns the capability contracts defined by this plugin.
 func (p *Plugin) Capabilities() []capability.Contract {
 	return []capability.Contract{
