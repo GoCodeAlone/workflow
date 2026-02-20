@@ -188,12 +188,12 @@ type WorkflowHandler interface {
 func GeneratePrompt(req GenerateRequest) string {
 	var b strings.Builder
 	b.WriteString("Generate a workflow configuration for the following request:\n\n")
-	b.WriteString(fmt.Sprintf("Intent: %s\n\n", req.Intent))
+	fmt.Fprintf(&b, "Intent: %s\n\n", req.Intent)
 
 	if len(req.Context) > 0 {
 		b.WriteString("Additional context:\n")
 		for k, v := range req.Context {
-			b.WriteString(fmt.Sprintf("- %s: %s\n", k, v))
+			fmt.Fprintf(&b, "- %s: %s\n", k, v)
 		}
 		b.WriteString("\n")
 	}
@@ -201,7 +201,7 @@ func GeneratePrompt(req GenerateRequest) string {
 	if len(req.Constraints) > 0 {
 		b.WriteString("Constraints:\n")
 		for _, c := range req.Constraints {
-			b.WriteString(fmt.Sprintf("- %s\n", c))
+			fmt.Fprintf(&b, "- %s\n", c)
 		}
 		b.WriteString("\n")
 	}
@@ -376,7 +376,7 @@ func ContextEnrichedPrompt(spec ComponentSpec, availableModules []string, availa
 		b.WriteString("\n\n## Available Module Types\n")
 		b.WriteString("The following module types are available in the system:\n")
 		for _, m := range availableModules {
-			b.WriteString(fmt.Sprintf("- %s\n", m))
+			fmt.Fprintf(&b, "- %s\n", m)
 		}
 	}
 
@@ -384,7 +384,7 @@ func ContextEnrichedPrompt(spec ComponentSpec, availableModules []string, availa
 		b.WriteString("\n\n## Available Services\n")
 		b.WriteString("The following services are available via the Init(services) map:\n")
 		for _, s := range availableServices {
-			b.WriteString(fmt.Sprintf("- %s\n", s))
+			fmt.Fprintf(&b, "- %s\n", s)
 		}
 	}
 
@@ -400,7 +400,7 @@ func ExamplePromptSection(examples map[string]string) string {
 	var b strings.Builder
 	b.WriteString("\n## Example Configurations\n\n")
 	for name, content := range examples {
-		b.WriteString(fmt.Sprintf("### %s\n```yaml\n%s\n```\n\n", name, content))
+		fmt.Fprintf(&b, "### %s\n```yaml\n%s\n```\n\n", name, content)
 	}
 	return b.String()
 }

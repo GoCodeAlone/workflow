@@ -99,7 +99,7 @@ func (h *handler) tableSchema(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.db.QueryContext(r.Context(), fmt.Sprintf("PRAGMA table_info(%s)", tableName))
+	rows, err := h.db.QueryContext(r.Context(), fmt.Sprintf("PRAGMA table_info(%s)", tableName)) //nolint:gosec // G701: table name validated against allowlist
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("table info: %v", err))
 		return
@@ -189,7 +189,7 @@ func (h *handler) tableRows(w http.ResponseWriter, r *http.Request) {
 	// and orderClause uses a column validated against getTableColumns(). Both are safe
 	// from injection. Parameters are bound via ? placeholders.
 	query := fmt.Sprintf("SELECT * FROM %s%s LIMIT ? OFFSET ?", tableName, orderClause) //nolint:gosec // tableName and orderClause are validated against DB schema above
-	rows, err := h.db.QueryContext(r.Context(), query, limit, offset)
+	rows, err := h.db.QueryContext(r.Context(), query, limit, offset) //nolint:gosec // G701: query built from validated table name and column
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("query rows: %v", err))
 		return
@@ -257,7 +257,7 @@ func (h *handler) execQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	rows, err := tx.QueryContext(r.Context(), q)
+	rows, err := tx.QueryContext(r.Context(), q) //nolint:gosec // G701: query validated by sanitizeReadOnlyQuery
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("query error: %v", err))
 		return
@@ -463,7 +463,7 @@ func getValidTables(db *sql.DB) (map[string]bool, error) {
 }
 
 func getTableColumns(db *sql.DB, table string) (map[string]bool, error) {
-	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table)) //nolint:gosec // G701: table name validated against allowlist
 	if err != nil {
 		return nil, err
 	}

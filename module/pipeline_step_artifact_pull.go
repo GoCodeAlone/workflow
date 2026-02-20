@@ -94,7 +94,7 @@ func (s *ArtifactPullStep) Execute(ctx context.Context, pc *PipelineContext) (*S
 		if err != nil {
 			return nil, fmt.Errorf("artifact_pull step %q: invalid URL: %w", s.name, err)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: SSRF via taint analysis
 		if err != nil {
 			return nil, fmt.Errorf("artifact_pull step %q: HTTP request failed: %w", s.name, err)
 		}

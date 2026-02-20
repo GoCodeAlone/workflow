@@ -172,7 +172,7 @@ func (ws *WebhookSink) doSend(ctx context.Context, payload []byte) error {
 	client := ws.client
 	ws.mu.RUnlock()
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: URL is from configured webhook destination
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}

@@ -255,7 +255,7 @@ func buildClassificationUserPrompt(messages []Message) string {
 		if role == "" {
 			role = "unknown"
 		}
-		b.WriteString(fmt.Sprintf("[%s]: %s\n", role, msg.Body))
+		fmt.Fprintf(&b, "[%s]: %s\n", role, msg.Body)
 	}
 	return b.String()
 }

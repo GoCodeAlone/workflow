@@ -247,7 +247,7 @@ func (rc *ReviewChecklist) PassedRequired() bool {
 // Summary returns a textual summary of the review.
 func (rc *ReviewChecklist) Summary() string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Review Checklist for %s v%s\n", rc.PluginName, rc.Version))
+	fmt.Fprintf(&b, "Review Checklist for %s v%s\n", rc.PluginName, rc.Version)
 	b.WriteString(strings.Repeat("=", 50) + "\n\n")
 
 	passed := 0
@@ -263,12 +263,12 @@ func (rc *ReviewChecklist) Summary() string {
 		if item.Required {
 			req = " (required)"
 		}
-		b.WriteString(fmt.Sprintf("%s [%s] %s%s\n", status, item.Category, item.Description, req))
+		fmt.Fprintf(&b, "%s [%s] %s%s\n", status, item.Category, item.Description, req)
 		if item.Notes != "" {
-			b.WriteString(fmt.Sprintf("    Notes: %s\n", item.Notes))
+			fmt.Fprintf(&b, "    Notes: %s\n", item.Notes)
 		}
 	}
-	b.WriteString(fmt.Sprintf("\nResult: %d/%d checks passed\n", passed, total))
+	fmt.Fprintf(&b, "\nResult: %d/%d checks passed\n", passed, total)
 	if rc.PassedRequired() {
 		b.WriteString("Status: APPROVED (all required checks passed)\n")
 	} else {

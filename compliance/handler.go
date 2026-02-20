@@ -77,7 +77,7 @@ func (h *ComplianceHandler) handleExportAudit(w http.ResponseWriter, r *http.Req
 		w.Header().Set("Content-Disposition", "attachment; filename=audit_export.json")
 	}
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	_, _ = w.Write(data) //nolint:gosec // G705: JSON-encoded data, not user-controlled HTML
 }
 
 // ---------- GET /api/v1/compliance/controls ----------

@@ -32,7 +32,7 @@ type DeployStatus struct {
 // RegistryAuth holds credentials for authenticating with a container registry.
 type RegistryAuth struct {
 	Username      string `json:"username"`
-	Password      string `json:"password"`
+	Password      string `json:"password"` //nolint:gosec // G117: registry auth config field
 	Token         string `json:"token"`
 	ServerAddress string `json:"server_address"`
 }

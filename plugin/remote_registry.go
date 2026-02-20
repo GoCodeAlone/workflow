@@ -60,7 +60,7 @@ func (r *RemoteRegistry) Search(ctx context.Context, query string) ([]*PluginMan
 		return nil, fmt.Errorf("create search request: %w", err)
 	}
 
-	resp, err := r.httpClient.Do(req)
+	resp, err := r.httpClient.Do(req) //nolint:gosec // G704: URL from configured registry endpoint
 	if err != nil {
 		return nil, fmt.Errorf("search remote registry: %w", err)
 	}
@@ -105,7 +105,7 @@ func (r *RemoteRegistry) GetManifest(ctx context.Context, name, version string) 
 		return nil, fmt.Errorf("create manifest request: %w", err)
 	}
 
-	resp, err := r.httpClient.Do(req)
+	resp, err := r.httpClient.Do(req) //nolint:gosec // G704: URL from configured registry endpoint
 	if err != nil {
 		return nil, fmt.Errorf("fetch manifest from remote: %w", err)
 	}
@@ -141,7 +141,7 @@ func (r *RemoteRegistry) Download(ctx context.Context, name, version string) (io
 		return nil, fmt.Errorf("create download request: %w", err)
 	}
 
-	resp, err := r.httpClient.Do(req)
+	resp, err := r.httpClient.Do(req) //nolint:gosec // G704: URL from configured registry endpoint
 	if err != nil {
 		return nil, fmt.Errorf("download plugin from remote: %w", err)
 	}
@@ -167,7 +167,7 @@ func (r *RemoteRegistry) ListVersions(ctx context.Context, name string) ([]strin
 		return nil, fmt.Errorf("create versions request: %w", err)
 	}
 
-	resp, err := r.httpClient.Do(req)
+	resp, err := r.httpClient.Do(req) //nolint:gosec // G704: URL from configured registry endpoint
 	if err != nil {
 		return nil, fmt.Errorf("list versions from remote: %w", err)
 	}

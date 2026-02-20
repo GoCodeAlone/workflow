@@ -117,7 +117,7 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		}
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: SSRF via taint analysis
 	if err != nil {
 		return nil, fmt.Errorf("http_call step %q: request failed: %w", s.name, err)
 	}

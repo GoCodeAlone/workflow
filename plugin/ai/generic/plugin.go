@@ -23,7 +23,7 @@ type Config struct {
 	BaseURL string
 
 	// APIKey is the bearer token for authentication (optional for local providers).
-	APIKey string
+	APIKey string //nolint:gosec // G117: config field
 
 	// Models lists the models available from this provider.
 	Models []ai.ModelInfo
@@ -153,7 +153,7 @@ func (p *Provider) doRequest(ctx context.Context, req chatRequest) (*chatRespons
 		httpReq.Header.Set(k, v)
 	}
 
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.httpClient.Do(httpReq) //nolint:gosec // G704: URL from configured provider endpoint
 	if err != nil {
 		return nil, fmt.Errorf("%s: request failed: %w", p.name, err)
 	}

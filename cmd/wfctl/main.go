@@ -54,13 +54,13 @@ func main() {
 
 	fn, ok := commands[cmd]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", cmd)
+		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", cmd) //nolint:gosec // G705: CLI error output
 		usage()
 		os.Exit(1)
 	}
 
 	if err := fn(os.Args[2:]); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err) //nolint:gosec // G705: CLI error output
 		os.Exit(1)
 	}
 }

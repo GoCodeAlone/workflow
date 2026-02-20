@@ -207,7 +207,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			Outputs:     []schema.ServiceIODef{{Name: "database", Type: "sql.DB", Description: "SQL database connection pool"}},
 			ConfigFields: []schema.ConfigFieldDef{
 				{Key: "driver", Label: "Driver", Type: schema.FieldTypeSelect, Options: []string{"postgres", "mysql", "sqlite3"}, Required: true, Description: "Database driver to use"},
-				{Key: "dsn", Label: "DSN", Type: schema.FieldTypeString, Required: true, Description: "Data source name / connection string", Placeholder: "postgres://user:pass@localhost/db?sslmode=disable", Sensitive: true},
+				{Key: "dsn", Label: "DSN", Type: schema.FieldTypeString, Required: true, Description: "Data source name / connection string", Placeholder: "postgres://user:pass@localhost/db?sslmode=disable", Sensitive: true}, //nolint:gosec // G101: placeholder DSN example in schema documentation
 				{Key: "maxOpenConns", Label: "Max Open Connections", Type: schema.FieldTypeNumber, DefaultValue: 25, Description: "Maximum number of open database connections"},
 				{Key: "maxIdleConns", Label: "Max Idle Connections", Type: schema.FieldTypeNumber, DefaultValue: 5, Description: "Maximum number of idle connections in the pool"},
 			},

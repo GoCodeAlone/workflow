@@ -127,15 +127,15 @@ func (v *Validator) ValidateAndFix(ctx context.Context, aiService *Service, spec
 func (v *Validator) BuildFixPrompt(spec ComponentSpec, source string, errors []string) string {
 	var b strings.Builder
 	b.WriteString("Fix the following dynamic component source code.\n\n")
-	b.WriteString(fmt.Sprintf("Component Name: %s\n", spec.Name))
-	b.WriteString(fmt.Sprintf("Component Type: %s\n", spec.Type))
-	b.WriteString(fmt.Sprintf("Description: %s\n\n", spec.Description))
+	fmt.Fprintf(&b, "Component Name: %s\n", spec.Name)   //nolint:gosec // G705: building internal prompt string, not HTML
+	fmt.Fprintf(&b, "Component Type: %s\n", spec.Type)   //nolint:gosec // G705: building internal prompt string, not HTML
+	fmt.Fprintf(&b, "Description: %s\n\n", spec.Description) //nolint:gosec // G705: building internal prompt string, not HTML
 	b.WriteString("Source code that failed validation:\n```go\n")
 	b.WriteString(source)
 	b.WriteString("\n```\n\n")
 	b.WriteString("Errors found:\n")
 	for _, e := range errors {
-		b.WriteString(fmt.Sprintf("- %s\n", e))
+		fmt.Fprintf(&b, "- %s\n", e)
 	}
 	b.WriteString("\nPlease fix all errors and return corrected Go source code.\n")
 	b.WriteString("The code must use 'package component', only standard library imports,\n")

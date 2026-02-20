@@ -204,7 +204,7 @@ func (u *UserStore) LoadSeedFile(path string) error {
 	var seeds []struct {
 		Email    string `json:"email"`
 		Name     string `json:"name"`
-		Password string `json:"password"`
+		Password string `json:"password"` //nolint:gosec // G117: seed file DTO field
 		Role     string `json:"role"`
 	}
 	if err := json.Unmarshal(data, &seeds); err != nil {

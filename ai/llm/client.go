@@ -24,7 +24,7 @@ const (
 
 // ClientConfig holds configuration for the Anthropic LLM client.
 type ClientConfig struct {
-	APIKey  string // Defaults to ANTHROPIC_API_KEY env var
+	APIKey  string `json:"-"` //nolint:gosec // G117: config struct field, not a credential
 	Model   string // Defaults to claude-sonnet-4-20250514
 	BaseURL string // Defaults to https://api.anthropic.com
 }
@@ -122,7 +122,7 @@ func (c *Client) call(ctx context.Context, system string, messages []message, to
 	httpReq.Header.Set("x-api-key", c.apiKey)
 	httpReq.Header.Set("anthropic-version", apiVersion)
 
-	resp, err := c.httpClient.Do(httpReq)
+	resp, err := c.httpClient.Do(httpReq) //nolint:gosec // G704: URL is from trusted API config
 	if err != nil {
 		return nil, fmt.Errorf("API request failed: %w", err)
 	}
@@ -378,7 +378,7 @@ func ExtractJSON(text string) string {
 				if inString {
 					continue
 				}
-				if text[j] == byte(ch) {
+				if rune(text[j]) == ch {
 					depth++
 				} else if text[j] == closing {
 					depth--

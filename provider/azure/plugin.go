@@ -15,7 +15,7 @@ type AzureConfig struct {
 	SubscriptionID string `json:"subscription_id" yaml:"subscription_id"`
 	TenantID       string `json:"tenant_id" yaml:"tenant_id"`
 	ClientID       string `json:"client_id" yaml:"client_id"`
-	ClientSecret   string `json:"client_secret" yaml:"client_secret"`
+	ClientSecret   string `json:"client_secret" yaml:"client_secret"` //nolint:gosec // G117: Azure config field
 	ResourceGroup  string `json:"resource_group" yaml:"resource_group"`
 	Region         string `json:"region" yaml:"region"`
 }

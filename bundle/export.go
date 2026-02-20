@@ -52,7 +52,7 @@ func Export(yamlContent string, workspaceDir string, w io.Writer) error {
 			if info, err := os.Stat(dirPath); err == nil && info.IsDir() {
 				_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 					if err != nil {
-						return nil
+						return err
 					}
 					rel, _ := filepath.Rel(workspaceDir, path)
 					if !info.IsDir() {
@@ -76,7 +76,10 @@ func Export(yamlContent string, workspaceDir string, w io.Writer) error {
 				}
 				if info.IsDir() {
 					_ = filepath.Walk(absPath, func(path string, fi os.FileInfo, err error) error {
-						if err != nil || fi.IsDir() {
+						if err != nil {
+							return err
+						}
+						if fi.IsDir() {
 							return nil
 						}
 						rel, _ := filepath.Rel(workspaceDir, path)

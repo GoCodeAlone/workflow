@@ -45,7 +45,7 @@ func NewAuthHandler(users store.UserStore, sessions store.SessionStore, secret [
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email       string `json:"email"`
-		Password    string `json:"password"`
+		Password    string `json:"password"`    //nolint:gosec // G117: request DTO field
 		DisplayName string `json:"display_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -97,7 +97,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email    string `json:"email"`
-		Password string `json:"password"`
+		Password string `json:"password"` //nolint:gosec // G117: request DTO field
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteError(w, http.StatusBadRequest, "invalid request body")
@@ -137,7 +137,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 // Refresh handles POST /api/v1/auth/refresh.
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		RefreshToken string `json:"refresh_token"`
+		RefreshToken string `json:"refresh_token"` //nolint:gosec // G117: request DTO field
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteError(w, http.StatusBadRequest, "invalid request body")
@@ -249,8 +249,8 @@ func (h *AuthHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 
 // tokenResponse is the JSON shape returned to callers.
 type tokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
+	AccessToken  string `json:"access_token"`  //nolint:gosec // G117: token response field
+	RefreshToken string `json:"refresh_token"` //nolint:gosec // G117: token response field
 	ExpiresIn    int64  `json:"expires_in"`
 }
 

@@ -20,7 +20,7 @@ import (
 // OAuthProviderConfig describes one OAuth2 provider.
 type OAuthProviderConfig struct {
 	ClientID     string   `json:"client_id"`
-	ClientSecret string   `json:"client_secret"`
+	ClientSecret string   `json:"client_secret"` //nolint:gosec // G117: OAuth config field
 	RedirectURL  string   `json:"redirect_url"`
 	Scopes       []string `json:"scopes"`
 	AuthURL      string   `json:"auth_url"`
@@ -211,7 +211,7 @@ func fetchUserInfo(url, accessToken string) (map[string]any, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: OAuth token exchange URL
 	if err != nil {
 		return nil, err
 	}

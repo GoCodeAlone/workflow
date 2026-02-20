@@ -109,7 +109,7 @@ func (h *EventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					continue
 				}
-				_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", data) //nolint:gosec // G705: SSE data stream, JSON-encoded
 				if e.StartedAt.After(lastSeen) {
 					lastSeen = e.StartedAt
 				}

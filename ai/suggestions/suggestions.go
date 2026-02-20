@@ -220,7 +220,7 @@ func buildUserPrompt(messages []Message) string {
 		case "counselor":
 			role = "Counselor"
 		}
-		b.WriteString(fmt.Sprintf("[%s] %s: %s\n", msg.Timestamp.Format("15:04"), role, msg.Body))
+		fmt.Fprintf(&b, "[%s] %s: %s\n", msg.Timestamp.Format("15:04"), role, msg.Body)
 	}
 	b.WriteString("\nGenerate response suggestions for the counselor.")
 	return b.String()

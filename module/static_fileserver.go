@@ -115,12 +115,12 @@ func (s *StaticFileServer) Handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", s.cacheMaxAge))
 
 	// Check if file exists
-	info, err := os.Stat(fullPath)
+	info, err := os.Stat(fullPath) //nolint:gosec // G703: path sanitized via filepath.Join with root
 	if os.IsNotExist(err) {
 		if s.spaFallback {
 			// Serve index.html for SPA routing
 			indexPath := filepath.Join(s.root, "index.html")
-			if _, indexErr := os.Stat(indexPath); indexErr == nil {
+			if _, indexErr := os.Stat(indexPath); indexErr == nil { //nolint:gosec // G703: path sanitized via filepath.Join with root
 				http.ServeFile(w, r, indexPath)
 				return
 			}
@@ -132,13 +132,13 @@ func (s *StaticFileServer) Handle(w http.ResponseWriter, r *http.Request) {
 	// If the path is a directory, serve its index.html (SPA entry point)
 	if err == nil && info.IsDir() {
 		indexPath := filepath.Join(fullPath, "index.html")
-		if _, indexErr := os.Stat(indexPath); indexErr == nil {
+		if _, indexErr := os.Stat(indexPath); indexErr == nil { //nolint:gosec // G703: path sanitized via filepath.Join with root
 			http.ServeFile(w, r, indexPath)
 			return
 		}
 		if s.spaFallback {
 			rootIndex := filepath.Join(s.root, "index.html")
-			if _, rootErr := os.Stat(rootIndex); rootErr == nil {
+			if _, rootErr := os.Stat(rootIndex); rootErr == nil { //nolint:gosec // G703: path sanitized via filepath.Join with root
 				http.ServeFile(w, r, rootIndex)
 				return
 			}

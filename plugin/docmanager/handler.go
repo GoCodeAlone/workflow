@@ -152,7 +152,7 @@ func (h *handler) listDocs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
+		query += " WHERE " + strings.Join(conditions, " AND ") //nolint:gosec // G202: WHERE clause built from validated column names
 	}
 	query += " ORDER BY updated_at DESC"
 

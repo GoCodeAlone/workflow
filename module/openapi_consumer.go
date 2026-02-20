@@ -306,7 +306,7 @@ func (c *OpenAPIConsumer) CallOperation(ctx context.Context, operationID string,
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) //nolint:gosec // G704: URL from configured OpenAPI endpoint
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}

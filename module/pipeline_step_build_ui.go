@@ -210,7 +210,7 @@ func (s *BuildUIStep) runCmd(ctx context.Context, dir, cmdStr string) (string, e
 		return "", fmt.Errorf("empty command")
 	}
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr)
+	cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr) //nolint:gosec // G204: build command from trusted pipeline config
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), s.env...)
 

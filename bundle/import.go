@@ -21,7 +21,7 @@ const (
 // Import extracts a tar.gz bundle to the destination directory.
 // Returns the manifest, path to the extracted workflow.yaml, and any error.
 func Import(r io.Reader, destDir string) (*Manifest, string, error) {
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	if err := os.MkdirAll(destDir, 0750); err != nil {
 		return nil, "", fmt.Errorf("create dest dir: %w", err)
 	}
 
@@ -64,12 +64,12 @@ func Import(r io.Reader, destDir string) (*Manifest, string, error) {
 
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(destPath, 0755); err != nil {
+			if err := os.MkdirAll(destPath, 0750); err != nil {
 				return nil, "", fmt.Errorf("create dir %s: %w", clean, err)
 			}
 		case tar.TypeReg:
 			// Ensure parent directory exists
-			if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(destPath), 0750); err != nil {
 				return nil, "", fmt.Errorf("create parent dir for %s: %w", clean, err)
 			}
 
@@ -81,7 +81,7 @@ func Import(r io.Reader, destDir string) (*Manifest, string, error) {
 				return nil, "", fmt.Errorf("file %s exceeds max size", clean)
 			}
 
-			if err := os.WriteFile(destPath, data, 0644); err != nil {
+			if err := os.WriteFile(destPath, data, 0600); err != nil {
 				return nil, "", fmt.Errorf("write %s: %w", clean, err)
 			}
 

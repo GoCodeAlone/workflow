@@ -63,7 +63,7 @@ func (rm *RuntimeManager) SetPortAllocator(pa *PortAllocator) {
 
 // AnnounceServices logs the ports assigned to a workflow instance.
 func (rm *RuntimeManager) AnnounceServices(instance *RuntimeInstance) {
-	if instance.Ports == nil || len(instance.Ports) == 0 {
+	if len(instance.Ports) == 0 {
 		return
 	}
 	rm.logger.Info(fmt.Sprintf("Workflow %q started:", instance.Name))

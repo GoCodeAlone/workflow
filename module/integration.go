@@ -280,7 +280,7 @@ func (c *HTTPIntegrationConnector) Execute(ctx context.Context, action string, p
 	}
 
 	// Execute request
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req) //nolint:gosec // G704: URL from configured integration endpoint
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}

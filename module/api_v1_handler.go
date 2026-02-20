@@ -1080,7 +1080,7 @@ func (h *V1APIHandler) importWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Read the extracted workflow.yaml
-	yamlData, err := os.ReadFile(workflowPath)
+	yamlData, err := os.ReadFile(workflowPath) //nolint:gosec // G703: path from trusted workspace extraction
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to read extracted workflow.yaml: %v", err)})
 		return
@@ -1109,7 +1109,7 @@ func (h *V1APIHandler) importWorkflow(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// Also update workspace_dir
-			h.store.SetWorkspaceDir(updated.ID, destDir)
+			_ = h.store.SetWorkspaceDir(updated.ID, destDir)
 			updated.WorkspaceDir = destDir
 			writeJSON(w, http.StatusOK, updated)
 			return
@@ -1135,7 +1135,7 @@ func (h *V1APIHandler) importWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set workspace_dir
-	h.store.SetWorkspaceDir(wf.ID, destDir)
+	_ = h.store.SetWorkspaceDir(wf.ID, destDir)
 	wf.WorkspaceDir = destDir
 
 	writeJSON(w, http.StatusCreated, wf)

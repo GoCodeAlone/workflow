@@ -20,7 +20,7 @@ import (
 type Config struct {
 	Issuer       string   `json:"issuer" yaml:"issuer"`
 	ClientID     string   `json:"client_id" yaml:"client_id"`
-	ClientSecret string   `json:"client_secret" yaml:"client_secret"`
+	ClientSecret string   `json:"client_secret" yaml:"client_secret"` //nolint:gosec // G117: OIDC config field
 	RedirectURI  string   `json:"redirect_uri" yaml:"redirect_uri"`
 	Scopes       []string `json:"scopes" yaml:"scopes"`
 }
@@ -61,10 +61,10 @@ type Claims struct {
 
 // TokenResponse represents the response from the token endpoint.
 type TokenResponse struct {
-	AccessToken  string `json:"access_token"`
+	AccessToken  string `json:"access_token"` //nolint:gosec // G117: OIDC token response field
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int    `json:"expires_in"`
-	RefreshToken string `json:"refresh_token,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"` //nolint:gosec // G117: OIDC token response field
 	IDToken      string `json:"id_token,omitempty"`
 }
 

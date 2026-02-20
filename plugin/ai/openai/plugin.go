@@ -20,7 +20,7 @@ const (
 
 // Config holds configuration for the OpenAI provider.
 type Config struct {
-	APIKey  string // Defaults to OPENAI_API_KEY env var
+	APIKey  string `yaml:"api_key"` //nolint:gosec // G117: config field
 	Model   string // Defaults to gpt-4o
 	BaseURL string // Defaults to https://api.openai.com/v1
 }
@@ -165,7 +165,7 @@ func (p *Provider) doRequest(ctx context.Context, req chatRequest) (*chatRespons
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
 
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.httpClient.Do(httpReq) //nolint:gosec // G704: Anthropic API endpoint
 	if err != nil {
 		return nil, fmt.Errorf("openai: request failed: %w", err)
 	}

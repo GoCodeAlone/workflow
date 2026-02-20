@@ -252,10 +252,7 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 			return err
 		}
 		return app.registerPostStartServices(logger)
-	})
-
-	// Import bundles from --import-bundle flag (runs after stores are ready).
-	app.postStartFuncs = append(app.postStartFuncs, func() error {
+	}, func() error {
 		return app.importBundles(logger)
 	})
 
@@ -453,6 +450,26 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	app.v1Handler = v1Handler
 
 	// -----------------------------------------------------------------------
+	// Feature Flag service — wire into the V1 API handler so the admin UI
+	// can manage flags via /api/v1/admin/feature-flags.
+	// -----------------------------------------------------------------------
+
+	ffDBPath := filepath.Join(*dataDir, "featureflags.db")
+	ffMod, ffErr := module.NewFeatureFlagModule("admin-feature-flags", module.FeatureFlagModuleConfig{
+		Provider:   "generic",
+		CacheTTL:   "30s",
+		SSEEnabled: true,
+		DBPath:     ffDBPath,
+	})
+	if ffErr != nil {
+		logger.Warn("Failed to create feature flag module — feature flags disabled", "error", ffErr)
+	} else {
+		ffAdapter := module.NewFeatureFlagAdminAdapter(ffMod.Service(), ffMod.Store())
+		v1Handler.SetFeatureFlagService(ffAdapter)
+		logger.Info("Wired feature flag service to V1 API handler", "db", ffDBPath)
+	}
+
+	// -----------------------------------------------------------------------
 	// Event store, idempotency store
 	// -----------------------------------------------------------------------
 
@@ -590,6 +607,11 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 		if err := pluginMgr.Register(p); err != nil {
 			logger.Warn("Failed to register cloud provider plugin", "plugin", p.Name(), "error", err)
 		}
+	}
+
+	// Feature flags plugin — register with PluginManager for Marketplace discovery
+	if err := pluginMgr.Register(pluginff.New()); err != nil {
+		logger.Warn("Failed to register feature-flags plugin", "error", err)
 	}
 
 	// Enable all registered plugins so their routes are active
@@ -890,7 +912,7 @@ func (app *serverApp) importBundles(logger *slog.Logger) error {
 		}
 
 		// Read the extracted workflow.yaml
-		yamlData, err := os.ReadFile(workflowPath)
+		yamlData, err := os.ReadFile(workflowPath) //nolint:gosec // G703: path from trusted bundle extraction
 		if err != nil {
 			logger.Error("Failed to read workflow.yaml", "path", workflowPath, "error", err)
 			continue
@@ -1013,10 +1035,10 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 
 	// Clean up temp files and directories
 	for _, f := range app.cleanupFiles {
-		os.Remove(f)
+		os.Remove(f) //nolint:gosec // G703: cleaning up server-managed temp files
 	}
 	for _, d := range app.cleanupDirs {
-		os.RemoveAll(d)
+		os.RemoveAll(d) //nolint:gosec // G703: cleaning up server-managed temp dirs
 	}
 
 	return nil
@@ -1036,7 +1058,7 @@ func envOrFlag(envKey string, flagVal *string) string {
 // applyEnvOverrides sets flag values from environment variables when the
 // corresponding flag was not explicitly provided on the command line.
 func applyEnvOverrides() {
-	envMap := map[string]string{
+	envMap := map[string]string{ //nolint:gosec // G101: env var name mapping, not credentials
 		"config":          "WORKFLOW_CONFIG",
 		"addr":            "WORKFLOW_ADDR",
 		"anthropic-key":   "WORKFLOW_AI_API_KEY",

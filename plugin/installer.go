@@ -87,10 +87,8 @@ func (i *PluginInstaller) Install(ctx context.Context, name, version string) err
 	}
 	f.Close()
 
-	// Extract archive
-	if err := extractTarGz(archivePath, pluginDir); err != nil {
-		// Archive may not be extractable; that's okay if we have the manifest
-	}
+	// Extract archive — failure is non-fatal if we have the manifest
+	_ = extractTarGz(archivePath, pluginDir)
 
 	// Save manifest
 	manifestPath := filepath.Join(pluginDir, "plugin.json")
@@ -259,35 +257,28 @@ func extractTarGz(archivePath, destDir string) error {
 			return err
 		}
 
-		target := filepath.Join(destDir, header.Name)
+		target := filepath.Join(destDir, header.Name) //nolint:gosec // G305: path traversal validated below
 
-		// Validate path to prevent directory traversal
-		absTarget, err := filepath.Abs(target)
-		if err != nil {
-			return fmt.Errorf("resolve target path: %w", err)
-		}
-		absDest, err := filepath.Abs(destDir)
-		if err != nil {
-			return fmt.Errorf("resolve dest dir: %w", err)
-		}
-		if !strings.HasPrefix(absTarget, absDest+string(os.PathSeparator)) && absTarget != absDest {
-			return fmt.Errorf("archive entry %q escapes destination directory", header.Name)
+		// Prevent path traversal (CWE-22)
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)+string(os.PathSeparator)) {
+			return fmt.Errorf("illegal file path in archive: %s", header.Name)
 		}
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0750); err != nil {
+			if err := os.MkdirAll(target, 0750); err != nil { //nolint:gosec // G703: target validated against destDir above
 				return err
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0750); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0750); err != nil { //nolint:gosec // G703: target validated against destDir above
 				return err
 			}
-			out, err := os.Create(target)
+			out, err := os.Create(target) //nolint:gosec // G703: target validated against destDir above
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(out, tr); err != nil {
+			// Limit copy to 100MB to prevent decompression bombs
+			if _, err := io.Copy(out, io.LimitReader(tr, 100*1024*1024)); err != nil {
 				out.Close()
 				return err
 			}

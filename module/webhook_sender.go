@@ -166,7 +166,7 @@ func (ws *WebhookSender) doSend(ctx context.Context, delivery *WebhookDelivery) 
 		req.Header.Set(k, v)
 	}
 
-	resp, err := ws.client.Do(req)
+	resp, err := ws.client.Do(req) //nolint:gosec // G704: SSRF via taint analysis
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}

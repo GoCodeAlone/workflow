@@ -21,17 +21,17 @@ func NewDocGenerator() *DocGenerator {
 func (g *DocGenerator) GeneratePluginDoc(manifest *plugin.PluginManifest) string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("# %s\n\n", manifest.Name))
-	b.WriteString(fmt.Sprintf("**Version:** %s  \n", manifest.Version))
-	b.WriteString(fmt.Sprintf("**Author:** %s  \n", manifest.Author))
+	fmt.Fprintf(&b, "# %s\n\n", manifest.Name)
+	fmt.Fprintf(&b, "**Version:** %s  \n", manifest.Version)
+	fmt.Fprintf(&b, "**Author:** %s  \n", manifest.Author)
 	if manifest.License != "" {
-		b.WriteString(fmt.Sprintf("**License:** %s  \n", manifest.License))
+		fmt.Fprintf(&b, "**License:** %s  \n", manifest.License)
 	}
 	if manifest.Repository != "" {
-		b.WriteString(fmt.Sprintf("**Repository:** %s  \n", manifest.Repository))
+		fmt.Fprintf(&b, "**Repository:** %s  \n", manifest.Repository)
 	}
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("%s\n\n", manifest.Description))
+	fmt.Fprintf(&b, "%s\n\n", manifest.Description)
 
 	if len(manifest.Tags) > 0 {
 		b.WriteString("**Tags:** ")
@@ -44,7 +44,7 @@ func (g *DocGenerator) GeneratePluginDoc(manifest *plugin.PluginManifest) string
 		b.WriteString("| Plugin | Constraint |\n")
 		b.WriteString("|--------|------------|\n")
 		for _, dep := range manifest.Dependencies {
-			b.WriteString(fmt.Sprintf("| %s | %s |\n", dep.Name, dep.Constraint))
+			fmt.Fprintf(&b, "| %s | %s |\n", dep.Name, dep.Constraint)
 		}
 		b.WriteString("\n")
 	}
@@ -102,7 +102,7 @@ func fieldSpecTable(specs map[string]dynamic.FieldSpec) string {
 		if spec.Default != nil {
 			def = fmt.Sprintf("%v", spec.Default)
 		}
-		b.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", name, spec.Type, spec.Description, def))
+		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", name, spec.Type, spec.Description, def)
 	}
 	return b.String()
 }

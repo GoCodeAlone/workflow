@@ -210,7 +210,7 @@ func (r *Reporter) sendBatch(ctx context.Context, path string, data any) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := r.client.Do(req)
+	resp, err := r.client.Do(req) //nolint:gosec // G704: URL from configured admin endpoint
 	if err != nil {
 		r.logger.Debug("Failed to send batch to admin", "url", url, "error", err)
 		return
@@ -236,7 +236,7 @@ func (r *Reporter) register(ctx context.Context) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := r.client.Do(req)
+	resp, err := r.client.Do(req) //nolint:gosec // G704: URL from configured admin endpoint
 	if err != nil {
 		r.logger.Debug("Failed to register with admin", "url", url, "error", err)
 		return
@@ -266,7 +266,7 @@ func (r *Reporter) heartbeat(ctx context.Context) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := r.client.Do(req)
+	resp, err := r.client.Do(req) //nolint:gosec // G704: URL from configured admin endpoint
 	if err != nil {
 		return
 	}

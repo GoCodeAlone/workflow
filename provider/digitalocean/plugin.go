@@ -12,7 +12,7 @@ import (
 
 // DOConfig holds configuration for the DigitalOcean cloud provider.
 type DOConfig struct {
-	APIToken string `json:"api_token" yaml:"api_token"`
+	APIToken string `json:"api_token" yaml:"api_token"` //nolint:gosec // G117: DigitalOcean config field
 	Region   string `json:"region" yaml:"region"`
 }
 

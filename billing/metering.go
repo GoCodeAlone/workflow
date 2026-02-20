@@ -209,7 +209,7 @@ func (m *SQLiteMeter) GetUsage(ctx context.Context, tenantID string, period time
 		Period:   time.Date(period.Year(), period.Month(), 1, 0, 0, 0, 0, time.UTC),
 	}
 
-	row := m.db.QueryRowContext(ctx,
+	row := m.db.QueryRowContext(ctx, //nolint:gosec // G701: parameterized query, no injection risk
 		`SELECT COUNT(*), COUNT(DISTINCT pipeline_name) FROM billing_executions WHERE tenant_id = ? AND period = ?`,
 		tenantID, pk,
 	)

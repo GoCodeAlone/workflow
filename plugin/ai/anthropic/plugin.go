@@ -22,7 +22,7 @@ const (
 
 // Config holds configuration for the Anthropic provider.
 type Config struct {
-	APIKey  string // Defaults to ANTHROPIC_API_KEY env var
+	APIKey  string `yaml:"api_key"` //nolint:gosec // G117: config field
 	Model   string // Defaults to claude-sonnet-4-20250514
 	BaseURL string // Defaults to https://api.anthropic.com
 }
@@ -165,7 +165,7 @@ func (p *Provider) doRequest(ctx context.Context, req apiRequest) (*apiResponse,
 	httpReq.Header.Set("x-api-key", p.apiKey)
 	httpReq.Header.Set("anthropic-version", apiVersion)
 
-	resp, err := p.httpClient.Do(httpReq)
+	resp, err := p.httpClient.Do(httpReq) //nolint:gosec // G704: Anthropic API endpoint
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: request failed: %w", err)
 	}

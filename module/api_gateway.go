@@ -269,7 +269,7 @@ func (g *APIGateway) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Proxy to backend
-	proxy.ServeHTTP(w, r)
+	proxy.ServeHTTP(w, r) //nolint:gosec // G704: reverse proxy to configured backend
 }
 
 // matchRoute finds the first route matching the request path.

@@ -365,7 +365,7 @@ func (p *PersistenceStore) LoadResource(resourceType, id string) (map[string]any
 		resourceType, id,
 	).Scan(&dataJSON)
 	if err != nil {
-		return nil, nil // not found or error — treat as absent
+		return nil, nil //nolint:nilerr // treat lookup errors as absent
 	}
 
 	var data map[string]any

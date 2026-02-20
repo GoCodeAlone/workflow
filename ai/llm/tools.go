@@ -136,7 +136,7 @@ func handleGetComponentSchema(input json.RawMessage) (string, error) {
 		"api.handler": map[string]any{
 			"resourceName": "string - REST resource name",
 		},
-		"http.middleware.auth": map[string]any{
+		"http.middleware.auth": map[string]any{ //nolint:gosec // G101: schema documentation, not actual credentials
 			"secretKey": "string - JWT secret key",
 			"authType":  "string - auth type (default: 'Bearer')",
 		},

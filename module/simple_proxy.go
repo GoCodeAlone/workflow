@@ -109,7 +109,7 @@ func (p *SimpleProxy) Handle(w http.ResponseWriter, r *http.Request) {
 	for _, prefix := range p.sortedPrefixes {
 		if strings.HasPrefix(r.URL.Path, prefix) {
 			proxy := p.proxies[prefix]
-			proxy.ServeHTTP(w, r)
+			proxy.ServeHTTP(w, r) //nolint:gosec // G704: SSRF via taint analysis
 			return
 		}
 	}

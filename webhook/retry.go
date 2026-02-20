@@ -192,7 +192,7 @@ func (rm *RetryManager) doSend(ctx context.Context, d *Delivery) error {
 		req.Header.Set(k, v)
 	}
 
-	resp, err := rm.client.Do(req)
+	resp, err := rm.client.Do(req) //nolint:gosec // G704: URL from configured webhook endpoint
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}

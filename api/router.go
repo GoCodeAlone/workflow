@@ -10,7 +10,7 @@ import (
 
 // Config holds configuration for the API layer.
 type Config struct {
-	JWTSecret  string
+	JWTSecret  string //nolint:gosec // G117: config field
 	JWTIssuer  string
 	AccessTTL  time.Duration
 	RefreshTTL time.Duration

@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -212,7 +213,7 @@ func TestInstall_NoRemoteRegistry(t *testing.T) {
 	installDir := t.TempDir()
 	installer := NewPluginInstaller(nil, nil, nil, installDir)
 
-	err := installer.Install(nil, "some-plugin", "1.0.0")
+	err := installer.Install(context.Background(), "some-plugin", "1.0.0")
 	if err == nil {
 		t.Fatal("expected error when no remote registry configured")
 	}
@@ -234,7 +235,7 @@ func TestInstall_AlreadyInstalled(t *testing.T) {
 	writeTestManifest(t, pluginDir, manifest)
 
 	// Should return nil (no-op) for already installed plugin
-	err := installer.Install(nil, "test-plugin", "1.0.0")
+	err := installer.Install(context.Background(), "test-plugin", "1.0.0")
 	if err != nil {
 		t.Fatalf("expected nil for already installed plugin, got: %v", err)
 	}

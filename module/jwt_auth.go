@@ -180,7 +180,7 @@ func (j *JWTAuthModule) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email    string `json:"email"`
 		Name     string `json:"name"`
-		Password string `json:"password"`
+		Password string `json:"password"` //nolint:gosec // G117: request DTO field
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -283,7 +283,7 @@ func (j *JWTAuthModule) handleRegister(w http.ResponseWriter, r *http.Request) {
 func (j *JWTAuthModule) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email    string `json:"email"`
-		Password string `json:"password"`
+		Password string `json:"password"` //nolint:gosec // G117: request DTO field
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -475,7 +475,7 @@ func (j *JWTAuthModule) generateRefreshToken(user *User) (string, error) {
 // handleRefresh exchanges a refresh token for a new access/refresh token pair.
 func (j *JWTAuthModule) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		RefreshToken string `json:"refresh_token"`
+		RefreshToken string `json:"refresh_token"` //nolint:gosec // G117: request DTO field
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -577,7 +577,7 @@ func (j *JWTAuthModule) handleSetup(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email    string `json:"email"`
 		Name     string `json:"name"`
-		Password string `json:"password"`
+		Password string `json:"password"` //nolint:gosec // G117: request DTO field
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -724,7 +724,7 @@ func (j *JWTAuthModule) handleCreateUser(w http.ResponseWriter, r *http.Request)
 	var req struct {
 		Email    string `json:"email"`
 		Name     string `json:"name"`
-		Password string `json:"password"`
+		Password string `json:"password"` //nolint:gosec // G117: request DTO field
 		Role     string `json:"role"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
