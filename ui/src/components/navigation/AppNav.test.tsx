@@ -47,13 +47,14 @@ describe('AppNav', () => {
     resetStores();
   });
 
-  it('renders global and plugin navigation items from enabledPages', () => {
+  it('renders global navigation items from enabledPages', () => {
     render(<AppNav />);
 
-    // Fallback pages have 6 global + 2 plugin = 8 buttons visible
-    // (workflow pages are hidden when no workflow is open)
+    // Fallback pages have 6 global pages visible
+    // (workflow pages are hidden when no workflow is open;
+    //  plugin pages like store-browser come from the plugin system, not FALLBACK_PAGES)
     const buttons = screen.getAllByRole('button');
-    expect(buttons.length).toBeGreaterThanOrEqual(8);
+    expect(buttons.length).toBeGreaterThanOrEqual(6);
   });
 
   it('renders correct titles on buttons from plugin-derived pages', () => {
@@ -67,9 +68,10 @@ describe('AppNav', () => {
     expect(screen.getByTitle('Environments')).toBeInTheDocument();
     expect(screen.getByTitle('Settings')).toBeInTheDocument();
 
-    // Plugin pages from FALLBACK_PAGES
-    expect(screen.getByTitle('Store Browser')).toBeInTheDocument();
-    expect(screen.getByTitle('Documentation')).toBeInTheDocument();
+    // Store Browser and Documentation come from the plugin system (not FALLBACK_PAGES),
+    // so they only appear when plugins are loaded with those pages registered.
+    expect(screen.queryByTitle('Store Browser')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Documentation')).not.toBeInTheDocument();
   });
 
   it('changes view when clicking a navigation item', () => {

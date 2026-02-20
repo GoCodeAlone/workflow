@@ -148,3 +148,24 @@ func (p *HTTPPlugin) ModuleSchemas() []*schema.ModuleSchema {
 func (p *HTTPPlugin) WiringHooks() []plugin.WiringHook {
 	return wiringHooks()
 }
+
+// PipelineTriggerConfigWrappers returns config wrappers that convert flat
+// pipeline trigger config into the HTTP trigger's native format.
+func (p *HTTPPlugin) PipelineTriggerConfigWrappers() map[string]plugin.TriggerConfigWrapperFunc {
+	return map[string]plugin.TriggerConfigWrapperFunc{
+		"http": func(pipelineName string, cfg map[string]any) map[string]any {
+			route := map[string]any{
+				"workflow": "pipeline:" + pipelineName,
+			}
+			if path, ok := cfg["path"]; ok {
+				route["path"] = path
+			}
+			if method, ok := cfg["method"]; ok {
+				route["method"] = method
+			}
+			return map[string]any{
+				"routes": []any{route},
+			}
+		},
+	}
+}

@@ -34,8 +34,8 @@ import (
 	"github.com/GoCodeAlone/workflow/observability/tracing"
 	"github.com/GoCodeAlone/workflow/plugin"
 	pluginexternal "github.com/GoCodeAlone/workflow/plugin/external"
-	"github.com/GoCodeAlone/workflow/plugin/docmanager"
-	"github.com/GoCodeAlone/workflow/plugin/storebrowser"
+	_ "github.com/GoCodeAlone/workflow/plugin/docmanager"
+	_ "github.com/GoCodeAlone/workflow/plugin/storebrowser"
 	pluginai "github.com/GoCodeAlone/workflow/plugins/ai"
 	pluginapi "github.com/GoCodeAlone/workflow/plugins/api"
 	pluginauth "github.com/GoCodeAlone/workflow/plugins/auth"
@@ -47,14 +47,16 @@ import (
 	pluginmodcompat "github.com/GoCodeAlone/workflow/plugins/modularcompat"
 	pluginobs "github.com/GoCodeAlone/workflow/plugins/observability"
 	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
+	pluginplatform "github.com/GoCodeAlone/workflow/plugins/platform"
 	pluginscheduler "github.com/GoCodeAlone/workflow/plugins/scheduler"
 	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
 	pluginsm "github.com/GoCodeAlone/workflow/plugins/statemachine"
 	pluginstorage "github.com/GoCodeAlone/workflow/plugins/storage"
-	"github.com/GoCodeAlone/workflow/provider/aws"
-	"github.com/GoCodeAlone/workflow/provider/azure"
-	"github.com/GoCodeAlone/workflow/provider/digitalocean"
-	"github.com/GoCodeAlone/workflow/provider/gcp"
+	"github.com/GoCodeAlone/workflow/provider"
+	_ "github.com/GoCodeAlone/workflow/provider/aws"
+	_ "github.com/GoCodeAlone/workflow/provider/azure"
+	_ "github.com/GoCodeAlone/workflow/provider/digitalocean"
+	_ "github.com/GoCodeAlone/workflow/provider/gcp"
 	"github.com/GoCodeAlone/workflow/schema"
 	evstore "github.com/GoCodeAlone/workflow/store"
 	"github.com/google/uuid"
@@ -89,6 +91,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 
 	// Load all engine plugins — each registers its module factories, step factories,
 	// trigger factories, and workflow handlers via engine.LoadPlugin.
+	pipelinePlugin := pluginpipeline.New()
 	plugins := []plugin.EnginePlugin{
 		pluginhttp.New(),
 		pluginobs.New(),
@@ -97,7 +100,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 		pluginauth.New(),
 		pluginstorage.New(),
 		pluginapi.New(),
-		pluginpipeline.New(),
+		pipelinePlugin,
 		plugincicd.New(),
 		pluginff.New(),
 		pluginsecrets.New(),
@@ -105,6 +108,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 		pluginscheduler.New(),
 		pluginintegration.New(),
 		pluginai.New(),
+		pluginplatform.New(),
 	}
 	for _, p := range plugins {
 		if err := engine.LoadPlugin(p); err != nil {
@@ -137,18 +141,14 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 		}
 	}
 
-	// Register handlers and steps not covered by plugins
-	engine.RegisterWorkflowHandler(handlers.NewPlatformWorkflowHandler())
-
-	pipelineHandler := handlers.NewPipelineWorkflowHandler()
-	pipelineHandler.SetStepRegistry(engine.GetStepRegistry())
-	pipelineHandler.SetLogger(logger)
-	engine.RegisterWorkflowHandler(pipelineHandler)
-
-	engine.AddStepType("step.platform_template", module.NewPlatformTemplateStepFactory())
-
-	// Register reconciliation trigger (not provided by any plugin)
-	engine.RegisterTrigger(module.NewReconciliationTrigger())
+	// Wire the PipelineWorkflowHandler (provided by the pipeline plugin) with
+	// the engine's StepRegistry and logger. The handler was already registered
+	// by LoadPlugin; we just need to inject its dependencies.
+	pipelineHandler := pipelinePlugin.PipelineHandler()
+	if pipelineHandler != nil {
+		pipelineHandler.SetStepRegistry(engine.GetStepRegistry())
+		pipelineHandler.SetLogger(logger)
+	}
 
 	// Set up dynamic component system
 	pool := dynamic.NewInterpreterPool()
@@ -598,47 +598,58 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	}
 	pluginMgr := plugin.NewPluginManager(pluginDB, logger)
 
-	// Store Browser plugin — needs the V1Store's DB, event store, and DLQ store
-	if store != nil {
-		sbPlugin := storebrowser.New(store.DB(), eventStore, dlqStore)
-		if err := pluginMgr.Register(sbPlugin); err != nil {
-			logger.Warn("Failed to register store-browser plugin", "error", err)
+	// Auto-register all loaded EnginePlugins that have UIPages as NativePlugins.
+	// This eliminates the need for duplicate per-plugin registration.
+	for _, ep := range engine.LoadedPlugins() {
+		if pages := ep.UIPages(); len(pages) > 0 {
+			if err := pluginMgr.Register(ep); err != nil {
+				logger.Debug("EnginePlugin not registered as NativePlugin (may already exist)", "plugin", ep.Name(), "error", err)
+			}
 		}
 	}
 
-	// Doc Manager plugin — needs the V1Store's DB for the workflow_docs table
-	if store != nil {
-		dmPlugin := docmanager.New(store.DB())
-		if err := pluginMgr.Register(dmPlugin); err != nil {
-			logger.Warn("Failed to register doc-manager plugin", "error", err)
+	// Register NativePlugins contributed via the NativePluginProvider interface.
+	// This allows EnginePlugins to contribute dependency-requiring NativePlugins
+	// (e.g., store-browser needs DB, doc-manager needs DB).
+	nativeCtx := plugin.PluginContext{
+		DB:     pluginDB,
+		Logger: logger,
+	}
+	for _, ep := range engine.LoadedPlugins() {
+		if npp, ok := ep.(plugin.NativePluginProvider); ok {
+			for _, np := range npp.NativePlugins(nativeCtx) {
+				if err := pluginMgr.Register(np); err != nil {
+					logger.Debug("NativePlugin from provider not registered", "plugin", np.Name(), "error", err)
+				}
+			}
 		}
 	}
 
-	// Cloud provider plugins
-	awsProvider := aws.NewAWSProvider(aws.AWSConfig{})
-	gcpProvider := gcp.NewGCPProvider(gcp.GCPConfig{})
-	azureProvider := azure.NewAzureProvider(azure.AzureConfig{})
-	doProvider := digitalocean.NewDOProvider(digitalocean.DOConfig{})
+	// Register standalone NativePlugins from the plugin registry.
+	// These are non-EnginePlugin NativePlugins (store-browser, doc-manager,
+	// cloud providers) that contribute UI pages and HTTP routes.
+	builtinDeps := map[string]any{
+		"eventStore": eventStore,
+		"dlqStore":   dlqStore,
+	}
+	for _, np := range plugin.BuiltinNativePlugins(pluginDB, builtinDeps) {
+		if err := pluginMgr.Register(np); err != nil {
+			logger.Debug("Builtin NativePlugin not registered", "plugin", np.Name(), "error", err)
+		}
+	}
 
-	// Deploy executor with strategy registry
+	// Deploy executor with strategy registry — discover cloud providers from
+	// the PluginManager rather than constructing them explicitly.
 	strategyReg := deploy.NewStrategyRegistry(logger)
 	deployExecutor := deploy.NewExecutor(strategyReg)
-	deployExecutor.RegisterProvider("aws", awsProvider)
-	deployExecutor.RegisterProvider("gcp", gcpProvider)
-	deployExecutor.RegisterProvider("azure", azureProvider)
-	deployExecutor.RegisterProvider("digitalocean", doProvider)
-
-	// Register cloud provider plugins with PluginManager
-	for _, p := range []plugin.NativePlugin{awsProvider, gcpProvider, azureProvider, doProvider} {
-		if err := pluginMgr.Register(p); err != nil {
-			logger.Warn("Failed to register cloud provider plugin", "plugin", p.Name(), "error", err)
+	cloudMux := http.NewServeMux()
+	for _, np := range pluginMgr.EnabledPlugins() {
+		if cp, ok := np.(provider.CloudProvider); ok {
+			deployExecutor.RegisterProvider(cp.Name(), cp)
+			cp.RegisterRoutes(cloudMux)
 		}
 	}
-
-	// Feature flags plugin — register with PluginManager for Marketplace discovery
-	if err := pluginMgr.Register(pluginff.New()); err != nil {
-		logger.Warn("Failed to register feature-flags plugin", "error", err)
-	}
+	app.cloudMux = cloudMux
 
 	// Enable all registered plugins so their routes are active
 	allPlugins := pluginMgr.AllPlugins()
@@ -650,19 +661,20 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 		}
 	}
 
+	// Re-discover cloud providers now that all are enabled
+	cloudMux = http.NewServeMux()
+	for _, np := range pluginMgr.EnabledPlugins() {
+		if cp, ok := np.(provider.CloudProvider); ok {
+			deployExecutor.RegisterProvider(cp.Name(), cp)
+			cp.RegisterRoutes(cloudMux)
+		}
+	}
+	app.cloudMux = cloudMux
+
 	// Plugin discovery + route handler (backed by PluginManager)
 	nativeHandler := plugin.NewNativeHandler(pluginMgr)
 	app.nativeHandler = nativeHandler
 
-	// Register provider routes on the cloud mux
-	cloudMux := http.NewServeMux()
-	awsProvider.RegisterRoutes(cloudMux)
-	gcpProvider.RegisterRoutes(cloudMux)
-	azureProvider.RegisterRoutes(cloudMux)
-	doProvider.RegisterRoutes(cloudMux)
-	app.cloudMux = cloudMux
-
-	logger.Info("Registered cloud providers", "providers", []string{"aws", "gcp", "azure", "digitalocean"})
 	logger.Info("Registered native plugins", "count", len(pluginMgr.AllPlugins()))
 
 	// -----------------------------------------------------------------------

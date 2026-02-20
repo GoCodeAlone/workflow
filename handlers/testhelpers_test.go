@@ -16,22 +16,20 @@ import (
 	pluginff "github.com/GoCodeAlone/workflow/plugins/featureflags"
 	pluginmodcompat "github.com/GoCodeAlone/workflow/plugins/modularcompat"
 	pluginobs "github.com/GoCodeAlone/workflow/plugins/observability"
-	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
 	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
 	pluginstorage "github.com/GoCodeAlone/workflow/plugins/storage"
 )
 
-// safePlugins returns the 10 engine plugins that do NOT import the handlers
-// package, avoiding an import cycle. The remaining 5 plugins (http, messaging,
-// statemachine, scheduler, integration) import handlers so their factories
-// are registered manually in registerCyclicPluginFactories.
+// safePlugins returns the 9 engine plugins that do NOT import the handlers
+// package, avoiding an import cycle. The remaining 6 plugins (http, messaging,
+// statemachine, scheduler, integration, pipelinesteps) import handlers so their
+// factories are registered manually in registerCyclicPluginFactories.
 func safePlugins() []plugin.EnginePlugin {
 	return []plugin.EnginePlugin{
 		pluginobs.New(),
 		pluginauth.New(),
 		pluginstorage.New(),
 		pluginapi.New(),
-		pluginpipeline.New(),
 		plugincicd.New(),
 		pluginff.New(),
 		pluginsecrets.New(),
@@ -266,13 +264,29 @@ func registerCyclicPluginFactories(engine *workflow.StdEngine) {
 	// plugins/scheduler — no module factories (only workflow handler + trigger)
 	// plugins/integration — no module factories (only workflow handler)
 
+	// From plugins/pipelinesteps — step factories (pipelinesteps imports handlers,
+	// so we register its step types here instead of calling LoadPlugin on it).
+	engine.AddStepType("step.validate", module.NewValidateStepFactory())
+	engine.AddStepType("step.transform", module.NewTransformStepFactory())
+	engine.AddStepType("step.conditional", module.NewConditionalStepFactory())
+	engine.AddStepType("step.set", module.NewSetStepFactory())
+	engine.AddStepType("step.log", module.NewLogStepFactory())
+	engine.AddStepType("step.delegate", module.NewDelegateStepFactory())
+	engine.AddStepType("step.jq", module.NewJQStepFactory())
+	engine.AddStepType("step.publish", module.NewPublishStepFactory())
+	engine.AddStepType("step.http_call", module.NewHTTPCallStepFactory())
+	engine.AddStepType("step.request_parse", module.NewRequestParseStepFactory())
+	engine.AddStepType("step.db_query", module.NewDBQueryStepFactory())
+	engine.AddStepType("step.db_exec", module.NewDBExecStepFactory())
+	engine.AddStepType("step.json_response", module.NewJSONResponseStepFactory())
+
 	// Workflow handlers from the cyclic plugins are registered directly by
 	// individual tests via engine.RegisterWorkflowHandler(), so we don't
 	// duplicate them here.
 }
 
-// loadAllPlugins loads the 10 safe plugins and manually registers module
-// factories from the 5 cyclic plugins to provide all module types for
+// loadAllPlugins loads the 9 safe plugins and manually registers module/step
+// factories from the 6 cyclic plugins to provide all module types for
 // BuildFromConfig without causing import cycles.
 func loadAllPlugins(t *testing.T, engine *workflow.StdEngine) {
 	t.Helper()

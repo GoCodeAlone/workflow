@@ -2,6 +2,7 @@ package digitalocean
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"time"
@@ -9,6 +10,12 @@ import (
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/provider"
 )
+
+func init() {
+	plugin.RegisterNativePluginFactory(func(_ *sql.DB, _ map[string]any) plugin.NativePlugin {
+		return NewDOProvider(DOConfig{})
+	})
+}
 
 // DOConfig holds configuration for the DigitalOcean cloud provider.
 type DOConfig struct {

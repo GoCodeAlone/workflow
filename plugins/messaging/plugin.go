@@ -141,6 +141,27 @@ func (p *Plugin) WorkflowHandlers() map[string]plugin.WorkflowHandlerFactory {
 	}
 }
 
+// PipelineTriggerConfigWrappers returns config wrappers that convert flat
+// pipeline trigger config into the messaging trigger's native format.
+func (p *Plugin) PipelineTriggerConfigWrappers() map[string]plugin.TriggerConfigWrapperFunc {
+	return map[string]plugin.TriggerConfigWrapperFunc{
+		"event": func(pipelineName string, cfg map[string]any) map[string]any {
+			sub := map[string]any{
+				"workflow": "pipeline:" + pipelineName,
+			}
+			if t, ok := cfg["topic"]; ok {
+				sub["topic"] = t
+			}
+			if ev, ok := cfg["event"]; ok {
+				sub["event"] = ev
+			}
+			return map[string]any{
+				"subscriptions": []any{sub},
+			}
+		},
+	}
+}
+
 // ModuleSchemas returns UI schema definitions for this plugin's module types.
 func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 	return []*schema.ModuleSchema{

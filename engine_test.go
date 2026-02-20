@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"slices"
 	"strings"
@@ -734,6 +735,13 @@ func TestEngine_BuildFromConfig_ModularModules(t *testing.T) {
 }
 
 func TestCanHandleTrigger(t *testing.T) {
+	// Create an engine with a populated trigger type map (simulating plugin loading)
+	app := modular.NewStdApplication(nil, nil)
+	engine := NewStdEngine(app, slog.Default())
+	engine.RegisterTriggerType("http", "trigger.http")
+	engine.RegisterTriggerType("schedule", "trigger.schedule")
+	engine.RegisterTriggerType("event", "trigger.event")
+
 	tests := []struct {
 		triggerName string
 		triggerType string
@@ -742,15 +750,15 @@ func TestCanHandleTrigger(t *testing.T) {
 		{"trigger.http", "http", true},
 		{"trigger.schedule", "schedule", true},
 		{"trigger.event", "event", true},
-		{"mock.trigger", "mock", true},
-		{"any.trigger", "unknown", false},
-		{"trigger.http", "schedule", false},
+		{"mock.trigger", "mock", true},     // fallback: "trigger.mock" convention doesn't match, but "mock.trigger" = type+".trigger"
+		{"any.trigger", "unknown", false},   // no match in registry or convention
+		{"trigger.http", "schedule", false}, // registry says schedule → trigger.schedule, not trigger.http
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.triggerName+"_"+tt.triggerType, func(t *testing.T) {
 			trigger := &mockTrigger{name: tt.triggerName}
-			result := canHandleTrigger(trigger, tt.triggerType)
+			result := engine.canHandleTrigger(trigger, tt.triggerType)
 			if result != tt.expected {
 				t.Errorf("canHandleTrigger(%q, %q) = %v, want %v", tt.triggerName, tt.triggerType, result, tt.expected)
 			}
@@ -1231,8 +1239,12 @@ func TestEngine_TriggerWorkflow_WithMetricsCollector(t *testing.T) {
 }
 
 func TestCanHandleTrigger_EventBus(t *testing.T) {
+	app := modular.NewStdApplication(nil, nil)
+	engine := NewStdEngine(app, slog.Default())
+	engine.RegisterTriggerType("eventbus", module.EventBusTriggerName)
+
 	trigger := &mockTrigger{name: module.EventBusTriggerName}
-	result := canHandleTrigger(trigger, "eventbus")
+	result := engine.canHandleTrigger(trigger, "eventbus")
 	if !result {
 		t.Errorf("canHandleTrigger(%q, %q) = false, want true", module.EventBusTriggerName, "eventbus")
 	}

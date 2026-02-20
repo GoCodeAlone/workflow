@@ -8,6 +8,23 @@ import (
 	"github.com/GoCodeAlone/workflow/store"
 )
 
+func init() {
+	plugin.RegisterNativePluginFactory(func(db *sql.DB, deps map[string]any) plugin.NativePlugin {
+		if db == nil {
+			return nil
+		}
+		var eventStore store.EventStore
+		if es, ok := deps["eventStore"].(store.EventStore); ok {
+			eventStore = es
+		}
+		var dlqStore store.DLQStore
+		if ds, ok := deps["dlqStore"].(store.DLQStore); ok {
+			dlqStore = ds
+		}
+		return New(db, eventStore, dlqStore)
+	})
+}
+
 // Compile-time interface check.
 var _ plugin.NativePlugin = (*Plugin)(nil)
 

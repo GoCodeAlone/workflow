@@ -73,6 +73,27 @@ type WiringHook struct {
 	Hook     func(app modular.Application, cfg *config.WorkflowConfig) error
 }
 
+// TriggerConfigWrapperFunc converts flat pipeline trigger config into the
+// trigger's native configuration format (e.g., wrapping {path, method} into
+// {routes: [{...}]} for HTTP triggers).
+type TriggerConfigWrapperFunc func(pipelineName string, flatConfig map[string]any) map[string]any
+
+// PipelineTriggerConfigProvider is optionally implemented by EnginePlugins that
+// register triggers. It provides config wrapper functions that convert flat
+// pipeline trigger config (e.g., {path, method}) into the trigger's native
+// configuration format (e.g., {routes: [{...}]}).
+type PipelineTriggerConfigProvider interface {
+	PipelineTriggerConfigWrappers() map[string]TriggerConfigWrapperFunc
+}
+
+// NativePluginProvider is optionally implemented by EnginePlugins that also
+// contribute NativePlugins (e.g., for Marketplace visibility, UI pages, or
+// HTTP route handlers). The PluginContext provides shared resources (DB, logger).
+type NativePluginProvider interface {
+	NativePlugins(ctx PluginContext) []NativePlugin
+}
+
+
 // BaseNativePlugin provides no-op defaults for all NativePlugin methods.
 // Embed this in concrete implementations to only override what you need.
 type BaseNativePlugin struct {

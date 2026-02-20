@@ -65,3 +65,21 @@ func (p *Plugin) TriggerFactories() map[string]plugin.TriggerFactory {
 		},
 	}
 }
+
+// PipelineTriggerConfigWrappers returns config wrappers that convert flat
+// pipeline trigger config into the schedule trigger's native format.
+func (p *Plugin) PipelineTriggerConfigWrappers() map[string]plugin.TriggerConfigWrapperFunc {
+	return map[string]plugin.TriggerConfigWrapperFunc{
+		"schedule": func(pipelineName string, cfg map[string]any) map[string]any {
+			job := map[string]any{
+				"workflow": "pipeline:" + pipelineName,
+			}
+			if c, ok := cfg["cron"]; ok {
+				job["cron"] = c
+			}
+			return map[string]any{
+				"jobs": []any{job},
+			}
+		},
+	}
+}

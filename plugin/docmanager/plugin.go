@@ -7,6 +7,15 @@ import (
 	"github.com/GoCodeAlone/workflow/plugin"
 )
 
+func init() {
+	plugin.RegisterNativePluginFactory(func(db *sql.DB, _ map[string]any) plugin.NativePlugin {
+		if db == nil {
+			return nil
+		}
+		return New(db)
+	})
+}
+
 // Compile-time interface check.
 var _ plugin.NativePlugin = (*Plugin)(nil)
 

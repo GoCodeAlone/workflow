@@ -15,13 +15,14 @@ import (
 	pluginmodcompat "github.com/GoCodeAlone/workflow/plugins/modularcompat"
 	pluginobs "github.com/GoCodeAlone/workflow/plugins/observability"
 	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
+	pluginplatform "github.com/GoCodeAlone/workflow/plugins/platform"
 	pluginscheduler "github.com/GoCodeAlone/workflow/plugins/scheduler"
 	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
 	pluginsm "github.com/GoCodeAlone/workflow/plugins/statemachine"
 	pluginstorage "github.com/GoCodeAlone/workflow/plugins/storage"
 )
 
-// allPlugins returns all 15 engine plugins for test use.
+// allPlugins returns all 16 engine plugins for test use.
 func allPlugins() []plugin.EnginePlugin {
 	return []plugin.EnginePlugin{
 		pluginhttp.New(),
@@ -39,6 +40,7 @@ func allPlugins() []plugin.EnginePlugin {
 		pluginscheduler.New(),
 		pluginintegration.New(),
 		pluginai.New(),
+		pluginplatform.New(),
 	}
 }
 

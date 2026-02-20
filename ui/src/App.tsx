@@ -25,6 +25,14 @@ import FlagManager from './components/featureflags/FlagManager.tsx';
 import StoreBrowserPage from './components/storebrowser/StoreBrowserPage.tsx';
 import DocsPage from './components/docmanager/DocsPage.tsx';
 import TemplatePage from './components/dynamic/TemplatePage.tsx';
+
+// Registry of plugin view components — keyed by UIPage id.
+// Only pages listed here (or pages with a template) will render when active.
+const PLUGIN_VIEW_COMPONENTS: Record<string, React.ComponentType> = {
+  'feature-flags': FlagManager,
+  'store-browser': StoreBrowserPage,
+  'docs': DocsPage,
+};
 import WorkflowPickerBar from './components/shared/WorkflowPickerBar.tsx';
 import CollapsiblePanel from './components/layout/CollapsiblePanel.tsx';
 import useWorkflowStore from './store/workflowStore.ts';
@@ -322,21 +330,24 @@ function AppLayout() {
         {activeView === 'marketplace' && <Marketplace />}
         {activeView === 'templates' && <Templates />}
         {activeView === 'environments' && <Environments />}
-        {activeView === 'feature-flags' && <FlagManager />}
         {activeView === 'settings' && <IAMSettings />}
-        {activeView === 'store-browser' && <StoreBrowserPage />}
-        {activeView === 'docs' && <DocsPage />}
-        {/* Template-based dynamic pages from plugins */}
+        {/* Plugin pages — rendered dynamically from enabledPages, not hardcoded */}
         {(() => {
-          const builtinViews = new Set([
+          const coreViews = new Set([
             'editor', 'dashboard', 'executions', 'logs', 'events',
-            'marketplace', 'templates', 'environments', 'feature-flags',
-            'settings', 'store-browser', 'docs',
+            'marketplace', 'templates', 'environments', 'settings',
           ]);
-          if (builtinViews.has(activeView)) return null;
-          const page = enabledPages.find((p: UIPageDef) => p.id === activeView && p.template);
+          if (coreViews.has(activeView)) return null;
+
+          // Only render if this view appears in an enabled plugin's pages
+          const page = enabledPages.find((p: UIPageDef) => p.id === activeView);
           if (!page) return null;
-          return <TemplatePage page={page} />;
+
+          // Use dedicated component if available, otherwise fall back to TemplatePage
+          const PluginComponent = PLUGIN_VIEW_COMPONENTS[activeView];
+          if (PluginComponent) return <PluginComponent />;
+          if (page.template) return <TemplatePage page={page} />;
+          return null;
         })()}
       </div>
       <ToastContainer />

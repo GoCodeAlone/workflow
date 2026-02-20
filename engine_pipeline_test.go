@@ -7,6 +7,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/module"
+	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
 )
 
 // setupPipelineEngine creates an engine with the PipelineWorkflowHandler
@@ -16,18 +17,20 @@ func setupPipelineEngine(t *testing.T) (*StdEngine, *handlers.PipelineWorkflowHa
 
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
-	loadAllPlugins(t, engine)
 
-	// Register built-in step types
-	engine.AddStepType("step.validate", module.NewValidateStepFactory())
-	engine.AddStepType("step.set", module.NewSetStepFactory())
-	engine.AddStepType("step.log", module.NewLogStepFactory())
-	engine.AddStepType("step.conditional", module.NewConditionalStepFactory())
-	engine.AddStepType("step.delegate", module.NewDelegateStepFactory())
+	// Load pipelinesteps plugin — it registers step factories and the
+	// PipelineWorkflowHandler. We use it directly (no loadAllPlugins) to avoid
+	// registering a second handler that would shadow the plugin's handler.
+	pp := pluginpipeline.New()
+	if err := engine.LoadPlugin(pp); err != nil {
+		t.Fatalf("LoadPlugin(pipelinesteps) failed: %v", err)
+	}
 
-	// Register the pipeline handler
-	pipelineHandler := handlers.NewPipelineWorkflowHandler()
-	engine.RegisterWorkflowHandler(pipelineHandler)
+	// Retrieve the pipeline handler created by the plugin so tests can inspect it.
+	pipelineHandler := pp.PipelineHandler()
+	if pipelineHandler == nil {
+		t.Fatal("pipelinesteps plugin did not create a PipelineWorkflowHandler")
+	}
 
 	return engine, pipelineHandler
 }
@@ -401,10 +404,11 @@ func TestPipeline_ConfigurePipelines_InvalidTimeout(t *testing.T) {
 }
 
 func TestPipeline_ConfigurePipelines_NoPipelineHandler(t *testing.T) {
-	// Create an engine without registering a PipelineWorkflowHandler
+	// Create an engine WITHOUT loading the pipelinesteps plugin (which would
+	// automatically register a PipelineWorkflowHandler). We use a bare engine
+	// so configurePipelines returns the "no handler" error.
 	app := newMockApplication()
 	engine := NewStdEngine(app, app.Logger())
-	loadAllPlugins(t, engine)
 
 	pipelineCfg := map[string]any{
 		"orphan-pipeline": map[string]any{

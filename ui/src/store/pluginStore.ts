@@ -45,9 +45,6 @@ const FALLBACK_PAGES: UIPageDef[] = [
   { id: 'templates',    label: 'Templates',     icon: '\u{1F4C4}', category: 'global', order: 3 },
   { id: 'environments',   label: 'Environments',  icon: '\u2601\uFE0F',  category: 'global', order: 4 },
   { id: 'settings',       label: 'Settings',      icon: '\u2699\uFE0F',  category: 'global', order: 6 },
-  // Plugin pages
-  { id: 'store-browser', label: 'Store Browser',  icon: '\u{1F5C4}\uFE0F',  category: 'plugin', order: 0 },
-  { id: 'docs',          label: 'Documentation',  icon: '\u{1F4D6}', category: 'plugin', order: 1 },
   // Workflow pages
   { id: 'executions', label: 'Executions', icon: '\u25B6\uFE0F',  category: 'workflow', order: 0 },
   { id: 'logs',       label: 'Logs',       icon: '\u{1F4C3}', category: 'workflow', order: 1 },

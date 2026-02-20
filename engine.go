@@ -35,6 +35,7 @@ type PipelineAdder interface {
 	AddPipeline(name string, p *module.Pipeline)
 }
 
+
 // ModuleFactory is a function that creates a module from a name and configuration
 type ModuleFactory func(name string, config map[string]any) modular.Module
 
@@ -44,6 +45,7 @@ type StartStopModule interface {
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
 }
+
 
 // StdEngine represents the workflow execution engine
 type StdEngine struct {
@@ -63,6 +65,15 @@ type StdEngine struct {
 	stepRegistry     *module.StepRegistry
 	pluginInstaller  *plugin.PluginInstaller
 	configDir        string // directory of the config file, for resolving relative paths
+
+	// triggerTypeMap maps trigger config type keys (e.g., "http", "schedule")
+	// to trigger names (e.g., "trigger.http", "trigger.schedule"). Populated
+	// during LoadPlugin() from TriggerFactories() keys.
+	triggerTypeMap map[string]string
+
+	// triggerConfigWrappers maps trigger type keys to functions that convert
+	// flat pipeline trigger config into the trigger's native format.
+	triggerConfigWrappers map[string]plugin.TriggerConfigWrapperFunc
 }
 
 // App returns the underlying modular.Application.
@@ -108,15 +119,17 @@ func (e *StdEngine) SetPluginInstaller(installer *plugin.PluginInstaller) {
 // NewStdEngine creates a new workflow engine
 func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
 	return &StdEngine{
-		app:              app,
-		workflowHandlers: make([]WorkflowHandler, 0),
-		moduleFactories:  make(map[string]ModuleFactory),
-		logger:           logger,
-		modules:          make([]modular.Module, 0),
-		triggers:         make([]module.Trigger, 0),
-		triggerRegistry:  module.NewTriggerRegistry(),
-		secretsResolver:  secrets.NewMultiResolver(),
-		stepRegistry:     module.NewStepRegistry(),
+		app:                  app,
+		workflowHandlers:     make([]WorkflowHandler, 0),
+		moduleFactories:      make(map[string]ModuleFactory),
+		logger:               logger,
+		modules:              make([]modular.Module, 0),
+		triggers:             make([]module.Trigger, 0),
+		triggerRegistry:      module.NewTriggerRegistry(),
+		secretsResolver:      secrets.NewMultiResolver(),
+		stepRegistry:         module.NewStepRegistry(),
+		triggerTypeMap:       make(map[string]string),
+		triggerConfigWrappers: make(map[string]plugin.TriggerConfigWrapperFunc),
 	}
 }
 
@@ -134,6 +147,20 @@ func (e *StdEngine) RegisterWorkflowHandler(handler WorkflowHandler) {
 func (e *StdEngine) RegisterTrigger(trigger module.Trigger) {
 	e.triggers = append(e.triggers, trigger)
 	e.triggerRegistry.RegisterTrigger(trigger)
+}
+
+// RegisterTriggerType registers a mapping from a trigger config type key
+// (e.g., "reconciliation") to a trigger Name() (e.g., "trigger.reconciliation").
+// This is used for triggers registered directly via RegisterTrigger() rather
+// than through a plugin's TriggerFactories().
+func (e *StdEngine) RegisterTriggerType(triggerType string, triggerName string) {
+	e.triggerTypeMap[triggerType] = triggerName
+}
+
+// RegisterTriggerConfigWrapper registers a function that converts flat pipeline
+// trigger config into the native format for a given trigger type.
+func (e *StdEngine) RegisterTriggerConfigWrapper(triggerType string, wrapper plugin.TriggerConfigWrapperFunc) {
+	e.triggerConfigWrappers[triggerType] = wrapper
 }
 
 // AddModuleType registers a factory function for a module type
@@ -191,11 +218,20 @@ func (e *StdEngine) LoadPlugin(p plugin.EnginePlugin) error {
 			return nil, fmt.Errorf("step factory for %q returned non-PipelineStep type", capturedType)
 		})
 	}
-	// Register triggers from plugin.
-	for _, factory := range p.TriggerFactories() {
+	// Register triggers from plugin. The factory map key is the trigger
+	// config type (e.g., "http", "schedule") used in YAML configs.
+	for triggerType, factory := range p.TriggerFactories() {
 		result := factory()
 		if trigger, ok := result.(module.Trigger); ok {
+			e.triggerTypeMap[triggerType] = trigger.Name()
 			e.RegisterTrigger(trigger)
+		}
+	}
+
+	// Register pipeline trigger config wrappers from plugin (optional interface).
+	if provider, ok := p.(plugin.PipelineTriggerConfigProvider); ok {
+		for triggerType, wrapper := range provider.PipelineTriggerConfigWrappers() {
+			e.triggerConfigWrappers[triggerType] = wrapper
 		}
 	}
 	// Register workflow handlers from plugin.
@@ -311,40 +347,15 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		// Create modules based on type
 		var mod modular.Module
 
-		// First check in the custom module factories
-		if factory, exists := e.moduleFactories[modCfg.Type]; exists {
-			e.logger.Debug("Existing factory using module type: " + modCfg.Type)
-			mod = factory(modCfg.Name, modCfg.Config)
-			if mod == nil {
-				return fmt.Errorf("factory for module type %q returned nil for module %q", modCfg.Type, modCfg.Name)
-			}
-		} else {
-			// Platform module types (not yet extracted to plugins)
-			switch modCfg.Type {
-			case "platform.provider":
-				e.logger.Debug("Loading platform provider module: " + modCfg.Name)
-				providerName := ""
-				if pn, ok := modCfg.Config["name"].(string); ok {
-					providerName = pn
-				}
-				svcName := "platform.provider"
-				if providerName != "" {
-					svcName = "platform.provider." + providerName
-				}
-				mod = module.NewServiceModule(modCfg.Name, map[string]any{
-					"provider_name": providerName,
-					"service_name":  svcName,
-					"config":        modCfg.Config,
-				})
-			case "platform.resource":
-				e.logger.Debug("Loading platform resource module: " + modCfg.Name)
-				mod = module.NewServiceModule(modCfg.Name, modCfg.Config)
-			case "platform.context":
-				e.logger.Debug("Loading platform context module: " + modCfg.Name)
-				mod = module.NewServiceModule(modCfg.Name, modCfg.Config)
-			default:
-				return fmt.Errorf("unknown module type %q for module %q — ensure the required plugin is loaded", modCfg.Type, modCfg.Name)
-			}
+		// Look up the module factory from the registry (populated by LoadPlugin)
+		factory, exists := e.moduleFactories[modCfg.Type]
+		if !exists {
+			return fmt.Errorf("unknown module type %q for module %q — ensure the required plugin is loaded", modCfg.Type, modCfg.Name)
+		}
+		e.logger.Debug("Using factory for module type: " + modCfg.Type)
+		mod = factory(modCfg.Name, modCfg.Config)
+		if mod == nil {
+			return fmt.Errorf("factory for module type %q returned nil for module %q", modCfg.Type, modCfg.Name)
 		}
 
 		e.app.RegisterModule(mod)
@@ -527,7 +538,7 @@ func (e *StdEngine) configureTriggers(triggerConfigs map[string]any) error {
 		var handlerFound bool
 		for _, trigger := range e.triggers {
 			// If this trigger can handle the type, configure it
-			if canHandleTrigger(trigger, triggerType) {
+			if e.canHandleTrigger(trigger, triggerType) {
 				if err := trigger.Configure(e.app, triggerConfig); err != nil {
 					return fmt.Errorf("failed to configure trigger '%s': %w", triggerType, err)
 				}
@@ -545,25 +556,17 @@ func (e *StdEngine) configureTriggers(triggerConfigs map[string]any) error {
 }
 
 // canHandleTrigger determines if a trigger can handle a specific trigger type
-// This is a simple implementation that could be expanded
-func canHandleTrigger(trigger module.Trigger, triggerType string) bool {
-	switch triggerType {
-	case "http":
-		return trigger.Name() == module.HTTPTriggerName
-	case "schedule":
-		return trigger.Name() == module.ScheduleTriggerName
-	case "event":
-		return trigger.Name() == module.EventTriggerName
-	case "eventbus":
-		return trigger.Name() == module.EventBusTriggerName
-	case "reconciliation":
-		return trigger.Name() == module.ReconciliationTriggerName
-	case "mock":
-		// For tests - match the name of the trigger
-		return trigger.Name() == "mock.trigger"
-	default:
-		return false
+// by looking up the trigger type in the engine's registry. Falls back to
+// matching the trigger name directly (e.g., trigger type "mock" matches
+// trigger name "mock.trigger" via "trigger.<type>" convention).
+func (e *StdEngine) canHandleTrigger(trigger module.Trigger, triggerType string) bool {
+	// Check the trigger type registry first (populated by LoadPlugin and RegisterTriggerType)
+	if expectedName, ok := e.triggerTypeMap[triggerType]; ok {
+		return trigger.Name() == expectedName
 	}
+	// Fallback: try convention "trigger.<type>" (supports test mocks and
+	// triggers registered outside the plugin system)
+	return trigger.Name() == "trigger."+triggerType || trigger.Name() == triggerType+".trigger" || trigger.Name() == triggerType
 }
 
 // configurePipelines creates Pipeline objects from config and registers them
@@ -650,7 +653,7 @@ func (e *StdEngine) configurePipelines(pipelineCfg map[string]any) error {
 			// Find a matching trigger and configure it
 			configured := false
 			for _, trigger := range e.triggers {
-				if canHandleTrigger(trigger, pipeCfg.Trigger.Type) {
+				if e.canHandleTrigger(trigger, pipeCfg.Trigger.Type) {
 					if err := trigger.Configure(e.app, wrappedCfg); err != nil {
 						e.logger.Warn(fmt.Sprintf("Pipeline %q: could not configure %s trigger (pipeline still usable via API): %v",
 							pipelineName, pipeCfg.Trigger.Type, err))
@@ -673,49 +676,17 @@ func (e *StdEngine) configurePipelines(pipelineCfg map[string]any) error {
 // format expected by the corresponding trigger handler. Pipeline triggers use a
 // simple format (e.g. {path, method}) while trigger handlers expect their native
 // config schema (e.g. HTTPTrigger expects {routes: [{...}]}).
+//
+// Wrapper functions are registered by plugins via PipelineTriggerConfigProvider
+// or RegisterTriggerConfigWrapper. If no wrapper is registered for the trigger
+// type, the config is passed through with a workflowType field injected.
 func (e *StdEngine) wrapPipelineTriggerConfig(triggerType, pipelineName string, cfg map[string]any) map[string]any {
-	switch triggerType {
-	case "http":
-		route := map[string]any{
-			"workflow": "pipeline:" + pipelineName,
-		}
-		if p, ok := cfg["path"]; ok {
-			route["path"] = p
-		}
-		if m, ok := cfg["method"]; ok {
-			route["method"] = m
-		}
-		return map[string]any{
-			"routes": []any{route},
-		}
-	case "event":
-		sub := map[string]any{
-			"workflow": "pipeline:" + pipelineName,
-		}
-		if t, ok := cfg["topic"]; ok {
-			sub["topic"] = t
-		}
-		if ev, ok := cfg["event"]; ok {
-			sub["event"] = ev
-		}
-		return map[string]any{
-			"subscriptions": []any{sub},
-		}
-	case "schedule":
-		job := map[string]any{
-			"workflow": "pipeline:" + pipelineName,
-		}
-		if c, ok := cfg["cron"]; ok {
-			job["cron"] = c
-		}
-		return map[string]any{
-			"jobs": []any{job},
-		}
-	default:
-		// Unknown trigger type — pass config as-is with workflow type injected
-		cfg["workflowType"] = "pipeline:" + pipelineName
-		return cfg
+	if wrapper, ok := e.triggerConfigWrappers[triggerType]; ok {
+		return wrapper(pipelineName, cfg)
 	}
+	// Default: pass config as-is with workflow type injected
+	cfg["workflowType"] = "pipeline:" + pipelineName
+	return cfg
 }
 
 // buildPipelineSteps creates PipelineStep instances from step configurations.
@@ -863,6 +834,13 @@ func (e *StdEngine) buildPipelineSteps(pipelineName string, stepCfgs []config.Pi
 // GetApp returns the underlying modular Application.
 func (e *StdEngine) GetApp() modular.Application {
 	return e.app
+}
+
+// LoadedPlugins returns all engine plugins that were loaded via LoadPlugin.
+func (e *StdEngine) LoadedPlugins() []plugin.EnginePlugin {
+	out := make([]plugin.EnginePlugin, len(e.enginePlugins))
+	copy(out, e.enginePlugins)
+	return out
 }
 
 type Engine interface {

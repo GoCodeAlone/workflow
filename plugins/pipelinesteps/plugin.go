@@ -1,18 +1,22 @@
 // Package pipelinesteps provides a plugin that registers generic pipeline step
 // types: validate, transform, conditional, set, log, delegate, jq, publish,
 // http_call, request_parse, db_query, db_exec, json_response.
+// It also provides the PipelineWorkflowHandler for composable pipelines.
 package pipelinesteps
 
 import (
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
+	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 )
 
-// Plugin registers generic pipeline step factories.
+// Plugin registers generic pipeline step factories and the pipeline workflow handler.
 type Plugin struct {
 	plugin.BaseEnginePlugin
+	// pipelineHandler is retained so the wiring hook can inject dependencies.
+	pipelineHandler *handlers.PipelineWorkflowHandler
 }
 
 // New creates a new pipeline-steps plugin.
@@ -28,7 +32,7 @@ func New() *Plugin {
 				Name:        "pipeline-steps",
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
-				Description: "Generic pipeline step types (validate, transform, conditional, set, log, delegate, jq, etc.)",
+				Description: "Generic pipeline step types and pipeline workflow handler",
 				StepTypes: []string{
 					"step.validate",
 					"step.transform",
@@ -44,6 +48,7 @@ func New() *Plugin {
 					"step.db_exec",
 					"step.json_response",
 				},
+				WorkflowTypes: []string{"pipeline"},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "pipeline-steps", Role: "provider", Priority: 50},
 				},
@@ -79,6 +84,22 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.db_exec":       wrapStepFactory(module.NewDBExecStepFactory()),
 		"step.json_response": wrapStepFactory(module.NewJSONResponseStepFactory()),
 	}
+}
+
+// WorkflowHandlers returns the pipeline workflow handler factory.
+func (p *Plugin) WorkflowHandlers() map[string]plugin.WorkflowHandlerFactory {
+	return map[string]plugin.WorkflowHandlerFactory{
+		"pipeline": func() any {
+			p.pipelineHandler = handlers.NewPipelineWorkflowHandler()
+			return p.pipelineHandler
+		},
+	}
+}
+
+// PipelineHandler returns the plugin's pipeline handler instance, if created.
+// This is used by the engine's wiring hook to inject StepRegistry and Logger.
+func (p *Plugin) PipelineHandler() *handlers.PipelineWorkflowHandler {
+	return p.pipelineHandler
 }
 
 // wrapStepFactory converts a module.StepFactory to a plugin.StepFactory,

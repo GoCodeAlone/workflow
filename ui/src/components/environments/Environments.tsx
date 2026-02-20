@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import useEnvironmentStore from '../../store/environmentStore.ts';
 import type { Environment } from '../../store/environmentStore.ts';
+import usePluginStore from '../../store/pluginStore.ts';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -53,6 +54,22 @@ const PROVIDER_FIELDS: Record<Provider, ProviderFieldDef[]> = {
     { key: 'api_token', label: 'API Token', sensitive: true, target: 'secrets' },
   ],
 };
+
+// ---------------------------------------------------------------------------
+// Dynamic provider list — filtered by enabled cloud-provider plugins.
+// Falls back to the full static list when no cloud-provider plugins are registered.
+// ---------------------------------------------------------------------------
+
+function useAvailableProviders(): Provider[] {
+  const enabledPages = usePluginStore((s) => s.enabledPages);
+  const cloudPluginIds = new Set(
+    enabledPages
+      .filter((p) => p.category === 'cloud-providers')
+      .map((p) => p.id.replace('-settings', '')),
+  );
+  if (cloudPluginIds.size === 0) return [...PROVIDERS];
+  return PROVIDERS.filter((p) => cloudPluginIds.has(p));
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -197,6 +214,7 @@ function EnvironmentFormModal({
   onCancel: () => void;
   saving: boolean;
 }) {
+  const availableProviders = useAvailableProviders();
   const [form, setForm] = useState<EnvFormData>(initial);
 
   const fields = PROVIDER_FIELDS[form.provider] || [];
@@ -274,7 +292,7 @@ function EnvironmentFormModal({
             onChange={(e) => setField('provider', e.target.value)}
             style={inputStyle}
           >
-            {PROVIDERS.map((p) => (
+            {availableProviders.map((p) => (
               <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>
             ))}
           </select>
@@ -486,6 +504,7 @@ function EnvironmentCard({
 // ---------------------------------------------------------------------------
 
 export default function Environments() {
+  const availableProviders = useAvailableProviders();
   const environments = useEnvironmentStore((s) => s.environments);
   const loading = useEnvironmentStore((s) => s.loading);
   const error = useEnvironmentStore((s) => s.error);
@@ -648,7 +667,7 @@ export default function Environments() {
           style={{ ...inputStyle, width: 160, marginBottom: 0 }}
         >
           <option value="">All Providers</option>
-          {PROVIDERS.map((p) => (
+          {availableProviders.map((p) => (
             <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>
           ))}
         </select>
