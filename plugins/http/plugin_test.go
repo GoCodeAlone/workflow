@@ -270,7 +270,7 @@ func TestStepFactorySmoke(t *testing.T) {
 				t.Fatalf("no step factory for %q", tt.stepType)
 			}
 
-			step, err := factory(tt.wantName, tt.config)
+			step, err := factory(tt.wantName, tt.config, nil)
 			if err != nil {
 				t.Fatalf("step factory error: %v", err)
 			}

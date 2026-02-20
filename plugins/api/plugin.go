@@ -3,6 +3,7 @@ package api
 import (
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/schema"
@@ -119,6 +120,7 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 				handler.SetInitialTransition(it)
 			}
 			if sf, ok := cfg["seedFile"].(string); ok && sf != "" {
+				sf = config.ResolvePathInConfig(cfg, sf)
 				handler.SetSeedFile(sf)
 			}
 			if src, ok := cfg["sourceResourceName"].(string); ok && src != "" {
@@ -126,6 +128,9 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			}
 			if stf, ok := cfg["stateFilter"].(string); ok && stf != "" {
 				handler.SetStateFilter(stf)
+			}
+			if idp, ok := cfg["instanceIDPrefix"].(string); ok && idp != "" {
+				handler.SetInstanceIDPrefix(idp)
 			}
 			// Dynamic field mapping (optional YAML override of default field names)
 			if fmCfg, ok := cfg["fieldMapping"].(map[string]any); ok {

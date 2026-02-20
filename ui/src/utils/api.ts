@@ -363,6 +363,16 @@ export function apiStopWorkflow(id: string): Promise<ApiWorkflowRecord> {
   return v1Fetch<ApiWorkflowRecord>(`/admin/workflows/${encodeURIComponent(id)}/stop`, { method: 'POST' });
 }
 
+export function apiLoadWorkflowFromPath(
+  projectId: string,
+  path: string,
+): Promise<ApiWorkflowRecord> {
+  return v1Fetch<ApiWorkflowRecord>('/admin/workflows/load-from-path', {
+    method: 'POST',
+    body: JSON.stringify({ project_id: projectId, path }),
+  });
+}
+
 export function apiGetWorkflowStatus(id: string): Promise<{ id: string; status: string; version: number }> {
   return v1Fetch<{ id: string; status: string; version: number }>(`/admin/workflows/${encodeURIComponent(id)}/status`);
 }

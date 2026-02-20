@@ -23,6 +23,7 @@ import (
 	"github.com/GoCodeAlone/workflow/ai/llm"
 	"github.com/GoCodeAlone/workflow/audit"
 	"github.com/GoCodeAlone/workflow/billing"
+	"github.com/GoCodeAlone/workflow/bundle"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/deploy"
 	"github.com/GoCodeAlone/workflow/dynamic"
@@ -55,6 +56,7 @@ import (
 	"github.com/GoCodeAlone/workflow/provider/gcp"
 	"github.com/GoCodeAlone/workflow/schema"
 	evstore "github.com/GoCodeAlone/workflow/store"
+	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
@@ -76,6 +78,7 @@ var (
 	dataDir       = flag.String("data-dir", "./data", "Directory for SQLite database and persistent data")
 	restoreAdmin  = flag.Bool("restore-admin", false, "Restore admin config to embedded default on startup")
 	loadWorkflows = flag.String("load-workflows", "", "Comma-separated paths to workflow YAML files or directories to load alongside admin")
+	importBundle  = flag.String("import-bundle", "", "Comma-separated paths to .tar.gz workflow bundles to import and deploy on startup")
 )
 
 // buildEngine creates the workflow engine with all handlers registered and built from config.
@@ -127,6 +130,18 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	loader := dynamic.NewLoader(pool, registry)
 	engine.SetDynamicRegistry(registry)
 	engine.SetDynamicLoader(loader)
+
+	// Set up plugin installer for auto-install during deploy
+	pluginInstallDir := filepath.Join(*dataDir, "plugins")
+	pluginLocalReg := plugin.NewLocalRegistry()
+	pluginRemoteReg := plugin.NewRemoteRegistry("https://plugins.workflow.dev")
+	installer := plugin.NewPluginInstaller(pluginRemoteReg, pluginLocalReg, loader, pluginInstallDir)
+
+	// Scan previously installed plugins
+	if _, scanErr := installer.ScanInstalled(); scanErr != nil {
+		logger.Warn("Failed to scan installed plugins", "error", scanErr)
+	}
+	engine.SetPluginInstaller(installer)
 
 	// Build engine from config
 	if err := engine.BuildFromConfig(cfg); err != nil {
@@ -239,6 +254,11 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 		return app.registerPostStartServices(logger)
 	})
 
+	// Import bundles from --import-bundle flag (runs after stores are ready).
+	app.postStartFuncs = append(app.postStartFuncs, func() error {
+		return app.importBundles(logger)
+	})
+
 	// Initialize audit logger (writes structured JSON to stdout)
 	app.auditLogger = audit.NewLogger(os.Stdout)
 	app.auditLogger.LogConfigChange(context.Background(), "system", "server", "server started")
@@ -249,12 +269,23 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 // mergeAdminConfig loads the embedded admin config, extracts assets to temp
 // locations, and merges admin modules/routes into the primary config.
 // If the config already contains admin modules (e.g., the user passed the
-// admin config directly), the merge is skipped to avoid duplicates.
+// admin config directly), the merge is skipped to avoid duplicates — but
+// UI assets are still extracted and injected so the static fileserver works.
 func mergeAdminConfig(logger *slog.Logger, cfg *config.WorkflowConfig, app *serverApp) error {
+	// Always extract UI assets so the static fileserver has correct paths
+	uiDir, err := admin.WriteUIAssets()
+	if err != nil {
+		return err
+	}
+	app.cleanupDirs = append(app.cleanupDirs, uiDir)
+
 	// Check if the config already contains admin modules
 	for _, m := range cfg.Modules {
 		if m.Name == "admin-server" {
 			logger.Info("Config already contains admin modules, skipping merge")
+			// Still inject the correct UI root into the existing config
+			admin.InjectUIRoot(cfg, uiDir)
+			logger.Info("Admin UI enabled", "uiDir", uiDir)
 			return nil
 		}
 	}
@@ -264,12 +295,6 @@ func mergeAdminConfig(logger *slog.Logger, cfg *config.WorkflowConfig, app *serv
 		return err
 	}
 
-	// Extract UI assets to temp directory for static.fileserver
-	uiDir, err := admin.WriteUIAssets()
-	if err != nil {
-		return err
-	}
-	app.cleanupDirs = append(app.cleanupDirs, uiDir)
 	admin.InjectUIRoot(adminCfg, uiDir)
 
 	// Merge admin modules and routes into primary config
@@ -419,8 +444,11 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	// Create V1 API handler
 	v1Handler := module.NewV1APIHandler(store, secret)
 	v1Handler.SetReloadFunc(func(configYAML string) error {
-		logger.Info("System workflow deploy requested — engine reload not yet wired for v1 deploy")
-		return nil
+		cfg, parseErr := config.LoadFromString(configYAML)
+		if parseErr != nil {
+			return fmt.Errorf("invalid config: %w", parseErr)
+		}
+		return app.reloadEngine(cfg)
 	})
 	app.v1Handler = v1Handler
 
@@ -445,6 +473,7 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	if err != nil {
 		logger.Warn("Failed to open idempotency DB", "error", err)
 	} else {
+		idempotencyDB.SetMaxOpenConns(1)
 		app.idempotencyDB = idempotencyDB
 		idempotencyStore, idErr := evstore.NewSQLiteIdempotencyStore(idempotencyDB)
 		if idErr != nil {
@@ -675,6 +704,14 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 
 	rm := module.NewRuntimeManager(store, runtimeBuilder, logger)
 	app.runtimeManager = rm
+	v1Handler.SetRuntimeManager(rm)
+
+	// Wire up port allocator for auto-port assignment on deployed workflows.
+	// Start allocating at 8082 (admin is 8081, primary config uses 8080).
+	pa := module.NewPortAllocator(8082)
+	pa.ExcludePort(8080, "primary-config")
+	pa.ExcludePort(8081, "admin-server")
+	rm.SetPortAllocator(pa)
 
 	// Create runtime handler
 	runtimeHandler := module.NewRuntimeHandler(rm)
@@ -818,6 +855,89 @@ func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
 	return nil
 }
 
+// importBundles imports and deploys workflow bundles specified via --import-bundle.
+func (app *serverApp) importBundles(logger *slog.Logger) error {
+	if *importBundle == "" {
+		return nil
+	}
+
+	paths := strings.Split(*importBundle, ",")
+	for i := range paths {
+		paths[i] = strings.TrimSpace(paths[i])
+	}
+
+	for _, bundlePath := range paths {
+		if bundlePath == "" {
+			continue
+		}
+
+		logger.Info("Importing bundle", "path", bundlePath)
+
+		f, err := os.Open(bundlePath)
+		if err != nil {
+			logger.Error("Failed to open bundle", "path", bundlePath, "error", err)
+			continue
+		}
+
+		id := uuid.New().String()
+		destDir := filepath.Join(*dataDir, "workspaces", id)
+
+		manifest, workflowPath, importErr := bundle.Import(f, destDir)
+		f.Close()
+		if importErr != nil {
+			logger.Error("Failed to import bundle", "path", bundlePath, "error", importErr)
+			continue
+		}
+
+		// Read the extracted workflow.yaml
+		yamlData, err := os.ReadFile(workflowPath)
+		if err != nil {
+			logger.Error("Failed to read workflow.yaml", "path", workflowPath, "error", err)
+			continue
+		}
+		yamlContent := string(yamlData)
+
+		name := manifest.Name
+		if name == "" {
+			name = filepath.Base(bundlePath)
+		}
+
+		// Create a workflow record in the V1Store
+		if app.v1Store != nil {
+			sysWf, sysErr := app.v1Store.GetSystemWorkflow()
+			projectID := ""
+			if sysErr == nil && sysWf != nil {
+				projectID = sysWf.ProjectID
+			}
+
+			wf, createErr := app.v1Store.CreateWorkflow(projectID, name, "", manifest.Description, yamlContent, "system")
+			if createErr != nil {
+				logger.Error("Failed to create workflow record", "name", name, "error", createErr)
+			} else {
+				// Update workspace dir on the record
+				_, _ = app.v1Store.DB().Exec(
+					`UPDATE workflows SET workspace_dir = ? WHERE id = ?`,
+					destDir, wf.ID,
+				)
+				logger.Info("Created workflow record", "id", wf.ID, "name", name)
+			}
+		}
+
+		// Deploy via RuntimeManager
+		if app.runtimeManager != nil {
+			if launchErr := app.runtimeManager.LaunchFromWorkspace(context.Background(), id, name, yamlContent, destDir); launchErr != nil {
+				logger.Error("Failed to launch bundle workflow", "name", name, "error", launchErr)
+				continue
+			}
+			logger.Info("Deployed bundle workflow", "id", id, "name", name, "dest", destDir)
+		} else {
+			logger.Warn("No runtime manager available, bundle extracted but not deployed", "name", name, "dest", destDir)
+		}
+	}
+
+	return nil
+}
+
 // run starts the engine and HTTP server, blocking until ctx is canceled.
 // It performs graceful shutdown when the context is done.
 func run(ctx context.Context, app *serverApp, listenAddr string) error {
@@ -924,6 +1044,7 @@ func applyEnvOverrides() {
 		"jwt-secret":      "WORKFLOW_JWT_SECRET",
 		"data-dir":        "WORKFLOW_DATA_DIR",
 		"load-workflows":  "WORKFLOW_LOAD_WORKFLOWS",
+		"import-bundle":   "WORKFLOW_IMPORT_BUNDLE",
 	}
 
 	// Track which flags were explicitly set on the command line.

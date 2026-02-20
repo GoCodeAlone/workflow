@@ -149,6 +149,11 @@ func (h *RESTAPIHandler) SetInitialTransition(t string) {
 	h.initialTransition = t
 }
 
+// SetInstanceIDPrefix sets the prefix used to build state machine instance IDs.
+func (h *RESTAPIHandler) SetInstanceIDPrefix(prefix string) {
+	h.instanceIDPrefix = prefix
+}
+
 // SetSeedFile sets the path to a JSON seed data file.
 func (h *RESTAPIHandler) SetSeedFile(path string) {
 	h.seedFile = path
@@ -410,10 +415,12 @@ func (h *RESTAPIHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		lastSegment := pathSegments[len(pathSegments)-1]
 		if lastSegment == "transition" {
 			isTransitionRequest = true
-		} else if h.workflowType != "" {
+		} else if h.workflowType != "" && lastSegment != resourceId {
 			// Only detect sub-actions for handlers with a workflow engine.
 			// This prevents non-workflow handlers (e.g. messages-api) from
 			// misinterpreting nested resource paths as sub-actions.
+			// Also skip when the last segment equals the resource ID (e.g.,
+			// /api/webchat/poll/{id}) — that's just a deeper path, not a sub-action.
 			subAction = lastSegment
 		}
 	}
@@ -732,6 +739,16 @@ func (h *RESTAPIHandler) handleGetAll(w http.ResponseWriter, r *http.Request) {
 
 // extractUserID extracts the authenticated user's ID from the request context.
 // Returns empty string if no auth claims are present.
+// firstNonEmpty returns the first non-empty string value found in data for the given keys.
+func firstNonEmpty(data map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if v, ok := data[k].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func extractUserID(r *http.Request) string {
 	claims, ok := r.Context().Value(authClaimsContextKey).(map[string]any)
 	if !ok {
@@ -783,6 +800,82 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 	// Attach the authenticated user's ID to the resource data
 	if userID := extractUserID(r); userID != "" {
 		h.fieldMapping.SetValue(data, "userId", userID)
+	}
+
+	// Check for follow-up messages: if the POST body contains a sessionId or
+	// conversationId referencing an existing resource, append the message to
+	// that resource instead of creating a new one. This supports webchat
+	// follow-up messages where the client sends to the same creation endpoint.
+	if followUpID := firstNonEmpty(data, "sessionId", "conversationId"); followUpID != "" {
+		h.mu.Lock()
+		resource, exists := h.resources[followUpID]
+		if !exists && h.instanceIDPrefix != "" {
+			prefixed := h.instanceIDPrefix + followUpID
+			if r2, ok := h.resources[prefixed]; ok {
+				followUpID = prefixed
+				resource = r2
+				exists = true
+			}
+		}
+		if exists {
+			// Extract message body from various field names
+			msgBody := ""
+			for _, field := range []string{"message", "body", "content", "text"} {
+				if b, ok := data[field].(string); ok && b != "" {
+					msgBody = b
+					break
+				}
+			}
+			if msgBody != "" {
+				msg := map[string]any{
+					"body":      msgBody,
+					"direction": "inbound",
+					"sender":    "texter",
+					"status":    "delivered",
+					"timestamp": time.Now().UTC().Format(time.RFC3339),
+				}
+				msgs := h.fieldMapping.ResolveSlice(resource.Data, "messages")
+				if msgs == nil {
+					msgs = []any{}
+				}
+				msgs = append(msgs, msg)
+				h.fieldMapping.SetValue(resource.Data, "messages", msgs)
+				h.resources[followUpID] = resource
+				h.mu.Unlock()
+
+				if h.persistence != nil {
+					_ = h.persistence.SaveResource(h.resourceName, followUpID, resource.Data)
+
+					// Bridge follow-up messages to the conversation resource
+					// so the SPA (which reads from "conversations") sees them too.
+					if h.instanceIDPrefix == "conv-" {
+						convoId := "conv-" + strings.TrimPrefix(followUpID, "conv-")
+						convoData, loadErr := h.persistence.LoadResource("conversations", convoId)
+						if loadErr == nil && convoData != nil {
+							convoMsgs := h.fieldMapping.ResolveSlice(convoData, "messages")
+							if convoMsgs == nil {
+								convoMsgs = []any{}
+							}
+							convoMsgs = append(convoMsgs, msg)
+							h.fieldMapping.SetValue(convoData, "messages", convoMsgs)
+							_ = h.persistence.SaveResource("conversations", convoId, convoData)
+						}
+					}
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"conversationId": followUpID,
+					"messageId":      fmt.Sprintf("msg-%s-%d", followUpID, len(msgs)),
+					"status":         "delivered",
+				})
+				return
+			}
+			h.mu.Unlock()
+		} else {
+			h.mu.Unlock()
+		}
 	}
 
 	h.mu.Lock()
@@ -895,7 +988,9 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 
 	// Bridge: when a webhook/webchat handler creates a resource, also create a
 	// corresponding conversation resource so the SPA can list it via /api/conversations.
-	if h.resourceName != "conversations" && h.persistence != nil && h.workflowType != "" {
+	// Only bridge if the handler has instanceIDPrefix "conv-" (set in config for
+	// webchat-api and webhooks-api), which signals it participates in conversation lifecycle.
+	if h.instanceIDPrefix == "conv-" && h.persistence != nil {
 		h.bridgeToConversation(resourceId, data)
 	}
 
@@ -1017,15 +1112,12 @@ func (h *RESTAPIHandler) startWorkflowForResource(_ context.Context, resourceId 
 	}
 
 	// Build the instance ID.
-	// For non-conversation handlers that bridge to conversations (webhooks, webchat),
-	// use the bridged conversation ID (conv-{resourceId}) so that conversations-api
-	// can later find the same state machine instance by the conversation's own ID.
+	// Handlers that bridge to conversations (webhooks, webchat) should set
+	// instanceIDPrefix: "conv-" in their config so the conversations-api
+	// can find the same state machine instance by the conversation's own ID.
 	instanceId := resourceId
 	if h.instanceIDPrefix != "" {
 		instanceId = h.instanceIDPrefix + resourceId
-	} else if h.resourceName != "conversations" && h.workflowType != "" {
-		// This handler bridges to a conversation — use the bridged conversation ID
-		instanceId = "conv-" + resourceId
 	}
 
 	// Create the workflow instance
@@ -1067,9 +1159,37 @@ func (h *RESTAPIHandler) startWorkflowForResource(_ context.Context, resourceId 
 }
 
 // syncResourceStateFromEngine reads the workflow instance state and updates the in-memory resource.
+// It polls the state machine until the state settles (stops changing) or a timeout is reached,
+// which handles multi-step pipelines that progress through several states asynchronously.
 func (h *RESTAPIHandler) syncResourceStateFromEngine(instanceId, resourceId string, engine *StateMachineEngine) {
-	// Give the async processing pipeline a moment to progress
-	time.Sleep(500 * time.Millisecond)
+	// Wait for the pipeline to settle: poll until the state stops changing or we time out.
+	// Multi-step pipelines (e.g., new → validating → validated → paying → paid → shipping →
+	// shipped → delivered) need time to progress through each step.
+	const (
+		pollInterval = 300 * time.Millisecond
+		maxWait      = 5 * time.Second
+	)
+	time.Sleep(pollInterval) // initial wait for first transition
+
+	var lastState string
+	var stableCount int
+	deadline := time.Now().Add(maxWait)
+	for time.Now().Before(deadline) {
+		inst, err := engine.GetInstance(instanceId)
+		if err != nil || inst == nil {
+			return
+		}
+		if inst.CurrentState == lastState {
+			stableCount++
+			if stableCount >= 2 || inst.Completed {
+				break // State hasn't changed for 2 consecutive polls — pipeline settled
+			}
+		} else {
+			lastState = inst.CurrentState
+			stableCount = 0
+		}
+		time.Sleep(pollInterval)
+	}
 
 	instance, err := engine.GetInstance(instanceId)
 	if err != nil || instance == nil {
@@ -1111,7 +1231,7 @@ func (h *RESTAPIHandler) syncResourceStateFromEngine(instanceId, resourceId stri
 		// Update the bridged conversation resource's state from the engine.
 		// Only update the state field, not the full data (which was already
 		// set by bridgeToConversation with routing info, messages, etc.).
-		if h.resourceName != "conversations" && h.persistence != nil {
+		if h.instanceIDPrefix == "conv-" && h.persistence != nil {
 			convoId := fmt.Sprintf("conv-%s", resourceId)
 			h.updateConversationState(convoId, res.State)
 		}
@@ -1857,8 +1977,25 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 		}
 	}
 
-	// Trigger the transition
-	if err := smEngine.TriggerTransition(r.Context(), instanceId, transitionName, workflowData); err != nil {
+	// Trigger the transition, with fallback for state-dependent actions
+	err := smEngine.TriggerTransition(r.Context(), instanceId, transitionName, workflowData)
+	if err != nil {
+		// For "assign" action, try fallback transitions for different source states
+		if subAction == "assign" && strings.Contains(err.Error(), "cannot trigger transition") {
+			fallbacks := []string{"assign_from_new", "assign_responder"}
+			for _, fb := range fallbacks {
+				if fb == transitionName {
+					continue // already tried
+				}
+				if fbErr := smEngine.TriggerTransition(r.Context(), instanceId, fb, workflowData); fbErr == nil {
+					transitionName = fb
+					err = nil
+					break
+				}
+			}
+		}
+	}
+	if err != nil {
 		h.logger.Error(fmt.Sprintf("Sub-action '%s' (transition '%s') failed for resource '%s': %v",
 			subAction, transitionName, resourceId, err))
 		w.WriteHeader(http.StatusBadRequest)

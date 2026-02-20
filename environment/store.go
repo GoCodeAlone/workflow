@@ -40,6 +40,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
+	db.SetMaxOpenConns(1)
 
 	createSQL := `CREATE TABLE IF NOT EXISTS environments (
 		id         TEXT PRIMARY KEY,

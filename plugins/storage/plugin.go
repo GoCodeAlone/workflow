@@ -3,6 +3,7 @@ package storage
 import (
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/schema"
@@ -106,6 +107,7 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			if p, ok := cfg["dbPath"].(string); ok && p != "" {
 				dbPath = p
 			}
+			dbPath = config.ResolvePathInConfig(cfg, dbPath)
 			sqliteStorage := module.NewSQLiteStorage(name, dbPath)
 			if mc, ok := cfg["maxConnections"].(float64); ok && mc > 0 {
 				sqliteStorage.SetMaxConnections(int(mc))

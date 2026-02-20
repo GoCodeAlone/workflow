@@ -64,6 +64,11 @@ func wireHealthEndpoints(app modular.Application, _ *config.WorkflowConfig) erro
 		// Auto-discover HealthCheckable services
 		hc.DiscoverHealthCheckables()
 
+		// Mark the health checker as started so /readyz returns 200.
+		// Wiring hooks run after all modules are initialized and services
+		// registered, so the application is ready to serve traffic.
+		hc.SetStarted(true)
+
 		// Wire endpoints onto the first available StandardHTTPRouter
 		for _, routerSvc := range app.SvcRegistry() {
 			router, ok := routerSvc.(*module.StandardHTTPRouter)

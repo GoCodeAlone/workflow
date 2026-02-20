@@ -436,7 +436,7 @@
             })
           });
           const data = await res.json();
-          sessionId = data.sessionId || data.data?.sessionId;
+          sessionId = data.id || data.data?.id || data.sessionId || data.data?.sessionId;
 
           if (!sessionId) {
             throw new Error('No session ID returned');

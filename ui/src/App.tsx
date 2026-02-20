@@ -1,4 +1,4 @@
-import { Component, type ReactNode, useEffect, useMemo, useState, useCallback } from 'react';
+import { Component, type ReactNode, useEffect, useState, useCallback } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import NodePalette from './components/sidebar/NodePalette.tsx';
 import WorkflowCanvas from './components/canvas/WorkflowCanvas.tsx';
@@ -296,7 +296,6 @@ function ValidationBar() {
 
 function AppLayout() {
   const activeView = useObservabilityStore((s) => s.activeView);
-  const setActiveView = useObservabilityStore((s) => s.setActiveView);
   const activeWorkflowRecord = useWorkflowStore((s) => s.activeWorkflowRecord);
   const nodes = useWorkflowStore((s) => s.nodes);
   const selectedWorkflowId = useObservabilityStore((s) => s.selectedWorkflowId);
@@ -305,18 +304,11 @@ function AppLayout() {
   // A workflow is "open" if it's loaded in the editor OR selected for observability
   const hasWorkflowOpen = !!(activeWorkflowRecord || nodes.length > 0 || selectedWorkflowId);
 
-  // Build set of workflow-category page IDs dynamically from plugin state
-  const workflowViewIds = useMemo(
-    () => new Set(enabledPages.filter((p: UIPageDef) => p.category === 'workflow').map((p: UIPageDef) => p.id)),
-    [enabledPages],
-  );
-
-  // Redirect to dashboard when on a workflow-specific view but no workflow context
-  useEffect(() => {
-    if (!hasWorkflowOpen && workflowViewIds.has(activeView)) {
-      setActiveView('dashboard');
-    }
-  }, [hasWorkflowOpen, activeView, setActiveView, workflowViewIds]);
+  // Note: Workflow-specific views (executions, logs, events) gracefully handle
+  // the "no workflow selected" case via ObservabilityView's fallback UI,
+  // so we do NOT force-redirect to dashboard when hasWorkflowOpen is false.
+  // This avoids view bouncing caused by transient state changes during
+  // workflow open/close transitions.
 
   return (
     <div

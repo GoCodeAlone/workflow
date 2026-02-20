@@ -61,6 +61,7 @@ type StdEngine struct {
 	eventEmitter     *module.WorkflowEventEmitter
 	secretsResolver  *secrets.MultiResolver
 	stepRegistry     *module.StepRegistry
+	pluginInstaller  *plugin.PluginInstaller
 	configDir        string // directory of the config file, for resolving relative paths
 }
 
@@ -96,6 +97,12 @@ func (e *StdEngine) SetDynamicLoader(loader *dynamic.Loader) {
 			setter.SetDynamicLoader(loader)
 		}
 	}
+}
+
+// SetPluginInstaller sets the plugin installer on the engine, enabling
+// auto-installation of required plugins during validateRequirements.
+func (e *StdEngine) SetPluginInstaller(installer *plugin.PluginInstaller) {
+	e.pluginInstaller = installer
 }
 
 // NewStdEngine creates a new workflow engine
@@ -173,8 +180,8 @@ func (e *StdEngine) LoadPlugin(p plugin.EnginePlugin) error {
 	for typeName, factory := range p.StepFactories() {
 		stepFactory := factory
 		capturedType := typeName
-		e.stepRegistry.Register(typeName, func(name string, cfg map[string]any, _ modular.Application) (module.PipelineStep, error) {
-			result, err := stepFactory(name, cfg)
+		e.stepRegistry.Register(typeName, func(name string, cfg map[string]any, app modular.Application) (module.PipelineStep, error) {
+			result, err := stepFactory(name, cfg, app)
 			if err != nil {
 				return nil, err
 			}
@@ -224,6 +231,20 @@ func (e *StdEngine) validateRequirements(req *config.RequiresConfig) error {
 		for _, pr := range req.Plugins {
 			version, ok := loaded[pr.Name]
 			if !ok {
+				// Attempt auto-install if an installer is configured
+				if e.pluginInstaller != nil {
+					installCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+					installErr := e.pluginInstaller.Install(installCtx, pr.Name, pr.Version)
+					cancel()
+					if installErr != nil {
+						return fmt.Errorf("required plugin %q is not loaded and auto-install failed: %w", pr.Name, installErr)
+					}
+					// Plugin files were installed but it still needs to be loaded
+					// by the caller; report as not loaded.
+					if e.logger != nil {
+						e.logger.Info("Plugin %s installed to %s; restart or reload required to activate", pr.Name, e.pluginInstaller.InstallDir())
+					}
+				}
 				return fmt.Errorf("required plugin %q is not loaded", pr.Name)
 			}
 			if pr.Version != "" {
@@ -278,6 +299,14 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		// Expand secret references in all string config values before module instantiation.
 		// This replaces ${vault:...}, ${aws-sm:...}, ${env:...}, and ${VAR_NAME} patterns.
 		expandConfigStrings(e.secretsResolver, modCfg.Config)
+
+		// Inject config directory for relative path resolution in module factories
+		if e.configDir != "" {
+			if modCfg.Config == nil {
+				modCfg.Config = make(map[string]any)
+			}
+			modCfg.Config["_config_dir"] = e.configDir
+		}
 
 		// Create modules based on type
 		var mod modular.Module
@@ -371,6 +400,15 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	if len(cfg.Pipelines) > 0 {
 		if err := e.configurePipelines(cfg.Pipelines); err != nil {
 			return fmt.Errorf("failed to configure pipelines: %w", err)
+		}
+	}
+
+	// Run plugin wiring hooks (e.g., wire AuthProviders to AuthMiddleware)
+	if e.pluginLoader != nil {
+		for _, hook := range e.pluginLoader.WiringHooks() {
+			if err := hook.Hook(e.app, cfg); err != nil {
+				return fmt.Errorf("wiring hook %q failed: %w", hook.Name, err)
+			}
 		}
 	}
 

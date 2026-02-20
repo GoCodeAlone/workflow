@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/ai"
+	"github.com/GoCodeAlone/workflow/bundle"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/module"
@@ -569,5 +571,221 @@ func TestSetup_WithModules(t *testing.T) {
 	}
 	if app.engine == nil {
 		t.Fatal("expected non-nil engine")
+	}
+}
+
+func TestImportBundles_DeploysOnStartup(t *testing.T) {
+	// Create a temp directory for the test
+	tmpDir := t.TempDir()
+
+	// Create a valid workflow YAML
+	yamlContent := `name: test-import-bundle
+modules:
+  - name: test-server
+    type: http.server
+    config:
+      address: ":0"
+workflows: {}
+triggers: {}
+`
+
+	// Create a .tar.gz bundle using bundle.Export
+	bundlePath := filepath.Join(tmpDir, "test-bundle.tar.gz")
+	f, err := os.Create(bundlePath)
+	if err != nil {
+		t.Fatalf("failed to create bundle file: %v", err)
+	}
+	if err := bundle.Export(yamlContent, "", f); err != nil {
+		f.Close()
+		t.Fatalf("failed to export bundle: %v", err)
+	}
+	f.Close()
+
+	// Set up data dir for workspaces
+	testDataDir := filepath.Join(tmpDir, "data")
+
+	// Save and restore flag values
+	origImportBundle := *importBundle
+	origDataDir := *dataDir
+	t.Cleanup(func() {
+		*importBundle = origImportBundle
+		*dataDir = origDataDir
+	})
+	*importBundle = bundlePath
+	*dataDir = testDataDir
+
+	// Open a V1Store backed by a temp SQLite DB
+	dbPath := filepath.Join(testDataDir, "workflow.db")
+	if err := os.MkdirAll(testDataDir, 0755); err != nil {
+		t.Fatalf("failed to create data dir: %v", err)
+	}
+	store, err := module.OpenV1Store(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open v1 store: %v", err)
+	}
+	defer store.Close()
+
+	// Mock builder that accepts any config without actually starting an engine
+	mockBuilder := func(cfg *config.WorkflowConfig, lg *slog.Logger) (func(context.Context) error, error) {
+		return func(ctx context.Context) error { return nil }, nil
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	rm := module.NewRuntimeManager(store, mockBuilder, logger)
+
+	// Construct a minimal serverApp with the required fields
+	app := &serverApp{
+		logger:         logger,
+		v1Store:        store,
+		runtimeManager: rm,
+	}
+
+	// Run the import
+	if err := app.importBundles(logger); err != nil {
+		t.Fatalf("importBundles failed: %v", err)
+	}
+
+	// Verify: workspace directory was created
+	entries, err := os.ReadDir(filepath.Join(testDataDir, "workspaces"))
+	if err != nil {
+		t.Fatalf("failed to read workspaces dir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 workspace, got %d", len(entries))
+	}
+
+	wsID := entries[0].Name()
+
+	// Verify: workflow.yaml was extracted
+	extractedYAML := filepath.Join(testDataDir, "workspaces", wsID, "workflow.yaml")
+	if _, err := os.Stat(extractedYAML); os.IsNotExist(err) {
+		t.Error("expected workflow.yaml to be extracted")
+	}
+
+	// Verify: manifest.json was extracted
+	extractedManifest := filepath.Join(testDataDir, "workspaces", wsID, "manifest.json")
+	if _, err := os.Stat(extractedManifest); os.IsNotExist(err) {
+		t.Error("expected manifest.json to be extracted")
+	}
+
+	// Verify: runtime manager has the instance
+	instances := rm.ListInstances()
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 runtime instance, got %d", len(instances))
+	}
+	if instances[0].Name != "test-import-bundle" {
+		t.Errorf("expected instance name 'test-import-bundle', got %q", instances[0].Name)
+	}
+
+}
+
+func TestImportBundles_EmptyFlag(t *testing.T) {
+	origImportBundle := *importBundle
+	t.Cleanup(func() { *importBundle = origImportBundle })
+	*importBundle = ""
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	app := &serverApp{logger: logger}
+
+	// Should be a no-op with no error
+	if err := app.importBundles(logger); err != nil {
+		t.Fatalf("importBundles with empty flag should not error: %v", err)
+	}
+}
+
+func TestImportBundles_InvalidPath(t *testing.T) {
+	origImportBundle := *importBundle
+	t.Cleanup(func() { *importBundle = origImportBundle })
+	*importBundle = "/nonexistent/bundle.tar.gz"
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	app := &serverApp{logger: logger}
+
+	// Should log error but not return an error (continues to next bundle)
+	if err := app.importBundles(logger); err != nil {
+		t.Fatalf("importBundles with invalid path should not return error: %v", err)
+	}
+}
+
+func TestImportBundles_MultipleBundles(t *testing.T) {
+	tmpDir := t.TempDir()
+	testDataDir := filepath.Join(tmpDir, "data")
+	if err := os.MkdirAll(testDataDir, 0755); err != nil {
+		t.Fatalf("failed to create data dir: %v", err)
+	}
+
+	// Create two bundles
+	var bundlePaths []string
+	for i, name := range []string{"bundle-a", "bundle-b"} {
+		yaml := "name: " + name + "\nmodules:\n  - name: srv\n    type: http.server\n    config:\n      address: \":0\"\nworkflows: {}\ntriggers: {}\n"
+		path := filepath.Join(tmpDir, name+".tar.gz")
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatalf("create bundle %d: %v", i, err)
+		}
+		if err := bundle.Export(yaml, "", f); err != nil {
+			f.Close()
+			t.Fatalf("export bundle %d: %v", i, err)
+		}
+		f.Close()
+		bundlePaths = append(bundlePaths, path)
+	}
+
+	origImportBundle := *importBundle
+	origDataDir := *dataDir
+	t.Cleanup(func() {
+		*importBundle = origImportBundle
+		*dataDir = origDataDir
+	})
+	*importBundle = bundlePaths[0] + "," + bundlePaths[1]
+	*dataDir = testDataDir
+
+	store, err := module.OpenV1Store(filepath.Join(testDataDir, "workflow.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	mockBuilder := func(cfg *config.WorkflowConfig, lg *slog.Logger) (func(context.Context) error, error) {
+		return func(ctx context.Context) error { return nil }, nil
+	}
+	rm := module.NewRuntimeManager(store, mockBuilder, logger)
+
+	app := &serverApp{
+		logger:         logger,
+		v1Store:        store,
+		runtimeManager: rm,
+	}
+
+	if err := app.importBundles(logger); err != nil {
+		t.Fatalf("importBundles failed: %v", err)
+	}
+
+	// Should have 2 workspaces and 2 runtime instances
+	entries, err := os.ReadDir(filepath.Join(testDataDir, "workspaces"))
+	if err != nil {
+		t.Fatalf("read workspaces: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("expected 2 workspaces, got %d", len(entries))
+	}
+
+	instances := rm.ListInstances()
+	if len(instances) != 2 {
+		t.Errorf("expected 2 runtime instances, got %d", len(instances))
+	}
+}
+
+func TestEnvOverride_ImportBundle(t *testing.T) {
+	origImportBundle := *importBundle
+	t.Cleanup(func() { *importBundle = origImportBundle })
+
+	*importBundle = ""
+	t.Setenv("WORKFLOW_IMPORT_BUNDLE", "/some/bundle.tar.gz")
+	applyEnvOverrides()
+
+	if *importBundle != "/some/bundle.tar.gz" {
+		t.Errorf("importBundle = %q, want %q", *importBundle, "/some/bundle.tar.gz")
 	}
 }

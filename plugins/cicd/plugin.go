@@ -4,6 +4,7 @@
 package cicd
 
 import (
+	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
@@ -79,7 +80,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 }
 
 func wrapStepFactory(f module.StepFactory) plugin.StepFactory {
-	return func(name string, config map[string]any) (any, error) {
-		return f(name, config, nil)
+	return func(name string, config map[string]any, app modular.Application) (any, error) {
+		return f(name, config, app)
 	}
 }

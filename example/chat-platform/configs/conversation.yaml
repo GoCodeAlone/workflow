@@ -706,6 +706,9 @@ workflows:
           assign_responder:
             fromState: "queued"
             toState: "assigned"
+          assign_from_new:
+            fromState: "new"
+            toState: "assigned"
           start_conversation:
             fromState: "assigned"
             toState: "active"

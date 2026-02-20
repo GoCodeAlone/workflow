@@ -42,7 +42,7 @@ func TestPluginLoader_LoadSinglePlugin(t *testing.T) {
 			},
 		},
 		steps: map[string]StepFactory{
-			"my.step": func(name string, cfg map[string]any) (any, error) {
+			"my.step": func(name string, cfg map[string]any, _ modular.Application) (any, error) {
 				return nil, nil
 			},
 		},

@@ -79,6 +79,7 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			}
 			authMod := module.NewJWTAuthModule(name, secret, tokenExpiry, issuer)
 			if sf, ok := cfg["seedFile"].(string); ok && sf != "" {
+				sf = config.ResolvePathInConfig(cfg, sf)
 				authMod.SetSeedFile(sf)
 			}
 			if rf, ok := cfg["responseFormat"].(string); ok && rf != "" {

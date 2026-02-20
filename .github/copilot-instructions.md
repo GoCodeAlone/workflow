@@ -19,7 +19,7 @@ All functionality is configured through YAML files without code changes.
 - **Formatting**: All Go code must be formatted with `gofmt`. Run `go fmt ./...` before committing
 - **Linting**: Use `golangci-lint run` to check code quality
 - **Testing**: Run `go test ./...` for unit tests, `go test -v ./...` for verbose output
-- **Module Dependencies**: The project heavily relies on `github.com/GoCodeAlone/modular` - follow its patterns
+- **Module Dependencies**: The project relies on `github.com/CrisisTextLine/modular` (the fork, not the original) - follow its patterns
 
 ### Required Before Each Commit
 - Format Go code with `gofmt`

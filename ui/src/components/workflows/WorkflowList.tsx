@@ -5,6 +5,7 @@ import {
   apiDeleteWorkflow,
   apiDeployWorkflow,
   apiStopWorkflow,
+  apiLoadWorkflowFromPath,
   type ApiWorkflowRecord,
 } from '../../utils/api.ts';
 
@@ -19,6 +20,8 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   active: { bg: 'rgba(166, 227, 161, 0.2)', text: '#a6e3a1' },
   stopped: { bg: 'rgba(249, 226, 175, 0.2)', text: '#f9e2af' },
   error: { bg: 'rgba(243, 139, 168, 0.2)', text: '#f38ba8' },
+  deploying: { bg: 'rgba(137, 180, 250, 0.2)', text: '#89b4fa' },
+  stopping: { bg: 'rgba(249, 226, 175, 0.2)', text: '#f9e2af' },
 };
 
 export default function WorkflowList({ projectId, projectName, onOpenWorkflow }: WorkflowListProps) {
@@ -27,6 +30,8 @@ export default function WorkflowList({ projectId, projectName, onOpenWorkflow }:
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [loading, setLoading] = useState(true);
+  const [actionInProgress, setActionInProgress] = useState<Record<string, string>>({}); // id -> "deploying"|"stopping"
+  const [actionError, setActionError] = useState<Record<string, string>>({}); // id -> error message
 
   useEffect(() => {
     let cancelled = false;
@@ -54,20 +59,39 @@ export default function WorkflowList({ projectId, projectName, onOpenWorkflow }:
   };
 
   const handleDeploy = async (id: string) => {
+    setActionInProgress((prev) => ({ ...prev, [id]: 'deploying' }));
+    setActionError((prev) => { const next = { ...prev }; delete next[id]; return next; });
     try {
       const updated = await apiDeployWorkflow(id);
       setWorkflows((prev) => prev.map((w) => (w.id === id ? updated : w)));
-    } catch {
-      // ignore
+    } catch (e) {
+      setActionError((prev) => ({ ...prev, [id]: (e as Error).message }));
+    } finally {
+      setActionInProgress((prev) => { const next = { ...prev }; delete next[id]; return next; });
     }
   };
 
   const handleStop = async (id: string) => {
+    setActionInProgress((prev) => ({ ...prev, [id]: 'stopping' }));
+    setActionError((prev) => { const next = { ...prev }; delete next[id]; return next; });
     try {
       const updated = await apiStopWorkflow(id);
       setWorkflows((prev) => prev.map((w) => (w.id === id ? updated : w)));
-    } catch {
-      // ignore
+    } catch (e) {
+      setActionError((prev) => ({ ...prev, [id]: (e as Error).message }));
+    } finally {
+      setActionInProgress((prev) => { const next = { ...prev }; delete next[id]; return next; });
+    }
+  };
+
+  const handleLoadFromPath = async () => {
+    const serverPath = window.prompt('Enter server-local path to a workflow YAML file or directory:');
+    if (!serverPath) return;
+    try {
+      const wf = await apiLoadWorkflowFromPath(projectId, serverPath);
+      setWorkflows((prev) => [wf, ...prev]);
+    } catch (e) {
+      setActionError((prev) => ({ ...prev, _global: (e as Error).message }));
     }
   };
 
@@ -125,6 +149,21 @@ export default function WorkflowList({ projectId, projectName, onOpenWorkflow }:
             width: 200,
           }}
         />
+        <button
+          onClick={handleLoadFromPath}
+          style={{
+            padding: '6px 14px',
+            background: '#45475a',
+            border: 'none',
+            borderRadius: 6,
+            color: '#cdd6f4',
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          From Server Path
+        </button>
         <button
           onClick={() => setCreating(true)}
           style={{
@@ -192,113 +231,144 @@ export default function WorkflowList({ projectId, projectName, onOpenWorkflow }:
           </div>
         )}
 
-        {filtered.map((wf) => {
-          const statusStyle = STATUS_COLORS[wf.status] || STATUS_COLORS.draft;
-          return (
-            <div
-              key={wf.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                padding: '10px 12px',
-                borderRadius: 8,
-                marginBottom: 4,
-                background: '#181825',
-                border: '1px solid #313244',
-                gap: 12,
-              }}
-            >
-              {/* Name */}
-              <div
-                style={{ flex: 1, cursor: 'pointer', minWidth: 0 }}
-                onClick={() => onOpenWorkflow(wf)}
-              >
-                <div
-                  style={{
-                    fontWeight: 500,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    color: wf.is_system ? '#f9e2af' : '#89b4fa',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                  }}
-                >
-                  {wf.is_system && <span title="System workflow">{'\u{1F6E1}'}</span>}
-                  {wf.name}
-                  {wf.is_system && (
-                    <span style={{
-                      fontSize: 10,
-                      padding: '1px 5px',
-                      borderRadius: 8,
-                      background: 'rgba(249, 226, 175, 0.15)',
-                      color: '#f9e2af',
-                      fontWeight: 600,
-                    }}>
-                      v{wf.version}
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontSize: 11, color: '#6c7086', marginTop: 2 }}>
-                  {!wf.is_system && <>v{wf.version} &middot; </>}
-                  {new Date(wf.updated_at).toLocaleDateString()}
-                  {wf.is_system && ' \u00B7 Admin Configuration'}
-                </div>
-              </div>
+        {actionError._global && (
+          <div style={{ padding: '8px 12px', marginBottom: 8, background: 'rgba(243, 139, 168, 0.15)', borderRadius: 6, color: '#f38ba8', fontSize: 12 }}>
+            {actionError._global}
+            <button onClick={() => setActionError((prev) => { const next = { ...prev }; delete next._global; return next; })} style={{ ...iconBtnStyle, color: '#f38ba8', marginLeft: 8 }}>&times;</button>
+          </div>
+        )}
 
-              {/* Status badge */}
-              <span
+        {filtered.map((wf) => {
+          const inProgress = actionInProgress[wf.id];
+          const error = actionError[wf.id];
+          const displayStatus = inProgress || wf.status;
+          const statusStyle = STATUS_COLORS[displayStatus] || STATUS_COLORS.draft;
+          return (
+            <div key={wf.id}>
+              <div
                 style={{
-                  padding: '3px 8px',
-                  borderRadius: 10,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  background: statusStyle.bg,
-                  color: statusStyle.text,
-                  whiteSpace: 'nowrap',
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '10px 12px',
+                  borderRadius: error ? '8px 8px 0 0' : 8,
+                  marginBottom: error ? 0 : 4,
+                  background: '#181825',
+                  border: '1px solid #313244',
+                  gap: 12,
                 }}
               >
-                {wf.status}
-              </span>
-
-              {/* Actions */}
-              <div style={{ display: 'flex', gap: 4 }}>
-                {(wf.status === 'draft' || wf.status === 'stopped') && (
-                  <button
-                    onClick={() => handleDeploy(wf.id)}
-                    style={iconBtnStyle}
-                    title="Deploy"
-                  >
-                    &#9654;
-                  </button>
-                )}
-                {wf.status === 'active' && (
-                  <button
-                    onClick={() => handleStop(wf.id)}
-                    style={iconBtnStyle}
-                    title="Stop"
-                  >
-                    &#9632;
-                  </button>
-                )}
-                <button
+                {/* Name */}
+                <div
+                  style={{ flex: 1, cursor: 'pointer', minWidth: 0 }}
                   onClick={() => onOpenWorkflow(wf)}
-                  style={iconBtnStyle}
-                  title="Edit"
                 >
-                  &#9998;
-                </button>
-                {!wf.is_system && (
-                  <button
-                    onClick={() => handleDelete(wf.id)}
-                    style={{ ...iconBtnStyle, color: '#f38ba8' }}
-                    title="Delete"
+                  <div
+                    style={{
+                      fontWeight: 500,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      color: wf.is_system ? '#f9e2af' : '#89b4fa',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
                   >
-                    &#10005;
+                    {!!wf.is_system && <span title="System workflow">{'\u{1F6E1}'}</span>}
+                    {wf.name}
+                    {!!wf.is_system && (
+                      <span style={{
+                        fontSize: 10,
+                        padding: '1px 5px',
+                        borderRadius: 8,
+                        background: 'rgba(249, 226, 175, 0.15)',
+                        color: '#f9e2af',
+                        fontWeight: 600,
+                      }}>
+                        v{wf.version}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#6c7086', marginTop: 2 }}>
+                    {!wf.is_system && <>v{wf.version} &middot; </>}
+                    {new Date(wf.updated_at).toLocaleDateString()}
+                    {!!wf.is_system && ' \u00B7 Admin Configuration'}
+                  </div>
+                </div>
+
+                {/* Status badge */}
+                <span
+                  style={{
+                    padding: '3px 8px',
+                    borderRadius: 10,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    background: statusStyle.bg,
+                    color: statusStyle.text,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {inProgress ? `${inProgress}...` : wf.status}
+                </span>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {(wf.status === 'draft' || wf.status === 'stopped' || wf.status === 'error') && !inProgress && (
+                    <button
+                      onClick={() => handleDeploy(wf.id)}
+                      style={iconBtnStyle}
+                      title="Deploy"
+                    >
+                      &#9654;
+                    </button>
+                  )}
+                  {wf.status === 'active' && !inProgress && (
+                    <button
+                      onClick={() => handleStop(wf.id)}
+                      style={iconBtnStyle}
+                      title="Stop"
+                    >
+                      &#9632;
+                    </button>
+                  )}
+                  <button
+                    onClick={() => onOpenWorkflow(wf)}
+                    style={iconBtnStyle}
+                    title="Edit"
+                  >
+                    &#9998;
                   </button>
-                )}
+                  {!wf.is_system && (
+                    <button
+                      onClick={() => handleDelete(wf.id)}
+                      style={{ ...iconBtnStyle, color: '#f38ba8' }}
+                      title="Delete"
+                    >
+                      &#10005;
+                    </button>
+                  )}
+                </div>
               </div>
+              {error && (
+                <div
+                  style={{
+                    padding: '6px 12px',
+                    background: 'rgba(243, 139, 168, 0.1)',
+                    borderRadius: '0 0 8px 8px',
+                    border: '1px solid #313244',
+                    borderTop: 'none',
+                    marginBottom: 4,
+                    fontSize: 11,
+                    color: '#f38ba8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <span style={{ flex: 1 }}>{error}</span>
+                  <button onClick={() => setActionError((prev) => { const next = { ...prev }; delete next[wf.id]; return next; })} style={{ ...iconBtnStyle, color: '#f38ba8', fontSize: 12, padding: 2 }}>&times;</button>
+                </div>
+              )}
             </div>
           );
         })}

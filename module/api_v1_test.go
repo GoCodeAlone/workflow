@@ -58,8 +58,9 @@ func TestV1Store_CreateAndListCompanies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCompanies: %v", err)
 	}
-	if len(companies) != 2 {
-		t.Errorf("got %d companies, want 2", len(companies))
+	// 2 created + 1 seeded default company
+	if len(companies) != 3 {
+		t.Errorf("got %d companies, want 3", len(companies))
 	}
 
 	// GetCompany
@@ -106,8 +107,9 @@ func TestV1Store_CreateAndListOrganizations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCompanies: %v", err)
 	}
-	if len(companies) != 1 {
-		t.Errorf("got %d top-level companies, want 1", len(companies))
+	// 1 created + 1 seeded default company
+	if len(companies) != 2 {
+		t.Errorf("got %d top-level companies, want 2", len(companies))
 	}
 }
 
@@ -422,7 +424,7 @@ func TestV1Handler_ListCompanies(t *testing.T) {
 	handler, store, secret := setupTestHandler(t)
 	token := generateTestToken(secret, "1", "admin@test.com", "admin")
 
-	// Initially empty
+	// Admin sees seeded default company (is_system=1)
 	rr := doRequest(handler, "GET", "/api/v1/companies", "", token)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("got status %d, want %d: %s", rr.Code, http.StatusOK, rr.Body.String())
@@ -430,8 +432,8 @@ func TestV1Handler_ListCompanies(t *testing.T) {
 
 	var companies []V1Company
 	json.NewDecoder(rr.Body).Decode(&companies)
-	if len(companies) != 0 {
-		t.Errorf("got %d companies, want 0", len(companies))
+	if len(companies) != 1 {
+		t.Errorf("got %d companies, want 1 (seeded default)", len(companies))
 	}
 
 	// Create a company
@@ -443,8 +445,8 @@ func TestV1Handler_ListCompanies(t *testing.T) {
 	}
 
 	json.NewDecoder(rr.Body).Decode(&companies)
-	if len(companies) != 1 {
-		t.Errorf("got %d companies, want 1", len(companies))
+	if len(companies) != 2 {
+		t.Errorf("got %d companies, want 2", len(companies))
 	}
 }
 

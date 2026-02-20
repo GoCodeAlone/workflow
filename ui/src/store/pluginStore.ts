@@ -116,7 +116,9 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
-/** Derive enabledPages from current plugin list, falling back to FALLBACK_PAGES.
+/** Derive enabledPages from current plugin list, always including FALLBACK_PAGES
+ *  as the core navigation base. Plugin pages are merged in, with plugin pages
+ *  overriding fallback pages that share the same id.
  *  Filters pages by user role and permissions when provided. */
 function deriveEnabledPages(
   plugins: PluginInfo[],
@@ -126,7 +128,16 @@ function deriveEnabledPages(
   const enabledPlugins = plugins.filter((p) => p.enabled);
   const pagesFromPlugins = enabledPlugins.flatMap((p) => p.uiPages ?? []);
 
-  const pages = pagesFromPlugins.length > 0 ? pagesFromPlugins : FALLBACK_PAGES;
+  // Always start with fallback core navigation, then merge in plugin pages.
+  // Plugin pages with the same id override fallback pages.
+  const pageMap = new Map<string, UIPageDef>();
+  for (const page of FALLBACK_PAGES) {
+    pageMap.set(page.id, page);
+  }
+  for (const page of pagesFromPlugins) {
+    pageMap.set(page.id, page);
+  }
+  const pages = Array.from(pageMap.values());
 
   // Filter by role and permissions
   return pages.filter((page) => {

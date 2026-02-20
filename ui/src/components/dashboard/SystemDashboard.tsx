@@ -2,7 +2,7 @@ import { useEffect, useCallback, useMemo, useState } from 'react';
 import useObservabilityStore from '../../store/observabilityStore.ts';
 import useWorkflowStore from '../../store/workflowStore.ts';
 import type { WorkflowDashSummary } from '../../types/observability.ts';
-import { apiFetchRuntimeInstances, apiStopRuntimeInstance, type RuntimeInstanceResponse, type ApiWorkflowRecord } from '../../utils/api.ts';
+import { apiFetchRuntimeInstances, apiStopRuntimeInstance, apiDeployWorkflow, apiStopWorkflow, type RuntimeInstanceResponse, type ApiWorkflowRecord } from '../../utils/api.ts';
 
 const STATUS_COLORS: Record<string, string> = {
   draft: '#6c7086',
@@ -59,16 +59,24 @@ function StatusBadge({ status }: { status: string }) {
 function WorkflowCard({
   summary,
   onClick,
+  onDeploy,
+  onStop,
+  actionInProgress,
 }: {
   summary: WorkflowDashSummary;
   onClick: () => void;
+  onDeploy: () => void;
+  onStop: () => void;
+  actionInProgress?: string;
 }) {
   const totalExecs = Object.values(summary.executions).reduce((a, b) => a + b, 0);
   const errorCount = (summary.log_counts?.error ?? 0) + (summary.log_counts?.fatal ?? 0);
+  const displayStatus = actionInProgress || summary.status;
+  const canDeploy = (summary.status === 'draft' || summary.status === 'stopped' || summary.status === 'error') && !actionInProgress;
+  const canStop = summary.status === 'active' && !actionInProgress;
 
   return (
     <div
-      onClick={onClick}
       style={{
         background: '#313244',
         border: '1px solid #45475a',
@@ -80,15 +88,71 @@ function WorkflowCard({
       onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#89b4fa')}
       onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#45475a')}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ color: '#cdd6f4', fontWeight: 600, fontSize: 14 }}>{summary.workflow_name}</span>
-        <StatusBadge status={summary.status} />
+      <div onClick={onClick}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <span style={{ color: '#cdd6f4', fontWeight: 600, fontSize: 14 }}>{summary.workflow_name}</span>
+          <StatusBadge status={displayStatus} />
+        </div>
+        <div style={{ fontSize: 12, color: '#a6adc8' }}>
+          {totalExecs} executions
+          {errorCount > 0 && (
+            <span style={{ color: '#f38ba8', marginLeft: 8 }}>{errorCount} errors</span>
+          )}
+        </div>
       </div>
-      <div style={{ fontSize: 12, color: '#a6adc8' }}>
-        {totalExecs} executions
-        {errorCount > 0 && (
-          <span style={{ color: '#f38ba8', marginLeft: 8 }}>{errorCount} errors</span>
+      <div style={{ display: 'flex', gap: 6, marginTop: 10, borderTop: '1px solid #45475a', paddingTop: 10 }}>
+        {canDeploy && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDeploy(); }}
+            style={{
+              background: 'rgba(166, 227, 161, 0.15)',
+              color: '#a6e3a1',
+              border: '1px solid rgba(166, 227, 161, 0.3)',
+              borderRadius: 4,
+              padding: '3px 10px',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Deploy
+          </button>
         )}
+        {canStop && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onStop(); }}
+            style={{
+              background: 'rgba(249, 226, 175, 0.15)',
+              color: '#f9e2af',
+              border: '1px solid rgba(249, 226, 175, 0.3)',
+              borderRadius: 4,
+              padding: '3px 10px',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Stop
+          </button>
+        )}
+        {actionInProgress && (
+          <span style={{ fontSize: 11, color: '#6c7086', padding: '3px 0' }}>{actionInProgress}...</span>
+        )}
+        <button
+          onClick={(e) => { e.stopPropagation(); onClick(); }}
+          style={{
+            background: 'none',
+            color: '#89b4fa',
+            border: '1px solid #45475a',
+            borderRadius: 4,
+            padding: '3px 10px',
+            fontSize: 11,
+            cursor: 'pointer',
+            marginLeft: 'auto',
+          }}
+        >
+          View
+        </button>
       </div>
     </div>
   );
@@ -102,6 +166,31 @@ export default function SystemDashboard() {
   const activeTabId = useWorkflowStore((s) => s.activeTabId);
 
   const [runtimeInstances, setRuntimeInstances] = useState<RuntimeInstanceResponse[]>([]);
+  const [workflowActions, setWorkflowActions] = useState<Record<string, string>>({});
+
+  const handleDeployWorkflow = useCallback(async (wfId: string) => {
+    setWorkflowActions((prev) => ({ ...prev, [wfId]: 'deploying' }));
+    try {
+      await apiDeployWorkflow(wfId);
+      fetchSystemDashboard();
+    } catch {
+      // silently fail, dashboard will refresh
+    } finally {
+      setWorkflowActions((prev) => { const next = { ...prev }; delete next[wfId]; return next; });
+    }
+  }, [fetchSystemDashboard]);
+
+  const handleStopWorkflow = useCallback(async (wfId: string) => {
+    setWorkflowActions((prev) => ({ ...prev, [wfId]: 'stopping' }));
+    try {
+      await apiStopWorkflow(wfId);
+      fetchSystemDashboard();
+    } catch {
+      // silently fail, dashboard will refresh
+    } finally {
+      setWorkflowActions((prev) => { const next = { ...prev }; delete next[wfId]; return next; });
+    }
+  }, [fetchSystemDashboard]);
 
   useEffect(() => {
     fetchSystemDashboard();
@@ -158,7 +247,7 @@ export default function SystemDashboard() {
         padding: 24,
       }}
     >
-      <h2 style={{ color: '#cdd6f4', margin: '0 0 20px', fontSize: 20, fontWeight: 600 }}>System Dashboard</h2>
+      <h2 style={{ color: '#cdd6f4', margin: '0 0 20px', fontSize: 20, fontWeight: 600 }}>System Dashboard <span style={{ fontSize: 12, color: '#6c7086', fontWeight: 400 }}>v1.0.0</span></h2>
 
       {dashboardLoading && !systemDashboard && (
         <div style={{ color: '#6c7086', padding: 40, textAlign: 'center' }}>Loading...</div>
@@ -183,7 +272,14 @@ export default function SystemDashboard() {
         }}
       >
         {summaries.map((s) => (
-          <WorkflowCard key={s.workflow_id} summary={s} onClick={() => handleWorkflowClick(s.workflow_id)} />
+          <WorkflowCard
+            key={s.workflow_id}
+            summary={s}
+            onClick={() => handleWorkflowClick(s.workflow_id)}
+            onDeploy={() => handleDeployWorkflow(s.workflow_id)}
+            onStop={() => handleStopWorkflow(s.workflow_id)}
+            actionInProgress={workflowActions[s.workflow_id]}
+          />
         ))}
         {summaries.length === 0 && !dashboardLoading && (
           <div style={{ color: '#6c7086', fontSize: 13, gridColumn: '1 / -1' }}>No workflows found.</div>

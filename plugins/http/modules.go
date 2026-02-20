@@ -3,6 +3,7 @@ package http
 import (
 	"github.com/CrisisTextLine/modular"
 	"github.com/CrisisTextLine/modular/modules/reverseproxy/v2"
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 )
@@ -73,6 +74,7 @@ func staticFileServerFactory(name string, cfg map[string]any) modular.Module {
 	if r, ok := cfg["root"].(string); ok {
 		root = r
 	}
+	root = config.ResolvePathInConfig(cfg, root)
 	prefix := "/"
 	if p, ok := cfg["prefix"].(string); ok && p != "" {
 		prefix = p

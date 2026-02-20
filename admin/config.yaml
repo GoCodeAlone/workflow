@@ -87,7 +87,7 @@ modules:
   - name: admin-ui
     type: static.fileserver
     config:
-      root: "../module/ui_dist"
+      root: "module/ui_dist"
       prefix: "/"
       spaFallback: true
       cacheMaxAge: 3600
@@ -675,7 +675,7 @@ workflows:
               type: step.db_query
               config:
                 database: admin-db
-                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at FROM workflows WHERE project_id = ? ORDER BY created_at DESC"
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at FROM workflows WHERE project_id = ? ORDER BY created_at DESC"
                 params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
                 mode: list
             - name: respond
@@ -743,7 +743,7 @@ workflows:
               type: step.db_query
               config:
                 database: admin-db
-                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at FROM workflows ORDER BY created_at DESC"
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at FROM workflows ORDER BY created_at DESC"
                 mode: list
             - name: respond
               type: step.json_response
@@ -811,7 +811,7 @@ workflows:
               type: step.db_query
               config:
                 database: admin-db
-                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
                 params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
                 mode: single
             - name: check-found
@@ -867,10 +867,22 @@ workflows:
               type: step.db_exec
               config:
                 database: admin-db
-                query: "UPDATE workflows SET name=?, description=?, config_yaml=?, version=version+1, updated_by=?, updated_at=? WHERE id=?"
+                query: >-
+                  UPDATE workflows SET
+                    name = COALESCE(NULLIF(?, ''), name),
+                    slug = COALESCE(NULLIF(?, ''), slug),
+                    description = COALESCE(NULLIF(?, ''), description),
+                    config_yaml = COALESCE(NULLIF(?, ''), config_yaml),
+                    version = CASE WHEN NULLIF(?, '') IS NOT NULL AND NULLIF(?, '') != config_yaml THEN version + 1 ELSE version END,
+                    updated_by = ?,
+                    updated_at = ?
+                  WHERE id = ?
                 params:
-                  - "{{index .steps \"parse-request\" \"body\" \"name\"}}"
+                  - "{{default \"\" (index .steps \"parse-request\" \"body\" \"name\")}}"
+                  - "{{default \"\" (index .steps \"parse-request\" \"body\" \"name\")}}"
                   - "{{default \"\" (index .steps \"parse-request\" \"body\" \"description\")}}"
+                  - "{{default \"\" (index .steps \"parse-request\" \"body\" \"config_yaml\")}}"
+                  - "{{default \"\" (index .steps \"parse-request\" \"body\" \"config_yaml\")}}"
                   - "{{default \"\" (index .steps \"parse-request\" \"body\" \"config_yaml\")}}"
                   - ""
                   - "{{index .steps \"prepare-update\" \"now\"}}"
@@ -888,7 +900,7 @@ workflows:
               type: step.db_query
               config:
                 database: admin-db
-                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
                 params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
                 mode: single
             - name: respond
@@ -967,112 +979,59 @@ workflows:
               config:
                 status: 200
                 body_from: "steps.get-versions.rows"
+      # Deploy and Stop delegate to V1APIHandler which manages RuntimeManager
       - method: POST
         path: "/api/v1/admin/workflows/{id}/deploy"
         handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: parse-request
-              type: step.request_parse
+            - name: deploy-workflow
+              type: step.delegate
               config:
-                path_params: [id]
-            - name: set-now
-              type: step.set
-              config:
-                values:
-                  now: "{{ now }}"
-            - name: activate-workflow
-              type: step.db_exec
-              config:
-                database: admin-db
-                query: "UPDATE workflows SET status='active', updated_at=? WHERE id=?"
-                params:
-                  - "{{index .steps \"set-now\" \"now\"}}"
-                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
-            - name: record-deploy
-              type: step.db_exec
-              config:
-                database: admin-db
-                query: "INSERT INTO workflow_executions (id, workflow_id, trigger_type, status, started_at, completed_at, duration_ms) VALUES (?, ?, 'deploy', 'completed', ?, ?, 0)"
-                params:
-                  - "{{ uuidv4 }}"
-                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
-                  - "{{index .steps \"set-now\" \"now\"}}"
-                  - "{{index .steps \"set-now\" \"now\"}}"
-            - name: audit-deploy
-              type: step.db_exec
-              config:
-                database: admin-db
-                query: "INSERT INTO audit_log (action, resource_type, resource_id, details, created_at) VALUES ('deploy', 'workflow', ?, '{}', ?)"
-                params:
-                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
-                  - "{{index .steps \"set-now\" \"now\"}}"
-            - name: get-workflow
-              type: step.db_query
-              config:
-                database: admin-db
-                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
-                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
-                mode: single
-            - name: respond
-              type: step.json_response
-              config:
-                status: 200
-                body_from: "steps.get-workflow.row"
+                service: admin-v1-mgmt
       - method: POST
         path: "/api/v1/admin/workflows/{id}/stop"
         handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: parse-request
-              type: step.request_parse
-              config:
-                path_params: [id]
-            - name: set-now
-              type: step.set
-              config:
-                values:
-                  now: "{{ now }}"
             - name: stop-workflow
-              type: step.db_exec
+              type: step.delegate
               config:
-                database: admin-db
-                query: "UPDATE workflows SET status='stopped', updated_at=? WHERE id=?"
-                params:
-                  - "{{index .steps \"set-now\" \"now\"}}"
-                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
-            - name: record-stop
-              type: step.db_exec
+                service: admin-v1-mgmt
+      # Load workflow from a server-local filesystem path
+      - method: POST
+        path: "/api/v1/admin/workflows/load-from-path"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: load-from-path
+              type: step.delegate
               config:
-                database: admin-db
-                query: "INSERT INTO workflow_executions (id, workflow_id, trigger_type, status, started_at, completed_at, duration_ms) VALUES (?, ?, 'stop', 'completed', ?, ?, 0)"
-                params:
-                  - "{{ uuidv4 }}"
-                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
-                  - "{{index .steps \"set-now\" \"now\"}}"
-                  - "{{index .steps \"set-now\" \"now\"}}"
-            - name: audit-stop
-              type: step.db_exec
+                service: admin-v1-mgmt
+      # Import/Export workflow bundles
+      - method: POST
+        path: "/api/v1/admin/workflows/import"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: import-workflow-bundle
+              type: step.delegate
               config:
-                database: admin-db
-                query: "INSERT INTO audit_log (action, resource_type, resource_id, details, created_at) VALUES ('stop', 'workflow', ?, '{}', ?)"
-                params:
-                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
-                  - "{{index .steps \"set-now\" \"now\"}}"
-            - name: get-workflow
-              type: step.db_query
+                service: admin-v1-mgmt
+      - method: GET
+        path: "/api/v1/admin/workflows/{id}/export"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: export-workflow-bundle
+              type: step.delegate
               config:
-                database: admin-db
-                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
-                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
-                mode: single
-            - name: respond
-              type: step.json_response
-              config:
-                status: 200
-                body_from: "steps.get-workflow.row"
+                service: admin-v1-mgmt
       - method: GET
         path: "/api/v1/admin/workflows/{id}/status"
         handler: admin-queries
@@ -1122,7 +1081,7 @@ workflows:
               type: step.db_query
               config:
                 database: admin-db
-                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
                 params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
                 mode: single
             - name: get-execution-stats
@@ -1420,6 +1379,24 @@ workflows:
       # ============================================================
       # V1 API: IAM (Phase C: decomposed with new tables)
       # ============================================================
+
+      - method: GET
+        path: "/api/v1/admin/iam/providers"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: list-iam-providers
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, name, type, client_id, enabled, created_at, updated_at FROM iam_provider_configs ORDER BY created_at DESC"
+                mode: list
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.list-iam-providers.rows"
 
       - method: GET
         path: "/api/v1/admin/iam/providers/{id}"
@@ -2071,6 +2048,71 @@ workflows:
               type: step.delegate
               config:
                 service: admin-env-mgmt
+
+      # ============================================================
+      # FEATURE FLAGS
+      # ============================================================
+
+      - method: GET
+        path: "/api/v1/admin/feature-flags"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: list-feature-flags
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
+      - method: POST
+        path: "/api/v1/admin/feature-flags"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: create-feature-flag
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
+      - method: PUT
+        path: "/api/v1/admin/feature-flags/{key}"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: update-feature-flag
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
+      - method: DELETE
+        path: "/api/v1/admin/feature-flags/{key}"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: delete-feature-flag
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
+      - method: PUT
+        path: "/api/v1/admin/feature-flags/{key}/overrides"
+        handler: admin-commands
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: set-feature-flag-overrides
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
+      - method: GET
+        path: "/api/v1/admin/feature-flags/stream"
+        handler: admin-queries
+        middlewares: [admin-cors, admin-auth-middleware]
+        pipeline:
+          steps:
+            - name: stream-feature-flags
+              type: step.delegate
+              config:
+                service: admin-v1-mgmt
 
       # ============================================================
       # CLOUD PROVIDERS (CI/CD Platform)

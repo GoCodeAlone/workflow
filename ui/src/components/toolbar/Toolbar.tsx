@@ -5,6 +5,9 @@ import {
   getWorkflowConfig,
   validateWorkflow,
   apiUpdateWorkflow,
+  apiLoadWorkflowFromPath,
+  apiDeployWorkflow,
+  apiStopWorkflow,
 } from '../../utils/api.ts';
 import WorkflowHistory from '../workflows/WorkflowHistory.tsx';
 
@@ -32,6 +35,35 @@ export default function Toolbar() {
   const setActiveWorkflowRecord = useWorkflowStore((s) => s.setActiveWorkflowRecord);
 
   const [showHistory, setShowHistory] = useState(false);
+  const [deployInProgress, setDeployInProgress] = useState(false);
+
+  const handleDeploy = async () => {
+    if (!activeWorkflowRecord) return;
+    setDeployInProgress(true);
+    try {
+      const updated = await apiDeployWorkflow(activeWorkflowRecord.id);
+      setActiveWorkflowRecord(updated);
+      addToast(`Deployed v${updated.version} - status: ${updated.status}`, 'success');
+    } catch (e) {
+      addToast(`Deploy failed: ${(e as Error).message}`, 'error');
+    } finally {
+      setDeployInProgress(false);
+    }
+  };
+
+  const handleStopWorkflow = async () => {
+    if (!activeWorkflowRecord) return;
+    setDeployInProgress(true);
+    try {
+      const updated = await apiStopWorkflow(activeWorkflowRecord.id);
+      setActiveWorkflowRecord(updated);
+      addToast(`Stopped "${updated.name}"`, 'success');
+    } catch (e) {
+      addToast(`Stop failed: ${(e as Error).message}`, 'error');
+    } finally {
+      setDeployInProgress(false);
+    }
+  };
 
   const handleExport = () => {
     const config = exportToConfig();
@@ -79,6 +111,25 @@ export default function Toolbar() {
       addToast('Workflow loaded from server', 'success');
     } catch (e) {
       addToast(`Failed to load: ${(e as Error).message}`, 'error');
+    }
+  };
+
+  const handleImportFromServerPath = async () => {
+    const serverPath = window.prompt('Enter server-local path to a workflow YAML file or directory:\n\nExamples:\n  example/chat-platform\n  /home/user/workflow/example/ecommerce-app.yaml');
+    if (!serverPath) return;
+
+    if (!activeWorkflowRecord) {
+      addToast('No workflow selected. Create a workflow first, then import config from server.', 'warning');
+      return;
+    }
+
+    try {
+      const wf = await apiLoadWorkflowFromPath(activeWorkflowRecord.project_id, serverPath);
+      const config = parseYaml(wf.config_yaml);
+      importFromConfig(config);
+      addToast(`Loaded "${wf.name}" from server path`, 'success');
+    } catch (e) {
+      addToast(`Failed to load from server: ${(e as Error).message}`, 'error');
     }
   };
 
@@ -218,8 +269,15 @@ export default function Toolbar() {
 
       <ToolbarButton label="Import" onClick={handleImport} />
       <ToolbarButton label="Load Server" onClick={handleLoadFromServer} />
+      <ToolbarButton label="From Path" onClick={handleImportFromServerPath} />
       <ToolbarButton label="Export YAML" onClick={handleExport} disabled={nodes.length === 0} />
       <ToolbarButton label="Save" onClick={handleSave} disabled={nodes.length === 0} />
+      {activeWorkflowRecord && (activeWorkflowRecord.status === 'draft' || activeWorkflowRecord.status === 'stopped' || activeWorkflowRecord.status === 'error') && (
+        <ToolbarButton label={deployInProgress ? 'Deploying...' : 'Deploy'} onClick={handleDeploy} disabled={deployInProgress} variant="deploy" />
+      )}
+      {activeWorkflowRecord && activeWorkflowRecord.status === 'active' && (
+        <ToolbarButton label={deployInProgress ? 'Stopping...' : 'Stop'} onClick={handleStopWorkflow} disabled={deployInProgress} variant="danger" />
+      )}
       {activeWorkflowRecord && (
         <ToolbarButton label="History" onClick={() => setShowHistory(true)} />
       )}
@@ -305,7 +363,7 @@ function ToolbarButton({
   label: string;
   onClick: () => void;
   disabled?: boolean;
-  variant?: 'danger' | 'active';
+  variant?: 'danger' | 'active' | 'deploy';
 }) {
   const color = disabled
     ? '#585b70'
@@ -313,6 +371,8 @@ function ToolbarButton({
     ? '#f38ba8'
     : variant === 'active'
     ? '#89b4fa'
+    : variant === 'deploy'
+    ? '#1e1e2e'
     : '#cdd6f4';
 
   return (
@@ -321,13 +381,13 @@ function ToolbarButton({
       disabled={disabled}
       style={{
         padding: '5px 12px',
-        background: variant === 'active' ? '#313244' : variant === 'danger' ? '#45475a' : '#313244',
-        border: `1px solid ${variant === 'active' ? '#89b4fa' : '#45475a'}`,
+        background: variant === 'deploy' ? '#a6e3a1' : variant === 'active' ? '#313244' : variant === 'danger' ? '#45475a' : '#313244',
+        border: `1px solid ${variant === 'deploy' ? '#a6e3a1' : variant === 'active' ? '#89b4fa' : '#45475a'}`,
         borderRadius: 4,
         color,
         fontSize: 12,
         cursor: disabled ? 'default' : 'pointer',
-        fontWeight: 500,
+        fontWeight: variant === 'deploy' ? 700 : 500,
         opacity: disabled ? 0.5 : 1,
       }}
     >

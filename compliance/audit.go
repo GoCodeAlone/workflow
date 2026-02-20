@@ -231,6 +231,7 @@ func NewSQLiteAuditLog(dbPath string) (*SQLiteAuditLog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("audit: open sqlite: %w", err)
 	}
+	db.SetMaxOpenConns(1)
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("audit: ping sqlite: %w", err)

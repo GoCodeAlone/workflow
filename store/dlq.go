@@ -289,7 +289,7 @@ func NewSQLiteDLQStore(dbPath string) (*SQLiteDLQStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	db.SetMaxOpenConns(5)
+	db.SetMaxOpenConns(1)
 
 	s := &SQLiteDLQStore{db: db}
 	if err := s.init(); err != nil {

@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/GoCodeAlone/workflow/bundle"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 // V1APIHandler handles the /api/v1/admin/ CRUD endpoints for companies, projects,
@@ -15,7 +19,9 @@ import (
 type V1APIHandler struct {
 	store              *V1Store
 	jwtSecret          string
+	dataDir            string                        // base data directory for workspace extraction
 	reloadFn           func(configYAML string) error // callback to reload engine with new admin config
+	runtimeManager     *RuntimeManager               // optional runtime manager for deploy/stop
 	workspaceHandler   *WorkspaceHandler             // optional workspace file management handler
 	featureFlagService FeatureFlagAdmin              // optional feature flag admin service
 }
@@ -36,6 +42,16 @@ func (h *V1APIHandler) SetWorkspaceHandler(wh *WorkspaceHandler) {
 // SetReloadFunc sets the callback invoked when deploying the system workflow.
 func (h *V1APIHandler) SetReloadFunc(fn func(configYAML string) error) {
 	h.reloadFn = fn
+}
+
+// SetRuntimeManager sets the runtime manager used for deploy/stop operations.
+func (h *V1APIHandler) SetRuntimeManager(rm *RuntimeManager) {
+	h.runtimeManager = rm
+}
+
+// SetDataDir sets the base data directory used for workspace extraction during import.
+func (h *V1APIHandler) SetDataDir(dir string) {
+	h.dataDir = dir
 }
 
 // ServeHTTP implements http.Handler for config-driven delegate dispatch.
@@ -271,6 +287,22 @@ func (h *V1APIHandler) handleWorkflows(w http.ResponseWriter, r *http.Request, r
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		}
 
+	// /workflows/load-from-path (special action, not an ID)
+	case len(rest) == 1 && rest[0] == "load-from-path":
+		if r.Method == http.MethodPost {
+			h.loadWorkflowFromPath(w, r)
+		} else {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		}
+
+	// /workflows/import (bundle import)
+	case len(rest) == 1 && rest[0] == "import":
+		if r.Method == http.MethodPost {
+			h.importWorkflow(w, r)
+		} else {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		}
+
 	// /workflows/{id}
 	case len(rest) == 1:
 		workflowID := rest[0]
@@ -305,6 +337,12 @@ func (h *V1APIHandler) handleWorkflows(w http.ResponseWriter, r *http.Request, r
 		case "stop":
 			if r.Method == http.MethodPost {
 				h.stopWorkflow(w, r, workflowID)
+			} else {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			}
+		case "export":
+			if r.Method == http.MethodGet {
+				h.exportWorkflow(w, r, workflowID)
 			} else {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			}
@@ -823,18 +861,27 @@ func (h *V1APIHandler) deployWorkflow(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 
-	updated, err := h.store.SetWorkflowStatus(id, "active")
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-
 	// For system workflows, trigger engine reload
 	if wf.IsSystem && h.reloadFn != nil {
 		if err := h.reloadFn(wf.ConfigYAML); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("deploy failed: %v", err)})
 			return
 		}
+	}
+
+	// For non-system workflows, start as a runtime instance
+	if !wf.IsSystem && h.runtimeManager != nil && wf.ConfigYAML != "" {
+		if launchErr := h.runtimeManager.LaunchFromWorkspace(r.Context(), id, wf.Name, wf.ConfigYAML, wf.WorkspaceDir); launchErr != nil {
+			_, _ = h.store.SetWorkflowStatus(id, "error")
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("launch failed: %v", launchErr)})
+			return
+		}
+	}
+
+	updated, err := h.store.SetWorkflowStatus(id, "active")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
 
 	writeJSON(w, http.StatusOK, updated)
@@ -862,12 +909,236 @@ func (h *V1APIHandler) stopWorkflow(w http.ResponseWriter, r *http.Request, id s
 		return
 	}
 
+	// Stop the runtime instance if running
+	if h.runtimeManager != nil {
+		if inst, ok := h.runtimeManager.GetInstance(id); ok && inst.Status == "running" {
+			if stopErr := h.runtimeManager.StopWorkflow(r.Context(), id); stopErr != nil {
+				// Log but don't fail — the DB status update should still proceed
+				_ = stopErr
+			}
+		}
+	}
+
 	updated, err := h.store.SetWorkflowStatus(id, "stopped")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
+}
+
+// loadWorkflowFromPath reads a workflow config from a server-local file path
+// and creates a workflow record in the store.
+func (h *V1APIHandler) loadWorkflowFromPath(w http.ResponseWriter, r *http.Request) {
+	claims := h.requireAuth(w, r)
+	if claims == nil {
+		return
+	}
+
+	var req struct {
+		Path      string `json:"path"`
+		ProjectID string `json:"project_id"`
+	}
+	if err := decodeBody(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.Path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
+		return
+	}
+	if req.ProjectID == "" {
+		// Use the default seeded project
+		req.ProjectID = "00000000-0000-0000-0000-000000000002"
+	}
+
+	// Resolve the config file path
+	configPath := filepath.Clean(req.Path)
+	info, err := os.Stat(configPath)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("path not found: %s", configPath)})
+		return
+	}
+
+	// If directory, look for workflow.yaml
+	if info.IsDir() {
+		yamlPath := filepath.Join(configPath, "workflow.yaml")
+		if _, err := os.Stat(yamlPath); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("no workflow.yaml in %s", configPath)})
+			return
+		}
+		configPath = yamlPath
+	}
+
+	// Read the config file
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to read file: %v", err)})
+		return
+	}
+
+	// Derive name from the directory or file
+	name := filepath.Base(filepath.Dir(configPath))
+	if name == "." || name == "/" {
+		name = strings.TrimSuffix(filepath.Base(configPath), filepath.Ext(configPath))
+	}
+
+	createdBy := claims.Email
+	if createdBy == "" {
+		createdBy = claims.UserID
+	}
+
+	// Set workspace_dir to the config file's directory so relative paths resolve
+	workspaceDir := filepath.Dir(configPath)
+
+	wf, err := h.store.CreateWorkflow(req.ProjectID, name, name, fmt.Sprintf("Loaded from %s", req.Path), string(data), createdBy)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Update workspace_dir on the record
+	wf.WorkspaceDir = workspaceDir
+	if updateErr := h.store.UpdateWorkflowWorkspaceDir(wf.ID, workspaceDir); updateErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to set workspace_dir: %v", updateErr)})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, wf)
+}
+
+// =============================================================================
+// Import / Export
+// =============================================================================
+
+func (h *V1APIHandler) exportWorkflow(w http.ResponseWriter, r *http.Request, id string) {
+	claims := h.requireAuth(w, r)
+	if claims == nil {
+		return
+	}
+
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workflow ID required"})
+		return
+	}
+
+	wf, err := h.store.GetWorkflow(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "workflow not found"})
+		return
+	}
+
+	if wf.IsSystem && claims.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		return
+	}
+
+	filename := wf.Slug + ".tar.gz"
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+
+	if err := bundle.Export(wf.ConfigYAML, wf.WorkspaceDir, w); err != nil {
+		// Headers already sent, best effort error
+		http.Error(w, fmt.Sprintf("export failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
+
+func (h *V1APIHandler) importWorkflow(w http.ResponseWriter, r *http.Request) {
+	claims := h.requireAuth(w, r)
+	if claims == nil {
+		return
+	}
+
+	if err := r.ParseMultipartForm(100 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid multipart form: %v", err)})
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file field is required"})
+		return
+	}
+	defer file.Close()
+
+	projectID := r.FormValue("project_id")
+
+	// Generate a workspace ID and determine the destination directory
+	workspaceID := uuid.New().String()
+	dataDir := h.dataDir
+	if dataDir == "" {
+		dataDir = "data"
+	}
+	destDir := filepath.Join(dataDir, "workspaces", workspaceID)
+
+	// Extract the bundle
+	manifest, workflowPath, err := bundle.Import(file, destDir)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("import failed: %v", err)})
+		return
+	}
+
+	// Read the extracted workflow.yaml
+	yamlData, err := os.ReadFile(workflowPath)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to read extracted workflow.yaml: %v", err)})
+		return
+	}
+
+	name := manifest.Name
+	if name == "" {
+		name = "imported-workflow"
+	}
+	slug := toSlug(name)
+
+	createdBy := claims.Email
+	if createdBy == "" {
+		createdBy = claims.UserID
+	}
+
+	// Idempotency: check if a workflow with the same slug exists in the project
+	if projectID != "" {
+		if existing, err := h.store.GetWorkflowBySlugAndProject(slug, projectID); err == nil && existing != nil {
+			// Update existing workflow
+			existing.ConfigYAML = string(yamlData)
+			existing.WorkspaceDir = destDir
+			updated, updateErr := h.store.UpdateWorkflow(existing.ID, name, existing.Description, string(yamlData), createdBy)
+			if updateErr != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": updateErr.Error()})
+				return
+			}
+			// Also update workspace_dir
+			h.store.SetWorkspaceDir(updated.ID, destDir)
+			updated.WorkspaceDir = destDir
+			writeJSON(w, http.StatusOK, updated)
+			return
+		}
+	}
+
+	// If no project_id provided, try to find the first available project
+	if projectID == "" {
+		projects, listErr := h.store.ListAllProjects()
+		if listErr == nil && len(projects) > 0 {
+			projectID = projects[0].ID
+		} else {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project_id is required (no projects found)"})
+			return
+		}
+	}
+
+	// Create new workflow
+	wf, err := h.store.CreateWorkflow(projectID, name, slug, fmt.Sprintf("Imported from bundle: %s", name), string(yamlData), createdBy)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Set workspace_dir
+	h.store.SetWorkspaceDir(wf.ID, destDir)
+	wf.WorkspaceDir = destDir
+
+	writeJSON(w, http.StatusCreated, wf)
 }
 
 // =============================================================================

@@ -170,6 +170,7 @@ modules:
       workflowType: "conversation-lifecycle"
       workflowEngine: "conversation-engine"
       initialTransition: "route_message"
+      instanceIDPrefix: "conv-"
     dependsOn:
       - rate-limiter
       - persistence
@@ -181,6 +182,7 @@ modules:
       workflowType: "conversation-lifecycle"
       workflowEngine: "conversation-engine"
       initialTransition: "route_message"
+      instanceIDPrefix: "conv-"
     dependsOn:
       - rate-limiter
       - persistence
@@ -1130,6 +1132,9 @@ workflows:
             autoTransform: true
           assign_responder:
             fromState: "queued"
+            toState: "assigned"
+          assign_from_new:
+            fromState: "new"
             toState: "assigned"
           start_conversation:
             fromState: "assigned"

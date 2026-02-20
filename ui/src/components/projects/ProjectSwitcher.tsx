@@ -324,7 +324,7 @@ export default function ProjectSwitcher({ selectedProjectId, onSelectProject }: 
                         {orgNode.projects.map((proj) => (
                           <div
                             key={proj.id}
-                            onClick={() => onSelectProject(proj)}
+                            onClick={(e) => { e.stopPropagation(); onSelectProject(proj); }}
                             title={proj.name}
                             style={{
                               padding: '4px 8px',

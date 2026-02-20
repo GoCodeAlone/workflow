@@ -10,8 +10,8 @@ import (
 
 func TestNew(t *testing.T) {
 	p := New()
-	if p.Name() != "ai-plugin" {
-		t.Fatalf("expected name ai-plugin, got %s", p.Name())
+	if p.Name() != "ai" {
+		t.Fatalf("expected name ai, got %s", p.Name())
 	}
 	if p.Version() != "1.0.0" {
 		t.Fatalf("expected version 1.0.0, got %s", p.Version())

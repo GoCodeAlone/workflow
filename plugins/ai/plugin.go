@@ -30,12 +30,12 @@ func New() *Plugin {
 	return &Plugin{
 		BaseEnginePlugin: pluginPkg.BaseEnginePlugin{
 			BaseNativePlugin: pluginPkg.BaseNativePlugin{
-				PluginName:        "ai-plugin",
+				PluginName:        "ai",
 				PluginVersion:     "1.0.0",
 				PluginDescription: "AI pipeline steps (complete, classify, extract), dynamic components, and sub-workflow orchestration",
 			},
 			Manifest: pluginPkg.PluginManifest{
-				Name:        "ai-plugin",
+				Name:        "ai",
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
 				Description: "AI pipeline steps (complete, classify, extract), dynamic components, and sub-workflow orchestration",
@@ -96,6 +96,7 @@ func (p *Plugin) ModuleFactories() map[string]pluginPkg.ModuleFactory {
 			// Load from source if loader is available
 			if p.dynamicLoader != nil {
 				if sourcePath, ok := cfg["source"].(string); ok && sourcePath != "" {
+					sourcePath = config.ResolvePathInConfig(cfg, sourcePath)
 					_, _ = p.dynamicLoader.LoadFromFile(componentID, sourcePath)
 				}
 			}
@@ -143,7 +144,7 @@ func (p *Plugin) StepFactories() map[string]pluginPkg.StepFactory {
 }
 
 func wrapStepFactory(f module.StepFactory) pluginPkg.StepFactory {
-	return func(name string, cfg map[string]any) (any, error) {
-		return f(name, cfg, nil)
+	return func(name string, cfg map[string]any, app modular.Application) (any, error) {
+		return f(name, cfg, app)
 	}
 }

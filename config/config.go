@@ -82,6 +82,22 @@ func LoadFromString(yamlContent string) (*WorkflowConfig, error) {
 	return &cfg, nil
 }
 
+// ResolvePathInConfig resolves a path relative to the _config_dir stored in
+// a module's config map. If the path is already absolute or no _config_dir
+// is present, the original path is returned.
+func ResolvePathInConfig(cfg map[string]any, path string) string {
+	if path == "" {
+		return path
+	}
+	if pathpkg.IsAbs(path) {
+		return path
+	}
+	if dir, ok := cfg["_config_dir"].(string); ok && dir != "" {
+		return pathpkg.Join(dir, path)
+	}
+	return path
+}
+
 // NewEmptyWorkflowConfig creates a new empty workflow configuration
 func NewEmptyWorkflowConfig() *WorkflowConfig {
 	return &WorkflowConfig{

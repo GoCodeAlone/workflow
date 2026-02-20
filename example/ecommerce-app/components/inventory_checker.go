@@ -45,6 +45,21 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 
 	items, _ := params["items"].([]interface{})
 	if len(items) == 0 {
+		// Build items from productId/quantity if no explicit items array
+		if productId, ok := params["productId"].(string); ok && productId != "" {
+			qty := 1
+			if q, ok := params["quantity"].(float64); ok {
+				qty = int(q)
+			}
+			items = []interface{}{
+				map[string]interface{}{
+					"productId": productId,
+					"quantity":  qty,
+				},
+			}
+		}
+	}
+	if len(items) == 0 {
 		return nil, fmt.Errorf("missing required parameter: items")
 	}
 

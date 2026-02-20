@@ -15,13 +15,14 @@ import (
 
 // RuntimeInstance represents a running workflow loaded from the filesystem.
 type RuntimeInstance struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	ConfigPath string    `json:"config_path"`
-	WorkDir    string    `json:"work_dir"`
-	Status     string    `json:"status"` // "running", "stopped", "error"
-	StartedAt  time.Time `json:"started_at"`
-	Error      string    `json:"error,omitempty"`
+	ID         string         `json:"id"`
+	Name       string         `json:"name"`
+	ConfigPath string         `json:"config_path"`
+	WorkDir    string         `json:"work_dir"`
+	Status     string         `json:"status"` // "running", "stopped", "error"
+	StartedAt  time.Time      `json:"started_at"`
+	Error      string         `json:"error,omitempty"`
+	Ports      map[string]int `json:"ports,omitempty"`
 	Config     *config.WorkflowConfig
 
 	cancel context.CancelFunc
@@ -35,12 +36,13 @@ type RuntimeEngineBuilder func(cfg *config.WorkflowConfig, logger *slog.Logger) 
 // It is used with the --load-workflows CLI flag to run example workflows
 // alongside the admin server.
 type RuntimeManager struct {
-	mu        sync.RWMutex
-	instances map[string]*RuntimeInstance
-	stopFuncs map[string]func(context.Context) error
-	store     *V1Store
-	builder   RuntimeEngineBuilder
-	logger    *slog.Logger
+	mu            sync.RWMutex
+	instances     map[string]*RuntimeInstance
+	stopFuncs     map[string]func(context.Context) error
+	store         *V1Store
+	builder       RuntimeEngineBuilder
+	logger        *slog.Logger
+	portAllocator *PortAllocator
 }
 
 // NewRuntimeManager creates a new runtime manager.
@@ -52,6 +54,44 @@ func NewRuntimeManager(store *V1Store, builder RuntimeEngineBuilder, logger *slo
 		builder:   builder,
 		logger:    logger,
 	}
+}
+
+// SetPortAllocator configures the port allocator for automatic port assignment.
+func (rm *RuntimeManager) SetPortAllocator(pa *PortAllocator) {
+	rm.portAllocator = pa
+}
+
+// AnnounceServices logs the ports assigned to a workflow instance.
+func (rm *RuntimeManager) AnnounceServices(instance *RuntimeInstance) {
+	if instance.Ports == nil || len(instance.Ports) == 0 {
+		return
+	}
+	rm.logger.Info(fmt.Sprintf("Workflow %q started:", instance.Name))
+	for modName, port := range instance.Ports {
+		rm.logger.Info(fmt.Sprintf("  - %s: http://localhost:%d", modName, port))
+	}
+}
+
+// rewritePorts scans modules for http.server types and assigns auto-allocated ports.
+func rewritePorts(cfg *config.WorkflowConfig, allocator *PortAllocator, name string) map[string]int {
+	if allocator == nil {
+		return nil
+	}
+	ports := make(map[string]int)
+	for i, mod := range cfg.Modules {
+		if mod.Type == "http.server" {
+			port, err := allocator.Allocate(name)
+			if err != nil {
+				continue
+			}
+			if cfg.Modules[i].Config == nil {
+				cfg.Modules[i].Config = make(map[string]any)
+			}
+			cfg.Modules[i].Config["address"] = fmt.Sprintf(":%d", port)
+			ports[mod.Name] = port
+		}
+	}
+	return ports
 }
 
 // LoadFromPaths loads workflows from comma-separated paths.
@@ -225,6 +265,131 @@ func (rm *RuntimeManager) ensureRuntimeProject() string {
 	return runtimeProjectID
 }
 
+// LaunchFromYAML creates and starts a workflow engine from a YAML config string.
+// The id parameter links this instance to its workflow record in the store.
+func (rm *RuntimeManager) LaunchFromYAML(ctx context.Context, id, name, yamlContent string) error {
+	return rm.LaunchFromWorkspace(ctx, id, name, yamlContent, "")
+}
+
+// LaunchFromWorkspace creates and starts a workflow engine from a YAML config string,
+// optionally setting the workspace directory for relative path resolution.
+func (rm *RuntimeManager) LaunchFromWorkspace(ctx context.Context, id, name, yamlContent, workspaceDir string) error {
+	cfg, err := config.LoadFromString(yamlContent)
+	if err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
+
+	if workspaceDir != "" {
+		cfg.ConfigDir = workspaceDir
+	}
+
+	ports := rewritePorts(cfg, rm.portAllocator, name)
+
+	instance := &RuntimeInstance{
+		ID:        id,
+		Name:      name,
+		WorkDir:   workspaceDir,
+		Status:    "starting",
+		StartedAt: time.Now(),
+		Config:    cfg,
+		Ports:     ports,
+	}
+
+	rm.mu.Lock()
+	if existing, ok := rm.instances[id]; ok && existing.Status == "running" {
+		rm.mu.Unlock()
+		return fmt.Errorf("workflow %s is already running", id)
+	}
+	rm.instances[id] = instance
+	rm.mu.Unlock()
+
+	// Use a background context for the engine lifecycle — the caller's context
+	// (typically an HTTP request) should not cancel the long-running engine.
+	engineCtx, cancel := context.WithCancel(context.Background())
+	instance.cancel = cancel
+
+	stopFunc, buildErr := rm.builder(cfg, rm.logger)
+	if buildErr != nil {
+		cancel()
+		rm.mu.Lock()
+		instance.Status = "error"
+		instance.Error = buildErr.Error()
+		rm.mu.Unlock()
+		return buildErr
+	}
+
+	rm.mu.Lock()
+	rm.stopFuncs[id] = stopFunc
+	instance.Status = "running"
+	rm.mu.Unlock()
+
+	rm.logger.Info("Workflow launched from YAML",
+		"workflow", name,
+		"id", id,
+		"workspace_dir", workspaceDir,
+	)
+
+	rm.AnnounceServices(instance)
+
+	go func() {
+		<-engineCtx.Done()
+		rm.mu.Lock()
+		if inst, ok := rm.instances[id]; ok && inst.Status == "running" {
+			inst.Status = "stopped"
+		}
+		rm.mu.Unlock()
+	}()
+
+	return nil
+}
+
+// LaunchFromPath loads a workflow config from a server-local path and starts it.
+// The path can be a YAML file or a directory containing workflow.yaml.
+func (rm *RuntimeManager) LaunchFromPath(ctx context.Context, path string) (*RuntimeInstance, error) {
+	path = filepath.Clean(path)
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path %s: %w", path, err)
+	}
+
+	var configPath, workDir string
+	if info.IsDir() {
+		yamlPath := filepath.Join(path, "workflow.yaml")
+		if _, err := os.Stat(yamlPath); err != nil {
+			return nil, fmt.Errorf("no workflow.yaml found in directory %s", path)
+		}
+		configPath = yamlPath
+		workDir = path
+	} else {
+		configPath = path
+		workDir = filepath.Dir(path)
+	}
+
+	if err := rm.loadWorkflow(ctx, configPath, workDir); err != nil {
+		return nil, err
+	}
+
+	// Find the instance that was just created (most recent by start time)
+	rm.mu.RLock()
+	var latest *RuntimeInstance
+	for _, inst := range rm.instances {
+		if inst.ConfigPath == configPath {
+			if latest == nil || inst.StartedAt.After(latest.StartedAt) {
+				latest = inst
+			}
+		}
+	}
+	rm.mu.RUnlock()
+
+	if latest == nil {
+		return nil, fmt.Errorf("workflow loaded but instance not found")
+	}
+
+	copy := *latest
+	copy.Config = nil
+	return &copy, nil
+}
+
 // StopWorkflow stops a specific running workflow.
 func (rm *RuntimeManager) StopWorkflow(ctx context.Context, id string) error {
 	rm.mu.Lock()
@@ -251,6 +416,10 @@ func (rm *RuntimeManager) StopWorkflow(ctx context.Context, id string) error {
 	inst.Status = "stopped"
 	delete(rm.stopFuncs, id)
 	rm.mu.Unlock()
+
+	if rm.portAllocator != nil {
+		rm.portAllocator.Release(inst.Name)
+	}
 
 	rm.logger.Info("Stopped workflow", "id", id, "name", inst.Name)
 	return nil
@@ -291,6 +460,7 @@ func (rm *RuntimeManager) ListInstances() []RuntimeInstance {
 			Status:     inst.Status,
 			StartedAt:  inst.StartedAt,
 			Error:      inst.Error,
+			Ports:      inst.Ports,
 		})
 	}
 	return result

@@ -4,6 +4,7 @@
 package pipelinesteps
 
 import (
+	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
@@ -80,11 +81,11 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 	}
 }
 
-// wrapStepFactory converts a module.StepFactory to a plugin.StepFactory.
-// The plugin.StepFactory signature does not include modular.Application,
-// so we pass nil (these generic steps don't use it).
+// wrapStepFactory converts a module.StepFactory to a plugin.StepFactory,
+// threading the modular.Application through so steps like db_exec and
+// db_query can access the service registry.
 func wrapStepFactory(f module.StepFactory) plugin.StepFactory {
-	return func(name string, config map[string]any) (any, error) {
-		return f(name, config, nil)
+	return func(name string, config map[string]any, app modular.Application) (any, error) {
+		return f(name, config, app)
 	}
 }

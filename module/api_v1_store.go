@@ -30,6 +30,10 @@ func OpenV1Store(dbPath string) (*V1Store, error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
+	// SQLite does not support concurrent writers. Limit to 1 open connection
+	// to prevent SQLITE_BUSY errors when multiple API requests arrive simultaneously.
+	db.SetMaxOpenConns(1)
+
 	// Enable foreign keys
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
 		db.Close()
@@ -197,6 +201,17 @@ func (s *V1Store) initSchema() error {
 	// Migration: add triggered_by column if it doesn't exist (for existing databases)
 	_, _ = s.db.Exec("ALTER TABLE workflow_executions ADD COLUMN triggered_by TEXT DEFAULT ''")
 
+	// Migration: add workspace_dir column if it doesn't exist (for existing databases)
+	_, _ = s.db.Exec("ALTER TABLE workflows ADD COLUMN workspace_dir TEXT DEFAULT ''")
+
+	// Seed default company and project so workflows can be imported on a fresh server
+	// without requiring manual org/project creation first. Uses deterministic UUIDs.
+	now := nowStr()
+	_, _ = s.db.Exec(`INSERT OR IGNORE INTO companies (id, name, slug, owner_id, is_system, metadata, created_at, updated_at)
+		VALUES ('00000000-0000-0000-0000-000000000001', 'Default Organization', 'default-organization', '', 1, '{}', ?, ?)`, now, now)
+	_, _ = s.db.Exec(`INSERT OR IGNORE INTO projects (id, company_id, name, slug, description, is_system, metadata, created_at, updated_at)
+		VALUES ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'Default Project', 'default-project', 'Auto-created default project for workflow imports', 1, '{}', ?, ?)`, now, now)
+
 	return nil
 }
 
@@ -230,19 +245,20 @@ type V1Project struct {
 
 // V1Workflow represents a workflow record.
 type V1Workflow struct {
-	ID          string `json:"id"`
-	ProjectID   string `json:"project_id"`
-	Name        string `json:"name"`
-	Slug        string `json:"slug"`
-	Description string `json:"description,omitempty"`
-	ConfigYAML  string `json:"config_yaml"`
-	Version     int    `json:"version"`
-	Status      string `json:"status"`
-	IsSystem    bool   `json:"is_system,omitempty"`
-	CreatedBy   string `json:"created_by"`
-	UpdatedBy   string `json:"updated_by"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID           string `json:"id"`
+	ProjectID    string `json:"project_id"`
+	Name         string `json:"name"`
+	Slug         string `json:"slug"`
+	Description  string `json:"description,omitempty"`
+	ConfigYAML   string `json:"config_yaml"`
+	Version      int    `json:"version"`
+	Status       string `json:"status"`
+	IsSystem     bool   `json:"is_system,omitempty"`
+	WorkspaceDir string `json:"workspace_dir,omitempty"`
+	CreatedBy    string `json:"created_by"`
+	UpdatedBy    string `json:"updated_by"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // V1WorkflowVersion represents a snapshot of a workflow at a specific version.
@@ -498,9 +514,9 @@ func (s *V1Store) CreateWorkflow(projectID, name, slug, description, configYAML,
 		UpdatedAt:   now,
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO workflows (id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
-		w.ID, w.ProjectID, w.Name, w.Slug, w.Description, w.ConfigYAML, w.Version, w.Status, w.CreatedBy, w.UpdatedBy, w.CreatedAt, w.UpdatedAt,
+		`INSERT INTO workflows (id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+		w.ID, w.ProjectID, w.Name, w.Slug, w.Description, w.ConfigYAML, w.Version, w.Status, w.WorkspaceDir, w.CreatedBy, w.UpdatedBy, w.CreatedAt, w.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -513,9 +529,9 @@ func (s *V1Store) GetWorkflow(id string) (*V1Workflow, error) {
 	w := &V1Workflow{}
 	var isSys int
 	err := s.db.QueryRow(
-		`SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at
+		`SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at
 		 FROM workflows WHERE id = ?`, id,
-	).Scan(&w.ID, &w.ProjectID, &w.Name, &w.Slug, &w.Description, &w.ConfigYAML, &w.Version, &w.Status, &isSys, &w.CreatedBy, &w.UpdatedBy, &w.CreatedAt, &w.UpdatedAt)
+	).Scan(&w.ID, &w.ProjectID, &w.Name, &w.Slug, &w.Description, &w.ConfigYAML, &w.Version, &w.Status, &isSys, &w.WorkspaceDir, &w.CreatedBy, &w.UpdatedBy, &w.CreatedAt, &w.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -549,9 +565,9 @@ func (s *V1Store) UpdateWorkflow(id string, name, description, configYAML, updat
 	w.UpdatedAt = nowStr()
 
 	_, err = s.db.Exec(
-		`UPDATE workflows SET name=?, slug=?, description=?, config_yaml=?, version=?, updated_by=?, updated_at=?
+		`UPDATE workflows SET name=?, slug=?, description=?, config_yaml=?, version=?, workspace_dir=?, updated_by=?, updated_at=?
 		 WHERE id=?`,
-		w.Name, w.Slug, w.Description, w.ConfigYAML, w.Version, w.UpdatedBy, w.UpdatedAt, w.ID,
+		w.Name, w.Slug, w.Description, w.ConfigYAML, w.Version, w.WorkspaceDir, w.UpdatedBy, w.UpdatedAt, w.ID,
 	)
 	if err != nil {
 		return nil, err
@@ -565,6 +581,12 @@ func (s *V1Store) UpdateWorkflow(id string, name, description, configYAML, updat
 	}
 
 	return w, nil
+}
+
+// UpdateWorkflowWorkspaceDir sets the workspace_dir for a workflow.
+func (s *V1Store) UpdateWorkflowWorkspaceDir(id, workspaceDir string) error {
+	_, err := s.db.Exec(`UPDATE workflows SET workspace_dir = ? WHERE id = ?`, workspaceDir, id)
+	return err
 }
 
 // DeleteWorkflow deletes a workflow by ID. Returns an error if the workflow is a system workflow.
@@ -586,12 +608,12 @@ func (s *V1Store) ListWorkflows(projectID string) ([]V1Workflow, error) {
 	var err error
 	if projectID != "" {
 		rows, err = s.db.Query(
-			`SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at
+			`SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at
 			 FROM workflows WHERE project_id = ? ORDER BY created_at DESC`, projectID,
 		)
 	} else {
 		rows, err = s.db.Query(
-			`SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at
+			`SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at
 			 FROM workflows ORDER BY created_at DESC`,
 		)
 	}
@@ -604,7 +626,7 @@ func (s *V1Store) ListWorkflows(projectID string) ([]V1Workflow, error) {
 	for rows.Next() {
 		var w V1Workflow
 		var isSys int
-		if err := rows.Scan(&w.ID, &w.ProjectID, &w.Name, &w.Slug, &w.Description, &w.ConfigYAML, &w.Version, &w.Status, &isSys, &w.CreatedBy, &w.UpdatedBy, &w.CreatedAt, &w.UpdatedAt); err != nil {
+		if err := rows.Scan(&w.ID, &w.ProjectID, &w.Name, &w.Slug, &w.Description, &w.ConfigYAML, &w.Version, &w.Status, &isSys, &w.WorkspaceDir, &w.CreatedBy, &w.UpdatedBy, &w.CreatedAt, &w.UpdatedAt); err != nil {
 			return nil, err
 		}
 		w.IsSystem = isSys == 1
@@ -621,6 +643,51 @@ func (s *V1Store) SetWorkflowStatus(id, status string) (*V1Workflow, error) {
 		return nil, err
 	}
 	return s.GetWorkflow(id)
+}
+
+// SetWorkspaceDir updates a workflow's workspace_dir field.
+func (s *V1Store) SetWorkspaceDir(id, workspaceDir string) error {
+	_, err := s.db.Exec(`UPDATE workflows SET workspace_dir=?, updated_at=? WHERE id=?`, workspaceDir, nowStr(), id)
+	return err
+}
+
+// GetWorkflowBySlugAndProject retrieves a workflow by slug within a specific project.
+func (s *V1Store) GetWorkflowBySlugAndProject(slug, projectID string) (*V1Workflow, error) {
+	w := &V1Workflow{}
+	var isSys int
+	err := s.db.QueryRow(
+		`SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at
+		 FROM workflows WHERE slug = ? AND project_id = ? LIMIT 1`, slug, projectID,
+	).Scan(&w.ID, &w.ProjectID, &w.Name, &w.Slug, &w.Description, &w.ConfigYAML, &w.Version, &w.Status, &isSys, &w.WorkspaceDir, &w.CreatedBy, &w.UpdatedBy, &w.CreatedAt, &w.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	w.IsSystem = isSys == 1
+	return w, nil
+}
+
+// ListAllProjects returns all projects regardless of organization.
+func (s *V1Store) ListAllProjects() ([]V1Project, error) {
+	rows, err := s.db.Query(
+		`SELECT id, company_id, name, slug, description, is_system, metadata, created_at, updated_at
+		 FROM projects ORDER BY created_at ASC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []V1Project
+	for rows.Next() {
+		var p V1Project
+		var isSys int
+		if err := rows.Scan(&p.ID, &p.CompanyID, &p.Name, &p.Slug, &p.Description, &isSys, &p.Metadata, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		p.IsSystem = isSys == 1
+		result = append(result, p)
+	}
+	return result, rows.Err()
 }
 
 // --- Versions ---
@@ -683,9 +750,9 @@ func (s *V1Store) GetSystemWorkflow() (*V1Workflow, error) {
 	w := &V1Workflow{}
 	var isSys int
 	err := s.db.QueryRow(
-		`SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, created_by, updated_by, created_at, updated_at
+		`SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at
 		 FROM workflows WHERE is_system = 1 LIMIT 1`,
-	).Scan(&w.ID, &w.ProjectID, &w.Name, &w.Slug, &w.Description, &w.ConfigYAML, &w.Version, &w.Status, &isSys, &w.CreatedBy, &w.UpdatedBy, &w.CreatedAt, &w.UpdatedAt)
+	).Scan(&w.ID, &w.ProjectID, &w.Name, &w.Slug, &w.Description, &w.ConfigYAML, &w.Version, &w.Status, &isSys, &w.WorkspaceDir, &w.CreatedBy, &w.UpdatedBy, &w.CreatedAt, &w.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}

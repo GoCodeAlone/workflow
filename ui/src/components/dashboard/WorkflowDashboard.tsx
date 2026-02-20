@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import useObservabilityStore from '../../store/observabilityStore.ts';
+import { apiDeployWorkflow, apiStopWorkflow } from '../../utils/api.ts';
 import type { WorkflowExecution, ExecutionStep } from '../../types/observability.ts';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -190,6 +191,33 @@ export default function WorkflowDashboard() {
 
   const [expandedExecId, setExpandedExecId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [deployAction, setDeployAction] = useState<string | null>(null);
+
+  const handleDeploy = useCallback(async () => {
+    if (!selectedWorkflowId) return;
+    setDeployAction('deploying');
+    try {
+      await apiDeployWorkflow(selectedWorkflowId);
+      fetchWorkflowDashboard(selectedWorkflowId);
+    } catch {
+      // dashboard will refresh
+    } finally {
+      setDeployAction(null);
+    }
+  }, [selectedWorkflowId, fetchWorkflowDashboard]);
+
+  const handleStop = useCallback(async () => {
+    if (!selectedWorkflowId) return;
+    setDeployAction('stopping');
+    try {
+      await apiStopWorkflow(selectedWorkflowId);
+      fetchWorkflowDashboard(selectedWorkflowId);
+    } catch {
+      // dashboard will refresh
+    } finally {
+      setDeployAction(null);
+    }
+  }, [selectedWorkflowId, fetchWorkflowDashboard]);
 
   useEffect(() => {
     if (selectedWorkflowId) {
@@ -273,6 +301,43 @@ export default function WorkflowDashboard() {
         <h2 style={{ color: '#cdd6f4', margin: 0, fontSize: 20, fontWeight: 600 }}>{wfName}</h2>
         {wfStatus && <StatusBadge status={wfStatus} />}
         <div style={{ flex: 1 }} />
+        {selectedWorkflowId && (wfStatus === 'draft' || wfStatus === 'stopped' || wfStatus === 'error') && !deployAction && (
+          <button
+            onClick={handleDeploy}
+            style={{
+              background: 'rgba(166, 227, 161, 0.2)',
+              border: '1px solid rgba(166, 227, 161, 0.4)',
+              borderRadius: 6,
+              color: '#a6e3a1',
+              padding: '6px 16px',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Deploy
+          </button>
+        )}
+        {selectedWorkflowId && wfStatus === 'active' && !deployAction && (
+          <button
+            onClick={handleStop}
+            style={{
+              background: 'rgba(249, 226, 175, 0.2)',
+              border: '1px solid rgba(249, 226, 175, 0.4)',
+              borderRadius: 6,
+              color: '#f9e2af',
+              padding: '6px 16px',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Stop
+          </button>
+        )}
+        {deployAction && (
+          <span style={{ color: '#6c7086', fontSize: 13 }}>{deployAction}...</span>
+        )}
         {selectedWorkflowId && (
           <button
             onClick={() => triggerExecution(selectedWorkflowId)}

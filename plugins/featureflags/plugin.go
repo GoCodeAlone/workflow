@@ -83,12 +83,12 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 // factories when the featureflag.service module is loaded.
 func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 	return map[string]plugin.StepFactory{
-		"step.feature_flag": func(name string, config map[string]any) (any, error) {
+		"step.feature_flag": func(name string, config map[string]any, _ modular.Application) (any, error) {
 			// The real factory is wired by engine.go when featureflag.service is loaded.
 			// This placeholder ensures the step type is registered in the manifest.
 			return nil, errServiceRequired("feature_flag", name)
 		},
-		"step.ff_gate": func(name string, config map[string]any) (any, error) {
+		"step.ff_gate": func(name string, config map[string]any, _ modular.Application) (any, error) {
 			return nil, errServiceRequired("ff_gate", name)
 		},
 	}

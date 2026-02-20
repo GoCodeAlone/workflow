@@ -356,6 +356,34 @@ func (p *PersistenceStore) LoadResources(resourceType string) (map[string]map[st
 	return result, rows.Err()
 }
 
+// LoadResource loads a single resource by type and ID.
+// Returns nil, nil if the resource does not exist.
+func (p *PersistenceStore) LoadResource(resourceType, id string) (map[string]any, error) {
+	var dataJSON string
+	err := p.db.QueryRow(
+		`SELECT data FROM resources WHERE resource_type = ? AND id = ?`,
+		resourceType, id,
+	).Scan(&dataJSON)
+	if err != nil {
+		return nil, nil // not found or error — treat as absent
+	}
+
+	var data map[string]any
+	if err := json.Unmarshal([]byte(dataJSON), &data); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal resource data for %s: %w", id, err)
+	}
+
+	if p.encryptor != nil && p.encryptor.Enabled() {
+		decrypted, err := p.encryptor.DecryptPIIFields(data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt resource PII for %s: %w", id, err)
+		}
+		data = decrypted
+	}
+
+	return data, nil
+}
+
 // SaveUser upserts a user record. PII fields (name, email) are encrypted
 // before writing to SQLite when ENCRYPTION_KEY is set.
 func (p *PersistenceStore) SaveUser(user UserRecord) error {

@@ -51,8 +51,10 @@ type ModuleFactory func(name string, config map[string]any) modular.Module
 // StepFactory creates a pipeline step from config.
 // The returned value should implement the PipelineStep interface
 // (module.PipelineStep). We use any here to avoid a circular import
-// on the module package.
-type StepFactory func(name string, config map[string]any) (any, error)
+// on the module package. The app parameter provides access to the
+// modular.Application service registry for steps that need it
+// (e.g., db_exec, db_query, delegate).
+type StepFactory func(name string, config map[string]any, app modular.Application) (any, error)
 
 // TriggerFactory creates a trigger instance.
 // The returned value should implement the Trigger interface

@@ -27,7 +27,7 @@ func NewSQLiteStorage(name, dbPath string) *SQLiteStorage {
 	return &SQLiteStorage{
 		name:           name,
 		dbPath:         dbPath,
-		maxConnections: 5,
+		maxConnections: 1,
 		walMode:        true,
 		logger:         &noopLogger{},
 	}
