@@ -52,6 +52,9 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 	return map[string]plugin.ModuleFactory{
 		"secrets.vault": func(name string, config map[string]any) modular.Module {
 			vm := module.NewSecretsVaultModule(name)
+			if mode, ok := config["mode"].(string); ok && mode != "" {
+				vm.SetMode(mode)
+			}
 			if addr, ok := config["address"].(string); ok {
 				vm.SetAddress(addr)
 			}

@@ -267,27 +267,6 @@ func TestNewVaultProvider_MissingToken(t *testing.T) {
 	}
 }
 
-func TestVaultProvider_Stub(t *testing.T) {
-	p, _ := NewVaultProvider(VaultConfig{
-		Address: "https://vault.example.com",
-		Token:   "s.abc",
-	})
-	ctx := context.Background()
-
-	if _, err := p.Get(ctx, "key"); !errors.Is(err, ErrUnsupported) {
-		t.Errorf("Get: expected ErrUnsupported, got %v", err)
-	}
-	if err := p.Set(ctx, "key", "val"); !errors.Is(err, ErrUnsupported) {
-		t.Errorf("Set: expected ErrUnsupported, got %v", err)
-	}
-	if err := p.Delete(ctx, "key"); !errors.Is(err, ErrUnsupported) {
-		t.Errorf("Delete: expected ErrUnsupported, got %v", err)
-	}
-	if _, err := p.List(ctx); !errors.Is(err, ErrUnsupported) {
-		t.Errorf("List: expected ErrUnsupported, got %v", err)
-	}
-}
-
 func TestVaultProvider_InvalidKey(t *testing.T) {
 	p, _ := NewVaultProvider(VaultConfig{
 		Address: "https://vault.example.com",

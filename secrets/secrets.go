@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -169,7 +168,7 @@ func (p *FileProvider) List(_ context.Context) ([]string, error) {
 	return keys, nil
 }
 
-// --- Vault Provider (Stub) ---
+// --- Vault Configuration ---
 
 // VaultConfig holds configuration for HashiCorp Vault.
 type VaultConfig struct {
@@ -178,70 +177,6 @@ type VaultConfig struct {
 	MountPath string `json:"mount_path" yaml:"mount_path"`
 	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
 }
-
-// VaultProvider implements a HashiCorp Vault secret provider.
-// When created with NewVaultProviderHTTP, it uses the Vault HTTP API.
-// When created with NewVaultProvider, it acts as a stub.
-type VaultProvider struct {
-	config     VaultConfig
-	httpClient HTTPClient
-}
-
-// HTTPClient is an interface for HTTP requests (allows testing).
-type HTTPClient interface {
-	Do(req *http.Request) (*http.Response, error)
-}
-
-// NewVaultProvider creates a new Vault provider stub.
-func NewVaultProvider(cfg VaultConfig) (*VaultProvider, error) {
-	if cfg.Address == "" {
-		return nil, fmt.Errorf("%w: vault address is required", ErrProviderInit)
-	}
-	if cfg.Token == "" {
-		return nil, fmt.Errorf("%w: vault token is required", ErrProviderInit)
-	}
-	if cfg.MountPath == "" {
-		cfg.MountPath = "secret"
-	}
-	return &VaultProvider{config: cfg}, nil
-}
-
-func (p *VaultProvider) Name() string { return "vault" }
-
-func (p *VaultProvider) Get(ctx context.Context, key string) (string, error) {
-	if key == "" {
-		return "", ErrInvalidKey
-	}
-	if p.httpClient != nil {
-		return p.GetFromVault(ctx, key)
-	}
-	// Stub: in production use NewVaultProviderHTTP for real API calls
-	return "", fmt.Errorf("%w: vault provider is a stub", ErrUnsupported)
-}
-
-func (p *VaultProvider) Set(_ context.Context, key, value string) error {
-	if key == "" {
-		return ErrInvalidKey
-	}
-	// Stub: in production this would call PUT /v1/{mount_path}/data/{key}
-	return fmt.Errorf("%w: vault provider is a stub", ErrUnsupported)
-}
-
-func (p *VaultProvider) Delete(_ context.Context, key string) error {
-	if key == "" {
-		return ErrInvalidKey
-	}
-	// Stub: in production this would call DELETE /v1/{mount_path}/data/{key}
-	return fmt.Errorf("%w: vault provider is a stub", ErrUnsupported)
-}
-
-func (p *VaultProvider) List(_ context.Context) ([]string, error) {
-	// Stub: in production this would call LIST /v1/{mount_path}/metadata/
-	return nil, fmt.Errorf("%w: vault provider is a stub", ErrUnsupported)
-}
-
-// Config returns the provider's Vault configuration.
-func (p *VaultProvider) Config() VaultConfig { return p.config }
 
 // --- Secret Resolver ---
 

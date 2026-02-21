@@ -14,6 +14,12 @@ import (
 	"time"
 )
 
+// HTTPClient is an interface for HTTP requests (allows testing).
+// Used by the AWS Secrets Manager provider.
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
 // AWSConfig holds configuration for AWS Secrets Manager.
 type AWSConfig struct {
 	Region          string `json:"region" yaml:"region"`

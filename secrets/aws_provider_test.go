@@ -8,6 +8,13 @@ import (
 	"testing"
 )
 
+// roundTripFunc allows creating simple mock HTTP clients for testing.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) Do(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestAWSProvider_Get_PlainSecret(t *testing.T) {
 	mockClient := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		// Verify it's a POST request
