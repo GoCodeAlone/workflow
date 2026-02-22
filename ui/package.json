@@ -14,6 +14,7 @@
     "test:e2e:execution": "npx playwright test --config playwright-e2e.config.ts"
   },
   "dependencies": {
+    "@gocodealoneorg/workflow-ui": "*",
     "@types/dagre": "^0.7.53",
     "@xyflow/react": "^12.10.0",
     "dagre": "^0.8.5",

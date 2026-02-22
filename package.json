@@ -1,0 +1,14 @@
+{
+  "name": "workflow-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "ui"
+  ],
+  "scripts": {
+    "build:ui-lib": "npm run build --workspace=packages/workflow-ui",
+    "build:ui": "npm run build --workspace=ui",
+    "test:ui-lib": "npm run test --workspace=packages/workflow-ui",
+    "test:ui": "npm run test --workspace=ui"
+  }
+}
