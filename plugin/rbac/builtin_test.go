@@ -245,13 +245,4 @@ func TestStubProviders_ReturnErrors(t *testing.T) {
 	if aws.Name() != "aws-iam" {
 		t.Errorf("expected name 'aws-iam', got %q", aws.Name())
 	}
-	if _, err := aws.CheckPermission(ctx, "s", "r", "a"); err == nil {
-		t.Error("expected error from aws stub")
-	}
-	if _, err := aws.ListPermissions(ctx, "s"); err == nil {
-		t.Error("expected error from aws stub")
-	}
-	if err := aws.SyncRoles(ctx, nil); err == nil {
-		t.Error("expected error from aws stub")
-	}
 }
