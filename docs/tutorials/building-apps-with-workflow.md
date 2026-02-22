@@ -2371,15 +2371,12 @@ cd workflow/ui
 npm install
 npm run build
 
-# Copy dist to the embed directory
-cp -r dist/ ../module/ui_dist/
-
-# Build the Go binary with embedded UI
+# Build the Go binary
 cd ..
 go build -o server ./cmd/server
 ```
 
-The `go:embed` directive in `module/ui_dist/` bundles the built UI into the server binary.
+The built UI assets in `ui/dist/` are served at runtime via the `static.fileserver` module configured in `admin/config.yaml`.
 
 ### Running with Different Configs
 

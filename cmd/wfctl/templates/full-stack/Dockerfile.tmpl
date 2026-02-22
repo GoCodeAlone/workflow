@@ -1,0 +1,30 @@
+FROM node:20-alpine AS ui-builder
+
+WORKDIR /app/ui
+COPY ui/package*.json ./
+RUN npm ci
+COPY ui/ .
+RUN npm run build
+
+FROM golang:1.22-alpine AS go-builder
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=ui-builder /app/ui/dist ./ui/dist
+RUN CGO_ENABLED=0 GOOS=linux go build -o {{.Name}} .
+
+FROM alpine:3.19
+
+RUN apk --no-cache add ca-certificates tzdata
+
+WORKDIR /app
+COPY --from=go-builder /app/{{.Name}} .
+COPY --from=go-builder /app/workflow.yaml .
+COPY --from=go-builder /app/ui/dist ./ui/dist
+
+EXPOSE 8080
+
+ENTRYPOINT ["./{{.Name}}"]
+CMD ["-config", "workflow.yaml"]

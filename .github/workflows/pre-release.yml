@@ -1,0 +1,174 @@
+name: Pre-release Snapshot
+
+# Creates a pre-release snapshot build on every merge to main.
+# These builds are tagged as "snapshot" and are considered unstable.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  test:
+    name: Pre-release Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.26'
+        cache: true
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: 'https://npm.pkg.github.com'
+        cache: 'npm'
+        cache-dependency-path: ui/package-lock.json
+
+    - name: Build UI assets (required for Go embed)
+      run: |
+        cd ui && npm ci && npm run build
+        cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Run tests
+      run: go test -race ./...
+
+  snapshot:
+    name: Build Snapshot Release
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.26'
+        cache: true
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: 'https://npm.pkg.github.com'
+        cache: 'npm'
+        cache-dependency-path: ui/package-lock.json
+
+    - name: Build UI assets (required for Go embed)
+      run: |
+        cd ui && npm ci && npm run build
+        cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Determine snapshot version
+      id: version
+      run: |
+        SHORT_SHA=$(git rev-parse --short HEAD)
+        SNAPSHOT_VERSION="snapshot-${SHORT_SHA}"
+        echo "VERSION=${SNAPSHOT_VERSION}" >> "$GITHUB_ENV"
+        echo "version=${SNAPSHOT_VERSION}" >> "$GITHUB_OUTPUT"
+
+    - name: Build binaries
+      run: |
+        mkdir -p dist
+        LDFLAGS="-s -w -X main.version=${VERSION}"
+
+        GOOS=linux   GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/workflow-linux-amd64    ./cmd/server
+        GOOS=linux   GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/workflow-linux-arm64    ./cmd/server
+        GOOS=darwin  GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/workflow-darwin-amd64   ./cmd/server
+        GOOS=darwin  GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/workflow-darwin-arm64   ./cmd/server
+        GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/workflow-windows-amd64.exe ./cmd/server
+
+    - name: Package admin UI
+      run: |
+        tar -czf "dist/workflow-admin-ui-${VERSION}.tar.gz" -C ui dist
+
+    - name: Create checksums
+      run: |
+        cd dist
+        sha256sum * > checksums.txt
+
+    - name: Delete existing snapshot release
+      run: |
+        gh release delete snapshot --yes || true
+        git push --delete origin refs/tags/snapshot || true
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Create snapshot release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: snapshot
+        name: "Snapshot (${{ steps.version.outputs.version }})"
+        body: |
+          Automated pre-release snapshot built from the latest commit on `main`.
+
+          **Commit**: ${{ github.sha }}
+          **Build**: ${{ steps.version.outputs.version }}
+
+          > **Warning**: This is an unstable development build. Use tagged releases for production.
+        files: |
+          dist/*
+        draft: false
+        prerelease: true
+
+  docker-snapshot:
+    name: Build & Push Snapshot Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository }}
+        tags: |
+          type=raw,value=snapshot
+          type=sha,prefix=main-
+
+    # The Dockerfile is a multi-stage build that builds the UI and embeds it
+    # into the Go binary automatically — no separate UI artifact needed here.
+    - name: Build and push snapshot image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        platforms: linux/amd64,linux/arm64
+        cache-from: type=gha
+        cache-to: type=gha,mode=max

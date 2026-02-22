@@ -1,0 +1,72 @@
+modules:
+  - name: {{.Name}}-server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: {{.Name}}-router
+    type: http.router
+    dependsOn:
+      - {{.Name}}-server
+
+  - name: {{.Name}}-api
+    type: http.handler
+    dependsOn:
+      - {{.Name}}-router
+    config:
+      contentType: application/json
+
+  - name: {{.Name}}-ui
+    type: static.fileserver
+    dependsOn:
+      - {{.Name}}-router
+    config:
+      root: "./ui/dist"
+      index: "index.html"
+      spa: true
+
+  - name: {{.Name}}-health
+    type: health.checker
+    config:
+      description: "Health check endpoint"
+
+  - name: {{.Name}}-metrics
+    type: metrics.collector
+    config:
+      description: "Prometheus metrics"
+
+workflows:
+  http:
+    router: {{.Name}}-router
+    server: {{.Name}}-server
+    routes:
+      - method: GET
+        path: /health
+        handler: {{.Name}}-health
+      - method: GET
+        path: /api/items
+        handler: {{.Name}}-api
+      - method: POST
+        path: /api/items
+        handler: {{.Name}}-api
+      - method: GET
+        path: /api/items/{id}
+        handler: {{.Name}}-api
+      - method: PUT
+        path: /api/items/{id}
+        handler: {{.Name}}-api
+      - method: DELETE
+        path: /api/items/{id}
+        handler: {{.Name}}-api
+      - method: GET
+        path: /
+        handler: {{.Name}}-ui
+      - method: GET
+        path: /assets/*
+        handler: {{.Name}}-ui
+
+triggers:
+  - name: http-trigger
+    type: http
+    config:
+      server: {{.Name}}-server

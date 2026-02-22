@@ -1,0 +1,22 @@
+const styles = {
+  container: { maxWidth: 800, margin: '40px auto', padding: '0 20px' } as React.CSSProperties,
+  heading: { marginBottom: 16, color: '#1a1a1a' } as React.CSSProperties,
+  subtitle: { color: '#666' } as React.CSSProperties,
+  hint: { marginTop: 12, color: '#666' } as React.CSSProperties,
+}
+
+function App() {
+  return (
+    <div style={styles.container}>
+      <h1 style={styles.heading}>{{.Name}}</h1>
+      <p style={styles.subtitle}>
+        This is the UI for the <strong>{{.Name}}</strong> workflow plugin.
+      </p>
+      <p style={styles.hint}>
+        Edit <code>ui/src/App.tsx</code> to build your plugin UI.
+      </p>
+    </div>
+  )
+}
+
+export default App
