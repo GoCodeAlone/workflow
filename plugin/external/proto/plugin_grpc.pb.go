@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v5.28.3
-// source: plugin.proto
+// source: plugin/external/proto/plugin.proto
 
 package proto
 
@@ -34,6 +34,7 @@ const (
 	PluginService_ExecuteStep_FullMethodName      = "/workflow.plugin.v1.PluginService/ExecuteStep"
 	PluginService_DestroyStep_FullMethodName      = "/workflow.plugin.v1.PluginService/DestroyStep"
 	PluginService_InvokeService_FullMethodName    = "/workflow.plugin.v1.PluginService/InvokeService"
+	PluginService_DeliverMessage_FullMethodName   = "/workflow.plugin.v1.PluginService/DeliverMessage"
 )
 
 // PluginServiceClient is the client API for PluginService service.
@@ -70,6 +71,8 @@ type PluginServiceClient interface {
 	DestroyStep(ctx context.Context, in *HandleRequest, opts ...grpc.CallOption) (*ErrorResponse, error)
 	// InvokeService calls a named method on a module's service interface.
 	InvokeService(ctx context.Context, in *InvokeServiceRequest, opts ...grpc.CallOption) (*InvokeServiceResponse, error)
+	// DeliverMessage delivers a message from the host to a plugin module.
+	DeliverMessage(ctx context.Context, in *DeliverMessageRequest, opts ...grpc.CallOption) (*DeliverMessageResponse, error)
 }
 
 type pluginServiceClient struct {
@@ -220,6 +223,16 @@ func (c *pluginServiceClient) InvokeService(ctx context.Context, in *InvokeServi
 	return out, nil
 }
 
+func (c *pluginServiceClient) DeliverMessage(ctx context.Context, in *DeliverMessageRequest, opts ...grpc.CallOption) (*DeliverMessageResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeliverMessageResponse)
+	err := c.cc.Invoke(ctx, PluginService_DeliverMessage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PluginServiceServer is the server API for PluginService service.
 // All implementations must embed UnimplementedPluginServiceServer
 // for forward compatibility.
@@ -254,6 +267,8 @@ type PluginServiceServer interface {
 	DestroyStep(context.Context, *HandleRequest) (*ErrorResponse, error)
 	// InvokeService calls a named method on a module's service interface.
 	InvokeService(context.Context, *InvokeServiceRequest) (*InvokeServiceResponse, error)
+	// DeliverMessage delivers a message from the host to a plugin module.
+	DeliverMessage(context.Context, *DeliverMessageRequest) (*DeliverMessageResponse, error)
 	mustEmbedUnimplementedPluginServiceServer()
 }
 
@@ -305,6 +320,9 @@ func (UnimplementedPluginServiceServer) DestroyStep(context.Context, *HandleRequ
 }
 func (UnimplementedPluginServiceServer) InvokeService(context.Context, *InvokeServiceRequest) (*InvokeServiceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method InvokeService not implemented")
+}
+func (UnimplementedPluginServiceServer) DeliverMessage(context.Context, *DeliverMessageRequest) (*DeliverMessageResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeliverMessage not implemented")
 }
 func (UnimplementedPluginServiceServer) mustEmbedUnimplementedPluginServiceServer() {}
 func (UnimplementedPluginServiceServer) testEmbeddedByValue()                       {}
@@ -579,6 +597,24 @@ func _PluginService_InvokeService_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PluginService_DeliverMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeliverMessageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServiceServer).DeliverMessage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PluginService_DeliverMessage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServiceServer).DeliverMessage(ctx, req.(*DeliverMessageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PluginService_ServiceDesc is the grpc.ServiceDesc for PluginService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -642,15 +678,22 @@ var PluginService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "InvokeService",
 			Handler:    _PluginService_InvokeService_Handler,
 		},
+		{
+			MethodName: "DeliverMessage",
+			Handler:    _PluginService_DeliverMessage_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "plugin.proto",
+	Metadata: "plugin/external/proto/plugin.proto",
 }
 
 const (
 	EngineCallbackService_TriggerWorkflow_FullMethodName = "/workflow.plugin.v1.EngineCallbackService/TriggerWorkflow"
 	EngineCallbackService_GetService_FullMethodName      = "/workflow.plugin.v1.EngineCallbackService/GetService"
 	EngineCallbackService_Log_FullMethodName             = "/workflow.plugin.v1.EngineCallbackService/Log"
+	EngineCallbackService_PublishMessage_FullMethodName  = "/workflow.plugin.v1.EngineCallbackService/PublishMessage"
+	EngineCallbackService_Subscribe_FullMethodName       = "/workflow.plugin.v1.EngineCallbackService/Subscribe"
+	EngineCallbackService_Unsubscribe_FullMethodName     = "/workflow.plugin.v1.EngineCallbackService/Unsubscribe"
 )
 
 // EngineCallbackServiceClient is the client API for EngineCallbackService service.
@@ -665,6 +708,12 @@ type EngineCallbackServiceClient interface {
 	GetService(ctx context.Context, in *GetServiceRequest, opts ...grpc.CallOption) (*GetServiceResponse, error)
 	// Log sends a log entry from the plugin to the host logger.
 	Log(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// PublishMessage publishes a message to the host message broker.
+	PublishMessage(ctx context.Context, in *PublishMessageRequest, opts ...grpc.CallOption) (*PublishMessageResponse, error)
+	// Subscribe registers the plugin to receive messages on a topic.
+	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*ErrorResponse, error)
+	// Unsubscribe removes a plugin's subscription to a topic.
+	Unsubscribe(ctx context.Context, in *UnsubscribeRequest, opts ...grpc.CallOption) (*ErrorResponse, error)
 }
 
 type engineCallbackServiceClient struct {
@@ -705,6 +754,36 @@ func (c *engineCallbackServiceClient) Log(ctx context.Context, in *LogRequest, o
 	return out, nil
 }
 
+func (c *engineCallbackServiceClient) PublishMessage(ctx context.Context, in *PublishMessageRequest, opts ...grpc.CallOption) (*PublishMessageResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PublishMessageResponse)
+	err := c.cc.Invoke(ctx, EngineCallbackService_PublishMessage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineCallbackServiceClient) Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*ErrorResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ErrorResponse)
+	err := c.cc.Invoke(ctx, EngineCallbackService_Subscribe_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineCallbackServiceClient) Unsubscribe(ctx context.Context, in *UnsubscribeRequest, opts ...grpc.CallOption) (*ErrorResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ErrorResponse)
+	err := c.cc.Invoke(ctx, EngineCallbackService_Unsubscribe_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // EngineCallbackServiceServer is the server API for EngineCallbackService service.
 // All implementations must embed UnimplementedEngineCallbackServiceServer
 // for forward compatibility.
@@ -717,6 +796,12 @@ type EngineCallbackServiceServer interface {
 	GetService(context.Context, *GetServiceRequest) (*GetServiceResponse, error)
 	// Log sends a log entry from the plugin to the host logger.
 	Log(context.Context, *LogRequest) (*emptypb.Empty, error)
+	// PublishMessage publishes a message to the host message broker.
+	PublishMessage(context.Context, *PublishMessageRequest) (*PublishMessageResponse, error)
+	// Subscribe registers the plugin to receive messages on a topic.
+	Subscribe(context.Context, *SubscribeRequest) (*ErrorResponse, error)
+	// Unsubscribe removes a plugin's subscription to a topic.
+	Unsubscribe(context.Context, *UnsubscribeRequest) (*ErrorResponse, error)
 	mustEmbedUnimplementedEngineCallbackServiceServer()
 }
 
@@ -735,6 +820,15 @@ func (UnimplementedEngineCallbackServiceServer) GetService(context.Context, *Get
 }
 func (UnimplementedEngineCallbackServiceServer) Log(context.Context, *LogRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method Log not implemented")
+}
+func (UnimplementedEngineCallbackServiceServer) PublishMessage(context.Context, *PublishMessageRequest) (*PublishMessageResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PublishMessage not implemented")
+}
+func (UnimplementedEngineCallbackServiceServer) Subscribe(context.Context, *SubscribeRequest) (*ErrorResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Subscribe not implemented")
+}
+func (UnimplementedEngineCallbackServiceServer) Unsubscribe(context.Context, *UnsubscribeRequest) (*ErrorResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Unsubscribe not implemented")
 }
 func (UnimplementedEngineCallbackServiceServer) mustEmbedUnimplementedEngineCallbackServiceServer() {}
 func (UnimplementedEngineCallbackServiceServer) testEmbeddedByValue()                               {}
@@ -811,6 +905,60 @@ func _EngineCallbackService_Log_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _EngineCallbackService_PublishMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PublishMessageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineCallbackServiceServer).PublishMessage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineCallbackService_PublishMessage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineCallbackServiceServer).PublishMessage(ctx, req.(*PublishMessageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineCallbackService_Subscribe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubscribeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineCallbackServiceServer).Subscribe(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineCallbackService_Subscribe_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineCallbackServiceServer).Subscribe(ctx, req.(*SubscribeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineCallbackService_Unsubscribe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnsubscribeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineCallbackServiceServer).Unsubscribe(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineCallbackService_Unsubscribe_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineCallbackServiceServer).Unsubscribe(ctx, req.(*UnsubscribeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // EngineCallbackService_ServiceDesc is the grpc.ServiceDesc for EngineCallbackService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -830,7 +978,19 @@ var EngineCallbackService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Log",
 			Handler:    _EngineCallbackService_Log_Handler,
 		},
+		{
+			MethodName: "PublishMessage",
+			Handler:    _EngineCallbackService_PublishMessage_Handler,
+		},
+		{
+			MethodName: "Subscribe",
+			Handler:    _EngineCallbackService_Subscribe_Handler,
+		},
+		{
+			MethodName: "Unsubscribe",
+			Handler:    _EngineCallbackService_Unsubscribe_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "plugin.proto",
+	Metadata: "plugin/external/proto/plugin.proto",
 }
