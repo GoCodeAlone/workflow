@@ -316,26 +316,26 @@ Ratchet binary
 
 ### Phase 1: Stabilize Core (Weeks 1-3)
 
-- Semver releases with CI/CD for workflow repo
-- API stability contract documentation
-- Remove `replace` directive from Ratchet, switch to versioned import
+- [x] Semver releases with CI/CD for workflow repo — `release.yml` enhanced with admin UI artifact, `pre-release.yml` added for snapshot builds on main merges. v0.1.0 tagged.
+- [x] API stability contract documentation — `docs/API_STABILITY.md` documents public vs internal packages, semver policy, deprecation policy, embedding contract.
+- [ ] Remove `replace` directive from Ratchet, switch to versioned import — pending Ratchet migration (Phase 7)
 
 ### Phase 2: UI Overhaul (Weeks 1-6, parallel with Phase 1)
 
 Already tracked as issues #34-#39:
-- #34: Decouple admin UI from Go binary
-- #35: Plugin-driven admin navigation
-- #36: Extract shared UI component library
-- #37: Application UI build/serve contract
-- #38: go-plugin UI hot-reload
-- #39: Cleanup legacy UI scaffolding
+- [x] #34: Decouple admin UI from Go binary — completed, admin UI served via `static.fileserver`
+- [x] #35: Plugin-driven admin navigation — completed, navigation fully plugin-driven
+- [x] #36: Extract shared UI component library — completed, `@gocodealone/workflow-ui` published to GitHub Packages
+- [x] #37: Application UI build/serve contract — `wfctl build-ui` command implemented, `docs/APPLICATION_UI_CONTRACT.md` created
+- [x] #38: go-plugin UI hot-reload — implemented in PR #45
+- [x] #39: Cleanup legacy UI scaffolding — removed stale `module/ui_dist/`, updated deployment docs, legacy embed references removed
 
 ### Phase 3: Developer Tooling (Weeks 3-6)
 
-- `wfctl init` with project templates
-- `wfctl plugin init` for plugin scaffolding
-- `wfctl build-ui` (tracked: #37)
-- Shared UI library npm publish (tracked: #36)
+- [x] `wfctl init` with project templates — 5 templates: api-service, event-processor, full-stack, plugin, ui-plugin
+- [x] `wfctl plugin init` for plugin scaffolding — improved with template system
+- [x] `wfctl build-ui` (tracked: #37) — framework detection, build, validate, copy, config snippet generation
+- [x] Shared UI library npm publish (tracked: #36) — `@gocodealone/workflow-ui` on GitHub Packages
 
 ### Phase 4: Plugin Registry (Weeks 5-8)
 
