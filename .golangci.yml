@@ -26,6 +26,7 @@ linters:
       excludes:
         - G104 # Duplicates errcheck
         - G304 # File inclusion from variable - expected for config/dynamic loading
+        - G704 # SSRF via taint analysis - URLs from admin config are intentional
     gocritic:
       enabled-tags:
         - diagnostic
