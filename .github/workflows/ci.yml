@@ -33,6 +33,7 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
+        registry-url: 'https://npm.pkg.github.com'
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
 
@@ -40,6 +41,8 @@ jobs:
       run: |
         cd ui && npm ci && npm run build
         cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Download dependencies
       run: |
@@ -77,6 +80,7 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
+        registry-url: 'https://npm.pkg.github.com'
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
 
@@ -84,6 +88,8 @@ jobs:
       run: |
         cd ui && npm ci && npm run build
         cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v7
@@ -111,6 +117,7 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
+        registry-url: 'https://npm.pkg.github.com'
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
 
@@ -118,6 +125,8 @@ jobs:
       run: |
         cd ui && npm ci && npm run build
         cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build server binary
       run: go build -v -o /dev/null ./cmd/server
@@ -147,11 +156,14 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
+        registry-url: 'https://npm.pkg.github.com'
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
 
     - name: Install dependencies
       run: npm ci
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Lint
       run: npm run lint
@@ -183,6 +195,7 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
+        registry-url: 'https://npm.pkg.github.com'
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
 
@@ -190,6 +203,8 @@ jobs:
       run: |
         cd ui && npm ci && npm run build
         cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: YAML parsing — all configs loadable
       run: go test -v -run TestExampleConfigsLoad -timeout 60s .
