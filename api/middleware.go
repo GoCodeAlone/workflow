@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -91,6 +92,9 @@ func (m *Middleware) authenticate(r *http.Request) (*store.User, error) {
 	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, jwt.ErrTokenSignatureInvalid
+		}
+		if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return m.jwtSecret, nil
 	})
