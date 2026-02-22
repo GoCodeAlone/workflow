@@ -1,5 +1,5 @@
-// Package license provides license validation and feature gating for the workflow engine.
-package license
+// Package licensing provides license validation and feature gating for the workflow engine.
+package licensing
 
 import (
 	"context"
