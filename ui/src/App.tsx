@@ -25,14 +25,6 @@ import FlagManager from './components/featureflags/FlagManager.tsx';
 import StoreBrowserPage from './components/storebrowser/StoreBrowserPage.tsx';
 import DocsPage from './components/docmanager/DocsPage.tsx';
 import TemplatePage from './components/dynamic/TemplatePage.tsx';
-
-// Registry of plugin view components — keyed by UIPage id.
-// Only pages listed here (or pages with a template) will render when active.
-const PLUGIN_VIEW_COMPONENTS: Record<string, React.ComponentType> = {
-  'feature-flags': FlagManager,
-  'store-browser': StoreBrowserPage,
-  'docs': DocsPage,
-};
 import WorkflowPickerBar from './components/shared/WorkflowPickerBar.tsx';
 import CollapsiblePanel from './components/layout/CollapsiblePanel.tsx';
 import useWorkflowStore from './store/workflowStore.ts';
@@ -231,6 +223,18 @@ function ExecutionsView() {
   );
 }
 
+function LogsView() {
+  return (
+    <ObservabilityView><LogViewer /></ObservabilityView>
+  );
+}
+
+function EventsView() {
+  return (
+    <ObservabilityView><EventInspector /></ObservabilityView>
+  );
+}
+
 function ValidationBar() {
   const validationErrors = useWorkflowStore((s) => s.validationErrors);
   const clearValidationErrors = useWorkflowStore((s) => s.clearValidationErrors);
@@ -286,6 +290,27 @@ function ValidationBar() {
   );
 }
 
+// Registry of all view components keyed by UIPage id.
+// Navigation is driven entirely by pages returned from /api/v1/admin/plugins.
+// Core views and plugin views are both dispatched through this registry;
+// pages with no matching entry fall back to TemplatePage (if a template is set).
+const VIEW_REGISTRY: Record<string, React.ComponentType> = {
+  // Core views (declared by the admin-core plugin on the backend)
+  dashboard: SystemDashboard,
+  editor: EditorView,
+  executions: ExecutionsView,
+  logs: LogsView,
+  events: EventsView,
+  marketplace: Marketplace,
+  templates: Templates,
+  environments: Environments,
+  settings: IAMSettings,
+  // Plugin views (declared by their respective NativePlugins)
+  'feature-flags': FlagManager,
+  'store-browser': StoreBrowserPage,
+  docs: DocsPage,
+};
+
 function AppLayout() {
   const activeView = useObservabilityStore((s) => s.activeView);
   const activeWorkflowRecord = useWorkflowStore((s) => s.activeWorkflowRecord);
@@ -318,34 +343,14 @@ function AppLayout() {
       {(activeView === 'editor' || hasWorkflowOpen) && <WorkflowTabs />}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', isolation: 'isolate' }}>
         <AppNav />
-        {activeView === 'editor' && <EditorView />}
-        {activeView === 'dashboard' && <SystemDashboard />}
-        {activeView === 'executions' && <ExecutionsView />}
-        {activeView === 'logs' && (
-          <ObservabilityView><LogViewer /></ObservabilityView>
-        )}
-        {activeView === 'events' && (
-          <ObservabilityView><EventInspector /></ObservabilityView>
-        )}
-        {activeView === 'marketplace' && <Marketplace />}
-        {activeView === 'templates' && <Templates />}
-        {activeView === 'environments' && <Environments />}
-        {activeView === 'settings' && <IAMSettings />}
-        {/* Plugin pages — rendered dynamically from enabledPages, not hardcoded */}
         {(() => {
-          const coreViews = new Set([
-            'editor', 'dashboard', 'executions', 'logs', 'events',
-            'marketplace', 'templates', 'environments', 'settings',
-          ]);
-          if (coreViews.has(activeView)) return null;
-
-          // Only render if this view appears in an enabled plugin's pages
+          // Only render a view if the active page is declared by an enabled plugin.
           const page = enabledPages.find((p: UIPageDef) => p.id === activeView);
           if (!page) return null;
 
-          // Use dedicated component if available, otherwise fall back to TemplatePage
-          const PluginComponent = PLUGIN_VIEW_COMPONENTS[activeView];
-          if (PluginComponent) return <PluginComponent />;
+          // Use the component from the registry when available; fall back to TemplatePage.
+          const ViewComponent = VIEW_REGISTRY[activeView];
+          if (ViewComponent) return <ViewComponent />;
           if (page.template) return <TemplatePage page={page} />;
           return null;
         })()}

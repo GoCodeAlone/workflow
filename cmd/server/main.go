@@ -34,6 +34,7 @@ import (
 	"github.com/GoCodeAlone/workflow/observability/tracing"
 	"github.com/GoCodeAlone/workflow/plugin"
 	pluginexternal "github.com/GoCodeAlone/workflow/plugin/external"
+	_ "github.com/GoCodeAlone/workflow/plugin/admincore"
 	_ "github.com/GoCodeAlone/workflow/plugin/docmanager"
 	_ "github.com/GoCodeAlone/workflow/plugin/storebrowser"
 	pluginai "github.com/GoCodeAlone/workflow/plugins/ai"
