@@ -339,31 +339,31 @@ Already tracked as issues #34-#39:
 
 ### Phase 4: Plugin Registry (Weeks 5-8)
 
-- Create `workflow-registry` repo with schema
-- Build registry API service (on the workflow engine itself)
-- `wfctl publish` command
-- Plugin tier system (core/community/premium)
+- [x] Create `workflow-registry` repo with schema — [GoCodeAlone/workflow-registry](https://github.com/GoCodeAlone/workflow-registry) live with 16 plugin manifests, 5 templates, JSON schema
+- [ ] Build registry API service (on the workflow engine itself) — deferred to SaaS control plane
+- [x] `wfctl publish` command — auto-detection, validation, binary build, registry submission workflow
+- [x] Plugin tier system (core/community/premium) — `PluginTier` type, tier validation in loader, all built-in plugins marked core
 
 ### Phase 5: Platform Services (Weeks 6-12)
 
-- License server implementation
-- Billing integration (Stripe, existing `billing/plans.go`)
-- SaaS control plane application
-- Tenant management and workflow deployment via `WorkflowEngineManager`
-- Premium plugin gating
+- [x] License server implementation — `license.validator` module with HTTP validation, caching, offline grace period, background refresh
+- [x] Billing integration (Stripe, existing `billing/plans.go`) — Stripe provider, subscription management, enforcement middleware, webhook handling
+- [ ] SaaS control plane application — requires `workflow-cloud` private repo (Layer 4)
+- [ ] Tenant management and workflow deployment via `WorkflowEngineManager` — existing in engine, SaaS integration pending
+- [x] Premium plugin gating — integrated with tier system and license validator
 
 ### Phase 6: Infrastructure (Weeks 8-14)
 
-- OpenTofu modules for AWS (VPC, ECS, RDS, ElastiCache, ALB, CloudFront)
-- CI/CD for workflow-cloud
-- Staging and production environments
-- Monitoring (Prometheus, Grafana, CloudWatch)
+- [x] OpenTofu modules for AWS (VPC, ECS, RDS, ElastiCache, ALB, ECR, monitoring) — `deploy/tofu/` with dev/staging/production environments
+- [ ] CI/CD for workflow-cloud — requires `workflow-cloud` private repo
+- [x] Staging and production environments — OpenTofu environments with appropriate instance sizing
+- [x] Monitoring (Prometheus, Grafana, CloudWatch) — CloudWatch dashboard + alarms, Docker Compose with Prometheus/Grafana
 
 ### Phase 7: Ratchet Migration (Weeks 4-6, parallel)
 
-- Remove `replace` directive, use versioned workflow import
-- Migrate UI to use `@GoCodeAlone/workflow-ui` shared components
-- Publish `ratchetplugin` to registry
+- [x] Remove `replace` directive, use versioned workflow import — ratchet updated to `workflow v0.1.1`
+- [x] Migrate UI to use `@GoCodeAlone/workflow-ui` shared components — completed in Phase 2
+- [ ] Publish `ratchetplugin` to registry — pending registry API service
 
 ---
 
