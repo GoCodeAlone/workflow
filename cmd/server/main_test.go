@@ -391,6 +391,7 @@ triggers: {}
 
 func TestSetup_EmptyConfig(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
 	*anthropicKey = ""
 	*copilotCLI = ""
 
@@ -414,6 +415,7 @@ func TestSetup_EmptyConfig(t *testing.T) {
 
 func TestRun_ImmediateCancel(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
 	*anthropicKey = ""
 	*copilotCLI = ""
 
@@ -437,6 +439,7 @@ func TestRun_ImmediateCancel(t *testing.T) {
 
 func TestRun_ServerStartsAndStops(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
 	*anthropicKey = ""
 	*copilotCLI = ""
 
@@ -550,6 +553,7 @@ func TestBuildEngine_InvalidModuleType(t *testing.T) {
 
 func TestSetup_WithModules(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("JWT_SECRET", "test-secret-that-is-at-least-32-bytes-long")
 	*anthropicKey = ""
 	*copilotCLI = ""
 
