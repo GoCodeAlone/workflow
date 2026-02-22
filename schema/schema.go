@@ -74,6 +74,7 @@ var coreModuleTypes = []string{
 	"http.router",
 	"http.server",
 	"http.simple_proxy",
+	"license.validator",
 	"log.collector",
 	"messaging.broker",
 	"messaging.broker.eventbus",
