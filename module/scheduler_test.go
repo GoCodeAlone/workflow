@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	wscheduler "github.com/GoCodeAlone/workflow/scheduler"
 )
 
 func TestNewCronScheduler(t *testing.T) {
@@ -92,13 +94,13 @@ func TestCronScheduler_StopNotRunning(t *testing.T) {
 
 func TestCronScheduler_CronExpressions(t *testing.T) {
 	tests := []struct {
-		cron     string
-		expected time.Duration
+		cron string
 	}{
-		{"* * * * *", time.Minute},
-		{"0 * * * *", time.Hour},
-		{"0 0 * * *", 24 * time.Hour},
-		{"custom", time.Minute}, // default
+		{"* * * * *"},
+		{"*/5 * * * *"},
+		{"0 * * * *"},
+		{"0 0 * * *"},
+		{"0 9 * * 1-5"},
 	}
 
 	for _, tc := range tests {
@@ -106,14 +108,51 @@ func TestCronScheduler_CronExpressions(t *testing.T) {
 			s := NewCronScheduler("test", tc.cron)
 			ctx, cancel := context.WithCancel(context.Background())
 
-			_ = s.Start(ctx)
-			// Verify the ticker was created
-			if s.ticker == nil {
-				t.Error("expected ticker to be created")
+			err := s.Start(ctx)
+			if err != nil {
+				t.Errorf("Start failed for %q: %v", tc.cron, err)
+			}
+			if !s.running {
+				t.Error("expected running=true after Start")
 			}
 			cancel()
 			// Give the goroutine time to handle context cancellation
 			time.Sleep(10 * time.Millisecond)
+		})
+	}
+}
+
+func TestCronScheduler_InvalidExpression(t *testing.T) {
+	s := NewCronScheduler("test", "not-a-cron")
+	err := s.Start(context.Background())
+	if err == nil {
+		t.Error("expected error for invalid cron expression")
+	}
+	if s.running {
+		t.Error("expected running=false for invalid expression")
+	}
+}
+
+func TestCronScheduler_NextRunTimes(t *testing.T) {
+	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		cron     string
+		expected time.Time
+	}{
+		{"* * * * *", from.Add(time.Minute).Truncate(time.Minute)},
+		{"*/5 * * * *", from.Add(5 * time.Minute).Truncate(time.Minute)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.cron, func(t *testing.T) {
+			next, err := wscheduler.NextRun(tc.cron, from)
+			if err != nil {
+				t.Fatalf("NextRun failed: %v", err)
+			}
+			if !next.Equal(tc.expected) {
+				t.Errorf("expected next run %v, got %v", tc.expected, next)
+			}
 		})
 	}
 }

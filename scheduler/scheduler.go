@@ -355,6 +355,11 @@ func mustGenerateID(prefix string) string {
 	return id
 }
 
+// NextRun computes the next run time for a cron expression from a given point in time.
+func NextRun(cronExpr string, from time.Time) (time.Time, error) {
+	return defaultNextRun(cronExpr, from)
+}
+
 // --- Simple cron parser (supports standard 5-field cron) ---
 
 // ValidateCron validates a standard 5-field cron expression.

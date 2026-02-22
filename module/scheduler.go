@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/workflow/scheduler"
 )
 
 // Job represents a scheduled job
@@ -26,7 +27,6 @@ type CronScheduler struct {
 	cronExpression string
 	jobs           []Job
 	running        bool
-	ticker         *time.Ticker
 	stopCh         chan struct{}
 }
 
@@ -57,26 +57,22 @@ func (s *CronScheduler) Start(ctx context.Context) error {
 		return nil
 	}
 
-	// For testing purposes, we'll use a simple ticker with fixed intervals
-	// In a real implementation, this would parse the cron expression and schedule accordingly
-	interval := time.Minute
-	switch s.cronExpression {
-	case "* * * * *": // every minute
-		interval = time.Minute
-	case "0 * * * *": // every hour
-		interval = time.Hour
-	case "0 0 * * *": // every day
-		interval = 24 * time.Hour
+	if err := scheduler.ValidateCron(s.cronExpression); err != nil {
+		return fmt.Errorf("invalid cron expression %q: %w", s.cronExpression, err)
 	}
 
-	s.ticker = time.NewTicker(interval)
 	s.running = true
 
 	go func() {
 		for {
+			next, err := scheduler.NextRun(s.cronExpression, time.Now())
+			if err != nil {
+				s.running = false
+				return
+			}
+			timer := time.NewTimer(time.Until(next))
 			select {
-			case <-s.ticker.C:
-				// Run all scheduled jobs
+			case <-timer.C:
 				for _, job := range s.jobs {
 					go func(j Job) {
 						if err := j.Execute(ctx); err != nil {
@@ -85,9 +81,10 @@ func (s *CronScheduler) Start(ctx context.Context) error {
 					}(job)
 				}
 			case <-s.stopCh:
+				timer.Stop()
 				return
 			case <-ctx.Done():
-				s.ticker.Stop()
+				timer.Stop()
 				s.running = false
 				return
 			}
@@ -103,7 +100,6 @@ func (s *CronScheduler) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	s.ticker.Stop()
 	s.stopCh <- struct{}{}
 	s.running = false
 	return nil
