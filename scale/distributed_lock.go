@@ -2,11 +2,15 @@ package scale
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"hash/fnv"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // DistributedLock provides distributed locking for state machine transitions
@@ -241,29 +245,130 @@ func hashToInt64(key string) int64 {
 
 // --- RedisLock ---
 
+// redisReleaseScript atomically releases a Redis lock only if the caller
+// holds it (i.e., the stored value matches the token).
+var redisReleaseScript = redis.NewScript(`
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end
+`)
+
 // RedisLock implements DistributedLock using Redis SET NX with TTL.
-// Requires a Redis client connection. This is a stub implementation;
-// the full implementation will be provided when the Redis client is
-// integrated as a direct dependency.
+// Uses a unique token per acquisition to ensure only the holder can release.
 type RedisLock struct {
-	// addr is the Redis server address.
-	addr string
+	addr     string
+	password string
+	db       int
+	client   *redis.Client
+	initOnce sync.Once
 }
 
-// NewRedisLock creates a new Redis distributed lock stub.
-// Full implementation requires a Redis client (e.g., go-redis).
+// NewRedisLock creates a new Redis distributed lock using the given address.
+// The Redis client is created lazily on first use.
 func NewRedisLock(addr string) *RedisLock {
-	return &RedisLock{addr: addr}
+	return NewRedisLockWithOptions(addr, "", 0)
 }
 
-// Acquire obtains a lock using Redis SET NX with TTL.
-// This is a stub that returns an error indicating Redis is not yet configured.
-func (l *RedisLock) Acquire(_ context.Context, key string, _ time.Duration) (func(), error) {
-	return nil, fmt.Errorf("redis lock not implemented: configure Redis client for key %s at %s", key, l.addr)
+// NewRedisLockWithOptions creates a new Redis distributed lock with full
+// connection options. The Redis client is created lazily on first use.
+func NewRedisLockWithOptions(addr, password string, db int) *RedisLock {
+	return &RedisLock{addr: addr, password: password, db: db}
 }
 
-// TryAcquire attempts to acquire a Redis lock without blocking.
-// This is a stub that returns an error indicating Redis is not yet configured.
-func (l *RedisLock) TryAcquire(_ context.Context, key string, _ time.Duration) (func(), bool, error) {
-	return nil, false, fmt.Errorf("redis lock not implemented: configure Redis client for key %s at %s", key, l.addr)
+// connect initialises the Redis client exactly once.
+func (l *RedisLock) connect() {
+	l.initOnce.Do(func() {
+		l.client = redis.NewClient(&redis.Options{
+			Addr:     l.addr,
+			Password: l.password,
+			DB:       l.db,
+		})
+	})
+}
+
+// Close releases the underlying Redis client connection.
+func (l *RedisLock) Close() error {
+	l.connect()
+	return l.client.Close()
+}
+
+// randomToken generates a cryptographically random hex string used as the
+// lock token, ensuring only the holder can release.
+func randomToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate lock token: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// buildRelease returns a release function that atomically deletes the lock
+// only when the stored token matches, making it safe to call multiple times.
+func (l *RedisLock) buildRelease(key, token string) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			ctx := context.Background()
+			_ = redisReleaseScript.Run(ctx, l.client, []string{key}, token).Err()
+		})
+	}
+}
+
+// Acquire obtains a Redis lock for the given key using SET NX PX.
+// Retries with exponential backoff until the lock is acquired or ctx is
+// cancelled. Returns a release function that atomically deletes the lock.
+func (l *RedisLock) Acquire(ctx context.Context, key string, ttl time.Duration) (func(), error) {
+	l.connect()
+
+	token, err := randomToken()
+	if err != nil {
+		return nil, err
+	}
+
+	backoff := 16 * time.Millisecond
+	const maxBackoff = 512 * time.Millisecond
+
+	for {
+		cmd := l.client.SetArgs(ctx, key, token, redis.SetArgs{Mode: "NX", TTL: ttl})
+		if err := cmd.Err(); err != nil && err != redis.Nil {
+			return nil, fmt.Errorf("acquire redis lock for %s: %w", key, err)
+		}
+		if cmd.Val() == "OK" {
+			return l.buildRelease(key, token), nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("acquire redis lock for %s: %w", key, ctx.Err())
+		case <-time.After(backoff):
+		}
+
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+}
+
+// TryAcquire attempts to acquire a Redis lock for the given key without
+// blocking. Returns (release, true, nil) if acquired, (nil, false, nil) if
+// the lock is already held.
+func (l *RedisLock) TryAcquire(ctx context.Context, key string, ttl time.Duration) (func(), bool, error) {
+	l.connect()
+
+	token, err := randomToken()
+	if err != nil {
+		return nil, false, err
+	}
+
+	cmd := l.client.SetArgs(ctx, key, token, redis.SetArgs{Mode: "NX", TTL: ttl})
+	if err := cmd.Err(); err != nil && err != redis.Nil {
+		return nil, false, fmt.Errorf("try acquire redis lock for %s: %w", key, err)
+	}
+	if cmd.Val() != "OK" {
+		return nil, false, nil
+	}
+	return l.buildRelease(key, token), true, nil
 }
