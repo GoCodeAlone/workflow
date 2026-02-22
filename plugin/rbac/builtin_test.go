@@ -241,7 +241,7 @@ func TestStubProviders_ReturnErrors(t *testing.T) {
 		t.Error("expected error from permit stub")
 	}
 
-	aws := NewAWSIAMProvider("us-east-1", "arn:aws:iam::role/test")
+	aws := NewAWSIAMProviderWithClient("us-east-1", "arn:aws:iam::role/test", &mockIAMClient{})
 	if aws.Name() != "aws-iam" {
 		t.Errorf("expected name 'aws-iam', got %q", aws.Name())
 	}

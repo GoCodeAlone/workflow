@@ -512,11 +512,135 @@ func TestAccountIDFromARN(t *testing.T) {
 		{"arn:aws:iam::123456789012:role/my-role", "123456789012"},
 		{"arn:aws:iam::000000000000:user/alice", "000000000000"},
 		{"not-an-arn", ""},
+		// 5-part ARN (missing account ID) returns empty
+		{"arn:aws:iam::role/test", ""},
 	}
 	for _, tt := range tests {
 		got := accountIDFromARN(tt.input)
 		if got != tt.want {
 			t.Errorf("accountIDFromARN(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestIsValidAccountID(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"123456789012", true},
+		{"000000000000", true},
+		{"12345678901", false},  // 11 digits
+		{"1234567890123", false}, // 13 digits
+		{"role/test", false},
+		{"", false},
+		{"12345678901a", false},
+	}
+	for _, tt := range tests {
+		got := isValidAccountID(tt.input)
+		if got != tt.want {
+			t.Errorf("isValidAccountID(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestParseIAMPolicyDocument_SingleObjectStatement(t *testing.T) {
+	// IAM allows Statement as a single object (not an array).
+	doc := `{
+		"Version": "2012-10-17",
+		"Statement": {"Effect": "Allow", "Action": "s3:GetObject", "Resource": "*"}
+	}`
+	perms, err := parseIAMPolicyDocument(doc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(perms) != 1 {
+		t.Fatalf("expected 1 permission, got %d", len(perms))
+	}
+	if perms[0].Resource != "s3" || perms[0].Action != "GetObject" || perms[0].Effect != "allow" {
+		t.Errorf("unexpected permission: %+v", perms[0])
+	}
+}
+
+func TestAWSIAMProvider_ListPermissions_Pagination(t *testing.T) {
+	callCount := 0
+	mock := &mockIAMClient{
+		listAttachedRolesFunc: func(_ context.Context, params *iam.ListAttachedRolePoliciesInput, _ ...func(*iam.Options)) (*iam.ListAttachedRolePoliciesOutput, error) {
+			callCount++
+			if callCount == 1 {
+				return &iam.ListAttachedRolePoliciesOutput{
+					AttachedPolicies: []iamtypes.AttachedPolicy{
+						{PolicyArn: awsv2.String("arn:aws:iam::123:policy/pol-1")},
+					},
+					IsTruncated: true,
+					Marker:      awsv2.String("next-marker"),
+				}, nil
+			}
+			return &iam.ListAttachedRolePoliciesOutput{
+				AttachedPolicies: []iamtypes.AttachedPolicy{
+					{PolicyArn: awsv2.String("arn:aws:iam::123:policy/pol-2")},
+				},
+				IsTruncated: false,
+			}, nil
+		},
+		getPolicyFunc: func(_ context.Context, params *iam.GetPolicyInput, _ ...func(*iam.Options)) (*iam.GetPolicyOutput, error) {
+			return &iam.GetPolicyOutput{
+				Policy: &iamtypes.Policy{DefaultVersionId: awsv2.String("v1")},
+			}, nil
+		},
+		getPolicyVersionFunc: func(_ context.Context, _ *iam.GetPolicyVersionInput, _ ...func(*iam.Options)) (*iam.GetPolicyVersionOutput, error) {
+			doc := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"*"}]}`
+			return &iam.GetPolicyVersionOutput{
+				PolicyVersion: &iamtypes.PolicyVersion{Document: awsv2.String(doc)},
+			}, nil
+		},
+	}
+	p := NewAWSIAMProviderWithClient("us-east-1", "arn:aws:iam::123:role/my-role", mock)
+	perms, err := p.ListPermissions(context.Background(), "arn:aws:iam::123:role/my-role")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if callCount != 2 {
+		t.Errorf("expected 2 calls to ListAttachedRolePolicies, got %d", callCount)
+	}
+	// Two policies, each with one permission.
+	if len(perms) != 2 {
+		t.Errorf("expected 2 permissions (one per page), got %d", len(perms))
+	}
+}
+
+func TestAWSIAMProvider_ListPermissions_GetPolicyError(t *testing.T) {
+	mock := &mockIAMClient{
+		listAttachedRolesFunc: func(_ context.Context, _ *iam.ListAttachedRolePoliciesInput, _ ...func(*iam.Options)) (*iam.ListAttachedRolePoliciesOutput, error) {
+			return &iam.ListAttachedRolePoliciesOutput{
+				AttachedPolicies: []iamtypes.AttachedPolicy{
+					{PolicyArn: awsv2.String("arn:aws:iam::123:policy/p1")},
+				},
+			}, nil
+		},
+		getPolicyFunc: func(_ context.Context, _ *iam.GetPolicyInput, _ ...func(*iam.Options)) (*iam.GetPolicyOutput, error) {
+			return nil, fmt.Errorf("get policy failed")
+		},
+	}
+	p := NewAWSIAMProviderWithClient("us-east-1", "arn:aws:iam::123:role/my-role", mock)
+	_, err := p.ListPermissions(context.Background(), "arn:aws:iam::123:role/my-role")
+	if err == nil {
+		t.Fatal("expected error when GetPolicy fails")
+	}
+}
+
+func TestAWSIAMProvider_SyncRoles_InvalidARNReturnsError(t *testing.T) {
+	mock := &mockIAMClient{
+		createPolicyFunc: func(_ context.Context, _ *iam.CreatePolicyInput, _ ...func(*iam.Options)) (*iam.CreatePolicyOutput, error) {
+			return nil, &iamtypes.EntityAlreadyExistsException{
+				Message: awsv2.String("policy already exists"),
+			}
+		},
+	}
+	// Role ARN without a valid 12-digit account ID.
+	p := NewAWSIAMProviderWithClient("us-east-1", "arn:aws:iam::role/test", mock)
+	roles := []auth.RoleDefinition{{Name: "reader", Permissions: []auth.Permission{{Resource: "r", Action: "a"}}}}
+	if err := p.SyncRoles(context.Background(), roles); err == nil {
+		t.Fatal("expected error when role ARN is missing a valid account ID")
 	}
 }

@@ -108,22 +108,38 @@ func (a *AWSIAMProvider) ListPermissions(ctx context.Context, subject string) ([
 	var attached []iamtypes.AttachedPolicy
 	if strings.Contains(subject, ":user/") {
 		userName := subject[strings.LastIndex(subject, ":user/")+len(":user/"):]
-		out, err := a.client.ListAttachedUserPolicies(ctx, &iam.ListAttachedUserPoliciesInput{
-			UserName: awsv2.String(userName),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("list attached user policies: %w", err)
+		var marker *string
+		for {
+			out, err := a.client.ListAttachedUserPolicies(ctx, &iam.ListAttachedUserPoliciesInput{
+				UserName: awsv2.String(userName),
+				Marker:   marker,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("list attached user policies: %w", err)
+			}
+			attached = append(attached, out.AttachedPolicies...)
+			if !out.IsTruncated {
+				break
+			}
+			marker = out.Marker
 		}
-		attached = out.AttachedPolicies
 	} else {
 		roleName := roleNameFromARN(subject)
-		out, err := a.client.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{
-			RoleName: awsv2.String(roleName),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("list attached role policies: %w", err)
+		var marker *string
+		for {
+			out, err := a.client.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{
+				RoleName: awsv2.String(roleName),
+				Marker:   marker,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("list attached role policies: %w", err)
+			}
+			attached = append(attached, out.AttachedPolicies...)
+			if !out.IsTruncated {
+				break
+			}
+			marker = out.Marker
 		}
-		attached = out.AttachedPolicies
 	}
 
 	var perms []auth.Permission
@@ -134,24 +150,31 @@ func (a *AWSIAMProvider) ListPermissions(ctx context.Context, subject string) ([
 		policyOut, err := a.client.GetPolicy(ctx, &iam.GetPolicyInput{
 			PolicyArn: p.PolicyArn,
 		})
-		if err != nil || policyOut.Policy == nil || policyOut.Policy.DefaultVersionId == nil {
+		if err != nil {
+			return nil, fmt.Errorf("get policy %s: %w", awsv2.ToString(p.PolicyArn), err)
+		}
+		if policyOut.Policy == nil || policyOut.Policy.DefaultVersionId == nil {
 			continue
 		}
 		versionOut, err := a.client.GetPolicyVersion(ctx, &iam.GetPolicyVersionInput{
 			PolicyArn: p.PolicyArn,
 			VersionId: policyOut.Policy.DefaultVersionId,
 		})
-		if err != nil || versionOut.PolicyVersion == nil || versionOut.PolicyVersion.Document == nil {
+		if err != nil {
+			return nil, fmt.Errorf("get policy version %s for policy %s: %w",
+				awsv2.ToString(policyOut.Policy.DefaultVersionId), awsv2.ToString(p.PolicyArn), err)
+		}
+		if versionOut.PolicyVersion == nil || versionOut.PolicyVersion.Document == nil {
 			continue
 		}
 		// Policy documents are URL-encoded per RFC 3986.
 		decoded, err := url.QueryUnescape(*versionOut.PolicyVersion.Document)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("decode policy document for policy %s: %w", awsv2.ToString(p.PolicyArn), err)
 		}
 		parsed, err := parseIAMPolicyDocument(decoded)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("parse policy document for policy %s: %w", awsv2.ToString(p.PolicyArn), err)
 		}
 		perms = append(perms, parsed...)
 	}
@@ -186,15 +209,17 @@ func (a *AWSIAMProvider) SyncRoles(ctx context.Context, roles []auth.RoleDefinit
 				return fmt.Errorf("create policy %q: %w", policyName, err)
 			}
 			// Policy already exists: create a new default version.
-			if accountID != "" {
-				policyARN = fmt.Sprintf("arn:aws:iam::%s:policy/%s", accountID, policyName)
-				if _, err := a.client.CreatePolicyVersion(ctx, &iam.CreatePolicyVersionInput{
-					PolicyArn:      awsv2.String(policyARN),
-					PolicyDocument: awsv2.String(doc),
-					SetAsDefault:   true,
-				}); err != nil {
-					return fmt.Errorf("create policy version for %q: %w", policyName, err)
-				}
+			// Require a valid account ID to build the policy ARN.
+			if !isValidAccountID(accountID) {
+				return fmt.Errorf("cannot update existing policy %q: unable to determine policy ARN from role ARN %q", policyName, a.roleARN)
+			}
+			policyARN = fmt.Sprintf("arn:aws:iam::%s:policy/%s", accountID, policyName)
+			if _, err := a.client.CreatePolicyVersion(ctx, &iam.CreatePolicyVersionInput{
+				PolicyArn:      awsv2.String(policyARN),
+				PolicyDocument: awsv2.String(doc),
+				SetAsDefault:   true,
+			}); err != nil {
+				return fmt.Errorf("create policy version for %q: %w", policyName, err)
 			}
 		} else if createOut.Policy != nil && createOut.Policy.Arn != nil {
 			policyARN = *createOut.Policy.Arn
@@ -214,14 +239,38 @@ func (a *AWSIAMProvider) SyncRoles(ctx context.Context, roles []auth.RoleDefinit
 }
 
 // parseIAMPolicyDocument converts an IAM policy document JSON string into
-// a slice of auth.Permission values.
+// a slice of auth.Permission values. It supports Statement as either a JSON
+// array or a single JSON object, both of which are valid per the IAM spec.
 func parseIAMPolicyDocument(doc string) ([]auth.Permission, error) {
-	var pd iamPolicyDocument
-	if err := json.Unmarshal([]byte(doc), &pd); err != nil {
+	// Use a wrapper so we can detect the Statement form before unmarshalling.
+	var wrapper struct {
+		Statement json.RawMessage `json:"Statement"`
+	}
+	if err := json.Unmarshal([]byte(doc), &wrapper); err != nil {
 		return nil, err
 	}
+	if len(wrapper.Statement) == 0 {
+		return nil, nil
+	}
+
+	var statements []iamPolicyStatement
+	switch wrapper.Statement[0] {
+	case '[':
+		if err := json.Unmarshal(wrapper.Statement, &statements); err != nil {
+			return nil, err
+		}
+	case '{':
+		var stmt iamPolicyStatement
+		if err := json.Unmarshal(wrapper.Statement, &stmt); err != nil {
+			return nil, err
+		}
+		statements = []iamPolicyStatement{stmt}
+	default:
+		return nil, fmt.Errorf("unexpected Statement format in IAM policy document")
+	}
+
 	var perms []auth.Permission
-	for _, stmt := range pd.Statement {
+	for _, stmt := range statements {
 		effect := strings.ToLower(stmt.Effect)
 		actions := parseStringOrSlice(stmt.Action)
 		for _, act := range actions {
@@ -271,10 +320,23 @@ func roleNameFromARN(arn string) string {
 // "arn:aws:iam::123456789012:role/my-role" → "123456789012".
 func accountIDFromARN(arn string) string {
 	parts := strings.Split(arn, ":")
-	if len(parts) >= 5 {
+	if len(parts) >= 6 {
 		return parts[4]
 	}
 	return ""
+}
+
+// isValidAccountID returns true if id is a valid 12-digit AWS account ID.
+func isValidAccountID(id string) bool {
+	if len(id) != 12 {
+		return false
+	}
+	for _, c := range id {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // buildPolicyDocument creates an IAM policy document JSON granting all
