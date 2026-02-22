@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built on Modular](https://img.shields.io/badge/Built%20on-CrisisTextLine%2Fmodular-green)](https://github.com/CrisisTextLine/modular)
 
-A production-grade, configuration-driven workflow orchestration engine built on [CrisisTextLine/modular](https://github.com/CrisisTextLine/modular) v1.11.11. Define entire applications in YAML -- from API servers to multi-service chat platforms -- with 60+ module types, dynamic hot-reload, AI-powered generation, and a visual builder UI.
+A production-grade, configuration-driven workflow orchestration engine built on [CrisisTextLine/modular](https://github.com/CrisisTextLine/modular) v1.11.11. Define entire applications in YAML -- from API servers to multi-service chat platforms -- with 48+ module types, dynamic hot-reload, AI-powered generation, and a visual builder UI.
 
 ## What It Does
 
@@ -44,7 +44,7 @@ workflows:
 
 ## Features
 
-### 60+ Module Types Across 11 Categories
+### 48+ Module Types Across 11 Categories
 
 | Category | Count | Types |
 |----------|-------|-------|
@@ -54,7 +54,7 @@ workflows:
 | **Pipeline Steps** | 14 | step.validate, step.transform, step.conditional, step.set, step.log, step.publish, step.http_call, step.delegate, step.request_parse, step.db_query, step.db_exec, step.json_response, step.feature_flag, step.ff_gate |
 | **API & CQRS** | 3 | api.handler, api.command, api.query |
 | **Feature Flags** | 1 | featureflag.service |
-| **Modular Framework** | 4 | scheduler.modular, cache.modular, database.modular, reverseproxy (deprecated -- may be replaced by workflow-native equivalents) |
+| **Modular Framework** | 4 | scheduler.modular, cache.modular, database.modular, reverseproxy |
 | **Storage/Persistence** | 7 | database.workflow, persistence.store, storage.s3, storage.gcs, storage.local, storage.sqlite, static.fileserver |
 | **Observability** | 4 | metrics.collector, health.checker, observability.otel, log.collector |
 | **Auth** | 2 | auth.jwt, auth.user-store |
@@ -94,7 +94,7 @@ Hybrid AI integration with two providers:
 
 ### Visual Workflow Builder (ReactFlow UI)
 
-- Drag-and-drop node palette with all 60+ module types across categorized sections
+- Drag-and-drop node palette with all 48+ module types across categorized sections
 - Property panel for node configuration with type-specific fields
 - YAML import/export with round-trip fidelity
 - Undo/redo, validation (local + server), Zustand state management
@@ -168,12 +168,13 @@ docker compose up
 A 73-file, multi-service platform demonstrating the full capabilities of the engine. Located in [`example/chat-platform/`](example/chat-platform/).
 
 **Architecture:**
-```
-Browser -> [gateway:8080] -> reverse proxy -> [api:8081]          (auth, CRUD, admin)
-                                           -> [conversation:8082] (chat, state machine)
-
-[conversation] <-> [Kafka] <-> [conversation]  (event-driven messaging)
-[prometheus] -> [grafana]                       (observability)
+```mermaid
+graph LR
+    Browser -->|":8080"| GW["gateway:8080"]
+    GW -->|reverse proxy| API["api:8081\n(auth, CRUD, admin)"]
+    GW -->|reverse proxy| Conv["conversation:8082\n(chat, state machine)"]
+    Conv <-->|event-driven messaging| Kafka[Kafka]
+    Prom[prometheus] --> Graf[grafana]
 ```
 
 **Highlights:**
@@ -228,7 +229,7 @@ mock/                Test helpers and mock implementations
 
 **Core flow:**
 1. `StdEngine` loads YAML config via `BuildFromConfig()`
-2. Each module definition is matched to a factory (60+ built-in types) and instantiated
+2. Each module definition is matched to a factory (48+ built-in types) and instantiated
 3. Modules register with the modular `Application` (dependency injection, service registry)
 4. Workflow handlers (HTTP, Messaging, StateMachine, Scheduler, Integration) configure workflows
 5. Triggers (HTTP endpoints, EventBus subscriptions, cron schedules) start the system

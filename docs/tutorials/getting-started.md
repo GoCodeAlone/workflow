@@ -19,7 +19,7 @@ go build -o wfctl ./cmd/wfctl
 ### 2. Run Your First Workflow
 
 ```bash
-./server -config example/simple-http-server.yaml
+./server -config example/simple-workflow-config.yaml
 ```
 
 Visit http://localhost:8080 to see your server running.

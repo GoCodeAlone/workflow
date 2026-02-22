@@ -11,66 +11,25 @@ Both categories implement the same `EnginePlugin` interface. The engine does not
 
 ### Architecture Diagram
 
-```
-+------------------------------------------------------------------+
-|                        Workflow Engine                             |
-|                                                                   |
-|  +-----------------------+    +-----------------------------+     |
-|  |  EnginePluginManager  |    |      PluginLoader           |     |
-|  |                       |    |  - moduleFactories          |     |
-|  |  Register / Enable    +--->|  - stepFactories            |     |
-|  |  Disable / List       |    |  - triggerFactories         |     |
-|  +-----------+-----------+    |  - wiringHooks              |     |
-|              |                |  - schemaRegistry           |     |
-|              |                +-----------------------------+     |
-|              |                                                    |
-|    +---------+----------+                                         |
-|    |                    |                                         |
-|    v                    v                                         |
-| +--------+   +-------------------------+                         |
-| | Builtin|   | ExternalPluginAdapter   |                         |
-| | Plugin |   |                         |                         |
-| | (Go)   |   | Wraps gRPC client as    |                         |
-| |        |   | EnginePlugin interface   |                         |
-| +--------+   +----------+--------------+                         |
-|                          |                                        |
-|                          | gRPC (PluginServiceClient)             |
-|                          |                                        |
-|              +-----------+-----------+                            |
-|              | CallbackServer        |                            |
-|              | (EngineCallbackService)|                            |
-|              +-----------+-----------+                            |
-|                          ^                                        |
-+--------------------------|---------+-----------------------------+
-                           |         |
-            Unix socket or TCP       | gRPC (EngineCallbackService)
-                           |         |
-+--------------------------|---------|---------+
-|                     Plugin Process           |
-|                                              |
-|  +---------------------------+               |
-|  | PluginService (gRPC)      |               |
-|  |                           |               |
-|  | GetManifest()             |               |
-|  | GetModuleTypes()          |               |
-|  | GetStepTypes()            |               |
-|  | GetTriggerTypes()         |               |
-|  | GetModuleSchemas()        |               |
-|  | CreateModule() / Init()   |               |
-|  | Start() / Stop()          |               |
-|  | CreateStep() / Execute()  |               |
-|  | DestroyModule/Step()      |               |
-|  | InvokeService()           |               |
-|  +---------------------------+               |
-|                                              |
-|  +---------------------------+               |
-|  | EngineCallback Client     |               |
-|  |                           |               |
-|  | TriggerWorkflow() --------+---> Host      |
-|  | GetService()      --------+---> Host      |
-|  | Log()             --------+---> Host      |
-|  +---------------------------+               |
-+----------------------------------------------+
+```mermaid
+graph TB
+    subgraph Engine["Workflow Engine"]
+        EPM["EnginePluginManager\nRegister / Enable / Disable / List"]
+        PL["PluginLoader\n- moduleFactories\n- stepFactories\n- triggerFactories\n- wiringHooks\n- schemaRegistry"]
+        BP["Builtin Plugin (Go)"]
+        EPA["ExternalPluginAdapter\nWraps gRPC client as EnginePlugin interface"]
+        CB["CallbackServer\n(EngineCallbackService)"]
+        EPM --> PL
+        EPM --> BP
+        EPM --> EPA
+        EPA -->|"gRPC (PluginServiceClient)"| CB
+    end
+    subgraph PP["Plugin Process"]
+        PS["PluginService (gRPC)\nGetManifest · GetModuleTypes · GetStepTypes\nGetTriggerTypes · GetModuleSchemas\nCreateModule / Init · Start / Stop\nCreateStep / Execute · DestroyModule/Step\nInvokeService"]
+        ECC["EngineCallback Client\nTriggerWorkflow → Host\nGetService → Host\nLog → Host"]
+    end
+    EPA <-->|"Unix socket or TCP"| PS
+    ECC -->|"gRPC (EngineCallbackService)"| CB
 ```
 
 ## gRPC Protocol

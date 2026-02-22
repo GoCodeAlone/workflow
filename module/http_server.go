@@ -12,11 +12,14 @@ import (
 
 // StandardHTTPServer implements the HTTPServer interface and modular.Module interfaces
 type StandardHTTPServer struct {
-	name    string
-	server  *http.Server
-	address string
-	router  HTTPRouter
-	logger  modular.Logger
+	name         string
+	server       *http.Server
+	address      string
+	router       HTTPRouter
+	logger       modular.Logger
+	readTimeout  time.Duration
+	writeTimeout time.Duration
+	idleTimeout  time.Duration
 }
 
 // NewStandardHTTPServer creates a new HTTP server with the given name and address
@@ -25,6 +28,14 @@ func NewStandardHTTPServer(name, address string) *StandardHTTPServer {
 		name:    name,
 		address: address,
 	}
+}
+
+// SetTimeouts configures read, write, and idle timeouts for the HTTP server.
+// Zero values will use defaults (30s read/write, 120s idle).
+func (s *StandardHTTPServer) SetTimeouts(read, write, idle time.Duration) {
+	s.readTimeout = read
+	s.writeTimeout = write
+	s.idleTimeout = idle
 }
 
 // Name returns the unique identifier for this module
@@ -71,6 +82,9 @@ func (s *StandardHTTPServer) Start(ctx context.Context) error {
 		Addr:              s.address,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       timeoutOrDefault(s.readTimeout, 30*time.Second),
+		WriteTimeout:      timeoutOrDefault(s.writeTimeout, 30*time.Second),
+		IdleTimeout:       timeoutOrDefault(s.idleTimeout, 120*time.Second),
 	}
 
 	// Start the server in a goroutine
@@ -113,4 +127,12 @@ func (s *StandardHTTPServer) ProvidesServices() []modular.ServiceProvider {
 func (s *StandardHTTPServer) RequiresServices() []modular.ServiceDependency {
 	// No required services
 	return nil
+}
+
+// timeoutOrDefault returns d if non-zero, otherwise returns the defaultVal.
+func timeoutOrDefault(d, defaultVal time.Duration) time.Duration {
+	if d > 0 {
+		return d
+	}
+	return defaultVal
 }

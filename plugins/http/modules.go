@@ -1,6 +1,8 @@
 package http
 
 import (
+	"time"
+
 	"github.com/CrisisTextLine/modular"
 	"github.com/CrisisTextLine/modular/modules/reverseproxy/v2"
 	"github.com/GoCodeAlone/workflow/config"
@@ -35,7 +37,18 @@ func httpServerFactory(name string, cfg map[string]any) modular.Module {
 	if addr, ok := cfg["address"].(string); ok {
 		address = addr
 	}
-	return module.NewStandardHTTPServer(name, address)
+	srv := module.NewStandardHTTPServer(name, address)
+
+	parseDuration := func(key string) time.Duration {
+		if v, ok := cfg[key].(string); ok {
+			if d, err := time.ParseDuration(v); err == nil {
+				return d
+			}
+		}
+		return 0
+	}
+	srv.SetTimeouts(parseDuration("readTimeout"), parseDuration("writeTimeout"), parseDuration("idleTimeout"))
+	return srv
 }
 
 func httpRouterFactory(name string, _ map[string]any) modular.Module {

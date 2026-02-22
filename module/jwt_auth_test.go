@@ -45,6 +45,22 @@ func TestJWTAuth_InitRequiresSecret(t *testing.T) {
 	}
 }
 
+func TestJWTAuth_InitRejectsShortSecret(t *testing.T) {
+	app := CreateIsolatedApp(t)
+	j := NewJWTAuthModule("jwt-auth", "short", 24*time.Hour, "issuer")
+	if err := j.Init(app); err == nil {
+		t.Error("expected error for secret shorter than 32 bytes")
+	}
+}
+
+func TestJWTAuth_InitAcceptsLongSecret(t *testing.T) {
+	app := CreateIsolatedApp(t)
+	j := NewJWTAuthModule("jwt-auth", "this-is-a-valid-secret-32-bytes!", 24*time.Hour, "issuer")
+	if err := j.Init(app); err != nil {
+		t.Errorf("expected no error for 32-byte secret, got: %v", err)
+	}
+}
+
 func TestJWTAuth_Register(t *testing.T) {
 	j := setupJWTAuth(t)
 

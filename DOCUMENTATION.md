@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Workflow Engine is a configuration-driven orchestration platform built in Go. It turns YAML configuration files into running applications with no code changes required. The engine provides 65+ built-in module types, a visual workflow builder UI, a multi-tenant admin platform, AI-assisted configuration generation, and dynamic hot-reload of Go components at runtime.
+The Workflow Engine is a configuration-driven orchestration platform built in Go. It turns YAML configuration files into running applications with no code changes required. The engine provides 48+ built-in module types, a visual workflow builder UI, a multi-tenant admin platform, AI-assisted configuration generation, and dynamic hot-reload of Go components at runtime.
 
 ## Core Engine
 
@@ -11,7 +11,7 @@ The engine is built on the [CrisisTextLine/modular](https://github.com/CrisisTex
 **Key capabilities:**
 - YAML-driven configuration with environment variable expansion (`${JWT_SECRET}`)
 - Config validation via JSON Schema
-- Module factory registry with 65+ built-in types
+- Module factory registry with 48 built-in types
 - Trigger-based workflow dispatch (HTTP, EventBus, cron schedule)
 - Graceful lifecycle management (start/stop)
 
@@ -19,7 +19,7 @@ The engine is built on the [CrisisTextLine/modular](https://github.com/CrisisTex
 - `cmd/server` -- runs workflow configs as a server process
 - `cmd/wfctl` -- validates and inspects workflow configs offline
 
-## Module Types (65+)
+## Module Types (48+)
 
 All modules are registered in `engine.go` and instantiated from YAML config. Organized by category:
 

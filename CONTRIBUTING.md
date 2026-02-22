@@ -121,7 +121,7 @@ npm test
    - Implement the `modular.Module` interface: `Name()`, `Dependencies()`, `Configure()`
    - Add configuration struct with `yaml:` and `default:` tags
 
-2. Register the module in `engine.go`'s `BuildFromConfig` switch statement
+2. Register the module via the plugin factory system: implement an `EnginePlugin` with `ModuleFactories()` returning a map of type names to factory functions, then load it with `engine.LoadPlugin()`. For simple cases, call `engine.AddModuleType(typeName, factory)` directly.
 
 3. Add an example YAML config in `example/` with a companion `.md` file
 

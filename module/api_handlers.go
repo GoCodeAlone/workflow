@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/google/uuid"
 )
 
 // riskPatterns maps risk categories to keyword patterns for message analysis.
@@ -886,8 +887,7 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 		if idFromBody := h.fieldMapping.ResolveString(data, "id"); idFromBody != "" {
 			resourceId = idFromBody
 		} else {
-			// Generate an ID (TODO: use a proper UUID generator)
-			resourceId = fmt.Sprintf("%d", len(h.resources)+1)
+			resourceId = uuid.New().String()
 		}
 	}
 

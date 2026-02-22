@@ -14,6 +14,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// ExecutionTrackerProvider is the minimal interface required to track pipeline executions.
+// *ExecutionTracker satisfies this interface.
+type ExecutionTrackerProvider interface {
+	TrackPipelineExecution(ctx context.Context, pipeline *Pipeline, triggerData map[string]any, r *http.Request) (*PipelineContext, error)
+}
+
 // ExecutionTracker wraps pipeline execution with V1Store recording.
 // It also implements EventRecorder so the pipeline can push step-level
 // events that are persisted to execution_steps and execution_logs.

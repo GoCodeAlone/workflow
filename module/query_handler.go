@@ -25,7 +25,7 @@ type QueryHandler struct {
 	app              modular.Application
 	queries          map[string]QueryFunc
 	routePipelines   map[string]*Pipeline
-	executionTracker *ExecutionTracker
+	executionTracker ExecutionTrackerProvider
 	mu               sync.RWMutex
 }
 
@@ -62,7 +62,7 @@ func (h *QueryHandler) SetDelegateHandler(handler http.Handler) {
 }
 
 // SetExecutionTracker sets the execution tracker for recording pipeline executions.
-func (h *QueryHandler) SetExecutionTracker(t *ExecutionTracker) {
+func (h *QueryHandler) SetExecutionTracker(t ExecutionTrackerProvider) {
 	h.executionTracker = t
 }
 

@@ -26,7 +26,7 @@ type CommandHandler struct {
 	app              modular.Application
 	commands         map[string]CommandFunc
 	routePipelines   map[string]*Pipeline
-	executionTracker *ExecutionTracker
+	executionTracker ExecutionTrackerProvider
 	mu               sync.RWMutex
 }
 
@@ -63,7 +63,7 @@ func (h *CommandHandler) SetDelegateHandler(handler http.Handler) {
 }
 
 // SetExecutionTracker sets the execution tracker for recording pipeline executions.
-func (h *CommandHandler) SetExecutionTracker(t *ExecutionTracker) {
+func (h *CommandHandler) SetExecutionTracker(t ExecutionTrackerProvider) {
 	h.executionTracker = t
 }
 

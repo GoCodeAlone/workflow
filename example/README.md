@@ -20,7 +20,7 @@ All application components are configured using workflow-native module types. Th
 - Great for rapid prototyping and production use
 - Simple JSON response handlers
 
-## Modular Framework Modules (Deprecated)
+## Modular Framework Modules (Legacy Support)
 
 A few CrisisTextLine/modular framework modules are still supported but may be replaced by workflow-native equivalents in the future:
 

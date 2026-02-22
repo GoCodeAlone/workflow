@@ -85,6 +85,9 @@ func (j *JWTAuthModule) Init(app modular.Application) error {
 	if j.secret == "" {
 		return fmt.Errorf("jwt secret is required")
 	}
+	if len(j.secret) < 32 {
+		return fmt.Errorf("JWT secret must be at least 32 bytes for security")
+	}
 	j.app = app
 
 	// Wire external user store (optional — from auth.user-store module)

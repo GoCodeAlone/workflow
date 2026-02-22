@@ -14,6 +14,8 @@ import (
 // Standard handler name constants
 const (
 	IntegrationWorkflowHandlerName = "workflow.handler.integration"
+	defaultWebhookPort             = 8080
+	defaultRetryDelay              = time.Second
 )
 
 // IntegrationWorkflowConfig represents an integration workflow configuration
@@ -23,14 +25,14 @@ type IntegrationWorkflowConfig struct {
 	Steps      []IntegrationStep      `json:"steps" yaml:"steps"`
 }
 
-// IntegrationConnector represents a connector configuration
+// IntegrationConnector represents a connector configuration for an integration workflow.
 type IntegrationConnector struct {
 	Name   string         `json:"name" yaml:"name"`
 	Type   string         `json:"type" yaml:"type"`
 	Config map[string]any `json:"config" yaml:"config"`
 }
 
-// IntegrationStep represents a step in an integration workflow
+// IntegrationStep represents a step in an integration workflow, referencing a named connector.
 type IntegrationStep struct {
 	Name       string         `json:"name" yaml:"name"`
 	Connector  string         `json:"connector" yaml:"connector"`
@@ -43,7 +45,7 @@ type IntegrationStep struct {
 	RetryDelay string         `json:"retryDelay,omitempty" yaml:"retryDelay,omitempty"`
 }
 
-// IntegrationWorkflowHandler handles integration workflows
+// IntegrationWorkflowHandler handles integration workflows by wiring connectors and executing step sequences.
 type IntegrationWorkflowHandler struct {
 	name         string
 	namespace    module.ModuleNamespaceProvider
@@ -100,6 +102,88 @@ func (h *IntegrationWorkflowHandler) CanHandle(workflowType string) bool {
 	return workflowType == "integration"
 }
 
+// connectorConfigureFunc is a factory function that creates an IntegrationConnector from a name and config map.
+type connectorConfigureFunc func(name string, cfg map[string]any) (module.IntegrationConnector, error)
+
+func configureHTTPConnector(name string, config map[string]any) (module.IntegrationConnector, error) {
+	baseURL, _ := config["baseURL"].(string)
+	if baseURL == "" {
+		return nil, fmt.Errorf("baseURL not specified for HTTP connector '%s'", name)
+	}
+	httpConn := module.NewHTTPIntegrationConnector(name, baseURL)
+
+	authType, _ := config["authType"].(string)
+	switch authType {
+	case "basic":
+		username, _ := config["username"].(string)
+		password, _ := config["password"].(string)
+		httpConn.SetBasicAuth(username, password)
+	case "bearer":
+		token, _ := config["token"].(string)
+		httpConn.SetBearerAuth(token)
+	}
+
+	headers, _ := config["headers"].(map[string]any)
+	for key, val := range headers {
+		if valStr, ok := val.(string); ok {
+			httpConn.SetHeader(key, valStr)
+		}
+	}
+
+	if timeout, ok := config["timeoutSeconds"].(float64); ok {
+		httpConn.SetTimeout(time.Duration(timeout) * time.Second)
+	}
+
+	if rateLimit, ok := config["requestsPerMinute"].(float64); ok {
+		httpConn.SetRateLimit(int(rateLimit))
+	}
+
+	if allowPrivate, ok := config["allowPrivateIPs"].(bool); ok && allowPrivate {
+		httpConn.SetAllowPrivateIPs(true)
+	}
+
+	return httpConn, nil
+}
+
+func configureWebhookConnector(name string, config map[string]any) (module.IntegrationConnector, error) {
+	path, _ := config["path"].(string)
+	if path == "" {
+		return nil, fmt.Errorf("path not specified for webhook connector '%s'", name)
+	}
+
+	port := defaultWebhookPort
+	if portVal, ok := config["port"].(float64); ok {
+		port = int(portVal)
+	}
+
+	return module.NewWebhookIntegrationConnector(name, path, port), nil
+}
+
+func configureDatabaseConnector(name string, config map[string]any) (module.IntegrationConnector, error) {
+	driver, _ := config["driver"].(string)
+	dsn, _ := config["dsn"].(string)
+	if driver == "" || dsn == "" {
+		return nil, fmt.Errorf("driver and dsn must be specified for database connector '%s'", name)
+	}
+	dbConfig := module.DatabaseConfig{
+		Driver: driver,
+		DSN:    dsn,
+	}
+	if maxOpen, ok := config["maxOpenConns"].(float64); ok {
+		dbConfig.MaxOpenConns = int(maxOpen)
+	}
+	return module.NewDatabaseIntegrationConnector(name, module.NewWorkflowDatabase(name+"-db", dbConfig)), nil
+}
+
+// connectorFactories maps connector type strings to their factory functions.
+var connectorFactories = map[string]connectorConfigureFunc{
+	"http":     configureHTTPConnector,
+	"rest":     configureHTTPConnector,
+	"api":      configureHTTPConnector,
+	"webhook":  configureWebhookConnector,
+	"database": configureDatabaseConnector,
+}
+
 // ConfigureWorkflow sets up the workflow from configuration
 func (h *IntegrationWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig any) error {
 	// Convert the generic config to integration-specific config
@@ -121,7 +205,9 @@ func (h *IntegrationWorkflowHandler) ConfigureWorkflow(app modular.Application, 
 
 	// Get the integration registry
 	var registrySvc any
-	_ = app.GetService(registryName, &registrySvc)
+	if err := app.GetService(registryName, &registrySvc); err != nil {
+		app.Logger().Warn("integration registry service lookup warning", "registry", registryName, "error", err)
+	}
 	if registrySvc == nil {
 		return fmt.Errorf("integration registry service '%s' not found", registryName)
 	}
@@ -157,87 +243,14 @@ func (h *IntegrationWorkflowHandler) ConfigureWorkflow(app modular.Application, 
 
 		// Create and configure the connector based on type
 		var connector module.IntegrationConnector
-		switch connType {
-		case "http", "rest", "api":
-			// HTTP connector
-			baseURL, _ := config["baseURL"].(string)
-			if baseURL == "" {
-				return fmt.Errorf("baseURL not specified for HTTP connector '%s'", name)
-			}
-			httpConn := module.NewHTTPIntegrationConnector(name, baseURL)
-
-			// Configure authentication
-			authType, _ := config["authType"].(string)
-			switch authType {
-			case "basic":
-				username, _ := config["username"].(string)
-				password, _ := config["password"].(string)
-				httpConn.SetBasicAuth(username, password)
-			case "bearer":
-				token, _ := config["token"].(string)
-				httpConn.SetBearerAuth(token)
-			}
-
-			// Configure headers
-			headers, _ := config["headers"].(map[string]any)
-			for key, val := range headers {
-				if valStr, ok := val.(string); ok {
-					httpConn.SetHeader(key, valStr)
-				}
-			}
-
-			// Configure timeout
-			if timeout, ok := config["timeoutSeconds"].(float64); ok {
-				httpConn.SetTimeout(time.Duration(timeout) * time.Second)
-			}
-
-			// Configure rate limiting
-			if rateLimit, ok := config["requestsPerMinute"].(float64); ok {
-				httpConn.SetRateLimit(int(rateLimit))
-			}
-
-			// Allow private IPs (for testing/internal services)
-			if allowPrivate, ok := config["allowPrivateIPs"].(bool); ok && allowPrivate {
-				httpConn.SetAllowPrivateIPs(true)
-			}
-
-			connector = httpConn
-		case "webhook":
-			// Webhook connector
-			path, _ := config["path"].(string)
-			if path == "" {
-				return fmt.Errorf("path not specified for webhook connector '%s'", name)
-			}
-
-			port := 8080 // Default port
-			if portVal, ok := config["port"].(float64); ok {
-				port = int(portVal)
-			}
-
-			webhookConn := module.NewWebhookIntegrationConnector(name, path, port)
-
-			// If there are predefined handlers, we'd configure them here
-			// This is a simplified version; in a full implementation we'd want to
-			// support mapping webhook events to internal handlers or message queues
-
-			connector = webhookConn
-		case "database":
-			driver, _ := config["driver"].(string)
-			dsn, _ := config["dsn"].(string)
-			if driver == "" || dsn == "" {
-				return fmt.Errorf("driver and dsn must be specified for database connector '%s'", name)
-			}
-			dbConfig := module.DatabaseConfig{
-				Driver: driver,
-				DSN:    dsn,
-			}
-			if maxOpen, ok := config["maxOpenConns"].(float64); ok {
-				dbConfig.MaxOpenConns = int(maxOpen)
-			}
-			dbConn := module.NewDatabaseIntegrationConnector(name, module.NewWorkflowDatabase(name+"-db", dbConfig))
-			connector = dbConn
-		default:
+		factory, ok := connectorFactories[connType]
+		if !ok {
 			return fmt.Errorf("unsupported connector type '%s' for connector '%s'", connType, name)
+		}
+		var err error
+		connector, err = factory(name, config)
+		if err != nil {
+			return err
 		}
 
 		// Register the connector
@@ -353,7 +366,7 @@ func (h *IntegrationWorkflowHandler) ExecuteIntegrationWorkflow(
 				var retryResult map[string]any
 
 				// Parse retry delay
-				retryDelay := time.Second // Default 1 second
+				retryDelay := defaultRetryDelay
 				if step.RetryDelay != "" {
 					if parsedDelay, parseErr := time.ParseDuration(step.RetryDelay); parseErr == nil {
 						retryDelay = parsedDelay
@@ -451,10 +464,14 @@ func (h *IntegrationWorkflowHandler) ExecuteWorkflow(ctx context.Context, workfl
 
 			step := IntegrationStep{
 				Name:       fmt.Sprintf("%s-%d", action, i),
-				Connector:  stepMap["connector"].(string),
-				Action:     stepMap["action"].(string),
 				RetryCount: 0,
 				RetryDelay: "1s",
+			}
+			if connectorVal, ok := stepMap["connector"].(string); ok {
+				step.Connector = connectorVal
+			}
+			if actionVal, ok := stepMap["action"].(string); ok {
+				step.Action = actionVal
 			}
 
 			// Extract optional fields if present
