@@ -70,13 +70,16 @@ type GCSStorage struct {
 	logger          modular.Logger
 }
 
-// setBucketHandle injects a gcsBucketHandle, used in tests to avoid real GCS calls.
-func (g *GCSStorage) setBucketHandle(bh gcsBucketHandle) { g.testBucket = bh }
+// SetBucketHandle injects a gcsBucketHandle, used in tests to avoid real GCS calls.
+func (g *GCSStorage) SetBucketHandle(bh gcsBucketHandle) { g.testBucket = bh }
 
 // getBucket returns the bucket handle, preferring the injected test handle.
 func (g *GCSStorage) getBucket() gcsBucketHandle {
 	if g.testBucket != nil {
 		return g.testBucket
+	}
+	if g.client == nil {
+		return nil
 	}
 	return &realBucketHandle{g.client.Bucket(g.bucket)}
 }

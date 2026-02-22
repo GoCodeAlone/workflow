@@ -99,7 +99,7 @@ func (m *mockBucketHandle) Object(name string) objectHandle {
 // newGCSWithMock wires up a GCSStorage backed by a mockBucketHandle.
 func newGCSWithMock(bh gcsBucketHandle) *GCSStorage {
 	g := NewGCSStorage("gcs-test")
-	g.setBucketHandle(bh)
+	g.SetBucketHandle(bh)
 	return g
 }
 
