@@ -318,71 +318,31 @@ func (m *OAuth2Module) fetchUserInfo(ctx context.Context, entry *oauth2ProviderE
 }
 
 // findOrCreateUser looks up or creates a local user from the OAuth2 provider
-// profile data.  It delegates to the JWTAuthModule's in-memory user store.
+// profile data, using only the provider-specific key to avoid email-based
+// account merging (which would allow account takeover).
 func (m *OAuth2Module) findOrCreateUser(info map[string]any, providerName string) (*User, error) {
 	if m.jwtAuth == nil {
 		return nil, fmt.Errorf("jwt auth module not configured")
 	}
 
 	oauthID := extractString(info, "id", "sub")
-	email := extractString(info, "email")
 	name := extractString(info, "name", "login")
 
 	if oauthID == "" {
 		return nil, fmt.Errorf("provider did not return a user id")
 	}
-	if email == "" {
-		// Use a synthetic email for providers that don't expose it (e.g. GitHub).
-		email = fmt.Sprintf("%s@%s.oauth", oauthID, providerName)
-	}
 
-	// Check if the user already exists in the JWTAuthModule's store.
+	// Key is always provider-scoped; we never merge with existing email-based
+	// accounts to prevent account takeover via email aliasing.
 	oauthKey := fmt.Sprintf("oauth:%s:%s", providerName, oauthID)
-	if existing, ok := m.jwtAuth.lookupUser(oauthKey); ok {
-		return existing, nil
-	}
-	// Also try lookup by email.
-	if existing, ok := m.jwtAuth.lookupUser(email); ok {
-		return existing, nil
-	}
 
-	// Create a new user with no password (OAuth2 users authenticate via provider).
 	meta := map[string]any{
 		"role":          "user",
 		"oauthProvider": providerName,
 		"oauthId":       oauthID,
 	}
 
-	var newUser *User
-	if m.jwtAuth.userStore != nil {
-		var err error
-		newUser, err = m.jwtAuth.userStore.CreateUser(oauthKey, name, "", meta)
-		if err != nil {
-			// If the key already exists (race), fall back to lookup.
-			if u, ok := m.jwtAuth.userStore.GetUser(oauthKey); ok {
-				return u, nil
-			}
-			return nil, err
-		}
-	} else {
-		m.jwtAuth.mu.Lock()
-		newUser = &User{
-			ID:       fmt.Sprintf("%d", m.jwtAuth.nextID),
-			Email:    oauthKey,
-			Name:     name,
-			Metadata: meta,
-			CreatedAt: time.Now(),
-		}
-		m.jwtAuth.nextID++
-		m.jwtAuth.users[oauthKey] = newUser
-		// Also index by email so lookups work both ways.
-		if _, exists := m.jwtAuth.users[email]; !exists && email != oauthKey {
-			m.jwtAuth.users[email] = newUser
-		}
-		m.jwtAuth.mu.Unlock()
-	}
-
-	return newUser, nil
+	return m.jwtAuth.CreateOAuthUser(oauthKey, name, meta)
 }
 
 // --- CSRF state helpers ---

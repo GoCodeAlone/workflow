@@ -345,11 +345,9 @@ func TestOAuth2_NewUserCreation(t *testing.T) {
 		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
 	}
 
-	// Verify user was created in jwtAuth's store.
+	// Verify user was created in jwtAuth's store using the public lookup.
 	key := "oauth:testprovider:new-user-99"
-	jwtAuth.mu.RLock()
-	u, exists := jwtAuth.users[key]
-	jwtAuth.mu.RUnlock()
+	u, exists := jwtAuth.lookupUser(key)
 	if !exists {
 		t.Fatal("user was not created in jwtAuth store")
 	}
@@ -374,16 +372,14 @@ func TestOAuth2_ReturningUserLookup(t *testing.T) {
 
 	oauthKey := "oauth:testprovider:returning-99"
 
-	// Pre-populate the user in jwtAuth's store.
-	jwtAuth.mu.Lock()
-	jwtAuth.users[oauthKey] = &User{
-		ID:        "pre-existing",
-		Email:     oauthKey,
-		Name:      "Returning User",
-		CreatedAt: time.Now(),
-		Metadata:  map[string]any{"role": "user"},
+	// Pre-populate the user in jwtAuth's store via the public method.
+	_, err := jwtAuth.CreateOAuthUser(oauthKey, "Returning User", map[string]any{"role": "user"})
+	if err != nil {
+		t.Fatalf("pre-populate user: %v", err)
 	}
-	jwtAuth.mu.Unlock()
+	// Override the auto-assigned ID so we can verify the same record is returned.
+	preExisting, _ := jwtAuth.lookupUser(oauthKey)
+	preExistingID := preExisting.ID
 
 	state := "state-returning"
 	mod.mu.Lock()
@@ -400,11 +396,12 @@ func TestOAuth2_ReturningUserLookup(t *testing.T) {
 	}
 
 	// User count should not have increased (existing user reused).
-	jwtAuth.mu.RLock()
-	u := jwtAuth.users[oauthKey]
-	jwtAuth.mu.RUnlock()
-	if u.ID != "pre-existing" {
-		t.Errorf("expected pre-existing user, got id=%s", u.ID)
+	u, exists := jwtAuth.lookupUser(oauthKey)
+	if !exists {
+		t.Fatal("user not found after callback")
+	}
+	if u.ID != preExistingID {
+		t.Errorf("expected pre-existing user id %s, got id=%s", preExistingID, u.ID)
 	}
 }
 
