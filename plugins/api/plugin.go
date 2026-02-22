@@ -30,6 +30,7 @@ func New() *Plugin {
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
 				Description: "REST API handlers, CQRS query/command, API gateway, and data transformation",
+				Tier:        plugin.TierCore,
 				ModuleTypes: []string{
 					"api.query",
 					"api.command",

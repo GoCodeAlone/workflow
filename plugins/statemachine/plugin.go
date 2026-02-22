@@ -31,6 +31,7 @@ func New() *Plugin {
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
 				Description: "State machine engine, tracker, connector modules and workflow handler",
+				Tier:        plugin.TierCore,
 				ModuleTypes: []string{
 					"statemachine.engine",
 					"state.tracker",

@@ -30,6 +30,7 @@ func New() *Plugin {
 				Version:       "1.0.0",
 				Author:        "GoCodeAlone",
 				Description:   "Platform infrastructure modules, workflow handler, reconciliation trigger, and template step",
+				Tier:          plugin.TierCore,
 				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context"},
 				StepTypes:     []string{"step.platform_template"},
 				TriggerTypes:  []string{"reconciliation"},

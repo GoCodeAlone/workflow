@@ -1,0 +1,47 @@
+# license-validator.yaml
+# Demonstrates the license.validator module type.
+#
+# The license validator performs HTTP-based license validation with:
+#   - Local cache (default 1 hour TTL)
+#   - Offline grace period (default 72 hours)
+#   - Background refresh at configurable interval
+#
+# License key can be set via:
+#   1. The license_key config field (supports $ENV_VAR expansion)
+#   2. The WORKFLOW_LICENSE_KEY environment variable
+#   3. The --license-key command-line flag
+#
+# When no server_url is configured, the module operates in offline/starter mode
+# and synthesizes a valid starter-tier license locally.
+
+modules:
+  - name: license
+    type: license.validator
+    config:
+      # URL of the license validation server.
+      # Leave empty for offline/starter mode.
+      server_url: ""  # e.g. https://license.gocodalone.com/api/v1
+
+      # License key. Supports $ENV_VAR expansion.
+      # If not set here, WORKFLOW_LICENSE_KEY env var is checked.
+      license_key: "$WORKFLOW_LICENSE_KEY"
+
+      # How long to cache a valid license result.
+      cache_ttl: "1h"
+
+      # How long to allow operation when the license server is unreachable.
+      grace_period: "72h"
+
+      # How often the background goroutine re-validates the license.
+      refresh_interval: "1h"
+
+# The license module provides the "license-validator" service which can be
+# used by other modules or pipeline steps to check feature availability.
+#
+# Example usage in code:
+#   svc := app.SvcRegistry()["license-validator"]
+#   if v, ok := svc.(*license.HTTPValidator); ok {
+#       if v.CanLoadPlugin("premium") {
+#           // load premium plugin
+#       }
+#   }

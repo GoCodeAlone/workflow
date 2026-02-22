@@ -17,6 +17,7 @@ var commands = map[string]func([]string) error{
 	"manifest": runManifest,
 	"migrate":  runMigrate,
 	"build-ui": runBuildUI,
+	"publish":  runPublish,
 }
 
 func usage() {
@@ -35,6 +36,7 @@ Commands:
   manifest   Analyze config and report infrastructure requirements
   migrate    Manage database schema migrations
   build-ui   Build the application UI (npm install + npm run build + validate)
+  publish    Prepare and publish a plugin manifest to the workflow-registry
 
 Run 'wfctl <command> -h' for command-specific help.
 `, version)

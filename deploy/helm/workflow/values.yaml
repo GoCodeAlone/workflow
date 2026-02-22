@@ -65,6 +65,13 @@ autoscaling:
   targetCPUUtilizationPercentage: 80
   targetMemoryUtilizationPercentage: 80
 
+# Pod Disruption Budget — prevents too many pods from going down during cluster maintenance
+podDisruptionBudget:
+  enabled: false
+  # Use either minAvailable or maxUnavailable, not both
+  minAvailable: 1
+  # maxUnavailable: 1
+
 nodeSelector: {}
 tolerations: []
 affinity: {}

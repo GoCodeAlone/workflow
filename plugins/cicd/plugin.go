@@ -29,6 +29,7 @@ func New() *Plugin {
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
 				Description: "CI/CD pipeline step types (shell exec, Docker, artifact management, security scanning, deploy, gate)",
+				Tier:        plugin.TierCore,
 				StepTypes: []string{
 					"step.shell_exec",
 					"step.artifact_pull",

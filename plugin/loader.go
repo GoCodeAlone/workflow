@@ -2,12 +2,21 @@ package plugin
 
 import (
 	"fmt"
+	"log/slog"
 	"reflect"
 	"sort"
 
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/schema"
 )
+
+// LicenseValidator is an optional service that approves or denies premium plugin usage.
+// If registered under the name "license-validator", the loader will call it during
+// tier validation for premium plugins.
+type LicenseValidator interface {
+	// ValidatePlugin returns nil if the named plugin is licensed for use.
+	ValidatePlugin(pluginName string) error
+}
 
 // PluginLoader loads EnginePlugins and populates registries.
 type PluginLoader struct {
@@ -19,6 +28,7 @@ type PluginLoader struct {
 	wiringHooks      []WiringHook
 	schemaRegistry   *schema.ModuleSchemaRegistry
 	plugins          []EnginePlugin
+	licenseValidator LicenseValidator
 }
 
 // NewPluginLoader creates a new PluginLoader backed by the given capability and schema registries.
@@ -33,6 +43,37 @@ func NewPluginLoader(capReg *capability.Registry, schemaReg *schema.ModuleSchema
 	}
 }
 
+// SetLicenseValidator registers a license validator used for premium tier plugins.
+func (l *PluginLoader) SetLicenseValidator(v LicenseValidator) {
+	l.licenseValidator = v
+}
+
+// ValidateTier checks whether a plugin's tier is allowed given the current
+// license validator configuration:
+//   - Core and Community plugins are always allowed.
+//   - Premium plugins are validated against the LicenseValidator if one is set.
+//     If no validator is configured, a warning is logged and the plugin is allowed
+//     (graceful degradation for self-hosted deployments without a license).
+func (l *PluginLoader) ValidateTier(manifest *PluginManifest) error {
+	switch manifest.Tier {
+	case TierCore, TierCommunity, "":
+		// Always allowed; empty tier treated as core.
+		return nil
+	case TierPremium:
+		if l.licenseValidator == nil {
+			slog.Warn("premium plugin loaded without license validator — allowing for self-hosted deployment",
+				"plugin", manifest.Name)
+			return nil
+		}
+		if err := l.licenseValidator.ValidatePlugin(manifest.Name); err != nil {
+			return fmt.Errorf("plugin %q requires a valid license: %w", manifest.Name, err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("plugin %q has unknown tier %q", manifest.Name, manifest.Tier)
+	}
+}
+
 // LoadPlugin validates a plugin's manifest, registers its capabilities, factories,
 // schemas, and wiring hooks. Returns an error if any factory type conflicts with
 // an existing registration.
@@ -40,6 +81,11 @@ func (l *PluginLoader) LoadPlugin(p EnginePlugin) error {
 	manifest := p.EngineManifest()
 	if err := manifest.Validate(); err != nil {
 		return fmt.Errorf("plugin %q: %w", manifest.Name, err)
+	}
+
+	// Validate plugin tier before proceeding.
+	if err := l.ValidateTier(manifest); err != nil {
+		return err
 	}
 
 	// Register capability contracts.

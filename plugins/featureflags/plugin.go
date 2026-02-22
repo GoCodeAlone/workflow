@@ -28,6 +28,7 @@ func New() *Plugin {
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
 				Description: "Feature flag service module and pipeline steps (feature_flag, ff_gate)",
+				Tier:        plugin.TierCore,
 				ModuleTypes: []string{"featureflag.service"},
 				StepTypes:   []string{"step.feature_flag", "step.ff_gate"},
 				Capabilities: []plugin.CapabilityDecl{

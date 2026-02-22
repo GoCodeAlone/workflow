@@ -31,6 +31,7 @@ func New() *Plugin {
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
 				Description: "JWT authentication, user store, and auth middleware wiring",
+				Tier:        plugin.TierCore,
 				ModuleTypes: []string{
 					"auth.jwt",
 					"auth.user-store",

@@ -44,6 +44,7 @@ import (
 	pluginff "github.com/GoCodeAlone/workflow/plugins/featureflags"
 	pluginhttp "github.com/GoCodeAlone/workflow/plugins/http"
 	pluginintegration "github.com/GoCodeAlone/workflow/plugins/integration"
+	pluginlicense "github.com/GoCodeAlone/workflow/plugins/license"
 	pluginmessaging "github.com/GoCodeAlone/workflow/plugins/messaging"
 	pluginmodcompat "github.com/GoCodeAlone/workflow/plugins/modularcompat"
 	pluginobs "github.com/GoCodeAlone/workflow/plugins/observability"
@@ -78,8 +79,11 @@ var (
 	adminEmail    = flag.String("admin-email", "", "Initial admin user email (first-run bootstrap)")
 	adminPassword = flag.String("admin-password", "", "Initial admin user password (first-run bootstrap)")
 
+	// License flags
+	licenseKey = flag.String("license-key", "", "License key for the workflow engine (or set WORKFLOW_LICENSE_KEY env var)")
+
 	// v1 API flags
-	dataDir       = flag.String("data-dir", "./data", "Directory for SQLite database and persistent data")
+	dataDir = flag.String("data-dir", "./data", "Directory for SQLite database and persistent data")
 	restoreAdmin  = flag.Bool("restore-admin", false, "Restore admin config to embedded default on startup")
 	loadWorkflows = flag.String("load-workflows", "", "Comma-separated paths to workflow YAML files or directories to load alongside admin")
 	importBundle  = flag.String("import-bundle", "", "Comma-separated paths to .tar.gz workflow bundles to import and deploy on startup")
@@ -95,6 +99,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	// trigger factories, and workflow handlers via engine.LoadPlugin.
 	pipelinePlugin := pluginpipeline.New()
 	plugins := []plugin.EnginePlugin{
+		pluginlicense.New(),
 		pluginhttp.New(),
 		pluginobs.New(),
 		pluginmessaging.New(),
@@ -1137,6 +1142,7 @@ func applyEnvOverrides() {
 		"load-workflows":  "WORKFLOW_LOAD_WORKFLOWS",
 		"import-bundle":   "WORKFLOW_IMPORT_BUNDLE",
 		"admin-ui-dir":    "ADMIN_UI_DIR",
+		"license-key":     "WORKFLOW_LICENSE_KEY",
 	}
 
 	// Track which flags were explicitly set on the command line.
@@ -1165,6 +1171,12 @@ func applyEnvOverrides() {
 func main() {
 	flag.Parse()
 	applyEnvOverrides()
+
+	// Propagate --license-key flag to WORKFLOW_LICENSE_KEY so that the
+	// license.validator module (and any other component) can read it via os.Getenv.
+	if *licenseKey != "" && os.Getenv("WORKFLOW_LICENSE_KEY") == "" {
+		_ = os.Setenv("WORKFLOW_LICENSE_KEY", *licenseKey)
+	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		AddSource: true,

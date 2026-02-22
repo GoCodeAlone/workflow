@@ -34,12 +34,13 @@ func (h *RegistryHandler) RegisterRoutes(mux *http.ServeMux) {
 func (h *RegistryHandler) handleListInstalled(w http.ResponseWriter, r *http.Request) {
 	entries := h.registry.List()
 	type pluginInfo struct {
-		Name        string   `json:"name"`
-		Version     string   `json:"version"`
-		Author      string   `json:"author"`
-		Description string   `json:"description"`
-		Tags        []string `json:"tags"`
-		Installed   bool     `json:"installed"`
+		Name        string     `json:"name"`
+		Version     string     `json:"version"`
+		Author      string     `json:"author"`
+		Description string     `json:"description"`
+		Tags        []string   `json:"tags"`
+		Tier        PluginTier `json:"tier,omitempty"`
+		Installed   bool       `json:"installed"`
 	}
 
 	plugins := make([]pluginInfo, 0, len(entries))
@@ -50,6 +51,7 @@ func (h *RegistryHandler) handleListInstalled(w http.ResponseWriter, r *http.Req
 			Author:      e.Manifest.Author,
 			Description: e.Manifest.Description,
 			Tags:        e.Manifest.Tags,
+			Tier:        e.Manifest.Tier,
 			Installed:   true,
 		})
 	}
@@ -70,12 +72,13 @@ func (h *RegistryHandler) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	// Build response with installed status
 	type searchResult struct {
-		Name        string   `json:"name"`
-		Version     string   `json:"version"`
-		Author      string   `json:"author"`
-		Description string   `json:"description"`
-		Tags        []string `json:"tags"`
-		Installed   bool     `json:"installed"`
+		Name        string     `json:"name"`
+		Version     string     `json:"version"`
+		Author      string     `json:"author"`
+		Description string     `json:"description"`
+		Tags        []string   `json:"tags"`
+		Tier        PluginTier `json:"tier,omitempty"`
+		Installed   bool       `json:"installed"`
 	}
 
 	response := make([]searchResult, 0, len(results))
@@ -87,6 +90,7 @@ func (h *RegistryHandler) handleSearch(w http.ResponseWriter, r *http.Request) {
 			Author:      m.Author,
 			Description: m.Description,
 			Tags:        m.Tags,
+			Tier:        m.Tier,
 			Installed:   installed,
 		})
 	}

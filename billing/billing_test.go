@@ -632,3 +632,165 @@ func TestHandler_Webhook_ProviderError(t *testing.T) {
 		t.Errorf("expected 400 for webhook error, got %d", w.Code)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Subscription tests
+// ---------------------------------------------------------------------------
+
+func TestSubscriptionConstants(t *testing.T) {
+	statuses := []string{StatusActive, StatusPastDue, StatusCanceled, StatusTrialing}
+	for _, s := range statuses {
+		if s == "" {
+			t.Errorf("unexpected empty status constant")
+		}
+	}
+}
+
+func TestSubscriptionFields(t *testing.T) {
+	sub := Subscription{
+		ID:                   "sub_123",
+		CustomerID:           "cus_456",
+		PlanID:               "starter",
+		Status:               StatusActive,
+		CurrentPeriodEnd:     time.Now().Add(30 * 24 * time.Hour),
+		StripeSubscriptionID: "sub_stripe_789",
+	}
+
+	if sub.ID != "sub_123" {
+		t.Errorf("ID mismatch")
+	}
+	if sub.Status != StatusActive {
+		t.Errorf("Status mismatch")
+	}
+	if sub.StripeSubscriptionID != "sub_stripe_789" {
+		t.Errorf("StripeSubscriptionID mismatch")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// EnforcementMiddleware tests
+// ---------------------------------------------------------------------------
+
+func tenantFromQuery(r *http.Request) string {
+	return r.URL.Query().Get("tenant_id")
+}
+
+func TestEnforcementMiddleware_Allowed(t *testing.T) {
+	meter := NewInMemoryMeter()
+	meter.SetPlan("t1", "starter")
+
+	mw := NewEnforcementMiddleware(meter, tenantFromQuery)
+	called := false
+	handler := mw.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/exec?tenant_id=t1", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if !called {
+		t.Error("expected inner handler to be called")
+	}
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestEnforcementMiddleware_LimitExceeded(t *testing.T) {
+	meter := NewInMemoryMeter()
+	meter.SetPlan("t1", "free") // 1000 executions
+
+	ctx := context.Background()
+	for range PlanFree.ExecutionsPerMonth {
+		_ = meter.RecordExecution(ctx, "t1", "pipe")
+	}
+
+	mw := NewEnforcementMiddleware(meter, tenantFromQuery)
+	called := false
+	handler := mw.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/exec?tenant_id=t1", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if called {
+		t.Error("expected inner handler NOT to be called when limit exceeded")
+	}
+	if w.Code != http.StatusPaymentRequired {
+		t.Errorf("expected 402, got %d", w.Code)
+	}
+}
+
+func TestEnforcementMiddleware_NoTenantID(t *testing.T) {
+	meter := NewInMemoryMeter()
+	mw := NewEnforcementMiddleware(meter, tenantFromQuery)
+
+	called := false
+	handler := mw.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/exec", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if !called {
+		t.Error("expected inner handler to be called when no tenant ID")
+	}
+}
+
+func TestCheckLimit_Allowed(t *testing.T) {
+	meter := NewInMemoryMeter()
+	meter.SetPlan("t1", "starter")
+
+	err := CheckLimit(context.Background(), meter, "t1")
+	if err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+}
+
+func TestCheckLimit_Exceeded(t *testing.T) {
+	meter := NewInMemoryMeter()
+	meter.SetPlan("t1", "free")
+
+	ctx := context.Background()
+	for range PlanFree.ExecutionsPerMonth {
+		_ = meter.RecordExecution(ctx, "t1", "pipe")
+	}
+
+	err := CheckLimit(ctx, meter, "t1")
+	if err == nil {
+		t.Error("expected error when limit exceeded")
+	}
+	if err != ErrLimitExceeded {
+		t.Errorf("expected ErrLimitExceeded, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// StripeProvider construction test (no live API calls)
+// ---------------------------------------------------------------------------
+
+func TestNewStripeProvider(t *testing.T) {
+	planPriceIDs := StripePlanIDs{
+		"starter":      "price_starter",
+		"professional": "price_professional",
+		"enterprise":   "price_enterprise",
+	}
+	p := NewStripeProvider("sk_test_placeholder", "whsec_placeholder", planPriceIDs)
+	if p == nil {
+		t.Fatal("expected non-nil StripeProvider")
+	}
+	if p.webhookSecret != "whsec_placeholder" {
+		t.Errorf("webhookSecret mismatch")
+	}
+	if p.planPriceIDs["starter"] != "price_starter" {
+		t.Errorf("planPriceIDs mismatch")
+	}
+}

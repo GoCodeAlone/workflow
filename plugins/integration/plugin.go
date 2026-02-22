@@ -27,6 +27,7 @@ func New() *Plugin {
 				Version:       "1.0.0",
 				Author:        "GoCodeAlone",
 				Description:   "Integration workflow handler for connector-based multi-system workflows",
+				Tier:          plugin.TierCore,
 				WorkflowTypes: []string{"integration"},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "integration-connectors", Role: "provider", Priority: 50},

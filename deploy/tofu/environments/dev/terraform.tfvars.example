@@ -1,0 +1,15 @@
+# Copy this file to terraform.tfvars and fill in values
+# DO NOT commit terraform.tfvars with real secrets
+
+aws_region         = "us-east-1"
+vpc_cidr           = "10.0.0.0/16"
+enable_nat_gateway = true
+
+# Get this from AWS Certificate Manager
+certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+db_username = "workflow"
+db_password = "change-me-use-a-strong-password"
+
+image_tag   = "latest"
+alert_email = "ops@example.com"

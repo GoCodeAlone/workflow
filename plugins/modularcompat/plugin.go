@@ -29,6 +29,7 @@ func New() *Plugin {
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
 				Description: "CrisisTextLine/modular framework compatibility modules (scheduler, cache)",
+				Tier:        plugin.TierCore,
 				ModuleTypes: []string{"scheduler.modular", "cache.modular"},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "scheduler", Role: "provider", Priority: 30},

@@ -28,6 +28,7 @@ func New() *Plugin {
 				Version:       "1.0.0",
 				Author:        "GoCodeAlone",
 				Description:   "Scheduler workflow handler and schedule trigger for cron-based job execution",
+				Tier:          plugin.TierCore,
 				WorkflowTypes: []string{"scheduler"},
 				TriggerTypes:  []string{"schedule"},
 				Capabilities: []plugin.CapabilityDecl{

@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: "workflow"
+    orgId: 1
+    folder: "Workflow"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    options:
+      path: /etc/grafana/dashboards

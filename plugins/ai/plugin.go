@@ -39,6 +39,7 @@ func New() *Plugin {
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
 				Description: "AI pipeline steps (complete, classify, extract), dynamic components, and sub-workflow orchestration",
+				Tier:        pluginPkg.TierCore,
 				ModuleTypes: []string{"dynamic.component"},
 				StepTypes:   []string{"step.ai_complete", "step.ai_classify", "step.ai_extract", "step.sub_workflow"},
 				Capabilities: []pluginPkg.CapabilityDecl{

@@ -33,6 +33,7 @@ func New() *Plugin {
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
 				Description: "Generic pipeline step types and pipeline workflow handler",
+				Tier:        plugin.TierCore,
 				StepTypes: []string{
 					"step.validate",
 					"step.transform",

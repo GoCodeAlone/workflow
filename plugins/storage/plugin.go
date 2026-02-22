@@ -30,6 +30,7 @@ func New() *Plugin {
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
 				Description: "Storage, database, and persistence modules with DB pipeline steps",
+				Tier:        plugin.TierCore,
 				ModuleTypes: []string{
 					"storage.s3",
 					"storage.local",

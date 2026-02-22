@@ -33,6 +33,7 @@ func New() *Plugin {
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
 				Description: "Messaging subsystem: brokers, handlers, triggers, and workflows",
+				Tier:        plugin.TierCore,
 				ModuleTypes: []string{
 					"messaging.broker",
 					"messaging.broker.eventbus",

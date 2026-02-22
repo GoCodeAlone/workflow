@@ -29,6 +29,7 @@ func New() *ObservabilityPlugin {
 			Version:     "1.0.0",
 			Author:      "GoCodeAlone",
 			Description: "Metrics, health checks, log collection, OpenTelemetry tracing, and OpenAPI spec generation/consumption",
+			Tier:        plugin.TierCore,
 			ModuleTypes: []string{
 				"metrics.collector",
 				"health.checker",

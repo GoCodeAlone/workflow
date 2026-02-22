@@ -11,6 +11,18 @@ import (
 	"github.com/GoCodeAlone/workflow/dynamic"
 )
 
+// PluginTier indicates the support and licensing tier for a plugin.
+type PluginTier string
+
+const (
+	// TierCore identifies plugins that are built-in and always available.
+	TierCore PluginTier = "core"
+	// TierCommunity identifies open-source community-contributed plugins.
+	TierCommunity PluginTier = "community"
+	// TierPremium identifies plugins that require a valid license to use.
+	TierPremium PluginTier = "premium"
+)
+
 // PluginManifest describes a plugin's metadata, dependencies, and contract.
 type PluginManifest struct {
 	Name         string                 `json:"name" yaml:"name"`
@@ -22,6 +34,7 @@ type PluginManifest struct {
 	Contract     *dynamic.FieldContract `json:"contract,omitempty" yaml:"contract,omitempty"`
 	Tags         []string               `json:"tags,omitempty" yaml:"tags,omitempty"`
 	Repository   string                 `json:"repository,omitempty" yaml:"repository,omitempty"`
+	Tier         PluginTier             `json:"tier,omitempty" yaml:"tier,omitempty"`
 
 	// Engine plugin declarations
 	Capabilities  []CapabilityDecl `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`

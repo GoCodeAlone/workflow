@@ -1,0 +1,16 @@
+aws_region = "us-east-1"
+vpc_cidr   = "10.2.0.0/16"
+
+certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+alb_logs_bucket = "workflow-alb-access-logs"
+
+db_username = "workflow"
+db_password = "use-aws-secrets-manager-in-production"
+
+image_tag = "v0.5.0"
+
+alert_email = "ops@example.com"
+
+ecs_desired_count = 3
+ecs_min_count     = 2
+ecs_max_count     = 10

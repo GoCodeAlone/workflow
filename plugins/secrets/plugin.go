@@ -28,6 +28,7 @@ func New() *Plugin {
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
 				Description: "Secrets management modules (Vault, AWS Secrets Manager)",
+				Tier:        plugin.TierCore,
 				ModuleTypes: []string{"secrets.vault", "secrets.aws"},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "secrets-management", Role: "provider", Priority: 50},
