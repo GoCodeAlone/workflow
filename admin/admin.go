@@ -11,10 +11,8 @@ package admin
 import (
 	_ "embed"
 	"fmt"
-	"os"
 
 	"github.com/GoCodeAlone/workflow/config"
-	"github.com/GoCodeAlone/workflow/module"
 	"gopkg.in/yaml.v3"
 )
 
@@ -36,22 +34,6 @@ func LoadConfig() (*config.WorkflowConfig, error) {
 		return nil, fmt.Errorf("failed to parse embedded admin config: %w", err)
 	}
 	return &cfg, nil
-}
-
-// WriteUIAssets extracts the embedded React UI assets to a temp directory
-// and returns the path. The caller should ensure the directory is cleaned
-// up on shutdown. The returned path is suitable for use as the root of a
-// static.fileserver module.
-func WriteUIAssets() (string, error) {
-	dir, err := os.MkdirTemp("", "workflow-admin-ui-*")
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp dir for admin UI: %w", err)
-	}
-	if err := module.ExtractUIAssets(dir); err != nil {
-		os.RemoveAll(dir)
-		return "", fmt.Errorf("failed to extract admin UI assets: %w", err)
-	}
-	return dir, nil
 }
 
 // MergeInto merges admin modules and workflows into the primary config.
@@ -81,20 +63,6 @@ func MergeInto(primary *config.WorkflowConfig, admin *config.WorkflowConfig) {
 			if _, exists := primary.Triggers[trigType]; !exists {
 				primary.Triggers[trigType] = trigCfg
 			}
-		}
-	}
-}
-
-// InjectUIRoot updates the admin static.fileserver module config to serve
-// from the given root directory. This should be called after LoadConfig
-// and before MergeInto.
-func InjectUIRoot(cfg *config.WorkflowConfig, uiRoot string) {
-	for i := range cfg.Modules {
-		if cfg.Modules[i].Type == "static.fileserver" {
-			if cfg.Modules[i].Config == nil {
-				cfg.Modules[i].Config = make(map[string]any)
-			}
-			cfg.Modules[i].Config["root"] = uiRoot
 		}
 	}
 }

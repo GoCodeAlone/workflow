@@ -83,11 +83,13 @@ modules:
     type: api.command
     dependsOn: [admin-router]
 
-  # --- Static File Server (serves embedded React UI) ---
+  # --- Static File Server (serves admin React UI built separately) ---
+  # Set root to the directory containing the built admin UI assets.
+  # Override at runtime via --admin-ui-dir flag or ADMIN_UI_DIR env var.
   - name: admin-ui
     type: static.fileserver
     config:
-      root: "module/ui_dist"
+      root: "./ui/dist"
       prefix: "/"
       spaFallback: true
       cacheMaxAge: 3600
