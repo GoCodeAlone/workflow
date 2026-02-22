@@ -50,6 +50,12 @@ A valid build **must** produce:
 The `wfctl build-ui --validate` command checks these requirements without
 running a build, which is useful in CI to verify artifacts.
 
+> **Note:** `wfctl build-ui --validate` requires at least one `.css` file in
+> `dist/assets/`. CSS-in-JS frameworks that do not emit separate CSS files
+> (e.g. styled-components or Emotion without extraction) should either configure
+> their build to extract CSS into a separate file, or use `--validate=false`
+> with manual verification of the build output.
+
 ### Building with `wfctl build-ui`
 
 ```bash

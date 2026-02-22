@@ -319,7 +319,7 @@ The following packages are **not part of the stable public API**. They may chang
 | `github.com/GoCodeAlone/workflow/ai/copilot` | GitHub Copilot SDK integration. Technical Preview. |
 | `github.com/GoCodeAlone/workflow/admin` | Admin server internals. Not designed for external embedding. |
 | `github.com/GoCodeAlone/workflow/mock` | Test helpers. Not stable; only for use in the repo's own test suite. |
-| `github.com/GoCodeAlone/workflow/secrets` | Secrets resolver internals. Accessed via `StdEngine.SecretsResolver()` only. |
+| `github.com/GoCodeAlone/workflow/secrets` | Secrets resolver internals. Accessed via `StdEngine.SecretsResolver()` only. Note: `StdEngine.SecretsResolver()` returns `*secrets.MultiResolver`. Callers should treat this type as opaque and not depend on its internal methods. A future version may replace this with a public interface. |
 | `github.com/GoCodeAlone/workflow/plugin/external` | gRPC-based external plugin protocol. Wire format may change. |
 | `github.com/GoCodeAlone/workflow/plugin/rbac` | RBAC plugin internals. Use the `plugin.EnginePlugin` interface instead. |
 | `github.com/GoCodeAlone/workflow/plugin/sdk` | Plugin scaffolding/generation tools. Internal CLI tooling only. |
