@@ -88,6 +88,7 @@ var projectTemplates = map[string]projectTemplate{
 			{src: "templates/plugin/main.go.tmpl"},
 			{src: "templates/plugin/plugin.go.tmpl"},
 			{src: "templates/plugin/README.md.tmpl"},
+			{src: "templates/plugin/.gitignore.tmpl"},
 		},
 	},
 	"ui-plugin": {
@@ -98,6 +99,7 @@ var projectTemplates = map[string]projectTemplate{
 			{src: "templates/ui-plugin/main.go.tmpl"},
 			{src: "templates/ui-plugin/plugin.go.tmpl"},
 			{src: "templates/ui-plugin/README.md.tmpl"},
+			{src: "templates/ui-plugin/.gitignore.tmpl"},
 			{src: "templates/ui-plugin/ui/package.json.tmpl", dst: "ui/package.json"},
 			{src: "templates/ui-plugin/ui/vite.config.ts.tmpl", dst: "ui/vite.config.ts"},
 			{src: "templates/ui-plugin/ui/index.html.tmpl", dst: "ui/index.html"},

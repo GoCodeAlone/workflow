@@ -1306,7 +1306,7 @@ The Workflow engine includes an embedded React-based visual builder for designin
 
 ### Accessing the UI
 
-When running the server with the admin configuration, the visual builder is available at the root URL (typically `http://localhost:8080/`). The UI is embedded in the server binary from the `module/ui_dist/` directory.
+When running the server with the admin configuration, the visual builder is available at the root URL (typically `http://localhost:8080/`). The UI is built as a separate artifact and served via the `static.fileserver` module configured in the admin YAML config. The admin UI is no longer embedded via `go:embed`.
 
 ### Adding Modules from the Palette
 
