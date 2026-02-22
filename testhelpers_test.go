@@ -11,6 +11,7 @@ import (
 	pluginff "github.com/GoCodeAlone/workflow/plugins/featureflags"
 	pluginhttp "github.com/GoCodeAlone/workflow/plugins/http"
 	pluginintegration "github.com/GoCodeAlone/workflow/plugins/integration"
+	pluginlicense "github.com/GoCodeAlone/workflow/plugins/license"
 	pluginmessaging "github.com/GoCodeAlone/workflow/plugins/messaging"
 	pluginmodcompat "github.com/GoCodeAlone/workflow/plugins/modularcompat"
 	pluginobs "github.com/GoCodeAlone/workflow/plugins/observability"
@@ -22,7 +23,7 @@ import (
 	pluginstorage "github.com/GoCodeAlone/workflow/plugins/storage"
 )
 
-// allPlugins returns all 16 engine plugins for test use.
+// allPlugins returns all engine plugins for test use.
 func allPlugins() []plugin.EnginePlugin {
 	return []plugin.EnginePlugin{
 		pluginhttp.New(),
@@ -41,6 +42,7 @@ func allPlugins() []plugin.EnginePlugin {
 		pluginintegration.New(),
 		pluginai.New(),
 		pluginplatform.New(),
+		pluginlicense.New(),
 	}
 }
 

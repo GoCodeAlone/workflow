@@ -1502,4 +1502,25 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "parameters", Label: "Parameters", Type: FieldTypeMap, MapValueType: "string", Description: "Template parameter values"},
 		},
 	})
+
+	// ---- License ----
+
+	r.Register(&ModuleSchema{
+		Type:        "license.validator",
+		Label:       "License Validator",
+		Category:    "infrastructure",
+		Description: "Validates license keys against a remote server with local caching and offline grace period",
+		Outputs: []ServiceIODef{
+			{Name: "license-validator", Type: "LicenseValidator", Description: "License validation service for feature gating"},
+		},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "server_url", Label: "License Server URL", Type: FieldTypeString, Description: "URL of the license validation server (leave empty for offline/starter mode)", Placeholder: "https://license.gocodalone.com/api/v1"},
+			{Key: "license_key", Label: "License Key", Type: FieldTypeString, Description: "License key (supports $ENV_VAR expansion; also reads WORKFLOW_LICENSE_KEY env var)", Placeholder: "$WORKFLOW_LICENSE_KEY", Sensitive: true},
+			{Key: "cache_ttl", Label: "Cache TTL", Type: FieldTypeDuration, DefaultValue: "1h", Description: "How long to cache a valid license result before re-validating", Placeholder: "1h"},
+			{Key: "grace_period", Label: "Grace Period", Type: FieldTypeDuration, DefaultValue: "72h", Description: "How long to allow operation when the license server is unreachable", Placeholder: "72h"},
+			{Key: "refresh_interval", Label: "Refresh Interval", Type: FieldTypeDuration, DefaultValue: "1h", Description: "How often the background goroutine re-validates the license", Placeholder: "1h"},
+		},
+		DefaultConfig: map[string]any{"cache_ttl": "1h", "grace_period": "72h", "refresh_interval": "1h"},
+		MaxIncoming:   intPtr(0),
+	})
 }
