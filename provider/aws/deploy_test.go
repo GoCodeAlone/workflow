@@ -221,6 +221,165 @@ func TestDeployECS_DeployIDContainsARNs(t *testing.T) {
 	}
 }
 
+func TestDeployECS_MissingCluster(t *testing.T) {
+	cfg := AWSConfig{Service: "my-service"} // no ECSCluster
+	ecsClient := &mockECSClient{}
+	p := NewAWSProviderWithClients(cfg, ecsClient, nil, nil)
+
+	_, err := p.deployECS(context.Background(), provider.DeployRequest{
+		Image:  "img:latest",
+		Config: map[string]any{}, // no cluster override either
+	})
+	if err == nil {
+		t.Fatal("expected an error when cluster name is missing")
+	}
+}
+
+func TestDeployECS_MissingService(t *testing.T) {
+	cfg := AWSConfig{ECSCluster: "my-cluster"} // no Service
+	ecsClient := &mockECSClient{}
+	p := NewAWSProviderWithClients(cfg, ecsClient, nil, nil)
+
+	_, err := p.deployECS(context.Background(), provider.DeployRequest{
+		Image:  "img:latest",
+		Config: map[string]any{}, // no service override either
+	})
+	if err == nil {
+		t.Fatal("expected an error when service name is missing")
+	}
+}
+
+func TestDeployECS_SetsContainerEssential(t *testing.T) {
+	var capturedEssential *bool
+	cfg := AWSConfig{ECSCluster: "my-cluster", Service: "my-service"}
+	ecsClient := &mockECSClient{
+		registerTaskDefFunc: func(_ context.Context, params *ecs.RegisterTaskDefinitionInput, _ ...func(*ecs.Options)) (*ecs.RegisterTaskDefinitionOutput, error) {
+			if len(params.ContainerDefinitions) > 0 {
+				capturedEssential = params.ContainerDefinitions[0].Essential
+			}
+			return &ecs.RegisterTaskDefinitionOutput{
+				TaskDefinition: &ecstypes.TaskDefinition{
+					TaskDefinitionArn: awsv2.String("arn:aws:ecs:us-east-1:123456789012:task-definition/my-service:1"),
+					Family:            awsv2.String("my-service"),
+					Revision:          1,
+				},
+			}, nil
+		},
+	}
+	p := NewAWSProviderWithClients(cfg, ecsClient, nil, nil)
+
+	_, err := p.deployECS(context.Background(), provider.DeployRequest{
+		Image:  "img:latest",
+		Config: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedEssential == nil || !*capturedEssential {
+		t.Error("expected Essential=true on the container definition")
+	}
+}
+
+func TestDeployECS_SetsEnvironmentTag(t *testing.T) {
+	var capturedTags []ecstypes.Tag
+	cfg := AWSConfig{ECSCluster: "my-cluster", Service: "my-service"}
+	ecsClient := &mockECSClient{
+		registerTaskDefFunc: func(_ context.Context, params *ecs.RegisterTaskDefinitionInput, _ ...func(*ecs.Options)) (*ecs.RegisterTaskDefinitionOutput, error) {
+			capturedTags = params.Tags
+			return &ecs.RegisterTaskDefinitionOutput{
+				TaskDefinition: &ecstypes.TaskDefinition{
+					TaskDefinitionArn: awsv2.String("arn:aws:ecs:us-east-1:123456789012:task-definition/my-service:1"),
+					Family:            awsv2.String("my-service"),
+					Revision:          1,
+				},
+			}, nil
+		},
+	}
+	p := NewAWSProviderWithClients(cfg, ecsClient, nil, nil)
+
+	_, err := p.deployECS(context.Background(), provider.DeployRequest{
+		Image:       "img:latest",
+		Environment: "production",
+		Config:      map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	found := false
+	for _, tag := range capturedTags {
+		if awsv2.ToString(tag.Key) == "environment" && awsv2.ToString(tag.Value) == "production" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected environment=production tag, got: %v", capturedTags)
+	}
+}
+
+func TestDeployECS_SetsEnvVarsFromConfig(t *testing.T) {
+	var capturedEnv []ecstypes.KeyValuePair
+	cfg := AWSConfig{ECSCluster: "my-cluster", Service: "my-service"}
+	ecsClient := &mockECSClient{
+		registerTaskDefFunc: func(_ context.Context, params *ecs.RegisterTaskDefinitionInput, _ ...func(*ecs.Options)) (*ecs.RegisterTaskDefinitionOutput, error) {
+			if len(params.ContainerDefinitions) > 0 {
+				capturedEnv = params.ContainerDefinitions[0].Environment
+			}
+			return &ecs.RegisterTaskDefinitionOutput{
+				TaskDefinition: &ecstypes.TaskDefinition{
+					TaskDefinitionArn: awsv2.String("arn:aws:ecs:us-east-1:123456789012:task-definition/my-service:1"),
+					Family:            awsv2.String("my-service"),
+					Revision:          1,
+				},
+			}, nil
+		},
+	}
+	p := NewAWSProviderWithClients(cfg, ecsClient, nil, nil)
+
+	_, err := p.deployECS(context.Background(), provider.DeployRequest{
+		Image: "img:latest",
+		Config: map[string]any{
+			"env_vars": map[string]any{
+				"APP_ENV": "prod",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	found := false
+	for _, kv := range capturedEnv {
+		if awsv2.ToString(kv.Name) == "APP_ENV" && awsv2.ToString(kv.Value) == "prod" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected APP_ENV=prod env var, got: %v", capturedEnv)
+	}
+}
+
+func TestDeployEKS_DeployIDIsUnique(t *testing.T) {
+	cfg := AWSConfig{EKSCluster: "my-eks-cluster"}
+	eksClient := &mockEKSClient{}
+	p := NewAWSProviderWithClients(cfg, nil, eksClient, nil)
+
+	req := provider.DeployRequest{
+		Image:  "myrepo/myapp:v1",
+		Config: map[string]any{},
+	}
+	result1, err := p.deployEKS(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	result2, err := p.deployEKS(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result1.DeployID == result2.DeployID {
+		t.Error("expected unique deploy IDs for distinct EKS deployments of the same image")
+	}
+}
 func TestDeployEKS_Success(t *testing.T) {
 	cfg := AWSConfig{EKSCluster: "my-eks-cluster"}
 	eksClient := &mockEKSClient{}
@@ -241,7 +400,6 @@ func TestDeployEKS_Success(t *testing.T) {
 		t.Error("expected non-empty DeployID")
 	}
 }
-
 func TestDeployEKS_MissingCluster(t *testing.T) {
 	cfg := AWSConfig{} // no EKSCluster set
 	eksClient := &mockEKSClient{}

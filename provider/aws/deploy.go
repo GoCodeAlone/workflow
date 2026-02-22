@@ -3,13 +3,13 @@ package aws
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
+	"github.com/google/uuid"
 
 	"github.com/GoCodeAlone/workflow/provider"
 )
@@ -23,24 +23,52 @@ func (p *AWSProvider) deployECS(ctx context.Context, req provider.DeployRequest)
 		return nil, err
 	}
 
+	// Determine cluster and service name, preferring request config over provider config.
+	// Both are validated early to avoid registering a task definition only to fail later.
+	cluster := p.config.ECSCluster
+	if c, ok := req.Config["cluster"].(string); ok && c != "" {
+		cluster = c
+	}
+	if cluster == "" {
+		return nil, fmt.Errorf("aws: ECS cluster name is required (set ecs_cluster in config or pass cluster in request config)")
+	}
+
+	service := p.config.Service
+	if s, ok := req.Config["service"].(string); ok && s != "" {
+		service = s
+	}
+	if service == "" {
+		return nil, fmt.Errorf("aws: ECS service name is required (set service in config or pass service in request config)")
+	}
+
 	// Determine task family from config or service name.
-	family := p.config.Service
+	family := service
 	if f, ok := req.Config["task_family"].(string); ok && f != "" {
 		family = f
 	}
-	if family == "" {
-		family = "workflow-task"
+
+	// Build container definition with Essential=true and optional environment variables.
+	containerDef := ecstypes.ContainerDefinition{
+		Name:      awsv2.String(family),
+		Image:     awsv2.String(req.Image),
+		Essential: awsv2.Bool(true),
+	}
+	// Map req.Config["env_vars"] (map[string]any{"KEY": "value"}) to ECS key-value pairs.
+	if envVars, ok := req.Config["env_vars"].(map[string]any); ok {
+		for k, v := range envVars {
+			if sv, ok := v.(string); ok {
+				containerDef.Environment = append(containerDef.Environment, ecstypes.KeyValuePair{
+					Name:  awsv2.String(k),
+					Value: awsv2.String(sv),
+				})
+			}
+		}
 	}
 
 	// Build the task definition input.
 	taskInput := &ecs.RegisterTaskDefinitionInput{
-		Family: awsv2.String(family),
-		ContainerDefinitions: []ecstypes.ContainerDefinition{
-			{
-				Name:  awsv2.String(family),
-				Image: awsv2.String(req.Image),
-			},
-		},
+		Family:                  awsv2.String(family),
+		ContainerDefinitions:    []ecstypes.ContainerDefinition{containerDef},
 		NetworkMode:             ecstypes.NetworkModeAwsvpc,
 		RequiresCompatibilities: []ecstypes.Compatibility{ecstypes.CompatibilityFargate},
 		Cpu:                     awsv2.String("256"),
@@ -52,22 +80,19 @@ func (p *AWSProvider) deployECS(ctx context.Context, req provider.DeployRequest)
 	if mem, ok := req.Config["memory"].(string); ok && mem != "" {
 		taskInput.Memory = awsv2.String(mem)
 	}
+	// Tag the task definition with the deployment environment for traceability.
+	if req.Environment != "" {
+		taskInput.Tags = append(taskInput.Tags, ecstypes.Tag{
+			Key:   awsv2.String("environment"),
+			Value: awsv2.String(req.Environment),
+		})
+	}
 
 	taskOut, err := client.RegisterTaskDefinition(ctx, taskInput)
 	if err != nil {
 		return nil, fmt.Errorf("aws: register task definition: %w", err)
 	}
 	taskDefARN := awsv2.ToString(taskOut.TaskDefinition.TaskDefinitionArn)
-
-	// Determine cluster and service name, preferring request config over provider config.
-	cluster := p.config.ECSCluster
-	if c, ok := req.Config["cluster"].(string); ok && c != "" {
-		cluster = c
-	}
-	service := p.config.Service
-	if s, ok := req.Config["service"].(string); ok && s != "" {
-		service = s
-	}
 
 	// Update the ECS service to use the new task definition.
 	svcOut, err := client.UpdateService(ctx, &ecs.UpdateServiceInput{
@@ -116,10 +141,9 @@ func (p *AWSProvider) deployEKS(ctx context.Context, req provider.DeployRequest)
 	if ns, ok := req.Config["namespace"].(string); ok && ns != "" {
 		namespace = ns
 	}
-	deployName := strings.ReplaceAll(req.Image, ":", "-")
-	deployName = strings.ReplaceAll(deployName, "/", "-")
 
-	deployID := fmt.Sprintf("eks:%s:%s", clusterName, deployName)
+	// Use a UUID to guarantee a unique, unambiguous deploy ID regardless of the image name.
+	deployID := fmt.Sprintf("eks:%s:%s", clusterName, uuid.New().String())
 	return &provider.DeployResult{
 		DeployID:  deployID,
 		Status:    "pending",

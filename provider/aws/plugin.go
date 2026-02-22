@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
@@ -32,15 +33,17 @@ type AWSConfig struct {
 	Region          string `json:"region" yaml:"region"`
 	AccessKeyID     string `json:"access_key_id" yaml:"access_key_id"`
 	SecretAccessKey string `json:"secret_access_key" yaml:"secret_access_key"`
-	RoleARN         string `json:"role_arn" yaml:"role_arn"`
-	ECSCluster      string `json:"ecs_cluster" yaml:"ecs_cluster"`
-	EKSCluster      string `json:"eks_cluster" yaml:"eks_cluster"`
-	Service         string `json:"service" yaml:"service"`
+	// TODO: implement IAM role assumption via STS AssumeRole for cross-account access.
+	RoleARN    string `json:"role_arn" yaml:"role_arn"`
+	ECSCluster string `json:"ecs_cluster" yaml:"ecs_cluster"`
+	EKSCluster string `json:"eks_cluster" yaml:"eks_cluster"`
+	Service    string `json:"service" yaml:"service"`
 }
 
 // AWSProvider implements CloudProvider for Amazon Web Services.
 type AWSProvider struct {
 	config    AWSConfig
+	mu        sync.Mutex // guards lazy client initialisation
 	ecsClient ECSClient
 	eksClient EKSClientIface
 	cwClient  CloudWatchClient
@@ -79,7 +82,10 @@ func (p *AWSProvider) buildAWSConfig(ctx context.Context) (awsv2.Config, error) 
 }
 
 // ensureECSClient lazily initializes the ECS client if not already set.
+// It is safe to call concurrently.
 func (p *AWSProvider) ensureECSClient(ctx context.Context) (ECSClient, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.ecsClient != nil {
 		return p.ecsClient, nil
 	}
@@ -92,7 +98,10 @@ func (p *AWSProvider) ensureECSClient(ctx context.Context) (ECSClient, error) {
 }
 
 // ensureEKSClient lazily initializes the EKS client if not already set.
+// It is safe to call concurrently.
 func (p *AWSProvider) ensureEKSClient(ctx context.Context) (EKSClientIface, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.eksClient != nil {
 		return p.eksClient, nil
 	}
@@ -105,7 +114,10 @@ func (p *AWSProvider) ensureEKSClient(ctx context.Context) (EKSClientIface, erro
 }
 
 // ensureCWClient lazily initializes the CloudWatch client if not already set.
+// It is safe to call concurrently.
 func (p *AWSProvider) ensureCWClient(ctx context.Context) (CloudWatchClient, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.cwClient != nil {
 		return p.cwClient, nil
 	}
@@ -190,6 +202,10 @@ func (p *AWSProvider) GetDeploymentStatus(ctx context.Context, deployID string) 
 	if err != nil {
 		return nil, err
 	}
+	// For old-format ARNs (no cluster segment), fall back to the configured cluster.
+	if cluster == "" {
+		cluster = p.config.ECSCluster
+	}
 	// DescribeServices accepts both ARNs and names; use the full ARN for precision.
 	out, err := client.DescribeServices(ctx, &ecs.DescribeServicesInput{
 		Cluster:  awsv2.String(cluster),
@@ -249,6 +265,10 @@ func (p *AWSProvider) Rollback(ctx context.Context, deployID string) error {
 	if err != nil {
 		return err
 	}
+	// For old-format ARNs (no cluster segment), fall back to the configured cluster.
+	if cluster == "" {
+		cluster = p.config.ECSCluster
+	}
 
 	prevTaskDef, err := p.getPreviousTaskDef(ctx, client, taskDefARN)
 	if err != nil {
@@ -307,8 +327,13 @@ func (p *AWSProvider) TestConnection(ctx context.Context, config map[string]any)
 }
 
 // GetMetrics fetches CPU and memory utilisation for an ECS service from CloudWatch.
-// The deployID must be in the format "<serviceARN>|<taskDefARN>" or "eks:<cluster>:<deploy>".
+// The deployID must be in the format "<serviceARN>|<taskDefARN>".
+// EKS deploy IDs are not supported; use a dedicated EKS metrics integration instead.
 func (p *AWSProvider) GetMetrics(ctx context.Context, deployID string, window time.Duration) (*provider.Metrics, error) {
+	if strings.HasPrefix(deployID, "eks:") {
+		return nil, fmt.Errorf("aws: EKS metrics are not available via the CloudWatch ECS namespace; use a dedicated EKS metrics integration")
+	}
+
 	client, err := p.ensureCWClient(ctx)
 	if err != nil {
 		return nil, err
@@ -321,11 +346,17 @@ func (p *AWSProvider) GetMetrics(ctx context.Context, deployID string, window ti
 
 	now := time.Now()
 	start := now.Add(-window)
+	// CloudWatch standard-resolution metrics require Period to be between 1 and 3600 seconds.
+	// For short windows (< 5 minutes) we keep 60s granularity for better resolution.
+	// For longer windows we target roughly 5 data points (period ≈ window/5),
+	// clamped to the valid [60, 3600] second range to avoid invalid requests.
 	period := int32(60)
 	if window >= 5*time.Minute {
 		period = int32(window.Seconds() / 5)
 		if period < 60 {
 			period = 60
+		} else if period > 3600 {
+			period = 3600
 		}
 	}
 

@@ -159,9 +159,77 @@ func TestGetDeploymentStatus_InvalidDeployID(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Rollback tests
-// ---------------------------------------------------------------------------
+func TestGetDeploymentStatus_OldFormatARN(t *testing.T) {
+	// Old-format ARN: no cluster segment – cluster should fall back to p.config.ECSCluster.
+	const deployID = "arn:aws:ecs:us-east-1:123456789012:service/my-svc|arn:aws:ecs:us-east-1:123456789012:task-definition/my-task:5"
+	var capturedCluster string
+	ecsClient := &mockECSClient{
+		describeServicesFunc: func(_ context.Context, params *ecs.DescribeServicesInput, _ ...func(*ecs.Options)) (*ecs.DescribeServicesOutput, error) {
+			capturedCluster = awsv2.ToString(params.Cluster)
+			return &ecs.DescribeServicesOutput{
+				Services: []ecstypes.Service{
+					{
+						Deployments: []ecstypes.Deployment{
+							{
+								Id:           awsv2.String("deploy-1"),
+								Status:       awsv2.String("PRIMARY"),
+								RolloutState: ecstypes.DeploymentRolloutStateCompleted,
+								DesiredCount: 2,
+								RunningCount: 2,
+							},
+						},
+					},
+				},
+			}, nil
+		},
+	}
+	cfg := AWSConfig{ECSCluster: "fallback-cluster"}
+	p := NewAWSProviderWithClients(cfg, ecsClient, nil, nil)
+
+	status, err := p.GetDeploymentStatus(context.Background(), deployID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status.Status != "succeeded" {
+		t.Errorf("expected status=succeeded, got %q", status.Status)
+	}
+	if capturedCluster != "fallback-cluster" {
+		t.Errorf("expected cluster=%q from config fallback, got %q", "fallback-cluster", capturedCluster)
+	}
+}
+
+func TestRollback_OldFormatARN(t *testing.T) {
+	// Old-format ARN: no cluster segment – cluster should fall back to p.config.ECSCluster.
+	const deployID = "arn:aws:ecs:us-east-1:123456789012:service/my-svc|arn:aws:ecs:us-east-1:123456789012:task-definition/my-task:3"
+	var capturedCluster string
+	ecsClient := &mockECSClient{
+		describeTaskDefFunc: func(_ context.Context, _ *ecs.DescribeTaskDefinitionInput, _ ...func(*ecs.Options)) (*ecs.DescribeTaskDefinitionOutput, error) {
+			return &ecs.DescribeTaskDefinitionOutput{
+				TaskDefinition: &ecstypes.TaskDefinition{
+					Family:   awsv2.String("my-task"),
+					Revision: 3,
+				},
+			}, nil
+		},
+		updateServiceFunc: func(_ context.Context, params *ecs.UpdateServiceInput, _ ...func(*ecs.Options)) (*ecs.UpdateServiceOutput, error) {
+			capturedCluster = awsv2.ToString(params.Cluster)
+			return &ecs.UpdateServiceOutput{
+				Service: &ecstypes.Service{
+					ServiceArn: awsv2.String("arn:aws:ecs:us-east-1:123456789012:service/my-svc"),
+				},
+			}, nil
+		},
+	}
+	cfg := AWSConfig{ECSCluster: "fallback-cluster"}
+	p := NewAWSProviderWithClients(cfg, ecsClient, nil, nil)
+
+	if err := p.Rollback(context.Background(), deployID); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedCluster != "fallback-cluster" {
+		t.Errorf("expected cluster=%q from config fallback, got %q", "fallback-cluster", capturedCluster)
+	}
+}
 
 func TestRollback_Success(t *testing.T) {
 	const deployID = "arn:aws:ecs:us-east-1:123456789012:service/my-cluster/my-svc|arn:aws:ecs:us-east-1:123456789012:task-definition/my-task:5"
@@ -342,12 +410,9 @@ func TestGetMetrics_EKSDeployID(t *testing.T) {
 	cwClient := &mockCWClient{}
 	p := NewAWSProviderWithClients(AWSConfig{}, nil, nil, cwClient)
 
-	metrics, err := p.GetMetrics(context.Background(), "eks:my-cluster:myapp-v1", 5*time.Minute)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if metrics == nil {
-		t.Fatal("expected non-nil metrics")
+	_, err := p.GetMetrics(context.Background(), "eks:my-cluster:myapp-v1", 5*time.Minute)
+	if err == nil {
+		t.Error("expected error: EKS metrics are not available via CloudWatch ECS namespace")
 	}
 }
 
