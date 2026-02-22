@@ -56,13 +56,22 @@ func NewGCPProvider(config GCPConfig) *GCPProvider {
 }
 
 // NewGCPProviderWithClient creates a GCPProvider with an injectable HTTP client and token
-// function. This constructor is intended for testing.
-func NewGCPProviderWithClient(config GCPConfig, client HTTPDoer, tokenFunc func(ctx context.Context) (string, error)) *GCPProvider {
-	return &GCPProvider{
+// function. Nil arguments are replaced with safe defaults: a 30-second http.Client and
+// the provider's Application Default Credentials token function.
+func NewGCPProviderWithClient(config GCPConfig, client HTTPDoer, tokenFn func(ctx context.Context) (string, error)) *GCPProvider {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	p := &GCPProvider{
 		config:     config,
 		httpClient: client,
-		tokenFunc:  tokenFunc,
 	}
+	if tokenFn == nil {
+		p.tokenFunc = p.defaultTokenFunc
+	} else {
+		p.tokenFunc = tokenFn
+	}
+	return p
 }
 
 // defaultTokenFunc retrieves a GCP OAuth2 access token using Application Default Credentials
@@ -286,9 +295,18 @@ func (p *GCPProvider) TestConnection(ctx context.Context, _ map[string]any) (*pr
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		const maxBodyBytes = 1024
+		var bodySnippet string
+		if data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes)); readErr == nil && len(data) > 0 {
+			bodySnippet = strings.TrimSpace(string(data))
+		}
+		msg := fmt.Sprintf("gcp: project %q returned HTTP %d", p.config.ProjectID, resp.StatusCode)
+		if bodySnippet != "" {
+			msg = fmt.Sprintf("%s: %s", msg, bodySnippet)
+		}
 		return &provider.ConnectionResult{
 			Success: false,
-			Message: fmt.Sprintf("gcp: project %q returned HTTP %d", p.config.ProjectID, resp.StatusCode),
+			Message: msg,
 			Latency: latency,
 		}, nil
 	}

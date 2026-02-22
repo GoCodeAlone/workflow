@@ -297,3 +297,67 @@ func TestPushImage_FallbackTokenFromProvider(t *testing.T) {
 		t.Fatalf("PushImage with fallback token: %v", err)
 	}
 }
+
+// TestListImages_InvalidSizeBytes verifies that ListImages returns an error when
+// the API returns a non-numeric imageSizeBytes value.
+func TestListImages_InvalidSizeBytes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := artifactRegistryDockerImagesResponse{
+			DockerImages: []artifactRegistryDockerImage{
+				{URI: "gcr.io/proj/img", Tags: []string{"v1"}, ImageSizeBytes: "not-a-number"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := newTestProvider(server, GCPConfig{ProjectID: "proj", Region: "us"})
+	_, err := p.ListImages(context.Background(), "repo")
+	if err == nil {
+		t.Fatal("expected error for invalid imageSizeBytes")
+	}
+	if !strings.Contains(err.Error(), "parse image size") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestListImages_InvalidUploadTime verifies that ListImages returns an error when
+// the API returns a non-RFC3339 uploadTime value.
+func TestListImages_InvalidUploadTime(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := artifactRegistryDockerImagesResponse{
+			DockerImages: []artifactRegistryDockerImage{
+				{URI: "gcr.io/proj/img", Tags: []string{"v1"}, ImageSizeBytes: "100", UploadTime: "not-a-time"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := newTestProvider(server, GCPConfig{ProjectID: "proj", Region: "us"})
+	_, err := p.ListImages(context.Background(), "repo")
+	if err == nil {
+		t.Fatal("expected error for invalid uploadTime")
+	}
+	if !strings.Contains(err.Error(), "parse upload time") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestNewGCPProviderWithClient_NilSafety verifies that nil client and tokenFunc
+// arguments do not cause panics; the provider falls back to safe defaults.
+func TestNewGCPProviderWithClient_NilSafety(t *testing.T) {
+	// Should not panic.
+	p := NewGCPProviderWithClient(GCPConfig{ProjectID: "proj"}, nil, nil)
+	if p == nil {
+		t.Fatal("expected non-nil provider")
+	}
+	if p.httpClient == nil {
+		t.Error("expected non-nil httpClient after nil default")
+	}
+	if p.tokenFunc == nil {
+		t.Error("expected non-nil tokenFunc after nil default")
+	}
+}

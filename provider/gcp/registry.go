@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -47,7 +48,7 @@ func (p *GCPProvider) ListImages(ctx context.Context, repo string) ([]provider.I
 	for {
 		reqURL := endpoint
 		if pageToken != "" {
-			reqURL += "?pageToken=" + pageToken
+			reqURL += "?pageToken=" + url.QueryEscape(pageToken)
 		}
 		resp, err := p.doRequest(ctx, http.MethodGet, reqURL, nil)
 		if err != nil {
@@ -67,8 +68,19 @@ func (p *GCPProvider) ListImages(ctx context.Context, repo string) ([]provider.I
 			return nil, fmt.Errorf("gcp: failed to parse ListImages response: %w", err)
 		}
 		for _, img := range result.DockerImages {
-			sizeBytes, _ := strconv.ParseInt(img.ImageSizeBytes, 10, 64)
-			pushedAt, _ := time.Parse(time.RFC3339, img.UploadTime)
+			sizeBytes, err := strconv.ParseInt(img.ImageSizeBytes, 10, 64)
+			if err != nil && img.ImageSizeBytes != "" {
+				return nil, fmt.Errorf("gcp: failed to parse image size %q for image %q: %w",
+					img.ImageSizeBytes, img.URI, err)
+			}
+			var pushedAt time.Time
+			if img.UploadTime != "" {
+				pushedAt, err = time.Parse(time.RFC3339, img.UploadTime)
+				if err != nil {
+					return nil, fmt.Errorf("gcp: failed to parse upload time %q for image %q: %w",
+						img.UploadTime, img.URI, err)
+				}
+			}
 			tags := img.Tags
 			if len(tags) == 0 {
 				tags = []string{""}

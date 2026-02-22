@@ -340,7 +340,8 @@ func TestTestConnection_Success(t *testing.T) {
 	}
 }
 
-// TestTestConnection_Failure verifies that TestConnection returns Success=false on HTTP 403.
+// TestTestConnection_Failure verifies that TestConnection returns Success=false on HTTP 403
+// and includes the response body in the failure message.
 func TestTestConnection_Failure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
@@ -358,6 +359,10 @@ func TestTestConnection_Failure(t *testing.T) {
 	}
 	if !strings.Contains(result.Message, "HTTP 403") {
 		t.Errorf("expected message to mention HTTP 403, got: %s", result.Message)
+	}
+	// The response body should be included in the failure message for easier diagnosis.
+	if !strings.Contains(result.Message, "permission denied") {
+		t.Errorf("expected message to include response body, got: %s", result.Message)
 	}
 }
 
