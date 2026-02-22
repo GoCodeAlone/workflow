@@ -83,6 +83,7 @@ var (
 	restoreAdmin  = flag.Bool("restore-admin", false, "Restore admin config to embedded default on startup")
 	loadWorkflows = flag.String("load-workflows", "", "Comma-separated paths to workflow YAML files or directories to load alongside admin")
 	importBundle  = flag.String("import-bundle", "", "Comma-separated paths to .tar.gz workflow bundles to import and deploy on startup")
+	adminUIDir    = flag.String("admin-ui-dir", "", "Path to admin UI static assets directory (overrides ADMIN_UI_DIR env var). Leave empty to use the path in admin/config.yaml")
 )
 
 // buildEngine creates the workflow engine with all handlers registered and built from config.
@@ -252,7 +253,7 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 	// Merge admin config into primary config — admin UI is always enabled.
 	// The admin config provides all management endpoints (auth, API, schema,
 	// AI, dynamic components) via the engine's own modules and routes.
-	if err := mergeAdminConfig(logger, cfg, app); err != nil {
+	if err := mergeAdminConfig(logger, cfg); err != nil {
 		return nil, fmt.Errorf("failed to set up admin: %w", err)
 	}
 
@@ -290,26 +291,25 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 	return app, nil
 }
 
-// mergeAdminConfig loads the embedded admin config, extracts assets to temp
-// locations, and merges admin modules/routes into the primary config.
+// mergeAdminConfig loads the embedded admin config and merges admin
+// modules/routes into the primary config. If --admin-ui-dir (or ADMIN_UI_DIR
+// env var) is set the static.fileserver root is updated to that path,
+// allowing the admin UI to be deployed and updated independently of the binary.
 // If the config already contains admin modules (e.g., the user passed the
 // admin config directly), the merge is skipped to avoid duplicates — but
-// UI assets are still extracted and injected so the static fileserver works.
-func mergeAdminConfig(logger *slog.Logger, cfg *config.WorkflowConfig, app *serverApp) error {
-	// Always extract UI assets so the static fileserver has correct paths
-	uiDir, err := admin.WriteUIAssets()
-	if err != nil {
-		return err
-	}
-	app.cleanupDirs = append(app.cleanupDirs, uiDir)
+// the UI root is still injected so the static fileserver works.
+func mergeAdminConfig(logger *slog.Logger, cfg *config.WorkflowConfig) error {
+	// Resolve the UI root: flag > ADMIN_UI_DIR env > leave as configured in config.yaml
+	uiDir := *adminUIDir
 
 	// Check if the config already contains admin modules
 	for _, m := range cfg.Modules {
 		if m.Name == "admin-server" {
 			logger.Info("Config already contains admin modules, skipping merge")
-			// Still inject the correct UI root into the existing config
-			admin.InjectUIRoot(cfg, uiDir)
-			logger.Info("Admin UI enabled", "uiDir", uiDir)
+			if uiDir != "" {
+				injectUIRoot(cfg, uiDir)
+				logger.Info("Admin UI root overridden", "uiDir", uiDir)
+			}
 			return nil
 		}
 	}
@@ -319,15 +319,29 @@ func mergeAdminConfig(logger *slog.Logger, cfg *config.WorkflowConfig, app *serv
 		return err
 	}
 
-	admin.InjectUIRoot(adminCfg, uiDir)
+	if uiDir != "" {
+		injectUIRoot(adminCfg, uiDir)
+		logger.Info("Admin UI root overridden", "uiDir", uiDir)
+	}
 
 	// Merge admin modules and routes into primary config
 	admin.MergeInto(cfg, adminCfg)
 
-	logger.Info("Admin UI enabled",
-		"uiDir", uiDir,
-	)
+	logger.Info("Admin UI enabled")
 	return nil
+}
+
+// injectUIRoot updates every static.fileserver module config in cfg to serve
+// from the given root directory.
+func injectUIRoot(cfg *config.WorkflowConfig, uiRoot string) {
+	for i := range cfg.Modules {
+		if cfg.Modules[i].Type == "static.fileserver" {
+			if cfg.Modules[i].Config == nil {
+				cfg.Modules[i].Config = make(map[string]any)
+			}
+			cfg.Modules[i].Config["root"] = uiRoot
+		}
+	}
 }
 
 // initManagementHandlers creates all management service handlers and stores
@@ -1122,6 +1136,7 @@ func applyEnvOverrides() {
 		"data-dir":        "WORKFLOW_DATA_DIR",
 		"load-workflows":  "WORKFLOW_LOAD_WORKFLOWS",
 		"import-bundle":   "WORKFLOW_IMPORT_BUNDLE",
+		"admin-ui-dir":    "ADMIN_UI_DIR",
 	}
 
 	// Track which flags were explicitly set on the command line.

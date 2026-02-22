@@ -1,50 +1,15 @@
 package module
 
 import (
-	"embed"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"gopkg.in/yaml.v3"
 )
-
-//go:embed all:ui_dist
-var uiAssets embed.FS
-
-// ExtractUIAssets extracts the embedded UI assets to destDir, preserving
-// directory structure. This is used by the admin package to provide a
-// filesystem path for static.fileserver to serve from.
-func ExtractUIAssets(destDir string) error {
-	return fs.WalkDir(uiAssets, "ui_dist", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Compute the relative path under ui_dist
-		rel, err := filepath.Rel("ui_dist", path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(destDir, rel)
-
-		if d.IsDir() {
-			return os.MkdirAll(target, 0750)
-		}
-
-		data, err := uiAssets.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("read embedded file %s: %w", path, err)
-		}
-		return os.WriteFile(target, data, 0600)
-	})
-}
 
 // ServiceInfo describes a registered service for API responses.
 type ServiceInfo struct {
@@ -95,14 +60,6 @@ func (h *WorkflowUIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workflow/validate", h.handleValidate)
 	mux.HandleFunc("POST /api/workflow/reload", h.handleReload)
 	mux.HandleFunc("GET /api/workflow/status", h.handleStatus)
-
-	// Serve the embedded UI assets
-	uiFS, err := fs.Sub(uiAssets, "ui_dist")
-	if err != nil {
-		panic(fmt.Sprintf("failed to create sub filesystem: %v", err))
-	}
-	fileServer := http.FileServer(http.FS(uiFS))
-	mux.Handle("/", fileServer)
 }
 
 func (h *WorkflowUIHandler) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
