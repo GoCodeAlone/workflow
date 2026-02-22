@@ -33,25 +33,6 @@ export interface PluginInfo {
 }
 
 // ---------------------------------------------------------------------------
-// TEMPORARY: Static fallback until backend plugin system returns UI pages.
-// Remove once all plugins implement UIPages().
-// ---------------------------------------------------------------------------
-
-const FALLBACK_PAGES: UIPageDef[] = [
-  // Global pages
-  { id: 'dashboard',    label: 'Dashboard',     icon: '\u{1F4CA}', category: 'global', order: 0 },
-  { id: 'editor',       label: 'Editor',        icon: '\u{1F4DD}', category: 'global', order: 1 },
-  { id: 'marketplace',  label: 'Marketplace',   icon: '\u{1F6D2}', category: 'global', order: 2 },
-  { id: 'templates',    label: 'Templates',     icon: '\u{1F4C4}', category: 'global', order: 3 },
-  { id: 'environments',   label: 'Environments',  icon: '\u2601\uFE0F',  category: 'global', order: 4 },
-  { id: 'settings',       label: 'Settings',      icon: '\u2699\uFE0F',  category: 'global', order: 6 },
-  // Workflow pages
-  { id: 'executions', label: 'Executions', icon: '\u25B6\uFE0F',  category: 'workflow', order: 0 },
-  { id: 'logs',       label: 'Logs',       icon: '\u{1F4C3}', category: 'workflow', order: 1 },
-  { id: 'events',     label: 'Events',     icon: '\u26A1',    category: 'workflow', order: 2 },
-];
-
-// ---------------------------------------------------------------------------
 // Role hierarchy for permission checks
 // ---------------------------------------------------------------------------
 
@@ -112,9 +93,8 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
-/** Derive enabledPages from current plugin list, always including FALLBACK_PAGES
- *  as the core navigation base. Plugin pages are merged in, with plugin pages
- *  overriding fallback pages that share the same id.
+/** Derive enabledPages from current plugin list.
+ *  Pages from enabled plugins are collected and deduplicated by id (last writer wins).
  *  Filters pages by user role and permissions when provided. */
 function deriveEnabledPages(
   plugins: PluginInfo[],
@@ -124,12 +104,8 @@ function deriveEnabledPages(
   const enabledPlugins = plugins.filter((p) => p.enabled);
   const pagesFromPlugins = enabledPlugins.flatMap((p) => p.uiPages ?? []);
 
-  // Always start with fallback core navigation, then merge in plugin pages.
-  // Plugin pages with the same id override fallback pages.
+  // Deduplicate by id — last plugin page with a given id wins.
   const pageMap = new Map<string, UIPageDef>();
-  for (const page of FALLBACK_PAGES) {
-    pageMap.set(page.id, page);
-  }
   for (const page of pagesFromPlugins) {
     pageMap.set(page.id, page);
   }
@@ -151,7 +127,7 @@ const usePluginStore = create<PluginStore>((set, get) => ({
   error: null,
   userRole: undefined,
   userPermissions: [],
-  enabledPages: FALLBACK_PAGES,
+  enabledPages: [],
 
   fetchPlugins: async () => {
     if (get().loading) return;
@@ -159,7 +135,7 @@ const usePluginStore = create<PluginStore>((set, get) => ({
     try {
       const res = await fetch('/api/v1/admin/plugins', { headers: authHeaders() });
       if (!res.ok) {
-        console.warn('Failed to fetch plugins, using fallback navigation');
+        console.warn('Failed to fetch plugins');
         const { userRole, userPermissions } = get();
         set({ loading: false, loaded: true, enabledPages: deriveEnabledPages([], userRole, userPermissions) });
         return;
@@ -235,5 +211,5 @@ const usePluginStore = create<PluginStore>((set, get) => ({
   clearError: () => set({ error: null }),
 }));
 
-export { FALLBACK_PAGES, meetsRoleRequirement, hasPermission };
+export { meetsRoleRequirement, hasPermission };
 export default usePluginStore;

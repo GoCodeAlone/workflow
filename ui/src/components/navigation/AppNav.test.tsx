@@ -27,18 +27,33 @@ vi.mock('../../utils/api.ts', () => ({
   createEventStream: vi.fn(),
 }));
 
+// Core pages that were previously in FALLBACK_PAGES — now declared by the
+// admin-core plugin. Tests set them explicitly so they don't depend on
+// backend plugin state.
+const CORE_PAGES = [
+  { id: 'dashboard',    label: 'Dashboard',    icon: '\u{1F4CA}', category: 'global',   order: 0 },
+  { id: 'editor',       label: 'Editor',       icon: '\u{1F4DD}', category: 'global',   order: 1 },
+  { id: 'marketplace',  label: 'Marketplace',  icon: '\u{1F6D2}', category: 'global',   order: 2 },
+  { id: 'templates',    label: 'Templates',    icon: '\u{1F4C4}', category: 'global',   order: 3 },
+  { id: 'environments', label: 'Environments', icon: '\u2601\uFE0F', category: 'global', order: 4 },
+  { id: 'settings',     label: 'Settings',     icon: '\u2699\uFE0F', category: 'global', order: 6 },
+  { id: 'executions',   label: 'Executions',   icon: '\u25B6\uFE0F', category: 'workflow', order: 0 },
+  { id: 'logs',         label: 'Logs',         icon: '\u{1F4C3}', category: 'workflow', order: 1 },
+  { id: 'events',       label: 'Events',       icon: '\u26A1',    category: 'workflow', order: 2 },
+];
+
 function resetStores() {
   useObservabilityStore.setState({
     activeView: 'editor',
   });
-  // Reset plugin store to use the fallback pages
+  // Populate enabledPages with core pages (mirroring what the admin-core plugin provides)
   usePluginStore.setState({
     plugins: [],
     loaded: true,
     loading: false,
     enabling: {},
     error: null,
-    // enabledPages uses FALLBACK_PAGES by default — no need to override
+    enabledPages: CORE_PAGES,
   });
 }
 
@@ -50,9 +65,8 @@ describe('AppNav', () => {
   it('renders global navigation items from enabledPages', () => {
     render(<AppNav />);
 
-    // Fallback pages have 6 global pages visible
-    // (workflow pages are hidden when no workflow is open;
-    //  plugin pages like store-browser come from the plugin system, not FALLBACK_PAGES)
+    // CORE_PAGES has 6 global pages visible
+    // (workflow pages are hidden when no workflow is open)
     const buttons = screen.getAllByRole('button');
     expect(buttons.length).toBeGreaterThanOrEqual(6);
   });
@@ -60,7 +74,7 @@ describe('AppNav', () => {
   it('renders correct titles on buttons from plugin-derived pages', () => {
     render(<AppNav />);
 
-    // Global pages from FALLBACK_PAGES
+    // Global pages from CORE_PAGES (provided by admin-core plugin)
     expect(screen.getByTitle('Dashboard')).toBeInTheDocument();
     expect(screen.getByTitle('Editor')).toBeInTheDocument();
     expect(screen.getByTitle('Marketplace')).toBeInTheDocument();
@@ -68,8 +82,8 @@ describe('AppNav', () => {
     expect(screen.getByTitle('Environments')).toBeInTheDocument();
     expect(screen.getByTitle('Settings')).toBeInTheDocument();
 
-    // Store Browser and Documentation come from the plugin system (not FALLBACK_PAGES),
-    // so they only appear when plugins are loaded with those pages registered.
+    // Store Browser and Documentation come from separate NativePlugins,
+    // so they only appear when those plugins are loaded with their pages.
     expect(screen.queryByTitle('Store Browser')).not.toBeInTheDocument();
     expect(screen.queryByTitle('Documentation')).not.toBeInTheDocument();
   });
