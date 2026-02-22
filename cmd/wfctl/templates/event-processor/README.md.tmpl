@@ -1,0 +1,53 @@
+# {{.Name}}
+
+An event-driven workflow processor built with the [GoCodeAlone/workflow](https://github.com/GoCodeAlone/workflow) engine.
+
+## Getting Started
+
+### Prerequisites
+
+- Go 1.22+
+
+### Run
+
+```bash
+go run . -config workflow.yaml
+```
+
+### Architecture
+
+Events flow through a state machine lifecycle:
+
+```
+incoming → received → processing → completed
+                   ↘             ↗
+                     failed
+```
+
+Topics:
+- `{{.Name}}.incoming` — events enter here
+- `{{.Name}}.processing` — events being processed
+- `{{.Name}}.completed` — successfully processed events
+- `{{.Name}}.errors` — failed events
+
+### Configuration
+
+Edit `workflow.yaml` to customize topics, state transitions, and handlers.
+
+### Build
+
+```bash
+go build -o {{.Name}} .
+./{{.Name}} -config workflow.yaml
+```
+
+## Project Structure
+
+```
+{{.Name}}/
+├── main.go          # Server entry point
+├── workflow.yaml    # Workflow engine configuration
+├── go.mod           # Go module definition
+├── Dockerfile       # Container build
+└── README.md        # This file
+```

@@ -1,0 +1,141 @@
+modules:
+  - name: {{.Name}}-broker
+    type: messaging.broker
+    config:
+      description: "In-memory message broker for {{.Name}}"
+
+  - name: {{.Name}}-receiver
+    type: messaging.handler
+    dependsOn:
+      - {{.Name}}-broker
+    config:
+      topic: "{{.Name}}.incoming"
+      description: "Receives incoming events"
+
+  - name: {{.Name}}-processor
+    type: messaging.handler
+    dependsOn:
+      - {{.Name}}-broker
+    config:
+      topic: "{{.Name}}.processing"
+      description: "Processes events through state machine"
+
+  - name: {{.Name}}-notifier
+    type: messaging.handler
+    dependsOn:
+      - {{.Name}}-broker
+    config:
+      topic: "{{.Name}}.completed"
+      description: "Sends notifications for completed events"
+
+  - name: {{.Name}}-error-handler
+    type: messaging.handler
+    dependsOn:
+      - {{.Name}}-broker
+    config:
+      topic: "{{.Name}}.errors"
+      description: "Handles processing errors"
+
+  - name: {{.Name}}-state-engine
+    type: statemachine.engine
+    config:
+      description: "Manages event processing lifecycle"
+
+  - name: {{.Name}}-state-tracker
+    type: state.tracker
+    dependsOn:
+      - {{.Name}}-state-engine
+    config:
+      description: "Tracks current state for all events"
+
+  - name: {{.Name}}-server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: {{.Name}}-router
+    type: http.router
+    dependsOn:
+      - {{.Name}}-server
+
+  - name: {{.Name}}-health
+    type: health.checker
+    config:
+      description: "Health check endpoint"
+
+workflows:
+  messaging:
+    broker: {{.Name}}-broker
+    subscriptions:
+      - topic: "{{.Name}}.incoming"
+        handler: {{.Name}}-receiver
+      - topic: "{{.Name}}.processing"
+        handler: {{.Name}}-processor
+      - topic: "{{.Name}}.completed"
+        handler: {{.Name}}-notifier
+      - topic: "{{.Name}}.errors"
+        handler: {{.Name}}-error-handler
+    producers:
+      - name: {{.Name}}-receiver
+        forwardTo:
+          - "{{.Name}}.processing"
+          - "{{.Name}}.errors"
+      - name: {{.Name}}-processor
+        forwardTo:
+          - "{{.Name}}.completed"
+          - "{{.Name}}.errors"
+
+  statemachine:
+    engine: {{.Name}}-state-engine
+    definitions:
+      - name: event-processing
+        description: "Event processing lifecycle"
+        initialState: "received"
+        states:
+          received:
+            description: "Event received"
+            isFinal: false
+            isError: false
+          processing:
+            description: "Event being processed"
+            isFinal: false
+            isError: false
+          completed:
+            description: "Event processed successfully"
+            isFinal: true
+            isError: false
+          failed:
+            description: "Event processing failed"
+            isFinal: true
+            isError: true
+        transitions:
+          start_processing:
+            fromState: "received"
+            toState: "processing"
+          complete:
+            fromState: "processing"
+            toState: "completed"
+          fail:
+            fromState: "processing"
+            toState: "failed"
+          fail_on_receive:
+            fromState: "received"
+            toState: "failed"
+
+  http:
+    router: {{.Name}}-router
+    server: {{.Name}}-server
+    routes:
+      - method: GET
+        path: /health
+        handler: {{.Name}}-health
+
+triggers:
+  - name: event-trigger
+    type: event
+    config:
+      topic: "{{.Name}}.incoming"
+  - name: http-trigger
+    type: http
+    config:
+      server: {{.Name}}-server

@@ -1,0 +1,51 @@
+# {{.Name}}
+
+A workflow-based API service built with the [GoCodeAlone/workflow](https://github.com/GoCodeAlone/workflow) engine.
+
+## Getting Started
+
+### Prerequisites
+
+- Go 1.22+
+
+### Run
+
+```bash
+go run . -config workflow.yaml
+```
+
+The server starts on port 8080.
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /health | Health check |
+| GET | /api/items | List items |
+| POST | /api/items | Create item |
+| GET | /api/items/{id} | Get item |
+| PUT | /api/items/{id} | Update item |
+| DELETE | /api/items/{id} | Delete item |
+
+### Configuration
+
+Edit `workflow.yaml` to add modules, routes, and workflows. See the
+[workflow documentation](https://github.com/GoCodeAlone/workflow) for available module types.
+
+### Build
+
+```bash
+go build -o {{.Name}} .
+./{{.Name}} -config workflow.yaml
+```
+
+## Project Structure
+
+```
+{{.Name}}/
+├── main.go          # Server entry point
+├── workflow.yaml    # Workflow engine configuration
+├── go.mod           # Go module definition
+├── Dockerfile       # Container build
+└── README.md        # This file
+```

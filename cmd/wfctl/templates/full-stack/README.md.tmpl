@@ -1,0 +1,74 @@
+# {{.Name}}
+
+A full-stack workflow application with React UI and Go backend, built with the [GoCodeAlone/workflow](https://github.com/GoCodeAlone/workflow) engine.
+
+## Getting Started
+
+### Prerequisites
+
+- Go 1.22+
+- Node.js 18+
+
+### Development
+
+Start the UI dev server:
+
+```bash
+cd ui
+npm install
+npm run dev
+```
+
+Start the backend (in a separate terminal):
+
+```bash
+go run . -config workflow.yaml
+```
+
+The backend runs on port 8080. The Vite dev server proxies API requests to it.
+
+### Production Build
+
+Build the UI:
+
+```bash
+cd ui
+npm run build
+```
+
+Build and run the Go server (serves the built UI):
+
+```bash
+go build -o {{.Name}} .
+./{{.Name}} -config workflow.yaml
+```
+
+Visit http://localhost:8080.
+
+### API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /health | Health check |
+| GET | /api/items | List items |
+| POST | /api/items | Create item |
+| GET | /api/items/{id} | Get item |
+| PUT | /api/items/{id} | Update item |
+| DELETE | /api/items/{id} | Delete item |
+
+## Project Structure
+
+```
+{{.Name}}/
+├── main.go          # Backend entry point
+├── workflow.yaml    # Workflow engine configuration
+├── go.mod           # Go module definition
+├── Dockerfile       # Container build
+├── README.md        # This file
+└── ui/              # React frontend
+    ├── package.json
+    ├── vite.config.ts
+    ├── index.html
+    └── src/
+        └── App.tsx
+```

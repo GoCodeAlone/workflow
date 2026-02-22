@@ -8,6 +8,7 @@ import (
 var version = "dev"
 
 var commands = map[string]func([]string) error{
+	"init":     runInit,
 	"validate": runValidate,
 	"inspect":  runInspect,
 	"run":      runRun,
@@ -15,6 +16,7 @@ var commands = map[string]func([]string) error{
 	"schema":   runSchema,
 	"manifest": runManifest,
 	"migrate":  runMigrate,
+	"build-ui": runBuildUI,
 }
 
 func usage() {
@@ -24,6 +26,7 @@ Usage:
   wfctl <command> [options]
 
 Commands:
+  init       Scaffold a new workflow project from a template
   validate   Validate a workflow configuration file
   inspect    Inspect modules, workflows, and triggers in a config
   run        Run a workflow engine from a config file
@@ -31,6 +34,7 @@ Commands:
   schema     Generate JSON Schema for workflow configs
   manifest   Analyze config and report infrastructure requirements
   migrate    Manage database schema migrations
+  build-ui   Build the application UI (npm install + npm run build + validate)
 
 Run 'wfctl <command> -h' for command-specific help.
 `, version)

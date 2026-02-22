@@ -1,0 +1,55 @@
+package main
+
+import (
+	"embed"
+	"io/fs"
+	"net/http"
+
+	"github.com/GoCodeAlone/workflow/plugin/external/sdk"
+)
+
+//go:embed ui/dist
+var uiAssets embed.FS
+
+// {{.NameCamel}}Plugin implements sdk.PluginProvider and serves UI assets.
+type {{.NameCamel}}Plugin struct{}
+
+// Manifest returns the plugin metadata.
+func (p *{{.NameCamel}}Plugin) Manifest() sdk.PluginManifest {
+	return sdk.PluginManifest{
+		Name:        "{{.Name}}",
+		Version:     "0.1.0",
+		Author:      "{{.Author}}",
+		Description: "{{.Description}}",
+	}
+}
+
+// ModuleTypes returns the module type names this plugin provides.
+func (p *{{.NameCamel}}Plugin) ModuleTypes() []string {
+	return nil
+}
+
+// CreateModule creates a module instance.
+func (p *{{.NameCamel}}Plugin) CreateModule(typeName, name string, config map[string]any) (sdk.ModuleInstance, error) {
+	return nil, nil
+}
+
+// StepTypes returns the step type names this plugin provides.
+func (p *{{.NameCamel}}Plugin) StepTypes() []string {
+	return nil
+}
+
+// CreateStep creates a step instance.
+func (p *{{.NameCamel}}Plugin) CreateStep(typeName, name string, config map[string]any) (sdk.StepInstance, error) {
+	return nil, nil
+}
+
+// UIHandler returns an http.Handler serving the embedded UI assets.
+// The host engine mounts this at /plugins/{{.Name}}/.
+func (p *{{.NameCamel}}Plugin) UIHandler() http.Handler {
+	sub, err := fs.Sub(uiAssets, "ui/dist")
+	if err != nil {
+		return http.NotFoundHandler()
+	}
+	return http.FileServer(http.FS(sub))
+}

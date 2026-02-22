@@ -1,0 +1,62 @@
+# {{.Name}}
+
+A workflow engine plugin built with the [GoCodeAlone/workflow](https://github.com/GoCodeAlone/workflow) plugin SDK.
+
+## Overview
+
+This plugin provides the `{{.Name}}.handler` module type to the workflow engine.
+
+## Build
+
+```bash
+go build -o {{.Name}}.plugin .
+```
+
+## Usage
+
+Reference this plugin from your workflow config:
+
+```yaml
+requires:
+  plugins:
+    - name: {{.Name}}
+      path: ./{{.Name}}.plugin
+
+modules:
+  - name: my-handler
+    type: {{.Name}}.handler
+    config:
+      timeout: 30s
+```
+
+## Development
+
+### Adding Module Types
+
+Add a new factory in `ModuleFactories()` in `plugin.go`:
+
+```go
+"{{.Name}}.my-type": func(name string, cfg map[string]any) modular.Module {
+    return NewMyModule(name, cfg)
+},
+```
+
+### Adding Pipeline Steps
+
+Add a new factory in `StepFactories()` in `plugin.go`:
+
+```go
+"step.{{.Name}}.my-step": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+    return NewMyStep(name, cfg, app), nil
+},
+```
+
+## Project Structure
+
+```
+{{.Name}}/
+├── main.go      # Plugin entry point (go-plugin server)
+├── plugin.go    # EnginePlugin implementation
+├── go.mod       # Go module definition
+└── README.md    # This file
+```

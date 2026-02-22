@@ -1,0 +1,66 @@
+package main
+
+import (
+	"context"
+
+	"github.com/GoCodeAlone/workflow/plugin/external/sdk"
+)
+
+// {{.NameCamel}}Plugin implements sdk.PluginProvider, sdk.ModuleProvider, and sdk.StepProvider.
+type {{.NameCamel}}Plugin struct{}
+
+// Manifest returns the plugin metadata.
+func (p *{{.NameCamel}}Plugin) Manifest() sdk.PluginManifest {
+	return sdk.PluginManifest{
+		Name:        "{{.Name}}",
+		Version:     "0.1.0",
+		Author:      "{{.Author}}",
+		Description: "{{.Description}}",
+	}
+}
+
+// ModuleTypes returns the module type names this plugin provides.
+func (p *{{.NameCamel}}Plugin) ModuleTypes() []string {
+	return []string{"{{.Name}}.handler"}
+}
+
+// CreateModule creates a module instance of the given type.
+func (p *{{.NameCamel}}Plugin) CreateModule(typeName, name string, config map[string]any) (sdk.ModuleInstance, error) {
+	switch typeName {
+	case "{{.Name}}.handler":
+		return &{{.NameCamel}}Handler{name: name, config: config}, nil
+	default:
+		return nil, nil
+	}
+}
+
+// StepTypes returns the step type names this plugin provides.
+func (p *{{.NameCamel}}Plugin) StepTypes() []string {
+	return nil
+}
+
+// CreateStep creates a step instance.
+func (p *{{.NameCamel}}Plugin) CreateStep(typeName, name string, config map[string]any) (sdk.StepInstance, error) {
+	return nil, nil
+}
+
+// {{.NameCamel}}Handler is the module implementation.
+type {{.NameCamel}}Handler struct {
+	name   string
+	config map[string]any
+}
+
+// Init initializes the handler.
+func (h *{{.NameCamel}}Handler) Init() error {
+	return nil
+}
+
+// Start starts the handler.
+func (h *{{.NameCamel}}Handler) Start(ctx context.Context) error {
+	return nil
+}
+
+// Stop stops the handler.
+func (h *{{.NameCamel}}Handler) Stop(ctx context.Context) error {
+	return nil
+}

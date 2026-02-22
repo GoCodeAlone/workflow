@@ -1,0 +1,55 @@
+# {{.Name}}
+
+A workflow engine UI plugin that serves a React frontend under `/plugins/{{.Name}}/`.
+
+## Build
+
+### 1. Build the UI
+
+```bash
+cd ui
+npm install
+npm run build
+```
+
+This produces `ui/dist/`, which is embedded into the plugin binary.
+
+### 2. Build the plugin binary
+
+```bash
+go build -o {{.Name}}.plugin .
+```
+
+## Usage
+
+Reference this plugin from your workflow config:
+
+```yaml
+requires:
+  plugins:
+    - name: {{.Name}}
+      path: ./{{.Name}}.plugin
+```
+
+The plugin UI will be available at `http://your-server/plugins/{{.Name}}/`.
+
+## Development
+
+Edit files in `ui/src/` and run `npm run dev` for hot-reload during development.
+
+## Project Structure
+
+```
+{{.Name}}/
+├── main.go        # Plugin entry point
+├── plugin.go      # EnginePlugin implementation + route registration
+├── go.mod         # Go module definition
+├── README.md      # This file
+└── ui/            # React frontend
+    ├── package.json
+    ├── vite.config.ts
+    ├── index.html
+    └── src/
+        ├── main.tsx
+        └── App.tsx
+```
