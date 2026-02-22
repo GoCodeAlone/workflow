@@ -39,7 +39,7 @@ jobs:
     - name: Build UI assets
       run: |
         cd ui && npm ci && npm run build
-        cd .. && cp -r ui/dist/* module/ui_dist/
+        cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
 
     - name: Download dependencies
       run: |
@@ -83,7 +83,7 @@ jobs:
     - name: Build UI assets
       run: |
         cd ui && npm ci && npm run build
-        cd .. && cp -r ui/dist/* module/ui_dist/
+        cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v7
@@ -117,7 +117,7 @@ jobs:
     - name: Build UI assets
       run: |
         cd ui && npm ci && npm run build
-        cd .. && cp -r ui/dist/* module/ui_dist/
+        cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
 
     - name: Build server binary
       run: go build -v -o /dev/null ./cmd/server
@@ -189,7 +189,7 @@ jobs:
     - name: Build UI assets
       run: |
         cd ui && npm ci && npm run build
-        cd .. && cp -r ui/dist/* module/ui_dist/
+        cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
 
     - name: YAML parsing — all configs loadable
       run: go test -v -run TestExampleConfigsLoad -timeout 60s .
