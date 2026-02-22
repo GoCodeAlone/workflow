@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GoCodeAlone/workflow/license"
+	"github.com/GoCodeAlone/workflow/licensing"
 	"github.com/GoCodeAlone/workflow/module"
 )
 
-// licenseValidateHandler returns a simple handler that always returns a valid professional license.
+// licenseValidateHandler returns a simple handler that always returns a valid professional licensing.
 func licenseValidateHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -204,4 +204,4 @@ func TestLicenseModule_CanLoadPlugin(t *testing.T) {
 }
 
 // Ensure HTTPValidator satisfies the Validator interface
-var _ license.Validator = (*license.HTTPValidator)(nil)
+var _ licensing.Validator = (*licensing.HTTPValidator)(nil)

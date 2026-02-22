@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/alicebob/miniredis/v2"
 )
 
 func TestInMemoryLockAcquireRelease(t *testing.T) {
@@ -244,19 +246,197 @@ func TestPGAdvisoryLockHashConsistency(t *testing.T) {
 	}
 }
 
-func TestRedisLockStub(t *testing.T) {
-	lock := NewRedisLock("localhost:6379")
+func TestRedisLockAcquireRelease(t *testing.T) {
+	mr := miniredis.RunT(t)
+	lock := NewRedisLock(mr.Addr())
+	defer lock.Close() //nolint:errcheck
+
 	ctx := context.Background()
 
-	_, err := lock.Acquire(ctx, "test", time.Second)
-	if err == nil {
-		t.Error("expected error from Redis stub")
+	release, err := lock.Acquire(ctx, "test-key", time.Second)
+	if err != nil {
+		t.Fatalf("Acquire failed: %v", err)
+	}
+	if release == nil {
+		t.Fatal("release function should not be nil")
 	}
 
-	_, _, err = lock.TryAcquire(ctx, "test", time.Second)
-	if err == nil {
-		t.Error("expected error from Redis stub TryAcquire")
+	release()
+
+	// Lock should be available again after release.
+	release2, err := lock.Acquire(ctx, "test-key", time.Second)
+	if err != nil {
+		t.Fatalf("second Acquire failed: %v", err)
 	}
+	defer release2()
+}
+
+func TestRedisLockTryAcquireFree(t *testing.T) {
+	mr := miniredis.RunT(t)
+	lock := NewRedisLock(mr.Addr())
+	defer lock.Close() //nolint:errcheck
+
+	ctx := context.Background()
+
+	release, acquired, err := lock.TryAcquire(ctx, "try-key", time.Second)
+	if err != nil {
+		t.Fatalf("TryAcquire failed: %v", err)
+	}
+	if !acquired {
+		t.Fatal("expected to acquire the free lock")
+	}
+	if release == nil {
+		t.Fatal("release function should not be nil")
+	}
+	defer release()
+}
+
+func TestRedisLockTryAcquireHeld(t *testing.T) {
+	mr := miniredis.RunT(t)
+	lock := NewRedisLock(mr.Addr())
+	defer lock.Close() //nolint:errcheck
+
+	ctx := context.Background()
+
+	release, acquired, err := lock.TryAcquire(ctx, "held-key", time.Second)
+	if err != nil || !acquired {
+		t.Fatalf("first TryAcquire failed: acquired=%v err=%v", acquired, err)
+	}
+	defer release()
+
+	_, acquired2, err := lock.TryAcquire(ctx, "held-key", time.Second)
+	if err != nil {
+		t.Fatalf("second TryAcquire returned unexpected error: %v", err)
+	}
+	if acquired2 {
+		t.Error("expected TryAcquire to fail when lock is held")
+	}
+}
+
+func TestRedisLockReleaseIdempotent(t *testing.T) {
+	mr := miniredis.RunT(t)
+	lock := NewRedisLock(mr.Addr())
+	defer lock.Close() //nolint:errcheck
+
+	ctx := context.Background()
+
+	release, err := lock.Acquire(ctx, "idempotent-key", time.Second)
+	if err != nil {
+		t.Fatalf("Acquire failed: %v", err)
+	}
+
+	// Calling release twice must not panic or error.
+	release()
+	release()
+}
+
+func TestRedisLockDifferentHolderCannotRelease(t *testing.T) {
+	mr := miniredis.RunT(t)
+	lock1 := NewRedisLock(mr.Addr())
+	lock2 := NewRedisLock(mr.Addr())
+	defer lock1.Close() //nolint:errcheck
+	defer lock2.Close() //nolint:errcheck
+
+	ctx := context.Background()
+
+	// lock1 acquires the lock.
+	release1, err := lock1.Acquire(ctx, "safety-key", time.Second)
+	if err != nil {
+		t.Fatalf("Acquire failed: %v", err)
+	}
+	defer release1()
+
+	// lock2 tries to acquire — should not succeed immediately.
+	_, acquired, err := lock2.TryAcquire(ctx, "safety-key", time.Second)
+	if err != nil {
+		t.Fatalf("TryAcquire on lock2 returned error: %v", err)
+	}
+	if acquired {
+		t.Fatal("lock2 should not have acquired a lock held by lock1")
+	}
+
+	// Simulate lock2 calling the release function it should not have —
+	// build a release with a wrong token and ensure lock1's key is intact.
+	fakeRelease := lock2.buildRelease("safety-key", "wrong-token")
+	fakeRelease() // must not delete lock1's key
+
+	// lock1's lock should still be held.
+	_, stillHeld, err := lock2.TryAcquire(ctx, "safety-key", time.Second)
+	if err != nil {
+		t.Fatalf("TryAcquire after fake release returned error: %v", err)
+	}
+	if stillHeld {
+		t.Error("lock1's lock should still be held after lock2 attempted a fake release")
+	}
+}
+
+func TestRedisLockTTLExpiry(t *testing.T) {
+	mr := miniredis.RunT(t)
+	lock := NewRedisLock(mr.Addr())
+	defer lock.Close() //nolint:errcheck
+
+	ctx := context.Background()
+
+	_, err := lock.Acquire(ctx, "ttl-key", 500*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Acquire failed: %v", err)
+	}
+
+	// Advance miniredis clock past the TTL.
+	mr.FastForward(time.Second)
+
+	// Lock should be available after TTL expiry.
+	release, acquired, err := lock.TryAcquire(ctx, "ttl-key", time.Second)
+	if err != nil {
+		t.Fatalf("TryAcquire after TTL failed: %v", err)
+	}
+	if !acquired {
+		t.Error("expected lock to be available after TTL expired")
+	}
+	if release != nil {
+		release()
+	}
+}
+
+func TestRedisLockAcquireContextCancel(t *testing.T) {
+	mr := miniredis.RunT(t)
+	lock := NewRedisLock(mr.Addr())
+	defer lock.Close() //nolint:errcheck
+
+	ctx := context.Background()
+
+	// Hold the lock with the same client (use a different key path via options).
+	release, err := lock.Acquire(ctx, "cancel-redis-key", time.Minute)
+	if err != nil {
+		t.Fatalf("Acquire failed: %v", err)
+	}
+	defer release()
+
+	// Second acquire should block until context is cancelled.
+	cancelCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+
+	_, err = lock.Acquire(cancelCtx, "cancel-redis-key", time.Minute)
+	if err == nil {
+		t.Fatal("expected error when context is cancelled")
+	}
+}
+
+func TestRedisLockNewRedisLockWithOptions(t *testing.T) {
+	mr := miniredis.RunT(t)
+	lock := NewRedisLockWithOptions(mr.Addr(), "", 0)
+	defer lock.Close() //nolint:errcheck
+
+	ctx := context.Background()
+
+	release, acquired, err := lock.TryAcquire(ctx, "opts-key", time.Second)
+	if err != nil {
+		t.Fatalf("TryAcquire failed: %v", err)
+	}
+	if !acquired {
+		t.Fatal("expected to acquire lock with options constructor")
+	}
+	defer release()
 }
 
 func TestDistributedLockInterface(t *testing.T) {

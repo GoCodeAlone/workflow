@@ -129,7 +129,27 @@ func (a *ExternalPluginAdapter) StepFactories() map[string]plugin.StepFactory {
 }
 
 func (a *ExternalPluginAdapter) TriggerFactories() map[string]plugin.TriggerFactory {
-	return nil
+	ctx := context.Background()
+	resp, err := a.client.client.GetTriggerTypes(ctx, &emptypb.Empty{})
+	if err != nil || resp == nil || len(resp.Types) == 0 {
+		return nil
+	}
+	factories := make(map[string]plugin.TriggerFactory, len(resp.Types))
+	for _, typeName := range resp.Types {
+		tn := typeName // capture
+		factories[tn] = func() any {
+			createResp, createErr := a.client.client.CreateModule(ctx, &pb.CreateModuleRequest{
+				Type:   tn,
+				Name:   tn,
+				Config: nil,
+			})
+			if createErr != nil || createResp.Error != "" {
+				return nil
+			}
+			return NewRemoteTrigger(tn, tn, createResp.HandleId, a.client.client, nil)
+		}
+	}
+	return factories
 }
 
 func (a *ExternalPluginAdapter) WorkflowHandlers() map[string]plugin.WorkflowHandlerFactory {

@@ -46,8 +46,11 @@ type servePlugin struct {
 }
 
 // GRPCServer registers the PluginService implementation on the gRPC server.
-func (p *servePlugin) GRPCServer(_ *goplugin.GRPCBroker, s *grpc.Server) error {
+// The broker is stored so that the server can dial back to the host's callback
+// service on the first incoming request that carries the broker ID.
+func (p *servePlugin) GRPCServer(broker *goplugin.GRPCBroker, s *grpc.Server) error {
 	pb.RegisterPluginServiceServer(s, p.server)
+	p.server.setBroker(broker)
 	return nil
 }
 
