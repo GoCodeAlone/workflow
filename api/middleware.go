@@ -2,11 +2,15 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/store"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"golang.org/x/time/rate"
 )
 
 // Middleware holds dependencies needed by authentication middleware.
@@ -74,6 +78,103 @@ func (m *Middleware) RequireRole(minRole store.Role, resourceType, idKey string)
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// ipLimiter holds a per-IP token bucket and the last time it was accessed.
+type ipLimiter struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+// rateLimiterStore holds per-IP limiters for a single endpoint group.
+type rateLimiterStore struct {
+	mu       sync.Mutex
+	limiters map[string]*ipLimiter
+	r        rate.Limit
+	b        int
+}
+
+func newRateLimiterStore(requestsPerMinute int) *rateLimiterStore {
+	s := &rateLimiterStore{
+		limiters: make(map[string]*ipLimiter),
+		r:        rate.Limit(float64(requestsPerMinute) / 60.0),
+		b:        requestsPerMinute,
+	}
+	go s.cleanup()
+	return s
+}
+
+// cleanup periodically removes stale entries.
+func (s *rateLimiterStore) cleanup() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.mu.Lock()
+		for ip, l := range s.limiters {
+			if time.Since(l.lastSeen) > 10*time.Minute {
+				delete(s.limiters, ip)
+			}
+		}
+		s.mu.Unlock()
+	}
+}
+
+func (s *rateLimiterStore) get(ip string) *rate.Limiter {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l, ok := s.limiters[ip]
+	if !ok {
+		l = &ipLimiter{limiter: rate.NewLimiter(s.r, s.b)}
+		s.limiters[ip] = l
+	}
+	l.lastSeen = time.Now()
+	return l.limiter
+}
+
+// RateLimit returns middleware that limits requests per IP to requestsPerMinute.
+// When requestsPerMinute is zero, the default of 10 is used.
+// Requests that exceed the limit receive HTTP 429 with a Retry-After header.
+func (m *Middleware) RateLimit(requestsPerMinute int) func(http.Handler) http.Handler {
+	if requestsPerMinute <= 0 {
+		requestsPerMinute = 10
+	}
+	limiters := newRateLimiterStore(requestsPerMinute)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := realIP(r)
+			limiter := limiters.get(ip)
+			if !limiter.Allow() {
+				retryAfter := int(time.Minute.Seconds() / float64(requestsPerMinute))
+				if retryAfter < 1 {
+					retryAfter = 1
+				}
+				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+				WriteError(w, http.StatusTooManyRequests, "rate limit exceeded")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// realIP extracts the client IP from common proxy headers or RemoteAddr.
+func realIP(r *http.Request) string {
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		return ip
+	}
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		// Take the first address in the list.
+		if idx := strings.Index(fwd, ","); idx != -1 {
+			return strings.TrimSpace(fwd[:idx])
+		}
+		return strings.TrimSpace(fwd)
+	}
+	// Strip port from RemoteAddr.
+	addr := r.RemoteAddr
+	if idx := strings.LastIndex(addr, ":"); idx != -1 {
+		return addr[:idx]
+	}
+	return addr
 }
 
 // authenticate extracts the Bearer token, validates it, and loads the user.
