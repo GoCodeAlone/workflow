@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/GoCodeAlone/workflow/license"
+	"github.com/GoCodeAlone/workflow/licensing"
 )
 
 // LicenseModuleConfig holds the configuration for the license validator module.
@@ -22,12 +22,12 @@ type LicenseModuleConfig struct {
 	RefreshInterval string `yaml:"refresh_interval" default:"1h"`
 }
 
-// LicenseModule wraps a license.HTTPValidator as a modular.Module.
+// LicenseModule wraps a licensing.HTTPValidator as a modular.Module.
 // It starts a background refresh on Start and exposes a status API endpoint.
 type LicenseModule struct {
 	name      string
 	config    LicenseModuleConfig
-	validator *license.HTTPValidator
+	validator *licensing.HTTPValidator
 	logger    *slog.Logger
 }
 
@@ -71,7 +71,7 @@ func NewLicenseModule(name string, cfg map[string]any) (*LicenseModule, error) {
 		return nil, fmt.Errorf("license module %q: invalid refresh_interval %q: %w", name, modCfg.RefreshInterval, err)
 	}
 
-	validator := license.NewHTTPValidator(license.ValidatorConfig{
+	validator := licensing.NewHTTPValidator(licensing.ValidatorConfig{
 		ServerURL:       modCfg.ServerURL,
 		LicenseKey:      modCfg.LicenseKey,
 		CacheTTL:        cacheTTL,
@@ -133,7 +133,7 @@ func (m *LicenseModule) Stop(ctx context.Context) error {
 }
 
 // Validator returns the underlying HTTPValidator for direct use.
-func (m *LicenseModule) Validator() *license.HTTPValidator {
+func (m *LicenseModule) Validator() *licensing.HTTPValidator {
 	return m.validator
 }
 
@@ -156,7 +156,7 @@ func (m *LicenseModule) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	type statusResponse struct {
 		Valid       bool                `json:"valid"`
-		License     *license.LicenseInfo `json:"license,omitempty"`
+		License     *licensing.LicenseInfo `json:"license,omitempty"`
 		Error       string              `json:"error,omitempty"`
 		CachedUntil time.Time           `json:"cached_until"`
 	}
