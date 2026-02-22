@@ -51,3 +51,68 @@ type StepResult struct {
 	Output       map[string]any
 	StopPipeline bool
 }
+
+// TriggerProvider is optionally implemented by plugins that provide trigger types.
+type TriggerProvider interface {
+	TriggerTypes() []string
+	CreateTrigger(typeName string, config map[string]any, cb TriggerCallback) (TriggerInstance, error)
+}
+
+// TriggerCallback allows a trigger to fire workflow actions on the host.
+type TriggerCallback func(action string, data map[string]any) error
+
+// TriggerInstance is a remote trigger's lifecycle.
+type TriggerInstance interface {
+	Start(ctx context.Context) error
+	Stop(ctx context.Context) error
+}
+
+// SchemaProvider is optionally implemented to provide UI schemas.
+type SchemaProvider interface {
+	ModuleSchemas() []ModuleSchemaData
+}
+
+// ModuleSchemaData describes a module type for the UI.
+type ModuleSchemaData struct {
+	Type         string
+	Label        string
+	Category     string
+	Description  string
+	Inputs       []ServiceIO
+	Outputs      []ServiceIO
+	ConfigFields []ConfigField
+}
+
+// ServiceIO describes a service input or output.
+type ServiceIO struct {
+	Name        string
+	Type        string
+	Description string
+}
+
+// ConfigField describes a configuration field.
+type ConfigField struct {
+	Name         string
+	Type         string
+	Description  string
+	DefaultValue string
+	Required     bool
+	Options      []string
+}
+
+// MessagePublisher is provided to modules that need to send messages to the host.
+type MessagePublisher interface {
+	Publish(topic string, payload []byte, metadata map[string]string) (messageID string, err error)
+}
+
+// MessageSubscriber is provided to modules that need to receive messages from the host.
+type MessageSubscriber interface {
+	Subscribe(topic string, handler func(payload []byte, metadata map[string]string) error) error
+	Unsubscribe(topic string) error
+}
+
+// MessageAwareModule is optionally implemented by ModuleInstance to receive message capabilities.
+type MessageAwareModule interface {
+	SetMessagePublisher(pub MessagePublisher)
+	SetMessageSubscriber(sub MessageSubscriber)
+}

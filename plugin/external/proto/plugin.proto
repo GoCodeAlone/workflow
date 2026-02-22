@@ -50,6 +50,9 @@ service PluginService {
 
   // InvokeService calls a named method on a module's service interface.
   rpc InvokeService(InvokeServiceRequest) returns (InvokeServiceResponse);
+
+  // DeliverMessage delivers a message from the host to a plugin module.
+  rpc DeliverMessage(DeliverMessageRequest) returns (DeliverMessageResponse);
 }
 
 // EngineCallbackService is implemented by the host and called by the plugin.
@@ -62,6 +65,15 @@ service EngineCallbackService {
 
   // Log sends a log entry from the plugin to the host logger.
   rpc Log(LogRequest) returns (google.protobuf.Empty);
+
+  // PublishMessage publishes a message to the host message broker.
+  rpc PublishMessage(PublishMessageRequest) returns (PublishMessageResponse);
+
+  // Subscribe registers the plugin to receive messages on a topic.
+  rpc Subscribe(SubscribeRequest) returns (ErrorResponse);
+
+  // Unsubscribe removes a plugin's subscription to a topic.
+  rpc Unsubscribe(UnsubscribeRequest) returns (ErrorResponse);
 }
 
 // Manifest describes the plugin's metadata.
@@ -191,4 +203,46 @@ message LogRequest {
   string level = 1;
   string message = 2;
   google.protobuf.Struct fields = 3;
+}
+
+// PublishMessageRequest asks the host to publish a message to a broker topic.
+message PublishMessageRequest {
+  string handle_id = 1;
+  string topic = 2;
+  bytes payload = 3;
+  map<string, string> metadata = 4;
+}
+
+// PublishMessageResponse returns the result of a publish operation.
+message PublishMessageResponse {
+  string error = 1;
+  string message_id = 2;
+}
+
+// SubscribeRequest asks the host to subscribe the plugin to a topic.
+message SubscribeRequest {
+  string handle_id = 1;
+  string topic = 2;
+  string broker_name = 3;
+}
+
+// UnsubscribeRequest asks the host to remove a plugin's topic subscription.
+message UnsubscribeRequest {
+  string handle_id = 1;
+  string topic = 2;
+}
+
+// DeliverMessageRequest delivers a message from the host to a plugin module.
+message DeliverMessageRequest {
+  string handle_id = 1;
+  string topic = 2;
+  bytes payload = 3;
+  string message_id = 4;
+  map<string, string> metadata = 5;
+}
+
+// DeliverMessageResponse returns the result of message delivery.
+message DeliverMessageResponse {
+  string error = 1;
+  bool acknowledged = 2;
 }
