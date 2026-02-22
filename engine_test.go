@@ -750,7 +750,7 @@ func TestCanHandleTrigger(t *testing.T) {
 		{"trigger.http", "http", true},
 		{"trigger.schedule", "schedule", true},
 		{"trigger.event", "event", true},
-		{"mock.trigger", "mock", true},     // fallback: "trigger.mock" convention doesn't match, but "mock.trigger" = type+".trigger"
+		{"mock.trigger", "mock", true},      // fallback: "trigger.mock" convention doesn't match, but "mock.trigger" = type+".trigger"
 		{"any.trigger", "unknown", false},   // no match in registry or convention
 		{"trigger.http", "schedule", false}, // registry says schedule → trigger.schedule, not trigger.http
 	}

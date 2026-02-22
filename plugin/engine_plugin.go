@@ -93,7 +93,6 @@ type NativePluginProvider interface {
 	NativePlugins(ctx PluginContext) []NativePlugin
 }
 
-
 // BaseNativePlugin provides no-op defaults for all NativePlugin methods.
 // Embed this in concrete implementations to only override what you need.
 type BaseNativePlugin struct {

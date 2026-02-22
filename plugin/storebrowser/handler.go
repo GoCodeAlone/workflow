@@ -189,7 +189,7 @@ func (h *handler) tableRows(w http.ResponseWriter, r *http.Request) {
 	// and orderClause uses a column validated against getTableColumns(). Both are safe
 	// from injection. Parameters are bound via ? placeholders.
 	query := fmt.Sprintf("SELECT * FROM %s%s LIMIT ? OFFSET ?", tableName, orderClause) //nolint:gosec // tableName and orderClause are validated against DB schema above
-	rows, err := h.db.QueryContext(r.Context(), query, limit, offset) //nolint:gosec // G701: query built from validated table name and column
+	rows, err := h.db.QueryContext(r.Context(), query, limit, offset)                   //nolint:gosec // G701: query built from validated table name and column
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("query rows: %v", err))
 		return

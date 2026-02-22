@@ -45,7 +45,7 @@ func NewAuthHandler(users store.UserStore, sessions store.SessionStore, secret [
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email       string `json:"email"`
-		Password    string `json:"password"`    //nolint:gosec // G117: request DTO field
+		Password    string `json:"password"` //nolint:gosec // G117: request DTO field
 		DisplayName string `json:"display_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

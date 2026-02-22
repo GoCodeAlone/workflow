@@ -127,8 +127,8 @@ func (v *Validator) ValidateAndFix(ctx context.Context, aiService *Service, spec
 func (v *Validator) BuildFixPrompt(spec ComponentSpec, source string, errors []string) string {
 	var b strings.Builder
 	b.WriteString("Fix the following dynamic component source code.\n\n")
-	fmt.Fprintf(&b, "Component Name: %s\n", spec.Name)   //nolint:gosec // G705: building internal prompt string, not HTML
-	fmt.Fprintf(&b, "Component Type: %s\n", spec.Type)   //nolint:gosec // G705: building internal prompt string, not HTML
+	fmt.Fprintf(&b, "Component Name: %s\n", spec.Name)       //nolint:gosec // G705: building internal prompt string, not HTML
+	fmt.Fprintf(&b, "Component Type: %s\n", spec.Type)       //nolint:gosec // G705: building internal prompt string, not HTML
 	fmt.Fprintf(&b, "Description: %s\n\n", spec.Description) //nolint:gosec // G705: building internal prompt string, not HTML
 	b.WriteString("Source code that failed validation:\n```go\n")
 	b.WriteString(source)

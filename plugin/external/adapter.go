@@ -6,9 +6,9 @@ import (
 	"net/http"
 
 	"github.com/CrisisTextLine/modular"
-	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/plugin"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/schema"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -37,9 +37,9 @@ func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPlugi
 
 // --- NativePlugin interface ---
 
-func (a *ExternalPluginAdapter) Name() string        { return a.manifest.Name }
-func (a *ExternalPluginAdapter) Version() string      { return a.manifest.Version }
-func (a *ExternalPluginAdapter) Description() string  { return a.manifest.Description }
+func (a *ExternalPluginAdapter) Name() string                            { return a.manifest.Name }
+func (a *ExternalPluginAdapter) Version() string                         { return a.manifest.Version }
+func (a *ExternalPluginAdapter) Description() string                     { return a.manifest.Description }
 func (a *ExternalPluginAdapter) Dependencies() []plugin.PluginDependency { return nil }
 func (a *ExternalPluginAdapter) UIPages() []plugin.UIPageDef             { return nil }
 func (a *ExternalPluginAdapter) RegisterRoutes(_ *http.ServeMux)         {}

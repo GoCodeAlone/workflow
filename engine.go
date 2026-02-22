@@ -35,7 +35,6 @@ type PipelineAdder interface {
 	AddPipeline(name string, p *module.Pipeline)
 }
 
-
 // ModuleFactory is a function that creates a module from a name and configuration
 type ModuleFactory func(name string, config map[string]any) modular.Module
 
@@ -45,7 +44,6 @@ type StartStopModule interface {
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
 }
-
 
 // StdEngine represents the workflow execution engine
 type StdEngine struct {
@@ -119,16 +117,16 @@ func (e *StdEngine) SetPluginInstaller(installer *plugin.PluginInstaller) {
 // NewStdEngine creates a new workflow engine
 func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
 	return &StdEngine{
-		app:                  app,
-		workflowHandlers:     make([]WorkflowHandler, 0),
-		moduleFactories:      make(map[string]ModuleFactory),
-		logger:               logger,
-		modules:              make([]modular.Module, 0),
-		triggers:             make([]module.Trigger, 0),
-		triggerRegistry:      module.NewTriggerRegistry(),
-		secretsResolver:      secrets.NewMultiResolver(),
-		stepRegistry:         module.NewStepRegistry(),
-		triggerTypeMap:       make(map[string]string),
+		app:                   app,
+		workflowHandlers:      make([]WorkflowHandler, 0),
+		moduleFactories:       make(map[string]ModuleFactory),
+		logger:                logger,
+		modules:               make([]modular.Module, 0),
+		triggers:              make([]module.Trigger, 0),
+		triggerRegistry:       module.NewTriggerRegistry(),
+		secretsResolver:       secrets.NewMultiResolver(),
+		stepRegistry:          module.NewStepRegistry(),
+		triggerTypeMap:        make(map[string]string),
 		triggerConfigWrappers: make(map[string]plugin.TriggerConfigWrapperFunc),
 	}
 }

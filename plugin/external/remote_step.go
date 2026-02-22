@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/module"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 

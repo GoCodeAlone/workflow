@@ -53,7 +53,12 @@ func (s *SQLiteStorage) Init(app modular.Application) error {
 }
 
 // Start opens the SQLite database connection.
+// Idempotent: if the DB is already open, this is a no-op.
 func (s *SQLiteStorage) Start(_ context.Context) error {
+	if s.db != nil {
+		return nil
+	}
+
 	dir := filepath.Dir(s.dbPath)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create data directory %s: %w", dir, err)
