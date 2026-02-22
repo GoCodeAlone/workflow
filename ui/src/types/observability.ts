@@ -129,6 +129,19 @@ export interface AuditFilter {
   until?: string;
 }
 
+// WorkflowEventEntry matches the backend execution_logs table records returned
+// by GET /admin/workflows/{id}/events (level="event" entries).
+export interface WorkflowEventEntry {
+  id: number;
+  workflow_id: string;
+  execution_id?: string;
+  level: string;
+  message: string;
+  module_name?: string;
+  fields?: string; // JSON string from backend
+  created_at: string;
+}
+
 // ActiveView is a string to support dynamic plugin page IDs.
 // Known built-in views are listed for reference but any plugin can register new ones.
 export type ActiveView = string;

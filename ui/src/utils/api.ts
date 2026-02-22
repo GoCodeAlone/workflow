@@ -12,6 +12,7 @@ import type {
   IAMRoleMapping,
   AuditEntry,
   AuditFilter,
+  WorkflowEventEntry,
 } from '../types/observability.ts';
 
 export interface ValidationResult {
@@ -399,8 +400,8 @@ export function createLogStream(workflowId: string, token: string): EventSource 
 
 // --- Events ---
 
-export function apiFetchEvents(workflowId: string): Promise<WorkflowExecution[]> {
-  return apiGet<WorkflowExecution[]>(`/admin/workflows/${encodeURIComponent(workflowId)}/events`);
+export function apiFetchEvents(workflowId: string): Promise<WorkflowEventEntry[]> {
+  return apiGet<WorkflowEventEntry[]>(`/admin/workflows/${encodeURIComponent(workflowId)}/events`);
 }
 
 export function createEventStream(workflowId: string, token: string): EventSource {

@@ -1,13 +1,14 @@
 import { useEffect, useState, useCallback } from 'react';
 import useObservabilityStore from '../../store/observabilityStore.ts';
-import type { WorkflowExecution } from '../../types/observability.ts';
+import type { WorkflowEventEntry } from '../../types/observability.ts';
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: '#6c7086',
-  running: '#89b4fa',
-  completed: '#a6e3a1',
-  failed: '#f38ba8',
-  cancelled: '#f9e2af',
+const LEVEL_COLORS: Record<string, string> = {
+  event: '#89b4fa',
+  info: '#a6e3a1',
+  warn: '#f9e2af',
+  error: '#f38ba8',
+  fatal: '#cba6f7',
+  debug: '#6c7086',
 };
 
 function formatTime(iso: string): string {
@@ -19,11 +20,21 @@ function EventCard({
   isExpanded,
   onToggle,
 }: {
-  event: WorkflowExecution;
+  event: WorkflowEventEntry;
   isExpanded: boolean;
   onToggle: () => void;
 }) {
-  const color = STATUS_COLORS[event.status] || '#6c7086';
+  const color = LEVEL_COLORS[event.level] || '#6c7086';
+  const idStr = String(event.id).slice(0, 8);
+
+  let parsedFields: Record<string, unknown> | null = null;
+  if (event.fields) {
+    try {
+      parsedFields = JSON.parse(event.fields);
+    } catch {
+      // ignore malformed fields
+    }
+  }
 
   return (
     <div
@@ -56,21 +67,33 @@ function EventCard({
             color,
           }}
         >
-          {event.status}
+          {event.level.toUpperCase()}
         </span>
-        <span style={{ color: '#a6adc8', fontSize: 12 }}>{event.trigger_type}</span>
+        <span style={{ color: '#cdd6f4', fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {event.message}
+        </span>
+        {event.module_name && (
+          <span style={{ color: '#89b4fa', fontSize: 11, fontFamily: 'monospace' }}>
+            [{event.module_name}]
+          </span>
+        )}
         <span style={{ color: '#6c7086', fontSize: 11, fontFamily: 'monospace' }}>
-          {event.id.slice(0, 8)}
+          #{idStr}
         </span>
-        <span style={{ flex: 1 }} />
-        <span style={{ color: '#6c7086', fontSize: 11 }}>{formatTime(event.started_at)}</span>
+        <span style={{ color: '#6c7086', fontSize: 11 }}>{formatTime(event.created_at)}</span>
         <span style={{ color: '#6c7086', fontSize: 12 }}>{isExpanded ? '\u25B2' : '\u25BC'}</span>
       </div>
       {isExpanded && (
         <div style={{ borderTop: '1px solid #45475a', padding: 12, background: '#181825' }}>
-          {event.trigger_data != null && (
+          {event.execution_id && (
             <div style={{ marginBottom: 8 }}>
-              <div style={{ color: '#a6adc8', fontSize: 11, marginBottom: 4 }}>Trigger Data</div>
+              <div style={{ color: '#a6adc8', fontSize: 11, marginBottom: 4 }}>Execution ID</div>
+              <code style={{ color: '#89b4fa', fontSize: 11 }}>{event.execution_id}</code>
+            </div>
+          )}
+          {parsedFields && Object.keys(parsedFields).length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ color: '#a6adc8', fontSize: 11, marginBottom: 4 }}>Fields</div>
               <pre
                 style={{
                   background: '#0d1117',
@@ -84,51 +107,8 @@ function EventCard({
                   margin: 0,
                 }}
               >
-                {JSON.stringify(event.trigger_data, null, 2)}
+                {JSON.stringify(parsedFields, null, 2)}
               </pre>
-            </div>
-          )}
-          {event.output_data != null && (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ color: '#a6adc8', fontSize: 11, marginBottom: 4 }}>Output Data</div>
-              <pre
-                style={{
-                  background: '#0d1117',
-                  padding: 8,
-                  borderRadius: 4,
-                  color: '#a6e3a1',
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                  overflow: 'auto',
-                  maxHeight: 200,
-                  margin: 0,
-                }}
-              >
-                {JSON.stringify(event.output_data, null, 2)}
-              </pre>
-            </div>
-          )}
-          {event.error_message && (
-            <div>
-              <div style={{ color: '#f38ba8', fontSize: 11, marginBottom: 4 }}>Error</div>
-              <div style={{ color: '#f38ba8', fontSize: 12 }}>{event.error_message}</div>
-              {event.error_stack && (
-                <pre
-                  style={{
-                    background: '#0d1117',
-                    padding: 8,
-                    borderRadius: 4,
-                    color: '#f38ba8',
-                    fontSize: 10,
-                    fontFamily: 'monospace',
-                    overflow: 'auto',
-                    maxHeight: 120,
-                    margin: '4px 0 0',
-                  }}
-                >
-                  {event.error_stack}
-                </pre>
-              )}
             </div>
           )}
         </div>
@@ -147,8 +127,8 @@ export default function EventInspector() {
     stopEventStream,
   } = useObservabilityStore();
 
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [typeFilter, setTypeFilter] = useState('');
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [messageFilter, setMessageFilter] = useState('');
 
   useEffect(() => {
     if (selectedWorkflowId) {
@@ -164,18 +144,15 @@ export default function EventInspector() {
     }
   }, [eventStreaming, selectedWorkflowId, startEventStream, stopEventStream]);
 
-  // Derive unique trigger types for filter
-  const triggerTypes = [...new Set(events.map((e) => e.trigger_type))];
-
   const filteredEvents = events.filter((e) => {
-    if (typeFilter && e.trigger_type !== typeFilter) return false;
+    if (messageFilter && !e.message.toLowerCase().includes(messageFilter.toLowerCase())) return false;
     return true;
   });
 
-  // Status summary
-  const statusCounts: Record<string, number> = {};
+  // Level summary counts
+  const levelCounts: Record<string, number> = {};
   for (const e of events) {
-    statusCounts[e.status] = (statusCounts[e.status] || 0) + 1;
+    levelCounts[e.level] = (levelCounts[e.level] || 0) + 1;
   }
 
   return (
@@ -193,10 +170,12 @@ export default function EventInspector() {
       >
         <h2 style={{ color: '#cdd6f4', margin: 0, fontSize: 16, fontWeight: 600, marginRight: 12 }}>Events</h2>
 
-        {/* Type filter */}
-        <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
+        {/* Message filter */}
+        <input
+          type="text"
+          value={messageFilter}
+          onChange={(e) => setMessageFilter(e.target.value)}
+          placeholder="Filter events..."
           style={{
             background: '#313244',
             border: '1px solid #45475a',
@@ -205,13 +184,9 @@ export default function EventInspector() {
             padding: '4px 8px',
             fontSize: 12,
             outline: 'none',
+            width: 180,
           }}
-        >
-          <option value="">All Types</option>
-          {triggerTypes.map((t) => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </select>
+        />
 
         <span style={{ flex: 1 }} />
 
@@ -241,20 +216,20 @@ export default function EventInspector() {
 
       {selectedWorkflowId && (
         <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-          {/* Status summary cards */}
+          {/* Level summary cards */}
           <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-            {Object.entries(statusCounts).map(([status, count]) => (
+            {Object.entries(levelCounts).map(([level, count]) => (
               <div
-                key={status}
+                key={level}
                 style={{
                   background: '#313244',
                   borderRadius: 8,
                   padding: '8px 16px',
-                  borderLeft: `3px solid ${STATUS_COLORS[status] || '#6c7086'}`,
+                  borderLeft: `3px solid ${LEVEL_COLORS[level] || '#6c7086'}`,
                 }}
               >
                 <div style={{ fontSize: 18, fontWeight: 700, color: '#cdd6f4' }}>{count}</div>
-                <div style={{ fontSize: 10, color: '#a6adc8', textTransform: 'capitalize' }}>{status}</div>
+                <div style={{ fontSize: 10, color: '#a6adc8', textTransform: 'capitalize' }}>{level}</div>
               </div>
             ))}
             <div

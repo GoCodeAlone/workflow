@@ -320,7 +320,7 @@ describe('observabilityStore', () => {
   describe('fetchEvents', () => {
     it('populates events', async () => {
       const events = [
-        { id: 'ev-1', workflow_id: 'wf-1', trigger_type: 'event', status: 'completed' as const, started_at: '2025-01-01' },
+        { id: 1, workflow_id: 'wf-1', level: 'event', message: 'execution.started', created_at: '2025-01-01T00:00:00Z' },
       ];
       vi.mocked(apiFetchEvents).mockResolvedValue(events);
 

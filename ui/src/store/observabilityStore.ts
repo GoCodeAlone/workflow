@@ -4,7 +4,7 @@ import type {
   WorkflowExecution,
   ExecutionStep,
   ExecutionLog,
-  WorkflowExecution as WorkflowEvent,
+  WorkflowEventEntry,
   SystemDashboard,
   WorkflowDashboardResponse,
   ExecutionFilter,
@@ -56,7 +56,7 @@ interface ObservabilityStore {
   logStreaming: boolean;
 
   // Events
-  events: WorkflowEvent[];
+  events: WorkflowEventEntry[];
   eventStreaming: boolean;
 
   // IAM
@@ -104,7 +104,7 @@ let eventEventSource: EventSource | null = null;
 let logBatchTimer: ReturnType<typeof setTimeout> | null = null;
 let eventBatchTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingLogs: ExecutionLog[] = [];
-let pendingEvents: WorkflowEvent[] = [];
+let pendingEvents: WorkflowEventEntry[] = [];
 
 const useObservabilityStore = create<ObservabilityStore>((set, get) => ({
   activeView: 'dashboard',
@@ -276,7 +276,7 @@ const useObservabilityStore = create<ObservabilityStore>((set, get) => ({
 
     es.onmessage = (event) => {
       try {
-        const evt: WorkflowEvent = JSON.parse(event.data);
+        const evt: WorkflowEventEntry = JSON.parse(event.data);
         pendingEvents.push(evt);
         if (!eventBatchTimer) {
           eventBatchTimer = setTimeout(() => {
