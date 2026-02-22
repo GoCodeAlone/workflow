@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/traefik/yaegi/interp"
-	"github.com/traefik/yaegi/stdlib"
+	"github.com/GoCodeAlone/yaegi/interp"
+	"github.com/GoCodeAlone/yaegi/stdlib"
 )
 
 // Option configures an InterpreterPool.

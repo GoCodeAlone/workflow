@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Switch yaegi dependency from `github.com/traefik/yaegi` v0.16.1 to `github.com/GoCodeAlone/yaegi` v0.17.0 (our maintained fork)
+  - Eval/EvalPath now recover from panics instead of crashing the host process
+  - Fixed binary channel type alias nil pointer, binary-to-source interface conversion
+  - 11-45x faster `yaegi extract` with x/tools/go/packages
+  - Generic function import support via `//yaegi:add` directive
+
 ### Added
 - Dynamic field mapping with FieldMapping type supporting fallback chains and primary/resolve/set operations
 - Schema-agnostic field resolution for REST API handler modules (42+ references refactored)

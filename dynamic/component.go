@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/traefik/yaegi/interp"
+	"github.com/GoCodeAlone/yaegi/interp"
 )
 
 // ComponentStatus describes the lifecycle state of a dynamic component.

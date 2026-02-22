@@ -10,6 +10,7 @@ require (
 	github.com/CrisisTextLine/modular/modules/reverseproxy/v2 v2.2.0
 	github.com/CrisisTextLine/modular/modules/scheduler v0.4.0
 	github.com/GoCodeAlone/go-plugin v0.0.0-20260220090904-b4c35f0e4271
+	github.com/GoCodeAlone/yaegi v0.17.0
 	github.com/IBM/sarama v1.46.3
 	github.com/aws/aws-sdk-go-v2 v1.41.1
 	github.com/aws/aws-sdk-go-v2/config v1.32.7
@@ -35,7 +36,7 @@ require (
 	github.com/launchdarkly/go-server-sdk/v7 v7.14.5
 	github.com/nats-io/nats.go v1.46.1
 	github.com/prometheus/client_golang v1.19.1
-	github.com/traefik/yaegi v0.16.1
+	github.com/stripe/stripe-go/v82 v82.5.1
 	go.opentelemetry.io/otel v1.40.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.40.0
 	go.opentelemetry.io/otel/sdk v1.40.0
@@ -155,7 +156,6 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
-	github.com/stripe/stripe-go/v82 v82.5.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.65.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.40.0 // indirect
