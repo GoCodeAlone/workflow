@@ -635,9 +635,13 @@ triggers: {}
 
 	// Construct a minimal serverApp with the required fields
 	app := &serverApp{
-		logger:         logger,
-		v1Store:        store,
-		runtimeManager: rm,
+		logger: logger,
+		stores: storeComponents{
+			v1Store: store,
+		},
+		services: serviceComponents{
+			runtimeManager: rm,
+		},
 	}
 
 	// Run the import
@@ -753,9 +757,13 @@ func TestImportBundles_MultipleBundles(t *testing.T) {
 	rm := module.NewRuntimeManager(store, mockBuilder, logger)
 
 	app := &serverApp{
-		logger:         logger,
-		v1Store:        store,
-		runtimeManager: rm,
+		logger: logger,
+		stores: storeComponents{
+			v1Store: store,
+		},
+		services: serviceComponents{
+			runtimeManager: rm,
+		},
 	}
 
 	if err := app.importBundles(logger); err != nil {
