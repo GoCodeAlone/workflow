@@ -81,9 +81,9 @@ func TestIntegrationWorkflow(t *testing.T) {
 
 	// Pre-create and connect the HTTP connectors with the mock server URL
 	crmConnector := module.NewHTTPIntegrationConnector("crm-connector", mockServer.URL)
-	crmConnector.SetAllowPrivateIPs(true)
+	crmConnector.AllowPrivateIPs()
 	emailConnector := module.NewHTTPIntegrationConnector("email-connector", mockServer.URL)
-	emailConnector.SetAllowPrivateIPs(true)
+	emailConnector.AllowPrivateIPs()
 
 	// Set default headers
 	crmConnector.SetDefaultHeader("Content-Type", "application/json")

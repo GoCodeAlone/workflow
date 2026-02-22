@@ -166,7 +166,7 @@ func TestHTTPIntegrationConnector_ExecuteGET(t *testing.T) {
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
-	c.SetAllowPrivateIPs(true)
+	c.AllowPrivateIPs()
 	ctx := context.Background()
 	_ = c.Connect(ctx)
 
@@ -195,7 +195,7 @@ func TestHTTPIntegrationConnector_ExecutePOST(t *testing.T) {
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
-	c.SetAllowPrivateIPs(true)
+	c.AllowPrivateIPs()
 	ctx := context.Background()
 	_ = c.Connect(ctx)
 
@@ -221,7 +221,7 @@ func TestHTTPIntegrationConnector_ExecuteWithBasicAuth(t *testing.T) {
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
-	c.SetAllowPrivateIPs(true)
+	c.AllowPrivateIPs()
 	c.SetBasicAuth("admin", "secret")
 	ctx := context.Background()
 	_ = c.Connect(ctx)
@@ -248,7 +248,7 @@ func TestHTTPIntegrationConnector_ExecuteWithBearerAuth(t *testing.T) {
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
-	c.SetAllowPrivateIPs(true)
+	c.AllowPrivateIPs()
 	c.SetBearerAuth("my-token")
 	ctx := context.Background()
 	_ = c.Connect(ctx)
@@ -273,7 +273,7 @@ func TestHTTPIntegrationConnector_ExecuteCustomHeaders(t *testing.T) {
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
-	c.SetAllowPrivateIPs(true)
+	c.AllowPrivateIPs()
 	c.SetHeader("X-Custom", "my-value")
 	ctx := context.Background()
 	_ = c.Connect(ctx)
@@ -293,7 +293,7 @@ func TestHTTPIntegrationConnector_ExecuteErrorStatus(t *testing.T) {
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
-	c.SetAllowPrivateIPs(true)
+	c.AllowPrivateIPs()
 	ctx := context.Background()
 	_ = c.Connect(ctx)
 
@@ -314,7 +314,7 @@ func TestHTTPIntegrationConnector_ExecuteNonJSONResponse(t *testing.T) {
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
-	c.SetAllowPrivateIPs(true)
+	c.AllowPrivateIPs()
 	ctx := context.Background()
 	_ = c.Connect(ctx)
 
@@ -334,7 +334,7 @@ func TestHTTPIntegrationConnector_ExecuteEmptyResponse(t *testing.T) {
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test", server.URL)
-	c.SetAllowPrivateIPs(true)
+	c.AllowPrivateIPs()
 	ctx := context.Background()
 	_ = c.Connect(ctx)
 
@@ -468,7 +468,7 @@ func TestStdIntegrationRegistry_StartAndStop(t *testing.T) {
 	defer server.Close()
 
 	c := NewHTTPIntegrationConnector("test-conn", server.URL)
-	c.SetAllowPrivateIPs(true)
+	c.AllowPrivateIPs()
 	r.RegisterConnector(c)
 
 	if err := r.Start(); err != nil {

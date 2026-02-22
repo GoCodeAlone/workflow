@@ -90,21 +90,24 @@ func registerCyclicPluginFactories(engine *workflow.StdEngine) {
 		if p, ok := cfg["prefix"].(string); ok && p != "" {
 			prefix = p
 		}
+		var opts []module.StaticFileServerOption
 		spaFallback := true
 		if sf, ok := cfg["spaFallback"].(bool); ok {
 			spaFallback = sf
 		}
-		cacheMaxAge := 3600
+		if spaFallback {
+			opts = append(opts, module.WithSPAFallback())
+		}
 		if cma, ok := cfg["cacheMaxAge"].(int); ok {
-			cacheMaxAge = cma
+			opts = append(opts, module.WithCacheMaxAge(cma))
 		} else if cma, ok := cfg["cacheMaxAge"].(float64); ok {
-			cacheMaxAge = int(cma)
+			opts = append(opts, module.WithCacheMaxAge(int(cma)))
 		}
 		routerName := ""
 		if rn, ok := cfg["router"].(string); ok {
 			routerName = rn
 		}
-		sfs := module.NewStaticFileServer(name, root, prefix, spaFallback, cacheMaxAge)
+		sfs := module.NewStaticFileServer(name, root, prefix, opts...)
 		if routerName != "" {
 			sfs.SetRouterName(routerName)
 		}

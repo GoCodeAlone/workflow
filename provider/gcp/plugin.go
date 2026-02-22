@@ -379,13 +379,13 @@ func (p *GCPProvider) fetchMetric(ctx context.Context, metricType, serviceName s
 		metricType, serviceName,
 	)
 	params := url.Values{
-		"filter":                          {filter},
-		"interval.startTime":              {startTime.Format(time.RFC3339)},
-		"interval.endTime":                {endTime.Format(time.RFC3339)},
-		"aggregation.alignmentPeriod":     {fmt.Sprintf("%ds", windowSec)},
-		"aggregation.perSeriesAligner":    {"ALIGN_MEAN"},
-		"aggregation.crossSeriesReducer":  {"REDUCE_SUM"},
-		"view":                            {"FULL"},
+		"filter":                         {filter},
+		"interval.startTime":             {startTime.Format(time.RFC3339)},
+		"interval.endTime":               {endTime.Format(time.RFC3339)},
+		"aggregation.alignmentPeriod":    {fmt.Sprintf("%ds", windowSec)},
+		"aggregation.perSeriesAligner":   {"ALIGN_MEAN"},
+		"aggregation.crossSeriesReducer": {"REDUCE_SUM"},
+		"view":                           {"FULL"},
 	}
 	endpoint := fmt.Sprintf("https://monitoring.googleapis.com/v3/projects/%s/timeSeries?%s",
 		p.config.ProjectID, params.Encode())

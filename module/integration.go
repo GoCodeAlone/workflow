@@ -151,10 +151,16 @@ func (c *HTTPIntegrationConnector) SetTimeout(timeout time.Duration) {
 	c.client.Timeout = timeout
 }
 
-// SetAllowPrivateIPs enables or disables requests to private/internal IP addresses.
+// AllowPrivateIPs enables requests to private/internal IP addresses.
 // This should only be used for testing or trusted internal services.
-func (c *HTTPIntegrationConnector) SetAllowPrivateIPs(allow bool) {
-	c.allowPrivateIPs = allow
+func (c *HTTPIntegrationConnector) AllowPrivateIPs() {
+	c.allowPrivateIPs = true
+}
+
+// DisallowPrivateIPs disables requests to private/internal IP addresses,
+// restoring SSRF protection (this is the default).
+func (c *HTTPIntegrationConnector) DisallowPrivateIPs() {
+	c.allowPrivateIPs = false
 }
 
 // SetRateLimit sets a rate limit for requests

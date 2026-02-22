@@ -18,7 +18,7 @@ import (
 // projects.locations.repositories.dockerImages.list API.
 type artifactRegistryDockerImagesResponse struct {
 	DockerImages  []artifactRegistryDockerImage `json:"dockerImages"`
-	NextPageToken string                         `json:"nextPageToken"`
+	NextPageToken string                        `json:"nextPageToken"`
 }
 
 // artifactRegistryDockerImage represents a single Docker image in Artifact Registry.

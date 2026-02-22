@@ -192,7 +192,7 @@ func TestLicenseModule_CanLoadPlugin(t *testing.T) {
 	}{
 		{"core", true},
 		{"community", true},
-		{"premium", true},  // professional license allows premium
+		{"premium", true}, // professional license allows premium
 		{"unknown", false},
 	}
 	for _, tt := range tests {
