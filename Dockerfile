@@ -1,16 +1,26 @@
 # Multi-stage build for the Workflow engine server.
 #
-# Build:   docker build -t workflow .
+# Build:   docker build --build-arg NPM_TOKEN=$(gh auth token) -t workflow .
 # Run:     docker run -p 8080:8080 -p 8081:8081 workflow -config /etc/workflow/config.yaml
 # Admin:   docker run -p 8080:8080 -p 8081:8081 -e JWT_SECRET=secret workflow -config /etc/workflow/config.yaml --admin
+#
+# NPM_TOKEN is required for @gocodealone scoped packages from GitHub Packages.
 
 # --- Stage 1: Build the React admin UI ---
 FROM node:22-alpine AS ui-builder
 
+ARG NPM_TOKEN
 WORKDIR /build/ui
 
-COPY ui/package.json ui/package-lock.json ./
-RUN npm ci --silent
+COPY ui/package.json ui/package-lock.json ui/.npmrc ./
+RUN --mount=type=secret,id=npm_token \
+    if [ -f /run/secrets/npm_token ]; then \
+      echo "//npm.pkg.github.com/:_authToken=$(cat /run/secrets/npm_token)" >> .npmrc; \
+    elif [ -n "$NPM_TOKEN" ]; then \
+      echo "//npm.pkg.github.com/:_authToken=${NPM_TOKEN}" >> .npmrc; \
+    fi && \
+    npm ci --silent && \
+    sed -i '/^\/\/npm.pkg.github.com\/:_authToken/d' .npmrc
 
 COPY ui/ .
 RUN npx vite build
