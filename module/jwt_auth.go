@@ -1188,3 +1188,45 @@ func (j *JWTAuthModule) RequiresServices() []modular.ServiceDependency {
 		},
 	}
 }
+
+// CreateOAuthUser creates (or returns an existing) user identified by the given
+// oauthKey (e.g. "oauth:google:12345").  The oauthKey is used as the user's
+// email so it can be looked up without any email-based account merging.
+// If a user already exists for that key, the existing user is returned.
+func (j *JWTAuthModule) CreateOAuthUser(oauthKey, name string, meta map[string]any) (*User, error) {
+	// Fast path: user already exists.
+	if existing, ok := j.lookupUser(oauthKey); ok {
+		return existing, nil
+	}
+
+	if j.userStore != nil {
+		newUser, err := j.userStore.CreateUser(oauthKey, name, "", meta)
+		if err != nil {
+			// Race condition: another goroutine created the user concurrently.
+			if existing, ok := j.userStore.GetUser(oauthKey); ok {
+				return existing, nil
+			}
+			return nil, err
+		}
+		return newUser, nil
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	// Re-check under the lock to avoid a TOCTOU race.
+	if existing, ok := j.users[oauthKey]; ok {
+		return existing, nil
+	}
+
+	newUser := &User{
+		ID:        fmt.Sprintf("%d", j.nextID),
+		Email:     oauthKey,
+		Name:      name,
+		Metadata:  meta,
+		CreatedAt: time.Now(),
+	}
+	j.nextID++
+	j.users[oauthKey] = newUser
+	return newUser, nil
+}

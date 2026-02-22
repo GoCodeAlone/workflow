@@ -21,11 +21,11 @@ func TestPluginManifest(t *testing.T) {
 	if m.Name != "auth" {
 		t.Errorf("expected name %q, got %q", "auth", m.Name)
 	}
-	if len(m.ModuleTypes) != 2 {
-		t.Errorf("expected 2 module types, got %d", len(m.ModuleTypes))
+	if len(m.ModuleTypes) != 3 {
+		t.Errorf("expected 3 module types, got %d", len(m.ModuleTypes))
 	}
-	if len(m.WiringHooks) != 1 {
-		t.Errorf("expected 1 wiring hook, got %d", len(m.WiringHooks))
+	if len(m.WiringHooks) != 2 {
+		t.Errorf("expected 2 wiring hooks, got %d", len(m.WiringHooks))
 	}
 }
 
@@ -50,7 +50,7 @@ func TestModuleFactories(t *testing.T) {
 	p := New()
 	factories := p.ModuleFactories()
 
-	expectedTypes := []string{"auth.jwt", "auth.user-store"}
+	expectedTypes := []string{"auth.jwt", "auth.user-store", "auth.oauth2"}
 	for _, typ := range expectedTypes {
 		factory, ok := factories[typ]
 		if !ok {
@@ -83,29 +83,35 @@ func TestModuleFactoryJWTWithConfig(t *testing.T) {
 func TestWiringHooks(t *testing.T) {
 	p := New()
 	hooks := p.WiringHooks()
-	if len(hooks) != 1 {
-		t.Fatalf("expected 1 wiring hook, got %d", len(hooks))
+	if len(hooks) != 2 {
+		t.Fatalf("expected 2 wiring hooks, got %d", len(hooks))
 	}
-	if hooks[0].Name != "auth-provider-wiring" {
-		t.Errorf("expected hook name %q, got %q", "auth-provider-wiring", hooks[0].Name)
+	hookNames := map[string]bool{}
+	for _, h := range hooks {
+		hookNames[h.Name] = true
+		if h.Hook == nil {
+			t.Errorf("wiring hook %q function is nil", h.Name)
+		}
 	}
-	if hooks[0].Hook == nil {
-		t.Error("wiring hook function is nil")
+	for _, expected := range []string{"auth-provider-wiring", "oauth2-jwt-wiring"} {
+		if !hookNames[expected] {
+			t.Errorf("missing wiring hook %q", expected)
+		}
 	}
 }
 
 func TestModuleSchemas(t *testing.T) {
 	p := New()
 	schemas := p.ModuleSchemas()
-	if len(schemas) != 2 {
-		t.Fatalf("expected 2 module schemas, got %d", len(schemas))
+	if len(schemas) != 3 {
+		t.Fatalf("expected 3 module schemas, got %d", len(schemas))
 	}
 
 	types := map[string]bool{}
 	for _, s := range schemas {
 		types[s.Type] = true
 	}
-	for _, expected := range []string{"auth.jwt", "auth.user-store"} {
+	for _, expected := range []string{"auth.jwt", "auth.user-store", "auth.oauth2"} {
 		if !types[expected] {
 			t.Errorf("missing schema for %q", expected)
 		}

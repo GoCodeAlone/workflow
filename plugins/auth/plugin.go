@@ -11,8 +11,9 @@ import (
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
-// Plugin provides authentication capabilities: auth.jwt and auth.user-store
-// modules plus the wiring hook that connects AuthProviders to AuthMiddleware.
+// Plugin provides authentication capabilities: auth.jwt, auth.user-store, and
+// auth.oauth2 modules plus the wiring hook that connects AuthProviders to
+// AuthMiddleware.
 type Plugin struct {
 	plugin.BaseEnginePlugin
 }
@@ -24,23 +25,24 @@ func New() *Plugin {
 			BaseNativePlugin: plugin.BaseNativePlugin{
 				PluginName:        "auth",
 				PluginVersion:     "1.0.0",
-				PluginDescription: "JWT authentication, user store, and auth middleware wiring",
+				PluginDescription: "JWT authentication, OAuth2, user store, and auth middleware wiring",
 			},
 			Manifest: plugin.PluginManifest{
 				Name:        "auth",
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
-				Description: "JWT authentication, user store, and auth middleware wiring",
+				Description: "JWT authentication, OAuth2, user store, and auth middleware wiring",
 				Tier:        plugin.TierCore,
 				ModuleTypes: []string{
 					"auth.jwt",
 					"auth.user-store",
+					"auth.oauth2",
 				},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "authentication", Role: "provider", Priority: 10},
 					{Name: "user-management", Role: "provider", Priority: 10},
 				},
-				WiringHooks: []string{"auth-provider-wiring"},
+				WiringHooks: []string{"auth-provider-wiring", "oauth2-jwt-wiring"},
 			},
 		},
 	}
@@ -60,7 +62,7 @@ func (p *Plugin) Capabilities() []capability.Contract {
 	}
 }
 
-// ModuleFactories returns factories for auth.jwt and auth.user-store.
+// ModuleFactories returns factories for auth.jwt, auth.user-store, and auth.oauth2.
 func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 	return map[string]plugin.ModuleFactory{
 		"auth.jwt": func(name string, cfg map[string]any) modular.Module {
@@ -91,10 +93,49 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 		"auth.user-store": func(name string, _ map[string]any) modular.Module {
 			return module.NewUserStore(name)
 		},
+		"auth.oauth2": func(name string, cfg map[string]any) modular.Module {
+			var providerCfgs []module.OAuth2ProviderConfig
+			if raw, ok := cfg["providers"]; ok {
+				if providers, ok := raw.([]any); ok {
+					for _, p := range providers {
+						if pm, ok := p.(map[string]any); ok {
+							pc := module.OAuth2ProviderConfig{
+								Name:         stringFromMap(pm, "name"),
+								ClientID:     stringFromMap(pm, "clientId"),
+								ClientSecret: stringFromMap(pm, "clientSecret"),
+								AuthURL:      stringFromMap(pm, "authUrl"),
+								TokenURL:     stringFromMap(pm, "tokenUrl"),
+								UserInfoURL:  stringFromMap(pm, "userInfoUrl"),
+								RedirectURL:  stringFromMap(pm, "redirectUrl"),
+							}
+							if scopes, ok := pm["scopes"].([]any); ok {
+								for _, s := range scopes {
+									if sv, ok := s.(string); ok {
+										pc.Scopes = append(pc.Scopes, sv)
+									}
+								}
+							}
+							providerCfgs = append(providerCfgs, pc)
+						}
+					}
+				}
+			}
+			// jwtAuth will be wired during the wiring hook.
+			return module.NewOAuth2Module(name, providerCfgs, nil)
+		},
 	}
 }
 
-// WiringHooks returns the hook that wires AuthProviders to AuthMiddleware instances.
+// stringFromMap is a helper that extracts a string value from a map by key.
+func stringFromMap(m map[string]any, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// WiringHooks returns the hooks that wire AuthProviders to AuthMiddleware instances
+// and JWTAuthModule into OAuth2Module instances.
 func (p *Plugin) WiringHooks() []plugin.WiringHook {
 	return []plugin.WiringHook{
 		{
@@ -114,6 +155,28 @@ func (p *Plugin) WiringHooks() []plugin.WiringHook {
 				for _, am := range authMiddlewares {
 					for _, ap := range authProviders {
 						am.RegisterProvider(ap)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			Name:     "oauth2-jwt-wiring",
+			Priority: 60,
+			Hook: func(app modular.Application, _ *config.WorkflowConfig) error {
+				var jwtAuth *module.JWTAuthModule
+				for _, svc := range app.SvcRegistry() {
+					if j, ok := svc.(*module.JWTAuthModule); ok {
+						jwtAuth = j
+						break
+					}
+				}
+				if jwtAuth == nil {
+					return nil
+				}
+				for _, svc := range app.SvcRegistry() {
+					if om, ok := svc.(*module.OAuth2Module); ok {
+						om.SetJWTAuth(jwtAuth)
 					}
 				}
 				return nil
@@ -149,6 +212,18 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			Inputs:       []schema.ServiceIODef{{Name: "credentials", Type: "Credentials", Description: "User credentials for CRUD operations"}},
 			Outputs:      []schema.ServiceIODef{{Name: "user-store", Type: "UserStore", Description: "User storage service for auth modules"}},
 			ConfigFields: []schema.ConfigFieldDef{},
+		},
+		{
+			Type:        "auth.oauth2",
+			Label:       "OAuth2",
+			Category:    "middleware",
+			Description: "OAuth2 authorization code flow supporting Google, GitHub, and generic OIDC providers",
+			Inputs:      []schema.ServiceIODef{{Name: "auth-code", Type: "AuthorizationCode", Description: "Authorization code from OAuth2 provider"}},
+			Outputs:     []schema.ServiceIODef{{Name: "jwt", Type: "JWTToken", Description: "Signed JWT token issued after successful OAuth2 login"}},
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "providers", Label: "Providers", Type: schema.FieldTypeJSON, Required: true, Description: "List of OAuth2 provider configurations (google, github, or custom)"},
+			},
+			DefaultConfig: map[string]any{"providers": []any{}},
 		},
 	}
 }
