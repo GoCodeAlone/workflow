@@ -421,7 +421,7 @@ func initManagementHandlers(logger *slog.Logger, engine *workflow.StdEngine, cfg
 		return map[string]any{"status": "running"}
 	})
 	mgmtHandler.SetServiceRegistry(func() map[string]any {
-		return app.engine.App().SvcRegistry()
+		return app.engine.GetApp().SvcRegistry()
 	})
 	app.mgmt.mgmtHandler = mgmtHandler
 
@@ -916,17 +916,22 @@ func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 
 	// Auto-discover FeatureFlagAdmin from the service registry and wire to the
 	// V1 API handler. The featureflag.service module (admin-feature-flags in
-	// admin/config.yaml) registers this adapter — no explicit Go wiring needed.
+	// admin/config.yaml) registers its admin adapter under a well-known name.
 	type featureFlagSetter interface {
 		SetFeatureFlagService(module.FeatureFlagAdmin)
 	}
+	const featureFlagAdminSvcName = "admin-feature-flags.admin"
 	if ffSetter, ok := app.services.v1Handler.(featureFlagSetter); ok {
-		for _, svc := range engine.GetApp().SvcRegistry() {
+		svcRegistry := engine.GetApp().SvcRegistry()
+		if svc, ok := svcRegistry[featureFlagAdminSvcName]; ok {
 			if ffAdmin, ok := svc.(module.FeatureFlagAdmin); ok {
 				ffSetter.SetFeatureFlagService(ffAdmin)
-				logger.Info("Auto-wired FeatureFlagAdmin to V1 API handler from service registry")
-				break
+				logger.Info("Auto-wired FeatureFlagAdmin to V1 API handler from service registry", "service", featureFlagAdminSvcName)
+			} else {
+				logger.Warn("Service registered under feature flag admin name does not implement FeatureFlagAdmin", "service", featureFlagAdminSvcName)
 			}
+		} else {
+			logger.Debug("FeatureFlagAdmin service not found in service registry; feature flags disabled", "service", featureFlagAdminSvcName)
 		}
 	}
 
