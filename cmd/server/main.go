@@ -237,6 +237,14 @@ type executionTrackerIface interface {
 	SetEventStoreRecorder(r module.EventRecorder)
 }
 
+// ExecutionTrackerSetter is implemented by any module that accepts an
+// ExecutionTrackerProvider. Using this interface in place of a concrete-type
+// switch means the server does not need to be modified when new module types
+// require execution tracking.
+type ExecutionTrackerSetter interface {
+	SetExecutionTracker(module.ExecutionTrackerProvider)
+}
+
 // runtimeLifecycle manages the lifecycle of running workflow instances.
 type runtimeLifecycle interface {
 	StopAll(ctx context.Context) error
@@ -945,10 +953,7 @@ func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 		}
 
 		for _, svc := range engine.GetApp().SvcRegistry() {
-			switch h := svc.(type) {
-			case *module.QueryHandler:
-				h.SetExecutionTracker(app.services.executionTracker)
-			case *module.CommandHandler:
+			if h, ok := svc.(ExecutionTrackerSetter); ok {
 				h.SetExecutionTracker(app.services.executionTracker)
 			}
 		}
