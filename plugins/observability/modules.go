@@ -84,6 +84,9 @@ func logCollectorFactory(name string, cfg map[string]any) modular.Module {
 
 func otelTracingFactory(name string, cfg map[string]any) modular.Module {
 	m := module.NewOTelTracing(name)
+	if cfg == nil {
+		return m
+	}
 	if v, ok := cfg["endpoint"].(string); ok && v != "" {
 		m.SetEndpoint(v)
 	}
