@@ -77,8 +77,8 @@ func (w *mockWriteCloser) Close() error                { return w.closeErr }
 
 // mockBucketHandle routes Object() calls to per-key mockObjectHandles.
 type mockBucketHandle struct {
-	objects map[string]*mockObjectHandle
-	listErr error
+	objects   map[string]*mockObjectHandle
+	listErr   error
 	listItems []*storage.ObjectAttrs
 }
 
@@ -389,4 +389,3 @@ func TestGCSStorage_StatNotFound(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
-

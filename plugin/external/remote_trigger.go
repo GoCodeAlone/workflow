@@ -12,11 +12,11 @@ import (
 // Trigger lifecycle (Start/Stop) is managed through the plugin's module RPCs,
 // treating trigger handles as module handles.
 type RemoteTrigger struct {
-	typeName  string
-	name      string
-	handleID  string
-	client    pb.PluginServiceClient
-	config    map[string]any
+	typeName string
+	name     string
+	handleID string
+	client   pb.PluginServiceClient
+	config   map[string]any
 }
 
 // NewRemoteTrigger creates a remote trigger proxy.

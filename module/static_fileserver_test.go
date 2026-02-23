@@ -27,7 +27,7 @@ func setupStaticFileServer(t *testing.T) (*StaticFileServer, string) {
 	}
 
 	app := CreateIsolatedApp(t)
-	srv := NewStaticFileServer("static-server", dir, "/", true, 3600)
+	srv := NewStaticFileServer("static-server", dir, "/", WithSPAFallback())
 	if err := srv.Init(app); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func setupStaticFileServer(t *testing.T) (*StaticFileServer, string) {
 }
 
 func TestStaticFileServer_Name(t *testing.T) {
-	srv := NewStaticFileServer("my-static", "/tmp", "/", true, 3600)
+	srv := NewStaticFileServer("my-static", "/tmp", "/")
 	if srv.Name() != "my-static" {
 		t.Errorf("expected name 'my-static', got '%s'", srv.Name())
 	}
@@ -93,7 +93,7 @@ func TestStaticFileServer_NoSPAFallback_404(t *testing.T) {
 	}
 
 	app := CreateIsolatedApp(t)
-	srv := NewStaticFileServer("static-no-spa", dir, "/", false, 3600)
+	srv := NewStaticFileServer("static-no-spa", dir, "/")
 	if err := srv.Init(app); err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestStaticFileServer_PrefixRouting(t *testing.T) {
 	}
 
 	app := CreateIsolatedApp(t)
-	srv := NewStaticFileServer("prefixed", dir, "/static/", false, 7200)
+	srv := NewStaticFileServer("prefixed", dir, "/static/", WithCacheMaxAge(7200))
 	if err := srv.Init(app); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestStaticFileServer_PrefixRouting(t *testing.T) {
 
 func TestStaticFileServer_InvalidRootPath(t *testing.T) {
 	app := CreateIsolatedApp(t)
-	srv := NewStaticFileServer("bad-root", "/nonexistent/path/that/doesnt/exist", "/", true, 3600)
+	srv := NewStaticFileServer("bad-root", "/nonexistent/path/that/doesnt/exist", "/", WithSPAFallback())
 	err := srv.Init(app)
 	if err == nil {
 		t.Error("expected error for nonexistent root path")
@@ -173,7 +173,7 @@ func TestStaticFileServer_InvalidRootPath(t *testing.T) {
 }
 
 func TestStaticFileServer_ProvidesServices(t *testing.T) {
-	srv := NewStaticFileServer("static-test", "/tmp", "/", true, 3600)
+	srv := NewStaticFileServer("static-test", "/tmp", "/", WithSPAFallback())
 	services := srv.ProvidesServices()
 	if len(services) != 1 {
 		t.Fatalf("expected 1 service, got %d", len(services))
@@ -184,7 +184,7 @@ func TestStaticFileServer_ProvidesServices(t *testing.T) {
 }
 
 func TestStaticFileServer_DefaultValues(t *testing.T) {
-	srv := NewStaticFileServer("defaults", "/tmp", "", false, 0)
+	srv := NewStaticFileServer("defaults", "/tmp", "")
 	if srv.prefix != "/" {
 		t.Errorf("expected default prefix '/', got '%s'", srv.prefix)
 	}

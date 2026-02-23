@@ -458,7 +458,7 @@ func TestOAuth2_GenericProviderMissingURLs(t *testing.T) {
 
 func TestOAuth2_MissingClientIDorSecret(t *testing.T) {
 	pc := OAuth2ProviderConfig{
-		Name:    "google",
+		Name: "google",
 		// No ClientID or ClientSecret
 	}
 	entry := buildProviderEntry(&pc)
