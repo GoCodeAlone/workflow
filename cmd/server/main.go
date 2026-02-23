@@ -85,9 +85,8 @@ var (
 	// Multi-workflow mode flags
 	databaseDSN       = flag.String("database-dsn", "", "PostgreSQL connection string for multi-workflow mode")
 	jwtSecret         = flag.String("jwt-secret", "", "JWT signing secret for API authentication")
-	adminEmail        = flag.String("admin-email", "", "Initial admin user email (first-run bootstrap)")
-	adminPassword     = flag.String("admin-password", "", "Initial admin user password (first-run bootstrap)")
-	multiWorkflowAddr = flag.String("multi-workflow-addr", ":8090", "HTTP listen address for multi-workflow REST API")
+	adminEmail    = flag.String("admin-email", "", "Initial admin user email (first-run bootstrap)")
+	adminPassword = flag.String("admin-password", "", "Initial admin user password (first-run bootstrap)")
 
 	// License flags
 	licenseKey = flag.String("license-key", "", "License key for the workflow engine (or set WORKFLOW_LICENSE_KEY env var)")
@@ -1401,11 +1400,12 @@ func main() {
 	}))
 
 	if *databaseDSN != "" {
-		// Multi-workflow mode: delegate entirely to runMultiWorkflow.
-		// Single-config mode is skipped.
+		// Multi-workflow mode: delegates to runMultiWorkflow which connects to
+		// PostgreSQL, runs migrations, starts the REST API, and blocks until shutdown.
 		if err := runMultiWorkflow(logger); err != nil {
-			log.Fatalf("multi-workflow mode: %v", err) //nolint:gocritic // exitAfterDefer: intentional
+			log.Fatalf("Multi-workflow error: %v", err)
 		}
+		fmt.Println("Shutdown complete")
 		return
 	}
 
