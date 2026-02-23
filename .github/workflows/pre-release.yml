@@ -12,6 +12,10 @@ permissions:
   contents: write
   packages: write
 
+env:
+  GOPRIVATE: github.com/GoCodeAlone/*
+  GONOSUMCHECK: github.com/GoCodeAlone/*
+
 jobs:
   test:
     name: Pre-release Tests
