@@ -1037,6 +1037,20 @@ workflows:
               type: step.request_parse
               config:
                 path_params: [id]
+            - name: check-exists
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: check-found
+              type: step.conditional
+              config:
+                field: "steps.check-exists.found"
+                routes:
+                  "false": not-found
+                default: set-now
             - name: set-now
               type: step.set
               config:
@@ -1062,6 +1076,12 @@ workflows:
               config:
                 status: 200
                 body_from: "steps.get-workflow.row"
+            - name: not-found
+              type: step.json_response
+              config:
+                status: 404
+                body:
+                  error: "workflow not found"
       # Stop: update workflow status to 'stopped'
       - method: POST
         path: "/api/v1/admin/workflows/{id}/stop"
@@ -1073,6 +1093,20 @@ workflows:
               type: step.request_parse
               config:
                 path_params: [id]
+            - name: check-exists
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: check-found
+              type: step.conditional
+              config:
+                field: "steps.check-exists.found"
+                routes:
+                  "false": not-found
+                default: set-now
             - name: set-now
               type: step.set
               config:
@@ -1098,6 +1132,12 @@ workflows:
               config:
                 status: 200
                 body_from: "steps.get-workflow.row"
+            - name: not-found
+              type: step.json_response
+              config:
+                status: 404
+                body:
+                  error: "workflow not found"
       # Load workflow from a server-local filesystem path
       - method: POST
         path: "/api/v1/admin/workflows/load-from-path"
