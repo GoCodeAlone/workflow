@@ -32,6 +32,10 @@ FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS go-builder
 
 ARG TARGETOS TARGETARCH
 
+# GoCodeAlone forks (yaegi, go-plugin) may have moved tags; bypass proxy/sumdb.
+ENV GOPRIVATE=github.com/GoCodeAlone/* \
+    GONOSUMCHECK=github.com/GoCodeAlone/*
+
 RUN apk add --no-cache git ca-certificates
 
 WORKDIR /build
