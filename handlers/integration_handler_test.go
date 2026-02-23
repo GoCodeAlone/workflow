@@ -96,7 +96,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow(t *testing.T) {
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 	conn := module.NewHTTPIntegrationConnector("test-api", server.URL)
-	conn.SetAllowPrivateIPs(true)
+	conn.AllowPrivateIPs()
 	_ = conn.Connect(context.Background())
 	registry.RegisterConnector(conn)
 
@@ -148,7 +148,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_NotConnected(t *t
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 	conn := module.NewHTTPIntegrationConnector("test-api", server.URL)
-	conn.SetAllowPrivateIPs(true)
+	conn.AllowPrivateIPs()
 	// Not connecting - should auto-connect
 	registry.RegisterConnector(conn)
 
@@ -178,7 +178,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_VariableSubstitut
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 	conn := module.NewHTTPIntegrationConnector("test-api", server.URL)
-	conn.SetAllowPrivateIPs(true)
+	conn.AllowPrivateIPs()
 	_ = conn.Connect(context.Background())
 	registry.RegisterConnector(conn)
 
@@ -216,7 +216,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_WithOnError(t *te
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 	conn := module.NewHTTPIntegrationConnector("test-api", server.URL)
-	conn.SetAllowPrivateIPs(true)
+	conn.AllowPrivateIPs()
 	_ = conn.Connect(context.Background())
 	registry.RegisterConnector(conn)
 
@@ -247,7 +247,7 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_WithOnSuccess(t *
 	h := NewIntegrationWorkflowHandler()
 	registry := module.NewIntegrationRegistry("test-registry")
 	conn := module.NewHTTPIntegrationConnector("test-api", server.URL)
-	conn.SetAllowPrivateIPs(true)
+	conn.AllowPrivateIPs()
 	_ = conn.Connect(context.Background())
 	registry.RegisterConnector(conn)
 

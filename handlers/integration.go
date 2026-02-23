@@ -139,7 +139,7 @@ func configureHTTPConnector(name string, config map[string]any) (module.Integrat
 	}
 
 	if allowPrivate, ok := config["allowPrivateIPs"].(bool); ok && allowPrivate {
-		httpConn.SetAllowPrivateIPs(true)
+		httpConn.AllowPrivateIPs()
 	}
 
 	return httpConn, nil
