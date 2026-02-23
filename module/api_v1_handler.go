@@ -3,6 +3,7 @@ package module
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -917,7 +918,7 @@ func (h *V1APIHandler) stopWorkflow(w http.ResponseWriter, r *http.Request, id s
 		if inst, ok := h.runtimeManager.GetInstance(id); ok && inst.Status == "running" {
 			if stopErr := h.runtimeManager.StopWorkflow(r.Context(), id); stopErr != nil {
 				// Log but don't fail — the DB status update should still proceed
-				_ = stopErr
+				log.Printf("workflow engine: failed to stop workflow %s: %v", id, stopErr)
 			}
 		}
 	}

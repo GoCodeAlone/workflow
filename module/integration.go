@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -292,8 +293,7 @@ func (c *HTTPIntegrationConnector) Execute(ctx context.Context, action string, p
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			// Log error but continue
-			_ = err // Explicitly ignore error to satisfy linter
+			log.Printf("integration: failed to close response body: %v", err)
 		}
 	}()
 
@@ -372,8 +372,7 @@ func (c *WebhookIntegrationConnector) Connect(ctx context.Context) error {
 		// Parse the request body
 		defer func() {
 			if err := r.Body.Close(); err != nil {
-				// Log error but continue
-				_ = err // Explicitly ignore error to satisfy linter
+				log.Printf("integration: failed to close request body: %v", err)
 			}
 		}()
 		body, err := io.ReadAll(r.Body)
@@ -414,8 +413,7 @@ func (c *WebhookIntegrationConnector) Connect(ctx context.Context) error {
 		// Return success
 		w.WriteHeader(http.StatusOK)
 		if _, err := w.Write([]byte(`{"status":"ok"}`)); err != nil {
-			// Log error but continue
-			_ = err // Explicitly ignore error to satisfy linter
+			log.Printf("integration: failed to write webhook response: %v", err)
 		}
 	})
 

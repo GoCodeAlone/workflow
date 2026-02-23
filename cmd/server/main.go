@@ -28,6 +28,8 @@ import (
 	"github.com/GoCodeAlone/workflow/deploy"
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/environment"
+	"github.com/GoCodeAlone/workflow/handlers"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/observability"
 	"github.com/GoCodeAlone/workflow/observability/tracing"
@@ -218,6 +220,14 @@ type closableEventStore interface {
 type executionTrackerIface interface {
 	module.ExecutionTrackerProvider
 	SetEventStoreRecorder(r module.EventRecorder)
+}
+
+// ExecutionTrackerSetter is implemented by any module that accepts an
+// ExecutionTrackerProvider. Using this interface in place of a concrete-type
+// switch means the server does not need to be modified when new module types
+// require execution tracking.
+type ExecutionTrackerSetter interface {
+	SetExecutionTracker(module.ExecutionTrackerProvider)
 }
 
 // runtimeLifecycle manages the lifecycle of running workflow instances.
@@ -452,8 +462,8 @@ func registerManagementServices(logger *slog.Logger, app *serverApp) {
 
 	// Enrich OpenAPI spec via the service registry
 	for _, svc := range engine.GetApp().SvcRegistry() {
-		if gen, ok := svc.(*module.OpenAPIGenerator); ok {
-			module.RegisterAdminSchemas(gen)
+		if gen, ok := svc.(interfaces.SchemaRegistrar); ok {
+			gen.RegisterAdminSchemas()
 			gen.ApplySchemas()
 			logger.Info("Registered typed OpenAPI schemas", "module", gen.Name())
 		}
@@ -479,10 +489,12 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	// Discover the WorkflowRegistry from the service registry
 	var store *module.V1Store
 	for _, svc := range engine.GetApp().SvcRegistry() {
-		if reg, ok := svc.(*module.WorkflowRegistry); ok {
-			store = reg.Store()
-			logger.Info("Using WorkflowRegistry store", "module", reg.Name())
-			break
+		if provider, ok := svc.(interfaces.WorkflowStoreProvider); ok {
+			if s, ok := provider.WorkflowStore().(*module.V1Store); ok {
+				store = s
+				logger.Info("Using WorkflowRegistry store", "module", provider.Name())
+				break
+			}
 		}
 	}
 
@@ -934,10 +946,7 @@ func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 		}
 
 		for _, svc := range engine.GetApp().SvcRegistry() {
-			switch h := svc.(type) {
-			case *module.QueryHandler:
-				h.SetExecutionTracker(app.services.executionTracker)
-			case *module.CommandHandler:
+			if h, ok := svc.(ExecutionTrackerSetter); ok {
 				h.SetExecutionTracker(app.services.executionTracker)
 			}
 		}

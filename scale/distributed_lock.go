@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash/fnv"
+	"log"
 	"sync"
 	"time"
 
@@ -311,7 +312,9 @@ func (l *RedisLock) buildRelease(key, token string) func() {
 	return func() {
 		once.Do(func() {
 			ctx := context.Background()
-			_ = redisReleaseScript.Run(ctx, l.client, []string{key}, token).Err()
+			if err := redisReleaseScript.Run(ctx, l.client, []string{key}, token).Err(); err != nil {
+				log.Printf("distributed lock: failed to release Redis lock for key %s: %v", key, err)
+			}
 		})
 	}
 }

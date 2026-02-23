@@ -5,7 +5,11 @@ import (
 	"fmt"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/workflow/interfaces"
 )
+
+// Compile-time assertion: *WorkflowRegistry must satisfy interfaces.WorkflowStoreProvider.
+var _ interfaces.WorkflowStoreProvider = (*WorkflowRegistry)(nil)
 
 // WorkflowRegistry is a module that provides the V1Store as a service,
 // making the workflow data store (companies, projects, workflows) available
@@ -81,6 +85,13 @@ func (w *WorkflowRegistry) Stop(_ context.Context) error {
 
 // Store returns the underlying V1Store.
 func (w *WorkflowRegistry) Store() *V1Store {
+	return w.store
+}
+
+// WorkflowStore satisfies the interfaces.WorkflowStoreProvider interface.
+// It returns the underlying V1Store as an opaque any value so that the
+// interfaces package does not need to import the module package.
+func (w *WorkflowRegistry) WorkflowStore() any {
 	return w.store
 }
 
