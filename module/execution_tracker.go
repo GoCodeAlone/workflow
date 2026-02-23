@@ -50,6 +50,13 @@ type ExecutionTracker struct {
 	chained EventRecorder
 }
 
+// SetEventStoreRecorder sets the optional event store recorder that receives
+// copies of all execution events. This is used by the server to wire the
+// SQLite event store without directly assigning the exported field.
+func (t *ExecutionTracker) SetEventStoreRecorder(r EventRecorder) {
+	t.EventStoreRecorder = r
+}
+
 // RecordEvent implements EventRecorder. It is called by the Pipeline for each
 // execution event (step.started, step.completed, step.failed, etc.).
 // Events are recorded best-effort — errors are silently ignored.
