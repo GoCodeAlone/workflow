@@ -327,6 +327,35 @@ func TestWorkflowHandlerFactorySmoke(t *testing.T) {
 	}
 }
 
+func TestRateLimitMiddlewareFactory_RequestsPerHour(t *testing.T) {
+	factories := moduleFactories()
+	factory, ok := factories["http.middleware.ratelimit"]
+	if !ok {
+		t.Fatal("no factory for http.middleware.ratelimit")
+	}
+
+	// requestsPerHour as int
+	mod := factory("auth-register-rl", map[string]any{
+		"requestsPerHour": 5,
+		"burstSize":       5,
+	})
+	if mod == nil {
+		t.Fatal("factory returned nil for requestsPerHour config")
+	}
+	if mod.Name() != "auth-register-rl" {
+		t.Errorf("expected name %q, got %q", "auth-register-rl", mod.Name())
+	}
+
+	// requestsPerHour as float64 (YAML unmarshals numbers as float64)
+	mod2 := factory("auth-register-rl2", map[string]any{
+		"requestsPerHour": float64(5),
+		"burstSize":       float64(5),
+	})
+	if mod2 == nil {
+		t.Fatal("factory returned nil for requestsPerHour float64 config")
+	}
+}
+
 func TestPluginLoaderIntegration(t *testing.T) {
 	p := New()
 

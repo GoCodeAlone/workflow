@@ -527,11 +527,11 @@ func TestRateLimitMiddleware_CleanupStaleClients(t *testing.T) {
 	// Manually add a stale client
 	m.mu.Lock()
 	m.clients["ip:stale-client"] = &client{
-		tokens:        10,
+		tokens:        10.0,
 		lastTimestamp: time.Now().Add(-1 * time.Hour), // 1 hour old
 	}
 	m.clients["ip:fresh-client"] = &client{
-		tokens:        10,
+		tokens:        10.0,
 		lastTimestamp: time.Now(),
 	}
 	m.mu.Unlock()
@@ -560,5 +560,83 @@ func TestRateLimitMiddleware_StartStop_Lifecycle(t *testing.T) {
 
 	if err := m.Stop(context.TODO()); err != nil {
 		t.Fatalf("Stop failed: %v", err)
+	}
+}
+
+// -- Hourly rate middleware tests --
+
+func TestNewRateLimitMiddlewareWithHourlyRate_AllowsBurst(t *testing.T) {
+	// 5 requests/hour, burst 5
+	m := NewRateLimitMiddlewareWithHourlyRate("rl-hour", 5, 5)
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// First 5 requests should succeed (burst exhausted)
+	for i := range 5 {
+		req := httptest.NewRequest("POST", "/api/v1/auth/register", nil)
+		req.RemoteAddr = "10.0.0.1:1234"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("request %d: expected 200, got %d", i+1, rec.Code)
+		}
+	}
+
+	// 6th request should be rate limited
+	req := httptest.NewRequest("POST", "/api/v1/auth/register", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429 after burst exhausted, got %d", rec.Code)
+	}
+}
+
+func TestNewRateLimitMiddlewareWithHourlyRate_PerIP(t *testing.T) {
+	// 5 requests/hour, burst 2
+	m := NewRateLimitMiddlewareWithHourlyRate("rl-hour", 5, 2)
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Exhaust IP A burst
+	for i := range 2 {
+		req := httptest.NewRequest("POST", "/api/v1/auth/register", nil)
+		req.RemoteAddr = "10.0.0.1:1234"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("IP A request %d: expected 200, got %d", i+1, rec.Code)
+		}
+	}
+
+	// IP A should be rate limited
+	reqA := httptest.NewRequest("POST", "/api/v1/auth/register", nil)
+	reqA.RemoteAddr = "10.0.0.1:1234"
+	recA := httptest.NewRecorder()
+	handler.ServeHTTP(recA, reqA)
+	if recA.Code != http.StatusTooManyRequests {
+		t.Errorf("IP A: expected 429, got %d", recA.Code)
+	}
+
+	// IP B should still be allowed (separate bucket)
+	reqB := httptest.NewRequest("POST", "/api/v1/auth/register", nil)
+	reqB.RemoteAddr = "10.0.0.2:5678"
+	recB := httptest.NewRecorder()
+	handler.ServeHTTP(recB, reqB)
+	if recB.Code != http.StatusOK {
+		t.Errorf("IP B: expected 200, got %d", recB.Code)
+	}
+}
+
+func TestNewRateLimitMiddlewareWithHourlyRate_RatePerMinute(t *testing.T) {
+	// 60 requests/hour = 1 request/minute
+	m := NewRateLimitMiddlewareWithHourlyRate("rl-hour", 60, 1)
+	// ratePerMinute should be 1.0
+	if m.ratePerMinute != 1.0 {
+		t.Errorf("expected ratePerMinute=1.0, got %f", m.ratePerMinute)
 	}
 }
