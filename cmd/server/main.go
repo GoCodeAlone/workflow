@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow"
@@ -21,6 +22,7 @@ import (
 	"github.com/GoCodeAlone/workflow/ai"
 	copilotai "github.com/GoCodeAlone/workflow/ai/copilot"
 	"github.com/GoCodeAlone/workflow/ai/llm"
+	apihandler "github.com/GoCodeAlone/workflow/api"
 	"github.com/GoCodeAlone/workflow/audit"
 	"github.com/GoCodeAlone/workflow/billing"
 	"github.com/GoCodeAlone/workflow/bundle"
@@ -62,6 +64,7 @@ import (
 	"github.com/GoCodeAlone/workflow/schema"
 	evstore "github.com/GoCodeAlone/workflow/store"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
 
@@ -74,10 +77,11 @@ var (
 	anthropicModel = flag.String("anthropic-model", "", "Anthropic model name")
 
 	// Multi-workflow mode flags
-	databaseDSN   = flag.String("database-dsn", "", "PostgreSQL connection string for multi-workflow mode")
-	jwtSecret     = flag.String("jwt-secret", "", "JWT signing secret for API authentication")
-	adminEmail    = flag.String("admin-email", "", "Initial admin user email (first-run bootstrap)")
-	adminPassword = flag.String("admin-password", "", "Initial admin user password (first-run bootstrap)")
+	databaseDSN       = flag.String("database-dsn", "", "PostgreSQL connection string for multi-workflow mode")
+	jwtSecret         = flag.String("jwt-secret", "", "JWT signing secret for API authentication")
+	adminEmail        = flag.String("admin-email", "", "Initial admin user email (first-run bootstrap)")
+	adminPassword     = flag.String("admin-password", "", "Initial admin user password (first-run bootstrap)")
+	multiWorkflowAddr = flag.String("multi-workflow-addr", ":8090", "HTTP listen address for multi-workflow REST API")
 
 	// License flags
 	licenseKey = flag.String("license-key", "", "License key for the workflow engine (or set WORKFLOW_LICENSE_KEY env var)")
@@ -1184,43 +1188,109 @@ func main() {
 	}))
 
 	if *databaseDSN != "" {
-		// Multi-workflow mode
-		logger.Info("Starting in multi-workflow mode")
-
-		// TODO: Once the api package is implemented, this section will:
-		// 1. Connect to PostgreSQL using *databaseDSN
-		// 2. Run database migrations
-		// 3. Create store instances (UserStore, CompanyStore, ProjectStore, WorkflowStore, etc.)
-		// 4. Bootstrap admin user if *adminEmail and *adminPassword are set (first-run)
-		// 5. Create WorkflowEngineManager with stores
-		// 6. Create api.NewRouter() with stores, *jwtSecret, and engine manager
-		// 7. Mount API router at /api/v1/ alongside existing routes
-
-		// For now, log the configuration and fall through to single-config mode
-		logger.Info("Multi-workflow mode configured",
-			"database_dsn_set", *databaseDSN != "",
+		// Multi-workflow mode: connect to PostgreSQL, run migrations, start the
+		// REST API router on a dedicated port alongside the single-config engine.
+		logger.Info("Starting in multi-workflow mode",
+			"database_dsn_set", true,
 			"jwt_secret_set", *jwtSecret != "",
 			"admin_email_set", *adminEmail != "",
+			"api_addr", *multiWorkflowAddr,
 		)
+		pgStore, pgErr := evstore.NewPGStore(context.Background(), evstore.PGConfig{URL: *databaseDSN})
+		if pgErr != nil {
+			log.Fatalf("multi-workflow mode: failed to connect to PostgreSQL: %v", pgErr)
+		}
+		migrator := evstore.NewMigrator(pgStore.Pool())
+		if mErr := migrator.Migrate(context.Background()); mErr != nil {
+			log.Fatalf("multi-workflow mode: database migration failed: %v", mErr)
+		}
+		logger.Info("multi-workflow mode: database migrations applied")
 
-		// Suppress unused variable warnings until api package is ready
-		_ = databaseDSN
-		_ = jwtSecret
-		_ = adminEmail
-		_ = adminPassword
+		// Bootstrap admin user on first run.
+		if *adminEmail != "" && *adminPassword != "" {
+			_, lookupErr := pgStore.Users().GetByEmail(context.Background(), *adminEmail)
+			if lookupErr != nil {
+				hash, hashErr := bcrypt.GenerateFromPassword([]byte(*adminPassword), bcrypt.DefaultCost)
+				if hashErr != nil {
+					log.Fatalf("multi-workflow mode: failed to hash admin password: %v", hashErr)
+				}
+				now := time.Now()
+				adminUser := &evstore.User{
+					ID:           uuid.New(),
+					Email:        *adminEmail,
+					PasswordHash: string(hash),
+					DisplayName:  "Admin",
+					Active:       true,
+					CreatedAt:    now,
+					UpdatedAt:    now,
+				}
+				if createErr := pgStore.Users().Create(context.Background(), adminUser); createErr != nil {
+					logger.Warn("multi-workflow mode: failed to create admin user (may already exist)", "error", createErr)
+				} else {
+					logger.Info("multi-workflow mode: created bootstrap admin user", "email", *adminEmail)
+				}
+			} else {
+				logger.Info("multi-workflow mode: admin user already exists, skipping bootstrap", "email", *adminEmail)
+			}
+		}
 
-		logger.Warn("Multi-workflow mode requires the api package (not yet available); falling back to single-config mode")
+		engineBuilder := func(cfg *config.WorkflowConfig, lg *slog.Logger) (*workflow.StdEngine, modular.Application, error) {
+			eng, _, _, _, buildErr := buildEngine(cfg, lg)
+			if buildErr != nil {
+				return nil, nil, buildErr
+			}
+			app := eng.GetApp()
+			return eng, app, nil
+		}
+		engineMgr := workflow.NewWorkflowEngineManager(pgStore.Workflows(), pgStore.CrossWorkflowLinks(), logger, engineBuilder)
+
+		apiRouter := apihandler.NewRouter(apihandler.Stores{
+			Users:       pgStore.Users(),
+			Sessions:    pgStore.Sessions(),
+			Companies:   pgStore.Companies(),
+			Projects:    pgStore.Projects(),
+			Workflows:   pgStore.Workflows(),
+			Memberships: pgStore.Memberships(),
+			Links:       pgStore.CrossWorkflowLinks(),
+			Executions:  pgStore.Executions(),
+			Logs:        pgStore.Logs(),
+			Audit:       pgStore.Audit(),
+			IAM:         pgStore.IAM(),
+		}, apihandler.Config{JWTSecret: *jwtSecret})
+
+		apiServer := &http.Server{ //nolint:gosec // ReadHeaderTimeout set below
+			Addr:              *multiWorkflowAddr,
+			Handler:           apiRouter,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		go func() {
+			logger.Info("multi-workflow API listening", "addr", *multiWorkflowAddr)
+			if sErr := apiServer.ListenAndServe(); sErr != nil && sErr != http.ErrServerClosed {
+				logger.Error("multi-workflow API server error", "error", sErr)
+			}
+		}()
+		defer func() {
+			shutdownCtx := context.Background()
+			if sErr := apiServer.Shutdown(shutdownCtx); sErr != nil {
+				logger.Warn("multi-workflow API server shutdown error", "error", sErr)
+			}
+			if sErr := engineMgr.StopAll(shutdownCtx); sErr != nil {
+				logger.Warn("multi-workflow engine manager shutdown error", "error", sErr)
+			}
+			pgStore.Close()
+		}()
+		_ = engineMgr // used via closure above
 	}
 
-	// Existing single-config behavior
+	// Single-config mode always runs alongside multi-workflow mode (if enabled).
 	cfg, err := loadConfig(logger)
 	if err != nil {
-		log.Fatalf("Configuration error: %v", err)
+		log.Fatalf("Configuration error: %v", err) //nolint:gocritic // exitAfterDefer: intentional, cleanup is best-effort
 	}
 
 	app, err := setup(logger, cfg)
 	if err != nil {
-		log.Fatalf("Setup error: %v", err)
+		log.Fatalf("Setup error: %v", err) //nolint:gocritic // exitAfterDefer: intentional, cleanup is best-effort
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
