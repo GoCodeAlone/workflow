@@ -49,6 +49,7 @@ import (
 	pluginmodcompat "github.com/GoCodeAlone/workflow/plugins/modularcompat"
 	pluginobs "github.com/GoCodeAlone/workflow/plugins/observability"
 	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
+	pluginadmin "github.com/GoCodeAlone/workflow/plugins/admin"
 	pluginplatform "github.com/GoCodeAlone/workflow/plugins/platform"
 	pluginscheduler "github.com/GoCodeAlone/workflow/plugins/scheduler"
 	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
@@ -115,6 +116,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 		pluginintegration.New(),
 		pluginai.New(),
 		pluginplatform.New(),
+		pluginadmin.New().WithUIDir(*adminUIDir),
 	}
 	for _, p := range plugins {
 		if err := engine.LoadPlugin(p); err != nil {
