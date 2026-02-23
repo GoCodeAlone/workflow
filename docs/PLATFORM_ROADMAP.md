@@ -267,7 +267,7 @@ Example from the admin API (a real production route):
 # From admin/config.yaml -- the engine serves its own API using pipelines
 - method: GET
   path: "/api/v1/admin/companies/{id}"
-  handler: admin-v1-queries
+  handler: admin-queries
   middlewares: [admin-cors, admin-auth-middleware]
   pipeline:
     steps:
