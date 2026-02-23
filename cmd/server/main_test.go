@@ -792,20 +792,22 @@ func TestImportBundles_MultipleBundles(t *testing.T) {
 // mockFeatureFlagAdmin implements module.FeatureFlagAdmin for testing.
 type mockFeatureFlagAdmin struct{}
 
-func (m *mockFeatureFlagAdmin) ListFlags() ([]any, error)                            { return nil, nil }
-func (m *mockFeatureFlagAdmin) GetFlag(key string) (any, error)                      { return nil, nil }
-func (m *mockFeatureFlagAdmin) CreateFlag(data json.RawMessage) (any, error)         { return nil, nil }
+func (m *mockFeatureFlagAdmin) ListFlags() ([]any, error)                    { return nil, nil }
+func (m *mockFeatureFlagAdmin) GetFlag(key string) (any, error)              { return nil, nil }
+func (m *mockFeatureFlagAdmin) CreateFlag(data json.RawMessage) (any, error) { return nil, nil }
 func (m *mockFeatureFlagAdmin) UpdateFlag(key string, data json.RawMessage) (any, error) {
 	return nil, nil
 }
-func (m *mockFeatureFlagAdmin) DeleteFlag(key string) error                          { return nil }
+func (m *mockFeatureFlagAdmin) DeleteFlag(key string) error { return nil }
 func (m *mockFeatureFlagAdmin) SetOverrides(key string, data json.RawMessage) (any, error) {
 	return nil, nil
 }
 func (m *mockFeatureFlagAdmin) EvaluateFlag(key string, user string, group string) (any, error) {
 	return nil, nil
 }
-func (m *mockFeatureFlagAdmin) SSEHandler() http.Handler { return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}) }
+func (m *mockFeatureFlagAdmin) SSEHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {})
+}
 
 // TestFeatureFlagAutoWiring verifies that registerPostStartServices wires a
 // FeatureFlagAdmin from the service registry into the V1 API handler.

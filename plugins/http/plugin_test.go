@@ -365,9 +365,9 @@ func TestRateLimitMiddlewareFactory_InvalidValues(t *testing.T) {
 
 	// Zero requestsPerHour must fall through to requestsPerMinute path (not crash).
 	modZeroRPH := factory("rl-zero-rph", map[string]any{
-		"requestsPerHour":    0,
-		"requestsPerMinute":  30,
-		"burstSize":          5,
+		"requestsPerHour":   0,
+		"requestsPerMinute": 30,
+		"burstSize":         5,
 	})
 	if modZeroRPH == nil {
 		t.Fatal("factory returned nil for zero requestsPerHour config")

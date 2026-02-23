@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
 // QueryFunc is a read-only query function that returns data or an error.
@@ -24,7 +25,7 @@ type QueryHandler struct {
 	delegateHandler  http.Handler
 	app              modular.Application
 	queries          map[string]QueryFunc
-	routePipelines   map[string]*Pipeline
+	routePipelines   map[string]interfaces.PipelineRunner
 	executionTracker ExecutionTrackerProvider
 	mu               sync.RWMutex
 }
@@ -34,12 +35,12 @@ func NewQueryHandler(name string) *QueryHandler {
 	return &QueryHandler{
 		name:           name,
 		queries:        make(map[string]QueryFunc),
-		routePipelines: make(map[string]*Pipeline),
+		routePipelines: make(map[string]interfaces.PipelineRunner),
 	}
 }
 
 // SetRoutePipeline attaches a pipeline to a specific route path.
-func (h *QueryHandler) SetRoutePipeline(routePath string, pipeline *Pipeline) {
+func (h *QueryHandler) SetRoutePipeline(routePath string, pipeline interfaces.PipelineRunner) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.routePipelines[routePath] = pipeline
@@ -150,39 +151,67 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"queryName": queryName,
 			"query":     r.URL.Query(),
 		}
-		// Inject HTTP context so delegate steps can forward directly
-		pipeline.Metadata = map[string]any{
-			"_http_request":         r,
-			"_http_response_writer": w,
-		}
-		if pipeline.RoutePattern != "" {
-			pipeline.Metadata["_route_pattern"] = pipeline.RoutePattern
-		}
-		var pc *PipelineContext
-		var err error
-		if h.executionTracker != nil {
-			pc, err = h.executionTracker.TrackPipelineExecution(r.Context(), pipeline, triggerData, r)
-		} else {
-			pc, err = pipeline.Execute(r.Context(), triggerData)
-		}
-		if err != nil {
-			// Only write error if response wasn't already handled by a delegate step
-			if pc == nil || pc.Metadata["_response_handled"] != true {
+		// Type-assert to *Pipeline for concrete field access (Metadata, RoutePattern,
+		// Execute) and execution tracker integration. All engine-registered pipelines
+		// are *Pipeline; the interface allows custom implementations in tests/plugins.
+		// concretePipeline != nil: real *Pipeline.
+		// concretePipeline == nil && isConcrete: typed-nil – fall through to delegate/404.
+		// !isConcrete: different implementation – use PipelineRunner.Run() fallback.
+		concretePipeline, isConcrete := pipeline.(*Pipeline)
+		if isConcrete && concretePipeline != nil {
+			// Inject HTTP context so delegate steps can forward directly
+			concretePipeline.Metadata = map[string]any{
+				"_http_request":         r,
+				"_http_response_writer": w,
+			}
+			if concretePipeline.RoutePattern != "" {
+				concretePipeline.Metadata["_route_pattern"] = concretePipeline.RoutePattern
+			}
+			var pc *PipelineContext
+			var err error
+			if h.executionTracker != nil {
+				pc, err = h.executionTracker.TrackPipelineExecution(r.Context(), concretePipeline, triggerData, r)
+			} else {
+				pc, err = concretePipeline.Execute(r.Context(), triggerData)
+			}
+			if err != nil {
+				// Only write error if response wasn't already handled by a delegate step
+				if pc == nil || pc.Metadata["_response_handled"] != true {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				}
+				return
+			}
+			// If response was handled by a delegate step, don't write again
+			if pc.Metadata["_response_handled"] == true {
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(pc.Current); err != nil {
+				http.Error(w, "failed to encode response", http.StatusInternalServerError)
+			}
+			return
+		} else if !isConcrete {
+			// Fallback for non-*Pipeline implementations: use the PipelineRunner interface.
+			result, err := pipeline.Run(r.Context(), triggerData)
+			if err != nil {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
 				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			// Allow the runner to signal that it has already written the response.
+			if result["_response_handled"] == true {
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(result); err != nil {
+				http.Error(w, "failed to encode response", http.StatusInternalServerError)
 			}
 			return
 		}
-		// If response was handled by a delegate step, don't write again
-		if pc.Metadata["_response_handled"] == true {
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(pc.Current); err != nil {
-			http.Error(w, "failed to encode response", http.StatusInternalServerError)
-		}
-		return
+		// typed-nil *Pipeline: fall through to delegate/404 handling.
 	}
 
 	if h.delegateHandler != nil {

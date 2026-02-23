@@ -216,3 +216,87 @@ func TestLastPathSegment(t *testing.T) {
 		}
 	}
 }
+
+// TestQueryHandler_RoutePipeline_MockRunner verifies that a non-*Pipeline
+// PipelineRunner is invoked via Run() and its result is JSON-encoded.
+func TestQueryHandler_RoutePipeline_MockRunner(t *testing.T) {
+	h := NewQueryHandler("test")
+	mock := &mockPipelineRunner{result: map[string]any{"data": "value"}}
+	h.routePipelines["report"] = mock
+
+	req := httptest.NewRequest("GET", "/api/v1/engine/report", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+	var got map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if got["data"] != "value" {
+		t.Errorf("expected data=value, got %v", got)
+	}
+}
+
+// TestQueryHandler_RoutePipeline_MockRunner_ResponseHandled verifies that
+// when the PipelineRunner.Run result contains _response_handled=true the
+// handler does not write an additional JSON body.
+func TestQueryHandler_RoutePipeline_MockRunner_ResponseHandled(t *testing.T) {
+	h := NewQueryHandler("test")
+	mock := &mockPipelineRunner{result: map[string]any{"_response_handled": true}}
+	h.routePipelines["report"] = mock
+
+	req := httptest.NewRequest("GET", "/api/v1/engine/report", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Body.Len() != 0 {
+		t.Errorf("expected empty body when _response_handled=true, got %q", rr.Body.String())
+	}
+}
+
+// TestQueryHandler_RoutePipeline_MockRunner_Error verifies that a Run() error
+// returns a 500 with the error message in the JSON body.
+func TestQueryHandler_RoutePipeline_MockRunner_Error(t *testing.T) {
+	h := NewQueryHandler("test")
+	mock := &mockPipelineRunner{err: errors.New("runner failed")}
+	h.routePipelines["report"] = mock
+
+	req := httptest.NewRequest("GET", "/api/v1/engine/report", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", rr.Code)
+	}
+	var got map[string]string
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if got["error"] != "runner failed" {
+		t.Errorf("expected error=runner failed, got %v", got)
+	}
+}
+
+// TestQueryHandler_RoutePipeline_TypedNil verifies that a typed-nil *Pipeline
+// stored as a PipelineRunner does not panic and falls through to 404.
+func TestQueryHandler_RoutePipeline_TypedNil(t *testing.T) {
+	h := NewQueryHandler("test")
+	// Store a typed-nil *Pipeline as an interfaces.PipelineRunner.
+	// pipeline != nil is true (interface has type info), concretePipeline == nil.
+	var p *Pipeline
+	h.routePipelines["report"] = p
+
+	req := httptest.NewRequest("GET", "/api/v1/engine/report", nil)
+	rr := httptest.NewRecorder()
+
+	// Must not panic.
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for typed-nil pipeline, got %d", rr.Code)
+	}
+}
+
