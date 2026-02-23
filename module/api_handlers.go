@@ -54,12 +54,15 @@ type RESTAPIHandler struct {
 
 // RESTAPIHandlerConfig contains configuration for a REST API handler
 type RESTAPIHandlerConfig struct {
-	ResourceName     string `json:"resourceName" yaml:"resourceName"`
-	PublishEvents    bool   `json:"publishEvents" yaml:"publishEvents"`
-	WorkflowType     string `json:"workflowType" yaml:"workflowType"`         // The type of workflow to use for state machine operations
-	WorkflowEngine   string `json:"workflowEngine" yaml:"workflowEngine"`     // The name of the workflow engine to use
-	InstanceIDPrefix string `json:"instanceIDPrefix" yaml:"instanceIDPrefix"` // Optional prefix for workflow instance IDs
-	InstanceIDField  string `json:"instanceIDField" yaml:"instanceIDField"`   // Field in resource data to use for instance ID (defaults to "id")
+	ResourceName       string `json:"resourceName" yaml:"resourceName"`
+	WorkflowType       string `json:"workflowType" yaml:"workflowType"`             // The type of workflow to use for state machine operations
+	WorkflowEngine     string `json:"workflowEngine" yaml:"workflowEngine"`         // The name of the workflow engine to use
+	InitialTransition  string `json:"initialTransition" yaml:"initialTransition"`   // First transition to trigger after creating a workflow instance
+	InstanceIDPrefix   string `json:"instanceIDPrefix" yaml:"instanceIDPrefix"`     // Optional prefix for workflow instance IDs
+	InstanceIDField    string `json:"instanceIDField" yaml:"instanceIDField"`       // Field in resource data to use for instance ID (defaults to "id")
+	SeedFile           string `json:"seedFile" yaml:"seedFile"`                     // Path to JSON seed data file
+	SourceResourceName string `json:"sourceResourceName" yaml:"sourceResourceName"` // Read from a different resource's persistence data
+	StateFilter        string `json:"stateFilter" yaml:"stateFilter"`               // Only include resources matching this state in GET responses
 }
 
 // NewRESTAPIHandler creates a new REST API handler
@@ -210,6 +213,16 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 								// Extract instance ID field
 								if field, ok := cfg["instanceIDField"].(string); ok && field != "" {
 									h.InstanceIDField = field
+								}
+
+								// Extract initial transition
+								if it, ok := cfg["initialTransition"].(string); ok && it != "" {
+									h.InitialTransition = it
+								}
+
+								// Extract seed file path
+								if sf, ok := cfg["seedFile"].(string); ok && sf != "" {
+									h.SeedFile = sf
 								}
 
 								// Extract source resource name (for view handlers like queue)
@@ -425,13 +438,13 @@ func (h *RESTAPIHandler) Start(ctx context.Context) error {
 	}
 
 	// Load seed data only if no persisted data was loaded
-	if h.seedFile != "" {
-		if err := h.loadSeedData(h.seedFile); err != nil {
+	if h.SeedFile != "" {
+		if err := h.loadSeedData(h.SeedFile); err != nil {
 			if h.logger != nil {
-				h.logger.Warn(fmt.Sprintf("Failed to load seed data from %s: %v", h.seedFile, err))
+				h.logger.Warn(fmt.Sprintf("Failed to load seed data from %s: %v", h.SeedFile, err))
 			}
 		} else if h.logger != nil {
-			h.logger.Info(fmt.Sprintf("Loaded seed data from %s", h.seedFile))
+			h.logger.Info(fmt.Sprintf("Loaded seed data from %s", h.SeedFile))
 		}
 	}
 

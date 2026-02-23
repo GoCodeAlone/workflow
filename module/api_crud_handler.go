@@ -200,7 +200,7 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 	}
 
 	// If a workflow engine is configured, create an instance and trigger the initial transition
-	if h.workflowType != "" && h.workflowEngine != "" {
+	if h.Type != "" && h.Engine != "" {
 		h.startWorkflowForResource(r.Context(), resourceId, resource)
 	}
 

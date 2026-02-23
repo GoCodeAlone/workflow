@@ -16,25 +16,25 @@ import (
 func (h *RESTAPIHandler) startWorkflowForResource(_ context.Context, resourceId string, resource RESTResource) {
 	// Find the state machine engine
 	var engineSvc any
-	if err := h.app.GetService(h.workflowEngine, &engineSvc); err != nil {
-		h.logger.Warn(fmt.Sprintf("Workflow engine '%s' not found: %v", h.workflowEngine, err))
+	if err := h.app.GetService(h.Engine, &engineSvc); err != nil {
+		h.logger.Warn(fmt.Sprintf("Workflow engine '%s' not found: %v", h.Engine, err))
 		return
 	}
 
 	smEngine, ok := engineSvc.(*StateMachineEngine)
 	if !ok {
-		h.logger.Warn(fmt.Sprintf("Service '%s' is not a StateMachineEngine", h.workflowEngine))
+		h.logger.Warn(fmt.Sprintf("Service '%s' is not a StateMachineEngine", h.Engine))
 		return
 	}
 
 	// Build the instance ID
 	instanceId := resourceId
-	if h.instanceIDPrefix != "" {
-		instanceId = h.instanceIDPrefix + resourceId
+	if h.InstanceIDPrefix != "" {
+		instanceId = h.InstanceIDPrefix + resourceId
 	}
 
 	// Create the workflow instance
-	_, err := smEngine.CreateWorkflow(h.workflowType, instanceId, resource.Data)
+	_, err := smEngine.CreateWorkflow(h.Type, instanceId, resource.Data)
 	if err != nil {
 		h.logger.Error(fmt.Sprintf("Failed to create workflow instance '%s': %v", instanceId, err))
 		return
@@ -46,7 +46,7 @@ func (h *RESTAPIHandler) startWorkflowForResource(_ context.Context, resourceId 
 	// handler returns, which would abort the processing pipeline.
 	go func() {
 		bgCtx := context.Background()
-		transitionName := h.initialTransition
+		transitionName := h.InitialTransition
 		if transitionName == "" {
 			transitionName = "start_validation" // default convention
 		}
@@ -173,7 +173,7 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 	}
 
 	// Determine the workflow type to use
-	workflowType := h.workflowType
+	workflowType := h.Type
 
 	// If a workflow type was specified in the transition request, use that instead
 	if transitionRequest.WorkflowType != "" {
@@ -189,16 +189,16 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 
 	// Generate the instance ID using our configuration
 	var instanceId string
-	if h.instanceIDField != "" && h.instanceIDField != "id" {
-		if idVal, ok := workflowData[h.instanceIDField].(string); ok && idVal != "" {
+	if h.InstanceIDField != "" && h.InstanceIDField != "id" {
+		if idVal, ok := workflowData[h.InstanceIDField].(string); ok && idVal != "" {
 			instanceId = idVal
 		}
 	}
 	if instanceId == "" {
 		instanceId = resourceId
 	}
-	if h.instanceIDPrefix != "" {
-		instanceId = h.instanceIDPrefix + instanceId
+	if h.InstanceIDPrefix != "" {
+		instanceId = h.InstanceIDPrefix + instanceId
 	}
 
 	// Set the required IDs in the workflow data
@@ -214,17 +214,17 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 	var isStateMachineEngine bool
 
 	// First, try to use the specifically configured engine if available
-	if h.workflowEngine != "" {
+	if h.Engine != "" {
 		var engineSvc any
-		if err := h.app.GetService(h.workflowEngine, &engineSvc); err == nil && engineSvc != nil {
+		if err := h.app.GetService(h.Engine, &engineSvc); err == nil && engineSvc != nil {
 			engine = engineSvc
 			if sm, ok := engineSvc.(*StateMachineEngine); ok {
 				stateMachineEngine = sm
 				isStateMachineEngine = true
 			}
-			h.logger.Debug(fmt.Sprintf("Using configured workflow engine: %s", h.workflowEngine))
+			h.logger.Debug(fmt.Sprintf("Using configured workflow engine: %s", h.Engine))
 		} else {
-			h.logger.Warn(fmt.Sprintf("Configured workflow engine '%s' not found, will try to discover one", h.workflowEngine))
+			h.logger.Warn(fmt.Sprintf("Configured workflow engine '%s' not found, will try to discover one", h.Engine))
 		}
 	}
 
@@ -467,9 +467,9 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 
 	// Find the state machine engine
 	var smEngine *StateMachineEngine
-	if h.workflowEngine != "" {
+	if h.Engine != "" {
 		var engineSvc any
-		if err := h.app.GetService(h.workflowEngine, &engineSvc); err == nil {
+		if err := h.app.GetService(h.Engine, &engineSvc); err == nil {
 			smEngine, _ = engineSvc.(*StateMachineEngine)
 		}
 	}
@@ -481,8 +481,8 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 
 	// Build instance ID
 	instanceId := resourceId
-	if h.instanceIDPrefix != "" {
-		instanceId = h.instanceIDPrefix + resourceId
+	if h.InstanceIDPrefix != "" {
+		instanceId = h.InstanceIDPrefix + resourceId
 	}
 
 	// Merge existing resource data into the transition payload
@@ -508,7 +508,7 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 
 	// Ensure workflow instance exists
 	if _, err := smEngine.GetInstance(instanceId); err != nil {
-		if _, err := smEngine.CreateWorkflow(h.workflowType, instanceId, workflowData); err != nil {
+		if _, err := smEngine.CreateWorkflow(h.Type, instanceId, workflowData); err != nil {
 			h.logger.Error(fmt.Sprintf("Failed to create workflow instance for sub-action: %v", err))
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create workflow instance"})
