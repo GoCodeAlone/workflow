@@ -93,7 +93,7 @@ func staticFileServerFactory(name string, cfg map[string]any) modular.Module {
 		prefix = p
 	}
 	var opts []module.StaticFileServerOption
-	spaFallback := true
+	spaFallback := false
 	if sf, ok := cfg["spaFallback"].(bool); ok {
 		spaFallback = sf
 	}

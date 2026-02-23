@@ -91,7 +91,7 @@ func registerCyclicPluginFactories(engine *workflow.StdEngine) {
 			prefix = p
 		}
 		var opts []module.StaticFileServerOption
-		spaFallback := true
+		spaFallback := false
 		if sf, ok := cfg["spaFallback"].(bool); ok {
 			spaFallback = sf
 		}
