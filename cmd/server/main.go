@@ -41,6 +41,8 @@ import (
 	pluginapi "github.com/GoCodeAlone/workflow/plugins/api"
 	pluginauth "github.com/GoCodeAlone/workflow/plugins/auth"
 	plugincicd "github.com/GoCodeAlone/workflow/plugins/cicd"
+	plugindlq "github.com/GoCodeAlone/workflow/plugins/dlq"
+	pluginevstore "github.com/GoCodeAlone/workflow/plugins/eventstore"
 	pluginff "github.com/GoCodeAlone/workflow/plugins/featureflags"
 	pluginhttp "github.com/GoCodeAlone/workflow/plugins/http"
 	pluginintegration "github.com/GoCodeAlone/workflow/plugins/integration"
@@ -54,6 +56,7 @@ import (
 	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
 	pluginsm "github.com/GoCodeAlone/workflow/plugins/statemachine"
 	pluginstorage "github.com/GoCodeAlone/workflow/plugins/storage"
+	plugintimeline "github.com/GoCodeAlone/workflow/plugins/timeline"
 	"github.com/GoCodeAlone/workflow/provider"
 	_ "github.com/GoCodeAlone/workflow/provider/aws"
 	_ "github.com/GoCodeAlone/workflow/provider/azure"
@@ -109,6 +112,9 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 		pluginpipeline.New(),
 		plugincicd.New(),
 		pluginff.New(),
+		pluginevstore.New(),
+		plugintimeline.New(),
+		plugindlq.New(),
 		pluginsecrets.New(),
 		pluginmodcompat.New(),
 		pluginscheduler.New(),
@@ -550,14 +556,29 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	// Event store, idempotency store
 	// -----------------------------------------------------------------------
 
-	// Create SQLite event store for execution events
-	eventsDBPath := filepath.Join(*dataDir, "events.db")
-	eventStore, err := evstore.NewSQLiteEventStore(eventsDBPath)
-	if err != nil {
-		logger.Warn("Failed to create event store — timeline/replay/diff features disabled", "error", err)
-	} else {
+	// Try to discover the event store from the service registry (registered
+	// by an eventstore.service module declared in config). Fall back to
+	// creating one directly if no module was configured.
+	var eventStore *evstore.SQLiteEventStore
+	for _, svc := range engine.GetApp().SvcRegistry() {
+		if es, ok := svc.(*evstore.SQLiteEventStore); ok {
+			eventStore = es
+			logger.Info("Discovered event store from service registry")
+			break
+		}
+	}
+	if eventStore == nil {
+		eventsDBPath := filepath.Join(*dataDir, "events.db")
+		var esErr error
+		eventStore, esErr = evstore.NewSQLiteEventStore(eventsDBPath)
+		if esErr != nil {
+			logger.Warn("Failed to create event store — timeline/replay/diff features disabled", "error", esErr)
+		} else {
+			logger.Info("Opened event store (fallback)", "path", eventsDBPath)
+		}
+	}
+	if eventStore != nil {
 		app.stores.eventStore = eventStore
-		logger.Info("Opened event store", "path", eventsDBPath)
 	}
 
 	// Create SQLite idempotency store (separate DB connection, same data dir)
@@ -582,47 +603,114 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	// Timeline, replay, backfill handlers
 	// -----------------------------------------------------------------------
 
-	if eventStore != nil {
-		// Timeline handler (execution list, timeline, events)
-		timelineHandler := evstore.NewTimelineHandler(eventStore, logger)
-		timelineMux := http.NewServeMux()
-		timelineHandler.RegisterRoutes(timelineMux)
-		app.services.timelineMux = timelineMux
+	// Try to discover timeline/replay/backfill from the service registry
+	// (registered by a timeline.service module). Fall back to direct creation.
+	timelineDiscovered := false
+	for svcName, svc := range engine.GetApp().SvcRegistry() {
+		if tsMod, ok := svc.(*module.TimelineServiceModule); ok {
+			app.services.timelineMux = tsMod.TimelineMux()
+			app.services.replayMux = tsMod.ReplayMux()
+			app.services.backfillMux = tsMod.BackfillMux()
+			timelineDiscovered = true
+			logger.Info("Discovered timeline service from service registry", "service", svcName)
+			break
+		}
+	}
+	// Also check for individual mux services registered by ProvidesServices
+	if !timelineDiscovered {
+		for svcName, svc := range engine.GetApp().SvcRegistry() {
+			if strings.HasSuffix(svcName, ".timeline") {
+				if h, ok := svc.(http.Handler); ok {
+					app.services.timelineMux = h
+					timelineDiscovered = true
+					logger.Info("Discovered timeline mux from service registry", "service", svcName)
+				}
+			}
+			if strings.HasSuffix(svcName, ".replay") {
+				if h, ok := svc.(http.Handler); ok {
+					app.services.replayMux = h
+				}
+			}
+			if strings.HasSuffix(svcName, ".backfill") {
+				if h, ok := svc.(http.Handler); ok {
+					app.services.backfillMux = h
+				}
+			}
+		}
+	}
+	if !timelineDiscovered {
+		if eventStore != nil {
+			timelineHandler := evstore.NewTimelineHandler(eventStore, logger)
+			timelineMux := http.NewServeMux()
+			timelineHandler.RegisterRoutes(timelineMux)
+			app.services.timelineMux = timelineMux
 
-		// Replay handler
-		replayHandler := evstore.NewReplayHandler(eventStore, logger)
-		replayMux := http.NewServeMux()
-		replayHandler.RegisterRoutes(replayMux)
-		app.services.replayMux = replayMux
+			replayHandler := evstore.NewReplayHandler(eventStore, logger)
+			replayMux := http.NewServeMux()
+			replayHandler.RegisterRoutes(replayMux)
+			app.services.replayMux = replayMux
 
-		// Backfill / Mock / Diff handler
-		backfillStore := evstore.NewInMemoryBackfillStore()
-		mockStore := evstore.NewInMemoryStepMockStore()
-		diffCalc := evstore.NewDiffCalculator(eventStore)
-		bmdHandler := evstore.NewBackfillMockDiffHandler(backfillStore, mockStore, diffCalc, logger)
-		bmdMux := http.NewServeMux()
-		bmdHandler.RegisterRoutes(bmdMux)
-		app.services.backfillMux = bmdMux
+			backfillStore := evstore.NewInMemoryBackfillStore()
+			mockStore := evstore.NewInMemoryStepMockStore()
+			diffCalc := evstore.NewDiffCalculator(eventStore)
+			bmdHandler := evstore.NewBackfillMockDiffHandler(backfillStore, mockStore, diffCalc, logger)
+			bmdMux := http.NewServeMux()
+			bmdHandler.RegisterRoutes(bmdMux)
+			app.services.backfillMux = bmdMux
 
-		logger.Info("Created timeline, replay, and backfill/mock/diff handlers")
-	} else {
-		// Create stub handlers so delegate routes return 503 instead of 500
-		stubMsg := "event store unavailable — timeline/replay/backfill features disabled"
-		app.services.timelineMux = featureDisabledHandler(stubMsg)
-		app.services.replayMux = featureDisabledHandler(stubMsg)
-		app.services.backfillMux = featureDisabledHandler(stubMsg)
-		logger.Info("Created stub handlers for timeline/replay/backfill (event store unavailable)")
+			logger.Info("Created timeline, replay, and backfill/mock/diff handlers (fallback)")
+		} else {
+			stubMsg := "event store unavailable — timeline/replay/backfill features disabled"
+			app.services.timelineMux = featureDisabledHandler(stubMsg)
+			app.services.replayMux = featureDisabledHandler(stubMsg)
+			app.services.backfillMux = featureDisabledHandler(stubMsg)
+			logger.Info("Created stub handlers for timeline/replay/backfill (event store unavailable)")
+		}
 	}
 
 	// -----------------------------------------------------------------------
 	// DLQ handler
 	// -----------------------------------------------------------------------
 
-	dlqStore := evstore.NewInMemoryDLQStore()
-	dlqHandler := evstore.NewDLQHandler(dlqStore, logger)
-	dlqMux := http.NewServeMux()
-	dlqHandler.RegisterRoutes(dlqMux)
-	app.services.dlqMux = dlqMux
+	// Try to discover DLQ from the service registry (registered by a
+	// dlq.service module). Fall back to direct creation.
+	dlqDiscovered := false
+	var dlqStore evstore.DLQStore
+	for svcName, svc := range engine.GetApp().SvcRegistry() {
+		if dlqMod, ok := svc.(*module.DLQServiceModule); ok {
+			app.services.dlqMux = dlqMod.DLQMux()
+			dlqStore = dlqMod.Store()
+			dlqDiscovered = true
+			logger.Info("Discovered DLQ service from service registry", "service", svcName)
+			break
+		}
+	}
+	// Also check for the DLQ store registered by ProvidesServices
+	if !dlqDiscovered {
+		for svcName, svc := range engine.GetApp().SvcRegistry() {
+			if strings.HasSuffix(svcName, ".store") {
+				if ds, ok := svc.(*evstore.InMemoryDLQStore); ok {
+					dlqStore = ds
+				}
+			}
+			if strings.HasSuffix(svcName, ".admin") {
+				if h, ok := svc.(http.Handler); ok && strings.Contains(svcName, "dlq") {
+					app.services.dlqMux = h
+					dlqDiscovered = true
+					logger.Info("Discovered DLQ mux from service registry", "service", svcName)
+				}
+			}
+		}
+	}
+	if !dlqDiscovered {
+		inMemDLQStore := evstore.NewInMemoryDLQStore()
+		dlqStore = inMemDLQStore
+		dlqHandler := evstore.NewDLQHandler(inMemDLQStore, logger)
+		dlqMux := http.NewServeMux()
+		dlqHandler.RegisterRoutes(dlqMux)
+		app.services.dlqMux = dlqMux
+		logger.Info("Created DLQ handler (fallback)")
+	}
 
 	// -----------------------------------------------------------------------
 	// Billing handler

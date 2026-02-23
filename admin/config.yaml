@@ -136,6 +136,29 @@ modules:
       sse_enabled: true
       db_path: "data/featureflags.db"
 
+  # --- Event Store ---
+  # Provides the execution event store; auto-discovered by timeline and replay modules.
+  - name: admin-event-store
+    type: eventstore.service
+    config:
+      db_path: "data/events.db"
+      retention_days: 90
+
+  # --- Timeline / Replay ---
+  # Provides timeline, replay, and backfill/mock/diff HTTP handlers.
+  - name: admin-timeline
+    type: timeline.service
+    config:
+      event_store: "admin-event-store"
+
+  # --- Dead Letter Queue ---
+  # Provides DLQ management HTTP endpoints.
+  - name: admin-dlq
+    type: dlq.service
+    config:
+      max_retries: 3
+      retention_days: 30
+
 workflows:
   http-admin:
     router: admin-router
