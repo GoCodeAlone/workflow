@@ -40,6 +40,7 @@ type JWTAuthModule struct {
 	mu             sync.RWMutex
 	nextID         int
 	app            modular.Application
+	logger         modular.Logger
 	persistence    *PersistenceStore // optional write-through backend
 	userStore      *UserStore        // optional external user store (from auth.user-store module)
 }
@@ -89,6 +90,7 @@ func (j *JWTAuthModule) Init(app modular.Application) error {
 		return fmt.Errorf("JWT secret must be at least 32 bytes for security")
 	}
 	j.app = app
+	j.logger = app.Logger()
 
 	// Wire external user store (optional — from auth.user-store module)
 	for _, svc := range app.SvcRegistry() {
@@ -1164,7 +1166,7 @@ func (j *JWTAuthModule) Start(ctx context.Context) error {
 	if j.seedFile != "" {
 		if err := j.loadSeedUsers(j.seedFile); err != nil {
 			// Non-fatal: log but don't prevent startup
-			_ = err
+			j.logger.Warn("failed to load seed users", "file", j.seedFile, "error", err)
 		}
 	}
 

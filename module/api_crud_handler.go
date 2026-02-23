@@ -196,7 +196,9 @@ func (h *RESTAPIHandler) handlePost(resourceId string, w http.ResponseWriter, r 
 	if h.persistence != nil {
 		h.fieldMapping.SetValue(resource.Data, "state", resource.State)
 		h.fieldMapping.SetValue(resource.Data, "lastUpdate", resource.LastUpdate)
-		_ = h.persistence.SaveResource(h.resourceName, resource.ID, resource.Data)
+		if err := h.persistence.SaveResource(h.resourceName, resource.ID, resource.Data); err != nil {
+			h.logger.Warn(fmt.Sprintf("failed to persist resource %s/%s: %v", h.resourceName, resource.ID, err))
+		}
 	}
 
 	// If a workflow engine is configured, create an instance and trigger the initial transition
@@ -252,7 +254,9 @@ func (h *RESTAPIHandler) handlePut(resourceId string, w http.ResponseWriter, r *
 
 	// Write-through to persistence
 	if h.persistence != nil {
-		_ = h.persistence.SaveResource(h.resourceName, resourceId, data)
+		if err := h.persistence.SaveResource(h.resourceName, resourceId, data); err != nil {
+			h.logger.Warn(fmt.Sprintf("failed to persist resource %s/%s: %v", h.resourceName, resourceId, err))
+		}
 	}
 
 	if err := json.NewEncoder(w).Encode(h.resources[resourceId]); err != nil {
@@ -287,7 +291,9 @@ func (h *RESTAPIHandler) handleDelete(resourceId string, w http.ResponseWriter, 
 
 	// Write-through to persistence
 	if h.persistence != nil {
-		_ = h.persistence.DeleteResource(h.resourceName, resourceId)
+		if err := h.persistence.DeleteResource(h.resourceName, resourceId); err != nil {
+			h.logger.Warn(fmt.Sprintf("failed to delete persisted resource %s/%s: %v", h.resourceName, resourceId, err))
+		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)

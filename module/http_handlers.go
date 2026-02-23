@@ -2,6 +2,7 @@ package module
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/CrisisTextLine/modular"
@@ -54,8 +55,7 @@ func (h *SimpleHTTPHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		// Log error but continue since response is already committed
-		_ = err
+		log.Printf("http handler: failed to encode response: %v", err)
 	}
 }
 
