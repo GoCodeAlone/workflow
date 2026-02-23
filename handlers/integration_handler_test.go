@@ -265,3 +265,227 @@ func TestIntegrationWorkflowHandler_ExecuteIntegrationWorkflow_WithOnSuccess(t *
 		t.Fatalf("ExecuteIntegrationWorkflow failed: %v", err)
 	}
 }
+
+// --- Tests for extracted helper functions ---
+
+func TestParseConnectorConfigs_Empty(t *testing.T) {
+	registry := module.NewIntegrationRegistry("test")
+	err := parseConnectorConfigs(nil, registry)
+	if err == nil {
+		t.Fatal("expected error for empty connectors")
+	}
+}
+
+func TestParseConnectorConfigs_InvalidEntry(t *testing.T) {
+	registry := module.NewIntegrationRegistry("test")
+	err := parseConnectorConfigs([]any{"not-a-map"}, registry)
+	if err == nil {
+		t.Fatal("expected error for non-map entry")
+	}
+}
+
+func TestParseConnectorConfigs_MissingName(t *testing.T) {
+	registry := module.NewIntegrationRegistry("test")
+	err := parseConnectorConfigs([]any{map[string]any{"type": "http"}}, registry)
+	if err == nil {
+		t.Fatal("expected error for missing name")
+	}
+}
+
+func TestParseConnectorConfigs_MissingType(t *testing.T) {
+	registry := module.NewIntegrationRegistry("test")
+	err := parseConnectorConfigs([]any{map[string]any{"name": "c"}}, registry)
+	if err == nil {
+		t.Fatal("expected error for missing type")
+	}
+}
+
+func TestParseConnectorConfigs_UnknownType(t *testing.T) {
+	registry := module.NewIntegrationRegistry("test")
+	err := parseConnectorConfigs([]any{map[string]any{"name": "c", "type": "unknown"}}, registry)
+	if err == nil {
+		t.Fatal("expected error for unknown connector type")
+	}
+}
+
+func TestParseConnectorConfigs_ValidHTTP(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer server.Close()
+
+	registry := module.NewIntegrationRegistry("test")
+	err := parseConnectorConfigs([]any{
+		map[string]any{
+			"name": "my-conn",
+			"type": "http",
+			"config": map[string]any{
+				"baseURL":         server.URL,
+				"allowPrivateIPs": true,
+			},
+		},
+	}, registry)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	conn, err := registry.GetConnector("my-conn")
+	if err != nil || conn == nil {
+		t.Fatal("expected connector to be registered")
+	}
+}
+
+func TestParseStepConfigs_InvalidEntry(t *testing.T) {
+	registry := module.NewIntegrationRegistry("test")
+	err := parseStepConfigs([]any{"not-a-map"}, registry)
+	if err == nil {
+		t.Fatal("expected error for non-map step entry")
+	}
+}
+
+func TestParseStepConfigs_MissingName(t *testing.T) {
+	registry := module.NewIntegrationRegistry("test")
+	err := parseStepConfigs([]any{map[string]any{"connector": "c", "action": "GET /"}}, registry)
+	if err == nil {
+		t.Fatal("expected error for missing step name")
+	}
+}
+
+func TestParseStepConfigs_MissingConnector(t *testing.T) {
+	registry := module.NewIntegrationRegistry("test")
+	err := parseStepConfigs([]any{map[string]any{"name": "s", "action": "GET /"}}, registry)
+	if err == nil {
+		t.Fatal("expected error for missing connector")
+	}
+}
+
+func TestParseStepConfigs_ConnectorNotRegistered(t *testing.T) {
+	registry := module.NewIntegrationRegistry("test")
+	err := parseStepConfigs([]any{map[string]any{"name": "s", "connector": "missing", "action": "GET /"}}, registry)
+	if err == nil {
+		t.Fatal("expected error for unregistered connector")
+	}
+}
+
+func TestParseStepConfigs_MissingAction(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer server.Close()
+
+	registry := module.NewIntegrationRegistry("test")
+	conn := module.NewHTTPIntegrationConnector("my-conn", server.URL)
+	conn.AllowPrivateIPs()
+	registry.RegisterConnector(conn)
+
+	err := parseStepConfigs([]any{map[string]any{"name": "s", "connector": "my-conn"}}, registry)
+	if err == nil {
+		t.Fatal("expected error for missing action")
+	}
+}
+
+func TestParseStepConfigs_Valid(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer server.Close()
+
+	registry := module.NewIntegrationRegistry("test")
+	conn := module.NewHTTPIntegrationConnector("my-conn", server.URL)
+	conn.AllowPrivateIPs()
+	registry.RegisterConnector(conn)
+
+	err := parseStepConfigs([]any{map[string]any{"name": "s", "connector": "my-conn", "action": "GET /"}}, registry)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExecuteStepWithRetry_SuccessOnFirstAttempt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+
+	conn := module.NewHTTPIntegrationConnector("c", server.URL)
+	conn.AllowPrivateIPs()
+	if err := conn.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+
+	step := &IntegrationStep{Name: "s", Action: "GET /", RetryCount: 0}
+	result, err := executeStepWithRetry(context.Background(), conn, step, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestExecuteStepWithRetry_RetryOnError(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "retry"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+
+	conn := module.NewHTTPIntegrationConnector("c", server.URL)
+	conn.AllowPrivateIPs()
+	if err := conn.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+
+	step := &IntegrationStep{Name: "s", Action: "GET /", RetryCount: 3, RetryDelay: "1ms"}
+	result, err := executeStepWithRetry(context.Background(), conn, step, nil)
+	if err != nil {
+		t.Fatalf("expected success after retries, got: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestExecuteStepWithRetry_ContextCancelled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "fail"})
+	}))
+	defer server.Close()
+
+	conn := module.NewHTTPIntegrationConnector("c", server.URL)
+	conn.AllowPrivateIPs()
+	if err := conn.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	step := &IntegrationStep{Name: "s", Action: "GET /", RetryCount: 5, RetryDelay: "1s"}
+	_, err := executeStepWithRetry(ctx, conn, step, nil)
+	if err == nil {
+		t.Fatal("expected context cancellation error")
+	}
+}
+
+func TestExecuteStepWithRetry_ExhaustedRetries(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "always-fail"})
+	}))
+	defer server.Close()
+
+	conn := module.NewHTTPIntegrationConnector("c", server.URL)
+	conn.AllowPrivateIPs()
+	if err := conn.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+
+	step := &IntegrationStep{Name: "s", Action: "GET /", RetryCount: 2, RetryDelay: "1ms"}
+	_, err := executeStepWithRetry(context.Background(), conn, step, nil)
+	if err == nil {
+		t.Fatal("expected error after exhausted retries")
+	}
+}

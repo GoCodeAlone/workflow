@@ -10,6 +10,10 @@ permissions:
   contents: read
   packages: read
 
+env:
+  GOPRIVATE: github.com/GoCodeAlone/*
+  GONOSUMCHECK: github.com/GoCodeAlone/*
+
 jobs:
   test:
     name: Test (Go ${{ matrix.go-version }})

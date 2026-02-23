@@ -184,6 +184,79 @@ var connectorFactories = map[string]connectorConfigureFunc{
 	"database": configureDatabaseConnector,
 }
 
+// parseConnectorConfigs parses the connectors config slice, creates each connector via the
+// appropriate factory, and registers it with intRegistry.
+func parseConnectorConfigs(connectorsConfig []any, intRegistry module.IntegrationRegistry) error {
+	if len(connectorsConfig) == 0 {
+		return fmt.Errorf("no connectors defined in integration workflow")
+	}
+
+	for i, cc := range connectorsConfig {
+		connMap, ok := cc.(map[string]any)
+		if !ok {
+			return fmt.Errorf("invalid connector configuration at index %d", i)
+		}
+
+		name, _ := connMap["name"].(string)
+		if name == "" {
+			return fmt.Errorf("connector name not specified at index %d", i)
+		}
+
+		connType, _ := connMap["type"].(string)
+		if connType == "" {
+			return fmt.Errorf("connector type not specified for connector '%s'", name)
+		}
+
+		config, _ := connMap["config"].(map[string]any)
+
+		factory, ok := connectorFactories[connType]
+		if !ok {
+			return fmt.Errorf("unsupported connector type '%s' for connector '%s'", connType, name)
+		}
+
+		connector, err := factory(name, config)
+		if err != nil {
+			return err
+		}
+
+		intRegistry.RegisterConnector(connector)
+	}
+
+	return nil
+}
+
+// parseStepConfigs validates the steps config slice against the registered connectors.
+func parseStepConfigs(stepsConfig []any, intRegistry module.IntegrationRegistry) error {
+	for i, sc := range stepsConfig {
+		stepMap, ok := sc.(map[string]any)
+		if !ok {
+			return fmt.Errorf("invalid step configuration at index %d", i)
+		}
+
+		name, _ := stepMap["name"].(string)
+		if name == "" {
+			return fmt.Errorf("step name not specified at index %d", i)
+		}
+
+		connectorName, _ := stepMap["connector"].(string)
+		if connectorName == "" {
+			return fmt.Errorf("connector not specified for step '%s'", name)
+		}
+
+		// Verify connector exists
+		if _, err := intRegistry.GetConnector(connectorName); err != nil {
+			return fmt.Errorf("connector '%s' not found for step '%s': %w", connectorName, name, err)
+		}
+
+		action, _ := stepMap["action"].(string)
+		if action == "" {
+			return fmt.Errorf("action not specified for step '%s'", name)
+		}
+	}
+
+	return nil
+}
+
 // ConfigureWorkflow sets up the workflow from configuration
 func (h *IntegrationWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig any) error {
 	// Convert the generic config to integration-specific config
@@ -217,82 +290,53 @@ func (h *IntegrationWorkflowHandler) ConfigureWorkflow(app modular.Application, 
 		return fmt.Errorf("service '%s' is not an IntegrationRegistry", registryName)
 	}
 
-	// Configure connectors
 	connectorsConfig, _ := intConfig["connectors"].([]any)
-	if len(connectorsConfig) == 0 {
-		return fmt.Errorf("no connectors defined in integration workflow")
+	if err := parseConnectorConfigs(connectorsConfig, intRegistry); err != nil {
+		return err
 	}
 
-	for i, cc := range connectorsConfig {
-		connMap, ok := cc.(map[string]any)
-		if !ok {
-			return fmt.Errorf("invalid connector configuration at index %d", i)
-		}
-
-		name, _ := connMap["name"].(string)
-		if name == "" {
-			return fmt.Errorf("connector name not specified at index %d", i)
-		}
-
-		connType, _ := connMap["type"].(string)
-		if connType == "" {
-			return fmt.Errorf("connector type not specified for connector '%s'", name)
-		}
-
-		config, _ := connMap["config"].(map[string]any)
-
-		// Create and configure the connector based on type
-		var connector module.IntegrationConnector
-		factory, ok := connectorFactories[connType]
-		if !ok {
-			return fmt.Errorf("unsupported connector type '%s' for connector '%s'", connType, name)
-		}
-		var err error
-		connector, err = factory(name, config)
-		if err != nil {
-			return err
-		}
-
-		// Register the connector
-		intRegistry.RegisterConnector(connector)
-	}
-
-	// Configure workflow steps
 	stepsConfig, _ := intConfig["steps"].([]any)
 	if len(stepsConfig) > 0 {
-		// Process steps configuration
-		// In a full implementation, we'd create a workflow executor that runs these steps
-		// For now, we'll just validate the configuration
-		for i, sc := range stepsConfig {
-			stepMap, ok := sc.(map[string]any)
-			if !ok {
-				return fmt.Errorf("invalid step configuration at index %d", i)
-			}
-
-			name, _ := stepMap["name"].(string)
-			if name == "" {
-				return fmt.Errorf("step name not specified at index %d", i)
-			}
-
-			connectorName, _ := stepMap["connector"].(string)
-			if connectorName == "" {
-				return fmt.Errorf("connector not specified for step '%s'", name)
-			}
-
-			// Verify connector exists
-			_, err := intRegistry.GetConnector(connectorName)
-			if err != nil {
-				return fmt.Errorf("connector '%s' not found for step '%s': %w", connectorName, name, err)
-			}
-
-			action, _ := stepMap["action"].(string)
-			if action == "" {
-				return fmt.Errorf("action not specified for step '%s'", name)
-			}
+		if err := parseStepConfigs(stepsConfig, intRegistry); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// executeStepWithRetry executes a single step action against the connector, retrying up to
+// step.RetryCount times with step.RetryDelay between attempts.
+func executeStepWithRetry(ctx context.Context, connector module.IntegrationConnector, step *IntegrationStep, params map[string]any) (map[string]any, error) {
+	result, err := connector.Execute(ctx, step.Action, params)
+	if err == nil || step.RetryCount == 0 {
+		return result, err
+	}
+
+	retryDelay := defaultRetryDelay
+	if step.RetryDelay != "" {
+		if parsedDelay, parseErr := time.ParseDuration(step.RetryDelay); parseErr == nil {
+			retryDelay = parsedDelay
+		}
+	}
+
+	for i := 0; i < step.RetryCount; i++ {
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		}
+		timer.Stop()
+
+		result, err = connector.Execute(ctx, step.Action, params)
+		if err == nil {
+			return result, nil
+		}
+	}
+
+	return result, err
 }
 
 // ExecuteIntegrationWorkflow executes a sequence of integration steps
@@ -356,59 +400,19 @@ func (h *IntegrationWorkflowHandler) ExecuteIntegrationWorkflow(
 			}
 		}
 
-		// Execute the step
-		stepResult, err := connector.Execute(ctx, step.Action, params)
+		stepResult, err := executeStepWithRetry(ctx, connector, step, params)
 		if err != nil {
-			// Handle retry logic if configured
-			if step.RetryCount > 0 {
-				// Simple retry implementation
-				var retryErr error
-				var retryResult map[string]any
-
-				// Parse retry delay
-				retryDelay := defaultRetryDelay
-				if step.RetryDelay != "" {
-					if parsedDelay, parseErr := time.ParseDuration(step.RetryDelay); parseErr == nil {
-						retryDelay = parsedDelay
-					}
-				}
-
-				// Try retries
-				for i := 0; i < step.RetryCount; i++ {
-					// Wait before retrying
-					select {
-					case <-time.After(retryDelay):
-						// Continue with retry
-					case <-ctx.Done():
-						// Context canceled or timed out
-						return results, ctx.Err()
-					}
-
-					// Retry execution
-					retryResult, retryErr = connector.Execute(ctx, step.Action, params)
-					if retryErr == nil {
-						// Success on retry
-						stepResult = retryResult
-						err = nil
-						break
-					}
-				}
+			if step.OnError != "" {
+				// Could invoke error handler here
+				// For now, just continue and store the error in results
+				results[step.Name+"_error"] = err.Error()
+				continue
 			}
-
-			// If still error after retries, handle error path
-			if err != nil {
-				if step.OnError != "" {
-					// Could invoke error handler here
-					// For now, just continue and store the error in results
-					results[step.Name+"_error"] = err.Error()
-					continue
-				}
-				// No error handler, return the error
-				if h.eventEmitter != nil {
-					h.eventEmitter.EmitStepFailed(ctx, "integration", step.Name, step.Connector, step.Action, time.Since(stepStartTime), err)
-				}
-				return results, fmt.Errorf("error executing step '%s': %w", step.Name, err)
+			// No error handler, return the error
+			if h.eventEmitter != nil {
+				h.eventEmitter.EmitStepFailed(ctx, "integration", step.Name, step.Connector, step.Action, time.Since(stepStartTime), err)
 			}
+			return results, fmt.Errorf("error executing step '%s': %w", step.Name, err)
 		}
 
 		// Store the result
