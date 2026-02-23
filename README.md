@@ -191,9 +191,9 @@ graph LR
 
 A 10+ module workflow demonstrating module composition with HTTP servers, routers, handlers, data transformers, state machines, message brokers, and observability. See [`example/order-processing-pipeline.yaml`](example/order-processing-pipeline.yaml).
 
-### 100+ Example Configurations
+### Example Configurations
 
-The [`example/`](example/) directory contains configurations covering:
+The [`example/`](example/) directory contains 27 YAML configurations covering:
 
 - API gateways and reverse proxies
 - Event-driven and scheduled workflows
@@ -223,7 +223,7 @@ ai/                  AI integration layer
   service.go           Provider selection and orchestration
   deploy.go            Validation loop and deployment to dynamic components
 ui/                  React + ReactFlow + Zustand visual builder (Vite, TypeScript)
-example/             100+ YAML configs and 2 full application examples
+example/             27 YAML configs and 2 full application examples
 mock/                Test helpers and mock implementations
 ```
 
