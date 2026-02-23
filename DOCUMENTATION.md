@@ -208,7 +208,7 @@ Validates license keys against a remote server with local caching and an offline
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `server_url` | string | `""` | License validation server URL. Leave empty for offline/starter mode. |
-| `license_key` | string | `""` | License key. Supports `$ENV_VAR` expansion. Falls back to `WORKFLOW_LICENSE_KEY` env var. |
+| `license_key` | string | `""` | License key. When empty, falls back to the `WORKFLOW_LICENSE_KEY` environment variable. |
 | `cache_ttl` | duration | `1h` | How long to cache a valid license result before re-validating. |
 | `grace_period` | duration | `72h` | How long to allow operation when the license server is unreachable. |
 | `refresh_interval` | duration | `1h` | How often the background goroutine re-validates the license. |
@@ -223,7 +223,7 @@ modules:
     type: license.validator
     config:
       server_url: "https://license.gocodalone.com/api/v1"
-      license_key: "$WORKFLOW_LICENSE_KEY"
+      license_key: ""  # leave empty to use WORKFLOW_LICENSE_KEY env var
       cache_ttl: "1h"
       grace_period: "72h"
       refresh_interval: "1h"
@@ -233,13 +233,15 @@ modules:
 
 ### `platform.provider`
 
-Declares a cloud infrastructure provider (e.g., Terraform, Pulumi) for use with the platform workflow handler and reconciliation trigger.
+Declares a cloud infrastructure provider (e.g., AWS, Docker Compose, GCP) for use with the platform workflow handler and reconciliation trigger.
 
 **Configuration:**
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `name` | string | yes | Provider name used to construct the service name `platform.provider.<name>`. |
+| `name` | string | yes | Provider identifier (e.g., `aws`, `docker-compose`, `gcp`). |
+| `config` | map[string]string | no | Provider-specific configuration (credentials, region, etc.). |
+| `tiers` | JSON | no | Three-tier infrastructure layout (`infrastructure`, `shared_primitives`, `application`). |
 
 **Example:**
 
@@ -249,20 +251,25 @@ modules:
     type: platform.provider
     config:
       name: "aws"
+      config:
+        region: "us-east-1"
 ```
 
 ---
 
 ### `platform.resource`
 
-Declares an infrastructure resource managed by a platform provider. Config keys are provider-specific and passed through as-is.
+A capability-based resource declaration managed by the platform abstraction layer.
 
 **Configuration:**
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `type` | string | yes | Infrastructure resource type (e.g., `database`, `queue`, `container_runtime`). |
-| *(additional keys)* | any | no | Provider-specific resource properties. |
+| `name` | string | yes | Unique identifier for this resource within its tier. |
+| `type` | string | yes | Abstract capability type (e.g., `container_runtime`, `database`, `message_queue`). |
+| `tier` | string | no | Infrastructure tier: `infrastructure`, `shared_primitive`, or `application` (default: `application`). |
+| `capabilities` | JSON | no | Provider-agnostic capability properties (replicas, memory, ports, etc.). |
+| `constraints` | JSON | no | Hard limits imposed by parent tiers. |
 
 **Example:**
 
@@ -271,9 +278,12 @@ modules:
   - name: orders-db
     type: platform.resource
     config:
+      name: orders-db
       type: database
-      engine: postgresql
-      storage: "10Gi"
+      tier: application
+      capabilities:
+        engine: postgresql
+        storage: "10Gi"
 ```
 
 ---
@@ -286,10 +296,9 @@ Provides the execution context for platform operations. Used to identify the org
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `path` | string | yes | Path identifying this context. |
-| `org` | string | no | Organization name. |
-| `environment` | string | no | Deployment environment (e.g., `production`, `staging`). |
-| `tier` | number | no | Platform tier level. |
+| `org` | string | yes | Organization identifier. |
+| `environment` | string | yes | Deployment environment (e.g., `production`, `staging`, `dev`). |
+| `tier` | string | no | Infrastructure tier: `infrastructure`, `shared_primitive`, or `application` (default: `application`). |
 
 **Example:**
 
@@ -298,10 +307,9 @@ modules:
   - name: platform-ctx
     type: platform.context
     config:
-      path: "acme-corp/production"
       org: "acme-corp"
       environment: "production"
-      tier: 3
+      tier: "application"
 ```
 
 ---
