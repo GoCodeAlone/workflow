@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
-	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -1402,114 +1401,13 @@ func main() {
 	}))
 
 	if *databaseDSN != "" {
-		// Multi-workflow mode: connect to PostgreSQL, run migrations, start the
-		// REST API router on a dedicated port. Single-config mode is skipped.
-		if *jwtSecret == "" {
-			log.Fatal("multi-workflow mode: --jwt-secret is required")
+		// Multi-workflow mode: delegate entirely to runMultiWorkflow.
+		// Single-config mode is skipped.
+		if err := runMultiWorkflow(logger); err != nil {
+			log.Fatalf("multi-workflow mode: %v", err) //nolint:gocritic // exitAfterDefer: intentional
 		}
-		logger.Info("Starting in multi-workflow mode",
-			"database_dsn_set", true,
-			"admin_email_set", *adminEmail != "",
-			"api_addr", *multiWorkflowAddr,
-		)
-		dbCtx, dbCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer dbCancel()
-		pgStore, pgErr := evstore.NewPGStore(dbCtx, evstore.PGConfig{URL: *databaseDSN})
-		if pgErr != nil {
-			log.Fatalf("multi-workflow mode: failed to connect to PostgreSQL: %v", pgErr) //nolint:gocritic // exitAfterDefer: intentional, cleanup is best-effort
-		}
-		migrator := evstore.NewMigrator(pgStore.Pool())
-		if mErr := migrator.Migrate(dbCtx); mErr != nil {
-			log.Fatalf("multi-workflow mode: database migration failed: %v", mErr)
-		}
-		logger.Info("multi-workflow mode: database migrations applied")
-
-		// Bootstrap admin user on first run.
-		if *adminEmail != "" && *adminPassword != "" {
-			_, lookupErr := pgStore.Users().GetByEmail(context.Background(), *adminEmail)
-			switch {
-			case errors.Is(lookupErr, evstore.ErrNotFound):
-				hash, hashErr := bcrypt.GenerateFromPassword([]byte(*adminPassword), bcrypt.DefaultCost)
-				if hashErr != nil {
-					log.Fatalf("multi-workflow mode: failed to hash admin password: %v", hashErr)
-				}
-				now := time.Now()
-				adminUser := &evstore.User{
-					ID:           uuid.New(),
-					Email:        *adminEmail,
-					PasswordHash: string(hash),
-					DisplayName:  "Admin",
-					Active:       true,
-					CreatedAt:    now,
-					UpdatedAt:    now,
-				}
-				if createErr := pgStore.Users().Create(context.Background(), adminUser); createErr != nil {
-					logger.Warn("multi-workflow mode: failed to create admin user (may already exist)", "error", createErr)
-				} else {
-					logger.Info("multi-workflow mode: created bootstrap admin user", "email", *adminEmail)
-				}
-			case lookupErr != nil:
-				log.Fatalf("multi-workflow mode: failed to check for admin user: %v", lookupErr)
-			default:
-				logger.Info("multi-workflow mode: admin user already exists, skipping bootstrap", "email", *adminEmail)
-			}
-		}
-
-		engineBuilder := func(cfg *config.WorkflowConfig, lg *slog.Logger) (*workflow.StdEngine, modular.Application, error) {
-			eng, _, _, buildErr := buildEngine(cfg, lg)
-			if buildErr != nil {
-				return nil, nil, buildErr
-			}
-			app := eng.GetApp()
-			return eng, app, nil
-		}
-		engineMgr := workflow.NewWorkflowEngineManager(pgStore.Workflows(), pgStore.CrossWorkflowLinks(), logger, engineBuilder)
-
-		apiRouter := apihandler.NewRouter(apihandler.Stores{
-			Users:       pgStore.Users(),
-			Sessions:    pgStore.Sessions(),
-			Companies:   pgStore.Companies(),
-			Projects:    pgStore.Projects(),
-			Workflows:   pgStore.Workflows(),
-			Memberships: pgStore.Memberships(),
-			Links:       pgStore.CrossWorkflowLinks(),
-			Executions:  pgStore.Executions(),
-			Logs:        pgStore.Logs(),
-			Audit:       pgStore.Audit(),
-			IAM:         pgStore.IAM(),
-		}, apihandler.Config{JWTSecret: *jwtSecret, Engine: engineMgr})
-
-		// Bind the listener eagerly so port conflicts are detected before the
-		// deferred cleanup is registered (fail-fast instead of silent goroutine death).
-		listener, listenErr := net.Listen("tcp", *multiWorkflowAddr)
-		if listenErr != nil {
-			log.Fatalf("multi-workflow mode: failed to listen on %s: %v", *multiWorkflowAddr, listenErr)
-		}
-
-		apiServer := &http.Server{
-			Handler:           apiRouter,
-			ReadHeaderTimeout: 10 * time.Second,
-		}
-		go func() {
-			logger.Info("multi-workflow API listening", "addr", *multiWorkflowAddr)
-			if sErr := apiServer.Serve(listener); sErr != nil && sErr != http.ErrServerClosed {
-				logger.Error("multi-workflow API server error", "error", sErr)
-			}
-		}()
-		defer func() {
-			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer shutdownCancel()
-			if sErr := apiServer.Shutdown(shutdownCtx); sErr != nil {
-				logger.Warn("multi-workflow API server shutdown error", "error", sErr)
-			}
-			if sErr := engineMgr.StopAll(shutdownCtx); sErr != nil {
-				logger.Warn("multi-workflow engine manager shutdown error", "error", sErr)
-			}
-			if shutdownCtx.Err() == context.DeadlineExceeded {
-				logger.Warn("multi-workflow shutdown timed out; some in-flight operations may be incomplete")
-			}
-			pgStore.Close()
-		}()
+		return
+	}
 
 	// Load configuration — supports both single-workflow and multi-workflow application configs.
 	cfg, appCfg, err := loadConfig(logger)
@@ -1643,7 +1541,7 @@ func runMultiWorkflow(logger *slog.Logger) error {
 	apiRouter := apihandler.NewRouter(stores, apiCfg)
 
 	// 7. Set up admin UI and management infrastructure for workflow management
-	singleCfg, err := loadConfig(logger)
+	singleCfg, _, err := loadConfig(logger)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -1663,7 +1561,7 @@ func runMultiWorkflow(logger *slog.Logger) error {
 	}))
 
 	srv := &http.Server{
-		Addr:              *addr,
+		Addr:              *multiWorkflowAddr,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -1683,7 +1581,7 @@ func runMultiWorkflow(logger *slog.Logger) error {
 	// Start API server; propagate failures back so we can initiate shutdown.
 	srvErrCh := make(chan error, 1)
 	go func() {
-		logger.Info("Multi-workflow API listening", "addr", *addr)
+		logger.Info("Multi-workflow API listening", "addr", *multiWorkflowAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("API server error", "error", err)
 			srvErrCh <- err
@@ -1691,8 +1589,8 @@ func runMultiWorkflow(logger *slog.Logger) error {
 	}()
 
 	// Build display address: if the host part is empty or 0.0.0.0/::/[::], use "localhost".
-	displayAddr := *addr
-	if host, port, splitErr := net.SplitHostPort(*addr); splitErr == nil &&
+	displayAddr := *multiWorkflowAddr
+	if host, port, splitErr := net.SplitHostPort(*multiWorkflowAddr); splitErr == nil &&
 		(host == "" || host == "0.0.0.0" || host == "::" || host == "[::]") {
 		displayAddr = ":" + port
 	}
