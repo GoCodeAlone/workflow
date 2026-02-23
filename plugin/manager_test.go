@@ -1,13 +1,10 @@
 package plugin
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	_ "modernc.org/sqlite"
 )
 
 // --- PluginManager additional coverage tests ---
@@ -35,11 +32,7 @@ func TestPluginManager_NilDB(t *testing.T) {
 }
 
 func TestPluginManager_RestoreState(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	// First manager: register, enable, and persist
 	pm1 := NewPluginManager(db, nil)
@@ -76,18 +69,20 @@ func TestPluginManager_RestoreState_NilDB(t *testing.T) {
 }
 
 func TestPluginManager_AllPlugins(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	pm := NewPluginManager(db, nil)
 	p1 := newSimplePlugin("alpha", "1.0.0", "Alpha plugin")
 	p2 := newSimplePlugin("beta", "2.0.0", "Beta plugin")
-	_ = pm.Register(p1)
-	_ = pm.Register(p2)
-	_ = pm.Enable("alpha")
+	if err := pm.Register(p1); err != nil {
+		t.Fatalf("Register p1: %v", err)
+	}
+	if err := pm.Register(p2); err != nil {
+		t.Fatalf("Register p2: %v", err)
+	}
+	if err := pm.Enable("alpha"); err != nil {
+		t.Fatalf("Enable alpha: %v", err)
+	}
 
 	all := pm.AllPlugins()
 	if len(all) != 2 {
@@ -175,11 +170,7 @@ func TestPluginManager_SetContext(t *testing.T) {
 }
 
 func TestPluginManager_EnableWithVersionConstraint(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	pm := NewPluginManager(db, nil)
 	base := newSimplePlugin("base-lib", "2.0.0", "Base library")
@@ -195,11 +186,7 @@ func TestPluginManager_EnableWithVersionConstraint(t *testing.T) {
 }
 
 func TestPluginManager_EnableWithVersionConstraint_Failure(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
+	db := openTestDB(t)
 
 	pm := NewPluginManager(db, nil)
 	base := newSimplePlugin("base-lib", "1.0.0", "Base library")
