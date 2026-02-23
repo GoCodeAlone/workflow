@@ -22,6 +22,11 @@ type Config struct {
 
 	// OAuth providers keyed by provider name (e.g. "google", "okta").
 	OAuthProviders map[string]*OAuthProviderConfig
+
+	// Orchestrator is an optional engine manager that is called when workflows
+	// are deployed or stopped via the API. When nil, only the database status
+	// is updated (no live engine is started or stopped).
+	Orchestrator WorkflowOrchestrator
 }
 
 // Stores groups all store interfaces needed by the API.
@@ -109,6 +114,7 @@ func NewRouterWithIAM(stores Stores, cfg Config, iamResolver *iam.IAMResolver) h
 
 	// --- Workflows ---
 	wfH := NewWorkflowHandler(stores.Workflows, stores.Projects, stores.Memberships, permissions)
+	wfH.orchestrator = cfg.Orchestrator
 	mux.Handle("POST /api/v1/projects/{pid}/workflows", mw.RequireAuth(http.HandlerFunc(wfH.Create)))
 	mux.Handle("GET /api/v1/workflows", mw.RequireAuth(http.HandlerFunc(wfH.ListAll)))
 	mux.Handle("GET /api/v1/projects/{pid}/workflows", mw.RequireAuth(http.HandlerFunc(wfH.ListInProject)))
