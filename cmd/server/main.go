@@ -555,26 +555,6 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	app.services.v1Handler = v1Handler
 
 	// -----------------------------------------------------------------------
-	// Feature Flag service — wire into the V1 API handler so the admin UI
-	// can manage flags via /api/v1/admin/feature-flags.
-	// -----------------------------------------------------------------------
-
-	ffDBPath := filepath.Join(*dataDir, "featureflags.db")
-	ffMod, ffErr := module.NewFeatureFlagModule("admin-feature-flags", module.FeatureFlagModuleConfig{
-		Provider:   "generic",
-		CacheTTL:   "30s",
-		SSEEnabled: true,
-		DBPath:     ffDBPath,
-	})
-	if ffErr != nil {
-		logger.Warn("Failed to create feature flag module — feature flags disabled", "error", ffErr)
-	} else {
-		ffAdapter := module.NewFeatureFlagAdminAdapter(ffMod.Service(), ffMod.Store())
-		v1Handler.SetFeatureFlagService(ffAdapter)
-		logger.Info("Wired feature flag service to V1 API handler", "db", ffDBPath)
-	}
-
-	// -----------------------------------------------------------------------
 	// Event store, idempotency store
 	// -----------------------------------------------------------------------
 
@@ -931,6 +911,22 @@ func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 		engine.GetApp().RegisterModule(module.NewServiceModule(name, handler))
 		if regErr := engine.GetApp().RegisterService(name, handler); regErr != nil {
 			logger.Warn("Failed to register service", "name", name, "error", regErr)
+		}
+	}
+
+	// Auto-discover FeatureFlagAdmin from the service registry and wire to the
+	// V1 API handler. The featureflag.service module (admin-feature-flags in
+	// admin/config.yaml) registers this adapter — no explicit Go wiring needed.
+	type featureFlagSetter interface {
+		SetFeatureFlagService(module.FeatureFlagAdmin)
+	}
+	if ffSetter, ok := app.services.v1Handler.(featureFlagSetter); ok {
+		for _, svc := range engine.GetApp().SvcRegistry() {
+			if ffAdmin, ok := svc.(module.FeatureFlagAdmin); ok {
+				ffSetter.SetFeatureFlagService(ffAdmin)
+				logger.Info("Auto-wired FeatureFlagAdmin to V1 API handler from service registry")
+				break
+			}
 		}
 	}
 
