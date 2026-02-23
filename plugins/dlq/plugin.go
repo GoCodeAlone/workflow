@@ -44,9 +44,13 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			}
 			if v, ok := config["max_retries"].(int); ok {
 				cfg.MaxRetries = v
+			} else if v, ok := config["max_retries"].(float64); ok {
+				cfg.MaxRetries = int(v)
 			}
 			if v, ok := config["retention_days"].(int); ok {
 				cfg.RetentionDays = v
+			} else if v, ok := config["retention_days"].(float64); ok {
+				cfg.RetentionDays = int(v)
 			}
 			return module.NewDLQServiceModule(name, cfg)
 		},

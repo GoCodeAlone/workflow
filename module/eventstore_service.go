@@ -12,8 +12,10 @@ import (
 
 // EventStoreServiceConfig holds the configuration for the event store service module.
 type EventStoreServiceConfig struct {
-	DBPath        string `yaml:"db_path" default:"data/events.db"`
-	RetentionDays int    `yaml:"retention_days" default:"90"`
+	DBPath string `yaml:"db_path" default:"data/events.db"`
+	// RetentionDays is reserved for future implementation of automatic event pruning.
+	// It is stored and exposed via RetentionDays() but not yet applied to the store.
+	RetentionDays int `yaml:"retention_days" default:"90"`
 }
 
 // EventStoreServiceModule wraps an evstore.SQLiteEventStore as a modular.Module.
