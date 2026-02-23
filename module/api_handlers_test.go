@@ -41,19 +41,13 @@ func TestRESTAPIHandler_ProvidesServices(t *testing.T) {
 func TestRESTAPIHandler_RequiresServices(t *testing.T) {
 	h := NewRESTAPIHandler("test-handler", "orders")
 	deps := h.RequiresServices()
-	if len(deps) != 2 {
-		t.Fatalf("expected 2 dependencies, got %d", len(deps))
+	if len(deps) != 1 {
+		t.Fatalf("expected 1 dependency, got %d", len(deps))
 	}
-	if deps[0].Name != "message-broker" {
-		t.Errorf("expected dependency 'message-broker', got '%s'", deps[0].Name)
+	if deps[0].Name != "persistence" {
+		t.Errorf("expected dependency 'persistence', got '%s'", deps[0].Name)
 	}
 	if deps[0].Required {
-		t.Error("expected message-broker to be optional")
-	}
-	if deps[1].Name != "persistence" {
-		t.Errorf("expected dependency 'persistence', got '%s'", deps[1].Name)
-	}
-	if deps[1].Required {
 		t.Error("expected persistence to be optional")
 	}
 }
@@ -517,24 +511,13 @@ func TestRESTAPIHandler_HandleTransition_WithStateMachineEngine(t *testing.T) {
 func TestRESTAPIHandler_HandleGet_WithStateTracker(t *testing.T) {
 	h := setupHandler(t)
 
-	// Register a state tracker service in the app
-	tracker := NewStateTracker("workflow.service.statetracker")
-	if err := h.app.RegisterService(StateTrackerName, tracker); err != nil {
-		t.Fatalf("failed to register state tracker: %v", err)
-	}
-
 	// Create a resource
 	createBody := `{"id": "order-1", "product": "widget"}`
 	createReq := httptest.NewRequest(http.MethodPost, "/api/orders", bytes.NewBufferString(createBody))
 	createW := httptest.NewRecorder()
 	h.Handle(createW, createReq)
 
-	// Set state for the resource
-	tracker.SetState("orders", "order-1", "processing", map[string]any{
-		"priority": "high",
-	})
-
-	// Get the resource - should be enhanced with state info
+	// Get the resource - should return stored state (no enrichment from external systems)
 	req := httptest.NewRequest(http.MethodGet, "/api/orders/{id}", nil)
 	req.SetPathValue("id", "order-1")
 	w := httptest.NewRecorder()
@@ -549,11 +532,9 @@ func TestRESTAPIHandler_HandleGet_WithStateTracker(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resource); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if resource.State != "processing" {
-		t.Errorf("expected state 'processing', got '%s'", resource.State)
-	}
-	if resource.Data["priority"] != "high" {
-		t.Errorf("expected priority 'high' from state tracker, got %v", resource.Data["priority"])
+	// State should be the stored value, not enriched from any external tracker
+	if resource.State != "new" {
+		t.Errorf("expected state 'new', got '%s'", resource.State)
 	}
 }
 
