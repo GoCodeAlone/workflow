@@ -100,6 +100,22 @@ All modules are registered in `engine.go` and instantiated from YAML config. Org
 | `step.db_query` | Executes parameterized SQL SELECT queries against a named database |
 | `step.db_exec` | Executes parameterized SQL INSERT/UPDATE/DELETE against a named database |
 | `step.json_response` | Writes HTTP JSON response with custom status code and headers |
+| `step.jq` | Applies a JQ expression to pipeline data for complex transformations |
+| `step.ai_complete` | AI text completion using a configured provider |
+| `step.ai_classify` | AI text classification into named categories |
+| `step.ai_extract` | AI structured data extraction using tool use or prompt-based parsing |
+
+### CI/CD Pipeline Steps
+| Type | Description |
+|------|-------------|
+| `step.docker_build` | Builds a Docker image from a context directory and Dockerfile |
+| `step.docker_push` | Pushes a Docker image to a remote registry |
+| `step.docker_run` | Runs a command inside a Docker container via sandbox |
+| `step.scan_sast` | Static Application Security Testing (SAST) via configurable scanner |
+| `step.scan_container` | Container image vulnerability scanning via Trivy |
+| `step.scan_deps` | Dependency vulnerability scanning via Grype |
+| `step.artifact_push` | Stores a file in the artifact store for cross-step sharing |
+| `step.artifact_pull` | Retrieves an artifact from a prior execution, URL, or S3 |
 
 ### Template Functions
 
@@ -114,6 +130,14 @@ Pipeline steps support Go template syntax with these built-in functions:
 | `json` | Marshal value to JSON string | `{{ json .data }}` |
 
 Template expressions can reference previous step outputs via `{{ .steps.step-name.field }}` or for hyphenated names `{{index .steps "step-name" "field"}}`.
+
+### Infrastructure
+| Type | Description |
+|------|-------------|
+| `license.validator` | License key validation against a remote server with caching and grace period |
+| `platform.provider` | Cloud infrastructure provider declaration (e.g., Terraform, Pulumi) |
+| `platform.resource` | Infrastructure resource managed by a platform provider |
+| `platform.context` | Execution context for platform operations (org, environment, tier) |
 
 ### Observability
 | Type | Description |
@@ -160,6 +184,548 @@ Template expressions can reference previous step outputs via `{{ .steps.step-nam
 | `dynamic.component` | Yaegi hot-reload Go component |
 | `data.transformer` | Data transformation |
 | `workflow.registry` | Workflow registration and discovery |
+
+## Module Type Reference
+
+Detailed configuration reference for module types not covered in the main table above.
+
+### Audit Logging (`audit/`)
+
+The `audit/` package provides a structured JSON audit logger for recording security-relevant events. It is used internally by the engine and admin platform -- not a YAML module type, but rather a Go library used by other modules.
+
+**Event types:** `auth`, `auth_failure`, `admin_op`, `escalation`, `data_access`, `config_change`, `component_op`
+
+Each audit event is written as a single JSON line containing `timestamp`, `type`, `action`, `actor`, `resource`, `detail`, `source_ip`, `success`, and `metadata` fields.
+
+---
+
+### `license.validator`
+
+Validates license keys against a remote server with local caching and an offline grace period. When no `server_url` is configured the module operates in offline/starter mode and synthesizes a valid starter-tier license locally.
+
+**Configuration:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `server_url` | string | `""` | License validation server URL. Leave empty for offline/starter mode. |
+| `license_key` | string | `""` | License key. Supports `$ENV_VAR` expansion. Falls back to `WORKFLOW_LICENSE_KEY` env var. |
+| `cache_ttl` | duration | `1h` | How long to cache a valid license result before re-validating. |
+| `grace_period` | duration | `72h` | How long to allow operation when the license server is unreachable. |
+| `refresh_interval` | duration | `1h` | How often the background goroutine re-validates the license. |
+
+**Outputs:** Provides the `license-validator` service (`LicenseValidator`).
+
+**Example:**
+
+```yaml
+modules:
+  - name: license
+    type: license.validator
+    config:
+      server_url: "https://license.gocodalone.com/api/v1"
+      license_key: "$WORKFLOW_LICENSE_KEY"
+      cache_ttl: "1h"
+      grace_period: "72h"
+      refresh_interval: "1h"
+```
+
+---
+
+### `platform.provider`
+
+Declares a cloud infrastructure provider (e.g., Terraform, Pulumi) for use with the platform workflow handler and reconciliation trigger.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `name` | string | yes | Provider name used to construct the service name `platform.provider.<name>`. |
+
+**Example:**
+
+```yaml
+modules:
+  - name: cloud-provider
+    type: platform.provider
+    config:
+      name: "aws"
+```
+
+---
+
+### `platform.resource`
+
+Declares an infrastructure resource managed by a platform provider. Config keys are provider-specific and passed through as-is.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `type` | string | yes | Infrastructure resource type (e.g., `database`, `queue`, `container_runtime`). |
+| *(additional keys)* | any | no | Provider-specific resource properties. |
+
+**Example:**
+
+```yaml
+modules:
+  - name: orders-db
+    type: platform.resource
+    config:
+      type: database
+      engine: postgresql
+      storage: "10Gi"
+```
+
+---
+
+### `platform.context`
+
+Provides the execution context for platform operations. Used to identify the organization, environment, and tier for a deployment.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `path` | string | yes | Path identifying this context. |
+| `org` | string | no | Organization name. |
+| `environment` | string | no | Deployment environment (e.g., `production`, `staging`). |
+| `tier` | number | no | Platform tier level. |
+
+**Example:**
+
+```yaml
+modules:
+  - name: platform-ctx
+    type: platform.context
+    config:
+      path: "acme-corp/production"
+      org: "acme-corp"
+      environment: "production"
+      tier: 3
+```
+
+---
+
+### `observability.otel`
+
+Initializes an OpenTelemetry distributed tracing provider that exports spans via OTLP/HTTP to a collector. Sets the global OTel tracer provider so all instrumented code in the process is covered.
+
+**Configuration:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `endpoint` | string | `localhost:4318` | OTLP collector endpoint (host:port). |
+| `serviceName` | string | `workflow` | Service name used for trace attribution. |
+
+**Outputs:** Provides the `tracer` service (`trace.Tracer`).
+
+**Example:**
+
+```yaml
+modules:
+  - name: tracing
+    type: observability.otel
+    config:
+      endpoint: "otel-collector:4318"
+      serviceName: "order-api"
+```
+
+---
+
+### `step.jq`
+
+Applies a JQ expression to pipeline data for complex transformations. Uses the `gojq` pure-Go JQ implementation, supporting the full JQ language: field access, pipes, `map`/`select`, object construction, arithmetic, conditionals, and more.
+
+The expression is compiled at startup so syntax errors are caught early. When the result is a single object, its keys are merged into the step output so downstream steps can access fields directly.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `expression` | string | yes | JQ expression to evaluate. |
+| `input_from` | string | no | Dotted path to the input value (e.g., `steps.fetch.items`). Defaults to the full current pipeline context. |
+
+**Output fields:** `result` — the JQ result. When the result is a single object, its keys are also promoted to the top level.
+
+**Example:**
+
+```yaml
+steps:
+  - name: extract-active
+    type: step.jq
+    config:
+      input_from: "steps.fetch-users.users"
+      expression: "[.[] | select(.active == true) | {id, email}]"
+```
+
+---
+
+### `step.ai_complete`
+
+Invokes an AI provider to produce a text completion. Provider resolution order: explicit `provider` name, then model-based lookup, then first registered provider.
+
+**Configuration:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `provider` | string | `""` | Named AI provider to use. Omit to auto-select. |
+| `model` | string | `""` | Model name (e.g., `claude-3-5-sonnet-20241022`). Used for provider lookup if `provider` is unset. |
+| `system_prompt` | string | `""` | System prompt. Supports Go template syntax with pipeline context. |
+| `input_from` | string | `""` | Template expression to resolve the user message (e.g., `.body`). Falls back to `text` or `body` fields in current context. |
+| `max_tokens` | number | `1024` | Maximum tokens in the completion. |
+| `temperature` | number | `0` | Sampling temperature (0.0–1.0). |
+
+**Output fields:** `content`, `model`, `finish_reason`, `usage.input_tokens`, `usage.output_tokens`.
+
+**Example:**
+
+```yaml
+steps:
+  - name: summarize
+    type: step.ai_complete
+    config:
+      model: "claude-3-5-haiku-20241022"
+      system_prompt: "You are a helpful assistant. Summarize the following text concisely."
+      input_from: ".body"
+      max_tokens: 512
+```
+
+---
+
+### `step.ai_classify`
+
+Classifies input text into one of a configured set of categories using an AI provider. Returns the winning category, a confidence score (0.0–1.0), and brief reasoning.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `categories` | array of strings | yes | List of valid classification categories. |
+| `provider` | string | no | Named AI provider. Auto-selected if omitted. |
+| `model` | string | no | Model name for provider lookup. |
+| `input_from` | string | no | Template expression for the input text. Falls back to `text` or `body` fields. |
+| `max_tokens` | number | `256` | Maximum tokens for the classification response. |
+| `temperature` | number | `0` | Sampling temperature. |
+
+**Output fields:** `category`, `confidence`, `reasoning`, `raw`, `model`, `usage.input_tokens`, `usage.output_tokens`.
+
+**Example:**
+
+```yaml
+steps:
+  - name: classify-ticket
+    type: step.ai_classify
+    config:
+      input_from: ".body"
+      categories:
+        - "billing"
+        - "technical-support"
+        - "account"
+        - "general-inquiry"
+```
+
+---
+
+### `step.ai_extract`
+
+Extracts structured data from text using an AI provider. When the provider supports tool use, it uses the tool-calling API for reliable structured output. Otherwise it falls back to prompt-based JSON extraction.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `schema` | object | yes | JSON Schema object describing the fields to extract. |
+| `provider` | string | no | Named AI provider. Auto-selected if omitted. |
+| `model` | string | no | Model name for provider lookup. |
+| `input_from` | string | no | Template expression for the input text. Falls back to `text` or `body` fields. |
+| `max_tokens` | number | `1024` | Maximum tokens. |
+| `temperature` | number | `0` | Sampling temperature. |
+
+**Output fields:** `extracted` (map of extracted fields), `method` (`tool_use`, `text_parse`, or `prompt`), `model`, `usage.input_tokens`, `usage.output_tokens`.
+
+**Example:**
+
+```yaml
+steps:
+  - name: extract-order
+    type: step.ai_extract
+    config:
+      input_from: ".body"
+      schema:
+        type: object
+        properties:
+          customer_name: {type: string}
+          order_items: {type: array, items: {type: string}}
+          total_amount: {type: number}
+```
+
+---
+
+### `step.docker_build`
+
+Builds a Docker image from a context directory and Dockerfile using the Docker SDK. The context directory is tar-archived and sent to the Docker daemon.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `context` | string | yes | Path to the build context directory. |
+| `dockerfile` | string | `Dockerfile` | Dockerfile path relative to the context directory. |
+| `tags` | array of strings | no | Image tags to apply (e.g., `["myapp:latest", "myapp:1.2.3"]`). |
+| `build_args` | map | no | Build argument key/value pairs. |
+| `cache_from` | array of strings | no | Image references to use as layer cache sources. |
+
+**Output fields:** `image_id`, `tags`, `context`.
+
+**Example:**
+
+```yaml
+steps:
+  - name: build-image
+    type: step.docker_build
+    config:
+      context: "./src"
+      dockerfile: "Dockerfile"
+      tags:
+        - "myapp:latest"
+      build_args:
+        APP_VERSION: "1.2.3"
+```
+
+---
+
+### `step.docker_push`
+
+Pushes a Docker image to a remote registry.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `image` | string | yes | Image name/tag to push. |
+| `registry` | string | no | Registry hostname prefix (prepended to `image` when constructing the reference). |
+| `auth_provider` | string | no | Named auth provider for registry credentials (informational; credentials are read from Docker daemon config). |
+
+**Output fields:** `image`, `registry`, `digest`, `auth_provider`.
+
+**Example:**
+
+```yaml
+steps:
+  - name: push-image
+    type: step.docker_push
+    config:
+      image: "myapp:latest"
+      registry: "ghcr.io/myorg"
+```
+
+---
+
+### `step.docker_run`
+
+Runs a command inside a Docker container using the sandbox. Returns exit code, stdout, and stderr.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `image` | string | yes | Docker image to run. |
+| `command` | array of strings | no | Command to execute inside the container. Uses image default entrypoint if omitted. |
+| `env` | map | no | Environment variables to set in the container. |
+| `wait_for_exit` | boolean | `true` | Whether to wait for the container to exit. |
+| `timeout` | duration | `""` | Maximum time to wait for the container. |
+
+**Output fields:** `exit_code`, `stdout`, `stderr`, `image`.
+
+**Example:**
+
+```yaml
+steps:
+  - name: run-tests
+    type: step.docker_run
+    config:
+      image: "golang:1.25"
+      command: ["go", "test", "./..."]
+      env:
+        CI: "true"
+      timeout: "10m"
+```
+
+---
+
+### `step.scan_sast`
+
+Runs a Static Application Security Testing (SAST) scanner inside a Docker container and evaluates findings against a severity gate. Supports Semgrep and generic scanner commands.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `scanner` | string | yes | Scanner to use. Supported: `semgrep`. Generic commands also accepted. |
+| `image` | string | `semgrep/semgrep:latest` | Docker image for the scanner. |
+| `source_path` | string | `/workspace` | Path to the source code to scan. |
+| `rules` | array of strings | no | Semgrep rule configs to apply (e.g., `auto`, `p/owasp-top-ten`). |
+| `fail_on_severity` | string | `error` | Minimum severity that causes the step to fail (`error`, `warning`, `info`). |
+| `output_format` | string | `sarif` | Output format: `sarif` or `json`. |
+
+**Output fields:** `scan_result`, `command`, `image`.
+
+**Example:**
+
+```yaml
+steps:
+  - name: sast-scan
+    type: step.scan_sast
+    config:
+      scanner: "semgrep"
+      source_path: "/workspace/src"
+      rules:
+        - "p/owasp-top-ten"
+        - "p/golang"
+      fail_on_severity: "error"
+```
+
+---
+
+### `step.scan_container`
+
+Scans a container image for vulnerabilities using Trivy. Evaluates findings against a configurable severity threshold.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `target_image` | string | yes | Container image to scan (e.g., `myapp:latest`). |
+| `scanner` | string | `trivy` | Scanner to use. |
+| `severity_threshold` | string | `HIGH` | Minimum severity to report: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, or `INFO`. |
+| `ignore_unfixed` | boolean | `false` | Skip vulnerabilities without a known fix. |
+| `output_format` | string | `sarif` | Output format: `sarif` or `json`. |
+
+**Output fields:** `scan_result`, `command`, `image`, `target_image`.
+
+**Example:**
+
+```yaml
+steps:
+  - name: scan-image
+    type: step.scan_container
+    config:
+      target_image: "myapp:latest"
+      severity_threshold: "HIGH"
+      ignore_unfixed: true
+```
+
+---
+
+### `step.scan_deps`
+
+Scans project dependencies for known vulnerabilities using Grype. Evaluates findings against a severity gate.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `scanner` | string | `grype` | Scanner to use. |
+| `image` | string | `anchore/grype:latest` | Docker image for the scanner. |
+| `source_path` | string | `/workspace` | Path to the project source to scan. |
+| `fail_on_severity` | string | `high` | Minimum severity that causes the step to fail: `critical`, `high`, `medium`, `low`, or `info`. |
+| `output_format` | string | `sarif` | Output format: `sarif` or `json`. |
+
+**Output fields:** `scan_result`, `command`, `image`.
+
+**Example:**
+
+```yaml
+steps:
+  - name: dep-scan
+    type: step.scan_deps
+    config:
+      source_path: "/workspace"
+      fail_on_severity: "high"
+```
+
+---
+
+### `step.artifact_push`
+
+Reads a file from `source_path` and stores it in the pipeline's artifact store. Computes a SHA-256 checksum of the artifact. Requires `artifact_store` and `execution_id` in pipeline metadata.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `source_path` | string | yes | Path to the file to store. |
+| `key` | string | yes | Artifact key under which to store the file. |
+| `dest` | string | `artifact_store` | Destination identifier (informational). |
+
+**Output fields:** `key`, `size`, `checksum`, `dest`.
+
+**Example:**
+
+```yaml
+steps:
+  - name: upload-binary
+    type: step.artifact_push
+    config:
+      source_path: "./bin/server"
+      key: "server-binary"
+```
+
+---
+
+### `step.artifact_pull`
+
+Retrieves an artifact from a prior execution, a URL, or S3 and writes it to a local destination path.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `source` | string | yes | Source type: `previous_execution`, `url`, or `s3`. |
+| `dest` | string | yes | Local file path to write the artifact to. |
+| `key` | string | yes (for `previous_execution`, `s3`) | Artifact key to retrieve. |
+| `execution_id` | string | no | Specific execution ID to pull from. Defaults to current execution. |
+| `url` | string | yes (for `url`) | URL to fetch the artifact from. |
+
+**Output fields:** `source`, `key`, `dest`, `size`, `bytes_written`.
+
+**Example:**
+
+```yaml
+steps:
+  - name: download-binary
+    type: step.artifact_pull
+    config:
+      source: "previous_execution"
+      key: "server-binary"
+      dest: "./bin/server"
+```
+
+---
+
+### Admin Core Plugin (`plugin/admincore/`)
+
+The `admincore` plugin is a NativePlugin that registers the built-in admin UI page definitions. It declares no HTTP routes -- all views are rendered entirely in the React frontend. Registering this plugin ensures navigation is driven by the plugin system with no static fallbacks.
+
+**UI pages declared:**
+
+| ID | Label | Category |
+|----|-------|----------|
+| `dashboard` | Dashboard | global |
+| `editor` | Editor | global |
+| `marketplace` | Marketplace | global |
+| `templates` | Templates | global |
+| `environments` | Environments | global |
+| `settings` | Settings | global |
+| `executions` | Executions | workflow |
+| `logs` | Logs | workflow |
+| `events` | Events | workflow |
+
+Global pages appear in the main navigation. Workflow-scoped pages (`executions`, `logs`, `events`) are only shown when a workflow is open.
+
+The plugin is auto-registered via `init()` in `plugin/admincore/plugin.go`. No YAML configuration is required.
+
+---
 
 ## Workflow Types
 
