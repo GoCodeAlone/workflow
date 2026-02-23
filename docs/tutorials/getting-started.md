@@ -26,7 +26,7 @@ Visit http://localhost:8080 to see your server running.
 
 ### 3. Explore Example Configs
 
-The `example/` directory contains 100+ YAML configurations:
+The `example/` directory contains 27 top-level `example/*.yaml` configurations, plus additional configs under application subdirectories:
 
 ```bash
 ls example/*.yaml | head -20
