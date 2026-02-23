@@ -96,6 +96,7 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			if r, ok := cfg["root"].(string); ok {
 				root = r
 			}
+			root = config.ResolvePathInConfig(cfg, root)
 			if p.UIDir != "" {
 				root = p.UIDir
 			}
@@ -103,7 +104,25 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			if pfx, ok := cfg["prefix"].(string); ok {
 				prefix = pfx
 			}
-			return module.NewStaticFileServer(name, root, prefix)
+			// SPA fallback is enabled by default for the admin dashboard UI.
+			spaFallback := true
+			if sf, ok := cfg["spaFallback"].(bool); ok {
+				spaFallback = sf
+			}
+			var opts []module.StaticFileServerOption
+			if spaFallback {
+				opts = append(opts, module.WithSPAFallback())
+			}
+			if cma, ok := cfg["cacheMaxAge"].(int); ok {
+				opts = append(opts, module.WithCacheMaxAge(cma))
+			} else if cma, ok := cfg["cacheMaxAge"].(float64); ok {
+				opts = append(opts, module.WithCacheMaxAge(int(cma)))
+			}
+			sfs := module.NewStaticFileServer(name, root, prefix, opts...)
+			if routerName, ok := cfg["router"].(string); ok && routerName != "" {
+				sfs.SetRouterName(routerName)
+			}
+			return sfs
 		},
 		"admin.config_loader": func(name string, _ map[string]any) modular.Module {
 			return newConfigLoaderModule(name)
@@ -185,11 +204,11 @@ func (p *Plugin) mergeAdminConfig(cfg *config.WorkflowConfig) error {
 	return nil
 }
 
-// injectUIRoot updates every static.fileserver module config in cfg to serve
-// from the given root directory.
+// injectUIRoot updates every static.fileserver and admin.dashboard module
+// config in cfg to serve from the given root directory.
 func injectUIRoot(cfg *config.WorkflowConfig, uiRoot string) {
 	for i := range cfg.Modules {
-		if cfg.Modules[i].Type == "static.fileserver" {
+		if cfg.Modules[i].Type == "static.fileserver" || cfg.Modules[i].Type == "admin.dashboard" {
 			if cfg.Modules[i].Config == nil {
 				cfg.Modules[i].Config = make(map[string]any)
 			}
