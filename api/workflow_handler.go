@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,12 +12,21 @@ import (
 	"github.com/google/uuid"
 )
 
+// WorkflowOrchestrator is implemented by the multi-workflow engine manager to
+// allow the API layer to start and stop live workflow engines. It is optional;
+// when nil the Deploy and Stop handlers only update the database status.
+type WorkflowOrchestrator interface {
+	DeployWorkflow(ctx context.Context, workflowID uuid.UUID) error
+	StopWorkflow(ctx context.Context, workflowID uuid.UUID) error
+}
+
 // WorkflowHandler handles workflow CRUD and lifecycle endpoints.
 type WorkflowHandler struct {
-	workflows   store.WorkflowStore
-	projects    store.ProjectStore
-	memberships store.MembershipStore
-	permissions *PermissionService
+	workflows    store.WorkflowStore
+	projects     store.ProjectStore
+	memberships  store.MembershipStore
+	permissions  *PermissionService
+	orchestrator WorkflowOrchestrator // optional; nil when no engine manager is wired
 }
 
 // NewWorkflowHandler creates a new WorkflowHandler.
@@ -259,11 +269,24 @@ func (h *WorkflowHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	wf.Status = store.WorkflowStatusActive
-	wf.UpdatedAt = time.Now()
-	if err := h.workflows.Update(r.Context(), wf); err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal error")
-		return
+	if h.orchestrator != nil {
+		if oErr := h.orchestrator.DeployWorkflow(r.Context(), id); oErr != nil {
+			WriteError(w, http.StatusInternalServerError, oErr.Error())
+			return
+		}
+		// Re-fetch to get updated status written by the orchestrator.
+		wf, err = h.workflows.Get(r.Context(), id)
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+	} else {
+		wf.Status = store.WorkflowStatusActive
+		wf.UpdatedAt = time.Now()
+		if err := h.workflows.Update(r.Context(), wf); err != nil {
+			WriteError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
 	}
 	WriteJSON(w, http.StatusOK, wf)
 }
@@ -284,11 +307,24 @@ func (h *WorkflowHandler) Stop(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	wf.Status = store.WorkflowStatusStopped
-	wf.UpdatedAt = time.Now()
-	if err := h.workflows.Update(r.Context(), wf); err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal error")
-		return
+	if h.orchestrator != nil {
+		if oErr := h.orchestrator.StopWorkflow(r.Context(), id); oErr != nil {
+			WriteError(w, http.StatusInternalServerError, oErr.Error())
+			return
+		}
+		// Re-fetch to get updated status written by the orchestrator.
+		wf, err = h.workflows.Get(r.Context(), id)
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+	} else {
+		wf.Status = store.WorkflowStatusStopped
+		wf.UpdatedAt = time.Now()
+		if err := h.workflows.Update(r.Context(), wf); err != nil {
+			WriteError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
 	}
 	WriteJSON(w, http.StatusOK, wf)
 }

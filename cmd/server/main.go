@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -1196,6 +1197,12 @@ func main() {
 			"admin_email_set", *adminEmail != "",
 			"api_addr", *multiWorkflowAddr,
 		)
+
+		// Validate JWT secret meets minimum security requirements.
+		if len(*jwtSecret) < 32 {
+			log.Fatalf("multi-workflow mode: --jwt-secret must be at least 32 bytes (got %d)", len(*jwtSecret))
+		}
+
 		pgStore, pgErr := evstore.NewPGStore(context.Background(), evstore.PGConfig{URL: *databaseDSN})
 		if pgErr != nil {
 			log.Fatalf("multi-workflow mode: failed to connect to PostgreSQL: %v", pgErr)
@@ -1209,7 +1216,8 @@ func main() {
 		// Bootstrap admin user on first run.
 		if *adminEmail != "" && *adminPassword != "" {
 			_, lookupErr := pgStore.Users().GetByEmail(context.Background(), *adminEmail)
-			if lookupErr != nil {
+			switch {
+			case errors.Is(lookupErr, evstore.ErrNotFound):
 				hash, hashErr := bcrypt.GenerateFromPassword([]byte(*adminPassword), bcrypt.DefaultCost)
 				if hashErr != nil {
 					log.Fatalf("multi-workflow mode: failed to hash admin password: %v", hashErr)
@@ -1229,7 +1237,9 @@ func main() {
 				} else {
 					logger.Info("multi-workflow mode: created bootstrap admin user", "email", *adminEmail)
 				}
-			} else {
+			case lookupErr != nil:
+				log.Fatalf("multi-workflow mode: failed to look up admin user: %v", lookupErr)
+			default:
 				logger.Info("multi-workflow mode: admin user already exists, skipping bootstrap", "email", *adminEmail)
 			}
 		}
@@ -1256,7 +1266,10 @@ func main() {
 			Logs:        pgStore.Logs(),
 			Audit:       pgStore.Audit(),
 			IAM:         pgStore.IAM(),
-		}, apihandler.Config{JWTSecret: *jwtSecret})
+		}, apihandler.Config{
+			JWTSecret:    *jwtSecret,
+			Orchestrator: engineMgr,
+		})
 
 		apiServer := &http.Server{ //nolint:gosec // ReadHeaderTimeout set below
 			Addr:              *multiWorkflowAddr,
@@ -1270,7 +1283,8 @@ func main() {
 			}
 		}()
 		defer func() {
-			shutdownCtx := context.Background()
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer shutdownCancel()
 			if sErr := apiServer.Shutdown(shutdownCtx); sErr != nil {
 				logger.Warn("multi-workflow API server shutdown error", "error", sErr)
 			}
@@ -1279,7 +1293,6 @@ func main() {
 			}
 			pgStore.Close()
 		}()
-		_ = engineMgr // used via closure above
 	}
 
 	// Single-config mode always runs alongside multi-workflow mode (if enabled).
