@@ -321,11 +321,14 @@ func executeStepWithRetry(ctx context.Context, connector module.IntegrationConne
 	}
 
 	for i := 0; i < step.RetryCount; i++ {
+		timer := time.NewTimer(retryDelay)
 		select {
-		case <-time.After(retryDelay):
+		case <-timer.C:
 		case <-ctx.Done():
+			timer.Stop()
 			return nil, ctx.Err()
 		}
+		timer.Stop()
 
 		result, err = connector.Execute(ctx, step.Action, params)
 		if err == nil {

@@ -403,7 +403,9 @@ func TestExecuteStepWithRetry_SuccessOnFirstAttempt(t *testing.T) {
 
 	conn := module.NewHTTPIntegrationConnector("c", server.URL)
 	conn.SetAllowPrivateIPs(true)
-	_ = conn.Connect(context.Background())
+	if err := conn.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
 
 	step := &IntegrationStep{Name: "s", Action: "GET /", RetryCount: 0}
 	result, err := executeStepWithRetry(context.Background(), conn, step, nil)
@@ -431,7 +433,9 @@ func TestExecuteStepWithRetry_RetryOnError(t *testing.T) {
 
 	conn := module.NewHTTPIntegrationConnector("c", server.URL)
 	conn.SetAllowPrivateIPs(true)
-	_ = conn.Connect(context.Background())
+	if err := conn.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
 
 	step := &IntegrationStep{Name: "s", Action: "GET /", RetryCount: 3, RetryDelay: "1ms"}
 	result, err := executeStepWithRetry(context.Background(), conn, step, nil)
@@ -452,7 +456,9 @@ func TestExecuteStepWithRetry_ContextCancelled(t *testing.T) {
 
 	conn := module.NewHTTPIntegrationConnector("c", server.URL)
 	conn.SetAllowPrivateIPs(true)
-	_ = conn.Connect(context.Background())
+	if err := conn.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
@@ -473,7 +479,9 @@ func TestExecuteStepWithRetry_ExhaustedRetries(t *testing.T) {
 
 	conn := module.NewHTTPIntegrationConnector("c", server.URL)
 	conn.SetAllowPrivateIPs(true)
-	_ = conn.Connect(context.Background())
+	if err := conn.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
 
 	step := &IntegrationStep{Name: "s", Action: "GET /", RetryCount: 2, RetryDelay: "1ms"}
 	_, err := executeStepWithRetry(context.Background(), conn, step, nil)
