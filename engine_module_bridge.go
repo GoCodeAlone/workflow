@@ -86,8 +86,13 @@ func (e *StdEngine) registerPluginSteps(typeName string, stepFactory func(name s
 // uses the canonical interface type.
 func (e *StdEngine) registerPluginTrigger(triggerType string, factory func() any) {
 	result := factory()
-	if trigger, ok := result.(interfaces.Trigger); ok {
-		e.triggerTypeMap[triggerType] = trigger.Name()
-		e.RegisterTrigger(trigger)
+	trigger, ok := result.(interfaces.Trigger)
+	if !ok {
+		// Fail fast with a clear warning when a plugin misconfigures its trigger factory.
+		// This avoids silent failures that later surface as "no handler found" errors.
+		e.logger.Error(fmt.Sprintf("workflow: plugin trigger factory for %q returned non-Trigger type %T; trigger not registered", triggerType, result))
+		return
 	}
+	e.triggerTypeMap[triggerType] = trigger.Name()
+	e.RegisterTrigger(trigger)
 }
