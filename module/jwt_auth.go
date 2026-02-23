@@ -115,6 +115,9 @@ func (j *JWTAuthModule) Authenticate(tokenStr string) (bool, map[string]any, err
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
 		return []byte(j.secret), nil
 	})
 	if err != nil {
@@ -400,6 +403,9 @@ func (j *JWTAuthModule) extractUserFromRequest(r *http.Request) (*User, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
 		return []byte(j.secret), nil
 	})
 	if err != nil {
@@ -495,6 +501,9 @@ func (j *JWTAuthModule) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	token, err := jwt.Parse(req.RefreshToken, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
+		}
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return []byte(j.secret), nil
 	})

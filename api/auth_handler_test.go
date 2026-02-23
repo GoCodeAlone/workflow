@@ -503,6 +503,32 @@ func TestRequireAuth(t *testing.T) {
 			t.Fatalf("expected 401, got %d", w.Code)
 		}
 	})
+
+	for _, method := range []jwt.SigningMethod{jwt.SigningMethodHS384, jwt.SigningMethodHS512} {
+		method := method
+		t.Run("rejected algorithm "+method.Alg(), func(t *testing.T) {
+			claims := jwt.MapClaims{
+				"sub":  user.ID.String(),
+				"type": "access",
+				"iat":  now.Unix(),
+				"exp":  now.Add(1 * time.Hour).Unix(),
+			}
+			tok, _ := jwt.NewWithClaims(method, claims).SignedString([]byte(testSecret))
+
+			handler := mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Fatal("handler should not be called")
+			}))
+
+			req := httptest.NewRequest("GET", "/test", nil)
+			req.Header.Set("Authorization", "Bearer "+tok)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("%s: expected 401, got %d", method.Alg(), w.Code)
+			}
+		})
+	}
 }
 
 // --- minimal mock stores for permission service in tests ---
