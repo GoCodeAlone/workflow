@@ -19,6 +19,17 @@ type RESTResource struct {
 	LastUpdate string         `json:"lastUpdate,omitempty"`
 }
 
+// WorkflowConfig holds the six workflow-related settings for a RESTAPIHandler.
+// These fields are always configured together and are extracted here for clarity.
+type WorkflowConfig struct {
+	Type              string // The type of workflow to use (e.g., "order-workflow")
+	Engine            string // The name of the workflow engine service to use
+	InitialTransition string // The first transition to trigger after creating a workflow instance (defaults to "start_validation")
+	InstanceIDPrefix  string // Optional prefix for workflow instance IDs
+	InstanceIDField   string // Field in resource data to use for instance ID (defaults to "id")
+	SeedFile          string // Path to JSON seed data file
+}
+
 // RESTAPIHandler provides CRUD operations for a REST API
 type RESTAPIHandler struct {
 	name         string
@@ -29,13 +40,7 @@ type RESTAPIHandler struct {
 	app          modular.Application
 	persistence  *PersistenceStore // optional write-through backend
 
-	// Workflow-related fields
-	workflowType      string // The type of workflow to use
-	workflowEngine    string // The name of the workflow engine service to use
-	initialTransition string // The first transition to trigger after creating a workflow instance (defaults to "start_validation")
-	instanceIDPrefix  string // Optional prefix for workflow instance IDs
-	instanceIDField   string // Field in resource data to use for instance ID (defaults to "id")
-	seedFile          string // Path to JSON seed data file
+	WorkflowConfig
 
 	// View/aggregation fields (e.g., a read-only handler over another collection)
 	sourceResourceName string // Read from a different resource's persistence data (defaults to resourceName)
@@ -70,27 +75,27 @@ func NewRESTAPIHandler(name, resourceName string) *RESTAPIHandler {
 
 // SetWorkflowType sets the workflow type for state machine operations.
 func (h *RESTAPIHandler) SetWorkflowType(wt string) {
-	h.workflowType = wt
+	h.Type = wt
 }
 
 // SetWorkflowEngine sets the name of the workflow engine service to use.
 func (h *RESTAPIHandler) SetWorkflowEngine(we string) {
-	h.workflowEngine = we
+	h.Engine = we
 }
 
 // SetInitialTransition sets the first transition to trigger after creating a workflow instance.
 func (h *RESTAPIHandler) SetInitialTransition(t string) {
-	h.initialTransition = t
+	h.InitialTransition = t
 }
 
 // SetInstanceIDPrefix sets the prefix used to build state machine instance IDs.
 func (h *RESTAPIHandler) SetInstanceIDPrefix(prefix string) {
-	h.instanceIDPrefix = prefix
+	h.InstanceIDPrefix = prefix
 }
 
 // SetSeedFile sets the path to a JSON seed data file.
 func (h *RESTAPIHandler) SetSeedFile(path string) {
-	h.seedFile = path
+	h.SeedFile = path
 }
 
 // SetSourceResourceName sets a different resource name for read operations (e.g., queue reads from conversations).
@@ -144,12 +149,7 @@ func (h *RESTAPIHandler) Constructor() modular.ModuleConstructor {
 		handler := NewRESTAPIHandler(h.name, h.resourceName)
 		handler.app = app
 		handler.logger = app.Logger()
-		handler.workflowType = h.workflowType
-		handler.workflowEngine = h.workflowEngine
-		handler.initialTransition = h.initialTransition
-		handler.instanceIDPrefix = h.instanceIDPrefix
-		handler.instanceIDField = h.instanceIDField
-		handler.seedFile = h.seedFile
+		handler.WorkflowConfig = h.WorkflowConfig
 		handler.sourceResourceName = h.sourceResourceName
 		handler.stateFilter = h.stateFilter
 		handler.fieldMapping = h.fieldMapping
@@ -173,7 +173,7 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 	h.logger = app.Logger()
 
 	// Default values for workflow configuration
-	h.instanceIDField = "id" // Default to using "id" field if not specified
+	h.InstanceIDField = "id" // Default to using "id" field if not specified
 	h.initFieldDefaults()
 
 	// Get configuration if available
@@ -194,22 +194,22 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 
 								// Extract workflow type
 								if wt, ok := cfg["workflowType"].(string); ok && wt != "" {
-									h.workflowType = wt
+									h.Type = wt
 								}
 
 								// Extract workflow engine
 								if we, ok := cfg["workflowEngine"].(string); ok && we != "" {
-									h.workflowEngine = we
+									h.Engine = we
 								}
 
 								// Extract instance ID prefix
 								if prefix, ok := cfg["instanceIDPrefix"].(string); ok {
-									h.instanceIDPrefix = prefix
+									h.InstanceIDPrefix = prefix
 								}
 
 								// Extract instance ID field
 								if field, ok := cfg["instanceIDField"].(string); ok && field != "" {
-									h.instanceIDField = field
+									h.InstanceIDField = field
 								}
 
 								// Extract source resource name (for view handlers like queue)
@@ -257,14 +257,14 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 
 			// If workflowType is not set but we have a state machine configuration,
 			// try to extract the default workflow type from there
-			if h.workflowType == "" {
+			if h.Type == "" {
 				if statemachine, ok := config.(map[string]any)["workflows"].(map[string]any)["statemachine"]; ok {
 					if smConfig, ok := statemachine.(map[string]any); ok {
 						if defs, ok := smConfig["definitions"].([]any); ok && len(defs) > 0 {
 							if def, ok := defs[0].(map[string]any); ok {
 								if name, ok := def["name"].(string); ok && name != "" {
-									h.workflowType = name
-									h.logger.Info(fmt.Sprintf("Using default workflow type from state machine definition: %s", h.workflowType))
+									h.Type = name
+									h.logger.Info(fmt.Sprintf("Using default workflow type from state machine definition: %s", h.Type))
 								}
 							}
 						}
@@ -274,12 +274,12 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 
 			// If workflow engine is not set but we have a state machine configuration,
 			// try to extract the engine name from there
-			if h.workflowEngine == "" {
+			if h.Engine == "" {
 				if statemachine, ok := config.(map[string]any)["workflows"].(map[string]any)["statemachine"]; ok {
 					if smConfig, ok := statemachine.(map[string]any); ok {
 						if engine, ok := smConfig["engine"].(string); ok && engine != "" {
-							h.workflowEngine = engine
-							h.logger.Info(fmt.Sprintf("Using state machine engine from configuration: %s", h.workflowEngine))
+							h.Engine = engine
+							h.logger.Info(fmt.Sprintf("Using state machine engine from configuration: %s", h.Engine))
 						}
 					}
 				}
@@ -298,15 +298,15 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 	}
 
 	// Log workflow configuration
-	if h.workflowType != "" {
-		h.logger.Info(fmt.Sprintf("REST API handler '%s' configured with workflow type: %s", h.name, h.workflowType))
-		if h.workflowEngine != "" {
-			h.logger.Info(fmt.Sprintf("Using workflow engine: %s", h.workflowEngine))
+	if h.Type != "" {
+		h.logger.Info(fmt.Sprintf("REST API handler '%s' configured with workflow type: %s", h.name, h.Type))
+		if h.Engine != "" {
+			h.logger.Info(fmt.Sprintf("Using workflow engine: %s", h.Engine))
 		}
-		if h.instanceIDPrefix != "" {
-			h.logger.Info(fmt.Sprintf("Using instance ID prefix: %s", h.instanceIDPrefix))
+		if h.InstanceIDPrefix != "" {
+			h.logger.Info(fmt.Sprintf("Using instance ID prefix: %s", h.InstanceIDPrefix))
 		}
-		h.logger.Info(fmt.Sprintf("Using instance ID field: %s", h.instanceIDField))
+		h.logger.Info(fmt.Sprintf("Using instance ID field: %s", h.InstanceIDField))
 	}
 
 	return nil
@@ -334,7 +334,7 @@ func (h *RESTAPIHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		lastSegment := pathSegments[len(pathSegments)-1]
 		if lastSegment == "transition" {
 			isTransitionRequest = true
-		} else if h.workflowType != "" && lastSegment != resourceId {
+		} else if h.Type != "" && lastSegment != resourceId {
 			// Only detect sub-actions for handlers with a workflow engine.
 			// This prevents non-workflow handlers from misinterpreting nested
 			// resource paths as sub-actions.

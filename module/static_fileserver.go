@@ -21,21 +21,44 @@ type StaticFileServer struct {
 	routerName  string // optional: name of the router to attach to
 }
 
-// NewStaticFileServer creates a new static file server module
-func NewStaticFileServer(name, root, prefix string, spaFallback bool, cacheMaxAge int) *StaticFileServer {
+// StaticFileServerOption is a functional option for configuring a StaticFileServer.
+type StaticFileServerOption func(*StaticFileServer)
+
+// WithSPAFallback enables Single Page Application fallback: requests for
+// unknown paths are served with index.html instead of a 404.
+func WithSPAFallback() StaticFileServerOption {
+	return func(s *StaticFileServer) {
+		s.spaFallback = true
+	}
+}
+
+// WithCacheMaxAge sets the Cache-Control max-age value (in seconds).
+// Defaults to 3600 when not specified or when seconds <= 0.
+func WithCacheMaxAge(seconds int) StaticFileServerOption {
+	return func(s *StaticFileServer) {
+		if seconds > 0 {
+			s.cacheMaxAge = seconds
+		}
+	}
+}
+
+// NewStaticFileServer creates a new static file server module.
+// Use WithSPAFallback() and WithCacheMaxAge() to customise behaviour.
+func NewStaticFileServer(name, root, prefix string, opts ...StaticFileServerOption) *StaticFileServer {
 	if prefix == "" {
 		prefix = "/"
 	}
-	if cacheMaxAge <= 0 {
-		cacheMaxAge = 3600
-	}
-	return &StaticFileServer{
+	s := &StaticFileServer{
 		name:        name,
 		root:        root,
 		prefix:      prefix,
-		spaFallback: spaFallback,
-		cacheMaxAge: cacheMaxAge,
+		spaFallback: false,
+		cacheMaxAge: 3600,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Name returns the module name

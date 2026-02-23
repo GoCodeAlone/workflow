@@ -155,10 +155,10 @@ func (m *LicenseModule) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type statusResponse struct {
-		Valid       bool                `json:"valid"`
+		Valid       bool                   `json:"valid"`
 		License     *licensing.LicenseInfo `json:"license,omitempty"`
-		Error       string              `json:"error,omitempty"`
-		CachedUntil time.Time           `json:"cached_until"`
+		Error       string                 `json:"error,omitempty"`
+		CachedUntil time.Time              `json:"cached_until"`
 	}
 
 	resp := statusResponse{

@@ -15,6 +15,11 @@ type Config struct {
 	AccessTTL  time.Duration
 	RefreshTTL time.Duration
 
+	// AuthRateLimit is the maximum number of requests per minute per IP
+	// allowed on the /auth/register and /auth/login endpoints.
+	// Defaults to 10 when zero.
+	AuthRateLimit int
+
 	// OAuth providers keyed by provider name (e.g. "google", "okta").
 	OAuthProviders map[string]*OAuthProviderConfig
 }
@@ -49,8 +54,9 @@ func NewRouterWithIAM(stores Stores, cfg Config, iamResolver *iam.IAMResolver) h
 
 	// --- Auth ---
 	authH := NewAuthHandler(stores.Users, stores.Sessions, secret, cfg.JWTIssuer, cfg.AccessTTL, cfg.RefreshTTL)
-	mux.HandleFunc("POST /api/v1/auth/register", authH.Register)
-	mux.HandleFunc("POST /api/v1/auth/login", authH.Login)
+	authRL := mw.RateLimit(cfg.AuthRateLimit)
+	mux.Handle("POST /api/v1/auth/register", authRL(http.HandlerFunc(authH.Register)))
+	mux.Handle("POST /api/v1/auth/login", authRL(http.HandlerFunc(authH.Login)))
 	mux.HandleFunc("POST /api/v1/auth/refresh", authH.Refresh)
 	mux.Handle("POST /api/v1/auth/logout", mw.RequireAuth(http.HandlerFunc(authH.Logout)))
 	mux.Handle("GET /api/v1/auth/me", mw.RequireAuth(http.HandlerFunc(authH.Me)))

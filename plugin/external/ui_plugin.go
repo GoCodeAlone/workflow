@@ -22,11 +22,11 @@ type UIPluginEntry struct {
 
 // UIPluginInfo is the JSON representation of a UI plugin for API responses.
 type UIPluginInfo struct {
-	Name        string          `json:"name"`
-	Version     string          `json:"version"`
-	Description string          `json:"description,omitempty"`
+	Name        string      `json:"name"`
+	Version     string      `json:"version"`
+	Description string      `json:"description,omitempty"`
 	NavItems    []UINavItem `json:"navItems,omitempty"`
-	Loaded      bool            `json:"loaded"`
+	Loaded      bool        `json:"loaded"`
 }
 
 // UIPluginManager discovers and manages UI plugins under a shared plugins
@@ -266,7 +266,7 @@ func (p *UIPluginNativePlugin) UIPages() []plugin.UIPageDef {
 	return p.manager.UIPages(p.name)
 }
 
-func (p *UIPluginNativePlugin) RegisterRoutes(_ *http.ServeMux) {}
+func (p *UIPluginNativePlugin) RegisterRoutes(_ *http.ServeMux)        {}
 func (p *UIPluginNativePlugin) OnEnable(_ plugin.PluginContext) error  { return nil }
 func (p *UIPluginNativePlugin) OnDisable(_ plugin.PluginContext) error { return nil }
 

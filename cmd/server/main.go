@@ -83,7 +83,7 @@ var (
 	licenseKey = flag.String("license-key", "", "License key for the workflow engine (or set WORKFLOW_LICENSE_KEY env var)")
 
 	// v1 API flags
-	dataDir = flag.String("data-dir", "./data", "Directory for SQLite database and persistent data")
+	dataDir       = flag.String("data-dir", "./data", "Directory for SQLite database and persistent data")
 	restoreAdmin  = flag.Bool("restore-admin", false, "Restore admin config to embedded default on startup")
 	loadWorkflows = flag.String("load-workflows", "", "Comma-separated paths to workflow YAML files or directories to load alongside admin")
 	importBundle  = flag.String("import-bundle", "", "Comma-separated paths to .tar.gz workflow bundles to import and deploy on startup")

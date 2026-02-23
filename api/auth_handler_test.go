@@ -503,6 +503,32 @@ func TestRequireAuth(t *testing.T) {
 			t.Fatalf("expected 401, got %d", w.Code)
 		}
 	})
+
+	for _, method := range []jwt.SigningMethod{jwt.SigningMethodHS384, jwt.SigningMethodHS512} {
+		method := method
+		t.Run("rejected algorithm "+method.Alg(), func(t *testing.T) {
+			claims := jwt.MapClaims{
+				"sub":  user.ID.String(),
+				"type": "access",
+				"iat":  now.Unix(),
+				"exp":  now.Add(1 * time.Hour).Unix(),
+			}
+			tok, _ := jwt.NewWithClaims(method, claims).SignedString([]byte(testSecret))
+
+			handler := mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Fatal("handler should not be called")
+			}))
+
+			req := httptest.NewRequest("GET", "/test", nil)
+			req.Header.Set("Authorization", "Bearer "+tok)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("%s: expected 401, got %d", method.Alg(), w.Code)
+			}
+		})
+	}
 }
 
 // --- minimal mock stores for permission service in tests ---
@@ -693,4 +719,118 @@ func (m *mockProjectStore) List(_ context.Context, _ store.ProjectFilter) ([]*st
 
 func (m *mockProjectStore) ListForUser(_ context.Context, _ uuid.UUID) ([]*store.Project, error) {
 	return nil, nil
+}
+
+// --- Rate-limit middleware tests ---
+
+func newTestMiddleware() *Middleware {
+	users := newMockUserStore()
+	perms := NewPermissionService(&mockMembershipStore{}, &mockWorkflowStore{}, &mockProjectStore{})
+	return NewMiddleware([]byte(testSecret), users, perms)
+}
+
+func TestRateLimitMiddleware(t *testing.T) {
+	const rpm = 5 // low limit for easy testing
+
+	mw := newTestMiddleware()
+	rl := mw.RateLimit(rpm)
+	called := 0
+	handler := rl(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called++
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// First rpm requests should succeed.
+	for i := 0; i < rpm; i++ {
+		req := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+		req.RemoteAddr = "1.2.3.4:5678"
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("request %d: expected 200, got %d", i+1, w.Code)
+		}
+	}
+
+	// Next request from the same IP should be rate-limited.
+	req := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	req.RemoteAddr = "1.2.3.4:5678"
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", w.Code)
+	}
+	if w.Header().Get("Retry-After") == "" {
+		t.Fatal("expected Retry-After header on 429 response")
+	}
+}
+
+func TestRateLimitPerIP(t *testing.T) {
+	const rpm = 2
+
+	mw := newTestMiddleware()
+	rl := mw.RateLimit(rpm)
+	handler := rl(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Exhaust the limit for IP A.
+	for i := 0; i < rpm; i++ {
+		req := httptest.NewRequest("POST", "/api/v1/auth/register", nil)
+		req.RemoteAddr = "10.0.0.1:1111"
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("IP A request %d: expected 200, got %d", i+1, w.Code)
+		}
+	}
+
+	// IP A should now be rate-limited.
+	reqA := httptest.NewRequest("POST", "/api/v1/auth/register", nil)
+	reqA.RemoteAddr = "10.0.0.1:1111"
+	wA := httptest.NewRecorder()
+	handler.ServeHTTP(wA, reqA)
+	if wA.Code != http.StatusTooManyRequests {
+		t.Fatalf("IP A: expected 429, got %d", wA.Code)
+	}
+
+	// A different IP should still be allowed.
+	reqB := httptest.NewRequest("POST", "/api/v1/auth/register", nil)
+	reqB.RemoteAddr = "10.0.0.2:2222"
+	wB := httptest.NewRecorder()
+	handler.ServeHTTP(wB, reqB)
+	if wB.Code != http.StatusOK {
+		t.Fatalf("IP B: expected 200, got %d", wB.Code)
+	}
+}
+
+func TestRateLimitDefaultValue(t *testing.T) {
+	mw := newTestMiddleware()
+	// Passing 0 should fall back to the default of 10.
+	rl := mw.RateLimit(0)
+	count := 0
+	handler := rl(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count++
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// 10 requests should pass.
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+		req.RemoteAddr = "5.5.5.5:9999"
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("request %d: expected 200, got %d", i+1, w.Code)
+		}
+	}
+
+	// 11th should be rate-limited.
+	req := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	req.RemoteAddr = "5.5.5.5:9999"
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after 10 requests, got %d", w.Code)
+	}
 }

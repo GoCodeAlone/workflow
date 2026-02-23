@@ -31,28 +31,29 @@ This document is the master plan for operationalizing the GoCodeAlone/workflow e
 
 The open-source workflow engine library and server binary. Everything in the `workflow` repo today, stabilized and released with semver.
 
-### Current State
+### Current State (as of v0.1.5)
 
-- 30+ module types, config-driven app building, visual editor, external plugin system (go-plugin/gRPC), deployment strategies (rolling, blue-green, canary), Helm chart, Prometheus/Grafana dashboards
-- No tagged semver releases — Ratchet depends on `v0.0.0` with `replace ../workflow`
-- Admin UI embedded in binary via `go:embed`
-- CI exists (`ci.yml`, `release.yml`, `helm-lint.yml`, `osv-scanner.yml`, `dependency-update.yml`)
+- 48+ module types, config-driven app building, visual editor, external plugin system (go-plugin/gRPC), deployment strategies (rolling, blue-green, canary), Helm chart, Prometheus/Grafana dashboards
+- Semver releases: v0.1.0 through v0.1.5 tagged with CI/CD automation
+- Admin UI decoupled from binary, served via `static.fileserver`
+- CI: `ci.yml`, `release.yml`, `pre-release.yml`, `helm-lint.yml`, `osv-scanner.yml`, `dependency-update.yml`
+- MIT License
 
 ### Actions
 
-| # | Action | Detail |
-|---|--------|--------|
-| 1.1 | **Semver releases with GitHub Actions** | Tag `v0.1.0` as baseline. Enhance `release.yml`: run tests + lint, build binaries (linux/darwin amd64/arm64), build admin UI, create GitHub Release with checksums. Every merge to `main` creates a pre-release; tag push creates stable release. |
-| 1.2 | **Remove `replace` directive from Ratchet** | Once workflow has tagged releases, Ratchet's `go.mod` changes from `replace github.com/GoCodeAlone/workflow => ../workflow` to `require github.com/GoCodeAlone/workflow v0.x.y`. |
-| 1.3 | **Admin UI decoupling** | Tracked: issue #34. Admin UI becomes standalone build artifact, not embedded via `go:embed`. |
-| 1.4 | **Plugin-driven admin navigation** | Tracked: issue #35. Remove hardcoded `FALLBACK_PAGES`, `PLUGIN_VIEW_COMPONENTS`. |
-| 1.5 | **UI plugin hot-reload** | Tracked: issue #38. go-plugin based UI plugin system. |
-| 1.6 | **API stability contract** | Document which Go packages are public API (`config`, `plugin`, `module`, `schema`, `capability`, `store`) vs internal. Breaking changes require major version bump. |
-| 1.7 | **License** | Engine stays open-source (MIT or Apache 2.0). Enterprise features gated at Layer 4. |
+| # | Action | Detail | Status |
+|---|--------|--------|--------|
+| 1.1 | **Semver releases with GitHub Actions** | `release.yml` runs tests + lint, builds admin UI artifact, creates GitHub Release. `pre-release.yml` creates snapshot builds on main merges. | Done (v0.1.5) |
+| 1.2 | **Remove `replace` directive from Ratchet** | Ratchet uses `require github.com/GoCodeAlone/workflow v0.1.5`. | Done |
+| 1.3 | **Admin UI decoupling** | Issue #34. Admin UI served via `static.fileserver`, no longer embedded via `go:embed`. | Done |
+| 1.4 | **Plugin-driven admin navigation** | Issue #35. Navigation fully plugin-driven, no hardcoded pages. | Done |
+| 1.5 | **UI plugin hot-reload** | Issue #38. go-plugin based UI plugin system implemented (PR #45). | Done |
+| 1.6 | **API stability contract** | `docs/API_STABILITY.md` documents public vs internal packages, semver policy, deprecation policy, embedding contract. | Done |
+| 1.7 | **License** | MIT License. Enterprise features gated at Layer 4. | Done |
 
 ### Deliverables
 
-- `github.com/GoCodeAlone/workflow` as a versioned Go module (e.g., `v0.1.0`)
+- `github.com/GoCodeAlone/workflow` as a versioned Go module (`v0.1.5`)
 - `workflow-server` binary downloadable from GitHub Releases
 - `workflow-admin-ui` tarball as a separate release artifact
 - Docker image: `ghcr.io/gocodalone/workflow:<version>`
@@ -63,36 +64,39 @@ The open-source workflow engine library and server binary. Everything in the `wo
 
 Everything a software engineer needs to build, test, and deploy a workflow application.
 
-### 2a. `wfctl` CLI (already at `cmd/wfctl/`)
-
-Current capabilities: `validate`, `run`, `serve`. Needs expansion:
+### 2a. `wfctl` CLI (at `cmd/wfctl/`)
 
 | Command | Purpose | Status |
 |---------|---------|--------|
-| `wfctl init` | Scaffold a new workflow application project | New |
-| `wfctl validate` | Validate workflow YAML config | Exists |
-| `wfctl run` | Run a workflow locally | Exists |
-| `wfctl build-ui` | Build UI assets, validate output, package | New (tracked: #37) |
-| `wfctl plugin init` | Scaffold a new plugin project | New |
-| `wfctl plugin test` | Run plugin in-process test mode | New |
-| `wfctl publish` | Package and push a plugin to the registry | New (Layer 3) |
-| `wfctl deploy` | Deploy to target environment | New (Layer 4 integration) |
+| `wfctl init` | Scaffold a new workflow application project | Done (5 templates) |
+| `wfctl validate` | Validate workflow YAML config | Done |
+| `wfctl run` | Run a workflow locally | Done |
+| `wfctl build-ui` | Build UI assets, validate output, package | Done (#37) |
+| `wfctl plugin init` | Scaffold a new plugin project | Done |
+| `wfctl plugin docs` | Generate documentation for a plugin | Done |
+| `wfctl plugin test` | Run plugin in-process test mode | **TODO** |
+| `wfctl publish` | Package and push a plugin to the registry | Done |
+| `wfctl deploy` | Deploy to target environment | **TODO** |
+| `wfctl inspect` | Inspect workflow config details | Done |
+| `wfctl schema` | Generate/view module schemas | Done |
+| `wfctl manifest` | Manage plugin manifests | Done |
+| `wfctl migrate` | Run config migrations | Done |
 
-### 2b. Shared UI Component Library (`@GoCodeAlone/workflow-ui`)
+### 2b. Shared UI Component Library (`@gocodealone/workflow-ui`)
 
-Tracked: issue #36. npm packages extracted from `workflow/ui/`:
+Issue #36. Published to GitHub Packages (`npm.pkg.github.com`):
 
-| Package | Contents |
-|---------|----------|
-| `@GoCodeAlone/workflow-ui/auth` | Login, JWT management, protected routes |
-| `@GoCodeAlone/workflow-ui/editor` | ReactFlow workflow editor, module palette, property panel |
-| `@GoCodeAlone/workflow-ui/observability` | Execution timeline, log viewer, event inspector |
-| `@GoCodeAlone/workflow-ui/layout` | App shell, plugin-driven nav, theme tokens |
-| `@GoCodeAlone/workflow-ui/api` | Typed API client for engine endpoints |
+| Export Path | Contents |
+|-------------|----------|
+| `@gocodealone/workflow-ui` | Main exports |
+| `@gocodealone/workflow-ui/auth` | Login, JWT management, protected routes |
+| `@gocodealone/workflow-ui/api` | Typed API client for engine endpoints |
+| `@gocodealone/workflow-ui/sse` | Server-Sent Events utilities |
+| `@gocodealone/workflow-ui/theme` | Theme/styling exports |
 
 ### 2c. Application UI Build/Serve Contract
 
-Tracked: issue #37. Standardized pattern:
+Issue #37, `docs/APPLICATION_UI_CONTRACT.md`:
 - SPA framework builds to `dist/`
 - `static.fileserver` serves with SPA fallback
 - Vite dev proxy for development
@@ -118,48 +122,48 @@ A registry and marketplace for discovering, distributing, and managing workflow 
 
 ### 3a. Plugin Registry Repo (`GoCodeAlone/workflow-registry` — public)
 
-A git-based registry:
+Live at [GoCodeAlone/workflow-registry](https://github.com/GoCodeAlone/workflow-registry) with 18 plugin manifests, 5 templates, JSON schema.
 
 ```
 workflow-registry/
 ├── plugins/
-│   ├── feature-flags/
-│   │   └── manifest.json
-│   ├── ratchet/
-│   │   └── manifest.json
-│   └── kubernetes-operator/   # premium
-│       └── manifest.json
+│   ├── ai/manifest.json
+│   ├── api/manifest.json
+│   ├── auth/manifest.json
+│   ├── bento/manifest.json
+│   ├── cicd/manifest.json
+│   ├── featureflags/manifest.json
+│   ├── http/manifest.json
+│   ├── integration/manifest.json
+│   ├── messaging/manifest.json
+│   ├── modularcompat/manifest.json
+│   ├── observability/manifest.json
+│   ├── pipelinesteps/manifest.json
+│   ├── platform/manifest.json
+│   ├── scheduler/manifest.json
+│   ├── secrets/manifest.json
+│   ├── statemachine/manifest.json
+│   └── storage/manifest.json
 ├── templates/
 │   ├── api-service.yaml
-│   └── event-processor.yaml
+│   ├── event-processor.yaml
+│   ├── full-stack.yaml
+│   ├── microservice-template.yaml
+│   └── plugin-template.yaml
 └── schema/
     └── registry-schema.json
 ```
 
-Each `manifest.json`:
-```json
-{
-  "name": "feature-flags",
-  "version": "1.0.0",
-  "author": "GoCodeAlone",
-  "description": "Feature flag service with LaunchDarkly integration",
-  "source": "github.com/GoCodeAlone/workflow",
-  "path": "plugins/featureflags",
-  "type": "builtin",
-  "license": "MIT",
-  "tier": "community",
-  "checksums": { "darwin-arm64": "sha256:...", "linux-amd64": "sha256:..." }
-}
-```
-
 ### 3b. Registry API Service
 
-A lightweight API (itself built on the workflow engine) that:
-- Indexes the registry repo
-- Serves plugin search/filter by tier, category, tag
-- Validates plugin submissions
-- Serves download URLs and checksums
-- Integrates with `wfctl publish` and admin Marketplace UI
+Built in `workflow-cloud` (dogfooding the workflow engine). Serves 4 endpoints matching the `RemoteRegistry` client contract:
+
+| Endpoint | Purpose | Status |
+|----------|---------|--------|
+| `GET /api/v1/plugins?q={query}` | Search plugins by name/keywords/description | Done |
+| `GET /api/v1/plugins/{name}/versions/{version}` | Get specific plugin manifest | Done |
+| `GET /api/v1/plugins/{name}/versions` | List available versions | Done |
+| `GET /api/v1/plugins/{name}/versions/{version}/download` | Download plugin archive | Done |
 
 ### 3c. Plugin Tiers
 
@@ -175,43 +179,47 @@ Premium plugins (go-plugin binaries) on load:
 1. Call `EngineCallbackService.GetService("license-validator")`
 2. License validator checks customer tier against platform API
 3. If tier doesn't include the plugin, `Init()` returns error and plugin refuses to start
-4. Uses the license validation pattern already designed in `docs/APPLICATION_LIFECYCLE.md`
+4. Uses the license validation pattern designed in `docs/APPLICATION_LIFECYCLE.md`
 
 ---
 
 ## Layer 4: Platform Services (`GoCodeAlone/workflow-cloud` — private)
 
-The commercial layer: multi-tenancy, billing, license management, SaaS control plane.
+The commercial layer: multi-tenancy, billing, license management, SaaS control plane. Built as a workflow application (dogfooding the engine) following the ratchet pattern.
 
 ### 4a. SaaS Control Plane
 
-A workflow application (built on the engine itself) providing:
+Repository: `GoCodeAlone/workflow-cloud` (private). Architecture: minimal Go bootstrap (~120 lines) + YAML config + custom `CloudPlugin` EnginePlugin.
 
-| Feature | Implementation |
-|---------|---------------|
-| Tenant management | PostgreSQL store (`PGWorkflowStore`, company/project hierarchy, RBAC) |
-| Workflow deployment | `WorkflowEngineManager` with `ModuleNamespace` for tenant isolation |
-| Visual designer | `@GoCodeAlone/workflow-ui/editor` shared component |
-| Execution monitoring | `@GoCodeAlone/workflow-ui/observability` shared component |
-| Billing | `billing/plans.go` (Starter/Professional/Enterprise tiers), Stripe integration |
-| License validation API | `POST /api/v1/license/validate` — validates keys, returns tier limits |
-| Plugin marketplace | Proxies Layer 3 registry, adds install/enable/disable per tenant |
-| SSO/OAuth | OAuth2 (GitHub, Google, OIDC) — enterprise feature |
+| Feature | Implementation | Status |
+|---------|---------------|--------|
+| Registry API | `cloudplugin/step_registry_*.go` — search, get, versions, download | Done |
+| License validation API | `cloudplugin/step_license_validate.go` — `POST /validate` | Done |
+| Tenant provisioning | `cloudplugin/step_tenant_provision.go` — creates tenant + license key | Done |
+| Stripe billing webhook | `cloudplugin/step_stripe_webhook.go` — subscription lifecycle | Done |
+| Usage reporting | `cloudplugin/step_usage_report.go` — quota tracking | Done |
+| DB migrations | `cloudplugin/hook_db_init.go` — PostgreSQL schema management | Done |
+| Registry sync | `cloudplugin/hook_registry_sync.go` — GitHub archive download + indexing | Done |
+| Per-tenant engine deployment | `WorkflowEngineManager` with `ModuleNamespace` for tenant isolation | **TODO** |
+| Visual designer | `@gocodealone/workflow-ui/editor` shared component | **TODO** (SaaS UI) |
+| Execution monitoring | `@gocodealone/workflow-ui/observability` shared component | **TODO** (SaaS UI) |
+| Plugin marketplace | Proxies registry, adds install/enable/disable per tenant | **TODO** (SaaS UI) |
+| SSO/OAuth | OAuth2 (GitHub, Google, OIDC) — enterprise feature | **TODO** (SaaS UI) |
 
 ### 4b. License Server
 
 ```
-Customer Engine ──→ POST /api/v1/license/validate ──→ License Server
-                                                          │
-                                         ┌────────────────┤
-                                         │                │
-                                   Check tier        Check usage
-                                   limits            quotas
-                                         │                │
-                                         └───────┬────────┘
-                                                 │
-                                           Return: valid/invalid,
-                                           tier, remaining quota
+Customer Engine ──→ POST /validate ──→ workflow-cloud License Server
+                                              │
+                             ┌────────────────┤
+                             │                │
+                       Check tier        Check usage
+                       limits            quotas
+                             │                │
+                             └───────┬────────┘
+                                     │
+                               Return: valid/invalid,
+                               tier, remaining quota
 ```
 
 Enforcement:
@@ -228,33 +236,15 @@ Enforcement:
 - Premium plugins require matching tier
 - Offline operation with cached license (configurable grace period)
 
-### 4d. Deployment Infrastructure (OpenTofu + AWS)
+### 4d. Deployment Infrastructure
 
-```
-workflow-cloud/
-├── infra/
-│   ├── modules/
-│   │   ├── vpc/
-│   │   ├── ecs/
-│   │   ├── rds/
-│   │   ├── elasticache/
-│   │   ├── alb/
-│   │   ├── cloudfront/
-│   │   ├── ecr/
-│   │   └── monitoring/
-│   ├── environments/
-│   │   ├── dev/
-│   │   ├── staging/
-│   │   └── production/
-│   └── main.tf
-├── deploy/
-│   ├── helm/
-│   └── docker-compose/
-└── ci/
-    ├── build.yml
-    ├── deploy.yml
-    └── release.yml
-```
+| Component | Location | Status |
+|-----------|----------|--------|
+| OpenTofu modules (VPC, ECS, RDS, ALB, ECR, monitoring) | `workflow/deploy/tofu/` | Done |
+| Helm chart for workflow-cloud | `workflow-cloud/deploy/helm/` | Done |
+| Docker Compose for local dev | `workflow-cloud/deploy/docker-compose.yml` | Done |
+| CI/CD pipelines | `workflow-cloud/.github/workflows/ci.yml`, `deploy.yml` | Done |
+| OpenTofu for workflow-cloud specifically | `workflow-cloud/infra/` | **TODO** |
 
 ---
 
@@ -267,7 +257,7 @@ Each mode of operation is a different configuration of the layers below.
 ```
 User ──→ SaaS UI (Layer 4) ──→ Control Plane API ──→ WorkflowEngineManager
               │                                              │
-    @GoCodeAlone/workflow-ui                    Deploy isolated engine per tenant
+    @gocodealone/workflow-ui                   Deploy isolated engine per tenant
               │                                              │
          Registry API (Layer 3)                    Each engine loads tenant YAML
               │                                    + tenant's enabled plugins
@@ -292,10 +282,10 @@ Customer ──→ workflow-server binary (Layer 1)
 
 ```
 Ratchet binary
-    ├── go.mod: require github.com/GoCodeAlone/workflow v0.x.y
+    ├── go.mod: require github.com/GoCodeAlone/workflow v0.1.5
     ├── ratchetplugin/       (custom Go plugin)
     ├── ratchet.yaml         (workflow config)
-    ├── ui/                  (custom React UI using @GoCodeAlone/workflow-ui)
+    ├── ui/                  (custom React UI using @gocodealone/workflow-ui)
     └── cmd/ratchetd/main.go (thin bootstrap, ~100 lines)
 ```
 
@@ -303,26 +293,27 @@ Ratchet binary
 
 ## Repo Strategy
 
-| Repo | Visibility | Purpose |
-|------|-----------|---------|
-| `GoCodeAlone/workflow` | Public | Core engine, admin UI, CLI, plugins, shared UI lib |
-| `GoCodeAlone/ratchet` | Public | AI agent platform — embedded workflow application |
-| `GoCodeAlone/workflow-registry` | Public | Plugin/template registry (git-based) |
-| `GoCodeAlone/workflow-cloud` | Private | SaaS control plane, billing, license server, infra |
+| Repo | Visibility | Purpose | Status |
+|------|-----------|---------|--------|
+| `GoCodeAlone/workflow` | Public | Core engine, admin UI, CLI, plugins | v0.1.5 released |
+| `GoCodeAlone/workflow-ui` | Public | Shared UI component library (npm) | Published |
+| `GoCodeAlone/workflow-registry` | Public | Plugin/template registry (git-based) | Live, 18 plugins |
+| `GoCodeAlone/workflow-plugin-bento` | Public | Bento messaging plugin | v0.1.5 dep |
+| `GoCodeAlone/ratchet` | Public | AI agent platform — embedded workflow application | v0.1.5 dep |
+| `GoCodeAlone/workflow-cloud` | Private | SaaS control plane, billing, license server | Built, API functional |
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Stabilize Core (Weeks 1-3)
+### Phase 1: Stabilize Core (Weeks 1-3) — COMPLETE
 
-- [x] Semver releases with CI/CD for workflow repo — `release.yml` enhanced with admin UI artifact, `pre-release.yml` added for snapshot builds on main merges. v0.1.0 tagged.
+- [x] Semver releases with CI/CD for workflow repo — `release.yml` enhanced with admin UI artifact, `pre-release.yml` added for snapshot builds on main merges. v0.1.5 tagged.
 - [x] API stability contract documentation — `docs/API_STABILITY.md` documents public vs internal packages, semver policy, deprecation policy, embedding contract.
-- [ ] Remove `replace` directive from Ratchet, switch to versioned import — pending Ratchet migration (Phase 7)
+- [x] Remove `replace` directive from Ratchet, switch to versioned import — Ratchet updated to `workflow v0.1.5`.
 
-### Phase 2: UI Overhaul (Weeks 1-6, parallel with Phase 1)
+### Phase 2: UI Overhaul (Weeks 1-6) — COMPLETE
 
-Already tracked as issues #34-#39:
 - [x] #34: Decouple admin UI from Go binary — completed, admin UI served via `static.fileserver`
 - [x] #35: Plugin-driven admin navigation — completed, navigation fully plugin-driven
 - [x] #36: Extract shared UI component library — completed, `@gocodealone/workflow-ui` published to GitHub Packages
@@ -330,40 +321,55 @@ Already tracked as issues #34-#39:
 - [x] #38: go-plugin UI hot-reload — implemented in PR #45
 - [x] #39: Cleanup legacy UI scaffolding — removed stale `module/ui_dist/`, updated deployment docs, legacy embed references removed
 
-### Phase 3: Developer Tooling (Weeks 3-6)
+### Phase 3: Developer Tooling (Weeks 3-6) — IN PROGRESS
 
 - [x] `wfctl init` with project templates — 5 templates: api-service, event-processor, full-stack, plugin, ui-plugin
 - [x] `wfctl plugin init` for plugin scaffolding — improved with template system
 - [x] `wfctl build-ui` (tracked: #37) — framework detection, build, validate, copy, config snippet generation
 - [x] Shared UI library npm publish (tracked: #36) — `@gocodealone/workflow-ui` on GitHub Packages
+- [ ] `wfctl plugin test` — run plugin in isolated test mode with mock engine
+- [ ] `wfctl deploy` — deploy workflow application to target environment (local Docker, Kubernetes, cloud)
 
-### Phase 4: Plugin Registry (Weeks 5-8)
+### Phase 4: Plugin Registry (Weeks 5-8) — COMPLETE
 
-- [x] Create `workflow-registry` repo with schema — [GoCodeAlone/workflow-registry](https://github.com/GoCodeAlone/workflow-registry) live with 16 plugin manifests, 5 templates, JSON schema
-- [ ] Build registry API service (on the workflow engine itself) — deferred to SaaS control plane
+- [x] Create `workflow-registry` repo with schema — [GoCodeAlone/workflow-registry](https://github.com/GoCodeAlone/workflow-registry) live with 18 plugin manifests, 5 templates, JSON schema
+- [x] Build registry API service — implemented in `workflow-cloud` cloudplugin (search, get, versions, download endpoints)
 - [x] `wfctl publish` command — auto-detection, validation, binary build, registry submission workflow
 - [x] Plugin tier system (core/community/premium) — `PluginTier` type, tier validation in loader, all built-in plugins marked core
 
-### Phase 5: Platform Services (Weeks 6-12)
+### Phase 5: Platform Services (Weeks 6-12) — IN PROGRESS
 
-- [x] License server implementation — `license.validator` module with HTTP validation, caching, offline grace period, background refresh
-- [x] Billing integration (Stripe, existing `billing/plans.go`) — Stripe provider, subscription management, enforcement middleware, webhook handling
-- [ ] SaaS control plane application — requires `workflow-cloud` private repo (Layer 4)
-- [ ] Tenant management and workflow deployment via `WorkflowEngineManager` — existing in engine, SaaS integration pending
+- [x] License server implementation — `license.validator` module with HTTP validation, caching, offline grace period, background refresh. Also `step.license_validate` in workflow-cloud.
+- [x] Billing integration (Stripe, existing `billing/plans.go`) — Stripe provider, subscription management, enforcement middleware, webhook handling. Also `step.stripe_webhook` in workflow-cloud.
+- [x] SaaS control plane application — `workflow-cloud` private repo built with registry API, license validation, tenant provisioning, Stripe webhook, usage reporting.
+- [ ] Per-tenant workflow deployment via `WorkflowEngineManager` — engine has the capability, SaaS integration in workflow-cloud pending.
 - [x] Premium plugin gating — integrated with tier system and license validator
 
-### Phase 6: Infrastructure (Weeks 8-14)
+### Phase 6: Infrastructure (Weeks 8-14) — IN PROGRESS
 
-- [x] OpenTofu modules for AWS (VPC, ECS, RDS, ElastiCache, ALB, ECR, monitoring) — `deploy/tofu/` with dev/staging/production environments
-- [ ] CI/CD for workflow-cloud — requires `workflow-cloud` private repo
+- [x] OpenTofu modules for AWS (VPC, ECS, RDS, ElastiCache, ALB, ECR, monitoring) — `workflow/deploy/tofu/` with dev/staging/production environments
+- [x] CI/CD for workflow-cloud — `.github/workflows/ci.yml` (test + lint with PG service container) and `deploy.yml` (build, push to GHCR, deploy staging/production)
 - [x] Staging and production environments — OpenTofu environments with appropriate instance sizing
 - [x] Monitoring (Prometheus, Grafana, CloudWatch) — CloudWatch dashboard + alarms, Docker Compose with Prometheus/Grafana
+- [ ] OpenTofu infrastructure for workflow-cloud — `workflow-cloud/infra/` with VPC, ECS, RDS, ElastiCache, ALB, CloudFront, ECR, monitoring modules
 
-### Phase 7: Ratchet Migration (Weeks 4-6, parallel)
+### Phase 7: Ratchet Migration (Weeks 4-6) — IN PROGRESS
 
-- [x] Remove `replace` directive, use versioned workflow import — ratchet updated to `workflow v0.1.1`
-- [x] Migrate UI to use `@GoCodeAlone/workflow-ui` shared components — completed in Phase 2
-- [ ] Publish `ratchetplugin` to registry — pending registry API service
+- [x] Remove `replace` directive, use versioned workflow import — ratchet updated to `workflow v0.1.5`
+- [x] Migrate UI to use `@gocodealone/workflow-ui` shared components — completed in Phase 2
+- [ ] Publish `ratchetplugin` to registry — add `ratchet/manifest.json` to `workflow-registry`
+
+---
+
+## Remaining Work Summary
+
+| # | Item | Layer | Effort |
+|---|------|-------|--------|
+| R1 | `wfctl plugin test` subcommand | Layer 2 | Medium — mock engine harness, plugin lifecycle test |
+| R2 | `wfctl deploy` subcommand | Layer 2 | Medium — Docker/K8s/cloud deployment targets |
+| R3 | Per-tenant engine deployment in workflow-cloud | Layer 4 | Large — WorkflowEngineManager integration, tenant isolation |
+| R4 | OpenTofu infrastructure for workflow-cloud | Layer 4 | Medium — mirror `workflow/deploy/tofu/` patterns for cloud-specific infra |
+| R5 | Publish ratchetplugin to registry | Layer 3 | Small — create manifest.json, add to workflow-registry |
 
 ---
 
@@ -383,11 +389,9 @@ Already tracked as issues #34-#39:
 
 ## Related Issues
 
-- #34: Decouple Admin UI from Go Binary
-- #35: Complete Plugin-Driven Admin UI Navigation
-- #36: Extract Shared UI Component Library
-- #37: Application UI Build/Serve Contract
-- #38: go-plugin UI Hot-Reload
-- #39: Cleanup Legacy UI Scaffolding
-
-Additional issues will be created from this plan for phases not yet tracked (semver releases, API stability, plugin registry, license server, wfctl expansion, Ratchet migration, infrastructure).
+- #34: Decouple Admin UI from Go Binary (Done)
+- #35: Complete Plugin-Driven Admin UI Navigation (Done)
+- #36: Extract Shared UI Component Library (Done)
+- #37: Application UI Build/Serve Contract (Done)
+- #38: go-plugin UI Hot-Reload (Done)
+- #39: Cleanup Legacy UI Scaffolding (Done)

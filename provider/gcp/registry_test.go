@@ -255,10 +255,10 @@ func TestPullImage_Unauthorized(t *testing.T) {
 // TestParseImageRef tests the image reference parser.
 func TestParseImageRef(t *testing.T) {
 	tests := []struct {
-		input     string
-		wantHost  string
-		wantPath  string
-		wantRef   string
+		input    string
+		wantHost string
+		wantPath string
+		wantRef  string
 	}{
 		{"gcr.io/project/image:v1", "gcr.io", "project/image", "v1"},
 		{"us-central1-docker.pkg.dev/proj/repo/img:latest", "us-central1-docker.pkg.dev", "proj/repo/img", "latest"},
