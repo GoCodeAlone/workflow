@@ -14,8 +14,8 @@ import (
 )
 
 // V1APIHandler handles the /api/v1/admin/ CRUD endpoints for companies, projects,
-// and workflows. It is wired as a fallback on the admin-v1-queries and
-// admin-v1-commands CQRS handler modules.
+// and workflows. It is wired as a fallback on the admin-queries and
+// admin-commands CQRS handler modules.
 type V1APIHandler struct {
 	store              *V1Store
 	jwtSecret          string
