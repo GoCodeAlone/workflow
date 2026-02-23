@@ -157,7 +157,7 @@ func (p *Plugin) WiringHooks() []plugin.WiringHook {
 	return []plugin.WiringHook{
 		{
 			Name:     "openapi-route-registration",
-			Priority: 45, // run after auth wiring (90), before static files (50)
+			Priority: 45, // run after auth wiring (90) and after static files (50)
 			Hook:     wireOpenAPIRoutes,
 		},
 	}
@@ -178,6 +178,19 @@ func wireOpenAPIRoutes(app modular.Application, cfg *config.WorkflowConfig) erro
 		}
 	}
 
+	// Build router lookup map and capture the first available router in a single pass.
+	// This reduces subsequent lookups from O(n) each to O(1).
+	routers := make(map[string]module.HTTPRouter)
+	var firstRouter module.HTTPRouter
+	for svcName, svc := range app.SvcRegistry() {
+		if router, ok := svc.(module.HTTPRouter); ok {
+			routers[svcName] = router
+			if firstRouter == nil {
+				firstRouter = router
+			}
+		}
+	}
+
 	for _, svc := range app.SvcRegistry() {
 		oaMod, ok := svc.(*module.OpenAPIModule)
 		if !ok {
@@ -188,25 +201,15 @@ func wireOpenAPIRoutes(app modular.Application, cfg *config.WorkflowConfig) erro
 
 		// 1) Explicit router name from config
 		if rName := oaMod.RouterName(); rName != "" {
-			for svcName, routerSvc := range app.SvcRegistry() {
-				if router, ok2 := routerSvc.(module.HTTPRouter); ok2 && svcName == rName {
-					targetRouter = router
-					break
-				}
-			}
+			targetRouter = routers[rName]
 		}
 
 		// 2) dependsOn router reference
 		if targetRouter == nil {
 			for _, dep := range openAPIDeps[oaMod.Name()] {
 				if routerNames[dep] {
-					for svcName, routerSvc := range app.SvcRegistry() {
-						if router, ok2 := routerSvc.(module.HTTPRouter); ok2 && svcName == dep {
-							targetRouter = router
-							break
-						}
-					}
-					if targetRouter != nil {
+					if router, found := routers[dep]; found {
+						targetRouter = router
 						break
 					}
 				}
@@ -215,12 +218,7 @@ func wireOpenAPIRoutes(app modular.Application, cfg *config.WorkflowConfig) erro
 
 		// 3) Fall back to first available router
 		if targetRouter == nil {
-			for _, routerSvc := range app.SvcRegistry() {
-				if router, ok2 := routerSvc.(module.HTTPRouter); ok2 {
-					targetRouter = router
-					break
-				}
-			}
+			targetRouter = firstRouter
 		}
 
 		if targetRouter == nil {

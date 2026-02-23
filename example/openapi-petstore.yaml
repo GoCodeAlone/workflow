@@ -22,6 +22,8 @@ modules:
     dependsOn:
       - petstore-router
     config:
+      # NOTE: spec_file is resolved relative to this config file's directory
+      # via the _config_dir mechanism in config.ResolvePathInConfig.
       spec_file: specs/petstore.yaml
       base_path: /api/v1
       router: petstore-router
