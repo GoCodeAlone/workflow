@@ -9,16 +9,106 @@ import (
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
+// Constructor function types for each module produced by the API plugin.
+// Callers may inject custom implementations via the Plugin setter methods,
+// allowing concrete types to be substituted without modifying plugin source.
+
+// QueryHandlerCtor creates a QueryHandler-compatible modular.Module for the given name.
+type QueryHandlerCtor func(name string) modular.Module
+
+// CommandHandlerCtor creates a CommandHandler-compatible modular.Module for the given name.
+type CommandHandlerCtor func(name string) modular.Module
+
+// RESTAPIHandlerCtor creates a RESTAPIHandler-compatible modular.Module.
+// resourceName is extracted from config by the factory before calling this.
+type RESTAPIHandlerCtor func(name, resourceName string) modular.Module
+
+// APIGatewayCtor creates an APIGateway-compatible modular.Module for the given name.
+type APIGatewayCtor func(name string) modular.Module
+
+// WorkflowRegistryCtor creates a WorkflowRegistry-compatible modular.Module.
+// storageBackend is extracted from config by the factory before calling this.
+type WorkflowRegistryCtor func(name, storageBackend string) modular.Module
+
+// DataTransformerCtor creates a DataTransformer-compatible modular.Module for the given name.
+type DataTransformerCtor func(name string) modular.Module
+
+// ProcessingStepCtor creates a ProcessingStep-compatible modular.Module.
+// stepConfig is built from the factory's config map before calling this.
+type ProcessingStepCtor func(name string, stepConfig module.ProcessingStepConfig) modular.Module
+
 // Plugin provides REST API and CQRS capabilities: api.query, api.command,
 // api.handler, api.gateway, workflow.registry, data.transformer,
 // and processing.step modules.
 type Plugin struct {
 	plugin.BaseEnginePlugin
+
+	// injectable constructors — default to the concrete module constructors.
+	newQueryHandler     QueryHandlerCtor
+	newCommandHandler   CommandHandlerCtor
+	newRESTAPIHandler   RESTAPIHandlerCtor
+	newAPIGateway       APIGatewayCtor
+	newWorkflowRegistry WorkflowRegistryCtor
+	newDataTransformer  DataTransformerCtor
+	newProcessingStep   ProcessingStepCtor
 }
 
-// New creates a new API plugin.
+// WithQueryHandlerCtor overrides the constructor used to create api.query modules.
+func (p *Plugin) WithQueryHandlerCtor(ctor QueryHandlerCtor) *Plugin {
+	p.newQueryHandler = ctor
+	return p
+}
+
+// WithCommandHandlerCtor overrides the constructor used to create api.command modules.
+func (p *Plugin) WithCommandHandlerCtor(ctor CommandHandlerCtor) *Plugin {
+	p.newCommandHandler = ctor
+	return p
+}
+
+// WithRESTAPIHandlerCtor overrides the constructor used to create api.handler modules.
+func (p *Plugin) WithRESTAPIHandlerCtor(ctor RESTAPIHandlerCtor) *Plugin {
+	p.newRESTAPIHandler = ctor
+	return p
+}
+
+// WithAPIGatewayCtor overrides the constructor used to create api.gateway modules.
+func (p *Plugin) WithAPIGatewayCtor(ctor APIGatewayCtor) *Plugin {
+	p.newAPIGateway = ctor
+	return p
+}
+
+// WithWorkflowRegistryCtor overrides the constructor used to create workflow.registry modules.
+func (p *Plugin) WithWorkflowRegistryCtor(ctor WorkflowRegistryCtor) *Plugin {
+	p.newWorkflowRegistry = ctor
+	return p
+}
+
+// WithDataTransformerCtor overrides the constructor used to create data.transformer modules.
+func (p *Plugin) WithDataTransformerCtor(ctor DataTransformerCtor) *Plugin {
+	p.newDataTransformer = ctor
+	return p
+}
+
+// WithProcessingStepCtor overrides the constructor used to create processing.step modules.
+func (p *Plugin) WithProcessingStepCtor(ctor ProcessingStepCtor) *Plugin {
+	p.newProcessingStep = ctor
+	return p
+}
+
+// New creates a new API plugin using the default concrete module constructors.
 func New() *Plugin {
 	return &Plugin{
+		// Default constructors wrap the concrete module constructors, adapting
+		// their return types to modular.Module via implicit interface satisfaction.
+		newQueryHandler:     func(name string) modular.Module { return module.NewQueryHandler(name) },
+		newCommandHandler:   func(name string) modular.Module { return module.NewCommandHandler(name) },
+		newRESTAPIHandler:   func(name, resourceName string) modular.Module { return module.NewRESTAPIHandler(name, resourceName) },
+		newAPIGateway:       func(name string) modular.Module { return module.NewAPIGateway(name) },
+		newWorkflowRegistry: func(name, storageBackend string) modular.Module { return module.NewWorkflowRegistry(name, storageBackend) },
+		newDataTransformer:  func(name string) modular.Module { return module.NewDataTransformer(name) },
+		newProcessingStep: func(name string, cfg module.ProcessingStepConfig) modular.Module {
+			return module.NewProcessingStep(name, cfg)
+		},
 		BaseEnginePlugin: plugin.BaseEnginePlugin{
 			BaseNativePlugin: plugin.BaseNativePlugin{
 				PluginName:        "api",
@@ -89,188 +179,222 @@ func getIntConfig(cfg map[string]any, key string, defaultVal int) int {
 }
 
 // ModuleFactories returns factories for all API module types.
+// Each factory delegates construction to the injectable constructor stored on
+// the Plugin, so callers can substitute implementations without modifying this
+// file (see WithQueryHandlerCtor, WithCommandHandlerCtor, etc.).
+// Post-construction config wiring uses interface assertions so that custom
+// implementations only need to implement the methods they support.
 func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 	return map[string]plugin.ModuleFactory{
 		"api.query": func(name string, cfg map[string]any) modular.Module {
-			qh := module.NewQueryHandler(name)
-			if delegate, ok := cfg["delegate"].(string); ok && delegate != "" {
-				qh.SetDelegate(delegate)
+			mod := p.newQueryHandler(name)
+			if qh, ok := mod.(interface{ SetDelegate(string) }); ok {
+				if delegate, ok2 := cfg["delegate"].(string); ok2 && delegate != "" {
+					qh.SetDelegate(delegate)
+				}
 			}
-			return qh
+			return mod
 		},
 		"api.command": func(name string, cfg map[string]any) modular.Module {
-			ch := module.NewCommandHandler(name)
-			if delegate, ok := cfg["delegate"].(string); ok && delegate != "" {
-				ch.SetDelegate(delegate)
+			mod := p.newCommandHandler(name)
+			if ch, ok := mod.(interface{ SetDelegate(string) }); ok {
+				if delegate, ok2 := cfg["delegate"].(string); ok2 && delegate != "" {
+					ch.SetDelegate(delegate)
+				}
 			}
-			return ch
+			return mod
 		},
 		"api.handler": func(name string, cfg map[string]any) modular.Module {
 			resourceName := "resources"
 			if rn, ok := cfg["resourceName"].(string); ok {
 				resourceName = rn
 			}
-			handler := module.NewRESTAPIHandler(name, resourceName)
-			if wt, ok := cfg["workflowType"].(string); ok && wt != "" {
-				handler.SetWorkflowType(wt)
+			mod := p.newRESTAPIHandler(name, resourceName)
+			// Apply optional config using interface assertions so that custom
+			// implementations only need to satisfy the methods they support.
+			type restAPIConfigurator interface {
+				SetWorkflowType(string)
+				SetWorkflowEngine(string)
+				SetInitialTransition(string)
+				SetSeedFile(string)
+				SetSourceResourceName(string)
+				SetStateFilter(string)
+				SetInstanceIDPrefix(string)
+				SetFieldMapping(*module.FieldMapping)
+				SetTransitionMap(map[string]string)
+				SetSummaryFields([]string)
 			}
-			if we, ok := cfg["workflowEngine"].(string); ok && we != "" {
-				handler.SetWorkflowEngine(we)
-			}
-			if it, ok := cfg["initialTransition"].(string); ok && it != "" {
-				handler.SetInitialTransition(it)
-			}
-			if sf, ok := cfg["seedFile"].(string); ok && sf != "" {
-				sf = config.ResolvePathInConfig(cfg, sf)
-				handler.SetSeedFile(sf)
-			}
-			if src, ok := cfg["sourceResourceName"].(string); ok && src != "" {
-				handler.SetSourceResourceName(src)
-			}
-			if stf, ok := cfg["stateFilter"].(string); ok && stf != "" {
-				handler.SetStateFilter(stf)
-			}
-			if idp, ok := cfg["instanceIDPrefix"].(string); ok && idp != "" {
-				handler.SetInstanceIDPrefix(idp)
-			}
-			// Dynamic field mapping (optional YAML override of default field names)
-			if fmCfg, ok := cfg["fieldMapping"].(map[string]any); ok {
-				override := module.FieldMappingFromConfig(fmCfg)
-				defaults := module.DefaultRESTFieldMapping()
-				defaults.Merge(override)
-				handler.SetFieldMapping(defaults)
-			}
-			// Custom sub-action to transition mapping
-			if tmCfg, ok := cfg["transitionMap"].(map[string]any); ok {
-				tm := module.DefaultTransitionMap()
-				for action, trans := range tmCfg {
-					if t, ok := trans.(string); ok {
-						tm[action] = t
+			if handler, ok := mod.(restAPIConfigurator); ok {
+				if wt, ok := cfg["workflowType"].(string); ok && wt != "" {
+					handler.SetWorkflowType(wt)
+				}
+				if we, ok := cfg["workflowEngine"].(string); ok && we != "" {
+					handler.SetWorkflowEngine(we)
+				}
+				if it, ok := cfg["initialTransition"].(string); ok && it != "" {
+					handler.SetInitialTransition(it)
+				}
+				if sf, ok := cfg["seedFile"].(string); ok && sf != "" {
+					sf = config.ResolvePathInConfig(cfg, sf)
+					handler.SetSeedFile(sf)
+				}
+				if src, ok := cfg["sourceResourceName"].(string); ok && src != "" {
+					handler.SetSourceResourceName(src)
+				}
+				if stf, ok := cfg["stateFilter"].(string); ok && stf != "" {
+					handler.SetStateFilter(stf)
+				}
+				if idp, ok := cfg["instanceIDPrefix"].(string); ok && idp != "" {
+					handler.SetInstanceIDPrefix(idp)
+				}
+				// Dynamic field mapping (optional YAML override of default field names)
+				if fmCfg, ok := cfg["fieldMapping"].(map[string]any); ok {
+					override := module.FieldMappingFromConfig(fmCfg)
+					defaults := module.DefaultRESTFieldMapping()
+					defaults.Merge(override)
+					handler.SetFieldMapping(defaults)
+				}
+				// Custom sub-action to transition mapping
+				if tmCfg, ok := cfg["transitionMap"].(map[string]any); ok {
+					tm := module.DefaultTransitionMap()
+					for action, trans := range tmCfg {
+						if t, ok := trans.(string); ok {
+							tm[action] = t
+						}
+					}
+					handler.SetTransitionMap(tm)
+				}
+				// Custom summary fields
+				if sfCfg, ok := cfg["summaryFields"].([]any); ok {
+					fields := make([]string, 0, len(sfCfg))
+					for _, f := range sfCfg {
+						if s, ok := f.(string); ok {
+							fields = append(fields, s)
+						}
+					}
+					if len(fields) > 0 {
+						handler.SetSummaryFields(fields)
 					}
 				}
-				handler.SetTransitionMap(tm)
 			}
-			// Custom summary fields
-			if sfCfg, ok := cfg["summaryFields"].([]any); ok {
-				fields := make([]string, 0, len(sfCfg))
-				for _, f := range sfCfg {
-					if s, ok := f.(string); ok {
-						fields = append(fields, s)
-					}
-				}
-				if len(fields) > 0 {
-					handler.SetSummaryFields(fields)
-				}
-			}
-			return handler
+			return mod
 		},
 		"api.gateway": func(name string, cfg map[string]any) modular.Module {
-			gw := module.NewAPIGateway(name)
-			// Parse routes
-			if routesCfg, ok := cfg["routes"].([]any); ok {
-				var routes []module.GatewayRoute
-				for _, rc := range routesCfg {
-					if rm, ok := rc.(map[string]any); ok {
-						route := module.GatewayRoute{}
-						if v, ok := rm["pathPrefix"].(string); ok {
-							route.PathPrefix = v
-						}
-						if v, ok := rm["backend"].(string); ok {
-							route.Backend = v
-						}
-						if v, ok := rm["stripPrefix"].(bool); ok {
-							route.StripPrefix = v
-						}
-						if v, ok := rm["auth"].(bool); ok {
-							route.Auth = v
-						}
-						if v, ok := rm["timeout"].(string); ok {
-							route.Timeout = v
-						}
-						if methods, ok := rm["methods"].([]any); ok {
-							for _, m := range methods {
-								if s, ok := m.(string); ok {
-									route.Methods = append(route.Methods, s)
+			mod := p.newAPIGateway(name)
+			// Apply optional config using interface assertions.
+			type gatewayConfigurator interface {
+				SetRoutes([]module.GatewayRoute) error
+				SetRateLimit(*module.RateLimitConfig)
+				SetCORS(*module.CORSConfig)
+				SetAuth(*module.AuthConfig)
+			}
+			if gw, ok := mod.(gatewayConfigurator); ok {
+				// Parse routes
+				if routesCfg, ok2 := cfg["routes"].([]any); ok2 {
+					var routes []module.GatewayRoute
+					for _, rc := range routesCfg {
+						if rm, ok3 := rc.(map[string]any); ok3 {
+							route := module.GatewayRoute{}
+							if v, ok4 := rm["pathPrefix"].(string); ok4 {
+								route.PathPrefix = v
+							}
+							if v, ok4 := rm["backend"].(string); ok4 {
+								route.Backend = v
+							}
+							if v, ok4 := rm["stripPrefix"].(bool); ok4 {
+								route.StripPrefix = v
+							}
+							if v, ok4 := rm["auth"].(bool); ok4 {
+								route.Auth = v
+							}
+							if v, ok4 := rm["timeout"].(string); ok4 {
+								route.Timeout = v
+							}
+							if methods, ok4 := rm["methods"].([]any); ok4 {
+								for _, m := range methods {
+									if s, ok5 := m.(string); ok5 {
+										route.Methods = append(route.Methods, s)
+									}
 								}
 							}
-						}
-						if rlCfg, ok := rm["rateLimit"].(map[string]any); ok {
-							rl := &module.RateLimitConfig{}
-							if v, ok := rlCfg["requestsPerMinute"].(float64); ok {
-								rl.RequestsPerMinute = int(v)
+							if rlCfg, ok4 := rm["rateLimit"].(map[string]any); ok4 {
+								rl := &module.RateLimitConfig{}
+								if v, ok5 := rlCfg["requestsPerMinute"].(float64); ok5 {
+									rl.RequestsPerMinute = int(v)
+								}
+								if v, ok5 := rlCfg["burstSize"].(float64); ok5 {
+									rl.BurstSize = int(v)
+								}
+								route.RateLimit = rl
 							}
-							if v, ok := rlCfg["burstSize"].(float64); ok {
-								rl.BurstSize = int(v)
+							routes = append(routes, route)
+						}
+					}
+					_ = gw.SetRoutes(routes)
+				}
+				// Global rate limit
+				if glCfg, ok2 := cfg["globalRateLimit"].(map[string]any); ok2 {
+					rl := &module.RateLimitConfig{}
+					if v, ok3 := glCfg["requestsPerMinute"].(float64); ok3 {
+						rl.RequestsPerMinute = int(v)
+					}
+					if v, ok3 := glCfg["burstSize"].(float64); ok3 {
+						rl.BurstSize = int(v)
+					}
+					gw.SetRateLimit(rl)
+				}
+				// CORS
+				if corsCfg, ok2 := cfg["cors"].(map[string]any); ok2 {
+					cors := &module.CORSConfig{}
+					if origins, ok3 := corsCfg["allowOrigins"].([]any); ok3 {
+						for _, o := range origins {
+							if s, ok4 := o.(string); ok4 {
+								cors.AllowOrigins = append(cors.AllowOrigins, s)
 							}
-							route.RateLimit = rl
-						}
-						routes = append(routes, route)
-					}
-				}
-				_ = gw.SetRoutes(routes)
-			}
-			// Global rate limit
-			if glCfg, ok := cfg["globalRateLimit"].(map[string]any); ok {
-				rl := &module.RateLimitConfig{}
-				if v, ok := glCfg["requestsPerMinute"].(float64); ok {
-					rl.RequestsPerMinute = int(v)
-				}
-				if v, ok := glCfg["burstSize"].(float64); ok {
-					rl.BurstSize = int(v)
-				}
-				gw.SetRateLimit(rl)
-			}
-			// CORS
-			if corsCfg, ok := cfg["cors"].(map[string]any); ok {
-				cors := &module.CORSConfig{}
-				if origins, ok := corsCfg["allowOrigins"].([]any); ok {
-					for _, o := range origins {
-						if s, ok := o.(string); ok {
-							cors.AllowOrigins = append(cors.AllowOrigins, s)
 						}
 					}
-				}
-				if methods, ok := corsCfg["allowMethods"].([]any); ok {
-					for _, m := range methods {
-						if s, ok := m.(string); ok {
-							cors.AllowMethods = append(cors.AllowMethods, s)
+					if methods, ok3 := corsCfg["allowMethods"].([]any); ok3 {
+						for _, m := range methods {
+							if s, ok4 := m.(string); ok4 {
+								cors.AllowMethods = append(cors.AllowMethods, s)
+							}
 						}
 					}
-				}
-				if headers, ok := corsCfg["allowHeaders"].([]any); ok {
-					for _, h := range headers {
-						if s, ok := h.(string); ok {
-							cors.AllowHeaders = append(cors.AllowHeaders, s)
+					if headers, ok3 := corsCfg["allowHeaders"].([]any); ok3 {
+						for _, h := range headers {
+							if s, ok4 := h.(string); ok4 {
+								cors.AllowHeaders = append(cors.AllowHeaders, s)
+							}
 						}
 					}
+					if v, ok3 := corsCfg["maxAge"].(float64); ok3 {
+						cors.MaxAge = int(v)
+					}
+					gw.SetCORS(cors)
 				}
-				if v, ok := corsCfg["maxAge"].(float64); ok {
-					cors.MaxAge = int(v)
+				// Auth
+				if authCfg, ok2 := cfg["auth"].(map[string]any); ok2 {
+					ac := &module.AuthConfig{}
+					if v, ok3 := authCfg["type"].(string); ok3 {
+						ac.Type = v
+					}
+					if v, ok3 := authCfg["header"].(string); ok3 {
+						ac.Header = v
+					}
+					gw.SetAuth(ac)
 				}
-				gw.SetCORS(cors)
 			}
-			// Auth
-			if authCfg, ok := cfg["auth"].(map[string]any); ok {
-				ac := &module.AuthConfig{}
-				if v, ok := authCfg["type"].(string); ok {
-					ac.Type = v
-				}
-				if v, ok := authCfg["header"].(string); ok {
-					ac.Header = v
-				}
-				gw.SetAuth(ac)
-			}
-			return gw
+			return mod
 		},
 		"workflow.registry": func(name string, cfg map[string]any) modular.Module {
 			storageBackend := ""
 			if sb, ok := cfg["storageBackend"].(string); ok && sb != "" {
 				storageBackend = sb
 			}
-			return module.NewWorkflowRegistry(name, storageBackend)
+			return p.newWorkflowRegistry(name, storageBackend)
 		},
 		"data.transformer": func(name string, _ map[string]any) modular.Module {
-			return module.NewDataTransformer(name)
+			return p.newDataTransformer(name)
 		},
 		"processing.step": func(name string, cfg map[string]any) modular.Module {
 			stepConfig := module.ProcessingStepConfig{
@@ -281,7 +405,7 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 				RetryBackoffMs:       getIntConfig(cfg, "retryBackoffMs", 1000),
 				TimeoutSeconds:       getIntConfig(cfg, "timeoutSeconds", 30),
 			}
-			return module.NewProcessingStep(name, stepConfig)
+			return p.newProcessingStep(name, stepConfig)
 		},
 	}
 }
