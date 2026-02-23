@@ -71,8 +71,8 @@ func TestRESTAPIHandler_Init(t *testing.T) {
 	if h.logger == nil {
 		t.Error("expected logger to be set")
 	}
-	if h.instanceIDField != "id" {
-		t.Errorf("expected default instanceIDField 'id', got '%s'", h.instanceIDField)
+	if h.InstanceIDField != "id" {
+		t.Errorf("expected default instanceIDField 'id', got '%s'", h.InstanceIDField)
 	}
 }
 
@@ -684,8 +684,8 @@ func TestRESTAPIHandler_Init_FullSetup(t *testing.T) {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	if h.workflowType != "item-workflow" {
-		t.Errorf("expected workflowType 'item-workflow', got '%s'", h.workflowType)
+	if h.Type != "item-workflow" {
+		t.Errorf("expected workflowType 'item-workflow', got '%s'", h.Type)
 	}
 }
 
