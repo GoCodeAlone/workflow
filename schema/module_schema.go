@@ -1370,6 +1370,58 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		MaxIncoming:   intPtr(0),
 	})
 
+	// ---- Event Store ----
+
+	r.Register(&ModuleSchema{
+		Type:        "eventstore.service",
+		Label:       "Event Store Service",
+		Category:    "infrastructure",
+		Description: "SQLite-backed event store for execution event persistence, timeline, and replay features",
+		Outputs:     []ServiceIODef{{Name: "EventStore", Type: "store.SQLiteEventStore", Description: "Execution event store"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "db_path", Label: "Database Path", Type: FieldTypeString, DefaultValue: "data/events.db", Description: "Path to the SQLite database file for event storage", Placeholder: "data/events.db"},
+			{Key: "retention_days", Label: "Retention Days", Type: FieldTypeNumber, DefaultValue: 90, Description: "Number of days to retain execution events"},
+		},
+		DefaultConfig: map[string]any{"db_path": "data/events.db", "retention_days": 90},
+		MaxIncoming:   intPtr(0),
+	})
+
+	// ---- Timeline / Replay ----
+
+	r.Register(&ModuleSchema{
+		Type:        "timeline.service",
+		Label:       "Timeline & Replay Service",
+		Category:    "infrastructure",
+		Description: "Provides execution timeline visualization and request replay HTTP endpoints",
+		Inputs:      []ServiceIODef{{Name: "EventStore", Type: "store.EventStore", Description: "Event store dependency for timeline and replay data"}},
+		Outputs: []ServiceIODef{
+			{Name: "TimelineMux", Type: "http.Handler", Description: "HTTP handler for timeline endpoints"},
+			{Name: "ReplayMux", Type: "http.Handler", Description: "HTTP handler for replay endpoints"},
+			{Name: "BackfillMux", Type: "http.Handler", Description: "HTTP handler for backfill/mock/diff endpoints"},
+		},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "event_store", Label: "Event Store Service", Type: FieldTypeString, DefaultValue: "admin-event-store", Description: "Name of the event store service module to use", Placeholder: "admin-event-store"},
+		},
+		DefaultConfig: map[string]any{"event_store": "admin-event-store"},
+		MaxIncoming:   intPtr(1),
+	})
+
+	// ---- DLQ (Dead Letter Queue) ----
+
+	r.Register(&ModuleSchema{
+		Type:        "dlq.service",
+		Label:       "Dead Letter Queue Service",
+		Category:    "infrastructure",
+		Description: "In-memory dead letter queue for failed message management with retry, discard, and purge",
+		Outputs:     []ServiceIODef{{Name: "DLQHandler", Type: "http.Handler", Description: "HTTP handler for DLQ management endpoints"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "max_retries", Label: "Max Retries", Type: FieldTypeNumber, DefaultValue: 3, Description: "Maximum number of retry attempts for failed messages"},
+			{Key: "retention_days", Label: "Retention Days", Type: FieldTypeNumber, DefaultValue: 30, Description: "Number of days to retain resolved/discarded DLQ entries"},
+		},
+		DefaultConfig: map[string]any{"max_retries": 3, "retention_days": 30},
+		MaxIncoming:   intPtr(0),
+	})
+
 	r.Register(&ModuleSchema{
 		Type:        "step.feature_flag",
 		Label:       "Feature Flag Check",

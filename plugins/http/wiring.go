@@ -1,7 +1,6 @@
 package http
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/CrisisTextLine/modular"
@@ -11,6 +10,8 @@ import (
 )
 
 // wiringHooks returns all post-init wiring functions for HTTP-related cross-module integrations.
+// Observability endpoint wiring (health, metrics, log, openapi) is handled by
+// the observability plugin to avoid duplicate registrations.
 func wiringHooks() []plugin.WiringHook {
 	return []plugin.WiringHook{
 		{
@@ -22,26 +23,6 @@ func wiringHooks() []plugin.WiringHook {
 			Name:     "http-static-fileserver-registration",
 			Priority: 50,
 			Hook:     wireStaticFileServers,
-		},
-		{
-			Name:     "http-health-endpoint-registration",
-			Priority: 40,
-			Hook:     wireHealthEndpoints,
-		},
-		{
-			Name:     "http-metrics-endpoint-registration",
-			Priority: 40,
-			Hook:     wireMetricsEndpoint,
-		},
-		{
-			Name:     "http-log-endpoint-registration",
-			Priority: 40,
-			Hook:     wireLogEndpoint,
-		},
-		{
-			Name:     "http-openapi-endpoint-registration",
-			Priority: 40,
-			Hook:     wireOpenAPIEndpoints,
 		},
 	}
 }
@@ -155,108 +136,5 @@ func wireStaticFileServers(app modular.Application, cfg *config.WorkflowConfig) 
 		}
 	}
 
-	return nil
-}
-
-// wireHealthEndpoints registers health checker endpoints on the first available router.
-func wireHealthEndpoints(app modular.Application, _ *config.WorkflowConfig) error {
-	for _, svc := range app.SvcRegistry() {
-		hc, ok := svc.(*module.HealthChecker)
-		if !ok {
-			continue
-		}
-
-		// Register persistence health checks if any persistence stores exist
-		for svcName, innerSvc := range app.SvcRegistry() {
-			if ps, ok := innerSvc.(*module.PersistenceStore); ok {
-				checkName := "persistence." + svcName
-				psRef := ps // capture for closure
-				hc.RegisterCheck(checkName, func(ctx context.Context) module.HealthCheckResult {
-					if err := psRef.Ping(ctx); err != nil {
-						return module.HealthCheckResult{Status: "degraded", Message: "database unreachable: " + err.Error()}
-					}
-					return module.HealthCheckResult{Status: "healthy", Message: "database connected"}
-				})
-			}
-		}
-
-		// Auto-discover any HealthCheckable services
-		hc.DiscoverHealthCheckables()
-
-		for _, routerSvc := range app.SvcRegistry() {
-			if router, ok := routerSvc.(*module.StandardHTTPRouter); ok {
-				healthPath := hc.HealthPath()
-				readyPath := hc.ReadyPath()
-				livePath := hc.LivePath()
-				if !router.HasRoute("GET", healthPath) {
-					router.AddRoute("GET", healthPath, &module.HealthHTTPHandler{Handler: hc.HealthHandler()})
-					router.AddRoute("GET", readyPath, &module.HealthHTTPHandler{Handler: hc.ReadyHandler()})
-					router.AddRoute("GET", livePath, &module.HealthHTTPHandler{Handler: hc.LiveHandler()})
-				}
-				break
-			}
-		}
-	}
-	return nil
-}
-
-// wireMetricsEndpoint registers the metrics collector endpoint on the first available router.
-func wireMetricsEndpoint(app modular.Application, _ *config.WorkflowConfig) error {
-	for _, svc := range app.SvcRegistry() {
-		mc, ok := svc.(*module.MetricsCollector)
-		if !ok {
-			continue
-		}
-		metricsPath := mc.MetricsPath()
-		for _, routerSvc := range app.SvcRegistry() {
-			if router, ok := routerSvc.(*module.StandardHTTPRouter); ok {
-				if !router.HasRoute("GET", metricsPath) {
-					router.AddRoute("GET", metricsPath, &module.MetricsHTTPHandler{Handler: mc.Handler()})
-				}
-				break
-			}
-		}
-	}
-	return nil
-}
-
-// wireLogEndpoint registers the log collector endpoint on the first available router.
-func wireLogEndpoint(app modular.Application, _ *config.WorkflowConfig) error {
-	for _, svc := range app.SvcRegistry() {
-		lc, ok := svc.(*module.LogCollector)
-		if !ok {
-			continue
-		}
-		for _, routerSvc := range app.SvcRegistry() {
-			if router, ok := routerSvc.(*module.StandardHTTPRouter); ok {
-				if !router.HasRoute("GET", "/logs") {
-					router.AddRoute("GET", "/logs", &module.LogHTTPHandler{Handler: lc.LogHandler()})
-				}
-				break
-			}
-		}
-	}
-	return nil
-}
-
-// wireOpenAPIEndpoints registers OpenAPI spec endpoints on the first available router.
-func wireOpenAPIEndpoints(app modular.Application, cfg *config.WorkflowConfig) error {
-	for _, svc := range app.SvcRegistry() {
-		gen, ok := svc.(*module.OpenAPIGenerator)
-		if !ok {
-			continue
-		}
-		gen.BuildSpec(cfg.Workflows)
-
-		for _, routerSvc := range app.SvcRegistry() {
-			if router, ok := routerSvc.(*module.StandardHTTPRouter); ok {
-				if !router.HasRoute("GET", "/api/openapi.json") {
-					router.AddRoute("GET", "/api/openapi.json", &module.OpenAPIHTTPHandler{Handler: gen.ServeJSON})
-					router.AddRoute("GET", "/api/openapi.yaml", &module.OpenAPIHTTPHandler{Handler: gen.ServeYAML})
-				}
-				break
-			}
-		}
-	}
 	return nil
 }

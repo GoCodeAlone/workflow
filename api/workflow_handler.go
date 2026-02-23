@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,12 +12,20 @@ import (
 	"github.com/google/uuid"
 )
 
+// EngineRunner is an optional engine lifecycle manager that the workflow handler
+// uses to actually start and stop workflow engines when deploying/stopping workflows.
+type EngineRunner interface {
+	DeployWorkflow(ctx context.Context, workflowID uuid.UUID) error
+	StopWorkflow(ctx context.Context, workflowID uuid.UUID) error
+}
+
 // WorkflowHandler handles workflow CRUD and lifecycle endpoints.
 type WorkflowHandler struct {
 	workflows   store.WorkflowStore
 	projects    store.ProjectStore
 	memberships store.MembershipStore
 	permissions *PermissionService
+	engine      EngineRunner
 }
 
 // NewWorkflowHandler creates a new WorkflowHandler.
@@ -27,6 +36,12 @@ func NewWorkflowHandler(workflows store.WorkflowStore, projects store.ProjectSto
 		memberships: memberships,
 		permissions: permissions,
 	}
+}
+
+// WithEngine sets the optional engine runner used by Deploy and Stop.
+func (h *WorkflowHandler) WithEngine(engine EngineRunner) *WorkflowHandler {
+	h.engine = engine
+	return h
 }
 
 // Create handles POST /api/v1/projects/{pid}/workflows.
@@ -259,6 +274,12 @@ func (h *WorkflowHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	if h.engine != nil {
+		if err := h.engine.DeployWorkflow(r.Context(), id); err != nil {
+			WriteError(w, http.StatusInternalServerError, "failed to deploy workflow engine")
+			return
+		}
+	}
 	wf.Status = store.WorkflowStatusActive
 	wf.UpdatedAt = time.Now()
 	if err := h.workflows.Update(r.Context(), wf); err != nil {
@@ -283,6 +304,12 @@ func (h *WorkflowHandler) Stop(w http.ResponseWriter, r *http.Request) {
 		}
 		WriteError(w, http.StatusInternalServerError, "internal error")
 		return
+	}
+	if h.engine != nil {
+		if err := h.engine.StopWorkflow(r.Context(), id); err != nil {
+			WriteError(w, http.StatusInternalServerError, "failed to stop workflow engine")
+			return
+		}
 	}
 	wf.Status = store.WorkflowStatusStopped
 	wf.UpdatedAt = time.Now()

@@ -60,7 +60,9 @@ var coreModuleTypes = []string{
 	"cache.modular",
 	"data.transformer",
 	"database.workflow",
+	"dlq.service",
 	"dynamic.component",
+	"eventstore.service",
 	"featureflag.service",
 	"health.checker",
 	"http.handler",
@@ -143,6 +145,7 @@ var coreModuleTypes = []string{
 	"storage.local",
 	"storage.s3",
 	"storage.sqlite",
+	"timeline.service",
 	"webhook.sender",
 	"workflow.registry",
 }
