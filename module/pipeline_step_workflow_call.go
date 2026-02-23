@@ -123,12 +123,13 @@ func (s *WorkflowCallStep) Execute(ctx context.Context, pc *PipelineContext) (*S
 	}
 
 	if s.mode == WorkflowCallModeAsync {
-		// Fire-and-forget: run in background goroutine with its own timeout
-		go func() {
-			asyncCtx, cancel := context.WithTimeout(context.Background(), s.timeout)
+		// Fire-and-forget: run in background goroutine derived from parent context
+		// so cancellation signals propagate, bounded by the configured timeout.
+		go func(parentCtx context.Context, data map[string]any) {
+			asyncCtx, cancel := context.WithTimeout(parentCtx, s.timeout)
 			defer cancel()
-			_, _ = target.Execute(asyncCtx, triggerData) //nolint:errcheck
-		}()
+			_, _ = target.Execute(asyncCtx, data) //nolint:errcheck
+		}(ctx, triggerData)
 		return &StepResult{Output: map[string]any{"workflow": s.workflow, "mode": "async", "dispatched": true}}, nil
 	}
 

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/CrisisTextLine/modular"
@@ -211,6 +212,99 @@ triggers: {}
 		t.Fatal("expected error for module name conflict")
 	}
 }
+
+func TestBuildFromApplicationConfig_TriggerNameConflict(t *testing.T) {
+	dir := t.TempDir()
+
+	wfA := `
+modules: []
+workflows: {}
+triggers:
+  my-trigger:
+    type: http
+pipelines: {}
+`
+	wfB := `
+modules: []
+workflows: {}
+triggers:
+  my-trigger:
+    type: schedule
+pipelines: {}
+`
+	writeTempYAML(t, dir, "a.yaml", wfA)
+	writeTempYAML(t, dir, "b.yaml", wfB)
+
+	engine := newTestEngine(t)
+	err := engine.BuildFromApplicationConfig(&config.ApplicationConfig{
+		Application: config.ApplicationInfo{
+			Name: "trigger-conflict-app",
+			Workflows: []config.WorkflowRef{
+				{File: filepath.Join(dir, "a.yaml")},
+				{File: filepath.Join(dir, "b.yaml")},
+			},
+		},
+		ConfigDir: dir,
+	})
+	if err == nil {
+		t.Fatal("expected error for trigger name conflict")
+	}
+	if !strings.Contains(err.Error(), "trigger name conflict") {
+		t.Fatalf("expected 'trigger name conflict' in error, got: %v", err)
+	}
+}
+
+func TestBuildFromApplicationConfig_PipelineNameConflict(t *testing.T) {
+	dir := t.TempDir()
+
+	wfA := `
+modules: []
+workflows: {}
+triggers: {}
+pipelines:
+  shared-pipeline:
+    steps:
+      - name: step-a
+        type: step.set
+        config:
+          values:
+            msg: "from a"
+`
+	wfB := `
+modules: []
+workflows: {}
+triggers: {}
+pipelines:
+  shared-pipeline:
+    steps:
+      - name: step-b
+        type: step.set
+        config:
+          values:
+            msg: "from b"
+`
+	writeTempYAML(t, dir, "a.yaml", wfA)
+	writeTempYAML(t, dir, "b.yaml", wfB)
+
+	engine := newTestEngine(t)
+	err := engine.BuildFromApplicationConfig(&config.ApplicationConfig{
+		Application: config.ApplicationInfo{
+			Name: "pipeline-conflict-app",
+			Workflows: []config.WorkflowRef{
+				{File: filepath.Join(dir, "a.yaml")},
+				{File: filepath.Join(dir, "b.yaml")},
+			},
+		},
+		ConfigDir: dir,
+	})
+	if err == nil {
+		t.Fatal("expected error for pipeline name conflict")
+	}
+	if !strings.Contains(err.Error(), "pipeline name conflict") {
+		t.Fatalf("expected 'pipeline name conflict' in error, got: %v", err)
+	}
+}
+
 
 func TestBuildFromApplicationConfig_MultipleWorkflows_MergesPipelines(t *testing.T) {
 	dir := t.TempDir()
