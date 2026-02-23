@@ -516,6 +516,12 @@ func TestValidateScalarValue(t *testing.T) {
 		{"string too long", "toolongstring", &openAPISchema{Type: "string", MaxLength: &maxLen}, true},
 		{"enum match", "cat", &openAPISchema{Type: "string", Enum: []any{"cat", "dog"}}, false},
 		{"enum mismatch", "fish", &openAPISchema{Type: "string", Enum: []any{"cat", "dog"}}, true},
+		// Query/path parameters are always strings; integer enum values from YAML
+		// (e.g. enum: [1, 2, 3]) are compared as their string representation.
+		// This is intentional: the parameter "1" should match the YAML integer 1.
+		{"enum integer yaml matches string param", "1", &openAPISchema{Type: "integer", Enum: []any{1, 2, 3}}, false},
+		{"enum integer yaml no match", "4", &openAPISchema{Type: "integer", Enum: []any{1, 2, 3}}, true},
+		{"enum nil values skipped", "a", &openAPISchema{Enum: []any{nil, "a", nil}}, false},
 	}
 
 	for _, tt := range tests {
