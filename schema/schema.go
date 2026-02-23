@@ -140,6 +140,7 @@ var coreModuleTypes = []string{
 	"step.sub_workflow",
 	"step.transform",
 	"step.validate",
+	"step.workflow_call",
 	"storage.gcs",
 	"storage.local",
 	"storage.s3",

@@ -1,0 +1,51 @@
+# queue-assignment.yaml — Conversation queue assignment pipeline
+#
+# This workflow receives a conversation and assigns it to the right
+# responder and queue based on channel and urgency.
+#
+# Called by main-loop.yaml via step.workflow_call.
+
+modules: []
+
+workflows: {}
+
+triggers: {}
+
+pipelines:
+  # Core assignment logic: resolves the best responder and queue
+  assign-conversation:
+    steps:
+      # Step 1: Determine which queue to use based on channel
+      - name: resolve-queue
+        type: step.set
+        config:
+          values:
+            # In production this would call an external service or DB lookup.
+            # For demonstration, we derive the queue from the channel field.
+            queue_name: "{{ .channel }}-queue"
+
+      # Step 2: Pick a responder (simplified round-robin placeholder)
+      - name: pick-responder
+        type: step.set
+        config:
+          values:
+            responder_id: "responder-{{ .urgency }}-01"
+
+      # Step 3: Record the assignment
+      - name: mark-assigned
+        type: step.set
+        config:
+          values:
+            assignment_status: "confirmed"
+
+  # Async notification: fire-and-forget notification to the assigned responder.
+  # Called with mode: async so the caller doesn't wait for the notification.
+  notify-responder:
+    steps:
+      - name: build-notification
+        type: step.set
+        config:
+          values:
+            notification_type: "new_conversation"
+            recipient: "{{ .responder_id }}"
+            conversation_id: "{{ .conversation_id }}"

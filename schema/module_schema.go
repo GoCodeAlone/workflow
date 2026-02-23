@@ -1273,6 +1273,27 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	})
 
 	// -----------------------------------------------------------------------
+	// Cross-workflow call step (multi-workflow composition)
+	// -----------------------------------------------------------------------
+
+	r.Register(&ModuleSchema{
+		Type:        "step.workflow_call",
+		Label:       "Workflow Call",
+		Category:    "composition",
+		Description: "Invokes another pipeline registered in the same engine application. Supports sync (call & wait) and async (fire-and-forget) modes with input/output mapping.",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with input data"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Called workflow result with mapped outputs (sync mode) or dispatch confirmation (async mode)"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "workflow", Label: "Workflow", Type: FieldTypeString, Required: true, Description: "Name of the target pipeline to call (must be registered in the same engine)", Placeholder: "queue-assignment"},
+			{Key: "mode", Label: "Mode", Type: FieldTypeSelect, Options: []string{"sync", "async"}, DefaultValue: "sync", Description: "Execution mode: 'sync' waits for result, 'async' fires and returns immediately"},
+			{Key: "input", Label: "Input Mapping", Type: FieldTypeJSON, Description: "Map of target pipeline input keys to template expressions from the current context (e.g. {\"conversation_id\": \"{{ .conversation_id }}\"}). If omitted, all current context data is passed through."},
+			{Key: "output_mapping", Label: "Output Mapping", Type: FieldTypeJSON, Description: "Map of parent context keys to target pipeline output paths (e.g. {\"assigned_responder\": \"responder_id\"}). If omitted, all outputs are returned under 'result'."},
+			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, DefaultValue: "30s", Description: "Maximum execution time for the called workflow (applies to both sync and async modes)"},
+		},
+		DefaultConfig: map[string]any{"mode": "sync", "timeout": "30s"},
+	})
+
+	// -----------------------------------------------------------------------
 	// AI pipeline steps
 	// -----------------------------------------------------------------------
 

@@ -61,6 +61,7 @@ func New() *Plugin {
 					"step.db_query",
 					"step.db_exec",
 					"step.json_response",
+					"step.workflow_call",
 					"step.validate_path_param",
 					"step.validate_pagination",
 					"step.validate_request_body",

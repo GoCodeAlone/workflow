@@ -329,12 +329,15 @@ func TestLoadConfig_NoFile(t *testing.T) {
 	*configFile = ""
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	cfg, err := loadConfig(logger)
+	cfg, appCfg, err := loadConfig(logger)
 	if err != nil {
 		t.Fatalf("loadConfig failed: %v", err)
 	}
 	if cfg == nil {
 		t.Fatal("expected non-nil config")
+	}
+	if appCfg != nil {
+		t.Fatal("expected nil application config for empty configFile")
 	}
 	if len(cfg.Modules) != 0 {
 		t.Errorf("expected empty modules, got %d", len(cfg.Modules))
@@ -346,7 +349,7 @@ func TestLoadConfig_InvalidFile(t *testing.T) {
 	defer func() { *configFile = "" }()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	_, err := loadConfig(logger)
+	_, _, err := loadConfig(logger)
 	if err == nil {
 		t.Fatal("expected error for nonexistent config file")
 	}
@@ -377,9 +380,12 @@ triggers: {}
 	defer func() { *configFile = "" }()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	cfg, err := loadConfig(logger)
+	cfg, appCfg, err := loadConfig(logger)
 	if err != nil {
 		t.Fatalf("loadConfig failed: %v", err)
+	}
+	if appCfg != nil {
+		t.Fatal("expected nil application config for single-workflow YAML")
 	}
 	if len(cfg.Modules) != 1 {
 		t.Fatalf("expected 1 module, got %d", len(cfg.Modules))

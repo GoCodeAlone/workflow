@@ -196,16 +196,33 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 
 // loadConfig loads a workflow configuration from the configured file path,
 // or returns an empty config if no path is set.
-func loadConfig(logger *slog.Logger) (*config.WorkflowConfig, error) {
+// If the config file contains an application-level config (multi-workflow),
+// the returned WorkflowConfig will be nil and the ApplicationConfig will be set.
+func loadConfig(logger *slog.Logger) (*config.WorkflowConfig, *config.ApplicationConfig, error) {
 	if *configFile != "" {
+		// Peek at the file to detect whether it is an application config.
+		data, err := os.ReadFile(*configFile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read configuration file: %w", err)
+		}
+
+		if config.IsApplicationConfig(data) {
+			logger.Info("Detected multi-workflow application config", "file", *configFile)
+			appCfg, err := config.LoadApplicationConfig(*configFile)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to load application configuration: %w", err)
+			}
+			return nil, appCfg, nil
+		}
+
 		cfg, err := config.LoadFromFile(*configFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load configuration: %w", err)
+			return nil, nil, fmt.Errorf("failed to load configuration: %w", err)
 		}
-		return cfg, nil
+		return cfg, nil, nil
 	}
 	logger.Info("No config file specified, using empty workflow config")
-	return config.NewEmptyWorkflowConfig(), nil
+	return config.NewEmptyWorkflowConfig(), nil, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -358,6 +375,111 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 	app.mgmt.auditLogger.LogConfigChange(context.Background(), "system", "server", "server started")
 
 	return app, nil
+}
+
+// setupFromAppConfig initializes all server components from a multi-workflow
+// application config. It merges all workflow files into a combined WorkflowConfig,
+// applies the admin config overlay, then builds the engine using
+// BuildFromApplicationConfig so cross-workflow pipeline calls are wired up.
+func setupFromAppConfig(logger *slog.Logger, appCfg *config.ApplicationConfig) (*serverApp, error) {
+	// Merge all workflow files into a combined config so the admin overlay
+	// can be applied consistently (module names, route configs, etc.).
+	combined, err := config.MergeApplicationConfig(appCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to merge application config: %w", err)
+	}
+
+	// Apply admin config overlay (admin UI, management routes, etc.).
+	if err := mergeAdminConfig(logger, combined); err != nil {
+		return nil, fmt.Errorf("failed to set up admin: %w", err)
+	}
+
+	// Build the engine from the already-merged application config (including the
+	// admin overlay). The merged config is passed directly to buildEngine, which
+	// internally uses BuildFromConfig and ensures features like the pipeline
+	// registry for step.workflow_call are configured correctly.
+	engine, loader, registry, err := buildEngine(combined, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build engine: %w", err)
+	}
+
+	sApp := &serverApp{
+		engine: engine,
+		logger: logger,
+	}
+
+	pool := dynamic.NewInterpreterPool()
+	aiSvc, deploySvc := initAIService(logger, registry, pool)
+	initManagementHandlers(logger, engine, combined, sApp, aiSvc, deploySvc, loader, registry)
+	registerManagementServices(logger, sApp)
+
+	sApp.postStartFuncs = append(sApp.postStartFuncs, func() error {
+		if err := sApp.initStores(logger); err != nil {
+			return err
+		}
+		return sApp.registerPostStartServices(logger)
+	}, func() error {
+		return sApp.importBundles(logger)
+	})
+
+	sApp.mgmt.auditLogger = audit.NewLogger(os.Stdout)
+	sApp.mgmt.auditLogger.LogConfigChange(context.Background(), "system", "server",
+		"server started with application config: "+appCfg.Application.Name)
+
+	return sApp, nil
+}
+
+// mergeAdminConfig loads the embedded admin config and merges admin
+// modules/routes into the primary config. If --admin-ui-dir (or ADMIN_UI_DIR
+// env var) is set the static.fileserver root is updated to that path,
+// allowing the admin UI to be deployed and updated independently of the binary.
+// If the config already contains admin modules (e.g., the user passed the
+// admin config directly), the merge is skipped to avoid duplicates — but
+// the UI root is still injected so the static fileserver works.
+func mergeAdminConfig(logger *slog.Logger, cfg *config.WorkflowConfig) error {
+	// Resolve the UI root: flag > ADMIN_UI_DIR env > leave as configured in config.yaml
+	uiDir := *adminUIDir
+
+	// Check if the config already contains admin modules
+	for _, m := range cfg.Modules {
+		if m.Name == "admin-server" {
+			logger.Info("Config already contains admin modules, skipping merge")
+			if uiDir != "" {
+				injectUIRoot(cfg, uiDir)
+				logger.Info("Admin UI root overridden", "uiDir", uiDir)
+			}
+			return nil
+		}
+	}
+
+	adminCfg, err := admin.LoadConfig()
+	if err != nil {
+		return err
+	}
+
+	if uiDir != "" {
+		injectUIRoot(adminCfg, uiDir)
+		logger.Info("Admin UI root overridden", "uiDir", uiDir)
+	}
+
+	// Merge admin modules and routes into primary config
+	admin.MergeInto(cfg, adminCfg)
+
+	logger.Info("Admin UI enabled")
+	return nil
+}
+
+// injectUIRoot updates every static.fileserver module config in cfg to serve
+// from the given root directory.
+func injectUIRoot(cfg *config.WorkflowConfig, uiRoot string) {
+	for i := range cfg.Modules {
+		if cfg.Modules[i].Type == "static.fileserver" {
+			if cfg.Modules[i].Config == nil {
+				cfg.Modules[i].Config = make(map[string]any)
+			}
+			cfg.Modules[i].Config["root"] = uiRoot
+		}
+	}
 }
 
 // initManagementHandlers creates all management service handlers and stores
@@ -1389,20 +1511,20 @@ func main() {
 			pgStore.Close()
 		}()
 
-		// Block until a termination signal is received, then let deferred cleanup run.
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		fmt.Printf("Multi-workflow API on %s\n", *multiWorkflowAddr)
-		<-sigCh
-		fmt.Println("Shutting down multi-workflow mode...")
-		return
-	}
-	cfg, err := loadConfig(logger)
+	// Load configuration — supports both single-workflow and multi-workflow application configs.
+	cfg, appCfg, err := loadConfig(logger)
 	if err != nil {
 		log.Fatalf("Configuration error: %v", err) //nolint:gocritic // exitAfterDefer: intentional, cleanup is best-effort
 	}
 
-	app, err := setup(logger, cfg)
+	var app *serverApp
+	if appCfg != nil {
+		// Multi-workflow application config: build engine from application config
+		app, err = setupFromAppConfig(logger, appCfg)
+	} else {
+		// Single-workflow config (backward-compatible)
+		app, err = setup(logger, cfg)
+	}
 	if err != nil {
 		log.Fatalf("Setup error: %v", err) //nolint:gocritic // exitAfterDefer: intentional, cleanup is best-effort
 	}

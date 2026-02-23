@@ -1,0 +1,15 @@
+# Multi-workflow application: Chat Platform
+#
+# This application config references three separate workflow YAML files.
+# Each workflow file defines its own pipelines, but they share a single
+# engine instance and can call each other using step.workflow_call.
+#
+# Usage:
+#   go run ./cmd/server -config example/multi-workflow/app.yaml
+
+application:
+  name: chat-platform
+  workflows:
+    - file: main-loop.yaml
+    - file: queue-assignment.yaml
+    - file: escalation.yaml
