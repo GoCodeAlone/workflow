@@ -219,14 +219,14 @@ func TestAPIGateway_CORS(t *testing.T) {
 	}
 }
 
-func TestAPIGateway_InstanceRateLimit_SetRateLimit(t *testing.T) {
+func TestAPIGateway_GlobalRateLimit(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer backend.Close()
 
 	gw := NewAPIGateway("gw")
-	gw.SetRateLimit(&RateLimitConfig{RequestsPerMinute: 60, BurstSize: 2})
+	gw.SetGlobalRateLimit(&RateLimitConfig{RequestsPerMinute: 60, BurstSize: 2})
 	_ = gw.SetRoutes([]GatewayRoute{
 		{PathPrefix: "/api", Backend: backend.URL},
 	})
@@ -249,75 +249,6 @@ func TestAPIGateway_InstanceRateLimit_SetRateLimit(t *testing.T) {
 	gw.Handle(w, req)
 	if w.Code != http.StatusTooManyRequests {
 		t.Errorf("expected 429, got %d", w.Code)
-	}
-}
-
-func TestAPIGateway_InstanceRateLimit_WithRateLimit(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer backend.Close()
-
-	gw := NewAPIGateway("gw", WithRateLimit(&RateLimitConfig{RequestsPerMinute: 60, BurstSize: 1}))
-	_ = gw.SetRoutes([]GatewayRoute{
-		{PathPrefix: "/api", Backend: backend.URL},
-	})
-
-	// First should succeed (burst=1)
-	req := httptest.NewRequest("GET", "/api/test", nil)
-	req.RemoteAddr = "10.0.0.2:1234"
-	w := httptest.NewRecorder()
-	gw.Handle(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("first request expected 200, got %d", w.Code)
-	}
-
-	// Second should be rate limited
-	req = httptest.NewRequest("GET", "/api/test", nil)
-	req.RemoteAddr = "10.0.0.2:1234"
-	w = httptest.NewRecorder()
-	gw.Handle(w, req)
-	if w.Code != http.StatusTooManyRequests {
-		t.Errorf("expected 429, got %d", w.Code)
-	}
-}
-
-func TestAPIGateway_InstanceRateLimiters_AreIsolated(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer backend.Close()
-
-	cfg := &RateLimitConfig{RequestsPerMinute: 60, BurstSize: 1}
-	gw1 := NewAPIGateway("gw1", WithRateLimit(cfg))
-	gw2 := NewAPIGateway("gw2", WithRateLimit(cfg))
-	_ = gw1.SetRoutes([]GatewayRoute{{PathPrefix: "/api", Backend: backend.URL}})
-	_ = gw2.SetRoutes([]GatewayRoute{{PathPrefix: "/api", Backend: backend.URL}})
-
-	// Exhaust gw1's burst for this client
-	req := httptest.NewRequest("GET", "/api/test", nil)
-	req.RemoteAddr = "10.0.0.3:1234"
-	w := httptest.NewRecorder()
-	gw1.Handle(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("gw1 first request expected 200, got %d", w.Code)
-	}
-
-	req = httptest.NewRequest("GET", "/api/test", nil)
-	req.RemoteAddr = "10.0.0.3:1234"
-	w = httptest.NewRecorder()
-	gw1.Handle(w, req)
-	if w.Code != http.StatusTooManyRequests {
-		t.Errorf("gw1 second request expected 429, got %d", w.Code)
-	}
-
-	// gw2 should be unaffected — its burst is independent
-	req = httptest.NewRequest("GET", "/api/test", nil)
-	req.RemoteAddr = "10.0.0.3:1234"
-	w = httptest.NewRecorder()
-	gw2.Handle(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("gw2 should be isolated from gw1; expected 200, got %d", w.Code)
 	}
 }
 

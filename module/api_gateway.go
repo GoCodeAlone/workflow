@@ -48,10 +48,6 @@ type AuthConfig struct {
 
 // APIGateway is a composable gateway module that combines routing, auth,
 // rate limiting, and proxying into a single module.
-//
-// Each APIGateway instance maintains its own independent rate limiter state.
-// Rate limiters are never shared across instances, so multiple APIGateway
-// instances (e.g. in multi-tenant deployments) do not interfere with each other.
 type APIGateway struct {
 	name   string
 	routes []GatewayRoute
@@ -59,10 +55,10 @@ type APIGateway struct {
 	auth   *AuthConfig
 
 	// internal state
-	sortedRoutes        []GatewayRoute // sorted by prefix length (longest first)
-	proxies             map[string]*httputil.ReverseProxy
-	rateLimiters        map[string]*gatewayRateLimiter // keyed by path prefix
-	instanceRateLimiter *gatewayRateLimiter            // instance-scoped limiter applied before per-route limits
+	sortedRoutes  []GatewayRoute // sorted by prefix length (longest first)
+	proxies       map[string]*httputil.ReverseProxy
+	rateLimiters  map[string]*gatewayRateLimiter // keyed by path prefix
+	globalLimiter *gatewayRateLimiter
 }
 
 // gatewayRateLimiter is a simple per-client token bucket limiter for the gateway.
@@ -94,36 +90,13 @@ func (rl *gatewayRateLimiter) allow(clientIP string) bool {
 	return bucket.allow()
 }
 
-// APIGatewayOption is a functional option for configuring an APIGateway at construction time.
-type APIGatewayOption func(*APIGateway)
-
-// WithRateLimit sets an instance-level rate limit applied to all requests before per-route
-// limits are checked. The limiter is scoped to this APIGateway instance and does not affect
-// any other instance.
-func WithRateLimit(cfg *RateLimitConfig) APIGatewayOption {
-	return func(g *APIGateway) {
-		if cfg != nil && cfg.RequestsPerMinute > 0 {
-			burst := cfg.BurstSize
-			if burst <= 0 {
-				burst = cfg.RequestsPerMinute
-			}
-			g.instanceRateLimiter = newGatewayRateLimiter(cfg.RequestsPerMinute, burst)
-		}
-	}
-}
-
-// NewAPIGateway creates a new APIGateway module. Optional functional options can be
-// provided to configure the instance at construction time (e.g. WithRateLimit).
-func NewAPIGateway(name string, opts ...APIGatewayOption) *APIGateway {
-	g := &APIGateway{
+// NewAPIGateway creates a new APIGateway module.
+func NewAPIGateway(name string) *APIGateway {
+	return &APIGateway{
 		name:         name,
 		proxies:      make(map[string]*httputil.ReverseProxy),
 		rateLimiters: make(map[string]*gatewayRateLimiter),
 	}
-	for _, opt := range opts {
-		opt(g)
-	}
-	return g
 }
 
 // SetRoutes configures the gateway routes.
@@ -173,25 +146,15 @@ func (g *APIGateway) SetRoutes(routes []GatewayRoute) error {
 	return nil
 }
 
-// SetRateLimit configures an instance-level rate limit applied to all routes on this gateway.
-// The limiter is scoped to this APIGateway instance and does not affect any other instance.
-// Prefer injecting rate limit config via WithRateLimit at construction time when possible.
-func (g *APIGateway) SetRateLimit(cfg *RateLimitConfig) {
+// SetGlobalRateLimit configures a global rate limit applied to all routes.
+func (g *APIGateway) SetGlobalRateLimit(cfg *RateLimitConfig) {
 	if cfg != nil && cfg.RequestsPerMinute > 0 {
 		burst := cfg.BurstSize
 		if burst <= 0 {
 			burst = cfg.RequestsPerMinute
 		}
-		g.instanceRateLimiter = newGatewayRateLimiter(cfg.RequestsPerMinute, burst)
+		g.globalLimiter = newGatewayRateLimiter(cfg.RequestsPerMinute, burst)
 	}
-}
-
-// SetGlobalRateLimit is deprecated: use SetRateLimit instead.
-// The rate limiter has always been instance-scoped; this method was misleadingly named.
-//
-// Deprecated: Use SetRateLimit.
-func (g *APIGateway) SetGlobalRateLimit(cfg *RateLimitConfig) {
-	g.SetRateLimit(cfg)
 }
 
 // SetCORS configures CORS settings.
@@ -251,9 +214,9 @@ func (g *APIGateway) Handle(w http.ResponseWriter, r *http.Request) {
 
 	clientIP := extractClientIP(r)
 
-	// Instance-level rate limiting (applied before per-route limits)
-	if g.instanceRateLimiter != nil {
-		if !g.instanceRateLimiter.allow(clientIP) {
+	// Global rate limiting
+	if g.globalLimiter != nil {
+		if !g.globalLimiter.allow(clientIP) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
 			_ = json.NewEncoder(w).Encode(map[string]string{
