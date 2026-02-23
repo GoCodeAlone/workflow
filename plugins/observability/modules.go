@@ -82,8 +82,18 @@ func logCollectorFactory(name string, cfg map[string]any) modular.Module {
 	return module.NewLogCollector(name, lcCfg)
 }
 
-func otelTracingFactory(name string, _ map[string]any) modular.Module {
-	return module.NewOTelTracing(name)
+func otelTracingFactory(name string, cfg map[string]any) modular.Module {
+	m := module.NewOTelTracing(name)
+	if cfg == nil {
+		return m
+	}
+	if v, ok := cfg["endpoint"].(string); ok && v != "" {
+		m.SetEndpoint(v)
+	}
+	if v, ok := cfg["serviceName"].(string); ok && v != "" {
+		m.SetServiceName(v)
+	}
+	return m
 }
 
 func openAPIGeneratorFactory(name string, cfg map[string]any) modular.Module {
