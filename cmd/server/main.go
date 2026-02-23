@@ -42,6 +42,7 @@ import (
 	_ "github.com/GoCodeAlone/workflow/plugin/docmanager"
 	pluginexternal "github.com/GoCodeAlone/workflow/plugin/external"
 	_ "github.com/GoCodeAlone/workflow/plugin/storebrowser"
+	pluginadmin "github.com/GoCodeAlone/workflow/plugins/admin"
 	pluginai "github.com/GoCodeAlone/workflow/plugins/ai"
 	pluginapi "github.com/GoCodeAlone/workflow/plugins/api"
 	pluginauth "github.com/GoCodeAlone/workflow/plugins/auth"
@@ -124,6 +125,7 @@ func defaultEnginePlugins() []plugin.EnginePlugin {
 		pluginintegration.New(),
 		pluginai.New(),
 		pluginplatform.New(),
+		pluginadmin.New().WithUIDir(*adminUIDir),
 	}
 }
 
@@ -324,13 +326,7 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 		logger: logger,
 	}
 
-	// Merge admin config into primary config — admin UI is always enabled.
-	// The admin config provides all management endpoints (auth, API, schema,
-	// AI, dynamic components) via the engine's own modules and routes.
-	if err := mergeAdminConfig(logger, cfg); err != nil {
-		return nil, fmt.Errorf("failed to set up admin: %w", err)
-	}
-
+	// Admin config is merged by the admin plugin's wiring hook during buildEngine.
 	engine, loader, registry, err := buildEngine(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build engine: %w", err)
@@ -362,59 +358,6 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 	app.mgmt.auditLogger.LogConfigChange(context.Background(), "system", "server", "server started")
 
 	return app, nil
-}
-
-// mergeAdminConfig loads the embedded admin config and merges admin
-// modules/routes into the primary config. If --admin-ui-dir (or ADMIN_UI_DIR
-// env var) is set the static.fileserver root is updated to that path,
-// allowing the admin UI to be deployed and updated independently of the binary.
-// If the config already contains admin modules (e.g., the user passed the
-// admin config directly), the merge is skipped to avoid duplicates — but
-// the UI root is still injected so the static fileserver works.
-func mergeAdminConfig(logger *slog.Logger, cfg *config.WorkflowConfig) error {
-	// Resolve the UI root: flag > ADMIN_UI_DIR env > leave as configured in config.yaml
-	uiDir := *adminUIDir
-
-	// Check if the config already contains admin modules
-	for _, m := range cfg.Modules {
-		if m.Name == "admin-server" {
-			logger.Info("Config already contains admin modules, skipping merge")
-			if uiDir != "" {
-				injectUIRoot(cfg, uiDir)
-				logger.Info("Admin UI root overridden", "uiDir", uiDir)
-			}
-			return nil
-		}
-	}
-
-	adminCfg, err := admin.LoadConfig()
-	if err != nil {
-		return err
-	}
-
-	if uiDir != "" {
-		injectUIRoot(adminCfg, uiDir)
-		logger.Info("Admin UI root overridden", "uiDir", uiDir)
-	}
-
-	// Merge admin modules and routes into primary config
-	admin.MergeInto(cfg, adminCfg)
-
-	logger.Info("Admin UI enabled")
-	return nil
-}
-
-// injectUIRoot updates every static.fileserver module config in cfg to serve
-// from the given root directory.
-func injectUIRoot(cfg *config.WorkflowConfig, uiRoot string) {
-	for i := range cfg.Modules {
-		if cfg.Modules[i].Type == "static.fileserver" {
-			if cfg.Modules[i].Config == nil {
-				cfg.Modules[i].Config = make(map[string]any)
-			}
-			cfg.Modules[i].Config["root"] = uiRoot
-		}
-	}
 }
 
 // initManagementHandlers creates all management service handlers and stores
