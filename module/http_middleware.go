@@ -3,8 +3,10 @@ package module
 import (
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -167,7 +169,14 @@ func (m *RateLimitMiddleware) Process(next http.Handler) http.Handler {
 		// Check if request can proceed
 		if c.tokens < 1 {
 			m.mu.Unlock()
-			w.Header().Set("Retry-After", "60")
+			// Compute how many seconds until 1 token refills, based on the
+			// fractional per-minute rate (ratePerMinute tokens/minute).
+			retryAfter := "60"
+			if m.ratePerMinute > 0 {
+				secondsUntilToken := 60.0 / m.ratePerMinute
+				retryAfter = strconv.Itoa(int(math.Ceil(secondsUntilToken)))
+			}
+			w.Header().Set("Retry-After", retryAfter)
 			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
