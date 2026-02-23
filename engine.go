@@ -218,7 +218,9 @@ func (e *StdEngine) LoadPlugin(p plugin.EnginePlugin) error {
 	for triggerType, factory := range p.TriggerFactories() {
 		// Delegate to the bridge helper; triggers are interfaces.Trigger values
 		// (module.Trigger is a type alias for interfaces.Trigger).
-		e.registerPluginTrigger(triggerType, factory)
+		if err := e.registerPluginTrigger(triggerType, factory); err != nil {
+			return fmt.Errorf("load plugin: %w", err)
+		}
 	}
 
 	// Register pipeline trigger config wrappers from plugin (optional interface).

@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// EventEmitter publishes workflow and step lifecycle events.
+// EventEmitter publishes workflow lifecycle events.
 // *module.WorkflowEventEmitter satisfies this interface.
 // All methods must be safe to call when no event bus is configured (no-ops).
 type EventEmitter interface {

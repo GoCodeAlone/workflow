@@ -84,15 +84,17 @@ func (e *StdEngine) registerPluginSteps(typeName string, stepFactory func(name s
 // Lives here to avoid a direct module.Trigger type assertion in engine.go.
 // Since module.Trigger is now an alias for interfaces.Trigger, the assertion
 // uses the canonical interface type.
-func (e *StdEngine) registerPluginTrigger(triggerType string, factory func() any) {
+// Returns an error when the factory returns a value that does not satisfy
+// interfaces.Trigger, so LoadPlugin can fail deterministically instead of
+// silently skipping the trigger and surfacing a confusing "no handler found"
+// error later at runtime.
+func (e *StdEngine) registerPluginTrigger(triggerType string, factory func() any) error {
 	result := factory()
 	trigger, ok := result.(interfaces.Trigger)
 	if !ok {
-		// Fail fast with a clear warning when a plugin misconfigures its trigger factory.
-		// This avoids silent failures that later surface as "no handler found" errors.
-		e.logger.Error(fmt.Sprintf("workflow: plugin trigger factory for %q returned non-Trigger type %T; trigger not registered", triggerType, result))
-		return
+		return fmt.Errorf("workflow: plugin trigger factory for %q returned non-Trigger type %T", triggerType, result)
 	}
 	e.triggerTypeMap[triggerType] = trigger.Name()
 	e.RegisterTrigger(trigger)
+	return nil
 }
