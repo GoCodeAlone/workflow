@@ -29,6 +29,7 @@ import (
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/environment"
 	"github.com/GoCodeAlone/workflow/handlers"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/observability"
 	"github.com/GoCodeAlone/workflow/observability/tracing"
@@ -479,8 +480,8 @@ func registerManagementServices(logger *slog.Logger, app *serverApp) {
 
 	// Enrich OpenAPI spec via the service registry
 	for _, svc := range engine.GetApp().SvcRegistry() {
-		if gen, ok := svc.(*module.OpenAPIGenerator); ok {
-			module.RegisterAdminSchemas(gen)
+		if gen, ok := svc.(interfaces.SchemaRegistrar); ok {
+			gen.RegisterAdminSchemas()
 			gen.ApplySchemas()
 			logger.Info("Registered typed OpenAPI schemas", "module", gen.Name())
 		}
@@ -506,10 +507,12 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	// Discover the WorkflowRegistry from the service registry
 	var store *module.V1Store
 	for _, svc := range engine.GetApp().SvcRegistry() {
-		if reg, ok := svc.(*module.WorkflowRegistry); ok {
-			store = reg.Store()
-			logger.Info("Using WorkflowRegistry store", "module", reg.Name())
-			break
+		if provider, ok := svc.(interfaces.WorkflowStoreProvider); ok {
+			if s, ok := provider.WorkflowStore().(*module.V1Store); ok {
+				store = s
+				logger.Info("Using WorkflowRegistry store", "module", provider.Name())
+				break
+			}
 		}
 	}
 
