@@ -2,11 +2,28 @@ package handlers
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 )
+
+// mockPipelineRunner is a minimal PipelineRunner mock used to verify that
+// PipelineWorkflowHandler tests do not require concrete module types.
+type mockPipelineRunner struct {
+	runResult map[string]any
+	runErr    error
+	loggerSet bool
+	recSet    bool
+}
+
+func (m *mockPipelineRunner) Run(_ context.Context, _ map[string]any) (map[string]any, error) {
+	return m.runResult, m.runErr
+}
+func (m *mockPipelineRunner) SetLogger(_ *slog.Logger)                    { m.loggerSet = true }
+func (m *mockPipelineRunner) SetEventRecorder(_ interfaces.EventRecorder) { m.recSet = true }
 
 func TestPipelineHandler_CanHandle_PrefixFormat(t *testing.T) {
 	h := NewPipelineWorkflowHandler()
@@ -231,5 +248,32 @@ func TestPipelineHandler_MultiplePipelines(t *testing.T) {
 	}
 	if !h.CanHandle("pipeline:pipeline-b") {
 		t.Error("expected CanHandle true for pipeline-b")
+	}
+}
+
+// TestPipelineHandler_MockRunner verifies that PipelineWorkflowHandler works
+// with a mock PipelineRunner — no module package import required.
+func TestPipelineHandler_MockRunner(t *testing.T) {
+	h := NewPipelineWorkflowHandler()
+	h.SetLogger(slog.Default())
+
+	mock := &mockPipelineRunner{
+		runResult: map[string]any{"mocked": true},
+	}
+	h.AddPipeline("mock-pipeline", mock)
+
+	if !h.CanHandle("pipeline:mock-pipeline") {
+		t.Fatal("expected CanHandle true for mock-pipeline")
+	}
+
+	result, err := h.ExecuteWorkflow(context.Background(), "pipeline:mock-pipeline", "", map[string]any{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result["mocked"] != true {
+		t.Errorf("expected mocked=true, got %v", result["mocked"])
+	}
+	if !mock.loggerSet {
+		t.Error("expected SetLogger to be called on mock runner")
 	}
 }

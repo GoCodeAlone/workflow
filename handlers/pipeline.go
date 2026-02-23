@@ -7,26 +7,26 @@ import (
 	"strings"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
 // PipelineWorkflowHandler manages and executes pipeline-based workflows.
 type PipelineWorkflowHandler struct {
-	pipelines     map[string]*module.Pipeline
-	stepRegistry  *module.StepRegistry
+	pipelines     map[string]interfaces.PipelineRunner
+	stepRegistry  interfaces.StepRegistryProvider
 	logger        *slog.Logger
-	eventRecorder module.EventRecorder
+	eventRecorder interfaces.EventRecorder
 }
 
 // NewPipelineWorkflowHandler creates a new PipelineWorkflowHandler.
 func NewPipelineWorkflowHandler() *PipelineWorkflowHandler {
 	return &PipelineWorkflowHandler{
-		pipelines: make(map[string]*module.Pipeline),
+		pipelines: make(map[string]interfaces.PipelineRunner),
 	}
 }
 
 // SetStepRegistry sets the step registry used to create pipeline steps.
-func (h *PipelineWorkflowHandler) SetStepRegistry(registry *module.StepRegistry) {
+func (h *PipelineWorkflowHandler) SetStepRegistry(registry interfaces.StepRegistryProvider) {
 	h.stepRegistry = registry
 }
 
@@ -37,12 +37,12 @@ func (h *PipelineWorkflowHandler) SetLogger(logger *slog.Logger) {
 
 // SetEventRecorder sets the event recorder for pipeline execution events.
 // When set, each pipeline execution will record events to this recorder.
-func (h *PipelineWorkflowHandler) SetEventRecorder(recorder module.EventRecorder) {
+func (h *PipelineWorkflowHandler) SetEventRecorder(recorder interfaces.EventRecorder) {
 	h.eventRecorder = recorder
 }
 
 // AddPipeline registers a named pipeline with the handler.
-func (h *PipelineWorkflowHandler) AddPipeline(name string, p *module.Pipeline) {
+func (h *PipelineWorkflowHandler) AddPipeline(name string, p interfaces.PipelineRunner) {
 	h.pipelines[name] = p
 }
 
@@ -87,20 +87,18 @@ func (h *PipelineWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowT
 		return nil, fmt.Errorf("pipeline %q not found", name)
 	}
 
-	// Set logger on pipeline if available
-	if h.logger != nil && pipeline.Logger == nil {
-		pipeline.Logger = h.logger
+	// Inject logger and event recorder via interface methods.
+	if h.logger != nil {
+		pipeline.SetLogger(h.logger)
+	}
+	if h.eventRecorder != nil {
+		pipeline.SetEventRecorder(h.eventRecorder)
 	}
 
-	// Set event recorder on pipeline if available
-	if h.eventRecorder != nil && pipeline.EventRecorder == nil {
-		pipeline.EventRecorder = h.eventRecorder
-	}
-
-	pc, err := pipeline.Execute(ctx, data)
+	result, err := pipeline.Run(ctx, data)
 	if err != nil {
 		return nil, fmt.Errorf("pipeline %q execution failed: %w", name, err)
 	}
 
-	return pc.Current, nil
+	return result, nil
 }
