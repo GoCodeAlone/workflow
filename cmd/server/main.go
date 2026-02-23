@@ -28,7 +28,6 @@ import (
 	"github.com/GoCodeAlone/workflow/deploy"
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/environment"
-	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/observability"
