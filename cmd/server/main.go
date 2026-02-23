@@ -379,12 +379,10 @@ func setupFromAppConfig(logger *slog.Logger, appCfg *config.ApplicationConfig) (
 		return nil, fmt.Errorf("failed to set up admin: %w", err)
 	}
 
-	// Build the engine using the application config so BuildFromApplicationConfig
-	// is called (which handles the pipeline registry for step.workflow_call).
-	// We re-use buildEngineFromAppConfig but pass the merged+admin config separately
-	// as the admin modules are now part of combined. Since BuildFromApplicationConfig
-	// calls MergeApplicationConfig internally, we bypass that by calling
-	// BuildFromConfig on the already-merged config via buildEngine.
+	// Build the engine from the already-merged application config (including the
+	// admin overlay). The merged config is passed directly to buildEngine, which
+	// internally uses BuildFromConfig and ensures features like the pipeline
+	// registry for step.workflow_call are configured correctly.
 	engine, loader, registry, err := buildEngine(combined, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build engine: %w", err)

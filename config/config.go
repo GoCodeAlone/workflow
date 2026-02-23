@@ -171,7 +171,10 @@ func MergeApplicationConfig(appCfg *ApplicationConfig) (*WorkflowConfig, error) 
 	}
 
 	combined := NewEmptyWorkflowConfig()
+	combined.ConfigDir = appCfg.ConfigDir
 	seenModules := make(map[string]string)
+	seenTriggers := make(map[string]string)
+	seenPipelines := make(map[string]string)
 
 	for _, ref := range appCfg.Application.Workflows {
 		if ref.File == "" {
@@ -203,6 +206,21 @@ func MergeApplicationConfig(appCfg *ApplicationConfig) (*WorkflowConfig, error) 
 			seenModules[modCfg.Name] = wfName
 		}
 
+		for k := range wfCfg.Triggers {
+			if existing, conflict := seenTriggers[k]; conflict {
+				return nil, fmt.Errorf("application %q: trigger name conflict: trigger %q is defined in both %q and %q",
+					appCfg.Application.Name, k, existing, wfName)
+			}
+			seenTriggers[k] = wfName
+		}
+		for k := range wfCfg.Pipelines {
+			if existing, conflict := seenPipelines[k]; conflict {
+				return nil, fmt.Errorf("application %q: pipeline name conflict: pipeline %q is defined in both %q and %q",
+					appCfg.Application.Name, k, existing, wfName)
+			}
+			seenPipelines[k] = wfName
+		}
+
 		combined.Modules = append(combined.Modules, wfCfg.Modules...)
 		for k, v := range wfCfg.Workflows {
 			combined.Workflows[k] = v
@@ -213,6 +231,8 @@ func MergeApplicationConfig(appCfg *ApplicationConfig) (*WorkflowConfig, error) 
 		for k, v := range wfCfg.Pipelines {
 			combined.Pipelines[k] = v
 		}
+		// Fall back to first workflow file's directory if application config
+		// directory was not set.
 		if combined.ConfigDir == "" {
 			combined.ConfigDir = wfCfg.ConfigDir
 		}
