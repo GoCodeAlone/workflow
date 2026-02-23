@@ -10,8 +10,12 @@ import (
 	"sync"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"gopkg.in/yaml.v3"
 )
+
+// Compile-time assertion: *OpenAPIGenerator must satisfy interfaces.SchemaRegistrar.
+var _ interfaces.SchemaRegistrar = (*OpenAPIGenerator)(nil)
 
 // --- OpenAPI 3.0 spec structs (minimal inline definitions) ---
 
@@ -680,4 +684,11 @@ func (g *OpenAPIGenerator) ApplySchemas() {
 			op.Tags = override.Tags
 		}
 	}
+}
+
+// RegisterAdminSchemas satisfies the interfaces.SchemaRegistrar interface.
+// It delegates to the package-level RegisterAdminSchemas function, registering
+// all admin API request/response schemas onto this generator.
+func (g *OpenAPIGenerator) RegisterAdminSchemas() {
+	RegisterAdminSchemas(g)
 }
