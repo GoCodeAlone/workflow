@@ -403,19 +403,6 @@ func (h *RESTAPIHandler) handleTransition(resourceId string, w http.ResponseWrit
 		}
 	}
 
-	// If we couldn't get the state from the engine, try the state tracker
-	if currentState == "" {
-		var stateTracker any
-		if err := h.app.GetService(StateTrackerName, &stateTracker); err == nil && stateTracker != nil {
-			if tracker, ok := stateTracker.(*StateTracker); ok {
-				if stateInfo, exists := tracker.GetState(h.resourceName, resourceId); exists {
-					currentState = stateInfo.CurrentState
-					h.logger.Debug(fmt.Sprintf("Retrieved current state from state tracker: %s", currentState))
-				}
-			}
-		}
-	}
-
 	// Update the resource with the current state
 	if currentState != "" {
 		h.mu.Lock()
@@ -468,12 +455,6 @@ func (h *RESTAPIHandler) handleSubAction(resourceId, subAction string, w http.Re
 	}
 	if body == nil {
 		body = make(map[string]any)
-	}
-
-	// Tag is a data-only update, no state transition
-	if subAction == "tag" {
-		h.handleTagAction(resourceId, body, w)
-		return
 	}
 
 	// Look up sub-action in the configurable transition map

@@ -293,44 +293,6 @@ func (h *RESTAPIHandler) handleDelete(resourceId string, w http.ResponseWriter, 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleTagAction handles POST /tag — updates resource tags without a state transition.
-func (h *RESTAPIHandler) handleTagAction(resourceId string, body map[string]any, w http.ResponseWriter) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	res, exists := h.resources[resourceId]
-	if !exists {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"})
-		return
-	}
-
-	// Merge tag data into the resource
-	tags := h.fieldMapping.ResolveSlice(res.Data, "tags")
-	if newTag, ok := body["tag"].(string); ok && newTag != "" {
-		tags = append(tags, newTag)
-		h.fieldMapping.SetValue(res.Data, "tags", tags)
-	}
-	if newTags, ok := body["tags"].([]any); ok {
-		tags = append(tags, newTags...)
-		h.fieldMapping.SetValue(res.Data, "tags", tags)
-	}
-	res.LastUpdate = time.Now().Format(time.RFC3339)
-	h.fieldMapping.SetValue(res.Data, "lastUpdate", res.LastUpdate)
-	h.resources[resourceId] = res
-
-	if h.persistence != nil {
-		_ = h.persistence.SaveResource(h.resourceName, res.ID, res.Data)
-	}
-
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"success": true,
-		"id":      resourceId,
-		"tags":    tags,
-	})
-}
-
 // handleSubActionGet handles GET requests for sub-resource data (e.g., /summary).
 func (h *RESTAPIHandler) handleSubActionGet(resourceId, subAction string, w http.ResponseWriter, r *http.Request) {
 	if resourceId == "" {
