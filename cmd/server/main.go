@@ -28,7 +28,6 @@ import (
 	"github.com/GoCodeAlone/workflow/deploy"
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/environment"
-	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/observability"
 	"github.com/GoCodeAlone/workflow/observability/tracing"
@@ -91,13 +90,12 @@ var (
 )
 
 // buildEngine creates the workflow engine with all handlers registered and built from config.
-func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, *handlers.PipelineWorkflowHandler, error) {
+func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
 	app := modular.NewStdApplication(nil, logger)
 	engine := workflow.NewStdEngine(app, logger)
 
 	// Load all engine plugins — each registers its module factories, step factories,
 	// trigger factories, and workflow handlers via engine.LoadPlugin.
-	pipelinePlugin := pluginpipeline.New()
 	plugins := []plugin.EnginePlugin{
 		pluginlicense.New(),
 		pluginhttp.New(),
@@ -107,7 +105,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 		pluginauth.New(),
 		pluginstorage.New(),
 		pluginapi.New(),
-		pipelinePlugin,
+		pluginpipeline.New(),
 		plugincicd.New(),
 		pluginff.New(),
 		pluginsecrets.New(),
@@ -148,15 +146,6 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 		}
 	}
 
-	// Wire the PipelineWorkflowHandler (provided by the pipeline plugin) with
-	// the engine's StepRegistry and logger. The handler was already registered
-	// by LoadPlugin; we just need to inject its dependencies.
-	pipelineHandler := pipelinePlugin.PipelineHandler()
-	if pipelineHandler != nil {
-		pipelineHandler.SetStepRegistry(engine.GetStepRegistry())
-		pipelineHandler.SetLogger(logger)
-	}
-
 	// Set up dynamic component system
 	pool := dynamic.NewInterpreterPool()
 	registry := dynamic.NewComponentRegistry()
@@ -178,10 +167,10 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 
 	// Build engine from config
 	if err := engine.BuildFromConfig(cfg); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("failed to build workflow: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to build workflow: %w", err)
 	}
 
-	return engine, loader, registry, pipelineHandler, nil
+	return engine, loader, registry, nil
 }
 
 // loadConfig loads a workflow configuration from the configured file path,
@@ -223,12 +212,6 @@ type ioCloser interface {
 type closableEventStore interface {
 	evstore.EventStore
 	Close() error
-}
-
-// pipelineEventSetter is the subset of *handlers.PipelineWorkflowHandler
-// called after the engine starts.
-type pipelineEventSetter interface {
-	SetEventRecorder(r module.EventRecorder)
 }
 
 // executionTrackerIface is the minimal interface over *module.ExecutionTracker.
@@ -276,7 +259,6 @@ type mgmtComponents struct {
 // instance after an engine reload.
 type serviceComponents struct {
 	v1Handler        http.Handler          // V1 API handler (dashboard)
-	pipelineHandler  pipelineEventSetter   // pipeline execution handler
 	executionTracker executionTrackerIface // CQRS execution tracking
 	runtimeManager   runtimeLifecycle      // filesystem-loaded workflow instances
 	reporter         observabilityReporter // background observability reporter
@@ -321,12 +303,11 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 		return nil, fmt.Errorf("failed to set up admin: %w", err)
 	}
 
-	engine, loader, registry, pipelineHandler, err := buildEngine(cfg, logger)
+	engine, loader, registry, err := buildEngine(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build engine: %w", err)
 	}
 	app.engine = engine
-	app.services.pipelineHandler = pipelineHandler
 
 	// Initialize AI services and dynamic component pool
 	pool := dynamic.NewInterpreterPool()
@@ -825,7 +806,7 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 
 	// Always create a RuntimeManager (returns empty list when no workflows loaded)
 	runtimeBuilder := func(cfg *config.WorkflowConfig, lg *slog.Logger) (func(context.Context) error, error) {
-		eng, _, _, _, buildErr := buildEngine(cfg, lg)
+		eng, _, _, buildErr := buildEngine(cfg, lg)
 		if buildErr != nil {
 			return nil, buildErr
 		}
@@ -875,11 +856,19 @@ func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 	engine := app.engine
 
 	// Wire EventRecorder adapter to the pipeline handler so pipeline
-	// executions emit events to the event store.
-	if app.stores.eventStore != nil && app.services.pipelineHandler != nil {
-		recorder := evstore.NewEventRecorderAdapter(app.stores.eventStore)
-		app.services.pipelineHandler.SetEventRecorder(recorder)
-		logger.Info("Wired EventRecorder to PipelineWorkflowHandler")
+	// executions emit events to the event store. The handler is discovered
+	// via the service registry (registered by the pipelinesteps plugin wiring hook).
+	if app.stores.eventStore != nil {
+		type eventRecorderSetter interface {
+			SetEventRecorder(r module.EventRecorder)
+		}
+		if svc, ok := engine.GetApp().SvcRegistry()[pluginpipeline.PipelineHandlerServiceName]; ok {
+			if ph, ok := svc.(eventRecorderSetter); ok {
+				recorder := evstore.NewEventRecorderAdapter(app.stores.eventStore)
+				ph.SetEventRecorder(recorder)
+				logger.Info("Wired EventRecorder to PipelineWorkflowHandler")
+			}
+		}
 	}
 
 	// Register V1 handler
@@ -981,15 +970,14 @@ func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
 	}
 
 	// Build and start a new engine
-	newEngine, _, _, newPipelineHandler, buildErr := buildEngine(newCfg, logger)
+	newEngine, _, _, buildErr := buildEngine(newCfg, logger)
 	if buildErr != nil {
 		return fmt.Errorf("failed to rebuild engine: %w", buildErr)
 	}
 
-	// Update the serverApp references BEFORE registering services,
+	// Update the serverApp reference BEFORE registering services,
 	// since registerManagementServices reads app.engine.
 	app.engine = newEngine
-	app.services.pipelineHandler = newPipelineHandler
 
 	// Re-register pre-start management services with the new Application
 	registerManagementServices(logger, app)

@@ -5,18 +5,30 @@
 package pipelinesteps
 
 import (
+	"log/slog"
+
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/handlers"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 )
+
+// PipelineHandlerServiceName is the service name under which the
+// PipelineWorkflowHandler is registered in the app's service registry.
+// External components can look it up to call SetEventRecorder after startup.
+const PipelineHandlerServiceName = "pipeline-workflow-handler"
 
 // Plugin registers generic pipeline step factories and the pipeline workflow handler.
 type Plugin struct {
 	plugin.BaseEnginePlugin
 	// pipelineHandler is retained so the wiring hook can inject dependencies.
 	pipelineHandler *handlers.PipelineWorkflowHandler
+	// stepRegistry and logger are injected by the engine via optional setter interfaces.
+	stepRegistry interfaces.StepRegistryProvider
+	logger       *slog.Logger
 }
 
 // New creates a new pipeline-steps plugin.
@@ -97,17 +109,50 @@ func (p *Plugin) WorkflowHandlers() map[string]plugin.WorkflowHandlerFactory {
 	}
 }
 
-// PipelineHandler returns the plugin's pipeline handler instance, if created.
-// This is used by the engine's wiring hook to inject StepRegistry and Logger.
-func (p *Plugin) PipelineHandler() *handlers.PipelineWorkflowHandler {
-	return p.pipelineHandler
+// SetStepRegistry is called by the engine (via optional-interface detection in LoadPlugin)
+// to inject the step registry after all step factories have been registered.
+func (p *Plugin) SetStepRegistry(registry interfaces.StepRegistryProvider) {
+	p.stepRegistry = registry
+}
+
+// SetLogger is called by the engine (via optional-interface detection in LoadPlugin)
+// to inject the application logger.
+func (p *Plugin) SetLogger(logger *slog.Logger) {
+	p.logger = logger
+}
+
+// WiringHooks returns a hook that wires the injected step registry and logger into
+// the PipelineWorkflowHandler and registers the handler as a named service so that
+// other components (e.g. the server) can look it up without reaching into the plugin.
+func (p *Plugin) WiringHooks() []plugin.WiringHook {
+	return []plugin.WiringHook{
+		{
+			Name:     "pipeline-handler-wiring",
+			Priority: 50,
+			Hook: func(app modular.Application, _ *config.WorkflowConfig) error {
+				if p.pipelineHandler == nil {
+					return nil
+				}
+				if p.stepRegistry != nil {
+					p.pipelineHandler.SetStepRegistry(p.stepRegistry)
+				}
+				if p.logger != nil {
+					p.pipelineHandler.SetLogger(p.logger)
+				}
+				// Register the handler as a service so callers can discover it
+				// (e.g. to wire SetEventRecorder post-start) without a plugin-specific getter.
+				_ = app.RegisterService(PipelineHandlerServiceName, p.pipelineHandler)
+				return nil
+			},
+		},
+	}
 }
 
 // wrapStepFactory converts a module.StepFactory to a plugin.StepFactory,
 // threading the modular.Application through so steps like db_exec and
 // db_query can access the service registry.
 func wrapStepFactory(f module.StepFactory) plugin.StepFactory {
-	return func(name string, config map[string]any, app modular.Application) (any, error) {
-		return f(name, config, app)
+	return func(name string, cfg map[string]any, app modular.Application) (any, error) {
+		return f(name, cfg, app)
 	}
 }
