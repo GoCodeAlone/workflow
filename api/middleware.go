@@ -1,6 +1,8 @@
 package api
 
 import (
+	"math"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +20,7 @@ type Middleware struct {
 	jwtSecret   []byte
 	users       store.UserStore
 	permissions *PermissionService
+	authLimiter *rateLimiterStore
 }
 
 // NewMiddleware creates a new Middleware.
@@ -92,6 +95,8 @@ type rateLimiterStore struct {
 	limiters map[string]*ipLimiter
 	r        rate.Limit
 	b        int
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 func newRateLimiterStore(requestsPerMinute int) *rateLimiterStore {
@@ -99,23 +104,29 @@ func newRateLimiterStore(requestsPerMinute int) *rateLimiterStore {
 		limiters: make(map[string]*ipLimiter),
 		r:        rate.Limit(float64(requestsPerMinute) / 60.0),
 		b:        requestsPerMinute,
+		stopCh:   make(chan struct{}),
 	}
 	go s.cleanup()
 	return s
 }
 
-// cleanup periodically removes stale entries.
+// cleanup periodically removes stale entries until stop is called.
 func (s *rateLimiterStore) cleanup() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		s.mu.Lock()
-		for ip, l := range s.limiters {
-			if time.Since(l.lastSeen) > 10*time.Minute {
-				delete(s.limiters, ip)
+	for {
+		select {
+		case <-ticker.C:
+			s.mu.Lock()
+			for ip, l := range s.limiters {
+				if time.Since(l.lastSeen) > 10*time.Minute {
+					delete(s.limiters, ip)
+				}
 			}
+			s.mu.Unlock()
+		case <-s.stopCh:
+			return
 		}
-		s.mu.Unlock()
 	}
 }
 
@@ -131,20 +142,35 @@ func (s *rateLimiterStore) get(ip string) *rate.Limiter {
 	return l.limiter
 }
 
+// Stop shuts down the background cleanup goroutine started by RateLimit.
+// It is safe to call multiple times.
+func (m *Middleware) Stop() {
+	if m.authLimiter != nil {
+		m.authLimiter.stopOnce.Do(func() { close(m.authLimiter.stopCh) })
+	}
+}
+
 // RateLimit returns middleware that limits requests per IP to requestsPerMinute.
 // When requestsPerMinute is zero, the default of 10 is used.
 // Requests that exceed the limit receive HTTP 429 with a Retry-After header.
+// The middleware shares a single per-IP store on this Middleware instance so
+// only one cleanup goroutine runs; call Stop() to release it.
 func (m *Middleware) RateLimit(requestsPerMinute int) func(http.Handler) http.Handler {
 	if requestsPerMinute <= 0 {
 		requestsPerMinute = 10
 	}
-	limiters := newRateLimiterStore(requestsPerMinute)
+	if m.authLimiter == nil {
+		m.authLimiter = newRateLimiterStore(requestsPerMinute)
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := realIP(r)
-			limiter := limiters.get(ip)
-			if !limiter.Allow() {
-				retryAfter := int(time.Minute.Seconds() / float64(requestsPerMinute))
+			limiter := m.authLimiter.get(ip)
+			reservation := limiter.Reserve()
+			if d := reservation.Delay(); d > 0 {
+				// Cancel so the token is returned; we are rejecting this request.
+				reservation.Cancel()
+				retryAfter := int(math.Ceil(d.Seconds()))
 				if retryAfter < 1 {
 					retryAfter = 1
 				}
@@ -169,12 +195,12 @@ func realIP(r *http.Request) string {
 		}
 		return strings.TrimSpace(fwd)
 	}
-	// Strip port from RemoteAddr.
-	addr := r.RemoteAddr
-	if idx := strings.LastIndex(addr, ":"); idx != -1 {
-		return addr[:idx]
+	// Strip port from RemoteAddr, handling IPv6 addresses correctly.
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
 	}
-	return addr
+	return host
 }
 
 // authenticate extracts the Bearer token, validates it, and loads the user.
