@@ -54,10 +54,6 @@ func New() *HTTPPlugin {
 				WiringHooks: []string{
 					"http-auth-provider-wiring",
 					"http-static-fileserver-registration",
-					"http-health-endpoint-registration",
-					"http-metrics-endpoint-registration",
-					"http-log-endpoint-registration",
-					"http-openapi-endpoint-registration",
 				},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "http-server", Role: "provider", Priority: 10},
