@@ -80,6 +80,8 @@ func (m *FeatureFlagModule) Init(_ modular.Application) error { return nil }
 
 // ProvidesServices implements modular.Module. The service is registered under
 // the module name so other modules (and the engine) can look it up.
+// A FeatureFlagAdmin adapter is also registered so that the V1 API handler
+// can discover it from the service registry without explicit wiring in main.
 func (m *FeatureFlagModule) ProvidesServices() []modular.ServiceProvider {
 	providers := []modular.ServiceProvider{
 		{
@@ -88,13 +90,23 @@ func (m *FeatureFlagModule) ProvidesServices() []modular.ServiceProvider {
 			Instance:    m.service,
 		},
 	}
-	// Also register the store if it's a generic provider so the admin API can use it
+	// Register the admin adapter so V1APIHandler can discover FeatureFlagAdmin
+	// from the service registry — eliminating explicit wiring in the server.
 	if m.store != nil {
-		providers = append(providers, modular.ServiceProvider{
-			Name:        m.name + ".store",
-			Description: "Feature flag store: " + m.name,
-			Instance:    m.store,
-		})
+		adapter := NewFeatureFlagAdminAdapter(m.service, m.store)
+		providers = append(providers,
+			modular.ServiceProvider{
+				Name:        m.name + ".admin",
+				Description: "Feature flag admin adapter: " + m.name,
+				Instance:    FeatureFlagAdmin(adapter),
+			},
+			// Also register the store for other consumers.
+			modular.ServiceProvider{
+				Name:        m.name + ".store",
+				Description: "Feature flag store: " + m.name,
+				Instance:    m.store,
+			},
+		)
 	}
 	return providers
 }

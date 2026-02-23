@@ -133,17 +133,26 @@ func loggingMiddlewareFactory(name string, cfg map[string]any) modular.Module {
 }
 
 func rateLimitMiddlewareFactory(name string, cfg map[string]any) modular.Module {
-	requestsPerMinute := 60
 	burstSize := 10
-	if rpm, ok := cfg["requestsPerMinute"].(int); ok {
-		requestsPerMinute = rpm
-	} else if rpm, ok := cfg["requestsPerMinute"].(float64); ok {
-		requestsPerMinute = int(rpm)
-	}
 	if bs, ok := cfg["burstSize"].(int); ok {
 		burstSize = bs
 	} else if bs, ok := cfg["burstSize"].(float64); ok {
 		burstSize = int(bs)
+	}
+
+	// requestsPerHour takes precedence over requestsPerMinute for low-frequency
+	// endpoints (e.g. registration) where fractional per-minute rates are needed.
+	if rph, ok := cfg["requestsPerHour"].(int); ok {
+		return module.NewRateLimitMiddlewareWithHourlyRate(name, rph, burstSize)
+	} else if rph, ok := cfg["requestsPerHour"].(float64); ok {
+		return module.NewRateLimitMiddlewareWithHourlyRate(name, int(rph), burstSize)
+	}
+
+	requestsPerMinute := 60
+	if rpm, ok := cfg["requestsPerMinute"].(int); ok {
+		requestsPerMinute = rpm
+	} else if rpm, ok := cfg["requestsPerMinute"].(float64); ok {
+		requestsPerMinute = int(rpm)
 	}
 	return module.NewRateLimitMiddleware(name, requestsPerMinute, burstSize)
 }

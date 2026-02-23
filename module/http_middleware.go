@@ -33,6 +33,7 @@ const (
 type RateLimitMiddleware struct {
 	name              string
 	requestsPerMinute int
+	ratePerMinute     float64 // fractional rate, used when requestsPerHour is set
 	burstSize         int
 	strategy          RateLimitStrategy
 	tokenHeader       string // HTTP header to extract token from
@@ -44,7 +45,7 @@ type RateLimitMiddleware struct {
 
 // client tracks the rate limiting state for a single client
 type client struct {
-	tokens        int
+	tokens        float64
 	lastTimestamp time.Time
 }
 
@@ -53,6 +54,7 @@ func NewRateLimitMiddleware(name string, requestsPerMinute, burstSize int) *Rate
 	return &RateLimitMiddleware{
 		name:              name,
 		requestsPerMinute: requestsPerMinute,
+		ratePerMinute:     float64(requestsPerMinute),
 		burstSize:         burstSize,
 		strategy:          RateLimitByIP,
 		tokenHeader:       "Authorization",
@@ -60,6 +62,24 @@ func NewRateLimitMiddleware(name string, requestsPerMinute, burstSize int) *Rate
 		cleanupInterval:   5 * time.Minute,
 		stopCleanup:       make(chan struct{}),
 	}
+}
+
+// NewRateLimitMiddlewareWithHourlyRate creates a rate limiting middleware using
+// a per-hour rate. Useful for low-frequency endpoints like registration where
+// fractional per-minute rates are needed.
+func NewRateLimitMiddlewareWithHourlyRate(name string, requestsPerHour, burstSize int) *RateLimitMiddleware {
+	m := &RateLimitMiddleware{
+		name:              name,
+		requestsPerMinute: 0, // not used when ratePerMinute is set
+		ratePerMinute:     float64(requestsPerHour) / 60.0,
+		burstSize:         burstSize,
+		strategy:          RateLimitByIP,
+		tokenHeader:       "Authorization",
+		clients:           make(map[string]*client),
+		cleanupInterval:   5 * time.Minute,
+		stopCleanup:       make(chan struct{}),
+	}
+	return m
 }
 
 // NewRateLimitMiddlewareWithStrategy creates a rate limiting middleware with
@@ -132,20 +152,20 @@ func (m *RateLimitMiddleware) Process(next http.Handler) http.Handler {
 		m.mu.Lock()
 		c, exists := m.clients[key]
 		if !exists {
-			c = &client{tokens: m.burstSize, lastTimestamp: time.Now()}
+			c = &client{tokens: float64(m.burstSize), lastTimestamp: time.Now()}
 			m.clients[key] = c
 		} else {
-			// Refill tokens based on elapsed time
+			// Refill tokens based on elapsed time using fractional rate
 			elapsed := time.Since(c.lastTimestamp).Minutes()
-			tokensToAdd := int(elapsed * float64(m.requestsPerMinute))
+			tokensToAdd := elapsed * m.ratePerMinute
 			if tokensToAdd > 0 {
-				c.tokens = min(c.tokens+tokensToAdd, m.burstSize)
+				c.tokens = min(c.tokens+tokensToAdd, float64(m.burstSize))
 				c.lastTimestamp = time.Now()
 			}
 		}
 
 		// Check if request can proceed
-		if c.tokens <= 0 {
+		if c.tokens < 1 {
 			m.mu.Unlock()
 			w.Header().Set("Retry-After", "60")
 			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
@@ -163,7 +183,12 @@ func (m *RateLimitMiddleware) Process(next http.Handler) http.Handler {
 // cleanupStaleClients removes client entries that haven't been seen in over
 // twice the refill window. This prevents unbounded memory growth.
 func (m *RateLimitMiddleware) cleanupStaleClients() {
-	staleThreshold := 2 * time.Minute * time.Duration(max(1, m.burstSize/max(1, m.requestsPerMinute)))
+	// Use fractional ratePerMinute to compute refill window correctly
+	refillWindow := 1.0
+	if m.ratePerMinute > 0 {
+		refillWindow = float64(m.burstSize) / m.ratePerMinute
+	}
+	staleThreshold := time.Duration(2*refillWindow) * time.Minute
 	if staleThreshold < 10*time.Minute {
 		staleThreshold = 10 * time.Minute
 	}

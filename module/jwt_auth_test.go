@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func setupJWTAuth(t *testing.T) *JWTAuthModule {
@@ -690,5 +692,127 @@ func TestJWTAuth_UpdateRole_Admin(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&updated)
 	if updated["role"] != "admin" {
 		t.Errorf("expected role 'admin', got %v", updated["role"])
+	}
+}
+
+// --- Algorithm confusion / signing method pinning tests ---
+
+// TestJWTAuth_Authenticate_RejectsNonHS256 verifies that Authenticate() rejects
+// tokens signed with algorithms other than HS256 (prevents algorithm confusion attacks).
+func TestJWTAuth_Authenticate_RejectsNonHS256(t *testing.T) {
+	j := setupJWTAuth(t)
+
+	user := &User{ID: "1", Email: "alg@example.com", Name: "Alg Test"}
+
+	for _, method := range []jwt.SigningMethod{jwt.SigningMethodHS384, jwt.SigningMethodHS512} {
+		method := method
+		t.Run("rejects "+method.Alg(), func(t *testing.T) {
+			claims := jwt.MapClaims{
+				"sub":   user.ID,
+				"email": user.Email,
+				"iss":   "test-issuer",
+				"iat":   time.Now().Unix(),
+				"exp":   time.Now().Add(24 * time.Hour).Unix(),
+			}
+			tok, err := jwt.NewWithClaims(method, claims).SignedString([]byte("test-secret-key"))
+			if err != nil {
+				t.Fatalf("failed to sign token with %s: %v", method.Alg(), err)
+			}
+
+			valid, _, authErr := j.Authenticate(tok)
+			if authErr != nil {
+				t.Fatalf("expected nil error, got: %v", authErr)
+			}
+			if valid {
+				t.Errorf("expected token signed with %s to be rejected, but it was accepted", method.Alg())
+			}
+		})
+	}
+}
+
+// TestJWTAuth_Authenticate_AcceptsHS256 verifies that valid HS256 tokens are accepted.
+func TestJWTAuth_Authenticate_AcceptsHS256(t *testing.T) {
+	j := setupJWTAuth(t)
+
+	user := &User{ID: "1", Email: "hs256@example.com", Name: "HS256 User"}
+	tok, err := j.generateToken(user)
+	if err != nil {
+		t.Fatalf("failed to generate token: %v", err)
+	}
+
+	valid, _, err := j.Authenticate(tok)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !valid {
+		t.Error("expected HS256 token to be valid")
+	}
+}
+
+// TestJWTAuth_HandleRefresh_RejectsNonHS256 verifies that the refresh handler
+// rejects tokens signed with algorithms other than HS256.
+func TestJWTAuth_HandleRefresh_RejectsNonHS256(t *testing.T) {
+	j := setupJWTAuthV1(t)
+	registerUserV1(t, j, "alg-refresh@example.com", "Alg Refresh", "pass123")
+
+	for _, method := range []jwt.SigningMethod{jwt.SigningMethodHS384, jwt.SigningMethodHS512} {
+		method := method
+		t.Run("rejects "+method.Alg(), func(t *testing.T) {
+			claims := jwt.MapClaims{
+				"sub":   "1",
+				"email": "alg-refresh@example.com",
+				"type":  "refresh",
+				"iss":   "test-issuer",
+				"iat":   time.Now().Unix(),
+				"exp":   time.Now().Add(7 * 24 * time.Hour).Unix(),
+			}
+			tok, err := jwt.NewWithClaims(method, claims).SignedString([]byte("test-secret-key"))
+			if err != nil {
+				t.Fatalf("failed to sign token with %s: %v", method.Alg(), err)
+			}
+
+			body, _ := json.Marshal(map[string]string{"refresh_token": tok})
+			req := httptest.NewRequest(http.MethodPost, "/auth/refresh", bytes.NewReader(body))
+			w := httptest.NewRecorder()
+			j.Handle(w, req)
+
+			if w.Code != http.StatusUnauthorized {
+				t.Errorf("%s: expected 401, got %d", method.Alg(), w.Code)
+			}
+		})
+	}
+}
+
+// TestJWTAuth_ExtractUser_RejectsNonHS256 verifies that protected endpoints
+// reject Authorization headers containing tokens signed with non-HS256 algorithms.
+func TestJWTAuth_ExtractUser_RejectsNonHS256(t *testing.T) {
+	j := setupJWTAuth(t)
+	// Register a user so we have a valid user in the store.
+	registerUser(t, j, "protect@example.com", "Protected User", "pass123")
+
+	for _, method := range []jwt.SigningMethod{jwt.SigningMethodHS384, jwt.SigningMethodHS512} {
+		method := method
+		t.Run("profile with "+method.Alg(), func(t *testing.T) {
+			claims := jwt.MapClaims{
+				"sub":   "1",
+				"email": "protect@example.com",
+				"iss":   "test-issuer",
+				"iat":   time.Now().Unix(),
+				"exp":   time.Now().Add(24 * time.Hour).Unix(),
+			}
+			tok, err := jwt.NewWithClaims(method, claims).SignedString([]byte("test-secret-key"))
+			if err != nil {
+				t.Fatalf("failed to sign token with %s: %v", method.Alg(), err)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/auth/profile", nil)
+			req.Header.Set("Authorization", "Bearer "+tok)
+			w := httptest.NewRecorder()
+			j.Handle(w, req)
+
+			if w.Code != http.StatusUnauthorized {
+				t.Errorf("%s: expected 401, got %d", method.Alg(), w.Code)
+			}
+		})
 	}
 }

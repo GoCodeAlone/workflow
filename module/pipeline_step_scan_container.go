@@ -10,6 +10,10 @@ import (
 
 // ScanContainerStep runs a container vulnerability scanner (e.g., Trivy)
 // against a target image and evaluates findings against a severity gate.
+//
+// NOTE: This step is not yet implemented. Docker-based execution requires
+// sandbox.DockerSandbox, which is not yet available. Calls to Execute will
+// always return ErrNotImplemented.
 type ScanContainerStep struct {
 	name              string
 	scanner           string
@@ -67,52 +71,12 @@ func NewScanContainerStepFactory() StepFactory {
 func (s *ScanContainerStep) Name() string { return s.name }
 
 // Execute runs the container scanner and returns findings as a ScanResult.
+//
+// NOTE: This step is not yet implemented. Execution via sandbox.DockerSandbox
+// is required but the sandbox package is not yet available. This method always
+// returns ErrNotImplemented to prevent silent no-ops in CI/CD pipelines.
 func (s *ScanContainerStep) Execute(_ context.Context, _ *PipelineContext) (*StepResult, error) {
-	cmd := s.buildCommand()
-
-	// TODO: Execute via sandbox.DockerSandbox once the sandbox package is available.
-	_ = cmd
-
-	scanResult := NewScanResult(s.scanner)
-	scanResult.ComputeSummary()
-	scanResult.EvaluateGate(s.severityThreshold)
-
-	return &StepResult{
-		Output: map[string]any{
-			"scan_result":  scanResult,
-			"command":      strings.Join(cmd, " "),
-			"image":        s.image,
-			"target_image": s.targetImage,
-		},
-	}, nil
-}
-
-// buildCommand constructs the Trivy command arguments for container scanning.
-func (s *ScanContainerStep) buildCommand() []string {
-	args := []string{"trivy", "image"}
-
-	// Set severity filter
-	args = append(args, "--severity", strings.ToUpper(s.severityThreshold))
-
-	if s.ignoreUnfixed {
-		args = append(args, "--ignore-unfixed")
-	}
-
-	switch s.outputFormat {
-	case "sarif":
-		args = append(args, "--format", "sarif")
-	case "json":
-		args = append(args, "--format", "json")
-	default:
-		args = append(args, "--format", "json")
-	}
-
-	if s.scanner != "trivy" {
-		return []string{s.scanner, s.targetImage}
-	}
-
-	args = append(args, s.targetImage)
-	return args
+	return nil, fmt.Errorf("scan_container step %q: %w", s.name, ErrNotImplemented)
 }
 
 // validateSeverity checks that a severity string is valid.

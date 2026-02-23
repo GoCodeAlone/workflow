@@ -3,13 +3,16 @@ package module
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/CrisisTextLine/modular"
 )
 
 // ScanSASTStep runs a SAST (Static Application Security Testing) scanner
 // inside a Docker container and evaluates findings against a severity gate.
+//
+// NOTE: This step is not yet implemented. Docker-based execution requires
+// sandbox.DockerSandbox, which is not yet available. Calls to Execute will
+// always return ErrNotImplemented.
 type ScanSASTStep struct {
 	name           string
 	scanner        string
@@ -73,42 +76,10 @@ func NewScanSASTStepFactory() StepFactory {
 func (s *ScanSASTStep) Name() string { return s.name }
 
 // Execute runs the SAST scanner and returns findings as a ScanResult.
+//
+// NOTE: This step is not yet implemented. Execution via sandbox.DockerSandbox
+// is required but the sandbox package is not yet available. This method always
+// returns ErrNotImplemented to prevent silent no-ops in CI/CD pipelines.
 func (s *ScanSASTStep) Execute(_ context.Context, _ *PipelineContext) (*StepResult, error) {
-	// Build the scanner command based on the configured scanner type
-	cmd := s.buildCommand()
-
-	// TODO: Execute via sandbox.DockerSandbox once the sandbox package is available.
-	// For now, construct the command and produce a placeholder result.
-	_ = cmd
-
-	scanResult := NewScanResult(s.scanner)
-	scanResult.ComputeSummary()
-	scanResult.EvaluateGate(s.failOnSeverity)
-
-	return &StepResult{
-		Output: map[string]any{
-			"scan_result": scanResult,
-			"command":     strings.Join(cmd, " "),
-			"image":       s.image,
-		},
-	}, nil
-}
-
-// buildCommand constructs the Docker command arguments for the configured scanner.
-func (s *ScanSASTStep) buildCommand() []string {
-	switch s.scanner {
-	case "semgrep":
-		args := []string{"semgrep", "scan"}
-		for _, rule := range s.rules {
-			args = append(args, "--config", rule)
-		}
-		if s.outputFormat == "sarif" {
-			args = append(args, "--sarif")
-		}
-		args = append(args, s.sourcePath)
-		return args
-	default:
-		// Generic fallback: run the scanner name as a command against the source path
-		return []string{s.scanner, s.sourcePath}
-	}
+	return nil, fmt.Errorf("scan_sast step %q: %w", s.name, ErrNotImplemented)
 }
