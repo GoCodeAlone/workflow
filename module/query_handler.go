@@ -154,7 +154,11 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Type-assert to *Pipeline for concrete field access (Metadata, RoutePattern,
 		// Execute) and execution tracker integration. All engine-registered pipelines
 		// are *Pipeline; the interface allows custom implementations in tests/plugins.
-		if concretePipeline, ok := pipeline.(*Pipeline); ok {
+		// concretePipeline != nil: real *Pipeline.
+		// concretePipeline == nil && isConcrete: typed-nil – fall through to delegate/404.
+		// !isConcrete: different implementation – use PipelineRunner.Run() fallback.
+		concretePipeline, isConcrete := pipeline.(*Pipeline)
+		if isConcrete && concretePipeline != nil {
 			// Inject HTTP context so delegate steps can forward directly
 			concretePipeline.Metadata = map[string]any{
 				"_http_request":         r,
@@ -188,20 +192,26 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to encode response", http.StatusInternalServerError)
 			}
 			return
-		}
-		// Fallback for non-*Pipeline implementations: use the PipelineRunner interface.
-		result, err := pipeline.Run(r.Context(), triggerData)
-		if err != nil {
+		} else if !isConcrete {
+			// Fallback for non-*Pipeline implementations: use the PipelineRunner interface.
+			result, err := pipeline.Run(r.Context(), triggerData)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			// Allow the runner to signal that it has already written the response.
+			if result["_response_handled"] == true {
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			if err := json.NewEncoder(w).Encode(result); err != nil {
+				http.Error(w, "failed to encode response", http.StatusInternalServerError)
+			}
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(result); err != nil {
-			http.Error(w, "failed to encode response", http.StatusInternalServerError)
-		}
-		return
+		// typed-nil *Pipeline: fall through to delegate/404 handling.
 	}
 
 	if h.delegateHandler != nil {
