@@ -17,6 +17,8 @@ func runPlugin(args []string) error {
 		return runPluginInit(args[1:])
 	case "docs":
 		return runPluginDocs(args[1:])
+	case "test":
+		return runPluginTest(args[1:])
 	default:
 		return pluginUsage()
 	}
@@ -28,6 +30,7 @@ func pluginUsage() error {
 Subcommands:
   init   Scaffold a new plugin project
   docs   Generate documentation for an existing plugin
+  test   Run a plugin through its full lifecycle in a test harness
 `)
 	return fmt.Errorf("plugin subcommand is required")
 }
