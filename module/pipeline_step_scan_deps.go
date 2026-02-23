@@ -3,13 +3,16 @@ package module
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/CrisisTextLine/modular"
 )
 
 // ScanDepsStep runs a dependency vulnerability scanner (e.g., Grype)
 // against a source path and evaluates findings against a severity gate.
+//
+// NOTE: This step is not yet implemented. Docker-based execution requires
+// sandbox.DockerSandbox, which is not yet available. Calls to Execute will
+// always return ErrNotImplemented.
 type ScanDepsStep struct {
 	name           string
 	scanner        string
@@ -66,46 +69,10 @@ func NewScanDepsStepFactory() StepFactory {
 func (s *ScanDepsStep) Name() string { return s.name }
 
 // Execute runs the dependency scanner and returns findings as a ScanResult.
+//
+// NOTE: This step is not yet implemented. Execution via sandbox.DockerSandbox
+// is required but the sandbox package is not yet available. This method always
+// returns ErrNotImplemented to prevent silent no-ops in CI/CD pipelines.
 func (s *ScanDepsStep) Execute(_ context.Context, _ *PipelineContext) (*StepResult, error) {
-	cmd := s.buildCommand()
-
-	// TODO: Execute via sandbox.DockerSandbox once the sandbox package is available.
-	_ = cmd
-
-	scanResult := NewScanResult(s.scanner)
-	scanResult.ComputeSummary()
-	scanResult.EvaluateGate(s.failOnSeverity)
-
-	return &StepResult{
-		Output: map[string]any{
-			"scan_result": scanResult,
-			"command":     strings.Join(cmd, " "),
-			"image":       s.image,
-		},
-	}, nil
-}
-
-// buildCommand constructs the Grype command arguments for dependency scanning.
-func (s *ScanDepsStep) buildCommand() []string {
-	switch s.scanner {
-	case "grype":
-		args := []string{"grype"}
-
-		// Set fail-on severity
-		args = append(args, "--fail-on", strings.ToLower(s.failOnSeverity))
-
-		switch s.outputFormat {
-		case "sarif":
-			args = append(args, "-o", "sarif")
-		case "json":
-			args = append(args, "-o", "json")
-		default:
-			args = append(args, "-o", "json")
-		}
-
-		args = append(args, "dir:"+s.sourcePath)
-		return args
-	default:
-		return []string{s.scanner, s.sourcePath}
-	}
+	return nil, fmt.Errorf("scan_deps step %q: %w", s.name, ErrNotImplemented)
 }
