@@ -91,7 +91,7 @@ func writeTempSpec(t *testing.T, ext, content string) string {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "spec"+ext)
-	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("write temp spec: %v", err)
 	}
 	return path
@@ -549,6 +549,128 @@ func TestHTMLEscape(t *testing.T) {
 	if strings.Contains(got, "<script>") {
 		t.Errorf("HTML not escaped: %s", got)
 	}
+}
+
+func TestValidateScalarValue_Pattern(t *testing.T) {
+	t.Run("valid pattern match", func(t *testing.T) {
+		schema := &openAPISchema{Type: "string", Pattern: "^foo[0-9]+$"}
+		errs := validateScalarValue("foo123", "param", schema)
+		if len(errs) > 0 {
+			t.Errorf("expected no errors, got %v", errs)
+		}
+	})
+
+	t.Run("pattern mismatch", func(t *testing.T) {
+		schema := &openAPISchema{Type: "string", Pattern: "^foo[0-9]+$"}
+		errs := validateScalarValue("bar", "param", schema)
+		if len(errs) == 0 {
+			t.Error("expected validation error for non-matching pattern, got none")
+		}
+	})
+
+	t.Run("invalid regex pattern returns error", func(t *testing.T) {
+		schema := &openAPISchema{Type: "string", Pattern: "["}
+		errs := validateScalarValue("anything", "param", schema)
+		if len(errs) == 0 {
+			t.Error("expected validation error for invalid regex pattern, got none")
+		}
+	})
+}
+
+func TestValidateJSONValue_Pattern(t *testing.T) {
+	t.Run("valid pattern match", func(t *testing.T) {
+		schema := &openAPISchema{Type: "string", Pattern: "^foo[0-9]+$"}
+		errs := validateJSONValue("foo123", "body", schema)
+		if len(errs) > 0 {
+			t.Errorf("expected no errors, got %v", errs)
+		}
+	})
+
+	t.Run("pattern mismatch", func(t *testing.T) {
+		schema := &openAPISchema{Type: "string", Pattern: "^foo[0-9]+$"}
+		errs := validateJSONValue("bar", "body", schema)
+		if len(errs) == 0 {
+			t.Error("expected validation error for non-matching pattern, got none")
+		}
+	})
+
+	t.Run("invalid regex pattern returns error", func(t *testing.T) {
+		schema := &openAPISchema{Type: "string", Pattern: "["}
+		errs := validateJSONValue("anything", "body", schema)
+		if len(errs) == 0 {
+			t.Error("expected validation error for invalid regex pattern, got none")
+		}
+	})
+
+	t.Run("integer with fractional part rejected", func(t *testing.T) {
+		schema := &openAPISchema{Type: "integer"}
+		errs := validateJSONValue(float64(3.14), "count", schema)
+		if len(errs) == 0 {
+			t.Error("expected validation error for fractional integer, got none")
+		}
+	})
+
+	t.Run("integer without fractional part accepted", func(t *testing.T) {
+		schema := &openAPISchema{Type: "integer"}
+		errs := validateJSONValue(float64(3), "count", schema)
+		if len(errs) > 0 {
+			t.Errorf("expected no errors for whole integer, got %v", errs)
+		}
+	})
+
+	t.Run("type mismatch error includes actual type", func(t *testing.T) {
+		schema := &openAPISchema{Type: "string"}
+		errs := validateJSONValue(float64(42), "field", schema)
+		if len(errs) == 0 {
+			t.Error("expected validation error for wrong type, got none")
+		}
+		if len(errs) > 0 && !strings.Contains(errs[0], "float64") {
+			t.Errorf("expected error to mention actual type, got: %s", errs[0])
+		}
+	})
+}
+
+func TestOpenAPIModule_PathParameterValidation(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", petstoreYAML)
+
+	mod := NewOpenAPIModule("petstore", OpenAPIConfig{
+		SpecFile:   specPath,
+		BasePath:   "/api/v1",
+		Validation: OpenAPIValidationConfig{Request: true},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/v1/pets/{petId}")
+	if h == nil {
+		t.Fatal("GET /api/v1/pets/{petId} handler not found")
+	}
+
+	t.Run("valid integer path param", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/pets/42", nil)
+		// Simulate Go 1.22 path value extraction
+		r.SetPathValue("petId", "42")
+		h.Handle(w, r)
+		// 501 = stub response, meaning validation passed
+		if w.Code != http.StatusNotImplemented {
+			t.Errorf("expected 501 stub (validation OK), got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("invalid non-integer path param", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/pets/not-an-id", nil)
+		r.SetPathValue("petId", "not-an-id")
+		h.Handle(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 validation error for non-integer petId, got %d: %s", w.Code, w.Body.String())
+		}
+	})
 }
 
 // routeKeys returns a list of "METHOD:path" strings from a testRouter.
