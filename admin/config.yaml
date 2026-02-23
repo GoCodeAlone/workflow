@@ -42,6 +42,20 @@ modules:
       requestsPerMinute: 120
       burstSize: 20
 
+  # Strict per-IP rate limiter for login: 10 attempts/minute, burst 10
+  - name: auth-login-ratelimit
+    type: http.middleware.ratelimit
+    config:
+      requestsPerMinute: 10
+      burstSize: 10
+
+  # Strict per-IP rate limiter for registration: 5 attempts/hour, burst 5
+  - name: auth-register-ratelimit
+    type: http.middleware.ratelimit
+    config:
+      requestsPerHour: 5
+      burstSize: 5
+
   # --- Data Layer ---
   - name: admin-db
     type: storage.sqlite
@@ -112,6 +126,16 @@ modules:
   - name: admin-metrics
     type: metrics.collector
 
+  # --- Feature Flags ---
+  # Provides the feature-flag admin service; auto-discovered by the V1 API handler.
+  - name: admin-feature-flags
+    type: featureflag.service
+    config:
+      provider: "generic"
+      cache_ttl: "30s"
+      sse_enabled: true
+      db_path: "data/featureflags.db"
+
 workflows:
   http-admin:
     router: admin-router
@@ -133,14 +157,16 @@ workflows:
         middlewares: [admin-cors, admin-ratelimit]
 
       # === Auth (unauthenticated) ===
+      # login: strict per-IP rate limit (10/minute) to defend against brute-force
       - method: POST
         path: "/api/v1/auth/login"
         handler: admin-auth
-        middlewares: [admin-cors, admin-ratelimit]
+        middlewares: [admin-cors, auth-login-ratelimit]
+      # register: strict per-IP rate limit (5/hour) to defend against account enumeration
       - method: POST
         path: "/api/v1/auth/register"
         handler: admin-auth
-        middlewares: [admin-cors, admin-ratelimit]
+        middlewares: [admin-cors, auth-register-ratelimit]
       - method: POST
         path: "/api/v1/auth/refresh"
         handler: admin-auth

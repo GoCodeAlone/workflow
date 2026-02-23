@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
 // ErrorStrategy defines how a pipeline handles step errors.
@@ -19,9 +21,9 @@ const (
 // EventRecorder is an optional interface for recording execution events.
 // When set on Pipeline, execution events are appended for observability.
 // The store.EventStore can satisfy this via an adapter at the wiring layer.
-type EventRecorder interface {
-	RecordEvent(ctx context.Context, executionID string, eventType string, data map[string]any) error
-}
+// This is a type alias for interfaces.EventRecorder so callers using
+// module.EventRecorder or interfaces.EventRecorder interchangeably are unaffected.
+type EventRecorder = interfaces.EventRecorder
 
 // Pipeline is an ordered sequence of steps with error handling.
 type Pipeline struct {
@@ -294,4 +296,32 @@ func (p *Pipeline) runCompensation(ctx context.Context, pc *PipelineContext, log
 	}
 
 	return firstErr
+}
+
+// SetLogger sets the logger for pipeline execution if one is not already set.
+// This implements part of interfaces.PipelineRunner and allows the handler
+// to inject a logger without directly accessing the Logger field.
+func (p *Pipeline) SetLogger(logger *slog.Logger) {
+	if p.Logger == nil {
+		p.Logger = logger
+	}
+}
+
+// SetEventRecorder sets the event recorder for pipeline execution if one is
+// not already set. This implements part of interfaces.PipelineRunner.
+func (p *Pipeline) SetEventRecorder(recorder interfaces.EventRecorder) {
+	if p.EventRecorder == nil {
+		p.EventRecorder = recorder
+	}
+}
+
+// Run executes the pipeline and returns the merged result data map.
+// It implements interfaces.PipelineRunner by wrapping Execute and
+// returning PipelineContext.Current so callers need not import PipelineContext.
+func (p *Pipeline) Run(ctx context.Context, data map[string]any) (map[string]any, error) {
+	pc, err := p.Execute(ctx, data)
+	if err != nil {
+		return nil, err
+	}
+	return pc.Current, nil
 }

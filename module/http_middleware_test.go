@@ -460,8 +460,8 @@ func TestRateLimitMiddleware_RetryAfterHeader(t *testing.T) {
 	if rec2.Code != http.StatusTooManyRequests {
 		t.Errorf("expected 429, got %d", rec2.Code)
 	}
-	if rec2.Header().Get("Retry-After") != "60" {
-		t.Errorf("expected Retry-After header '60', got %q", rec2.Header().Get("Retry-After"))
+	if rec2.Header().Get("Retry-After") != "1" {
+		t.Errorf("expected Retry-After header '1', got %q", rec2.Header().Get("Retry-After"))
 	}
 }
 
@@ -527,11 +527,11 @@ func TestRateLimitMiddleware_CleanupStaleClients(t *testing.T) {
 	// Manually add a stale client
 	m.mu.Lock()
 	m.clients["ip:stale-client"] = &client{
-		tokens:        10,
+		tokens:        10.0,
 		lastTimestamp: time.Now().Add(-1 * time.Hour), // 1 hour old
 	}
 	m.clients["ip:fresh-client"] = &client{
-		tokens:        10,
+		tokens:        10.0,
 		lastTimestamp: time.Now(),
 	}
 	m.mu.Unlock()
@@ -560,5 +560,133 @@ func TestRateLimitMiddleware_StartStop_Lifecycle(t *testing.T) {
 
 	if err := m.Stop(context.TODO()); err != nil {
 		t.Fatalf("Stop failed: %v", err)
+	}
+}
+
+// -- Hourly rate middleware tests --
+
+func TestNewRateLimitMiddlewareWithHourlyRate_AllowsBurst(t *testing.T) {
+	// 5 requests/hour, burst 5
+	m := NewRateLimitMiddlewareWithHourlyRate("rl-hour", 5, 5)
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// First 5 requests should succeed (burst exhausted)
+	for i := range 5 {
+		req := httptest.NewRequest("POST", "/api/v1/auth/register", nil)
+		req.RemoteAddr = "10.0.0.1:1234"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("request %d: expected 200, got %d", i+1, rec.Code)
+		}
+	}
+
+	// 6th request should be rate limited
+	req := httptest.NewRequest("POST", "/api/v1/auth/register", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429 after burst exhausted, got %d", rec.Code)
+	}
+}
+
+func TestNewRateLimitMiddlewareWithHourlyRate_PerIP(t *testing.T) {
+	// 5 requests/hour, burst 2
+	m := NewRateLimitMiddlewareWithHourlyRate("rl-hour", 5, 2)
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Exhaust IP A burst
+	for i := range 2 {
+		req := httptest.NewRequest("POST", "/api/v1/auth/register", nil)
+		req.RemoteAddr = "10.0.0.1:1234"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("IP A request %d: expected 200, got %d", i+1, rec.Code)
+		}
+	}
+
+	// IP A should be rate limited
+	reqA := httptest.NewRequest("POST", "/api/v1/auth/register", nil)
+	reqA.RemoteAddr = "10.0.0.1:1234"
+	recA := httptest.NewRecorder()
+	handler.ServeHTTP(recA, reqA)
+	if recA.Code != http.StatusTooManyRequests {
+		t.Errorf("IP A: expected 429, got %d", recA.Code)
+	}
+
+	// IP B should still be allowed (separate bucket)
+	reqB := httptest.NewRequest("POST", "/api/v1/auth/register", nil)
+	reqB.RemoteAddr = "10.0.0.2:5678"
+	recB := httptest.NewRecorder()
+	handler.ServeHTTP(recB, reqB)
+	if recB.Code != http.StatusOK {
+		t.Errorf("IP B: expected 200, got %d", recB.Code)
+	}
+}
+
+func TestNewRateLimitMiddlewareWithHourlyRate_RatePerMinute(t *testing.T) {
+	// 60 requests/hour = 1 request/minute
+	m := NewRateLimitMiddlewareWithHourlyRate("rl-hour", 60, 1)
+	// ratePerMinute should be 1.0
+	if m.ratePerMinute != 1.0 {
+		t.Errorf("expected ratePerMinute=1.0, got %f", m.ratePerMinute)
+	}
+}
+
+func TestNewRateLimitMiddlewareWithHourlyRate_FractionalRefill(t *testing.T) {
+	// 3600 requests/hour -> ratePerMinute = 60.0, timePerToken = 1 second.
+	// Using a high hourly rate keeps the sleep short while still exercising
+	// the fractional refill path.
+	m := NewRateLimitMiddlewareWithHourlyRate("rl-hour-fractional", 3600, 1)
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// First request should be allowed (uses the single burst token).
+	req1 := httptest.NewRequest("GET", "/fractional", nil)
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("first request: expected 200, got %d", rec1.Code)
+	}
+
+	// Second immediate request must be rate-limited (burst exhausted, no refill yet).
+	req2 := httptest.NewRequest("GET", "/fractional", nil)
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Fatalf("second request: expected 429, got %d", rec2.Code)
+	}
+
+	// Wait slightly longer than the time needed to refill one token.
+	if m.ratePerMinute <= 0 {
+		t.Fatalf("ratePerMinute must be positive, got %f", m.ratePerMinute)
+	}
+	timePerToken := time.Duration(float64(time.Minute) / m.ratePerMinute)
+	time.Sleep(timePerToken + 100*time.Millisecond)
+
+	// After waiting, exactly one additional request should be allowed.
+	req3 := httptest.NewRequest("GET", "/fractional", nil)
+	rec3 := httptest.NewRecorder()
+	handler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("third request after refill: expected 200, got %d", rec3.Code)
+	}
+
+	// An immediately following request must still be rate-limited.
+	req4 := httptest.NewRequest("GET", "/fractional", nil)
+	rec4 := httptest.NewRecorder()
+	handler.ServeHTTP(rec4, req4)
+	if rec4.Code != http.StatusTooManyRequests {
+		t.Fatalf("fourth request after refill: expected 429, got %d", rec4.Code)
 	}
 }

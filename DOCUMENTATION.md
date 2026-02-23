@@ -239,7 +239,7 @@ Declares a cloud infrastructure provider (e.g., AWS, Docker Compose, GCP) for us
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `name` | string | yes | Provider identifier (e.g., `aws`, `docker-compose`, `gcp`). |
+| `name` | string | yes | Provider identifier (e.g., `aws`, `docker-compose`, `gcp`). Used to construct the service name `platform.provider.<name>`. |
 | `config` | map[string]string | no | Provider-specific configuration (credentials, region, etc.). |
 | `tiers` | JSON | no | Three-tier infrastructure layout (`infrastructure`, `shared_primitives`, `application`). |
 

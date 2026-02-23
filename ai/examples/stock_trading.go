@@ -42,12 +42,14 @@ Components:
 			Interface:   "modular.Module",
 			GoCode: `package module
 
+// [DEMO STUB] Replace this entire file with a real stock API integration.
+// The CheckPrice method below returns synthetic demo data.
+// In production, call a real API (e.g. Alpha Vantage, Polygon.io) and
+// parse the JSON response to get live prices.
+
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"math"
-	"net/http"
 	"sync"
 
 	"github.com/GoCodeAlone/modular"
@@ -81,13 +83,21 @@ func (s *StockPriceChecker) Init(app modular.Application) error {
 }
 
 func (s *StockPriceChecker) CheckPrice(ctx context.Context) (currentPrice float64, pctChange float64, err error) {
-	// Placeholder: In production, call real stock API
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	// [DEMO STUB] This is example/demonstration code only.
+	// In production, replace this method body with a real stock API call,
+	// e.g. Alpha Vantage: GET /query?function=GLOBAL_QUOTE&symbol=AAPL&apikey=YOUR_KEY
+	// For now, synthetic demo prices are returned so the workflow exercises the full decision path.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	if s.openPrice == 0 {
-		return 0, 0, fmt.Errorf("opening price not set")
+		// Seed with a realistic demo opening price so callers always get usable data.
+		s.openPrice = 182.50 // [DEMO] hardcoded AAPL-like opening price
+		s.lastPrice = 182.50
 	}
+
+	// Simulate a small price tick so repeated calls show movement.
+	s.lastPrice += 0.10 // [DEMO] synthetic +0.10 tick per call
 
 	pctChange = ((s.lastPrice - s.openPrice) / s.openPrice) * 100
 	return s.lastPrice, pctChange, nil
@@ -175,7 +185,8 @@ func (t *TradeExecutor) Execute(ctx context.Context, order TradeOrder) (*TradeRe
 	t.logger.Info(fmt.Sprintf("Executing %s order for %s: qty=%d price=%.2f",
 		order.Action, order.Symbol, order.Quantity, order.Price))
 
-	// Placeholder: In production, call brokerage API
+	// [DEMO STUB] Returns a simulated order confirmation.
+	// In production, replace this with a real brokerage API call (e.g. Alpaca, TD Ameritrade).
 	return &TradeResult{
 		OrderID:   fmt.Sprintf("ORD-%d", time.Now().UnixNano()),
 		Status:    "executed",

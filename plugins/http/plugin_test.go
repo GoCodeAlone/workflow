@@ -327,6 +327,70 @@ func TestWorkflowHandlerFactorySmoke(t *testing.T) {
 	}
 }
 
+func TestRateLimitMiddlewareFactory_RequestsPerHour(t *testing.T) {
+	factories := moduleFactories()
+	factory, ok := factories["http.middleware.ratelimit"]
+	if !ok {
+		t.Fatal("no factory for http.middleware.ratelimit")
+	}
+
+	// requestsPerHour as int
+	mod := factory("auth-register-rl", map[string]any{
+		"requestsPerHour": 5,
+		"burstSize":       5,
+	})
+	if mod == nil {
+		t.Fatal("factory returned nil for requestsPerHour config")
+	}
+	if mod.Name() != "auth-register-rl" {
+		t.Errorf("expected name %q, got %q", "auth-register-rl", mod.Name())
+	}
+
+	// requestsPerHour as float64 (YAML unmarshals numbers as float64)
+	mod2 := factory("auth-register-rl2", map[string]any{
+		"requestsPerHour": float64(5),
+		"burstSize":       float64(5),
+	})
+	if mod2 == nil {
+		t.Fatal("factory returned nil for requestsPerHour float64 config")
+	}
+}
+
+func TestRateLimitMiddlewareFactory_InvalidValues(t *testing.T) {
+	factories := moduleFactories()
+	factory, ok := factories["http.middleware.ratelimit"]
+	if !ok {
+		t.Fatal("no factory for http.middleware.ratelimit")
+	}
+
+	// Zero requestsPerHour must fall through to requestsPerMinute path (not crash).
+	modZeroRPH := factory("rl-zero-rph", map[string]any{
+		"requestsPerHour":    0,
+		"requestsPerMinute":  30,
+		"burstSize":          5,
+	})
+	if modZeroRPH == nil {
+		t.Fatal("factory returned nil for zero requestsPerHour config")
+	}
+
+	// Negative requestsPerMinute must use default (60).
+	modNegRPM := factory("rl-neg-rpm", map[string]any{
+		"requestsPerMinute": -10,
+	})
+	if modNegRPM == nil {
+		t.Fatal("factory returned nil for negative requestsPerMinute config")
+	}
+
+	// Zero burstSize must keep default (10).
+	modZeroBurst := factory("rl-zero-burst", map[string]any{
+		"requestsPerMinute": 60,
+		"burstSize":         0,
+	})
+	if modZeroBurst == nil {
+		t.Fatal("factory returned nil for zero burstSize config")
+	}
+}
+
 func TestPluginLoaderIntegration(t *testing.T) {
 	p := New()
 

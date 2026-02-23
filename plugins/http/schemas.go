@@ -159,10 +159,11 @@ func rateLimitMiddlewareSchema() *schema.ModuleSchema {
 		Inputs:      []schema.ServiceIODef{{Name: "request", Type: "http.Request", Description: "HTTP request to rate-limit"}},
 		Outputs:     []schema.ServiceIODef{{Name: "limited", Type: "http.Request", Description: "HTTP request (passed through if within limit)"}},
 		ConfigFields: []schema.ConfigFieldDef{
-			{Key: "requestsPerMinute", Label: "Requests Per Minute", Type: schema.FieldTypeNumber, DefaultValue: 60, Description: "Maximum number of requests per minute per client"},
-			{Key: "burstSize", Label: "Burst Size", Type: schema.FieldTypeNumber, DefaultValue: 10, Description: "Maximum burst of requests allowed above the rate limit"},
+			{Key: "requestsPerMinute", Label: "Requests Per Minute", Type: schema.FieldTypeNumber, DefaultValue: 60, Description: "Maximum number of requests per minute per client (mutually exclusive with requestsPerHour)"},
+			{Key: "requestsPerHour", Label: "Requests Per Hour", Type: schema.FieldTypeNumber, DefaultValue: 0, Description: "Maximum number of requests per hour per client; takes precedence over requestsPerMinute when set"},
+			{Key: "burstSize", Label: "Burst Size", Type: schema.FieldTypeNumber, DefaultValue: 10, Description: "Maximum number of tokens in the bucket; determines how many requests can burst when the bucket is full"},
 		},
-		DefaultConfig: map[string]any{"requestsPerMinute": 60, "burstSize": 10},
+		DefaultConfig: map[string]any{"requestsPerMinute": 60, "requestsPerHour": 0, "burstSize": 10},
 	}
 }
 
