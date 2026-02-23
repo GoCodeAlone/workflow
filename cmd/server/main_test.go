@@ -191,7 +191,7 @@ func TestBuildEngine_WithConfig(t *testing.T) {
 		Triggers:  map[string]any{},
 	}
 
-	engine, loader, registry, _, err := buildEngine(cfg, logger)
+	engine, loader, registry, err := buildEngine(cfg, logger)
 	if err != nil {
 		t.Fatalf("buildEngine failed: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestBuildEngine_EmptyConfig(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	cfg := config.NewEmptyWorkflowConfig()
 
-	engine, loader, registry, _, err := buildEngine(cfg, logger)
+	engine, loader, registry, err := buildEngine(cfg, logger)
 	if err != nil {
 		t.Fatalf("buildEngine with empty config failed: %v", err)
 	}
@@ -545,7 +545,7 @@ func TestBuildEngine_InvalidModuleType(t *testing.T) {
 		Triggers:  map[string]any{},
 	}
 
-	_, _, _, _, err := buildEngine(cfg, logger)
+	_, _, _, err := buildEngine(cfg, logger)
 	if err == nil {
 		t.Fatal("expected error for invalid module type")
 	}
@@ -823,7 +823,7 @@ func TestFeatureFlagAutoWiring_WiredWhenServicePresent(t *testing.T) {
 	t.Cleanup(func() { store.Close() })
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	engine, _, _, _, err := buildEngine(config.NewEmptyWorkflowConfig(), logger)
+	engine, _, _, err := buildEngine(config.NewEmptyWorkflowConfig(), logger)
 	if err != nil {
 		t.Fatalf("buildEngine: %v", err)
 	}
@@ -871,7 +871,7 @@ func TestFeatureFlagAutoWiring_NotWiredWhenServiceAbsent(t *testing.T) {
 	t.Cleanup(func() { store.Close() })
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	engine, _, _, _, err := buildEngine(config.NewEmptyWorkflowConfig(), logger)
+	engine, _, _, err := buildEngine(config.NewEmptyWorkflowConfig(), logger)
 	if err != nil {
 		t.Fatalf("buildEngine: %v", err)
 	}

@@ -21,13 +21,19 @@ func setupPipelineEngine(t *testing.T) (*StdEngine, *handlers.PipelineWorkflowHa
 	// Load pipelinesteps plugin — it registers step factories and the
 	// PipelineWorkflowHandler. We use it directly (no loadAllPlugins) to avoid
 	// registering a second handler that would shadow the plugin's handler.
-	pp := pluginpipeline.New()
-	if err := engine.LoadPlugin(pp); err != nil {
+	if err := engine.LoadPlugin(pluginpipeline.New()); err != nil {
 		t.Fatalf("LoadPlugin(pipelinesteps) failed: %v", err)
 	}
 
-	// Retrieve the pipeline handler created by the plugin so tests can inspect it.
-	pipelineHandler := pp.PipelineHandler()
+	// Retrieve the pipeline handler registered by the plugin via type assertion
+	// on the engine's workflow handler list.
+	var pipelineHandler *handlers.PipelineWorkflowHandler
+	for _, h := range engine.workflowHandlers {
+		if ph, ok := h.(*handlers.PipelineWorkflowHandler); ok {
+			pipelineHandler = ph
+			break
+		}
+	}
 	if pipelineHandler == nil {
 		t.Fatal("pipelinesteps plugin did not create a PipelineWorkflowHandler")
 	}

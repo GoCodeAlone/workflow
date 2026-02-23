@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -238,6 +239,24 @@ func (e *StdEngine) LoadPlugin(p plugin.EnginePlugin) error {
 		result := factory()
 		if handler, ok := result.(WorkflowHandler); ok {
 			e.RegisterWorkflowHandler(handler)
+		}
+	}
+	// Inject step registry and logger into the plugin via optional setter
+	// interfaces, following the same pattern as SetDynamicRegistry.
+	type stepRegistrySetter interface {
+		SetStepRegistry(interfaces.StepRegistryProvider)
+	}
+	if setter, ok := p.(stepRegistrySetter); ok {
+		setter.SetStepRegistry(e.stepRegistry)
+	}
+	// Inject *slog.Logger if the engine's logger is backed by one.
+	// Plugins declare SetLogger(*slog.Logger) to receive a structured logger.
+	type slogLoggerSetter interface {
+		SetLogger(logger *slog.Logger)
+	}
+	if setter, ok := p.(slogLoggerSetter); ok {
+		if sl, ok := e.logger.(*slog.Logger); ok {
+			setter.SetLogger(sl)
 		}
 	}
 	e.enginePlugins = append(e.enginePlugins, p)
