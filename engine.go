@@ -10,6 +10,7 @@ import (
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/dynamic"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/schema"
@@ -32,7 +33,7 @@ type WorkflowHandler interface {
 // PipelineAdder is implemented by workflow handlers that can receive named pipelines.
 // This allows the engine to add pipelines without importing the handlers package.
 type PipelineAdder interface {
-	AddPipeline(name string, p *module.Pipeline)
+	AddPipeline(name string, p interfaces.PipelineRunner)
 }
 
 // ModuleFactory is a function that creates a module from a name and configuration

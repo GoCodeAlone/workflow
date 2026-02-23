@@ -639,9 +639,13 @@ triggers: {}
 
 	// Construct a minimal serverApp with the required fields
 	app := &serverApp{
-		logger:         logger,
-		v1Store:        store,
-		runtimeManager: rm,
+		logger: logger,
+		stores: storeComponents{
+			v1Store: store,
+		},
+		services: serviceComponents{
+			runtimeManager: rm,
+		},
 	}
 
 	// Run the import
@@ -757,9 +761,13 @@ func TestImportBundles_MultipleBundles(t *testing.T) {
 	rm := module.NewRuntimeManager(store, mockBuilder, logger)
 
 	app := &serverApp{
-		logger:         logger,
-		v1Store:        store,
-		runtimeManager: rm,
+		logger: logger,
+		stores: storeComponents{
+			v1Store: store,
+		},
+		services: serviceComponents{
+			runtimeManager: rm,
+		},
 	}
 
 	if err := app.importBundles(logger); err != nil {
@@ -778,6 +786,114 @@ func TestImportBundles_MultipleBundles(t *testing.T) {
 	instances := rm.ListInstances()
 	if len(instances) != 2 {
 		t.Errorf("expected 2 runtime instances, got %d", len(instances))
+	}
+}
+
+// mockFeatureFlagAdmin implements module.FeatureFlagAdmin for testing.
+type mockFeatureFlagAdmin struct{}
+
+func (m *mockFeatureFlagAdmin) ListFlags() ([]any, error)                            { return nil, nil }
+func (m *mockFeatureFlagAdmin) GetFlag(key string) (any, error)                      { return nil, nil }
+func (m *mockFeatureFlagAdmin) CreateFlag(data json.RawMessage) (any, error)         { return nil, nil }
+func (m *mockFeatureFlagAdmin) UpdateFlag(key string, data json.RawMessage) (any, error) {
+	return nil, nil
+}
+func (m *mockFeatureFlagAdmin) DeleteFlag(key string) error                          { return nil }
+func (m *mockFeatureFlagAdmin) SetOverrides(key string, data json.RawMessage) (any, error) {
+	return nil, nil
+}
+func (m *mockFeatureFlagAdmin) EvaluateFlag(key string, user string, group string) (any, error) {
+	return nil, nil
+}
+func (m *mockFeatureFlagAdmin) SSEHandler() http.Handler { return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}) }
+
+// TestFeatureFlagAutoWiring verifies that registerPostStartServices wires a
+// FeatureFlagAdmin from the service registry into the V1 API handler.
+// When the service is present, the feature-flags route returns 401 (auth required)
+// instead of 503 (service unavailable). When absent, it returns 503.
+func TestFeatureFlagAutoWiring_WiredWhenServicePresent(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	store, err := module.OpenV1Store(dbPath)
+	if err != nil {
+		t.Fatalf("OpenV1Store: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	engine, _, _, _, err := buildEngine(config.NewEmptyWorkflowConfig(), logger)
+	if err != nil {
+		t.Fatalf("buildEngine: %v", err)
+	}
+
+	v1Handler := module.NewV1APIHandler(store, "test-secret-key-at-least-32-chars!!")
+
+	// Register the mock FeatureFlagAdmin under the well-known service name.
+	const ffAdminSvc = "admin-feature-flags.admin"
+	if regErr := engine.GetApp().RegisterService(ffAdminSvc, module.FeatureFlagAdmin(&mockFeatureFlagAdmin{})); regErr != nil {
+		t.Fatalf("RegisterService: %v", regErr)
+	}
+
+	app := &serverApp{
+		engine: engine,
+		logger: logger,
+		services: serviceComponents{
+			v1Handler: v1Handler,
+		},
+	}
+	if err := app.registerPostStartServices(logger); err != nil {
+		t.Fatalf("registerPostStartServices: %v", err)
+	}
+
+	// With FeatureFlagAdmin wired, the route should require auth (401), not return 503.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feature-flags", nil)
+	w := httptest.NewRecorder()
+	v1Handler.HandleV1(w, req)
+	if w.Code == http.StatusServiceUnavailable {
+		t.Errorf("expected feature flags to be wired (not 503), got %d", w.Code)
+	}
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 (auth required), got %d", w.Code)
+	}
+}
+
+// TestFeatureFlagAutoWiring_NotWiredWhenServiceAbsent verifies that when no
+// FeatureFlagAdmin is registered, the feature-flags route returns 503.
+func TestFeatureFlagAutoWiring_NotWiredWhenServiceAbsent(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	store, err := module.OpenV1Store(dbPath)
+	if err != nil {
+		t.Fatalf("OpenV1Store: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	engine, _, _, _, err := buildEngine(config.NewEmptyWorkflowConfig(), logger)
+	if err != nil {
+		t.Fatalf("buildEngine: %v", err)
+	}
+
+	v1Handler := module.NewV1APIHandler(store, "test-secret-key-at-least-32-chars!!")
+
+	// Do NOT register the FeatureFlagAdmin service.
+	app := &serverApp{
+		engine: engine,
+		logger: logger,
+		services: serviceComponents{
+			v1Handler: v1Handler,
+		},
+	}
+	if err := app.registerPostStartServices(logger); err != nil {
+		t.Fatalf("registerPostStartServices: %v", err)
+	}
+
+	// Without FeatureFlagAdmin, the route should return 503.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feature-flags", nil)
+	w := httptest.NewRecorder()
+	v1Handler.HandleV1(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 (service unavailable), got %d", w.Code)
 	}
 }
 

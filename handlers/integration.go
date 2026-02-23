@@ -339,6 +339,62 @@ func executeStepWithRetry(ctx context.Context, connector module.IntegrationConne
 	return result, err
 }
 
+// ensureConnectorConnected connects the connector if not already connected and verifies the connection.
+func ensureConnectorConnected(ctx context.Context, connector module.IntegrationConnector, stepName string) error {
+	if connector.IsConnected() {
+		return nil
+	}
+	if err := connector.Connect(ctx); err != nil {
+		return fmt.Errorf("error executing step '%s': connector not connected: %w", stepName, err)
+	}
+	if !connector.IsConnected() {
+		return fmt.Errorf("error executing step '%s': connector not connected after connection attempt", stepName)
+	}
+	return nil
+}
+
+// resolveParamValue resolves a single input value, substituting step result references where applicable.
+// References use the ${varName} syntax. Dot-notation is supported: ${step1.value} looks up results["step1"]
+// and then retrieves the "value" key from the resulting map. If the variable is not found, the original value is returned.
+func resolveParamValue(v any, results map[string]any) any {
+	strVal, ok := v.(string)
+	if !ok || len(strVal) <= 3 || strVal[0:2] != "${" || strVal[len(strVal)-1] != '}' {
+		return v
+	}
+	// Extract the variable name, e.g., ${step1.value} -> step1.value
+	varName := strVal[2 : len(strVal)-1]
+	// Fast path: exact match in results
+	if result, found := results[varName]; found {
+		return result
+	}
+	// Dot-notation path: split on "." and traverse nested maps
+	parts := strings.SplitN(varName, ".", 2)
+	if len(parts) != 2 {
+		return v
+	}
+	stepResult, found := results[parts[0]]
+	if !found {
+		return v
+	}
+	nested, ok := stepResult.(map[string]any)
+	if !ok {
+		return v
+	}
+	if val, found := nested[parts[1]]; found {
+		return val
+	}
+	return v
+}
+
+// resolveStepParams builds the params map for a step, substituting ${varName} references from results.
+func resolveStepParams(input map[string]any, results map[string]any) map[string]any {
+	params := make(map[string]any, len(input))
+	for k, v := range input {
+		params[k] = resolveParamValue(v, results)
+	}
+	return params
+}
+
 // ExecuteIntegrationWorkflow executes a sequence of integration steps
 func (h *IntegrationWorkflowHandler) ExecuteIntegrationWorkflow(
 	ctx context.Context,
@@ -347,10 +403,8 @@ func (h *IntegrationWorkflowHandler) ExecuteIntegrationWorkflow(
 	initialContext map[string]any,
 ) (map[string]any, error) {
 	results := make(map[string]any)
-	// Add initial context values to results
 	maps.Copy(results, initialContext)
 
-	// Execute steps sequentially
 	for i := range steps {
 		step := &steps[i]
 		stepStartTime := time.Now()
@@ -358,7 +412,6 @@ func (h *IntegrationWorkflowHandler) ExecuteIntegrationWorkflow(
 			h.eventEmitter.EmitStepStarted(ctx, "integration", step.Name, step.Connector, step.Action)
 		}
 
-		// Get the connector for this step
 		connector, err := registry.GetConnector(step.Connector)
 		if err != nil {
 			return results, fmt.Errorf("error getting connector '%s': %w", step.Connector, err)
@@ -367,68 +420,33 @@ func (h *IntegrationWorkflowHandler) ExecuteIntegrationWorkflow(
 			return results, fmt.Errorf("connector '%s' not found", step.Connector)
 		}
 
-		// Ensure the connector is connected
-		if !connector.IsConnected() {
-			if err = connector.Connect(ctx); err != nil {
-				return results, fmt.Errorf("error executing step '%s': connector not connected: %w", step.Name, err)
-			}
-
-			// Double check it's now connected
-			if !connector.IsConnected() {
-				return results, fmt.Errorf("error executing step '%s': connector not connected after connection attempt", step.Name)
-			}
+		if err := ensureConnectorConnected(ctx, connector, step.Name); err != nil {
+			return results, err
 		}
 
-		// Process input parameters - could handle variable substitution here
-		params := make(map[string]any)
-		for k, v := range step.Input {
-			// Simple variable substitution from previous steps
-			if strVal, ok := v.(string); ok && len(strVal) > 3 && strVal[0:2] == "${" && strVal[len(strVal)-1] == '}' {
-				// Extract the variable name, e.g., ${step1.value} -> step1.value
-				varName := strVal[2 : len(strVal)-1]
-
-				// Check if it's a reference to a previous step result
-				if result, ok := results[varName]; ok {
-					params[k] = result
-				} else {
-					// If not found, keep the original value
-					params[k] = v
-				}
-			} else {
-				// Use the value as is
-				params[k] = v
-			}
-		}
+		params := resolveStepParams(step.Input, results)
 
 		stepResult, err := executeStepWithRetry(ctx, connector, step, params)
 		if err != nil {
 			if step.OnError != "" {
-				// Could invoke error handler here
-				// For now, just continue and store the error in results
+				// Store the error in results and continue to the next step
 				results[step.Name+"_error"] = err.Error()
 				continue
 			}
-			// No error handler, return the error
 			if h.eventEmitter != nil {
 				h.eventEmitter.EmitStepFailed(ctx, "integration", step.Name, step.Connector, step.Action, time.Since(stepStartTime), err)
 			}
 			return results, fmt.Errorf("error executing step '%s': %w", step.Name, err)
 		}
 
-		// Store the result
 		results[step.Name] = stepResult
 
 		if h.eventEmitter != nil {
 			h.eventEmitter.EmitStepCompleted(ctx, "integration", step.Name, step.Connector, step.Action, time.Since(stepStartTime), stepResult)
 		}
 
-		// Handle success path if specified
-		if step.OnSuccess != "" {
-			// Could invoke success handler here
-			// For now, we just continue with the next step
-			// Note: Logging would require access to logger (stepIndex: %d, onSuccess: %s)
-			_ = step.OnSuccess // Mark as used to satisfy linter
-		}
+		// Handle success path if specified (reserved for future use)
+		_ = step.OnSuccess
 	}
 
 	return results, nil
