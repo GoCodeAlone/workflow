@@ -7,7 +7,8 @@
 # NPM_TOKEN is required for @gocodealone scoped packages from GitHub Packages.
 
 # --- Stage 1: Build the React admin UI ---
-FROM node:22-alpine AS ui-builder
+# Use BUILDPLATFORM so npm ci runs natively (UI assets are platform-independent).
+FROM --platform=$BUILDPLATFORM node:22-alpine AS ui-builder
 
 ARG NPM_TOKEN
 WORKDIR /build/ui
@@ -26,7 +27,10 @@ COPY ui/ .
 RUN npx vite build
 
 # --- Stage 2: Build the Go binary ---
-FROM golang:1.26-alpine AS go-builder
+# Use BUILDPLATFORM so go mod download runs natively; cross-compile via TARGETOS/TARGETARCH.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS go-builder
+
+ARG TARGETOS TARGETARCH
 
 RUN apk add --no-cache git ca-certificates
 
@@ -42,8 +46,8 @@ COPY . .
 # Copy built UI assets into the embed directory
 COPY --from=ui-builder /build/ui/dist/ module/ui_dist/
 
-# Build the server binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o server ./cmd/server
+# Cross-compile for the target platform (no QEMU needed)
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o server ./cmd/server
 
 # --- Stage 3: Runtime ---
 FROM alpine:3.21
