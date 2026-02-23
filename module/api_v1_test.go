@@ -724,16 +724,28 @@ func TestV1Handler_Projects(t *testing.T) {
 func TestV1Store_ExecutionLifecycle(t *testing.T) {
 	store := setupTestStore(t)
 
-	company, _ := store.CreateCompany("Co", "", "u1")
-	org, _ := store.CreateOrganization(company.ID, "Org", "", "u1")
-	proj, _ := store.CreateProject(org.ID, "Proj", "", "")
-	wf, _ := store.CreateWorkflow(proj.ID, "WF", "", "", "modules: []", "u1")
+	company, err := store.CreateCompany("Co", "", "u1")
+	if err != nil {
+		t.Fatalf("CreateCompany: %v", err)
+	}
+	org, err := store.CreateOrganization(company.ID, "Org", "", "u1")
+	if err != nil {
+		t.Fatalf("CreateOrganization: %v", err)
+	}
+	proj, err := store.CreateProject(org.ID, "Proj", "", "")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	wf, err := store.CreateWorkflow(proj.ID, "WF", "", "", "modules: []", "u1")
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
 
 	now := time.Now().UTC()
 	execID := "exec-001"
 
 	// Insert execution
-	err := store.InsertExecution(execID, wf.ID, "manual", "pending", "u1", now)
+	err = store.InsertExecution(execID, wf.ID, "manual", "pending", "u1", now)
 	if err != nil {
 		t.Fatalf("InsertExecution: %v", err)
 	}
@@ -776,17 +788,31 @@ func TestV1Store_ExecutionLifecycle(t *testing.T) {
 func TestV1Store_ExecutionStepLifecycle(t *testing.T) {
 	store := setupTestStore(t)
 
-	company, _ := store.CreateCompany("Co", "", "u1")
-	org, _ := store.CreateOrganization(company.ID, "Org", "", "u1")
-	proj, _ := store.CreateProject(org.ID, "Proj", "", "")
-	wf, _ := store.CreateWorkflow(proj.ID, "WF", "", "", "modules: []", "u1")
+	company, err := store.CreateCompany("Co", "", "u1")
+	if err != nil {
+		t.Fatalf("CreateCompany: %v", err)
+	}
+	org, err := store.CreateOrganization(company.ID, "Org", "", "u1")
+	if err != nil {
+		t.Fatalf("CreateOrganization: %v", err)
+	}
+	proj, err := store.CreateProject(org.ID, "Proj", "", "")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	wf, err := store.CreateWorkflow(proj.ID, "WF", "", "", "modules: []", "u1")
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
 
 	now := time.Now().UTC()
 	execID := "exec-step-001"
-	_ = store.InsertExecution(execID, wf.ID, "manual", "running", "u1", now)
+	if err = store.InsertExecution(execID, wf.ID, "manual", "running", "u1", now); err != nil {
+		t.Fatalf("InsertExecution: %v", err)
+	}
 
 	stepID := "step-001"
-	err := store.InsertExecutionStep(stepID, execID, "parse-request", "step.request_parse", "running", 0, now)
+	err = store.InsertExecutionStep(stepID, execID, "parse-request", "step.request_parse", "running", 0, now)
 	if err != nil {
 		t.Fatalf("InsertExecutionStep: %v", err)
 	}
@@ -832,8 +858,13 @@ func TestV1Store_ExecutionStepLifecycle(t *testing.T) {
 	var ids []string
 	for rows.Next() {
 		var id string
-		rows.Scan(&id)
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan step id: %v", err)
+		}
 		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate steps: %v", err)
 	}
 	if len(ids) != 2 || ids[0] != stepID || ids[1] != step2ID {
 		t.Errorf("got step order %v, want [%s, %s]", ids, stepID, step2ID)
@@ -843,15 +874,27 @@ func TestV1Store_ExecutionStepLifecycle(t *testing.T) {
 func TestV1Store_ExecutionLogs(t *testing.T) {
 	store := setupTestStore(t)
 
-	company, _ := store.CreateCompany("Co", "", "u1")
-	org, _ := store.CreateOrganization(company.ID, "Org", "", "u1")
-	proj, _ := store.CreateProject(org.ID, "Proj", "", "")
-	wf, _ := store.CreateWorkflow(proj.ID, "WF", "", "", "modules: []", "u1")
+	company, err := store.CreateCompany("Co", "", "u1")
+	if err != nil {
+		t.Fatalf("CreateCompany: %v", err)
+	}
+	org, err := store.CreateOrganization(company.ID, "Org", "", "u1")
+	if err != nil {
+		t.Fatalf("CreateOrganization: %v", err)
+	}
+	proj, err := store.CreateProject(org.ID, "Proj", "", "")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	wf, err := store.CreateWorkflow(proj.ID, "WF", "", "", "modules: []", "u1")
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
 
 	now := time.Now().UTC()
 
 	// Insert logs at various levels
-	err := store.InsertLog(wf.ID, "exec-1", "info", "Workflow started", "engine", "{}", now)
+	err = store.InsertLog(wf.ID, "exec-1", "info", "Workflow started", "engine", "{}", now)
 	if err != nil {
 		t.Fatalf("InsertLog(info): %v", err)
 	}
@@ -958,17 +1001,31 @@ func TestV1Store_PhaseCTablesExist(t *testing.T) {
 func TestV1Store_ExecutionFailure(t *testing.T) {
 	store := setupTestStore(t)
 
-	company, _ := store.CreateCompany("Co", "", "u1")
-	org, _ := store.CreateOrganization(company.ID, "Org", "", "u1")
-	proj, _ := store.CreateProject(org.ID, "Proj", "", "")
-	wf, _ := store.CreateWorkflow(proj.ID, "WF", "", "", "modules: []", "u1")
+	company, err := store.CreateCompany("Co", "", "u1")
+	if err != nil {
+		t.Fatalf("CreateCompany: %v", err)
+	}
+	org, err := store.CreateOrganization(company.ID, "Org", "", "u1")
+	if err != nil {
+		t.Fatalf("CreateOrganization: %v", err)
+	}
+	proj, err := store.CreateProject(org.ID, "Proj", "", "")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	wf, err := store.CreateWorkflow(proj.ID, "WF", "", "", "modules: []", "u1")
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
 
 	now := time.Now().UTC()
 	execID := "exec-fail-001"
-	_ = store.InsertExecution(execID, wf.ID, "manual", "running", "u1", now)
+	if err = store.InsertExecution(execID, wf.ID, "manual", "running", "u1", now); err != nil {
+		t.Fatalf("InsertExecution: %v", err)
+	}
 
 	// Fail the execution with an error message
-	err := store.CompleteExecution(execID, "failed", now.Add(3*time.Second), 3000, "timeout exceeded")
+	err = store.CompleteExecution(execID, "failed", now.Add(3*time.Second), 3000, "timeout exceeded")
 	if err != nil {
 		t.Fatalf("CompleteExecution(failed): %v", err)
 	}
@@ -985,7 +1042,10 @@ func TestV1Store_ExecutionFailure(t *testing.T) {
 		t.Errorf("got error_message %q, want %q", errMsg, "timeout exceeded")
 	}
 
-	counts, _ := store.CountExecutionsByWorkflow(wf.ID)
+	counts, err := store.CountExecutionsByWorkflow(wf.ID)
+	if err != nil {
+		t.Fatalf("CountExecutionsByWorkflow: %v", err)
+	}
 	if counts["failed"] != 1 {
 		t.Errorf("got failed count %d, want 1", counts["failed"])
 	}
