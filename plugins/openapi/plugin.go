@@ -58,6 +58,11 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 		"openapi": func(name string, cfg map[string]any) modular.Module {
 			oacfg := module.OpenAPIConfig{}
 
+			// NOTE: spec_file existence is not validated here at configuration time.
+			// Path resolution is performed by ResolvePathInConfig (relative to the
+			// config file directory via the _config_dir key), but file existence and
+			// readability are checked lazily during Init(). Errors will surface at
+			// engine startup, after all modules have been constructed.
 			if v, ok := cfg["spec_file"].(string); ok {
 				oacfg.SpecFile = config.ResolvePathInConfig(cfg, v)
 			}
