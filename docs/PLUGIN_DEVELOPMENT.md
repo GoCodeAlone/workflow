@@ -152,7 +152,7 @@ The returned value must implement `module.PipelineStep`:
 ```go
 type PipelineStep interface {
     Name() string
-    Execute(ctx context.Context, pc *PipelineContext) error
+    Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error)
 }
 ```
 
@@ -349,6 +349,7 @@ This enables workflows to fail fast with actionable errors rather than cryptic r
 package myplugin
 
 import (
+    "log/slog"
     "testing"
 
     "github.com/CrisisTextLine/modular"
@@ -368,7 +369,9 @@ func TestPluginLoads(t *testing.T) {
 func TestModuleCreation(t *testing.T) {
     app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), nil)
     engine := workflow.NewStdEngine(app, slog.Default())
-    engine.LoadPlugin(New())
+    if err := engine.LoadPlugin(New()); err != nil {
+        t.Fatalf("LoadPlugin failed: %v", err)
+    }
 
     cfg := &config.WorkflowConfig{
         Modules: []config.ModuleConfig{
