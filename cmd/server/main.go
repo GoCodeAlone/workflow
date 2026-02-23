@@ -1561,7 +1561,7 @@ func runMultiWorkflow(logger *slog.Logger) error {
 	}))
 
 	srv := &http.Server{
-		Addr:              *addr,
+		Addr:              *multiWorkflowAddr,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -1581,7 +1581,7 @@ func runMultiWorkflow(logger *slog.Logger) error {
 	// Start API server; propagate failures back so we can initiate shutdown.
 	srvErrCh := make(chan error, 1)
 	go func() {
-		logger.Info("Multi-workflow API listening", "addr", *addr)
+		logger.Info("Multi-workflow API listening", "addr", *multiWorkflowAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("API server error", "error", err)
 			srvErrCh <- err
@@ -1589,8 +1589,8 @@ func runMultiWorkflow(logger *slog.Logger) error {
 	}()
 
 	// Build display address: if the host part is empty or 0.0.0.0/::/[::], use "localhost".
-	displayAddr := *addr
-	if host, port, splitErr := net.SplitHostPort(*addr); splitErr == nil &&
+	displayAddr := *multiWorkflowAddr
+	if host, port, splitErr := net.SplitHostPort(*multiWorkflowAddr); splitErr == nil &&
 		(host == "" || host == "0.0.0.0" || host == "::" || host == "[::]") {
 		displayAddr = ":" + port
 	}
