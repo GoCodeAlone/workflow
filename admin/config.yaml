@@ -126,6 +126,16 @@ modules:
   - name: admin-metrics
     type: metrics.collector
 
+  # --- Feature Flags ---
+  # Provides the feature-flag admin service; auto-discovered by the V1 API handler.
+  - name: admin-feature-flags
+    type: featureflag.service
+    config:
+      provider: "generic"
+      cache_ttl: "30s"
+      sse_enabled: true
+      db_path: "data/featureflags.db"
+
 workflows:
   http-admin:
     router: admin-router
