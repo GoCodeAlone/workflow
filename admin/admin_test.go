@@ -185,8 +185,8 @@ func TestMergeInto_WithRealAdminConfig(t *testing.T) {
 
 	if len(primary.Modules) <= initialModuleCount {
 		t.Error("expected admin modules to be appended")
-  }
-)
+	}
+}
 
 func TestLoadConfig_Parses(t *testing.T) {
 	cfg, err := LoadConfig()
