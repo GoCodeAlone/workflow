@@ -218,7 +218,7 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 				if v, ok := glCfg["burstSize"].(float64); ok {
 					rl.BurstSize = int(v)
 				}
-				gw.SetGlobalRateLimit(rl)
+				gw.SetRateLimit(rl)
 			}
 			// CORS
 			if corsCfg, ok := cfg["cors"].(map[string]any); ok {
