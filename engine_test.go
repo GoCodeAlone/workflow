@@ -281,10 +281,15 @@ func (a *mockApplication) GetService(name string, out any) error {
 
 	// If out is provided, try to assign the service to it using reflection
 	if out != nil {
+		// Guard: nil service value would make reflect.ValueOf(svc).Type() panic.
+		if svc == nil {
+			return fmt.Errorf("service %s has a nil value", name)
+		}
+
 		// Get reflect values
 		outVal := reflect.ValueOf(out)
-		if outVal.Kind() != reflect.Pointer {
-			return fmt.Errorf("out parameter must be a pointer")
+		if outVal.Kind() != reflect.Pointer || outVal.IsNil() {
+			return fmt.Errorf("out parameter must be a non-nil pointer")
 		}
 
 		// Dereference the pointer
@@ -1544,14 +1549,6 @@ func TestEngine_BuildFromConfig_RequiresPlugins_EmptyPluginsList(t *testing.T) {
 // TestEngine_BuildFromConfig_RequiresPlugins_ExactVersionMatch verifies
 // exact version matching (=1.2.3 constraint).
 func TestEngine_BuildFromConfig_RequiresPlugins_ExactVersionMatch(t *testing.T) {
-	app := newMockApplication()
-	engine := NewStdEngine(app, app.Logger())
-
-	p := newMinimalPlugin("exact-plugin", "1.2.3")
-	if err := engine.LoadPlugin(p); err != nil {
-		t.Fatalf("LoadPlugin failed: %v", err)
-	}
-
 	tests := []struct {
 		constraint string
 		wantOK     bool
@@ -1577,10 +1574,8 @@ func TestEngine_BuildFromConfig_RequiresPlugins_ExactVersionMatch(t *testing.T) 
 				},
 			}
 
-			// Use a fresh engine for each sub-test to avoid state contamination.
-			// We re-use the same app since plugins are already registered in the
-			// PluginLoader (which we recreate by calling LoadPlugin again on a
-			// fresh engine but referencing the same plugin instance).
+			// Use a fresh app and engine (with a freshly loaded plugin) for each
+			// sub-test to avoid state contamination.
 			subApp := newMockApplication()
 			subEngine := NewStdEngine(subApp, subApp.Logger())
 			subP := newMinimalPlugin("exact-plugin", "1.2.3")
