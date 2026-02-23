@@ -370,7 +370,7 @@ func TestParseStepConfigs_MissingAction(t *testing.T) {
 
 	registry := module.NewIntegrationRegistry("test")
 	conn := module.NewHTTPIntegrationConnector("my-conn", server.URL)
-	conn.SetAllowPrivateIPs(true)
+	conn.AllowPrivateIPs()
 	registry.RegisterConnector(conn)
 
 	err := parseStepConfigs([]any{map[string]any{"name": "s", "connector": "my-conn"}}, registry)
@@ -385,7 +385,7 @@ func TestParseStepConfigs_Valid(t *testing.T) {
 
 	registry := module.NewIntegrationRegistry("test")
 	conn := module.NewHTTPIntegrationConnector("my-conn", server.URL)
-	conn.SetAllowPrivateIPs(true)
+	conn.AllowPrivateIPs()
 	registry.RegisterConnector(conn)
 
 	err := parseStepConfigs([]any{map[string]any{"name": "s", "connector": "my-conn", "action": "GET /"}}, registry)
@@ -402,7 +402,7 @@ func TestExecuteStepWithRetry_SuccessOnFirstAttempt(t *testing.T) {
 	defer server.Close()
 
 	conn := module.NewHTTPIntegrationConnector("c", server.URL)
-	conn.SetAllowPrivateIPs(true)
+	conn.AllowPrivateIPs()
 	if err := conn.Connect(context.Background()); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestExecuteStepWithRetry_RetryOnError(t *testing.T) {
 	defer server.Close()
 
 	conn := module.NewHTTPIntegrationConnector("c", server.URL)
-	conn.SetAllowPrivateIPs(true)
+	conn.AllowPrivateIPs()
 	if err := conn.Connect(context.Background()); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestExecuteStepWithRetry_ContextCancelled(t *testing.T) {
 	defer server.Close()
 
 	conn := module.NewHTTPIntegrationConnector("c", server.URL)
-	conn.SetAllowPrivateIPs(true)
+	conn.AllowPrivateIPs()
 	if err := conn.Connect(context.Background()); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
@@ -478,7 +478,7 @@ func TestExecuteStepWithRetry_ExhaustedRetries(t *testing.T) {
 	defer server.Close()
 
 	conn := module.NewHTTPIntegrationConnector("c", server.URL)
-	conn.SetAllowPrivateIPs(true)
+	conn.AllowPrivateIPs()
 	if err := conn.Connect(context.Background()); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
