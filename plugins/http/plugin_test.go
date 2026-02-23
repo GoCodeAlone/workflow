@@ -420,7 +420,7 @@ func TestPluginLoaderIntegration(t *testing.T) {
 	}
 
 	hooks := loader.WiringHooks()
-	if len(hooks) < 2 {
-		t.Errorf("loader has %d wiring hooks, want >= 2", len(hooks))
+	if len(hooks) != 2 {
+		t.Errorf("loader has %d wiring hooks, want 2", len(hooks))
 	}
 }
