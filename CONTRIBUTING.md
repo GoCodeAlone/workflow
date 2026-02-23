@@ -46,7 +46,7 @@ schema/          JSON Schema generation and validation
 middleware/      HTTP middleware (validation, rate limiting)
 audit/           Structured audit logging
 ui/              React + ReactFlow visual builder
-example/         27 YAML configs and application examples
+example/         YAML configs and application examples
 mock/            Test helpers
 docs/            API docs, tutorials, ADRs
 ```
