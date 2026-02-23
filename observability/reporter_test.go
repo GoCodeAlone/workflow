@@ -138,24 +138,26 @@ func TestReporter_BufferAndFlush(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	reporter.Start(ctx)
 
-	// Wait for flush
-	time.Sleep(200 * time.Millisecond)
-	cancel()
-	time.Sleep(100 * time.Millisecond)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		execFlushed := receivedPaths["/api/v1/admin/ingest/executions"] > 0
+		logsFlushed := receivedPaths["/api/v1/admin/ingest/logs"] > 0
+		eventsFlushed := receivedPaths["/api/v1/admin/ingest/events"] > 0
+		mu.Unlock()
 
-	mu.Lock()
-	defer mu.Unlock()
+		if execFlushed && logsFlushed && eventsFlushed {
+			break
+		}
 
-	if receivedPaths["/api/v1/admin/ingest/executions"] == 0 {
-		t.Error("expected executions to be flushed")
-	}
-	if receivedPaths["/api/v1/admin/ingest/logs"] == 0 {
-		t.Error("expected logs to be flushed")
-	}
-	if receivedPaths["/api/v1/admin/ingest/events"] == 0 {
-		t.Error("expected events to be flushed")
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for reports to be flushed, got: %#v", receivedPaths)
+		}
+
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -166,9 +168,11 @@ func TestReporter_StopFlushesRemaining(t *testing.T) {
 	received := false
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		received = true
-		mu.Unlock()
+		if r.URL.Path == "/api/v1/admin/ingest/executions" {
+			mu.Lock()
+			received = true
+			mu.Unlock()
+		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
