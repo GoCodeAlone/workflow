@@ -14,6 +14,10 @@
 # When no server_url is configured, the module operates in offline/starter mode
 # and synthesizes a valid starter-tier license locally.
 
+requires:
+  plugins:
+    - name: license
+
 modules:
   - name: license
     type: license.validator
