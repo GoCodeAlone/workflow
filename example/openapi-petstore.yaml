@@ -22,7 +22,7 @@ modules:
     dependsOn:
       - petstore-router
     config:
-      spec_file: example/specs/petstore.yaml
+      spec_file: specs/petstore.yaml
       base_path: /api/v1
       router: petstore-router
       validation:

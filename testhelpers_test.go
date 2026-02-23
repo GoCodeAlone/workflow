@@ -13,6 +13,7 @@ import (
 	pluginintegration "github.com/GoCodeAlone/workflow/plugins/integration"
 	pluginlicense "github.com/GoCodeAlone/workflow/plugins/license"
 	pluginmessaging "github.com/GoCodeAlone/workflow/plugins/messaging"
+	pluginopenapi "github.com/GoCodeAlone/workflow/plugins/openapi"
 	pluginmodcompat "github.com/GoCodeAlone/workflow/plugins/modularcompat"
 	pluginobs "github.com/GoCodeAlone/workflow/plugins/observability"
 	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
@@ -43,6 +44,7 @@ func allPlugins() []plugin.EnginePlugin {
 		pluginai.New(),
 		pluginplatform.New(),
 		pluginlicense.New(),
+		pluginopenapi.New(),
 	}
 }
 

@@ -84,6 +84,7 @@ var coreModuleTypes = []string{
 	"metrics.collector",
 	"notification.slack",
 	"observability.otel",
+	"openapi",
 	"openapi.consumer",
 	"openapi.generator",
 	"persistence.store",

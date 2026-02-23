@@ -781,6 +781,25 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	// ---- OpenAPI Category ----
 
 	r.Register(&ModuleSchema{
+		Type:        "openapi",
+		Label:       "OpenAPI Spec Server",
+		Category:    "integration",
+		Description: "Parses an OpenAPI v3 spec file and auto-generates HTTP routes with request validation and optional Swagger UI",
+		Inputs:      []ServiceIODef{{Name: "router", Type: "HTTPRouter", Description: "HTTP router to register generated routes on"}},
+		Outputs:     []ServiceIODef{{Name: "routes", Type: "OpenAPIRoutes", Description: "Auto-generated HTTP routes from the spec"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "spec_file", Label: "Spec File", Type: FieldTypeFilePath, Required: true, Description: "Path to the OpenAPI v3 spec file (JSON or YAML)", Placeholder: "specs/petstore.yaml"},
+			{Key: "base_path", Label: "Base Path", Type: FieldTypeString, Description: "Base path prefix for all generated routes", Placeholder: "/api/v1"},
+			{Key: "router", Label: "Router Module", Type: FieldTypeString, Required: true, Description: "Name of the http.router module to register routes on", Placeholder: "my-router"},
+			{Key: "validation.request", Label: "Validate Requests", Type: FieldTypeBool, DefaultValue: true, Description: "Enable request validation against the OpenAPI schema"},
+			{Key: "validation.response", Label: "Validate Responses", Type: FieldTypeBool, DefaultValue: false, Description: "Enable response validation against the OpenAPI schema"},
+			{Key: "swagger_ui.enabled", Label: "Enable Swagger UI", Type: FieldTypeBool, DefaultValue: false, Description: "Serve Swagger UI for interactive API documentation"},
+			{Key: "swagger_ui.path", Label: "Swagger UI Path", Type: FieldTypeString, DefaultValue: "/docs", Description: "URL path for the Swagger UI", Placeholder: "/docs"},
+		},
+		DefaultConfig: map[string]any{"validation": map[string]any{"request": true, "response": false}, "swagger_ui": map[string]any{"enabled": false, "path": "/docs"}},
+	})
+
+	r.Register(&ModuleSchema{
 		Type:        "openapi.generator",
 		Label:       "OpenAPI Generator",
 		Category:    "integration",
