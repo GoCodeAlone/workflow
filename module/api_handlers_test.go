@@ -819,3 +819,62 @@ func TestRESTAPIHandler_LoadSeedData_InvalidJSON(t *testing.T) {
 		t.Fatalf("Init should not fail for bad JSON seed: %v", err)
 	}
 }
+
+func TestRESTAPIHandler_SetRiskPatterns(t *testing.T) {
+	h := NewRESTAPIHandler("test-handler", "conversations")
+
+	// Default patterns should be initialized
+	if len(h.riskPatterns) == 0 {
+		t.Error("expected default riskPatterns to be initialized")
+	}
+
+	// Override with custom patterns
+	customPatterns := map[string][]string{
+		"test-category": {"test phrase", "another phrase"},
+	}
+	h.SetRiskPatterns(customPatterns)
+	if len(h.riskPatterns) != 1 {
+		t.Errorf("expected 1 risk pattern category, got %d", len(h.riskPatterns))
+	}
+	if _, ok := h.riskPatterns["test-category"]; !ok {
+		t.Error("expected 'test-category' in riskPatterns")
+	}
+
+	// Reset to nil should fall back to defaults in assessRiskLevel
+	h.SetRiskPatterns(nil)
+	msgs := []any{map[string]any{"body": "kill myself"}}
+	level, tags := h.assessRiskLevel(msgs)
+	if level == "low" {
+		t.Error("expected non-low risk for suicidal message with default patterns")
+	}
+	if len(tags) == 0 {
+		t.Error("expected tags for suicidal message with default patterns")
+	}
+}
+
+func TestRESTAPIHandler_AssessRiskLevel_CustomPatterns(t *testing.T) {
+	h := NewRESTAPIHandler("test-handler", "conversations")
+	h.SetRiskPatterns(map[string][]string{
+		"custom-risk": {"danger word"},
+	})
+
+	// Should detect custom pattern
+	msgs := []any{map[string]any{"body": "this contains danger word here"}}
+	_, tags := h.assessRiskLevel(msgs)
+	found := false
+	for _, tag := range tags {
+		if tag == "custom-risk" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected 'custom-risk' tag from custom patterns")
+	}
+
+	// Standard patterns should no longer match
+	msgs2 := []any{map[string]any{"body": "kill myself"}}
+	level2, _ := h.assessRiskLevel(msgs2)
+	if level2 != "low" {
+		t.Errorf("expected 'low' with custom patterns that don't match 'kill myself', got '%s'", level2)
+	}
+}
