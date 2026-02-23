@@ -1,9 +1,9 @@
 package api
 
 import (
+	"fmt"
 	"math"
 	"net"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
