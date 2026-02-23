@@ -30,19 +30,36 @@ func (h *PipelineWorkflowHandler) SetStepRegistry(registry interfaces.StepRegist
 	h.stepRegistry = registry
 }
 
-// SetLogger sets the logger for pipeline execution.
+// SetLogger sets the logger for pipeline execution and propagates it to
+// all already-registered pipelines. Pipelines added after this call will
+// also have the logger injected in AddPipeline.
 func (h *PipelineWorkflowHandler) SetLogger(logger *slog.Logger) {
 	h.logger = logger
+	for _, p := range h.pipelines {
+		p.SetLogger(logger)
+	}
 }
 
-// SetEventRecorder sets the event recorder for pipeline execution events.
-// When set, each pipeline execution will record events to this recorder.
+// SetEventRecorder sets the event recorder for pipeline execution events and
+// propagates it to all already-registered pipelines. Pipelines added after
+// this call will also have the recorder injected in AddPipeline.
 func (h *PipelineWorkflowHandler) SetEventRecorder(recorder interfaces.EventRecorder) {
 	h.eventRecorder = recorder
+	for _, p := range h.pipelines {
+		p.SetEventRecorder(recorder)
+	}
 }
 
 // AddPipeline registers a named pipeline with the handler.
+// If a logger or event recorder has already been set on the handler,
+// they are injected into the pipeline immediately at configuration time.
 func (h *PipelineWorkflowHandler) AddPipeline(name string, p interfaces.PipelineRunner) {
+	if h.logger != nil {
+		p.SetLogger(h.logger)
+	}
+	if h.eventRecorder != nil {
+		p.SetEventRecorder(h.eventRecorder)
+	}
 	h.pipelines[name] = p
 }
 
@@ -85,14 +102,6 @@ func (h *PipelineWorkflowHandler) ExecuteWorkflow(ctx context.Context, workflowT
 	pipeline, ok := h.pipelines[name]
 	if !ok {
 		return nil, fmt.Errorf("pipeline %q not found", name)
-	}
-
-	// Inject logger and event recorder via interface methods.
-	if h.logger != nil {
-		pipeline.SetLogger(h.logger)
-	}
-	if h.eventRecorder != nil {
-		pipeline.SetEventRecorder(h.eventRecorder)
 	}
 
 	result, err := pipeline.Run(ctx, data)

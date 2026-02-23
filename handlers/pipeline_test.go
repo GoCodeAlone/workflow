@@ -25,6 +25,13 @@ func (m *mockPipelineRunner) Run(_ context.Context, _ map[string]any) (map[strin
 func (m *mockPipelineRunner) SetLogger(_ *slog.Logger)                    { m.loggerSet = true }
 func (m *mockPipelineRunner) SetEventRecorder(_ interfaces.EventRecorder) { m.recSet = true }
 
+// mockEventRecorder is a no-op EventRecorder for tests.
+type mockEventRecorder struct{}
+
+func (mockEventRecorder) RecordEvent(_ context.Context, _, _ string, _ map[string]any) error {
+	return nil
+}
+
 func TestPipelineHandler_CanHandle_PrefixFormat(t *testing.T) {
 	h := NewPipelineWorkflowHandler()
 
@@ -252,7 +259,7 @@ func TestPipelineHandler_MultiplePipelines(t *testing.T) {
 }
 
 // TestPipelineHandler_MockRunner verifies that PipelineWorkflowHandler works
-// with a mock PipelineRunner — no module package import required.
+// with a mock PipelineRunner without depending on concrete module types.
 func TestPipelineHandler_MockRunner(t *testing.T) {
 	h := NewPipelineWorkflowHandler()
 	h.SetLogger(slog.Default())
@@ -274,6 +281,41 @@ func TestPipelineHandler_MockRunner(t *testing.T) {
 		t.Errorf("expected mocked=true, got %v", result["mocked"])
 	}
 	if !mock.loggerSet {
-		t.Error("expected SetLogger to be called on mock runner")
+		t.Error("expected SetLogger to be called on mock runner at configuration time")
+	}
+}
+
+// TestPipelineHandler_InjectionAtConfigTime verifies that logger and recorder
+// are injected into pipelines at configuration time, not on each execution.
+func TestPipelineHandler_InjectionAtConfigTime(t *testing.T) {
+	h := NewPipelineWorkflowHandler()
+
+	// Add pipeline before logger/recorder are set.
+	m1 := &mockPipelineRunner{runResult: map[string]any{}}
+	h.AddPipeline("p1", m1)
+	if m1.loggerSet || m1.recSet {
+		t.Error("expected no injection before logger/recorder are set")
+	}
+
+	// SetLogger should propagate to the already-registered pipeline.
+	h.SetLogger(slog.Default())
+	if !m1.loggerSet {
+		t.Error("expected SetLogger to propagate to existing pipeline p1")
+	}
+
+	// SetEventRecorder should propagate to the already-registered pipeline.
+	h.SetEventRecorder(mockEventRecorder{})
+	if !m1.recSet {
+		t.Error("expected SetEventRecorder to propagate to existing pipeline p1")
+	}
+
+	// Pipeline added after both are set should receive them in AddPipeline.
+	m2 := &mockPipelineRunner{runResult: map[string]any{}}
+	h.AddPipeline("p2", m2)
+	if !m2.loggerSet {
+		t.Error("expected logger injected into p2 via AddPipeline")
+	}
+	if !m2.recSet {
+		t.Error("expected recorder injected into p2 via AddPipeline")
 	}
 }
