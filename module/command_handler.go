@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
 // CommandFunc is a state-changing command function that returns a result or an error.
@@ -25,7 +26,7 @@ type CommandHandler struct {
 	delegateHandler  http.Handler
 	app              modular.Application
 	commands         map[string]CommandFunc
-	routePipelines   map[string]*Pipeline
+	routePipelines   map[string]interfaces.PipelineRunner
 	executionTracker ExecutionTrackerProvider
 	mu               sync.RWMutex
 }
@@ -35,12 +36,12 @@ func NewCommandHandler(name string) *CommandHandler {
 	return &CommandHandler{
 		name:           name,
 		commands:       make(map[string]CommandFunc),
-		routePipelines: make(map[string]*Pipeline),
+		routePipelines: make(map[string]interfaces.PipelineRunner),
 	}
 }
 
 // SetRoutePipeline attaches a pipeline to a specific route path.
-func (h *CommandHandler) SetRoutePipeline(routePath string, pipeline *Pipeline) {
+func (h *CommandHandler) SetRoutePipeline(routePath string, pipeline interfaces.PipelineRunner) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.routePipelines[routePath] = pipeline
@@ -165,34 +166,52 @@ func (h *CommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// Restore the body so delegate steps can re-read it
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		}
-		// Inject HTTP context so delegate steps can forward directly
-		pipeline.Metadata = map[string]any{
-			"_http_request":         r,
-			"_http_response_writer": w,
-		}
-		if pipeline.RoutePattern != "" {
-			pipeline.Metadata["_route_pattern"] = pipeline.RoutePattern
-		}
-		var pc *PipelineContext
-		var err error
-		if h.executionTracker != nil {
-			pc, err = h.executionTracker.TrackPipelineExecution(r.Context(), pipeline, triggerData, r)
-		} else {
-			pc, err = pipeline.Execute(r.Context(), triggerData)
-		}
-		if err != nil {
-			if pc == nil || pc.Metadata["_response_handled"] != true {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		// Type-assert to *Pipeline for concrete field access (Metadata, RoutePattern,
+		// Execute) and execution tracker integration. All engine-registered pipelines
+		// are *Pipeline; the interface allows custom implementations in tests/plugins.
+		if concretePipeline, ok := pipeline.(*Pipeline); ok {
+			// Inject HTTP context so delegate steps can forward directly
+			concretePipeline.Metadata = map[string]any{
+				"_http_request":         r,
+				"_http_response_writer": w,
+			}
+			if concretePipeline.RoutePattern != "" {
+				concretePipeline.Metadata["_route_pattern"] = concretePipeline.RoutePattern
+			}
+			var pc *PipelineContext
+			var err error
+			if h.executionTracker != nil {
+				pc, err = h.executionTracker.TrackPipelineExecution(r.Context(), concretePipeline, triggerData, r)
+			} else {
+				pc, err = concretePipeline.Execute(r.Context(), triggerData)
+			}
+			if err != nil {
+				if pc == nil || pc.Metadata["_response_handled"] != true {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				}
+				return
+			}
+			if pc.Metadata["_response_handled"] == true {
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(pc.Current); err != nil {
+				http.Error(w, "failed to encode response", http.StatusInternalServerError)
 			}
 			return
 		}
-		if pc.Metadata["_response_handled"] == true {
+		// Fallback for non-*Pipeline implementations: use the PipelineRunner interface.
+		result, err := pipeline.Run(r.Context(), triggerData)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(pc.Current); err != nil {
+		if err := json.NewEncoder(w).Encode(result); err != nil {
 			http.Error(w, "failed to encode response", http.StatusInternalServerError)
 		}
 		return

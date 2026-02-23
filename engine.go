@@ -691,7 +691,7 @@ func (e *StdEngine) wrapPipelineTriggerConfig(triggerType, pipelineName string, 
 // buildPipelineSteps creates PipelineStep instances from step configurations.
 // RoutePipelineSetter is implemented by handlers (QueryHandler, CommandHandler) that support per-route pipelines.
 type RoutePipelineSetter interface {
-	SetRoutePipeline(routePath string, pipeline *module.Pipeline)
+	SetRoutePipeline(routePath string, pipeline interfaces.PipelineRunner)
 }
 
 // configureRoutePipelines scans HTTP workflow routes for inline pipeline steps
