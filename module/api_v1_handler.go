@@ -394,6 +394,9 @@ func (h *V1APIHandler) extractClaims(r *http.Request) (*userClaims, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
 		return []byte(h.jwtSecret), nil
 	})
 	if err != nil {
