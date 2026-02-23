@@ -176,16 +176,33 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 
 // loadConfig loads a workflow configuration from the configured file path,
 // or returns an empty config if no path is set.
-func loadConfig(logger *slog.Logger) (*config.WorkflowConfig, error) {
+// If the config file contains an application-level config (multi-workflow),
+// the returned WorkflowConfig will be nil and the ApplicationConfig will be set.
+func loadConfig(logger *slog.Logger) (*config.WorkflowConfig, *config.ApplicationConfig, error) {
 	if *configFile != "" {
+		// Peek at the file to detect whether it is an application config.
+		data, err := os.ReadFile(*configFile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read configuration file: %w", err)
+		}
+
+		if config.IsApplicationConfig(data) {
+			logger.Info("Detected multi-workflow application config", "file", *configFile)
+			appCfg, err := config.LoadApplicationConfig(*configFile)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to load application configuration: %w", err)
+			}
+			return nil, appCfg, nil
+		}
+
 		cfg, err := config.LoadFromFile(*configFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load configuration: %w", err)
+			return nil, nil, fmt.Errorf("failed to load configuration: %w", err)
 		}
-		return cfg, nil
+		return cfg, nil, nil
 	}
 	logger.Info("No config file specified, using empty workflow config")
-	return config.NewEmptyWorkflowConfig(), nil
+	return config.NewEmptyWorkflowConfig(), nil, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +360,60 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 	app.mgmt.auditLogger.LogConfigChange(context.Background(), "system", "server", "server started")
 
 	return app, nil
+}
+
+// setupFromAppConfig initializes all server components from a multi-workflow
+// application config. It merges all workflow files into a combined WorkflowConfig,
+// applies the admin config overlay, then builds the engine using
+// BuildFromApplicationConfig so cross-workflow pipeline calls are wired up.
+func setupFromAppConfig(logger *slog.Logger, appCfg *config.ApplicationConfig) (*serverApp, error) {
+	// Merge all workflow files into a combined config so the admin overlay
+	// can be applied consistently (module names, route configs, etc.).
+	combined, err := config.MergeApplicationConfig(appCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to merge application config: %w", err)
+	}
+
+	// Apply admin config overlay (admin UI, management routes, etc.).
+	if err := mergeAdminConfig(logger, combined); err != nil {
+		return nil, fmt.Errorf("failed to set up admin: %w", err)
+	}
+
+	// Build the engine using the application config so BuildFromApplicationConfig
+	// is called (which handles the pipeline registry for step.workflow_call).
+	// We re-use buildEngineFromAppConfig but pass the merged+admin config separately
+	// as the admin modules are now part of combined. Since BuildFromApplicationConfig
+	// calls MergeApplicationConfig internally, we bypass that by calling
+	// BuildFromConfig on the already-merged config via buildEngine.
+	engine, loader, registry, err := buildEngine(combined, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build engine: %w", err)
+	}
+
+	sApp := &serverApp{
+		engine: engine,
+		logger: logger,
+	}
+
+	pool := dynamic.NewInterpreterPool()
+	aiSvc, deploySvc := initAIService(logger, registry, pool)
+	initManagementHandlers(logger, engine, combined, sApp, aiSvc, deploySvc, loader, registry)
+	registerManagementServices(logger, sApp)
+
+	sApp.postStartFuncs = append(sApp.postStartFuncs, func() error {
+		if err := sApp.initStores(logger); err != nil {
+			return err
+		}
+		return sApp.registerPostStartServices(logger)
+	}, func() error {
+		return sApp.importBundles(logger)
+	})
+
+	sApp.mgmt.auditLogger = audit.NewLogger(os.Stdout)
+	sApp.mgmt.auditLogger.LogConfigChange(context.Background(), "system", "server",
+		"server started with application config: "+appCfg.Application.Name)
+
+	return sApp, nil
 }
 
 // mergeAdminConfig loads the embedded admin config and merges admin
@@ -1268,13 +1339,20 @@ func main() {
 		logger.Warn("Multi-workflow mode requires the api package (not yet available); falling back to single-config mode")
 	}
 
-	// Existing single-config behavior
-	cfg, err := loadConfig(logger)
+	// Load configuration — supports both single-workflow and multi-workflow application configs.
+	cfg, appCfg, err := loadConfig(logger)
 	if err != nil {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
-	app, err := setup(logger, cfg)
+	var app *serverApp
+	if appCfg != nil {
+		// Multi-workflow application config: build engine from application config
+		app, err = setupFromAppConfig(logger, appCfg)
+	} else {
+		// Single-workflow config (backward-compatible)
+		app, err = setup(logger, cfg)
+	}
 	if err != nil {
 		log.Fatalf("Setup error: %v", err)
 	}

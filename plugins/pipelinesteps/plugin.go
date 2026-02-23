@@ -60,6 +60,7 @@ func New() *Plugin {
 					"step.db_query",
 					"step.db_exec",
 					"step.json_response",
+					"step.workflow_call",
 				},
 				WorkflowTypes: []string{"pipeline"},
 				Capabilities: []plugin.CapabilityDecl{

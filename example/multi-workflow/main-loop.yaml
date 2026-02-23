@@ -1,0 +1,52 @@
+# main-loop.yaml — Main conversation intake pipeline
+#
+# This workflow receives incoming messages, classifies them, and routes
+# to either the queue-assignment or escalation workflow via step.workflow_call.
+
+modules: []
+
+workflows: {}
+
+triggers: {}
+
+pipelines:
+  # Incoming message handler
+  handle-message:
+    steps:
+      # Step 1: Parse and normalize the incoming message
+      - name: parse-message
+        type: step.set
+        config:
+          values:
+            conversation_id: "{{ .conversation_id }}"
+            channel: "{{ .channel }}"
+            message_text: "{{ .message_text }}"
+            urgency: "{{ .urgency | default \"normal\" }}"
+
+      # Step 2: Route to queue-assignment for normal messages
+      # or escalation for urgent ones based on the urgency field.
+      #
+      # In a real deployment, you would use step.conditional here to branch,
+      # then call either queue-assignment or escalation. For this example we
+      # call queue-assignment directly to demonstrate the cross-workflow call.
+      - name: assign-to-queue
+        type: step.workflow_call
+        config:
+          workflow: assign-conversation
+          mode: sync
+          input:
+            conversation_id: "{{ .conversation_id }}"
+            channel: "{{ .channel }}"
+            urgency: "{{ .urgency }}"
+          output_mapping:
+            assigned_responder: responder_id
+            assigned_queue: queue_name
+
+      # Step 3: Record the assignment
+      - name: record-assignment
+        type: step.set
+        config:
+          values:
+            status: "assigned"
+            responder: "{{ .assigned_responder }}"
+            queue: "{{ .assigned_queue }}"
