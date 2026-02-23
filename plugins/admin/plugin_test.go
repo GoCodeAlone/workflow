@@ -207,6 +207,32 @@ func TestWiringHookInjectsUIDir(t *testing.T) {
 	}
 }
 
+func TestWiringHookInjectsUIDirForAdminDashboard(t *testing.T) {
+	p := New().WithUIDir("/custom/admin-ui")
+	hooks := p.WiringHooks()
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "admin-server", Type: "http.server"},
+			{Name: "admin-dashboard", Type: "admin.dashboard", Config: map[string]any{"root": "ui/dist"}},
+		},
+	}
+
+	err := hooks[0].Hook(nil, cfg)
+	if err != nil {
+		t.Fatalf("wiring hook failed: %v", err)
+	}
+
+	// The admin.dashboard should have the overridden root
+	for _, m := range cfg.Modules {
+		if m.Type == "admin.dashboard" {
+			if m.Config["root"] != "/custom/admin-ui" {
+				t.Errorf("expected root %q, got %q", "/custom/admin-ui", m.Config["root"])
+			}
+		}
+	}
+}
+
 func TestWithLoggerChaining(t *testing.T) {
 	p := New()
 	p2 := p.WithUIDir("/dir").WithLogger(nil)
