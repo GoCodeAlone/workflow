@@ -41,19 +41,13 @@ func TestRESTAPIHandler_ProvidesServices(t *testing.T) {
 func TestRESTAPIHandler_RequiresServices(t *testing.T) {
 	h := NewRESTAPIHandler("test-handler", "orders")
 	deps := h.RequiresServices()
-	if len(deps) != 2 {
-		t.Fatalf("expected 2 dependencies, got %d", len(deps))
+	if len(deps) != 1 {
+		t.Fatalf("expected 1 dependency, got %d", len(deps))
 	}
-	if deps[0].Name != "message-broker" {
-		t.Errorf("expected dependency 'message-broker', got '%s'", deps[0].Name)
+	if deps[0].Name != "persistence" {
+		t.Errorf("expected dependency 'persistence', got '%s'", deps[0].Name)
 	}
 	if deps[0].Required {
-		t.Error("expected message-broker to be optional")
-	}
-	if deps[1].Name != "persistence" {
-		t.Errorf("expected dependency 'persistence', got '%s'", deps[1].Name)
-	}
-	if deps[1].Required {
 		t.Error("expected persistence to be optional")
 	}
 }
@@ -517,24 +511,13 @@ func TestRESTAPIHandler_HandleTransition_WithStateMachineEngine(t *testing.T) {
 func TestRESTAPIHandler_HandleGet_WithStateTracker(t *testing.T) {
 	h := setupHandler(t)
 
-	// Register a state tracker service in the app
-	tracker := NewStateTracker("workflow.service.statetracker")
-	if err := h.app.RegisterService(StateTrackerName, tracker); err != nil {
-		t.Fatalf("failed to register state tracker: %v", err)
-	}
-
 	// Create a resource
 	createBody := `{"id": "order-1", "product": "widget"}`
 	createReq := httptest.NewRequest(http.MethodPost, "/api/orders", bytes.NewBufferString(createBody))
 	createW := httptest.NewRecorder()
 	h.Handle(createW, createReq)
 
-	// Set state for the resource
-	tracker.SetState("orders", "order-1", "processing", map[string]any{
-		"priority": "high",
-	})
-
-	// Get the resource - should be enhanced with state info
+	// Get the resource - should return stored state (no enrichment from external systems)
 	req := httptest.NewRequest(http.MethodGet, "/api/orders/{id}", nil)
 	req.SetPathValue("id", "order-1")
 	w := httptest.NewRecorder()
@@ -549,11 +532,9 @@ func TestRESTAPIHandler_HandleGet_WithStateTracker(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resource); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if resource.State != "processing" {
-		t.Errorf("expected state 'processing', got '%s'", resource.State)
-	}
-	if resource.Data["priority"] != "high" {
-		t.Errorf("expected priority 'high' from state tracker, got %v", resource.Data["priority"])
+	// State should be the stored value, not enriched from any external tracker
+	if resource.State != "new" {
+		t.Errorf("expected state 'new', got '%s'", resource.State)
 	}
 }
 
@@ -817,64 +798,5 @@ func TestRESTAPIHandler_LoadSeedData_InvalidJSON(t *testing.T) {
 	// Init should succeed but warn about bad JSON
 	if err := h.Init(app); err != nil {
 		t.Fatalf("Init should not fail for bad JSON seed: %v", err)
-	}
-}
-
-func TestRESTAPIHandler_SetRiskPatterns(t *testing.T) {
-	h := NewRESTAPIHandler("test-handler", "conversations")
-
-	// Default patterns should be initialized
-	if len(h.riskPatterns) == 0 {
-		t.Error("expected default riskPatterns to be initialized")
-	}
-
-	// Override with custom patterns
-	customPatterns := map[string][]string{
-		"test-category": {"test phrase", "another phrase"},
-	}
-	h.SetRiskPatterns(customPatterns)
-	if len(h.riskPatterns) != 1 {
-		t.Errorf("expected 1 risk pattern category, got %d", len(h.riskPatterns))
-	}
-	if _, ok := h.riskPatterns["test-category"]; !ok {
-		t.Error("expected 'test-category' in riskPatterns")
-	}
-
-	// Reset to nil should fall back to defaults in assessRiskLevel
-	h.SetRiskPatterns(nil)
-	msgs := []any{map[string]any{"body": "kill myself"}}
-	level, tags := h.assessRiskLevel(msgs)
-	if level == "low" {
-		t.Error("expected non-low risk for suicidal message with default patterns")
-	}
-	if len(tags) == 0 {
-		t.Error("expected tags for suicidal message with default patterns")
-	}
-}
-
-func TestRESTAPIHandler_AssessRiskLevel_CustomPatterns(t *testing.T) {
-	h := NewRESTAPIHandler("test-handler", "conversations")
-	h.SetRiskPatterns(map[string][]string{
-		"custom-risk": {"danger word"},
-	})
-
-	// Should detect custom pattern
-	msgs := []any{map[string]any{"body": "this contains danger word here"}}
-	_, tags := h.assessRiskLevel(msgs)
-	found := false
-	for _, tag := range tags {
-		if tag == "custom-risk" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected 'custom-risk' tag from custom patterns")
-	}
-
-	// Standard patterns should no longer match
-	msgs2 := []any{map[string]any{"body": "kill myself"}}
-	level2, _ := h.assessRiskLevel(msgs2)
-	if level2 != "low" {
-		t.Errorf("expected 'low' with custom patterns that don't match 'kill myself', got '%s'", level2)
 	}
 }

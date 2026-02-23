@@ -25,20 +25,19 @@ type RESTAPIHandler struct {
 	resourceName string
 	resources    map[string]RESTResource
 	mu           sync.RWMutex
-	eventBroker  MessageProducer // Optional dependency for publishing events
 	logger       modular.Logger
 	app          modular.Application
 	persistence  *PersistenceStore // optional write-through backend
 
 	// Workflow-related fields
-	workflowType      string // The type of workflow to use (e.g., "order-workflow")
+	workflowType      string // The type of workflow to use
 	workflowEngine    string // The name of the workflow engine service to use
 	initialTransition string // The first transition to trigger after creating a workflow instance (defaults to "start_validation")
 	instanceIDPrefix  string // Optional prefix for workflow instance IDs
 	instanceIDField   string // Field in resource data to use for instance ID (defaults to "id")
 	seedFile          string // Path to JSON seed data file
 
-	// View/aggregation fields (e.g., queue-api reading from conversations)
+	// View/aggregation fields (e.g., a read-only handler over another collection)
 	sourceResourceName string // Read from a different resource's persistence data (defaults to resourceName)
 	stateFilter        string // Only include resources matching this state in GET responses
 
@@ -46,20 +45,16 @@ type RESTAPIHandler struct {
 	fieldMapping  *FieldMapping     // Maps logical field names to actual field names with fallback chains
 	transitionMap map[string]string // Maps sub-action names to state machine transition names
 	summaryFields []string          // Fields to include in summary sub-resource responses
-
-	// Risk pattern detection (configurable; defaults to defaultRiskPatterns when nil)
-	riskPatterns map[string][]string
 }
 
 // RESTAPIHandlerConfig contains configuration for a REST API handler
 type RESTAPIHandlerConfig struct {
-	ResourceName     string              `json:"resourceName" yaml:"resourceName"`
-	PublishEvents    bool                `json:"publishEvents" yaml:"publishEvents"`
-	WorkflowType     string              `json:"workflowType" yaml:"workflowType"`         // The type of workflow to use for state machine operations
-	WorkflowEngine   string              `json:"workflowEngine" yaml:"workflowEngine"`     // The name of the workflow engine to use
-	InstanceIDPrefix string              `json:"instanceIDPrefix" yaml:"instanceIDPrefix"` // Optional prefix for workflow instance IDs
-	InstanceIDField  string              `json:"instanceIDField" yaml:"instanceIDField"`   // Field in resource data to use for instance ID (defaults to "id")
-	RiskPatterns     map[string][]string `json:"riskPatterns" yaml:"riskPatterns"`         // Override the default crisis-detection keyword patterns
+	ResourceName     string `json:"resourceName" yaml:"resourceName"`
+	PublishEvents    bool   `json:"publishEvents" yaml:"publishEvents"`
+	WorkflowType     string `json:"workflowType" yaml:"workflowType"`         // The type of workflow to use for state machine operations
+	WorkflowEngine   string `json:"workflowEngine" yaml:"workflowEngine"`     // The name of the workflow engine to use
+	InstanceIDPrefix string `json:"instanceIDPrefix" yaml:"instanceIDPrefix"` // Optional prefix for workflow instance IDs
+	InstanceIDField  string `json:"instanceIDField" yaml:"instanceIDField"`   // Field in resource data to use for instance ID (defaults to "id")
 }
 
 // NewRESTAPIHandler creates a new REST API handler
@@ -123,13 +118,7 @@ func (h *RESTAPIHandler) SetSummaryFields(fields []string) {
 	h.summaryFields = fields
 }
 
-// SetRiskPatterns overrides the default crisis-detection keyword patterns used for risk assessment.
-// Pass nil to revert to defaultRiskPatterns.
-func (h *RESTAPIHandler) SetRiskPatterns(patterns map[string][]string) {
-	h.riskPatterns = patterns
-}
-
-// initFieldDefaults initializes fieldMapping, transitionMap, summaryFields, and riskPatterns
+// initFieldDefaults initializes fieldMapping, transitionMap, and summaryFields
 // with default values if not already set.
 func (h *RESTAPIHandler) initFieldDefaults() {
 	if h.fieldMapping == nil {
@@ -140,9 +129,6 @@ func (h *RESTAPIHandler) initFieldDefaults() {
 	}
 	if h.summaryFields == nil {
 		h.summaryFields = DefaultSummaryFields()
-	}
-	if h.riskPatterns == nil {
-		h.riskPatterns = defaultRiskPatterns
 	}
 }
 
@@ -169,14 +155,6 @@ func (h *RESTAPIHandler) Constructor() modular.ModuleConstructor {
 		handler.fieldMapping = h.fieldMapping
 		handler.transitionMap = h.transitionMap
 		handler.summaryFields = h.summaryFields
-		handler.riskPatterns = h.riskPatterns
-
-		// Look for a message broker service for event publishing
-		if broker, ok := services["message-broker"]; ok {
-			if mb, ok := broker.(MessageBroker); ok {
-				handler.eventBroker = mb.Producer()
-			}
-		}
 
 		// Look for persistence store (optional)
 		if ps, ok := services["persistence"]; ok {
@@ -271,25 +249,6 @@ func (h *RESTAPIHandler) Init(app modular.Application) error {
 										h.summaryFields = fields
 									}
 								}
-
-								// Extract custom risk patterns (overrides defaults)
-								if rpCfg, ok := cfg["riskPatterns"].(map[string]any); ok {
-									patterns := make(map[string][]string)
-									for category, vals := range rpCfg {
-										if valsSlice, ok := vals.([]any); ok {
-											strs := make([]string, 0, len(valsSlice))
-											for _, v := range valsSlice {
-												if s, ok := v.(string); ok {
-													strs = append(strs, s)
-												}
-											}
-											patterns[category] = strs
-										}
-									}
-									if len(patterns) > 0 {
-										h.riskPatterns = patterns
-									}
-								}
 							}
 						}
 					}
@@ -365,14 +324,6 @@ func (h *RESTAPIHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	isTransitionRequest := false
 	subAction := ""
 
-	// For view handlers (e.g., queue-api), detect virtual endpoints like "health"
-	if h.sourceResourceName != "" && resourceId == "" && len(pathSegments) >= 3 {
-		lastSeg := pathSegments[len(pathSegments)-1]
-		if lastSeg == "health" {
-			resourceId = "health"
-		}
-	}
-
 	// We expect paths like:
 	// - /api/orders (collection)
 	// - /api/orders/123 (specific resource)
@@ -385,8 +336,8 @@ func (h *RESTAPIHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			isTransitionRequest = true
 		} else if h.workflowType != "" && lastSegment != resourceId {
 			// Only detect sub-actions for handlers with a workflow engine.
-			// This prevents non-workflow handlers (e.g. messages-api) from
-			// misinterpreting nested resource paths as sub-actions.
+			// This prevents non-workflow handlers from misinterpreting nested
+			// resource paths as sub-actions.
 			// Also skip when the last segment equals the resource ID (e.g.,
 			// /api/webchat/poll/{id}) — that's just a deeper path, not a sub-action.
 			subAction = lastSegment
@@ -506,10 +457,6 @@ func (h *RESTAPIHandler) ProvidesServices() []modular.ServiceProvider {
 // RequiresServices returns the services required by this module
 func (h *RESTAPIHandler) RequiresServices() []modular.ServiceDependency {
 	return []modular.ServiceDependency{
-		{
-			Name:     "message-broker",
-			Required: false, // Optional dependency
-		},
 		{
 			Name:     "persistence",
 			Required: false, // Optional dependency
