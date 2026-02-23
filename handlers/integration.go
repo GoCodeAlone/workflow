@@ -354,7 +354,8 @@ func ensureConnectorConnected(ctx context.Context, connector module.IntegrationC
 }
 
 // resolveParamValue resolves a single input value, substituting step result references where applicable.
-// References use the ${varName} syntax. If the variable is not found, the original value is returned.
+// References use the ${varName} syntax. Dot-notation is supported: ${step1.value} looks up results["step1"]
+// and then retrieves the "value" key from the resulting map. If the variable is not found, the original value is returned.
 func resolveParamValue(v any, results map[string]any) any {
 	strVal, ok := v.(string)
 	if !ok || len(strVal) <= 3 || strVal[0:2] != "${" || strVal[len(strVal)-1] != '}' {
@@ -362,8 +363,25 @@ func resolveParamValue(v any, results map[string]any) any {
 	}
 	// Extract the variable name, e.g., ${step1.value} -> step1.value
 	varName := strVal[2 : len(strVal)-1]
+	// Fast path: exact match in results
 	if result, found := results[varName]; found {
 		return result
+	}
+	// Dot-notation path: split on "." and traverse nested maps
+	parts := strings.SplitN(varName, ".", 2)
+	if len(parts) != 2 {
+		return v
+	}
+	stepResult, found := results[parts[0]]
+	if !found {
+		return v
+	}
+	nested, ok := stepResult.(map[string]any)
+	if !ok {
+		return v
+	}
+	if val, found := nested[parts[1]]; found {
+		return val
 	}
 	return v
 }
