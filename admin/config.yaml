@@ -1033,6 +1033,11 @@ workflows:
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
+            - name: set-target-status
+              type: step.set
+              config:
+                values:
+                  target_status: "active"
             - name: parse-request
               type: step.request_parse
               config:
@@ -1060,8 +1065,9 @@ workflows:
               type: step.db_exec
               config:
                 database: admin-db
-                query: "UPDATE workflows SET status = 'active', updated_at = ? WHERE id = ?"
+                query: "UPDATE workflows SET status = ?, updated_at = ? WHERE id = ?"
                 params:
+                  - "{{index .steps \"set-target-status\" \"target_status\"}}"
                   - "{{index .steps \"set-now\" \"now\"}}"
                   - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
             - name: get-updated
@@ -1089,6 +1095,11 @@ workflows:
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
+            - name: set-target-status
+              type: step.set
+              config:
+                values:
+                  target_status: "stopped"
             - name: parse-request
               type: step.request_parse
               config:
@@ -1116,8 +1127,9 @@ workflows:
               type: step.db_exec
               config:
                 database: admin-db
-                query: "UPDATE workflows SET status = 'stopped', updated_at = ? WHERE id = ?"
+                query: "UPDATE workflows SET status = ?, updated_at = ? WHERE id = ?"
                 params:
+                  - "{{index .steps \"set-target-status\" \"target_status\"}}"
                   - "{{index .steps \"set-now\" \"now\"}}"
                   - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
             - name: get-updated
