@@ -23,8 +23,11 @@ type TimelineServiceModule struct {
 }
 
 // NewTimelineServiceModule creates a new timeline service module.
-// It requires a non-nil EventStore to function.
+// It requires a non-nil EventStore to function. Panics if eventStore is nil.
 func NewTimelineServiceModule(name string, eventStore evstore.EventStore) *TimelineServiceModule {
+	if eventStore == nil {
+		panic("NewTimelineServiceModule: eventStore must not be nil")
+	}
 	logger := slog.Default()
 
 	timelineHandler := evstore.NewTimelineHandler(eventStore, logger)

@@ -47,6 +47,8 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			}
 			if v, ok := config["retention_days"].(int); ok {
 				cfg.RetentionDays = v
+			} else if v, ok := config["retention_days"].(float64); ok {
+				cfg.RetentionDays = int(v)
 			}
 			mod, err := module.NewEventStoreServiceModule(name, cfg)
 			if err != nil {

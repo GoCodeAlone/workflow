@@ -1,6 +1,7 @@
 package module
 
 import (
+	"os"
 	"testing"
 
 	"github.com/CrisisTextLine/modular"
@@ -89,17 +90,16 @@ func TestEventStoreServiceModule_RetentionDays(t *testing.T) {
 }
 
 func TestEventStoreServiceModule_DefaultDBPath(t *testing.T) {
-	// Test that empty DBPath falls back to default
-	tmpDir := t.TempDir()
-	m, err := NewEventStoreServiceModule("test-es", EventStoreServiceConfig{
-		DBPath: tmpDir + "/events.db",
-	})
+	// Test that an empty DBPath falls back to the default "data/events.db" path.
+	m, err := NewEventStoreServiceModule("test-es", EventStoreServiceConfig{})
 	if err != nil {
 		t.Fatalf("NewEventStoreServiceModule() error = %v", err)
 	}
 	if m.Store() == nil {
-		t.Error("Store() returned nil with explicit path")
+		t.Error("Store() returned nil with default path")
 	}
+	// Clean up the created data directory (created as side-effect of default path).
+	_ = os.RemoveAll("data")
 }
 
 // Verify EventStoreServiceModule satisfies the modular.Module interface.

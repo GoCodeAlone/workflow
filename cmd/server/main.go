@@ -603,40 +603,38 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	// Timeline, replay, backfill handlers
 	// -----------------------------------------------------------------------
 
-	// Try to discover timeline/replay/backfill from the service registry
+	// Discover timeline/replay/backfill mux services registered by ProvidesServices
 	// (registered by a timeline.service module). Fall back to direct creation.
 	timelineDiscovered := false
+	var (
+		discoveredTimelineMux http.Handler
+		discoveredReplayMux   http.Handler
+		discoveredBackfillMux http.Handler
+	)
 	for svcName, svc := range engine.GetApp().SvcRegistry() {
-		if tsMod, ok := svc.(*module.TimelineServiceModule); ok {
-			app.services.timelineMux = tsMod.TimelineMux()
-			app.services.replayMux = tsMod.ReplayMux()
-			app.services.backfillMux = tsMod.BackfillMux()
-			timelineDiscovered = true
-			logger.Info("Discovered timeline service from service registry", "service", svcName)
-			break
+		if strings.HasSuffix(svcName, ".timeline") {
+			if h, ok := svc.(http.Handler); ok {
+				discoveredTimelineMux = h
+				logger.Info("Discovered timeline mux from service registry", "service", svcName)
+			}
+		}
+		if strings.HasSuffix(svcName, ".replay") {
+			if h, ok := svc.(http.Handler); ok {
+				discoveredReplayMux = h
+			}
+		}
+		if strings.HasSuffix(svcName, ".backfill") {
+			if h, ok := svc.(http.Handler); ok {
+				discoveredBackfillMux = h
+			}
 		}
 	}
-	// Also check for individual mux services registered by ProvidesServices
-	if !timelineDiscovered {
-		for svcName, svc := range engine.GetApp().SvcRegistry() {
-			if strings.HasSuffix(svcName, ".timeline") {
-				if h, ok := svc.(http.Handler); ok {
-					app.services.timelineMux = h
-					timelineDiscovered = true
-					logger.Info("Discovered timeline mux from service registry", "service", svcName)
-				}
-			}
-			if strings.HasSuffix(svcName, ".replay") {
-				if h, ok := svc.(http.Handler); ok {
-					app.services.replayMux = h
-				}
-			}
-			if strings.HasSuffix(svcName, ".backfill") {
-				if h, ok := svc.(http.Handler); ok {
-					app.services.backfillMux = h
-				}
-			}
-		}
+	if discoveredTimelineMux != nil && discoveredReplayMux != nil && discoveredBackfillMux != nil {
+		app.services.timelineMux = discoveredTimelineMux
+		app.services.replayMux = discoveredReplayMux
+		app.services.backfillMux = discoveredBackfillMux
+		timelineDiscovered = true
+		logger.Info("Discovered timeline, replay, and backfill muxes from service registry")
 	}
 	if !timelineDiscovered {
 		if eventStore != nil {
@@ -672,35 +670,28 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	// DLQ handler
 	// -----------------------------------------------------------------------
 
-	// Try to discover DLQ from the service registry (registered by a
+	// Discover DLQ mux and store from the service registry (registered by a
 	// dlq.service module). Fall back to direct creation.
 	dlqDiscovered := false
 	var dlqStore evstore.DLQStore
+	var discoveredDLQMux http.Handler
 	for svcName, svc := range engine.GetApp().SvcRegistry() {
-		if dlqMod, ok := svc.(*module.DLQServiceModule); ok {
-			app.services.dlqMux = dlqMod.DLQMux()
-			dlqStore = dlqMod.Store()
-			dlqDiscovered = true
-			logger.Info("Discovered DLQ service from service registry", "service", svcName)
-			break
+		if strings.HasSuffix(svcName, ".store") {
+			if ds, ok := svc.(*evstore.InMemoryDLQStore); ok {
+				dlqStore = ds
+			}
+		}
+		if strings.HasSuffix(svcName, ".admin") {
+			if h, ok := svc.(http.Handler); ok && strings.Contains(svcName, "dlq") {
+				discoveredDLQMux = h
+				logger.Info("Discovered DLQ mux from service registry", "service", svcName)
+			}
 		}
 	}
-	// Also check for the DLQ store registered by ProvidesServices
-	if !dlqDiscovered {
-		for svcName, svc := range engine.GetApp().SvcRegistry() {
-			if strings.HasSuffix(svcName, ".store") {
-				if ds, ok := svc.(*evstore.InMemoryDLQStore); ok {
-					dlqStore = ds
-				}
-			}
-			if strings.HasSuffix(svcName, ".admin") {
-				if h, ok := svc.(http.Handler); ok && strings.Contains(svcName, "dlq") {
-					app.services.dlqMux = h
-					dlqDiscovered = true
-					logger.Info("Discovered DLQ mux from service registry", "service", svcName)
-				}
-			}
-		}
+	if discoveredDLQMux != nil && dlqStore != nil {
+		app.services.dlqMux = discoveredDLQMux
+		dlqDiscovered = true
+		logger.Info("Discovered DLQ service from service registry")
 	}
 	if !dlqDiscovered {
 		inMemDLQStore := evstore.NewInMemoryDLQStore()

@@ -10,7 +10,11 @@ import (
 
 // DLQServiceConfig holds the configuration for the DLQ service module.
 type DLQServiceConfig struct {
-	MaxRetries    int `yaml:"max_retries" default:"3"`
+	// MaxRetries is reserved for future implementation of per-entry retry limits.
+	// It is stored and exposed via MaxRetries() but not yet applied to the DLQ store.
+	MaxRetries int `yaml:"max_retries" default:"3"`
+	// RetentionDays is reserved for future implementation of automatic DLQ entry purging.
+	// It is stored and exposed via RetentionDays() but not yet applied to the DLQ store.
 	RetentionDays int `yaml:"retention_days" default:"30"`
 }
 
