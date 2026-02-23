@@ -1,6 +1,7 @@
 package module
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -237,10 +238,14 @@ func (m *OpenAPIModule) RegisterRoutes(router HTTPRouter) {
 		// JSON endpoint: serve re-serialised spec as JSON.
 		router.AddRoute(http.MethodGet, specPathJSON, &openAPISpecHandler{specJSON: m.specJSON})
 
-		// YAML endpoint: serve the original spec bytes with a YAML content-type.
-		// This preserves the source format; if the original file was YAML it is
-		// served as YAML, and if it was JSON it is served as-is (JSON is valid YAML).
-		router.AddRoute(http.MethodGet, specPathYAML, &openAPIRawSpecHandler{specBytes: m.specBytes, contentType: "application/yaml"})
+		// YAML endpoint: serve the original spec bytes with a content-type that
+		// matches the source format. JSON source files are served as application/json;
+		// YAML source files are served as application/yaml.
+		rawContentType := "application/yaml"
+		if trimmed := strings.TrimSpace(string(m.specBytes)); len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+			rawContentType = "application/json"
+		}
+		router.AddRoute(http.MethodGet, specPathYAML, &openAPIRawSpecHandler{specBytes: m.specBytes, contentType: rawContentType})
 
 		m.logger.Debug("OpenAPI spec endpoint registered", "module", m.name, "paths", []string{specPathJSON, specPathYAML})
 	}
@@ -250,6 +255,8 @@ func (m *OpenAPIModule) RegisterRoutes(router HTTPRouter) {
 		uiPath := m.cfg.SwaggerUI.Path
 		if uiPath == "" {
 			uiPath = "/docs"
+		} else if !strings.HasPrefix(uiPath, "/") {
+			uiPath = "/" + uiPath
 		}
 		uiRoutePath := basePath + uiPath
 		specURL := basePath + "/openapi.json"
@@ -352,6 +359,10 @@ func (h *openAPIRouteHandler) validate(r *http.Request) []string {
 			// application/octet-stream, but this engine is primarily used for JSON APIs and this
 			// default simplifies client usage.
 			mediaType = &mt
+		} else if ct != "" && len(h.op.RequestBody.Content) > 0 {
+			// Content-Type is present but not listed in the spec — reject with 400.
+			errs = append(errs, fmt.Sprintf("unsupported Content-Type %q; spec defines: %s",
+				ct, supportedContentTypes(h.op.RequestBody.Content)))
 		}
 
 		// Read the body once so we can both check for presence (when required)
@@ -365,17 +376,18 @@ func (h *openAPIRouteHandler) validate(r *http.Request) []string {
 			)
 			errs = append(errs, "failed to read request body")
 		} else {
-			// Always restore body for downstream handlers.
-			r.Body = io.NopCloser(strings.NewReader(string(bodyBytes)))
+			// Always restore body for downstream handlers using the original byte slice
+			// to avoid a bytes→string→bytes conversion that could corrupt non-UTF-8 payloads.
+			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 			if h.op.RequestBody.Required && len(bodyBytes) == 0 {
 				errs = append(errs, "request body is required but missing")
 			} else if mediaType != nil && mediaType.Schema != nil && len(bodyBytes) > 0 {
 				var bodyData any
-				if jsonErr := json.Unmarshal(bodyBytes, &bodyData); jsonErr == nil {
-					if bodyErrs := validateJSONBody(bodyData, mediaType.Schema); len(bodyErrs) > 0 {
-						errs = append(errs, bodyErrs...)
-					}
+				if jsonErr := json.Unmarshal(bodyBytes, &bodyData); jsonErr != nil {
+					errs = append(errs, fmt.Sprintf("request body contains invalid JSON: %v", jsonErr))
+				} else if bodyErrs := validateJSONBody(bodyData, mediaType.Schema); len(bodyErrs) > 0 {
+					errs = append(errs, bodyErrs...)
 				}
 			}
 		}
@@ -714,4 +726,14 @@ func swaggerUIHTML(title, specURL string) string {
 // It delegates to the standard library html.EscapeString for robust escaping.
 func htmlEscape(s string) string {
 	return html.EscapeString(s)
+}
+
+// supportedContentTypes returns a comma-joined list of content types defined
+// in the requestBody.content map, used in validation error messages.
+func supportedContentTypes(content map[string]openAPIMediaType) string {
+	types := make([]string, 0, len(content))
+	for ct := range content {
+		types = append(types, ct)
+	}
+	return strings.Join(types, ", ")
 }

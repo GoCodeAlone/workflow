@@ -416,6 +416,17 @@ func TestOpenAPIModule_RequestValidation_Body(t *testing.T) {
 			t.Errorf("expected 400 validation error, got %d: %s", w.Code, w.Body.String())
 		}
 	})
+
+	t.Run("invalid JSON", func(t *testing.T) {
+		body := `{"name": "Fluffy",` // malformed JSON
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/pets", bytes.NewBufferString(body))
+		r.Header.Set("Content-Type", "application/json")
+		h.Handle(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 validation error for malformed JSON, got %d: %s", w.Code, w.Body.String())
+		}
+	})
 }
 
 func TestOpenAPIModule_NoValidation(t *testing.T) {

@@ -4,6 +4,8 @@
 package openapi
 
 import (
+	"log/slog"
+
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/config"
@@ -56,7 +58,10 @@ func (p *Plugin) Capabilities() []capability.Contract {
 func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 	return map[string]plugin.ModuleFactory{
 		"openapi": func(name string, cfg map[string]any) modular.Module {
-			oacfg := module.OpenAPIConfig{}
+			oacfg := module.OpenAPIConfig{
+				// Default: enable request validation unless explicitly overridden.
+				Validation: module.OpenAPIValidationConfig{Request: true},
+			}
 
 			// NOTE: spec_file existence is not validated here at configuration time.
 			// Path resolution is performed by ResolvePathInConfig (relative to the
@@ -227,7 +232,10 @@ func wireOpenAPIRoutes(app modular.Application, cfg *config.WorkflowConfig) erro
 		}
 
 		if targetRouter == nil {
-			// No router found — log and skip (not fatal; engine may be running without HTTP)
+			// No router found — log a warning and skip (not fatal; engine may be running without HTTP).
+			slog.Warn("openapi: no HTTP router found; skipping route registration",
+				"module", oaMod.Name(),
+			)
 			continue
 		}
 
