@@ -193,7 +193,7 @@ A 10+ module workflow demonstrating module composition with HTTP servers, router
 
 ### Example Configurations
 
-The [`example/`](example/) directory contains 27 YAML configurations covering:
+The [`example/`](example/) directory contains 27 top-level `example/*.yaml` configurations covering:
 
 - API gateways and reverse proxies
 - Event-driven and scheduled workflows
@@ -223,7 +223,7 @@ ai/                  AI integration layer
   service.go           Provider selection and orchestration
   deploy.go            Validation loop and deployment to dynamic components
 ui/                  React + ReactFlow + Zustand visual builder (Vite, TypeScript)
-example/             27 YAML configs and 2 full application examples
+example/             Top-level example YAML configs and full application examples
 mock/                Test helpers and mock implementations
 ```
 
