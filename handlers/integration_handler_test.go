@@ -489,3 +489,63 @@ func TestExecuteStepWithRetry_ExhaustedRetries(t *testing.T) {
 		t.Fatal("expected error after exhausted retries")
 	}
 }
+
+func TestResolveParamValue_PlainValue(t *testing.T) {
+	results := map[string]any{"step1": map[string]any{"value": "hello"}}
+	got := resolveParamValue(42, results)
+	if got != 42 {
+		t.Errorf("expected 42, got %v", got)
+	}
+}
+
+func TestResolveParamValue_ExactMatch(t *testing.T) {
+	results := map[string]any{"step1": "direct"}
+	got := resolveParamValue("${step1}", results)
+	if got != "direct" {
+		t.Errorf("expected 'direct', got %v", got)
+	}
+}
+
+func TestResolveParamValue_DotNotation(t *testing.T) {
+	results := map[string]any{
+		"step1": map[string]any{"value": "resolved"},
+	}
+	got := resolveParamValue("${step1.value}", results)
+	if got != "resolved" {
+		t.Errorf("expected 'resolved', got %v", got)
+	}
+}
+
+func TestResolveParamValue_DotNotation_MissingKey(t *testing.T) {
+	results := map[string]any{
+		"step1": map[string]any{"other": "x"},
+	}
+	got := resolveParamValue("${step1.value}", results)
+	if got != "${step1.value}" {
+		t.Errorf("expected original string, got %v", got)
+	}
+}
+
+func TestResolveParamValue_DotNotation_NonMapResult(t *testing.T) {
+	results := map[string]any{"step1": "not-a-map"}
+	got := resolveParamValue("${step1.value}", results)
+	if got != "${step1.value}" {
+		t.Errorf("expected original string when step result is not a map, got %v", got)
+	}
+}
+
+func TestResolveParamValue_DotNotation_MissingStep(t *testing.T) {
+	results := map[string]any{}
+	got := resolveParamValue("${step1.value}", results)
+	if got != "${step1.value}" {
+		t.Errorf("expected original string when step not found, got %v", got)
+	}
+}
+
+func TestResolveParamValue_NotAReference(t *testing.T) {
+	results := map[string]any{"foo": "bar"}
+	got := resolveParamValue("just-a-string", results)
+	if got != "just-a-string" {
+		t.Errorf("expected 'just-a-string', got %v", got)
+	}
+}
