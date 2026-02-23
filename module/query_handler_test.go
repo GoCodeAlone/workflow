@@ -299,4 +299,3 @@ func TestQueryHandler_RoutePipeline_TypedNil(t *testing.T) {
 		t.Errorf("expected 404 for typed-nil pipeline, got %d", rr.Code)
 	}
 }
-
