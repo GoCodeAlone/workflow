@@ -1026,27 +1026,118 @@ workflows:
               config:
                 status: 200
                 body_from: "steps.get-versions.rows"
-      # Deploy and Stop delegate to V1APIHandler which manages RuntimeManager
+      # Deploy: update status to 'active', return the updated workflow record
       - method: POST
         path: "/api/v1/admin/workflows/{id}/deploy"
         handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: deploy-workflow
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: check-exists
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: check-found
+              type: step.conditional
+              config:
+                field: "steps.check-exists.found"
+                routes:
+                  "false": not-found
+                default: set-now
+            - name: set-now
+              type: step.set
+              config:
+                values:
+                  now: "{{ now }}"
+            - name: update-status
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "UPDATE workflows SET status = 'active', updated_at = ? WHERE id = ?"
+                params:
+                  - "{{index .steps \"set-now\" \"now\"}}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+            - name: get-updated
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.get-updated.row"
+            - name: not-found
+              type: step.json_response
+              config:
+                status: 404
+                body:
+                  error: "workflow not found"
+      # Stop: update status to 'stopped', return the updated workflow record
       - method: POST
         path: "/api/v1/admin/workflows/{id}/stop"
         handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: stop-workflow
-              type: step.delegate
+            - name: parse-request
+              type: step.request_parse
               config:
-                service: admin-v1-mgmt
+                path_params: [id]
+            - name: check-exists
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: check-found
+              type: step.conditional
+              config:
+                field: "steps.check-exists.found"
+                routes:
+                  "false": not-found
+                default: set-now
+            - name: set-now
+              type: step.set
+              config:
+                values:
+                  now: "{{ now }}"
+            - name: update-status
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "UPDATE workflows SET status = 'stopped', updated_at = ? WHERE id = ?"
+                params:
+                  - "{{index .steps \"set-now\" \"now\"}}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+            - name: get-updated
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.get-updated.row"
+            - name: not-found
+              type: step.json_response
+              config:
+                status: 404
+                body:
+                  error: "workflow not found"
       # Load workflow from a server-local filesystem path
       - method: POST
         path: "/api/v1/admin/workflows/load-from-path"
