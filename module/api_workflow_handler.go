@@ -108,7 +108,9 @@ func (h *RESTAPIHandler) syncResourceStateFromEngine(instanceId, resourceId stri
 
 		// Write-through to persistence
 		if h.persistence != nil {
-			_ = h.persistence.SaveResource(h.resourceName, res.ID, res.Data)
+			if err := h.persistence.SaveResource(h.resourceName, res.ID, res.Data); err != nil {
+				h.logger.Warn(fmt.Sprintf("failed to persist resource %s/%s: %v", h.resourceName, res.ID, err))
+			}
 		}
 	}
 }
