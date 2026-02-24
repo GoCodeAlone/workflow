@@ -600,14 +600,14 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 
 // configureTriggers sets up all triggers from configuration
 func (e *StdEngine) configureTriggers(triggerConfigs map[string]any) error {
+	// Always register the engine as a service so inline pipeline triggers can find it
+	if err := e.app.RegisterService("workflowEngine", e); err != nil {
+		return fmt.Errorf("failed to register workflow engine service: %w", err)
+	}
+
 	if len(triggerConfigs) == 0 {
 		// No triggers configured, which is fine
 		return nil
-	}
-
-	// Register this engine as a service so triggers can find it
-	if err := e.app.RegisterService("workflowEngine", e); err != nil {
-		return fmt.Errorf("failed to register workflow engine service: %w", err)
 	}
 
 	// Configure each trigger type

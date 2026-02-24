@@ -153,6 +153,7 @@ func (p *HTTPPlugin) PipelineTriggerConfigWrappers() map[string]plugin.TriggerCo
 		"http": func(pipelineName string, cfg map[string]any) map[string]any {
 			route := map[string]any{
 				"workflow": "pipeline:" + pipelineName,
+				"action":   "execute",
 			}
 			if path, ok := cfg["path"]; ok {
 				route["path"] = path
