@@ -99,10 +99,11 @@ const useAuthStore = create<AuthStore>((set, get) => ({
       scheduleRefresh(data.expires_in, get().refreshAuth);
       await get().loadUser();
     } catch (err) {
-      set({
-        isLoading: false,
-        error: err instanceof Error ? err.message : 'Login failed',
-      });
+      const raw = err instanceof Error ? err.message : 'Login failed';
+      const friendly = /(invalid.*(cred|password|user)|unauthorized|\b401\b)/i.test(raw)
+        ? 'Invalid email or password'
+        : raw;
+      set({ isLoading: false, error: friendly });
     }
   },
 
@@ -128,10 +129,11 @@ const useAuthStore = create<AuthStore>((set, get) => ({
       scheduleRefresh(data.expires_in, get().refreshAuth);
       await get().loadUser();
     } catch (err) {
-      set({
-        isLoading: false,
-        error: err instanceof Error ? err.message : 'Registration failed',
-      });
+      const raw = err instanceof Error ? err.message : 'Registration failed';
+      const friendly = /(already\s*(exists|registered)|duplicate.*email)/i.test(raw)
+        ? 'An account with this email already exists'
+        : raw;
+      set({ isLoading: false, error: friendly });
     }
   },
 

@@ -46,7 +46,8 @@ function mockFetchFailure(message: string, status = 401) {
     ok: false,
     status,
     statusText: 'Unauthorized',
-    text: () => Promise.resolve(message),
+    json: () => Promise.resolve({ error: message }),
+    text: () => Promise.resolve(JSON.stringify({ error: message })),
   });
 }
 
@@ -122,7 +123,7 @@ describe('authStore', () => {
       expect(state.user?.email).toBe('test@example.com');
     });
 
-    it('sets error on failure', async () => {
+    it('maps "Invalid credentials" to friendly error message', async () => {
       globalThis.fetch = mockFetchFailure('Invalid credentials');
 
       await act(async () => {
@@ -131,7 +132,7 @@ describe('authStore', () => {
 
       const state = useAuthStore.getState();
       expect(state.isAuthenticated).toBe(false);
-      expect(state.error).toBe('Invalid credentials');
+      expect(state.error).toBe('Invalid email or password');
       expect(state.isLoading).toBe(false);
     });
 
@@ -200,15 +201,99 @@ describe('authStore', () => {
       expect(state.user?.display_name).toBe('New User');
     });
 
-    it('sets error on registration failure', async () => {
+    it('maps "Email already exists" to friendly error message', async () => {
       globalThis.fetch = mockFetchFailure('Email already exists', 409);
 
       await act(async () => {
         await useAuthStore.getState().register('dup@example.com', 'pw', 'Dup');
       });
 
-      expect(useAuthStore.getState().error).toBe('Email already exists');
+      expect(useAuthStore.getState().error).toBe('An account with this email already exists');
       expect(useAuthStore.getState().isAuthenticated).toBe(false);
+    });
+  });
+
+  describe('login error transformation', () => {
+    function setupLoginFailure(errorMessage: string) {
+      globalThis.fetch = mockFetchFailure(errorMessage);
+    }
+
+    it.each([
+      'invalid credentials',
+      'Invalid credentials',
+      'invalid password',
+      'invalid user',
+      'unauthorized',
+      'Unauthorized',
+      'HTTP 401',
+    ])('maps "%s" to "Invalid email or password"', async (msg) => {
+      setupLoginFailure(msg);
+      await act(async () => {
+        await useAuthStore.getState().login('a@b.com', 'pw');
+      });
+      expect(useAuthStore.getState().error).toBe('Invalid email or password');
+    });
+
+    it.each([
+      'Internal server error',
+      'request timeout',
+      'Error 4010',
+      'Code: 14015',
+      'something went wrong',
+    ])('passes through "%s" unchanged', async (msg) => {
+      setupLoginFailure(msg);
+      await act(async () => {
+        await useAuthStore.getState().login('a@b.com', 'pw');
+      });
+      expect(useAuthStore.getState().error).toBe(msg);
+    });
+
+    it('does not match partial status codes like "4010"', async () => {
+      setupLoginFailure('Error 4010');
+      await act(async () => {
+        await useAuthStore.getState().login('a@b.com', 'pw');
+      });
+      expect(useAuthStore.getState().error).toBe('Error 4010');
+    });
+
+    it('does not match partial status codes like "14015"', async () => {
+      setupLoginFailure('Code: 14015');
+      await act(async () => {
+        await useAuthStore.getState().login('a@b.com', 'pw');
+      });
+      expect(useAuthStore.getState().error).toBe('Code: 14015');
+    });
+  });
+
+  describe('register error transformation', () => {
+    function setupRegisterFailure(errorMessage: string) {
+      globalThis.fetch = mockFetchFailure(errorMessage, 409);
+    }
+
+    it.each([
+      'email already exists',
+      'Email already exists',
+      'already registered',
+      'Already registered',
+      'duplicate email address',
+    ])('maps "%s" to friendly message', async (msg) => {
+      setupRegisterFailure(msg);
+      await act(async () => {
+        await useAuthStore.getState().register('a@b.com', 'pw', 'Test');
+      });
+      expect(useAuthStore.getState().error).toBe('An account with this email already exists');
+    });
+
+    it.each([
+      'password too short',
+      'Internal server error',
+      'invalid email format',
+    ])('passes through "%s" unchanged', async (msg) => {
+      setupRegisterFailure(msg);
+      await act(async () => {
+        await useAuthStore.getState().register('a@b.com', 'pw', 'Test');
+      });
+      expect(useAuthStore.getState().error).toBe(msg);
     });
   });
 

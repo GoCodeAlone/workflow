@@ -247,7 +247,7 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 	handlerFn := func(w http.ResponseWriter, r *http.Request) {
 		// Extract path parameters from the context (would have been set by the router)
 		params := make(map[string]string)
-		if routeParams, ok := r.Context().Value("params").(map[string]string); ok {
+		if routeParams, ok := r.Context().Value(paramsKey).(map[string]string); ok {
 			params = routeParams
 		}
 

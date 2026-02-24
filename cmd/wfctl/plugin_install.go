@@ -240,7 +240,7 @@ func downloadURL(url string) ([]byte, error) {
 func verifyChecksum(data []byte, expected string) error {
 	h := sha256.Sum256(data)
 	got := hex.EncodeToString(h[:])
-	if got != strings.ToLower(expected) {
+	if !strings.EqualFold(got, expected) {
 		return fmt.Errorf("checksum mismatch: got %s, want %s", got, expected)
 	}
 	return nil

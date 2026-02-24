@@ -169,6 +169,7 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter password"
               required
+              autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
               style={inputStyle}
             />
           </div>
@@ -184,6 +185,7 @@ export default function LoginPage() {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Confirm password"
                 required
+                autoComplete="new-password"
                 style={inputStyle}
               />
             </div>
