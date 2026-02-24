@@ -163,6 +163,35 @@ func TestOpenAPIModule_ParseJSON(t *testing.T) {
 	}
 }
 
+func TestOpenAPIModule_JSONSourceNoYAMLEndpoint(t *testing.T) {
+	specPath := writeTempSpec(t, ".json", petstoreJSON)
+
+	mod := NewOpenAPIModule("json-api", OpenAPIConfig{
+		SpecFile: specPath,
+		BasePath: "/api",
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	paths := make(map[string]bool)
+	for _, rt := range router.routes {
+		paths[rt.method+":"+rt.path] = true
+	}
+
+	// JSON source spec: /openapi.json should be registered
+	if !paths["GET:/api/openapi.json"] {
+		t.Error("expected GET:/api/openapi.json to be registered for JSON source")
+	}
+	// /openapi.yaml should NOT be registered for a JSON source spec
+	if paths["GET:/api/openapi.yaml"] {
+		t.Error("expected GET:/api/openapi.yaml NOT to be registered for JSON source")
+	}
+}
+
 func TestOpenAPIModule_MissingSpecFile(t *testing.T) {
 	mod := NewOpenAPIModule("bad", OpenAPIConfig{})
 	if err := mod.Init(nil); err == nil {
@@ -427,6 +456,41 @@ func TestOpenAPIModule_RequestValidation_Body(t *testing.T) {
 			t.Errorf("expected 400 validation error for malformed JSON, got %d: %s", w.Code, w.Body.String())
 		}
 	})
+}
+
+func TestOpenAPIModule_MaxBodySize(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", petstoreYAML)
+
+	mod := NewOpenAPIModule("petstore", OpenAPIConfig{
+		SpecFile:     specPath,
+		BasePath:     "/api/v1",
+		Validation:   OpenAPIValidationConfig{Request: true},
+		MaxBodyBytes: 10, // very small limit to trigger the check
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("POST", "/api/v1/pets")
+	if h == nil {
+		t.Fatal("POST /api/v1/pets handler not found")
+	}
+
+	body := `{"name": "Fluffy", "tag": "cat"}` // 33 bytes, exceeds limit of 10
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/pets", bytes.NewBufferString(body))
+	r.Header.Set("Content-Type", "application/json")
+	h.Handle(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for oversized body, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "exceeds maximum") {
+		t.Errorf("expected error message about size limit, got: %s", w.Body.String())
+	}
 }
 
 func TestOpenAPIModule_NoValidation(t *testing.T) {

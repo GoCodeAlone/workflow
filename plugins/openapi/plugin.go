@@ -77,6 +77,13 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			if v, ok := cfg["router"].(string); ok {
 				oacfg.RouterName = v
 			}
+			if v, ok := cfg["max_body_bytes"].(int); ok && v > 0 {
+				oacfg.MaxBodyBytes = int64(v)
+			} else if v, ok := cfg["max_body_bytes"].(int64); ok && v > 0 {
+				oacfg.MaxBodyBytes = v
+			} else if v, ok := cfg["max_body_bytes"].(float64); ok && v > 0 {
+				oacfg.MaxBodyBytes = int64(v)
+			}
 
 			if valCfg, ok := cfg["validation"].(map[string]any); ok {
 				if v, ok2 := valCfg["request"].(bool); ok2 {
@@ -151,9 +158,16 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 					DefaultValue: map[string]any{"enabled": false, "path": "/docs"},
 					Group:        "swagger_ui",
 				},
+				{
+					Key:         "max_body_bytes",
+					Label:       "Max Body Size",
+					Type:        schema.FieldTypeNumber,
+					Description: "Maximum allowed request body size in bytes when validation is enabled (default: 1048576 = 1 MiB)",
+					Placeholder: "1048576",
+					Group:       "validation",
+				},
 			},
 			DefaultConfig: map[string]any{
-				"base_path":  "/api/v1",
 				"validation": map[string]any{"request": true, "response": false},
 				"swagger_ui": map[string]any{"enabled": false, "path": "/docs"},
 			},
@@ -178,12 +192,16 @@ func (p *Plugin) WiringHooks() []plugin.WiringHook {
 func wireOpenAPIRoutes(app modular.Application, cfg *config.WorkflowConfig) error {
 	// Build name→router lookup from config dependsOn
 	routerNames := make(map[string]bool)
-	openAPIDeps := make(map[string][]string) // openapi module name → dependsOn
+	serverToRouter := make(map[string]string) // http.server name → router name
+	openAPIDeps := make(map[string][]string)   // openapi module name → dependsOn
 	for _, modCfg := range cfg.Modules {
-		if modCfg.Type == "http.router" {
+		switch modCfg.Type {
+		case "http.router":
 			routerNames[modCfg.Name] = true
-		}
-		if modCfg.Type == "openapi" {
+			for _, dep := range modCfg.DependsOn {
+				serverToRouter[dep] = modCfg.Name
+			}
+		case "openapi":
 			openAPIDeps[modCfg.Name] = modCfg.DependsOn
 		}
 	}
@@ -214,7 +232,7 @@ func wireOpenAPIRoutes(app modular.Application, cfg *config.WorkflowConfig) erro
 			targetRouter = routers[rName]
 		}
 
-		// 2) dependsOn router reference
+		// 2) dependsOn: direct router reference
 		if targetRouter == nil {
 			for _, dep := range openAPIDeps[oaMod.Name()] {
 				if routerNames[dep] {
@@ -226,7 +244,19 @@ func wireOpenAPIRoutes(app modular.Application, cfg *config.WorkflowConfig) erro
 			}
 		}
 
-		// 3) Fall back to first available router
+		// 3) dependsOn: server reference → follow server→router mapping
+		if targetRouter == nil {
+			for _, dep := range openAPIDeps[oaMod.Name()] {
+				if rName, ok := serverToRouter[dep]; ok {
+					if router, found := routers[rName]; found {
+						targetRouter = router
+						break
+					}
+				}
+			}
+		}
+
+		// 4) Fall back to first available router
 		if targetRouter == nil {
 			targetRouter = firstRouter
 		}
