@@ -1,6 +1,7 @@
 // Package pipelinesteps provides a plugin that registers generic pipeline step
 // types: validate, transform, conditional, set, log, delegate, jq, publish,
-// http_call, request_parse, db_query, db_exec, json_response.
+// http_call, request_parse, db_query, db_exec, json_response,
+// validate_path_param, validate_pagination, validate_request_body.
 // It also provides the PipelineWorkflowHandler for composable pipelines.
 package pipelinesteps
 
@@ -38,13 +39,13 @@ func New() *Plugin {
 			BaseNativePlugin: plugin.BaseNativePlugin{
 				PluginName:        "pipeline-steps",
 				PluginVersion:     "1.0.0",
-				PluginDescription: "Generic pipeline step types (validate, transform, conditional, set, log, delegate, jq, etc.)",
+				PluginDescription: "Generic pipeline step types (validate, transform, conditional, set, log, delegate, jq, validate_path_param, validate_pagination, validate_request_body, etc.)",
 			},
 			Manifest: plugin.PluginManifest{
 				Name:        "pipeline-steps",
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
-				Description: "Generic pipeline step types and pipeline workflow handler",
+				Description: "Generic pipeline step types, pre-processing validators, and pipeline workflow handler",
 				Tier:        plugin.TierCore,
 				StepTypes: []string{
 					"step.validate",
@@ -60,6 +61,10 @@ func New() *Plugin {
 					"step.db_query",
 					"step.db_exec",
 					"step.json_response",
+					"step.workflow_call",
+					"step.validate_path_param",
+					"step.validate_pagination",
+					"step.validate_request_body",
 				},
 				WorkflowTypes: []string{"pipeline"},
 				Capabilities: []plugin.CapabilityDecl{
@@ -83,19 +88,22 @@ func (p *Plugin) Capabilities() []capability.Contract {
 // StepFactories returns the step factories provided by this plugin.
 func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 	return map[string]plugin.StepFactory{
-		"step.validate":      wrapStepFactory(module.NewValidateStepFactory()),
-		"step.transform":     wrapStepFactory(module.NewTransformStepFactory()),
-		"step.conditional":   wrapStepFactory(module.NewConditionalStepFactory()),
-		"step.set":           wrapStepFactory(module.NewSetStepFactory()),
-		"step.log":           wrapStepFactory(module.NewLogStepFactory()),
-		"step.delegate":      wrapStepFactory(module.NewDelegateStepFactory()),
-		"step.jq":            wrapStepFactory(module.NewJQStepFactory()),
-		"step.publish":       wrapStepFactory(module.NewPublishStepFactory()),
-		"step.http_call":     wrapStepFactory(module.NewHTTPCallStepFactory()),
-		"step.request_parse": wrapStepFactory(module.NewRequestParseStepFactory()),
-		"step.db_query":      wrapStepFactory(module.NewDBQueryStepFactory()),
-		"step.db_exec":       wrapStepFactory(module.NewDBExecStepFactory()),
-		"step.json_response": wrapStepFactory(module.NewJSONResponseStepFactory()),
+		"step.validate":              wrapStepFactory(module.NewValidateStepFactory()),
+		"step.transform":             wrapStepFactory(module.NewTransformStepFactory()),
+		"step.conditional":           wrapStepFactory(module.NewConditionalStepFactory()),
+		"step.set":                   wrapStepFactory(module.NewSetStepFactory()),
+		"step.log":                   wrapStepFactory(module.NewLogStepFactory()),
+		"step.delegate":              wrapStepFactory(module.NewDelegateStepFactory()),
+		"step.jq":                    wrapStepFactory(module.NewJQStepFactory()),
+		"step.publish":               wrapStepFactory(module.NewPublishStepFactory()),
+		"step.http_call":             wrapStepFactory(module.NewHTTPCallStepFactory()),
+		"step.request_parse":         wrapStepFactory(module.NewRequestParseStepFactory()),
+		"step.db_query":              wrapStepFactory(module.NewDBQueryStepFactory()),
+		"step.db_exec":               wrapStepFactory(module.NewDBExecStepFactory()),
+		"step.json_response":         wrapStepFactory(module.NewJSONResponseStepFactory()),
+		"step.validate_path_param":   wrapStepFactory(module.NewValidatePathParamStepFactory()),
+		"step.validate_pagination":   wrapStepFactory(module.NewValidatePaginationStepFactory()),
+		"step.validate_request_body": wrapStepFactory(module.NewValidateRequestBodyStepFactory()),
 	}
 }
 

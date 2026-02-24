@@ -152,8 +152,8 @@ func TestModuleSchemas(t *testing.T) {
 func TestWiringHooks(t *testing.T) {
 	p := New()
 	hooks := p.WiringHooks()
-	if len(hooks) < 6 {
-		t.Errorf("WiringHooks() returned %d hooks, want >= 6", len(hooks))
+	if len(hooks) != 2 {
+		t.Errorf("WiringHooks() returned %d hooks, want 2", len(hooks))
 	}
 
 	hookNames := make(map[string]bool)
@@ -164,10 +164,6 @@ func TestWiringHooks(t *testing.T) {
 	expectedHooks := []string{
 		"http-auth-provider-wiring",
 		"http-static-fileserver-registration",
-		"http-health-endpoint-registration",
-		"http-metrics-endpoint-registration",
-		"http-log-endpoint-registration",
-		"http-openapi-endpoint-registration",
 	}
 
 	for _, name := range expectedHooks {
@@ -424,7 +420,7 @@ func TestPluginLoaderIntegration(t *testing.T) {
 	}
 
 	hooks := loader.WiringHooks()
-	if len(hooks) < 6 {
-		t.Errorf("loader has %d wiring hooks, want >= 6", len(hooks))
+	if len(hooks) != 2 {
+		t.Errorf("loader has %d wiring hooks, want 2", len(hooks))
 	}
 }

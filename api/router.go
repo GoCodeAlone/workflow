@@ -22,6 +22,10 @@ type Config struct {
 
 	// OAuth providers keyed by provider name (e.g. "google", "okta").
 	OAuthProviders map[string]*OAuthProviderConfig
+
+	// Engine is an optional engine lifecycle manager used by the workflow
+	// deploy/stop endpoints to actually start and stop workflow engines.
+	Engine EngineRunner
 }
 
 // Stores groups all store interfaces needed by the API.
@@ -109,6 +113,9 @@ func NewRouterWithIAM(stores Stores, cfg Config, iamResolver *iam.IAMResolver) h
 
 	// --- Workflows ---
 	wfH := NewWorkflowHandler(stores.Workflows, stores.Projects, stores.Memberships, permissions)
+	if cfg.Engine != nil {
+		wfH.WithEngine(cfg.Engine)
+	}
 	mux.Handle("POST /api/v1/projects/{pid}/workflows", mw.RequireAuth(http.HandlerFunc(wfH.Create)))
 	mux.Handle("GET /api/v1/workflows", mw.RequireAuth(http.HandlerFunc(wfH.ListAll)))
 	mux.Handle("GET /api/v1/projects/{pid}/workflows", mw.RequireAuth(http.HandlerFunc(wfH.ListInProject)))

@@ -44,6 +44,9 @@ func TestStepFactories(t *testing.T) {
 		"step.db_query",
 		"step.db_exec",
 		"step.json_response",
+		"step.validate_path_param",
+		"step.validate_pagination",
+		"step.validate_request_body",
 	}
 
 	for _, stepType := range expectedSteps {
@@ -65,7 +68,7 @@ func TestPluginLoads(t *testing.T) {
 	}
 
 	steps := loader.StepFactories()
-	if len(steps) != 13 {
-		t.Fatalf("expected 13 step factories after load, got %d", len(steps))
+	if len(steps) != 16 {
+		t.Fatalf("expected 16 step factories after load, got %d", len(steps))
 	}
 }

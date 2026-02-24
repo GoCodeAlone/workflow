@@ -17,6 +17,7 @@
 # - Phase B: V1 CRUD routes decomposed into pipeline primitives (db_query/db_exec)
 # - Phase C: Missing DB tables added, broken routes replaced with working pipelines
 # - Phase D: All remaining delegate steps given meaningful names
+# - Phase D+: Pre-processing pipeline steps (validation, pagination, rate limiting) for domain routes
 
 modules:
   # --- HTTP Server (admin port) ---
@@ -135,6 +136,29 @@ modules:
       cache_ttl: "30s"
       sse_enabled: true
       db_path: "data/featureflags.db"
+
+  # --- Event Store ---
+  # Provides the execution event store; auto-discovered by timeline and replay modules.
+  - name: admin-event-store
+    type: eventstore.service
+    config:
+      db_path: "data/events.db"
+      retention_days: 90
+
+  # --- Timeline / Replay ---
+  # Provides timeline, replay, and backfill/mock/diff HTTP handlers.
+  - name: admin-timeline
+    type: timeline.service
+    config:
+      event_store: "admin-event-store"
+
+  # --- Dead Letter Queue ---
+  # Provides DLQ management HTTP endpoints.
+  - name: admin-dlq
+    type: dlq.service
+    config:
+      max_retries: 3
+      retention_days: 30
 
 workflows:
   http-admin:
@@ -266,6 +290,10 @@ workflows:
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
+            - name: validate-body
+              type: step.validate_request_body
+              config:
+                required_fields: [config]
             - name: validate-engine-config
               type: step.delegate
               config:
@@ -276,6 +304,17 @@ workflows:
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
+            - name: rate-limit
+              type: step.rate_limit
+              config:
+                requests_per_minute: 5
+                burst_size: 2
+                key_from: "global"
+            - name: log-reload-attempt
+              type: step.log
+              config:
+                level: warn
+                message: "Engine reload requested via admin API"
             - name: reload-engine
               type: step.delegate
               config:
@@ -1026,27 +1065,130 @@ workflows:
               config:
                 status: 200
                 body_from: "steps.get-versions.rows"
-      # Deploy and Stop delegate to V1APIHandler which manages RuntimeManager
+      # Deploy: update status to 'active', return the updated workflow record
       - method: POST
         path: "/api/v1/admin/workflows/{id}/deploy"
         handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: deploy-workflow
-              type: step.delegate
+            - name: set-target-status
+              type: step.set
               config:
-                service: admin-v1-mgmt
+                values:
+                  target_status: "active"
+            - name: parse-request
+              type: step.request_parse
+              config:
+                path_params: [id]
+            - name: check-exists
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: check-found
+              type: step.conditional
+              config:
+                field: "steps.check-exists.found"
+                routes:
+                  "false": not-found
+                default: set-now
+            - name: set-now
+              type: step.set
+              config:
+                values:
+                  now: "{{ now }}"
+            - name: update-status
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "UPDATE workflows SET status = ?, updated_at = ? WHERE id = ?"
+                params:
+                  - "{{index .steps \"set-target-status\" \"target_status\"}}"
+                  - "{{index .steps \"set-now\" \"now\"}}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+            - name: get-updated
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.get-updated.row"
+            - name: not-found
+              type: step.json_response
+              config:
+                status: 404
+                body:
+                  error: "workflow not found"
+      # Stop: update status to 'stopped', return the updated workflow record
       - method: POST
         path: "/api/v1/admin/workflows/{id}/stop"
         handler: admin-commands
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
-            - name: stop-workflow
-              type: step.delegate
+            - name: set-target-status
+              type: step.set
               config:
-                service: admin-v1-mgmt
+                values:
+                  target_status: "stopped"
+            - name: parse-request
+              type: step.request_parse
+              config:
+                path_params: [id]
+            - name: check-exists
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: check-found
+              type: step.conditional
+              config:
+                field: "steps.check-exists.found"
+                routes:
+                  "false": not-found
+                default: set-now
+            - name: set-now
+              type: step.set
+              config:
+                values:
+                  now: "{{ now }}"
+            - name: update-status
+              type: step.db_exec
+              config:
+                database: admin-db
+                query: "UPDATE workflows SET status = ?, updated_at = ? WHERE id = ?"
+                params:
+                  - "{{index .steps \"set-target-status\" \"target_status\"}}"
+                  - "{{index .steps \"set-now\" \"now\"}}"
+                  - "{{index .steps \"parse-request\" \"path_params\" \"id\"}}"
+            - name: get-updated
+              type: step.db_query
+              config:
+                database: admin-db
+                query: "SELECT id, project_id, name, slug, description, config_yaml, version, status, is_system, workspace_dir, created_by, updated_by, created_at, updated_at FROM workflows WHERE id = ?"
+                params: ["{{index .steps \"parse-request\" \"path_params\" \"id\"}}"]
+                mode: single
+            - name: respond
+              type: step.json_response
+              config:
+                status: 200
+                body_from: "steps.get-updated.row"
+            - name: not-found
+              type: step.json_response
+              config:
+                status: 404
+                body:
+                  error: "workflow not found"
       # Load workflow from a server-local filesystem path
       - method: POST
         path: "/api/v1/admin/workflows/load-from-path"
@@ -1226,6 +1368,12 @@ workflows:
               type: step.request_parse
               config:
                 path_params: [id]
+            - name: validate-id
+              type: step.validate_path_param
+              config:
+                params: [id]
+                format: uuid
+                source: "steps.parse-request.path_params"
             - name: get-execution
               type: step.db_query
               config:
@@ -1261,6 +1409,18 @@ workflows:
               type: step.request_parse
               config:
                 path_params: [id]
+            - name: validate-id
+              type: step.validate_path_param
+              config:
+                params: [id]
+                format: uuid
+                source: "steps.parse-request.path_params"
+            - name: validate-pagination
+              type: step.validate_pagination
+              config:
+                max_limit: 100
+                default_limit: 50
+                default_page: 1
             - name: list-steps
               type: step.db_query
               config:
@@ -1696,6 +1856,12 @@ workflows:
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
+            - name: validate-pagination
+              type: step.validate_pagination
+              config:
+                max_limit: 100
+                default_limit: 20
+                default_page: 1
             - name: list-all-executions
               type: step.delegate
               config:
@@ -1781,6 +1947,22 @@ workflows:
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
+            - name: parse-request
+              type: step.request_parse
+              config:
+                path_params: [id]
+            - name: validate-id
+              type: step.validate_path_param
+              config:
+                params: [id]
+                format: uuid
+                source: "steps.parse-request.path_params"
+            - name: rate-limit
+              type: step.rate_limit
+              config:
+                requests_per_minute: 30
+                burst_size: 5
+                key_from: "global"
             - name: retry-dlq-entry
               type: step.delegate
               config:
@@ -1791,6 +1973,22 @@ workflows:
         middlewares: [admin-cors, admin-auth-middleware]
         pipeline:
           steps:
+            - name: parse-request
+              type: step.request_parse
+              config:
+                path_params: [id]
+            - name: validate-id
+              type: step.validate_path_param
+              config:
+                params: [id]
+                format: uuid
+                source: "steps.parse-request.path_params"
+            - name: rate-limit
+              type: step.rate_limit
+              config:
+                requests_per_minute: 30
+                burst_size: 5
+                key_from: "global"
             - name: discard-dlq-entry
               type: step.delegate
               config:

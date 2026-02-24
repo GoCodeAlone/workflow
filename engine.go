@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -78,6 +79,10 @@ type StdEngine struct {
 	// triggerConfigWrappers maps trigger type keys to functions that convert
 	// flat pipeline trigger config into the trigger's native format.
 	triggerConfigWrappers map[string]plugin.TriggerConfigWrapperFunc
+
+	// pipelineRegistry holds all registered pipelines by name, enabling
+	// step.workflow_call to look up sibling pipelines at execution time.
+	pipelineRegistry map[string]*module.Pipeline
 }
 
 // App returns the underlying modular.Application.
@@ -122,7 +127,7 @@ func (e *StdEngine) SetPluginInstaller(installer *plugin.PluginInstaller) {
 
 // NewStdEngine creates a new workflow engine
 func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
-	return &StdEngine{
+	e := &StdEngine{
 		app:                   app,
 		workflowHandlers:      make([]WorkflowHandler, 0),
 		moduleFactories:       make(map[string]ModuleFactory),
@@ -134,7 +139,17 @@ func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
 		stepRegistry:          newStepRegistry(), // bridge: returns *module.StepRegistry
 		triggerTypeMap:        make(map[string]string),
 		triggerConfigWrappers: make(map[string]plugin.TriggerConfigWrapperFunc),
+		pipelineRegistry:      make(map[string]*module.Pipeline),
 	}
+	// Register the step.workflow_call factory with a closure that looks up
+	// pipelines from this engine's registry at execution time.
+	e.stepRegistry.Register("step.workflow_call", module.NewWorkflowCallStepFactory(
+		func(name string) (*module.Pipeline, bool) {
+			p, ok := e.pipelineRegistry[name]
+			return p, ok
+		},
+	))
+	return e
 }
 
 // SecretsResolver returns the engine's multi-provider secrets resolver.
@@ -439,6 +454,52 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	return nil
 }
 
+// BuildFromApplicationConfig loads a multi-workflow application config and builds
+// the engine from all referenced workflow configs. Each workflow config file is
+// parsed independently, and their modules are merged into the shared module
+// registry. Module name conflicts across workflow files produce a clear error.
+//
+// This is the entry point for the application-level multi-workflow feature:
+//
+//	application:
+//	  name: chat-platform
+//	  workflows:
+//	    - file: workflows/main-loop.yaml
+//	    - file: workflows/queue-assignment.yaml
+//
+// All pipelines defined across workflow files share a single engine and can
+// call each other using step.workflow_call.
+func (e *StdEngine) BuildFromApplicationConfig(appCfg *config.ApplicationConfig) error {
+	if appCfg == nil {
+		return fmt.Errorf("application config is nil")
+	}
+	if len(appCfg.Application.Workflows) == 0 {
+		return fmt.Errorf("application %q has no workflow files defined", appCfg.Application.Name)
+	}
+
+	e.logger.Info(fmt.Sprintf("Building application %q from %d workflow files",
+		appCfg.Application.Name, len(appCfg.Application.Workflows)))
+
+	// Use the shared MergeApplicationConfig helper (also used by the server's
+	// admin config merge step) to load and validate all workflow files.
+	combined, err := config.MergeApplicationConfig(appCfg)
+	if err != nil {
+		return fmt.Errorf("application %q: %w", appCfg.Application.Name, err)
+	}
+
+	for _, ref := range appCfg.Application.Workflows {
+		wfName := ref.Name
+		if wfName == "" {
+			base := filepath.Base(ref.File)
+			wfName = strings.TrimSuffix(base, filepath.Ext(base))
+		}
+		e.logger.Info(fmt.Sprintf("Application %q: loaded workflow %q from %q",
+			appCfg.Application.Name, wfName, ref.File))
+	}
+
+	return e.BuildFromConfig(combined)
+}
+
 // Start starts all modules and triggers
 func (e *StdEngine) Start(ctx context.Context) error {
 	err := e.app.Start()
@@ -642,6 +703,9 @@ func (e *StdEngine) configurePipelines(pipelineCfg map[string]any) error {
 		}
 
 		adder.AddPipeline(pipelineName, pipeline)
+		// Register in the engine's pipeline registry so step.workflow_call can
+		// look up this pipeline at execution time.
+		e.pipelineRegistry[pipelineName] = pipeline
 		e.logger.Info(fmt.Sprintf("Configured pipeline: %s (%d steps)", pipelineName, len(steps)))
 
 		// Create trigger from inline trigger config if present.
