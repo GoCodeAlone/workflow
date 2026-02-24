@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -33,12 +35,17 @@ type OpenAPISwaggerUIConfig struct {
 
 // OpenAPIConfig holds the full configuration for an OpenAPI module.
 type OpenAPIConfig struct {
-	SpecFile   string                  `yaml:"spec_file"  json:"spec_file"`
-	BasePath   string                  `yaml:"base_path"  json:"base_path"`
-	Validation OpenAPIValidationConfig `yaml:"validation" json:"validation"`
-	SwaggerUI  OpenAPISwaggerUIConfig  `yaml:"swagger_ui" json:"swagger_ui"`
-	RouterName string                  `yaml:"router"     json:"router"` // optional: explicit router to attach to
+	SpecFile     string                  `yaml:"spec_file"      json:"spec_file"`
+	BasePath     string                  `yaml:"base_path"      json:"base_path"`
+	Validation   OpenAPIValidationConfig `yaml:"validation"     json:"validation"`
+	SwaggerUI    OpenAPISwaggerUIConfig  `yaml:"swagger_ui"     json:"swagger_ui"`
+	RouterName   string                  `yaml:"router"         json:"router"`          // optional: explicit router to attach to
+	MaxBodyBytes int64                   `yaml:"max_body_bytes" json:"max_body_bytes"`  // max request body size (bytes); 0 = use default
 }
+
+// defaultMaxBodyBytes is the default request body size limit (1 MiB) applied
+// when Validation.Request is enabled and MaxBodyBytes is not explicitly set.
+const defaultMaxBodyBytes int64 = 1 << 20 // 1 MiB
 
 // ---- Minimal OpenAPI v3 structs (parsed from YAML/JSON) ----
 
@@ -221,7 +228,7 @@ func (m *OpenAPIModule) RegisterRoutes(router HTTPRouter) {
 		}
 	}
 
-	// Serve raw spec at /openapi.json and /openapi.yaml
+	// Serve raw spec at /openapi.json and (when source is YAML) /openapi.yaml
 	if len(m.specBytes) > 0 {
 		// Cache the JSON representation once per registration.
 		if m.specJSON == nil {
@@ -233,21 +240,21 @@ func (m *OpenAPIModule) RegisterRoutes(router HTTPRouter) {
 		}
 
 		specPathJSON := basePath + "/openapi.json"
-		specPathYAML := basePath + "/openapi.yaml"
 
 		// JSON endpoint: serve re-serialised spec as JSON.
 		router.AddRoute(http.MethodGet, specPathJSON, &openAPISpecHandler{specJSON: m.specJSON})
 
-		// YAML endpoint: serve the original spec bytes with a content-type that
-		// matches the source format. JSON source files are served as application/json;
-		// YAML source files are served as application/yaml.
-		rawContentType := "application/yaml"
-		if trimmed := strings.TrimSpace(string(m.specBytes)); len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
-			rawContentType = "application/json"
+		// YAML endpoint: only register /openapi.yaml when the source spec is YAML.
+		// When the source is JSON, clients can use /openapi.json instead.
+		trimmed := strings.TrimSpace(string(m.specBytes))
+		isJSONSource := len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[')
+		if !isJSONSource {
+			specPathYAML := basePath + "/openapi.yaml"
+			router.AddRoute(http.MethodGet, specPathYAML, &openAPIRawSpecHandler{specBytes: m.specBytes, contentType: "application/yaml"})
+			m.logger.Debug("OpenAPI spec endpoint registered", "module", m.name, "paths", []string{specPathJSON, specPathYAML})
+		} else {
+			m.logger.Debug("OpenAPI spec endpoint registered", "module", m.name, "paths", []string{specPathJSON})
 		}
-		router.AddRoute(http.MethodGet, specPathYAML, &openAPIRawSpecHandler{specBytes: m.specBytes, contentType: rawContentType})
-
-		m.logger.Debug("OpenAPI spec endpoint registered", "module", m.name, "paths", []string{specPathJSON, specPathYAML})
 	}
 
 	// Serve Swagger UI
@@ -365,16 +372,29 @@ func (h *openAPIRouteHandler) validate(r *http.Request) []string {
 				ct, supportedContentTypes(h.op.RequestBody.Content)))
 		}
 
+		// Enforce a max body size to prevent DoS via arbitrarily large payloads.
+		// The limit is configurable via OpenAPIConfig.MaxBodyBytes; default is 1 MiB.
+		maxBytes := h.module.cfg.MaxBodyBytes
+		if maxBytes <= 0 {
+			maxBytes = defaultMaxBodyBytes
+		}
+		r.Body = http.MaxBytesReader(nil, r.Body, maxBytes)
+
 		// Read the body once so we can both check for presence (when required)
 		// and validate against the schema. Restore it afterwards for downstream handlers.
 		bodyBytes, readErr := io.ReadAll(r.Body)
 		if readErr != nil {
-			h.module.logger.Error("failed to read request body for validation",
-				"module", h.module.name,
-				"path", h.specPath,
-				"error", readErr,
-			)
-			errs = append(errs, "failed to read request body")
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(readErr, &maxBytesErr) {
+				errs = append(errs, fmt.Sprintf("request body exceeds maximum allowed size of %d bytes", maxBytes))
+			} else {
+				h.module.logger.Error("failed to read request body for validation",
+					"module", h.module.name,
+					"path", h.specPath,
+					"error", readErr,
+				)
+				errs = append(errs, "failed to read request body")
+			}
 		} else {
 			// Always restore body for downstream handlers using the original byte slice
 			// to avoid a bytes→string→bytes conversion that could corrupt non-UTF-8 payloads.
@@ -386,7 +406,7 @@ func (h *openAPIRouteHandler) validate(r *http.Request) []string {
 				var bodyData any
 				if jsonErr := json.Unmarshal(bodyBytes, &bodyData); jsonErr != nil {
 					errs = append(errs, fmt.Sprintf("request body contains invalid JSON: %v", jsonErr))
-				} else if bodyErrs := validateJSONBody(bodyData, mediaType.Schema); len(bodyErrs) > 0 {
+				} else if bodyErrs := validateJSONValue(bodyData, "body", mediaType.Schema); len(bodyErrs) > 0 {
 					errs = append(errs, bodyErrs...)
 				}
 			}
@@ -728,12 +748,13 @@ func htmlEscape(s string) string {
 	return html.EscapeString(s)
 }
 
-// supportedContentTypes returns a comma-joined list of content types defined
-// in the requestBody.content map, used in validation error messages.
+// supportedContentTypes returns a sorted, comma-joined list of content types
+// defined in the requestBody.content map, used in validation error messages.
 func supportedContentTypes(content map[string]openAPIMediaType) string {
 	types := make([]string, 0, len(content))
 	for ct := range content {
 		types = append(types, ct)
 	}
+	sort.Strings(types)
 	return strings.Join(types, ", ")
 }
