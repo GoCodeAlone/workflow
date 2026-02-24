@@ -14,6 +14,17 @@ import (
 
 // --- Negative tests: core engine rejects unknown module types ---
 
+// findPluginByName returns the plugin with the given name from allPlugins,
+// or nil if no such plugin exists.
+func findPluginByName(name string) plugin.EnginePlugin {
+	for _, p := range allPlugins() {
+		if p.Name() == name {
+			return p
+		}
+	}
+	return nil
+}
+
 // TestCoreRejectsUnknownModuleType verifies that the engine returns a clear
 // error when a config references a module type that no plugin provides.
 func TestCoreRejectsUnknownModuleType(t *testing.T) {
@@ -201,7 +212,10 @@ func TestSelectivePluginLoading_HTTPOnly(t *testing.T) {
 	engine := NewStdEngine(app, &mock.Logger{})
 
 	// Load only the HTTP plugin.
-	httpPlugin := allPlugins()[0] // http plugin is first
+	httpPlugin := findPluginByName("workflow-plugin-http")
+	if httpPlugin == nil {
+		t.Fatalf("HTTP plugin not found in allPlugins")
+	}
 	if err := engine.LoadPlugin(httpPlugin); err != nil {
 		t.Fatalf("LoadPlugin(http) failed: %v", err)
 	}
@@ -274,11 +288,26 @@ func TestEngineFactoryMapPopulatedByPlugins(t *testing.T) {
 		"auth.jwt",
 	}
 
+	// Build a set of known module types from the public schema API.
+	known := schema.KnownModuleTypes()
+	knownSet := make(map[string]bool, len(known))
+	for _, k := range known {
+		knownSet[k] = true
+	}
+
 	for _, mt := range expectedTypes {
-		if _, ok := engine.moduleFactories[mt]; !ok {
-			t.Errorf("module type %q not found in factory map after loading all plugins", mt)
+		if !knownSet[mt] {
+			t.Errorf("module type %q not found in schema.KnownModuleTypes() after loading all plugins", mt)
 		}
 	}
+}
+
+func getEngineModuleTypes(engine *StdEngine) []string {
+	types := make([]string, 0, len(engine.moduleFactories))
+	for mt := range engine.moduleFactories {
+		types = append(types, mt)
+	}
+	return types
 }
 
 // TestSchemaKnowsPluginModuleTypes verifies that schema.RegisterModuleType is
@@ -295,7 +324,7 @@ func TestSchemaKnowsPluginModuleTypes(t *testing.T) {
 	}
 
 	// Every module type in the factory map should be in the schema.
-	for mt := range engine.moduleFactories {
+	for _, mt := range getEngineModuleTypes(engine) {
 		if !knownSet[mt] {
 			t.Errorf("module type %q is in factory map but not in schema.KnownModuleTypes()", mt)
 		}

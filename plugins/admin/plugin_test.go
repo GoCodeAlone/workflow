@@ -9,7 +9,19 @@ import (
 
 func TestPluginImplementsEnginePlugin(t *testing.T) {
 	p := New()
+	// Compile-time assertion that *Plugin implements plugin.EnginePlugin.
 	var _ plugin.EnginePlugin = p
+
+	// Runtime checks via the EnginePlugin interface.
+	var ep plugin.EnginePlugin = p
+
+	manifest := ep.EngineManifest()
+	if manifest == nil {
+		t.Fatal("EngineManifest() returned nil")
+	}
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("EngineManifest.Validate() failed: %v", err)
+	}
 }
 
 func TestPluginManifest(t *testing.T) {
@@ -55,9 +67,14 @@ func TestModuleFactories(t *testing.T) {
 			t.Errorf("missing factory for %q", typ)
 			continue
 		}
-		mod := factory("test-"+typ, map[string]any{})
+		name := "test-" + typ
+		mod := factory(name, map[string]any{})
 		if mod == nil {
 			t.Errorf("factory for %q returned nil", typ)
+			continue
+		}
+		if mod.Name() != name {
+			t.Errorf("factory for %q produced module with unexpected name: got %q, want %q", typ, mod.Name(), name)
 		}
 	}
 }
@@ -141,6 +158,7 @@ func TestWiringHookMergesAdminConfig(t *testing.T) {
 		},
 	}
 
+	originalLen := len(cfg.Modules)
 	err := hooks[0].Hook(nil, cfg)
 	if err != nil {
 		t.Fatalf("wiring hook failed: %v", err)
@@ -156,6 +174,11 @@ func TestWiringHookMergesAdminConfig(t *testing.T) {
 	}
 	if !found {
 		t.Error("admin-server module not found after wiring hook merge")
+	}
+
+	// Ensure that additional admin modules have been merged
+	if len(cfg.Modules) <= originalLen {
+		t.Errorf("expected modules to be added by wiring hook, before=%d after=%d", originalLen, len(cfg.Modules))
 	}
 }
 

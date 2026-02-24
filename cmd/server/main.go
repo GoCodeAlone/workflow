@@ -85,8 +85,9 @@ var (
 	// Multi-workflow mode flags
 	databaseDSN       = flag.String("database-dsn", "", "PostgreSQL connection string for multi-workflow mode")
 	jwtSecret         = flag.String("jwt-secret", "", "JWT signing secret for API authentication")
-	adminEmail    = flag.String("admin-email", "", "Initial admin user email (first-run bootstrap)")
-	adminPassword = flag.String("admin-password", "", "Initial admin user password (first-run bootstrap)")
+	adminEmail        = flag.String("admin-email", "", "Initial admin user email (first-run bootstrap)")
+	adminPassword     = flag.String("admin-password", "", "Initial admin user password (first-run bootstrap)")
+	multiWorkflowAddr = flag.String("multi-workflow-addr", ":8081", "HTTP listen address (multi-workflow API)")
 
 	// License flags
 	licenseKey = flag.String("license-key", "", "License key for the workflow engine (or set WORKFLOW_LICENSE_KEY env var)")
@@ -1196,10 +1197,29 @@ func (app *serverApp) importBundles(logger *slog.Logger) error {
 			continue
 		}
 
+		// Ensure the extracted workflow.yaml path is within the expected destination directory
+		absDestDir, absDestErr := filepath.Abs(destDir)
+		if absDestErr != nil {
+			logger.Error("Failed to resolve destination directory", "destDir", destDir, "error", absDestErr)
+			continue
+		}
+
+		absWorkflowPath, absWorkflowErr := filepath.Abs(workflowPath)
+		if absWorkflowErr != nil {
+			logger.Error("Failed to resolve workflow path", "path", workflowPath, "error", absWorkflowErr)
+			continue
+		}
+
+		rel, relErr := filepath.Rel(absDestDir, absWorkflowPath)
+		if relErr != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+			logger.Error("Workflow path is outside destination directory; possible path traversal", "path", absWorkflowPath, "destDir", absDestDir, "error", relErr)
+			continue
+		}
+
 		// Read the extracted workflow.yaml
-		yamlData, err := os.ReadFile(workflowPath) //nolint:gosec // G703: path from trusted bundle extraction
+		yamlData, err := os.ReadFile(absWorkflowPath) //nolint:gosec // G703: path validated to be within destDir
 		if err != nil {
-			logger.Error("Failed to read workflow.yaml", "path", workflowPath, "error", err)
+			logger.Error("Failed to read workflow.yaml", "path", absWorkflowPath, "error", err)
 			continue
 		}
 		yamlContent := string(yamlData)
@@ -1325,10 +1345,14 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 
 	// Clean up temp files and directories
 	for _, f := range app.cleanupFiles {
-		os.Remove(f) //nolint:gosec // G703: cleaning up server-managed temp files
+		if err := os.Remove(f); err != nil && !os.IsNotExist(err) { //nolint:gosec // G703: cleaning up server-managed temp files
+			app.logger.Error("Temp file cleanup error", "path", f, "error", err)
+		}
 	}
 	for _, d := range app.cleanupDirs {
-		os.RemoveAll(d) //nolint:gosec // G703: cleaning up server-managed temp dirs
+		if err := os.RemoveAll(d); err != nil && !os.IsNotExist(err) { //nolint:gosec // G703: cleaning up server-managed temp dirs
+			app.logger.Error("Temp directory cleanup error", "path", d, "error", err)
+		}
 	}
 
 	return nil
