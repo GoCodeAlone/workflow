@@ -1,0 +1,35 @@
+requires:
+  plugins:
+    - name: workflow-plugin-http
+    - name: workflow-plugin-openapi
+
+modules:
+  # HTTP server on port 8095
+  - name: petstore-server
+    type: http.server
+    config:
+      address: ":8095"
+
+  # HTTP router — the OpenAPI module registers routes onto this
+  - name: petstore-router
+    type: http.router
+    dependsOn:
+      - petstore-server
+
+  # OpenAPI module — parses the spec and generates routes
+  - name: pet-store-api
+    type: openapi
+    dependsOn:
+      - petstore-router
+    config:
+      # NOTE: spec_file is resolved relative to this config file's directory
+      # via the _config_dir mechanism in config.ResolvePathInConfig.
+      spec_file: specs/petstore.yaml
+      base_path: /api/v1
+      router: petstore-router
+      validation:
+        request: true
+        response: false
+      swagger_ui:
+        enabled: true
+        path: /docs

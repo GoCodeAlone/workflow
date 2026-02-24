@@ -781,6 +781,23 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	// ---- OpenAPI Category ----
 
 	r.Register(&ModuleSchema{
+		Type:        "openapi",
+		Label:       "OpenAPI Spec Server",
+		Category:    "integration",
+		Description: "Parses an OpenAPI v3 spec file and auto-generates HTTP routes with request validation and optional Swagger UI",
+		Inputs:      []ServiceIODef{{Name: "router", Type: "HTTPRouter", Description: "HTTP router to register generated routes on"}},
+		Outputs:     []ServiceIODef{{Name: "routes", Type: "OpenAPIRoutes", Description: "Auto-generated HTTP routes from the spec"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "spec_file", Label: "Spec File", Type: FieldTypeFilePath, Required: true, Description: "Path to the OpenAPI v3 spec file (JSON or YAML)", Placeholder: "specs/petstore.yaml"},
+			{Key: "base_path", Label: "Base Path", Type: FieldTypeString, Description: "Base path prefix for all generated routes", Placeholder: "/api/v1"},
+			{Key: "router", Label: "Router Module", Type: FieldTypeString, Description: "Name of the http.router module to register routes on (auto-detected if omitted)", Placeholder: "my-router"},
+			{Key: "validation", Label: "Validation", Type: FieldTypeJSON, DefaultValue: map[string]any{"request": true, "response": false}, Description: "Request/response validation settings, e.g. {\"request\": true, \"response\": false}"},
+			{Key: "swagger_ui", Label: "Swagger UI", Type: FieldTypeJSON, DefaultValue: map[string]any{"enabled": false, "path": "/docs"}, Description: "Swagger UI settings, e.g. {\"enabled\": false, \"path\": \"/docs\"}"},
+		},
+		DefaultConfig: map[string]any{"validation": map[string]any{"request": true, "response": false}, "swagger_ui": map[string]any{"enabled": false, "path": "/docs"}},
+	})
+
+	r.Register(&ModuleSchema{
 		Type:        "openapi.generator",
 		Label:       "OpenAPI Generator",
 		Category:    "integration",
