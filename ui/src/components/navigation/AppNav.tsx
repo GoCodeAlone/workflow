@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react';
 import useObservabilityStore from '../../store/observabilityStore.ts';
 import useWorkflowStore from '../../store/workflowStore.ts';
 import usePluginStore, { type UIPageDef } from '../../store/pluginStore.ts';
+import useAuthStore from '../../store/authStore.ts';
 import type { ActiveView } from '../../types/observability.ts';
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,8 @@ export default function AppNav() {
   const activeWorkflowRecord = useWorkflowStore((s) => s.activeWorkflowRecord);
   const nodes = useWorkflowStore((s) => s.nodes);
   const selectedWorkflowId = useObservabilityStore((s) => s.selectedWorkflowId);
+  const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
 
   const enabledPages = usePluginStore((s) => s.enabledPages);
 
@@ -173,6 +176,36 @@ export default function AppNav() {
           ))}
         </>
       )}
+
+      {/* Spacer to push logout to bottom */}
+      <div style={{ flex: 1 }} />
+
+      {/* User / logout section */}
+      <NavDivider />
+      <button
+        onClick={logout}
+        title={`Sign out${user ? ` (${user.email})` : ''}`}
+        aria-label="Sign out"
+        style={{
+          width: 40,
+          height: 40,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'none',
+          border: 'none',
+          borderLeft: '3px solid transparent',
+          borderRadius: 0,
+          cursor: 'pointer',
+          padding: 0,
+          flexShrink: 0,
+          fontSize: 18,
+          filter: 'grayscale(0.4) opacity(0.7)',
+          marginBottom: 4,
+        }}
+      >
+        <span aria-hidden="true">🚪</span>
+      </button>
     </nav>
   );
 }

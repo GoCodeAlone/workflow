@@ -381,14 +381,18 @@ func (h *V1APIHandler) extractClaims(r *http.Request) (*userClaims, error) {
 		return uc, nil
 	}
 
-	// Fallback: parse JWT directly from Authorization header
+	// Fallback: parse JWT directly from Authorization header or token query param
+	// (EventSource for SSE cannot set custom headers, so falls back to query param)
 	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		return nil, fmt.Errorf("no authorization header")
-	}
 	tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-	if tokenStr == authHeader {
-		return nil, fmt.Errorf("bearer token required")
+	if authHeader == "" || tokenStr == authHeader {
+		if queryToken := r.URL.Query().Get("token"); queryToken != "" {
+			tokenStr = queryToken
+		} else if authHeader == "" {
+			return nil, fmt.Errorf("no authorization header")
+		} else {
+			return nil, fmt.Errorf("bearer token required")
+		}
 	}
 
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) {
