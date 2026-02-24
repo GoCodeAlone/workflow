@@ -20,7 +20,6 @@ import (
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow"
-	"github.com/GoCodeAlone/workflow/admin"
 	"github.com/GoCodeAlone/workflow/ai"
 	copilotai "github.com/GoCodeAlone/workflow/ai/copilot"
 	"github.com/GoCodeAlone/workflow/ai/llm"
@@ -41,7 +40,6 @@ import (
 	_ "github.com/GoCodeAlone/workflow/plugin/docmanager"
 	pluginexternal "github.com/GoCodeAlone/workflow/plugin/external"
 	_ "github.com/GoCodeAlone/workflow/plugin/storebrowser"
-	pluginadmin "github.com/GoCodeAlone/workflow/plugins/admin"
 	pluginai "github.com/GoCodeAlone/workflow/plugins/ai"
 	pluginapi "github.com/GoCodeAlone/workflow/plugins/api"
 	pluginauth "github.com/GoCodeAlone/workflow/plugins/auth"
@@ -94,10 +92,11 @@ var (
 
 	// v1 API flags
 	dataDir       = flag.String("data-dir", "./data", "Directory for SQLite database and persistent data")
-	restoreAdmin  = flag.Bool("restore-admin", false, "Restore admin config to embedded default on startup")
 	loadWorkflows = flag.String("load-workflows", "", "Comma-separated paths to workflow YAML files or directories to load alongside admin")
-	importBundle  = flag.String("import-bundle", "", "Comma-separated paths to .tar.gz workflow bundles to import and deploy on startup")
-	adminUIDir    = flag.String("admin-ui-dir", "", "Path to admin UI static assets directory (overrides ADMIN_UI_DIR env var). Leave empty to use the path in admin/config.yaml")
+	importBundle = flag.String("import-bundle", "", "Comma-separated paths to .tar.gz workflow bundles to import and deploy on startup")
+	// Deprecated: admin UI is now served by the external workflow-plugin-admin binary.
+	// This flag is accepted for backwards compatibility but has no effect.
+	_ = flag.String("admin-ui-dir", "", "Deprecated: admin UI is now served by the external workflow-plugin-admin binary")
 )
 
 // defaultEnginePlugins returns the standard set of engine plugins used by all engine instances.
@@ -124,7 +123,6 @@ func defaultEnginePlugins() []plugin.EnginePlugin {
 		pluginintegration.New(),
 		pluginai.New(),
 		pluginplatform.New(),
-		pluginadmin.New().WithUIDir(*adminUIDir),
 	}
 }
 
@@ -342,12 +340,6 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 		logger: logger,
 	}
 
-	// Merge admin config before building the engine so admin modules are
-	// registered and initialized alongside user-provided modules.
-	if err := mergeAdminConfig(logger, cfg); err != nil {
-		return nil, fmt.Errorf("failed to set up admin: %w", err)
-	}
-
 	engine, loader, registry, err := buildEngine(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build engine: %w", err)
@@ -386,22 +378,12 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 // applies the admin config overlay, then builds the engine using
 // BuildFromApplicationConfig so cross-workflow pipeline calls are wired up.
 func setupFromAppConfig(logger *slog.Logger, appCfg *config.ApplicationConfig) (*serverApp, error) {
-	// Merge all workflow files into a combined config so the admin overlay
-	// can be applied consistently (module names, route configs, etc.).
+	// Merge all workflow files into a combined config.
 	combined, err := config.MergeApplicationConfig(appCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to merge application config: %w", err)
 	}
 
-	// Apply admin config overlay (admin UI, management routes, etc.).
-	if err := mergeAdminConfig(logger, combined); err != nil {
-		return nil, fmt.Errorf("failed to set up admin: %w", err)
-	}
-
-	// Build the engine from the already-merged application config (including the
-	// admin overlay). The merged config is passed directly to buildEngine, which
-	// internally uses BuildFromConfig and ensures features like the pipeline
-	// registry for step.workflow_call are configured correctly.
 	engine, loader, registry, err := buildEngine(combined, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build engine: %w", err)
@@ -431,59 +413,6 @@ func setupFromAppConfig(logger *slog.Logger, appCfg *config.ApplicationConfig) (
 		"server started with application config: "+appCfg.Application.Name)
 
 	return sApp, nil
-}
-
-// mergeAdminConfig loads the embedded admin config and merges admin
-// modules/routes into the primary config. If --admin-ui-dir (or ADMIN_UI_DIR
-// env var) is set the static.fileserver root is updated to that path,
-// allowing the admin UI to be deployed and updated independently of the binary.
-// If the config already contains admin modules (e.g., the user passed the
-// admin config directly), the merge is skipped to avoid duplicates — but
-// the UI root is still injected so the static fileserver works.
-func mergeAdminConfig(logger *slog.Logger, cfg *config.WorkflowConfig) error {
-	// Resolve the UI root: flag > ADMIN_UI_DIR env > leave as configured in config.yaml
-	uiDir := *adminUIDir
-
-	// Check if the config already contains admin modules
-	for _, m := range cfg.Modules {
-		if m.Name == "admin-server" {
-			logger.Info("Config already contains admin modules, skipping merge")
-			if uiDir != "" {
-				injectUIRoot(cfg, uiDir)
-				logger.Info("Admin UI root overridden", "uiDir", uiDir)
-			}
-			return nil
-		}
-	}
-
-	adminCfg, err := admin.LoadConfig()
-	if err != nil {
-		return err
-	}
-
-	if uiDir != "" {
-		injectUIRoot(adminCfg, uiDir)
-		logger.Info("Admin UI root overridden", "uiDir", uiDir)
-	}
-
-	// Merge admin modules and routes into primary config
-	admin.MergeInto(cfg, adminCfg)
-
-	logger.Info("Admin UI enabled")
-	return nil
-}
-
-// injectUIRoot updates every static.fileserver module config in cfg to serve
-// from the given root directory.
-func injectUIRoot(cfg *config.WorkflowConfig, uiRoot string) {
-	for i := range cfg.Modules {
-		if cfg.Modules[i].Type == "static.fileserver" {
-			if cfg.Modules[i].Config == nil {
-				cfg.Modules[i].Config = make(map[string]any)
-			}
-			cfg.Modules[i].Config["root"] = uiRoot
-		}
-	}
 }
 
 // initManagementHandlers creates all management service handlers and stores
@@ -597,30 +526,13 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	}
 	app.stores.v1Store = store
 
-	// If --restore-admin, reset the system workflow to the embedded default
-	if *restoreAdmin {
-		adminCfgData, err := admin.LoadConfigRaw()
-		if err != nil {
-			logger.Warn("Failed to load embedded admin config for restore", "error", err)
-		} else if resetErr := store.ResetSystemWorkflow(string(adminCfgData)); resetErr != nil {
-			logger.Info("No system workflow to reset (first run)")
-		} else {
-			logger.Info("Restored admin config to embedded default")
-		}
-	}
-
 	// Ensure the system hierarchy exists (Company -> Org -> Project -> Workflow).
-	// This is idempotent -- if it already exists, it returns the existing IDs.
-	adminCfgData, loadErr := admin.LoadConfigRaw()
-	if loadErr != nil {
-		logger.Warn("Failed to load embedded admin config for system hierarchy", "error", loadErr)
+	// This is idempotent — if it already exists, it returns the existing IDs.
+	// The admin plugin (external binary) manages its own workflow config.
+	if _, _, _, _, ensureErr := store.EnsureSystemHierarchy("system", ""); ensureErr != nil {
+		logger.Warn("Failed to ensure system hierarchy", "error", ensureErr)
 	} else {
-		_, _, _, _, ensureErr := store.EnsureSystemHierarchy("system", string(adminCfgData))
-		if ensureErr != nil {
-			logger.Warn("Failed to ensure system hierarchy", "error", ensureErr)
-		} else {
-			logger.Info("System hierarchy ready")
-		}
+		logger.Info("System hierarchy ready")
 	}
 
 	// Create V1 API handler
@@ -1384,10 +1296,9 @@ func applyEnvOverrides() {
 		"anthropic-model": "WORKFLOW_AI_MODEL",
 		"jwt-secret":      "WORKFLOW_JWT_SECRET",
 		"data-dir":        "WORKFLOW_DATA_DIR",
-		"load-workflows":  "WORKFLOW_LOAD_WORKFLOWS",
-		"import-bundle":   "WORKFLOW_IMPORT_BUNDLE",
-		"admin-ui-dir":    "ADMIN_UI_DIR",
-		"license-key":     "WORKFLOW_LICENSE_KEY",
+		"load-workflows": "WORKFLOW_LOAD_WORKFLOWS",
+		"import-bundle":  "WORKFLOW_IMPORT_BUNDLE",
+		"license-key":    "WORKFLOW_LICENSE_KEY",
 	}
 
 	// Track which flags were explicitly set on the command line.
