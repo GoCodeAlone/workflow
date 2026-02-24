@@ -43,6 +43,9 @@ type EnginePlugin interface {
 
 	// WiringHooks returns post-init wiring functions.
 	WiringHooks() []WiringHook
+
+	// ConfigTransformHooks returns hooks that run before module registration in BuildFromConfig.
+	ConfigTransformHooks() []ConfigTransformHook
 }
 
 // ModuleFactory creates a modular.Module from a name and config map.
@@ -71,6 +74,14 @@ type WiringHook struct {
 	Name     string
 	Priority int // higher priority runs first
 	Hook     func(app modular.Application, cfg *config.WorkflowConfig) error
+}
+
+// ConfigTransformHook runs BEFORE module registration in BuildFromConfig,
+// allowing plugins to inject modules, workflows, and triggers into the config.
+type ConfigTransformHook struct {
+	Name     string
+	Priority int // higher priority runs first
+	Hook     func(cfg *config.WorkflowConfig) error
 }
 
 // TriggerConfigWrapperFunc converts flat pipeline trigger config into the
@@ -154,5 +165,10 @@ func (b *BaseEnginePlugin) ModuleSchemas() []*schema.ModuleSchema {
 
 // WiringHooks returns no wiring hooks.
 func (b *BaseEnginePlugin) WiringHooks() []WiringHook {
+	return nil
+}
+
+// ConfigTransformHooks returns no config transform hooks.
+func (b *BaseEnginePlugin) ConfigTransformHooks() []ConfigTransformHook {
 	return nil
 }

@@ -20,15 +20,16 @@ type LicenseValidator interface {
 
 // PluginLoader loads EnginePlugins and populates registries.
 type PluginLoader struct {
-	capabilityReg    *capability.Registry
-	moduleFactories  map[string]ModuleFactory
-	stepFactories    map[string]StepFactory
-	triggerFactories map[string]TriggerFactory
-	handlerFactories map[string]WorkflowHandlerFactory
-	wiringHooks      []WiringHook
-	schemaRegistry   *schema.ModuleSchemaRegistry
-	plugins          []EnginePlugin
-	licenseValidator LicenseValidator
+	capabilityReg        *capability.Registry
+	moduleFactories      map[string]ModuleFactory
+	stepFactories        map[string]StepFactory
+	triggerFactories     map[string]TriggerFactory
+	handlerFactories     map[string]WorkflowHandlerFactory
+	wiringHooks          []WiringHook
+	configTransformHooks []ConfigTransformHook
+	schemaRegistry       *schema.ModuleSchemaRegistry
+	plugins              []EnginePlugin
+	licenseValidator     LicenseValidator
 }
 
 // NewPluginLoader creates a new PluginLoader backed by the given capability and schema registries.
@@ -144,6 +145,9 @@ func (l *PluginLoader) LoadPlugin(p EnginePlugin) error {
 	// Collect wiring hooks.
 	l.wiringHooks = append(l.wiringHooks, p.WiringHooks()...)
 
+	// Collect config transform hooks.
+	l.configTransformHooks = append(l.configTransformHooks, p.ConfigTransformHooks()...)
+
 	l.plugins = append(l.plugins, p)
 	return nil
 }
@@ -203,6 +207,16 @@ func (l *PluginLoader) WorkflowHandlerFactories() map[string]WorkflowHandlerFact
 func (l *PluginLoader) WiringHooks() []WiringHook {
 	hooks := make([]WiringHook, len(l.wiringHooks))
 	copy(hooks, l.wiringHooks)
+	sort.Slice(hooks, func(i, j int) bool {
+		return hooks[i].Priority > hooks[j].Priority
+	})
+	return hooks
+}
+
+// ConfigTransformHooks returns all registered config transform hooks sorted by priority (highest first).
+func (l *PluginLoader) ConfigTransformHooks() []ConfigTransformHook {
+	hooks := make([]ConfigTransformHook, len(l.configTransformHooks))
+	copy(hooks, l.configTransformHooks)
 	sort.Slice(hooks, func(i, j int) bool {
 		return hooks[i].Priority > hooks[j].Priority
 	})

@@ -4,21 +4,26 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path/filepath"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/schema"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"gopkg.in/yaml.v3"
 )
 
 // ExternalPluginAdapter wraps a gRPC plugin client to implement plugin.EnginePlugin.
 // The engine sees this as a regular plugin — no changes to engine.go needed.
 type ExternalPluginAdapter struct {
-	name     string
-	client   *PluginClient
-	manifest *pb.Manifest
+	name           string
+	client         *PluginClient
+	manifest       *pb.Manifest
+	configFragment []byte
+	pluginDir      string
 }
 
 // NewExternalPluginAdapter creates an adapter from a connected plugin client.
@@ -28,11 +33,17 @@ func NewExternalPluginAdapter(name string, client *PluginClient) (*ExternalPlugi
 	if err != nil {
 		return nil, fmt.Errorf("get manifest from plugin %s: %w", name, err)
 	}
-	return &ExternalPluginAdapter{
+	a := &ExternalPluginAdapter{
 		name:     name,
 		client:   client,
 		manifest: manifest,
-	}, nil
+	}
+	// Fetch config fragment eagerly so it's available before BuildFromConfig runs.
+	if resp, fragErr := client.client.GetConfigFragment(ctx, &emptypb.Empty{}); fragErr == nil && len(resp.YamlConfig) > 0 {
+		a.configFragment = resp.YamlConfig
+		a.pluginDir = resp.PluginDir
+	}
+	return a, nil
 }
 
 // --- NativePlugin interface ---
@@ -171,6 +182,34 @@ func (a *ExternalPluginAdapter) ModuleSchemas() []*schema.ModuleSchema {
 
 func (a *ExternalPluginAdapter) WiringHooks() []plugin.WiringHook {
 	return nil
+}
+
+func (a *ExternalPluginAdapter) ConfigTransformHooks() []plugin.ConfigTransformHook {
+	if len(a.configFragment) == 0 {
+		return nil
+	}
+	return []plugin.ConfigTransformHook{
+		{
+			Name:     a.manifest.Name + "-config-merge",
+			Priority: 100,
+			Hook: func(cfg *config.WorkflowConfig) error {
+				var fragment config.WorkflowConfig
+				if err := yaml.Unmarshal(a.configFragment, &fragment); err != nil {
+					return fmt.Errorf("failed to parse config fragment from plugin %s: %w", a.manifest.Name, err)
+				}
+				// Resolve relative paths against plugin directory.
+				if a.pluginDir != "" {
+					for i := range fragment.Modules {
+						if mc, ok := fragment.Modules[i].Config["root"].(string); ok && !filepath.IsAbs(mc) {
+							fragment.Modules[i].Config["root"] = filepath.Join(a.pluginDir, mc)
+						}
+					}
+				}
+				config.MergeConfigs(cfg, &fragment)
+				return nil
+			},
+		},
+	}
 }
 
 // Ensure ExternalPluginAdapter satisfies plugin.EnginePlugin at compile time.

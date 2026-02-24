@@ -53,6 +53,9 @@ service PluginService {
 
   // DeliverMessage delivers a message from the host to a plugin module.
   rpc DeliverMessage(DeliverMessageRequest) returns (DeliverMessageResponse);
+
+  // GetConfigFragment returns YAML config to merge into the host config before module registration.
+  rpc GetConfigFragment(google.protobuf.Empty) returns (ConfigFragmentResponse);
 }
 
 // EngineCallbackService is implemented by the host and called by the plugin.
@@ -245,4 +248,10 @@ message DeliverMessageRequest {
 message DeliverMessageResponse {
   string error = 1;
   bool acknowledged = 2;
+}
+
+// ConfigFragmentResponse returns YAML config bytes and the plugin's working directory.
+message ConfigFragmentResponse {
+  bytes yaml_config = 1;
+  string plugin_dir = 2;
 }

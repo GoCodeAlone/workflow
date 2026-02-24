@@ -3,6 +3,7 @@ package sdk
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
@@ -341,6 +342,24 @@ func (s *grpcServer) DestroyStep(_ context.Context, req *pb.HandleRequest) (*pb.
 		return &pb.ErrorResponse{Error: fmt.Sprintf("unknown step handle: %s", req.HandleId)}, nil
 	}
 	return &pb.ErrorResponse{}, nil
+}
+
+// --- Config fragment RPC ---
+
+func (s *grpcServer) GetConfigFragment(_ context.Context, _ *emptypb.Empty) (*pb.ConfigFragmentResponse, error) {
+	cp, ok := s.provider.(ConfigProvider)
+	if !ok {
+		return &pb.ConfigFragmentResponse{}, nil
+	}
+	data, err := cp.ConfigFragment()
+	if err != nil {
+		return nil, err
+	}
+	dir, _ := os.Getwd()
+	return &pb.ConfigFragmentResponse{
+		YamlConfig: data,
+		PluginDir:  dir,
+	}, nil
 }
 
 // --- Service RPCs ---

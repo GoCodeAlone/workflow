@@ -358,6 +358,15 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	// Store config directory for consistent path resolution in pipeline steps
 	e.configDir = cfg.ConfigDir
 
+	// Run plugin config transform hooks BEFORE module registration.
+	if e.pluginLoader != nil {
+		for _, hook := range e.pluginLoader.ConfigTransformHooks() {
+			if err := hook.Hook(cfg); err != nil {
+				return fmt.Errorf("config transform hook %q failed: %w", hook.Name, err)
+			}
+		}
+	}
+
 	// Register all modules from config
 	for _, modCfg := range cfg.Modules {
 		// Expand secret references in all string config values before module instantiation.

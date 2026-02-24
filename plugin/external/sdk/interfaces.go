@@ -116,3 +116,11 @@ type MessageAwareModule interface {
 	SetMessagePublisher(pub MessagePublisher)
 	SetMessageSubscriber(sub MessageSubscriber)
 }
+
+// ConfigProvider is optionally implemented by plugins that need to inject
+// config (modules, workflows, triggers) into the host config before
+// module registration.
+type ConfigProvider interface {
+	// ConfigFragment returns YAML config to merge into the host config.
+	ConfigFragment() ([]byte, error)
+}
