@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/modules/eventbus"
+	"github.com/CrisisTextLine/modular/modules/eventbus/v2"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/handlers"

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/modules/eventbus"
+	"github.com/CrisisTextLine/modular/modules/eventbus/v2"
 )
 
 // setupEventBusForBridge creates a working EventBusModule backed by the in-memory engine.
@@ -193,13 +193,13 @@ func TestEventBusBridge_SendMessageThenReceiveViaEventBus(t *testing.T) {
 
 	select {
 	case evt := <-received:
-		if evt.Topic != "test.send" {
-			t.Fatalf("expected topic %q, got %q", "test.send", evt.Topic)
+		if evt.Type() != "test.send" {
+			t.Fatalf("expected topic %q, got %q", "test.send", evt.Type())
 		}
 		// The payload went through JSON unmarshal in SendMessage then was published.
-		payloadMap, ok := evt.Payload.(map[string]any)
-		if !ok {
-			t.Fatalf("expected map payload, got %T", evt.Payload)
+		var payloadMap map[string]any
+		if err := evt.DataAs(&payloadMap); err != nil {
+			t.Fatalf("expected map payload, got error: %v", err)
 		}
 		if payloadMap["hello"] != "world" {
 			t.Fatalf("expected hello=world, got %v", payloadMap["hello"])
@@ -309,10 +309,7 @@ func TestEventBusBridge_SendInvalidJSON(t *testing.T) {
 	select {
 	case evt := <-received:
 		// Payload should be the raw bytes since JSON unmarshal failed.
-		b, ok := evt.Payload.([]byte)
-		if !ok {
-			t.Fatalf("expected []byte payload for invalid JSON, got %T", evt.Payload)
-		}
+		b := evt.Data()
 		if string(b) != "this is not json" {
 			t.Fatalf("expected raw message, got %q", string(b))
 		}

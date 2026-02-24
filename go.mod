@@ -7,7 +7,7 @@ require (
 	github.com/CrisisTextLine/modular v1.11.11
 	github.com/CrisisTextLine/modular/modules/auth v0.4.0
 	github.com/CrisisTextLine/modular/modules/cache v0.4.0
-	github.com/CrisisTextLine/modular/modules/eventbus v1.6.0
+	github.com/CrisisTextLine/modular/modules/eventbus/v2 v2.0.0
 	github.com/CrisisTextLine/modular/modules/reverseproxy/v2 v2.2.0
 	github.com/CrisisTextLine/modular/modules/scheduler v0.4.0
 	github.com/GoCodeAlone/go-plugin v0.0.0-20260220090904-b4c35f0e4271
@@ -38,7 +38,7 @@ require (
 	github.com/jackc/pgx/v5 v5.7.5
 	github.com/launchdarkly/go-sdk-common/v3 v3.5.0
 	github.com/launchdarkly/go-server-sdk/v7 v7.14.5
-	github.com/nats-io/nats.go v1.46.1
+	github.com/nats-io/nats.go v1.48.0
 	github.com/prometheus/client_golang v1.19.1
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/stripe/stripe-go/v82 v82.5.1
@@ -143,7 +143,7 @@ require (
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/compress v1.18.1 // indirect
+	github.com/klauspost/compress v1.18.3 // indirect
 	github.com/launchdarkly/ccache v1.1.0 // indirect
 	github.com/launchdarkly/eventsource v1.10.0 // indirect
 	github.com/launchdarkly/go-jsonstream/v3 v3.1.0 // indirect
@@ -162,7 +162,7 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/morikuni/aec v1.1.0 // indirect
-	github.com/nats-io/nkeys v0.4.11 // indirect
+	github.com/nats-io/nkeys v0.4.12 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/oklog/run v1.2.0 // indirect

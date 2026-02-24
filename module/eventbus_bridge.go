@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/modules/eventbus"
+	"github.com/CrisisTextLine/modular/modules/eventbus/v2"
 )
 
 // EventBusBridgeName is the default service name for the EventBus bridge adapter.
@@ -107,11 +107,7 @@ func (b *EventBusBridge) Subscribe(topic string, handler MessageHandler) error {
 	}
 
 	eventHandler := func(_ context.Context, event eventbus.Event) error {
-		jsonBytes, err := json.Marshal(event.Payload)
-		if err != nil {
-			return fmt.Errorf("marshalling event payload: %w", err)
-		}
-		return handler.HandleMessage(jsonBytes)
+		return handler.HandleMessage(event.Data())
 	}
 
 	sub, err := b.eventBus.Subscribe(context.Background(), topic, eventHandler)

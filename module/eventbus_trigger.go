@@ -2,12 +2,11 @@ package module
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/modules/eventbus"
+	"github.com/CrisisTextLine/modular/modules/eventbus/v2"
 )
 
 const (
@@ -185,17 +184,9 @@ func (t *EventBusTrigger) SetEventBusAndEngine(eb *eventbus.EventBusModule, engi
 func (t *EventBusTrigger) createHandler(sub EventBusTriggerSubscription) eventbus.EventHandler {
 	return func(ctx context.Context, ev eventbus.Event) error {
 		// Extract payload as map[string]interface{}.
-		data, ok := ev.Payload.(map[string]any)
-		if !ok {
-			// JSON round-trip for non-map payloads.
-			raw, err := json.Marshal(ev.Payload)
-			if err != nil {
-				return fmt.Errorf("failed to marshal event payload: %w", err)
-			}
-			data = make(map[string]any)
-			if err := json.Unmarshal(raw, &data); err != nil {
-				return fmt.Errorf("failed to unmarshal event payload: %w", err)
-			}
+		data := make(map[string]any)
+		if err := ev.DataAs(&data); err != nil {
+			return fmt.Errorf("failed to unmarshal event payload: %w", err)
 		}
 
 		// Event type filtering.

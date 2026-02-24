@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/modules/eventbus"
+	"github.com/CrisisTextLine/modular/modules/eventbus/v2"
 )
 
 // --- helpers -----------------------------------------------------------------
