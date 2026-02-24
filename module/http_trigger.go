@@ -19,6 +19,15 @@ type httpRWContextKey struct{}
 // like step.json_response can write directly to the HTTP response.
 var HTTPResponseWriterContextKey = httpRWContextKey{}
 
+// httpReqContextKey is the unexported type for the HTTP request context key.
+type httpReqContextKey struct{}
+
+// HTTPRequestContextKey is the context key used to pass an *http.Request through
+// the pipeline execution context. Pipeline.Execute extracts this value and injects
+// it into PipelineContext.Metadata["_http_request"] so that steps can read request
+// headers, path parameters, and the request body.
+var HTTPRequestContextKey = httpReqContextKey{}
+
 // trackedResponseWriter wraps http.ResponseWriter and tracks whether a response
 // body has been written, so the HTTP trigger can fall back to the generic
 // "workflow triggered" response only when the pipeline didn't write one.
@@ -249,6 +258,11 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 		// can seed it into PipelineContext.Metadata["_http_response_writer"],
 		// allowing steps like step.json_response to write directly to the response.
 		ctx := context.WithValue(r.Context(), HTTPResponseWriterContextKey, rw)
+
+		// Inject the HTTP request into the context so Pipeline.Execute can seed
+		// it into PipelineContext.Metadata["_http_request"], giving steps access
+		// to headers (e.g. Authorization), method, URL, and body.
+		ctx = context.WithValue(ctx, HTTPRequestContextKey, r)
 
 		// Extract data from the request to pass to the workflow
 		data := make(map[string]any)
