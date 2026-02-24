@@ -5,10 +5,31 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"regexp"
 	"sync"
 
 	"github.com/CrisisTextLine/modular"
 )
+
+// pathParamRe matches {name} or {name...} segments in a URL path template.
+var pathParamRe = regexp.MustCompile(`\{(\w+)(?:\.\.\.)?}`)
+
+// extractRouteParams reads all {name} placeholders from a path template
+// and returns their runtime values from the request using r.PathValue.
+func extractRouteParams(path string, r *http.Request) map[string]string {
+	matches := pathParamRe.FindAllStringSubmatch(path, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	params := make(map[string]string, len(matches))
+	for _, m := range matches {
+		name := m[1]
+		if v := r.PathValue(name); v != "" {
+			params[name] = v
+		}
+	}
+	return params
+}
 
 // Route represents an HTTP route
 type Route struct {
@@ -149,6 +170,11 @@ func (r *StandardHTTPRouter) rebuildMuxLocked() {
 	mux := http.NewServeMux()
 	for _, route := range r.routes {
 		mux.HandleFunc(fmt.Sprintf("%s %s", route.Method, route.Path), func(w http.ResponseWriter, r *http.Request) {
+			// Inject path params into context so triggers can read them via r.Context().Value("params").
+			if params := extractRouteParams(route.Path, r); len(params) > 0 {
+				r = r.WithContext(context.WithValue(r.Context(), "params", params))
+			}
+
 			// Create handler chain with middleware
 			var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				route.Handler.Handle(w, r)
