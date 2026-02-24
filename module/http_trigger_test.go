@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -143,5 +144,172 @@ func (r *MockHTTPRouter) Start(ctx context.Context) error {
 }
 
 func (r *MockHTTPRouter) Stop(ctx context.Context) error {
+	return nil
+}
+
+// responseWritingEngine is a mock WorkflowEngine that writes an HTTP response
+// via the ResponseWriter injected into the context, simulating a pipeline
+// that contains a step.json_response step.
+type responseWritingEngine struct {
+	statusCode int
+	body       string
+}
+
+func (e *responseWritingEngine) TriggerWorkflow(ctx context.Context, workflowType, action string, data map[string]any) error {
+	rw, ok := ctx.Value(HTTPResponseWriterContextKey).(http.ResponseWriter)
+	if !ok {
+		return nil
+	}
+	rw.Header().Set("Content-Type", "application/json")
+	rw.WriteHeader(e.statusCode)
+	_, _ = rw.Write([]byte(e.body))
+	return nil
+}
+
+// TestHTTPTrigger_ResponsePassthrough verifies that when a pipeline step writes
+// an HTTP response via the injected ResponseWriter, the HTTP trigger does not
+// overwrite it with the generic "workflow triggered" fallback.
+func TestHTTPTrigger_ResponsePassthrough(t *testing.T) {
+	app := NewMockApplication()
+	router := NewMockHTTPRouter("test-router")
+	_ = app.RegisterService("httpRouter", router)
+
+	engine := &responseWritingEngine{statusCode: 201, body: `{"id":"new-123"}`}
+	_ = app.RegisterService("workflowEngine", engine)
+
+	trigger := NewHTTPTrigger()
+	app.RegisterModule(trigger)
+
+	cfg := map[string]any{
+		"routes": []any{
+			map[string]any{
+				"path":     "/api/items",
+				"method":   "POST",
+				"workflow": "create-item",
+				"action":   "execute",
+			},
+		},
+	}
+	if err := trigger.Configure(app, cfg); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := trigger.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	handler := router.routes["POST /api/items"]
+	if handler == nil {
+		t.Fatal("handler not registered")
+	}
+
+	req := httptest.NewRequest("POST", "/api/items", strings.NewReader(""))
+	w := httptest.NewRecorder()
+	handler.Handle(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != 201 {
+		t.Errorf("expected 201 from pipeline, got %d", resp.StatusCode)
+	}
+	if !strings.Contains(w.Body.String(), "new-123") {
+		t.Errorf("expected pipeline body, got %q", w.Body.String())
+	}
+}
+
+// TestHTTPTrigger_FallbackResponse verifies that when no pipeline step writes
+// an HTTP response, the trigger falls back to the generic accepted response.
+func TestHTTPTrigger_FallbackResponse(t *testing.T) {
+	app := NewMockApplication()
+	router := NewMockHTTPRouter("test-router")
+	_ = app.RegisterService("httpRouter", router)
+
+	// Standard mock engine — does not write to the response writer.
+	engine := NewMockWorkflowEngine()
+	_ = app.RegisterService("workflowEngine", engine)
+
+	trigger := NewHTTPTrigger()
+	app.RegisterModule(trigger)
+
+	cfg := map[string]any{
+		"routes": []any{
+			map[string]any{
+				"path":     "/api/items",
+				"method":   "POST",
+				"workflow": "fire-and-forget",
+				"action":   "execute",
+			},
+		},
+	}
+	if err := trigger.Configure(app, cfg); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := trigger.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	handler := router.routes["POST /api/items"]
+	req := httptest.NewRequest("POST", "/api/items", strings.NewReader(""))
+	w := httptest.NewRecorder()
+	handler.Handle(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != 202 {
+		t.Errorf("expected fallback 202, got %d", resp.StatusCode)
+	}
+	if !strings.Contains(w.Body.String(), "workflow triggered") {
+		t.Errorf("expected fallback body, got %q", w.Body.String())
+	}
+}
+
+// TestHTTPTrigger_ResponseWriterInContext verifies that the HTTP response writer
+// is correctly threaded through the Go context to the workflow engine.
+func TestHTTPTrigger_ResponseWriterInContext(t *testing.T) {
+	app := NewMockApplication()
+	router := NewMockHTTPRouter("test-router")
+	_ = app.RegisterService("httpRouter", router)
+
+	var capturedCtx context.Context
+	captureEngine := &captureContextEngine{capture: &capturedCtx}
+	_ = app.RegisterService("workflowEngine", captureEngine)
+
+	trigger := NewHTTPTrigger()
+	app.RegisterModule(trigger)
+
+	cfg := map[string]any{
+		"routes": []any{
+			map[string]any{
+				"path":     "/test",
+				"method":   "GET",
+				"workflow": "test-wf",
+				"action":   "execute",
+			},
+		},
+	}
+	if err := trigger.Configure(app, cfg); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := trigger.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	handler := router.routes["GET /test"]
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	handler.Handle(w, req)
+
+	if capturedCtx == nil {
+		t.Fatal("context was not captured by engine")
+	}
+	if capturedCtx.Value(HTTPResponseWriterContextKey) == nil {
+		t.Error("HTTPResponseWriterContextKey not present in context passed to TriggerWorkflow")
+	}
+}
+
+// captureContextEngine captures the context passed to TriggerWorkflow for inspection.
+type captureContextEngine struct {
+	capture *context.Context
+}
+
+func (e *captureContextEngine) TriggerWorkflow(ctx context.Context, _ string, _ string, _ map[string]any) error {
+	*e.capture = ctx
 	return nil
 }

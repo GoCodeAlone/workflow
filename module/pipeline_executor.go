@@ -100,6 +100,12 @@ func (p *Pipeline) Execute(ctx context.Context, triggerData map[string]any) (*Pi
 	for k, v := range p.Metadata {
 		md[k] = v
 	}
+	// If an HTTP response writer was threaded through the Go context (e.g. by
+	// the HTTP trigger), inject it into the pipeline metadata so that steps
+	// like step.json_response can write directly to the HTTP response.
+	if rw := ctx.Value(HTTPResponseWriterContextKey); rw != nil {
+		md["_http_response_writer"] = rw
+	}
 	pc := NewPipelineContext(triggerData, md)
 
 	logger := p.Logger

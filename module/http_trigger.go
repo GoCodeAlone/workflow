@@ -10,6 +10,33 @@ import (
 	"github.com/CrisisTextLine/modular"
 )
 
+// httpRWContextKey is the unexported type for the HTTP response writer context key.
+type httpRWContextKey struct{}
+
+// HTTPResponseWriterContextKey is the context key used to pass an http.ResponseWriter
+// through the pipeline execution context. Pipeline.Execute extracts this value and
+// injects it into PipelineContext.Metadata["_http_response_writer"] so that steps
+// like step.json_response can write directly to the HTTP response.
+var HTTPResponseWriterContextKey = httpRWContextKey{}
+
+// trackedResponseWriter wraps http.ResponseWriter and tracks whether a response
+// body has been written, so the HTTP trigger can fall back to the generic
+// "workflow triggered" response only when the pipeline didn't write one.
+type trackedResponseWriter struct {
+	http.ResponseWriter
+	written bool
+}
+
+func (t *trackedResponseWriter) Write(b []byte) (int, error) {
+	t.written = true
+	return t.ResponseWriter.Write(b)
+}
+
+func (t *trackedResponseWriter) WriteHeader(code int) {
+	t.written = true
+	t.ResponseWriter.WriteHeader(code)
+}
+
 const (
 	// HTTPTriggerName is the standard name for HTTP triggers
 	HTTPTriggerName = "trigger.http"
@@ -215,8 +242,13 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 			params = routeParams
 		}
 
-		// Create a context for the workflow
-		ctx := r.Context()
+		// Wrap the response writer so we can detect if the pipeline wrote a response.
+		rw := &trackedResponseWriter{ResponseWriter: w}
+
+		// Inject the tracked response writer into the context so Pipeline.Execute
+		// can seed it into PipelineContext.Metadata["_http_response_writer"],
+		// allowing steps like step.json_response to write directly to the response.
+		ctx := context.WithValue(r.Context(), HTTPResponseWriterContextKey, rw)
 
 		// Extract data from the request to pass to the workflow
 		data := make(map[string]any)
@@ -243,7 +275,14 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 			return
 		}
 
-		// Return a success response
+		// If a pipeline step (e.g. step.json_response) already wrote the response,
+		// don't overwrite it with the generic fallback.
+		if rw.written {
+			return
+		}
+
+		// Fallback: return a generic accepted response when the pipeline doesn't
+		// write its own HTTP response.
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		if _, err := w.Write([]byte(`{"status": "workflow triggered"}`)); err != nil {
