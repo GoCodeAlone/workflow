@@ -1,20 +1,17 @@
 package module
 
 import (
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// Trigger defines what can start a workflow execution
-type Trigger interface {
-	modular.Module
-	modular.Startable
-	modular.Stoppable
+// Trigger is a type alias for interfaces.Trigger.
+// The canonical definition lives in the interfaces package so that the engine
+// and other packages can reference it without importing this module package.
+// All existing code using module.Trigger is unaffected by this alias.
+type Trigger = interfaces.Trigger
 
-	// Configure sets up the trigger from configuration
-	Configure(app modular.Application, triggerConfig any) error
-}
-
-// TriggerRegistry manages registered triggers and allows finding them by name
+// TriggerRegistry manages registered triggers and allows finding them by name.
+// It satisfies interfaces.TriggerRegistrar.
 type TriggerRegistry struct {
 	triggers map[string]Trigger
 }
