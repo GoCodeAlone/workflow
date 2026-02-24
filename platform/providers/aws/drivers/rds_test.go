@@ -96,6 +96,7 @@ func TestRDSDriver_Create(t *testing.T) {
 		"instance_class":    "db.r5.large",
 		"allocated_storage": 50,
 		"multi_az":          true,
+		"master_password":   "s3cureP@ss!",
 	})
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
@@ -108,6 +109,18 @@ func TestRDSDriver_Create(t *testing.T) {
 	}
 	if out.Status != platform.ResourceStatusCreating {
 		t.Errorf("Status = %q, want creating", out.Status)
+	}
+}
+
+func TestRDSDriver_CreateMissingPassword(t *testing.T) {
+	d := NewRDSDriverWithClient(&mockRDSClient{})
+	ctx := context.Background()
+
+	_, err := d.Create(ctx, "test-db", map[string]any{
+		"engine": "postgres",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing master_password")
 	}
 }
 

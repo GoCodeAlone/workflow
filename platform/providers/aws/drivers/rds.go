@@ -56,7 +56,7 @@ func (d *RDSDriver) Create(ctx context.Context, name string, properties map[stri
 	}
 	masterPass, _ := properties["master_password"].(string)
 	if masterPass == "" {
-		masterPass = "changeme123!" // Would be from secrets in production
+		return nil, fmt.Errorf("rds: create %q: master_password is required", name)
 	}
 
 	input := &rds.CreateDBInstanceInput{

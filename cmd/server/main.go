@@ -83,7 +83,7 @@ var (
 	anthropicModel = flag.String("anthropic-model", "", "Anthropic model name")
 
 	// Multi-workflow mode flags
-	multiWorkflowAddr = flag.String("multi-workflow-addr", ":8090", "HTTP listen address for multi-workflow REST API")
+	multiWorkflowAddr = flag.String("multi-workflow-addr", ":8080", "Listen address for the multi-workflow API server")
 	databaseDSN       = flag.String("database-dsn", "", "PostgreSQL connection string for multi-workflow mode")
 	jwtSecret         = flag.String("jwt-secret", "", "JWT signing secret for API authentication")
 	adminEmail    = flag.String("admin-email", "", "Initial admin user email (first-run bootstrap)")
