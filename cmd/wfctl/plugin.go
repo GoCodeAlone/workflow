@@ -19,6 +19,16 @@ func runPlugin(args []string) error {
 		return runPluginDocs(args[1:])
 	case "test":
 		return runPluginTest(args[1:])
+	case "search":
+		return runPluginSearch(args[1:])
+	case "install":
+		return runPluginInstall(args[1:])
+	case "list":
+		return runPluginList(args[1:])
+	case "update":
+		return runPluginUpdate(args[1:])
+	case "remove":
+		return runPluginRemove(args[1:])
 	default:
 		return pluginUsage()
 	}
@@ -28,9 +38,14 @@ func pluginUsage() error {
 	fmt.Fprintf(flag.CommandLine.Output(), `Usage: wfctl plugin <subcommand> [options]
 
 Subcommands:
-  init   Scaffold a new plugin project
-  docs   Generate documentation for an existing plugin
-  test   Run a plugin through its full lifecycle in a test harness
+  init     Scaffold a new plugin project
+  docs     Generate documentation for an existing plugin
+  test     Run a plugin through its full lifecycle in a test harness
+  search   Search the plugin registry
+  install  Install a plugin from the registry
+  list     List installed plugins
+  update   Update an installed plugin to its latest version
+  remove   Uninstall a plugin
 `)
 	return fmt.Errorf("plugin subcommand is required")
 }
