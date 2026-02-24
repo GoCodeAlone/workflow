@@ -4,16 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow"
@@ -21,6 +24,7 @@ import (
 	"github.com/GoCodeAlone/workflow/ai"
 	copilotai "github.com/GoCodeAlone/workflow/ai/copilot"
 	"github.com/GoCodeAlone/workflow/ai/llm"
+	apihandler "github.com/GoCodeAlone/workflow/api"
 	"github.com/GoCodeAlone/workflow/audit"
 	"github.com/GoCodeAlone/workflow/billing"
 	"github.com/GoCodeAlone/workflow/bundle"
@@ -37,10 +41,13 @@ import (
 	_ "github.com/GoCodeAlone/workflow/plugin/docmanager"
 	pluginexternal "github.com/GoCodeAlone/workflow/plugin/external"
 	_ "github.com/GoCodeAlone/workflow/plugin/storebrowser"
+	pluginadmin "github.com/GoCodeAlone/workflow/plugins/admin"
 	pluginai "github.com/GoCodeAlone/workflow/plugins/ai"
 	pluginapi "github.com/GoCodeAlone/workflow/plugins/api"
 	pluginauth "github.com/GoCodeAlone/workflow/plugins/auth"
 	plugincicd "github.com/GoCodeAlone/workflow/plugins/cicd"
+	plugindlq "github.com/GoCodeAlone/workflow/plugins/dlq"
+	pluginevstore "github.com/GoCodeAlone/workflow/plugins/eventstore"
 	pluginff "github.com/GoCodeAlone/workflow/plugins/featureflags"
 	pluginhttp "github.com/GoCodeAlone/workflow/plugins/http"
 	pluginintegration "github.com/GoCodeAlone/workflow/plugins/integration"
@@ -54,6 +61,7 @@ import (
 	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
 	pluginsm "github.com/GoCodeAlone/workflow/plugins/statemachine"
 	pluginstorage "github.com/GoCodeAlone/workflow/plugins/storage"
+	plugintimeline "github.com/GoCodeAlone/workflow/plugins/timeline"
 	"github.com/GoCodeAlone/workflow/provider"
 	_ "github.com/GoCodeAlone/workflow/provider/aws"
 	_ "github.com/GoCodeAlone/workflow/provider/azure"
@@ -62,6 +70,7 @@ import (
 	"github.com/GoCodeAlone/workflow/schema"
 	evstore "github.com/GoCodeAlone/workflow/store"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
 
@@ -74,8 +83,8 @@ var (
 	anthropicModel = flag.String("anthropic-model", "", "Anthropic model name")
 
 	// Multi-workflow mode flags
-	databaseDSN   = flag.String("database-dsn", "", "PostgreSQL connection string for multi-workflow mode")
-	jwtSecret     = flag.String("jwt-secret", "", "JWT signing secret for API authentication")
+	databaseDSN       = flag.String("database-dsn", "", "PostgreSQL connection string for multi-workflow mode")
+	jwtSecret         = flag.String("jwt-secret", "", "JWT signing secret for API authentication")
 	adminEmail    = flag.String("admin-email", "", "Initial admin user email (first-run bootstrap)")
 	adminPassword = flag.String("admin-password", "", "Initial admin user password (first-run bootstrap)")
 
@@ -90,14 +99,10 @@ var (
 	adminUIDir    = flag.String("admin-ui-dir", "", "Path to admin UI static assets directory (overrides ADMIN_UI_DIR env var). Leave empty to use the path in admin/config.yaml")
 )
 
-// buildEngine creates the workflow engine with all handlers registered and built from config.
-func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
-	app := modular.NewStdApplication(nil, logger)
-	engine := workflow.NewStdEngine(app, logger)
-
-	// Load all engine plugins — each registers its module factories, step factories,
-	// trigger factories, and workflow handlers via engine.LoadPlugin.
-	plugins := []plugin.EnginePlugin{
+// defaultEnginePlugins returns the standard set of engine plugins used by all engine instances.
+// Centralising the list here avoids duplication between buildEngine and runMultiWorkflow.
+func defaultEnginePlugins() []plugin.EnginePlugin {
+	return []plugin.EnginePlugin{
 		pluginlicense.New(),
 		pluginhttp.New(),
 		pluginobs.New(),
@@ -109,14 +114,27 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 		pluginpipeline.New(),
 		plugincicd.New(),
 		pluginff.New(),
+		pluginevstore.New(),
+		plugintimeline.New(),
+		plugindlq.New(),
 		pluginsecrets.New(),
 		pluginmodcompat.New(),
 		pluginscheduler.New(),
 		pluginintegration.New(),
 		pluginai.New(),
 		pluginplatform.New(),
+		pluginadmin.New().WithUIDir(*adminUIDir),
 	}
-	for _, p := range plugins {
+}
+
+// buildEngine creates the workflow engine with all handlers registered and built from config.
+func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
+	app := modular.NewStdApplication(nil, logger)
+	engine := workflow.NewStdEngine(app, logger)
+
+	// Load all engine plugins — each registers its module factories, step factories,
+	// trigger factories, and workflow handlers via engine.LoadPlugin.
+	for _, p := range defaultEnginePlugins() {
 		if err := engine.LoadPlugin(p); err != nil {
 			log.Fatalf("Failed to load plugin %s: %v", p.Name(), err)
 		}
@@ -176,16 +194,33 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 
 // loadConfig loads a workflow configuration from the configured file path,
 // or returns an empty config if no path is set.
-func loadConfig(logger *slog.Logger) (*config.WorkflowConfig, error) {
+// If the config file contains an application-level config (multi-workflow),
+// the returned WorkflowConfig will be nil and the ApplicationConfig will be set.
+func loadConfig(logger *slog.Logger) (*config.WorkflowConfig, *config.ApplicationConfig, error) {
 	if *configFile != "" {
+		// Peek at the file to detect whether it is an application config.
+		data, err := os.ReadFile(*configFile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read configuration file: %w", err)
+		}
+
+		if config.IsApplicationConfig(data) {
+			logger.Info("Detected multi-workflow application config", "file", *configFile)
+			appCfg, err := config.LoadApplicationConfig(*configFile)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to load application configuration: %w", err)
+			}
+			return nil, appCfg, nil
+		}
+
 		cfg, err := config.LoadFromFile(*configFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load configuration: %w", err)
+			return nil, nil, fmt.Errorf("failed to load configuration: %w", err)
 		}
-		return cfg, nil
+		return cfg, nil, nil
 	}
 	logger.Info("No config file specified, using empty workflow config")
-	return config.NewEmptyWorkflowConfig(), nil
+	return config.NewEmptyWorkflowConfig(), nil, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +325,7 @@ type serviceComponents struct {
 type serverApp struct {
 	engine         *workflow.StdEngine
 	engineManager  *workflow.WorkflowEngineManager
+	pgStore        *evstore.PGStore // multi-workflow mode PG connection
 	logger         *slog.Logger
 	cleanupDirs    []string       // temp directories to clean up on shutdown
 	cleanupFiles   []string       // temp files to clean up on shutdown
@@ -305,13 +341,7 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 		logger: logger,
 	}
 
-	// Merge admin config into primary config — admin UI is always enabled.
-	// The admin config provides all management endpoints (auth, API, schema,
-	// AI, dynamic components) via the engine's own modules and routes.
-	if err := mergeAdminConfig(logger, cfg); err != nil {
-		return nil, fmt.Errorf("failed to set up admin: %w", err)
-	}
-
+	// Admin config is merged by the admin plugin's wiring hook during buildEngine.
 	engine, loader, registry, err := buildEngine(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build engine: %w", err)
@@ -343,6 +373,58 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 	app.mgmt.auditLogger.LogConfigChange(context.Background(), "system", "server", "server started")
 
 	return app, nil
+}
+
+// setupFromAppConfig initializes all server components from a multi-workflow
+// application config. It merges all workflow files into a combined WorkflowConfig,
+// applies the admin config overlay, then builds the engine using
+// BuildFromApplicationConfig so cross-workflow pipeline calls are wired up.
+func setupFromAppConfig(logger *slog.Logger, appCfg *config.ApplicationConfig) (*serverApp, error) {
+	// Merge all workflow files into a combined config so the admin overlay
+	// can be applied consistently (module names, route configs, etc.).
+	combined, err := config.MergeApplicationConfig(appCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to merge application config: %w", err)
+	}
+
+	// Apply admin config overlay (admin UI, management routes, etc.).
+	if err := mergeAdminConfig(logger, combined); err != nil {
+		return nil, fmt.Errorf("failed to set up admin: %w", err)
+	}
+
+	// Build the engine from the already-merged application config (including the
+	// admin overlay). The merged config is passed directly to buildEngine, which
+	// internally uses BuildFromConfig and ensures features like the pipeline
+	// registry for step.workflow_call are configured correctly.
+	engine, loader, registry, err := buildEngine(combined, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build engine: %w", err)
+	}
+
+	sApp := &serverApp{
+		engine: engine,
+		logger: logger,
+	}
+
+	pool := dynamic.NewInterpreterPool()
+	aiSvc, deploySvc := initAIService(logger, registry, pool)
+	initManagementHandlers(logger, engine, combined, sApp, aiSvc, deploySvc, loader, registry)
+	registerManagementServices(logger, sApp)
+
+	sApp.postStartFuncs = append(sApp.postStartFuncs, func() error {
+		if err := sApp.initStores(logger); err != nil {
+			return err
+		}
+		return sApp.registerPostStartServices(logger)
+	}, func() error {
+		return sApp.importBundles(logger)
+	})
+
+	sApp.mgmt.auditLogger = audit.NewLogger(os.Stdout)
+	sApp.mgmt.auditLogger.LogConfigChange(context.Background(), "system", "server",
+		"server started with application config: "+appCfg.Application.Name)
+
+	return sApp, nil
 }
 
 // mergeAdminConfig loads the embedded admin config and merges admin
@@ -550,14 +632,29 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	// Event store, idempotency store
 	// -----------------------------------------------------------------------
 
-	// Create SQLite event store for execution events
-	eventsDBPath := filepath.Join(*dataDir, "events.db")
-	eventStore, err := evstore.NewSQLiteEventStore(eventsDBPath)
-	if err != nil {
-		logger.Warn("Failed to create event store — timeline/replay/diff features disabled", "error", err)
-	} else {
+	// Try to discover the event store from the service registry (registered
+	// by an eventstore.service module declared in config). Fall back to
+	// creating one directly if no module was configured.
+	var eventStore *evstore.SQLiteEventStore
+	for _, svc := range engine.GetApp().SvcRegistry() {
+		if es, ok := svc.(*evstore.SQLiteEventStore); ok {
+			eventStore = es
+			logger.Info("Discovered event store from service registry")
+			break
+		}
+	}
+	if eventStore == nil {
+		eventsDBPath := filepath.Join(*dataDir, "events.db")
+		var esErr error
+		eventStore, esErr = evstore.NewSQLiteEventStore(eventsDBPath)
+		if esErr != nil {
+			logger.Warn("Failed to create event store — timeline/replay/diff features disabled", "error", esErr)
+		} else {
+			logger.Info("Opened event store (fallback)", "path", eventsDBPath)
+		}
+	}
+	if eventStore != nil {
 		app.stores.eventStore = eventStore
-		logger.Info("Opened event store", "path", eventsDBPath)
 	}
 
 	// Create SQLite idempotency store (separate DB connection, same data dir)
@@ -582,47 +679,105 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	// Timeline, replay, backfill handlers
 	// -----------------------------------------------------------------------
 
-	if eventStore != nil {
-		// Timeline handler (execution list, timeline, events)
-		timelineHandler := evstore.NewTimelineHandler(eventStore, logger)
-		timelineMux := http.NewServeMux()
-		timelineHandler.RegisterRoutes(timelineMux)
-		app.services.timelineMux = timelineMux
+	// Discover timeline/replay/backfill mux services registered by ProvidesServices
+	// (registered by a timeline.service module). Fall back to direct creation.
+	timelineDiscovered := false
+	var (
+		discoveredTimelineMux http.Handler
+		discoveredReplayMux   http.Handler
+		discoveredBackfillMux http.Handler
+	)
+	for svcName, svc := range engine.GetApp().SvcRegistry() {
+		if strings.HasSuffix(svcName, ".timeline") {
+			if h, ok := svc.(http.Handler); ok {
+				discoveredTimelineMux = h
+				logger.Info("Discovered timeline mux from service registry", "service", svcName)
+			}
+		}
+		if strings.HasSuffix(svcName, ".replay") {
+			if h, ok := svc.(http.Handler); ok {
+				discoveredReplayMux = h
+			}
+		}
+		if strings.HasSuffix(svcName, ".backfill") {
+			if h, ok := svc.(http.Handler); ok {
+				discoveredBackfillMux = h
+			}
+		}
+	}
+	if discoveredTimelineMux != nil && discoveredReplayMux != nil && discoveredBackfillMux != nil {
+		app.services.timelineMux = discoveredTimelineMux
+		app.services.replayMux = discoveredReplayMux
+		app.services.backfillMux = discoveredBackfillMux
+		timelineDiscovered = true
+		logger.Info("Discovered timeline, replay, and backfill muxes from service registry")
+	}
+	if !timelineDiscovered {
+		if eventStore != nil {
+			timelineHandler := evstore.NewTimelineHandler(eventStore, logger)
+			timelineMux := http.NewServeMux()
+			timelineHandler.RegisterRoutes(timelineMux)
+			app.services.timelineMux = timelineMux
 
-		// Replay handler
-		replayHandler := evstore.NewReplayHandler(eventStore, logger)
-		replayMux := http.NewServeMux()
-		replayHandler.RegisterRoutes(replayMux)
-		app.services.replayMux = replayMux
+			replayHandler := evstore.NewReplayHandler(eventStore, logger)
+			replayMux := http.NewServeMux()
+			replayHandler.RegisterRoutes(replayMux)
+			app.services.replayMux = replayMux
 
-		// Backfill / Mock / Diff handler
-		backfillStore := evstore.NewInMemoryBackfillStore()
-		mockStore := evstore.NewInMemoryStepMockStore()
-		diffCalc := evstore.NewDiffCalculator(eventStore)
-		bmdHandler := evstore.NewBackfillMockDiffHandler(backfillStore, mockStore, diffCalc, logger)
-		bmdMux := http.NewServeMux()
-		bmdHandler.RegisterRoutes(bmdMux)
-		app.services.backfillMux = bmdMux
+			backfillStore := evstore.NewInMemoryBackfillStore()
+			mockStore := evstore.NewInMemoryStepMockStore()
+			diffCalc := evstore.NewDiffCalculator(eventStore)
+			bmdHandler := evstore.NewBackfillMockDiffHandler(backfillStore, mockStore, diffCalc, logger)
+			bmdMux := http.NewServeMux()
+			bmdHandler.RegisterRoutes(bmdMux)
+			app.services.backfillMux = bmdMux
 
-		logger.Info("Created timeline, replay, and backfill/mock/diff handlers")
-	} else {
-		// Create stub handlers so delegate routes return 503 instead of 500
-		stubMsg := "event store unavailable — timeline/replay/backfill features disabled"
-		app.services.timelineMux = featureDisabledHandler(stubMsg)
-		app.services.replayMux = featureDisabledHandler(stubMsg)
-		app.services.backfillMux = featureDisabledHandler(stubMsg)
-		logger.Info("Created stub handlers for timeline/replay/backfill (event store unavailable)")
+			logger.Info("Created timeline, replay, and backfill/mock/diff handlers (fallback)")
+		} else {
+			stubMsg := "event store unavailable — timeline/replay/backfill features disabled"
+			app.services.timelineMux = featureDisabledHandler(stubMsg)
+			app.services.replayMux = featureDisabledHandler(stubMsg)
+			app.services.backfillMux = featureDisabledHandler(stubMsg)
+			logger.Info("Created stub handlers for timeline/replay/backfill (event store unavailable)")
+		}
 	}
 
 	// -----------------------------------------------------------------------
 	// DLQ handler
 	// -----------------------------------------------------------------------
 
-	dlqStore := evstore.NewInMemoryDLQStore()
-	dlqHandler := evstore.NewDLQHandler(dlqStore, logger)
-	dlqMux := http.NewServeMux()
-	dlqHandler.RegisterRoutes(dlqMux)
-	app.services.dlqMux = dlqMux
+	// Discover DLQ mux and store from the service registry (registered by a
+	// dlq.service module). Fall back to direct creation.
+	dlqDiscovered := false
+	var dlqStore evstore.DLQStore
+	var discoveredDLQMux http.Handler
+	for svcName, svc := range engine.GetApp().SvcRegistry() {
+		if strings.HasSuffix(svcName, ".store") {
+			if ds, ok := svc.(*evstore.InMemoryDLQStore); ok {
+				dlqStore = ds
+			}
+		}
+		if strings.HasSuffix(svcName, ".admin") {
+			if h, ok := svc.(http.Handler); ok && strings.Contains(svcName, "dlq") {
+				discoveredDLQMux = h
+				logger.Info("Discovered DLQ mux from service registry", "service", svcName)
+			}
+		}
+	}
+	if discoveredDLQMux != nil && dlqStore != nil {
+		app.services.dlqMux = discoveredDLQMux
+		dlqDiscovered = true
+		logger.Info("Discovered DLQ service from service registry")
+	}
+	if !dlqDiscovered {
+		inMemDLQStore := evstore.NewInMemoryDLQStore()
+		dlqStore = inMemDLQStore
+		dlqHandler := evstore.NewDLQHandler(inMemDLQStore, logger)
+		dlqMux := http.NewServeMux()
+		dlqHandler.RegisterRoutes(dlqMux)
+		app.services.dlqMux = dlqMux
+		logger.Info("Created DLQ handler (fallback)")
+	}
 
 	// -----------------------------------------------------------------------
 	// Billing handler
@@ -1163,6 +1318,11 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 		}
 	}
 
+	// Close PG store (multi-workflow mode)
+	if app.pgStore != nil {
+		app.pgStore.Close()
+	}
+
 	// Clean up temp files and directories
 	for _, f := range app.cleanupFiles {
 		os.Remove(f) //nolint:gosec // G703: cleaning up server-managed temp files
@@ -1240,43 +1400,31 @@ func main() {
 	}))
 
 	if *databaseDSN != "" {
-		// Multi-workflow mode
-		logger.Info("Starting in multi-workflow mode")
-
-		// TODO: Once the api package is implemented, this section will:
-		// 1. Connect to PostgreSQL using *databaseDSN
-		// 2. Run database migrations
-		// 3. Create store instances (UserStore, CompanyStore, ProjectStore, WorkflowStore, etc.)
-		// 4. Bootstrap admin user if *adminEmail and *adminPassword are set (first-run)
-		// 5. Create WorkflowEngineManager with stores
-		// 6. Create api.NewRouter() with stores, *jwtSecret, and engine manager
-		// 7. Mount API router at /api/v1/ alongside existing routes
-
-		// For now, log the configuration and fall through to single-config mode
-		logger.Info("Multi-workflow mode configured",
-			"database_dsn_set", *databaseDSN != "",
-			"jwt_secret_set", *jwtSecret != "",
-			"admin_email_set", *adminEmail != "",
-		)
-
-		// Suppress unused variable warnings until api package is ready
-		_ = databaseDSN
-		_ = jwtSecret
-		_ = adminEmail
-		_ = adminPassword
-
-		logger.Warn("Multi-workflow mode requires the api package (not yet available); falling back to single-config mode")
+		// Multi-workflow mode: delegates to runMultiWorkflow which connects to
+		// PostgreSQL, runs migrations, starts the REST API, and blocks until shutdown.
+		if err := runMultiWorkflow(logger); err != nil {
+			log.Fatalf("Multi-workflow error: %v", err)
+		}
+		fmt.Println("Shutdown complete")
+		return
 	}
 
-	// Existing single-config behavior
-	cfg, err := loadConfig(logger)
+	// Load configuration — supports both single-workflow and multi-workflow application configs.
+	cfg, appCfg, err := loadConfig(logger)
 	if err != nil {
-		log.Fatalf("Configuration error: %v", err)
+		log.Fatalf("Configuration error: %v", err) //nolint:gocritic // exitAfterDefer: intentional, cleanup is best-effort
 	}
 
-	app, err := setup(logger, cfg)
+	var app *serverApp
+	if appCfg != nil {
+		// Multi-workflow application config: build engine from application config
+		app, err = setupFromAppConfig(logger, appCfg)
+	} else {
+		// Single-workflow config (backward-compatible)
+		app, err = setup(logger, cfg)
+	}
 	if err != nil {
-		log.Fatalf("Setup error: %v", err)
+		log.Fatalf("Setup error: %v", err) //nolint:gocritic // exitAfterDefer: intentional, cleanup is best-effort
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1299,6 +1447,329 @@ func main() {
 	}
 
 	fmt.Println("Shutdown complete")
+}
+
+// runMultiWorkflow implements multi-workflow mode: connects to PostgreSQL,
+// runs migrations, creates an engine manager, mounts the REST API, and
+// optionally seeds an initial workflow from -config.
+func runMultiWorkflow(logger *slog.Logger) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 1. Connect to PostgreSQL
+	pgCfg := evstore.PGConfig{URL: *databaseDSN}
+	pg, err := evstore.NewPGStore(ctx, pgCfg)
+	if err != nil {
+		return fmt.Errorf("connect to postgres: %w", err)
+	}
+	defer pg.Close()
+	logger.Info("Connected to PostgreSQL")
+
+	// 2. Run database migrations
+	migrator := evstore.NewMigrator(pg.Pool())
+	if err := migrator.Migrate(ctx); err != nil {
+		return fmt.Errorf("run migrations: %w", err)
+	}
+	logger.Info("Database migrations applied")
+
+	// 3. Bootstrap admin user if credentials provided
+	var adminUserID uuid.UUID
+	if *adminEmail != "" && *adminPassword != "" {
+		var err error
+		adminUserID, err = bootstrapAdmin(ctx, pg.Users(), *adminEmail, *adminPassword, logger)
+		if err != nil {
+			return fmt.Errorf("bootstrap admin: %w", err)
+		}
+	}
+
+	// 4. Create WorkflowEngineManager
+	engineBuilder := func(cfg *config.WorkflowConfig, l *slog.Logger) (*workflow.StdEngine, modular.Application, error) {
+		app := modular.NewStdApplication(nil, l)
+		engine := workflow.NewStdEngine(app, l)
+		for _, p := range defaultEnginePlugins() {
+			if loadErr := engine.LoadPlugin(p); loadErr != nil {
+				return nil, nil, fmt.Errorf("load plugin %s: %w", p.Name(), loadErr)
+			}
+		}
+		if err := engine.BuildFromConfig(cfg); err != nil {
+			return nil, nil, fmt.Errorf("build from config: %w", err)
+		}
+		return engine, app, nil
+	}
+
+	mgr := workflow.NewWorkflowEngineManager(
+		pg.Workflows(),
+		pg.CrossWorkflowLinks(),
+		logger,
+		engineBuilder,
+	)
+
+	// 5. Seed initial workflow from -config if provided
+	if *configFile != "" {
+		if adminUserID == uuid.Nil {
+			logger.Warn("Skipping workflow seed: -admin-email and -admin-password are required for seeding")
+		} else if err := seedWorkflow(ctx, pg, *configFile, adminUserID, logger); err != nil {
+			logger.Warn("Failed to seed workflow from config", "file", *configFile, "error", err)
+		}
+	}
+
+	// 6. Create API router
+	secret := envOrFlag("JWT_SECRET", jwtSecret)
+	if secret == "" {
+		secret = "dev-secret-change-me"
+		logger.Error("No JWT secret configured — using insecure default; set JWT_SECRET env var or -jwt-secret flag")
+	}
+	stores := apihandler.Stores{
+		Users:       pg.Users(),
+		Sessions:    pg.Sessions(),
+		Companies:   pg.Companies(),
+		Projects:    pg.Projects(),
+		Workflows:   pg.Workflows(),
+		Memberships: pg.Memberships(),
+		Links:       pg.CrossWorkflowLinks(),
+		Executions:  pg.Executions(),
+		Logs:        pg.Logs(),
+		Audit:       pg.Audit(),
+		IAM:         pg.IAM(),
+	}
+	apiCfg := apihandler.Config{
+		JWTSecret:  secret,
+		JWTIssuer:  "workflow-server",
+		AccessTTL:  15 * time.Minute,
+		RefreshTTL: 7 * 24 * time.Hour,
+	}
+	apiRouter := apihandler.NewRouter(stores, apiCfg)
+
+	// 7. Set up admin UI and management infrastructure for workflow management
+	singleCfg, _, err := loadConfig(logger)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	app, err := setup(logger, singleCfg)
+	if err != nil {
+		return fmt.Errorf("setup: %w", err)
+	}
+	app.engineManager = mgr
+	app.pgStore = pg
+
+	// 8. Mount API router on the same HTTP mux
+	mux := http.NewServeMux()
+	mux.Handle("/api/v1/", apiRouter)
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"mode":"multi-workflow","status":"ok"}`))
+	}))
+
+	srv := &http.Server{
+		Addr:              *multiWorkflowAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	// Start admin engine (background — handles admin UI on :8081)
+	if app.engine != nil {
+		if err := app.engine.Start(ctx); err != nil {
+			return fmt.Errorf("start admin engine: %w", err)
+		}
+	}
+	for _, fn := range app.postStartFuncs {
+		if err := fn(); err != nil {
+			logger.Warn("Post-start hook failed", "error", err)
+		}
+	}
+
+	// Start API server; propagate failures back so we can initiate shutdown.
+	srvErrCh := make(chan error, 1)
+	go func() {
+		logger.Info("Multi-workflow API listening", "addr", *multiWorkflowAddr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("API server error", "error", err)
+			srvErrCh <- err
+		}
+	}()
+
+	// Build display address: if the host part is empty or 0.0.0.0/::/[::], use "localhost".
+	displayAddr := *multiWorkflowAddr
+	if host, port, splitErr := net.SplitHostPort(*multiWorkflowAddr); splitErr == nil &&
+		(host == "" || host == "0.0.0.0" || host == "::" || host == "[::]") {
+		displayAddr = ":" + port
+	}
+	fmt.Printf("Multi-workflow API on http://localhost%s/api/v1/\n", displayAddr)
+	fmt.Println("Admin UI on http://localhost:8081")
+
+	// Wait for termination signal or server failure.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	select {
+	case <-sigCh:
+		fmt.Println("Shutting down...")
+	case <-srvErrCh:
+		logger.Error("API server failed; initiating shutdown")
+	}
+	cancel()
+
+	// Graceful shutdown
+	shutdownCtx := context.Background()
+	if err := mgr.StopAll(shutdownCtx); err != nil {
+		logger.Error("Engine manager shutdown error", "error", err)
+	}
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("API server shutdown error", "error", err)
+	}
+	if app.engine != nil {
+		if err := app.engine.Stop(shutdownCtx); err != nil {
+			logger.Error("Admin engine shutdown error", "error", err)
+		}
+	}
+
+	return nil
+}
+
+// bootstrapAdmin creates an admin user if one doesn't already exist.
+// It returns the admin user's UUID so callers can associate resources with them.
+func bootstrapAdmin(ctx context.Context, users evstore.UserStore, email, password string, logger *slog.Logger) (uuid.UUID, error) {
+	existing, err := users.GetByEmail(ctx, email)
+	if err != nil && !errors.Is(err, evstore.ErrNotFound) {
+		return uuid.Nil, fmt.Errorf("check existing admin: %w", err)
+	}
+	if err == nil && existing != nil {
+		logger.Info("Admin user already exists", "email", email)
+		return existing.ID, nil
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("hash password: %w", err)
+	}
+	now := time.Now()
+	admin := &evstore.User{
+		ID:           uuid.New(),
+		Email:        email,
+		PasswordHash: string(hash),
+		DisplayName:  "Admin",
+		Active:       true,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := users.Create(ctx, admin); err != nil {
+		return uuid.Nil, fmt.Errorf("create admin user: %w", err)
+	}
+	logger.Info("Bootstrapped admin user", "email", email)
+	return admin.ID, nil
+}
+
+// slugify converts a string into a URL-friendly slug: lowercase, ASCII alphanumeric
+// characters and hyphens only, with consecutive hyphens collapsed and leading/trailing
+// hyphens trimmed.
+func slugify(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('-')
+		}
+	}
+	result := b.String()
+	for strings.Contains(result, "--") {
+		result = strings.ReplaceAll(result, "--", "-")
+	}
+	return strings.Trim(result, "-")
+}
+
+// ensureSystemProject finds or creates the "system" company and "default" project
+// used to associate seed workflows with the required database entities.
+func ensureSystemProject(ctx context.Context, pg *evstore.PGStore, ownerID uuid.UUID) (*evstore.Project, error) {
+	const companySlug = "system"
+	const projectSlug = "default"
+
+	company, err := pg.Companies().GetBySlug(ctx, companySlug)
+	if errors.Is(err, evstore.ErrNotFound) {
+		company = &evstore.Company{Name: "System", Slug: companySlug, OwnerID: ownerID}
+		if createErr := pg.Companies().Create(ctx, company); createErr != nil {
+			if !errors.Is(createErr, evstore.ErrDuplicate) {
+				return nil, fmt.Errorf("create system company: %w", createErr)
+			}
+			// Another process created it concurrently; fetch it.
+			if company, err = pg.Companies().GetBySlug(ctx, companySlug); err != nil {
+				return nil, fmt.Errorf("get system company: %w", err)
+			}
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("get system company: %w", err)
+	}
+
+	project, err := pg.Projects().GetBySlug(ctx, company.ID, projectSlug)
+	if errors.Is(err, evstore.ErrNotFound) {
+		project = &evstore.Project{CompanyID: company.ID, Name: "Default", Slug: projectSlug}
+		if createErr := pg.Projects().Create(ctx, project); createErr != nil {
+			if !errors.Is(createErr, evstore.ErrDuplicate) {
+				return nil, fmt.Errorf("create default project: %w", createErr)
+			}
+			if project, err = pg.Projects().GetBySlug(ctx, company.ID, projectSlug); err != nil {
+				return nil, fmt.Errorf("get default project: %w", err)
+			}
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("get default project: %w", err)
+	}
+
+	return project, nil
+}
+
+// seedWorkflow imports a YAML config as the initial workflow into the database.
+func seedWorkflow(ctx context.Context, pg *evstore.PGStore, configPath string, adminUserID uuid.UUID, logger *slog.Logger) error {
+	// Validate the config is loadable
+	if _, err := config.LoadFromFile(configPath); err != nil {
+		return fmt.Errorf("load config file: %w", err)
+	}
+
+	yamlBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("read config file: %w", err)
+	}
+
+	name := filepath.Base(configPath)
+	name = strings.TrimSuffix(name, filepath.Ext(name))
+	slug := slugify(name)
+
+	// Check if a workflow with this slug already exists in any project.
+	existing, err := pg.Workflows().List(ctx, evstore.WorkflowFilter{})
+	if err != nil {
+		return fmt.Errorf("list existing workflows: %w", err)
+	}
+	for _, wf := range existing {
+		if wf.Slug == slug {
+			logger.Info("Seed workflow already exists", "slug", slug)
+			return nil
+		}
+	}
+
+	project, err := ensureSystemProject(ctx, pg, adminUserID)
+	if err != nil {
+		return fmt.Errorf("ensure system project: %w", err)
+	}
+
+	now := time.Now()
+	record := &evstore.WorkflowRecord{
+		ID:          uuid.New(),
+		ProjectID:   project.ID,
+		Name:        name,
+		Slug:        slug,
+		Description: "Seeded from " + configPath,
+		ConfigYAML:  string(yamlBytes),
+		Version:     1,
+		Status:      evstore.WorkflowStatusDraft,
+		CreatedBy:   adminUserID,
+		UpdatedBy:   adminUserID,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := pg.Workflows().Create(ctx, record); err != nil {
+		return fmt.Errorf("create seed workflow: %w", err)
+	}
+	logger.Info("Seeded workflow from config", "name", name, "id", record.ID)
+	return nil
 }
 
 func initAIService(logger *slog.Logger, registry *dynamic.ComponentRegistry, pool *dynamic.InterpreterPool) (*ai.Service, *ai.DeployService) {

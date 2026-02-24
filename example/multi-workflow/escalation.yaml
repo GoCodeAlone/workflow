@@ -1,0 +1,45 @@
+# escalation.yaml — Conversation escalation pipeline
+#
+# This workflow handles escalation of urgent conversations to
+# senior responders or supervisors.
+#
+# Called by main-loop.yaml via step.workflow_call when urgency is high.
+
+modules: []
+
+workflows: {}
+
+triggers: {}
+
+pipelines:
+  # Escalate an urgent conversation to a supervisor
+  escalate-conversation:
+    steps:
+      # Step 1: Flag as escalated
+      - name: flag-escalation
+        type: step.set
+        config:
+          values:
+            escalation_level: "supervisor"
+            original_urgency: "{{ .urgency }}"
+            escalated: true
+
+      # Step 2: Assign to escalation queue
+      - name: assign-escalation-queue
+        type: step.set
+        config:
+          values:
+            queue_name: "escalation-queue"
+            responder_id: "supervisor-01"
+
+      # Step 3: Optionally call back into queue-assignment to record
+      # the escalation as a special assignment. This shows that pipelines
+      # from different files can freely call each other in any direction.
+      - name: notify-escalation
+        type: step.workflow_call
+        config:
+          workflow: notify-responder
+          mode: async
+          input:
+            responder_id: "supervisor-01"
+            conversation_id: "{{ .conversation_id }}"

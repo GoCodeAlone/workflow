@@ -100,12 +100,14 @@ func New() *Plugin {
 	return &Plugin{
 		// Default constructors wrap the concrete module constructors, adapting
 		// their return types to modular.Module via implicit interface satisfaction.
-		newQueryHandler:     func(name string) modular.Module { return module.NewQueryHandler(name) },
-		newCommandHandler:   func(name string) modular.Module { return module.NewCommandHandler(name) },
-		newRESTAPIHandler:   func(name, resourceName string) modular.Module { return module.NewRESTAPIHandler(name, resourceName) },
-		newAPIGateway:       func(name string) modular.Module { return module.NewAPIGateway(name) },
-		newWorkflowRegistry: func(name, storageBackend string) modular.Module { return module.NewWorkflowRegistry(name, storageBackend) },
-		newDataTransformer:  func(name string) modular.Module { return module.NewDataTransformer(name) },
+		newQueryHandler:   func(name string) modular.Module { return module.NewQueryHandler(name) },
+		newCommandHandler: func(name string) modular.Module { return module.NewCommandHandler(name) },
+		newRESTAPIHandler: func(name, resourceName string) modular.Module { return module.NewRESTAPIHandler(name, resourceName) },
+		newAPIGateway:     func(name string) modular.Module { return module.NewAPIGateway(name) },
+		newWorkflowRegistry: func(name, storageBackend string) modular.Module {
+			return module.NewWorkflowRegistry(name, storageBackend)
+		},
+		newDataTransformer: func(name string) modular.Module { return module.NewDataTransformer(name) },
 		newProcessingStep: func(name string, cfg module.ProcessingStepConfig) modular.Module {
 			return module.NewProcessingStep(name, cfg)
 		},
