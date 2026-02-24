@@ -57,15 +57,19 @@ type StdEngine struct {
 	moduleFactories  map[string]ModuleFactory
 	logger           modular.Logger
 	modules          []modular.Module
-	triggers         []module.Trigger
-	triggerRegistry  *module.TriggerRegistry
+	triggers         []interfaces.Trigger
+	triggerRegistry  interfaces.TriggerRegistrar
 	dynamicRegistry  *dynamic.ComponentRegistry
 	dynamicLoader    *dynamic.Loader
-	eventEmitter     *module.WorkflowEventEmitter
+	eventEmitter     interfaces.EventEmitter
 	secretsResolver  *secrets.MultiResolver
-	stepRegistry     *module.StepRegistry
-	pluginInstaller  *plugin.PluginInstaller
-	configDir        string // directory of the config file, for resolving relative paths
+	// stepRegistry is a concrete *module.StepRegistry because StepFactory and
+	// PipelineStep are module-level types not yet abstracted in interfaces.
+	// TODO(phase5): move StepFactory/PipelineStep to interfaces and change this
+	// field to interfaces.StepRegistrar.
+	stepRegistry    *module.StepRegistry
+	pluginInstaller *plugin.PluginInstaller
+	configDir       string // directory of the config file, for resolving relative paths
 
 	// triggerTypeMap maps trigger config type keys (e.g., "http", "schedule")
 	// to trigger names (e.g., "trigger.http", "trigger.schedule"). Populated
@@ -129,10 +133,10 @@ func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
 		moduleFactories:       make(map[string]ModuleFactory),
 		logger:                logger,
 		modules:               make([]modular.Module, 0),
-		triggers:              make([]module.Trigger, 0),
-		triggerRegistry:       module.NewTriggerRegistry(),
+		triggers:              make([]interfaces.Trigger, 0),
+		triggerRegistry:       newTriggerRegistrar(), // bridge: returns *module.TriggerRegistry
 		secretsResolver:       secrets.NewMultiResolver(),
-		stepRegistry:          module.NewStepRegistry(),
+		stepRegistry:          newStepRegistry(), // bridge: returns *module.StepRegistry
 		triggerTypeMap:        make(map[string]string),
 		triggerConfigWrappers: make(map[string]plugin.TriggerConfigWrapperFunc),
 		pipelineRegistry:      make(map[string]*module.Pipeline),
@@ -159,7 +163,7 @@ func (e *StdEngine) RegisterWorkflowHandler(handler WorkflowHandler) {
 }
 
 // RegisterTrigger registers a trigger with the engine
-func (e *StdEngine) RegisterTrigger(trigger module.Trigger) {
+func (e *StdEngine) RegisterTrigger(trigger interfaces.Trigger) {
 	e.triggers = append(e.triggers, trigger)
 	e.triggerRegistry.RegisterTrigger(trigger)
 }
@@ -220,26 +224,17 @@ func (e *StdEngine) LoadPlugin(p plugin.EnginePlugin) error {
 		schema.RegisterModuleType(typeName)
 	}
 	for typeName, factory := range p.StepFactories() {
-		stepFactory := factory
-		capturedType := typeName
-		e.stepRegistry.Register(typeName, func(name string, cfg map[string]any, app modular.Application) (module.PipelineStep, error) {
-			result, err := stepFactory(name, cfg, app)
-			if err != nil {
-				return nil, err
-			}
-			if step, ok := result.(module.PipelineStep); ok {
-				return step, nil
-			}
-			return nil, fmt.Errorf("step factory for %q returned non-PipelineStep type", capturedType)
-		})
+		// Delegate to the bridge helper which type-asserts to module.PipelineStep
+		// so that engine.go need not reference that concrete type directly.
+		e.registerPluginSteps(typeName, factory)
 	}
 	// Register triggers from plugin. The factory map key is the trigger
 	// config type (e.g., "http", "schedule") used in YAML configs.
 	for triggerType, factory := range p.TriggerFactories() {
-		result := factory()
-		if trigger, ok := result.(module.Trigger); ok {
-			e.triggerTypeMap[triggerType] = trigger.Name()
-			e.RegisterTrigger(trigger)
+		// Delegate to the bridge helper; triggers are interfaces.Trigger values
+		// (module.Trigger is a type alias for interfaces.Trigger).
+		if err := e.registerPluginTrigger(triggerType, factory); err != nil {
+			return fmt.Errorf("load plugin: %w", err)
 		}
 	}
 
@@ -404,8 +399,8 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		e.logger.Debug("Loaded service: " + name)
 	}
 
-	// Initialize the workflow event emitter
-	e.eventEmitter = module.NewWorkflowEventEmitter(e.app)
+	// Initialize the workflow event emitter via bridge (avoids direct module dep).
+	e.eventEmitter = newEventEmitter(e.app)
 
 	// Register config section for workflow
 	e.app.RegisterConfigSection("workflow", modular.NewStdConfigProvider(cfg))
@@ -590,14 +585,9 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 	return fmt.Errorf("no handler found for workflow type: %s", workflowType)
 }
 
-// recordWorkflowMetrics records workflow execution metrics if the metrics collector is available.
-func (e *StdEngine) recordWorkflowMetrics(workflowType, action, status string, duration time.Duration) {
-	var mc *module.MetricsCollector
-	if err := e.app.GetService("metrics.collector", &mc); err == nil && mc != nil {
-		mc.RecordWorkflowExecution(workflowType, action, status)
-		mc.RecordWorkflowDuration(workflowType, action, duration)
-	}
-}
+// recordWorkflowMetrics is defined in engine_module_bridge.go.
+// It records execution metrics via interfaces.MetricsRecorder so that engine.go
+// need not reference the concrete *module.MetricsCollector type.
 
 // configureTriggers sets up all triggers from configuration
 func (e *StdEngine) configureTriggers(triggerConfigs map[string]any) error {
@@ -638,7 +628,7 @@ func (e *StdEngine) configureTriggers(triggerConfigs map[string]any) error {
 // by looking up the trigger type in the engine's registry. Falls back to
 // matching the trigger name directly (e.g., trigger type "mock" matches
 // trigger name "mock.trigger" via "trigger.<type>" convention).
-func (e *StdEngine) canHandleTrigger(trigger module.Trigger, triggerType string) bool {
+func (e *StdEngine) canHandleTrigger(trigger interfaces.Trigger, triggerType string) bool {
 	// Check the trigger type registry first (populated by LoadPlugin and RegisterTriggerType)
 	if expectedName, ok := e.triggerTypeMap[triggerType]; ok {
 		return trigger.Name() == expectedName
@@ -927,7 +917,7 @@ func (e *StdEngine) LoadedPlugins() []plugin.EnginePlugin {
 
 type Engine interface {
 	RegisterWorkflowHandler(handler WorkflowHandler)
-	RegisterTrigger(trigger module.Trigger)
+	RegisterTrigger(trigger interfaces.Trigger)
 	AddModuleType(moduleType string, factory ModuleFactory)
 	BuildFromConfig(cfg *config.WorkflowConfig) error
 	Start(ctx context.Context) error

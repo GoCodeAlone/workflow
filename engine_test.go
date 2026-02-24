@@ -17,6 +17,7 @@ import (
 	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/mock"
 	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/plugin"
 )
 
 // setupEngineTest creates an isolated test environment for engine tests
@@ -269,7 +270,9 @@ func (a *mockApplication) Init() error {
 	return nil
 }
 
-// GetService retrieves a service by name and populates the out parameter if provided
+// GetService retrieves a service by name and populates the out parameter if provided.
+// Supports both direct type assignment and interface satisfaction checks (matching
+// the behaviour of the real modular.StdApplication.GetService).
 func (a *mockApplication) GetService(name string, out any) error {
 	svc, ok := a.services[name]
 	if !ok {
@@ -278,10 +281,15 @@ func (a *mockApplication) GetService(name string, out any) error {
 
 	// If out is provided, try to assign the service to it using reflection
 	if out != nil {
+		// Guard: nil service value would make reflect.ValueOf(svc).Type() panic.
+		if svc == nil {
+			return fmt.Errorf("service %s has a nil value", name)
+		}
+
 		// Get reflect values
 		outVal := reflect.ValueOf(out)
-		if outVal.Kind() != reflect.Pointer {
-			return fmt.Errorf("out parameter must be a pointer")
+		if outVal.Kind() != reflect.Pointer || outVal.IsNil() {
+			return fmt.Errorf("out parameter must be a non-nil pointer")
 		}
 
 		// Dereference the pointer
@@ -290,14 +298,24 @@ func (a *mockApplication) GetService(name string, out any) error {
 			return fmt.Errorf("out parameter cannot be set")
 		}
 
-		// Set the value if compatible
 		svcVal := reflect.ValueOf(svc)
-		if !svcVal.Type().AssignableTo(outVal.Type()) {
-			return fmt.Errorf("service type %s not assignable to out parameter type %s",
-				svcVal.Type(), outVal.Type())
+		svcType := svcVal.Type()
+		targetType := outVal.Type()
+
+		// Case 1: target is an interface that the service implements
+		if targetType.Kind() == reflect.Interface && svcType.Implements(targetType) {
+			outVal.Set(svcVal)
+			return nil
 		}
 
-		outVal.Set(svcVal)
+		// Case 2: direct type assignment
+		if svcType.AssignableTo(targetType) {
+			outVal.Set(svcVal)
+			return nil
+		}
+
+		return fmt.Errorf("service type %s not assignable to out parameter type %s",
+			svcType, targetType)
 	}
 
 	return nil
@@ -1247,5 +1265,330 @@ func TestCanHandleTrigger_EventBus(t *testing.T) {
 	result := engine.canHandleTrigger(trigger, "eventbus")
 	if !result {
 		t.Errorf("canHandleTrigger(%q, %q) = false, want true", module.EventBusTriggerName, "eventbus")
+	}
+}
+
+// ============================================================================
+// Tests for requires.plugins validation (Phase 4 - Engine Decomposition)
+// ============================================================================
+
+// minimalPlugin is a test-only EnginePlugin with a controllable name/version.
+type minimalPlugin struct {
+	plugin.BaseEnginePlugin
+}
+
+func newMinimalPlugin(name, version string) *minimalPlugin {
+	return &minimalPlugin{
+		BaseEnginePlugin: plugin.BaseEnginePlugin{
+			BaseNativePlugin: plugin.BaseNativePlugin{
+				PluginName:    name,
+				PluginVersion: version,
+			},
+			Manifest: plugin.PluginManifest{
+				Name:        name,
+				Version:     version,
+				Author:      "test",
+				Description: "test plugin for requires validation",
+			},
+		},
+	}
+}
+
+// TestEngine_BuildFromConfig_RequiresPlugins_NilRequires verifies that a
+// config with no requires section is accepted without error.
+func TestEngine_BuildFromConfig_RequiresPlugins_NilRequires(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	cfg := &config.WorkflowConfig{
+		Modules:   []config.ModuleConfig{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+		Requires:  nil,
+	}
+
+	if err := engine.BuildFromConfig(cfg); err != nil {
+		t.Fatalf("expected no error for nil Requires, got: %v", err)
+	}
+}
+
+// TestEngine_BuildFromConfig_RequiresPlugins_PluginLoaded verifies that a
+// required plugin that is loaded passes validation.
+func TestEngine_BuildFromConfig_RequiresPlugins_PluginLoaded(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	// Load a minimal plugin with a known name.
+	p := newMinimalPlugin("my-plugin", "1.2.3")
+	if err := engine.LoadPlugin(p); err != nil {
+		t.Fatalf("LoadPlugin failed: %v", err)
+	}
+
+	cfg := &config.WorkflowConfig{
+		Modules:   []config.ModuleConfig{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+		Requires: &config.RequiresConfig{
+			Plugins: []config.PluginRequirement{
+				{Name: "my-plugin"},
+			},
+		},
+	}
+
+	if err := engine.BuildFromConfig(cfg); err != nil {
+		t.Fatalf("expected no error when required plugin is loaded, got: %v", err)
+	}
+}
+
+// TestEngine_BuildFromConfig_RequiresPlugins_PluginNotLoaded verifies that a
+// required plugin that is NOT loaded produces a clear error.
+func TestEngine_BuildFromConfig_RequiresPlugins_PluginNotLoaded(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	// Do NOT load "missing-plugin" — only load an unrelated one.
+	p := newMinimalPlugin("other-plugin", "1.0.0")
+	if err := engine.LoadPlugin(p); err != nil {
+		t.Fatalf("LoadPlugin failed: %v", err)
+	}
+
+	cfg := &config.WorkflowConfig{
+		Modules:   []config.ModuleConfig{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+		Requires: &config.RequiresConfig{
+			Plugins: []config.PluginRequirement{
+				{Name: "missing-plugin"},
+			},
+		},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error when required plugin is not loaded")
+	}
+	if !strings.Contains(err.Error(), "missing-plugin") {
+		t.Errorf("expected error to mention missing plugin name, got: %v", err)
+	}
+}
+
+// TestEngine_BuildFromConfig_RequiresPlugins_VersionSatisfied verifies that
+// a semver constraint that IS satisfied passes validation.
+func TestEngine_BuildFromConfig_RequiresPlugins_VersionSatisfied(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	p := newMinimalPlugin("versioned-plugin", "2.5.1")
+	if err := engine.LoadPlugin(p); err != nil {
+		t.Fatalf("LoadPlugin failed: %v", err)
+	}
+
+	cfg := &config.WorkflowConfig{
+		Modules:   []config.ModuleConfig{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+		Requires: &config.RequiresConfig{
+			Plugins: []config.PluginRequirement{
+				{Name: "versioned-plugin", Version: ">=2.0.0"},
+			},
+		},
+	}
+
+	if err := engine.BuildFromConfig(cfg); err != nil {
+		t.Fatalf("expected no error for satisfied version constraint, got: %v", err)
+	}
+}
+
+// TestEngine_BuildFromConfig_RequiresPlugins_VersionNotSatisfied verifies that
+// a semver constraint that is NOT satisfied returns a meaningful error.
+func TestEngine_BuildFromConfig_RequiresPlugins_VersionNotSatisfied(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	p := newMinimalPlugin("versioned-plugin", "1.0.0")
+	if err := engine.LoadPlugin(p); err != nil {
+		t.Fatalf("LoadPlugin failed: %v", err)
+	}
+
+	cfg := &config.WorkflowConfig{
+		Modules:   []config.ModuleConfig{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+		Requires: &config.RequiresConfig{
+			Plugins: []config.PluginRequirement{
+				{Name: "versioned-plugin", Version: ">=2.0.0"},
+			},
+		},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for unsatisfied version constraint")
+	}
+	if !strings.Contains(err.Error(), "versioned-plugin") {
+		t.Errorf("expected error to mention plugin name, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), ">=2.0.0") {
+		t.Errorf("expected error to mention version constraint, got: %v", err)
+	}
+}
+
+// TestEngine_BuildFromConfig_RequiresPlugins_NoVersionConstraint verifies that
+// a plugin requirement with no version constraint matches any loaded version.
+func TestEngine_BuildFromConfig_RequiresPlugins_NoVersionConstraint(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	p := newMinimalPlugin("any-version-plugin", "99.0.0")
+	if err := engine.LoadPlugin(p); err != nil {
+		t.Fatalf("LoadPlugin failed: %v", err)
+	}
+
+	cfg := &config.WorkflowConfig{
+		Modules:   []config.ModuleConfig{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+		Requires: &config.RequiresConfig{
+			Plugins: []config.PluginRequirement{
+				{Name: "any-version-plugin"}, // no Version constraint
+			},
+		},
+	}
+
+	if err := engine.BuildFromConfig(cfg); err != nil {
+		t.Fatalf("expected no error when no version constraint is set, got: %v", err)
+	}
+}
+
+// TestEngine_BuildFromConfig_RequiresPlugins_MultiplePlugins verifies that all
+// plugins in the requires list must be loaded.
+func TestEngine_BuildFromConfig_RequiresPlugins_MultiplePlugins(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+
+	// Load two of three required plugins.
+	for _, name := range []string{"plugin-alpha", "plugin-beta"} {
+		if err := engine.LoadPlugin(newMinimalPlugin(name, "1.0.0")); err != nil {
+			t.Fatalf("LoadPlugin(%s) failed: %v", name, err)
+		}
+	}
+	// "plugin-gamma" is intentionally NOT loaded.
+
+	cfg := &config.WorkflowConfig{
+		Modules:   []config.ModuleConfig{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+		Requires: &config.RequiresConfig{
+			Plugins: []config.PluginRequirement{
+				{Name: "plugin-alpha"},
+				{Name: "plugin-beta"},
+				{Name: "plugin-gamma"},
+			},
+		},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error when one of multiple required plugins is missing")
+	}
+	if !strings.Contains(err.Error(), "plugin-gamma") {
+		t.Errorf("expected error to mention the missing plugin 'plugin-gamma', got: %v", err)
+	}
+}
+
+// TestEngine_BuildFromConfig_RequiresPlugins_NoPluginLoaderFails verifies that
+// if the plugin loader is nil but plugins are required, the validation is skipped
+// (not a hard failure — engine must be usable without a plugin loader).
+func TestEngine_BuildFromConfig_RequiresPlugins_NoPluginLoader(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	// Explicitly do not set a plugin loader (pluginLoader stays nil).
+
+	cfg := &config.WorkflowConfig{
+		Modules:   []config.ModuleConfig{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+		Requires: &config.RequiresConfig{
+			Plugins: []config.PluginRequirement{
+				{Name: "some-plugin"},
+			},
+		},
+	}
+
+	// When no plugin loader is configured, requires.plugins validation is
+	// skipped (pluginLoader == nil guard in validateRequirements).
+	// This is intentional: simple engines that don't use LoadPlugin() should
+	// not be broken by a requires section.
+	if err := engine.BuildFromConfig(cfg); err != nil {
+		t.Fatalf("expected no error when plugin loader is nil, got: %v", err)
+	}
+}
+
+// TestEngine_BuildFromConfig_RequiresPlugins_EmptyPluginsList verifies that
+// an empty plugins list in requires is handled gracefully.
+func TestEngine_BuildFromConfig_RequiresPlugins_EmptyPluginsList(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	if err := engine.LoadPlugin(newMinimalPlugin("some-plugin", "1.0.0")); err != nil {
+		t.Fatalf("LoadPlugin failed: %v", err)
+	}
+
+	cfg := &config.WorkflowConfig{
+		Modules:   []config.ModuleConfig{},
+		Workflows: map[string]any{},
+		Triggers:  map[string]any{},
+		Requires: &config.RequiresConfig{
+			Plugins: []config.PluginRequirement{}, // empty list
+		},
+	}
+
+	if err := engine.BuildFromConfig(cfg); err != nil {
+		t.Fatalf("expected no error for empty plugins list, got: %v", err)
+	}
+}
+
+// TestEngine_BuildFromConfig_RequiresPlugins_ExactVersionMatch verifies
+// exact version matching (=1.2.3 constraint).
+func TestEngine_BuildFromConfig_RequiresPlugins_ExactVersionMatch(t *testing.T) {
+	tests := []struct {
+		constraint string
+		wantOK     bool
+	}{
+		{"=1.2.3", true},
+		{"=1.2.4", false},
+		{">=1.0.0", true},
+		{">=2.0.0", false},
+		{"<2.0.0", true},
+		{"<1.0.0", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.constraint, func(t *testing.T) {
+			cfg := &config.WorkflowConfig{
+				Modules:   []config.ModuleConfig{},
+				Workflows: map[string]any{},
+				Triggers:  map[string]any{},
+				Requires: &config.RequiresConfig{
+					Plugins: []config.PluginRequirement{
+						{Name: "exact-plugin", Version: tt.constraint},
+					},
+				},
+			}
+
+			// Use a fresh app and engine (with a freshly loaded plugin) for each
+			// sub-test to avoid state contamination.
+			subApp := newMockApplication()
+			subEngine := NewStdEngine(subApp, subApp.Logger())
+			subP := newMinimalPlugin("exact-plugin", "1.2.3")
+			if err := subEngine.LoadPlugin(subP); err != nil {
+				t.Fatalf("LoadPlugin failed: %v", err)
+			}
+
+			err := subEngine.BuildFromConfig(cfg)
+			if tt.wantOK && err != nil {
+				t.Errorf("expected no error for constraint %q, got: %v", tt.constraint, err)
+			} else if !tt.wantOK && err == nil {
+				t.Errorf("expected error for constraint %q but got none", tt.constraint)
+			}
+		})
 	}
 }
