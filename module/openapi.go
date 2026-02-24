@@ -39,8 +39,8 @@ type OpenAPIConfig struct {
 	BasePath     string                  `yaml:"base_path"      json:"base_path"`
 	Validation   OpenAPIValidationConfig `yaml:"validation"     json:"validation"`
 	SwaggerUI    OpenAPISwaggerUIConfig  `yaml:"swagger_ui"     json:"swagger_ui"`
-	RouterName   string                  `yaml:"router"         json:"router"`          // optional: explicit router to attach to
-	MaxBodyBytes int64                   `yaml:"max_body_bytes" json:"max_body_bytes"`  // max request body size (bytes); 0 = use default
+	RouterName   string                  `yaml:"router"         json:"router"`         // optional: explicit router to attach to
+	MaxBodyBytes int64                   `yaml:"max_body_bytes" json:"max_body_bytes"` // max request body size (bytes); 0 = use default
 }
 
 // defaultMaxBodyBytes is the default request body size limit (1 MiB) applied

@@ -305,7 +305,6 @@ pipelines:
 	}
 }
 
-
 func TestBuildFromApplicationConfig_MultipleWorkflows_MergesPipelines(t *testing.T) {
 	dir := t.TempDir()
 

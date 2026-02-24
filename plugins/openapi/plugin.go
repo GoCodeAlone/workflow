@@ -193,7 +193,7 @@ func wireOpenAPIRoutes(app modular.Application, cfg *config.WorkflowConfig) erro
 	// Build name→router lookup from config dependsOn
 	routerNames := make(map[string]bool)
 	serverToRouter := make(map[string]string) // http.server name → router name
-	openAPIDeps := make(map[string][]string)   // openapi module name → dependsOn
+	openAPIDeps := make(map[string][]string)  // openapi module name → dependsOn
 	for _, modCfg := range cfg.Modules {
 		switch modCfg.Type {
 		case "http.router":
