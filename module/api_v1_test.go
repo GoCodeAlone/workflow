@@ -29,6 +29,35 @@ func setupTestStore(t *testing.T) *V1Store {
 
 // --- V1Store Tests ---
 
+func mustCreateCompany(t *testing.T, store *V1Store, name, desc, userID string) *V1Company {
+	t.Helper()
+	company, err := store.CreateCompany(name, desc, userID)
+	if err != nil {
+		t.Fatalf("CreateCompany(%q) failed: %v", name, err)
+	}
+	return company
+}
+
+func mustCreateOrganization(t *testing.T, store *V1Store, companyID, name, desc, userID string) *V1Company {
+	t.Helper()
+	org, err := store.CreateOrganization(companyID, name, desc, userID)
+	if err != nil {
+		t.Fatalf("CreateOrganization(%q) failed: %v", name, err)
+	}
+	return org
+}
+
+func mustCreateProject(t *testing.T, store *V1Store, orgID, name, desc, userID string) *V1Project {
+	t.Helper()
+	proj, err := store.CreateProject(orgID, name, desc, userID)
+	if err != nil {
+		t.Fatalf("CreateProject(%q) failed: %v", name, err)
+	}
+	return proj
+}
+
+// --- V1Store Tests ---
+
 func TestV1Store_CreateAndListCompanies(t *testing.T) {
 	store := setupTestStore(t)
 
@@ -116,8 +145,14 @@ func TestV1Store_CreateAndListOrganizations(t *testing.T) {
 func TestV1Store_CreateAndListProjects(t *testing.T) {
 	store := setupTestStore(t)
 
-	company, _ := store.CreateCompany("Co", "", "u1")
-	org, _ := store.CreateOrganization(company.ID, "Org", "", "u1")
+	company, err := store.CreateCompany("Co", "", "u1")
+	if err != nil {
+		t.Fatalf("CreateCompany: %v", err)
+	}
+	org, err := store.CreateOrganization(company.ID, "Org", "", "u1")
+	if err != nil {
+		t.Fatalf("CreateOrganization: %v", err)
+	}
 
 	p, err := store.CreateProject(org.ID, "My Project", "", "A cool project")
 	if err != nil {
@@ -151,9 +186,9 @@ func TestV1Store_CreateAndListProjects(t *testing.T) {
 func TestV1Store_WorkflowCRUD(t *testing.T) {
 	store := setupTestStore(t)
 
-	company, _ := store.CreateCompany("Co", "", "u1")
-	org, _ := store.CreateOrganization(company.ID, "Org", "", "u1")
-	proj, _ := store.CreateProject(org.ID, "Proj", "", "")
+	company := mustCreateCompany(t, store, "Co", "", "u1")
+	org := mustCreateOrganization(t, store, company.ID, "Org", "", "u1")
+	proj := mustCreateProject(t, store, org.ID, "Proj", "", "")
 
 	// Create
 	wf, err := store.CreateWorkflow(proj.ID, "Test Workflow", "", "desc", "modules: []", "u1")
@@ -221,7 +256,10 @@ func TestV1Store_WorkflowCRUD(t *testing.T) {
 		t.Fatalf("DeleteWorkflow: %v", err)
 	}
 
-	wfs, _ = store.ListWorkflows(proj.ID)
+	wfs, err = store.ListWorkflows(proj.ID)
+	if err != nil {
+		t.Fatalf("ListWorkflows after delete: %v", err)
+	}
 	if len(wfs) != 0 {
 		t.Errorf("got %d workflows after delete, want 0", len(wfs))
 	}
@@ -230,15 +268,21 @@ func TestV1Store_WorkflowCRUD(t *testing.T) {
 func TestV1Store_WorkflowVersioning(t *testing.T) {
 	store := setupTestStore(t)
 
-	company, _ := store.CreateCompany("Co", "", "u1")
-	org, _ := store.CreateOrganization(company.ID, "Org", "", "u1")
-	proj, _ := store.CreateProject(org.ID, "Proj", "", "")
+	company := mustCreateCompany(t, store, "Co", "", "u1")
+	org := mustCreateOrganization(t, store, company.ID, "Org", "", "u1")
+	proj := mustCreateProject(t, store, org.ID, "Proj", "", "")
 	wf, _ := store.CreateWorkflow(proj.ID, "WF", "", "", "v1 config", "u1")
 
 	// Update config 3 times to create versions 2, 3, 4
-	store.UpdateWorkflow(wf.ID, "", "", "v2 config", "u1")
-	store.UpdateWorkflow(wf.ID, "", "", "v3 config", "u1")
-	store.UpdateWorkflow(wf.ID, "", "", "v4 config", "u1")
+	if _, err := store.UpdateWorkflow(wf.ID, "", "", "v2 config", "u1"); err != nil {
+		t.Fatalf("UpdateWorkflow v2: %v", err)
+	}
+	if _, err := store.UpdateWorkflow(wf.ID, "", "", "v3 config", "u1"); err != nil {
+		t.Fatalf("UpdateWorkflow v3: %v", err)
+	}
+	if _, err := store.UpdateWorkflow(wf.ID, "", "", "v4 config", "u1"); err != nil {
+		t.Fatalf("UpdateWorkflow v4: %v", err)
+	}
 
 	versions, err := store.ListVersions(wf.ID)
 	if err != nil {
@@ -311,12 +355,18 @@ func TestV1Store_EnsureSystemHierarchy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureSystemHierarchy (second call): %v", err)
 	}
+	if c2 != companyID {
+		t.Errorf("expected same company ID %q, got %q", companyID, c2)
+	}
+	if o2 != orgID {
+		t.Errorf("expected same organization ID %q, got %q", orgID, o2)
+	}
+	if p2 != projectID {
+		t.Errorf("expected same project ID %q, got %q", projectID, p2)
+	}
 	if w2 != workflowID {
 		t.Errorf("expected same workflow ID %q, got %q", workflowID, w2)
 	}
-	_ = c2
-	_ = o2
-	_ = p2
 }
 
 func TestV1Store_ResetSystemWorkflow(t *testing.T) {
