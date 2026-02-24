@@ -11,6 +11,13 @@ import (
 	"github.com/CrisisTextLine/modular"
 )
 
+// contextKey is a private type for context keys defined in this package,
+// preventing collisions with keys defined in other packages.
+type contextKey string
+
+// paramsKey is the context key used to store extracted path parameters.
+const paramsKey contextKey = "params"
+
 // pathParamRe matches {name} or {name...} segments in a URL path template.
 var pathParamRe = regexp.MustCompile(`\{(\w+)(?:\.\.\.)?}`)
 
@@ -170,9 +177,9 @@ func (r *StandardHTTPRouter) rebuildMuxLocked() {
 	mux := http.NewServeMux()
 	for _, route := range r.routes {
 		mux.HandleFunc(fmt.Sprintf("%s %s", route.Method, route.Path), func(w http.ResponseWriter, r *http.Request) {
-			// Inject path params into context so triggers can read them via r.Context().Value("params").
+			// Inject path params into context so triggers can read them via r.Context().Value(paramsKey).
 			if params := extractRouteParams(route.Path, r); len(params) > 0 {
-				r = r.WithContext(context.WithValue(r.Context(), "params", params))
+				r = r.WithContext(context.WithValue(r.Context(), paramsKey, params))
 			}
 
 			// Create handler chain with middleware
