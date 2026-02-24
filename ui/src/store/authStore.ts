@@ -99,10 +99,11 @@ const useAuthStore = create<AuthStore>((set, get) => ({
       scheduleRefresh(data.expires_in, get().refreshAuth);
       await get().loadUser();
     } catch (err) {
-      set({
-        isLoading: false,
-        error: err instanceof Error ? err.message : 'Login failed',
-      });
+      const raw = err instanceof Error ? err.message : 'Login failed';
+      const friendly = /invalid.*(cred|password|user)|unauthorized|401/i.test(raw)
+        ? 'Invalid email or password'
+        : raw;
+      set({ isLoading: false, error: friendly });
     }
   },
 

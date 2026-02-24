@@ -116,6 +116,7 @@ export default function SetupWizard() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Min 6 characters"
               required
+              autoComplete="new-password"
               style={inputStyle}
             />
           </div>
@@ -130,6 +131,7 @@ export default function SetupWizard() {
               onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder="Confirm password"
               required
+              autoComplete="new-password"
               style={inputStyle}
             />
           </div>
