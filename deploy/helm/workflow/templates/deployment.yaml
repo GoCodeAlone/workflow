@@ -49,8 +49,6 @@ spec:
             {{- end }}
             - "-addr"
             - "{{ .Values.env.WORKFLOW_ADDR | default ":8080" }}"
-            - "-mgmt-addr"
-            - ":{{ .Values.service.mgmtPort }}"
           env:
             {{- range $key, $value := .Values.env }}
             - name: {{ $key }}
@@ -71,29 +69,33 @@ spec:
           livenessProbe:
             httpGet:
               path: /healthz
-              port: http
+              port: mgmt
             initialDelaySeconds: 10
             periodSeconds: 15
           readinessProbe:
             httpGet:
               path: /healthz
-              port: http
+              port: mgmt
             initialDelaySeconds: 5
             periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if .Values.config.inline }}
           volumeMounts:
+            - name: data
+              mountPath: /app/data
+            {{- if .Values.config.inline }}
             - name: config
               mountPath: /etc/workflow
               readOnly: true
-          {{- end }}
-      {{- if .Values.config.inline }}
+            {{- end }}
       volumes:
+        - name: data
+          emptyDir: {}
+        {{- if .Values.config.inline }}
         - name: config
           configMap:
             name: {{ include "workflow.fullname" . }}-config
-      {{- end }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

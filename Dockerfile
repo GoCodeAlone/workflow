@@ -62,6 +62,7 @@ RUN apk add --no-cache ca-certificates tzdata \
 WORKDIR /app
 
 COPY --from=go-builder /build/server .
+COPY --from=ui-builder /build/ui/dist/ ./ui/dist/
 
 USER nonroot
 

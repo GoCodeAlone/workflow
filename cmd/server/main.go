@@ -342,7 +342,12 @@ func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) 
 		logger: logger,
 	}
 
-	// Admin config is merged by the admin plugin's wiring hook during buildEngine.
+	// Merge admin config before building the engine so admin modules are
+	// registered and initialized alongside user-provided modules.
+	if err := mergeAdminConfig(logger, cfg); err != nil {
+		return nil, fmt.Errorf("failed to set up admin: %w", err)
+	}
+
 	engine, loader, registry, err := buildEngine(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build engine: %w", err)
