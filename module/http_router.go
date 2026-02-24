@@ -80,10 +80,20 @@ func (r *StandardHTTPRouter) AddRoute(method, path string, handler HTTPHandler) 
 	r.AddRouteWithMiddleware(method, path, handler, nil)
 }
 
-// AddRouteWithMiddleware adds a route with middleware to the router
+// AddRouteWithMiddleware adds a route with middleware to the router.
+// If the router has already been started, the internal mux is rebuilt
+// so that dynamically added routes (e.g. from pipeline triggers) are served.
 func (r *StandardHTTPRouter) AddRouteWithMiddleware(method, path string, handler HTTPHandler, middlewares []HTTPMiddleware) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// Avoid duplicate routes (same method+path)
+	for _, existing := range r.routes {
+		if existing.Method == method && existing.Path == path {
+			fmt.Printf("Route already exists, skipping: %s %s\n", method, path)
+			return
+		}
+	}
 
 	r.routes = append(r.routes, Route{
 		Method:      method,
@@ -93,6 +103,11 @@ func (r *StandardHTTPRouter) AddRouteWithMiddleware(method, path string, handler
 	})
 
 	fmt.Printf("Route added: %s %s\n", method, path)
+
+	// Rebuild the mux if we've already started (hot-add support)
+	if r.serveMux != nil {
+		r.rebuildMuxLocked()
+	}
 }
 
 // HasRoute checks if a route with the given method and path already exists
@@ -119,11 +134,18 @@ func (r *StandardHTTPRouter) ServeHTTP(w http.ResponseWriter, req *http.Request)
 	}
 }
 
-// Start is a no-op for router (implements Startable interface)
+// Start compiles all registered routes into the internal ServeMux.
 func (r *StandardHTTPRouter) Start(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	r.rebuildMuxLocked()
+	return nil
+}
+
+// rebuildMuxLocked creates a new ServeMux from the current routes.
+// Caller must hold r.mu.
+func (r *StandardHTTPRouter) rebuildMuxLocked() {
 	mux := http.NewServeMux()
 	for _, route := range r.routes {
 		mux.HandleFunc(fmt.Sprintf("%s %s", route.Method, route.Path), func(w http.ResponseWriter, r *http.Request) {
@@ -145,8 +167,6 @@ func (r *StandardHTTPRouter) Start(ctx context.Context) error {
 	}
 
 	r.serveMux = mux
-
-	return nil
 }
 
 // Stop is a no-op for router (implements Stoppable interface)
