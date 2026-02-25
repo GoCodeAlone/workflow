@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"time"
+
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/config"
@@ -10,8 +12,8 @@ import (
 )
 
 // Plugin provides storage and database capabilities: storage.s3, storage.local,
-// storage.gcs, storage.sqlite, database.workflow, persistence.store modules,
-// and the step.db_query / step.db_exec pipeline step factories.
+// storage.gcs, storage.sqlite, database.workflow, persistence.store, cache.redis
+// modules, and the step.db_query / step.db_exec pipeline step factories.
 type Plugin struct {
 	plugin.BaseEnginePlugin
 }
@@ -23,13 +25,13 @@ func New() *Plugin {
 			BaseNativePlugin: plugin.BaseNativePlugin{
 				PluginName:        "storage",
 				PluginVersion:     "1.0.0",
-				PluginDescription: "Storage, database, and persistence modules with DB pipeline steps",
+				PluginDescription: "Storage, database, persistence, and cache modules with DB pipeline steps",
 			},
 			Manifest: plugin.PluginManifest{
 				Name:        "storage",
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
-				Description: "Storage, database, and persistence modules with DB pipeline steps",
+				Description: "Storage, database, persistence, and cache modules with DB pipeline steps",
 				Tier:        plugin.TierCore,
 				ModuleTypes: []string{
 					"storage.s3",
@@ -38,11 +40,13 @@ func New() *Plugin {
 					"storage.sqlite",
 					"database.workflow",
 					"persistence.store",
+					"cache.redis",
 				},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "storage", Role: "provider", Priority: 10},
 					{Name: "database", Role: "provider", Priority: 10},
 					{Name: "persistence", Role: "provider", Priority: 10},
+					{Name: "cache", Role: "provider", Priority: 10},
 				},
 			},
 		},
@@ -63,6 +67,10 @@ func (p *Plugin) Capabilities() []capability.Contract {
 		{
 			Name:        "persistence",
 			Description: "Persistence layer that uses a database service for storage",
+		},
+		{
+			Name:        "cache",
+			Description: "Redis-backed key/value cache for pipeline data",
 		},
 	}
 }
@@ -140,6 +148,31 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 				dbServiceName = n
 			}
 			return module.NewPersistenceStore(name, dbServiceName)
+		},
+		"cache.redis": func(name string, cfg map[string]any) modular.Module {
+			redisCfg := module.RedisCacheConfig{
+				Address:    "localhost:6379",
+				Prefix:     "wf:",
+				DefaultTTL: time.Hour,
+			}
+			if addr, ok := cfg["address"].(string); ok && addr != "" {
+				redisCfg.Address = module.ExpandEnvString(addr)
+			}
+			if pw, ok := cfg["password"].(string); ok {
+				redisCfg.Password = module.ExpandEnvString(pw)
+			}
+			if db, ok := cfg["db"].(float64); ok {
+				redisCfg.DB = int(db)
+			}
+			if prefix, ok := cfg["prefix"].(string); ok && prefix != "" {
+				redisCfg.Prefix = prefix
+			}
+			if ttlStr, ok := cfg["defaultTTL"].(string); ok && ttlStr != "" {
+				if d, err := time.ParseDuration(ttlStr); err == nil {
+					redisCfg.DefaultTTL = d
+				}
+			}
+			return module.NewRedisCache(name, redisCfg)
 		},
 	}
 }
@@ -225,6 +258,26 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "database", Label: "Database Service", Type: schema.FieldTypeString, DefaultValue: "database", Description: "Name of the database module to use for storage", Placeholder: "database", InheritFrom: "dependency.name"},
 			},
 			DefaultConfig: map[string]any{"database": "database"},
+		},
+		{
+			Type:        "cache.redis",
+			Label:       "Redis Cache",
+			Category:    "cache",
+			Description: "Redis-backed key/value cache for pipeline step data",
+			Outputs:     []schema.ServiceIODef{{Name: "cache", Type: "CacheModule", Description: "Redis cache service"}},
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "address", Label: "Address", Type: schema.FieldTypeString, DefaultValue: "localhost:6379", Description: "Redis server address (host:port)", Placeholder: "localhost:6379"},
+				{Key: "password", Label: "Password", Type: schema.FieldTypeString, Description: "Redis password (optional)", Sensitive: true},
+				{Key: "db", Label: "Database", Type: schema.FieldTypeNumber, DefaultValue: 0, Description: "Redis database number"},
+				{Key: "prefix", Label: "Key Prefix", Type: schema.FieldTypeString, DefaultValue: "wf:", Description: "Prefix applied to all cache keys"},
+				{Key: "defaultTTL", Label: "Default TTL", Type: schema.FieldTypeString, DefaultValue: "1h", Description: "Default time-to-live for cached values (e.g. 30m, 1h, 24h)"},
+			},
+			DefaultConfig: map[string]any{
+				"address":    "localhost:6379",
+				"db":         0,
+				"prefix":     "wf:",
+				"defaultTTL": "1h",
+			},
 		},
 	}
 }
