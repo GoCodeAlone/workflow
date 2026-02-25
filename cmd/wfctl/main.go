@@ -18,8 +18,10 @@ var commands = map[string]func([]string) error{
 	"manifest": runManifest,
 	"migrate":  runMigrate,
 	"build-ui": runBuildUI,
+	"ui":       runUI,
 	"publish":  runPublish,
 	"deploy":   runDeploy,
+	"api":      runAPI,
 }
 
 func usage() {
@@ -39,8 +41,10 @@ Commands:
   manifest   Analyze config and report infrastructure requirements
   migrate    Manage database schema migrations
   build-ui   Build the application UI (npm install + npm run build + validate)
+  ui         UI tooling (scaffold: generate Vite+React+TypeScript SPA from OpenAPI spec)
   publish    Prepare and publish a plugin manifest to the workflow-registry
   deploy     Deploy the workflow application (docker, kubernetes, cloud)
+  api        API tooling (extract: generate OpenAPI 3.0 spec from config)
 
 Run 'wfctl <command> -h' for command-specific help.
 `, version)
