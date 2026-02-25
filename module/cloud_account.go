@@ -27,6 +27,11 @@ type CloudCredentials struct {
 	// GCP
 	ProjectID          string
 	ServiceAccountJSON []byte
+	// Azure
+	TenantID       string
+	ClientID       string
+	ClientSecret   string
+	SubscriptionID string
 	// Kubernetes
 	Kubeconfig []byte
 	Context    string
@@ -107,6 +112,14 @@ func (m *CloudAccount) resolveCredentials() (*CloudCredentials, error) {
 		Region:   m.region,
 	}
 
+	// Read top-level provider-specific config fields.
+	if pid, ok := m.config["project_id"].(string); ok {
+		creds.ProjectID = pid
+	}
+	if sid, ok := m.config["subscription_id"].(string); ok {
+		creds.SubscriptionID = sid
+	}
+
 	if m.provider == "mock" {
 		return m.resolveMockCredentials(creds)
 	}
@@ -133,6 +146,22 @@ func (m *CloudAccount) resolveCredentials() (*CloudCredentials, error) {
 		return m.resolveRoleARNCredentials(creds, credsMap)
 	case "kubeconfig":
 		return m.resolveKubeconfigCredentials(creds, credsMap)
+	// GCP credential types
+	case "service_account_json":
+		return m.resolveGCPServiceAccountJSON(creds, credsMap)
+	case "service_account_key":
+		return m.resolveGCPServiceAccountKey(creds, credsMap)
+	case "workload_identity":
+		return m.resolveGCPWorkloadIdentity(creds)
+	case "application_default":
+		return m.resolveGCPApplicationDefault(creds)
+	// Azure credential types
+	case "client_credentials":
+		return m.resolveAzureClientCredentials(creds, credsMap)
+	case "managed_identity":
+		return m.resolveAzureManagedIdentity(creds, credsMap)
+	case "cli":
+		return m.resolveAzureCLI(creds)
 	default:
 		return nil, fmt.Errorf("unsupported credential type %q", credType)
 	}
@@ -165,9 +194,18 @@ func (m *CloudAccount) resolveStaticCredentials(creds *CloudCredentials, credsMa
 		creds.SessionToken, _ = credsMap["sessionToken"].(string)
 		creds.RoleARN, _ = credsMap["roleArn"].(string)
 	case "gcp":
-		creds.ProjectID, _ = credsMap["projectId"].(string)
+		if pid, ok := credsMap["projectId"].(string); ok {
+			creds.ProjectID = pid
+		}
 		if saJSON, ok := credsMap["serviceAccountJson"].(string); ok {
 			creds.ServiceAccountJSON = []byte(saJSON)
+		}
+	case "azure":
+		creds.TenantID, _ = credsMap["tenant_id"].(string)
+		creds.ClientID, _ = credsMap["client_id"].(string)
+		creds.ClientSecret, _ = credsMap["client_secret"].(string)
+		if sub, ok := credsMap["subscription_id"].(string); ok {
+			creds.SubscriptionID = sub
 		}
 	case "kubernetes":
 		if kc, ok := credsMap["kubeconfig"].(string); ok {
@@ -205,6 +243,13 @@ func (m *CloudAccount) resolveEnvCredentials(creds *CloudCredentials) (*CloudCre
 				return nil, fmt.Errorf("reading GOOGLE_APPLICATION_CREDENTIALS: %w", err)
 			}
 			creds.ServiceAccountJSON = data
+		}
+	case "azure":
+		creds.TenantID = os.Getenv("AZURE_TENANT_ID")
+		creds.ClientID = os.Getenv("AZURE_CLIENT_ID")
+		creds.ClientSecret = os.Getenv("AZURE_CLIENT_SECRET")
+		if sub := os.Getenv("AZURE_SUBSCRIPTION_ID"); sub != "" {
+			creds.SubscriptionID = sub
 		}
 	case "kubernetes":
 		kubeconfigPath := os.Getenv("KUBECONFIG")
@@ -273,5 +318,100 @@ func (m *CloudAccount) resolveKubeconfigCredentials(creds *CloudCredentials, cre
 	}
 
 	creds.Context, _ = credsMap["context"].(string)
+	return creds, nil
+}
+
+// resolveGCPServiceAccountJSON reads a GCP service account JSON key file from the given path.
+func (m *CloudAccount) resolveGCPServiceAccountJSON(creds *CloudCredentials, credsMap map[string]any) (*CloudCredentials, error) {
+	path, _ := credsMap["path"].(string)
+	if path == "" {
+		return nil, fmt.Errorf("service_account_json credential requires 'path'")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading service account JSON at %q: %w", path, err)
+	}
+	creds.ServiceAccountJSON = data
+	return creds, nil
+}
+
+// resolveGCPServiceAccountKey uses an inline GCP service account JSON key.
+func (m *CloudAccount) resolveGCPServiceAccountKey(creds *CloudCredentials, credsMap map[string]any) (*CloudCredentials, error) {
+	key, _ := credsMap["key"].(string)
+	if key == "" {
+		return nil, fmt.Errorf("service_account_key credential requires 'key'")
+	}
+	creds.ServiceAccountJSON = []byte(key)
+	return creds, nil
+}
+
+// resolveGCPWorkloadIdentity handles GCP Workload Identity (GKE metadata server).
+// Production: use golang.org/x/oauth2/google with google.FindDefaultCredentials.
+func (m *CloudAccount) resolveGCPWorkloadIdentity(creds *CloudCredentials) (*CloudCredentials, error) {
+	if creds.Extra == nil {
+		creds.Extra = map[string]string{}
+	}
+	creds.Extra["credential_source"] = "workload_identity"
+	return creds, nil
+}
+
+// resolveGCPApplicationDefault resolves GCP Application Default Credentials.
+// Reads GOOGLE_APPLICATION_CREDENTIALS if set; otherwise records the ADC source.
+func (m *CloudAccount) resolveGCPApplicationDefault(creds *CloudCredentials) (*CloudCredentials, error) {
+	if creds.ProjectID == "" {
+		creds.ProjectID = os.Getenv("GOOGLE_CLOUD_PROJECT")
+		if creds.ProjectID == "" {
+			creds.ProjectID = os.Getenv("GCP_PROJECT_ID")
+		}
+	}
+	saPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+	if saPath != "" {
+		data, err := os.ReadFile(saPath)
+		if err != nil {
+			return nil, fmt.Errorf("reading GOOGLE_APPLICATION_CREDENTIALS: %w", err)
+		}
+		creds.ServiceAccountJSON = data
+		return creds, nil
+	}
+	// No explicit file — production would use the ADC chain (gcloud, metadata server, etc.)
+	if creds.Extra == nil {
+		creds.Extra = map[string]string{}
+	}
+	creds.Extra["credential_source"] = "application_default"
+	return creds, nil
+}
+
+// resolveAzureClientCredentials resolves Azure service principal client credentials.
+func (m *CloudAccount) resolveAzureClientCredentials(creds *CloudCredentials, credsMap map[string]any) (*CloudCredentials, error) {
+	creds.TenantID, _ = credsMap["tenant_id"].(string)
+	creds.ClientID, _ = credsMap["client_id"].(string)
+	creds.ClientSecret, _ = credsMap["client_secret"].(string)
+	if creds.TenantID == "" || creds.ClientID == "" || creds.ClientSecret == "" {
+		return nil, fmt.Errorf("client_credentials requires tenant_id, client_id, and client_secret")
+	}
+	return creds, nil
+}
+
+// resolveAzureManagedIdentity handles Azure Managed Identity (VMs, AKS, etc.).
+// Optional client_id selects a user-assigned managed identity.
+// Production: use github.com/Azure/azure-sdk-for-go/sdk/azidentity ManagedIdentityCredential.
+func (m *CloudAccount) resolveAzureManagedIdentity(creds *CloudCredentials, credsMap map[string]any) (*CloudCredentials, error) {
+	if clientID, ok := credsMap["client_id"].(string); ok {
+		creds.ClientID = clientID
+	}
+	if creds.Extra == nil {
+		creds.Extra = map[string]string{}
+	}
+	creds.Extra["credential_source"] = "managed_identity"
+	return creds, nil
+}
+
+// resolveAzureCLI handles Azure CLI credentials (az login).
+// Production: use github.com/Azure/azure-sdk-for-go/sdk/azidentity AzureCLICredential.
+func (m *CloudAccount) resolveAzureCLI(creds *CloudCredentials) (*CloudCredentials, error) {
+	if creds.Extra == nil {
+		creds.Extra = map[string]string{}
+	}
+	creds.Extra["credential_source"] = "azure_cli"
 	return creds, nil
 }

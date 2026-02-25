@@ -61,11 +61,21 @@ func (s *CloudValidateStep) Execute(ctx context.Context, _ *PipelineContext) (*S
 		"valid":    valid,
 	}
 
-	// For AWS: note where STS GetCallerIdentity would be called
-	// Production: use aws-sdk-go-v2/service/sts GetCallerIdentity to confirm
-	// credentials are actually valid (not just non-empty).
-	if provider.Provider() == "aws" {
+	switch provider.Provider() {
+	case "aws":
+		// Production: use aws-sdk-go-v2/service/sts GetCallerIdentity to confirm credentials.
 		output["sts_check"] = "stub: call STS GetCallerIdentity for live validation"
+	case "gcp":
+		if creds.ProjectID != "" {
+			output["project_id"] = creds.ProjectID
+		}
+	case "azure":
+		if creds.TenantID != "" {
+			output["tenant_id"] = creds.TenantID
+		}
+		if creds.SubscriptionID != "" {
+			output["subscription_id"] = creds.SubscriptionID
+		}
 	}
 
 	return &StepResult{Output: output}, nil
@@ -97,6 +107,19 @@ func (s *CloudValidateStep) validateCreds(provider string, creds *CloudCredentia
 		return creds.AccessKey != "" && creds.SecretKey != ""
 	case "gcp":
 		return creds.ProjectID != "" || len(creds.ServiceAccountJSON) > 0
+	case "azure":
+		// client_credentials: requires tenant+client+secret
+		// managed_identity/cli: valid if SubscriptionID or credential_source is set
+		if creds.TenantID != "" && creds.ClientID != "" {
+			return true
+		}
+		if creds.SubscriptionID != "" {
+			return true
+		}
+		if src, ok := creds.Extra["credential_source"]; ok && src != "" {
+			return true
+		}
+		return false
 	case "kubernetes":
 		return len(creds.Kubeconfig) > 0
 	case "mock":
