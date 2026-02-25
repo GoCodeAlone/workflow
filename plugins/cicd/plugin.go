@@ -1,7 +1,7 @@
 // Package cicd provides a plugin that registers CI/CD pipeline step types:
 // shell_exec, artifact_pull, artifact_push, docker_build, docker_push,
 // docker_run, scan_sast, scan_container, scan_deps, deploy, gate, build_ui,
-// build_from_config, git_clone, git_commit, git_push, git_tag, git_checkout.
+// build_from_config, build_binary, git_clone, git_commit, git_push, git_tag, git_checkout.
 package cicd
 
 import (
@@ -45,6 +45,7 @@ func New() *Plugin {
 					"step.gate",
 					"step.build_ui",
 					"step.build_from_config",
+					"step.build_binary",
 				"step.git_clone",
 				"step.git_commit",
 				"step.git_push",
@@ -85,6 +86,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.gate":              wrapStepFactory(module.NewGateStepFactory()),
 		"step.build_ui":          wrapStepFactory(module.NewBuildUIStepFactory()),
 		"step.build_from_config": wrapStepFactory(module.NewBuildFromConfigStepFactory()),
+		"step.build_binary":      wrapStepFactory(module.NewBuildBinaryStepFactory()),
 		"step.git_clone":         wrapStepFactory(module.NewGitCloneStepFactory()),
 		"step.git_commit":        wrapStepFactory(module.NewGitCommitStepFactory()),
 		"step.git_push":          wrapStepFactory(module.NewGitPushStepFactory()),
