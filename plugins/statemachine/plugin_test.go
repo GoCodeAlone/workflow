@@ -24,6 +24,9 @@ func TestPluginManifest(t *testing.T) {
 	if len(m.ModuleTypes) != 3 {
 		t.Errorf("expected 3 module types, got %d", len(m.ModuleTypes))
 	}
+	if len(m.StepTypes) != 2 {
+		t.Errorf("expected 2 step types, got %d", len(m.StepTypes))
+	}
 	if len(m.WorkflowTypes) != 1 {
 		t.Errorf("expected 1 workflow type, got %d", len(m.WorkflowTypes))
 	}
@@ -97,6 +100,21 @@ func TestWorkflowHandlers(t *testing.T) {
 	handler := factory()
 	if handler == nil {
 		t.Fatal("statemachine workflow handler factory returned nil")
+	}
+}
+
+func TestStepFactories(t *testing.T) {
+	p := New()
+	factories := p.StepFactories()
+
+	expectedTypes := []string{"step.statemachine_transition", "step.statemachine_get"}
+	for _, typ := range expectedTypes {
+		if _, ok := factories[typ]; !ok {
+			t.Errorf("missing step factory for %q", typ)
+		}
+	}
+	if len(factories) != len(expectedTypes) {
+		t.Errorf("expected %d step factories, got %d", len(expectedTypes), len(factories))
 	}
 }
 
