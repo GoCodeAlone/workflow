@@ -82,6 +82,11 @@ func (s *StaticFileServer) SetRouterName(name string) {
 	s.routerName = name
 }
 
+// SPAFallbackEnabled returns whether SPA fallback is active.
+func (s *StaticFileServer) SPAFallbackEnabled() bool {
+	return s.spaFallback
+}
+
 // Init initializes the module
 func (s *StaticFileServer) Init(app modular.Application) error {
 	// Validate root path exists, creating it if needed (for build pipeline workflows

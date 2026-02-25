@@ -387,6 +387,52 @@ func TestRateLimitMiddlewareFactory_InvalidValues(t *testing.T) {
 	}
 }
 
+func TestStaticFileServerFactory_SPAConfigKey(t *testing.T) {
+	factories := moduleFactories()
+	factory, ok := factories["static.fileserver"]
+	if !ok {
+		t.Fatal("no factory for static.fileserver")
+	}
+
+	// "spaFallback" key should enable SPA fallback
+	mod1 := factory("sfs-legacy", map[string]any{
+		"root":        t.TempDir(),
+		"spaFallback": true,
+	})
+	sfs1, ok := mod1.(*module.StaticFileServer)
+	if !ok {
+		t.Fatal("expected *module.StaticFileServer")
+	}
+	if !sfs1.SPAFallbackEnabled() {
+		t.Error("spaFallback: true should enable SPA fallback")
+	}
+
+	// "spa" shorthand key should also enable SPA fallback
+	mod2 := factory("sfs-shorthand", map[string]any{
+		"root": t.TempDir(),
+		"spa":  true,
+	})
+	sfs2, ok := mod2.(*module.StaticFileServer)
+	if !ok {
+		t.Fatal("expected *module.StaticFileServer")
+	}
+	if !sfs2.SPAFallbackEnabled() {
+		t.Error("spa: true should enable SPA fallback")
+	}
+
+	// Neither key set — SPA fallback should be off
+	mod3 := factory("sfs-off", map[string]any{
+		"root": t.TempDir(),
+	})
+	sfs3, ok := mod3.(*module.StaticFileServer)
+	if !ok {
+		t.Fatal("expected *module.StaticFileServer")
+	}
+	if sfs3.SPAFallbackEnabled() {
+		t.Error("no SPA key set — SPA fallback should be off")
+	}
+}
+
 func TestPluginLoaderIntegration(t *testing.T) {
 	p := New()
 

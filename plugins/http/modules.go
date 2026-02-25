@@ -96,6 +96,8 @@ func staticFileServerFactory(name string, cfg map[string]any) modular.Module {
 	spaFallback := false
 	if sf, ok := cfg["spaFallback"].(bool); ok {
 		spaFallback = sf
+	} else if sf, ok := cfg["spa"].(bool); ok {
+		spaFallback = sf
 	}
 	if spaFallback {
 		opts = append(opts, module.WithSPAFallback())
