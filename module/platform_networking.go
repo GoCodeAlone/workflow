@@ -1,9 +1,13 @@
 package module
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
 
 // NetworkState holds the current state of a managed VPC network.
@@ -318,36 +322,281 @@ func (b *mockNetworkBackend) destroy(m *PlatformNetworking) error {
 	return nil
 }
 
-// ─── AWS stub ─────────────────────────────────────────────────────────────────
+// ─── AWS EC2 backend ──────────────────────────────────────────────────────────
 
-// awsNetworkBackend is a stub for AWS VPC provisioning.
-// Real implementation would use aws-sdk-go-v2/service/ec2 to:
-//   - CreateVpc / DescribeVpcs / DeleteVpc
-//   - CreateSubnet / DescribeSubnets / DeleteSubnet
-//   - CreateNatGateway / DeleteNatGateway
-//   - CreateSecurityGroup / AuthorizeSecurityGroupIngress / DeleteSecurityGroup
+// awsNetworkBackend manages AWS VPC networking using aws-sdk-go-v2/service/ec2.
 type awsNetworkBackend struct{}
 
 func (b *awsNetworkBackend) plan(m *PlatformNetworking) (*NetworkPlan, error) {
+	awsProv, ok := awsProviderFrom(m.provider)
 	vpc := m.vpcConfig()
-	return &NetworkPlan{
+	if !ok {
+		return &NetworkPlan{
+			VPC:            vpc,
+			Subnets:        m.subnets(),
+			NATGateway:     m.natGateway(),
+			SecurityGroups: m.securityGroups(),
+			Changes:        []string{fmt.Sprintf("create VPC %q (%s)", vpc.Name, vpc.CIDR)},
+		}, nil
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("aws network plan: AWS config: %w", err)
+	}
+	client := ec2.NewFromConfig(cfg)
+
+	// Check if VPC already exists by Name tag
+	descOut, err := client.DescribeVpcs(context.Background(), &ec2.DescribeVpcsInput{
+		Filters: []ec2types.Filter{
+			{Name: aws.String("tag:Name"), Values: []string{vpc.Name}},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("aws network plan: DescribeVpcs: %w", err)
+	}
+
+	plan := &NetworkPlan{
 		VPC:            vpc,
 		Subnets:        m.subnets(),
 		NATGateway:     m.natGateway(),
 		SecurityGroups: m.securityGroups(),
-		Changes:        []string{fmt.Sprintf("create VPC %q (stub — use aws-sdk-go-v2/service/ec2)", vpc.Name)},
-	}, nil
+	}
+
+	if len(descOut.Vpcs) > 0 {
+		plan.Changes = []string{fmt.Sprintf("noop: VPC %q already exists", vpc.Name)}
+	} else {
+		plan.Changes = []string{fmt.Sprintf("create VPC %q (%s)", vpc.Name, vpc.CIDR)}
+		for _, sn := range m.subnets() {
+			plan.Changes = append(plan.Changes, fmt.Sprintf("create subnet %q (%s)", sn.Name, sn.CIDR))
+		}
+		for _, sg := range m.securityGroups() {
+			plan.Changes = append(plan.Changes, fmt.Sprintf("create security group %q", sg.Name))
+		}
+		if m.natGateway() {
+			plan.Changes = append(plan.Changes, "create NAT gateway")
+		}
+	}
+	return plan, nil
 }
 
 func (b *awsNetworkBackend) apply(m *PlatformNetworking) (*NetworkState, error) {
-	return nil, fmt.Errorf("aws network backend: not implemented — use aws-sdk-go-v2/service/ec2")
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		return nil, fmt.Errorf("aws network apply: no AWS cloud account configured")
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("aws network apply: AWS config: %w", err)
+	}
+	client := ec2.NewFromConfig(cfg)
+	vpc := m.vpcConfig()
+
+	// Create VPC
+	vpcOut, err := client.CreateVpc(context.Background(), &ec2.CreateVpcInput{
+		CidrBlock: aws.String(vpc.CIDR),
+		TagSpecifications: []ec2types.TagSpecification{
+			{
+				ResourceType: ec2types.ResourceTypeVpc,
+				Tags:         []ec2types.Tag{{Key: aws.String("Name"), Value: aws.String(vpc.Name)}},
+			},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("aws network apply: CreateVpc: %w", err)
+	}
+
+	vpcID := ""
+	if vpcOut.Vpc != nil && vpcOut.Vpc.VpcId != nil {
+		vpcID = *vpcOut.Vpc.VpcId
+	}
+	m.state.VPCID = vpcID
+
+	// Create Internet Gateway and attach
+	igwOut, err := client.CreateInternetGateway(context.Background(), &ec2.CreateInternetGatewayInput{})
+	if err != nil {
+		return nil, fmt.Errorf("aws network apply: CreateInternetGateway: %w", err)
+	}
+	if igwOut.InternetGateway != nil && igwOut.InternetGateway.InternetGatewayId != nil {
+		_, _ = client.AttachInternetGateway(context.Background(), &ec2.AttachInternetGatewayInput{
+			InternetGatewayId: igwOut.InternetGateway.InternetGatewayId,
+			VpcId:             aws.String(vpcID),
+		})
+	}
+
+	// Create subnets
+	m.state.SubnetIDs = make(map[string]string)
+	var firstPublicSubnetID string
+	for _, sn := range m.subnets() {
+		snOut, err := client.CreateSubnet(context.Background(), &ec2.CreateSubnetInput{
+			VpcId:            aws.String(vpcID),
+			CidrBlock:        aws.String(sn.CIDR),
+			AvailabilityZone: optString(sn.AZ),
+			TagSpecifications: []ec2types.TagSpecification{
+				{
+					ResourceType: ec2types.ResourceTypeSubnet,
+					Tags:         []ec2types.Tag{{Key: aws.String("Name"), Value: aws.String(sn.Name)}},
+				},
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("aws network apply: CreateSubnet %q: %w", sn.Name, err)
+		}
+		if snOut.Subnet != nil && snOut.Subnet.SubnetId != nil {
+			m.state.SubnetIDs[sn.Name] = *snOut.Subnet.SubnetId
+			if sn.Public && firstPublicSubnetID == "" {
+				firstPublicSubnetID = *snOut.Subnet.SubnetId
+			}
+		}
+	}
+
+	// Create NAT gateway if requested
+	if m.natGateway() && firstPublicSubnetID != "" {
+		// Allocate EIP for NAT gateway
+		eipOut, err := client.AllocateAddress(context.Background(), &ec2.AllocateAddressInput{
+			Domain: ec2types.DomainTypeVpc,
+		})
+		if err == nil && eipOut.AllocationId != nil {
+			natOut, err := client.CreateNatGateway(context.Background(), &ec2.CreateNatGatewayInput{
+				SubnetId:     aws.String(firstPublicSubnetID),
+				AllocationId: eipOut.AllocationId,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("aws network apply: CreateNatGateway: %w", err)
+			}
+			if natOut.NatGateway != nil && natOut.NatGateway.NatGatewayId != nil {
+				m.state.NATGatewayID = *natOut.NatGateway.NatGatewayId
+			}
+		}
+	}
+
+	// Create security groups
+	m.state.SecurityGroupIDs = make(map[string]string)
+	for _, sg := range m.securityGroups() {
+		sgOut, err := client.CreateSecurityGroup(context.Background(), &ec2.CreateSecurityGroupInput{
+			GroupName:   aws.String(sg.Name),
+			Description: aws.String(fmt.Sprintf("Security group: %s", sg.Name)),
+			VpcId:       aws.String(vpcID),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("aws network apply: CreateSecurityGroup %q: %w", sg.Name, err)
+		}
+		if sgOut.GroupId != nil {
+			m.state.SecurityGroupIDs[sg.Name] = *sgOut.GroupId
+
+			// Authorize ingress rules
+			var ipPerms []ec2types.IpPermission
+			for _, rule := range sg.Rules {
+				ipPerms = append(ipPerms, ec2types.IpPermission{
+					IpProtocol: aws.String(rule.Protocol),
+					FromPort:   aws.Int32(int32(rule.Port)),
+					ToPort:     aws.Int32(int32(rule.Port)),
+					IpRanges:   []ec2types.IpRange{{CidrIp: aws.String(rule.Source)}},
+				})
+			}
+			if len(ipPerms) > 0 {
+				_, _ = client.AuthorizeSecurityGroupIngress(context.Background(), &ec2.AuthorizeSecurityGroupIngressInput{
+					GroupId:       sgOut.GroupId,
+					IpPermissions: ipPerms,
+				})
+			}
+		}
+	}
+
+	m.state.Status = "active"
+	return m.state, nil
 }
 
 func (b *awsNetworkBackend) status(m *PlatformNetworking) (*NetworkState, error) {
-	m.state.Status = "unknown"
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		return m.state, nil
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return m.state, fmt.Errorf("aws network status: AWS config: %w", err)
+	}
+	client := ec2.NewFromConfig(cfg)
+
+	if m.state.VPCID == "" {
+		vpc := m.vpcConfig()
+		descOut, err := client.DescribeVpcs(context.Background(), &ec2.DescribeVpcsInput{
+			Filters: []ec2types.Filter{
+				{Name: aws.String("tag:Name"), Values: []string{vpc.Name}},
+			},
+		})
+		if err == nil && len(descOut.Vpcs) > 0 && descOut.Vpcs[0].VpcId != nil {
+			m.state.VPCID = *descOut.Vpcs[0].VpcId
+			m.state.Status = "active"
+		} else {
+			m.state.Status = "not-found"
+		}
+		return m.state, nil
+	}
+
+	descOut, err := client.DescribeVpcs(context.Background(), &ec2.DescribeVpcsInput{
+		VpcIds: []string{m.state.VPCID},
+	})
+	if err != nil {
+		return m.state, fmt.Errorf("aws network status: DescribeVpcs: %w", err)
+	}
+	if len(descOut.Vpcs) > 0 {
+		m.state.Status = "active"
+	} else {
+		m.state.Status = "not-found"
+	}
 	return m.state, nil
 }
 
 func (b *awsNetworkBackend) destroy(m *PlatformNetworking) error {
-	return fmt.Errorf("aws network backend: not implemented — use aws-sdk-go-v2/service/ec2")
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		return fmt.Errorf("aws network destroy: no AWS cloud account configured")
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return fmt.Errorf("aws network destroy: AWS config: %w", err)
+	}
+	client := ec2.NewFromConfig(cfg)
+
+	// Delete security groups
+	for _, sgID := range m.state.SecurityGroupIDs {
+		_, _ = client.DeleteSecurityGroup(context.Background(), &ec2.DeleteSecurityGroupInput{
+			GroupId: aws.String(sgID),
+		})
+	}
+
+	// Delete subnets
+	for _, snID := range m.state.SubnetIDs {
+		_, _ = client.DeleteSubnet(context.Background(), &ec2.DeleteSubnetInput{
+			SubnetId: aws.String(snID),
+		})
+	}
+
+	// Delete NAT gateway
+	if m.state.NATGatewayID != "" {
+		_, _ = client.DeleteNatGateway(context.Background(), &ec2.DeleteNatGatewayInput{
+			NatGatewayId: aws.String(m.state.NATGatewayID),
+		})
+	}
+
+	// Delete VPC
+	if m.state.VPCID != "" {
+		_, err = client.DeleteVpc(context.Background(), &ec2.DeleteVpcInput{
+			VpcId: aws.String(m.state.VPCID),
+		})
+		if err != nil {
+			return fmt.Errorf("aws network destroy: DeleteVpc: %w", err)
+		}
+	}
+
+	m.state.Status = "destroyed"
+	m.state.VPCID = ""
+	m.state.SubnetIDs = make(map[string]string)
+	m.state.SecurityGroupIDs = make(map[string]string)
+	m.state.NATGatewayID = ""
+	return nil
 }

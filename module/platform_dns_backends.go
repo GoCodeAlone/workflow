@@ -1,7 +1,13 @@
 package module
 
 import (
+	"context"
 	"fmt"
+	"strings"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/route53"
+	r53types "github.com/aws/aws-sdk-go-v2/service/route53/types"
 )
 
 // ─── Mock backend ─────────────────────────────────────────────────────────────
@@ -82,32 +88,269 @@ func (b *mockDNSBackend) destroyDNS(m *PlatformDNS) error {
 	return nil
 }
 
-// ─── Route53 stub ─────────────────────────────────────────────────────────────
+// ─── Route53 backend ──────────────────────────────────────────────────────────
 
-// route53Backend is a stub for Amazon Route 53.
-// Real implementation would use aws-sdk-go-v2/service/route53 to:
-//   - CreateHostedZone / GetHostedZone / DeleteHostedZone
-//   - ChangeResourceRecordSets / ListResourceRecordSets
+// route53Backend manages Amazon Route 53 hosted zones and records
+// using aws-sdk-go-v2/service/route53.
 type route53Backend struct{}
 
 func (b *route53Backend) planDNS(m *PlatformDNS) (*DNSPlan, error) {
 	zone := m.zoneConfig()
-	return &DNSPlan{
-		Zone:    zone,
-		Records: m.recordConfigs(),
-		Changes: []string{fmt.Sprintf("create Route53 hosted zone %q (stub — use aws-sdk-go-v2/service/route53)", zone.Name)},
-	}, nil
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		return &DNSPlan{
+			Zone:    zone,
+			Records: m.recordConfigs(),
+			Changes: []string{fmt.Sprintf("create Route53 hosted zone %q", zone.Name)},
+		}, nil
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("route53 plan: AWS config: %w", err)
+	}
+	client := route53.NewFromConfig(cfg)
+
+	// Check if zone already exists
+	listOut, err := client.ListHostedZonesByName(context.Background(), &route53.ListHostedZonesByNameInput{
+		DNSName: aws.String(zone.Name),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("route53 plan: ListHostedZonesByName: %w", err)
+	}
+
+	plan := &DNSPlan{Zone: zone, Records: m.recordConfigs()}
+	for _, hz := range listOut.HostedZones {
+		if hz.Name != nil && strings.TrimSuffix(*hz.Name, ".") == strings.TrimSuffix(zone.Name, ".") {
+			plan.Changes = []string{fmt.Sprintf("noop: Route53 zone %q already exists", zone.Name)}
+			return plan, nil
+		}
+	}
+
+	plan.Changes = []string{fmt.Sprintf("create Route53 hosted zone %q", zone.Name)}
+	for _, r := range m.recordConfigs() {
+		plan.Changes = append(plan.Changes, fmt.Sprintf("create %s record %q -> %q", r.Type, r.Name, r.Value))
+	}
+	return plan, nil
 }
 
 func (b *route53Backend) applyDNS(m *PlatformDNS) (*DNSState, error) {
-	return nil, fmt.Errorf("route53 backend: not implemented — use aws-sdk-go-v2/service/route53")
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		return nil, fmt.Errorf("route53 apply: no AWS cloud account configured")
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("route53 apply: AWS config: %w", err)
+	}
+	client := route53.NewFromConfig(cfg)
+	zone := m.zoneConfig()
+
+	// Find or create hosted zone
+	zoneID := m.state.ZoneID
+	if zoneID == "" {
+		listOut, _ := client.ListHostedZonesByName(context.Background(), &route53.ListHostedZonesByNameInput{
+			DNSName: aws.String(zone.Name),
+		})
+		if listOut != nil {
+			for _, hz := range listOut.HostedZones {
+				if hz.Name != nil && strings.TrimSuffix(*hz.Name, ".") == strings.TrimSuffix(zone.Name, ".") {
+					if hz.Id != nil {
+						zoneID = strings.TrimPrefix(*hz.Id, "/hostedzone/")
+					}
+					break
+				}
+			}
+		}
+	}
+
+	if zoneID == "" {
+		createOut, err := client.CreateHostedZone(context.Background(), &route53.CreateHostedZoneInput{
+			Name:            aws.String(zone.Name),
+			CallerReference: aws.String(fmt.Sprintf("workflow-%s", zone.Name)),
+			HostedZoneConfig: &r53types.HostedZoneConfig{
+				Comment: aws.String(zone.Comment),
+				PrivateZone: zone.Private,
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("route53 apply: CreateHostedZone: %w", err)
+		}
+		if createOut.HostedZone != nil && createOut.HostedZone.Id != nil {
+			zoneID = strings.TrimPrefix(*createOut.HostedZone.Id, "/hostedzone/")
+		}
+	}
+
+	// Upsert DNS records
+	records := m.recordConfigs()
+	if len(records) > 0 {
+		var changes []r53types.Change
+		for _, rec := range records {
+			rrType, err := r53RecordType(rec.Type)
+			if err != nil {
+				continue
+			}
+			changes = append(changes, r53types.Change{
+				Action: r53types.ChangeActionUpsert,
+				ResourceRecordSet: &r53types.ResourceRecordSet{
+					Name: aws.String(rec.Name),
+					Type: rrType,
+					TTL:  aws.Int64(int64(rec.TTL)),
+					ResourceRecords: []r53types.ResourceRecord{
+						{Value: aws.String(rec.Value)},
+					},
+				},
+			})
+		}
+		if len(changes) > 0 {
+			_, err = client.ChangeResourceRecordSets(context.Background(), &route53.ChangeResourceRecordSetsInput{
+				HostedZoneId: aws.String(zoneID),
+				ChangeBatch:  &r53types.ChangeBatch{Changes: changes},
+			})
+			if err != nil {
+				return nil, fmt.Errorf("route53 apply: ChangeResourceRecordSets: %w", err)
+			}
+		}
+	}
+
+	m.state.ZoneID = zoneID
+	m.state.ZoneName = zone.Name
+	m.state.Records = records
+	m.state.Status = "active"
+	return m.state, nil
 }
 
 func (b *route53Backend) statusDNS(m *PlatformDNS) (*DNSState, error) {
-	m.state.Status = "unknown"
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		return m.state, nil
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return m.state, fmt.Errorf("route53 status: AWS config: %w", err)
+	}
+	client := route53.NewFromConfig(cfg)
+
+	if m.state.ZoneID == "" {
+		m.state.Status = "not-found"
+		return m.state, nil
+	}
+
+	_, err = client.GetHostedZone(context.Background(), &route53.GetHostedZoneInput{
+		Id: aws.String(m.state.ZoneID),
+	})
+	if err != nil {
+		m.state.Status = "not-found"
+		return m.state, nil
+	}
+
+	// List records
+	listOut, err := client.ListResourceRecordSets(context.Background(), &route53.ListResourceRecordSetsInput{
+		HostedZoneId: aws.String(m.state.ZoneID),
+	})
+	if err == nil {
+		var records []DNSRecordConfig
+		for _, rrs := range listOut.ResourceRecordSets {
+			if rrs.Name == nil {
+				continue
+			}
+			for _, rr := range rrs.ResourceRecords {
+				if rr.Value == nil {
+					continue
+				}
+				ttl := 300
+				if rrs.TTL != nil {
+					ttl = int(*rrs.TTL)
+				}
+				records = append(records, DNSRecordConfig{
+					Name:  *rrs.Name,
+					Type:  string(rrs.Type),
+					Value: *rr.Value,
+					TTL:   ttl,
+				})
+			}
+		}
+		m.state.Records = records
+	}
+
+	m.state.Status = "active"
 	return m.state, nil
 }
 
 func (b *route53Backend) destroyDNS(m *PlatformDNS) error {
-	return fmt.Errorf("route53 backend: not implemented — use aws-sdk-go-v2/service/route53")
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		return fmt.Errorf("route53 destroy: no AWS cloud account configured")
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return fmt.Errorf("route53 destroy: AWS config: %w", err)
+	}
+	client := route53.NewFromConfig(cfg)
+
+	if m.state.ZoneID == "" {
+		return nil
+	}
+
+	// Delete all non-NS/SOA records before deleting the zone
+	listOut, _ := client.ListResourceRecordSets(context.Background(), &route53.ListResourceRecordSetsInput{
+		HostedZoneId: aws.String(m.state.ZoneID),
+	})
+	if listOut != nil {
+		var changes []r53types.Change
+		for _, rrs := range listOut.ResourceRecordSets {
+			if rrs.Type == r53types.RRTypeNs || rrs.Type == r53types.RRTypeSoa {
+				continue
+			}
+			changes = append(changes, r53types.Change{
+				Action:            r53types.ChangeActionDelete,
+				ResourceRecordSet: &rrs,
+			})
+		}
+		if len(changes) > 0 {
+			_, _ = client.ChangeResourceRecordSets(context.Background(), &route53.ChangeResourceRecordSetsInput{
+				HostedZoneId: aws.String(m.state.ZoneID),
+				ChangeBatch:  &r53types.ChangeBatch{Changes: changes},
+			})
+		}
+	}
+
+	_, err = client.DeleteHostedZone(context.Background(), &route53.DeleteHostedZoneInput{
+		Id: aws.String(m.state.ZoneID),
+	})
+	if err != nil {
+		return fmt.Errorf("route53 destroy: DeleteHostedZone: %w", err)
+	}
+
+	m.state.Status = "deleted"
+	m.state.ZoneID = ""
+	m.state.Records = nil
+	return nil
+}
+
+// r53RecordType maps a DNS record type string to the Route53 RRType.
+func r53RecordType(t string) (r53types.RRType, error) {
+	switch strings.ToUpper(t) {
+	case "A":
+		return r53types.RRTypeA, nil
+	case "AAAA":
+		return r53types.RRTypeAaaa, nil
+	case "CNAME":
+		return r53types.RRTypeCname, nil
+	case "TXT":
+		return r53types.RRTypeTxt, nil
+	case "MX":
+		return r53types.RRTypeMx, nil
+	case "NS":
+		return r53types.RRTypeNs, nil
+	case "SRV":
+		return r53types.RRTypeSrv, nil
+	case "PTR":
+		return r53types.RRTypePtr, nil
+	default:
+		return "", fmt.Errorf("unsupported Route53 record type: %q", t)
+	}
 }

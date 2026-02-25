@@ -1,10 +1,14 @@
 package module
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/applicationautoscaling"
+	appscalingtypes "github.com/aws/aws-sdk-go-v2/service/applicationautoscaling/types"
 )
 
 // ScalingPolicy describes a single autoscaling policy.
@@ -49,11 +53,12 @@ type autoscalingBackend interface {
 //	provider: mock | aws
 //	policies: list of scaling policy definitions
 type PlatformAutoscaling struct {
-	name    string
-	config  map[string]any
-	account string
-	state   *ScalingState
-	backend autoscalingBackend
+	name     string
+	config   map[string]any
+	account  string
+	provider CloudCredentialProvider
+	state    *ScalingState
+	backend  autoscalingBackend
 }
 
 // NewPlatformAutoscaling creates a new PlatformAutoscaling module.
@@ -68,8 +73,12 @@ func (m *PlatformAutoscaling) Name() string { return m.name }
 func (m *PlatformAutoscaling) Init(app modular.Application) error {
 	m.account, _ = m.config["account"].(string)
 	if m.account != "" {
-		if _, ok := app.SvcRegistry()[m.account]; !ok {
+		svc, ok := app.SvcRegistry()[m.account]
+		if !ok {
 			return fmt.Errorf("platform.autoscaling %q: account service %q not found", m.name, m.account)
+		}
+		if prov, ok := svc.(CloudCredentialProvider); ok {
+			m.provider = prov
 		}
 	}
 
@@ -232,28 +241,222 @@ func (b *mockAutoscalingBackend) destroy(m *PlatformAutoscaling) error {
 	return nil
 }
 
-// ─── AWS stub ─────────────────────────────────────────────────────────────────
+// ─── AWS Application Autoscaling backend ──────────────────────────────────────
 
-// awsAutoscalingBackend is a stub for AWS Auto Scaling.
-// Real implementation would use aws-sdk-go-v2/service/autoscaling.
+// awsAutoscalingBackend manages AWS Application Autoscaling policies using
+// aws-sdk-go-v2/service/applicationautoscaling.
 type awsAutoscalingBackend struct{}
 
+// ecsServiceDimension returns the Application Autoscaling resource ID for an ECS service.
+func ecsServiceDimension(policy ScalingPolicy) string {
+	// Resource ID format: service/<cluster>/<service>
+	parts := strings.SplitN(policy.TargetResource, "/", 2)
+	if len(parts) == 2 {
+		return fmt.Sprintf("service/%s/%s", parts[0], parts[1])
+	}
+	return fmt.Sprintf("service/%s", policy.TargetResource)
+}
+
 func (b *awsAutoscalingBackend) plan(m *PlatformAutoscaling) (*ScalingPlan, error) {
-	return &ScalingPlan{
-		Policies: m.policies(),
-		Changes:  []string{"AWS Auto Scaling (stub — use Terraform or aws-sdk-go-v2/service/autoscaling)"},
-	}, nil
+	policies := m.policies()
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		plan := &ScalingPlan{Policies: policies}
+		plan.Changes = []string{fmt.Sprintf("register %d Application Autoscaling policy(s)", len(policies))}
+		return plan, nil
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("autoscaling plan: AWS config: %w", err)
+	}
+	client := applicationautoscaling.NewFromConfig(cfg)
+
+	if len(policies) == 0 {
+		return &ScalingPlan{Policies: policies, Changes: []string{"no policies configured"}}, nil
+	}
+
+	// Check if targets already registered
+	resourceIDs := make([]string, 0, len(policies))
+	for _, p := range policies {
+		resourceIDs = append(resourceIDs, ecsServiceDimension(p))
+	}
+
+	out, err := client.DescribeScalableTargets(context.Background(), &applicationautoscaling.DescribeScalableTargetsInput{
+		ServiceNamespace: appscalingtypes.ServiceNamespaceEcs,
+		ResourceIds:      resourceIDs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("autoscaling plan: DescribeScalableTargets: %w", err)
+	}
+
+	registered := make(map[string]bool)
+	for _, t := range out.ScalableTargets {
+		if t.ResourceId != nil {
+			registered[*t.ResourceId] = true
+		}
+	}
+
+	plan := &ScalingPlan{Policies: policies}
+	for _, p := range policies {
+		rid := ecsServiceDimension(p)
+		if registered[rid] {
+			plan.Changes = append(plan.Changes, fmt.Sprintf("noop: target %q already registered", rid))
+		} else {
+			plan.Changes = append(plan.Changes, fmt.Sprintf("register scalable target %q (%s)", p.Name, rid))
+		}
+	}
+	return plan, nil
 }
 
 func (b *awsAutoscalingBackend) apply(m *PlatformAutoscaling) (*ScalingState, error) {
-	return nil, fmt.Errorf("aws autoscaling backend: not implemented — use Terraform or aws-sdk-go-v2/service/autoscaling")
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		return nil, fmt.Errorf("autoscaling apply: no AWS cloud account configured")
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("autoscaling apply: AWS config: %w", err)
+	}
+	client := applicationautoscaling.NewFromConfig(cfg)
+
+	roleARN, _ := m.config["role_arn"].(string)
+	policies := m.policies()
+
+	for _, policy := range policies {
+		resourceID := ecsServiceDimension(policy)
+
+		// Register scalable target
+		_, err := client.RegisterScalableTarget(context.Background(), &applicationautoscaling.RegisterScalableTargetInput{
+			ServiceNamespace:  appscalingtypes.ServiceNamespaceEcs,
+			ScalableDimension: appscalingtypes.ScalableDimensionECSServiceDesiredCount,
+			ResourceId:        aws.String(resourceID),
+			MinCapacity:       aws.Int32(int32(policy.MinCapacity)),
+			MaxCapacity:       aws.Int32(int32(policy.MaxCapacity)),
+			RoleARN:           optString(roleARN),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("autoscaling apply: RegisterScalableTarget %q: %w", policy.Name, err)
+		}
+
+		// Put scaling policy
+		switch policy.Type {
+		case "target_tracking":
+			_, err = client.PutScalingPolicy(context.Background(), &applicationautoscaling.PutScalingPolicyInput{
+				PolicyName:        aws.String(policy.Name),
+				ServiceNamespace:  appscalingtypes.ServiceNamespaceEcs,
+				ScalableDimension: appscalingtypes.ScalableDimensionECSServiceDesiredCount,
+				ResourceId:        aws.String(resourceID),
+				PolicyType:        appscalingtypes.PolicyTypeTargetTrackingScaling,
+				TargetTrackingScalingPolicyConfiguration: &appscalingtypes.TargetTrackingScalingPolicyConfiguration{
+					TargetValue: aws.Float64(policy.TargetValue),
+					PredefinedMetricSpecification: &appscalingtypes.PredefinedMetricSpecification{
+						PredefinedMetricType: appscalingtypes.MetricTypeECSServiceAverageCPUUtilization,
+					},
+				},
+			})
+		case "step":
+			_, err = client.PutScalingPolicy(context.Background(), &applicationautoscaling.PutScalingPolicyInput{
+				PolicyName:        aws.String(policy.Name),
+				ServiceNamespace:  appscalingtypes.ServiceNamespaceEcs,
+				ScalableDimension: appscalingtypes.ScalableDimensionECSServiceDesiredCount,
+				ResourceId:        aws.String(resourceID),
+				PolicyType:        appscalingtypes.PolicyTypeStepScaling,
+			})
+		}
+		if err != nil {
+			return nil, fmt.Errorf("autoscaling apply: PutScalingPolicy %q: %w", policy.Name, err)
+		}
+	}
+
+	m.state.ID = fmt.Sprintf("aws-scaling-%s", strings.ReplaceAll(m.name, " ", "-"))
+	m.state.Policies = policies
+	if len(policies) > 0 {
+		m.state.CurrentCapacity = policies[0].MinCapacity
+	}
+	m.state.Status = "active"
+	return m.state, nil
 }
 
 func (b *awsAutoscalingBackend) status(m *PlatformAutoscaling) (*ScalingState, error) {
-	m.state.Status = "unknown"
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		return m.state, nil
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return m.state, fmt.Errorf("autoscaling status: AWS config: %w", err)
+	}
+	client := applicationautoscaling.NewFromConfig(cfg)
+
+	policies := m.policies()
+	if len(policies) == 0 {
+		return m.state, nil
+	}
+
+	resourceIDs := make([]string, 0, len(policies))
+	for _, p := range policies {
+		resourceIDs = append(resourceIDs, ecsServiceDimension(p))
+	}
+
+	out, err := client.DescribeScalableTargets(context.Background(), &applicationautoscaling.DescribeScalableTargetsInput{
+		ServiceNamespace: appscalingtypes.ServiceNamespaceEcs,
+		ResourceIds:      resourceIDs,
+	})
+	if err != nil {
+		return m.state, fmt.Errorf("autoscaling status: DescribeScalableTargets: %w", err)
+	}
+
+	if len(out.ScalableTargets) > 0 {
+		m.state.Status = "active"
+		if out.ScalableTargets[0].MinCapacity != nil {
+			m.state.CurrentCapacity = int(*out.ScalableTargets[0].MinCapacity)
+		}
+	} else {
+		m.state.Status = "not-registered"
+	}
+
 	return m.state, nil
 }
 
 func (b *awsAutoscalingBackend) destroy(m *PlatformAutoscaling) error {
-	return fmt.Errorf("aws autoscaling backend: not implemented — use Terraform or aws-sdk-go-v2/service/autoscaling")
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		return fmt.Errorf("autoscaling destroy: no AWS cloud account configured")
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return fmt.Errorf("autoscaling destroy: AWS config: %w", err)
+	}
+	client := applicationautoscaling.NewFromConfig(cfg)
+
+	for _, policy := range m.policies() {
+		resourceID := ecsServiceDimension(policy)
+
+		// Delete scaling policy
+		_, _ = client.DeleteScalingPolicy(context.Background(), &applicationautoscaling.DeleteScalingPolicyInput{
+			PolicyName:        aws.String(policy.Name),
+			ServiceNamespace:  appscalingtypes.ServiceNamespaceEcs,
+			ScalableDimension: appscalingtypes.ScalableDimensionECSServiceDesiredCount,
+			ResourceId:        aws.String(resourceID),
+		})
+
+		// Deregister scalable target
+		_, err := client.DeregisterScalableTarget(context.Background(), &applicationautoscaling.DeregisterScalableTargetInput{
+			ServiceNamespace:  appscalingtypes.ServiceNamespaceEcs,
+			ScalableDimension: appscalingtypes.ScalableDimensionECSServiceDesiredCount,
+			ResourceId:        aws.String(resourceID),
+		})
+		if err != nil {
+			return fmt.Errorf("autoscaling destroy: DeregisterScalableTarget %q: %w", policy.Name, err)
+		}
+	}
+
+	m.state.Status = "deleted"
+	m.state.Policies = nil
+	m.state.ID = ""
+	return nil
 }

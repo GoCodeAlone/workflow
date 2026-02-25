@@ -1,10 +1,14 @@
 package module
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
+	apigwtypes "github.com/aws/aws-sdk-go-v2/service/apigatewayv2/types"
 )
 
 // PlatformGatewayCORSConfig holds CORS settings for a provisioned API gateway.
@@ -61,11 +65,12 @@ type apigatewayBackend interface {
 //	cors:     CORS configuration
 //	routes:   list of route definitions
 type PlatformAPIGateway struct {
-	name    string
-	config  map[string]any
-	account string
-	state   *PlatformGatewayState
-	backend apigatewayBackend
+	name     string
+	config   map[string]any
+	account  string
+	provider CloudCredentialProvider
+	state    *PlatformGatewayState
+	backend  apigatewayBackend
 }
 
 // NewPlatformAPIGateway creates a new PlatformAPIGateway module.
@@ -80,8 +85,12 @@ func (m *PlatformAPIGateway) Name() string { return m.name }
 func (m *PlatformAPIGateway) Init(app modular.Application) error {
 	m.account, _ = m.config["account"].(string)
 	if m.account != "" {
-		if _, ok := app.SvcRegistry()[m.account]; !ok {
+		svc, ok := app.SvcRegistry()[m.account]
+		if !ok {
 			return fmt.Errorf("platform.apigateway %q: account service %q not found", m.name, m.account)
+		}
+		if prov, ok := svc.(CloudCredentialProvider); ok {
+			m.provider = prov
 		}
 	}
 
@@ -273,30 +282,208 @@ func (b *mockAPIGatewayBackend) destroy(m *PlatformAPIGateway) error {
 	return nil
 }
 
-// ─── AWS stub ─────────────────────────────────────────────────────────────────
+// ─── AWS APIGateway v2 backend ────────────────────────────────────────────────
 
-// awsAPIGatewayBackend is a stub for AWS API Gateway v2.
-// Real implementation would use aws-sdk-go-v2/service/apigatewayv2.
+// awsAPIGatewayBackend manages AWS API Gateway v2 (HTTP APIs) using
+// aws-sdk-go-v2/service/apigatewayv2.
 type awsAPIGatewayBackend struct{}
 
 func (b *awsAPIGatewayBackend) plan(m *PlatformAPIGateway) (*PlatformGatewayPlan, error) {
+	routes := m.platformRoutes()
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		return &PlatformGatewayPlan{
+			Name:    m.gatewayName(),
+			Stage:   m.state.Stage,
+			Routes:  routes,
+			Changes: []string{fmt.Sprintf("create API Gateway %q with %d route(s)", m.gatewayName(), len(routes))},
+		}, nil
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("apigateway plan: AWS config: %w", err)
+	}
+	client := apigatewayv2.NewFromConfig(cfg)
+
+	// Check if API already exists by name
+	listOut, err := client.GetApis(context.Background(), &apigatewayv2.GetApisInput{})
+	if err != nil {
+		return nil, fmt.Errorf("apigateway plan: GetApis: %w", err)
+	}
+
+	for _, api := range listOut.Items {
+		if api.Name != nil && *api.Name == m.gatewayName() {
+			return &PlatformGatewayPlan{
+				Name:    m.gatewayName(),
+				Stage:   m.state.Stage,
+				Routes:  routes,
+				Changes: []string{fmt.Sprintf("noop: API Gateway %q already exists", m.gatewayName())},
+			}, nil
+		}
+	}
+
 	return &PlatformGatewayPlan{
 		Name:    m.gatewayName(),
 		Stage:   m.state.Stage,
-		Routes:  m.platformRoutes(),
-		Changes: []string{"AWS API Gateway (stub — use Terraform or aws-sdk-go-v2/service/apigatewayv2)"},
+		Routes:  routes,
+		CORS:    m.platformCORS(),
+		Changes: []string{fmt.Sprintf("create API Gateway %q with %d route(s) in stage %q", m.gatewayName(), len(routes), m.state.Stage)},
 	}, nil
 }
 
 func (b *awsAPIGatewayBackend) apply(m *PlatformAPIGateway) (*PlatformGatewayState, error) {
-	return nil, fmt.Errorf("aws apigateway backend: not implemented — use Terraform or aws-sdk-go-v2/service/apigatewayv2")
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		return nil, fmt.Errorf("apigateway apply: no AWS cloud account configured")
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("apigateway apply: AWS config: %w", err)
+	}
+	client := apigatewayv2.NewFromConfig(cfg)
+
+	// Check if API already exists
+	apiID := m.state.ID
+	if apiID == "" {
+		listOut, _ := client.GetApis(context.Background(), &apigatewayv2.GetApisInput{})
+		if listOut != nil {
+			for _, api := range listOut.Items {
+				if api.Name != nil && *api.Name == m.gatewayName() && api.ApiId != nil {
+					apiID = *api.ApiId
+					break
+				}
+			}
+		}
+	}
+
+	if apiID == "" {
+		createInput := &apigatewayv2.CreateApiInput{
+			Name:         aws.String(m.gatewayName()),
+			ProtocolType: apigwtypes.ProtocolTypeHttp,
+		}
+		if cors := m.platformCORS(); cors != nil {
+			createInput.CorsConfiguration = &apigwtypes.Cors{
+				AllowOrigins:  cors.AllowOrigins,
+				AllowMethods:  cors.AllowMethods,
+				AllowHeaders:  cors.AllowHeaders,
+			}
+		}
+		apiOut, err := client.CreateApi(context.Background(), createInput)
+		if err != nil {
+			return nil, fmt.Errorf("apigateway apply: CreateApi: %w", err)
+		}
+		if apiOut.ApiId != nil {
+			apiID = *apiOut.ApiId
+		}
+		if apiOut.ApiEndpoint != nil {
+			m.state.Endpoint = *apiOut.ApiEndpoint
+		}
+	}
+	m.state.ID = apiID
+
+	// Create stage
+	_, _ = client.CreateStage(context.Background(), &apigatewayv2.CreateStageInput{
+		ApiId:      aws.String(apiID),
+		StageName:  aws.String(m.state.Stage),
+		AutoDeploy: aws.Bool(true),
+	})
+
+	// Create routes and integrations
+	routes := m.platformRoutes()
+	for _, route := range routes {
+		// Create integration for the route target
+		integOut, err := client.CreateIntegration(context.Background(), &apigatewayv2.CreateIntegrationInput{
+			ApiId:             aws.String(apiID),
+			IntegrationType:   apigwtypes.IntegrationTypeHttpProxy,
+			IntegrationUri:    aws.String(route.Target),
+			IntegrationMethod: aws.String(route.Method),
+			PayloadFormatVersion: aws.String("1.0"),
+		})
+		if err != nil {
+			continue
+		}
+
+		integID := ""
+		if integOut.IntegrationId != nil {
+			integID = *integOut.IntegrationId
+		}
+
+		routeKey := fmt.Sprintf("%s %s", strings.ToUpper(route.Method), route.Path)
+		_, _ = client.CreateRoute(context.Background(), &apigatewayv2.CreateRouteInput{
+			ApiId:    aws.String(apiID),
+			RouteKey: aws.String(routeKey),
+			Target:   optString(fmt.Sprintf("integrations/%s", integID)),
+		})
+	}
+
+	m.state.Routes = routes
+	m.state.CORS = m.platformCORS()
+	m.state.Status = "active"
+	if m.state.Endpoint == "" {
+		m.state.Endpoint = fmt.Sprintf("https://%s.execute-api.amazonaws.com/%s", apiID, m.state.Stage)
+	}
+
+	return m.state, nil
 }
 
 func (b *awsAPIGatewayBackend) status(m *PlatformAPIGateway) (*PlatformGatewayState, error) {
-	m.state.Status = "unknown"
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		return m.state, nil
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return m.state, fmt.Errorf("apigateway status: AWS config: %w", err)
+	}
+	client := apigatewayv2.NewFromConfig(cfg)
+
+	if m.state.ID == "" {
+		m.state.Status = "not-found"
+		return m.state, nil
+	}
+
+	out, err := client.GetApi(context.Background(), &apigatewayv2.GetApiInput{
+		ApiId: aws.String(m.state.ID),
+	})
+	if err != nil {
+		m.state.Status = "not-found"
+		return m.state, nil
+	}
+	if out.ApiEndpoint != nil {
+		m.state.Endpoint = *out.ApiEndpoint
+	}
+	m.state.Status = "active"
 	return m.state, nil
 }
 
 func (b *awsAPIGatewayBackend) destroy(m *PlatformAPIGateway) error {
-	return fmt.Errorf("aws apigateway backend: not implemented — use Terraform or aws-sdk-go-v2/service/apigatewayv2")
+	awsProv, ok := awsProviderFrom(m.provider)
+	if !ok {
+		return fmt.Errorf("apigateway destroy: no AWS cloud account configured")
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return fmt.Errorf("apigateway destroy: AWS config: %w", err)
+	}
+	client := apigatewayv2.NewFromConfig(cfg)
+
+	if m.state.ID == "" {
+		return nil
+	}
+
+	_, err = client.DeleteApi(context.Background(), &apigatewayv2.DeleteApiInput{
+		ApiId: aws.String(m.state.ID),
+	})
+	if err != nil {
+		return fmt.Errorf("apigateway destroy: DeleteApi: %w", err)
+	}
+
+	m.state.Status = "deleted"
+	m.state.ID = ""
+	m.state.Endpoint = ""
+	return nil
 }

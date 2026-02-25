@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/digitalocean/godo"
+	"golang.org/x/oauth2"
 )
 
 // CloudCredentialProvider provides cloud credentials to other modules.
@@ -35,7 +37,7 @@ type CloudCredentials struct {
 	// Kubernetes
 	Kubeconfig []byte
 	Context    string
-	// Generic
+	// Generic / DigitalOcean
 	Token string
 	Extra map[string]string
 }
@@ -162,6 +164,9 @@ func (m *CloudAccount) resolveCredentials() (*CloudCredentials, error) {
 		return m.resolveAzureManagedIdentity(creds, credsMap)
 	case "cli":
 		return m.resolveAzureCLI(creds)
+	// DigitalOcean credential types
+	case "api_token":
+		return m.resolveDOAPIToken(creds, credsMap)
 	default:
 		return nil, fmt.Errorf("unsupported credential type %q", credType)
 	}
@@ -262,6 +267,11 @@ func (m *CloudAccount) resolveEnvCredentials(creds *CloudCredentials) (*CloudCre
 			return nil, fmt.Errorf("reading kubeconfig: %w", err)
 		}
 		creds.Kubeconfig = data
+	case "digitalocean":
+		creds.Token = os.Getenv("DIGITALOCEAN_TOKEN")
+		if creds.Token == "" {
+			creds.Token = os.Getenv("DO_TOKEN")
+		}
 	default:
 		creds.Token = os.Getenv("CLOUD_TOKEN")
 	}
@@ -414,4 +424,25 @@ func (m *CloudAccount) resolveAzureCLI(creds *CloudCredentials) (*CloudCredentia
 	}
 	creds.Extra["credential_source"] = "azure_cli"
 	return creds, nil
+}
+
+// resolveDOAPIToken resolves a DigitalOcean API token from config.
+func (m *CloudAccount) resolveDOAPIToken(creds *CloudCredentials, credsMap map[string]any) (*CloudCredentials, error) {
+	token, _ := credsMap["token"].(string)
+	if token == "" {
+		return nil, fmt.Errorf("api_token credential requires 'token'")
+	}
+	creds.Token = token
+	return creds, nil
+}
+
+// doClient returns a configured *godo.Client using the Token credential.
+// The caller must have resolved credentials with provider=digitalocean before calling this.
+func (m *CloudAccount) doClient() (*godo.Client, error) {
+	if m.creds == nil || m.creds.Token == "" {
+		return nil, fmt.Errorf("cloud.account %q: DigitalOcean token not set", m.name)
+	}
+	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: m.creds.Token})
+	httpClient := oauth2.NewClient(context.Background(), ts)
+	return godo.NewClient(httpClient), nil
 }
