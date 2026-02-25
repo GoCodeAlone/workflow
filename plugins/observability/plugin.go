@@ -39,6 +39,7 @@ func New() *ObservabilityPlugin {
 				"http.middleware.otel",
 			},
 			WiringHooks: []string{
+				"observability.otel-middleware",
 				"observability.health-endpoints",
 				"observability.metrics-endpoint",
 				"observability.log-endpoint",

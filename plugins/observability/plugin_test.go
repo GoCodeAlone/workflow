@@ -36,8 +36,8 @@ func TestManifestValidation(t *testing.T) {
 	if m.Name != "observability" {
 		t.Errorf("manifest Name = %q, want %q", m.Name, "observability")
 	}
-	if len(m.ModuleTypes) != 5 {
-		t.Errorf("manifest ModuleTypes count = %d, want 5", len(m.ModuleTypes))
+	if len(m.ModuleTypes) != 6 {
+		t.Errorf("manifest ModuleTypes count = %d, want 6", len(m.ModuleTypes))
 	}
 }
 
@@ -79,6 +79,7 @@ func TestModuleFactories(t *testing.T) {
 		"log.collector",
 		"observability.otel",
 		"openapi.generator",
+		"http.middleware.otel",
 	}
 
 	if len(factories) != len(expectedTypes) {
@@ -166,6 +167,7 @@ func TestModuleSchemas(t *testing.T) {
 		"log.collector":      false,
 		"observability.otel": false,
 		"openapi.generator":  false,
+		"http.middleware.otel": false,
 	}
 
 	if len(schemas) != len(expectedTypes) {
@@ -235,11 +237,12 @@ func TestWiringHooks(t *testing.T) {
 	p := New()
 	hooks := p.WiringHooks()
 
-	if len(hooks) != 4 {
-		t.Fatalf("WiringHooks() count = %d, want 4", len(hooks))
+	if len(hooks) != 5 {
+		t.Fatalf("WiringHooks() count = %d, want 5", len(hooks))
 	}
 
 	expectedNames := map[string]bool{
+		"observability.otel-middleware":   false,
 		"observability.health-endpoints":  false,
 		"observability.metrics-endpoint":  false,
 		"observability.log-endpoint":      false,

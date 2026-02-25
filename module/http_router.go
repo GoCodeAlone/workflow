@@ -48,11 +48,12 @@ type Route struct {
 
 // StandardHTTPRouter implements both HTTPRouter and http.Handler interfaces
 type StandardHTTPRouter struct {
-	name       string
-	routes     []Route
-	mu         sync.RWMutex
-	serverDeps []string // Names of HTTP server modules this router depends on
-	serveMux   *http.ServeMux
+	name              string
+	routes            []Route
+	mu                sync.RWMutex
+	serverDeps        []string // Names of HTTP server modules this router depends on
+	serveMux          *http.ServeMux
+	globalMiddlewares []HTTPMiddleware
 }
 
 // NewStandardHTTPRouter creates a new HTTP router
@@ -138,6 +139,17 @@ func (r *StandardHTTPRouter) AddRouteWithMiddleware(method, path string, handler
 	}
 }
 
+// AddGlobalMiddleware appends a middleware that wraps every request served by
+// this router, regardless of which route is matched. Global middlewares are
+// applied in the order they are added, before any per-route middlewares.
+// This is the correct place to attach cross-cutting concerns such as
+// distributed tracing that must observe all traffic.
+func (r *StandardHTTPRouter) AddGlobalMiddleware(mw HTTPMiddleware) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.globalMiddlewares = append(r.globalMiddlewares, mw)
+}
+
 // HasRoute checks if a route with the given method and path already exists
 func (r *StandardHTTPRouter) HasRoute(method, path string) bool {
 	r.mu.RLock()
@@ -150,16 +162,29 @@ func (r *StandardHTTPRouter) HasRoute(method, path string) bool {
 	return false
 }
 
-// ServeHTTP implements the http.Handler interface
+// ServeHTTP implements the http.Handler interface.
+// Global middlewares (e.g. OTEL tracing) are applied around the entire mux so
+// every request — including health-checks and pipeline-triggered routes — is
+// instrumented, regardless of how the route was registered.
 func (r *StandardHTTPRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	var base http.Handler
 	if r.serveMux != nil {
-		r.serveMux.ServeHTTP(w, req)
+		base = r.serveMux
 	} else {
-		http.NotFound(w, req)
+		base = http.NotFoundHandler()
 	}
+
+	// Wrap with global middlewares in reverse registration order so that the
+	// first-added middleware is outermost (executes first).
+	handler := base
+	for i := len(r.globalMiddlewares) - 1; i >= 0; i-- {
+		handler = r.globalMiddlewares[i].Process(handler)
+	}
+
+	handler.ServeHTTP(w, req)
 }
 
 // Start compiles all registered routes into the internal ServeMux.

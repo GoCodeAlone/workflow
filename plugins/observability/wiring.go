@@ -14,6 +14,14 @@ import (
 func wiringHooks() []plugin.WiringHook {
 	return []plugin.WiringHook{
 		{
+			// Run at priority 100 (highest) so OTEL wraps all other middleware
+			// and every request — including health, metrics, and pipeline routes
+			// registered later — is captured in a trace span.
+			Name:     "observability.otel-middleware",
+			Priority: 100,
+			Hook:     wireOTelMiddleware,
+		},
+		{
 			Name:     "observability.health-endpoints",
 			Priority: 50,
 			Hook:     wireHealthEndpoints,
@@ -127,6 +135,26 @@ func wireLogEndpoint(app modular.Application, _ *config.WorkflowConfig) error {
 				router.AddRoute("GET", "/logs", &module.LogHTTPHandler{Handler: lc.LogHandler()})
 			}
 			break
+		}
+	}
+	return nil
+}
+
+// wireOTelMiddleware registers any OTelMiddleware instances as global middleware
+// on every available StandardHTTPRouter so that all inbound HTTP requests are
+// wrapped in an OpenTelemetry trace span.
+func wireOTelMiddleware(app modular.Application, _ *config.WorkflowConfig) error {
+	for _, svc := range app.SvcRegistry() {
+		otelMw, ok := svc.(*module.OTelMiddleware)
+		if !ok {
+			continue
+		}
+		for _, routerSvc := range app.SvcRegistry() {
+			router, ok := routerSvc.(*module.StandardHTTPRouter)
+			if !ok {
+				continue
+			}
+			router.AddGlobalMiddleware(otelMw)
 		}
 	}
 	return nil
