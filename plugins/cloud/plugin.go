@@ -1,0 +1,75 @@
+// Package cloud provides an EnginePlugin that registers the cloud.account
+// module type and the step.cloud_validate pipeline step.
+// cloud.account is the foundation for Infrastructure-as-Config: other modules
+// (platform.kubernetes, platform.ecs, etc.) look up CloudCredentialProvider
+// from the service registry by account name.
+package cloud
+
+import (
+	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/plugin"
+	"github.com/GoCodeAlone/workflow/schema"
+)
+
+// Plugin registers cloud.account and step.cloud_validate.
+type Plugin struct {
+	plugin.BaseEnginePlugin
+}
+
+// New creates a new cloud plugin.
+func New() *Plugin {
+	return &Plugin{
+		BaseEnginePlugin: plugin.BaseEnginePlugin{
+			BaseNativePlugin: plugin.BaseNativePlugin{
+				PluginName:        "cloud",
+				PluginVersion:     "1.0.0",
+				PluginDescription: "Cloud provider credentials (cloud.account) and validation step",
+			},
+			Manifest: plugin.PluginManifest{
+				Name:        "cloud",
+				Version:     "1.0.0",
+				Author:      "GoCodeAlone",
+				Description: "Cloud provider credentials and validation. Foundation for IaC modules.",
+				Tier:        plugin.TierCore,
+				ModuleTypes: []string{"cloud.account"},
+				StepTypes:   []string{"step.cloud_validate"},
+			},
+		},
+	}
+}
+
+// ModuleFactories returns the cloud.account module factory.
+func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
+	return map[string]plugin.ModuleFactory{
+		"cloud.account": func(name string, cfg map[string]any) modular.Module {
+			return module.NewCloudAccount(name, cfg)
+		},
+	}
+}
+
+// StepFactories returns the step.cloud_validate factory.
+func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
+	return map[string]plugin.StepFactory{
+		"step.cloud_validate": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewCloudValidateStepFactory()(name, cfg, app)
+		},
+	}
+}
+
+// ModuleSchemas returns UI schema definitions for cloud module types.
+func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
+	return []*schema.ModuleSchema{
+		{
+			Type:        "cloud.account",
+			Label:       "Cloud Account",
+			Category:    "cloud",
+			Description: "Cloud provider credentials (AWS, GCP, Kubernetes, or mock). Used by IaC modules.",
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Required: true, Description: "Cloud provider: aws, gcp, kubernetes, mock"},
+				{Key: "region", Label: "Region", Type: schema.FieldTypeString, Description: "Primary region (e.g. us-east-1)"},
+				{Key: "credentials", Label: "Credentials", Type: schema.FieldTypeJSON, Description: "Credential configuration (type, keys, paths)"},
+			},
+		},
+	}
+}
