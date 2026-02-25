@@ -31,8 +31,8 @@ func New() *Plugin {
 				Author:        "GoCodeAlone",
 				Description:   "Platform infrastructure modules, workflow handler, reconciliation trigger, and template step",
 				Tier:          plugin.TierCore,
-				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes"},
-				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy"},
+				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes", "iac.state"},
+				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy", "step.iac_plan", "step.iac_apply", "step.iac_status", "step.iac_destroy", "step.iac_drift_detect"},
 				TriggerTypes:  []string{"reconciliation"},
 				WorkflowTypes: []string{"platform"},
 			},
@@ -45,6 +45,9 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 	return map[string]plugin.ModuleFactory{
 		"platform.kubernetes": func(name string, cfg map[string]any) modular.Module {
 			return module.NewPlatformKubernetes(name, cfg)
+		},
+		"iac.state": func(name string, cfg map[string]any) modular.Module {
+			return module.NewIaCModule(name, cfg)
 		},
 		"platform.provider": func(name string, cfg map[string]any) modular.Module {
 			providerName := ""
@@ -88,6 +91,21 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.k8s_destroy": func(name string, cfg map[string]any, app modular.Application) (any, error) {
 			return module.NewK8sDestroyStepFactory()(name, cfg, app)
 		},
+		"step.iac_plan": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewIaCPlanStepFactory()(name, cfg, app)
+		},
+		"step.iac_apply": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewIaCApplyStepFactory()(name, cfg, app)
+		},
+		"step.iac_status": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewIaCStatusStepFactory()(name, cfg, app)
+		},
+		"step.iac_destroy": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewIaCDestroyStepFactory()(name, cfg, app)
+		},
+		"step.iac_drift_detect": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewIaCDriftDetectStepFactory()(name, cfg, app)
+		},
 	}
 }
 
@@ -112,6 +130,16 @@ func (p *Plugin) WorkflowHandlers() map[string]plugin.WorkflowHandlerFactory {
 // ModuleSchemas returns UI schema definitions for platform module types.
 func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 	return []*schema.ModuleSchema{
+		{
+			Type:        "iac.state",
+			Label:       "IaC State Store",
+			Category:    "infrastructure",
+			Description: "Tracks infrastructure provisioning state (memory or filesystem backend)",
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "backend", Label: "Backend", Type: schema.FieldTypeString, Description: "memory or filesystem"},
+				{Key: "directory", Label: "Directory", Type: schema.FieldTypeString, Description: "State directory (filesystem backend only)"},
+			},
+		},
 		{
 			Type:        "platform.kubernetes",
 			Label:       "Kubernetes Cluster",
