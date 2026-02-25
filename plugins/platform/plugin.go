@@ -31,8 +31,8 @@ func New() *Plugin {
 				Author:        "GoCodeAlone",
 				Description:   "Platform infrastructure modules, workflow handler, reconciliation trigger, and template step",
 				Tier:          plugin.TierCore,
-				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context"},
-				StepTypes:     []string{"step.platform_template"},
+				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes"},
+				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy"},
 				TriggerTypes:  []string{"reconciliation"},
 				WorkflowTypes: []string{"platform"},
 			},
@@ -43,6 +43,9 @@ func New() *Plugin {
 // ModuleFactories returns factory functions for platform module types.
 func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 	return map[string]plugin.ModuleFactory{
+		"platform.kubernetes": func(name string, cfg map[string]any) modular.Module {
+			return module.NewPlatformKubernetes(name, cfg)
+		},
 		"platform.provider": func(name string, cfg map[string]any) modular.Module {
 			providerName := ""
 			if pn, ok := cfg["name"].(string); ok {
@@ -73,6 +76,18 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.platform_template": func(name string, cfg map[string]any, app modular.Application) (any, error) {
 			return module.NewPlatformTemplateStepFactory()(name, cfg, app)
 		},
+		"step.k8s_plan": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewK8sPlanStepFactory()(name, cfg, app)
+		},
+		"step.k8s_apply": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewK8sApplyStepFactory()(name, cfg, app)
+		},
+		"step.k8s_status": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewK8sStatusStepFactory()(name, cfg, app)
+		},
+		"step.k8s_destroy": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewK8sDestroyStepFactory()(name, cfg, app)
+		},
 	}
 }
 
@@ -97,6 +112,18 @@ func (p *Plugin) WorkflowHandlers() map[string]plugin.WorkflowHandlerFactory {
 // ModuleSchemas returns UI schema definitions for platform module types.
 func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 	return []*schema.ModuleSchema{
+		{
+			Type:        "platform.kubernetes",
+			Label:       "Kubernetes Cluster",
+			Category:    "infrastructure",
+			Description: "Managed Kubernetes cluster (kind/k3s for local, EKS/GKE/AKS stubs for cloud)",
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (optional for kind)"},
+				{Key: "type", Label: "Cluster Type", Type: schema.FieldTypeString, Required: true, Description: "eks | gke | aks | kind | k3s"},
+				{Key: "version", Label: "Kubernetes Version", Type: schema.FieldTypeString, Description: "e.g. 1.29"},
+				{Key: "nodeGroups", Label: "Node Groups", Type: schema.FieldTypeJSON, Description: "Node group definitions"},
+			},
+		},
 		{
 			Type:        "platform.provider",
 			Label:       "Platform Provider",
