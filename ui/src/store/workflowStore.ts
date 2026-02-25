@@ -608,17 +608,43 @@ const useWorkflowStore = create<WorkflowStore>()(
 }),
   {
     name: 'workflow-store',
-    partialize: (state) => ({
-      nodes: state.nodes,
-      edges: state.edges,
-      nodeCounter: state.nodeCounter,
-      importedWorkflows: state.importedWorkflows,
-      importedTriggers: state.importedTriggers,
-      importedPipelines: state.importedPipelines,
-      activeWorkflowRecord: state.activeWorkflowRecord,
-      tabs: state.tabs,
-      activeTabId: state.activeTabId,
-    }),
+    partialize: (state) => {
+      // Strip session-scoped undo/redo stacks from every tab before persisting.
+      // undoStack/redoStack hold up to 50 deep-cloned node+edge snapshots per tab
+      // and are the primary cause of the localStorage quota exceeded error.
+      // importedWorkflows/Triggers/Pipelines are re-derived on YAML re-import.
+      // activeWorkflowRecord is fetched fresh from the API on load.
+      const tabsWithoutHistory = state.tabs.map(
+        ({ undoStack: _u, redoStack: _r, ...rest }) => rest,
+      );
+
+      const full = {
+        nodes: state.nodes,
+        edges: state.edges,
+        nodeCounter: state.nodeCounter,
+        tabs: tabsWithoutHistory,
+        activeTabId: state.activeTabId,
+      };
+
+      // Size guard: if the payload would exceed 4 MB, fall back to tab metadata
+      // only (no nodes/edges) so we never blow the ~5 MB per-item Chrome limit.
+      const serialized = JSON.stringify(full);
+      if (serialized.length > 4 * 1024 * 1024) {
+        return {
+          nodes: [],
+          edges: [],
+          nodeCounter: state.nodeCounter,
+          tabs: tabsWithoutHistory.map(({ nodes: _n, edges: _e, ...meta }) => ({
+            ...meta,
+            nodes: [],
+            edges: [],
+          })),
+          activeTabId: state.activeTabId,
+        };
+      }
+
+      return full;
+    },
   },
 ));
 
