@@ -705,6 +705,7 @@ var scaffoldFiles = []scaffoldFile{
 	{path: "vite.config.ts", tmplName: "vite.config.ts"},
 	{path: "index.html", tmplName: "index.html"},
 	{path: "src/main.tsx", tmplName: "main.tsx"},
+	{path: "src/index.css", tmplName: "index.css"},
 	{path: "src/App.tsx", tmplName: "App.tsx"},
 	{path: "src/api.ts", tmplName: "api.ts"},
 	{path: "src/auth.tsx", tmplName: "auth.tsx", onlyIf: func(d Data) bool { return d.HasAuth }},
@@ -719,15 +720,18 @@ var scaffoldFiles = []scaffoldFile{
 // parseScaffoldTemplates parses all scaffold template strings into a map.
 func parseScaffoldTemplates() (map[string]*template.Template, error) {
 	funcs := template.FuncMap{
-		"lower":      strings.ToLower,
-		"upper":      strings.ToUpper,
-		"title":      toCamelCase,
-		"join":       strings.Join,
-		"hasPrefix":  strings.HasPrefix,
-		"trimPrefix": strings.TrimPrefix,
-		"replace":    strings.ReplaceAll,
-		"jsPath":     jsPathExpr,
+		"lower":       strings.ToLower,
+		"upper":       strings.ToUpper,
+		"title":       toCamelCase,
+		"join":        strings.Join,
+		"hasPrefix":   strings.HasPrefix,
+		"trimPrefix":  strings.TrimPrefix,
+		"replace":     strings.ReplaceAll,
+		"jsPath":      jsPathExpr,
 		"tsTupleArgs": tsTupleArgs,
+		// ob/cb emit literal {{ and }} in generated JSX/TSX files.
+		"ob": func() string { return "{{" },
+		"cb": func() string { return "}}" },
 	}
 
 	result := make(map[string]*template.Template, len(scaffoldTemplates))
