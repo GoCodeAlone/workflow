@@ -1,10 +1,15 @@
 package module
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 )
 
 // ECSServiceState holds the current state of a managed ECS service.
@@ -115,8 +120,12 @@ func (m *PlatformECS) Init(app modular.Application) error {
 		Status:     "pending",
 	}
 
-	// Default backend is mock (in-memory); real FARGATE would call AWS SDK.
-	m.backend = &ecsMockBackend{}
+	// Select backend: use real AWS ECS when account is AWS, otherwise use in-memory mock.
+	if m.provider != nil && m.provider.Provider() == "aws" {
+		m.backend = &awsECSBackend{}
+	} else {
+		m.backend = &ecsMockBackend{}
+	}
 
 	return app.RegisterService(m.name, m)
 }
@@ -275,29 +284,252 @@ func (b *ecsMockBackend) destroy(e *PlatformECS) error {
 	return nil
 }
 
-// ─── fargate stub ─────────────────────────────────────────────────────────────
+// ─── AWS ECS backend ──────────────────────────────────────────────────────────
 
-// ecsFargateBackend is a stub for real AWS ECS Fargate.
-// Real implementation would use aws-sdk-go-v2/service/ecs.
-type ecsFargateBackend struct{}
+// awsECSBackend manages AWS ECS services using aws-sdk-go-v2/service/ecs.
+type awsECSBackend struct{}
 
-func (b *ecsFargateBackend) plan(e *PlatformECS) (*PlatformPlan, error) {
+func (b *awsECSBackend) plan(e *PlatformECS) (*PlatformPlan, error) {
+	awsProv, ok := awsProviderFrom(e.provider)
+	if !ok {
+		return &PlatformPlan{
+			Provider: "ecs",
+			Resource: e.serviceName(),
+			Actions:  []PlatformAction{{Type: "create", Resource: e.serviceName(), Detail: fmt.Sprintf("create ECS service %q (no AWS config)", e.serviceName())}},
+		}, nil
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("ecs plan: AWS config: %w", err)
+	}
+	client := ecs.NewFromConfig(cfg)
+
+	out, err := client.DescribeServices(context.Background(), &ecs.DescribeServicesInput{
+		Cluster:  aws.String(e.state.Cluster),
+		Services: []string{e.serviceName()},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ecs plan: DescribeServices: %w", err)
+	}
+
+	for _, svc := range out.Services {
+		if svc.ServiceName != nil && *svc.ServiceName == e.serviceName() && svc.Status != nil && *svc.Status != "INACTIVE" {
+			return &PlatformPlan{
+				Provider: "ecs",
+				Resource: e.serviceName(),
+				Actions:  []PlatformAction{{Type: "noop", Resource: e.serviceName(), Detail: fmt.Sprintf("ECS service %q exists (status: %s)", e.serviceName(), *svc.Status)}},
+			}, nil
+		}
+	}
+
 	return &PlatformPlan{
-		Provider: "ecs-fargate",
+		Provider: "ecs",
 		Resource: e.serviceName(),
-		Actions:  []PlatformAction{{Type: "create", Resource: e.serviceName(), Detail: "ECS Fargate service (stub — use aws-sdk-go-v2/service/ecs)"}},
+		Actions: []PlatformAction{
+			{Type: "create", Resource: e.taskFamily(), Detail: fmt.Sprintf("register ECS task definition %q", e.taskFamily())},
+			{Type: "create", Resource: e.serviceName(), Detail: fmt.Sprintf("create ECS service %q in cluster %q (%s)", e.serviceName(), e.state.Cluster, e.state.LaunchType)},
+		},
 	}, nil
 }
 
-func (b *ecsFargateBackend) apply(e *PlatformECS) (*PlatformResult, error) {
-	return nil, fmt.Errorf("ecs fargate backend: not implemented — use aws-sdk-go-v2/service/ecs")
+func (b *awsECSBackend) apply(e *PlatformECS) (*PlatformResult, error) {
+	awsProv, ok := awsProviderFrom(e.provider)
+	if !ok {
+		return nil, fmt.Errorf("ecs apply: no AWS cloud account configured")
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("ecs apply: AWS config: %w", err)
+	}
+	client := ecs.NewFromConfig(cfg)
+
+	// Build container definitions from config
+	containers := parseECSContainers(e.config)
+	if len(containers) == 0 {
+		containers = []ecstypes.ContainerDefinition{
+			{Name: aws.String("app"), Image: aws.String("app:latest"), Essential: aws.Bool(true)},
+		}
+	}
+
+	cpu, _ := e.config["cpu"].(string)
+	memory, _ := e.config["memory"].(string)
+	execRoleARN, _ := e.config["execution_role_arn"].(string)
+
+	tdOut, err := client.RegisterTaskDefinition(context.Background(), &ecs.RegisterTaskDefinitionInput{
+		Family:                  aws.String(e.taskFamily()),
+		ContainerDefinitions:    containers,
+		Cpu:                     optString(cpu),
+		Memory:                  optString(memory),
+		ExecutionRoleArn:        optString(execRoleARN),
+		NetworkMode:             ecstypes.NetworkModeAwsvpc,
+		RequiresCompatibilities: []ecstypes.Compatibility{ecstypes.CompatibilityFargate},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ecs apply: RegisterTaskDefinition: %w", err)
+	}
+
+	taskDefARN := ""
+	revision := 1
+	if tdOut.TaskDefinition != nil {
+		if tdOut.TaskDefinition.TaskDefinitionArn != nil {
+			taskDefARN = *tdOut.TaskDefinition.TaskDefinitionArn
+		}
+		revision = int(tdOut.TaskDefinition.Revision)
+	}
+
+	subnets := parseStringSlice(e.config["vpc_subnets"])
+	sgs := parseStringSlice(e.config["security_groups"])
+	desiredCount := int32(e.desiredCount())
+
+	_, err = client.CreateService(context.Background(), &ecs.CreateServiceInput{
+		ServiceName:    aws.String(e.serviceName()),
+		Cluster:        aws.String(e.state.Cluster),
+		TaskDefinition: aws.String(taskDefARN),
+		DesiredCount:   aws.Int32(desiredCount),
+		LaunchType:     ecstypes.LaunchTypeFargate,
+		NetworkConfiguration: &ecstypes.NetworkConfiguration{
+			AwsvpcConfiguration: &ecstypes.AwsVpcConfiguration{
+				Subnets:        subnets,
+				SecurityGroups: sgs,
+			},
+		},
+	})
+	if err != nil {
+		// If service already exists, update it instead
+		var alreadyExists *ecstypes.InvalidParameterException
+		if !errors.As(err, &alreadyExists) {
+			_, updateErr := client.UpdateService(context.Background(), &ecs.UpdateServiceInput{
+				Service:        aws.String(e.serviceName()),
+				Cluster:        aws.String(e.state.Cluster),
+				TaskDefinition: aws.String(taskDefARN),
+				DesiredCount:   aws.Int32(desiredCount),
+			})
+			if updateErr != nil {
+				return nil, fmt.Errorf("ecs apply: CreateService failed (%v), UpdateService also failed: %w", err, updateErr)
+			}
+		} else {
+			return nil, fmt.Errorf("ecs apply: CreateService: %w", err)
+		}
+	}
+
+	e.state.Status = "creating"
+	e.state.CreatedAt = time.Now()
+	e.state.DesiredCount = int(desiredCount)
+	e.state.TaskDefinition = ECSTaskDefinition{
+		Family:   e.taskFamily(),
+		Revision: revision,
+		CPU:      cpu,
+		Memory:   memory,
+	}
+
+	return &PlatformResult{
+		Success: true,
+		Message: fmt.Sprintf("ECS service %q created in cluster %q", e.serviceName(), e.state.Cluster),
+		State:   e.state,
+	}, nil
 }
 
-func (b *ecsFargateBackend) status(e *PlatformECS) (*ECSServiceState, error) {
-	e.state.Status = "unknown"
+func (b *awsECSBackend) status(e *PlatformECS) (*ECSServiceState, error) {
+	awsProv, ok := awsProviderFrom(e.provider)
+	if !ok {
+		return e.state, nil
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return e.state, fmt.Errorf("ecs status: AWS config: %w", err)
+	}
+	client := ecs.NewFromConfig(cfg)
+
+	out, err := client.DescribeServices(context.Background(), &ecs.DescribeServicesInput{
+		Cluster:  aws.String(e.state.Cluster),
+		Services: []string{e.serviceName()},
+	})
+	if err != nil {
+		return e.state, fmt.Errorf("ecs status: DescribeServices: %w", err)
+	}
+
+	for _, svc := range out.Services {
+		if svc.ServiceName != nil && *svc.ServiceName == e.serviceName() {
+			if svc.Status != nil {
+				e.state.Status = *svc.Status
+			}
+			e.state.RunningCount = int(svc.RunningCount)
+			e.state.DesiredCount = int(svc.DesiredCount)
+		}
+	}
+
 	return e.state, nil
 }
 
-func (b *ecsFargateBackend) destroy(e *PlatformECS) error {
-	return fmt.Errorf("ecs fargate backend: not implemented — use aws-sdk-go-v2/service/ecs")
+func (b *awsECSBackend) destroy(e *PlatformECS) error {
+	awsProv, ok := awsProviderFrom(e.provider)
+	if !ok {
+		return fmt.Errorf("ecs destroy: no AWS cloud account configured")
+	}
+
+	cfg, err := awsProv.AWSConfig(context.Background())
+	if err != nil {
+		return fmt.Errorf("ecs destroy: AWS config: %w", err)
+	}
+	client := ecs.NewFromConfig(cfg)
+
+	// Scale down to 0 before deleting
+	_, _ = client.UpdateService(context.Background(), &ecs.UpdateServiceInput{
+		Service:      aws.String(e.serviceName()),
+		Cluster:      aws.String(e.state.Cluster),
+		DesiredCount: aws.Int32(0),
+	})
+
+	_, err = client.DeleteService(context.Background(), &ecs.DeleteServiceInput{
+		Service: aws.String(e.serviceName()),
+		Cluster: aws.String(e.state.Cluster),
+	})
+	if err != nil {
+		return fmt.Errorf("ecs destroy: DeleteService: %w", err)
+	}
+
+	e.state.Status = "deleted"
+	e.state.RunningCount = 0
+	e.state.DesiredCount = 0
+	return nil
+}
+
+// parseECSContainers parses ECS container definitions from module config.
+func parseECSContainers(cfg map[string]any) []ecstypes.ContainerDefinition {
+	raw, ok := cfg["containers"].([]any)
+	if !ok {
+		return nil
+	}
+	var result []ecstypes.ContainerDefinition
+	for _, item := range raw {
+		c, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := c["name"].(string)
+		image, _ := c["image"].(string)
+		def := ecstypes.ContainerDefinition{
+			Name:      aws.String(name),
+			Image:     aws.String(image),
+			Essential: aws.Bool(true),
+		}
+		if port, ok := intFromAny(c["port"]); ok && port > 0 {
+			def.PortMappings = []ecstypes.PortMapping{
+				{ContainerPort: aws.Int32(int32(port)), Protocol: ecstypes.TransportProtocolTcp},
+			}
+		}
+		result = append(result, def)
+	}
+	return result
+}
+
+// optString returns a *string pointer if the string is non-empty, otherwise nil.
+func optString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
