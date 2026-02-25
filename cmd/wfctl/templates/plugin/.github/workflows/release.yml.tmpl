@@ -1,0 +1,27 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Build plugin binaries
+        run: |
+          mkdir -p dist
+          for GOOS in linux darwin; do
+            for GOARCH in amd64 arm64; do
+              GOOS=$GOOS GOARCH=$GOARCH go build -o dist/{{.Name}}-$GOOS-$GOARCH ./...
+            done
+          done
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

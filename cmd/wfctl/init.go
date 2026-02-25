@@ -49,6 +49,7 @@ var projectTemplates = map[string]projectTemplate{
 			{src: "templates/api-service/README.md.tmpl"},
 			{src: "templates/api-service/Dockerfile.tmpl"},
 			{src: "templates/api-service/.gitignore.tmpl"},
+			{src: "templates/api-service/.github/workflows/ci.yml.tmpl", dst: ".github/workflows/ci.yml"},
 		},
 	},
 	"event-processor": {
@@ -61,6 +62,7 @@ var projectTemplates = map[string]projectTemplate{
 			{src: "templates/event-processor/README.md.tmpl"},
 			{src: "templates/event-processor/Dockerfile.tmpl"},
 			{src: "templates/event-processor/.gitignore.tmpl"},
+			{src: "templates/event-processor/.github/workflows/ci.yml.tmpl", dst: ".github/workflows/ci.yml"},
 		},
 	},
 	"full-stack": {
@@ -78,6 +80,7 @@ var projectTemplates = map[string]projectTemplate{
 			{src: "templates/full-stack/ui/index.html.tmpl", dst: "ui/index.html"},
 			{src: "templates/full-stack/ui/src/main.tsx.tmpl", dst: "ui/src/main.tsx"},
 			{src: "templates/full-stack/ui/src/App.tsx.tmpl", dst: "ui/src/App.tsx"},
+			{src: "templates/full-stack/.github/workflows/ci.yml.tmpl", dst: ".github/workflows/ci.yml"},
 		},
 	},
 	"plugin": {
@@ -89,6 +92,7 @@ var projectTemplates = map[string]projectTemplate{
 			{src: "templates/plugin/plugin.go.tmpl"},
 			{src: "templates/plugin/README.md.tmpl"},
 			{src: "templates/plugin/.gitignore.tmpl"},
+			{src: "templates/plugin/.github/workflows/release.yml.tmpl", dst: ".github/workflows/release.yml"},
 		},
 	},
 	"ui-plugin": {
@@ -105,6 +109,7 @@ var projectTemplates = map[string]projectTemplate{
 			{src: "templates/ui-plugin/ui/index.html.tmpl", dst: "ui/index.html"},
 			{src: "templates/ui-plugin/ui/src/main.tsx.tmpl", dst: "ui/src/main.tsx"},
 			{src: "templates/ui-plugin/ui/src/App.tsx.tmpl", dst: "ui/src/App.tsx"},
+			{src: "templates/ui-plugin/.github/workflows/release.yml.tmpl", dst: ".github/workflows/release.yml"},
 		},
 	},
 }

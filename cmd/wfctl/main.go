@@ -26,6 +26,8 @@ var commands = map[string]func([]string) error{
 	"template": runTemplate,
 	"contract": runContract,
 	"compat":   runCompat,
+	"generate": runGenerate,
+	"git":      runGit,
 }
 
 func usage() {
@@ -53,6 +55,8 @@ Commands:
   template   Template management (validate: check templates against known types)
   contract   Contract testing (test: generate/compare API contracts)
   compat     Compatibility checking (check: verify config works with current engine)
+  generate   Code generation (github-actions: generate CI/CD workflows from config)
+  git        Git integration (connect: link to GitHub repo, push: commit and push)
 
 Run 'wfctl <command> -h' for command-specific help.
 `, version)

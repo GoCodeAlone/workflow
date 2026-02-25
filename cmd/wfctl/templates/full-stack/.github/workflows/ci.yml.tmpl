@@ -1,0 +1,30 @@
+name: CI
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install wfctl
+        run: go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
+      - name: Validate config
+        run: wfctl validate workflow.yaml
+      - name: Inspect config
+        run: wfctl inspect workflow.yaml
+      - name: Build UI
+        run: wfctl build-ui --ui-dir ui
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test ./...
