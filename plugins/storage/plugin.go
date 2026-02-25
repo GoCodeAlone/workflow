@@ -12,8 +12,8 @@ import (
 )
 
 // Plugin provides storage and database capabilities: storage.s3, storage.local,
-// storage.gcs, storage.sqlite, database.workflow, persistence.store, cache.redis
-// modules, and the step.db_query / step.db_exec pipeline step factories.
+// storage.gcs, storage.sqlite, storage.artifact, database.workflow,
+// persistence.store, cache.redis modules, and artifact pipeline step factories.
 type Plugin struct {
 	plugin.BaseEnginePlugin
 }
@@ -38,9 +38,16 @@ func New() *Plugin {
 					"storage.local",
 					"storage.gcs",
 					"storage.sqlite",
+					"storage.artifact",
 					"database.workflow",
 					"persistence.store",
 					"cache.redis",
+				},
+				StepTypes: []string{
+					"step.artifact_upload",
+					"step.artifact_download",
+					"step.artifact_list",
+					"step.artifact_delete",
 				},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "storage", Role: "provider", Priority: 10},
@@ -174,6 +181,64 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			}
 			return module.NewRedisCache(name, redisCfg)
 		},
+		"storage.artifact": func(name string, cfg map[string]any) modular.Module {
+			backend, _ := cfg["backend"].(string)
+			switch backend {
+			case "s3":
+				s3Cfg := module.ArtifactS3Config{}
+				if bucket, ok := cfg["bucket"].(string); ok {
+					s3Cfg.Bucket = bucket
+				}
+				if prefix, ok := cfg["prefix"].(string); ok {
+					s3Cfg.Prefix = prefix
+				}
+				if region, ok := cfg["region"].(string); ok {
+					s3Cfg.Region = region
+				}
+				if endpoint, ok := cfg["endpoint"].(string); ok {
+					s3Cfg.Endpoint = endpoint
+				}
+				if basePath, ok := cfg["basePath"].(string); ok {
+					s3Cfg.BasePath = basePath
+				}
+				if creds, ok := cfg["credentials"].(map[string]any); ok {
+					if k, ok := creds["accessKeyID"].(string); ok {
+						s3Cfg.Credentials.AccessKeyID = k
+					}
+					if s, ok := creds["secretAccessKey"].(string); ok {
+						s3Cfg.Credentials.SecretAccessKey = s
+					}
+				}
+				return module.NewArtifactS3Module(name, s3Cfg)
+			default: // filesystem
+				fsCfg := module.ArtifactFSConfig{
+					BasePath: "./data/artifacts",
+				}
+				if basePath, ok := cfg["basePath"].(string); ok && basePath != "" {
+					fsCfg.BasePath = basePath
+				}
+				if maxSize, ok := cfg["maxSize"].(float64); ok && maxSize > 0 {
+					fsCfg.MaxSize = int64(maxSize)
+				}
+				return module.NewArtifactFSModule(name, fsCfg)
+			}
+		},
+	}
+}
+
+// StepFactories returns step factories for artifact pipeline steps.
+func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
+	return map[string]plugin.StepFactory{
+		"step.artifact_upload":   wrapStepFactory(module.NewArtifactUploadStepFactory()),
+		"step.artifact_download": wrapStepFactory(module.NewArtifactDownloadStepFactory()),
+		"step.artifact_list":     wrapStepFactory(module.NewArtifactListStepFactory()),
+		"step.artifact_delete":   wrapStepFactory(module.NewArtifactDeleteStepFactory()),
+	}
+}
+
+func wrapStepFactory(f module.StepFactory) plugin.StepFactory {
+	return func(name string, cfg map[string]any, app modular.Application) (any, error) {
+		return f(name, cfg, app)
 	}
 }
 
@@ -258,6 +323,22 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "database", Label: "Database Service", Type: schema.FieldTypeString, DefaultValue: "database", Description: "Name of the database module to use for storage", Placeholder: "database", InheritFrom: "dependency.name"},
 			},
 			DefaultConfig: map[string]any{"database": "database"},
+		},
+		{
+			Type:        "storage.artifact",
+			Label:       "Artifact Store",
+			Category:    "storage",
+			Description: "Named artifact storage with metadata support (filesystem or S3)",
+			Outputs:     []schema.ServiceIODef{{Name: "store", Type: "ArtifactStore", Description: "Artifact storage service"}},
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "backend", Label: "Backend", Type: schema.FieldTypeSelect, Options: []string{"filesystem", "s3"}, DefaultValue: "filesystem", Description: "Storage backend to use"},
+				{Key: "basePath", Label: "Base Path", Type: schema.FieldTypeString, DefaultValue: "./data/artifacts", Description: "Root directory for filesystem backend", Placeholder: "./data/artifacts"},
+				{Key: "maxSize", Label: "Max Size (bytes)", Type: schema.FieldTypeNumber, Description: "Maximum artifact size in bytes (0 = unlimited)"},
+				{Key: "bucket", Label: "S3 Bucket", Type: schema.FieldTypeString, Description: "S3 bucket name (s3 backend only)", Placeholder: "my-artifacts"},
+				{Key: "region", Label: "S3 Region", Type: schema.FieldTypeString, Description: "AWS region (s3 backend only)", Placeholder: "us-east-1"},
+				{Key: "endpoint", Label: "S3 Endpoint", Type: schema.FieldTypeString, Description: "Custom S3 endpoint; use 'local' for filesystem fallback", Placeholder: "local"},
+			},
+			DefaultConfig: map[string]any{"backend": "filesystem", "basePath": "./data/artifacts"},
 		},
 		{
 			Type:        "cache.redis",
