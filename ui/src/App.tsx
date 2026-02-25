@@ -24,6 +24,7 @@ import Environments from './components/environments/Environments.tsx';
 import FlagManager from './components/featureflags/FlagManager.tsx';
 import StoreBrowserPage from './components/storebrowser/StoreBrowserPage.tsx';
 import DocsPage from './components/docmanager/DocsPage.tsx';
+import ScaffoldPage from './components/scaffold/ScaffoldPage.tsx';
 import TemplatePage from './components/dynamic/TemplatePage.tsx';
 import WorkflowPickerBar from './components/shared/WorkflowPickerBar.tsx';
 import CollapsiblePanel from './components/layout/CollapsiblePanel.tsx';
@@ -309,6 +310,7 @@ const VIEW_REGISTRY: Record<string, React.ComponentType> = {
   'feature-flags': FlagManager,
   'store-browser': StoreBrowserPage,
   docs: DocsPage,
+  scaffold: ScaffoldPage,
 };
 
 function AppLayout() {

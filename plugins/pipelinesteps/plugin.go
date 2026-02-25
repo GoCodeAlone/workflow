@@ -2,7 +2,7 @@
 // types: validate, transform, conditional, set, log, delegate, jq, publish,
 // http_call, request_parse, db_query, db_exec, json_response,
 // validate_path_param, validate_pagination, validate_request_body,
-// foreach, webhook_verify.
+// foreach, webhook_verify, ui_scaffold, ui_scaffold_analyze.
 // It also provides the PipelineWorkflowHandler for composable pipelines.
 package pipelinesteps
 
@@ -72,6 +72,8 @@ func New() *Plugin {
 					"step.cache_get",
 					"step.cache_set",
 					"step.cache_delete",
+					"step.ui_scaffold",
+					"step.ui_scaffold_analyze",
 				},
 				WorkflowTypes: []string{"pipeline"},
 				Capabilities: []plugin.CapabilityDecl{
@@ -117,9 +119,11 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 			return p.concreteStepRegistry
 		}, nil)),
 		"step.webhook_verify": wrapStepFactory(module.NewWebhookVerifyStepFactory()),
-		"step.cache_get":      wrapStepFactory(module.NewCacheGetStepFactory()),
-		"step.cache_set":      wrapStepFactory(module.NewCacheSetStepFactory()),
-		"step.cache_delete":   wrapStepFactory(module.NewCacheDeleteStepFactory()),
+		"step.cache_get":           wrapStepFactory(module.NewCacheGetStepFactory()),
+		"step.cache_set":           wrapStepFactory(module.NewCacheSetStepFactory()),
+		"step.cache_delete":        wrapStepFactory(module.NewCacheDeleteStepFactory()),
+		"step.ui_scaffold":         wrapStepFactory(module.NewScaffoldStepFactory()),
+		"step.ui_scaffold_analyze": wrapStepFactory(module.NewScaffoldAnalyzeStepFactory()),
 	}
 }
 
