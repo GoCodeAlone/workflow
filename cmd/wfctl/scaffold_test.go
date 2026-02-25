@@ -517,6 +517,7 @@ func TestGenerateScaffold_WithAuth(t *testing.T) {
 		"vite.config.ts",
 		"index.html",
 		"src/main.tsx",
+		"src/index.css",
 		"src/App.tsx",
 		"src/api.ts",
 		"src/auth.tsx",
@@ -721,6 +722,92 @@ func TestGenerateScaffold_LayoutNav(t *testing.T) {
 	// Should have logout since auth is present.
 	if !strings.Contains(content, "logout") && !strings.Contains(content, "Logout") {
 		t.Error("Layout.tsx should have logout for auth-enabled spec")
+	}
+}
+
+func TestGenerateScaffold_GetOnlyResource(t *testing.T) {
+	// A spec with only GET endpoints — no CreateOp — should not generate
+	// showForm, setShowForm, form, setForm, or import FormEvent.
+	const getOnlySpec = `{
+  "openapi": "3.0.3",
+  "info": {"title": "Health API", "version": "1.0.0"},
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "getHealth",
+        "responses": {"200": {"description": "ok"}}
+      }
+    }
+  }
+}`
+	spec, err := parseScaffoldSpec([]byte(getOnlySpec))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	data := analyzeSpec(spec, "", false, "auto")
+
+	outDir := t.TempDir()
+	if err := generateScaffold(outDir, data); err != nil {
+		t.Fatalf("generateScaffold failed: %v", err)
+	}
+
+	pageData, err := os.ReadFile(filepath.Join(outDir, "src", "pages", "HealthzPage.tsx"))
+	if err != nil {
+		t.Fatalf("read HealthzPage.tsx: %v", err)
+	}
+	content := string(pageData)
+
+	for _, forbidden := range []string{"showForm", "setShowForm", "FormEvent", "form, setForm"} {
+		if strings.Contains(content, forbidden) {
+			t.Errorf("GET-only page should not contain %q, but it does", forbidden)
+		}
+	}
+}
+
+func TestGenerateScaffold_CSSFile(t *testing.T) {
+	spec, err := parseScaffoldSpec([]byte(sampleMinimalSpec))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	data := analyzeSpec(spec, "", false, "auto")
+
+	outDir := t.TempDir()
+	if err := generateScaffold(outDir, data); err != nil {
+		t.Fatalf("generateScaffold failed: %v", err)
+	}
+
+	cssPath := filepath.Join(outDir, "src", "index.css")
+	if _, err := os.Stat(cssPath); os.IsNotExist(err) {
+		t.Fatal("src/index.css was not generated")
+	}
+
+	cssData, err := os.ReadFile(cssPath)
+	if err != nil {
+		t.Fatalf("read index.css: %v", err)
+	}
+	if !strings.Contains(string(cssData), "box-sizing") {
+		t.Error("index.css should contain 'box-sizing'")
+	}
+}
+
+func TestGenerateScaffold_MainImportsCSS(t *testing.T) {
+	spec, err := parseScaffoldSpec([]byte(sampleMinimalSpec))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	data := analyzeSpec(spec, "", false, "auto")
+
+	outDir := t.TempDir()
+	if err := generateScaffold(outDir, data); err != nil {
+		t.Fatalf("generateScaffold failed: %v", err)
+	}
+
+	mainData, err := os.ReadFile(filepath.Join(outDir, "src", "main.tsx"))
+	if err != nil {
+		t.Fatalf("read main.tsx: %v", err)
+	}
+	if !strings.Contains(string(mainData), "import './index.css'") {
+		t.Error("main.tsx should contain \"import './index.css'\"")
 	}
 }
 
