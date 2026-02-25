@@ -1,7 +1,7 @@
 // Package cicd provides a plugin that registers CI/CD pipeline step types:
 // shell_exec, artifact_pull, artifact_push, docker_build, docker_push,
 // docker_run, scan_sast, scan_container, scan_deps, deploy, gate, build_ui,
-// build_from_config.
+// build_from_config, git_clone, git_commit, git_push, git_tag, git_checkout.
 package cicd
 
 import (
@@ -23,13 +23,13 @@ func New() *Plugin {
 			BaseNativePlugin: plugin.BaseNativePlugin{
 				PluginName:        "cicd",
 				PluginVersion:     "1.0.0",
-				PluginDescription: "CI/CD pipeline step types (shell exec, Docker, artifact management, security scanning, deploy, gate, build from config)",
+				PluginDescription: "CI/CD pipeline step types (shell exec, Docker, artifact management, security scanning, deploy, gate, build from config, git operations)",
 			},
 			Manifest: plugin.PluginManifest{
 				Name:        "cicd",
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
-				Description: "CI/CD pipeline step types (shell exec, Docker, artifact management, security scanning, deploy, gate, build from config)",
+				Description: "CI/CD pipeline step types (shell exec, Docker, artifact management, security scanning, deploy, gate, build from config, git operations)",
 				Tier:        plugin.TierCore,
 				StepTypes: []string{
 					"step.shell_exec",
@@ -45,6 +45,11 @@ func New() *Plugin {
 					"step.gate",
 					"step.build_ui",
 					"step.build_from_config",
+				"step.git_clone",
+				"step.git_commit",
+				"step.git_push",
+				"step.git_tag",
+				"step.git_checkout",
 				},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "cicd-pipeline", Role: "provider", Priority: 50},
@@ -59,7 +64,7 @@ func (p *Plugin) Capabilities() []capability.Contract {
 	return []capability.Contract{
 		{
 			Name:        "cicd-pipeline",
-			Description: "CI/CD pipeline operations: shell exec, Docker, artifact management, security scanning, deploy, gate, build from config",
+			Description: "CI/CD pipeline operations: shell exec, Docker, artifact management, security scanning, deploy, gate, build from config, git operations",
 		},
 	}
 }
@@ -80,6 +85,11 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.gate":              wrapStepFactory(module.NewGateStepFactory()),
 		"step.build_ui":          wrapStepFactory(module.NewBuildUIStepFactory()),
 		"step.build_from_config": wrapStepFactory(module.NewBuildFromConfigStepFactory()),
+		"step.git_clone":         wrapStepFactory(module.NewGitCloneStepFactory()),
+		"step.git_commit":        wrapStepFactory(module.NewGitCommitStepFactory()),
+		"step.git_push":          wrapStepFactory(module.NewGitPushStepFactory()),
+		"step.git_tag":           wrapStepFactory(module.NewGitTagStepFactory()),
+		"step.git_checkout":      wrapStepFactory(module.NewGitCheckoutStepFactory()),
 	}
 }
 
