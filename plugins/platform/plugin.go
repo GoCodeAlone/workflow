@@ -31,8 +31,8 @@ func New() *Plugin {
 				Author:        "GoCodeAlone",
 				Description:   "Platform infrastructure modules, workflow handler, reconciliation trigger, and template step",
 				Tier:          plugin.TierCore,
-				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes", "platform.ecs", "platform.dns", "platform.networking", "platform.apigateway", "platform.autoscaling", "iac.state"},
-				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy", "step.ecs_plan", "step.ecs_apply", "step.ecs_status", "step.ecs_destroy", "step.iac_plan", "step.iac_apply", "step.iac_status", "step.iac_destroy", "step.iac_drift_detect", "step.dns_plan", "step.dns_apply", "step.dns_status", "step.network_plan", "step.network_apply", "step.network_status", "step.apigw_plan", "step.apigw_apply", "step.apigw_status", "step.apigw_destroy", "step.scaling_plan", "step.scaling_apply", "step.scaling_status", "step.scaling_destroy"},
+				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes", "platform.ecs", "platform.dns", "platform.networking", "platform.apigateway", "platform.autoscaling", "iac.state", "app.container"},
+				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy", "step.ecs_plan", "step.ecs_apply", "step.ecs_status", "step.ecs_destroy", "step.iac_plan", "step.iac_apply", "step.iac_status", "step.iac_destroy", "step.iac_drift_detect", "step.dns_plan", "step.dns_apply", "step.dns_status", "step.network_plan", "step.network_apply", "step.network_status", "step.apigw_plan", "step.apigw_apply", "step.apigw_status", "step.apigw_destroy", "step.scaling_plan", "step.scaling_apply", "step.scaling_status", "step.scaling_destroy", "step.app_deploy", "step.app_status", "step.app_rollback"},
 				TriggerTypes:  []string{"reconciliation"},
 				WorkflowTypes: []string{"platform"},
 			},
@@ -84,6 +84,9 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 		},
 		"platform.context": func(name string, cfg map[string]any) modular.Module {
 			return module.NewServiceModule(name, cfg)
+		},
+		"app.container": func(name string, cfg map[string]any) modular.Module {
+			return module.NewAppContainerModule(name, cfg)
 		},
 	}
 }
@@ -174,6 +177,15 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		},
 		"step.scaling_destroy": func(name string, cfg map[string]any, app modular.Application) (any, error) {
 			return module.NewScalingDestroyStepFactory()(name, cfg, app)
+		},
+		"step.app_deploy": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewAppDeployStepFactory()(name, cfg, app)
+		},
+		"step.app_status": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewAppStatusStepFactory()(name, cfg, app)
+		},
+		"step.app_rollback": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewAppRollbackStepFactory()(name, cfg, app)
 		},
 	}
 }
@@ -312,6 +324,23 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			Description: "Execution context for platform operations",
 			ConfigFields: []schema.ConfigFieldDef{
 				{Key: "path", Label: "Context Path", Type: schema.FieldTypeString, Required: true, Description: "Path identifying this context"},
+			},
+		},
+		{
+			Type:        "app.container",
+			Label:       "App Container",
+			Category:    "application",
+			Description: "Application deployment abstraction that translates high-level config into platform-specific resources (Kubernetes Deployment+Service or ECS task definition)",
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "environment", Label: "Environment", Type: schema.FieldTypeString, Required: true, Description: "Name of the platform.kubernetes or platform.ecs module to deploy to"},
+				{Key: "image", Label: "Container Image", Type: schema.FieldTypeString, Required: true, Description: "Container image reference (e.g. registry.example.com/my-api:v1.0.0)"},
+				{Key: "replicas", Label: "Replicas", Type: schema.FieldTypeNumber, Description: "Desired replica count (default: 1)"},
+				{Key: "ports", Label: "Ports", Type: schema.FieldTypeArray, Description: "List of container port numbers"},
+				{Key: "cpu", Label: "CPU", Type: schema.FieldTypeString, Description: "CPU request/limit (e.g. 500m; default: 256m)"},
+				{Key: "memory", Label: "Memory", Type: schema.FieldTypeString, Description: "Memory request/limit (e.g. 512Mi; default: 512Mi)"},
+				{Key: "env", Label: "Environment Variables", Type: schema.FieldTypeMap, Description: "Environment variables injected into the container"},
+				{Key: "health_path", Label: "Health Path", Type: schema.FieldTypeString, Description: "HTTP health check path (default: /healthz)"},
+				{Key: "health_port", Label: "Health Port", Type: schema.FieldTypeNumber, Description: "HTTP health check port (default: first port or 8080)"},
 			},
 		},
 	}
