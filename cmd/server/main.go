@@ -55,6 +55,7 @@ import (
 	pluginobs "github.com/GoCodeAlone/workflow/plugins/observability"
 	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
 	plugincloud "github.com/GoCodeAlone/workflow/plugins/cloud"
+	plugingitlab "github.com/GoCodeAlone/workflow/plugins/gitlab"
 	pluginplatform "github.com/GoCodeAlone/workflow/plugins/platform"
 	pluginscheduler "github.com/GoCodeAlone/workflow/plugins/scheduler"
 	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
@@ -125,6 +126,7 @@ func defaultEnginePlugins() []plugin.EnginePlugin {
 		pluginai.New(),
 		pluginplatform.New(),
 		plugincloud.New(),
+		plugingitlab.New(),
 	}
 }
 
