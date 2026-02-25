@@ -50,6 +50,12 @@ func TestStepFactories(t *testing.T) {
 		"step.git_push",
 		"step.git_tag",
 		"step.git_checkout",
+		"step.codebuild_create_project",
+		"step.codebuild_start",
+		"step.codebuild_status",
+		"step.codebuild_logs",
+		"step.codebuild_delete_project",
+		"step.codebuild_list_builds",
 	}
 
 	for _, stepType := range expectedSteps {
@@ -64,6 +70,18 @@ func TestStepFactories(t *testing.T) {
 
 }
 
+func TestModuleFactories(t *testing.T) {
+	p := New()
+	factories := p.ModuleFactories()
+
+	if _, ok := factories["aws.codebuild"]; !ok {
+		t.Error("missing module factory: aws.codebuild")
+	}
+	if len(factories) != 1 {
+		t.Errorf("expected 1 module factory, got %d", len(factories))
+	}
+}
+
 func TestPluginLoads(t *testing.T) {
 	p := New()
 	loader := plugin.NewPluginLoader(capability.NewRegistry(), schema.NewModuleSchemaRegistry())
@@ -72,7 +90,7 @@ func TestPluginLoads(t *testing.T) {
 	}
 
 	steps := loader.StepFactories()
-	if len(steps) != 19 {
-		t.Fatalf("expected 19 step factories after load, got %d", len(steps))
+	if len(steps) != 25 {
+		t.Fatalf("expected 25 step factories after load, got %d", len(steps))
 	}
 }

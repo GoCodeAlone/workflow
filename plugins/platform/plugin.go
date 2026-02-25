@@ -31,8 +31,8 @@ func New() *Plugin {
 				Author:        "GoCodeAlone",
 				Description:   "Platform infrastructure modules, workflow handler, reconciliation trigger, and template step",
 				Tier:          plugin.TierCore,
-				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes", "platform.ecs", "platform.dns", "platform.networking", "platform.apigateway", "platform.autoscaling", "iac.state", "app.container"},
-				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy", "step.ecs_plan", "step.ecs_apply", "step.ecs_status", "step.ecs_destroy", "step.iac_plan", "step.iac_apply", "step.iac_status", "step.iac_destroy", "step.iac_drift_detect", "step.dns_plan", "step.dns_apply", "step.dns_status", "step.network_plan", "step.network_apply", "step.network_status", "step.apigw_plan", "step.apigw_apply", "step.apigw_status", "step.apigw_destroy", "step.scaling_plan", "step.scaling_apply", "step.scaling_status", "step.scaling_destroy", "step.app_deploy", "step.app_status", "step.app_rollback"},
+				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes", "platform.ecs", "platform.dns", "platform.networking", "platform.apigateway", "platform.autoscaling", "platform.region", "platform.region_router", "platform.doks", "platform.do_networking", "platform.do_dns", "platform.do_app", "iac.state", "app.container", "argo.workflows"},
+				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy", "step.ecs_plan", "step.ecs_apply", "step.ecs_status", "step.ecs_destroy", "step.iac_plan", "step.iac_apply", "step.iac_status", "step.iac_destroy", "step.iac_drift_detect", "step.dns_plan", "step.dns_apply", "step.dns_status", "step.network_plan", "step.network_apply", "step.network_status", "step.apigw_plan", "step.apigw_apply", "step.apigw_status", "step.apigw_destroy", "step.scaling_plan", "step.scaling_apply", "step.scaling_status", "step.scaling_destroy", "step.app_deploy", "step.app_status", "step.app_rollback", "step.region_deploy", "step.region_promote", "step.region_failover", "step.region_status", "step.region_weight", "step.region_sync", "step.argo_submit", "step.argo_status", "step.argo_logs", "step.argo_delete", "step.argo_list", "step.do_deploy", "step.do_status", "step.do_logs", "step.do_scale", "step.do_destroy"},
 				TriggerTypes:  []string{"reconciliation"},
 				WorkflowTypes: []string{"platform"},
 			},
@@ -87,6 +87,24 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 		},
 		"app.container": func(name string, cfg map[string]any) modular.Module {
 			return module.NewAppContainerModule(name, cfg)
+		},
+		"platform.region": func(name string, cfg map[string]any) modular.Module {
+			return module.NewMultiRegionModule(name, cfg)
+		},
+		"argo.workflows": func(name string, cfg map[string]any) modular.Module {
+			return module.NewArgoWorkflowsModule(name, cfg)
+		},
+		"platform.doks": func(name string, cfg map[string]any) modular.Module {
+			return module.NewPlatformDOKS(name, cfg)
+		},
+		"platform.do_networking": func(name string, cfg map[string]any) modular.Module {
+			return module.NewPlatformDONetworking(name, cfg)
+		},
+		"platform.do_dns": func(name string, cfg map[string]any) modular.Module {
+			return module.NewPlatformDODNS(name, cfg)
+		},
+		"platform.do_app": func(name string, cfg map[string]any) modular.Module {
+			return module.NewPlatformDOApp(name, cfg)
 		},
 	}
 }
@@ -186,6 +204,54 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		},
 		"step.app_rollback": func(name string, cfg map[string]any, app modular.Application) (any, error) {
 			return module.NewAppRollbackStepFactory()(name, cfg, app)
+		},
+		"step.region_deploy": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewRegionDeployStepFactory()(name, cfg, app)
+		},
+		"step.region_promote": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewRegionPromoteStepFactory()(name, cfg, app)
+		},
+		"step.region_failover": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewRegionFailoverStepFactory()(name, cfg, app)
+		},
+		"step.region_status": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewRegionStatusStepFactory()(name, cfg, app)
+		},
+		"step.region_weight": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewRegionWeightStepFactory()(name, cfg, app)
+		},
+		"step.region_sync": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewRegionSyncStepFactory()(name, cfg, app)
+		},
+		"step.argo_submit": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewArgoSubmitStepFactory()(name, cfg, app)
+		},
+		"step.argo_status": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewArgoStatusStepFactory()(name, cfg, app)
+		},
+		"step.argo_logs": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewArgoLogsStepFactory()(name, cfg, app)
+		},
+		"step.argo_delete": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewArgoDeleteStepFactory()(name, cfg, app)
+		},
+		"step.argo_list": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewArgoListStepFactory()(name, cfg, app)
+		},
+		"step.do_deploy": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewDODeployStepFactory()(name, cfg, app)
+		},
+		"step.do_status": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewDOStatusStepFactory()(name, cfg, app)
+		},
+		"step.do_logs": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewDOLogsStepFactory()(name, cfg, app)
+		},
+		"step.do_scale": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewDOScaleStepFactory()(name, cfg, app)
+		},
+		"step.do_destroy": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewDODestroyStepFactory()(name, cfg, app)
 		},
 	}
 }
@@ -341,6 +407,69 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "env", Label: "Environment Variables", Type: schema.FieldTypeMap, Description: "Environment variables injected into the container"},
 				{Key: "health_path", Label: "Health Path", Type: schema.FieldTypeString, Description: "HTTP health check path (default: /healthz)"},
 				{Key: "health_port", Label: "Health Port", Type: schema.FieldTypeNumber, Description: "HTTP health check port (default: first port or 8080)"},
+			},
+		},
+		{
+			Type:        "platform.region",
+			Label:       "Multi-Region Deployment",
+			Category:    "infrastructure",
+			Description: "Manages multi-region tenant deployments with failover, health checking, and traffic weight routing (mock or cloud provider backend)",
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock (default)"},
+				{Key: "regions", Label: "Regions", Type: schema.FieldTypeJSON, Required: true, Description: "List of region definitions (name, provider, endpoint, priority, health_check)"},
+			},
+		},
+		{
+			Type:        "platform.doks",
+			Label:       "DigitalOcean Kubernetes (DOKS)",
+			Category:    "infrastructure",
+			Description: "Manages DigitalOcean Kubernetes Service clusters (mock or real DO backend)",
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (provider=digitalocean)"},
+				{Key: "cluster_name", Label: "Cluster Name", Type: schema.FieldTypeString, Description: "DOKS cluster name"},
+				{Key: "region", Label: "Region", Type: schema.FieldTypeString, Description: "DO region slug (e.g. nyc3)"},
+				{Key: "version", Label: "Kubernetes Version", Type: schema.FieldTypeString, Description: "Kubernetes version slug (e.g. 1.29.1-do.0)"},
+				{Key: "node_pool", Label: "Node Pool", Type: schema.FieldTypeJSON, Description: "Node pool config (size, count, auto_scale, min_nodes, max_nodes)"},
+			},
+		},
+		{
+			Type:        "platform.do_networking",
+			Label:       "DigitalOcean VPC & Firewalls",
+			Category:    "infrastructure",
+			Description: "Manages DigitalOcean VPCs, firewalls, and load balancers (mock or real DO backend)",
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (provider=digitalocean)"},
+				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock | digitalocean"},
+				{Key: "vpc", Label: "VPC Config", Type: schema.FieldTypeJSON, Required: true, Description: "VPC configuration (name, region, ip_range)"},
+				{Key: "firewalls", Label: "Firewalls", Type: schema.FieldTypeJSON, Description: "List of firewall definitions"},
+			},
+		},
+		{
+			Type:        "platform.do_dns",
+			Label:       "DigitalOcean DNS",
+			Category:    "infrastructure",
+			Description: "Manages DigitalOcean domains and DNS records (mock or real DO backend)",
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (provider=digitalocean)"},
+				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock | digitalocean"},
+				{Key: "domain", Label: "Domain", Type: schema.FieldTypeString, Required: true, Description: "Domain name (e.g. example.com)"},
+				{Key: "records", Label: "Records", Type: schema.FieldTypeJSON, Description: "List of DNS record definitions (name, type, data, ttl)"},
+			},
+		},
+		{
+			Type:        "platform.do_app",
+			Label:       "DigitalOcean App Platform",
+			Category:    "application",
+			Description: "Deploys containerized apps to DigitalOcean App Platform (mock or real DO backend)",
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (provider=digitalocean)"},
+				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock | digitalocean"},
+				{Key: "name", Label: "App Name", Type: schema.FieldTypeString, Description: "App Platform application name"},
+				{Key: "region", Label: "Region", Type: schema.FieldTypeString, Description: "DO region slug (e.g. nyc)"},
+				{Key: "image", Label: "Container Image", Type: schema.FieldTypeString, Description: "Container image reference"},
+				{Key: "instances", Label: "Instances", Type: schema.FieldTypeNumber, Description: "Number of instances (default: 1)"},
+				{Key: "http_port", Label: "HTTP Port", Type: schema.FieldTypeNumber, Description: "Container HTTP port (default: 8080)"},
+				{Key: "envs", Label: "Environment Variables", Type: schema.FieldTypeMap, Description: "Environment variables for the app"},
 			},
 		},
 	}

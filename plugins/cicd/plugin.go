@@ -1,7 +1,10 @@
 // Package cicd provides a plugin that registers CI/CD pipeline step types:
 // shell_exec, artifact_pull, artifact_push, docker_build, docker_push,
 // docker_run, scan_sast, scan_container, scan_deps, deploy, gate, build_ui,
-// build_from_config, build_binary, git_clone, git_commit, git_push, git_tag, git_checkout.
+// build_from_config, build_binary, git_clone, git_commit, git_push, git_tag, git_checkout,
+// codebuild_create_project, codebuild_start, codebuild_status, codebuild_logs,
+// codebuild_delete_project, codebuild_list_builds.
+// It also registers the aws.codebuild module type.
 package cicd
 
 import (
@@ -11,7 +14,7 @@ import (
 	"github.com/GoCodeAlone/workflow/plugin"
 )
 
-// Plugin registers CI/CD pipeline step factories.
+// Plugin registers CI/CD pipeline step factories and the aws.codebuild module type.
 type Plugin struct {
 	plugin.BaseEnginePlugin
 }
@@ -23,14 +26,15 @@ func New() *Plugin {
 			BaseNativePlugin: plugin.BaseNativePlugin{
 				PluginName:        "cicd",
 				PluginVersion:     "1.0.0",
-				PluginDescription: "CI/CD pipeline step types (shell exec, Docker, artifact management, security scanning, deploy, gate, build from config, git operations)",
+				PluginDescription: "CI/CD pipeline step types (shell exec, Docker, artifact management, security scanning, deploy, gate, build from config, git operations, AWS CodeBuild)",
 			},
 			Manifest: plugin.PluginManifest{
 				Name:        "cicd",
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
-				Description: "CI/CD pipeline step types (shell exec, Docker, artifact management, security scanning, deploy, gate, build from config, git operations)",
+				Description: "CI/CD pipeline step types (shell exec, Docker, artifact management, security scanning, deploy, gate, build from config, git operations, AWS CodeBuild)",
 				Tier:        plugin.TierCore,
+				ModuleTypes: []string{"aws.codebuild"},
 				StepTypes: []string{
 					"step.shell_exec",
 					"step.artifact_pull",
@@ -46,11 +50,17 @@ func New() *Plugin {
 					"step.build_ui",
 					"step.build_from_config",
 					"step.build_binary",
-				"step.git_clone",
-				"step.git_commit",
-				"step.git_push",
-				"step.git_tag",
-				"step.git_checkout",
+					"step.git_clone",
+					"step.git_commit",
+					"step.git_push",
+					"step.git_tag",
+					"step.git_checkout",
+					"step.codebuild_create_project",
+					"step.codebuild_start",
+					"step.codebuild_status",
+					"step.codebuild_logs",
+					"step.codebuild_delete_project",
+					"step.codebuild_list_builds",
 				},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "cicd-pipeline", Role: "provider", Priority: 50},
@@ -65,7 +75,16 @@ func (p *Plugin) Capabilities() []capability.Contract {
 	return []capability.Contract{
 		{
 			Name:        "cicd-pipeline",
-			Description: "CI/CD pipeline operations: shell exec, Docker, artifact management, security scanning, deploy, gate, build from config, git operations",
+			Description: "CI/CD pipeline operations: shell exec, Docker, artifact management, security scanning, deploy, gate, build from config, git operations, AWS CodeBuild",
+		},
+	}
+}
+
+// ModuleFactories returns module factories for CI/CD module types.
+func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
+	return map[string]plugin.ModuleFactory{
+		"aws.codebuild": func(name string, cfg map[string]any) modular.Module {
+			return module.NewCodeBuildModule(name, cfg)
 		},
 	}
 }
@@ -92,6 +111,12 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.git_push":          wrapStepFactory(module.NewGitPushStepFactory()),
 		"step.git_tag":           wrapStepFactory(module.NewGitTagStepFactory()),
 		"step.git_checkout":      wrapStepFactory(module.NewGitCheckoutStepFactory()),
+		"step.codebuild_create_project": wrapStepFactory(module.NewCodeBuildCreateProjectStepFactory()),
+		"step.codebuild_start":          wrapStepFactory(module.NewCodeBuildStartStepFactory()),
+		"step.codebuild_status":         wrapStepFactory(module.NewCodeBuildStatusStepFactory()),
+		"step.codebuild_logs":           wrapStepFactory(module.NewCodeBuildLogsStepFactory()),
+		"step.codebuild_delete_project": wrapStepFactory(module.NewCodeBuildDeleteProjectStepFactory()),
+		"step.codebuild_list_builds":    wrapStepFactory(module.NewCodeBuildListBuildsStepFactory()),
 	}
 }
 
