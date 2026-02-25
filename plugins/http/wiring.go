@@ -2,6 +2,7 @@ package http
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/config"
@@ -131,8 +132,12 @@ func wireStaticFileServers(app modular.Application, cfg *config.WorkflowConfig) 
 		}
 
 		if targetRouter != nil {
-			targetRouter.AddRoute("GET", sfs.Prefix()+"{path...}", sfs)
-			_ = fmt.Sprintf("Registered static file server %s on router %s at prefix: %s", sfs.Name(), targetName, sfs.Prefix())
+			prefix := sfs.Prefix()
+			// Ensure the wildcard segment is at a path boundary (Go net/http requirement).
+			// e.g. "/ui" → "/ui/{path...}", "/" → "/{path...}"
+			routePattern := strings.TrimSuffix(prefix, "/") + "/{path...}"
+			targetRouter.AddRoute("GET", routePattern, sfs)
+			_ = fmt.Sprintf("Registered static file server %s on router %s at prefix: %s", sfs.Name(), targetName, prefix)
 		}
 	}
 
