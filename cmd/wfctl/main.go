@@ -23,6 +23,9 @@ var commands = map[string]func([]string) error{
 	"deploy":   runDeploy,
 	"api":      runAPI,
 	"diff":     runDiff,
+	"template": runTemplate,
+	"contract": runContract,
+	"compat":   runCompat,
 }
 
 func usage() {
@@ -47,6 +50,9 @@ Commands:
   deploy     Deploy the workflow application (docker, kubernetes, cloud)
   api        API tooling (extract: generate OpenAPI 3.0 spec from config)
   diff       Compare two workflow config files and show what changed
+  template   Template management (validate: check templates against known types)
+  contract   Contract testing (test: generate/compare API contracts)
+  compat     Compatibility checking (check: verify config works with current engine)
 
 Run 'wfctl <command> -h' for command-specific help.
 `, version)
