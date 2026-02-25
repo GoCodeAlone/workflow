@@ -37,6 +37,10 @@ func New() *Plugin {
 					"state.tracker",
 					"state.connector",
 				},
+				StepTypes: []string{
+					"step.statemachine_transition",
+					"step.statemachine_get",
+				},
 				WorkflowTypes: []string{"statemachine"},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "state-machine", Role: "provider", Priority: 10},
@@ -95,6 +99,22 @@ func (p *Plugin) WorkflowHandlers() map[string]plugin.WorkflowHandlerFactory {
 		"statemachine": func() any {
 			return handlers.NewStateMachineWorkflowHandler()
 		},
+	}
+}
+
+// StepFactories returns the pipeline step factories for state machine operations.
+func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
+	return map[string]plugin.StepFactory{
+		"step.statemachine_transition": wrapStepFactory(module.NewStateMachineTransitionStepFactory()),
+		"step.statemachine_get":        wrapStepFactory(module.NewStateMachineGetStepFactory()),
+	}
+}
+
+// wrapStepFactory converts a module.StepFactory to a plugin.StepFactory,
+// threading the modular.Application through so steps can access the service registry.
+func wrapStepFactory(f module.StepFactory) plugin.StepFactory {
+	return func(name string, cfg map[string]any, app modular.Application) (any, error) {
+		return f(name, cfg, app)
 	}
 }
 
