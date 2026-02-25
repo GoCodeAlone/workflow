@@ -7,15 +7,15 @@ import (
 	"github.com/CrisisTextLine/modular"
 )
 
-// IaCCORSConfig holds CORS settings for an IaC-managed API gateway.
-type IaCCORSConfig struct {
+// PlatformGatewayCORSConfig holds CORS settings for a provisioned API gateway.
+type PlatformGatewayCORSConfig struct {
 	AllowOrigins []string `json:"allowOrigins"`
 	AllowMethods []string `json:"allowMethods"`
 	AllowHeaders []string `json:"allowHeaders"`
 }
 
-// IaCGatewayRoute describes a single route managed by the IaC API gateway provisioner.
-type IaCGatewayRoute struct {
+// PlatformGatewayRoute describes a single route managed by the API gateway provisioner.
+type PlatformGatewayRoute struct {
 	Path      string `json:"path"`
 	Method    string `json:"method"`
 	Target    string `json:"target"`
@@ -23,31 +23,31 @@ type IaCGatewayRoute struct {
 	AuthType  string `json:"authType"` // none, api_key, jwt
 }
 
-// IaCGatewayPlan describes the changes needed to reach desired gateway state.
-type IaCGatewayPlan struct {
-	Name    string            `json:"name"`
-	Stage   string            `json:"stage"`
-	Routes  []IaCGatewayRoute `json:"routes"`
-	CORS    *IaCCORSConfig    `json:"cors,omitempty"`
-	Changes []string          `json:"changes"`
+// PlatformGatewayPlan describes the changes needed to reach desired gateway state.
+type PlatformGatewayPlan struct {
+	Name    string                     `json:"name"`
+	Stage   string                     `json:"stage"`
+	Routes  []PlatformGatewayRoute     `json:"routes"`
+	CORS    *PlatformGatewayCORSConfig `json:"cors,omitempty"`
+	Changes []string                   `json:"changes"`
 }
 
-// IaCGatewayState represents the current state of a provisioned API gateway.
-type IaCGatewayState struct {
-	ID       string            `json:"id"`
-	Name     string            `json:"name"`
-	Endpoint string            `json:"endpoint"`
-	Stage    string            `json:"stage"`
-	Routes   []IaCGatewayRoute `json:"routes"`
-	CORS     *IaCCORSConfig    `json:"cors,omitempty"`
-	Status   string            `json:"status"` // pending, active, updating, deleted
+// PlatformGatewayState represents the current state of a provisioned API gateway.
+type PlatformGatewayState struct {
+	ID       string                     `json:"id"`
+	Name     string                     `json:"name"`
+	Endpoint string                     `json:"endpoint"`
+	Stage    string                     `json:"stage"`
+	Routes   []PlatformGatewayRoute     `json:"routes"`
+	CORS     *PlatformGatewayCORSConfig `json:"cors,omitempty"`
+	Status   string                     `json:"status"` // pending, active, updating, deleted
 }
 
-// apigatewayBackend is the internal interface for gateway backends.
+// apigatewayBackend is the internal interface for gateway provisioning backends.
 type apigatewayBackend interface {
-	plan(m *PlatformAPIGateway) (*IaCGatewayPlan, error)
-	apply(m *PlatformAPIGateway) (*IaCGatewayState, error)
-	status(m *PlatformAPIGateway) (*IaCGatewayState, error)
+	plan(m *PlatformAPIGateway) (*PlatformGatewayPlan, error)
+	apply(m *PlatformAPIGateway) (*PlatformGatewayState, error)
+	status(m *PlatformAPIGateway) (*PlatformGatewayState, error)
 	destroy(m *PlatformAPIGateway) error
 }
 
@@ -64,7 +64,7 @@ type PlatformAPIGateway struct {
 	name    string
 	config  map[string]any
 	account string
-	state   *IaCGatewayState
+	state   *PlatformGatewayState
 	backend apigatewayBackend
 }
 
@@ -108,8 +108,7 @@ func (m *PlatformAPIGateway) Init(app modular.Application) error {
 		stage = "dev"
 	}
 
-	m.state = &IaCGatewayState{
-		ID:     "",
+	m.state = &PlatformGatewayState{
 		Name:   gwName,
 		Stage:  stage,
 		Status: "pending",
@@ -131,12 +130,12 @@ func (m *PlatformAPIGateway) RequiresServices() []modular.ServiceDependency {
 }
 
 // Plan returns the proposed changes.
-func (m *PlatformAPIGateway) Plan() (*IaCGatewayPlan, error) {
+func (m *PlatformAPIGateway) Plan() (*PlatformGatewayPlan, error) {
 	return m.backend.plan(m)
 }
 
 // Apply provisions or updates the gateway.
-func (m *PlatformAPIGateway) Apply() (*IaCGatewayState, error) {
+func (m *PlatformAPIGateway) Apply() (*PlatformGatewayState, error) {
 	return m.backend.apply(m)
 }
 
@@ -158,13 +157,13 @@ func (m *PlatformAPIGateway) gatewayName() string {
 	return m.name
 }
 
-// routes parses routes from config.
-func (m *PlatformAPIGateway) routes() []IaCGatewayRoute {
+// platformRoutes parses routes from config.
+func (m *PlatformAPIGateway) platformRoutes() []PlatformGatewayRoute {
 	raw, ok := m.config["routes"].([]any)
 	if !ok {
 		return nil
 	}
-	var routes []IaCGatewayRoute
+	var routes []PlatformGatewayRoute
 	for _, item := range raw {
 		r, ok := item.(map[string]any)
 		if !ok {
@@ -175,7 +174,7 @@ func (m *PlatformAPIGateway) routes() []IaCGatewayRoute {
 		target, _ := r["target"].(string)
 		authType, _ := r["auth_type"].(string)
 		rateLimit, _ := intFromAny(r["rate_limit"])
-		routes = append(routes, IaCGatewayRoute{
+		routes = append(routes, PlatformGatewayRoute{
 			Path:      path,
 			Method:    method,
 			Target:    target,
@@ -186,13 +185,13 @@ func (m *PlatformAPIGateway) routes() []IaCGatewayRoute {
 	return routes
 }
 
-// cors parses CORS config.
-func (m *PlatformAPIGateway) cors() *IaCCORSConfig {
+// platformCORS parses CORS config.
+func (m *PlatformAPIGateway) platformCORS() *PlatformGatewayCORSConfig {
 	raw, ok := m.config["cors"].(map[string]any)
 	if !ok {
 		return nil
 	}
-	cfg := &IaCCORSConfig{}
+	cfg := &PlatformGatewayCORSConfig{}
 	if origins, ok := raw["allow_origins"].([]any); ok {
 		for _, o := range origins {
 			if s, ok := o.(string); ok {
@@ -222,13 +221,13 @@ func (m *PlatformAPIGateway) cors() *IaCCORSConfig {
 // mockAPIGatewayBackend implements apigatewayBackend with in-memory state.
 type mockAPIGatewayBackend struct{}
 
-func (b *mockAPIGatewayBackend) plan(m *PlatformAPIGateway) (*IaCGatewayPlan, error) {
-	routes := m.routes()
-	plan := &IaCGatewayPlan{
+func (b *mockAPIGatewayBackend) plan(m *PlatformAPIGateway) (*PlatformGatewayPlan, error) {
+	routes := m.platformRoutes()
+	plan := &PlatformGatewayPlan{
 		Name:   m.gatewayName(),
 		Stage:  m.state.Stage,
 		Routes: routes,
-		CORS:   m.cors(),
+		CORS:   m.platformCORS(),
 	}
 
 	switch m.state.Status {
@@ -245,22 +244,22 @@ func (b *mockAPIGatewayBackend) plan(m *PlatformAPIGateway) (*IaCGatewayPlan, er
 	return plan, nil
 }
 
-func (b *mockAPIGatewayBackend) apply(m *PlatformAPIGateway) (*IaCGatewayState, error) {
+func (b *mockAPIGatewayBackend) apply(m *PlatformAPIGateway) (*PlatformGatewayState, error) {
 	if m.state.Status == "active" {
 		return m.state, nil
 	}
 
-	routes := m.routes()
+	routes := m.platformRoutes()
 	m.state.ID = fmt.Sprintf("mock-gw-%s", strings.ReplaceAll(m.gatewayName(), " ", "-"))
 	m.state.Routes = routes
-	m.state.CORS = m.cors()
+	m.state.CORS = m.platformCORS()
 	m.state.Endpoint = fmt.Sprintf("https://mock.execute-api.example.com/%s", m.state.Stage)
 	m.state.Status = "active"
 
 	return m.state, nil
 }
 
-func (b *mockAPIGatewayBackend) status(m *PlatformAPIGateway) (*IaCGatewayState, error) {
+func (b *mockAPIGatewayBackend) status(m *PlatformAPIGateway) (*PlatformGatewayState, error) {
 	return m.state, nil
 }
 
@@ -280,20 +279,20 @@ func (b *mockAPIGatewayBackend) destroy(m *PlatformAPIGateway) error {
 // Real implementation would use aws-sdk-go-v2/service/apigatewayv2.
 type awsAPIGatewayBackend struct{}
 
-func (b *awsAPIGatewayBackend) plan(m *PlatformAPIGateway) (*IaCGatewayPlan, error) {
-	return &IaCGatewayPlan{
+func (b *awsAPIGatewayBackend) plan(m *PlatformAPIGateway) (*PlatformGatewayPlan, error) {
+	return &PlatformGatewayPlan{
 		Name:    m.gatewayName(),
 		Stage:   m.state.Stage,
-		Routes:  m.routes(),
+		Routes:  m.platformRoutes(),
 		Changes: []string{"AWS API Gateway (stub — use Terraform or aws-sdk-go-v2/service/apigatewayv2)"},
 	}, nil
 }
 
-func (b *awsAPIGatewayBackend) apply(m *PlatformAPIGateway) (*IaCGatewayState, error) {
+func (b *awsAPIGatewayBackend) apply(m *PlatformAPIGateway) (*PlatformGatewayState, error) {
 	return nil, fmt.Errorf("aws apigateway backend: not implemented — use Terraform or aws-sdk-go-v2/service/apigatewayv2")
 }
 
-func (b *awsAPIGatewayBackend) status(m *PlatformAPIGateway) (*IaCGatewayState, error) {
+func (b *awsAPIGatewayBackend) status(m *PlatformAPIGateway) (*PlatformGatewayState, error) {
 	m.state.Status = "unknown"
 	return m.state, nil
 }
