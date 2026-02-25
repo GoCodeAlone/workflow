@@ -22,6 +22,7 @@ var commands = map[string]func([]string) error{
 	"publish":  runPublish,
 	"deploy":   runDeploy,
 	"api":      runAPI,
+	"diff":     runDiff,
 }
 
 func usage() {
@@ -45,6 +46,7 @@ Commands:
   publish    Prepare and publish a plugin manifest to the workflow-registry
   deploy     Deploy the workflow application (docker, kubernetes, cloud)
   api        API tooling (extract: generate OpenAPI 3.0 spec from config)
+  diff       Compare two workflow config files and show what changed
 
 Run 'wfctl <command> -h' for command-specific help.
 `, version)
