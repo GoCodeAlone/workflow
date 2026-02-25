@@ -10,13 +10,14 @@ import (
 	"github.com/CrisisTextLine/modular"
 )
 
-// RequestParseStep extracts path parameters, query parameters, and request body
-// from the HTTP request stored in pipeline metadata.
+// RequestParseStep extracts path parameters, query parameters, request body,
+// and optionally request headers from the HTTP request stored in pipeline metadata.
 type RequestParseStep struct {
-	name        string
-	pathParams  []string
-	queryParams []string
-	parseBody   bool
+	name         string
+	pathParams   []string
+	queryParams  []string
+	parseBody    bool
+	parseHeaders []string
 }
 
 // NewRequestParseStepFactory returns a StepFactory that creates RequestParseStep instances.
@@ -46,11 +47,23 @@ func NewRequestParseStepFactory() StepFactory {
 
 		parseBody, _ := config["parse_body"].(bool)
 
+		var parseHeaders []string
+		if ph, ok := config["parse_headers"]; ok {
+			if list, ok := ph.([]any); ok {
+				for _, item := range list {
+					if s, ok := item.(string); ok {
+						parseHeaders = append(parseHeaders, s)
+					}
+				}
+			}
+		}
+
 		return &RequestParseStep{
-			name:        name,
-			pathParams:  pathParams,
-			queryParams: queryParams,
-			parseBody:   parseBody,
+			name:         name,
+			pathParams:   pathParams,
+			queryParams:  queryParams,
+			parseBody:    parseBody,
+			parseHeaders: parseHeaders,
 		}, nil
 	}
 }
@@ -109,6 +122,20 @@ func (s *RequestParseStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 			}
 		}
 		output["query"] = queryValues
+	}
+
+	// Extract request headers (always includes the key, empty string if header absent)
+	if len(s.parseHeaders) > 0 {
+		headerValues := make(map[string]any)
+		req, _ := pc.Metadata["_http_request"].(*http.Request)
+		for _, name := range s.parseHeaders {
+			if req != nil {
+				headerValues[name] = req.Header.Get(name)
+			} else {
+				headerValues[name] = ""
+			}
+		}
+		output["headers"] = headerValues
 	}
 
 	// Parse request body — first try trigger data (command handler pre-parses body),

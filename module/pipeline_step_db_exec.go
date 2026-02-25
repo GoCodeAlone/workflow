@@ -10,12 +10,13 @@ import (
 
 // DBExecStep executes parameterized SQL INSERT/UPDATE/DELETE against a named database service.
 type DBExecStep struct {
-	name     string
-	database string
-	query    string
-	params   []string
-	app      modular.Application
-	tmpl     *TemplateEngine
+	name        string
+	database    string
+	query       string
+	params      []string
+	ignoreError bool
+	app         modular.Application
+	tmpl        *TemplateEngine
 }
 
 // NewDBExecStepFactory returns a StepFactory that creates DBExecStep instances.
@@ -47,13 +48,16 @@ func NewDBExecStepFactory() StepFactory {
 			}
 		}
 
+		ignoreError, _ := config["ignore_error"].(bool)
+
 		return &DBExecStep{
-			name:     name,
-			database: database,
-			query:    query,
-			params:   params,
-			app:      app,
-			tmpl:     NewTemplateEngine(),
+			name:        name,
+			database:    database,
+			query:       query,
+			params:      params,
+			ignoreError: ignoreError,
+			app:         app,
+			tmpl:        NewTemplateEngine(),
 		}, nil
 	}
 }
@@ -93,6 +97,13 @@ func (s *DBExecStep) Execute(_ context.Context, pc *PipelineContext) (*StepResul
 	// Execute statement
 	result, err := db.Exec(s.query, resolvedParams...)
 	if err != nil {
+		if s.ignoreError {
+			return &StepResult{Output: map[string]any{
+				"affected_rows": int64(0),
+				"last_id":       "0",
+				"ignored_error": err.Error(),
+			}}, nil
+		}
 		return nil, fmt.Errorf("db_exec step %q: exec failed: %w", s.name, err)
 	}
 
