@@ -55,8 +55,11 @@ import (
 	pluginobs "github.com/GoCodeAlone/workflow/plugins/observability"
 	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
 	plugincloud "github.com/GoCodeAlone/workflow/plugins/cloud"
+	plugindatastores "github.com/GoCodeAlone/workflow/plugins/datastores"
 	plugingitlab "github.com/GoCodeAlone/workflow/plugins/gitlab"
+	pluginmarketplace "github.com/GoCodeAlone/workflow/plugins/marketplace"
 	pluginplatform "github.com/GoCodeAlone/workflow/plugins/platform"
+	pluginpolicy "github.com/GoCodeAlone/workflow/plugins/policy"
 	pluginscheduler "github.com/GoCodeAlone/workflow/plugins/scheduler"
 	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
 	pluginsm "github.com/GoCodeAlone/workflow/plugins/statemachine"
@@ -127,6 +130,9 @@ func defaultEnginePlugins() []plugin.EnginePlugin {
 		pluginplatform.New(),
 		plugincloud.New(),
 		plugingitlab.New(),
+		plugindatastores.New(),
+		pluginpolicy.New(),
+		pluginmarketplace.New(),
 	}
 }
 
