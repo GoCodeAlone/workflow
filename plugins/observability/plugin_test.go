@@ -36,8 +36,8 @@ func TestManifestValidation(t *testing.T) {
 	if m.Name != "observability" {
 		t.Errorf("manifest Name = %q, want %q", m.Name, "observability")
 	}
-	if len(m.ModuleTypes) != 6 {
-		t.Errorf("manifest ModuleTypes count = %d, want 6", len(m.ModuleTypes))
+	if len(m.ModuleTypes) != 7 {
+		t.Errorf("manifest ModuleTypes count = %d, want 7", len(m.ModuleTypes))
 	}
 }
 
@@ -80,6 +80,7 @@ func TestModuleFactories(t *testing.T) {
 		"observability.otel",
 		"openapi.generator",
 		"http.middleware.otel",
+		"tracing.propagation",
 	}
 
 	if len(factories) != len(expectedTypes) {
@@ -162,12 +163,13 @@ func TestModuleSchemas(t *testing.T) {
 	schemas := p.ModuleSchemas()
 
 	expectedTypes := map[string]bool{
-		"metrics.collector":  false,
-		"health.checker":     false,
-		"log.collector":      false,
-		"observability.otel": false,
-		"openapi.generator":  false,
+		"metrics.collector":   false,
+		"health.checker":      false,
+		"log.collector":       false,
+		"observability.otel":  false,
+		"openapi.generator":   false,
 		"http.middleware.otel": false,
+		"tracing.propagation": false,
 	}
 
 	if len(schemas) != len(expectedTypes) {
@@ -267,11 +269,27 @@ func TestWiringHooks(t *testing.T) {
 	}
 }
 
-func TestStepFactoriesEmpty(t *testing.T) {
+func TestStepFactories(t *testing.T) {
 	p := New()
 	steps := p.StepFactories()
-	if steps != nil {
-		t.Errorf("StepFactories() should return nil, got %v", steps)
+	if steps == nil {
+		t.Fatal("StepFactories() should not return nil")
+	}
+
+	expectedSteps := []string{
+		"step.trace_start",
+		"step.trace_inject",
+		"step.trace_extract",
+		"step.trace_annotate",
+		"step.trace_link",
+	}
+	if len(steps) != len(expectedSteps) {
+		t.Errorf("StepFactories() count = %d, want %d", len(steps), len(expectedSteps))
+	}
+	for _, typ := range expectedSteps {
+		if _, ok := steps[typ]; !ok {
+			t.Errorf("missing step factory for %q", typ)
+		}
 	}
 }
 

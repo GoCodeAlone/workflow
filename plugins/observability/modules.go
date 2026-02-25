@@ -11,12 +11,13 @@ import (
 // moduleFactories returns factories for all observability module types.
 func moduleFactories() map[string]plugin.ModuleFactory {
 	return map[string]plugin.ModuleFactory{
-		"metrics.collector":  metricsCollectorFactory,
-		"health.checker":     healthCheckerFactory,
-		"log.collector":      logCollectorFactory,
-		"observability.otel": otelTracingFactory,
-		"openapi.generator":  openAPIGeneratorFactory,
+		"metrics.collector":    metricsCollectorFactory,
+		"health.checker":       healthCheckerFactory,
+		"log.collector":        logCollectorFactory,
+		"observability.otel":   otelTracingFactory,
+		"openapi.generator":    openAPIGeneratorFactory,
 		"http.middleware.otel": otelMiddlewareFactory,
+		"tracing.propagation":  tracePropagationFactory,
 	}
 }
 
@@ -124,4 +125,8 @@ func otelMiddlewareFactory(name string, cfg map[string]any) modular.Module {
 		serverName = v
 	}
 	return module.NewOTelMiddleware(name, serverName)
+}
+
+func tracePropagationFactory(name string, cfg map[string]any) modular.Module {
+	return module.NewTracePropagationModule(name, cfg)
 }

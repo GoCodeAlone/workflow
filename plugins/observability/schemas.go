@@ -86,5 +86,15 @@ func moduleSchemas() []*schema.ModuleSchema {
 			},
 			DefaultConfig: map[string]any{"serverName": "workflow-http"},
 		},
+		{
+			Type:        "tracing.propagation",
+			Label:       "Trace Propagation",
+			Category:    "observability",
+			Description: "Propagates trace context across async boundaries (Kafka, EventBridge, webhooks, HTTP)",
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "format", Label: "Propagation Format", Type: schema.FieldTypeSelect, Options: []string{"w3c", "b3", "composite"}, DefaultValue: "w3c", Description: "Trace context propagation format (W3C TraceContext, B3, or composite)"},
+			},
+			DefaultConfig: map[string]any{"format": "w3c"},
+		},
 	}
 }
