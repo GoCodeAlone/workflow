@@ -44,6 +44,7 @@ func TestStepFactories(t *testing.T) {
 		"step.gate",
 		"step.build_ui",
 		"step.build_from_config",
+		"step.build_binary",
 		"step.git_clone",
 		"step.git_commit",
 		"step.git_push",
@@ -71,7 +72,7 @@ func TestPluginLoads(t *testing.T) {
 	}
 
 	steps := loader.StepFactories()
-	if len(steps) != 18 {
-		t.Fatalf("expected 18 step factories after load, got %d", len(steps))
+	if len(steps) != 19 {
+		t.Fatalf("expected 19 step factories after load, got %d", len(steps))
 	}
 }

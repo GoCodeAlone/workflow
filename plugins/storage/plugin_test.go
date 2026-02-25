@@ -21,11 +21,11 @@ func TestPluginManifest(t *testing.T) {
 	if m.Name != "storage" {
 		t.Errorf("expected name %q, got %q", "storage", m.Name)
 	}
-	if len(m.ModuleTypes) != 7 {
-		t.Errorf("expected 7 module types, got %d", len(m.ModuleTypes))
+	if len(m.ModuleTypes) != 8 {
+		t.Errorf("expected 8 module types, got %d", len(m.ModuleTypes))
 	}
-	if len(m.StepTypes) != 0 {
-		t.Errorf("expected 0 step types, got %d", len(m.StepTypes))
+	if len(m.StepTypes) != 4 {
+		t.Errorf("expected 4 step types, got %d", len(m.StepTypes))
 	}
 }
 
@@ -126,16 +126,16 @@ func TestStepFactories(t *testing.T) {
 	p := New()
 	stepFactories := p.StepFactories()
 
-	if len(stepFactories) != 0 {
-		t.Fatalf("expected 0 step factories (moved to pipelinesteps plugin), got %d", len(stepFactories))
+	if len(stepFactories) != 4 {
+		t.Fatalf("expected 4 step factories (artifact ops), got %d", len(stepFactories))
 	}
 }
 
 func TestModuleSchemas(t *testing.T) {
 	p := New()
 	schemas := p.ModuleSchemas()
-	if len(schemas) != 7 {
-		t.Fatalf("expected 7 module schemas, got %d", len(schemas))
+	if len(schemas) != 8 {
+		t.Fatalf("expected 8 module schemas, got %d", len(schemas))
 	}
 
 	types := map[string]bool{}

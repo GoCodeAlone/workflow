@@ -52,6 +52,8 @@ func TestStepFactories(t *testing.T) {
 		"step.cache_get",
 		"step.cache_set",
 		"step.cache_delete",
+		"step.ui_scaffold",
+		"step.ui_scaffold_analyze",
 	}
 
 	for _, stepType := range expectedSteps {
@@ -73,7 +75,7 @@ func TestPluginLoads(t *testing.T) {
 	}
 
 	steps := loader.StepFactories()
-	if len(steps) != 21 {
-		t.Fatalf("expected 21 step factories after load, got %d", len(steps))
+	if len(steps) != 23 {
+		t.Fatalf("expected 23 step factories after load, got %d", len(steps))
 	}
 }
