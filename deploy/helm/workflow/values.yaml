@@ -93,6 +93,15 @@ env:
 # Sensitive values from Kubernetes secrets
 envFromSecret: ""
 
+# Plugin and runtime data persistence
+# With emptyDir (disabled), data is lost on pod restart — plugins must be re-fetched.
+# Enable to retain downloaded plugins and runtime state across restarts.
+persistence:
+  enabled: false
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 1Gi
+
 # Prometheus monitoring
 monitoring:
   enabled: false
