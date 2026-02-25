@@ -51,7 +51,7 @@ workflows:
         handler: {{.Name}}-api
 
 triggers:
-  - name: http-trigger
+  http-trigger:
     type: http
     config:
       server: {{.Name}}-server

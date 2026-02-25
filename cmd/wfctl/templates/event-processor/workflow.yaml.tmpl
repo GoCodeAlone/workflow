@@ -131,11 +131,11 @@ workflows:
         handler: {{.Name}}-health
 
 triggers:
-  - name: event-trigger
+  event-trigger:
     type: event
     config:
       topic: "{{.Name}}.incoming"
-  - name: http-trigger
+  http-trigger:
     type: http
     config:
       server: {{.Name}}-server
