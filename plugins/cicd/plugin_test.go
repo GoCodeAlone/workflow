@@ -43,6 +43,7 @@ func TestStepFactories(t *testing.T) {
 		"step.deploy",
 		"step.gate",
 		"step.build_ui",
+		"step.build_from_config",
 	}
 
 	for _, stepType := range expectedSteps {
@@ -54,6 +55,7 @@ func TestStepFactories(t *testing.T) {
 	if len(factories) != len(expectedSteps) {
 		t.Errorf("expected %d step factories, got %d", len(expectedSteps), len(factories))
 	}
+
 }
 
 func TestPluginLoads(t *testing.T) {
@@ -64,7 +66,7 @@ func TestPluginLoads(t *testing.T) {
 	}
 
 	steps := loader.StepFactories()
-	if len(steps) != 12 {
-		t.Fatalf("expected 12 step factories after load, got %d", len(steps))
+	if len(steps) != 13 {
+		t.Fatalf("expected 13 step factories after load, got %d", len(steps))
 	}
 }
