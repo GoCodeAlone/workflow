@@ -47,6 +47,8 @@ func TestStepFactories(t *testing.T) {
 		"step.validate_path_param",
 		"step.validate_pagination",
 		"step.validate_request_body",
+		"step.foreach",
+		"step.webhook_verify",
 	}
 
 	for _, stepType := range expectedSteps {
@@ -68,7 +70,7 @@ func TestPluginLoads(t *testing.T) {
 	}
 
 	steps := loader.StepFactories()
-	if len(steps) != 16 {
-		t.Fatalf("expected 16 step factories after load, got %d", len(steps))
+	if len(steps) != 18 {
+		t.Fatalf("expected 18 step factories after load, got %d", len(steps))
 	}
 }

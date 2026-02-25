@@ -1,7 +1,8 @@
 // Package pipelinesteps provides a plugin that registers generic pipeline step
 // types: validate, transform, conditional, set, log, delegate, jq, publish,
 // http_call, request_parse, db_query, db_exec, json_response,
-// validate_path_param, validate_pagination, validate_request_body.
+// validate_path_param, validate_pagination, validate_request_body,
+// foreach, webhook_verify.
 // It also provides the PipelineWorkflowHandler for composable pipelines.
 package pipelinesteps
 
@@ -28,8 +29,9 @@ type Plugin struct {
 	// pipelineHandler is retained so the wiring hook can inject dependencies.
 	pipelineHandler *handlers.PipelineWorkflowHandler
 	// stepRegistry and logger are injected by the engine via optional setter interfaces.
-	stepRegistry interfaces.StepRegistryProvider
-	logger       *slog.Logger
+	stepRegistry         interfaces.StepRegistryProvider
+	concreteStepRegistry *module.StepRegistry
+	logger               *slog.Logger
 }
 
 // New creates a new pipeline-steps plugin.
@@ -39,7 +41,7 @@ func New() *Plugin {
 			BaseNativePlugin: plugin.BaseNativePlugin{
 				PluginName:        "pipeline-steps",
 				PluginVersion:     "1.0.0",
-				PluginDescription: "Generic pipeline step types (validate, transform, conditional, set, log, delegate, jq, validate_path_param, validate_pagination, validate_request_body, etc.)",
+				PluginDescription: "Generic pipeline step types (validate, transform, conditional, set, log, delegate, jq, validate_path_param, validate_pagination, validate_request_body, foreach, webhook_verify, etc.)",
 			},
 			Manifest: plugin.PluginManifest{
 				Name:        "pipeline-steps",
@@ -65,6 +67,8 @@ func New() *Plugin {
 					"step.validate_path_param",
 					"step.validate_pagination",
 					"step.validate_request_body",
+					"step.foreach",
+					"step.webhook_verify",
 				},
 				WorkflowTypes: []string{"pipeline"},
 				Capabilities: []plugin.CapabilityDecl{
@@ -80,7 +84,7 @@ func (p *Plugin) Capabilities() []capability.Contract {
 	return []capability.Contract{
 		{
 			Name:        "pipeline-steps",
-			Description: "Generic pipeline step operations: validate, transform, conditional, set, log, delegate, jq, etc.",
+			Description: "Generic pipeline step operations: validate, transform, conditional, set, log, delegate, jq, foreach, webhook_verify, etc.",
 		},
 	}
 }
@@ -104,6 +108,12 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.validate_path_param":   wrapStepFactory(module.NewValidatePathParamStepFactory()),
 		"step.validate_pagination":   wrapStepFactory(module.NewValidatePaginationStepFactory()),
 		"step.validate_request_body": wrapStepFactory(module.NewValidateRequestBodyStepFactory()),
+		// step.foreach uses a lazy registry getter so it can reference any registered step type,
+		// including types registered by other plugins loaded after this one.
+		"step.foreach": wrapStepFactory(module.NewForEachStepFactory(func() *module.StepRegistry {
+			return p.concreteStepRegistry
+		}, nil)),
+		"step.webhook_verify": wrapStepFactory(module.NewWebhookVerifyStepFactory()),
 	}
 }
 
@@ -119,8 +129,15 @@ func (p *Plugin) WorkflowHandlers() map[string]plugin.WorkflowHandlerFactory {
 
 // SetStepRegistry is called by the engine (via optional-interface detection in LoadPlugin)
 // to inject the step registry after all step factories have been registered.
+// It also stores the concrete *module.StepRegistry so that step.foreach can build
+// sub-steps using the full registry at step-creation time.
 func (p *Plugin) SetStepRegistry(registry interfaces.StepRegistryProvider) {
 	p.stepRegistry = registry
+	// Type-assert to the concrete registry so step.foreach can call Create().
+	// The engine always passes *module.StepRegistry; this is safe.
+	if concrete, ok := registry.(*module.StepRegistry); ok {
+		p.concreteStepRegistry = concrete
+	}
 }
 
 // SetLogger is called by the engine (via optional-interface detection in LoadPlugin)
