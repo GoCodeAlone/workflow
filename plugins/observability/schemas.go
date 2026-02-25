@@ -76,5 +76,15 @@ func moduleSchemas() []*schema.ModuleSchema {
 			},
 			DefaultConfig: map[string]any{"title": "Workflow API", "version": "1.0.0"},
 		},
+		{
+			Type:        "http.middleware.otel",
+			Label:       "OTEL HTTP Middleware",
+			Category:    "observability",
+			Description: "Instruments HTTP requests with OpenTelemetry tracing spans",
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "serverName", Label: "Server Name", Type: schema.FieldTypeString, DefaultValue: "workflow-http", Description: "Server name used as the span operation name", Placeholder: "workflow-http"},
+			},
+			DefaultConfig: map[string]any{"serverName": "workflow-http"},
+		},
 	}
 }

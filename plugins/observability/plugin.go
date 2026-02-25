@@ -36,6 +36,7 @@ func New() *ObservabilityPlugin {
 				"log.collector",
 				"observability.otel",
 				"openapi.generator",
+				"http.middleware.otel",
 			},
 			WiringHooks: []string{
 				"observability.health-endpoints",

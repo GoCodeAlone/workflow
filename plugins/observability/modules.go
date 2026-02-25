@@ -16,6 +16,7 @@ func moduleFactories() map[string]plugin.ModuleFactory {
 		"log.collector":      logCollectorFactory,
 		"observability.otel": otelTracingFactory,
 		"openapi.generator":  openAPIGeneratorFactory,
+		"http.middleware.otel": otelMiddlewareFactory,
 	}
 }
 
@@ -115,4 +116,12 @@ func openAPIGeneratorFactory(name string, cfg map[string]any) modular.Module {
 		}
 	}
 	return module.NewOpenAPIGenerator(name, genConfig)
+}
+
+func otelMiddlewareFactory(name string, cfg map[string]any) modular.Module {
+	serverName := "workflow-http"
+	if v, ok := cfg["serverName"].(string); ok && v != "" {
+		serverName = v
+	}
+	return module.NewOTelMiddleware(name, serverName)
 }
