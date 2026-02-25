@@ -13,6 +13,7 @@ var commands = map[string]func([]string) error{
 	"inspect":  runInspect,
 	"run":      runRun,
 	"plugin":   runPlugin,
+	"pipeline": runPipeline,
 	"schema":   runSchema,
 	"manifest": runManifest,
 	"migrate":  runMigrate,
@@ -32,7 +33,8 @@ Commands:
   validate   Validate a workflow configuration file
   inspect    Inspect modules, workflows, and triggers in a config
   run        Run a workflow engine from a config file
-  plugin     Plugin management (init, docs)
+  plugin     Plugin management (init, docs, search, install, list, update, remove)
+  pipeline   Pipeline management (list, run)
   schema     Generate JSON Schema for workflow configs
   manifest   Analyze config and report infrastructure requirements
   migrate    Manage database schema migrations

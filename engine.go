@@ -917,6 +917,15 @@ func (e *StdEngine) GetApp() modular.Application {
 	return e.app
 }
 
+// GetPipeline returns the named pipeline from the engine's pipeline registry.
+// Returns nil and false if no pipeline with the given name exists.
+// This is useful for CLI tools (e.g., wfctl pipeline run) that need to
+// execute a pipeline directly without starting the HTTP server.
+func (e *StdEngine) GetPipeline(name string) (*module.Pipeline, bool) {
+	p, ok := e.pipelineRegistry[name]
+	return p, ok
+}
+
 // LoadedPlugins returns all engine plugins that were loaded via LoadPlugin.
 func (e *StdEngine) LoadedPlugins() []plugin.EnginePlugin {
 	out := make([]plugin.EnginePlugin, len(e.enginePlugins))
