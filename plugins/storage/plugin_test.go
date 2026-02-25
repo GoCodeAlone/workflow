@@ -21,8 +21,8 @@ func TestPluginManifest(t *testing.T) {
 	if m.Name != "storage" {
 		t.Errorf("expected name %q, got %q", "storage", m.Name)
 	}
-	if len(m.ModuleTypes) != 6 {
-		t.Errorf("expected 6 module types, got %d", len(m.ModuleTypes))
+	if len(m.ModuleTypes) != 7 {
+		t.Errorf("expected 7 module types, got %d", len(m.ModuleTypes))
 	}
 	if len(m.StepTypes) != 0 {
 		t.Errorf("expected 0 step types, got %d", len(m.StepTypes))
@@ -32,14 +32,14 @@ func TestPluginManifest(t *testing.T) {
 func TestPluginCapabilities(t *testing.T) {
 	p := New()
 	caps := p.Capabilities()
-	if len(caps) != 3 {
-		t.Fatalf("expected 3 capabilities, got %d", len(caps))
+	if len(caps) != 4 {
+		t.Fatalf("expected 4 capabilities, got %d", len(caps))
 	}
 	names := map[string]bool{}
 	for _, c := range caps {
 		names[c.Name] = true
 	}
-	for _, expected := range []string{"storage", "database", "persistence"} {
+	for _, expected := range []string{"storage", "database", "persistence", "cache"} {
 		if !names[expected] {
 			t.Errorf("missing capability %q", expected)
 		}
@@ -53,6 +53,7 @@ func TestModuleFactories(t *testing.T) {
 	expectedTypes := []string{
 		"storage.s3", "storage.local", "storage.gcs",
 		"storage.sqlite", "database.workflow", "persistence.store",
+		"cache.redis",
 	}
 	for _, typ := range expectedTypes {
 		factory, ok := factories[typ]
@@ -133,8 +134,8 @@ func TestStepFactories(t *testing.T) {
 func TestModuleSchemas(t *testing.T) {
 	p := New()
 	schemas := p.ModuleSchemas()
-	if len(schemas) != 6 {
-		t.Fatalf("expected 6 module schemas, got %d", len(schemas))
+	if len(schemas) != 7 {
+		t.Fatalf("expected 7 module schemas, got %d", len(schemas))
 	}
 
 	types := map[string]bool{}
@@ -144,10 +145,39 @@ func TestModuleSchemas(t *testing.T) {
 	expectedTypes := []string{
 		"storage.s3", "storage.local", "storage.gcs",
 		"storage.sqlite", "database.workflow", "persistence.store",
+		"cache.redis",
 	}
 	for _, expected := range expectedTypes {
 		if !types[expected] {
 			t.Errorf("missing schema for %q", expected)
 		}
+	}
+}
+
+func TestCacheRedisFactory(t *testing.T) {
+	p := New()
+	factories := p.ModuleFactories()
+
+	factory, ok := factories["cache.redis"]
+	if !ok {
+		t.Fatal("missing factory for cache.redis")
+	}
+
+	// Default config
+	mod := factory("cache", map[string]any{})
+	if mod == nil {
+		t.Fatal("cache.redis factory returned nil with empty config")
+	}
+
+	// Full config
+	mod = factory("cache", map[string]any{
+		"address":    "redis:6379",
+		"password":   "secret",
+		"db":         float64(1),
+		"prefix":     "myapp:",
+		"defaultTTL": "30m",
+	})
+	if mod == nil {
+		t.Fatal("cache.redis factory returned nil with full config")
 	}
 }

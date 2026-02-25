@@ -69,6 +69,9 @@ func New() *Plugin {
 					"step.validate_request_body",
 					"step.foreach",
 					"step.webhook_verify",
+					"step.cache_get",
+					"step.cache_set",
+					"step.cache_delete",
 				},
 				WorkflowTypes: []string{"pipeline"},
 				Capabilities: []plugin.CapabilityDecl{
@@ -114,6 +117,9 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 			return p.concreteStepRegistry
 		}, nil)),
 		"step.webhook_verify": wrapStepFactory(module.NewWebhookVerifyStepFactory()),
+		"step.cache_get":      wrapStepFactory(module.NewCacheGetStepFactory()),
+		"step.cache_set":      wrapStepFactory(module.NewCacheSetStepFactory()),
+		"step.cache_delete":   wrapStepFactory(module.NewCacheDeleteStepFactory()),
 	}
 }
 
