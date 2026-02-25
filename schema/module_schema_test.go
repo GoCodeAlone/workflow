@@ -65,7 +65,7 @@ func TestModuleSchemaRegistry_ConfigFieldsMatchEngine(t *testing.T) {
 		{"api.handler", []string{"resourceName", "workflowType", "workflowEngine", "initialTransition", "seedFile", "sourceResourceName", "stateFilter", "fieldMapping", "transitionMap", "summaryFields"}},
 		{"database.workflow", []string{"driver", "dsn", "maxOpenConns", "maxIdleConns"}},
 		{"messaging.kafka", []string{"brokers", "groupId"}},
-		{"auth.jwt", []string{"secret", "tokenExpiry", "issuer", "seedFile", "responseFormat"}},
+		{"auth.jwt", []string{"secret", "tokenExpiry", "issuer", "seedFile", "responseFormat", "allowRegistration"}},
 		{"static.fileserver", []string{"root", "prefix", "spaFallback", "cacheMaxAge", "router"}},
 		{"processing.step", []string{"componentId", "successTransition", "compensateTransition", "maxRetries", "retryBackoffMs", "timeoutSeconds"}},
 		{"http.middleware.securityheaders", []string{"contentSecurityPolicy", "frameOptions", "contentTypeOptions", "hstsMaxAge", "referrerPolicy", "permissionsPolicy"}},

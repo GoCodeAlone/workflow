@@ -88,6 +88,9 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			if rf, ok := cfg["responseFormat"].(string); ok && rf != "" {
 				authMod.SetResponseFormat(rf)
 			}
+			if ar, ok := cfg["allowRegistration"].(bool); ok && ar {
+				authMod.SetAllowRegistration(true)
+			}
 			return authMod
 		},
 		"auth.user-store": func(name string, _ map[string]any) modular.Module {
@@ -201,6 +204,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "issuer", Label: "Issuer", Type: schema.FieldTypeString, DefaultValue: "workflow", Description: "Token issuer claim", Placeholder: "workflow"},
 				{Key: "seedFile", Label: "Seed Users File", Type: schema.FieldTypeString, Description: "Path to JSON file with initial user accounts", Placeholder: "data/users.json"},
 				{Key: "responseFormat", Label: "Response Format", Type: schema.FieldTypeSelect, Options: []string{"standard", "oauth2"}, Description: "Format of authentication response payloads"},
+				{Key: "allowRegistration", Label: "Allow Open Registration", Type: schema.FieldTypeBool, DefaultValue: false, Description: "When true, any visitor may register without admin intervention"},
 			},
 			DefaultConfig: map[string]any{"tokenExpiry": "24h", "issuer": "workflow"},
 		},

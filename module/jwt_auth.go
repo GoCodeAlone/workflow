@@ -39,10 +39,11 @@ type JWTAuthModule struct {
 	users          map[string]*User // keyed by email (used when no external userStore)
 	mu             sync.RWMutex
 	nextID         int
-	app            modular.Application
-	logger         modular.Logger
-	persistence    *PersistenceStore // optional write-through backend
-	userStore      *UserStore        // optional external user store (from auth.user-store module)
+	app                 modular.Application
+	logger              modular.Logger
+	persistence         *PersistenceStore // optional write-through backend
+	userStore           *UserStore        // optional external user store (from auth.user-store module)
+	allowRegistration   bool              // when true, any visitor may self-register
 }
 
 // NewJWTAuthModule creates a new JWT auth module
@@ -74,6 +75,13 @@ func (j *JWTAuthModule) SetSeedFile(path string) {
 // "standard" (default) returns {token, user}.
 func (j *JWTAuthModule) SetResponseFormat(format string) {
 	j.responseFormat = format
+}
+
+// SetAllowRegistration enables or disables open self-registration.
+// When true, any visitor may register; when false (default), registration is
+// only permitted when no users exist (initial setup mode).
+func (j *JWTAuthModule) SetAllowRegistration(allow bool) {
+	j.allowRegistration = allow
 }
 
 // Name returns the module name
@@ -177,9 +185,9 @@ func (j *JWTAuthModule) Handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (j *JWTAuthModule) handleRegister(w http.ResponseWriter, r *http.Request) {
-	// Self-registration is only allowed when no users exist (initial setup).
-	// After setup, new users must be created by an admin via the user management API.
-	if j.userCount() > 0 {
+	// Self-registration is only allowed when no users exist (initial setup) OR
+	// when allowRegistration is explicitly enabled.
+	if !j.allowRegistration && j.userCount() > 0 {
 		w.WriteHeader(http.StatusForbidden)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "registration is disabled; contact an administrator"})
 		return

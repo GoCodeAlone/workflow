@@ -580,6 +580,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "issuer", Label: "Issuer", Type: FieldTypeString, DefaultValue: "workflow", Description: "Token issuer claim", Placeholder: "workflow"},
 			{Key: "seedFile", Label: "Seed Users File", Type: FieldTypeString, Description: "Path to JSON file with initial user accounts", Placeholder: "data/users.json"},
 			{Key: "responseFormat", Label: "Response Format", Type: FieldTypeSelect, Options: []string{"standard", "oauth2"}, Description: "Format of authentication response payloads"},
+			{Key: "allowRegistration", Label: "Allow Open Registration", Type: FieldTypeBool, DefaultValue: false, Description: "When true, any visitor may register without admin intervention"},
 		},
 		DefaultConfig: map[string]any{"tokenExpiry": "24h", "issuer": "workflow"},
 	})

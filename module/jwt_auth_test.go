@@ -86,6 +86,24 @@ func TestJWTAuth_Register(t *testing.T) {
 	}
 }
 
+func TestJWTAuth_OpenRegistration(t *testing.T) {
+	j := setupJWTAuth(t)
+	j.SetAllowRegistration(true)
+
+	// First user registers successfully
+	registerUser(t, j, "user1@example.com", "User One", "pass1")
+
+	// Second user should also succeed when allowRegistration is true
+	body := `{"email":"user2@example.com","name":"User Two","password":"pass2"}`
+	req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewBufferString(body))
+	w := httptest.NewRecorder()
+	j.Handle(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected status %d (open registration enabled), got %d; body: %s", http.StatusCreated, w.Code, w.Body.String())
+	}
+}
+
 func TestJWTAuth_RegisterDisabledAfterSetup(t *testing.T) {
 	j := setupJWTAuth(t)
 
