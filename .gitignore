@@ -20,6 +20,7 @@
 !*/
 !Dockerfile
 !Makefile
+!scripts/pre-push
 
 # Dependency directories (remove the comment below to include it)
 # vendor/

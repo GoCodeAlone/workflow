@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Pre-push hook: validate all example configs before pushing.
+set -euo pipefail
+
+echo "=== Pre-push config validation ==="
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+WFCTL="$REPO_ROOT/bin/wfctl"
+
+# Build wfctl if not present
+if [ ! -f "$WFCTL" ]; then
+    echo "Building wfctl..."
+    (cd "$REPO_ROOT" && go build -o bin/wfctl ./cmd/wfctl)
+fi
+
+PASSED=0
+FAILED=0
+TOTAL=0
+
+# Schema validation on all example configs
+echo ""
+echo "--- Schema validation ---"
+for config in $(find "$REPO_ROOT/example" -name "*.yaml" \
+    -not -path "*/configs/*" -not -path "*/seed/*" -not -path "*/observability/*" \
+    -not -path "*/spa/*" -not -path "*/components/*" -not -path "*/node_modules/*" \
+    -not -path "*/e2e/*" -not -path "*/data/*" -not -path "*/.*" \
+    -not -name "docker-compose.yaml" -not -name "docker-compose.yml" | sort); do
+    TOTAL=$((TOTAL + 1))
+    name=$(basename "$(dirname "$config")")/$(basename "$config")
+    if "$WFCTL" validate -skip-unknown-types "$config" 2>/dev/null; then
+        PASSED=$((PASSED + 1))
+    else
+        echo "  FAIL: $name"
+        FAILED=$((FAILED + 1))
+    fi
+done
+
+echo ""
+echo "Validation: $PASSED/$TOTAL passed, $FAILED failed"
+
+if [ "$FAILED" -gt 0 ]; then
+    echo "ERROR: Config validation failed. Fix the above configs before pushing."
+    exit 1
+fi
+
+echo "All configs valid. Push allowed."
