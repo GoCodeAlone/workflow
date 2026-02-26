@@ -64,11 +64,11 @@ func (p *AWSIAMProvider) ResolveIdentities(ctx context.Context, cfgRaw json.RawM
 
 	sdkCfg, sdkErr := buildAWSSDKConfig(ctx, awsCfg)
 	if sdkErr != nil {
-		return []ExternalIdentity{{
+		return []ExternalIdentity{{ //nolint:nilerr // fallback identity on SDK failure
 			Provider:   string(store.IAMProviderAWS),
 			Identifier: arn,
 			Attributes: attrs,
-		}}, nil //nolint:nilerr // fallback to basic identity on SDK init failure
+		}}, nil
 	}
 
 	// Verify caller identity via STS.
