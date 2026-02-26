@@ -3,11 +3,8 @@ package module
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/digitalocean/godo"
-	"golang.org/x/oauth2"
 )
 
 // CloudCredentialProvider provides cloud credentials to other modules.
@@ -49,6 +46,7 @@ type CloudAccount struct {
 	config   map[string]any
 	provider string
 	region   string
+	credType string
 	creds    *CloudCredentials
 }
 
@@ -108,6 +106,7 @@ func (m *CloudAccount) GetCredentials(_ context.Context) (*CloudCredentials, err
 }
 
 // resolveCredentials resolves credentials based on provider and credential type config.
+// It dispatches to registered CloudCredentialResolvers via the global registry.
 func (m *CloudAccount) resolveCredentials() (*CloudCredentials, error) {
 	creds := &CloudCredentials{
 		Provider: m.provider,
@@ -132,44 +131,26 @@ func (m *CloudAccount) resolveCredentials() (*CloudCredentials, error) {
 		return creds, nil
 	}
 
-	credType, _ := credsMap["type"].(string)
-	if credType == "" {
-		credType = "static"
+	m.credType, _ = credsMap["type"].(string)
+	if m.credType == "" {
+		m.credType = "static"
 	}
 
-	switch credType {
-	case "static":
-		return m.resolveStaticCredentials(creds, credsMap)
-	case "env":
-		return m.resolveEnvCredentials(creds)
-	case "profile":
-		return m.resolveProfileCredentials(creds, credsMap)
-	case "role_arn":
-		return m.resolveRoleARNCredentials(creds, credsMap)
-	case "kubeconfig":
-		return m.resolveKubeconfigCredentials(creds, credsMap)
-	// GCP credential types
-	case "service_account_json":
-		return m.resolveGCPServiceAccountJSON(creds, credsMap)
-	case "service_account_key":
-		return m.resolveGCPServiceAccountKey(creds, credsMap)
-	case "workload_identity":
-		return m.resolveGCPWorkloadIdentity(creds)
-	case "application_default":
-		return m.resolveGCPApplicationDefault(creds)
-	// Azure credential types
-	case "client_credentials":
-		return m.resolveAzureClientCredentials(creds, credsMap)
-	case "managed_identity":
-		return m.resolveAzureManagedIdentity(creds, credsMap)
-	case "cli":
-		return m.resolveAzureCLI(creds)
-	// DigitalOcean credential types
-	case "api_token":
-		return m.resolveDOAPIToken(creds, credsMap)
-	default:
-		return nil, fmt.Errorf("unsupported credential type %q", credType)
+	// Store creds on m so resolvers can write into it directly.
+	m.creds = creds
+
+	providerResolvers, ok := credentialResolvers[m.provider]
+	if !ok {
+		return nil, fmt.Errorf("unknown cloud provider: %s", m.provider)
 	}
+	resolver, ok := providerResolvers[m.credType]
+	if !ok {
+		return nil, fmt.Errorf("unsupported credential type %q for provider %q", m.credType, m.provider)
+	}
+	if err := resolver.Resolve(m); err != nil {
+		return nil, err
+	}
+	return m.creds, nil
 }
 
 func (m *CloudAccount) resolveMockCredentials(creds *CloudCredentials) (*CloudCredentials, error) {
@@ -189,260 +170,4 @@ func (m *CloudAccount) resolveMockCredentials(creds *CloudCredentials) (*CloudCr
 		creds.Region = "us-mock-1"
 	}
 	return creds, nil
-}
-
-func (m *CloudAccount) resolveStaticCredentials(creds *CloudCredentials, credsMap map[string]any) (*CloudCredentials, error) {
-	switch m.provider {
-	case "aws":
-		creds.AccessKey, _ = credsMap["accessKey"].(string)
-		creds.SecretKey, _ = credsMap["secretKey"].(string)
-		creds.SessionToken, _ = credsMap["sessionToken"].(string)
-		creds.RoleARN, _ = credsMap["roleArn"].(string)
-	case "gcp":
-		if pid, ok := credsMap["projectId"].(string); ok {
-			creds.ProjectID = pid
-		}
-		if saJSON, ok := credsMap["serviceAccountJson"].(string); ok {
-			creds.ServiceAccountJSON = []byte(saJSON)
-		}
-	case "azure":
-		creds.TenantID, _ = credsMap["tenant_id"].(string)
-		creds.ClientID, _ = credsMap["client_id"].(string)
-		creds.ClientSecret, _ = credsMap["client_secret"].(string)
-		if sub, ok := credsMap["subscription_id"].(string); ok {
-			creds.SubscriptionID = sub
-		}
-	case "kubernetes":
-		if kc, ok := credsMap["kubeconfig"].(string); ok {
-			creds.Kubeconfig = []byte(kc)
-		}
-		creds.Context, _ = credsMap["context"].(string)
-	default:
-		creds.Token, _ = credsMap["token"].(string)
-	}
-	return creds, nil
-}
-
-func (m *CloudAccount) resolveEnvCredentials(creds *CloudCredentials) (*CloudCredentials, error) {
-	switch m.provider {
-	case "aws":
-		creds.AccessKey = os.Getenv("AWS_ACCESS_KEY_ID")
-		if creds.AccessKey == "" {
-			creds.AccessKey = os.Getenv("AWS_ACCESS_KEY")
-		}
-		creds.SecretKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
-		if creds.SecretKey == "" {
-			creds.SecretKey = os.Getenv("AWS_SECRET_KEY")
-		}
-		creds.SessionToken = os.Getenv("AWS_SESSION_TOKEN")
-		creds.RoleARN = os.Getenv("AWS_ROLE_ARN")
-	case "gcp":
-		creds.ProjectID = os.Getenv("GOOGLE_CLOUD_PROJECT")
-		if creds.ProjectID == "" {
-			creds.ProjectID = os.Getenv("GCP_PROJECT_ID")
-		}
-		saPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
-		if saPath != "" {
-			data, err := os.ReadFile(saPath) //nolint:gosec // G304: path from trusted config data
-			if err != nil {
-				return nil, fmt.Errorf("reading GOOGLE_APPLICATION_CREDENTIALS: %w", err)
-			}
-			creds.ServiceAccountJSON = data
-		}
-	case "azure":
-		creds.TenantID = os.Getenv("AZURE_TENANT_ID")
-		creds.ClientID = os.Getenv("AZURE_CLIENT_ID")
-		creds.ClientSecret = os.Getenv("AZURE_CLIENT_SECRET")
-		if sub := os.Getenv("AZURE_SUBSCRIPTION_ID"); sub != "" {
-			creds.SubscriptionID = sub
-		}
-	case "kubernetes":
-		kubeconfigPath := os.Getenv("KUBECONFIG")
-		if kubeconfigPath == "" {
-			home, _ := os.UserHomeDir()
-			kubeconfigPath = home + "/.kube/config"
-		}
-		data, err := os.ReadFile(kubeconfigPath) //nolint:gosec // G304: path from trusted config data
-		if err != nil {
-			return nil, fmt.Errorf("reading kubeconfig: %w", err)
-		}
-		creds.Kubeconfig = data
-	case "digitalocean":
-		creds.Token = os.Getenv("DIGITALOCEAN_TOKEN")
-		if creds.Token == "" {
-			creds.Token = os.Getenv("DO_TOKEN")
-		}
-	default:
-		creds.Token = os.Getenv("CLOUD_TOKEN")
-	}
-	return creds, nil
-}
-
-func (m *CloudAccount) resolveProfileCredentials(creds *CloudCredentials, credsMap map[string]any) (*CloudCredentials, error) {
-	// AWS named profile from ~/.aws/credentials
-	// For now: read AWS_PROFILE or the configured profile name from the shared credentials file.
-	profile, _ := credsMap["profile"].(string)
-	if profile == "" {
-		profile = os.Getenv("AWS_PROFILE")
-	}
-	if profile == "" {
-		profile = "default"
-	}
-	// Stub: document STS/profile resolution path.
-	// Production implementation would use aws-sdk-go-v2/config.LoadDefaultConfig
-	// with config.WithSharedConfigProfile(profile).
-	creds.Extra = map[string]string{"profile": profile}
-	return creds, nil
-}
-
-func (m *CloudAccount) resolveRoleARNCredentials(creds *CloudCredentials, credsMap map[string]any) (*CloudCredentials, error) {
-	// Stub for STS AssumeRole.
-	// Production implementation: use aws-sdk-go-v2/service/sts AssumeRole with
-	// the source credentials, then populate AccessKey/SecretKey/SessionToken
-	// from the returned Credentials.
-	roleARN, _ := credsMap["roleArn"].(string)
-	externalID, _ := credsMap["externalId"].(string)
-	creds.RoleARN = roleARN
-	creds.Extra = map[string]string{"external_id": externalID}
-	return creds, nil
-}
-
-func (m *CloudAccount) resolveKubeconfigCredentials(creds *CloudCredentials, credsMap map[string]any) (*CloudCredentials, error) {
-	path, _ := credsMap["path"].(string)
-	if path == "" {
-		path = os.Getenv("KUBECONFIG")
-	}
-	if path == "" {
-		home, _ := os.UserHomeDir()
-		path = home + "/.kube/config"
-	}
-
-	if inline, ok := credsMap["inline"].(string); ok && inline != "" {
-		creds.Kubeconfig = []byte(inline)
-	} else if path != "" {
-		data, err := os.ReadFile(path) //nolint:gosec // G304: path from trusted config data
-		if err != nil {
-			return nil, fmt.Errorf("reading kubeconfig at %q: %w", path, err)
-		}
-		creds.Kubeconfig = data
-	}
-
-	creds.Context, _ = credsMap["context"].(string)
-	return creds, nil
-}
-
-// resolveGCPServiceAccountJSON reads a GCP service account JSON key file from the given path.
-func (m *CloudAccount) resolveGCPServiceAccountJSON(creds *CloudCredentials, credsMap map[string]any) (*CloudCredentials, error) {
-	path, _ := credsMap["path"].(string)
-	if path == "" {
-		return nil, fmt.Errorf("service_account_json credential requires 'path'")
-	}
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path from trusted config data
-	if err != nil {
-		return nil, fmt.Errorf("reading service account JSON at %q: %w", path, err)
-	}
-	creds.ServiceAccountJSON = data
-	return creds, nil
-}
-
-// resolveGCPServiceAccountKey uses an inline GCP service account JSON key.
-func (m *CloudAccount) resolveGCPServiceAccountKey(creds *CloudCredentials, credsMap map[string]any) (*CloudCredentials, error) {
-	key, _ := credsMap["key"].(string)
-	if key == "" {
-		return nil, fmt.Errorf("service_account_key credential requires 'key'")
-	}
-	creds.ServiceAccountJSON = []byte(key)
-	return creds, nil
-}
-
-// resolveGCPWorkloadIdentity handles GCP Workload Identity (GKE metadata server).
-// Production: use golang.org/x/oauth2/google with google.FindDefaultCredentials.
-func (m *CloudAccount) resolveGCPWorkloadIdentity(creds *CloudCredentials) (*CloudCredentials, error) {
-	if creds.Extra == nil {
-		creds.Extra = map[string]string{}
-	}
-	creds.Extra["credential_source"] = "workload_identity"
-	return creds, nil
-}
-
-// resolveGCPApplicationDefault resolves GCP Application Default Credentials.
-// Reads GOOGLE_APPLICATION_CREDENTIALS if set; otherwise records the ADC source.
-func (m *CloudAccount) resolveGCPApplicationDefault(creds *CloudCredentials) (*CloudCredentials, error) {
-	if creds.ProjectID == "" {
-		creds.ProjectID = os.Getenv("GOOGLE_CLOUD_PROJECT")
-		if creds.ProjectID == "" {
-			creds.ProjectID = os.Getenv("GCP_PROJECT_ID")
-		}
-	}
-	saPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
-	if saPath != "" {
-		data, err := os.ReadFile(saPath) //nolint:gosec // G304: path from trusted config data
-		if err != nil {
-			return nil, fmt.Errorf("reading GOOGLE_APPLICATION_CREDENTIALS: %w", err)
-		}
-		creds.ServiceAccountJSON = data
-		return creds, nil
-	}
-	// No explicit file — production would use the ADC chain (gcloud, metadata server, etc.)
-	if creds.Extra == nil {
-		creds.Extra = map[string]string{}
-	}
-	creds.Extra["credential_source"] = "application_default"
-	return creds, nil
-}
-
-// resolveAzureClientCredentials resolves Azure service principal client credentials.
-func (m *CloudAccount) resolveAzureClientCredentials(creds *CloudCredentials, credsMap map[string]any) (*CloudCredentials, error) {
-	creds.TenantID, _ = credsMap["tenant_id"].(string)
-	creds.ClientID, _ = credsMap["client_id"].(string)
-	creds.ClientSecret, _ = credsMap["client_secret"].(string)
-	if creds.TenantID == "" || creds.ClientID == "" || creds.ClientSecret == "" {
-		return nil, fmt.Errorf("client_credentials requires tenant_id, client_id, and client_secret")
-	}
-	return creds, nil
-}
-
-// resolveAzureManagedIdentity handles Azure Managed Identity (VMs, AKS, etc.).
-// Optional client_id selects a user-assigned managed identity.
-// Production: use github.com/Azure/azure-sdk-for-go/sdk/azidentity ManagedIdentityCredential.
-func (m *CloudAccount) resolveAzureManagedIdentity(creds *CloudCredentials, credsMap map[string]any) (*CloudCredentials, error) {
-	if clientID, ok := credsMap["client_id"].(string); ok {
-		creds.ClientID = clientID
-	}
-	if creds.Extra == nil {
-		creds.Extra = map[string]string{}
-	}
-	creds.Extra["credential_source"] = "managed_identity"
-	return creds, nil
-}
-
-// resolveAzureCLI handles Azure CLI credentials (az login).
-// Production: use github.com/Azure/azure-sdk-for-go/sdk/azidentity AzureCLICredential.
-func (m *CloudAccount) resolveAzureCLI(creds *CloudCredentials) (*CloudCredentials, error) {
-	if creds.Extra == nil {
-		creds.Extra = map[string]string{}
-	}
-	creds.Extra["credential_source"] = "azure_cli"
-	return creds, nil
-}
-
-// resolveDOAPIToken resolves a DigitalOcean API token from config.
-func (m *CloudAccount) resolveDOAPIToken(creds *CloudCredentials, credsMap map[string]any) (*CloudCredentials, error) {
-	token, _ := credsMap["token"].(string)
-	if token == "" {
-		return nil, fmt.Errorf("api_token credential requires 'token'")
-	}
-	creds.Token = token
-	return creds, nil
-}
-
-// doClient returns a configured *godo.Client using the Token credential.
-// The caller must have resolved credentials with provider=digitalocean before calling this.
-func (m *CloudAccount) doClient() (*godo.Client, error) {
-	if m.creds == nil || m.creds.Token == "" {
-		return nil, fmt.Errorf("cloud.account %q: DigitalOcean token not set", m.name)
-	}
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: m.creds.Token})
-	httpClient := oauth2.NewClient(context.Background(), ts)
-	return godo.NewClient(httpClient), nil
 }
