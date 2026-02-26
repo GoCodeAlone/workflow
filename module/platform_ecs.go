@@ -477,11 +477,13 @@ func (b *awsECSBackend) destroy(e *PlatformECS) error {
 	client := ecs.NewFromConfig(cfg)
 
 	// Scale down to 0 before deleting
-	_, _ = client.UpdateService(context.Background(), &ecs.UpdateServiceInput{
+	if _, err := client.UpdateService(context.Background(), &ecs.UpdateServiceInput{
 		Service:      aws.String(e.serviceName()),
 		Cluster:      aws.String(e.state.Cluster),
 		DesiredCount: aws.Int32(0),
-	})
+	}); err != nil {
+		return fmt.Errorf("ecs destroy: UpdateService (scale down): %w", err)
+	}
 
 	_, err = client.DeleteService(context.Background(), &ecs.DeleteServiceInput{
 		Service: aws.String(e.serviceName()),

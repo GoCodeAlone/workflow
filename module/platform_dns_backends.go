@@ -150,17 +150,18 @@ func (b *route53Backend) applyDNS(m *PlatformDNS) (*DNSState, error) {
 	// Find or create hosted zone
 	zoneID := m.state.ZoneID
 	if zoneID == "" {
-		listOut, _ := client.ListHostedZonesByName(context.Background(), &route53.ListHostedZonesByNameInput{
+		listOut, err := client.ListHostedZonesByName(context.Background(), &route53.ListHostedZonesByNameInput{
 			DNSName: aws.String(zone.Name),
 		})
-		if listOut != nil {
-			for _, hz := range listOut.HostedZones {
-				if hz.Name != nil && strings.TrimSuffix(*hz.Name, ".") == strings.TrimSuffix(zone.Name, ".") {
-					if hz.Id != nil {
-						zoneID = strings.TrimPrefix(*hz.Id, "/hostedzone/")
-					}
-					break
+		if err != nil {
+			return nil, fmt.Errorf("route53 apply: ListHostedZonesByName: %w", err)
+		}
+		for _, hz := range listOut.HostedZones {
+			if hz.Name != nil && strings.TrimSuffix(*hz.Name, ".") == strings.TrimSuffix(zone.Name, ".") {
+				if hz.Id != nil {
+					zoneID = strings.TrimPrefix(*hz.Id, "/hostedzone/")
 				}
+				break
 			}
 		}
 	}
@@ -294,25 +295,28 @@ func (b *route53Backend) destroyDNS(m *PlatformDNS) error {
 	}
 
 	// Delete all non-NS/SOA records before deleting the zone
-	listOut, _ := client.ListResourceRecordSets(context.Background(), &route53.ListResourceRecordSetsInput{
+	listOut, listErr := client.ListResourceRecordSets(context.Background(), &route53.ListResourceRecordSetsInput{
 		HostedZoneId: aws.String(m.state.ZoneID),
 	})
-	if listOut != nil {
-		var changes []r53types.Change
-		for i := range listOut.ResourceRecordSets {
-			if listOut.ResourceRecordSets[i].Type == r53types.RRTypeNs || listOut.ResourceRecordSets[i].Type == r53types.RRTypeSoa {
-				continue
-			}
-			changes = append(changes, r53types.Change{
-				Action:            r53types.ChangeActionDelete,
-				ResourceRecordSet: &listOut.ResourceRecordSets[i],
-			})
+	if listErr != nil {
+		return fmt.Errorf("route53 destroy: ListResourceRecordSets: %w", listErr)
+	}
+	var changes []r53types.Change
+	for i := range listOut.ResourceRecordSets {
+		if listOut.ResourceRecordSets[i].Type == r53types.RRTypeNs || listOut.ResourceRecordSets[i].Type == r53types.RRTypeSoa {
+			continue
 		}
-		if len(changes) > 0 {
-			_, _ = client.ChangeResourceRecordSets(context.Background(), &route53.ChangeResourceRecordSetsInput{
-				HostedZoneId: aws.String(m.state.ZoneID),
-				ChangeBatch:  &r53types.ChangeBatch{Changes: changes},
-			})
+		changes = append(changes, r53types.Change{
+			Action:            r53types.ChangeActionDelete,
+			ResourceRecordSet: &listOut.ResourceRecordSets[i],
+		})
+	}
+	if len(changes) > 0 {
+		if _, err := client.ChangeResourceRecordSets(context.Background(), &route53.ChangeResourceRecordSetsInput{
+			HostedZoneId: aws.String(m.state.ZoneID),
+			ChangeBatch:  &r53types.ChangeBatch{Changes: changes},
+		}); err != nil {
+			return fmt.Errorf("route53 destroy: ChangeResourceRecordSets: %w", err)
 		}
 	}
 

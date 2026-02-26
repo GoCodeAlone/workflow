@@ -384,14 +384,17 @@ func (b *awsAPIGatewayBackend) apply(m *PlatformAPIGateway) (*PlatformGatewaySta
 	m.state.ID = apiID
 
 	// Create stage
-	_, _ = client.CreateStage(context.Background(), &apigatewayv2.CreateStageInput{
+	if _, stageErr := client.CreateStage(context.Background(), &apigatewayv2.CreateStageInput{
 		ApiId:      aws.String(apiID),
 		StageName:  aws.String(m.state.Stage),
 		AutoDeploy: aws.Bool(true),
-	})
+	}); stageErr != nil {
+		return nil, fmt.Errorf("apigateway apply: CreateStage: %w", stageErr)
+	}
 
 	// Create routes and integrations
 	routes := m.platformRoutes()
+	var routeErrs []string
 	for _, route := range routes {
 		// Create integration for the route target
 		integOut, err := client.CreateIntegration(context.Background(), &apigatewayv2.CreateIntegrationInput{
@@ -402,6 +405,7 @@ func (b *awsAPIGatewayBackend) apply(m *PlatformAPIGateway) (*PlatformGatewaySta
 			PayloadFormatVersion: aws.String("1.0"),
 		})
 		if err != nil {
+			routeErrs = append(routeErrs, fmt.Sprintf("CreateIntegration %s %s: %v", route.Method, route.Path, err))
 			continue
 		}
 
@@ -411,11 +415,16 @@ func (b *awsAPIGatewayBackend) apply(m *PlatformAPIGateway) (*PlatformGatewaySta
 		}
 
 		routeKey := fmt.Sprintf("%s %s", strings.ToUpper(route.Method), route.Path)
-		_, _ = client.CreateRoute(context.Background(), &apigatewayv2.CreateRouteInput{
+		if _, err := client.CreateRoute(context.Background(), &apigatewayv2.CreateRouteInput{
 			ApiId:    aws.String(apiID),
 			RouteKey: aws.String(routeKey),
 			Target:   optString(fmt.Sprintf("integrations/%s", integID)),
-		})
+		}); err != nil {
+			routeErrs = append(routeErrs, fmt.Sprintf("CreateRoute %s: %v", routeKey, err))
+		}
+	}
+	if len(routeErrs) > 0 {
+		return nil, fmt.Errorf("apigateway apply: route errors: %s", strings.Join(routeErrs, "; "))
 	}
 
 	m.state.Routes = routes

@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -497,10 +498,12 @@ func (b *awsNetworkBackend) apply(m *PlatformNetworking) (*NetworkState, error) 
 				})
 			}
 			if len(ipPerms) > 0 {
-				_, _ = client.AuthorizeSecurityGroupIngress(context.Background(), &ec2.AuthorizeSecurityGroupIngressInput{
+				if _, err := client.AuthorizeSecurityGroupIngress(context.Background(), &ec2.AuthorizeSecurityGroupIngressInput{
 					GroupId:       sgOut.GroupId,
 					IpPermissions: ipPerms,
-				})
+				}); err != nil {
+					return nil, fmt.Errorf("aws network apply: AuthorizeSecurityGroupIngress %q: %w", sg.Name, err)
+				}
 			}
 		}
 	}
@@ -563,35 +566,46 @@ func (b *awsNetworkBackend) destroy(m *PlatformNetworking) error {
 	}
 	client := ec2.NewFromConfig(cfg)
 
+	var destroyErrs []string
+
 	// Delete security groups
-	for _, sgID := range m.state.SecurityGroupIDs {
-		_, _ = client.DeleteSecurityGroup(context.Background(), &ec2.DeleteSecurityGroupInput{
+	for name, sgID := range m.state.SecurityGroupIDs {
+		if _, err := client.DeleteSecurityGroup(context.Background(), &ec2.DeleteSecurityGroupInput{
 			GroupId: aws.String(sgID),
-		})
+		}); err != nil {
+			destroyErrs = append(destroyErrs, fmt.Sprintf("DeleteSecurityGroup %q: %v", name, err))
+		}
 	}
 
 	// Delete subnets
-	for _, snID := range m.state.SubnetIDs {
-		_, _ = client.DeleteSubnet(context.Background(), &ec2.DeleteSubnetInput{
+	for name, snID := range m.state.SubnetIDs {
+		if _, err := client.DeleteSubnet(context.Background(), &ec2.DeleteSubnetInput{
 			SubnetId: aws.String(snID),
-		})
+		}); err != nil {
+			destroyErrs = append(destroyErrs, fmt.Sprintf("DeleteSubnet %q: %v", name, err))
+		}
 	}
 
 	// Delete NAT gateway
 	if m.state.NATGatewayID != "" {
-		_, _ = client.DeleteNatGateway(context.Background(), &ec2.DeleteNatGatewayInput{
+		if _, err := client.DeleteNatGateway(context.Background(), &ec2.DeleteNatGatewayInput{
 			NatGatewayId: aws.String(m.state.NATGatewayID),
-		})
+		}); err != nil {
+			destroyErrs = append(destroyErrs, fmt.Sprintf("DeleteNatGateway: %v", err))
+		}
 	}
 
 	// Delete VPC
 	if m.state.VPCID != "" {
-		_, err = client.DeleteVpc(context.Background(), &ec2.DeleteVpcInput{
+		if _, err := client.DeleteVpc(context.Background(), &ec2.DeleteVpcInput{
 			VpcId: aws.String(m.state.VPCID),
-		})
-		if err != nil {
-			return fmt.Errorf("aws network destroy: DeleteVpc: %w", err)
+		}); err != nil {
+			destroyErrs = append(destroyErrs, fmt.Sprintf("DeleteVpc: %v", err))
 		}
+	}
+
+	if len(destroyErrs) > 0 {
+		return fmt.Errorf("aws network destroy: %s", strings.Join(destroyErrs, "; "))
 	}
 
 	m.state.Status = "destroyed"
