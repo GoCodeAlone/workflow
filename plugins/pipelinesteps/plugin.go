@@ -2,7 +2,8 @@
 // types: validate, transform, conditional, set, log, delegate, jq, publish,
 // http_call, request_parse, db_query, db_exec, json_response,
 // validate_path_param, validate_pagination, validate_request_body,
-// foreach, webhook_verify, ui_scaffold, ui_scaffold_analyze.
+// foreach, webhook_verify, ui_scaffold, ui_scaffold_analyze,
+// dlq_send, dlq_replay, retry_with_backoff, circuit_breaker (wrapping).
 // It also provides the PipelineWorkflowHandler for composable pipelines.
 package pipelinesteps
 
@@ -75,6 +76,10 @@ func New() *Plugin {
 					"step.cache_delete",
 					"step.ui_scaffold",
 					"step.ui_scaffold_analyze",
+					"step.dlq_send",
+					"step.dlq_replay",
+					"step.retry_with_backoff",
+					"step.resilient_circuit_breaker",
 				},
 				WorkflowTypes: []string{"pipeline"},
 				Capabilities: []plugin.CapabilityDecl{
@@ -126,6 +131,15 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.cache_delete":        wrapStepFactory(module.NewCacheDeleteStepFactory()),
 		"step.ui_scaffold":         wrapStepFactory(module.NewScaffoldStepFactory()),
 		"step.ui_scaffold_analyze": wrapStepFactory(module.NewScaffoldAnalyzeStepFactory()),
+		// DLQ steps use a lazy registry getter so sub-steps can reference any registered type.
+		"step.dlq_send":   wrapStepFactory(module.NewDLQSendStepFactory()),
+		"step.dlq_replay": wrapStepFactory(module.NewDLQReplayStepFactory()),
+		"step.retry_with_backoff": wrapStepFactory(module.NewRetryWithBackoffStepFactory(func() *module.StepRegistry {
+			return p.concreteStepRegistry
+		})),
+		"step.resilient_circuit_breaker": wrapStepFactory(module.NewResilienceCircuitBreakerStepFactory(func() *module.StepRegistry {
+			return p.concreteStepRegistry
+		})),
 	}
 }
 

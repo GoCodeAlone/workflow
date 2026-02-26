@@ -621,6 +621,26 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"cache", "key"},
 		},
+		"step.dlq_send": {
+			Type:       "step.dlq_send",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"topic", "original_topic", "error", "payload", "broker"},
+		},
+		"step.dlq_replay": {
+			Type:       "step.dlq_replay",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"dlq_topic", "target_topic", "max_messages", "broker"},
+		},
+		"step.retry_with_backoff": {
+			Type:       "step.retry_with_backoff",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"max_retries", "initial_delay", "max_delay", "multiplier", "step"},
+		},
+		"step.resilient_circuit_breaker": {
+			Type:       "step.resilient_circuit_breaker",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"failure_threshold", "reset_timeout", "step", "fallback"},
+		},
 
 		// http plugin steps
 		"step.rate_limit": {
