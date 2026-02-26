@@ -20,12 +20,18 @@ import (
 func runRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	logLevel := fs.String("log-level", "info", "Log level (debug, info, warn, error)")
+	env := fs.String("env", "", "Environment name (sets WORKFLOW_ENV)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl run [options] <config.yaml>\n\nRun a workflow engine from a config file.\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *env != "" {
+		if err := os.Setenv("WORKFLOW_ENV", *env); err != nil {
+			return fmt.Errorf("failed to set WORKFLOW_ENV: %w", err)
+		}
 	}
 	if fs.NArg() < 1 {
 		fs.Usage()

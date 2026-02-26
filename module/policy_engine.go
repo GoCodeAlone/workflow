@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/CrisisTextLine/modular"
@@ -53,14 +54,20 @@ func (m *PolicyEngineModule) Init(app modular.Application) error {
 		m.backend = "mock"
 	}
 
+	allowStub := isTruthy(m.config["allow_stub_backends"])
+
 	switch m.backend {
 	case "mock":
 		m.engine = newMockPolicyEngine()
 	case "opa":
 		endpoint, _ := m.config["endpoint"].(string)
-		m.engine = newOPAPolicyEngine(endpoint)
+		m.engine = newOPAPolicyEngine(endpoint, allowStub)
+		slog.Warn("WARNING: using stub policy engine — all requests will be DENIED. Set allow_stub_backends: true in config to use stub backends for testing.",
+			"module", m.name, "backend", "opa", "allow_stub_backends", allowStub)
 	case "cedar":
-		m.engine = newCedarPolicyEngine()
+		m.engine = newCedarPolicyEngine(allowStub)
+		slog.Warn("WARNING: using stub policy engine — all requests will be DENIED. Set allow_stub_backends: true in config to use stub backends for testing.",
+			"module", m.name, "backend", "cedar", "allow_stub_backends", allowStub)
 	default:
 		return fmt.Errorf("policy.engine %q: unsupported backend %q", m.name, m.backend)
 	}
@@ -165,6 +172,17 @@ func (e *mockPolicyEngine) Evaluate(_ context.Context, input map[string]any) (*P
 	}, nil
 }
 
+// isTruthy returns true if v is a bool true, or a string "true"/"1"/"yes".
+func isTruthy(v any) bool {
+	switch val := v.(type) {
+	case bool:
+		return val
+	case string:
+		return val == "true" || val == "1" || val == "yes"
+	}
+	return false
+}
+
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
 		func() bool {
@@ -182,16 +200,17 @@ func containsString(s, substr string) bool {
 // opaPolicyEngine is a stub for OPA (Open Policy Agent) integration.
 // Production: POST to the OPA REST API at <endpoint>/v1/data/<policy-path>.
 type opaPolicyEngine struct {
-	endpoint string
-	mu       sync.RWMutex
-	policies map[string]string
+	endpoint   string
+	allowStub  bool
+	mu         sync.RWMutex
+	policies   map[string]string
 }
 
-func newOPAPolicyEngine(endpoint string) *opaPolicyEngine {
+func newOPAPolicyEngine(endpoint string, allowStub bool) *opaPolicyEngine {
 	if endpoint == "" {
 		endpoint = "http://localhost:8181"
 	}
-	return &opaPolicyEngine{endpoint: endpoint, policies: make(map[string]string)}
+	return &opaPolicyEngine{endpoint: endpoint, allowStub: allowStub, policies: make(map[string]string)}
 }
 
 func (e *opaPolicyEngine) LoadPolicy(name, content string) error {
@@ -215,9 +234,16 @@ func (e *opaPolicyEngine) ListPolicies() []PolicyInfo {
 func (e *opaPolicyEngine) Evaluate(_ context.Context, input map[string]any) (*PolicyDecision, error) {
 	// Production: POST {"input": input} to <endpoint>/v1/data/<default-policy>
 	// and parse the result body for {"result": {"allow": true}}.
+	if e.allowStub {
+		return &PolicyDecision{
+			Allowed:  true,
+			Reasons:  []string{"opa stub: allow_stub_backends enabled"},
+			Metadata: map[string]any{"backend": "opa", "endpoint": e.endpoint, "input": input},
+		}, nil
+	}
 	return &PolicyDecision{
-		Allowed:  true,
-		Reasons:  []string{"opa stub: default allow"},
+		Allowed:  false,
+		Reasons:  []string{"STUB IMPLEMENTATION - not connected to real backend - denied for safety"},
 		Metadata: map[string]any{"backend": "opa", "endpoint": e.endpoint, "input": input},
 	}, nil
 }
@@ -227,12 +253,13 @@ func (e *opaPolicyEngine) Evaluate(_ context.Context, input map[string]any) (*Po
 // cedarPolicyEngine is a stub for Cedar policy language integration.
 // Production: use the cedar-go library (github.com/cedar-policy/cedar-go).
 type cedarPolicyEngine struct {
-	mu       sync.RWMutex
-	policies map[string]string
+	allowStub bool
+	mu        sync.RWMutex
+	policies  map[string]string
 }
 
-func newCedarPolicyEngine() *cedarPolicyEngine {
-	return &cedarPolicyEngine{policies: make(map[string]string)}
+func newCedarPolicyEngine(allowStub bool) *cedarPolicyEngine {
+	return &cedarPolicyEngine{allowStub: allowStub, policies: make(map[string]string)}
 }
 
 func (e *cedarPolicyEngine) LoadPolicy(name, content string) error {
@@ -256,9 +283,16 @@ func (e *cedarPolicyEngine) ListPolicies() []PolicyInfo {
 func (e *cedarPolicyEngine) Evaluate(_ context.Context, input map[string]any) (*PolicyDecision, error) {
 	// Production: build a cedar.Request from input (principal, action, resource, context)
 	// and call policySet.IsAuthorized(request).
+	if e.allowStub {
+		return &PolicyDecision{
+			Allowed:  true,
+			Reasons:  []string{"cedar stub: allow_stub_backends enabled"},
+			Metadata: map[string]any{"backend": "cedar", "input": input},
+		}, nil
+	}
 	return &PolicyDecision{
-		Allowed:  true,
-		Reasons:  []string{"cedar stub: default allow"},
+		Allowed:  false,
+		Reasons:  []string{"STUB IMPLEMENTATION - not connected to real backend - denied for safety"},
 		Metadata: map[string]any{"backend": "cedar", "input": input},
 	}, nil
 }

@@ -93,7 +93,7 @@ func runContract(args []string) error {
 		return contractUsage()
 	}
 	switch args[0] {
-	case "test":
+	case "test", "compare":
 		return runContractTest(args[1:])
 	default:
 		return contractUsage()
@@ -104,7 +104,8 @@ func contractUsage() error {
 	fmt.Fprintf(os.Stderr, `Usage: wfctl contract <subcommand> [options]
 
 Subcommands:
-  test   Generate a contract from a config and optionally compare to a baseline
+  test     Generate a contract from a config and optionally compare to a baseline
+  compare  Alias for test
 
 Run 'wfctl contract test -h' for details.
 `)
