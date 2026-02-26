@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
@@ -249,7 +250,7 @@ func verifyChecksum(data []byte, expected string) error {
 // extractTarGz decompresses and extracts a .tar.gz archive into destDir.
 // It guards against path traversal (zip-slip) attacks.
 func extractTarGz(data []byte, destDir string) error {
-	gzr, err := gzip.NewReader(bytesReader(data))
+	gzr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("open gzip: %w", err)
 	}
@@ -299,25 +300,6 @@ func extractTarGz(data []byte, destDir string) error {
 		}
 	}
 	return nil
-}
-
-// bytesReader wraps a byte slice as an io.Reader.
-type bytesReaderImpl struct {
-	data []byte
-	pos  int
-}
-
-func (b *bytesReaderImpl) Read(p []byte) (int, error) {
-	if b.pos >= len(b.data) {
-		return 0, io.EOF
-	}
-	n := copy(p, b.data[b.pos:])
-	b.pos += n
-	return n, nil
-}
-
-func bytesReader(data []byte) io.Reader {
-	return &bytesReaderImpl{data: data}
 }
 
 // stripTopDir removes the first path component from a tar entry name.
