@@ -142,7 +142,8 @@ func (a *AWSAPIGateway) listIntegrations(ctx context.Context, client *apigateway
 		if err != nil {
 			return nil, fmt.Errorf("GetIntegrations: %w", err)
 		}
-		for _, item := range out.Items {
+		for i := range out.Items {
+			item := &out.Items[i]
 			if item.IntegrationUri != nil && item.IntegrationId != nil {
 				result[aws.ToString(item.IntegrationUri)] = aws.ToString(item.IntegrationId)
 			}
@@ -168,7 +169,8 @@ func (a *AWSAPIGateway) listRoutes(ctx context.Context, client *apigatewayv2.Cli
 		if err != nil {
 			return nil, fmt.Errorf("GetRoutes: %w", err)
 		}
-		for _, item := range out.Items {
+		for i := range out.Items {
+			item := &out.Items[i]
 			if item.RouteKey != nil && item.RouteId != nil {
 				result[aws.ToString(item.RouteKey)] = aws.ToString(item.RouteId)
 			}

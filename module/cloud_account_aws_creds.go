@@ -83,12 +83,12 @@ func (r *awsProfileResolver) Resolve(m *CloudAccount) error {
 	// Load credentials from the named profile using the AWS SDK.
 	// A missing local profile file is normal in CI/prod — don't hard-fail.
 	ctx := context.Background()
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithSharedConfigProfile(profile))
-	if err != nil {
+	cfg, loadErr := config.LoadDefaultConfig(ctx, config.WithSharedConfigProfile(profile))
+	if loadErr != nil {
 		return nil
 	}
-	creds, err := cfg.Credentials.Retrieve(ctx)
-	if err != nil {
+	creds, credErr := cfg.Credentials.Retrieve(ctx)
+	if credErr != nil {
 		return nil
 	}
 	m.creds.AccessKey = creds.AccessKeyID
@@ -146,8 +146,8 @@ func (r *awsRoleARNResolver) Resolve(m *CloudAccount) error {
 		))
 	}
 
-	baseCfg, err := config.LoadDefaultConfig(ctx, baseCfgOpts...)
-	if err != nil {
+	baseCfg, loadErr := config.LoadDefaultConfig(ctx, baseCfgOpts...)
+	if loadErr != nil {
 		// AWSConfig() will retry via stscreds.AssumeRoleProvider at call time.
 		return nil
 	}
@@ -161,8 +161,8 @@ func (r *awsRoleARNResolver) Resolve(m *CloudAccount) error {
 		input.ExternalId = aws.String(externalID)
 	}
 
-	out, err := stsClient.AssumeRole(ctx, input)
-	if err != nil {
+	out, assumeErr := stsClient.AssumeRole(ctx, input)
+	if assumeErr != nil {
 		// AssumeRole may fail at config-load time without real credentials;
 		// AWSConfig() handles deferred token refresh via stscreds.
 		return nil

@@ -20,7 +20,7 @@ type AWSConfig struct {
 	Region          string `json:"region"`
 	AccessKeyID     string `json:"access_key_id,omitempty"`
 	SecretAccessKey string `json:"secret_access_key,omitempty"`
-	SessionToken    string `json:"session_token,omitempty"`
+	SessionToken    string `json:"session_token,omitempty"` //nolint:gosec // field name, not a credential
 }
 
 // AWSIAMProvider validates AWS IAM ARNs using STS GetCallerIdentity and
@@ -62,8 +62,8 @@ func (p *AWSIAMProvider) ResolveIdentities(ctx context.Context, cfgRaw json.RawM
 
 	attrs := map[string]string{"arn": arn}
 
-	sdkCfg, err := buildAWSSDKConfig(ctx, awsCfg)
-	if err != nil {
+	sdkCfg, sdkErr := buildAWSSDKConfig(ctx, awsCfg)
+	if sdkErr != nil {
 		return []ExternalIdentity{{
 			Provider:   string(store.IAMProviderAWS),
 			Identifier: arn,
@@ -137,9 +137,9 @@ func (p *AWSIAMProvider) TestConnection(ctx context.Context, cfgRaw json.RawMess
 		return fmt.Errorf("invalid aws config: %w", err)
 	}
 
-	sdkCfg, err := buildAWSSDKConfig(ctx, awsCfg)
-	if err != nil {
-		return fmt.Errorf("aws iam: building SDK config: %w", err)
+	sdkCfg, sdkErr := buildAWSSDKConfig(ctx, awsCfg)
+	if sdkErr != nil {
+		return fmt.Errorf("aws iam: building SDK config: %w", sdkErr)
 	}
 
 	stsClient := sts.NewFromConfig(sdkCfg)
