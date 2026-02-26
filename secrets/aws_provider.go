@@ -111,6 +111,9 @@ type awsListSecretsResponse struct {
 
 // List returns the names of all secrets using the ListSecrets API with pagination.
 func (p *AWSSecretsManagerProvider) List(ctx context.Context) ([]string, error) {
+	if p.httpClient == nil {
+		return nil, fmt.Errorf("secrets: AWS HTTP client not configured")
+	}
 	var names []string
 	nextToken := ""
 
