@@ -151,6 +151,81 @@ func TestHTTPIntegrationConnector_ExecuteInvalidAction(t *testing.T) {
 	}
 }
 
+func TestValidateURLHost(t *testing.T) {
+	tests := []struct {
+		name    string
+		reqURL  string
+		baseURL string
+		wantErr bool
+	}{
+		{
+			name:    "matching host and scheme",
+			reqURL:  "https://api.example.com/v1/resource",
+			baseURL: "https://api.example.com",
+			wantErr: false,
+		},
+		{
+			name:    "matching host with path in base",
+			reqURL:  "https://api.example.com/v1/resource",
+			baseURL: "https://api.example.com/v1",
+			wantErr: false,
+		},
+		{
+			name:    "different host",
+			reqURL:  "https://evil.com/steal",
+			baseURL: "https://api.example.com",
+			wantErr: true,
+		},
+		{
+			name:    "different scheme",
+			reqURL:  "http://api.example.com/resource",
+			baseURL: "https://api.example.com",
+			wantErr: true,
+		},
+		{
+			name:    "invalid request URL",
+			reqURL:  "://bad-url",
+			baseURL: "https://api.example.com",
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateURLHost(tc.reqURL, tc.baseURL)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("validateURLHost(%q, %q) error = %v, wantErr %v", tc.reqURL, tc.baseURL, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestHTTPIntegrationConnector_ExecuteHostInjectionBlocked(t *testing.T) {
+	// A second server that should never be contacted.
+	victim := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("victim server should not have been contacted")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer victim.Close()
+
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer primary.Close()
+
+	c := NewHTTPIntegrationConnector("test", primary.URL)
+	c.AllowPrivateIPs()
+	ctx := context.Background()
+	_ = c.Connect(ctx)
+
+	// Craft a path that tries to redirect to the victim server host.
+	// url.JoinPath escapes "//", but we verify the host check catches any bypass.
+	victimHost := victim.URL[len("http://"):]
+	_, err := c.Execute(ctx, "GET /"+victimHost+"/secret", nil)
+	// The request may succeed (path-joined to primary) or fail on parse, but must NOT
+	// contact the victim server.  If host injection were possible, wantErr would be true.
+	_ = err // outcome is acceptable either way; the victim handler asserts no contact
+}
+
 func TestHTTPIntegrationConnector_ExecuteGET(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {
