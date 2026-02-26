@@ -38,7 +38,7 @@ type KubernetesConfig struct {
 const inClusterServer = "https://kubernetes.default.svc"
 
 // inClusterTokenPath is the default service account token path.
-const inClusterTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+const inClusterTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token" //nolint:gosec // filesystem path, not a credential
 
 // inClusterCAPath is the default service account CA bundle path.
 const inClusterCAPath = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"

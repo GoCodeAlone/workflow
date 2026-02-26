@@ -448,9 +448,9 @@ func (b *argoRealBackend) doRequest(ctx context.Context, method, path string, bo
 
 func (b *argoRealBackend) plan(m *ArgoWorkflowsModule) (*PlatformPlan, error) {
 	// Check if Argo Server is reachable by calling the version endpoint.
-	_, status, err := b.doRequest(context.Background(), http.MethodGet, "/api/v1/version", nil)
+	_, status, connErr := b.doRequest(context.Background(), http.MethodGet, "/api/v1/version", nil)
 	plan := &PlatformPlan{Provider: "argo.workflows", Resource: m.name}
-	if err != nil || status != http.StatusOK {
+	if connErr != nil || status != http.StatusOK {
 		plan.Actions = []PlatformAction{
 			{Type: "create", Resource: m.name, Detail: fmt.Sprintf("install/connect Argo Workflows at %s (namespace: %s)", b.endpoint, m.namespace())},
 		}
@@ -492,8 +492,8 @@ func (b *argoRealBackend) apply(m *ArgoWorkflowsModule) (*PlatformResult, error)
 }
 
 func (b *argoRealBackend) status(m *ArgoWorkflowsModule) (*ArgoWorkflowState, error) {
-	_, status, err := b.doRequest(context.Background(), http.MethodGet, "/api/v1/version", nil)
-	if err != nil || status != http.StatusOK {
+	_, statusCode, connErr := b.doRequest(context.Background(), http.MethodGet, "/api/v1/version", nil)
+	if connErr != nil || statusCode != http.StatusOK {
 		m.state.Status = "error"
 		return m.state, nil
 	}
