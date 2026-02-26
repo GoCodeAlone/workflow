@@ -2,6 +2,8 @@ package module
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/CrisisTextLine/modular"
 )
@@ -27,6 +29,7 @@ type AppContainerModule struct {
 	current      *AppDeployResult // current deployment state
 	previous     *AppDeployResult // last known-good deployment for rollback
 	backend      appContainerBackend
+	logger       modular.Logger
 }
 
 // AppContainerSpec describes the desired state of an application container.
@@ -111,6 +114,8 @@ func (m *AppContainerModule) Name() string { return m.name }
 
 // Init resolves the environment module and initialises the platform backend.
 func (m *AppContainerModule) Init(app modular.Application) error {
+	m.logger = app.Logger()
+
 	envName, _ := m.config["environment"].(string)
 	if envName != "" {
 		svc, ok := app.SvcRegistry()[envName]
@@ -129,9 +134,20 @@ func (m *AppContainerModule) Init(app modular.Application) error {
 			return fmt.Errorf("app.container %q: environment %q is not a platform.kubernetes or platform.ecs module (got %T)", m.name, envName, svc)
 		}
 	} else {
-		// Default to kubernetes mock when no environment is specified.
-		m.backend = &k8sAppBackend{}
-		m.platformType = "kubernetes"
+		// No environment configured: choose backend based on whether a kubeconfig is available.
+		kubeconfigPath := kubeconfigPath()
+		if kubeconfigPath != "" {
+			m.logger.Info("app.container: no environment configured, using kubernetes backend from kubeconfig",
+				"module", m.name, "kubeconfig", kubeconfigPath)
+			m.backend = &k8sAppBackend{}
+			m.platformType = "kubernetes"
+		} else {
+			m.logger.Warn("app.container: no environment configured and no kubeconfig found; defaulting to mock kubernetes backend",
+				"module", m.name,
+				"hint", "set 'environment' to a platform.kubernetes or platform.ecs module, or ensure KUBECONFIG / ~/.kube/config is present")
+			m.backend = &k8sAppBackend{}
+			m.platformType = "kubernetes"
+		}
 	}
 
 	m.spec = m.parseSpec()
@@ -411,6 +427,23 @@ type K8sIngressSvcBackend struct {
 // K8sServicePortRef defines a port reference in an ingress service backend.
 type K8sServicePortRef struct {
 	Number int `json:"number"`
+}
+
+// kubeconfigPath returns the path to the kubeconfig file if it exists, or an
+// empty string. It checks KUBECONFIG env var first, then ~/.kube/config.
+func kubeconfigPath() string {
+	if kc := os.Getenv("KUBECONFIG"); kc != "" {
+		if _, err := os.Stat(kc); err == nil {
+			return kc
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidate := filepath.Join(home, ".kube", "config")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
 }
 
 // ─── Kubernetes backend ───────────────────────────────────────────────────────
