@@ -712,7 +712,15 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	// -----------------------------------------------------------------------
 
 	billingMeter := billing.NewInMemoryMeter()
-	billingProvider := billing.NewMockBillingProvider()
+	var billingProvider billing.BillingProvider
+	if stripeKey := os.Getenv("STRIPE_API_KEY"); stripeKey != "" {
+		webhookSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
+		billingProvider = billing.NewStripeProvider(stripeKey, webhookSecret, billing.StripePlanIDs{})
+		logger.Info("Billing: using Stripe provider")
+	} else {
+		logger.Warn("STRIPE_API_KEY not set — billing is using MockBillingProvider; set STRIPE_API_KEY to enable real billing")
+		billingProvider = billing.NewMockBillingProvider()
+	}
 	billingHandler := billing.NewHandler(billingMeter, billingProvider)
 	billingMux := http.NewServeMux()
 	billingHandler.RegisterRoutes(billingMux)
