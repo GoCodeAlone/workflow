@@ -84,6 +84,7 @@ func TestAWSProvider_ResolveIdentities_InvalidARN(t *testing.T) {
 }
 
 func TestAWSProvider_TestConnection(t *testing.T) {
+	t.Skip("requires real AWS credentials")
 	p := &AWSIAMProvider{}
 	cfg := json.RawMessage(`{"account_id":"123456789012","region":"us-east-1"}`)
 	if err := p.TestConnection(context.Background(), cfg); err != nil {

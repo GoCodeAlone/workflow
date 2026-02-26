@@ -474,6 +474,7 @@ func TestAWSAPIGateway_Basic(t *testing.T) {
 }
 
 func TestAWSAPIGateway_SyncRoutesStub(t *testing.T) {
+	t.Skip("requires real AWS credentials and API Gateway")
 	aws := NewAWSAPIGateway("aws-gw")
 	aws.SetConfig("us-east-1", "abc123", "prod")
 

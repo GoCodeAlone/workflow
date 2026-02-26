@@ -101,8 +101,77 @@ func (p *AWSSecretsManagerProvider) Delete(_ context.Context, _ string) error {
 	return fmt.Errorf("%w: aws secrets manager provider is read-only", ErrUnsupported)
 }
 
-func (p *AWSSecretsManagerProvider) List(_ context.Context) ([]string, error) {
-	return nil, fmt.Errorf("%w: aws secrets manager list not implemented", ErrUnsupported)
+// awsListSecretsResponse represents the relevant fields from ListSecrets response.
+type awsListSecretsResponse struct {
+	SecretList []struct {
+		Name string `json:"Name"`
+	} `json:"SecretList"`
+	NextToken string `json:"NextToken,omitempty"`
+}
+
+// List returns the names of all secrets using the ListSecrets API with pagination.
+func (p *AWSSecretsManagerProvider) List(ctx context.Context) ([]string, error) {
+	if p.httpClient == nil {
+		return nil, fmt.Errorf("secrets: AWS HTTP client not configured")
+	}
+	var names []string
+	nextToken := ""
+
+	for {
+		reqBodyStr := `{}`
+		if nextToken != "" {
+			reqBodyStr = fmt.Sprintf(`{"NextToken":%q}`, nextToken)
+		}
+
+		host := fmt.Sprintf("secretsmanager.%s.amazonaws.com", p.config.Region)
+		endpoint := fmt.Sprintf("https://%s", host)
+		now := time.Now().UTC()
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(reqBodyStr))
+		if err != nil {
+			return nil, fmt.Errorf("secrets: failed to create ListSecrets request: %w", err)
+		}
+
+		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+		req.Header.Set("X-Amz-Target", "secretsmanager.ListSecrets")
+		req.Header.Set("Host", host)
+
+		p.signRequest(req, []byte(reqBodyStr), now)
+
+		resp, err := p.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("secrets: ListSecrets request failed: %w", err)
+		}
+		defer resp.Body.Close() //nolint:gocritic
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("secrets: failed to read ListSecrets response: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("%w: ListSecrets returned status %d: %s",
+				ErrUnsupported, resp.StatusCode, string(body))
+		}
+
+		var result awsListSecretsResponse
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, fmt.Errorf("secrets: failed to parse ListSecrets response: %w", err)
+		}
+
+		for _, s := range result.SecretList {
+			if s.Name != "" {
+				names = append(names, s.Name)
+			}
+		}
+
+		if result.NextToken == "" {
+			break
+		}
+		nextToken = result.NextToken
+	}
+
+	return names, nil
 }
 
 // Config returns the provider's AWS configuration.
