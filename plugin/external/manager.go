@@ -105,10 +105,17 @@ func (m *ExternalPluginManager) LoadPlugin(name string) (*ExternalPluginAdapter,
 
 	m.logger.Printf("starting plugin %q (version %s)", name, manifest.Version)
 
+	// Run the plugin subprocess with its own directory as the working directory.
+	// This ensures plugins that extract embedded assets (e.g. ui_dist/) write to
+	// their own directory rather than inheriting the parent's working directory,
+	// which may not be writable (e.g. /app owned by root, process runs as nonroot).
+	cmd := exec.Command(binaryPath) //nolint:gosec // G204: plugin binary path is from trusted data/plugins directory
+	cmd.Dir = pluginDir
+
 	client := goplugin.NewClient(&goplugin.ClientConfig{
 		HandshakeConfig:  Handshake,
 		Plugins:          goplugin.PluginSet{"plugin": &GRPCPlugin{}},
-		Cmd:              exec.Command(binaryPath), //nolint:gosec // G204: plugin binary path is from trusted data/plugins directory
+		Cmd:              cmd,
 		AllowedProtocols: []goplugin.Protocol{goplugin.ProtocolGRPC},
 	})
 

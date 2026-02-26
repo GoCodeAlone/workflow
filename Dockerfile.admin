@@ -1,0 +1,55 @@
+# Dockerfile.admin — builds workflow-server-admin:local
+# Packages the workflow server + workflow-plugin-admin external plugin.
+#
+# Build:
+#   GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bin/admin \
+#       ./cmd/workflow-plugin-admin   (from workflow-plugin-admin repo)
+#   docker build -f Dockerfile.admin \
+#       --build-arg ADMIN_BIN=../workflow-plugin-admin/bin/admin \
+#       -t workflow-server-admin:local .
+
+# --- Stage 1: Build the Go server binary ---
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS go-builder
+
+ARG TARGETOS TARGETARCH
+
+ENV GOPRIVATE=github.com/GoCodeAlone/* \
+    GONOSUMCHECK=github.com/GoCodeAlone/*
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o server ./cmd/server
+
+# --- Stage 2: Runtime image ---
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates tzdata \
+    && adduser -D -u 65532 nonroot
+
+WORKDIR /app
+
+COPY --from=go-builder /build/server /server
+
+# Admin plugin binary (pre-built for the target platform).
+# Copy the binary into the plugin directory that the engine discovers at runtime.
+# The engine looks in <data-dir>/plugins/<name>/<name> — we use /app/data as data-dir.
+# Build context must have _build/admin-plugin/admin and _build/admin-plugin/plugin.json.
+RUN mkdir -p /app/data/plugins/admin
+COPY _build/admin-plugin/admin /app/data/plugins/admin/admin
+COPY _build/admin-plugin/plugin.json /app/data/plugins/admin/plugin.json
+
+# Ensure nonroot owns everything it needs
+RUN chown -R nonroot:nonroot /app/data
+
+USER nonroot
+
+EXPOSE 8080 8081
+
+ENTRYPOINT ["/server"]
