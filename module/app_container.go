@@ -433,6 +433,7 @@ type K8sServicePortRef struct {
 // empty string. It checks KUBECONFIG env var first, then ~/.kube/config.
 func kubeconfigPath() string {
 	if kc := os.Getenv("KUBECONFIG"); kc != "" {
+		kc = filepath.Clean(kc) //nolint:gosec // KUBECONFIG is a trusted env var
 		if _, err := os.Stat(kc); err == nil {
 			return kc
 		}
