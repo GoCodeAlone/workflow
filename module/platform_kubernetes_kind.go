@@ -825,3 +825,21 @@ func (b *aksBackend) azureToken(creds *CloudCredentials) (string, error) {
 	}
 	return token, nil
 }
+
+func init() {
+	RegisterKubernetesBackend("kind", func(_ map[string]any) (kubernetesBackend, error) {
+		return &kindBackend{}, nil
+	})
+	RegisterKubernetesBackend("k3s", func(_ map[string]any) (kubernetesBackend, error) {
+		return &kindBackend{}, nil
+	})
+	RegisterKubernetesBackend("eks", func(_ map[string]any) (kubernetesBackend, error) {
+		return &eksBackend{}, nil
+	})
+	RegisterKubernetesBackend("gke", func(_ map[string]any) (kubernetesBackend, error) {
+		return &gkeBackend{}, nil
+	})
+	RegisterKubernetesBackend("aks", func(_ map[string]any) (kubernetesBackend, error) {
+		return &aksBackend{}, nil
+	})
+}

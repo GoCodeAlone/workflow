@@ -55,6 +55,26 @@ type apigatewayBackend interface {
 	destroy(m *PlatformAPIGateway) error
 }
 
+// APIGatewayBackendFactory creates an apigatewayBackend for a given provider config.
+type APIGatewayBackendFactory func(cfg map[string]any) (apigatewayBackend, error)
+
+// apigatewayBackendRegistry maps provider name to its factory.
+var apigatewayBackendRegistry = map[string]APIGatewayBackendFactory{}
+
+// RegisterAPIGatewayBackend registers an APIGatewayBackendFactory for the given provider name.
+func RegisterAPIGatewayBackend(provider string, factory APIGatewayBackendFactory) {
+	apigatewayBackendRegistry[provider] = factory
+}
+
+func init() {
+	RegisterAPIGatewayBackend("mock", func(_ map[string]any) (apigatewayBackend, error) {
+		return &mockAPIGatewayBackend{}, nil
+	})
+	RegisterAPIGatewayBackend("aws", func(_ map[string]any) (apigatewayBackend, error) {
+		return &awsAPIGatewayBackend{}, nil
+	})
+}
+
 // PlatformAPIGateway manages API gateway provisioning via pluggable backends.
 // Config:
 //
@@ -99,14 +119,15 @@ func (m *PlatformAPIGateway) Init(app modular.Application) error {
 		provider = "mock"
 	}
 
-	switch provider {
-	case "mock":
-		m.backend = &mockAPIGatewayBackend{}
-	case "aws":
-		m.backend = &awsAPIGatewayBackend{}
-	default:
+	factory, ok := apigatewayBackendRegistry[provider]
+	if !ok {
 		return fmt.Errorf("platform.apigateway %q: unsupported provider %q", m.name, provider)
 	}
+	backend, err := factory(m.config)
+	if err != nil {
+		return fmt.Errorf("platform.apigateway %q: creating backend: %w", m.name, err)
+	}
+	m.backend = backend
 
 	gwName, _ := m.config["name"].(string)
 	if gwName == "" {

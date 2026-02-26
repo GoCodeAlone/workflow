@@ -46,6 +46,26 @@ type autoscalingBackend interface {
 	destroy(m *PlatformAutoscaling) error
 }
 
+// AutoscalingBackendFactory creates an autoscalingBackend for a given provider config.
+type AutoscalingBackendFactory func(cfg map[string]any) (autoscalingBackend, error)
+
+// autoscalingBackendRegistry maps provider name to its factory.
+var autoscalingBackendRegistry = map[string]AutoscalingBackendFactory{}
+
+// RegisterAutoscalingBackend registers an AutoscalingBackendFactory for the given provider name.
+func RegisterAutoscalingBackend(provider string, factory AutoscalingBackendFactory) {
+	autoscalingBackendRegistry[provider] = factory
+}
+
+func init() {
+	RegisterAutoscalingBackend("mock", func(_ map[string]any) (autoscalingBackend, error) {
+		return &mockAutoscalingBackend{}, nil
+	})
+	RegisterAutoscalingBackend("aws", func(_ map[string]any) (autoscalingBackend, error) {
+		return &awsAutoscalingBackend{}, nil
+	})
+}
+
 // PlatformAutoscaling manages autoscaling policies via pluggable backends.
 // Config:
 //
@@ -87,14 +107,15 @@ func (m *PlatformAutoscaling) Init(app modular.Application) error {
 		provider = "mock"
 	}
 
-	switch provider {
-	case "mock":
-		m.backend = &mockAutoscalingBackend{}
-	case "aws":
-		m.backend = &awsAutoscalingBackend{}
-	default:
+	factory, ok := autoscalingBackendRegistry[provider]
+	if !ok {
 		return fmt.Errorf("platform.autoscaling %q: unsupported provider %q", m.name, provider)
 	}
+	backend, err := factory(m.config)
+	if err != nil {
+		return fmt.Errorf("platform.autoscaling %q: creating backend: %w", m.name, err)
+	}
+	m.backend = backend
 
 	m.state = &ScalingState{
 		ID:              "",
