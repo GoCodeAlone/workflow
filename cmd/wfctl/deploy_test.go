@@ -52,14 +52,20 @@ func TestRunDeployKubernetesFlagParsing(t *testing.T) {
 	}
 }
 
-// TestRunDeployCloudNoTarget returns usage guidance as an error.
+// TestRunDeployCloudNoConfig returns an error when no config file is found.
 func TestRunDeployCloudNoTarget(t *testing.T) {
+	// Run from a temp dir with no config files
+	orig, _ := os.Getwd()
+	tmp := t.TempDir()
+	os.Chdir(tmp)
+	defer os.Chdir(orig)
+
 	err := runDeployCloud([]string{})
 	if err == nil {
-		t.Fatal("expected error from cloud deploy stub")
+		t.Fatal("expected error when no config file found")
 	}
-	if !strings.Contains(err.Error(), "cloud deployment requires") {
-		t.Errorf("expected cloud deployment guidance in error, got: %v", err)
+	if !strings.Contains(err.Error(), "no config file found") {
+		t.Errorf("expected config file error, got: %v", err)
 	}
 }
 
@@ -74,14 +80,20 @@ func TestRunDeployCloudInvalidTarget(t *testing.T) {
 	}
 }
 
-// TestRunDeployCloudValidTarget returns the stub guidance error for a valid target.
+// TestRunDeployCloudValidTarget with a config file but no platform modules.
 func TestRunDeployCloudValidTarget(t *testing.T) {
+	tmp := t.TempDir()
+	orig, _ := os.Getwd()
+	os.Chdir(tmp)
+	defer os.Chdir(orig)
+
+	os.WriteFile("app.yaml", []byte("modules:\n  - name: test\n    type: cache.memory\n"), 0644)
 	err := runDeployCloud([]string{"-target", "staging"})
 	if err == nil {
-		t.Fatal("expected stub error from cloud deploy")
+		t.Fatal("expected error when no platform modules found")
 	}
-	if !strings.Contains(err.Error(), "cloud deployment requires") {
-		t.Errorf("expected guidance error, got: %v", err)
+	if !strings.Contains(err.Error(), "no platform.* modules found") {
+		t.Errorf("expected no platform modules error, got: %v", err)
 	}
 }
 

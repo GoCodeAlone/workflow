@@ -12,11 +12,13 @@ import (
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
 	awscfg "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	cwtypes "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/provider"
@@ -33,7 +35,6 @@ type AWSConfig struct {
 	Region          string `json:"region" yaml:"region"`
 	AccessKeyID     string `json:"access_key_id" yaml:"access_key_id"`
 	SecretAccessKey string `json:"secret_access_key" yaml:"secret_access_key"`
-	// TODO: implement IAM role assumption via STS AssumeRole for cross-account access.
 	RoleARN    string `json:"role_arn" yaml:"role_arn"`
 	ECSCluster string `json:"ecs_cluster" yaml:"ecs_cluster"`
 	EKSCluster string `json:"eks_cluster" yaml:"eks_cluster"`
@@ -69,6 +70,7 @@ func NewAWSProviderWithClients(config AWSConfig, ecsClient ECSClient, eksClient 
 }
 
 // buildAWSConfig builds an AWS SDK config from the provider configuration.
+// If RoleARN is set, assumes the role via STS for cross-account access.
 func (p *AWSProvider) buildAWSConfig(ctx context.Context) (awsv2.Config, error) {
 	opts := []func(*awscfg.LoadOptions) error{
 		awscfg.WithRegion(p.config.Region),
@@ -78,7 +80,18 @@ func (p *AWSProvider) buildAWSConfig(ctx context.Context) (awsv2.Config, error) 
 			credentials.NewStaticCredentialsProvider(p.config.AccessKeyID, p.config.SecretAccessKey, ""),
 		))
 	}
-	return awscfg.LoadDefaultConfig(ctx, opts...)
+	cfg, err := awscfg.LoadDefaultConfig(ctx, opts...)
+	if err != nil {
+		return cfg, err
+	}
+
+	if p.config.RoleARN != "" {
+		stsClient := sts.NewFromConfig(cfg)
+		provider := stscreds.NewAssumeRoleProvider(stsClient, p.config.RoleARN)
+		cfg.Credentials = awsv2.NewCredentialsCache(provider)
+	}
+
+	return cfg, nil
 }
 
 // ensureECSClient lazily initializes the ECS client if not already set.

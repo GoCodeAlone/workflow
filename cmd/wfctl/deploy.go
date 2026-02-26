@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 func runDeploy(args []string) error {
@@ -210,16 +212,21 @@ Options:
 	return nil
 }
 
-// runDeployCloud is a stub for cloud deployment that prints usage guidance.
+// runDeployCloud deploys infrastructure defined in a workflow config to a cloud provider.
+// It reads the config, discovers cloud.account and platform modules, validates
+// credentials, shows a plan, and applies changes.
 func runDeployCloud(args []string) error {
 	fs := flag.NewFlagSet("deploy cloud", flag.ContinueOnError)
 	target := fs.String("target", "", "Deployment target: staging or production")
-	configFile := fs.String("config-file", "", "Cloud deploy config file (default: .wfctl.yaml or deploy.yaml)")
+	configFile := fs.String("config", "", "Workflow config file (default: app.yaml or workflow.yaml)")
+	dryRun := fs.Bool("dry-run", false, "Show plan without applying changes")
+	yes := fs.Bool("yes", false, "Skip confirmation prompt")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl deploy cloud [options]
 
-Deploy the workflow application to a cloud environment.
-Reads cloud configuration from .wfctl.yaml or deploy.yaml in the project root.
+Deploy infrastructure defined in a workflow config to a cloud environment.
+Discovers cloud.account and platform.* modules, validates credentials,
+shows a deployment plan, and applies changes.
 
 Options:
 `)
@@ -229,7 +236,6 @@ Options:
 		return err
 	}
 
-	// Validate target if given
 	if *target != "" && *target != "staging" && *target != "production" {
 		return fmt.Errorf("invalid target %q: must be staging or production", *target)
 	}
@@ -237,36 +243,147 @@ Options:
 	// Resolve config file
 	cfg := *configFile
 	if cfg == "" {
-		for _, candidate := range []string{".wfctl.yaml", "deploy.yaml"} {
+		for _, candidate := range []string{"config/app.yaml", "app.yaml", "workflow.yaml", ".wfctl.yaml", "deploy.yaml"} {
 			if _, err := os.Stat(candidate); err == nil {
 				cfg = candidate
 				break
 			}
 		}
 	}
+	if cfg == "" {
+		return fmt.Errorf("no config file found (tried config/app.yaml, app.yaml, workflow.yaml, .wfctl.yaml, deploy.yaml)")
+	}
+
+	data, err := os.ReadFile(cfg)
+	if err != nil {
+		return fmt.Errorf("read config %s: %w", cfg, err)
+	}
+
+	// Parse YAML modules
+	type moduleEntry struct {
+		Name   string         `yaml:"name"`
+		Type   string         `yaml:"type"`
+		Config map[string]any `yaml:"config"`
+	}
+	type appConfig struct {
+		Modules []moduleEntry `yaml:"modules"`
+	}
+	var parsed appConfig
+	if yamlErr := yaml.Unmarshal(data, &parsed); yamlErr != nil {
+		return fmt.Errorf("parse config %s: %w", cfg, yamlErr)
+	}
+
+	// Discover cloud accounts and platform modules
+	var cloudAccounts []moduleEntry
+	var platformModules []moduleEntry
+	for _, m := range parsed.Modules {
+		if m.Type == "cloud.account" {
+			cloudAccounts = append(cloudAccounts, m)
+		}
+		if strings.HasPrefix(m.Type, "platform.") {
+			platformModules = append(platformModules, m)
+		}
+	}
 
 	targetLabel := *target
 	if targetLabel == "" {
-		targetLabel = "staging"
+		targetLabel = "default"
 	}
 
-	fmt.Fprintf(os.Stderr, `wfctl deploy cloud: cloud deployment is not yet fully implemented.
+	fmt.Printf("Cloud Deployment Plan\n")
+	fmt.Printf("=====================\n")
+	fmt.Printf("Config:  %s\n", cfg)
+	fmt.Printf("Target:  %s\n\n", targetLabel)
 
-To deploy to a cloud environment:
-  1. Create a .wfctl.yaml or deploy.yaml with your cloud provider settings.
-  2. Build and push your Docker image:
-       docker build -t <registry>/<image>:<tag> .
-       docker push <registry>/<image>:<tag>
-  3. Apply infrastructure (OpenTofu / Terraform):
-       cd deploy/tofu/environments/%s
-       tofu apply
-  4. Update your Kubernetes deployment or ECS task definition with the new image.
+	// Report cloud accounts
+	if len(cloudAccounts) == 0 {
+		fmt.Printf("WARNING: No cloud.account modules found in config.\n")
+		fmt.Printf("         Infrastructure modules may not have credentials.\n\n")
+	} else {
+		fmt.Printf("Cloud Accounts:\n")
+		for _, ca := range cloudAccounts {
+			provider, _ := ca.Config["provider"].(string)
+			region, _ := ca.Config["region"].(string)
+			fmt.Printf("  - %s (provider: %s, region: %s)\n", ca.Name, provider, region)
+			// Validate credentials exist
+			switch {
+			case provider == "aws":
+				if os.Getenv("AWS_ACCESS_KEY_ID") != "" || os.Getenv("AWS_PROFILE") != "" {
+					fmt.Printf("    credentials: OK (from environment)\n")
+				} else {
+					credsMap, _ := ca.Config["credentials"].(map[string]any)
+					if credsMap != nil {
+						fmt.Printf("    credentials: OK (from config)\n")
+					} else {
+						fmt.Printf("    credentials: WARNING — no AWS credentials found\n")
+					}
+				}
+			case provider == "gcp":
+				if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" || os.Getenv("GOOGLE_CLOUD_PROJECT") != "" {
+					fmt.Printf("    credentials: OK (from environment)\n")
+				} else {
+					fmt.Printf("    credentials: check GOOGLE_APPLICATION_CREDENTIALS\n")
+				}
+			case provider == "azure":
+				if os.Getenv("AZURE_SUBSCRIPTION_ID") != "" || os.Getenv("AZURE_TENANT_ID") != "" {
+					fmt.Printf("    credentials: OK (from environment)\n")
+				} else {
+					fmt.Printf("    credentials: check AZURE_TENANT_ID / AZURE_CLIENT_ID\n")
+				}
+			case provider != "mock":
+				fmt.Printf("    credentials: unknown provider %q\n", provider)
+			}
+		}
+		fmt.Println()
+	}
 
-Config file: %s
-Target:      %s
-`, targetLabel, ifEmpty(cfg, "(none found)"), targetLabel)
+	// Report platform modules (deployment plan)
+	if len(platformModules) == 0 {
+		return fmt.Errorf("no platform.* modules found in config — nothing to deploy")
+	}
 
-	return fmt.Errorf("cloud deployment requires manual configuration; see guidance above")
+	fmt.Printf("Infrastructure Modules (%d):\n", len(platformModules))
+	for _, pm := range platformModules {
+		account, _ := pm.Config["account"].(string)
+		detail := pm.Type
+		if account != "" {
+			detail += fmt.Sprintf(" (account: %s)", account)
+		}
+		fmt.Printf("  + CREATE  %s  [%s]\n", pm.Name, detail)
+	}
+	fmt.Println()
+
+	if *dryRun {
+		fmt.Printf("Dry run complete. Use 'wfctl deploy cloud --yes' to apply.\n")
+		return nil
+	}
+
+	if !*yes {
+		fmt.Printf("Apply these changes? [y/N] ")
+		var answer string
+		if _, scanErr := fmt.Scanln(&answer); scanErr != nil || (answer != "y" && answer != "Y" && answer != "yes") {
+			return fmt.Errorf("deployment cancelled")
+		}
+	}
+
+	// Execute deployment via the engine
+	fmt.Printf("\nApplying infrastructure...\n")
+	cmdArgs := []string{"run", "-config", cfg}
+	if *target != "" {
+		cmdArgs = append(cmdArgs, "-env", *target)
+	}
+
+	wfctl, _ := os.Executable()
+	cmd := exec.Command(wfctl, cmdArgs...) //nolint:gosec // G204: re-executing self with validated args
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if runErr := cmd.Run(); runErr != nil {
+		return fmt.Errorf("deployment failed: %w", runErr)
+	}
+
+	fmt.Printf("\nDeployment complete.\n")
+	return nil
 }
 
 // writeDockerfile writes a minimal multi-stage Dockerfile suitable for workflow engine projects.
@@ -319,11 +436,4 @@ services:
       start_period: 30s
 `, image, configFile)
 	return os.WriteFile(path, []byte(content), 0640) //nolint:gosec // G306: generated project file
-}
-
-func ifEmpty(s, fallback string) string {
-	if s == "" {
-		return fallback
-	}
-	return s
 }
