@@ -128,8 +128,8 @@ func TestKubernetesProvider_ResolveIdentities_ServiceAccount(t *testing.T) {
 	if len(ids) != 1 {
 		t.Fatalf("expected 1 identity, got %d", len(ids))
 	}
-	if ids[0].Identifier != "sa:my-svc" {
-		t.Errorf("expected identifier 'sa:my-svc', got %s", ids[0].Identifier)
+	if ids[0].Identifier != "system:serviceaccount:default:my-svc" {
+		t.Errorf("expected identifier 'system:serviceaccount:default:my-svc', got %s", ids[0].Identifier)
 	}
 }
 

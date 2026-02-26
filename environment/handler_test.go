@@ -29,8 +29,14 @@ func setupTestServer(t *testing.T) (*Handler, *http.ServeMux) {
 func TestCRUDLifecycle(t *testing.T) {
 	_, mux := setupTestServer(t)
 
+	// Start a test server to act as the environment endpoint for connectivity checks.
+	testEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testEndpoint.Close()
+
 	// --- Create ---
-	createBody := `{"name":"staging","provider":"aws","workflow_id":"wf-1","region":"us-east-1","config":{"instance_type":"t3.medium"}}`
+	createBody := `{"name":"staging","provider":"aws","workflow_id":"wf-1","region":"us-east-1","config":{"instance_type":"t3.medium","endpoint":"` + testEndpoint.URL + `"}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/environments", bytes.NewBufferString(createBody))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -107,7 +113,7 @@ func TestCRUDLifecycle(t *testing.T) {
 	}
 
 	// --- Update ---
-	updateBody := `{"name":"production","provider":"aws","workflow_id":"wf-1","region":"us-west-2","status":"active","config":{"instance_type":"m5.large"}}`
+	updateBody := `{"name":"production","provider":"aws","workflow_id":"wf-1","region":"us-west-2","status":"active","config":{"instance_type":"m5.large","endpoint":"` + testEndpoint.URL + `"}}`
 	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/environments/"+envID, bytes.NewBufferString(updateBody))
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)

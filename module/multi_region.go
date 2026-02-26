@@ -113,8 +113,16 @@ func (m *MultiRegionModule) Init(app modular.Application) error {
 	switch providerType {
 	case "mock":
 		m.backend = &mockMultiRegionBackend{}
+	case "aws":
+		return fmt.Errorf("platform.region %q: provider %q is not yet supported; use AWS Route53/ALB directly via platform.kubernetes or platform.ecs modules", m.name, providerType)
+	case "gcp":
+		return fmt.Errorf("platform.region %q: provider %q is not yet supported; use GKE modules with Cloud Load Balancing for multi-region routing", m.name, providerType)
+	case "azure":
+		return fmt.Errorf("platform.region %q: provider %q is not yet supported; use AKS modules with Azure Traffic Manager for multi-region routing", m.name, providerType)
+	case "digitalocean":
+		return fmt.Errorf("platform.region %q: provider %q is not yet supported; use platform.doks modules per region for DigitalOcean multi-region deployments", m.name, providerType)
 	default:
-		return fmt.Errorf("platform.region %q: unsupported provider %q", m.name, providerType)
+		return fmt.Errorf("platform.region %q: unsupported provider %q (supported: mock)", m.name, providerType)
 	}
 
 	return app.RegisterService(m.name, m)
