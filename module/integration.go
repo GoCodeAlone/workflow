@@ -44,6 +44,24 @@ func isPrivateIP(ip net.IP) bool {
 	return false
 }
 
+// validateURLHost checks that the constructed request URL targets the same host
+// as the configured base URL. This prevents host injection via path manipulation
+// (e.g. a crafted path that tries to redirect the request to a different server).
+func validateURLHost(reqURL, baseURL string) error {
+	req, err := url.Parse(reqURL)
+	if err != nil {
+		return fmt.Errorf("invalid request URL: %w", err)
+	}
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return fmt.Errorf("invalid base URL: %w", err)
+	}
+	if req.Scheme != base.Scheme || req.Host != base.Host {
+		return fmt.Errorf("request URL host %q does not match configured base URL host %q", req.Host, base.Host)
+	}
+	return nil
+}
+
 // validateURL checks that a URL is safe to request (not targeting private/internal networks).
 func validateURL(rawURL string) error {
 	parsed, err := url.Parse(rawURL)
@@ -239,6 +257,11 @@ func (c *HTTPIntegrationConnector) Execute(ctx context.Context, action string, p
 	reqURL, err := url.JoinPath(c.baseURL, path)
 	if err != nil {
 		return nil, fmt.Errorf("invalid URL path: %w", err)
+	}
+
+	// Ensure the constructed URL still targets the configured base host (prevent host injection via path).
+	if err := validateURLHost(reqURL, c.baseURL); err != nil {
+		return nil, fmt.Errorf("invalid request URL: %w", err)
 	}
 
 	// Handle query parameters for GET requests
