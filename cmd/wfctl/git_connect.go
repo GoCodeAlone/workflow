@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // wfctlConfig represents the .wfctl.yaml project config file.
@@ -236,6 +238,25 @@ ui/node_modules/
 	return os.WriteFile(".gitignore", []byte(content), 0600)
 }
 
+// wfctlConfigFile mirrors the nested YAML structure of .wfctl.yaml for unmarshaling.
+type wfctlConfigFile struct {
+	Project struct {
+		Name       string `yaml:"name"`
+		Version    string `yaml:"version"`
+		ConfigFile string `yaml:"configFile"`
+	} `yaml:"project"`
+	Git struct {
+		Repository      string `yaml:"repository"`
+		Branch          string `yaml:"branch"`
+		AutoPush        bool   `yaml:"autoPush"`
+		GenerateActions bool   `yaml:"generateActions"`
+	} `yaml:"git"`
+	Deploy struct {
+		Target    string `yaml:"target"`
+		Namespace string `yaml:"namespace"`
+	} `yaml:"deploy"`
+}
+
 // loadWfctlConfig reads .wfctl.yaml from the current directory.
 func loadWfctlConfig() (*wfctlConfig, error) {
 	data, err := os.ReadFile(".wfctl.yaml")
@@ -243,44 +264,28 @@ func loadWfctlConfig() (*wfctlConfig, error) {
 		return nil, fmt.Errorf("failed to read .wfctl.yaml: %w (run 'wfctl git connect' first)", err)
 	}
 
-	cfg := &wfctlConfig{
-		GitBranch:    "main",
-		DeployTarget: "kubernetes",
+	var raw wfctlConfigFile
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("failed to parse .wfctl.yaml: %w", err)
 	}
 
-	// Simple line-by-line YAML parser for .wfctl.yaml
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		kv := strings.SplitN(line, ":", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(kv[0])
-		val := strings.TrimSpace(kv[1])
+	cfg := &wfctlConfig{
+		ProjectName:     raw.Project.Name,
+		ProjectVersion:  raw.Project.Version,
+		ConfigFile:      raw.Project.ConfigFile,
+		GitRepository:   raw.Git.Repository,
+		GitBranch:       raw.Git.Branch,
+		GitAutoPush:     raw.Git.AutoPush,
+		GenerateActions: raw.Git.GenerateActions,
+		DeployTarget:    raw.Deploy.Target,
+		DeployNamespace: raw.Deploy.Namespace,
+	}
 
-		switch key {
-		case "name":
-			cfg.ProjectName = val
-		case "version":
-			cfg.ProjectVersion = strings.Trim(val, "\"")
-		case "configFile":
-			cfg.ConfigFile = val
-		case "repository":
-			cfg.GitRepository = val
-		case "branch":
-			cfg.GitBranch = val
-		case "autoPush":
-			cfg.GitAutoPush = val == "true"
-		case "generateActions":
-			cfg.GenerateActions = val == "true"
-		case "target":
-			cfg.DeployTarget = val
-		case "namespace":
-			cfg.DeployNamespace = val
-		}
+	if cfg.GitBranch == "" {
+		cfg.GitBranch = "main"
+	}
+	if cfg.DeployTarget == "" {
+		cfg.DeployTarget = "kubernetes"
 	}
 
 	return cfg, nil
