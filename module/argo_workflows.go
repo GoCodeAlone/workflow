@@ -454,7 +454,7 @@ func (b *argoRealBackend) plan(m *ArgoWorkflowsModule) (*PlatformPlan, error) {
 		plan.Actions = []PlatformAction{
 			{Type: "create", Resource: m.name, Detail: fmt.Sprintf("install/connect Argo Workflows at %s (namespace: %s)", b.endpoint, m.namespace())},
 		}
-		return plan, nil
+		return plan, nil //nolint:nilerr // graceful fallback — unreachable server produces a plan action
 	}
 	plan.Actions = []PlatformAction{
 		{Type: "noop", Resource: m.name, Detail: fmt.Sprintf("Argo Server reachable at %s", b.endpoint)},
@@ -495,7 +495,7 @@ func (b *argoRealBackend) status(m *ArgoWorkflowsModule) (*ArgoWorkflowState, er
 	_, statusCode, connErr := b.doRequest(context.Background(), http.MethodGet, "/api/v1/version", nil)
 	if connErr != nil || statusCode != http.StatusOK {
 		m.state.Status = "error"
-		return m.state, nil
+		return m.state, nil //nolint:nilerr // error status is reported in state, not as error
 	}
 	m.state.Status = "running"
 	return m.state, nil
