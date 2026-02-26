@@ -142,10 +142,14 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			m := module.NewM2MAuthModule(name, secret, tokenExpiry, issuer)
 
 			if algo, ok := cfg["algorithm"].(string); ok && module.SigningAlgorithm(algo) == module.SigningAlgES256 {
+				var keyErr error
 				if pemKey, ok := cfg["privateKey"].(string); ok && pemKey != "" {
-					_ = m.SetECDSAKey(pemKey)
+					keyErr = m.SetECDSAKey(pemKey)
 				} else {
-					_ = m.GenerateECDSAKey()
+					keyErr = m.GenerateECDSAKey()
+				}
+				if keyErr != nil {
+					m.SetInitErr(keyErr)
 				}
 			}
 
@@ -284,13 +288,13 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			Outputs:     []schema.ServiceIODef{{Name: "access-token", Type: "BearerToken", Description: "Signed access token (HS256 or ES256)"}},
 			ConfigFields: []schema.ConfigFieldDef{
 				{Key: "secret", Label: "HMAC Secret", Type: schema.FieldTypeString, Description: "Secret for HS256 token signing (min 32 bytes; leave blank for ES256)", Placeholder: "$M2M_SECRET", Sensitive: true},
-				{Key: "algorithm", Label: "Signing Algorithm", Type: schema.FieldTypeSelect, Options: []string{"HS256", "ES256"}, DefaultValue: "HS256", Description: "JWT signing algorithm: HS256 (symmetric) or ES256 (ECDSA P-256)"},
+				{Key: "algorithm", Label: "Signing Algorithm", Type: schema.FieldTypeSelect, Options: []string{"HS256", "ES256"}, DefaultValue: "ES256", Description: "JWT signing algorithm: ES256 (ECDSA P-256) or HS256 (symmetric)"},
 				{Key: "privateKey", Label: "EC Private Key (PEM)", Type: schema.FieldTypeString, Description: "PEM-encoded EC private key for ES256 signing; if omitted a key is auto-generated", Sensitive: true},
 				{Key: "tokenExpiry", Label: "Token Expiry", Type: schema.FieldTypeDuration, DefaultValue: "1h", Description: "Access token expiration duration (e.g. 15m, 1h)", Placeholder: "1h"},
 				{Key: "issuer", Label: "Issuer", Type: schema.FieldTypeString, DefaultValue: "workflow", Description: "Token issuer (iss) claim", Placeholder: "workflow"},
 				{Key: "clients", Label: "Registered Clients", Type: schema.FieldTypeJSON, Description: "List of OAuth2 clients: [{clientId, clientSecret, scopes, description}]"},
 			},
-			DefaultConfig: map[string]any{"algorithm": "HS256", "tokenExpiry": "1h", "issuer": "workflow", "clients": []any{}},
+			DefaultConfig: map[string]any{"algorithm": "ES256", "tokenExpiry": "1h", "issuer": "workflow", "clients": []any{}},
 		},
 	}
 }

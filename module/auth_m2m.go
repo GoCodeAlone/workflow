@@ -55,6 +55,10 @@ type M2MAuthModule struct {
 	issuer      string
 	tokenExpiry time.Duration
 
+	// initErr holds an error from factory-time key setup (e.g. SetECDSAKey/GenerateECDSAKey),
+	// which is surfaced in Init() since module factories cannot return errors.
+	initErr error
+
 	// HS256 fields
 	hmacSecret []byte
 
@@ -104,6 +108,7 @@ func (m *M2MAuthModule) GenerateECDSAKey() error {
 }
 
 // SetECDSAKey loads a PEM-encoded EC private key and switches the module to ES256 signing.
+// Only P-256 keys are accepted; other curves are rejected.
 func (m *M2MAuthModule) SetECDSAKey(pemKey string) error {
 	block, _ := pem.Decode([]byte(pemKey))
 	if block == nil {
@@ -113,10 +118,19 @@ func (m *M2MAuthModule) SetECDSAKey(pemKey string) error {
 	if err != nil {
 		return fmt.Errorf("parse EC private key: %w", err)
 	}
+	if key.Curve != elliptic.P256() {
+		return fmt.Errorf("unsupported ECDSA curve: got %s, want P-256", key.Curve.Params().Name)
+	}
 	m.privateKey = key
 	m.publicKey = &key.PublicKey
 	m.algorithm = SigningAlgES256
 	return nil
+}
+
+// SetInitErr stores a deferred initialization error to be returned by Init().
+// This is used by factory functions which cannot return errors directly.
+func (m *M2MAuthModule) SetInitErr(err error) {
+	m.initErr = err
 }
 
 // AddTrustedKey registers a trusted ECDSA public key for JWT-bearer assertion validation.
@@ -137,8 +151,12 @@ func (m *M2MAuthModule) RegisterClient(client M2MClient) {
 // Name returns the module name.
 func (m *M2MAuthModule) Name() string { return m.name }
 
-// Init validates the module configuration.
+// Init validates the module configuration. It also surfaces any key-setup error
+// that occurred in the factory (stored in initErr).
 func (m *M2MAuthModule) Init(_ modular.Application) error {
+	if m.initErr != nil {
+		return fmt.Errorf("M2M auth: key setup failed: %w", m.initErr)
+	}
 	if m.algorithm == SigningAlgHS256 && len(m.hmacSecret) < 32 {
 		return fmt.Errorf("M2M auth: HMAC secret must be at least 32 bytes for HS256")
 	}
@@ -300,11 +318,18 @@ func (m *M2MAuthModule) handleJWTBearer(w http.ResponseWriter, r *http.Request) 
 func (m *M2MAuthModule) handleJWKS(w http.ResponseWriter, _ *http.Request) {
 	if m.algorithm != SigningAlgES256 || m.publicKey == nil {
 		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "JWKS not available for HS256 (symmetric) configuration"})
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "JWKS not available: algorithm must be ES256 with a configured public key",
+		})
 		return
 	}
 
-	jwk := ecPublicKeyToJWK(m.publicKey, m.name+"-key")
+	jwk, err := ecPublicKeyToJWK(m.publicKey, m.name+"-key")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(oauthError("server_error", "failed to generate JWK for ES256 public key"))
+		return
+	}
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"keys": []any{jwk},
 	})
@@ -373,8 +398,12 @@ func (m *M2MAuthModule) authenticateClient(clientID, clientSecret string) (*M2MC
 		return nil, fmt.Errorf("client not found")
 	}
 
-	// Constant-time comparison to prevent timing attacks.
-	if subtle.ConstantTimeCompare([]byte(client.ClientSecret), []byte(clientSecret)) != 1 {
+	// Compare fixed-length SHA-256 hashes to keep the comparison constant-time
+	// regardless of whether the provided secret length differs from the stored one,
+	// since subtle.ConstantTimeCompare returns early when lengths differ.
+	storedHash := sha256.Sum256([]byte(client.ClientSecret))
+	providedHash := sha256.Sum256([]byte(clientSecret))
+	if subtle.ConstantTimeCompare(storedHash[:], providedHash[:]) != 1 {
 		return nil, fmt.Errorf("invalid client secret")
 	}
 
@@ -403,18 +432,38 @@ func (m *M2MAuthModule) validateScopes(client *M2MClient, requestedScope string)
 }
 
 // validateJWTAssertion parses and validates a JWT bearer assertion (RFC 7523).
-// It tries to verify the signature using any registered trusted key.
+// It first parses the assertion unverified to extract the `iss` claim and the
+// `kid` header, then selects the matching trusted key, and verifies the signature
+// with that specific key.  This prevents a holder of any trusted key from
+// impersonating an arbitrary subject.
 func (m *M2MAuthModule) validateJWTAssertion(assertion string) (jwt.MapClaims, error) {
-	m.mu.RLock()
-	keys := make(map[string]*ecdsa.PublicKey, len(m.trustedKeys))
-	for k, v := range m.trustedKeys {
-		keys[k] = v
+	// Parse unverified to extract iss/kid for key selection.
+	unverified, _, err := new(jwt.Parser).ParseUnverified(assertion, jwt.MapClaims{})
+	if err != nil {
+		return nil, fmt.Errorf("malformed assertion: %w", err)
 	}
+	uClaims, ok := unverified.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf("malformed assertion claims")
+	}
+	iss, _ := uClaims["iss"].(string)
+	kid, _ := unverified.Header["kid"].(string)
+
+	m.mu.RLock()
+	// Try kid first, then iss.
+	var selectedKey *ecdsa.PublicKey
+	if kid != "" {
+		selectedKey = m.trustedKeys[kid]
+	}
+	if selectedKey == nil && iss != "" {
+		selectedKey = m.trustedKeys[iss]
+	}
+	hmacSecret := m.hmacSecret
 	m.mu.RUnlock()
 
-	var lastErr error
-	for _, pubKey := range keys {
-		k := pubKey // capture range var
+	// Try EC key if found.
+	if selectedKey != nil {
+		k := selectedKey
 		token, err := jwt.Parse(assertion, func(token *jwt.Token) (any, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -422,36 +471,35 @@ func (m *M2MAuthModule) validateJWTAssertion(assertion string) (jwt.MapClaims, e
 			return k, nil
 		}, jwt.WithExpirationRequired())
 		if err != nil {
-			lastErr = err
-			continue
+			return nil, fmt.Errorf("invalid assertion: %w", err)
 		}
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok || !token.Valid {
-			continue
+			return nil, fmt.Errorf("invalid assertion claims")
 		}
 		return claims, nil
 	}
 
-	// Also allow HS256-signed assertions using the module's own secret (for testing/internal use).
-	if len(m.hmacSecret) >= 32 {
+	// Fall back to HS256 using the module's own secret (for internal/testing use).
+	// The assertion must be signed with the module's exact secret.
+	if len(hmacSecret) >= 32 {
 		token, err := jwt.Parse(assertion, func(token *jwt.Token) (any, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
-			return m.hmacSecret, nil
+			return hmacSecret, nil
 		}, jwt.WithExpirationRequired())
-		if err == nil {
-			if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-				return claims, nil
-			}
+		if err != nil {
+			return nil, fmt.Errorf("invalid assertion: %w", err)
 		}
-		lastErr = err
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || !token.Valid {
+			return nil, fmt.Errorf("invalid assertion claims")
+		}
+		return claims, nil
 	}
 
-	if lastErr != nil {
-		return nil, fmt.Errorf("invalid assertion: %w", lastErr)
-	}
-	return nil, fmt.Errorf("no trusted key found for assertion")
+	return nil, fmt.Errorf("no trusted key found for assertion issuer %q", iss)
 }
 
 // Authenticate implements the AuthProvider interface so M2MAuthModule can be
@@ -502,13 +550,17 @@ func (m *M2MAuthModule) Authenticate(tokenStr string) (bool, map[string]any, err
 // ecPublicKeyToJWK converts an ECDSA P-256 public key to a JWK (RFC 7517) map.
 // It uses the ecdh package to extract the uncompressed point bytes, avoiding
 // the deprecated ecdsa.PublicKey.X / .Y big.Int fields.
-func ecPublicKeyToJWK(pub *ecdsa.PublicKey, kid string) map[string]any {
+// Returns an error if the key cannot be converted.
+func ecPublicKeyToJWK(pub *ecdsa.PublicKey, kid string) (map[string]any, error) {
 	ecdhPub, err := pub.ECDH()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("convert to ECDH key: %w", err)
 	}
-	// Uncompressed point: 0x04 || x (32 bytes) || y (32 bytes)
+	// Uncompressed point format for P-256: 0x04 || x (32 bytes) || y (32 bytes) = 65 bytes.
 	b := ecdhPub.Bytes()
+	if len(b) != 65 || b[0] != 0x04 {
+		return nil, fmt.Errorf("unexpected uncompressed point length %d or prefix 0x%02x (want 65, 0x04)", len(b), b[0])
+	}
 	x := b[1:33]
 	y := b[33:65]
 	return map[string]any{
@@ -519,7 +571,7 @@ func ecPublicKeyToJWK(pub *ecdsa.PublicKey, kid string) map[string]any {
 		"kid": kid,
 		"x":   base64.RawURLEncoding.EncodeToString(x),
 		"y":   base64.RawURLEncoding.EncodeToString(y),
-	}
+	}, nil
 }
 
 // jwkThumbprint computes the JWK thumbprint (RFC 7638) for an EC P-256 key.
@@ -530,6 +582,9 @@ func jwkThumbprint(pub *ecdsa.PublicKey) string {
 		return ""
 	}
 	b := ecdhPub.Bytes()
+	if len(b) != 65 || b[0] != 0x04 {
+		return ""
+	}
 	x := base64.RawURLEncoding.EncodeToString(b[1:33])
 	y := base64.RawURLEncoding.EncodeToString(b[33:65])
 	// RFC 7638: lexicographic JSON of required members.

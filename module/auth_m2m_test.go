@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -382,6 +383,33 @@ func TestM2M_SetECDSAKey_InvalidPEM(t *testing.T) {
 	}
 }
 
+func TestM2M_SetECDSAKey_NonP256Rejected(t *testing.T) {
+	// Generate a P-384 key (not P-256) and verify it is rejected.
+	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate P-384 key: %v", err)
+	}
+	der, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
+	m := NewM2MAuthModule("m2m", "", time.Hour, "issuer")
+	if err := m.SetECDSAKey(string(pemBytes)); err == nil {
+		t.Error("expected error for non-P256 key")
+	} else if !strings.Contains(err.Error(), "P-256") {
+		t.Errorf("expected P-256 mention in error, got %q", err.Error())
+	}
+}
+
+func TestM2M_InitErr_SurfacedInInit(t *testing.T) {
+	m := NewM2MAuthModule("m2m", "", time.Hour, "issuer")
+	m.SetInitErr(fmt.Errorf("injected key error"))
+	if err := m.Init(nil); err == nil {
+		t.Error("expected init error to surface")
+	}
+}
+
 // --- JWKS endpoint ---
 
 func TestM2M_JWKS_ES256(t *testing.T) {
@@ -647,6 +675,68 @@ func TestM2M_JWTBearer_UntrustedKey(t *testing.T) {
 	}
 }
 
+// TestM2M_JWTBearer_KeySelectedByIss verifies that validation selects the key
+// that matches the assertion's iss claim, not an arbitrary trusted key.
+func TestM2M_JWTBearer_KeySelectedByIss(t *testing.T) {
+	server := newM2MES256(t)
+
+	// Register two different keys for two different issuers.
+	keyA, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	keyB, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	server.AddTrustedKey("service-a", &keyA.PublicKey)
+	server.AddTrustedKey("service-b", &keyB.PublicKey)
+
+	// Build an assertion claiming iss=service-a but signed with keyB (mismatch).
+	badClaims := jwt.MapClaims{
+		"iss": "service-a",
+		"sub": "service-a",
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+	}
+	badTok := jwt.NewWithClaims(jwt.SigningMethodES256, badClaims)
+	badAssertion, _ := badTok.SignedString(keyB) // signed by keyB but iss=service-a
+
+	params := url.Values{
+		"grant_type": {GrantTypeJWTBearer},
+		"assertion":  {badAssertion},
+	}
+	w := postToken(t, server, params)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 when assertion iss/key mismatch, got %d; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestM2M_JWTBearer_KeySelectedByKid verifies that the kid header is used for key lookup.
+func TestM2M_JWTBearer_KeySelectedByKid(t *testing.T) {
+	server := newM2MES256(t)
+
+	clientKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	server.AddTrustedKey("my-kid", &clientKey.PublicKey)
+
+	claims := jwt.MapClaims{
+		"iss": "some-service",
+		"sub": "some-service",
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+	}
+	// Set kid in header; server should find key by kid.
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	tok.Header["kid"] = "my-kid"
+	assertion, err := tok.SignedString(clientKey)
+	if err != nil {
+		t.Fatalf("sign assertion: %v", err)
+	}
+
+	params := url.Values{
+		"grant_type": {GrantTypeJWTBearer},
+		"assertion":  {assertion},
+	}
+	w := postToken(t, server, params)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for kid-based key lookup, got %d; body: %s", w.Code, w.Body.String())
+	}
+}
+
 // --- unsupported grant type ---
 
 func TestM2M_UnsupportedGrantType(t *testing.T) {
@@ -766,7 +856,10 @@ func TestM2M_ecPublicKeyToJWK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	jwk := ecPublicKeyToJWK(&key.PublicKey, "test-key")
+	jwk, err := ecPublicKeyToJWK(&key.PublicKey, "test-key")
+	if err != nil {
+		t.Fatalf("ecPublicKeyToJWK: %v", err)
+	}
 	if jwk["kty"] != "EC" {
 		t.Errorf("expected kty=EC, got %v", jwk["kty"])
 	}
@@ -899,7 +992,10 @@ func TestM2M_JWKSKeyID(t *testing.T) {
 
 func TestM2M_ecPublicKeyToJWK_CoordinatesDecodable(t *testing.T) {
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	jwk := ecPublicKeyToJWK(&key.PublicKey, "kid")
+	jwk, err := ecPublicKeyToJWK(&key.PublicKey, "kid")
+	if err != nil {
+		t.Fatalf("ecPublicKeyToJWK: %v", err)
+	}
 
 	xStr, _ := jwk["x"].(string)
 	yStr, _ := jwk["y"].(string)
