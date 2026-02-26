@@ -375,6 +375,130 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Stateful:   false,
 			ConfigKeys: []string{},
 		},
+
+		// datastores plugin
+		"nosql.memory": {
+			Type:       "nosql.memory",
+			Plugin:     "datastores",
+			Stateful:   true,
+			ConfigKeys: []string{"collection"},
+		},
+		"nosql.dynamodb": {
+			Type:       "nosql.dynamodb",
+			Plugin:     "datastores",
+			Stateful:   false,
+			ConfigKeys: []string{"tableName", "region", "endpoint", "credentials"},
+		},
+		"nosql.mongodb": {
+			Type:       "nosql.mongodb",
+			Plugin:     "datastores",
+			Stateful:   false,
+			ConfigKeys: []string{"uri", "database", "collection"},
+		},
+		"nosql.redis": {
+			Type:       "nosql.redis",
+			Plugin:     "datastores",
+			Stateful:   false,
+			ConfigKeys: []string{"addr", "password", "db"},
+		},
+
+		// storage plugin (artifact)
+		"storage.artifact": {
+			Type:       "storage.artifact",
+			Plugin:     "storage",
+			Stateful:   false,
+			ConfigKeys: []string{"backend", "basePath", "maxSize", "bucket", "region", "endpoint"},
+		},
+
+		// cloud plugin
+		"cloud.account": {
+			Type:       "cloud.account",
+			Plugin:     "cloud",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "region", "credentials", "project_id", "subscription_id"},
+		},
+
+		// gitlab plugin
+		"gitlab.client": {
+			Type:       "gitlab.client",
+			Plugin:     "gitlab",
+			Stateful:   false,
+			ConfigKeys: []string{"url", "token"},
+		},
+		"gitlab.webhook": {
+			Type:       "gitlab.webhook",
+			Plugin:     "gitlab",
+			Stateful:   false,
+			ConfigKeys: []string{"secret", "path", "events"},
+		},
+
+		// cicd plugin (codebuild module)
+		"aws.codebuild": {
+			Type:       "aws.codebuild",
+			Plugin:     "cicd",
+			Stateful:   true,
+			ConfigKeys: []string{"account", "region", "service_role", "compute_type", "image", "source_type"},
+		},
+
+		// policy plugin
+		"policy.opa": {
+			Type:       "policy.opa",
+			Plugin:     "policy",
+			Stateful:   false,
+			ConfigKeys: []string{"endpoint", "policies"},
+		},
+		"policy.cedar": {
+			Type:       "policy.cedar",
+			Plugin:     "policy",
+			Stateful:   false,
+			ConfigKeys: []string{"policies"},
+		},
+		"policy.mock": {
+			Type:       "policy.mock",
+			Plugin:     "policy",
+			Stateful:   false,
+			ConfigKeys: []string{"policies"},
+		},
+
+		// observability plugin (tracing)
+		"tracing.propagation": {
+			Type:       "tracing.propagation",
+			Plugin:     "observability",
+			Stateful:   false,
+			ConfigKeys: []string{"format"},
+		},
+
+		// platform plugin (region router + DigitalOcean)
+		"platform.region_router": {
+			Type:       "platform.region_router",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"module", "mode"},
+		},
+		"platform.doks": {
+			Type:       "platform.doks",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"account", "cluster_name", "region", "version", "node_pool"},
+		},
+		"platform.do_networking": {
+			Type:       "platform.do_networking",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"account", "provider", "vpc", "firewalls"},
+		},
+		"platform.do_dns": {
+			Type:       "platform.do_dns",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"account", "provider", "domain", "records"},
+		},
+		"platform.do_app": {
+			Type:       "platform.do_app",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"account", "provider", "name", "region", "image", "instances", "http_port", "envs"},
+		},
 	}
 }
 
@@ -649,15 +773,298 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"store"},
 		},
+
+		// datastores plugin steps
+		"step.nosql_get": {
+			Type:       "step.nosql_get",
+			Plugin:     "datastores",
+			ConfigKeys: []string{"store", "key", "output", "miss_ok"},
+		},
+		"step.nosql_put": {
+			Type:       "step.nosql_put",
+			Plugin:     "datastores",
+			ConfigKeys: []string{"store", "key", "item"},
+		},
+		"step.nosql_delete": {
+			Type:       "step.nosql_delete",
+			Plugin:     "datastores",
+			ConfigKeys: []string{"store", "key"},
+		},
+		"step.nosql_query": {
+			Type:       "step.nosql_query",
+			Plugin:     "datastores",
+			ConfigKeys: []string{"store", "prefix", "output"},
+		},
+
+		// storage plugin steps (artifact)
+		"step.artifact_upload": {
+			Type:       "step.artifact_upload",
+			Plugin:     "storage",
+			ConfigKeys: []string{"store", "key", "source", "metadata"},
+		},
+		"step.artifact_download": {
+			Type:       "step.artifact_download",
+			Plugin:     "storage",
+			ConfigKeys: []string{"store", "key", "dest"},
+		},
+		"step.artifact_list": {
+			Type:       "step.artifact_list",
+			Plugin:     "storage",
+			ConfigKeys: []string{"store", "prefix", "output"},
+		},
+		"step.artifact_delete": {
+			Type:       "step.artifact_delete",
+			Plugin:     "storage",
+			ConfigKeys: []string{"store", "key"},
+		},
+
+		// cloud plugin steps
+		"step.cloud_validate": {
+			Type:       "step.cloud_validate",
+			Plugin:     "cloud",
+			ConfigKeys: []string{"account"},
+		},
+
+		// cicd plugin steps (build_binary + codebuild)
+		"step.build_binary": {
+			Type:       "step.build_binary",
+			Plugin:     "cicd",
+			ConfigKeys: []string{"config_file", "output", "os", "arch"},
+		},
+		"step.codebuild_create_project": {
+			Type:       "step.codebuild_create_project",
+			Plugin:     "cicd",
+			ConfigKeys: []string{"project"},
+		},
+		"step.codebuild_start": {
+			Type:       "step.codebuild_start",
+			Plugin:     "cicd",
+			ConfigKeys: []string{"project", "env_vars"},
+		},
+		"step.codebuild_status": {
+			Type:       "step.codebuild_status",
+			Plugin:     "cicd",
+			ConfigKeys: []string{"project", "build_id"},
+		},
+		"step.codebuild_logs": {
+			Type:       "step.codebuild_logs",
+			Plugin:     "cicd",
+			ConfigKeys: []string{"project", "build_id"},
+		},
+		"step.codebuild_list_builds": {
+			Type:       "step.codebuild_list_builds",
+			Plugin:     "cicd",
+			ConfigKeys: []string{"project"},
+		},
+		"step.codebuild_delete_project": {
+			Type:       "step.codebuild_delete_project",
+			Plugin:     "cicd",
+			ConfigKeys: []string{"project"},
+		},
+
+		// gitlab plugin steps
+		"step.gitlab_trigger_pipeline": {
+			Type:       "step.gitlab_trigger_pipeline",
+			Plugin:     "gitlab",
+			ConfigKeys: []string{"client", "project", "ref", "variables"},
+		},
+		"step.gitlab_pipeline_status": {
+			Type:       "step.gitlab_pipeline_status",
+			Plugin:     "gitlab",
+			ConfigKeys: []string{"client", "project", "pipeline_id"},
+		},
+		"step.gitlab_parse_webhook": {
+			Type:       "step.gitlab_parse_webhook",
+			Plugin:     "gitlab",
+			ConfigKeys: []string{"client"},
+		},
+		"step.gitlab_create_mr": {
+			Type:       "step.gitlab_create_mr",
+			Plugin:     "gitlab",
+			ConfigKeys: []string{"client", "project", "source_branch", "target_branch", "title", "description"},
+		},
+		"step.gitlab_mr_comment": {
+			Type:       "step.gitlab_mr_comment",
+			Plugin:     "gitlab",
+			ConfigKeys: []string{"client", "project", "mr_iid", "body"},
+		},
+
+		// policy plugin steps
+		"step.policy_load": {
+			Type:       "step.policy_load",
+			Plugin:     "policy",
+			ConfigKeys: []string{"engine", "policy_name", "content"},
+		},
+		"step.policy_evaluate": {
+			Type:       "step.policy_evaluate",
+			Plugin:     "policy",
+			ConfigKeys: []string{"engine", "input_from"},
+		},
+		"step.policy_list": {
+			Type:       "step.policy_list",
+			Plugin:     "policy",
+			ConfigKeys: []string{"engine"},
+		},
+		"step.policy_test": {
+			Type:       "step.policy_test",
+			Plugin:     "policy",
+			ConfigKeys: []string{"engine", "sample_input", "expect_allow"},
+		},
+
+		// observability plugin steps (tracing)
+		"step.trace_start": {
+			Type:       "step.trace_start",
+			Plugin:     "observability",
+			ConfigKeys: []string{"span_name", "attributes"},
+		},
+		"step.trace_inject": {
+			Type:       "step.trace_inject",
+			Plugin:     "observability",
+			ConfigKeys: []string{"carrier_field", "carrier_type"},
+		},
+		"step.trace_extract": {
+			Type:       "step.trace_extract",
+			Plugin:     "observability",
+			ConfigKeys: []string{"carrier_field", "carrier_type"},
+		},
+		"step.trace_annotate": {
+			Type:       "step.trace_annotate",
+			Plugin:     "observability",
+			ConfigKeys: []string{"event_name", "attributes"},
+		},
+		"step.trace_link": {
+			Type:       "step.trace_link",
+			Plugin:     "observability",
+			ConfigKeys: []string{"parent_field"},
+		},
+
+		// marketplace plugin steps
+		"step.marketplace_search": {
+			Type:       "step.marketplace_search",
+			Plugin:     "marketplace",
+			ConfigKeys: []string{"query", "category", "tags"},
+		},
+		"step.marketplace_detail": {
+			Type:       "step.marketplace_detail",
+			Plugin:     "marketplace",
+			ConfigKeys: []string{"plugin"},
+		},
+		"step.marketplace_install": {
+			Type:       "step.marketplace_install",
+			Plugin:     "marketplace",
+			ConfigKeys: []string{"plugin"},
+		},
+		"step.marketplace_installed": {
+			Type:       "step.marketplace_installed",
+			Plugin:     "marketplace",
+			ConfigKeys: []string{},
+		},
+		"step.marketplace_update": {
+			Type:       "step.marketplace_update",
+			Plugin:     "marketplace",
+			ConfigKeys: []string{"plugin"},
+		},
+		"step.marketplace_uninstall": {
+			Type:       "step.marketplace_uninstall",
+			Plugin:     "marketplace",
+			ConfigKeys: []string{"plugin"},
+		},
+
+		// platform plugin steps (region)
+		"step.region_deploy": {
+			Type:       "step.region_deploy",
+			Plugin:     "platform",
+			ConfigKeys: []string{"module", "region"},
+		},
+		"step.region_promote": {
+			Type:       "step.region_promote",
+			Plugin:     "platform",
+			ConfigKeys: []string{"module", "region"},
+		},
+		"step.region_failover": {
+			Type:       "step.region_failover",
+			Plugin:     "platform",
+			ConfigKeys: []string{"module", "from", "to"},
+		},
+		"step.region_status": {
+			Type:       "step.region_status",
+			Plugin:     "platform",
+			ConfigKeys: []string{"module"},
+		},
+		"step.region_weight": {
+			Type:       "step.region_weight",
+			Plugin:     "platform",
+			ConfigKeys: []string{"module", "region", "weight"},
+		},
+		"step.region_sync": {
+			Type:       "step.region_sync",
+			Plugin:     "platform",
+			ConfigKeys: []string{"module"},
+		},
+
+		// platform plugin steps (argo)
+		"step.argo_submit": {
+			Type:       "step.argo_submit",
+			Plugin:     "platform",
+			ConfigKeys: []string{"service", "workflow_name", "steps"},
+		},
+		"step.argo_status": {
+			Type:       "step.argo_status",
+			Plugin:     "platform",
+			ConfigKeys: []string{"service", "workflow_run"},
+		},
+		"step.argo_logs": {
+			Type:       "step.argo_logs",
+			Plugin:     "platform",
+			ConfigKeys: []string{"service", "workflow_run"},
+		},
+		"step.argo_delete": {
+			Type:       "step.argo_delete",
+			Plugin:     "platform",
+			ConfigKeys: []string{"service", "workflow_run"},
+		},
+		"step.argo_list": {
+			Type:       "step.argo_list",
+			Plugin:     "platform",
+			ConfigKeys: []string{"service", "label_selector"},
+		},
+
+		// platform plugin steps (DigitalOcean)
+		"step.do_deploy": {
+			Type:       "step.do_deploy",
+			Plugin:     "platform",
+			ConfigKeys: []string{"app", "image"},
+		},
+		"step.do_status": {
+			Type:       "step.do_status",
+			Plugin:     "platform",
+			ConfigKeys: []string{"app"},
+		},
+		"step.do_logs": {
+			Type:       "step.do_logs",
+			Plugin:     "platform",
+			ConfigKeys: []string{"app"},
+		},
+		"step.do_scale": {
+			Type:       "step.do_scale",
+			Plugin:     "platform",
+			ConfigKeys: []string{"app", "instances"},
+		},
+		"step.do_destroy": {
+			Type:       "step.do_destroy",
+			Plugin:     "platform",
+			ConfigKeys: []string{"app"},
+		},
 	}
 }
 
 // KnownTriggerTypes returns all known trigger types.
 func KnownTriggerTypes() map[string]bool {
 	return map[string]bool{
-		"http":     true,
-		"event":    true,
-		"eventbus": true,
-		"schedule": true,
+		"http":           true,
+		"event":          true,
+		"eventbus":       true,
+		"schedule":       true,
+		"reconciliation": true,
 	}
 }

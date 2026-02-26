@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"github.com/CrisisTextLine/modular"
 )
 
 // RegionRouterInterface defines the interface for routing requests across regions.
@@ -56,6 +58,11 @@ func NewMultiRegionRoutingModule(name string, cfg map[string]any) *MultiRegionRo
 
 // Name returns the module name.
 func (r *MultiRegionRoutingModule) Name() string { return r.name }
+
+// Init registers the module as a service and optionally loads region config from the platform.region module.
+func (r *MultiRegionRoutingModule) Init(app modular.Application) error {
+	return app.RegisterService(r.name, r)
+}
 
 // SetRegions configures the regions available for routing.
 func (r *MultiRegionRoutingModule) SetRegions(regions []RegionDeployConfig) {

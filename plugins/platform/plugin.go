@@ -106,6 +106,9 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 		"platform.do_app": func(name string, cfg map[string]any) modular.Module {
 			return module.NewPlatformDOApp(name, cfg)
 		},
+		"platform.region_router": func(name string, cfg map[string]any) modular.Module {
+			return module.NewMultiRegionRoutingModule(name, cfg)
+		},
 	}
 }
 
