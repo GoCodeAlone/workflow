@@ -224,23 +224,7 @@ func TestBuiltinProvider_WithPermissionManager(t *testing.T) {
 	}
 }
 
-func TestStubProviders_ReturnErrors(t *testing.T) {
-	ctx := context.Background()
-
-	permit := NewPermitProvider("key", "https://pdp.permit.io")
-	if permit.Name() != "permit" {
-		t.Errorf("expected name 'permit', got %q", permit.Name())
-	}
-	if _, err := permit.CheckPermission(ctx, "s", "r", "a"); err == nil {
-		t.Error("expected error from permit stub")
-	}
-	if _, err := permit.ListPermissions(ctx, "s"); err == nil {
-		t.Error("expected error from permit stub")
-	}
-	if err := permit.SyncRoles(ctx, nil); err == nil {
-		t.Error("expected error from permit stub")
-	}
-
+func TestAWSIAMProvider_NameCheck(t *testing.T) {
 	aws := NewAWSIAMProviderWithClient("us-east-1", "arn:aws:iam::role/test", &mockIAMClient{})
 	if aws.Name() != "aws-iam" {
 		t.Errorf("expected name 'aws-iam', got %q", aws.Name())

@@ -1,7 +1,9 @@
 package environment
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -175,8 +177,7 @@ func (h *Handler) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify the environment exists
-	_, err := h.store.Get(r.Context(), id)
+	env, err := h.store.Get(r.Context(), id)
 	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "environment not found")
@@ -186,13 +187,66 @@ func (h *Handler) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Placeholder connectivity test — always succeeds
-	result := ConnectionTestResult{
-		Success: true,
-		Message: "connection test passed (placeholder)",
-		Latency: 42 * time.Millisecond,
-	}
+	result := testConnectivity(r.Context(), env)
 	writeJSON(w, http.StatusOK, result)
+}
+
+// testConnectivity performs a real HTTP connectivity check against the
+// environment's configured endpoint URL. The endpoint is read from
+// env.Config["endpoint"] or env.Config["url"]. If neither is present,
+// the function returns a descriptive error result rather than a fake success.
+func testConnectivity(ctx context.Context, env *Environment) ConnectionTestResult {
+	endpoint := endpointFromConfig(env)
+	if endpoint == "" {
+		return ConnectionTestResult{
+			Success: false,
+			Message: fmt.Sprintf("no endpoint configured for environment %q (set config.endpoint or config.url)", env.Name),
+		}
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return ConnectionTestResult{
+			Success: false,
+			Message: fmt.Sprintf("invalid endpoint URL %q: %v", endpoint, err),
+		}
+	}
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	latency := time.Since(start)
+
+	if err != nil {
+		return ConnectionTestResult{
+			Success: false,
+			Message: fmt.Sprintf("cannot reach endpoint %q: %v", endpoint, err),
+			Latency: latency,
+		}
+	}
+	resp.Body.Close()
+
+	// Any HTTP response (including 4xx/5xx) means the endpoint is reachable.
+	return ConnectionTestResult{
+		Success: true,
+		Message: fmt.Sprintf("endpoint %q reachable (HTTP %d)", endpoint, resp.StatusCode),
+		Latency: latency,
+	}
+}
+
+// endpointFromConfig extracts the connectivity test endpoint from the environment config.
+// It checks config["endpoint"] and config["url"] in that order.
+func endpointFromConfig(env *Environment) string {
+	if env.Config == nil {
+		return ""
+	}
+	if v, ok := env.Config["endpoint"].(string); ok && v != "" {
+		return v
+	}
+	if v, ok := env.Config["url"].(string); ok && v != "" {
+		return v
+	}
+	return ""
 }
 
 // ---------- helpers ----------

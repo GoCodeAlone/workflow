@@ -1,7 +1,12 @@
 package module
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -85,7 +90,12 @@ func NewArgoWorkflowsModule(name string, cfg map[string]any) *ArgoWorkflowsModul
 // Name returns the module name.
 func (m *ArgoWorkflowsModule) Name() string { return m.name }
 
-// Init resolves optional cluster reference and initialises the mock backend.
+// Init resolves optional cluster reference and initialises the backend.
+// Config options:
+//
+//	backend:   mock (default) | real
+//	endpoint:  Argo Server URL, e.g. http://localhost:2746 (required for backend: real)
+//	token:     Bearer token for Argo Server auth (optional)
 func (m *ArgoWorkflowsModule) Init(app modular.Application) error {
 	clusterName, _ := m.config["cluster"].(string)
 	if clusterName != "" {
@@ -113,7 +123,29 @@ func (m *ArgoWorkflowsModule) Init(app modular.Application) error {
 		Status:    "pending",
 	}
 
-	m.backend = &argoMockBackend{}
+	backendType, _ := m.config["backend"].(string)
+	if backendType == "" {
+		backendType = "mock"
+	}
+
+	switch backendType {
+	case "mock":
+		m.backend = &argoMockBackend{}
+	case "real":
+		endpoint, _ := m.config["endpoint"].(string)
+		if endpoint == "" {
+			return fmt.Errorf("argo.workflows %q: 'endpoint' is required for backend=real", m.name)
+		}
+		token, _ := m.config["token"].(string)
+		m.backend = &argoRealBackend{
+			endpoint:   endpoint,
+			token:      token,
+			httpClient: &http.Client{Timeout: 30 * time.Second},
+		}
+		m.state.Endpoint = endpoint
+	default:
+		return fmt.Errorf("argo.workflows %q: unsupported backend %q (use mock or real)", m.name, backendType)
+	}
 
 	return app.RegisterService(m.name, m)
 }
@@ -369,4 +401,316 @@ func (b *argoMockBackend) listWorkflows(m *ArgoWorkflowsModule, labelSelector st
 		names = append(names, name)
 	}
 	return names, nil
+}
+
+// ─── real backend ─────────────────────────────────────────────────────────────
+
+// argoRealBackend implements argoBackend using the Argo Workflows REST API.
+// It targets the Argo Server HTTP API (default port 2746).
+type argoRealBackend struct {
+	endpoint   string       // e.g. http://argo-server.argo.svc.cluster.local:2746
+	token      string       // Bearer token (optional)
+	httpClient *http.Client
+}
+
+// doRequest performs an authenticated HTTP request against the Argo Server.
+func (b *argoRealBackend) doRequest(ctx context.Context, method, path string, body any) ([]byte, int, error) {
+	var reqBody io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, 0, fmt.Errorf("argo marshal request: %w", err)
+		}
+		reqBody = bytes.NewReader(data)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, b.endpoint+path, reqBody)
+	if err != nil {
+		return nil, 0, fmt.Errorf("argo new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if b.token != "" {
+		req.Header.Set("Authorization", "Bearer "+b.token)
+	}
+
+	resp, err := b.httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("argo request %s %s: %w", method, path, err)
+	}
+	defer resp.Body.Close()
+
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("argo read response: %w", err)
+	}
+	return respData, resp.StatusCode, nil
+}
+
+func (b *argoRealBackend) plan(m *ArgoWorkflowsModule) (*PlatformPlan, error) {
+	// Check if Argo Server is reachable by calling the version endpoint.
+	_, status, connErr := b.doRequest(context.Background(), http.MethodGet, "/api/v1/version", nil)
+	plan := &PlatformPlan{Provider: "argo.workflows", Resource: m.name}
+	if connErr != nil || status != http.StatusOK {
+		plan.Actions = []PlatformAction{
+			{Type: "create", Resource: m.name, Detail: fmt.Sprintf("install/connect Argo Workflows at %s (namespace: %s)", b.endpoint, m.namespace())},
+		}
+		return plan, nil //nolint:nilerr // graceful fallback — unreachable server produces a plan action
+	}
+	plan.Actions = []PlatformAction{
+		{Type: "noop", Resource: m.name, Detail: fmt.Sprintf("Argo Server reachable at %s", b.endpoint)},
+	}
+	return plan, nil
+}
+
+func (b *argoRealBackend) apply(m *ArgoWorkflowsModule) (*PlatformResult, error) {
+	// Verify connectivity to Argo Server.
+	data, status, err := b.doRequest(context.Background(), http.MethodGet, "/api/v1/version", nil)
+	if err != nil {
+		return nil, fmt.Errorf("argo.workflows %q: cannot reach server at %s: %w", m.name, b.endpoint, err)
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("argo.workflows %q: server returned status %d", m.name, status)
+	}
+
+	var versionResp struct {
+		Version string `json:"version"`
+	}
+	_ = json.Unmarshal(data, &versionResp)
+	if versionResp.Version != "" {
+		m.state.Version = versionResp.Version
+	}
+
+	m.state.Status = "running"
+	m.state.Endpoint = b.endpoint
+	m.state.CreatedAt = time.Now()
+
+	return &PlatformResult{
+		Success: true,
+		Message: fmt.Sprintf("Argo Server reachable at %s (version: %s)", b.endpoint, m.state.Version),
+		State:   m.state,
+	}, nil
+}
+
+func (b *argoRealBackend) status(m *ArgoWorkflowsModule) (*ArgoWorkflowState, error) {
+	_, statusCode, connErr := b.doRequest(context.Background(), http.MethodGet, "/api/v1/version", nil)
+	if connErr != nil || statusCode != http.StatusOK {
+		m.state.Status = "error"
+		return m.state, nil //nolint:nilerr // error status is reported in state, not as error
+	}
+	m.state.Status = "running"
+	return m.state, nil
+}
+
+func (b *argoRealBackend) destroy(m *ArgoWorkflowsModule) error {
+	// Destroy does not uninstall Argo — it simply marks the module as no longer managed.
+	m.state.Status = "deleted"
+	m.state.Endpoint = ""
+	return nil
+}
+
+// submitWorkflow submits an Argo Workflow via the REST API.
+// Returns the server-assigned workflow name.
+func (b *argoRealBackend) submitWorkflow(m *ArgoWorkflowsModule, spec *ArgoWorkflowSpec) (string, error) {
+	ns := m.namespace()
+	if spec.Namespace != "" {
+		ns = spec.Namespace
+	}
+
+	// Build the Argo Workflow CRD as a map to POST to the API.
+	wf := argoWorkflowCRD(spec)
+	reqBody := map[string]any{
+		"namespace": ns,
+		"workflow":  wf,
+	}
+
+	data, status, err := b.doRequest(context.Background(), http.MethodPost,
+		fmt.Sprintf("/api/v1/workflows/%s", ns), reqBody)
+	if err != nil {
+		return "", fmt.Errorf("argo submit workflow: %w", err)
+	}
+	if status != http.StatusOK && status != http.StatusCreated {
+		return "", fmt.Errorf("argo submit workflow: server returned %d: %s", status, string(data))
+	}
+
+	var result struct {
+		Metadata struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return "", fmt.Errorf("argo submit workflow: parse response: %w", err)
+	}
+	return result.Metadata.Name, nil
+}
+
+func (b *argoRealBackend) workflowStatus(m *ArgoWorkflowsModule, workflowName string) (string, error) {
+	ns := m.namespace()
+	data, status, err := b.doRequest(context.Background(), http.MethodGet,
+		fmt.Sprintf("/api/v1/workflows/%s/%s", ns, workflowName), nil)
+	if err != nil {
+		return "", fmt.Errorf("argo get workflow status: %w", err)
+	}
+	if status == http.StatusNotFound {
+		return "", fmt.Errorf("argo.workflows: workflow %q not found", workflowName)
+	}
+	if status != http.StatusOK {
+		return "", fmt.Errorf("argo get workflow status: server returned %d", status)
+	}
+
+	var result struct {
+		Status struct {
+			Phase string `json:"phase"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return "", fmt.Errorf("argo get workflow status: parse response: %w", err)
+	}
+	return result.Status.Phase, nil
+}
+
+func (b *argoRealBackend) workflowLogs(m *ArgoWorkflowsModule, workflowName string) ([]string, error) {
+	ns := m.namespace()
+	// Use the Argo log endpoint: GET /api/v1/workflows/{ns}/{name}/log?logOptions.container=main
+	data, status, err := b.doRequest(context.Background(), http.MethodGet,
+		fmt.Sprintf("/api/v1/workflows/%s/%s/log?logOptions.container=main&grep=&selector=", ns, workflowName), nil)
+	if err != nil {
+		return nil, fmt.Errorf("argo get workflow logs: %w", err)
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("argo get workflow logs: server returned %d: %s", status, string(data))
+	}
+
+	// The log endpoint returns newline-delimited JSON objects.
+	var lines []string
+	for _, rawLine := range bytes.Split(data, []byte("\n")) {
+		rawLine = bytes.TrimSpace(rawLine)
+		if len(rawLine) == 0 {
+			continue
+		}
+		var entry struct {
+			Result struct {
+				Content string `json:"content"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(rawLine, &entry); err == nil && entry.Result.Content != "" {
+			lines = append(lines, entry.Result.Content)
+		} else {
+			lines = append(lines, string(rawLine))
+		}
+	}
+	return lines, nil
+}
+
+func (b *argoRealBackend) deleteWorkflow(m *ArgoWorkflowsModule, workflowName string) error {
+	ns := m.namespace()
+	data, status, err := b.doRequest(context.Background(), http.MethodDelete,
+		fmt.Sprintf("/api/v1/workflows/%s/%s", ns, workflowName), nil)
+	if err != nil {
+		return fmt.Errorf("argo delete workflow: %w", err)
+	}
+	if status == http.StatusNotFound {
+		return fmt.Errorf("argo.workflows: workflow %q not found", workflowName)
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("argo delete workflow: server returned %d: %s", status, string(data))
+	}
+	return nil
+}
+
+func (b *argoRealBackend) listWorkflows(m *ArgoWorkflowsModule, labelSelector string) ([]string, error) {
+	ns := m.namespace()
+	path := fmt.Sprintf("/api/v1/workflows/%s", ns)
+	if labelSelector != "" {
+		path += "?listOptions.labelSelector=" + labelSelector
+	}
+
+	data, status, err := b.doRequest(context.Background(), http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("argo list workflows: %w", err)
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("argo list workflows: server returned %d: %s", status, string(data))
+	}
+
+	var result struct {
+		Items []struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("argo list workflows: parse response: %w", err)
+	}
+
+	names := make([]string, 0, len(result.Items))
+	for _, item := range result.Items {
+		names = append(names, item.Metadata.Name)
+	}
+	return names, nil
+}
+
+// argoWorkflowCRD converts an ArgoWorkflowSpec into the map structure expected
+// by the Argo Server REST API (mirrors the Workflow CRD structure).
+func argoWorkflowCRD(spec *ArgoWorkflowSpec) map[string]any {
+	templates := make([]map[string]any, 0, len(spec.Templates))
+	for _, t := range spec.Templates {
+		tmap := map[string]any{"name": t.Name}
+		switch t.Kind {
+		case "dag":
+			tasks := make([]map[string]any, 0, len(t.DAG))
+			for _, task := range t.DAG {
+				tm := map[string]any{
+					"name":     task.Name,
+					"template": task.Template,
+				}
+				if len(task.Dependencies) > 0 {
+					tm["dependencies"] = task.Dependencies
+				}
+				tasks = append(tasks, tm)
+			}
+			tmap["dag"] = map[string]any{"tasks": tasks}
+		case "container":
+			if t.Container != nil {
+				c := map[string]any{
+					"image": t.Container.Image,
+				}
+				if len(t.Container.Command) > 0 {
+					c["command"] = t.Container.Command
+				}
+				if len(t.Container.Env) > 0 {
+					envList := make([]map[string]any, 0, len(t.Container.Env))
+					for k, v := range t.Container.Env {
+						envList = append(envList, map[string]any{"name": k, "value": v})
+					}
+					c["env"] = envList
+				}
+				tmap["container"] = c
+			}
+		}
+		templates = append(templates, tmap)
+	}
+
+	wf := map[string]any{
+		"apiVersion": "argoproj.io/v1alpha1",
+		"kind":       "Workflow",
+		"metadata": map[string]any{
+			"generateName": spec.Name + "-",
+			"namespace":    spec.Namespace,
+		},
+		"spec": map[string]any{
+			"entrypoint": spec.Entrypoint,
+			"templates":  templates,
+		},
+	}
+
+	if len(spec.Arguments) > 0 {
+		params := make([]map[string]any, 0, len(spec.Arguments))
+		for k, v := range spec.Arguments {
+			params = append(params, map[string]any{"name": k, "value": v})
+		}
+		wf["spec"].(map[string]any)["arguments"] = map[string]any{"parameters": params}
+	}
+
+	return wf
 }

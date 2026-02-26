@@ -51,6 +51,17 @@ type kubernetesBackend interface {
 	destroy(k *PlatformKubernetes) error
 }
 
+// KubernetesBackendFactory creates a kubernetesBackend for a given cluster type config.
+type KubernetesBackendFactory func(cfg map[string]any) (kubernetesBackend, error)
+
+// kubernetesBackendRegistry maps cluster type name to its factory.
+var kubernetesBackendRegistry = map[string]KubernetesBackendFactory{}
+
+// RegisterKubernetesBackend registers a KubernetesBackendFactory for the given cluster type.
+func RegisterKubernetesBackend(clusterType string, factory KubernetesBackendFactory) {
+	kubernetesBackendRegistry[clusterType] = factory
+}
+
 // NewPlatformKubernetes creates a new PlatformKubernetes module.
 func NewPlatformKubernetes(name string, cfg map[string]any) *PlatformKubernetes {
 	return &PlatformKubernetes{name: name, config: cfg}
@@ -79,18 +90,15 @@ func (m *PlatformKubernetes) Init(app modular.Application) error {
 		clusterType = "kind"
 	}
 
-	switch clusterType {
-	case "kind", "k3s":
-		m.backend = &kindBackend{}
-	case "eks":
-		m.backend = &eksBackend{}
-	case "gke":
-		m.backend = &gkeBackend{}
-	case "aks":
-		m.backend = &aksBackend{}
-	default:
+	factory, ok := kubernetesBackendRegistry[clusterType]
+	if !ok {
 		return fmt.Errorf("platform.kubernetes %q: unsupported type %q", m.name, clusterType)
 	}
+	backend, err := factory(m.config)
+	if err != nil {
+		return fmt.Errorf("platform.kubernetes %q: creating backend: %w", m.name, err)
+	}
+	m.backend = backend
 
 	version, _ := m.config["version"].(string)
 	m.state = &KubernetesClusterState{

@@ -446,19 +446,7 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			ConfigKeys: []string{"account", "region", "service_role", "compute_type", "image", "source_type"},
 		},
 
-		// policy plugin
-		"policy.opa": {
-			Type:       "policy.opa",
-			Plugin:     "policy",
-			Stateful:   false,
-			ConfigKeys: []string{"endpoint", "policies"},
-		},
-		"policy.cedar": {
-			Type:       "policy.cedar",
-			Plugin:     "policy",
-			Stateful:   false,
-			ConfigKeys: []string{"policies"},
-		},
+		// policy plugin (OPA and Cedar are external plugins: workflow-plugin-policy-opa, workflow-plugin-policy-cedar)
 		"policy.mock": {
 			Type:       "policy.mock",
 			Plugin:     "policy",
