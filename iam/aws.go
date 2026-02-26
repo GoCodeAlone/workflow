@@ -68,7 +68,7 @@ func (p *AWSIAMProvider) ResolveIdentities(ctx context.Context, cfgRaw json.RawM
 			Provider:   string(store.IAMProviderAWS),
 			Identifier: arn,
 			Attributes: attrs,
-		}}, nil
+		}}, nil //nolint:nilerr // fallback to basic identity on SDK init failure
 	}
 
 	// Verify caller identity via STS.

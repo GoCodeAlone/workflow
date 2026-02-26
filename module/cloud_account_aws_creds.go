@@ -85,11 +85,11 @@ func (r *awsProfileResolver) Resolve(m *CloudAccount) error {
 	ctx := context.Background()
 	cfg, loadErr := config.LoadDefaultConfig(ctx, config.WithSharedConfigProfile(profile))
 	if loadErr != nil {
-		return nil
+		return nil //nolint:nilerr // missing profile is normal in CI
 	}
 	creds, credErr := cfg.Credentials.Retrieve(ctx)
 	if credErr != nil {
-		return nil
+		return nil //nolint:nilerr // credential retrieval failure is non-fatal
 	}
 	m.creds.AccessKey = creds.AccessKeyID
 	m.creds.SecretKey = creds.SecretAccessKey
@@ -149,7 +149,7 @@ func (r *awsRoleARNResolver) Resolve(m *CloudAccount) error {
 	baseCfg, loadErr := config.LoadDefaultConfig(ctx, baseCfgOpts...)
 	if loadErr != nil {
 		// AWSConfig() will retry via stscreds.AssumeRoleProvider at call time.
-		return nil
+		return nil //nolint:nilerr // config load failure is non-fatal
 	}
 
 	stsClient := sts.NewFromConfig(baseCfg)
@@ -165,7 +165,7 @@ func (r *awsRoleARNResolver) Resolve(m *CloudAccount) error {
 	if assumeErr != nil {
 		// AssumeRole may fail at config-load time without real credentials;
 		// AWSConfig() handles deferred token refresh via stscreds.
-		return nil
+		return nil //nolint:nilerr // AssumeRole failure handled by deferred refresh
 	}
 
 	if out.Credentials != nil {
