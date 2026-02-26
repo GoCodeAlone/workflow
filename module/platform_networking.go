@@ -64,6 +64,26 @@ type networkBackend interface {
 	destroy(m *PlatformNetworking) error
 }
 
+// NetworkingBackendFactory creates a networkBackend for a given provider config.
+type NetworkingBackendFactory func(cfg map[string]any) (networkBackend, error)
+
+// networkingBackendRegistry maps provider name to its factory.
+var networkingBackendRegistry = map[string]NetworkingBackendFactory{}
+
+// RegisterNetworkingBackend registers a NetworkingBackendFactory for the given provider name.
+func RegisterNetworkingBackend(provider string, factory NetworkingBackendFactory) {
+	networkingBackendRegistry[provider] = factory
+}
+
+func init() {
+	RegisterNetworkingBackend("mock", func(_ map[string]any) (networkBackend, error) {
+		return &mockNetworkBackend{}, nil
+	})
+	RegisterNetworkingBackend("aws", func(_ map[string]any) (networkBackend, error) {
+		return &awsNetworkBackend{}, nil
+	})
+}
+
 // PlatformNetworking manages VPC/subnet/security-group resources via pluggable backends.
 // Config:
 //
@@ -115,14 +135,15 @@ func (m *PlatformNetworking) Init(app modular.Application) error {
 		providerType = "mock"
 	}
 
-	switch providerType {
-	case "mock":
-		m.backend = &mockNetworkBackend{}
-	case "aws":
-		m.backend = &awsNetworkBackend{}
-	default:
+	factory, ok := networkingBackendRegistry[providerType]
+	if !ok {
 		return fmt.Errorf("platform.networking %q: unsupported provider %q", m.name, providerType)
 	}
+	backend, err := factory(m.config)
+	if err != nil {
+		return fmt.Errorf("platform.networking %q: creating backend: %w", m.name, err)
+	}
+	m.backend = backend
 
 	m.state = &NetworkState{
 		SubnetIDs:        make(map[string]string),

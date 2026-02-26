@@ -74,6 +74,26 @@ type ecsBackend interface {
 	destroy(e *PlatformECS) error
 }
 
+// ECSBackendFactory creates an ecsBackend for a given provider config.
+type ECSBackendFactory func(cfg map[string]any) (ecsBackend, error)
+
+// ecsBackendRegistry maps provider name to its factory.
+var ecsBackendRegistry = map[string]ECSBackendFactory{}
+
+// RegisterECSBackend registers an ECSBackendFactory for the given provider name.
+func RegisterECSBackend(provider string, factory ECSBackendFactory) {
+	ecsBackendRegistry[provider] = factory
+}
+
+func init() {
+	RegisterECSBackend("mock", func(_ map[string]any) (ecsBackend, error) {
+		return &ecsMockBackend{}, nil
+	})
+	RegisterECSBackend("aws", func(_ map[string]any) (ecsBackend, error) {
+		return &awsECSBackend{}, nil
+	})
+}
+
 // NewPlatformECS creates a new PlatformECS module.
 func NewPlatformECS(name string, cfg map[string]any) *PlatformECS {
 	return &PlatformECS{name: name, config: cfg}
@@ -120,12 +140,26 @@ func (m *PlatformECS) Init(app modular.Application) error {
 		Status:     "pending",
 	}
 
-	// Select backend: use real AWS ECS when account is AWS, otherwise use in-memory mock.
-	if m.provider != nil && m.provider.Provider() == "aws" {
-		m.backend = &awsECSBackend{}
-	} else {
-		m.backend = &ecsMockBackend{}
+	// Determine provider type: use explicit "provider" config field if set,
+	// otherwise fall back to the cloud account's provider name (if available).
+	providerType, _ := m.config["provider"].(string)
+	if providerType == "" && m.provider != nil {
+		providerType = m.provider.Provider()
 	}
+	if providerType == "" {
+		providerType = "mock"
+	}
+
+	factory, ok := ecsBackendRegistry[providerType]
+	if !ok {
+		// Fall back to mock for unknown provider types to preserve backward compatibility.
+		factory = ecsBackendRegistry["mock"]
+	}
+	backend, err := factory(m.config)
+	if err != nil {
+		return fmt.Errorf("platform.ecs %q: creating backend: %w", m.name, err)
+	}
+	m.backend = backend
 
 	return app.RegisterService(m.name, m)
 }

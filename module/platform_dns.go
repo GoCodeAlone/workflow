@@ -52,6 +52,26 @@ type dnsBackend interface {
 	destroyDNS(m *PlatformDNS) error
 }
 
+// DNSBackendFactory creates a dnsBackend for a given provider config.
+type DNSBackendFactory func(cfg map[string]any) (dnsBackend, error)
+
+// dnsBackendRegistry maps provider name to its factory.
+var dnsBackendRegistry = map[string]DNSBackendFactory{}
+
+// RegisterDNSBackend registers a DNSBackendFactory for the given provider name.
+func RegisterDNSBackend(provider string, factory DNSBackendFactory) {
+	dnsBackendRegistry[provider] = factory
+}
+
+func init() {
+	RegisterDNSBackend("mock", func(_ map[string]any) (dnsBackend, error) {
+		return &mockDNSBackend{}, nil
+	})
+	RegisterDNSBackend("aws", func(_ map[string]any) (dnsBackend, error) {
+		return &route53Backend{}, nil
+	})
+}
+
 // PlatformDNS manages DNS zones and records via pluggable backends.
 // Config:
 //
@@ -95,14 +115,15 @@ func (m *PlatformDNS) Init(app modular.Application) error {
 		providerType = "mock"
 	}
 
-	switch providerType {
-	case "mock":
-		m.backend = &mockDNSBackend{}
-	case "aws":
-		m.backend = &route53Backend{}
-	default:
+	factory, ok := dnsBackendRegistry[providerType]
+	if !ok {
 		return fmt.Errorf("platform.dns %q: unsupported provider %q", m.name, providerType)
 	}
+	backend, err := factory(m.config)
+	if err != nil {
+		return fmt.Errorf("platform.dns %q: creating backend: %w", m.name, err)
+	}
+	m.backend = backend
 
 	zone := m.zoneConfig()
 	if zone.Name == "" {
