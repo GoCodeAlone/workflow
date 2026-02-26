@@ -165,13 +165,26 @@ func (s *BuildBinaryStep) generateGoMod() string {
 }
 
 // generateMainGo returns the contents of the generated main.go file.
+// The generated binary loads a workflow config (either embedded at compile-time
+// or read from disk at runtime), builds the workflow engine, and runs it until
+// SIGINT/SIGTERM is received.
 func (s *BuildBinaryStep) generateMainGo() string {
 	var sb strings.Builder
 	sb.WriteString("package main\n\n")
 	sb.WriteString("import (\n")
-	sb.WriteString("\t_ \"embed\"\n")
+	if s.embedConfig {
+		sb.WriteString("\t_ \"embed\"\n")
+	}
+	sb.WriteString("\t\"context\"\n")
 	sb.WriteString("\t\"fmt\"\n")
+	sb.WriteString("\t\"log/slog\"\n")
 	sb.WriteString("\t\"os\"\n")
+	sb.WriteString("\t\"os/signal\"\n")
+	sb.WriteString("\t\"syscall\"\n")
+	sb.WriteString("\n")
+	sb.WriteString("\t\"github.com/CrisisTextLine/modular\"\n")
+	sb.WriteString("\tworkflow \"github.com/GoCodeAlone/workflow\"\n")
+	sb.WriteString("\t\"github.com/GoCodeAlone/workflow/config\"\n")
 	sb.WriteString(")\n\n")
 
 	if s.embedConfig {
@@ -180,17 +193,51 @@ func (s *BuildBinaryStep) generateMainGo() string {
 	}
 
 	sb.WriteString("func main() {\n")
+	sb.WriteString("\tlogger := slog.New(slog.NewTextHandler(os.Stdout, nil))\n\n")
+
 	if s.embedConfig {
 		sb.WriteString("\tif len(configYAML) == 0 {\n")
 		sb.WriteString("\t\tfmt.Fprintln(os.Stderr, \"embedded config is empty\")\n")
 		sb.WriteString("\t\tos.Exit(1)\n")
-		sb.WriteString("\t}\n")
-		sb.WriteString("\tfmt.Printf(\"Starting workflow app (config: %d bytes)\\n\", len(configYAML))\n")
+		sb.WriteString("\t}\n\n")
+		sb.WriteString("\tcfg, err := config.LoadFromString(string(configYAML))\n")
 	} else {
-		sb.WriteString("\tfmt.Println(\"Starting workflow app\")\n")
+		sb.WriteString("\tcfgFile := \"app.yaml\"\n")
+		sb.WriteString("\tif len(os.Args) > 1 {\n")
+		sb.WriteString("\t\tcfgFile = os.Args[1]\n")
+		sb.WriteString("\t}\n\n")
+		sb.WriteString("\tcfg, err := config.LoadFromFile(cfgFile)\n")
 	}
-	sb.WriteString("\t// TODO: wire up modular.NewStdApplication with embedded config\n")
-	sb.WriteString("\t_ = os.Args\n")
+	sb.WriteString("\tif err != nil {\n")
+	sb.WriteString("\t\tfmt.Fprintf(os.Stderr, \"parse config: %v\\n\", err)\n")
+	sb.WriteString("\t\tos.Exit(1)\n")
+	sb.WriteString("\t}\n\n")
+
+	sb.WriteString("\tapp := modular.NewStdApplication(nil, logger)\n")
+	sb.WriteString("\tengine := workflow.NewStdEngine(app, logger)\n\n")
+
+	sb.WriteString("\tif err := engine.BuildFromConfig(cfg); err != nil {\n")
+	sb.WriteString("\t\tfmt.Fprintf(os.Stderr, \"build engine: %v\\n\", err)\n")
+	sb.WriteString("\t\tos.Exit(1)\n")
+	sb.WriteString("\t}\n\n")
+
+	sb.WriteString("\tctx, cancel := context.WithCancel(context.Background())\n")
+	sb.WriteString("\tdefer cancel()\n\n")
+
+	sb.WriteString("\tif err := engine.Start(ctx); err != nil {\n")
+	sb.WriteString("\t\tfmt.Fprintf(os.Stderr, \"start engine: %v\\n\", err)\n")
+	sb.WriteString("\t\tos.Exit(1)\n")
+	sb.WriteString("\t}\n\n")
+
+	sb.WriteString("\tsigCh := make(chan os.Signal, 1)\n")
+	sb.WriteString("\tsignal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)\n")
+	sb.WriteString("\t<-sigCh\n\n")
+
+	sb.WriteString("\tcancel()\n")
+	sb.WriteString("\tif err := engine.Stop(context.Background()); err != nil {\n")
+	sb.WriteString("\t\tfmt.Fprintf(os.Stderr, \"stop engine: %v\\n\", err)\n")
+	sb.WriteString("\t\tos.Exit(1)\n")
+	sb.WriteString("\t}\n")
 	sb.WriteString("}\n")
 	return sb.String()
 }

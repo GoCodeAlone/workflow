@@ -124,3 +124,11 @@ type ConfigProvider interface {
 	// ConfigFragment returns YAML config to merge into the host config.
 	ConfigFragment() ([]byte, error)
 }
+
+// ServiceInvoker is optionally implemented by ModuleInstance to handle
+// service method invocations from the host. The host calls InvokeService
+// with a method name and a map of arguments; the implementation dispatches
+// to the appropriate logic and returns a result map.
+type ServiceInvoker interface {
+	InvokeMethod(method string, args map[string]any) (map[string]any, error)
+}

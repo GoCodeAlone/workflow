@@ -192,6 +192,17 @@ func (s *V1Store) initSchema() error {
 		created_at          TEXT NOT NULL,
 		FOREIGN KEY (provider_id) REFERENCES iam_provider_configs(id) ON DELETE CASCADE
 	);
+
+	CREATE TABLE IF NOT EXISTS workflow_permissions (
+		id          TEXT PRIMARY KEY,
+		workflow_id TEXT NOT NULL,
+		subject     TEXT NOT NULL,
+		action      TEXT NOT NULL DEFAULT 'read',
+		granted     INTEGER NOT NULL DEFAULT 1,
+		created_at  TEXT NOT NULL,
+		updated_at  TEXT NOT NULL,
+		FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+	);
 	`
 	_, err := s.db.Exec(schema)
 	if err != nil {
