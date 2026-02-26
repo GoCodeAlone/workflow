@@ -130,22 +130,16 @@ func (s *StateMachineTransitionStep) executeViaEngine(ctx context.Context, pc *P
 		}, nil
 	}
 
-	// Fetch the new state from the engine
-	instance, err := engine.GetInstance(entityID)
-	if err != nil {
-		// Transition succeeded but we can't read new state — treat as success with unknown state
-		return &StepResult{
-			Output: map[string]any{
-				"transition_ok": true,
-				"new_state":     "",
-			},
-		}, nil
+	// Fetch the new state from the engine (read-back failure is non-fatal)
+	newState := ""
+	if instance, lookupErr := engine.GetInstance(entityID); lookupErr == nil {
+		newState = instance.CurrentState
 	}
 
 	return &StepResult{
 		Output: map[string]any{
 			"transition_ok": true,
-			"new_state":     instance.CurrentState,
+			"new_state":     newState,
 		},
 	}, nil
 }

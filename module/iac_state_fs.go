@@ -79,7 +79,7 @@ func (s *FSIaCStateStore) SaveState(state *IaCState) error {
 	if err != nil {
 		return fmt.Errorf("iac fs state: SaveState %q: marshal: %w", state.ResourceID, err)
 	}
-	if err := os.WriteFile(s.statePath(state.ResourceID), data, 0o640); err != nil {
+	if err := os.WriteFile(s.statePath(state.ResourceID), data, 0o600); err != nil {
 		return fmt.Errorf("iac fs state: SaveState %q: write: %w", state.ResourceID, err)
 	}
 	return nil
@@ -136,7 +136,7 @@ func (s *FSIaCStateStore) Lock(resourceID string) error {
 	}
 	lp := s.lockPath(resourceID)
 	// O_CREATE|O_EXCL atomically creates the file only if it does not exist.
-	f, err := os.OpenFile(lp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640)
+	f, err := os.OpenFile(lp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
 			return fmt.Errorf("iac fs state: Lock %q: resource is already locked", resourceID)

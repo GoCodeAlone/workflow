@@ -33,6 +33,11 @@ Options:
 `)
 		fs.PrintDefaults()
 	}
+	// Reorder args so flags come before positional args.
+	// Go's flag.FlagSet.Parse stops at the first non-flag argument,
+	// so "validate config.yaml --skip-unknown-types" would treat the
+	// flag as a second file path. Move all flag-like args first.
+	args = reorderFlags(args)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -168,4 +173,30 @@ func findYAMLFiles(root string) ([]string, error) {
 
 func indentError(err error) string {
 	return strings.ReplaceAll(err.Error(), "\n", "\n       ")
+}
+
+// reorderFlags moves flag-like arguments (starting with "-") before
+// positional arguments so that Go's flag.FlagSet.Parse handles them
+// correctly regardless of where the user places them.
+func reorderFlags(args []string) []string {
+	var flags, positional []string
+	for i := 0; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "-") {
+			flags = append(flags, args[i])
+			// If this flag takes a value (e.g. --dir foo), grab next arg too.
+			// Flags with "=" are self-contained (--dir=foo).
+			if !strings.Contains(args[i], "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				// Peek: could be a flag value or a positional arg.
+				// Only consume it if the flag is known to take a value.
+				flagName := strings.TrimLeft(args[i], "-")
+				if flagName == "dir" {
+					i++
+					flags = append(flags, args[i])
+				}
+			}
+		} else {
+			positional = append(positional, args[i])
+		}
+	}
+	return append(flags, positional...)
 }

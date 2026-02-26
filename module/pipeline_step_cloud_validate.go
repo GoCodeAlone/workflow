@@ -41,18 +41,14 @@ func (s *CloudValidateStep) Execute(ctx context.Context, _ *PipelineContext) (*S
 		return nil, fmt.Errorf("cloud_validate step %q: %w", s.name, err)
 	}
 
-	creds, err := provider.GetCredentials(ctx)
-	if err != nil {
-		return &StepResult{Output: map[string]any{
-			"account":  s.account,
-			"provider": provider.Provider(),
-			"region":   provider.Region(),
-			"valid":    false,
-			"error":    err.Error(),
-		}}, nil
+	creds, credErr := provider.GetCredentials(ctx)
+	valid := credErr == nil
+	var credErrMsg string
+	if !valid {
+		credErrMsg = credErr.Error()
+	} else {
+		valid = s.validateCreds(provider.Provider(), creds)
 	}
-
-	valid := s.validateCreds(provider.Provider(), creds)
 
 	output := map[string]any{
 		"account":  s.account,
@@ -60,21 +56,23 @@ func (s *CloudValidateStep) Execute(ctx context.Context, _ *PipelineContext) (*S
 		"region":   provider.Region(),
 		"valid":    valid,
 	}
+	if credErrMsg != "" {
+		output["error"] = credErrMsg
+	}
 
-	switch provider.Provider() {
-	case "aws":
-		// Production: use aws-sdk-go-v2/service/sts GetCallerIdentity to confirm credentials.
-		output["sts_check"] = "stub: call STS GetCallerIdentity for live validation"
-	case "gcp":
-		if creds.ProjectID != "" {
-			output["project_id"] = creds.ProjectID
-		}
-	case "azure":
-		if creds.TenantID != "" {
-			output["tenant_id"] = creds.TenantID
-		}
-		if creds.SubscriptionID != "" {
-			output["subscription_id"] = creds.SubscriptionID
+	if creds != nil {
+		switch provider.Provider() {
+		case "gcp":
+			if creds.ProjectID != "" {
+				output["project_id"] = creds.ProjectID
+			}
+		case "azure":
+			if creds.TenantID != "" {
+				output["tenant_id"] = creds.TenantID
+			}
+			if creds.SubscriptionID != "" {
+				output["subscription_id"] = creds.SubscriptionID
+			}
 		}
 	}
 

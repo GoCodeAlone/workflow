@@ -328,12 +328,14 @@ func (b *awsAutoscalingBackend) apply(m *PlatformAutoscaling) (*ScalingState, er
 		resourceID := ecsServiceDimension(policy)
 
 		// Register scalable target
+		minCap := safeIntToInt32(policy.MinCapacity)
+		maxCap := safeIntToInt32(policy.MaxCapacity)
 		_, err := client.RegisterScalableTarget(context.Background(), &applicationautoscaling.RegisterScalableTargetInput{
 			ServiceNamespace:  appscalingtypes.ServiceNamespaceEcs,
 			ScalableDimension: appscalingtypes.ScalableDimensionECSServiceDesiredCount,
 			ResourceId:        aws.String(resourceID),
-			MinCapacity:       aws.Int32(int32(policy.MinCapacity)),
-			MaxCapacity:       aws.Int32(int32(policy.MaxCapacity)),
+			MinCapacity:       aws.Int32(minCap),
+			MaxCapacity:       aws.Int32(maxCap),
 			RoleARN:           optString(roleARN),
 		})
 		if err != nil {

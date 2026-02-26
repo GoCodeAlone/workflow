@@ -313,12 +313,12 @@ func (b *awsECSBackend) plan(e *PlatformECS) (*PlatformPlan, error) {
 		return nil, fmt.Errorf("ecs plan: DescribeServices: %w", err)
 	}
 
-	for _, svc := range out.Services {
-		if svc.ServiceName != nil && *svc.ServiceName == e.serviceName() && svc.Status != nil && *svc.Status != "INACTIVE" {
+	for i := range out.Services {
+		if out.Services[i].ServiceName != nil && *out.Services[i].ServiceName == e.serviceName() && out.Services[i].Status != nil && *out.Services[i].Status != "INACTIVE" {
 			return &PlatformPlan{
 				Provider: "ecs",
 				Resource: e.serviceName(),
-				Actions:  []PlatformAction{{Type: "noop", Resource: e.serviceName(), Detail: fmt.Sprintf("ECS service %q exists (status: %s)", e.serviceName(), *svc.Status)}},
+				Actions:  []PlatformAction{{Type: "noop", Resource: e.serviceName(), Detail: fmt.Sprintf("ECS service %q exists (status: %s)", e.serviceName(), *out.Services[i].Status)}},
 			}, nil
 		}
 	}
@@ -381,7 +381,7 @@ func (b *awsECSBackend) apply(e *PlatformECS) (*PlatformResult, error) {
 
 	subnets := parseStringSlice(e.config["vpc_subnets"])
 	sgs := parseStringSlice(e.config["security_groups"])
-	desiredCount := int32(e.desiredCount())
+	desiredCount := safeIntToInt32(e.desiredCount())
 
 	_, err = client.CreateService(context.Background(), &ecs.CreateServiceInput{
 		ServiceName:    aws.String(e.serviceName()),
@@ -451,13 +451,13 @@ func (b *awsECSBackend) status(e *PlatformECS) (*ECSServiceState, error) {
 		return e.state, fmt.Errorf("ecs status: DescribeServices: %w", err)
 	}
 
-	for _, svc := range out.Services {
-		if svc.ServiceName != nil && *svc.ServiceName == e.serviceName() {
-			if svc.Status != nil {
-				e.state.Status = *svc.Status
+	for i := range out.Services {
+		if out.Services[i].ServiceName != nil && *out.Services[i].ServiceName == e.serviceName() {
+			if out.Services[i].Status != nil {
+				e.state.Status = *out.Services[i].Status
 			}
-			e.state.RunningCount = int(svc.RunningCount)
-			e.state.DesiredCount = int(svc.DesiredCount)
+			e.state.RunningCount = int(out.Services[i].RunningCount)
+			e.state.DesiredCount = int(out.Services[i].DesiredCount)
 		}
 	}
 
@@ -518,7 +518,7 @@ func parseECSContainers(cfg map[string]any) []ecstypes.ContainerDefinition {
 		}
 		if port, ok := intFromAny(c["port"]); ok && port > 0 {
 			def.PortMappings = []ecstypes.PortMapping{
-				{ContainerPort: aws.Int32(int32(port)), Protocol: ecstypes.TransportProtocolTcp},
+				{ContainerPort: aws.Int32(safeIntToInt32(port)), Protocol: ecstypes.TransportProtocolTcp},
 			}
 		}
 		result = append(result, def)

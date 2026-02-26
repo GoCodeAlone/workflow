@@ -110,18 +110,18 @@ func newLocalRegistry(baseDir string) *localRegistry {
 func (r *localRegistry) Search(query, category string, tags []string) ([]module.MarketplaceEntry, error) {
 	var results []module.MarketplaceEntry
 	installed := r.installedSet()
-	for _, e := range r.catalog {
-		if query != "" && !strings.Contains(strings.ToLower(e.Name), strings.ToLower(query)) &&
-			!strings.Contains(strings.ToLower(e.Description), strings.ToLower(query)) {
+	for i := range r.catalog {
+		if query != "" && !strings.Contains(strings.ToLower(r.catalog[i].Name), strings.ToLower(query)) &&
+			!strings.Contains(strings.ToLower(r.catalog[i].Description), strings.ToLower(query)) {
 			continue
 		}
-		if category != "" && e.Category != category {
+		if category != "" && r.catalog[i].Category != category {
 			continue
 		}
 		if len(tags) > 0 {
 			matched := false
 			for _, want := range tags {
-				for _, have := range e.Tags {
+				for _, have := range r.catalog[i].Tags {
 					if have == want {
 						matched = true
 						break
@@ -135,21 +135,23 @@ func (r *localRegistry) Search(query, category string, tags []string) ([]module.
 				continue
 			}
 		}
-		e.Installed = installed[e.Name]
-		results = append(results, e)
+		entry := r.catalog[i]
+		entry.Installed = installed[entry.Name]
+		results = append(results, entry)
 	}
 	return results, nil
 }
 
 func (r *localRegistry) Detail(name string) (*module.MarketplaceEntry, error) {
 	installed := r.installedSet()
-	for _, e := range r.catalog {
-		if e.Name == name {
-			e.Installed = installed[name]
-			if e.Installed {
-				e.InstalledAt = r.installedAt(name)
+	for i := range r.catalog {
+		if r.catalog[i].Name == name {
+			entry := r.catalog[i]
+			entry.Installed = installed[name]
+			if entry.Installed {
+				entry.InstalledAt = r.installedAt(name)
 			}
-			return &e, nil
+			return &entry, nil
 		}
 	}
 	return nil, fmt.Errorf("plugin %q not found in catalog", name)
@@ -160,12 +162,12 @@ func (r *localRegistry) Install(name string) error {
 		return err
 	}
 	pluginDir := filepath.Join(r.baseDir, name)
-	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+	if err := os.MkdirAll(pluginDir, 0o750); err != nil {
 		return fmt.Errorf("failed to create plugin dir %s: %w", pluginDir, err)
 	}
 	// Write a sentinel file to mark installation
 	marker := filepath.Join(pluginDir, ".installed")
-	return os.WriteFile(marker, []byte(time.Now().UTC().Format(time.RFC3339)), 0o644)
+	return os.WriteFile(marker, []byte(time.Now().UTC().Format(time.RFC3339)), 0o600)
 }
 
 func (r *localRegistry) Uninstall(name string) error {
@@ -191,11 +193,12 @@ func (r *localRegistry) Update(name string) (*module.MarketplaceEntry, error) {
 func (r *localRegistry) ListInstalled() ([]module.MarketplaceEntry, error) {
 	installed := r.installedSet()
 	var result []module.MarketplaceEntry
-	for _, e := range r.catalog {
-		if installed[e.Name] {
-			e.Installed = true
-			e.InstalledAt = r.installedAt(e.Name)
-			result = append(result, e)
+	for i := range r.catalog {
+		if installed[r.catalog[i].Name] {
+			entry := r.catalog[i]
+			entry.Installed = true
+			entry.InstalledAt = r.installedAt(entry.Name)
+			result = append(result, entry)
 		}
 	}
 	return result, nil

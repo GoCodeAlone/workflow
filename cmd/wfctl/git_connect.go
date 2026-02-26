@@ -131,18 +131,18 @@ Options:
 func writeWfctlConfig(cfg *wfctlConfig) error {
 	var b strings.Builder
 	b.WriteString("project:\n")
-	b.WriteString(fmt.Sprintf("  name: %s\n", cfg.ProjectName))
-	b.WriteString(fmt.Sprintf("  version: \"%s\"\n", cfg.ProjectVersion))
-	b.WriteString(fmt.Sprintf("  configFile: %s\n", cfg.ConfigFile))
+	fmt.Fprintf(&b, "  name: %s\n", cfg.ProjectName)
+	fmt.Fprintf(&b, "  version: %q\n", cfg.ProjectVersion)
+	fmt.Fprintf(&b, "  configFile: %s\n", cfg.ConfigFile)
 	b.WriteString("git:\n")
-	b.WriteString(fmt.Sprintf("  repository: %s\n", cfg.GitRepository))
-	b.WriteString(fmt.Sprintf("  branch: %s\n", cfg.GitBranch))
-	b.WriteString(fmt.Sprintf("  autoPush: %v\n", cfg.GitAutoPush))
-	b.WriteString(fmt.Sprintf("  generateActions: %v\n", cfg.GenerateActions))
+	fmt.Fprintf(&b, "  repository: %s\n", cfg.GitRepository)
+	fmt.Fprintf(&b, "  branch: %s\n", cfg.GitBranch)
+	fmt.Fprintf(&b, "  autoPush: %v\n", cfg.GitAutoPush)
+	fmt.Fprintf(&b, "  generateActions: %v\n", cfg.GenerateActions)
 	b.WriteString("deploy:\n")
-	b.WriteString(fmt.Sprintf("  target: %s\n", cfg.DeployTarget))
-	b.WriteString(fmt.Sprintf("  namespace: %s\n", cfg.DeployNamespace))
-	return os.WriteFile(".wfctl.yaml", []byte(b.String()), 0640)
+	fmt.Fprintf(&b, "  target: %s\n", cfg.DeployTarget)
+	fmt.Fprintf(&b, "  namespace: %s\n", cfg.DeployNamespace)
+	return os.WriteFile(".wfctl.yaml", []byte(b.String()), 0600)
 }
 
 // initGitRepo initializes a git repository and sets up the remote.
@@ -233,7 +233,7 @@ ui/node_modules/
 # wfctl artifacts
 .wfctl.yaml
 `
-	return os.WriteFile(".gitignore", []byte(content), 0640)
+	return os.WriteFile(".gitignore", []byte(content), 0600)
 }
 
 // loadWfctlConfig reads .wfctl.yaml from the current directory.
@@ -244,7 +244,7 @@ func loadWfctlConfig() (*wfctlConfig, error) {
 	}
 
 	cfg := &wfctlConfig{
-		GitBranch:   "main",
+		GitBranch:    "main",
 		DeployTarget: "kubernetes",
 	}
 
@@ -288,7 +288,7 @@ func loadWfctlConfig() (*wfctlConfig, error) {
 
 // runCmd runs a shell command and streams its output.
 func runCmd(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) //nolint:gosec // G204: arguments are trusted CLI commands from internal callers
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

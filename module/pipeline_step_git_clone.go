@@ -125,7 +125,7 @@ func (s *GitCloneStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		}
 		keyFile.Close()
 
-		if err := os.Chmod(keyFile.Name(), 0600); err != nil {
+		if err := os.Chmod(keyFile.Name(), 0600); err != nil { //nolint:gosec // G304: path from trusted temp file
 			return nil, fmt.Errorf("git_clone step %q: failed to chmod SSH key: %w", s.name, err)
 		}
 

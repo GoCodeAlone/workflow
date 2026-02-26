@@ -40,7 +40,7 @@ Options:
 	// Determine commit message
 	commitMsg := *message
 	if commitMsg == "" {
-		commitMsg = fmt.Sprintf("chore: update workflow config [wfctl]")
+		commitMsg = "chore: update workflow config [wfctl]"
 	}
 
 	// Stage files

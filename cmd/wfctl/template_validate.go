@@ -125,13 +125,13 @@ Options:
 		Total:   len(results),
 	}
 	totalWarnings := 0
-	for _, r := range results {
-		if r.pass() {
+	for i := range results {
+		if results[i].pass() {
 			summary.Passed++
 		} else {
 			summary.Failed++
 		}
-		totalWarnings += len(r.Warnings)
+		totalWarnings += len(results[i].Warnings)
 	}
 	summary.Warnings = totalWarnings
 
@@ -460,7 +460,8 @@ func validateWorkflowConfig(name string, cfg *config.WorkflowConfig, knownModule
 
 // printTemplateValidationResults prints results in human-readable text format.
 func printTemplateValidationResults(results []templateValidationResult, summary templateValidationSummary) {
-	for _, r := range results {
+	for i := range results {
+		r := &results[i]
 		fmt.Printf("Validating template: %s\n", r.Name)
 
 		if r.ModuleCount > 0 {
@@ -515,8 +516,8 @@ func printTemplateValidationResults(results []templateValidationResult, summary 
 	}
 
 	totalWarn := 0
-	for _, r := range results {
-		totalWarn += len(r.Warnings)
+	for i := range results {
+		totalWarn += len(results[i].Warnings)
 	}
 
 	if totalWarn > 0 {

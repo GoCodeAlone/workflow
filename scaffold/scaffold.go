@@ -26,9 +26,9 @@ type Options struct {
 
 // Spec mirrors the subset of OpenAPI 3.0 we need for scaffolding.
 type Spec struct {
-	Info       SpecInfo                  `json:"info" yaml:"info"`
-	Paths      map[string]*SpecPath      `json:"paths" yaml:"paths"`
-	Components *SpecComponents           `json:"components,omitempty" yaml:"components,omitempty"`
+	Info       SpecInfo             `json:"info" yaml:"info"`
+	Paths      map[string]*SpecPath `json:"paths" yaml:"paths"`
+	Components *SpecComponents      `json:"components,omitempty" yaml:"components,omitempty"`
 }
 
 // SpecInfo holds the info block of an OpenAPI spec.
@@ -49,11 +49,11 @@ type SpecPath struct {
 
 // SpecOp describes a single operation in a path.
 type SpecOp struct {
-	OperationID string          `json:"operationId,omitempty" yaml:"operationId,omitempty"`
-	Summary     string          `json:"summary,omitempty" yaml:"summary,omitempty"`
-	Tags        []string        `json:"tags,omitempty" yaml:"tags,omitempty"`
-	Parameters  []SpecParam     `json:"parameters,omitempty" yaml:"parameters,omitempty"`
-	RequestBody *SpecReqBody    `json:"requestBody,omitempty" yaml:"requestBody,omitempty"`
+	OperationID string       `json:"operationId,omitempty" yaml:"operationId,omitempty"`
+	Summary     string       `json:"summary,omitempty" yaml:"summary,omitempty"`
+	Tags        []string     `json:"tags,omitempty" yaml:"tags,omitempty"`
+	Parameters  []SpecParam  `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+	RequestBody *SpecReqBody `json:"requestBody,omitempty" yaml:"requestBody,omitempty"`
 }
 
 // SpecParam describes a parameter in an operation.
@@ -228,9 +228,7 @@ func AnalyzeSpec(spec *Spec, opts Options) *Data {
 		if authPathRe.MatchString(p) {
 			// Still add auth ops to allOps.
 			pi := spec.Paths[p]
-			for _, op := range pathOps(pi, p) {
-				allOps = append(allOps, op)
-			}
+			allOps = append(allOps, pathOps(pi, p)...)
 			continue
 		}
 
@@ -446,13 +444,11 @@ func buildAPIOperation(op *SpecOp, method, path string) APIOperation {
 	funcName := op.OperationID
 	if funcName == "" {
 		funcName = generateFuncName(method, path)
-	} else {
+	} else if len(funcName) > 0 {
 		// Ensure it starts lower-case for TS convention.
-		if len(funcName) > 0 {
-			r := []rune(funcName)
-			r[0] = unicode.ToLower(r[0])
-			funcName = string(r)
-		}
+		r := []rune(funcName)
+		r[0] = unicode.ToLower(r[0])
+		funcName = string(r)
 	}
 
 	var pathParams []string

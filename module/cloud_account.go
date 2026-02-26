@@ -22,9 +22,9 @@ type CloudCredentials struct {
 	Provider string
 	Region   string
 	// AWS
-	AccessKey    string
+	AccessKey    string //nolint:gosec // G117: config struct field, not a hardcoded secret
 	SecretKey    string
-	SessionToken string
+	SessionToken string //nolint:gosec // G117: config struct field, not a hardcoded secret
 	RoleARN      string
 	// GCP
 	ProjectID          string
@@ -32,7 +32,7 @@ type CloudCredentials struct {
 	// Azure
 	TenantID       string
 	ClientID       string
-	ClientSecret   string
+	ClientSecret   string //nolint:gosec // G117: config struct field, not a hardcoded secret
 	SubscriptionID string
 	// Kubernetes
 	Kubeconfig []byte
@@ -243,7 +243,7 @@ func (m *CloudAccount) resolveEnvCredentials(creds *CloudCredentials) (*CloudCre
 		}
 		saPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
 		if saPath != "" {
-			data, err := os.ReadFile(saPath)
+			data, err := os.ReadFile(saPath) //nolint:gosec // G304: path from trusted config data
 			if err != nil {
 				return nil, fmt.Errorf("reading GOOGLE_APPLICATION_CREDENTIALS: %w", err)
 			}
@@ -262,7 +262,7 @@ func (m *CloudAccount) resolveEnvCredentials(creds *CloudCredentials) (*CloudCre
 			home, _ := os.UserHomeDir()
 			kubeconfigPath = home + "/.kube/config"
 		}
-		data, err := os.ReadFile(kubeconfigPath)
+		data, err := os.ReadFile(kubeconfigPath) //nolint:gosec // G304: path from trusted config data
 		if err != nil {
 			return nil, fmt.Errorf("reading kubeconfig: %w", err)
 		}
@@ -320,7 +320,7 @@ func (m *CloudAccount) resolveKubeconfigCredentials(creds *CloudCredentials, cre
 	if inline, ok := credsMap["inline"].(string); ok && inline != "" {
 		creds.Kubeconfig = []byte(inline)
 	} else if path != "" {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //nolint:gosec // G304: path from trusted config data
 		if err != nil {
 			return nil, fmt.Errorf("reading kubeconfig at %q: %w", path, err)
 		}
@@ -337,7 +337,7 @@ func (m *CloudAccount) resolveGCPServiceAccountJSON(creds *CloudCredentials, cre
 	if path == "" {
 		return nil, fmt.Errorf("service_account_json credential requires 'path'")
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path from trusted config data
 	if err != nil {
 		return nil, fmt.Errorf("reading service account JSON at %q: %w", path, err)
 	}
@@ -376,7 +376,7 @@ func (m *CloudAccount) resolveGCPApplicationDefault(creds *CloudCredentials) (*C
 	}
 	saPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
 	if saPath != "" {
-		data, err := os.ReadFile(saPath)
+		data, err := os.ReadFile(saPath) //nolint:gosec // G304: path from trusted config data
 		if err != nil {
 			return nil, fmt.Errorf("reading GOOGLE_APPLICATION_CREDENTIALS: %w", err)
 		}

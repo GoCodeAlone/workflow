@@ -170,9 +170,9 @@ func writeCIWorkflow(path string, features *projectFeatures) error {
 	b.WriteString("      - name: Install wfctl\n")
 	b.WriteString("        run: go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest\n")
 	b.WriteString("      - name: Validate config\n")
-	b.WriteString(fmt.Sprintf("        run: wfctl validate %s\n", features.configFile))
+	fmt.Fprintf(&b, "        run: wfctl validate %s\n", features.configFile)
 	b.WriteString("      - name: Inspect config\n")
-	b.WriteString(fmt.Sprintf("        run: wfctl inspect %s\n", features.configFile))
+	fmt.Fprintf(&b, "        run: wfctl inspect %s\n", features.configFile)
 
 	if features.hasUI {
 		b.WriteString("      - uses: actions/setup-node@v4\n")
@@ -195,7 +195,7 @@ func writeCIWorkflow(path string, features *projectFeatures) error {
 		b.WriteString("        continue-on-error: true\n")
 	}
 
-	return os.WriteFile(path, []byte(b.String()), 0640)
+	return os.WriteFile(path, []byte(b.String()), 0600)
 }
 
 func writeCDWorkflow(path string, features *projectFeatures, registry, platforms string) error {
@@ -207,7 +207,7 @@ func writeCDWorkflow(path string, features *projectFeatures, registry, platforms
 	b.WriteString("    tags: ['v*']\n")
 	b.WriteString("\n")
 	b.WriteString("env:\n")
-	b.WriteString(fmt.Sprintf("  REGISTRY: %s\n", registry))
+	fmt.Fprintf(&b, "  REGISTRY: %s\n", registry)
 	b.WriteString("\n")
 	b.WriteString("jobs:\n")
 	b.WriteString("  build:\n")
@@ -246,12 +246,12 @@ func writeCDWorkflow(path string, features *projectFeatures, registry, platforms
 	b.WriteString("        with:\n")
 	b.WriteString("          context: .\n")
 	b.WriteString("          push: true\n")
-	b.WriteString(fmt.Sprintf("          platforms: %s\n", platforms))
+	fmt.Fprintf(&b, "          platforms: %s\n", platforms)
 	b.WriteString("          tags: |\n")
 	b.WriteString("            ${{ env.REGISTRY }}/${{ github.repository }}:${{ github.ref_name }}\n")
 	b.WriteString("            ${{ env.REGISTRY }}/${{ github.repository }}:latest\n")
 
-	return os.WriteFile(path, []byte(b.String()), 0640)
+	return os.WriteFile(path, []byte(b.String()), 0600)
 }
 
 func writeReleaseWorkflow(path string) error {
@@ -283,5 +283,5 @@ jobs:
         with:
           files: dist/*
 `
-	return os.WriteFile(path, []byte(content), 0640)
+	return os.WriteFile(path, []byte(content), 0600)
 }

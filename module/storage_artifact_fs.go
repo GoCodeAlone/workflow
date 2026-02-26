@@ -130,7 +130,7 @@ func (m *ArtifactFSModule) Upload(_ context.Context, key string, reader io.Reade
 	if err != nil {
 		return fmt.Errorf("artifact store %q: Upload %q: failed to marshal metadata: %w", m.name, key, err)
 	}
-	if err := os.WriteFile(metaPath(path), metaData, 0o640); err != nil {
+	if err := os.WriteFile(metaPath(path), metaData, 0o600); err != nil { //nolint:gosec // G306
 		return fmt.Errorf("artifact store %q: Upload %q: failed to write metadata: %w", m.name, key, err)
 	}
 
@@ -170,9 +170,9 @@ func (m *ArtifactFSModule) List(_ context.Context, prefix string) ([]ArtifactInf
 
 	var results []ArtifactInfo
 
-	err := filepath.Walk(m.cfg.BasePath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // skip unreadable entries
+	err := filepath.Walk(m.cfg.BasePath, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return nil //nolint:nilerr // skip unreadable entries
 		}
 		if info.IsDir() {
 			return nil
@@ -183,9 +183,9 @@ func (m *ArtifactFSModule) List(_ context.Context, prefix string) ([]ArtifactInf
 		}
 
 		// Derive key from path relative to basePath.
-		rel, err := filepath.Rel(m.cfg.BasePath, path)
-		if err != nil {
-			return nil
+		rel, relErr := filepath.Rel(m.cfg.BasePath, path)
+		if relErr != nil {
+			return nil //nolint:nilerr // skip entries with unparseable paths
 		}
 		key := filepath.ToSlash(rel)
 

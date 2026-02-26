@@ -140,7 +140,7 @@ func (h *gitLabWebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	out, _ := json.Marshal(event)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(out)
+	_, _ = w.Write(out) //nolint:gosec // response is JSON-marshaled from trusted internal data
 }
 
 func (h *gitLabWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, params map[string]string) {

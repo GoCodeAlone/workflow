@@ -312,8 +312,8 @@ func (b *awsAPIGatewayBackend) plan(m *PlatformAPIGateway) (*PlatformGatewayPlan
 		return nil, fmt.Errorf("apigateway plan: GetApis: %w", err)
 	}
 
-	for _, api := range listOut.Items {
-		if api.Name != nil && *api.Name == m.gatewayName() {
+	for i := range listOut.Items {
+		if listOut.Items[i].Name != nil && *listOut.Items[i].Name == m.gatewayName() {
 			return &PlatformGatewayPlan{
 				Name:    m.gatewayName(),
 				Stage:   m.state.Stage,
@@ -349,9 +349,9 @@ func (b *awsAPIGatewayBackend) apply(m *PlatformAPIGateway) (*PlatformGatewaySta
 	if apiID == "" {
 		listOut, _ := client.GetApis(context.Background(), &apigatewayv2.GetApisInput{})
 		if listOut != nil {
-			for _, api := range listOut.Items {
-				if api.Name != nil && *api.Name == m.gatewayName() && api.ApiId != nil {
-					apiID = *api.ApiId
+			for i := range listOut.Items {
+				if listOut.Items[i].Name != nil && *listOut.Items[i].Name == m.gatewayName() && listOut.Items[i].ApiId != nil {
+					apiID = *listOut.Items[i].ApiId
 					break
 				}
 			}
@@ -445,17 +445,17 @@ func (b *awsAPIGatewayBackend) status(m *PlatformAPIGateway) (*PlatformGatewaySt
 		return m.state, nil
 	}
 
-	out, err := client.GetApi(context.Background(), &apigatewayv2.GetApiInput{
+	out, getErr := client.GetApi(context.Background(), &apigatewayv2.GetApiInput{
 		ApiId: aws.String(m.state.ID),
 	})
-	if err != nil {
+	if getErr == nil {
+		if out.ApiEndpoint != nil {
+			m.state.Endpoint = *out.ApiEndpoint
+		}
+		m.state.Status = "active"
+	} else {
 		m.state.Status = "not-found"
-		return m.state, nil
 	}
-	if out.ApiEndpoint != nil {
-		m.state.Endpoint = *out.ApiEndpoint
-	}
-	m.state.Status = "active"
 	return m.state, nil
 }
 

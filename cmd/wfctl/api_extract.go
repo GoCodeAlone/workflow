@@ -5,7 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"regexp"
+
 	"sort"
 	"strings"
 
@@ -190,9 +190,6 @@ type pipelineEndpoint struct {
 	includeSchemas bool
 }
 
-// pathParamRegexExtract matches {paramName} in route paths.
-var pathParamRegexExtract = regexp.MustCompile(`\{([^}]+)\}`)
-
 // extractPipelineRoutes scans the pipelines map for HTTP-triggered pipelines
 // and returns route definitions for each one.
 func extractPipelineRoutes(pipelines map[string]any, includeSchemas bool, gen *module.OpenAPIGenerator) []module.RouteDefinition {
@@ -315,7 +312,7 @@ func applyPipelineSchemas(gen *module.OpenAPIGenerator, ep *pipelineEndpoint) {
 			}
 
 		case "step.user_login":
-			// Request: email + password; Response: token
+			// Expects email and password in request, returns token in response
 			if reqSchema == nil {
 				reqSchema = userCredentialsSchema()
 			}
@@ -345,15 +342,6 @@ func applyPipelineSchemas(gen *module.OpenAPIGenerator, ep *pipelineEndpoint) {
 				respSchema = &module.OpenAPISchema{Type: "object"}
 			}
 		}
-	}
-
-	// Build extra responses map for auth
-	if hasAuthRequired {
-		// We'll register these via SetOperationSchema — the generator adds 401/403
-		// by detecting auth in middlewares, but for pipelines we set it directly.
-		// We use a trick: add "auth" to the route middleware list by ensuring
-		// we call SetOperationSchema with a summary that includes auth note.
-		// The cleanest approach is to set the schemas and rely on the generator.
 	}
 
 	// Set the inferred schemas on the operation

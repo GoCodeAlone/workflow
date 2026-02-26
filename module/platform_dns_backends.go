@@ -238,44 +238,42 @@ func (b *route53Backend) statusDNS(m *PlatformDNS) (*DNSState, error) {
 		return m.state, nil
 	}
 
-	_, err = client.GetHostedZone(context.Background(), &route53.GetHostedZoneInput{
+	_, getErr := client.GetHostedZone(context.Background(), &route53.GetHostedZoneInput{
 		Id: aws.String(m.state.ZoneID),
 	})
-	if err != nil {
-		m.state.Status = "not-found"
-		return m.state, nil
-	}
-
-	// List records
-	listOut, err := client.ListResourceRecordSets(context.Background(), &route53.ListResourceRecordSetsInput{
-		HostedZoneId: aws.String(m.state.ZoneID),
-	})
-	if err == nil {
-		var records []DNSRecordConfig
-		for _, rrs := range listOut.ResourceRecordSets {
-			if rrs.Name == nil {
-				continue
-			}
-			for _, rr := range rrs.ResourceRecords {
-				if rr.Value == nil {
+	if getErr == nil {
+		// Zone found — list records
+		listOut, listErr := client.ListResourceRecordSets(context.Background(), &route53.ListResourceRecordSetsInput{
+			HostedZoneId: aws.String(m.state.ZoneID),
+		})
+		if listErr == nil {
+			var records []DNSRecordConfig
+			for i := range listOut.ResourceRecordSets {
+				if listOut.ResourceRecordSets[i].Name == nil {
 					continue
 				}
-				ttl := 300
-				if rrs.TTL != nil {
-					ttl = int(*rrs.TTL)
+				for _, rr := range listOut.ResourceRecordSets[i].ResourceRecords {
+					if rr.Value == nil {
+						continue
+					}
+					ttl := 300
+					if listOut.ResourceRecordSets[i].TTL != nil {
+						ttl = int(*listOut.ResourceRecordSets[i].TTL)
+					}
+					records = append(records, DNSRecordConfig{
+						Name:  *listOut.ResourceRecordSets[i].Name,
+						Type:  string(listOut.ResourceRecordSets[i].Type),
+						Value: *rr.Value,
+						TTL:   ttl,
+					})
 				}
-				records = append(records, DNSRecordConfig{
-					Name:  *rrs.Name,
-					Type:  string(rrs.Type),
-					Value: *rr.Value,
-					TTL:   ttl,
-				})
 			}
+			m.state.Records = records
 		}
-		m.state.Records = records
+		m.state.Status = "active"
+	} else {
+		m.state.Status = "not-found"
 	}
-
-	m.state.Status = "active"
 	return m.state, nil
 }
 
@@ -301,13 +299,13 @@ func (b *route53Backend) destroyDNS(m *PlatformDNS) error {
 	})
 	if listOut != nil {
 		var changes []r53types.Change
-		for _, rrs := range listOut.ResourceRecordSets {
-			if rrs.Type == r53types.RRTypeNs || rrs.Type == r53types.RRTypeSoa {
+		for i := range listOut.ResourceRecordSets {
+			if listOut.ResourceRecordSets[i].Type == r53types.RRTypeNs || listOut.ResourceRecordSets[i].Type == r53types.RRTypeSoa {
 				continue
 			}
 			changes = append(changes, r53types.Change{
 				Action:            r53types.ChangeActionDelete,
-				ResourceRecordSet: &rrs,
+				ResourceRecordSet: &listOut.ResourceRecordSets[i],
 			})
 		}
 		if len(changes) > 0 {

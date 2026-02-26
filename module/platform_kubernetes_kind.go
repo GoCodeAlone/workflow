@@ -53,7 +53,7 @@ func (b *kindBackend) apply(k *PlatformKubernetes) (*PlatformResult, error) {
 	// In-memory: immediately transition to running.
 	// Real implementation: exec `kind create cluster --name <name> --image kindest/node:v<version>`
 	k.state.Status = "running"
-	k.state.Endpoint = fmt.Sprintf("https://127.0.0.1:6443")
+	k.state.Endpoint = "https://127.0.0.1:6443"
 
 	return &PlatformResult{
 		Success: true,
@@ -183,6 +183,9 @@ func (b *eksBackend) apply(k *PlatformKubernetes) (*PlatformResult, error) {
 		if ngRoleARN == "" {
 			ngRoleARN = roleARN
 		}
+		ngMin := safeIntToInt32(ng.Min)
+		ngMax := safeIntToInt32(ng.Max)
+		ngCurrent := safeIntToInt32(ng.Current)
 		_, ngErr := client.CreateNodegroup(context.Background(), &eks.CreateNodegroupInput{
 			ClusterName:   aws.String(k.clusterName()),
 			NodegroupName: aws.String(ng.Name),
@@ -190,9 +193,9 @@ func (b *eksBackend) apply(k *PlatformKubernetes) (*PlatformResult, error) {
 			InstanceTypes: []string{ng.InstanceType},
 			Subnets:       subnetIDs,
 			ScalingConfig: &ekstypes.NodegroupScalingConfig{
-				MinSize:     aws.Int32(int32(ng.Min)),
-				MaxSize:     aws.Int32(int32(ng.Max)),
-				DesiredSize: aws.Int32(int32(ng.Current)),
+				MinSize:     aws.Int32(ngMin),
+				MaxSize:     aws.Int32(ngMax),
+				DesiredSize: aws.Int32(ngCurrent),
 			},
 		})
 		if ngErr != nil {

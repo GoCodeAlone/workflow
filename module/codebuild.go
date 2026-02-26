@@ -182,8 +182,7 @@ func (m *CodeBuildModule) GenerateBuildspec(pipelineConfig map[string]any) strin
 
 	// Env section
 	if vars, ok := pipelineConfig["env_variables"].(map[string]any); ok && len(vars) > 0 {
-		lines = append(lines, "env:")
-		lines = append(lines, "  variables:")
+		lines = append(lines, "env:", "  variables:")
 		for k, v := range vars {
 			lines = append(lines, fmt.Sprintf("    %s: %q", k, fmt.Sprint(v)))
 		}
@@ -194,8 +193,7 @@ func (m *CodeBuildModule) GenerateBuildspec(pipelineConfig map[string]any) strin
 
 	// install phase
 	if cmds := codebuildExtractStringSlice(pipelineConfig, "install_commands"); len(cmds) > 0 {
-		lines = append(lines, "  install:")
-		lines = append(lines, "    commands:")
+		lines = append(lines, "  install:", "    commands:")
 		for _, cmd := range cmds {
 			lines = append(lines, "      - "+cmd)
 		}
@@ -203,8 +201,7 @@ func (m *CodeBuildModule) GenerateBuildspec(pipelineConfig map[string]any) strin
 
 	// pre_build phase
 	if cmds := codebuildExtractStringSlice(pipelineConfig, "pre_build_commands"); len(cmds) > 0 {
-		lines = append(lines, "  pre_build:")
-		lines = append(lines, "    commands:")
+		lines = append(lines, "  pre_build:", "    commands:")
 		for _, cmd := range cmds {
 			lines = append(lines, "      - "+cmd)
 		}
@@ -215,16 +212,14 @@ func (m *CodeBuildModule) GenerateBuildspec(pipelineConfig map[string]any) strin
 	if len(buildCmds) == 0 {
 		buildCmds = []string{"echo Build started", "echo Build complete"}
 	}
-	lines = append(lines, "  build:")
-	lines = append(lines, "    commands:")
+	lines = append(lines, "  build:", "    commands:")
 	for _, cmd := range buildCmds {
 		lines = append(lines, "      - "+cmd)
 	}
 
 	// post_build phase
 	if cmds := codebuildExtractStringSlice(pipelineConfig, "post_build_commands"); len(cmds) > 0 {
-		lines = append(lines, "  post_build:")
-		lines = append(lines, "    commands:")
+		lines = append(lines, "  post_build:", "    commands:")
 		for _, cmd := range cmds {
 			lines = append(lines, "      - "+cmd)
 		}
@@ -232,9 +227,7 @@ func (m *CodeBuildModule) GenerateBuildspec(pipelineConfig map[string]any) strin
 
 	// Artifacts section
 	if files := codebuildExtractStringSlice(pipelineConfig, "artifact_files"); len(files) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, "artifacts:")
-		lines = append(lines, "  files:")
+		lines = append(lines, "", "artifacts:", "  files:")
 		for _, f := range files {
 			lines = append(lines, "    - "+f)
 		}
@@ -245,9 +238,7 @@ func (m *CodeBuildModule) GenerateBuildspec(pipelineConfig map[string]any) strin
 
 	// Cache section
 	if paths := codebuildExtractStringSlice(pipelineConfig, "cache_paths"); len(paths) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, "cache:")
-		lines = append(lines, "  paths:")
+		lines = append(lines, "", "cache:", "  paths:")
 		for _, p := range paths {
 			lines = append(lines, "    - "+p)
 		}

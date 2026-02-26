@@ -488,10 +488,11 @@ func (b *awsNetworkBackend) apply(m *PlatformNetworking) (*NetworkState, error) 
 			// Authorize ingress rules
 			var ipPerms []ec2types.IpPermission
 			for _, rule := range sg.Rules {
+				rulePort := safeIntToInt32(rule.Port)
 				ipPerms = append(ipPerms, ec2types.IpPermission{
 					IpProtocol: aws.String(rule.Protocol),
-					FromPort:   aws.Int32(int32(rule.Port)),
-					ToPort:     aws.Int32(int32(rule.Port)),
+					FromPort:   aws.Int32(rulePort),
+					ToPort:     aws.Int32(rulePort),
 					IpRanges:   []ec2types.IpRange{{CidrIp: aws.String(rule.Source)}},
 				})
 			}

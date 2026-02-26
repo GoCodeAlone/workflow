@@ -98,7 +98,7 @@ func (s *ScaffoldStep) Execute(_ context.Context, pc *PipelineContext) (*StepRes
 		w.Header().Set("Content-Type", "application/zip")
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", s.filename))
 		w.WriteHeader(http.StatusOK)
-		if _, writeErr := w.Write(zipBytes); writeErr != nil {
+		if _, writeErr := w.Write(zipBytes); writeErr != nil { //nolint:gosec // response is binary zip data with proper Content-Type header
 			return nil, fmt.Errorf("step.ui_scaffold %q: writing response: %w", s.name, writeErr)
 		}
 		pc.Metadata["_response_handled"] = true

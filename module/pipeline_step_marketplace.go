@@ -75,8 +75,8 @@ func (s *MarketplaceSearchStep) Execute(_ context.Context, _ *PipelineContext) (
 		return nil, fmt.Errorf("marketplace_search step %q: %w", s.name, err)
 	}
 	entries := make([]map[string]any, 0, len(results))
-	for _, e := range results {
-		entries = append(entries, entryToMap(e))
+	for i := range results {
+		entries = append(entries, entryToMap(results[i]))
 	}
 	return &StepResult{Output: map[string]any{
 		"results": entries,
@@ -173,8 +173,8 @@ func (s *MarketplaceInstalledStep) Execute(_ context.Context, _ *PipelineContext
 		return nil, fmt.Errorf("marketplace_installed step %q: %w", s.name, err)
 	}
 	entries := make([]map[string]any, 0, len(installed))
-	for _, e := range installed {
-		entries = append(entries, entryToMap(e))
+	for i := range installed {
+		entries = append(entries, entryToMap(installed[i]))
 	}
 	return &StepResult{Output: map[string]any{
 		"plugins": entries,
