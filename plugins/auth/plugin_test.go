@@ -21,8 +21,8 @@ func TestPluginManifest(t *testing.T) {
 	if m.Name != "auth" {
 		t.Errorf("expected name %q, got %q", "auth", m.Name)
 	}
-	if len(m.ModuleTypes) != 3 {
-		t.Errorf("expected 3 module types, got %d", len(m.ModuleTypes))
+	if len(m.ModuleTypes) != 4 {
+		t.Errorf("expected 4 module types, got %d", len(m.ModuleTypes))
 	}
 	if len(m.WiringHooks) != 2 {
 		t.Errorf("expected 2 wiring hooks, got %d", len(m.WiringHooks))
@@ -50,7 +50,7 @@ func TestModuleFactories(t *testing.T) {
 	p := New()
 	factories := p.ModuleFactories()
 
-	expectedTypes := []string{"auth.jwt", "auth.user-store", "auth.oauth2"}
+	expectedTypes := []string{"auth.jwt", "auth.user-store", "auth.oauth2", "auth.m2m"}
 	for _, typ := range expectedTypes {
 		factory, ok := factories[typ]
 		if !ok {
@@ -103,15 +103,15 @@ func TestWiringHooks(t *testing.T) {
 func TestModuleSchemas(t *testing.T) {
 	p := New()
 	schemas := p.ModuleSchemas()
-	if len(schemas) != 3 {
-		t.Fatalf("expected 3 module schemas, got %d", len(schemas))
+	if len(schemas) != 4 {
+		t.Fatalf("expected 4 module schemas, got %d", len(schemas))
 	}
 
 	types := map[string]bool{}
 	for _, s := range schemas {
 		types[s.Type] = true
 	}
-	for _, expected := range []string{"auth.jwt", "auth.user-store", "auth.oauth2"} {
+	for _, expected := range []string{"auth.jwt", "auth.user-store", "auth.oauth2", "auth.m2m"} {
 		if !types[expected] {
 			t.Errorf("missing schema for %q", expected)
 		}

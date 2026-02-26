@@ -161,6 +161,12 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Stateful:   false,
 			ConfigKeys: []string{"providers"},
 		},
+		"auth.m2m": {
+			Type:       "auth.m2m",
+			Plugin:     "auth",
+			Stateful:   false,
+			ConfigKeys: []string{"secret", "algorithm", "privateKey", "tokenExpiry", "issuer", "clients"},
+		},
 
 		// messaging plugin
 		"messaging.broker": {

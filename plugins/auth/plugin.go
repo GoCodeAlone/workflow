@@ -11,9 +11,9 @@ import (
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
-// Plugin provides authentication capabilities: auth.jwt, auth.user-store, and
-// auth.oauth2 modules plus the wiring hook that connects AuthProviders to
-// AuthMiddleware.
+// Plugin provides authentication capabilities: auth.jwt, auth.user-store,
+// auth.oauth2, and auth.m2m modules plus the wiring hook that connects
+// AuthProviders to AuthMiddleware.
 type Plugin struct {
 	plugin.BaseEnginePlugin
 }
@@ -37,6 +37,7 @@ func New() *Plugin {
 					"auth.jwt",
 					"auth.user-store",
 					"auth.oauth2",
+					"auth.m2m",
 				},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "authentication", Role: "provider", Priority: 10},
@@ -125,6 +126,55 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			}
 			// jwtAuth will be wired during the wiring hook.
 			return module.NewOAuth2Module(name, providerCfgs, nil)
+		},
+		"auth.m2m": func(name string, cfg map[string]any) modular.Module {
+			secret := stringFromMap(cfg, "secret")
+			tokenExpiry := time.Hour
+			if te, ok := cfg["tokenExpiry"].(string); ok && te != "" {
+				if d, err := time.ParseDuration(te); err == nil {
+					tokenExpiry = d
+				}
+			}
+			issuer := "workflow"
+			if iss, ok := cfg["issuer"].(string); ok && iss != "" {
+				issuer = iss
+			}
+			m := module.NewM2MAuthModule(name, secret, tokenExpiry, issuer)
+
+			if algo, ok := cfg["algorithm"].(string); ok && module.SigningAlgorithm(algo) == module.SigningAlgES256 {
+				var keyErr error
+				if pemKey, ok := cfg["privateKey"].(string); ok && pemKey != "" {
+					keyErr = m.SetECDSAKey(pemKey)
+				} else {
+					keyErr = m.GenerateECDSAKey()
+				}
+				if keyErr != nil {
+					m.SetInitErr(keyErr)
+				}
+			}
+
+			if clients, ok := cfg["clients"].([]any); ok {
+				for _, c := range clients {
+					if cm, ok := c.(map[string]any); ok {
+						client := module.M2MClient{
+							ClientID:     stringFromMap(cm, "clientId"),
+							ClientSecret: stringFromMap(cm, "clientSecret"),
+							Description:  stringFromMap(cm, "description"),
+						}
+						if scopes, ok := cm["scopes"].([]any); ok {
+							for _, s := range scopes {
+								if sv, ok := s.(string); ok {
+									client.Scopes = append(client.Scopes, sv)
+								}
+							}
+						}
+						if client.ClientID != "" && client.ClientSecret != "" {
+							m.RegisterClient(client)
+						}
+					}
+				}
+			}
+			return m
 		},
 	}
 }
@@ -228,6 +278,23 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "providers", Label: "Providers", Type: schema.FieldTypeJSON, Required: true, Description: "List of OAuth2 provider configurations (google, github, or custom)"},
 			},
 			DefaultConfig: map[string]any{"providers": []any{}},
+		},
+		{
+			Type:        "auth.m2m",
+			Label:       "M2M Auth",
+			Category:    "middleware",
+			Description: "Machine-to-machine OAuth2 auth: client_credentials grant, JWT-bearer assertion grant, ES256/HS256 token issuance, and JWKS endpoint",
+			Inputs:      []schema.ServiceIODef{{Name: "client-credentials", Type: "ClientCredentials", Description: "OAuth2 client_id + client_secret, or a signed JWT assertion"}},
+			Outputs:     []schema.ServiceIODef{{Name: "access-token", Type: "BearerToken", Description: "Signed access token (HS256 or ES256)"}},
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "secret", Label: "HMAC Secret", Type: schema.FieldTypeString, Description: "Secret for HS256 token signing (min 32 bytes; leave blank for ES256)", Placeholder: "$M2M_SECRET", Sensitive: true},
+				{Key: "algorithm", Label: "Signing Algorithm", Type: schema.FieldTypeSelect, Options: []string{"HS256", "ES256"}, DefaultValue: "ES256", Description: "JWT signing algorithm: ES256 (ECDSA P-256) or HS256 (symmetric)"},
+				{Key: "privateKey", Label: "EC Private Key (PEM)", Type: schema.FieldTypeString, Description: "PEM-encoded EC private key for ES256 signing; if omitted a key is auto-generated", Sensitive: true},
+				{Key: "tokenExpiry", Label: "Token Expiry", Type: schema.FieldTypeDuration, DefaultValue: "1h", Description: "Access token expiration duration (e.g. 15m, 1h)", Placeholder: "1h"},
+				{Key: "issuer", Label: "Issuer", Type: schema.FieldTypeString, DefaultValue: "workflow", Description: "Token issuer (iss) claim", Placeholder: "workflow"},
+				{Key: "clients", Label: "Registered Clients", Type: schema.FieldTypeJSON, Description: "List of OAuth2 clients: [{clientId, clientSecret, scopes, description}]"},
+			},
+			DefaultConfig: map[string]any{"algorithm": "ES256", "tokenExpiry": "1h", "issuer": "workflow", "clients": []any{}},
 		},
 	}
 }
