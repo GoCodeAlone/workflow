@@ -9,11 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow"
 	"github.com/GoCodeAlone/workflow/config"
-	"github.com/GoCodeAlone/workflow/handlers"
-	"github.com/GoCodeAlone/workflow/module"
 )
 
 func main() {
@@ -41,18 +38,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	app := modular.NewStdApplication(nil, logger)
-	engine := workflow.NewStdEngine(app, logger)
-
-	engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
-
-	engine.RegisterTrigger(module.NewEventTrigger())
-	engine.RegisterTrigger(module.NewEventBusTrigger())
-	engine.RegisterTrigger(module.NewHTTPTrigger())
-
-	if err := engine.BuildFromConfig(cfg); err != nil {
+	engine, err := workflow.NewEngineBuilder().
+		WithLogger(logger).
+		WithAllDefaults().
+		BuildFromConfig(cfg)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to build workflow: %v\n", err)
 		os.Exit(1)
 	}

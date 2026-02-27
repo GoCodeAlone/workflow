@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/handlers"
@@ -189,20 +188,12 @@ Options:
 	// build from config (which wires all step factories and compiles pipelines),
 	// then look up the named pipeline from the engine's pipeline registry directly.
 	// We deliberately skip engine.Start() so no HTTP servers or triggers are started.
-	app := modular.NewStdApplication(nil, logger)
-	eng := workflow.NewStdEngine(app, logger)
-
-	// Register the pipeline workflow handler (required for configurePipelines to find a PipelineAdder).
-	eng.RegisterWorkflowHandler(handlers.NewPipelineWorkflowHandler())
-
-	// Load the pipeline-steps plugin (registers step.log, step.set, step.validate, etc.)
-	if err := eng.LoadPlugin(pluginpipeline.New()); err != nil {
-		return fmt.Errorf("failed to load pipeline-steps plugin: %w", err)
-	}
-
-	// BuildFromConfig registers modules, compiles pipeline steps, and populates
-	// the engine's pipeline registry. It does NOT start the HTTP server.
-	if err := eng.BuildFromConfig(cfg); err != nil {
+	eng, err := workflow.NewEngineBuilder().
+		WithLogger(logger).
+		WithHandler(handlers.NewPipelineWorkflowHandler()).
+		WithPlugin(pluginpipeline.New()).
+		BuildFromConfig(cfg)
+	if err != nil {
 		return fmt.Errorf("failed to build engine from config: %w", err)
 	}
 

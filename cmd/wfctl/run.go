@@ -11,6 +11,9 @@ import (
 
 	"github.com/GoCodeAlone/workflow"
 	"github.com/GoCodeAlone/workflow/config"
+
+	// Blank import registers default handlers and triggers with the engine builder.
+	_ "github.com/GoCodeAlone/workflow/setup"
 )
 
 func runRun(args []string) error {

@@ -11,10 +11,19 @@ import (
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/dynamic"
-	"github.com/GoCodeAlone/workflow/handlers"
-	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/plugin"
 )
+
+// DefaultHandlerFactory is a function that returns a slice of default
+// WorkflowHandler instances. It is set by engine_builder_defaults.go
+// via an init function to break the import cycle between the root
+// workflow package and the handlers package.
+var DefaultHandlerFactory func() []WorkflowHandler
+
+// DefaultTriggerFactory is a function that returns a slice of default
+// Trigger instances. It is set by engine_builder_defaults.go.
+var DefaultTriggerFactory func() []interfaces.Trigger
 
 // EngineBuilder provides a fluent API for constructing a fully-configured
 // StdEngine. It encapsulates the boilerplate of registering workflow handlers,
@@ -31,7 +40,7 @@ type EngineBuilder struct {
 
 	// Accumulator slices for deferred registration.
 	workflowHandlers []WorkflowHandler
-	triggers         []module.Trigger
+	triggers         []interfaces.Trigger
 	plugins          []plugin.EnginePlugin
 
 	// Feature flags
@@ -53,7 +62,7 @@ type EngineBuilder struct {
 func NewEngineBuilder() *EngineBuilder {
 	return &EngineBuilder{
 		workflowHandlers: make([]WorkflowHandler, 0),
-		triggers:         make([]module.Trigger, 0),
+		triggers:         make([]interfaces.Trigger, 0),
 		plugins:          make([]plugin.EnginePlugin, 0),
 	}
 }
@@ -108,7 +117,7 @@ func (b *EngineBuilder) WithHandler(handler WorkflowHandler) *EngineBuilder {
 }
 
 // WithTrigger adds a custom trigger to the engine.
-func (b *EngineBuilder) WithTrigger(trigger module.Trigger) *EngineBuilder {
+func (b *EngineBuilder) WithTrigger(trigger interfaces.Trigger) *EngineBuilder {
 	b.triggers = append(b.triggers, trigger)
 	return b
 }
@@ -155,16 +164,11 @@ func (b *EngineBuilder) Build() (*StdEngine, error) {
 		engine.SetPluginLoader(b.pluginLoader)
 	}
 
-	// Register default handlers
-	if b.useDefaultHandlers {
-		engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
-		engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
-		engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
-		engine.RegisterWorkflowHandler(handlers.NewSchedulerWorkflowHandler())
-		engine.RegisterWorkflowHandler(handlers.NewIntegrationWorkflowHandler())
-		engine.RegisterWorkflowHandler(handlers.NewPipelineWorkflowHandler())
-		engine.RegisterWorkflowHandler(handlers.NewEventWorkflowHandler())
-		engine.RegisterWorkflowHandler(handlers.NewPlatformWorkflowHandler())
+	// Register default handlers via factory (set in engine_builder_defaults.go)
+	if b.useDefaultHandlers && DefaultHandlerFactory != nil {
+		for _, h := range DefaultHandlerFactory() {
+			engine.RegisterWorkflowHandler(h)
+		}
 	}
 
 	// Register custom handlers
@@ -172,13 +176,11 @@ func (b *EngineBuilder) Build() (*StdEngine, error) {
 		engine.RegisterWorkflowHandler(handler)
 	}
 
-	// Register default triggers
-	if b.useDefaultTriggers {
-		engine.RegisterTrigger(module.NewHTTPTrigger())
-		engine.RegisterTrigger(module.NewEventTrigger())
-		engine.RegisterTrigger(module.NewScheduleTrigger())
-		engine.RegisterTrigger(module.NewEventBusTrigger())
-		engine.RegisterTrigger(module.NewReconciliationTrigger())
+	// Register default triggers via factory (set in engine_builder_defaults.go)
+	if b.useDefaultTriggers && DefaultTriggerFactory != nil {
+		for _, t := range DefaultTriggerFactory() {
+			engine.RegisterTrigger(t)
+		}
 	}
 
 	// Register custom triggers

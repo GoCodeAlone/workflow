@@ -839,11 +839,11 @@ func createTestPlugin(dir, version string) error {
 
 // mockEngine implements EngineProvider for testing.
 type mockEngine struct {
-	triggerCalled  bool
-	triggerType    string
-	triggerAction  string
-	triggerData    map[string]any
-	triggerErr     error
+	triggerCalled bool
+	triggerType   string
+	triggerAction string
+	triggerData   map[string]any
+	triggerErr    error
 }
 
 func (m *mockEngine) BuildFromConfig(_ *config.WorkflowConfig) error { return nil }

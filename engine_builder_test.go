@@ -10,9 +10,40 @@ import (
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/handlers"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/mock"
 	"github.com/GoCodeAlone/workflow/module"
 )
+
+func init() {
+	// Register default factories for tests. In production code, the
+	// setup package does this via a blank import.
+	if DefaultHandlerFactory == nil {
+		DefaultHandlerFactory = func() []WorkflowHandler {
+			return []WorkflowHandler{
+				handlers.NewHTTPWorkflowHandler(),
+				handlers.NewMessagingWorkflowHandler(),
+				handlers.NewStateMachineWorkflowHandler(),
+				handlers.NewSchedulerWorkflowHandler(),
+				handlers.NewIntegrationWorkflowHandler(),
+				handlers.NewPipelineWorkflowHandler(),
+				handlers.NewEventWorkflowHandler(),
+				handlers.NewPlatformWorkflowHandler(),
+			}
+		}
+	}
+	if DefaultTriggerFactory == nil {
+		DefaultTriggerFactory = func() []interfaces.Trigger {
+			return []interfaces.Trigger{
+				module.NewHTTPTrigger(),
+				module.NewEventTrigger(),
+				module.NewScheduleTrigger(),
+				module.NewEventBusTrigger(),
+				module.NewReconciliationTrigger(),
+			}
+		}
+	}
+}
 
 func TestEngineBuilder_Build_Defaults(t *testing.T) {
 	// Build with no options — should create engine with default app/logger
