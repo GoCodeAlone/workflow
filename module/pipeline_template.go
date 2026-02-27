@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"text/template"
 	"time"
@@ -40,6 +41,168 @@ func (te *TemplateEngine) templateData(pc *PipelineContext) map[string]any {
 	return data
 }
 
+// dotChainRe matches dot-access chains like .steps.my-step.field
+var dotChainRe = regexp.MustCompile(`\.[a-zA-Z_][a-zA-Z0-9_-]*(?:\.[a-zA-Z_][a-zA-Z0-9_-]*)*`)
+
+// stringLiteralRe matches double-quoted and backtick-quoted string literals.
+var stringLiteralRe = regexp.MustCompile(`"(?:[^"\\]|\\.)*"` + "|`[^`]*`")
+
+// preprocessTemplate rewrites dot-access chains containing hyphens into index
+// syntax so that Go's text/template parser does not treat hyphens as minus.
+// For example: {{ .steps.my-step.field }} → {{ (index .steps "my-step" "field") }}
+func preprocessTemplate(tmplStr string) string {
+	// Quick exit: nothing to do if there are no actions or no hyphens.
+	if !strings.Contains(tmplStr, "{{") || !strings.Contains(tmplStr, "-") {
+		return tmplStr
+	}
+
+	var out strings.Builder
+	rest := tmplStr
+
+	for {
+		openIdx := strings.Index(rest, "{{")
+		if openIdx < 0 {
+			out.WriteString(rest)
+			break
+		}
+		closeIdx := strings.Index(rest[openIdx:], "}}")
+		if closeIdx < 0 {
+			out.WriteString(rest)
+			break
+		}
+		closeIdx += openIdx // absolute position
+
+		// Write text before the action.
+		out.WriteString(rest[:openIdx])
+
+		action := rest[openIdx+2 : closeIdx] // content between {{ and }}
+
+		// Skip template comments {{/* ... */}}.
+		trimmed := strings.TrimSpace(action)
+		if strings.HasPrefix(trimmed, "/*") && strings.HasSuffix(trimmed, "*/") {
+			out.WriteString("{{")
+			out.WriteString(action)
+			out.WriteString("}}")
+			rest = rest[closeIdx+2:]
+			continue
+		}
+
+		// Strip string literals to avoid false matches on quoted hyphens.
+		var placeholders []string
+		stripped := stringLiteralRe.ReplaceAllStringFunc(action, func(m string) string {
+			placeholders = append(placeholders, m)
+			return "\x00"
+		})
+
+		// Rewrite hyphenated dot-chains in the stripped action.
+		rewritten := dotChainRe.ReplaceAllStringFunc(stripped, func(chain string) string {
+			segments := strings.Split(chain[1:], ".") // drop leading dot
+			hasHyphen := false
+			for _, seg := range segments {
+				if strings.Contains(seg, "-") {
+					hasHyphen = true
+					break
+				}
+			}
+			if !hasHyphen {
+				return chain // no hyphens → leave as-is
+			}
+
+			// Find the first hyphenated segment.
+			firstHyphen := -1
+			for i, seg := range segments {
+				if strings.Contains(seg, "-") {
+					firstHyphen = i
+					break
+				}
+			}
+
+			// Build the prefix (non-hyphenated dot-access) and the quoted tail.
+			var prefix string
+			if firstHyphen == 0 {
+				prefix = "."
+			} else {
+				prefix = "." + strings.Join(segments[:firstHyphen], ".")
+			}
+
+			var quoted []string
+			for _, seg := range segments[firstHyphen:] {
+				quoted = append(quoted, `"`+seg+`"`)
+			}
+
+			return "(index " + prefix + " " + strings.Join(quoted, " ") + ")"
+		})
+
+		// Restore string literals from placeholders.
+		var restored string
+		if len(placeholders) > 0 {
+			phIdx := 0
+			var final strings.Builder
+			for i := 0; i < len(rewritten); i++ {
+				if rewritten[i] == '\x00' && phIdx < len(placeholders) {
+					final.WriteString(placeholders[phIdx])
+					phIdx++
+				} else {
+					final.WriteByte(rewritten[i])
+				}
+			}
+			restored = final.String()
+		} else {
+			restored = rewritten
+		}
+
+		out.WriteString("{{")
+		out.WriteString(restored)
+		out.WriteString("}}")
+		rest = rest[closeIdx+2:]
+	}
+
+	return out.String()
+}
+
+// funcMapWithContext returns the base template functions plus context-aware
+// helper functions (step, trigger) that access PipelineContext data directly.
+func (te *TemplateEngine) funcMapWithContext(pc *PipelineContext) template.FuncMap {
+	fm := templateFuncMap()
+
+	// step accesses step outputs by name and optional nested keys.
+	// Usage: {{ step "parse-request" "path_params" "id" }}
+	fm["step"] = func(name string, keys ...string) any {
+		stepMap, ok := pc.StepOutputs[name]
+		if !ok || stepMap == nil {
+			return nil
+		}
+		var val any = stepMap
+		for _, key := range keys {
+			m, ok := val.(map[string]any)
+			if !ok {
+				return nil
+			}
+			val = m[key]
+		}
+		return val
+	}
+
+	// trigger accesses trigger data by nested keys.
+	// Usage: {{ trigger "path_params" "id" }}
+	fm["trigger"] = func(keys ...string) any {
+		if pc.TriggerData == nil {
+			return nil
+		}
+		var val any = map[string]any(pc.TriggerData)
+		for _, key := range keys {
+			m, ok := val.(map[string]any)
+			if !ok {
+				return nil
+			}
+			val = m[key]
+		}
+		return val
+	}
+
+	return fm
+}
+
 // Resolve evaluates a template string against a PipelineContext.
 // If the string does not contain {{ }}, it is returned as-is.
 func (te *TemplateEngine) Resolve(tmplStr string, pc *PipelineContext) (string, error) {
@@ -47,7 +210,9 @@ func (te *TemplateEngine) Resolve(tmplStr string, pc *PipelineContext) (string, 
 		return tmplStr, nil
 	}
 
-	t, err := template.New("").Funcs(templateFuncMap()).Option("missingkey=zero").Parse(tmplStr)
+	tmplStr = preprocessTemplate(tmplStr)
+
+	t, err := template.New("").Funcs(te.funcMapWithContext(pc)).Option("missingkey=zero").Parse(tmplStr)
 	if err != nil {
 		return "", fmt.Errorf("template parse error: %w", err)
 	}

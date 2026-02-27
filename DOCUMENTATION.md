@@ -124,12 +124,46 @@ Pipeline steps support Go template syntax with these built-in functions:
 | Function | Description | Example |
 |----------|-------------|---------|
 | `uuidv4` | Generates a UUID v4 | `{{ uuidv4 }}` |
-| `now` | Current time in RFC3339 format | `{{ now }}` |
+| `now` | Current time (RFC3339 default, or named/custom layout) | `{{ now }}`, `{{ now "DateOnly" }}`, `{{ now "2006-01-02" }}` |
 | `lower` | Lowercase string | `{{ lower .name }}` |
 | `default` | Default value when empty | `{{ default "pending" .status }}` |
 | `json` | Marshal value to JSON string | `{{ json .data }}` |
+| `trimPrefix` | Remove prefix from string | `{{ .phone \| trimPrefix "+" }}` |
+| `trimSuffix` | Remove suffix from string | `{{ .file \| trimSuffix ".txt" }}` |
+| `step` | Access step outputs by name and keys | `{{ step "parse-request" "path_params" "id" }}` |
+| `trigger` | Access trigger data by keys | `{{ trigger "path_params" "id" }}` |
 
-Template expressions can reference previous step outputs via `{{ .steps.step-name.field }}` or for hyphenated names `{{index .steps "step-name" "field"}}`.
+#### Template Data Context
+
+Templates have access to four top-level namespaces:
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| `{{ .field }}` | `pc.Current` | Merged trigger data + all prior step outputs (flat) |
+| `{{ .steps.NAME.field }}` | `pc.StepOutputs` | Namespaced access to a specific step's output |
+| `{{ .trigger.field }}` | `pc.TriggerData` | Original trigger data (immutable) |
+| `{{ .meta.field }}` | `pc.Metadata` | Execution metadata (pipeline name, etc.) |
+
+#### Hyphenated Step Names
+
+Step names commonly contain hyphens (e.g., `parse-request`, `fetch-orders`). Go's template parser treats `-` as subtraction, so `{{ .steps.my-step.field }}` would normally fail. The engine handles this automatically:
+
+**Auto-fix (just works):** Write natural dot notation — the engine rewrites it before parsing:
+```yaml
+value: "{{ .steps.parse-request.path_params.id }}"
+```
+
+**Preferred syntax:** The `step` function avoids quoting issues entirely:
+```yaml
+value: '{{ step "parse-request" "path_params" "id" }}'
+```
+
+**Manual alternative:** The `index` function also works:
+```yaml
+value: '{{ index .steps "parse-request" "path_params" "id" }}'
+```
+
+`wfctl template validate --config workflow.yaml` lints template expressions and warns on undefined step references, forward references, and suggests the `step` function for hyphenated names.
 
 ### Infrastructure
 | Type | Description |
@@ -815,6 +849,82 @@ triggers:
       workflow: "order-workflow"
       action: "create-order"
 ```
+
+### Config Imports
+
+Large configs can be split into domain-specific files using `imports`. Each imported file is a standard workflow config — no special format required. Imports are recursive (imported files can import other files) with circular import detection.
+
+```yaml
+# main.yaml
+imports:
+  - config/modules.yaml
+  - config/routes/agents.yaml
+  - config/routes/tasks.yaml
+  - config/routes/requests.yaml
+
+modules:
+  - name: extra-module
+    type: http.server
+    config:
+      address: ":9090"
+
+pipelines:
+  health-check:
+    steps:
+      - name: respond
+        type: step.json_response
+        config:
+          body: '{"status": "ok"}'
+```
+
+```yaml
+# config/modules.yaml
+modules:
+  - name: my-db
+    type: storage.sqlite
+    config:
+      dbPath: ./data/app.db
+
+  - name: my-router
+    type: http.router
+```
+
+```yaml
+# config/routes/agents.yaml
+pipelines:
+  list-agents:
+    steps:
+      - name: query
+        type: step.db_query
+        config:
+          query: "SELECT * FROM agents"
+      - name: respond
+        type: step.json_response
+
+triggers:
+  list-agents:
+    type: http
+    config:
+      path: /api/agents
+      method: GET
+```
+
+**Merge rules:**
+- **Modules:** All modules from all files are included. Main file's modules appear first.
+- **Pipelines, triggers, workflows, platform:** Main file's definitions take precedence. Imported values only fill in keys not already defined.
+- **Recursive imports:** Imported files can themselves use `imports`. Circular imports are detected and produce an error.
+- **Relative paths:** Import paths are resolved relative to the importing file's directory.
+
+**Comparison with ApplicationConfig:**
+
+| Feature | `imports` | `ApplicationConfig` |
+|---------|-----------|---------------------|
+| Format | Standard `WorkflowConfig` with `imports:` field | Separate `application:` top-level format |
+| Conflict handling | Main file wins silently | Errors on name conflicts |
+| Use case | Splitting a monolith incrementally | Composing independent workflow services |
+| Nesting | Files can import other files recursively | Flat list of workflow references |
+
+Both approaches work with `wfctl template validate --config` for validation.
 
 ## Visual Workflow Builder (UI)
 

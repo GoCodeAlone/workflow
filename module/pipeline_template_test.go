@@ -366,3 +366,190 @@ func TestTemplateEngine_ResolveMap_DoesNotMutateInput(t *testing.T) {
 		t.Errorf("expected 'resolved', got %v", result["key"])
 	}
 }
+
+// --- preprocessTemplate tests ---
+
+func TestPreprocessTemplate_HyphenatedStepName(t *testing.T) {
+	input := "{{ .steps.my-step.field }}"
+	result := preprocessTemplate(input)
+	if !strings.Contains(result, `index .steps "my-step" "field"`) {
+		t.Errorf("expected index rewrite, got %q", result)
+	}
+}
+
+func TestPreprocessTemplate_NoHyphens(t *testing.T) {
+	input := "{{ .steps.validate.result }}"
+	result := preprocessTemplate(input)
+	if result != input {
+		t.Errorf("expected unchanged %q, got %q", input, result)
+	}
+}
+
+func TestPreprocessTemplate_SingleHyphenatedSegment(t *testing.T) {
+	input := "{{ .my-var }}"
+	result := preprocessTemplate(input)
+	if !strings.Contains(result, `index . "my-var"`) {
+		t.Errorf("expected index rewrite for single hyphenated segment, got %q", result)
+	}
+}
+
+func TestPreprocessTemplate_MultipleHyphenatedSegments(t *testing.T) {
+	input := "{{ .steps.my-step.sub-field.more }}"
+	result := preprocessTemplate(input)
+	if !strings.Contains(result, `index .steps "my-step" "sub-field" "more"`) {
+		t.Errorf("expected index rewrite for multiple hyphenated segments, got %q", result)
+	}
+}
+
+func TestPreprocessTemplate_WithPipe(t *testing.T) {
+	input := "{{ .steps.my-step.field | lower }}"
+	result := preprocessTemplate(input)
+	if !strings.Contains(result, `index .steps "my-step" "field"`) {
+		t.Errorf("expected index rewrite before pipe, got %q", result)
+	}
+	if !strings.Contains(result, "| lower") {
+		t.Errorf("expected pipe preserved, got %q", result)
+	}
+}
+
+func TestPreprocessTemplate_WithFunction(t *testing.T) {
+	input := `{{ default "x" .steps.my-step.field }}`
+	result := preprocessTemplate(input)
+	if !strings.Contains(result, `index .steps "my-step" "field"`) {
+		t.Errorf("expected index rewrite with function, got %q", result)
+	}
+	if !strings.Contains(result, `default "x"`) {
+		t.Errorf("expected function preserved, got %q", result)
+	}
+}
+
+func TestPreprocessTemplate_StringLiteralsSkipped(t *testing.T) {
+	input := `{{ index .steps "my-step" "field" }}`
+	result := preprocessTemplate(input)
+	if result != input {
+		t.Errorf("expected unchanged when hyphens are in string literals, got %q", result)
+	}
+}
+
+func TestPreprocessTemplate_MixedContent(t *testing.T) {
+	input := "Hello {{ .steps.my-step.name }}!"
+	result := preprocessTemplate(input)
+	if !strings.HasPrefix(result, "Hello ") {
+		t.Errorf("expected text prefix preserved, got %q", result)
+	}
+	if !strings.HasSuffix(result, "!") {
+		t.Errorf("expected text suffix preserved, got %q", result)
+	}
+	if !strings.Contains(result, `index .steps "my-step" "name"`) {
+		t.Errorf("expected index rewrite in action, got %q", result)
+	}
+}
+
+func TestPreprocessTemplate_NoTemplate(t *testing.T) {
+	input := "plain text"
+	result := preprocessTemplate(input)
+	if result != input {
+		t.Errorf("expected unchanged %q, got %q", input, result)
+	}
+}
+
+func TestPreprocessTemplate_AlreadyUsingIndex(t *testing.T) {
+	input := `{{ index .steps "my-step" "field" }}`
+	result := preprocessTemplate(input)
+	if result != input {
+		t.Errorf("expected unchanged %q, got %q", input, result)
+	}
+}
+
+// --- step and trigger helper function tests ---
+
+func TestTemplateEngine_StepFunction(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("validate", map[string]any{"result": "passed"})
+
+	result, err := te.Resolve(`{{ step "validate" "result" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "passed" {
+		t.Errorf("expected 'passed', got %q", result)
+	}
+}
+
+func TestTemplateEngine_StepFunctionHyphenated(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("parse-request", map[string]any{
+		"path_params": map[string]any{"id": "42"},
+	})
+
+	result, err := te.Resolve(`{{ step "parse-request" "path_params" "id" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "42" {
+		t.Errorf("expected '42', got %q", result)
+	}
+}
+
+func TestTemplateEngine_StepFunctionDeepNesting(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("parse-request", map[string]any{
+		"body": map[string]any{
+			"nested": "deep-value",
+		},
+	})
+
+	result, err := te.Resolve(`{{ step "parse-request" "body" "nested" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "deep-value" {
+		t.Errorf("expected 'deep-value', got %q", result)
+	}
+}
+
+func TestTemplateEngine_StepFunctionMissing(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+
+	result, err := te.Resolve(`{{ step "nonexistent" "field" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// nil renders as "<no value>" with missingkey=zero; just verify no error
+	_ = result
+}
+
+func TestTemplateEngine_TriggerFunction(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{
+		"path_params": map[string]any{"id": "99"},
+	}, nil)
+
+	result, err := te.Resolve(`{{ trigger "path_params" "id" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "99" {
+		t.Errorf("expected '99', got %q", result)
+	}
+}
+
+func TestTemplateEngine_HyphenatedResolveEndToEnd(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("parse-request", map[string]any{
+		"path_params": map[string]any{"id": "123"},
+	})
+
+	result, err := te.Resolve("{{ .steps.parse-request.path_params.id }}", pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "123" {
+		t.Errorf("expected '123', got %q", result)
+	}
+}

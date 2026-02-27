@@ -92,6 +92,7 @@ type PluginRequirement struct {
 
 // WorkflowConfig represents the overall configuration for the workflow engine
 type WorkflowConfig struct {
+	Imports   []string        `json:"imports,omitempty" yaml:"imports,omitempty"`
 	Modules   []ModuleConfig  `json:"modules" yaml:"modules"`
 	Workflows map[string]any  `json:"workflows" yaml:"workflows"`
 	Triggers  map[string]any  `json:"triggers" yaml:"triggers"`
@@ -113,9 +114,31 @@ func (c *WorkflowConfig) ResolveRelativePath(path string) string {
 	return pathpkg.Join(c.ConfigDir, path)
 }
 
-// LoadFromFile loads a workflow configuration from a YAML file
+// LoadFromFile loads a workflow configuration from a YAML file.
+// If the config contains an "imports" field, referenced files are loaded
+// recursively and merged. The importing file's definitions take precedence
+// over imported ones for map-based fields (workflows, triggers, pipelines,
+// platform). Modules are concatenated with the main file's modules first.
 func LoadFromFile(filepath string) (*WorkflowConfig, error) {
-	data, err := os.ReadFile(filepath)
+	return loadFromFileWithImports(filepath, nil)
+}
+
+func loadFromFileWithImports(filepath string, seen map[string]bool) (*WorkflowConfig, error) {
+	absPath, err := pathpkg.Abs(filepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve path %s: %w", filepath, err)
+	}
+
+	// Circular import detection
+	if seen == nil {
+		seen = make(map[string]bool)
+	}
+	if seen[absPath] {
+		return nil, fmt.Errorf("circular import detected: %s", filepath)
+	}
+	seen[absPath] = true
+
+	data, err := os.ReadFile(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
@@ -125,16 +148,84 @@ func LoadFromFile(filepath string) (*WorkflowConfig, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	// Store the config file's directory for relative path resolution
-	absPath, err := pathpkg.Abs(filepath)
-	if err == nil {
-		cfg.ConfigDir = pathpkg.Dir(absPath)
+	cfg.ConfigDir = pathpkg.Dir(absPath)
+
+	// Process imports
+	if len(cfg.Imports) > 0 {
+		if err := cfg.processImports(seen); err != nil {
+			return nil, err
+		}
 	}
 
 	return &cfg, nil
 }
 
+// processImports loads all imported config files and merges them into this config.
+// Imported definitions provide defaults — the importing file's own definitions take
+// precedence for map-based fields (workflows, triggers, pipelines, platform).
+// Modules are appended after the main file's modules.
+func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
+	for _, imp := range cfg.Imports {
+		impPath := imp
+		if !pathpkg.IsAbs(impPath) {
+			impPath = pathpkg.Join(cfg.ConfigDir, impPath)
+		}
+
+		impCfg, err := loadFromFileWithImports(impPath, seen)
+		if err != nil {
+			return fmt.Errorf("import %q: %w", imp, err)
+		}
+
+		// Merge imported modules (append after main file's modules)
+		cfg.Modules = append(cfg.Modules, impCfg.Modules...)
+
+		// Merge maps — imported values only added if not already defined in main file
+		if cfg.Workflows == nil {
+			cfg.Workflows = make(map[string]any)
+		}
+		for k, v := range impCfg.Workflows {
+			if _, exists := cfg.Workflows[k]; !exists {
+				cfg.Workflows[k] = v
+			}
+		}
+
+		if cfg.Triggers == nil {
+			cfg.Triggers = make(map[string]any)
+		}
+		for k, v := range impCfg.Triggers {
+			if _, exists := cfg.Triggers[k]; !exists {
+				cfg.Triggers[k] = v
+			}
+		}
+
+		if cfg.Pipelines == nil {
+			cfg.Pipelines = make(map[string]any)
+		}
+		for k, v := range impCfg.Pipelines {
+			if _, exists := cfg.Pipelines[k]; !exists {
+				cfg.Pipelines[k] = v
+			}
+		}
+
+		if impCfg.Platform != nil {
+			if cfg.Platform == nil {
+				cfg.Platform = make(map[string]any)
+			}
+			for k, v := range impCfg.Platform {
+				if _, exists := cfg.Platform[k]; !exists {
+					cfg.Platform[k] = v
+				}
+			}
+		}
+	}
+
+	cfg.Imports = nil // clear after processing
+	return nil
+}
+
 // LoadFromString loads a workflow configuration from a YAML string.
+// Note: imports are NOT processed when loading from a string because there is
+// no file path context to resolve relative import paths against.
 func LoadFromString(yamlContent string) (*WorkflowConfig, error) {
 	var cfg WorkflowConfig
 	if err := yaml.Unmarshal([]byte(yamlContent), &cfg); err != nil {
