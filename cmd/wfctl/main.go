@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 )
 
 var version = "dev"
@@ -29,6 +30,8 @@ var commands = map[string]func([]string) error{
 	"generate": runGenerate,
 	"git":      runGit,
 	"registry": runRegistry,
+	"update":   runUpdate,
+	"mcp":      runMCP,
 }
 
 func usage() {
@@ -59,6 +62,8 @@ Commands:
   generate   Code generation (github-actions: generate CI/CD workflows from config)
   git        Git integration (connect: link to GitHub repo, push: commit and push)
   registry   Registry management (list, add, remove plugin registry sources)
+  update     Update wfctl to the latest version (use --check to only check)
+  mcp        Start the MCP server over stdio for AI assistant integration
 
 Run 'wfctl <command> -h' for command-specific help.
 `, version)
@@ -87,8 +92,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Start the update check in the background before running the command so
+	// that it runs concurrently. For long-running commands (mcp, run) we skip
+	// it entirely. After the command finishes we wait briefly for the result.
+	var updateNoticeDone <-chan struct{}
+	if cmd != "mcp" && cmd != "run" {
+		updateNoticeDone = checkForUpdateNotice()
+	}
+
 	if err := fn(os.Args[2:]); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err) //nolint:gosec // G705: CLI error output
 		os.Exit(1)
+	}
+
+	// Wait briefly for the update notice after the command completes.
+	// A 1-second ceiling ensures we never meaningfully delay the shell prompt.
+	if updateNoticeDone != nil {
+		select {
+		case <-updateNoticeDone:
+		case <-time.After(time.Second):
+		}
 	}
 }

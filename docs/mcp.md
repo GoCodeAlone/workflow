@@ -2,6 +2,8 @@
 
 The workflow engine includes a built-in [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes engine functionality to AI assistants and tools.
 
+> **Note**: The MCP server is now integrated into the `wfctl` CLI as the `mcp` subcommand. The standalone `workflow-mcp-server` binary is still available for backward compatibility but the recommended approach is to use `wfctl mcp`. This ensures the MCP server version always matches the CLI and engine version, and benefits from automatic updates via `wfctl update`.
+
 ## Features
 
 The MCP server provides:
@@ -28,20 +30,33 @@ The MCP server provides:
 | `workflow://docs/yaml-syntax` | YAML configuration syntax guide |
 | `workflow://docs/module-reference` | Dynamic module type reference |
 
-## Building
+## Installation
+
+Install `wfctl` (the CLI includes the MCP server):
 
 ```bash
-# Build the MCP server binary
-make build-mcp
+# Install via Go
+go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
 
-# Or directly with Go
-go build -o workflow-mcp-server ./cmd/workflow-mcp-server
+# Or download a pre-built binary from GitHub releases
+# https://github.com/GoCodeAlone/workflow/releases/latest
 
-# Or install globally with Go
-go install github.com/GoCodeAlone/workflow/cmd/workflow-mcp-server@latest
+# Keep wfctl up to date (and thus the MCP server too)
+wfctl update
 ```
 
-## Installation
+### Building from Source
+
+```bash
+# Build wfctl (includes the mcp command)
+go build -o wfctl ./cmd/wfctl
+
+# Build the standalone MCP server binary (legacy)
+make build-mcp
+# Or: go build -o workflow-mcp-server ./cmd/workflow-mcp-server
+```
+
+## Configuring AI Clients
 
 ### Claude Desktop
 
@@ -50,6 +65,18 @@ Add the following to your Claude Desktop configuration file:
 **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
+```json
+{
+  "mcpServers": {
+    "workflow": {
+      "command": "wfctl",
+      "args": ["mcp", "-plugin-dir", "/path/to/data/plugins"]
+    }
+  }
+}
+```
+
+**Legacy (standalone binary)**:
 ```json
 {
   "mcpServers": {
@@ -69,8 +96,8 @@ Add to your VS Code `settings.json`:
 {
   "github.copilot.chat.mcpServers": {
     "workflow": {
-      "command": "/path/to/workflow-mcp-server",
-      "args": ["-plugin-dir", "/path/to/data/plugins"]
+      "command": "wfctl",
+      "args": ["mcp", "-plugin-dir", "/path/to/data/plugins"]
     }
   }
 }
@@ -84,8 +111,8 @@ Add to your Cursor MCP configuration (`.cursor/mcp.json`):
 {
   "mcpServers": {
     "workflow": {
-      "command": "/path/to/workflow-mcp-server",
-      "args": ["-plugin-dir", "/path/to/data/plugins"]
+      "command": "wfctl",
+      "args": ["mcp", "-plugin-dir", "/path/to/data/plugins"]
     }
   }
 }
@@ -96,7 +123,7 @@ Add to your Cursor MCP configuration (`.cursor/mcp.json`):
 The server communicates over **stdio** using JSON-RPC 2.0. Any MCP-compatible client can connect:
 
 ```bash
-./workflow-mcp-server -plugin-dir ./data/plugins
+wfctl mcp -plugin-dir ./data/plugins
 ```
 
 ## Usage Examples
@@ -131,12 +158,25 @@ Inspect this config and show me the dependency graph...
 ## Command Line Options
 
 ```
-Usage: workflow-mcp-server [options]
+Usage: wfctl mcp [options]
 
 Options:
   -plugin-dir string   Plugin data directory (default "data/plugins")
-  -version             Show version and exit
 ```
+
+## Keeping the MCP Server Up to Date
+
+Because the MCP server is now part of `wfctl`, you can use the built-in update command to keep everything in sync:
+
+```bash
+# Check for updates
+wfctl update --check
+
+# Install the latest version (replaces the wfctl binary in-place)
+wfctl update
+```
+
+Set `WFCTL_NO_UPDATE_CHECK=1` to suppress automatic update notices.
 
 ## Dynamic Updates
 
@@ -153,15 +193,20 @@ This means the MCP server automatically picks up new module types and plugins wi
 
 ```bash
 go test -v ./mcp/
+go test -v -run TestRunMCP ./cmd/wfctl/
 ```
 
 ## Architecture
 
 ```
-cmd/workflow-mcp-server/main.go  → Entry point (stdio transport)
+cmd/wfctl/main.go    → CLI entry point; registers "mcp" command
+cmd/wfctl/mcp.go     → "wfctl mcp" command handler (delegates to mcp package)
 mcp/server.go        → MCP server setup, tool handlers, resource handlers
 mcp/docs.go          → Embedded documentation content
 mcp/server_test.go   → Unit tests
+
+cmd/workflow-mcp-server/main.go  → Standalone binary entry point (legacy)
 ```
 
 The server uses the [mcp-go](https://github.com/mark3labs/mcp-go) library for MCP protocol implementation over stdio transport.
+
