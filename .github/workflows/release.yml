@@ -188,7 +188,8 @@ jobs:
         GOOS=linux   GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/workflow-lsp-server-linux-arm64    ./cmd/workflow-lsp-server
         GOOS=darwin  GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/workflow-lsp-server-darwin-amd64   ./cmd/workflow-lsp-server
         GOOS=darwin  GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/workflow-lsp-server-darwin-arm64   ./cmd/workflow-lsp-server
-        GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/workflow-lsp-server-windows-amd64.exe ./cmd/workflow-lsp-server
+        # Windows LSP build skipped: tliron/kutil v0.3.11 has a termenv API mismatch on Windows.
+        # Tracked upstream. Server/wfctl Windows builds are unaffected.
 
     - name: Download admin UI artifact
       uses: actions/download-artifact@v4
