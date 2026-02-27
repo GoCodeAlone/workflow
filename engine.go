@@ -997,6 +997,8 @@ func expandConfigStrings(resolver *secrets.MultiResolver, cfg map[string]any) {
 					if expanded, err := resolver.Expand(ctx, s); err == nil {
 						val[i] = expanded
 					}
+				} else if m, ok := item.(map[string]any); ok {
+					expandConfigStrings(resolver, m)
 				}
 			}
 		}

@@ -115,6 +115,32 @@ func TestExpandConfigStrings_ArrayValues(t *testing.T) {
 	}
 }
 
+func TestExpandConfigStrings_ArrayOfMaps(t *testing.T) {
+	t.Setenv("OAUTH_CLIENT_ID", "test1")
+	t.Setenv("OAUTH_CLIENT_SECRET", "secret1")
+
+	resolver := secrets.NewMultiResolver()
+	cfg := map[string]any{
+		"clients": []any{
+			map[string]any{
+				"clientId":     "${OAUTH_CLIENT_ID}",
+				"clientSecret": "${OAUTH_CLIENT_SECRET}",
+			},
+		},
+	}
+
+	expandConfigStrings(resolver, cfg)
+
+	clients := cfg["clients"].([]any)
+	client := clients[0].(map[string]any)
+	if client["clientId"] != "test1" {
+		t.Errorf("expected 'test1', got %v", client["clientId"])
+	}
+	if client["clientSecret"] != "secret1" {
+		t.Errorf("expected 'secret1', got %v", client["clientSecret"])
+	}
+}
+
 func TestExpandConfigStrings_UnresolvablePreserved(t *testing.T) {
 	resolver := secrets.NewMultiResolver()
 	cfg := map[string]any{
