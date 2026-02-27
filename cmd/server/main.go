@@ -40,31 +40,8 @@ import (
 	_ "github.com/GoCodeAlone/workflow/plugin/docmanager"
 	pluginexternal "github.com/GoCodeAlone/workflow/plugin/external"
 	_ "github.com/GoCodeAlone/workflow/plugin/storebrowser"
-	pluginai "github.com/GoCodeAlone/workflow/plugins/ai"
-	pluginapi "github.com/GoCodeAlone/workflow/plugins/api"
-	pluginauth "github.com/GoCodeAlone/workflow/plugins/auth"
-	plugincicd "github.com/GoCodeAlone/workflow/plugins/cicd"
-	plugindlq "github.com/GoCodeAlone/workflow/plugins/dlq"
-	pluginevstore "github.com/GoCodeAlone/workflow/plugins/eventstore"
-	pluginff "github.com/GoCodeAlone/workflow/plugins/featureflags"
-	pluginhttp "github.com/GoCodeAlone/workflow/plugins/http"
-	pluginintegration "github.com/GoCodeAlone/workflow/plugins/integration"
-	pluginlicense "github.com/GoCodeAlone/workflow/plugins/license"
-	pluginmessaging "github.com/GoCodeAlone/workflow/plugins/messaging"
-	pluginmodcompat "github.com/GoCodeAlone/workflow/plugins/modularcompat"
-	pluginobs "github.com/GoCodeAlone/workflow/plugins/observability"
+	allplugins "github.com/GoCodeAlone/workflow/plugins/all"
 	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
-	plugincloud "github.com/GoCodeAlone/workflow/plugins/cloud"
-	plugindatastores "github.com/GoCodeAlone/workflow/plugins/datastores"
-	plugingitlab "github.com/GoCodeAlone/workflow/plugins/gitlab"
-	pluginmarketplace "github.com/GoCodeAlone/workflow/plugins/marketplace"
-	pluginplatform "github.com/GoCodeAlone/workflow/plugins/platform"
-	pluginpolicy "github.com/GoCodeAlone/workflow/plugins/policy"
-	pluginscheduler "github.com/GoCodeAlone/workflow/plugins/scheduler"
-	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
-	pluginsm "github.com/GoCodeAlone/workflow/plugins/statemachine"
-	pluginstorage "github.com/GoCodeAlone/workflow/plugins/storage"
-	plugintimeline "github.com/GoCodeAlone/workflow/plugins/timeline"
 	"github.com/GoCodeAlone/workflow/provider"
 	_ "github.com/GoCodeAlone/workflow/provider/aws"
 	_ "github.com/GoCodeAlone/workflow/provider/azure"
@@ -109,33 +86,7 @@ var (
 // defaultEnginePlugins returns the standard set of engine plugins used by all engine instances.
 // Centralising the list here avoids duplication between buildEngine and runMultiWorkflow.
 func defaultEnginePlugins() []plugin.EnginePlugin {
-	return []plugin.EnginePlugin{
-		pluginlicense.New(),
-		pluginhttp.New(),
-		pluginobs.New(),
-		pluginmessaging.New(),
-		pluginsm.New(),
-		pluginauth.New(),
-		pluginstorage.New(),
-		pluginapi.New(),
-		pluginpipeline.New(),
-		plugincicd.New(),
-		pluginff.New(),
-		pluginevstore.New(),
-		plugintimeline.New(),
-		plugindlq.New(),
-		pluginsecrets.New(),
-		pluginmodcompat.New(),
-		pluginscheduler.New(),
-		pluginintegration.New(),
-		pluginai.New(),
-		pluginplatform.New(),
-		plugincloud.New(),
-		plugingitlab.New(),
-		plugindatastores.New(),
-		pluginpolicy.New(),
-		pluginmarketplace.New(),
-	}
+	return allplugins.DefaultPlugins()
 }
 
 // buildEngine creates the workflow engine with all handlers registered and built from config.
