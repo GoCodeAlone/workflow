@@ -393,6 +393,42 @@ func TestValidateConfigWithStepFunction(t *testing.T) {
 	}
 }
 
+func TestValidateConfigWithSelfReference(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "do-thing",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								"x": "{{ .steps.do-thing.output }}",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "references itself") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected self-reference warning, got warnings: %v", result.Warnings)
+	}
+}
+
 func TestValidateConfigWithHyphenDotAccess(t *testing.T) {
 	cfg := &config.WorkflowConfig{
 		Pipelines: map[string]any{

@@ -41,10 +41,17 @@ func (te *TemplateEngine) templateData(pc *PipelineContext) map[string]any {
 	return data
 }
 
-// dotChainRe matches dot-access chains like .steps.my-step.field
+// dotChainRe matches dot-access chains like .steps.my-step.field.
+// Hyphens are intentionally allowed within identifier segments so that
+// hyphenated step names and fields (e.g. .steps.my-step.field) are
+// treated as a single chain. This means ambiguous cases like ".x-1"
+// are interpreted as a hyphenated identifier ("x-1") rather than as
+// subtraction ".x - 1" when applying the auto-fix rewrite.
 var dotChainRe = regexp.MustCompile(`\.[a-zA-Z_][a-zA-Z0-9_-]*(?:\.[a-zA-Z_][a-zA-Z0-9_-]*)*`)
 
 // stringLiteralRe matches double-quoted and backtick-quoted string literals.
+// Go templates only support double-quoted and backtick strings (not single-quoted),
+// so single quotes are intentionally not handled here.
 var stringLiteralRe = regexp.MustCompile(`"(?:[^"\\]|\\.)*"` + "|`[^`]*`")
 
 // preprocessTemplate rewrites dot-access chains containing hyphens into index
@@ -89,9 +96,10 @@ func preprocessTemplate(tmplStr string) string {
 
 		// Strip string literals to avoid false matches on quoted hyphens.
 		var placeholders []string
+		const placeholderSentinel = "\x00<TMPL_PLACEHOLDER>"
 		stripped := stringLiteralRe.ReplaceAllStringFunc(action, func(m string) string {
 			placeholders = append(placeholders, m)
-			return "\x00"
+			return placeholderSentinel
 		})
 
 		// Rewrite hyphenated dot-chains in the stripped action.
@@ -139,9 +147,10 @@ func preprocessTemplate(tmplStr string) string {
 			phIdx := 0
 			var final strings.Builder
 			for i := 0; i < len(rewritten); i++ {
-				if rewritten[i] == '\x00' && phIdx < len(placeholders) {
+				if strings.HasPrefix(rewritten[i:], placeholderSentinel) && phIdx < len(placeholders) {
 					final.WriteString(placeholders[phIdx])
 					phIdx++
+					i += len(placeholderSentinel) - 1 // skip rest of sentinel
 				} else {
 					final.WriteByte(rewritten[i])
 				}

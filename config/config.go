@@ -137,6 +137,7 @@ func loadFromFileWithImports(filepath string, seen map[string]bool) (*WorkflowCo
 		return nil, fmt.Errorf("circular import detected: %s", filepath)
 	}
 	seen[absPath] = true
+	defer delete(seen, absPath)
 
 	data, err := os.ReadFile(absPath)
 	if err != nil {
@@ -164,6 +165,12 @@ func loadFromFileWithImports(filepath string, seen map[string]bool) (*WorkflowCo
 // Imported definitions provide defaults — the importing file's own definitions take
 // precedence for map-based fields (workflows, triggers, pipelines, platform).
 // Modules are appended after the main file's modules.
+//
+// Import order follows depth-first traversal: if main.yaml imports [A, B] and A
+// imports C, the final module order is: main's modules, A's modules, C's modules,
+// B's modules. Diamond imports (multiple files importing a shared dependency) are
+// allowed — the shared file is loaded each time but only non-duplicate map keys
+// are added (main-file-wins semantics).
 func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
 	for _, imp := range cfg.Imports {
 		impPath := imp

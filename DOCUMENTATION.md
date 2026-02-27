@@ -912,7 +912,8 @@ triggers:
 **Merge rules:**
 - **Modules:** All modules from all files are included. Main file's modules appear first.
 - **Pipelines, triggers, workflows, platform:** Main file's definitions take precedence. Imported values only fill in keys not already defined.
-- **Recursive imports:** Imported files can themselves use `imports`. Circular imports are detected and produce an error.
+- **Recursive imports:** Imported files can themselves use `imports`. Circular imports are detected and produce an error. Diamond imports (multiple files importing a shared dependency) are allowed.
+- **Import order:** Depth-first traversal — if main imports [A, B] and A imports C, module order is: main, A, C, B.
 - **Relative paths:** Import paths are resolved relative to the importing file's directory.
 
 **Comparison with ApplicationConfig:**

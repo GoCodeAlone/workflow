@@ -545,11 +545,13 @@ var stepRefDotRe = regexp.MustCompile(`\.steps\.([a-zA-Z_][a-zA-Z0-9_-]*)`)
 // stepRefIndexRe matches index .steps "STEP_NAME" patterns.
 var stepRefIndexRe = regexp.MustCompile(`index\s+\.steps\s+"([^"]+)"`)
 
-// stepRefFuncRe matches step "STEP_NAME" function calls.
-var stepRefFuncRe = regexp.MustCompile(`\bstep\s+"([^"]+)"`)
+// stepRefFuncRe matches step "STEP_NAME" function calls at the start of an
+// action, after a pipe, or after an opening parenthesis.
+var stepRefFuncRe = regexp.MustCompile(`(?:^|\||\()\s*step\s+"([^"]+)"`)
 
-// hyphenDotRe matches dot-access chains with hyphens (e.g., .steps.my-step.field).
-var hyphenDotRe = regexp.MustCompile(`\.[a-zA-Z_][a-zA-Z0-9_]*-[a-zA-Z0-9_-]*`)
+// hyphenDotRe matches dot-access chains with hyphens (e.g., .steps.my-step.field),
+// including continuation segments after the hyphenated part.
+var hyphenDotRe = regexp.MustCompile(`\.[a-zA-Z_][a-zA-Z0-9_]*-[a-zA-Z0-9_-]*(?:\.[a-zA-Z_][a-zA-Z0-9_-]*)*`)
 
 // validatePipelineTemplates checks template expressions in pipeline step configs for
 // references to nonexistent or forward-declared steps and common template pitfalls.
@@ -634,13 +636,18 @@ func validateStepRef(pipelineName, currentStep, refName string, currentIdx int, 
 	if !exists {
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("pipeline %q step %q: references step %q which does not exist in this pipeline", pipelineName, currentStep, refName))
-	} else if refIdx >= currentIdx {
+	} else if refIdx == currentIdx {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("pipeline %q step %q: references itself; a step cannot use its own outputs because they are not available until after execution", pipelineName, currentStep))
+	} else if refIdx > currentIdx {
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("pipeline %q step %q: references step %q which has not executed yet (appears later in pipeline)", pipelineName, currentStep, refName))
 	}
 }
 
 // collectTemplateStrings recursively finds all strings containing {{ in a value tree.
+// This intentionally scans all fields (not just "config") because template expressions
+// can appear in conditions, names, and other step fields.
 func collectTemplateStrings(data any) []string {
 	var results []string
 	switch v := data.(type) {

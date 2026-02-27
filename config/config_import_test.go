@@ -563,3 +563,74 @@ platform:
 		}
 	}
 }
+
+func TestLoadFromFile_DiamondImports(t *testing.T) {
+	dir := t.TempDir()
+
+	// shared.yaml (D) - common dependency imported by both B and C
+	sharedYAML := `
+modules:
+  - name: shared-db
+    type: state.connector
+`
+	if err := os.WriteFile(filepath.Join(dir, "shared.yaml"), []byte(sharedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// service-b.yaml (B) imports shared.yaml
+	serviceBYAML := `
+imports:
+  - shared.yaml
+
+modules:
+  - name: service-b
+    type: http.handler
+`
+	if err := os.WriteFile(filepath.Join(dir, "service-b.yaml"), []byte(serviceBYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// service-c.yaml (C) imports shared.yaml
+	serviceCYAML := `
+imports:
+  - shared.yaml
+
+modules:
+  - name: service-c
+    type: http.handler
+`
+	if err := os.WriteFile(filepath.Join(dir, "service-c.yaml"), []byte(serviceCYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// main.yaml (A) imports both B and C
+	mainYAML := `
+imports:
+  - service-b.yaml
+  - service-c.yaml
+
+modules:
+  - name: main-gateway
+    type: http.server
+`
+	mainPath := filepath.Join(dir, "main.yaml")
+	if err := os.WriteFile(mainPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFromFile(mainPath)
+	if err != nil {
+		t.Fatalf("unexpected error loading diamond imports: %v", err)
+	}
+
+	gotModules := make(map[string]bool)
+	for _, m := range cfg.Modules {
+		gotModules[m.Name] = true
+	}
+
+	for _, name := range []string{"main-gateway", "service-b", "service-c", "shared-db"} {
+		if !gotModules[name] {
+			t.Errorf("expected module %q to be loaded in diamond import scenario", name)
+		}
+	}
+}
