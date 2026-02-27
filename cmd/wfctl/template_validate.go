@@ -633,13 +633,14 @@ func validatePipelineTemplates(pipelineName string, stepsRaw []any, result *temp
 // current step in the pipeline execution order.
 func validateStepRef(pipelineName, currentStep, refName string, currentIdx int, stepNames map[string]int, result *templateValidationResult) {
 	refIdx, exists := stepNames[refName]
-	if !exists {
+	switch {
+	case !exists:
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("pipeline %q step %q: references step %q which does not exist in this pipeline", pipelineName, currentStep, refName))
-	} else if refIdx == currentIdx {
+	case refIdx == currentIdx:
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("pipeline %q step %q: references itself; a step cannot use its own outputs because they are not available until after execution", pipelineName, currentStep))
-	} else if refIdx > currentIdx {
+	case refIdx > currentIdx:
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("pipeline %q step %q: references step %q which has not executed yet (appears later in pipeline)", pipelineName, currentStep, refName))
 	}
