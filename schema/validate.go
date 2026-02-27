@@ -434,12 +434,29 @@ func camelToSnake(s string) string {
 
 // CamelToSnake converts a camelCase identifier to its snake_case equivalent.
 // For example: "contentType" → "content_type", "dbPath" → "db_path".
+// It treats consecutive uppercase letters (acronyms) as a single word:
+// "webhookURL" → "webhook_url", "HTTPRequest" → "http_request".
 func CamelToSnake(s string) string {
 	var b strings.Builder
-	for i, r := range s {
+
+	runes := []rune(s)
+	for i, r := range runes {
 		if i > 0 && unicode.IsUpper(r) {
-			b.WriteByte('_')
+			prev := runes[i-1]
+			var next rune
+			if i+1 < len(runes) {
+				next = runes[i+1]
+			}
+
+			// Insert underscore at word boundaries:
+			// 1. lower/digit → upper (e.g., "dbPath" → "db_path")
+			// 2. acronym → word, before the last upper (e.g., "HTTPRequest" → "http_request")
+			if unicode.IsLower(prev) || unicode.IsDigit(prev) ||
+				(unicode.IsUpper(prev) && next != 0 && unicode.IsLower(next)) {
+				b.WriteByte('_')
+			}
 		}
+
 		b.WriteRune(unicode.ToLower(r))
 	}
 	return b.String()

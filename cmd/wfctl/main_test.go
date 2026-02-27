@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/GoCodeAlone/workflow/schema"
 )
 
 func writeTestConfig(t *testing.T, dir, name, content string) string {
@@ -313,4 +315,7 @@ modules:
 	if err := runValidate([]string{"--plugin-dir", pluginsDir, path}); err != nil {
 		t.Errorf("expected valid config with --plugin-dir, got: %v", err)
 	}
+	t.Cleanup(func() {
+		schema.UnregisterModuleType("custom.ext.validate.testonly")
+	})
 }

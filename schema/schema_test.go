@@ -798,7 +798,8 @@ func TestCamelToSnake(t *testing.T) {
 		{"address", "address"},
 		{"rootDir", "root_dir"},
 		{"spaFallback", "spa_fallback"},
-		{"webhookURL", "webhook_u_r_l"}, // consecutive caps — each uppercase letter gets underscore
+		{"webhookURL", "webhook_url"},   // consecutive caps (acronym) treated as single word
+		{"HTTPRequest", "http_request"}, // leading acronym
 		{"already_snake", "already_snake"},
 	}
 	for _, c := range cases {

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/schema"
 )
 
 func TestRunTemplateValidateAllTemplates(t *testing.T) {
@@ -333,6 +334,9 @@ modules:
 	if err := runTemplateValidate([]string{"-plugin-dir", pluginsDir, "-config", configPath}); err != nil {
 		t.Errorf("expected valid config with --plugin-dir, got: %v", err)
 	}
+	t.Cleanup(func() {
+		schema.UnregisterModuleType("custom.external.module")
+	})
 }
 
 // --- Pipeline template expression linting tests ---

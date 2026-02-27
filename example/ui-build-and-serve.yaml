@@ -54,9 +54,8 @@ modules:
     config:
       root: "./ui_built"
       prefix: "/"
-      spa: true
-      cache_max_age: 3600
-      security_headers: true
+      spaFallback: true
+      cacheMaxAge: 3600
 
 workflows:
   http:
