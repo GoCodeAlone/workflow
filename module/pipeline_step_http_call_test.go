@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -422,9 +423,9 @@ func TestHTTPCallStep_OAuth2_TokenExpiry(t *testing.T) {
 	// Force expiry: sleep briefly then call again; the cache should be empty.
 	time.Sleep(50 * time.Millisecond)
 	// Manually set the token expiry to the past to simulate expiration.
-	step.(*HTTPCallStep).tokenCache.mu.Lock()
-	step.(*HTTPCallStep).tokenCache.expiry = time.Now().Add(-time.Second)
-	step.(*HTTPCallStep).tokenCache.mu.Unlock()
+	step.(*HTTPCallStep).oauthEntry.mu.Lock()
+	step.(*HTTPCallStep).oauthEntry.expiry = time.Now().Add(-time.Second)
+	step.(*HTTPCallStep).oauthEntry.mu.Unlock()
 
 	if _, err := step.Execute(context.Background(), pc); err != nil {
 		t.Fatalf("second execute error: %v", err)
@@ -432,5 +433,71 @@ func TestHTTPCallStep_OAuth2_TokenExpiry(t *testing.T) {
 
 	if atomic.LoadInt32(&tokenRequests) != 2 {
 		t.Errorf("expected token to be fetched twice (once per expired cache), got %d", atomic.LoadInt32(&tokenRequests))
+	}
+}
+
+// TestHTTPCallStep_OAuth2_ConcurrentFetch verifies that concurrent executions on different step
+// instances sharing the same credentials only call the token endpoint once (singleflight).
+func TestHTTPCallStep_OAuth2_ConcurrentFetch(t *testing.T) {
+	var tokenRequests int32
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Small delay to allow multiple goroutines to pile up before the first response.
+		time.Sleep(20 * time.Millisecond)
+		atomic.AddInt32(&tokenRequests, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "shared-token",
+			"expires_in":   3600,
+		})
+	}))
+	defer tokenSrv.Close()
+
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer apiSrv.Close()
+
+	// Use a unique client_secret per test run to get a fresh global cache entry.
+	uniqueSecret := fmt.Sprintf("concurrent-secret-%d", time.Now().UnixNano())
+
+	factory := NewHTTPCallStepFactory()
+	authCfg := map[string]any{
+		"type":          "oauth2_client_credentials",
+		"token_url":     tokenSrv.URL + "/token",
+		"client_id":     "concurrent-cid",
+		"client_secret": uniqueSecret,
+	}
+
+	const concurrency = 5
+	errs := make(chan error, concurrency)
+
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			step, err := factory("concurrent-test", map[string]any{
+				"url":    apiSrv.URL,
+				"method": "GET",
+				"auth":   authCfg,
+			}, nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			step.(*HTTPCallStep).httpClient = &http.Client{}
+			pc := NewPipelineContext(nil, nil)
+			_, err = step.Execute(context.Background(), pc)
+			errs <- err
+		}()
+	}
+
+	for i := 0; i < concurrency; i++ {
+		if err := <-errs; err != nil {
+			t.Errorf("goroutine error: %v", err)
+		}
+	}
+
+	if n := atomic.LoadInt32(&tokenRequests); n != 1 {
+		t.Errorf("expected exactly 1 token request via singleflight, got %d", n)
 	}
 }

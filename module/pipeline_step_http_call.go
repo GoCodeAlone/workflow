@@ -12,8 +12,77 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/CrisisTextLine/modular"
 )
+
+// globalOAuthCache is a process-wide registry of OAuth2 token cache entries, shared across all
+// HTTPCallStep instances. Entries are keyed by a credential fingerprint (token URL + client ID +
+// client secret + scopes), so each distinct set of credentials (i.e. each tenant) gets its own
+// isolated entry.
+var globalOAuthCache = &oauthTokenCache{ //nolint:gochecknoglobals // intentional process-wide cache
+	entries: make(map[string]*oauthCacheEntry),
+}
+
+// oauthTokenCache is a registry of per-credential token cache entries.
+type oauthTokenCache struct {
+	mu      sync.RWMutex
+	entries map[string]*oauthCacheEntry
+}
+
+// getOrCreate returns the existing cache entry for key, or creates and stores a new one.
+func (c *oauthTokenCache) getOrCreate(key string) *oauthCacheEntry {
+	c.mu.RLock()
+	entry, ok := c.entries[key]
+	c.mu.RUnlock()
+	if ok {
+		return entry
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if entry, ok = c.entries[key]; ok {
+		return entry
+	}
+	entry = &oauthCacheEntry{}
+	c.entries[key] = entry
+	return entry
+}
+
+// oauthCacheEntry holds a cached OAuth2 access token with expiry. A singleflight.Group is
+// embedded to ensure at most one concurrent token fetch per credential set.
+type oauthCacheEntry struct {
+	mu          sync.Mutex
+	accessToken string
+	expiry      time.Time
+	sfGroup     singleflight.Group
+}
+
+// get returns the cached token if still valid, or an empty string.
+func (e *oauthCacheEntry) get() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.accessToken != "" && time.Now().Before(e.expiry) {
+		return e.accessToken
+	}
+	return ""
+}
+
+// set stores a token with the given TTL.
+func (e *oauthCacheEntry) set(token string, ttl time.Duration) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.accessToken = token
+	e.expiry = time.Now().Add(ttl)
+}
+
+// invalidate clears the cached token.
+func (e *oauthCacheEntry) invalidate() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.accessToken = ""
+	e.expiry = time.Time{}
+}
 
 // oauthConfig holds OAuth2 client_credentials configuration.
 type oauthConfig struct {
@@ -21,39 +90,7 @@ type oauthConfig struct {
 	clientID     string
 	clientSecret string
 	scopes       []string
-}
-
-// tokenCache holds a cached OAuth2 access token and its expiry.
-type tokenCache struct {
-	mu          sync.Mutex
-	accessToken string
-	expiry      time.Time
-}
-
-// get returns the cached token if it is still valid, or empty string.
-func (c *tokenCache) get() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.accessToken != "" && time.Now().Before(c.expiry) {
-		return c.accessToken
-	}
-	return ""
-}
-
-// set stores a token with the given TTL.
-func (c *tokenCache) set(token string, ttl time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.accessToken = token
-	c.expiry = time.Now().Add(ttl)
-}
-
-// invalidate clears the cached token.
-func (c *tokenCache) invalidate() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.accessToken = ""
-	c.expiry = time.Time{}
+	cacheKey     string // derived from credentials; used for per-tenant cache isolation
 }
 
 // HTTPCallStep makes an HTTP request as a pipeline step.
@@ -66,8 +103,8 @@ type HTTPCallStep struct {
 	timeout    time.Duration
 	tmpl       *TemplateEngine
 	auth       *oauthConfig
-	tokenCache *tokenCache
-	httpClient *http.Client
+	oauthEntry *oauthCacheEntry // shared entry from globalOAuthCache; nil when no auth configured
+	httpClient *http.Client     // timeout is enforced via the context passed to each request
 }
 
 // NewHTTPCallStepFactory returns a StepFactory that creates HTTPCallStep instances.
@@ -141,13 +178,17 @@ func NewHTTPCallStepFactory() StepFactory {
 					}
 				}
 
+				// Cache key incorporates all credential fields so each distinct tenant/client
+				// gets its own isolated token cache entry.
+				cacheKey := tokenURL + "\x00" + clientID + "\x00" + clientSecret + "\x00" + strings.Join(scopes, " ")
 				step.auth = &oauthConfig{
 					tokenURL:     tokenURL,
 					clientID:     clientID,
 					clientSecret: clientSecret,
 					scopes:       scopes,
+					cacheKey:     cacheKey,
 				}
-				step.tokenCache = &tokenCache{}
+				step.oauthEntry = globalOAuthCache.getOrCreate(cacheKey)
 			}
 		}
 
@@ -158,8 +199,10 @@ func NewHTTPCallStepFactory() StepFactory {
 // Name returns the step name.
 func (s *HTTPCallStep) Name() string { return s.name }
 
-// fetchToken obtains a new OAuth2 access token using client_credentials grant.
-func (s *HTTPCallStep) fetchToken(ctx context.Context) (string, error) {
+// doFetchToken performs the actual HTTP call to the token endpoint, caches the result, and returns
+// the new access token. It is called either via getToken (through singleflight) or directly on
+// the 401-retry path where an unconditional refresh is needed.
+func (s *HTTPCallStep) doFetchToken(ctx context.Context) (string, error) {
 	params := url.Values{
 		"grant_type":    {"client_credentials"},
 		"client_id":     {s.auth.clientID},
@@ -211,17 +254,33 @@ func (s *HTTPCallStep) fetchToken(ctx context.Context) (string, error) {
 	if ttl > 10*time.Second {
 		ttl -= 10 * time.Second
 	}
-	s.tokenCache.set(tokenResp.AccessToken, ttl)
+	s.oauthEntry.set(tokenResp.AccessToken, ttl)
 
 	return tokenResp.AccessToken, nil
 }
 
-// getToken returns a valid OAuth2 token, fetching one if the cache is empty or expired.
+// getToken returns a valid OAuth2 token from the shared cache. If the cache is empty or expired,
+// a single network fetch is performed; concurrent callers for the same credential set are
+// coalesced via singleflight so the token endpoint is called at most once.
 func (s *HTTPCallStep) getToken(ctx context.Context) (string, error) {
-	if token := s.tokenCache.get(); token != "" {
+	// Fast path: valid token already in the shared cache.
+	if token := s.oauthEntry.get(); token != "" {
 		return token, nil
 	}
-	return s.fetchToken(ctx)
+
+	// Slow path: coalesce concurrent fetches so only one goroutine calls the token endpoint.
+	val, err, _ := s.oauthEntry.sfGroup.Do("fetch", func() (any, error) {
+		// Double-check inside the group so we don't fetch again if a concurrent goroutine
+		// already populated the cache while we were waiting.
+		if token := s.oauthEntry.get(); token != "" {
+			return token, nil
+		}
+		return s.doFetchToken(ctx)
+	})
+	if err != nil {
+		return "", err
+	}
+	return val.(string), nil
 }
 
 // buildBodyReader constructs the request body reader from the step configuration.
@@ -344,11 +403,12 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		return nil, fmt.Errorf("http_call step %q: failed to read response: %w", s.name, err)
 	}
 
-	// On 401, invalidate token cache and retry once with a fresh token
+	// On 401, invalidate the shared cache and fetch a fresh token directly (bypassing
+	// singleflight so the refresh is not coalesced with an in-progress normal fetch).
 	if resp.StatusCode == http.StatusUnauthorized && s.auth != nil {
-		s.tokenCache.invalidate()
+		s.oauthEntry.invalidate()
 
-		newToken, tokenErr := s.fetchToken(ctx)
+		newToken, tokenErr := s.doFetchToken(ctx)
 		if tokenErr != nil {
 			return nil, tokenErr
 		}
