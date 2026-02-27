@@ -3,7 +3,8 @@
 // http_call, request_parse, db_query, db_exec, json_response,
 // validate_path_param, validate_pagination, validate_request_body,
 // foreach, webhook_verify, ui_scaffold, ui_scaffold_analyze,
-// dlq_send, dlq_replay, retry_with_backoff, circuit_breaker (wrapping).
+// dlq_send, dlq_replay, retry_with_backoff, circuit_breaker (wrapping),
+// auth_validate.
 // It also provides the PipelineWorkflowHandler for composable pipelines.
 package pipelinesteps
 
@@ -80,6 +81,7 @@ func New() *Plugin {
 					"step.dlq_replay",
 					"step.retry_with_backoff",
 					"step.resilient_circuit_breaker",
+					"step.auth_validate",
 				},
 				WorkflowTypes: []string{"pipeline"},
 				Capabilities: []plugin.CapabilityDecl{
@@ -111,7 +113,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.delegate":              wrapStepFactory(module.NewDelegateStepFactory()),
 		"step.jq":                    wrapStepFactory(module.NewJQStepFactory()),
 		"step.publish":               wrapStepFactory(module.NewPublishStepFactory()),
-		"step.event_publish":          wrapStepFactory(module.NewEventPublishStepFactory()),
+		"step.event_publish":         wrapStepFactory(module.NewEventPublishStepFactory()),
 		"step.http_call":             wrapStepFactory(module.NewHTTPCallStepFactory()),
 		"step.request_parse":         wrapStepFactory(module.NewRequestParseStepFactory()),
 		"step.db_query":              wrapStepFactory(module.NewDBQueryStepFactory()),
@@ -125,7 +127,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.foreach": wrapStepFactory(module.NewForEachStepFactory(func() *module.StepRegistry {
 			return p.concreteStepRegistry
 		})),
-		"step.webhook_verify": wrapStepFactory(module.NewWebhookVerifyStepFactory()),
+		"step.webhook_verify":      wrapStepFactory(module.NewWebhookVerifyStepFactory()),
 		"step.cache_get":           wrapStepFactory(module.NewCacheGetStepFactory()),
 		"step.cache_set":           wrapStepFactory(module.NewCacheSetStepFactory()),
 		"step.cache_delete":        wrapStepFactory(module.NewCacheDeleteStepFactory()),
@@ -140,6 +142,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.resilient_circuit_breaker": wrapStepFactory(module.NewResilienceCircuitBreakerStepFactory(func() *module.StepRegistry {
 			return p.concreteStepRegistry
 		})),
+		"step.auth_validate": wrapStepFactory(module.NewAuthValidateStepFactory()),
 	}
 }
 
