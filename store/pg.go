@@ -30,6 +30,7 @@ type PGStore struct {
 	logs               *PGLogStore
 	audit              *PGAuditStore
 	iam                *PGIAMStore
+	configDocs         *PGConfigStore
 }
 
 // NewPGStore connects to PostgreSQL and returns a PGStore with all sub-stores.
@@ -68,6 +69,7 @@ func NewPGStore(ctx context.Context, cfg PGConfig) (*PGStore, error) {
 	s.logs = &PGLogStore{pool: pool}
 	s.audit = &PGAuditStore{pool: pool}
 	s.iam = &PGIAMStore{pool: pool}
+	s.configDocs = NewPGConfigStore(pool)
 
 	return s, nil
 }
@@ -110,3 +112,6 @@ func (s *PGStore) Audit() AuditStore { return s.audit }
 
 // IAM returns the IAMStore.
 func (s *PGStore) IAM() IAMStore { return s.iam }
+
+// ConfigDocs returns the PGConfigStore.
+func (s *PGStore) ConfigDocs() *PGConfigStore { return s.configDocs }

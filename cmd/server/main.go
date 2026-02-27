@@ -102,6 +102,8 @@ var (
 	// Deprecated: admin UI is now served by the external workflow-plugin-admin binary.
 	// This flag is accepted for backwards compatibility but has no effect.
 	_ = flag.String("admin-ui-dir", "", "Deprecated: admin UI is now served by the external workflow-plugin-admin binary")
+
+	watchConfig = flag.Bool("watch", false, "Watch config file for changes and auto-reload")
 )
 
 // defaultEnginePlugins returns the standard set of engine plugins used by all engine instances.
@@ -342,12 +344,14 @@ type serverApp struct {
 	stores         storeComponents
 	mgmt           mgmtComponents
 	services       serviceComponents
+	currentConfig  *config.WorkflowConfig // last loaded config, used by dynamic config watcher
 }
 
 // setup initializes all server components: engine, AI services, and HTTP mux.
 func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) {
 	app := &serverApp{
-		logger: logger,
+		logger:        logger,
+		currentConfig: cfg,
 	}
 
 	engine, loader, registry, err := buildEngine(cfg, logger)
@@ -400,8 +404,9 @@ func setupFromAppConfig(logger *slog.Logger, appCfg *config.ApplicationConfig) (
 	}
 
 	sApp := &serverApp{
-		engine: engine,
-		logger: logger,
+		engine:        engine,
+		logger:        logger,
+		currentConfig: combined,
 	}
 
 	pool := dynamic.NewInterpreterPool()
@@ -1220,6 +1225,74 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 		}
 	}
 
+	// Config file watcher — started after the engine and all post-start hooks are up.
+	var reloader *config.ConfigReloader
+	if *watchConfig && *configFile != "" {
+		fileSource := config.NewFileSource(*configFile)
+
+		var reloaderErr error
+		reloader, reloaderErr = config.NewConfigReloader(
+			app.currentConfig,   // the loaded WorkflowConfig
+			app.reloadEngine,    // existing full reload function
+			app.engine,          // implements ModuleReconfigurer
+			app.logger,
+		)
+		if reloaderErr != nil {
+			app.logger.Error("Failed to create config reloader", "error", reloaderErr)
+		} else {
+			configWatcher := config.NewConfigWatcher(fileSource, func(evt config.ConfigChangeEvent) {
+				app.logger.Info("Config file changed, reloading",
+					"source", evt.Source,
+					"old_hash", evt.OldHash[:8],
+					"new_hash", evt.NewHash[:8])
+				if err := reloader.HandleChange(evt); err != nil {
+					app.logger.Error("Config reload failed", "error", err)
+				}
+			}, config.WithWatchLogger(app.logger))
+
+			if err := configWatcher.Start(); err != nil {
+				app.logger.Error("Failed to start config watcher", "error", err)
+			} else {
+				defer func() { _ = configWatcher.Stop() }()
+				app.logger.Info("Config file watcher started", "file", *configFile)
+			}
+		}
+	}
+
+	// Database config poller — activated when a PG store is available.
+	if app.pgStore != nil {
+		dbSource := config.NewDatabaseSource(
+			app.pgStore.ConfigDocs(),
+			config.WithRefreshInterval(30*time.Second),
+		)
+
+		// Reuse or create a reloader for the DB poller.
+		if reloader == nil {
+			var reloaderErr error
+			reloader, reloaderErr = config.NewConfigReloader(app.currentConfig, app.reloadEngine, app.engine, app.logger)
+			if reloaderErr != nil {
+				app.logger.Error("Failed to create config reloader for DB poller", "error", reloaderErr)
+			}
+		}
+
+		if reloader != nil {
+			poller := config.NewDatabasePoller(dbSource, 30*time.Second, func(evt config.ConfigChangeEvent) {
+				app.logger.Info("Database config changed, reloading",
+					"source", evt.Source)
+				if err := reloader.HandleChange(evt); err != nil {
+					app.logger.Error("DB config reload failed", "error", err)
+				}
+			}, app.logger)
+
+			if err := poller.Start(ctx); err != nil {
+				app.logger.Error("DB config poller start failed", "error", err)
+			} else {
+				defer poller.Stop()
+				app.logger.Info("Database config poller started", "interval", "30s")
+			}
+		}
+	}
+
 	// Wait for context cancellation
 	<-ctx.Done()
 
@@ -1317,6 +1390,7 @@ func applyEnvOverrides() {
 		"load-workflows": "WORKFLOW_LOAD_WORKFLOWS",
 		"import-bundle":  "WORKFLOW_IMPORT_BUNDLE",
 		"license-key":    "WORKFLOW_LICENSE_KEY",
+		"watch":          "WORKFLOW_WATCH",
 	}
 
 	// Track which flags were explicitly set on the command line.
@@ -1513,6 +1587,44 @@ func runMultiWorkflow(logger *slog.Logger) error {
 	// 8. Mount API router on the same HTTP mux
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/", apiRouter)
+
+	// Module reconfiguration endpoint — allows runtime hot-reload of individual
+	// modules that implement interfaces.Reconfigurable without a full engine restart.
+	mux.HandleFunc("PUT /api/v1/modules/{name}/config", func(w http.ResponseWriter, r *http.Request) {
+		moduleName := r.PathValue("name")
+		if moduleName == "" {
+			http.Error(w, `{"error":"module name required"}`, http.StatusBadRequest)
+			return
+		}
+
+		var newConfig map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"invalid JSON: %v"}`, err), http.StatusBadRequest)
+			return
+		}
+
+		mod := app.engine.GetApp().GetModule(moduleName)
+		if mod == nil {
+			http.Error(w, fmt.Sprintf(`{"error":"module %q not found"}`, moduleName), http.StatusNotFound)
+			return
+		}
+
+		reconf, ok := mod.(interfaces.Reconfigurable)
+		if !ok {
+			http.Error(w, fmt.Sprintf(`{"error":"module %q does not support runtime reconfiguration"}`, moduleName), http.StatusNotImplemented)
+			return
+		}
+
+		if err := reconf.Reconfigure(r.Context(), newConfig); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"reconfiguration failed: %v"}`, err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		resp, _ := json.Marshal(map[string]string{"status": "ok", "module": moduleName})
+		w.Write(resp) //nolint:errcheck
+	})
+
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"mode":"multi-workflow","status":"ok"}`))
