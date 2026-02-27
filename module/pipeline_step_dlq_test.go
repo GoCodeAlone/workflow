@@ -27,11 +27,11 @@ type dlqMockBroker struct {
 	producer *dlqMockProducer
 }
 
-func (b *dlqMockBroker) Producer() MessageProducer                      { return b.producer }
-func (b *dlqMockBroker) Consumer() MessageConsumer                      { return nil }
-func (b *dlqMockBroker) Subscribe(_ string, _ MessageHandler) error     { return nil }
-func (b *dlqMockBroker) Start(_ context.Context) error                  { return nil }
-func (b *dlqMockBroker) Stop(_ context.Context) error                   { return nil }
+func (b *dlqMockBroker) Producer() MessageProducer                  { return b.producer }
+func (b *dlqMockBroker) Consumer() MessageConsumer                  { return nil }
+func (b *dlqMockBroker) Subscribe(_ string, _ MessageHandler) error { return nil }
+func (b *dlqMockBroker) Start(_ context.Context) error              { return nil }
+func (b *dlqMockBroker) Stop(_ context.Context) error               { return nil }
 
 // newAppWithDLQBroker creates a MockApplication with the broker registered under "test-broker".
 func newAppWithDLQBroker() (*MockApplication, *dlqMockProducer) {

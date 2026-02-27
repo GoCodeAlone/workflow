@@ -182,6 +182,7 @@ var coreModuleTypes = []string{
 	"step.request_parse",
 	"step.resilient_circuit_breaker",
 	"step.retry_with_backoff",
+	"step.s3_upload",
 	"step.scan_container",
 	"step.scan_deps",
 	"step.scan_sast",

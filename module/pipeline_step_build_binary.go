@@ -16,16 +16,16 @@ import (
 // BuildBinaryStep reads a workflow config YAML, generates a self-contained Go
 // project that embeds the config, and compiles it into a standalone binary.
 type BuildBinaryStep struct {
-	name         string
-	configFile   string
-	output       string
-	targetOS     string
-	targetArch   string
-	embedConfig  bool
-	modulePath   string
-	goVersion    string
-	dryRun       bool
-	execCommand  func(ctx context.Context, name string, args ...string) *exec.Cmd
+	name        string
+	configFile  string
+	output      string
+	targetOS    string
+	targetArch  string
+	embedConfig bool
+	modulePath  string
+	goVersion   string
+	dryRun      bool
+	execCommand func(ctx context.Context, name string, args ...string) *exec.Cmd
 }
 
 // NewBuildBinaryStepFactory returns a StepFactory that creates BuildBinaryStep instances.

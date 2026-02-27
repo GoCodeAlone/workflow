@@ -18,7 +18,7 @@ func init() {
 // doStaticResolver resolves DigitalOcean credentials from static config fields.
 type doStaticResolver struct{}
 
-func (r *doStaticResolver) Provider() string      { return "digitalocean" }
+func (r *doStaticResolver) Provider() string       { return "digitalocean" }
 func (r *doStaticResolver) CredentialType() string { return "static" }
 
 func (r *doStaticResolver) Resolve(m *CloudAccount) error {
@@ -32,7 +32,7 @@ func (r *doStaticResolver) Resolve(m *CloudAccount) error {
 // doEnvResolver resolves DigitalOcean credentials from environment variables.
 type doEnvResolver struct{}
 
-func (r *doEnvResolver) Provider() string      { return "digitalocean" }
+func (r *doEnvResolver) Provider() string       { return "digitalocean" }
 func (r *doEnvResolver) CredentialType() string { return "env" }
 
 func (r *doEnvResolver) Resolve(m *CloudAccount) error {
@@ -46,7 +46,7 @@ func (r *doEnvResolver) Resolve(m *CloudAccount) error {
 // doAPITokenResolver resolves a DigitalOcean API token from explicit config.
 type doAPITokenResolver struct{}
 
-func (r *doAPITokenResolver) Provider() string      { return "digitalocean" }
+func (r *doAPITokenResolver) Provider() string       { return "digitalocean" }
 func (r *doAPITokenResolver) CredentialType() string { return "api_token" }
 
 func (r *doAPITokenResolver) Resolve(m *CloudAccount) error {

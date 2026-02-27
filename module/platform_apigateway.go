@@ -386,9 +386,9 @@ func (b *awsAPIGatewayBackend) apply(m *PlatformAPIGateway) (*PlatformGatewaySta
 		}
 		if cors := m.platformCORS(); cors != nil {
 			createInput.CorsConfiguration = &apigwtypes.Cors{
-				AllowOrigins:  cors.AllowOrigins,
-				AllowMethods:  cors.AllowMethods,
-				AllowHeaders:  cors.AllowHeaders,
+				AllowOrigins: cors.AllowOrigins,
+				AllowMethods: cors.AllowMethods,
+				AllowHeaders: cors.AllowHeaders,
 			}
 		}
 		apiOut, err := client.CreateApi(context.Background(), createInput)
@@ -419,10 +419,10 @@ func (b *awsAPIGatewayBackend) apply(m *PlatformAPIGateway) (*PlatformGatewaySta
 	for _, route := range routes {
 		// Create integration for the route target
 		integOut, err := client.CreateIntegration(context.Background(), &apigatewayv2.CreateIntegrationInput{
-			ApiId:             aws.String(apiID),
-			IntegrationType:   apigwtypes.IntegrationTypeHttpProxy,
-			IntegrationUri:    aws.String(route.Target),
-			IntegrationMethod: aws.String(route.Method),
+			ApiId:                aws.String(apiID),
+			IntegrationType:      apigwtypes.IntegrationTypeHttpProxy,
+			IntegrationUri:       aws.String(route.Target),
+			IntegrationMethod:    aws.String(route.Method),
 			PayloadFormatVersion: aws.String("1.0"),
 		})
 		if err != nil {

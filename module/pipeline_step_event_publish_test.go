@@ -36,11 +36,11 @@ func newMockBroker() *mockBroker {
 	return &mockBroker{producer: &mockBrokerProducer{}}
 }
 
-func (b *mockBroker) Producer() MessageProducer          { return b.producer }
-func (b *mockBroker) Consumer() MessageConsumer          { return nil }
+func (b *mockBroker) Producer() MessageProducer                  { return b.producer }
+func (b *mockBroker) Consumer() MessageConsumer                  { return nil }
 func (b *mockBroker) Subscribe(_ string, _ MessageHandler) error { return nil }
-func (b *mockBroker) Start(_ context.Context) error      { return nil }
-func (b *mockBroker) Stop(_ context.Context) error       { return nil }
+func (b *mockBroker) Start(_ context.Context) error              { return nil }
+func (b *mockBroker) Stop(_ context.Context) error               { return nil }
 
 func mockAppWithBroker(name string, broker MessageBroker) *MockApplication {
 	app := NewMockApplication()

@@ -11,15 +11,15 @@ import (
 
 // DOAppState holds the current state of a DigitalOcean App Platform app.
 type DOAppState struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Region      string    `json:"region"`
-	Status      string    `json:"status"` // pending, deploying, running, error, deleted
-	LiveURL     string    `json:"liveUrl"`
-	Instances   int       `json:"instances"`
-	Image       string    `json:"image"`
-	DeployedAt  time.Time `json:"deployedAt"`
-	DeploymentID string   `json:"deploymentId"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Region       string    `json:"region"`
+	Status       string    `json:"status"` // pending, deploying, running, error, deleted
+	LiveURL      string    `json:"liveUrl"`
+	Instances    int       `json:"instances"`
+	Image        string    `json:"image"`
+	DeployedAt   time.Time `json:"deployedAt"`
+	DeploymentID string    `json:"deploymentId"`
 }
 
 // doAppBackend is the interface DO App Platform backends implement.
@@ -198,10 +198,10 @@ func (m *PlatformDOApp) buildAppSpec() *godo.AppSpec {
 					RegistryType: godo.ImageSourceSpecRegistryType_DockerHub,
 					Repository:   m.state.Image,
 				},
-				InstanceCount:      int64(m.state.Instances),
-				InstanceSizeSlug:   "basic-xxs",
-				HTTPPort:           int64(m.httpPort()),
-				Envs:               appEnvs,
+				InstanceCount:    int64(m.state.Instances),
+				InstanceSizeSlug: "basic-xxs",
+				HTTPPort:         int64(m.httpPort()),
+				Envs:             appEnvs,
 			},
 		},
 	}

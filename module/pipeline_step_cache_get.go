@@ -81,7 +81,7 @@ func (s *CacheGetStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 				return nil, fmt.Errorf("cache_get step %q: cache miss for key %q", s.name, resolvedKey)
 			}
 			return &StepResult{Output: map[string]any{
-				s.output:  "",
+				s.output:    "",
 				"cache_hit": false,
 			}}, nil
 		}
@@ -89,7 +89,7 @@ func (s *CacheGetStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 	}
 
 	return &StepResult{Output: map[string]any{
-		s.output:  val,
+		s.output:    val,
 		"cache_hit": true,
 	}}, nil
 }

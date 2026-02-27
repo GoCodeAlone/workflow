@@ -21,7 +21,7 @@ func init() {
 // awsStaticResolver resolves AWS credentials from static config fields.
 type awsStaticResolver struct{}
 
-func (r *awsStaticResolver) Provider() string      { return "aws" }
+func (r *awsStaticResolver) Provider() string       { return "aws" }
 func (r *awsStaticResolver) CredentialType() string { return "static" }
 
 func (r *awsStaticResolver) Resolve(m *CloudAccount) error {
@@ -38,7 +38,7 @@ func (r *awsStaticResolver) Resolve(m *CloudAccount) error {
 // awsEnvResolver resolves AWS credentials from environment variables.
 type awsEnvResolver struct{}
 
-func (r *awsEnvResolver) Provider() string      { return "aws" }
+func (r *awsEnvResolver) Provider() string       { return "aws" }
 func (r *awsEnvResolver) CredentialType() string { return "env" }
 
 func (r *awsEnvResolver) Resolve(m *CloudAccount) error {
@@ -59,7 +59,7 @@ func (r *awsEnvResolver) Resolve(m *CloudAccount) error {
 // using aws-sdk-go-v2/config.LoadDefaultConfig with WithSharedConfigProfile.
 type awsProfileResolver struct{}
 
-func (r *awsProfileResolver) Provider() string      { return "aws" }
+func (r *awsProfileResolver) Provider() string       { return "aws" }
 func (r *awsProfileResolver) CredentialType() string { return "profile" }
 
 func (r *awsProfileResolver) Resolve(m *CloudAccount) error {
@@ -102,7 +102,7 @@ func (r *awsProfileResolver) Resolve(m *CloudAccount) error {
 // sts:AssumeRole to obtain temporary credentials for the target role.
 type awsRoleARNResolver struct{}
 
-func (r *awsRoleARNResolver) Provider() string      { return "aws" }
+func (r *awsRoleARNResolver) Provider() string       { return "aws" }
 func (r *awsRoleARNResolver) CredentialType() string { return "role_arn" }
 
 func (r *awsRoleARNResolver) Resolve(m *CloudAccount) error {
