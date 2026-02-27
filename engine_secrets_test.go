@@ -195,6 +195,28 @@ func TestExpandConfigStrings_DeeplyNestedArrayOfMaps(t *testing.T) {
 	}
 }
 
+func TestExpandConfigStrings_NestedArrayOfArrays(t *testing.T) {
+	t.Setenv("CLIENT_ID", "test1")
+
+	resolver := secrets.NewMultiResolver()
+	cfg := map[string]any{
+		"roleAssignments": []any{
+			[]any{"${CLIENT_ID}", "api_client"},
+		},
+	}
+
+	expandConfigStrings(resolver, cfg)
+
+	assignments := cfg["roleAssignments"].([]any)
+	inner := assignments[0].([]any)
+	if inner[0] != "test1" {
+		t.Errorf("expected 'test1', got %v", inner[0])
+	}
+	if inner[1] != "api_client" {
+		t.Errorf("expected 'api_client', got %v", inner[1])
+	}
+}
+
 func TestExpandConfigStrings_UnresolvablePreserved(t *testing.T) {
 	resolver := secrets.NewMultiResolver()
 	cfg := map[string]any{
