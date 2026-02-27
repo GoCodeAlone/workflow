@@ -71,6 +71,7 @@ type openAPIOperation struct {
 	Parameters  []openAPIParameter         `yaml:"parameters"  json:"parameters"`
 	RequestBody *openAPIRequestBody        `yaml:"requestBody" json:"requestBody"`
 	Responses   map[string]openAPIResponse `yaml:"responses"   json:"responses"`
+	XPipeline   string                     `yaml:"x-pipeline"  json:"x-pipeline"`
 }
 
 // openAPIParameter describes a path, query, header, or cookie parameter.
@@ -116,13 +117,14 @@ type openAPISchema struct {
 // OpenAPIModule parses an OpenAPI v3 spec and registers HTTP routes that
 // validate incoming requests against the spec schemas.
 type OpenAPIModule struct {
-	name       string
-	cfg        OpenAPIConfig
-	spec       *openAPISpec
-	specBytes  []byte // raw spec bytes for serving (original file content)
-	specJSON   []byte // cached JSON-serialised spec for /openapi.json endpoint
-	routerName string
-	logger     *slog.Logger
+	name           string
+	cfg            OpenAPIConfig
+	spec           *openAPISpec
+	specBytes      []byte // raw spec bytes for serving (original file content)
+	specJSON       []byte // cached JSON-serialised spec for /openapi.json endpoint
+	routerName     string
+	logger         *slog.Logger
+	pipelineLookup PipelineLookupFn
 }
 
 // NewOpenAPIModule creates a new OpenAPIModule with the given name and config.
@@ -198,6 +200,12 @@ func (m *OpenAPIModule) RequiresServices() []modular.ServiceDependency { return 
 
 // RouterName returns the optional explicit router module name to attach routes to.
 func (m *OpenAPIModule) RouterName() string { return m.routerName }
+
+// SetPipelineLookup sets the function used to resolve pipeline names found in
+// x-pipeline operation extensions. This must be called before RegisterRoutes.
+func (m *OpenAPIModule) SetPipelineLookup(fn PipelineLookupFn) {
+	m.pipelineLookup = fn
+}
 
 // RegisterRoutes attaches all spec paths (and optional Swagger UI / spec endpoints)
 // to the given HTTPRouter.
@@ -276,17 +284,22 @@ func (m *OpenAPIModule) RegisterRoutes(router HTTPRouter) {
 // ---- Handler builders ----
 
 // buildRouteHandler creates an HTTPHandler that validates the request (if enabled)
-// and returns a 501 Not Implemented stub response. In a full integration the
-// caller would wrap this handler or replace the stub with real business logic.
+// and either executes the linked pipeline (if x-pipeline is set) or returns a 501
+// Not Implemented stub response.
 func (m *OpenAPIModule) buildRouteHandler(specPath, method string, op *openAPIOperation) HTTPHandler {
 	validateReq := m.cfg.Validation.Request
-	return &openAPIRouteHandler{
+	h := &openAPIRouteHandler{
 		module:      m,
 		specPath:    specPath,
 		method:      method,
 		op:          op,
 		validateReq: validateReq,
 	}
+	if op.XPipeline != "" {
+		h.pipelineName = op.XPipeline
+		h.pipelineLookup = m.pipelineLookup
+	}
+	return h
 }
 
 // buildSwaggerUIHandler returns an inline Swagger UI page that loads the spec
@@ -299,11 +312,13 @@ func (m *OpenAPIModule) buildSwaggerUIHandler(specURL string) HTTPHandler {
 // ---- openAPIRouteHandler ----
 
 type openAPIRouteHandler struct {
-	module      *OpenAPIModule
-	specPath    string
-	method      string
-	op          *openAPIOperation
-	validateReq bool
+	module         *OpenAPIModule
+	specPath       string
+	method         string
+	op             *openAPIOperation
+	validateReq    bool
+	pipelineName   string
+	pipelineLookup PipelineLookupFn
 }
 
 func (h *openAPIRouteHandler) Handle(w http.ResponseWriter, r *http.Request) {
@@ -317,6 +332,46 @@ func (h *openAPIRouteHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	}
+
+	// If x-pipeline is configured, execute the named pipeline.
+	if h.pipelineName != "" && h.pipelineLookup != nil {
+		pipeline, ok := h.pipelineLookup(h.pipelineName)
+		if !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": fmt.Sprintf("pipeline %q not found", h.pipelineName),
+			})
+			return
+		}
+
+		data := openAPIExtractRequestData(r)
+
+		rw := &trackedResponseWriter{ResponseWriter: w}
+		ctx := context.WithValue(r.Context(), HTTPResponseWriterContextKey, rw)
+		ctx = context.WithValue(ctx, HTTPRequestContextKey, r)
+
+		result, err := pipeline.Execute(ctx, data)
+		if err != nil {
+			if !rw.written {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"error": fmt.Sprintf("pipeline execution failed: %v", err),
+				})
+			}
+			return
+		}
+
+		if rw.written {
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(result.Current)
+		return
 	}
 
 	// Default stub: 501 Not Implemented
@@ -757,4 +812,16 @@ func supportedContentTypes(content map[string]openAPIMediaType) string {
 	}
 	sort.Strings(types)
 	return strings.Join(types, ", ")
+}
+
+// openAPIExtractRequestData builds a trigger data map from an HTTP request,
+// extracting query parameters and (for JSON bodies) the decoded body fields.
+func openAPIExtractRequestData(r *http.Request) map[string]any {
+	data := make(map[string]any)
+	for k, v := range r.URL.Query() {
+		if len(v) > 0 {
+			data[k] = v[0]
+		}
+	}
+	return data
 }

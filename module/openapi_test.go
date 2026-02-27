@@ -14,6 +14,35 @@ import (
 
 // ---- spec fixtures ----
 
+const xPipelineYAML = `
+openapi: "3.0.0"
+info:
+  title: Pipeline API
+  version: "1.0.0"
+paths:
+  /greet:
+    get:
+      operationId: greetUser
+      summary: Greet the user
+      x-pipeline: greet-pipeline
+      parameters:
+        - name: name
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Greeting
+  /stub:
+    get:
+      operationId: stubOp
+      summary: No pipeline
+      responses:
+        "200":
+          description: OK
+`
+
 const petstoreYAML = `
 openapi: "3.0.0"
 info:
@@ -761,4 +790,176 @@ func routeKeys(r *testRouter) []string {
 		keys[i] = rt.method + ":" + rt.path
 	}
 	return keys
+}
+
+// ---- x-pipeline tests ----
+
+func TestOpenAPIModule_XPipelineParsed(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", xPipelineYAML)
+
+	mod := NewOpenAPIModule("pipe-api", OpenAPIConfig{
+		SpecFile: specPath,
+		BasePath: "/api",
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Verify x-pipeline was parsed for the greet operation.
+	pathItem := mod.spec.Paths["/greet"]
+	if pathItem == nil {
+		t.Fatal("expected /greet path in spec")
+	}
+	op := pathItem["get"]
+	if op == nil {
+		t.Fatal("expected GET operation on /greet")
+	}
+	if op.XPipeline != "greet-pipeline" {
+		t.Errorf("expected x-pipeline 'greet-pipeline', got %q", op.XPipeline)
+	}
+
+	// Verify the stub operation has no x-pipeline.
+	stubItem := mod.spec.Paths["/stub"]
+	if stubItem == nil {
+		t.Fatal("expected /stub path in spec")
+	}
+	stubOp := stubItem["get"]
+	if stubOp == nil {
+		t.Fatal("expected GET operation on /stub")
+	}
+	if stubOp.XPipeline != "" {
+		t.Errorf("expected empty x-pipeline on stub, got %q", stubOp.XPipeline)
+	}
+}
+
+func TestOpenAPIModule_XPipeline_ExecutesPipeline(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", xPipelineYAML)
+
+	mod := NewOpenAPIModule("pipe-api", OpenAPIConfig{
+		SpecFile: specPath,
+		BasePath: "/api",
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Create a simple pipeline that sets a greeting.
+	greetStep := &stubPipelineStep{
+		name: "set-greeting",
+		exec: func(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+			name := "world"
+			if n, ok := pc.TriggerData["name"].(string); ok && n != "" {
+				name = n
+			}
+			return &StepResult{Output: map[string]any{"greeting": "hello " + name}}, nil
+		},
+	}
+	greetPipeline := &Pipeline{
+		Name:  "greet-pipeline",
+		Steps: []PipelineStep{greetStep},
+	}
+
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "greet-pipeline" {
+			return greetPipeline, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/greet")
+	if h == nil {
+		t.Fatal("GET /api/greet handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/greet?name=Alice", nil)
+	h.Handle(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON response: %v", err)
+	}
+	if resp["greeting"] != "hello Alice" {
+		t.Errorf("expected greeting 'hello Alice', got %v", resp["greeting"])
+	}
+}
+
+func TestOpenAPIModule_XPipeline_NotFound(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", xPipelineYAML)
+
+	mod := NewOpenAPIModule("pipe-api", OpenAPIConfig{
+		SpecFile: specPath,
+		BasePath: "/api",
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Set a lookup that never finds the pipeline.
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/greet")
+	if h == nil {
+		t.Fatal("GET /api/greet handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/greet", nil)
+	h.Handle(w, r)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("expected 502 for missing pipeline, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestOpenAPIModule_XPipeline_StubWithoutPipeline(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", xPipelineYAML)
+
+	mod := NewOpenAPIModule("pipe-api", OpenAPIConfig{
+		SpecFile: specPath,
+		BasePath: "/api",
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// No pipeline lookup set — routes without x-pipeline should still return 501.
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/stub")
+	if h == nil {
+		t.Fatal("GET /api/stub handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/stub", nil)
+	h.Handle(w, r)
+
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("expected 501 for stub, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// stubPipelineStep is a minimal PipelineStep implementation for testing.
+type stubPipelineStep struct {
+	name string
+	exec func(ctx context.Context, pc *PipelineContext) (*StepResult, error)
+}
+
+func (s *stubPipelineStep) Name() string { return s.name }
+func (s *stubPipelineStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+	return s.exec(ctx, pc)
 }
