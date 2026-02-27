@@ -197,23 +197,26 @@ func (s *Server) handleValidateTemplateExpressions(_ context.Context, req mcp.Ca
 		Steps []minStep `yaml:"steps"`
 	}
 
+	var warnings []string
+
 	pipelines := make(map[string]minPipeline, len(pipelinesRaw))
 	for pName, pRaw := range pipelinesRaw {
 		data, err := yaml.Marshal(pRaw)
 		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("[pipeline=%s] could not re-marshal pipeline for analysis: %v", pName, err))
 			continue
 		}
 		var p minPipeline
 		if err := yaml.Unmarshal(data, &p); err != nil {
+			warnings = append(warnings, fmt.Sprintf("[pipeline=%s] could not parse pipeline steps for analysis: %v", pName, err))
 			continue
 		}
 		pipelines[pName] = p
 	}
 
-	var warnings []string
-
 	// Regex patterns for template expression analysis.
-	templateRefRe := regexp.MustCompile(`\{\{[^}]*\}\}`)
+	// templateRefRe is a heuristic matcher — it may not handle every edge case in Go templates.
+	templateRefRe := regexp.MustCompile(`(?s)\{\{.*?\}\}`)
 	stepsRefRe := regexp.MustCompile(`\.steps\.([a-zA-Z0-9_-]+)`)
 	hyphenStepRe := regexp.MustCompile(`\.steps\.([a-zA-Z0-9_]*-[a-zA-Z0-9_-]*)`)
 
@@ -226,6 +229,12 @@ func (s *Server) handleValidateTemplateExpressions(_ context.Context, req mcp.Ca
 		}
 
 		for stepIdx, step := range p.Steps {
+			// Compile self-reference regex once per step, outside the config/expression loops.
+			var selfRefRe *regexp.Regexp
+			if step.Name != "" {
+				selfRefRe = regexp.MustCompile(`\.steps\.` + regexp.QuoteMeta(step.Name) + `\b`)
+			}
+
 			// Check all config values for template expressions.
 			for configKey, configVal := range step.Config {
 				valStr := fmt.Sprintf("%v", configVal)
@@ -235,8 +244,7 @@ func (s *Server) handleValidateTemplateExpressions(_ context.Context, req mcp.Ca
 				exprs := templateRefRe.FindAllString(valStr, -1)
 				for _, expr := range exprs {
 					// Self-reference check.
-					if step.Name != "" {
-						selfRefRe := regexp.MustCompile(`\.steps\.` + regexp.QuoteMeta(step.Name) + `\b`)
+					if selfRefRe != nil {
 						if selfRefRe.MatchString(expr) {
 							warnings = append(warnings, fmt.Sprintf(
 								"[pipeline=%s step=%s config=%s] self-reference: step %q references itself in %s",
@@ -245,6 +253,9 @@ func (s *Server) handleValidateTemplateExpressions(_ context.Context, req mcp.Ca
 						}
 					}
 
+					// warnedRefs tracks step names that have already received a forward/undefined warning
+					// so the hyphen check below doesn't emit a redundant second warning for the same ref.
+					warnedRefs := make(map[string]bool)
 					refs := stepsRefRe.FindAllStringSubmatch(expr, -1)
 					for _, ref := range refs {
 						refName := ref[1]
@@ -254,6 +265,7 @@ func (s *Server) handleValidateTemplateExpressions(_ context.Context, req mcp.Ca
 								"[pipeline=%s step=%s config=%s] forward reference: step %q (index %d) references step %q (index %d) which has not yet run",
 								pName, step.Name, configKey, step.Name, stepIdx, refName, refIdx,
 							))
+							warnedRefs[refName] = true
 						}
 						// Undefined step reference check.
 						if _, exists := stepIndexMap[refName]; !exists {
@@ -261,17 +273,20 @@ func (s *Server) handleValidateTemplateExpressions(_ context.Context, req mcp.Ca
 								"[pipeline=%s step=%s config=%s] undefined step reference: %q not found in pipeline",
 								pName, step.Name, configKey, refName,
 							))
+							warnedRefs[refName] = true
 						}
 					}
 
-					// Hyphenated dot-access check.
+					// Hyphenated dot-access check — skip refs already reported above to avoid duplicate warnings.
 					hyphenRefs := hyphenStepRe.FindAllStringSubmatch(expr, -1)
-					for _, ref := range hyphenRefs {
-						stepName := ref[1]
-						warnings = append(warnings, fmt.Sprintf(
-							"[pipeline=%s step=%s config=%s] hyphenated step name %q uses dot-access; use: {{ index .steps %q \"field\" }} instead",
-							pName, step.Name, configKey, stepName, stepName,
-						))
+					for _, href := range hyphenRefs {
+						hyphenName := href[1]
+						if !warnedRefs[hyphenName] {
+							warnings = append(warnings, fmt.Sprintf(
+								"[pipeline=%s step=%s config=%s] hyphenated step name %q uses dot-access; the engine auto-corrects this, but consider using {{ index .steps %q \"field\" }} for clarity",
+								pName, step.Name, configKey, hyphenName, hyphenName,
+							))
+						}
 					}
 				}
 			}
@@ -293,11 +308,17 @@ func (s *Server) handleGetConfigExamples(_ context.Context, req mcp.CallToolRequ
 
 	exampleDir := "example"
 	// Support absolute path from the server's working directory.
+	// Only derive the root when pluginDir follows the expected "data/plugins" layout.
 	if s.pluginDir != "" {
-		// Try to derive the root from pluginDir (data/plugins -> .)
-		candidate := filepath.Join(filepath.Dir(filepath.Dir(s.pluginDir)), "example")
-		if _, err := os.Stat(candidate); err == nil {
-			exampleDir = candidate
+		// Validate expected layout: pluginDir must end with "data/plugins" (or "data"+sep+"plugins").
+		pluginBase := filepath.Base(s.pluginDir)
+		dataDir := filepath.Dir(s.pluginDir)
+		dataBase := filepath.Base(dataDir)
+		if pluginBase == "plugins" && dataBase == "data" {
+			candidate := filepath.Join(filepath.Dir(dataDir), "example")
+			if _, err := os.Stat(candidate); err == nil {
+				exampleDir = candidate
+			}
 		}
 	}
 
@@ -421,7 +442,7 @@ func knownStepTypeDescriptions() map[string]stepTypeInfoFull {
 			Description: "Sends a JSON HTTP response and terminates pipeline execution.",
 			ConfigKeys:  []string{"status", "body", "headers"},
 			ConfigDefs: []stepConfigKeyDef{
-				{Key: "status", Type: "number", Description: "HTTP status code (default: 200)", Required: true},
+				{Key: "status", Type: "number", Description: "HTTP status code", Required: true},
 				{Key: "body", Type: "string|map", Description: "Response body (string template or map for JSON object)"},
 				{Key: "headers", Type: "map", Description: "Additional response headers"},
 			},
@@ -869,20 +890,30 @@ func listExamples(exampleDir string) ([]exampleInfo, error) {
 // readExampleFile reads an example YAML file by name.
 // name can be the base name with or without the .yaml extension.
 func readExampleFile(exampleDir, name string) (string, string, error) {
+	// Path traversal protection: reject names containing ".." or path separators.
+	if strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+		return "", "", fmt.Errorf("invalid example name %q", name)
+	}
+
 	// Normalize name.
 	if !strings.HasSuffix(name, ".yaml") {
 		name += ".yaml"
 	}
 
-	candidates := []string{
-		filepath.Join(exampleDir, name),
+	absDir, err := filepath.Abs(exampleDir)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid example directory: %w", err)
 	}
 
-	for _, path := range candidates {
-		data, err := os.ReadFile(path) //nolint:gosec // G304: path is within example dir
-		if err == nil {
-			return string(data), filepath.Base(path), nil
-		}
+	resolved := filepath.Join(absDir, name)
+	// Verify the resolved path stays within exampleDir.
+	if !strings.HasPrefix(resolved, absDir+string(filepath.Separator)) {
+		return "", "", fmt.Errorf("invalid example name %q", name)
+	}
+
+	data, err := os.ReadFile(resolved) //nolint:gosec // G304: path is validated to be within absDir
+	if err == nil {
+		return string(data), filepath.Base(resolved), nil
 	}
 	return "", "", fmt.Errorf("file not found")
 }
