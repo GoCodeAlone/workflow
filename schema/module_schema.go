@@ -472,6 +472,16 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{},
 	})
 
+	r.Register(&ModuleSchema{
+		Type:         "jsonschema.modular",
+		Label:        "JSON Schema Validator",
+		Category:     "validation",
+		Description:  "CrisisTextLine/modular JSON Schema validation module",
+		Inputs:       []ServiceIODef{{Name: "data", Type: "any", Description: "Data to validate against schema"}},
+		Outputs:      []ServiceIODef{{Name: "validator", Type: "JSONSchemaService", Description: "JSON Schema validation service"}},
+		ConfigFields: []ConfigFieldDef{},
+	})
+
 	// ---- Database Category ----
 
 	r.Register(&ModuleSchema{

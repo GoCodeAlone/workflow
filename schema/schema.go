@@ -120,6 +120,7 @@ var coreModuleTypes = []string{
 	"http.router",
 	"http.server",
 	"http.simple_proxy",
+	"jsonschema.modular",
 	"license.validator",
 	"log.collector",
 	"messaging.broker",
