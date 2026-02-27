@@ -7,27 +7,74 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
 )
 
+// oauthConfig holds OAuth2 client_credentials configuration.
+type oauthConfig struct {
+	tokenURL     string
+	clientID     string
+	clientSecret string
+	scopes       []string
+}
+
+// tokenCache holds a cached OAuth2 access token and its expiry.
+type tokenCache struct {
+	mu          sync.Mutex
+	accessToken string
+	expiry      time.Time
+}
+
+// get returns the cached token if it is still valid, or empty string.
+func (c *tokenCache) get() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.accessToken != "" && time.Now().Before(c.expiry) {
+		return c.accessToken
+	}
+	return ""
+}
+
+// set stores a token with the given TTL.
+func (c *tokenCache) set(token string, ttl time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.accessToken = token
+	c.expiry = time.Now().Add(ttl)
+}
+
+// invalidate clears the cached token.
+func (c *tokenCache) invalidate() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.accessToken = ""
+	c.expiry = time.Time{}
+}
+
 // HTTPCallStep makes an HTTP request as a pipeline step.
 type HTTPCallStep struct {
-	name    string
-	url     string
-	method  string
-	headers map[string]string
-	body    map[string]any
-	timeout time.Duration
-	tmpl    *TemplateEngine
+	name       string
+	url        string
+	method     string
+	headers    map[string]string
+	body       map[string]any
+	timeout    time.Duration
+	tmpl       *TemplateEngine
+	auth       *oauthConfig
+	tokenCache *tokenCache
+	httpClient *http.Client
 }
 
 // NewHTTPCallStepFactory returns a StepFactory that creates HTTPCallStep instances.
 func NewHTTPCallStepFactory() StepFactory {
 	return func(name string, config map[string]any, _ modular.Application) (PipelineStep, error) {
-		url, _ := config["url"].(string)
-		if url == "" {
+		rawURL, _ := config["url"].(string)
+		if rawURL == "" {
 			return nil, fmt.Errorf("http_call step %q: 'url' is required", name)
 		}
 
@@ -37,11 +84,12 @@ func NewHTTPCallStepFactory() StepFactory {
 		}
 
 		step := &HTTPCallStep{
-			name:    name,
-			url:     url,
-			method:  method,
-			timeout: 30 * time.Second,
-			tmpl:    NewTemplateEngine(),
+			name:       name,
+			url:        rawURL,
+			method:     method,
+			timeout:    30 * time.Second,
+			tmpl:       NewTemplateEngine(),
+			httpClient: http.DefaultClient,
 		}
 
 		if headers, ok := config["headers"].(map[string]any); ok {
@@ -63,6 +111,46 @@ func NewHTTPCallStepFactory() StepFactory {
 			}
 		}
 
+		if authCfg, ok := config["auth"].(map[string]any); ok {
+			authType, _ := authCfg["type"].(string)
+			if authType == "oauth2_client_credentials" {
+				tokenURL, _ := authCfg["token_url"].(string)
+				if tokenURL == "" {
+					return nil, fmt.Errorf("http_call step %q: auth.token_url is required for oauth2_client_credentials", name)
+				}
+				clientID, _ := authCfg["client_id"].(string)
+				if clientID == "" {
+					return nil, fmt.Errorf("http_call step %q: auth.client_id is required for oauth2_client_credentials", name)
+				}
+				clientSecret, _ := authCfg["client_secret"].(string)
+				if clientSecret == "" {
+					return nil, fmt.Errorf("http_call step %q: auth.client_secret is required for oauth2_client_credentials", name)
+				}
+
+				var scopes []string
+				if raw, ok := authCfg["scopes"]; ok {
+					switch v := raw.(type) {
+					case []string:
+						scopes = v
+					case []any:
+						for _, s := range v {
+							if str, ok := s.(string); ok {
+								scopes = append(scopes, str)
+							}
+						}
+					}
+				}
+
+				step.auth = &oauthConfig{
+					tokenURL:     tokenURL,
+					clientID:     clientID,
+					clientSecret: clientSecret,
+					scopes:       scopes,
+				}
+				step.tokenCache = &tokenCache{}
+			}
+		}
+
 		return step, nil
 	}
 }
@@ -70,18 +158,74 @@ func NewHTTPCallStepFactory() StepFactory {
 // Name returns the step name.
 func (s *HTTPCallStep) Name() string { return s.name }
 
-// Execute performs the HTTP request and returns the response.
-func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, s.timeout)
-	defer cancel()
-
-	// Resolve URL template
-	resolvedURL, err := s.tmpl.Resolve(s.url, pc)
-	if err != nil {
-		return nil, fmt.Errorf("http_call step %q: failed to resolve url: %w", s.name, err)
+// fetchToken obtains a new OAuth2 access token using client_credentials grant.
+func (s *HTTPCallStep) fetchToken(ctx context.Context) (string, error) {
+	params := url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {s.auth.clientID},
+		"client_secret": {s.auth.clientSecret},
+	}
+	if len(s.auth.scopes) > 0 {
+		params.Set("scope", strings.Join(s.auth.scopes, " "))
 	}
 
-	var bodyReader io.Reader
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.auth.tokenURL,
+		strings.NewReader(params.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("http_call step %q: failed to create token request: %w", s.name, err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("http_call step %q: token request failed: %w", s.name, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("http_call step %q: failed to read token response: %w", s.name, err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("http_call step %q: token endpoint returned HTTP %d: %s", s.name, resp.StatusCode, string(body))
+	}
+
+	var tokenResp struct {
+		AccessToken string  `json:"access_token"` //nolint:gosec // G117: parsing OAuth2 token response, not a secret exposure
+		ExpiresIn   float64 `json:"expires_in"`
+		TokenType   string  `json:"token_type"`
+	}
+	if err := json.Unmarshal(body, &tokenResp); err != nil {
+		return "", fmt.Errorf("http_call step %q: failed to parse token response: %w", s.name, err)
+	}
+	if tokenResp.AccessToken == "" {
+		return "", fmt.Errorf("http_call step %q: token response missing access_token", s.name)
+	}
+
+	ttl := time.Duration(tokenResp.ExpiresIn) * time.Second
+	if ttl <= 0 {
+		ttl = 3600 * time.Second
+	}
+	// Subtract a small buffer to avoid using a token that is about to expire
+	if ttl > 10*time.Second {
+		ttl -= 10 * time.Second
+	}
+	s.tokenCache.set(tokenResp.AccessToken, ttl)
+
+	return tokenResp.AccessToken, nil
+}
+
+// getToken returns a valid OAuth2 token, fetching one if the cache is empty or expired.
+func (s *HTTPCallStep) getToken(ctx context.Context) (string, error) {
+	if token := s.tokenCache.get(); token != "" {
+		return token, nil
+	}
+	return s.fetchToken(ctx)
+}
+
+// buildBodyReader constructs the request body reader from the step configuration.
+func (s *HTTPCallStep) buildBodyReader(pc *PipelineContext) (io.Reader, error) {
 	if s.body != nil {
 		resolvedBody, resolveErr := s.tmpl.ResolveMap(s.body, pc)
 		if resolveErr != nil {
@@ -91,15 +235,20 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		if marshalErr != nil {
 			return nil, fmt.Errorf("http_call step %q: failed to marshal body: %w", s.name, marshalErr)
 		}
-		bodyReader = bytes.NewReader(data)
-	} else if s.method != "GET" && s.method != "HEAD" {
+		return bytes.NewReader(data), nil
+	}
+	if s.method != "GET" && s.method != "HEAD" {
 		data, marshalErr := json.Marshal(pc.Current)
 		if marshalErr != nil {
 			return nil, fmt.Errorf("http_call step %q: failed to marshal current data: %w", s.name, marshalErr)
 		}
-		bodyReader = bytes.NewReader(data)
+		return bytes.NewReader(data), nil
 	}
+	return nil, nil
+}
 
+// buildRequest constructs the HTTP request with resolved headers and optional bearer token.
+func (s *HTTPCallStep) buildRequest(ctx context.Context, resolvedURL string, bodyReader io.Reader, pc *PipelineContext, bearerToken string) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, s.method, resolvedURL, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("http_call step %q: failed to create request: %w", s.name, err)
@@ -116,19 +265,15 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 			req.Header.Set(k, resolved)
 		}
 	}
-
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: SSRF via taint analysis
-	if err != nil {
-		return nil, fmt.Errorf("http_call step %q: request failed: %w", s.name, err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("http_call step %q: failed to read response: %w", s.name, err)
+	if bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
 	}
 
-	// Build response headers map
+	return req, nil
+}
+
+// parseResponse converts an HTTP response into a StepResult output map.
+func parseHTTPResponse(resp *http.Response, respBody []byte) map[string]any {
 	respHeaders := make(map[string]any, len(resp.Header))
 	for k, v := range resp.Header {
 		if len(v) == 1 {
@@ -148,13 +293,94 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		"headers":     respHeaders,
 	}
 
-	// Try to parse response as JSON
 	var jsonResp any
 	if json.Unmarshal(respBody, &jsonResp) == nil {
 		output["body"] = jsonResp
 	} else {
 		output["body"] = string(respBody)
 	}
+
+	return output
+}
+
+// Execute performs the HTTP request and returns the response.
+func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	// Resolve URL template
+	resolvedURL, err := s.tmpl.Resolve(s.url, pc)
+	if err != nil {
+		return nil, fmt.Errorf("http_call step %q: failed to resolve url: %w", s.name, err)
+	}
+
+	bodyReader, err := s.buildBodyReader(pc)
+	if err != nil {
+		return nil, err
+	}
+
+	// Obtain OAuth2 bearer token if auth is configured
+	var bearerToken string
+	if s.auth != nil {
+		bearerToken, err = s.getToken(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	req, err := s.buildRequest(ctx, resolvedURL, bodyReader, pc, bearerToken)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := s.httpClient.Do(req) //nolint:gosec // G107: URL is user-configured
+	if err != nil {
+		return nil, fmt.Errorf("http_call step %q: request failed: %w", s.name, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("http_call step %q: failed to read response: %w", s.name, err)
+	}
+
+	// On 401, invalidate token cache and retry once with a fresh token
+	if resp.StatusCode == http.StatusUnauthorized && s.auth != nil {
+		s.tokenCache.invalidate()
+
+		newToken, tokenErr := s.fetchToken(ctx)
+		if tokenErr != nil {
+			return nil, tokenErr
+		}
+
+		retryBody, buildErr := s.buildBodyReader(pc)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		retryReq, buildErr := s.buildRequest(ctx, resolvedURL, retryBody, pc, newToken)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+
+		retryResp, doErr := s.httpClient.Do(retryReq) //nolint:gosec // G107: URL is user-configured
+		if doErr != nil {
+			return nil, fmt.Errorf("http_call step %q: retry request failed: %w", s.name, doErr)
+		}
+		defer retryResp.Body.Close()
+
+		respBody, err = io.ReadAll(retryResp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("http_call step %q: failed to read retry response: %w", s.name, err)
+		}
+
+		output := parseHTTPResponse(retryResp, respBody)
+		if retryResp.StatusCode >= 400 {
+			return nil, fmt.Errorf("http_call step %q: HTTP %d: %s", s.name, retryResp.StatusCode, string(respBody))
+		}
+		return &StepResult{Output: output}, nil
+	}
+
+	output := parseHTTPResponse(resp, respBody)
 
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("http_call step %q: HTTP %d: %s", s.name, resp.StatusCode, string(respBody))
