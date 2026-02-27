@@ -473,48 +473,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	})
 
 	r.Register(&ModuleSchema{
-		Type:         "chimux.router",
-		Label:        "Chi Mux Router",
-		Category:     "http",
-		Description:  "CrisisTextLine/modular Chi-based HTTP router with middleware and CORS support",
-		Inputs:       []ServiceIODef{{Name: "handler", Type: "http.Handler", Description: "HTTP handler to register with the router"}},
-		Outputs:      []ServiceIODef{{Name: "router", Type: "Router", Description: "Chi router service for HTTP request routing"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "allowedOrigins", Label: "Allowed Origins", Type: FieldTypeArray, Description: "List of allowed CORS origins"},
-			{Key: "basePath", Label: "Base Path", Type: FieldTypeString, Description: "Base URL path for all routes"},
-		},
-	})
-
-	r.Register(&ModuleSchema{
-		Type:         "httpclient.modular",
-		Label:        "HTTP Client",
-		Category:     "http",
-		Description:  "CrisisTextLine/modular HTTP client for making outbound HTTP requests",
-		Inputs:       []ServiceIODef{{Name: "request", Type: "http.Request", Description: "HTTP request to send"}},
-		Outputs:      []ServiceIODef{{Name: "client", Type: "HTTPClient", Description: "HTTP client service for outbound requests"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "timeout", Label: "Timeout", Type: FieldTypeString, Description: "Request timeout duration (e.g. 30s)", DefaultValue: "30s"},
-			{Key: "baseURL", Label: "Base URL", Type: FieldTypeString, Description: "Base URL for all requests"},
-		},
-		DefaultConfig: map[string]any{"timeout": "30s"},
-	})
-
-	r.Register(&ModuleSchema{
-		Type:         "httpserver.modular",
-		Label:        "HTTP Server (Modular)",
-		Category:     "http",
-		Description:  "CrisisTextLine/modular HTTP server integration with TLS and certificate support",
-		Inputs:       []ServiceIODef{{Name: "handler", Type: "http.Handler", Description: "HTTP handler to serve"}},
-		Outputs:      []ServiceIODef{{Name: "server", Type: "HTTPServer", Description: "HTTP server service"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "address", Label: "Address", Type: FieldTypeString, Description: "Listen address (e.g. :8080)", DefaultValue: ":8080"},
-			{Key: "readTimeout", Label: "Read Timeout", Type: FieldTypeString, Description: "Maximum duration for reading request (e.g. 30s)"},
-			{Key: "writeTimeout", Label: "Write Timeout", Type: FieldTypeString, Description: "Maximum duration for writing response (e.g. 30s)"},
-		},
-		DefaultConfig: map[string]any{"address": ":8080"},
-	})
-
-	r.Register(&ModuleSchema{
 		Type:         "jsonschema.modular",
 		Label:        "JSON Schema Validator",
 		Category:     "validation",
@@ -522,37 +480,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Inputs:       []ServiceIODef{{Name: "data", Type: "any", Description: "Data to validate against schema"}},
 		Outputs:      []ServiceIODef{{Name: "validator", Type: "JSONSchemaService", Description: "JSON Schema validation service"}},
 		ConfigFields: []ConfigFieldDef{},
-	})
-
-	r.Register(&ModuleSchema{
-		Type:         "letsencrypt.modular",
-		Label:        "Let's Encrypt",
-		Category:     "infrastructure",
-		Description:  "CrisisTextLine/modular automatic TLS certificate management via Let's Encrypt",
-		Inputs:       []ServiceIODef{},
-		Outputs:      []ServiceIODef{{Name: "certificate", Type: "CertificateService", Description: "TLS certificate service for automatic cert acquisition and renewal"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "email", Label: "Email", Type: FieldTypeString, Required: true, Description: "Email address for Let's Encrypt account registration"},
-			{Key: "domains", Label: "Domains", Type: FieldTypeArray, Required: true, Description: "List of domain names to obtain certificates for"},
-			{Key: "storage_path", Label: "Storage Path", Type: FieldTypeString, Required: true, Description: "Directory for storing certificates and account data"},
-			{Key: "use_staging", Label: "Use Staging", Type: FieldTypeBool, Description: "Use Let's Encrypt staging environment (for testing)", DefaultValue: false},
-			{Key: "auto_renew", Label: "Auto Renew", Type: FieldTypeBool, Description: "Enable automatic certificate renewal", DefaultValue: true},
-		},
-		DefaultConfig: map[string]any{"use_staging": false, "auto_renew": true},
-	})
-
-	r.Register(&ModuleSchema{
-		Type:         "logmasker.modular",
-		Label:        "Log Masker",
-		Category:     "observability",
-		Description:  "CrisisTextLine/modular log masking module for redacting sensitive data from logs",
-		Inputs:       []ServiceIODef{},
-		Outputs:      []ServiceIODef{{Name: "masker", Type: "LogMasker", Description: "Log masking service"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "enabled", Label: "Enabled", Type: FieldTypeBool, Description: "Enable log masking", DefaultValue: true},
-			{Key: "defaultMaskStrategy", Label: "Default Mask Strategy", Type: FieldTypeSelect, Options: []string{"redact", "partial", "hash"}, Description: "Default strategy when no rule matches", DefaultValue: "redact"},
-		},
-		DefaultConfig: map[string]any{"enabled": true, "defaultMaskStrategy": "redact"},
 	})
 
 	// ---- Database Category ----
