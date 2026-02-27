@@ -600,6 +600,11 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"provider", "scheme", "secret", "secret_from", "header", "signature_header", "url_reconstruction", "include_form_params", "error_status"},
 		},
+		"step.base64_decode": {
+			Type:       "step.base64_decode",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"input_from", "format", "allowed_types", "max_size_bytes", "validate_magic_bytes"},
+		},
 		"step.cache_get": {
 			Type:       "step.cache_get",
 			Plugin:     "pipelinesteps",

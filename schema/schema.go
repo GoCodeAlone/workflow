@@ -107,6 +107,7 @@ var coreModuleTypes = []string{
 	"step.ai_extract",
 	"step.artifact_pull",
 	"step.artifact_push",
+	"step.base64_decode",
 	"step.build_ui",
 	"step.circuit_breaker",
 	"step.conditional",
