@@ -1602,10 +1602,12 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Category:    "pipeline_steps",
 		Description: "Iterates over a collection and executes a sub-pipeline step for each item",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "items_from", Label: "Items From", Type: FieldTypeString, Required: true, Description: "Dotted path to the collection to iterate over", Placeholder: "steps.fetch.items"},
-			{Key: "step", Label: "Step Type", Type: FieldTypeString, Required: true, Description: "Step type to execute for each item"},
-			{Key: "step_config", Label: "Step Config", Type: FieldTypeJSON, Description: "Configuration for the sub-step"},
-			{Key: "output_key", Label: "Output Key", Type: FieldTypeString, Description: "Key to store the collected results in context", DefaultValue: "foreach_results"},
+			{Key: "collection", Label: "Collection", Type: FieldTypeString, Required: true, Description: "Dotted path to the collection to iterate over", Placeholder: "steps.fetch.items"},
+			{Key: "item_var", Label: "Item Variable", Type: FieldTypeString, Description: "Context variable name for the current item (defaults to 'item')", DefaultValue: "item"},
+			{Key: "item_key", Label: "Item Key (legacy)", Type: FieldTypeString, Description: "Legacy alias for item_var"},
+			{Key: "index_key", Label: "Index Key", Type: FieldTypeString, Description: "Context variable name for the current index (defaults to 'index')", DefaultValue: "index"},
+			{Key: "step", Label: "Step", Type: FieldTypeMap, Description: "Single step map to execute for each item (mutually exclusive with steps); must include 'type' key"},
+			{Key: "steps", Label: "Steps", Type: FieldTypeJSON, Description: "Array of step maps to execute for each item (mutually exclusive with step)"},
 		},
 	})
 
@@ -1675,11 +1677,11 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "step.validate_path_param",
 		Label:       "Validate Path Param",
 		Category:    "pipeline_steps",
-		Description: "Validates and extracts a URL path parameter",
+		Description: "Validates URL path parameters are present and optionally conform to a format (e.g. UUID)",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "param", Label: "Parameter Name", Type: FieldTypeString, Required: true, Description: "Path parameter name to extract", Placeholder: "id"},
-			{Key: "required", Label: "Required", Type: FieldTypeBool, DefaultValue: true, Description: "Whether the parameter is required"},
-			{Key: "output_key", Label: "Output Key", Type: FieldTypeString, Description: "Context key for the extracted value"},
+			{Key: "params", Label: "Parameter Names", Type: FieldTypeArray, Required: true, ArrayItemType: "string", Description: "List of path parameter names to validate", Placeholder: "id"},
+			{Key: "format", Label: "Format", Type: FieldTypeString, Description: "Validation format to apply to each parameter (e.g. 'uuid')"},
+			{Key: "source", Label: "Source Path", Type: FieldTypeString, Description: "Dotted path within the context to read path parameters from (e.g. 'steps.parse-request.path_params')"},
 		},
 	})
 
@@ -1698,10 +1700,9 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "step.validate_request_body",
 		Label:       "Validate Request Body",
 		Category:    "pipeline_steps",
-		Description: "Parses and validates the HTTP request body against a schema",
+		Description: "Parses the HTTP request body and validates required fields are present",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "schema", Label: "JSON Schema", Type: FieldTypeJSON, Description: "JSON Schema to validate the request body against"},
-			{Key: "output_key", Label: "Output Key", Type: FieldTypeString, DefaultValue: "body", Description: "Context key to store the parsed body"},
+			{Key: "required_fields", Label: "Required Fields", Type: FieldTypeArray, ArrayItemType: "string", Description: "List of required top-level field names in the request body"},
 		},
 	})
 
@@ -1734,11 +1735,11 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Category:    "pipeline_steps",
 		Description: "Wraps a sub-step with automatic retry logic using exponential backoff",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "step", Label: "Step Type", Type: FieldTypeString, Required: true, Description: "Step type to retry"},
-			{Key: "step_config", Label: "Step Config", Type: FieldTypeJSON, Description: "Configuration for the wrapped step"},
-			{Key: "max_attempts", Label: "Max Attempts", Type: FieldTypeNumber, DefaultValue: 3, Description: "Maximum number of retry attempts"},
-			{Key: "initial_delay", Label: "Initial Delay", Type: FieldTypeDuration, DefaultValue: "100ms", Description: "Initial delay before first retry"},
+			{Key: "step", Label: "Step", Type: FieldTypeMap, Required: true, Description: "Sub-step map to retry; must include 'type' key with inline step configuration"},
+			{Key: "max_retries", Label: "Max Retries", Type: FieldTypeNumber, DefaultValue: 3, Description: "Maximum number of retry attempts"},
+			{Key: "initial_delay", Label: "Initial Delay", Type: FieldTypeDuration, DefaultValue: "1s", Description: "Initial delay before first retry"},
 			{Key: "max_delay", Label: "Max Delay", Type: FieldTypeDuration, DefaultValue: "30s", Description: "Maximum delay between retries"},
+			{Key: "multiplier", Label: "Backoff Multiplier", Type: FieldTypeNumber, DefaultValue: 2.0, Description: "Multiplier applied to the delay for each retry (exponential backoff factor)"},
 		},
 	})
 
@@ -1748,10 +1749,10 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Category:    "pipeline_steps",
 		Description: "Wraps a sub-step with circuit breaker pattern to prevent cascading failures",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "step", Label: "Step Type", Type: FieldTypeString, Required: true, Description: "Step type to protect"},
-			{Key: "step_config", Label: "Step Config", Type: FieldTypeJSON, Description: "Configuration for the wrapped step"},
-			{Key: "threshold", Label: "Failure Threshold", Type: FieldTypeNumber, DefaultValue: 5, Description: "Number of consecutive failures to open the circuit"},
-			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, DefaultValue: "60s", Description: "Duration to keep the circuit open before trying again"},
+			{Key: "step", Label: "Step", Type: FieldTypeMap, Required: true, Description: "Sub-step map to protect; must include 'type' key with inline step configuration"},
+			{Key: "failure_threshold", Label: "Failure Threshold", Type: FieldTypeNumber, DefaultValue: 5, Description: "Number of consecutive failures to open the circuit"},
+			{Key: "reset_timeout", Label: "Reset Timeout", Type: FieldTypeDuration, DefaultValue: "60s", Description: "Duration the circuit remains open before attempting a half-open state"},
+			{Key: "fallback", Label: "Fallback Step", Type: FieldTypeMap, Description: "Optional fallback step map executed when the circuit is open; must include 'type' key"},
 		},
 	})
 
@@ -1759,10 +1760,12 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "step.ui_scaffold",
 		Label:       "UI Scaffold",
 		Category:    "pipeline_steps",
-		Description: "Generates UI component scaffolding from a prompt using AI assistance",
+		Description: "Generates a Vite+React+TypeScript UI scaffold from an OpenAPI spec (read from the request body or context) and returns a ZIP archive",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "prompt_from", Label: "Prompt From", Type: FieldTypeString, Description: "Context key containing the scaffold prompt"},
-			{Key: "output_key", Label: "Output Key", Type: FieldTypeString, DefaultValue: "scaffold_result", Description: "Context key for the generated scaffold"},
+			{Key: "title", Label: "Title", Type: FieldTypeString, Description: "Title to use for the generated UI"},
+			{Key: "theme", Label: "Theme", Type: FieldTypeString, Description: "UI theme or design system to target"},
+			{Key: "auth", Label: "Auth", Type: FieldTypeBool, Description: "Whether to generate authentication UI components"},
+			{Key: "filename", Label: "Filename", Type: FieldTypeString, DefaultValue: "scaffold.zip", Description: "Filename for the generated ZIP archive"},
 		},
 	})
 
@@ -1770,10 +1773,10 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "step.ui_scaffold_analyze",
 		Label:       "UI Scaffold Analyze",
 		Category:    "pipeline_steps",
-		Description: "Analyzes existing UI components to extract scaffold metadata",
+		Description: "Analyzes an OpenAPI spec (read from the request body or context) to produce scaffold analysis metadata",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "target_from", Label: "Target From", Type: FieldTypeString, Description: "Context key containing the component to analyze"},
-			{Key: "output_key", Label: "Output Key", Type: FieldTypeString, DefaultValue: "analysis_result", Description: "Context key for the analysis result"},
+			{Key: "title", Label: "Title", Type: FieldTypeString, Description: "Title to use for the generated scaffold analysis"},
+			{Key: "theme", Label: "Theme", Type: FieldTypeString, Description: "Visual theme or design system to target when generating scaffold analysis"},
 		},
 	})
 
