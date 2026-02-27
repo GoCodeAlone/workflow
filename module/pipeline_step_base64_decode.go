@@ -115,14 +115,16 @@ func (s *Base64DecodeStep) Name() string { return s.name }
 // and returns structured metadata plus the re-encoded base64 data.
 func (s *Base64DecodeStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
 	// Resolve the input value from the pipeline context.
+	// A missing or unresolvable path is treated as invalid input rather than a
+	// hard error, consistent with the step's non-fatal validation semantics.
 	raw, err := s.resolveInput(pc)
 	if err != nil {
-		return nil, fmt.Errorf("base64_decode step %q: %w", s.name, err)
+		return s.invalid(fmt.Sprintf("could not resolve input_from %q: %v", s.inputFrom, err))
 	}
 
 	encoded, ok := raw.(string)
 	if !ok {
-		return nil, fmt.Errorf("base64_decode step %q: input at %q is not a string", s.name, s.inputFrom)
+		return s.invalid(fmt.Sprintf("input at %q is not a string (got %T)", s.inputFrom, raw))
 	}
 
 	// Parse the encoded string and determine the claimed MIME type.
@@ -135,6 +137,22 @@ func (s *Base64DecodeStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 		}
 	case base64DecodeFormatRawBase64:
 		b64data = encoded
+	}
+
+	// Guard against excessively large allocations when max_size_bytes is set.
+	// Base64 encodes 3 bytes into 4 characters, so the decoded length is at
+	// most ceil(len(b64data)/4)*3. If that upper bound already exceeds the
+	// limit we can reject without decoding the full payload.
+	if s.maxSizeBytes > 0 {
+		estimatedMax := (len(b64data)/4 + 1) * 3
+		if estimatedMax > s.maxSizeBytes {
+			// Perform a precise check only when the estimate exceeds the limit.
+			// We still need to decode to get the exact size, but we use the
+			// estimate as an early-exit hint for clearly oversized inputs.
+			if len(b64data) > (s.maxSizeBytes/3+1)*4 {
+				return s.invalid(fmt.Sprintf("encoded length indicates decoded size would exceed max_size_bytes %d", s.maxSizeBytes))
+			}
+		}
 	}
 
 	// Decode the base64 payload.
@@ -153,7 +171,7 @@ func (s *Base64DecodeStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 		}
 	}
 
-	// Enforce max size.
+	// Enforce max size with exact decoded length.
 	if s.maxSizeBytes > 0 && len(decoded) > s.maxSizeBytes {
 		return s.invalid(fmt.Sprintf("decoded size %d exceeds max_size_bytes %d", len(decoded), s.maxSizeBytes))
 	}
@@ -201,11 +219,17 @@ func (s *Base64DecodeStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 }
 
 // invalid returns a StepResult with valid=false and a reason field (no error).
+// All output keys are present with zero/empty defaults so that downstream
+// template expressions that reference e.g. {{ .content_type }} do not fail.
 func (s *Base64DecodeStep) invalid(reason string) (*StepResult, error) {
 	return &StepResult{
 		Output: map[string]any{
-			"valid":  false,
-			"reason": reason,
+			"valid":        false,
+			"reason":       reason,
+			"content_type": "",
+			"extension":    "",
+			"size_bytes":   0,
+			"data":         "",
 		},
 	}, nil
 }

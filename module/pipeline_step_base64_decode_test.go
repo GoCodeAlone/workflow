@@ -341,9 +341,63 @@ func TestBase64DecodeStep_InputFrom_MissingPath(t *testing.T) {
 	}
 
 	pc := NewPipelineContext(nil, nil)
-	_, err = step.Execute(context.Background(), pc)
-	if err == nil {
-		t.Error("expected error when input_from path does not exist")
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error (should return valid=false, not error): %v", err)
+	}
+	if result.Output["valid"] != false {
+		t.Errorf("expected valid=false for missing input_from path, got %v", result.Output["valid"])
+	}
+	if result.Output["reason"] == nil || result.Output["reason"] == "" {
+		t.Error("expected non-empty reason when input_from path does not exist")
+	}
+}
+
+func TestBase64DecodeStep_NonStringInput(t *testing.T) {
+	factory := NewBase64DecodeStepFactory()
+	step, err := factory("decode-non-string", map[string]any{
+		"input_from": "payload",
+		"format":     "raw_base64",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	// Integer value at the input path — not a string
+	pc := NewPipelineContext(map[string]any{"payload": 12345}, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error (should return valid=false, not error): %v", err)
+	}
+	if result.Output["valid"] != false {
+		t.Errorf("expected valid=false for non-string input, got %v", result.Output["valid"])
+	}
+}
+
+func TestBase64DecodeStep_InvalidResult_HasAllOutputKeys(t *testing.T) {
+	factory := NewBase64DecodeStepFactory()
+	step, err := factory("decode-invalid-keys", map[string]any{
+		"input_from": "steps.missing.value",
+		"format":     "raw_base64",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Output["valid"] != false {
+		t.Errorf("expected valid=false, got %v", result.Output["valid"])
+	}
+
+	// All output keys must be present even on failure to allow safe template access
+	for _, key := range []string{"content_type", "extension", "size_bytes", "data", "valid", "reason"} {
+		if _, exists := result.Output[key]; !exists {
+			t.Errorf("expected output key %q to be present in invalid result", key)
+		}
 	}
 }
 
