@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -950,6 +951,90 @@ func TestOpenAPIModule_XPipeline_StubWithoutPipeline(t *testing.T) {
 
 	if w.Code != http.StatusNotImplemented {
 		t.Errorf("expected 501 for stub, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestOpenAPIModule_XPipeline_NilLookup(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", xPipelineYAML)
+
+	mod := NewOpenAPIModule("pipe-api", OpenAPIConfig{
+		SpecFile: specPath,
+		BasePath: "/api",
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// No lookup set — x-pipeline route should return 500.
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/greet")
+	if h == nil {
+		t.Fatal("GET /api/greet handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/greet", nil)
+	h.Handle(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 for nil pipeline lookup, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "pipeline lookup not configured") {
+		t.Errorf("expected descriptive error, got: %s", w.Body.String())
+	}
+}
+
+func TestOpenAPIExtractRequestData_JSONBody(t *testing.T) {
+	body := `{"foo": "bar", "count": 42}`
+	r := httptest.NewRequest(http.MethodPost, "/test?q=1", bytes.NewBufferString(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	data := openAPIExtractRequestData(r)
+
+	if data["q"] != "1" {
+		t.Errorf("expected query param q=1, got %v", data["q"])
+	}
+	if data["foo"] != "bar" {
+		t.Errorf("expected body field foo=bar, got %v", data["foo"])
+	}
+	if data["count"] != float64(42) {
+		t.Errorf("expected body field count=42, got %v", data["count"])
+	}
+
+	// Body must be restored.
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatalf("failed to read restored body: %v", err)
+	}
+	if string(bodyBytes) != body {
+		t.Errorf("body not restored: got %q, want %q", string(bodyBytes), body)
+	}
+}
+
+func TestOpenAPIExtractRequestData_QueryParamNotOverwrittenByBody(t *testing.T) {
+	body := `{"name": "from-body"}`
+	r := httptest.NewRequest(http.MethodPost, "/test?name=from-query", bytes.NewBufferString(body))
+	r.Header.Set("Content-Type", "application/json")
+
+	data := openAPIExtractRequestData(r)
+
+	// Query param should win over body field.
+	if data["name"] != "from-query" {
+		t.Errorf("expected query param to win, got %v", data["name"])
+	}
+}
+
+func TestOpenAPIExtractRequestData_NonJSONBodySkipped(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/test", bytes.NewBufferString("plain text"))
+	r.Header.Set("Content-Type", "text/plain")
+
+	data := openAPIExtractRequestData(r)
+
+	// No body fields should appear.
+	if len(data) != 0 {
+		t.Errorf("expected empty data for non-JSON body, got %v", data)
 	}
 }
 

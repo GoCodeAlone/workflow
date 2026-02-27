@@ -335,7 +335,16 @@ func (h *openAPIRouteHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If x-pipeline is configured, execute the named pipeline.
-	if h.pipelineName != "" && h.pipelineLookup != nil {
+	if h.pipelineName != "" {
+		if h.pipelineLookup == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": fmt.Sprintf("pipeline lookup not configured for pipeline %q", h.pipelineName),
+			})
+			return
+		}
+
 		pipeline, ok := h.pipelineLookup(h.pipelineName)
 		if !ok {
 			w.Header().Set("Content-Type", "application/json")
@@ -352,7 +361,10 @@ func (h *openAPIRouteHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		ctx := context.WithValue(r.Context(), HTTPResponseWriterContextKey, rw)
 		ctx = context.WithValue(ctx, HTTPRequestContextKey, r)
 
-		result, err := pipeline.Execute(ctx, data)
+		// Use a per-request shallow copy of the pipeline to avoid concurrent
+		// mutations of shared pipeline state (e.g. sequence/event counters).
+		pipelineCopy := *pipeline
+		result, err := pipelineCopy.Execute(ctx, data)
 		if err != nil {
 			if !rw.written {
 				w.Header().Set("Content-Type", "application/json")
@@ -815,13 +827,48 @@ func supportedContentTypes(content map[string]openAPIMediaType) string {
 }
 
 // openAPIExtractRequestData builds a trigger data map from an HTTP request,
-// extracting query parameters and (for JSON bodies) the decoded body fields.
+// extracting query parameters (first value per key) and, for JSON bodies,
+// the decoded top-level body fields (without overwriting query param values).
+// The request body is restored after reading so downstream handlers can still
+// consume it.
 func openAPIExtractRequestData(r *http.Request) map[string]any {
+	const maxBodySize = 1 << 20 // 1 MiB limit for JSON body parsing
+
 	data := make(map[string]any)
+
+	// Extract query parameters (first value per key).
 	for k, v := range r.URL.Query() {
 		if len(v) > 0 {
 			data[k] = v[0]
 		}
 	}
+
+	// Extract JSON body fields if Content-Type is application/json.
+	if r.Body != nil {
+		ct := r.Header.Get("Content-Type")
+		if idx := strings.Index(ct, ";"); idx != -1 {
+			ct = strings.TrimSpace(ct[:idx])
+		} else {
+			ct = strings.TrimSpace(ct)
+		}
+
+		if strings.EqualFold(ct, "application/json") {
+			bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxBodySize))
+			if err == nil && len(bodyBytes) > 0 {
+				var bodyData map[string]any
+				if err := json.Unmarshal(bodyBytes, &bodyData); err == nil {
+					for k, v := range bodyData {
+						// Do not overwrite query parameters with body fields.
+						if _, exists := data[k]; !exists {
+							data[k] = v
+						}
+					}
+				}
+				// Restore r.Body so downstream handlers can still read it.
+				r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			}
+		}
+	}
+
 	return data
 }
