@@ -35,7 +35,10 @@ The MCP server provides:
 make build-mcp
 
 # Or directly with Go
-go build -o workflow-mcp-server ./cmd/mcp
+go build -o workflow-mcp-server ./cmd/workflow-mcp-server
+
+# Or install globally with Go
+go install github.com/GoCodeAlone/workflow/cmd/workflow-mcp-server@latest
 ```
 
 ## Installation
@@ -155,7 +158,7 @@ go test -v ./mcp/
 ## Architecture
 
 ```
-cmd/mcp/main.go      → Entry point (stdio transport)
+cmd/workflow-mcp-server/main.go  → Entry point (stdio transport)
 mcp/server.go        → MCP server setup, tool handlers, resource handlers
 mcp/docs.go          → Embedded documentation content
 mcp/server_test.go   → Unit tests
