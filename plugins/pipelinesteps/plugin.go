@@ -2,7 +2,7 @@
 // types: validate, transform, conditional, set, log, delegate, jq, publish,
 // http_call, request_parse, db_query, db_exec, json_response,
 // validate_path_param, validate_pagination, validate_request_body,
-// foreach, webhook_verify, ui_scaffold, ui_scaffold_analyze,
+// foreach, webhook_verify, base64_decode, ui_scaffold, ui_scaffold_analyze,
 // dlq_send, dlq_replay, retry_with_backoff, circuit_breaker (wrapping).
 // It also provides the PipelineWorkflowHandler for composable pipelines.
 package pipelinesteps
@@ -42,13 +42,13 @@ func New() *Plugin {
 			BaseNativePlugin: plugin.BaseNativePlugin{
 				PluginName:        "pipeline-steps",
 				PluginVersion:     "1.0.0",
-				PluginDescription: "Generic pipeline step types (validate, transform, conditional, set, log, delegate, jq, validate_path_param, validate_pagination, validate_request_body, foreach, webhook_verify, etc.)",
+				PluginDescription: "Generic pipeline step types (validate, transform, conditional, set, log, delegate, jq, base64_decode, validate_path_param, validate_pagination, validate_request_body, foreach, webhook_verify, etc.)",
 			},
 			Manifest: plugin.PluginManifest{
 				Name:        "pipeline-steps",
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
-				Description: "Generic pipeline step types, pre-processing validators, and pipeline workflow handler",
+				Description: "Generic pipeline step types, pre-processing validators, and pipeline workflow handler (including base64_decode)",
 				Tier:        plugin.TierCore,
 				StepTypes: []string{
 					"step.validate",
@@ -71,6 +71,7 @@ func New() *Plugin {
 					"step.validate_request_body",
 					"step.foreach",
 					"step.webhook_verify",
+					"step.base64_decode",
 					"step.cache_get",
 					"step.cache_set",
 					"step.cache_delete",
@@ -126,6 +127,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 			return p.concreteStepRegistry
 		})),
 		"step.webhook_verify": wrapStepFactory(module.NewWebhookVerifyStepFactory()),
+		"step.base64_decode":  wrapStepFactory(module.NewBase64DecodeStepFactory()),
 		"step.cache_get":           wrapStepFactory(module.NewCacheGetStepFactory()),
 		"step.cache_set":           wrapStepFactory(module.NewCacheSetStepFactory()),
 		"step.cache_delete":        wrapStepFactory(module.NewCacheDeleteStepFactory()),

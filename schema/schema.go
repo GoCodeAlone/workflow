@@ -125,6 +125,7 @@ var coreModuleTypes = []string{
 	"step.http_call",
 	"step.jq",
 	"step.json_response",
+	"step.base64_decode",
 	"step.log",
 	"step.platform_apply",
 	"step.platform_destroy",

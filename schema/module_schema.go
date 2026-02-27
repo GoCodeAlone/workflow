@@ -1010,6 +1010,22 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		},
 	})
 
+	r.Register(&ModuleSchema{
+		Type:        "step.base64_decode",
+		Label:       "Base64 Decode",
+		Category:    "pipeline",
+		Description: "Decodes base64-encoded content (raw or data-URI), validates MIME type and size, and returns structured metadata",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context containing the encoded data at the path specified by input_from"}},
+		Outputs: []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Decoded content metadata: content_type, extension, size_bytes, data (base64), valid, reason (on failure)"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "input_from", Label: "Input From", Type: FieldTypeString, Required: true, Description: "Dotted path to the encoded data in the pipeline context (e.g., steps.upload.file_data)", Placeholder: "steps.upload.file_data"},
+			{Key: "format", Label: "Format", Type: FieldTypeSelect, Options: []string{"data_uri", "raw_base64"}, DefaultValue: "data_uri", Description: "Encoding format: 'data_uri' expects a data:mime/type;base64,... string; 'raw_base64' expects plain base64"},
+			{Key: "allowed_types", Label: "Allowed MIME Types", Type: FieldTypeArray, ArrayItemType: "string", Description: "Whitelist of allowed MIME types (e.g., [\"image/jpeg\", \"image/png\"]). Omit to allow all types."},
+			{Key: "max_size_bytes", Label: "Max Size (bytes)", Type: FieldTypeNumber, Description: "Maximum allowed decoded size in bytes. 0 means unlimited."},
+			{Key: "validate_magic_bytes", Label: "Validate Magic Bytes", Type: FieldTypeBool, DefaultValue: "false", Description: "When true, verifies the decoded content matches the MIME type claimed in the data-URI header"},
+		},
+	})
+
 	// ---- CI/CD Pipeline Steps Category ----
 
 	r.Register(&ModuleSchema{
