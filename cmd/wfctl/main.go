@@ -29,6 +29,8 @@ var commands = map[string]func([]string) error{
 	"generate": runGenerate,
 	"git":      runGit,
 	"registry": runRegistry,
+	"update":   runUpdate,
+	"mcp":      runMCP,
 }
 
 func usage() {
@@ -59,6 +61,8 @@ Commands:
   generate   Code generation (github-actions: generate CI/CD workflows from config)
   git        Git integration (connect: link to GitHub repo, push: commit and push)
   registry   Registry management (list, add, remove plugin registry sources)
+  update     Update wfctl to the latest version (use --check to only check)
+  mcp        Start the MCP server over stdio for AI assistant integration
 
 Run 'wfctl <command> -h' for command-specific help.
 `, version)
@@ -85,6 +89,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", cmd) //nolint:gosec // G705: CLI error output
 		usage()
 		os.Exit(1)
+	}
+
+	// Check for updates in the background for commands that are not long-running
+	// (mcp and run keep the process alive, so we skip the notice there).
+	if cmd != "mcp" && cmd != "run" {
+		checkForUpdateNotice()
 	}
 
 	if err := fn(os.Args[2:]); err != nil {
