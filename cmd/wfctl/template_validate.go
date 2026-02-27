@@ -16,17 +16,17 @@ import (
 
 // templateValidationResult holds the outcome of validating a single template.
 type templateValidationResult struct {
-	Name          string
-	ModuleCount   int
-	ModuleValid   int
-	StepCount     int
-	StepValid     int
-	DepCount      int
-	DepValid      int
-	TriggerCount  int
-	TriggerValid  int
-	Warnings      []string
-	Errors        []string
+	Name         string
+	ModuleCount  int
+	ModuleValid  int
+	StepCount    int
+	StepValid    int
+	DepCount     int
+	DepValid     int
+	TriggerCount int
+	TriggerValid int
+	Warnings     []string
+	Errors       []string
 }
 
 // pass returns true if there are no errors.
@@ -341,7 +341,7 @@ func validateWorkflowConfig(name string, cfg *config.WorkflowConfig, knownModule
 		moduleNames[mod.Name] = true
 	}
 
-	// 1. Validate module types
+	// 1. Validate module types and config fields
 	result.ModuleCount = len(cfg.Modules)
 	for _, mod := range cfg.Modules {
 		if mod.Type == "" {
@@ -353,7 +353,7 @@ func validateWorkflowConfig(name string, cfg *config.WorkflowConfig, knownModule
 			result.Errors = append(result.Errors, fmt.Sprintf("module %q uses unknown type %q", mod.Name, mod.Type))
 		} else {
 			result.ModuleValid++
-			// 5. Warn on unknown config fields
+			// Warn on unknown config fields
 			if mod.Config != nil && len(info.ConfigKeys) > 0 {
 				knownKeys := make(map[string]bool)
 				for _, k := range info.ConfigKeys {
@@ -367,7 +367,7 @@ func validateWorkflowConfig(name string, cfg *config.WorkflowConfig, knownModule
 			}
 		}
 
-		// 3. Validate dependencies
+		// 2. Validate dependencies
 		for _, dep := range mod.DependsOn {
 			result.DepCount++
 			if !moduleNames[dep] {
@@ -378,7 +378,7 @@ func validateWorkflowConfig(name string, cfg *config.WorkflowConfig, knownModule
 		}
 	}
 
-	// 2. Validate step types in pipelines
+	// 3. Validate step types in pipelines
 	for pipelineName, pipelineRaw := range cfg.Pipelines {
 		pipelineMap, ok := pipelineRaw.(map[string]any)
 		if !ok {
@@ -416,7 +416,10 @@ func validateWorkflowConfig(name string, cfg *config.WorkflowConfig, knownModule
 			}
 		}
 
-		// 4. Validate trigger types
+		// 4. Validate template expressions in pipeline steps
+		validatePipelineTemplates(pipelineName, stepsRaw, &result)
+
+		// 5. Validate trigger types
 		if triggerRaw, ok := pipelineMap["trigger"]; ok {
 			if triggerMap, ok := triggerRaw.(map[string]any); ok {
 				triggerType, _ := triggerMap["type"].(string)
@@ -530,3 +533,137 @@ func printTemplateValidationResults(results []templateValidationResult, summary 
 // templateFSReader allows reading from the embedded templateFS for validation.
 // It wraps around the existing templateFS embed.FS.
 var _ fs.FS = templateFS
+
+// --- Pipeline template expression linting ---
+
+// templateExprRe matches template actions {{ ... }}.
+var templateExprRe = regexp.MustCompile(`\{\{(.*?)\}\}`)
+
+// stepRefDotRe matches .steps.STEP_NAME patterns (dot access).
+var stepRefDotRe = regexp.MustCompile(`\.steps\.([a-zA-Z_][a-zA-Z0-9_-]*)`)
+
+// stepRefIndexRe matches index .steps "STEP_NAME" patterns.
+var stepRefIndexRe = regexp.MustCompile(`index\s+\.steps\s+"([^"]+)"`)
+
+// stepRefFuncRe matches step "STEP_NAME" function calls at the start of an
+// action, after a pipe, or after an opening parenthesis.
+var stepRefFuncRe = regexp.MustCompile(`(?:^|\||\()\s*step\s+"([^"]+)"`)
+
+// hyphenDotRe matches dot-access chains with hyphens (e.g., .steps.my-step.field),
+// including continuation segments after the hyphenated part.
+var hyphenDotRe = regexp.MustCompile(`\.[a-zA-Z_][a-zA-Z0-9_]*-[a-zA-Z0-9_-]*(?:\.[a-zA-Z_][a-zA-Z0-9_-]*)*`)
+
+// validatePipelineTemplates checks template expressions in pipeline step configs for
+// references to nonexistent or forward-declared steps and common template pitfalls.
+func validatePipelineTemplates(pipelineName string, stepsRaw []any, result *templateValidationResult) {
+	// Build ordered step name list
+	stepNames := make(map[string]int) // step name -> index in pipeline
+	for i, stepRaw := range stepsRaw {
+		stepMap, ok := stepRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := stepMap["name"].(string)
+		if name != "" {
+			stepNames[name] = i
+		}
+	}
+
+	// Check each step's config for template expressions
+	for i, stepRaw := range stepsRaw {
+		stepMap, ok := stepRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		stepName, _ := stepMap["name"].(string)
+		if stepName == "" {
+			stepName = fmt.Sprintf("step[%d]", i)
+		}
+
+		// Collect all string values from the step config recursively
+		templates := collectTemplateStrings(stepMap)
+
+		for _, tmpl := range templates {
+			// Find all template actions
+			actions := templateExprRe.FindAllStringSubmatch(tmpl, -1)
+			for _, action := range actions {
+				if len(action) < 2 {
+					continue
+				}
+				actionContent := action[1]
+
+				// Skip comments
+				trimmed := strings.TrimSpace(actionContent)
+				if strings.HasPrefix(trimmed, "/*") {
+					continue
+				}
+
+				// Check for step name references via dot-access
+				dotMatches := stepRefDotRe.FindAllStringSubmatch(actionContent, -1)
+				for _, m := range dotMatches {
+					refName := m[1]
+					validateStepRef(pipelineName, stepName, refName, i, stepNames, result)
+				}
+
+				// Check for step name references via index
+				indexMatches := stepRefIndexRe.FindAllStringSubmatch(actionContent, -1)
+				for _, m := range indexMatches {
+					refName := m[1]
+					validateStepRef(pipelineName, stepName, refName, i, stepNames, result)
+				}
+
+				// Check for step name references via step function
+				funcMatches := stepRefFuncRe.FindAllStringSubmatch(actionContent, -1)
+				for _, m := range funcMatches {
+					refName := m[1]
+					validateStepRef(pipelineName, stepName, refName, i, stepNames, result)
+				}
+
+				// Warn on hyphenated dot-access (auto-fixed but suggest preferred syntax)
+				if hyphenDotRe.MatchString(actionContent) {
+					result.Warnings = append(result.Warnings,
+						fmt.Sprintf("pipeline %q step %q: template uses hyphenated dot-access which is auto-fixed; prefer step \"name\" \"field\" syntax", pipelineName, stepName))
+				}
+			}
+		}
+	}
+}
+
+// validateStepRef checks that a referenced step name exists and appears before the
+// current step in the pipeline execution order.
+func validateStepRef(pipelineName, currentStep, refName string, currentIdx int, stepNames map[string]int, result *templateValidationResult) {
+	refIdx, exists := stepNames[refName]
+	switch {
+	case !exists:
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("pipeline %q step %q: references step %q which does not exist in this pipeline", pipelineName, currentStep, refName))
+	case refIdx == currentIdx:
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("pipeline %q step %q: references itself; a step cannot use its own outputs because they are not available until after execution", pipelineName, currentStep))
+	case refIdx > currentIdx:
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("pipeline %q step %q: references step %q which has not executed yet (appears later in pipeline)", pipelineName, currentStep, refName))
+	}
+}
+
+// collectTemplateStrings recursively finds all strings containing {{ in a value tree.
+// This intentionally scans all fields (not just "config") because template expressions
+// can appear in conditions, names, and other step fields.
+func collectTemplateStrings(data any) []string {
+	var results []string
+	switch v := data.(type) {
+	case string:
+		if strings.Contains(v, "{{") {
+			results = append(results, v)
+		}
+	case map[string]any:
+		for _, val := range v {
+			results = append(results, collectTemplateStrings(val)...)
+		}
+	case []any:
+		for _, item := range v {
+			results = append(results, collectTemplateStrings(item)...)
+		}
+	}
+	return results
+}

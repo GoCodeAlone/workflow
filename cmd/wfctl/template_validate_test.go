@@ -235,3 +235,241 @@ func TestRunTemplateUnknownSubcommand(t *testing.T) {
 		t.Fatal("expected error for unknown subcommand")
 	}
 }
+
+// --- Pipeline template expression linting tests ---
+
+func TestValidateConfigWithValidStepRefs(t *testing.T) {
+	dir := t.TempDir()
+	configContent := `
+pipelines:
+  api:
+    trigger:
+      type: http
+      config:
+        path: /items/:id
+        method: GET
+    steps:
+      - name: parse-request
+        type: step.set
+        config:
+          values:
+            item_id: "static-id"
+      - name: db-query
+        type: step.set
+        config:
+          values:
+            query: "{{ .steps.parse-request.path_params.id }}"
+`
+	configPath := filepath.Join(dir, "workflow.yaml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	err := runTemplateValidate([]string{"-config", configPath})
+	if err != nil {
+		t.Fatalf("expected valid step refs to pass, got: %v", err)
+	}
+}
+
+func TestValidateConfigWithMissingStepRef(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "do-thing",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								"x": "{{ .steps.nonexistent.field }}",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "nonexistent") && strings.Contains(w, "does not exist") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected warning about nonexistent step reference, got warnings: %v", result.Warnings)
+	}
+}
+
+func TestValidateConfigWithForwardStepRef(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "first",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								"x": "{{ .steps.second.output }}",
+							},
+						},
+					},
+					map[string]any{
+						"name": "second",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								"y": "hello",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "second") && strings.Contains(w, "has not executed yet") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected warning about forward step reference, got warnings: %v", result.Warnings)
+	}
+}
+
+func TestValidateConfigWithStepFunction(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "parse-request",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								"x": "raw-body",
+							},
+						},
+					},
+					map[string]any{
+						"name": "process",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								"name": `{{ step "parse-request" "body" "name" }}`,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	// parse-request exists and is before process, so no warning about missing/forward ref
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "parse-request") && (strings.Contains(w, "does not exist") || strings.Contains(w, "has not executed yet")) {
+			t.Errorf("unexpected warning about parse-request: %s", w)
+		}
+	}
+}
+
+func TestValidateConfigWithSelfReference(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "do-thing",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								"x": "{{ .steps.do-thing.output }}",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "references itself") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected self-reference warning, got warnings: %v", result.Warnings)
+	}
+}
+
+func TestValidateConfigWithHyphenDotAccess(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "my-step",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								"x": "hello",
+							},
+						},
+					},
+					map[string]any{
+						"name": "consumer",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								"y": "{{ .steps.my-step.field }}",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "hyphenated dot-access") && strings.Contains(w, "prefer") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected informational warning about hyphenated dot-access, got warnings: %v", result.Warnings)
+	}
+}
