@@ -413,9 +413,9 @@ func (b *gkeBackend) apply(k *PlatformKubernetes) (*PlatformResult, error) {
 	parent := fmt.Sprintf("projects/%s/locations/%s", project, location)
 	req := &container.CreateClusterRequest{
 		Cluster: &container.Cluster{
-			Name:             k.clusterName(),
+			Name:                  k.clusterName(),
 			InitialClusterVersion: version,
-			NodePools:        nodePools,
+			NodePools:             nodePools,
 		},
 	}
 
@@ -611,8 +611,8 @@ func (b *aksBackend) apply(k *PlatformKubernetes) (*PlatformResult, error) {
 	}
 	if creds.ClientID != "" {
 		clusterBody["properties"].(map[string]any)["servicePrincipalProfile"] = map[string]any{
-			"clientId":     creds.ClientID,
-			"secret":       creds.ClientSecret,
+			"clientId": creds.ClientID,
+			"secret":   creds.ClientSecret,
 		}
 	}
 
@@ -762,11 +762,11 @@ func (b *aksBackend) buildAgentPools(k *PlatformKubernetes) []map[string]any {
 	groups := k.nodeGroups()
 	if len(groups) == 0 {
 		return []map[string]any{{
-			"name":         "default",
-			"count":        1,
-			"vmSize":       "Standard_DS2_v2",
-			"mode":         "System",
-			"osType":       "Linux",
+			"name":   "default",
+			"count":  1,
+			"vmSize": "Standard_DS2_v2",
+			"mode":   "System",
+			"osType": "Linux",
 		}}
 	}
 	var pools []map[string]any
@@ -780,14 +780,14 @@ func (b *aksBackend) buildAgentPools(k *PlatformKubernetes) []map[string]any {
 			mode = "System"
 		}
 		pools = append(pools, map[string]any{
-			"name":                ng.Name,
-			"count":               ng.Min,
-			"minCount":            ng.Min,
-			"maxCount":            ng.Max,
-			"vmSize":              vmSize,
-			"mode":                mode,
-			"osType":              "Linux",
-			"enableAutoScaling":   true,
+			"name":              ng.Name,
+			"count":             ng.Min,
+			"minCount":          ng.Min,
+			"maxCount":          ng.Max,
+			"vmSize":            vmSize,
+			"mode":              mode,
+			"osType":            "Linux",
+			"enableAutoScaling": true,
 		})
 	}
 	return pools

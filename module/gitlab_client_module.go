@@ -13,11 +13,11 @@ import (
 //
 // Config:
 //
-//	- name: gitlab-client
-//	  type: gitlab.client
-//	  config:
-//	    url: "https://gitlab.com"   # or self-hosted URL; use "mock://" for testing
-//	    token: "${GITLAB_TOKEN}"
+//   - name: gitlab-client
+//     type: gitlab.client
+//     config:
+//     url: "https://gitlab.com"   # or self-hosted URL; use "mock://" for testing
+//     token: "${GITLAB_TOKEN}"
 type GitLabClientModule struct {
 	name   string
 	config map[string]any

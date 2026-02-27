@@ -35,9 +35,9 @@ type ArgoWorkflowSpec struct {
 
 // ArgoTemplate is a single template (DAG or step list) within an Argo Workflow.
 type ArgoTemplate struct {
-	Name string          `json:"name"`
-	Kind string          `json:"kind"` // dag, steps, container
-	DAG  []ArgoDAGTask   `json:"dag,omitempty"`
+	Name      string         `json:"name"`
+	Kind      string         `json:"kind"` // dag, steps, container
+	DAG       []ArgoDAGTask  `json:"dag,omitempty"`
 	Container *ArgoContainer `json:"container,omitempty"`
 }
 
@@ -408,8 +408,8 @@ func (b *argoMockBackend) listWorkflows(m *ArgoWorkflowsModule, labelSelector st
 // argoRealBackend implements argoBackend using the Argo Workflows REST API.
 // It targets the Argo Server HTTP API (default port 2746).
 type argoRealBackend struct {
-	endpoint   string       // e.g. http://argo-server.argo.svc.cluster.local:2746
-	token      string       // Bearer token (optional)
+	endpoint   string // e.g. http://argo-server.argo.svc.cluster.local:2746
+	token      string // Bearer token (optional)
 	httpClient *http.Client
 }
 

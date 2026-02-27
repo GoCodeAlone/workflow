@@ -17,7 +17,7 @@ func init() {
 // gcpStaticResolver resolves GCP credentials from static config fields.
 type gcpStaticResolver struct{}
 
-func (r *gcpStaticResolver) Provider() string      { return "gcp" }
+func (r *gcpStaticResolver) Provider() string       { return "gcp" }
 func (r *gcpStaticResolver) CredentialType() string { return "static" }
 
 func (r *gcpStaticResolver) Resolve(m *CloudAccount) error {
@@ -37,7 +37,7 @@ func (r *gcpStaticResolver) Resolve(m *CloudAccount) error {
 // gcpEnvResolver resolves GCP credentials from environment variables.
 type gcpEnvResolver struct{}
 
-func (r *gcpEnvResolver) Provider() string      { return "gcp" }
+func (r *gcpEnvResolver) Provider() string       { return "gcp" }
 func (r *gcpEnvResolver) CredentialType() string { return "env" }
 
 func (r *gcpEnvResolver) Resolve(m *CloudAccount) error {
@@ -59,7 +59,7 @@ func (r *gcpEnvResolver) Resolve(m *CloudAccount) error {
 // gcpServiceAccountJSONResolver reads a GCP service account JSON key file from the given path.
 type gcpServiceAccountJSONResolver struct{}
 
-func (r *gcpServiceAccountJSONResolver) Provider() string      { return "gcp" }
+func (r *gcpServiceAccountJSONResolver) Provider() string       { return "gcp" }
 func (r *gcpServiceAccountJSONResolver) CredentialType() string { return "service_account_json" }
 
 func (r *gcpServiceAccountJSONResolver) Resolve(m *CloudAccount) error {
@@ -82,7 +82,7 @@ func (r *gcpServiceAccountJSONResolver) Resolve(m *CloudAccount) error {
 // gcpServiceAccountKeyResolver uses an inline GCP service account JSON key.
 type gcpServiceAccountKeyResolver struct{}
 
-func (r *gcpServiceAccountKeyResolver) Provider() string      { return "gcp" }
+func (r *gcpServiceAccountKeyResolver) Provider() string       { return "gcp" }
 func (r *gcpServiceAccountKeyResolver) CredentialType() string { return "service_account_key" }
 
 func (r *gcpServiceAccountKeyResolver) Resolve(m *CloudAccount) error {
@@ -102,7 +102,7 @@ func (r *gcpServiceAccountKeyResolver) Resolve(m *CloudAccount) error {
 // Production: use golang.org/x/oauth2/google with google.FindDefaultCredentials.
 type gcpWorkloadIdentityResolver struct{}
 
-func (r *gcpWorkloadIdentityResolver) Provider() string      { return "gcp" }
+func (r *gcpWorkloadIdentityResolver) Provider() string       { return "gcp" }
 func (r *gcpWorkloadIdentityResolver) CredentialType() string { return "workload_identity" }
 
 func (r *gcpWorkloadIdentityResolver) Resolve(m *CloudAccount) error {
@@ -117,7 +117,7 @@ func (r *gcpWorkloadIdentityResolver) Resolve(m *CloudAccount) error {
 // Reads GOOGLE_APPLICATION_CREDENTIALS if set; otherwise records the ADC source.
 type gcpApplicationDefaultResolver struct{}
 
-func (r *gcpApplicationDefaultResolver) Provider() string      { return "gcp" }
+func (r *gcpApplicationDefaultResolver) Provider() string       { return "gcp" }
 func (r *gcpApplicationDefaultResolver) CredentialType() string { return "application_default" }
 
 func (r *gcpApplicationDefaultResolver) Resolve(m *CloudAccount) error {

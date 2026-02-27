@@ -60,6 +60,7 @@ func TestStepFactories(t *testing.T) {
 		"step.dlq_replay",
 		"step.retry_with_backoff",
 		"step.resilient_circuit_breaker",
+		"step.s3_upload",
 		"step.auth_validate",
 	}
 
@@ -82,7 +83,7 @@ func TestPluginLoads(t *testing.T) {
 	}
 
 	steps := loader.StepFactories()
-	if len(steps) != 29 {
-		t.Fatalf("expected 29 step factories after load, got %d", len(steps))
+	if len(steps) != len(p.StepFactories()) {
+		t.Fatalf("expected %d step factories after load, got %d", len(p.StepFactories()), len(steps))
 	}
 }

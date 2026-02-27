@@ -30,20 +30,20 @@ type User struct {
 // When an auth.user-store service is available, it delegates user CRUD to it;
 // otherwise it uses its own internal map for backward compatibility.
 type JWTAuthModule struct {
-	name           string
-	secret         string
-	tokenExpiry    time.Duration
-	issuer         string
-	seedFile       string
-	responseFormat string           // "standard" (default) or "v1" (access_token/refresh_token)
-	users          map[string]*User // keyed by email (used when no external userStore)
-	mu             sync.RWMutex
-	nextID         int
-	app                 modular.Application
-	logger              modular.Logger
-	persistence         *PersistenceStore // optional write-through backend
-	userStore           *UserStore        // optional external user store (from auth.user-store module)
-	allowRegistration   bool              // when true, any visitor may self-register
+	name              string
+	secret            string
+	tokenExpiry       time.Duration
+	issuer            string
+	seedFile          string
+	responseFormat    string           // "standard" (default) or "v1" (access_token/refresh_token)
+	users             map[string]*User // keyed by email (used when no external userStore)
+	mu                sync.RWMutex
+	nextID            int
+	app               modular.Application
+	logger            modular.Logger
+	persistence       *PersistenceStore // optional write-through backend
+	userStore         *UserStore        // optional external user store (from auth.user-store module)
+	allowRegistration bool              // when true, any visitor may self-register
 }
 
 // NewJWTAuthModule creates a new JWT auth module

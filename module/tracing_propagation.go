@@ -34,8 +34,8 @@ func NewMapCarrier(m map[string]string) MapCarrier {
 	return MapCarrier{m: m}
 }
 
-func (c MapCarrier) Get(key string) string    { return c.m[key] }
-func (c MapCarrier) Set(key, value string)    { c.m[key] = value }
+func (c MapCarrier) Get(key string) string { return c.m[key] }
+func (c MapCarrier) Set(key, value string) { c.m[key] = value }
 func (c MapCarrier) Keys() []string {
 	keys := make([]string, 0, len(c.m))
 	for k := range c.m {

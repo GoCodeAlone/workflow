@@ -54,11 +54,11 @@ func (s *ArgoSubmitStep) Execute(_ context.Context, _ *PipelineContext) (*StepRe
 		return nil, fmt.Errorf("argo_submit step %q: %w", s.name, err)
 	}
 	return &StepResult{Output: map[string]any{
-		"workflow_run": runName,
-		"service":      s.service,
+		"workflow_run":  runName,
+		"service":       s.service,
 		"workflow_name": s.wfName,
-		"namespace":    spec.Namespace,
-		"templates":    len(spec.Templates),
+		"namespace":     spec.Namespace,
+		"templates":     len(spec.Templates),
 	}}, nil
 }
 
@@ -66,10 +66,10 @@ func (s *ArgoSubmitStep) Execute(_ context.Context, _ *PipelineContext) (*StepRe
 
 // ArgoStatusStep checks the execution status of an Argo Workflow run.
 type ArgoStatusStep struct {
-	name         string
-	service      string
-	workflowRun  string
-	app          modular.Application
+	name        string
+	service     string
+	workflowRun string
+	app         modular.Application
 }
 
 // NewArgoStatusStepFactory returns a StepFactory for step.argo_status.

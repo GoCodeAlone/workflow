@@ -34,12 +34,12 @@ type GitEvent struct {
 //
 // Config:
 //
-//	- name: gitlab-hooks
-//	  type: gitlab.webhook
-//	  config:
-//	    secret: "${GITLAB_WEBHOOK_SECRET}"
-//	    path: /webhooks/gitlab         # optional, default: /webhooks/gitlab
-//	    events: [push, merge_request, tag_push, pipeline]
+//   - name: gitlab-hooks
+//     type: gitlab.webhook
+//     config:
+//     secret: "${GITLAB_WEBHOOK_SECRET}"
+//     path: /webhooks/gitlab         # optional, default: /webhooks/gitlab
+//     events: [push, merge_request, tag_push, pipeline]
 type GitLabWebhookModule struct {
 	name   string
 	config map[string]any
@@ -255,10 +255,10 @@ func normalizeGitLabEventType(header string) string {
 // GitLabWebhookParseStep is a pipeline step that parses a GitLab webhook from
 // the HTTP request in the pipeline context.
 //
-//	- name: parse-webhook
-//	  type: step.gitlab_parse_webhook
-//	  config:
-//	    secret: "${GITLAB_WEBHOOK_SECRET}"   # optional; skips validation if empty
+//   - name: parse-webhook
+//     type: step.gitlab_parse_webhook
+//     config:
+//     secret: "${GITLAB_WEBHOOK_SECRET}"   # optional; skips validation if empty
 type GitLabWebhookParseStep struct {
 	name   string
 	secret string

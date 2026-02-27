@@ -14,24 +14,24 @@ import (
 
 // ECSServiceState holds the current state of a managed ECS service.
 type ECSServiceState struct {
-	Name           string             `json:"name"`
-	Cluster        string             `json:"cluster"`
-	Region         string             `json:"region"`
-	LaunchType     string             `json:"launchType"`
-	Status         string             `json:"status"` // pending, creating, running, deleting, deleted
-	DesiredCount   int                `json:"desiredCount"`
-	RunningCount   int                `json:"runningCount"`
-	TaskDefinition ECSTaskDefinition  `json:"taskDefinition"`
-	LoadBalancer   *ECSLoadBalancer   `json:"loadBalancer,omitempty"`
-	CreatedAt      time.Time          `json:"createdAt"`
+	Name           string            `json:"name"`
+	Cluster        string            `json:"cluster"`
+	Region         string            `json:"region"`
+	LaunchType     string            `json:"launchType"`
+	Status         string            `json:"status"` // pending, creating, running, deleting, deleted
+	DesiredCount   int               `json:"desiredCount"`
+	RunningCount   int               `json:"runningCount"`
+	TaskDefinition ECSTaskDefinition `json:"taskDefinition"`
+	LoadBalancer   *ECSLoadBalancer  `json:"loadBalancer,omitempty"`
+	CreatedAt      time.Time         `json:"createdAt"`
 }
 
 // ECSTaskDefinition describes an ECS task definition.
 type ECSTaskDefinition struct {
-	Family   string         `json:"family"`
-	Revision int            `json:"revision"`
-	CPU      string         `json:"cpu"`
-	Memory   string         `json:"memory"`
+	Family     string         `json:"family"`
+	Revision   int            `json:"revision"`
+	CPU        string         `json:"cpu"`
+	Memory     string         `json:"memory"`
 	Containers []ECSContainer `json:"containers"`
 }
 
