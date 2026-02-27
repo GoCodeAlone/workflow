@@ -29,6 +29,8 @@ func runPlugin(args []string) error {
 		return runPluginUpdate(args[1:])
 	case "remove":
 		return runPluginRemove(args[1:])
+	case "validate":
+		return runPluginValidate(args[1:])
 	default:
 		return pluginUsage()
 	}
@@ -46,6 +48,7 @@ Subcommands:
   list     List installed plugins
   update   Update an installed plugin to its latest version
   remove   Uninstall a plugin
+  validate Validate a plugin manifest from the registry or a local file
 `)
 	return fmt.Errorf("plugin subcommand is required")
 }
