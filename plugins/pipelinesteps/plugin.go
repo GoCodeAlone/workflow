@@ -1,6 +1,6 @@
 // Package pipelinesteps provides a plugin that registers generic pipeline step
 // types: validate, transform, conditional, set, log, delegate, jq, publish,
-// http_call, request_parse, db_query, db_exec, json_response,
+// http_call, request_parse, db_query, db_exec, json_response, raw_response,
 // validate_path_param, validate_pagination, validate_request_body,
 // foreach, webhook_verify, ui_scaffold, ui_scaffold_analyze,
 // dlq_send, dlq_replay, retry_with_backoff, circuit_breaker (wrapping),
@@ -66,6 +66,7 @@ func New() *Plugin {
 					"step.db_query",
 					"step.db_exec",
 					"step.json_response",
+					"step.raw_response",
 					"step.workflow_call",
 					"step.validate_path_param",
 					"step.validate_pagination",
@@ -119,6 +120,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.db_query":              wrapStepFactory(module.NewDBQueryStepFactory()),
 		"step.db_exec":               wrapStepFactory(module.NewDBExecStepFactory()),
 		"step.json_response":         wrapStepFactory(module.NewJSONResponseStepFactory()),
+		"step.raw_response":          wrapStepFactory(module.NewRawResponseStepFactory()),
 		"step.validate_path_param":   wrapStepFactory(module.NewValidatePathParamStepFactory()),
 		"step.validate_pagination":   wrapStepFactory(module.NewValidatePaginationStepFactory()),
 		"step.validate_request_body": wrapStepFactory(module.NewValidateRequestBodyStepFactory()),
