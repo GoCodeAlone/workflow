@@ -9,14 +9,14 @@ import (
 
 // StateMachineTransitionStep triggers a state machine transition from within a pipeline.
 type StateMachineTransitionStep struct {
-	name          string
-	statemachine  string
-	entityID      string
-	event         string
-	data          map[string]any
-	failOnError   bool
-	app           modular.Application
-	tmpl          *TemplateEngine
+	name         string
+	statemachine string
+	entityID     string
+	event        string
+	data         map[string]any
+	failOnError  bool
+	app          modular.Application
+	tmpl         *TemplateEngine
 }
 
 // NewStateMachineTransitionStepFactory returns a StepFactory for step.statemachine_transition.

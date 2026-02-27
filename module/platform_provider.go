@@ -18,7 +18,7 @@ type PlatformPlan struct {
 
 // PlatformAction describes a single change within a plan.
 type PlatformAction struct {
-	Type     string `json:"type"`     // create, update, delete, noop
+	Type     string `json:"type"` // create, update, delete, noop
 	Resource string `json:"resource"`
 	Detail   string `json:"detail"`
 }

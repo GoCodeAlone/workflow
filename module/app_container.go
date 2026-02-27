@@ -82,9 +82,9 @@ type ECSAppManifests struct {
 
 // ECSAppTaskDef represents an ECS task definition for an app container.
 type ECSAppTaskDef struct {
-	Family     string        `json:"family"`
-	CPU        string        `json:"cpu"`
-	Memory     string        `json:"memory"`
+	Family     string         `json:"family"`
+	CPU        string         `json:"cpu"`
+	Memory     string         `json:"memory"`
 	Containers []ECSContainer `json:"containers"`
 }
 
@@ -292,17 +292,17 @@ type K8sDeploymentManifest struct {
 
 // K8sServiceManifest represents a Kubernetes Service resource.
 type K8sServiceManifest struct {
-	APIVersion string        `json:"apiVersion"`
-	Kind       string        `json:"kind"`
-	Metadata   K8sObjectMeta `json:"metadata"`
+	APIVersion string         `json:"apiVersion"`
+	Kind       string         `json:"kind"`
+	Metadata   K8sObjectMeta  `json:"metadata"`
 	Spec       K8sServiceSpec `json:"spec"`
 }
 
 // K8sIngressManifest represents a Kubernetes Ingress resource.
 type K8sIngressManifest struct {
-	APIVersion string        `json:"apiVersion"`
-	Kind       string        `json:"kind"`
-	Metadata   K8sObjectMeta `json:"metadata"`
+	APIVersion string         `json:"apiVersion"`
+	Kind       string         `json:"kind"`
+	Metadata   K8sObjectMeta  `json:"metadata"`
 	Spec       K8sIngressSpec `json:"spec"`
 }
 
@@ -408,8 +408,8 @@ type K8sIngressHTTP struct {
 
 // K8sIngressPath defines an HTTP path in an ingress rule.
 type K8sIngressPath struct {
-	Path     string           `json:"path"`
-	PathType string           `json:"pathType"`
+	Path     string            `json:"path"`
+	PathType string            `json:"pathType"`
 	Backend  K8sIngressBackend `json:"backend"`
 }
 

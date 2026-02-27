@@ -14,7 +14,7 @@ func init() {
 // k8sStaticResolver resolves Kubernetes credentials from static config fields.
 type k8sStaticResolver struct{}
 
-func (r *k8sStaticResolver) Provider() string      { return "kubernetes" }
+func (r *k8sStaticResolver) Provider() string       { return "kubernetes" }
 func (r *k8sStaticResolver) CredentialType() string { return "static" }
 
 func (r *k8sStaticResolver) Resolve(m *CloudAccount) error {
@@ -32,7 +32,7 @@ func (r *k8sStaticResolver) Resolve(m *CloudAccount) error {
 // k8sEnvResolver resolves Kubernetes credentials from the KUBECONFIG environment variable.
 type k8sEnvResolver struct{}
 
-func (r *k8sEnvResolver) Provider() string      { return "kubernetes" }
+func (r *k8sEnvResolver) Provider() string       { return "kubernetes" }
 func (r *k8sEnvResolver) CredentialType() string { return "env" }
 
 func (r *k8sEnvResolver) Resolve(m *CloudAccount) error {
@@ -52,7 +52,7 @@ func (r *k8sEnvResolver) Resolve(m *CloudAccount) error {
 // k8sKubeconfigResolver resolves Kubernetes credentials from a kubeconfig file or inline content.
 type k8sKubeconfigResolver struct{}
 
-func (r *k8sKubeconfigResolver) Provider() string      { return "kubernetes" }
+func (r *k8sKubeconfigResolver) Provider() string       { return "kubernetes" }
 func (r *k8sKubeconfigResolver) CredentialType() string { return "kubeconfig" }
 
 func (r *k8sKubeconfigResolver) Resolve(m *CloudAccount) error {

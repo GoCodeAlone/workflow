@@ -22,15 +22,15 @@ type DOVPCState struct {
 
 // DOFirewallRule describes a single firewall rule (inbound or outbound).
 type DOFirewallRule struct {
-	Protocol string `json:"protocol"` // tcp, udp, icmp
+	Protocol  string `json:"protocol"`  // tcp, udp, icmp
 	PortRange string `json:"portRange"` // e.g. "80" or "8000-9000"
 	Sources   string `json:"sources"`   // CIDR, tag, or load_balancer_uid
 }
 
 // DOFirewallConfig describes a DigitalOcean firewall.
 type DOFirewallConfig struct {
-	Name         string           `json:"name"`
-	InboundRules []DOFirewallRule `json:"inboundRules"`
+	Name          string           `json:"name"`
+	InboundRules  []DOFirewallRule `json:"inboundRules"`
 	OutboundRules []DOFirewallRule `json:"outboundRules"`
 }
 
@@ -257,9 +257,9 @@ func (b *doNetworkingRealBackend) plan(m *PlatformDONetworking) (*DONetworkPlan,
 
 func (b *doNetworkingRealBackend) apply(m *PlatformDONetworking) (*DOVPCState, error) {
 	req := &godo.VPCCreateRequest{
-		Name:      m.state.Name,
+		Name:       m.state.Name,
 		RegionSlug: m.state.Region,
-		IPRange:   m.state.IPRange,
+		IPRange:    m.state.IPRange,
 	}
 	vpc, _, err := b.client.VPCs.Create(context.Background(), req)
 	if err != nil {

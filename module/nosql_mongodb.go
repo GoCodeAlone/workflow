@@ -14,7 +14,7 @@ import (
 //
 // When uri == "memory://" the module falls back to the in-memory backend.
 type MongoDBNoSQLConfig struct {
-	URI        string `json:"uri"        yaml:"uri"`        // "memory://" => in-memory fallback
+	URI        string `json:"uri"        yaml:"uri"` // "memory://" => in-memory fallback
 	Database   string `json:"database"   yaml:"database"`
 	Collection string `json:"collection" yaml:"collection"`
 }

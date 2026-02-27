@@ -10,13 +10,13 @@ import (
 
 // NewGitLabTriggerPipelineStepFactory returns a StepFactory for step.gitlab_trigger_pipeline.
 //
-//	- type: step.gitlab_trigger_pipeline
-//	  config:
-//	    client: gitlab-client     # name of the gitlab.client module
-//	    project: "group/project"  # project path or numeric ID
-//	    ref: main
-//	    variables:
-//	      KEY: value
+//   - type: step.gitlab_trigger_pipeline
+//     config:
+//     client: gitlab-client     # name of the gitlab.client module
+//     project: "group/project"  # project path or numeric ID
+//     ref: main
+//     variables:
+//     KEY: value
 func NewGitLabTriggerPipelineStepFactory() StepFactory {
 	return func(name string, config map[string]any, app modular.Application) (PipelineStep, error) {
 		clientName, _ := config["client"].(string)
@@ -82,11 +82,11 @@ func (s *gitLabTriggerPipelineStep) Execute(_ context.Context, _ *PipelineContex
 
 // NewGitLabPipelineStatusStepFactory returns a StepFactory for step.gitlab_pipeline_status.
 //
-//	- type: step.gitlab_pipeline_status
-//	  config:
-//	    client: gitlab-client
-//	    project: "group/project"
-//	    pipeline_id: "42"   # string or int
+//   - type: step.gitlab_pipeline_status
+//     config:
+//     client: gitlab-client
+//     project: "group/project"
+//     pipeline_id: "42"   # string or int
 func NewGitLabPipelineStatusStepFactory() StepFactory {
 	return func(name string, config map[string]any, app modular.Application) (PipelineStep, error) {
 		clientName, _ := config["client"].(string)
@@ -152,14 +152,14 @@ func (s *gitLabPipelineStatusStep) Execute(_ context.Context, _ *PipelineContext
 
 // NewGitLabCreateMRStepFactory returns a StepFactory for step.gitlab_create_mr.
 //
-//	- type: step.gitlab_create_mr
-//	  config:
-//	    client: gitlab-client
-//	    project: "group/project"
-//	    source_branch: feature-x
-//	    target_branch: main
-//	    title: "Feature X"
-//	    description: "Optional description"
+//   - type: step.gitlab_create_mr
+//     config:
+//     client: gitlab-client
+//     project: "group/project"
+//     source_branch: feature-x
+//     target_branch: main
+//     title: "Feature X"
+//     description: "Optional description"
 func NewGitLabCreateMRStepFactory() StepFactory {
 	return func(name string, config map[string]any, app modular.Application) (PipelineStep, error) {
 		clientName, _ := config["client"].(string)
@@ -237,12 +237,12 @@ func (s *gitLabCreateMRStep) Execute(_ context.Context, _ *PipelineContext) (*St
 
 // NewGitLabMRCommentStepFactory returns a StepFactory for step.gitlab_mr_comment.
 //
-//	- type: step.gitlab_mr_comment
-//	  config:
-//	    client: gitlab-client
-//	    project: "group/project"
-//	    mr_iid: 42
-//	    body: "Pipeline passed!"
+//   - type: step.gitlab_mr_comment
+//     config:
+//     client: gitlab-client
+//     project: "group/project"
+//     mr_iid: 42
+//     body: "Pipeline passed!"
 func NewGitLabMRCommentStepFactory() StepFactory {
 	return func(name string, config map[string]any, app modular.Application) (PipelineStep, error) {
 		clientName, _ := config["client"].(string)

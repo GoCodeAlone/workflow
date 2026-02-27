@@ -470,8 +470,8 @@ func TestForEachStep_StepAndStepsMutuallyExclusive(t *testing.T) {
 	_, err := buildTestForEachStep(t, "foreach-both", map[string]any{
 		"collection": "items",
 		"step": map[string]any{
-			"type": "step.set",
-			"name": "s",
+			"type":   "step.set",
+			"name":   "s",
 			"values": map[string]any{"x": "1"},
 		},
 		"steps": []any{
