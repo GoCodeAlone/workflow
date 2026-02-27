@@ -245,17 +245,18 @@ func TestEngineBuilder_WithPlugin(t *testing.T) {
 
 func TestEngineBuilder_Chaining(t *testing.T) {
 	// Test that all builder methods return the same builder for chaining
+	mockLogger := &mock.Logger{LogEntries: make([]string, 0)}
+	mockApp := modular.NewStdApplication(modular.NewStdConfigProvider(nil), mockLogger)
 	b := NewEngineBuilder()
 	result := b.
-		WithApplication(nil).
-		WithLogger(nil).
+		WithApplication(mockApp).
+		WithLogger(mockLogger).
 		WithDefaultHandlers().
 		WithDefaultTriggers().
 		WithDynamicComponents().
 		WithAllDefaults().
-		WithHandler(nil).
-		WithTrigger(nil).
-		WithPlugin(nil).
+		WithHandler(&builderTestHandler{canHandleType: "test"}).
+		WithTrigger(module.NewHTTPTrigger()).
 		WithPlugins().
 		WithPluginLoader(nil).
 		WithConfigPath("test.yaml")

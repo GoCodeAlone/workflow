@@ -16,13 +16,14 @@ import (
 )
 
 // DefaultHandlerFactory is a function that returns a slice of default
-// WorkflowHandler instances. It is set by engine_builder_defaults.go
-// via an init function to break the import cycle between the root
-// workflow package and the handlers package.
+// WorkflowHandler instances. It is set by the setup package via an init
+// function to break the import cycle between the root workflow package
+// and the handlers package. Import "github.com/GoCodeAlone/workflow/setup"
+// (typically as a blank import) to register the default factories.
 var DefaultHandlerFactory func() []WorkflowHandler
 
 // DefaultTriggerFactory is a function that returns a slice of default
-// Trigger instances. It is set by engine_builder_defaults.go.
+// Trigger instances. It is set by the setup package.
 var DefaultTriggerFactory func() []interfaces.Trigger
 
 // EngineBuilder provides a fluent API for constructing a fully-configured
