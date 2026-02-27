@@ -499,3 +499,87 @@ func TestPipeline_CompensateWithNoCompensationSteps(t *testing.T) {
 		t.Errorf("expected 'compensation executed' in error, got: %v", err)
 	}
 }
+
+func TestPipeline_Execute_SeedsRoutePatternFromField(t *testing.T) {
+	// RoutePattern should be seeded into _route_pattern in pipeline metadata
+	// when Execute is called, enabling step.request_parse path param extraction
+	// for pipelines executed via inline HTTP triggers.
+	var capturedRoutePattern any
+	step1 := &mockStep{
+		name: "capture",
+		execFn: func(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+			capturedRoutePattern = pc.Metadata["_route_pattern"]
+			return &StepResult{}, nil
+		},
+	}
+
+	p := &Pipeline{
+		Name:         "route-pipeline",
+		Steps:        []PipelineStep{step1},
+		RoutePattern: "/api/items/{id}",
+	}
+
+	_, err := p.Execute(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedRoutePattern != "/api/items/{id}" {
+		t.Errorf("expected _route_pattern %q in metadata, got %v", "/api/items/{id}", capturedRoutePattern)
+	}
+}
+
+func TestPipeline_Execute_MetadataRoutePatternTakesPrecedence(t *testing.T) {
+	// When _route_pattern is already set in p.Metadata (e.g. by a CQRS handler),
+	// it should not be overwritten by p.RoutePattern.
+	var capturedRoutePattern any
+	step1 := &mockStep{
+		name: "capture",
+		execFn: func(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+			capturedRoutePattern = pc.Metadata["_route_pattern"]
+			return &StepResult{}, nil
+		},
+	}
+
+	p := &Pipeline{
+		Name:         "route-pipeline",
+		Steps:        []PipelineStep{step1},
+		RoutePattern: "/api/items/{id}",
+		Metadata: map[string]any{
+			"_route_pattern": "/overridden/pattern/{id}",
+		},
+	}
+
+	_, err := p.Execute(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedRoutePattern != "/overridden/pattern/{id}" {
+		t.Errorf("expected _route_pattern %q from Metadata, got %v", "/overridden/pattern/{id}", capturedRoutePattern)
+	}
+}
+
+func TestPipeline_Execute_NoRoutePatternNoMetadata(t *testing.T) {
+	// When RoutePattern is empty and Metadata has no _route_pattern,
+	// _route_pattern should not appear in the pipeline context.
+	var capturedRoutePattern any
+	step1 := &mockStep{
+		name: "capture",
+		execFn: func(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+			capturedRoutePattern = pc.Metadata["_route_pattern"]
+			return &StepResult{}, nil
+		},
+	}
+
+	p := &Pipeline{
+		Name:  "plain-pipeline",
+		Steps: []PipelineStep{step1},
+	}
+
+	_, err := p.Execute(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedRoutePattern != nil {
+		t.Errorf("expected no _route_pattern in metadata, got %v", capturedRoutePattern)
+	}
+}
