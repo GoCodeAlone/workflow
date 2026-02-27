@@ -116,15 +116,21 @@ func TestExpandConfigStrings_ArrayValues(t *testing.T) {
 }
 
 func TestExpandConfigStrings_ArrayOfMaps(t *testing.T) {
-	t.Setenv("OAUTH_CLIENT_ID", "test1")
-	t.Setenv("OAUTH_CLIENT_SECRET", "secret1")
+	t.Setenv("OAUTH_CLIENT_ID_1", "test1")
+	t.Setenv("OAUTH_CLIENT_SECRET_1", "secret1")
+	t.Setenv("OAUTH_CLIENT_ID_2", "test2")
+	t.Setenv("OAUTH_CLIENT_SECRET_2", "secret2")
 
 	resolver := secrets.NewMultiResolver()
 	cfg := map[string]any{
 		"clients": []any{
 			map[string]any{
-				"clientId":     "${OAUTH_CLIENT_ID}",
-				"clientSecret": "${OAUTH_CLIENT_SECRET}",
+				"clientId":     "${OAUTH_CLIENT_ID_1}",
+				"clientSecret": "${OAUTH_CLIENT_SECRET_1}",
+			},
+			map[string]any{
+				"clientId":     "${OAUTH_CLIENT_ID_2}",
+				"clientSecret": "${OAUTH_CLIENT_SECRET_2}",
 			},
 		},
 	}
@@ -132,12 +138,60 @@ func TestExpandConfigStrings_ArrayOfMaps(t *testing.T) {
 	expandConfigStrings(resolver, cfg)
 
 	clients := cfg["clients"].([]any)
-	client := clients[0].(map[string]any)
-	if client["clientId"] != "test1" {
-		t.Errorf("expected 'test1', got %v", client["clientId"])
+	if len(clients) != 2 {
+		t.Fatalf("expected 2 clients, got %d", len(clients))
 	}
-	if client["clientSecret"] != "secret1" {
-		t.Errorf("expected 'secret1', got %v", client["clientSecret"])
+
+	client1 := clients[0].(map[string]any)
+	if client1["clientId"] != "test1" {
+		t.Errorf("expected first clientId 'test1', got %v", client1["clientId"])
+	}
+	if client1["clientSecret"] != "secret1" {
+		t.Errorf("expected first clientSecret 'secret1', got %v", client1["clientSecret"])
+	}
+
+	client2 := clients[1].(map[string]any)
+	if client2["clientId"] != "test2" {
+		t.Errorf("expected second clientId 'test2', got %v", client2["clientId"])
+	}
+	if client2["clientSecret"] != "secret2" {
+		t.Errorf("expected second clientSecret 'secret2', got %v", client2["clientSecret"])
+	}
+}
+
+func TestExpandConfigStrings_DeeplyNestedArrayOfMaps(t *testing.T) {
+	t.Setenv("SCOPE1", "read")
+	t.Setenv("SCOPE2", "write")
+
+	resolver := secrets.NewMultiResolver()
+	cfg := map[string]any{
+		"providers": []any{
+			map[string]any{
+				"name":   "oauth-provider",
+				"scopes": []any{"${SCOPE1}", "${SCOPE2}"},
+			},
+		},
+	}
+
+	expandConfigStrings(resolver, cfg)
+
+	providers := cfg["providers"].([]any)
+	if len(providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(providers))
+	}
+	provider := providers[0].(map[string]any)
+	scopes, ok := provider["scopes"].([]any)
+	if !ok {
+		t.Fatalf("expected scopes to be []any, got %T", provider["scopes"])
+	}
+	if len(scopes) != 2 {
+		t.Fatalf("expected 2 scopes, got %d", len(scopes))
+	}
+	if scopes[0] != "read" {
+		t.Errorf("expected first scope 'read', got %v", scopes[0])
+	}
+	if scopes[1] != "write" {
+		t.Errorf("expected second scope 'write', got %v", scopes[1])
 	}
 }
 
