@@ -30,13 +30,17 @@ func TestModuleFactories(t *testing.T) {
 	p := New()
 	factories := p.ModuleFactories()
 
-	for _, name := range []string{"scheduler.modular", "cache.modular"} {
+	for _, name := range []string{
+		"cache.modular",
+		"jsonschema.modular",
+		"scheduler.modular",
+	} {
 		if _, ok := factories[name]; !ok {
 			t.Errorf("missing module factory: %s", name)
 		}
 	}
-	if len(factories) != 2 {
-		t.Errorf("expected 2 module factories, got %d", len(factories))
+	if len(factories) != 3 {
+		t.Errorf("expected 3 module factories, got %d", len(factories))
 	}
 }
 
@@ -58,6 +62,15 @@ func TestCacheModuleFactory(t *testing.T) {
 	}
 }
 
+func TestJSONSchemaModuleFactory(t *testing.T) {
+	p := New()
+	factories := p.ModuleFactories()
+	mod := factories["jsonschema.modular"]("test-jsonschema", nil)
+	if mod == nil {
+		t.Fatal("jsonschema.modular factory returned nil")
+	}
+}
+
 func TestPluginLoads(t *testing.T) {
 	p := New()
 	loader := plugin.NewPluginLoader(capability.NewRegistry(), schema.NewModuleSchemaRegistry())
@@ -66,7 +79,7 @@ func TestPluginLoads(t *testing.T) {
 	}
 
 	modules := loader.ModuleFactories()
-	if len(modules) != 2 {
-		t.Fatalf("expected 2 module factories after load, got %d", len(modules))
+	if len(modules) != 3 {
+		t.Fatalf("expected 3 module factories after load, got %d", len(modules))
 	}
 }
