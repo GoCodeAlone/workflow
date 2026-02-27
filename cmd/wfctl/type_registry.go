@@ -548,7 +548,7 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.http_call": {
 			Type:       "step.http_call",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"url", "method", "headers", "body", "timeout"},
+			ConfigKeys: []string{"url", "method", "headers", "body", "timeout", "auth"},
 		},
 		"step.request_parse": {
 			Type:       "step.request_parse",
