@@ -80,7 +80,7 @@ func TestListStepTypes(t *testing.T) {
 	// All step types should start with "step."
 	for _, s := range steps {
 		str := s.(string)
-		if str[:5] != "step." {
+		if !strings.HasPrefix(str, "step.") {
 			t.Errorf("step type %q does not start with 'step.'", str)
 		}
 	}
@@ -359,9 +359,6 @@ func TestListPlugins_WithPlugins(t *testing.T) {
 	// Create a temp directory with a fake plugin
 	dir := t.TempDir()
 	pluginDir := dir + "/test-plugin"
-	if err := json.Unmarshal([]byte("{}"), new(any)); err != nil {
-		t.Fatal(err)
-	}
 	if err := createTestPlugin(pluginDir, "1.2.3"); err != nil {
 		t.Fatal(err)
 	}

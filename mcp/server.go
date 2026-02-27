@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"github.com/GoCodeAlone/workflow/schema"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -539,7 +541,7 @@ func generateModuleReference() string {
 	b.WriteString("This reference lists all available module types grouped by category.\n\n")
 
 	for _, prefix := range prefixes {
-		fmt.Fprintf(&b, "## %s\n\n", strings.Title(prefix)) //nolint:staticcheck // SA1019: strings.Title is fine for docs
+		fmt.Fprintf(&b, "## %s\n\n", cases.Title(language.English).String(prefix))
 		for _, t := range groups[prefix] {
 			fmt.Fprintf(&b, "- `%s`\n", t)
 		}
