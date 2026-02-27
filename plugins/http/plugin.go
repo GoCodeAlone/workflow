@@ -161,6 +161,9 @@ func (p *HTTPPlugin) PipelineTriggerConfigWrappers() map[string]plugin.TriggerCo
 			if method, ok := cfg["method"]; ok {
 				route["method"] = method
 			}
+			if middlewares, ok := cfg["middlewares"]; ok {
+				route["middlewares"] = middlewares
+			}
 			return map[string]any{
 				"routes": []any{route},
 			}

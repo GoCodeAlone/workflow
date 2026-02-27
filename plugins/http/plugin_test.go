@@ -433,6 +433,58 @@ func TestStaticFileServerFactory_SPAConfigKey(t *testing.T) {
 	}
 }
 
+func TestPipelineTriggerConfigWrappers(t *testing.T) {
+	p := New()
+	wrappers := p.PipelineTriggerConfigWrappers()
+	wrapper, ok := wrappers["http"]
+	if !ok {
+		t.Fatal("missing pipeline trigger config wrapper for http")
+	}
+
+	t.Run("forwards path, method, and middlewares", func(t *testing.T) {
+		cfg := map[string]any{
+			"path":        "/items",
+			"method":      "GET",
+			"middlewares": []any{"auth-bearer", "rate-limit"},
+		}
+		result := wrapper("list-items", cfg)
+		routes, ok := result["routes"].([]any)
+		if !ok || len(routes) != 1 {
+			t.Fatalf("expected 1 route, got %v", result["routes"])
+		}
+		route := routes[0].(map[string]any)
+		if route["path"] != "/items" {
+			t.Errorf("path = %v, want /items", route["path"])
+		}
+		if route["method"] != "GET" {
+			t.Errorf("method = %v, want GET", route["method"])
+		}
+		mw, ok := route["middlewares"].([]any)
+		if !ok || len(mw) != 2 {
+			t.Fatalf("middlewares = %v, want [auth-bearer rate-limit]", route["middlewares"])
+		}
+		if mw[0] != "auth-bearer" || mw[1] != "rate-limit" {
+			t.Errorf("middlewares = %v, want [auth-bearer rate-limit]", mw)
+		}
+		if route["workflow"] != "pipeline:list-items" {
+			t.Errorf("workflow = %v, want pipeline:list-items", route["workflow"])
+		}
+	})
+
+	t.Run("omits middlewares when not set", func(t *testing.T) {
+		cfg := map[string]any{
+			"path":   "/items",
+			"method": "GET",
+		}
+		result := wrapper("list-items", cfg)
+		routes := result["routes"].([]any)
+		route := routes[0].(map[string]any)
+		if _, exists := route["middlewares"]; exists {
+			t.Error("middlewares key should not be present when not configured")
+		}
+	})
+}
+
 func TestPluginLoaderIntegration(t *testing.T) {
 	p := New()
 
