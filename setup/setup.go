@@ -1,13 +1,20 @@
-// Package setup provides convenience functions for initialising a workflow
-// engine with sensible defaults. It bridges the root workflow package with
-// the handlers and module packages so that consumers don't need to wire up
-// all the built-in handlers and triggers manually.
+// Package setup bridges the root workflow package with the handlers and
+// module packages to register default workflow handlers and triggers.
+// It exists to break the import cycle that would occur if the root package
+// directly imported handlers (which has test files that import the root package).
 //
-// Typical usage:
+// Typical usage is to blank-import this package so that its init function
+// registers the default handler and trigger factories with the workflow
+// engine, and then build an engine using the workflow package:
 //
-//	engine, err := setup.NewDefaultEngine()
-//	engine, err := setup.NewDefaultEngineFromConfig(cfg)
-//	engine, err := setup.NewEngineBuilder().WithAllDefaults().Build()
+//	import (
+//		"github.com/GoCodeAlone/workflow"
+//		_ "github.com/GoCodeAlone/workflow/setup"
+//	)
+//
+//	engine, err := workflow.NewEngineBuilder().
+//		WithAllDefaults().
+//		Build()
 package setup
 
 import (

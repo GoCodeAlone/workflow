@@ -31,6 +31,13 @@ var DefaultTriggerFactory func() []interfaces.Trigger
 // triggers, dynamic components, and plugins so that CLI tools, MCP servers,
 // and other consumers can initialise an engine in a few lines.
 //
+// Import the setup package to register default handler and trigger factories:
+//
+//	import (
+//	    "github.com/GoCodeAlone/workflow"
+//	    _ "github.com/GoCodeAlone/workflow/setup"
+//	)
+//
 //	engine, err := workflow.NewEngineBuilder().
 //	    WithAllDefaults().
 //	    Build()
@@ -86,6 +93,7 @@ func (b *EngineBuilder) WithLogger(logger modular.Logger) *EngineBuilder {
 
 // WithDefaultHandlers registers all built-in workflow handlers:
 // HTTP, Messaging, StateMachine, Scheduler, Integration, Pipeline, Event, Platform.
+// Requires importing the setup package: import _ "github.com/GoCodeAlone/workflow/setup"
 func (b *EngineBuilder) WithDefaultHandlers() *EngineBuilder {
 	b.useDefaultHandlers = true
 	return b
@@ -93,6 +101,7 @@ func (b *EngineBuilder) WithDefaultHandlers() *EngineBuilder {
 
 // WithDefaultTriggers registers all built-in triggers:
 // HTTP, Event, Schedule, EventBus, Reconciliation.
+// Requires importing the setup package: import _ "github.com/GoCodeAlone/workflow/setup"
 func (b *EngineBuilder) WithDefaultTriggers() *EngineBuilder {
 	b.useDefaultTriggers = true
 	return b
@@ -107,6 +116,7 @@ func (b *EngineBuilder) WithDynamicComponents() *EngineBuilder {
 
 // WithAllDefaults is a convenience method that enables default handlers,
 // default triggers, and dynamic components.
+// Requires importing the setup package: import _ "github.com/GoCodeAlone/workflow/setup"
 func (b *EngineBuilder) WithAllDefaults() *EngineBuilder {
 	return b.WithDefaultHandlers().WithDefaultTriggers().WithDynamicComponents()
 }
