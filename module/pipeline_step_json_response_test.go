@@ -387,10 +387,8 @@ func TestJSONResponseStep_BodyFromRefMissingPath(t *testing.T) {
 	if err := json.NewDecoder(recorder.Body).Decode(&body); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
-	// Missing paths should resolve to nil, so "data" key should be null
-	if _, exists := body["data"]; !exists {
-		// null is fine — it should appear with a null value
-	}
+	// Missing paths should resolve to nil; the key may be absent or null.
+	_ = body["data"]
 }
 
 func TestJSONResponseStep_BodyFromRefInArray(t *testing.T) {
