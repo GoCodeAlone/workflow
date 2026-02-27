@@ -992,15 +992,25 @@ func expandConfigStrings(resolver *secrets.MultiResolver, cfg map[string]any) {
 		case map[string]any:
 			expandConfigStrings(resolver, val)
 		case []any:
-			for i, item := range val {
-				if s, ok := item.(string); ok {
-					if expanded, err := resolver.Expand(ctx, s); err == nil {
-						val[i] = expanded
-					}
-				} else if m, ok := item.(map[string]any); ok {
-					expandConfigStrings(resolver, m)
-				}
+			expandConfigSlice(resolver, val)
+		}
+	}
+}
+
+// expandConfigSlice expands ${...} placeholders in a slice, recursing into nested
+// maps and slices to support arbitrary nesting depth.
+func expandConfigSlice(resolver *secrets.MultiResolver, items []any) {
+	ctx := context.Background()
+	for i, item := range items {
+		switch v := item.(type) {
+		case string:
+			if expanded, err := resolver.Expand(ctx, v); err == nil {
+				items[i] = expanded
 			}
+		case map[string]any:
+			expandConfigStrings(resolver, v)
+		case []any:
+			expandConfigSlice(resolver, v)
 		}
 	}
 }
