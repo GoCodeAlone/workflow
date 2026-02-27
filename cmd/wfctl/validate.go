@@ -17,6 +17,7 @@ func runValidate(args []string) error {
 	skipUnknownTypes := fs.Bool("skip-unknown-types", false, "Skip unknown module/workflow/trigger type checks")
 	allowNoEntryPoints := fs.Bool("allow-no-entry-points", false, "Allow configs with no entry points (triggers, routes, subscriptions, jobs)")
 	dir := fs.String("dir", "", "Validate all .yaml/.yml files in a directory (recursive)")
+	pluginDir := fs.String("plugin-dir", "", "Directory of installed external plugins; their types are loaded before validation")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl validate [options] <config.yaml> [config2.yaml ...]
 
@@ -28,6 +29,7 @@ Examples:
   wfctl validate --dir ./example/
   wfctl validate --strict admin/config.yaml
   wfctl validate --skip-unknown-types example/*.yaml
+  wfctl validate --plugin-dir data/plugins config.yaml
 
 Options:
 `)
@@ -40,6 +42,14 @@ Options:
 	args = reorderFlags(args)
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	// Load external plugin types before validation so their module/trigger/workflow
+	// types are recognised and don't cause false "unknown type" errors.
+	if *pluginDir != "" {
+		if err := schema.LoadPluginTypesFromDir(*pluginDir); err != nil {
+			return fmt.Errorf("failed to load plugins from %s: %w", *pluginDir, err)
+		}
 	}
 
 	// Collect files to validate
@@ -180,6 +190,11 @@ func indentError(err error) string {
 // correctly regardless of where the user places them.
 func reorderFlags(args []string) []string {
 	var flags, positional []string
+	// flags that take a value argument (not self-contained with "=")
+	valueFlagNames := map[string]bool{
+		"dir":        true,
+		"plugin-dir": true,
+	}
 	for i := 0; i < len(args); i++ {
 		if strings.HasPrefix(args[i], "-") {
 			flags = append(flags, args[i])
@@ -189,7 +204,7 @@ func reorderFlags(args []string) []string {
 				// Peek: could be a flag value or a positional arg.
 				// Only consume it if the flag is known to take a value.
 				flagName := strings.TrimLeft(args[i], "-")
-				if flagName == "dir" {
+				if valueFlagNames[flagName] {
 					i++
 					flags = append(flags, args[i])
 				}

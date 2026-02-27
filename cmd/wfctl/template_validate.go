@@ -11,22 +11,23 @@ import (
 	"text/template"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/schema"
 	"gopkg.in/yaml.v3"
 )
 
 // templateValidationResult holds the outcome of validating a single template.
 type templateValidationResult struct {
-	Name          string
-	ModuleCount   int
-	ModuleValid   int
-	StepCount     int
-	StepValid     int
-	DepCount      int
-	DepValid      int
-	TriggerCount  int
-	TriggerValid  int
-	Warnings      []string
-	Errors        []string
+	Name         string
+	ModuleCount  int
+	ModuleValid  int
+	StepCount    int
+	StepValid    int
+	DepCount     int
+	DepValid     int
+	TriggerCount int
+	TriggerValid int
+	Warnings     []string
+	Errors       []string
 }
 
 // pass returns true if there are no errors.
@@ -77,6 +78,7 @@ func runTemplateValidate(args []string) error {
 	configFile := fs2.String("config", "", "Validate a specific config file instead of templates")
 	strict := fs2.Bool("strict", false, "Fail on warnings (not just errors)")
 	format := fs2.String("format", "text", "Output format: text or json")
+	pluginDir := fs2.String("plugin-dir", "", "Directory of installed external plugins; their types are loaded before validation")
 	fs2.Usage = func() {
 		fmt.Fprintf(fs2.Output(), `Usage: wfctl template validate [options]
 
@@ -88,6 +90,14 @@ Options:
 	}
 	if err := fs2.Parse(args); err != nil {
 		return err
+	}
+
+	// Load external plugin types before validation so their module/trigger/workflow
+	// types are recognised and don't cause false "unknown type" errors.
+	if *pluginDir != "" {
+		if err := schema.LoadPluginTypesFromDir(*pluginDir); err != nil {
+			return fmt.Errorf("failed to load plugins from %s: %w", *pluginDir, err)
+		}
 	}
 
 	knownModules := KnownModuleTypes()
@@ -353,15 +363,23 @@ func validateWorkflowConfig(name string, cfg *config.WorkflowConfig, knownModule
 			result.Errors = append(result.Errors, fmt.Sprintf("module %q uses unknown type %q", mod.Name, mod.Type))
 		} else {
 			result.ModuleValid++
-			// 5. Warn on unknown config fields
+			// 5. Warn on unknown config fields (with snake_case hint)
 			if mod.Config != nil && len(info.ConfigKeys) > 0 {
 				knownKeys := make(map[string]bool)
+				snakeToCamel := make(map[string]string)
 				for _, k := range info.ConfigKeys {
 					knownKeys[k] = true
+					if snake := schema.CamelToSnake(k); snake != k {
+						snakeToCamel[snake] = k
+					}
 				}
 				for key := range mod.Config {
 					if !knownKeys[key] {
-						result.Warnings = append(result.Warnings, fmt.Sprintf("module %q (%s) config field %q not in known fields", mod.Name, mod.Type, key))
+						if camel, ok := snakeToCamel[key]; ok {
+							result.Warnings = append(result.Warnings, fmt.Sprintf("module %q (%s) config field %q uses snake_case; use camelCase %q instead", mod.Name, mod.Type, key, camel))
+						} else {
+							result.Warnings = append(result.Warnings, fmt.Sprintf("module %q (%s) config field %q not in known fields", mod.Name, mod.Type, key))
+						}
 					}
 				}
 			}
@@ -401,15 +419,23 @@ func validateWorkflowConfig(name string, cfg *config.WorkflowConfig, knownModule
 				result.Errors = append(result.Errors, fmt.Sprintf("pipeline %q step uses unknown type %q", pipelineName, stepType))
 			} else {
 				result.StepValid++
-				// Config key warnings
+				// Config key warnings (with snake_case hint)
 				if stepCfg, ok := stepMap["config"].(map[string]any); ok && len(stepInfo.ConfigKeys) > 0 {
 					knownKeys := make(map[string]bool)
+					snakeToCamel := make(map[string]string)
 					for _, k := range stepInfo.ConfigKeys {
 						knownKeys[k] = true
+						if snake := schema.CamelToSnake(k); snake != k {
+							snakeToCamel[snake] = k
+						}
 					}
 					for key := range stepCfg {
 						if !knownKeys[key] {
-							result.Warnings = append(result.Warnings, fmt.Sprintf("pipeline %q step %q (%s) config field %q not in known fields", pipelineName, stepMap["name"], stepType, key))
+							if camel, ok := snakeToCamel[key]; ok {
+								result.Warnings = append(result.Warnings, fmt.Sprintf("pipeline %q step %q (%s) config field %q uses snake_case; use camelCase %q instead", pipelineName, stepMap["name"], stepType, key, camel))
+							} else {
+								result.Warnings = append(result.Warnings, fmt.Sprintf("pipeline %q step %q (%s) config field %q not in known fields", pipelineName, stepMap["name"], stepType, key))
+							}
 						}
 					}
 				}

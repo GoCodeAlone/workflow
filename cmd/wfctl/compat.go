@@ -21,11 +21,11 @@ type CompatibilityInfo struct {
 
 // compatCheckResult holds the result of a compatibility check.
 type compatCheckResult struct {
-	EngineVersion   string          `json:"engineVersion"`
-	RequiredModules []compatItem    `json:"requiredModules"`
-	RequiredSteps   []compatItem    `json:"requiredSteps"`
-	Compatible      bool            `json:"compatible"`
-	Issues          []string        `json:"issues,omitempty"`
+	EngineVersion   string       `json:"engineVersion"`
+	RequiredModules []compatItem `json:"requiredModules"`
+	RequiredSteps   []compatItem `json:"requiredSteps"`
+	Compatible      bool         `json:"compatible"`
+	Issues          []string     `json:"issues,omitempty"`
 }
 
 // compatItem represents a single required type and whether it's available.

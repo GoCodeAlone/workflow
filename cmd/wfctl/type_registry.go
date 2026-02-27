@@ -1,5 +1,11 @@
 package main
 
+import (
+	"strings"
+
+	"github.com/GoCodeAlone/workflow/schema"
+)
+
 // ModuleTypeInfo holds metadata about a known module type.
 type ModuleTypeInfo struct {
 	Type       string   // e.g., "storage.sqlite"
@@ -17,7 +23,7 @@ type StepTypeInfo struct {
 
 // KnownModuleTypes returns all module types registered in the engine's plugins.
 func KnownModuleTypes() map[string]ModuleTypeInfo {
-	return map[string]ModuleTypeInfo{
+	m := map[string]ModuleTypeInfo{
 		// storage plugin
 		"storage.s3": {
 			Type:       "storage.s3",
@@ -494,11 +500,18 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			ConfigKeys: []string{"account", "provider", "name", "region", "image", "instances", "http_port", "envs"},
 		},
 	}
+	// Include any types registered dynamically (e.g. from external plugins loaded via LoadPluginTypesFromDir).
+	for _, t := range schema.KnownModuleTypes() {
+		if _, exists := m[t]; !exists {
+			m[t] = ModuleTypeInfo{Type: t, Plugin: "external"}
+		}
+	}
+	return m
 }
 
 // KnownStepTypes returns all step types registered in the engine's plugins.
 func KnownStepTypes() map[string]StepTypeInfo {
-	return map[string]StepTypeInfo{
+	m := map[string]StepTypeInfo{
 		// pipelinesteps plugin
 		"step.validate": {
 			Type:       "step.validate",
@@ -1080,15 +1093,29 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			ConfigKeys: []string{"app"},
 		},
 	}
+	// Include any step types registered dynamically (e.g. from external plugins).
+	for _, t := range schema.KnownModuleTypes() {
+		if strings.HasPrefix(t, "step.") {
+			if _, exists := m[t]; !exists {
+				m[t] = StepTypeInfo{Type: t, Plugin: "external"}
+			}
+		}
+	}
+	return m
 }
 
 // KnownTriggerTypes returns all known trigger types.
 func KnownTriggerTypes() map[string]bool {
-	return map[string]bool{
+	m := map[string]bool{
 		"http":           true,
 		"event":          true,
 		"eventbus":       true,
 		"schedule":       true,
 		"reconciliation": true,
 	}
+	// Include any trigger types registered dynamically (e.g. from external plugins).
+	for _, t := range schema.KnownTriggerTypes() {
+		m[t] = true
+	}
+	return m
 }

@@ -3,6 +3,7 @@ package schema
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/GoCodeAlone/workflow/config"
 )
@@ -256,6 +257,26 @@ func validateModuleConfig(mod config.ModuleConfig, prefix string, errs *Validati
 	// Schema-driven validation for required fields
 	s := schemaRegistry.Get(mod.Type)
 	if s != nil {
+		// Build snake_case → camelCase mapping for "did you mean" hints.
+		snakeToCamel := make(map[string]string, len(s.ConfigFields))
+		for i := range s.ConfigFields {
+			if snake := camelToSnake(s.ConfigFields[i].Key); snake != s.ConfigFields[i].Key {
+				snakeToCamel[snake] = s.ConfigFields[i].Key
+			}
+		}
+
+		// Check each config key for snake_case/camelCase confusion.
+		if mod.Config != nil {
+			for key := range mod.Config {
+				if camel, ok := snakeToCamel[key]; ok {
+					*errs = append(*errs, &ValidationError{
+						Path:    prefix + ".config." + key,
+						Message: fmt.Sprintf("config field %q uses snake_case; use camelCase %q instead", key, camel),
+					})
+				}
+			}
+		}
+
 		for i := range s.ConfigFields {
 			if !s.ConfigFields[i].Required {
 				continue
@@ -270,9 +291,16 @@ func validateModuleConfig(mod config.ModuleConfig, prefix string, errs *Validati
 			}
 			v, ok := mod.Config[s.ConfigFields[i].Key]
 			if !ok {
+				msg := fmt.Sprintf("required config field %q is missing", s.ConfigFields[i].Key)
+				// Check if the snake_case form of the required key was provided instead.
+				if snakeKey := camelToSnake(s.ConfigFields[i].Key); snakeKey != s.ConfigFields[i].Key {
+					if _, snakeProvided := mod.Config[snakeKey]; snakeProvided {
+						msg = fmt.Sprintf("required config field %q is missing; found snake_case %q — use camelCase instead", s.ConfigFields[i].Key, snakeKey)
+					}
+				}
 				*errs = append(*errs, &ValidationError{
 					Path:    fieldPath,
-					Message: fmt.Sprintf("required config field %q is missing", s.ConfigFields[i].Key),
+					Message: msg,
 				})
 				continue
 			}
@@ -396,4 +424,23 @@ func makeSet(items []string) map[string]bool {
 		s[item] = true
 	}
 	return s
+}
+
+// camelToSnake converts a camelCase identifier to its snake_case equivalent.
+// For example: "contentType" → "content_type", "dbPath" → "db_path".
+func camelToSnake(s string) string {
+	return CamelToSnake(s)
+}
+
+// CamelToSnake converts a camelCase identifier to its snake_case equivalent.
+// For example: "contentType" → "content_type", "dbPath" → "db_path".
+func CamelToSnake(s string) string {
+	var b strings.Builder
+	for i, r := range s {
+		if i > 0 && unicode.IsUpper(r) {
+			b.WriteByte('_')
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
 }

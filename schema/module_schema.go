@@ -1016,7 +1016,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Category:    "pipeline",
 		Description: "Decodes base64-encoded content (raw or data-URI), validates MIME type and size, and returns structured metadata",
 		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context containing the encoded data at the path specified by input_from"}},
-		Outputs: []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Decoded content metadata: content_type, extension, size_bytes, data (base64), valid, reason (on failure)"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Decoded content metadata: content_type, extension, size_bytes, data (base64), valid, reason (on failure)"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "input_from", Label: "Input From", Type: FieldTypeString, Required: true, Description: "Dotted path to the encoded data in the pipeline context (e.g., steps.upload.file_data)", Placeholder: "steps.upload.file_data"},
 			{Key: "format", Label: "Format", Type: FieldTypeSelect, Options: []string{"data_uri", "raw_base64"}, DefaultValue: "data_uri", Description: "Encoding format: 'data_uri' expects a data:mime/type;base64,... string; 'raw_base64' expects plain base64"},
@@ -1027,7 +1027,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	})
 
 	r.Register(&ModuleSchema{
-    Type:        "step.s3_upload",
+		Type:        "step.s3_upload",
 		Label:       "S3 Upload",
 		Category:    "pipeline",
 		Description: "Uploads base64-encoded binary data from the pipeline context to AWS S3 or S3-compatible storage (MinIO, LocalStack). Returns the public URL, resolved object key, and bucket name.",
