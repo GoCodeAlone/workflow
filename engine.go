@@ -711,6 +711,14 @@ func (e *StdEngine) configurePipelines(pipelineCfg map[string]any) error {
 			Compensation: compSteps,
 		}
 
+		// Set RoutePattern from inline HTTP trigger path so that step.request_parse
+		// can extract path parameters via _route_pattern in the pipeline context.
+		if pipeCfg.Trigger.Type == "http" {
+			if path, _ := pipeCfg.Trigger.Config["path"].(string); path != "" {
+				pipeline.RoutePattern = path
+			}
+		}
+
 		adder.AddPipeline(pipelineName, pipeline)
 		// Register in the engine's pipeline registry so step.workflow_call can
 		// look up this pipeline at execution time.

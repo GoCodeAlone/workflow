@@ -112,6 +112,14 @@ func (p *Pipeline) Execute(ctx context.Context, triggerData map[string]any) (*Pi
 	if req := ctx.Value(HTTPRequestContextKey); req != nil {
 		md["_http_request"] = req
 	}
+	// Seed _route_pattern from RoutePattern if not already provided via Metadata
+	// (e.g. by CQRS handlers). This ensures step.request_parse can extract path
+	// parameters when a pipeline is executed via an inline HTTP trigger.
+	if p.RoutePattern != "" {
+		if _, exists := md["_route_pattern"]; !exists {
+			md["_route_pattern"] = p.RoutePattern
+		}
+	}
 	pc := NewPipelineContext(triggerData, md)
 
 	logger := p.Logger
