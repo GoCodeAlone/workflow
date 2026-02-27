@@ -27,9 +27,20 @@ type RegistryManifest struct {
 	License          string          `json:"license"`
 	MinEngineVersion string          `json:"minEngineVersion,omitempty"`
 	Repository       string          `json:"repository,omitempty"`
-	Keywords         []string        `json:"keywords,omitempty"`
-	Downloads        []PluginDownload `json:"downloads,omitempty"`
-	Assets           *PluginAssets   `json:"assets,omitempty"`
+	Keywords         []string             `json:"keywords,omitempty"`
+	Homepage         string               `json:"homepage,omitempty"`
+	Capabilities     *RegistryCapabilities `json:"capabilities,omitempty"`
+	Downloads        []PluginDownload     `json:"downloads,omitempty"`
+	Assets           *PluginAssets        `json:"assets,omitempty"`
+}
+
+// RegistryCapabilities describes what module/step/trigger types a plugin provides.
+type RegistryCapabilities struct {
+	ConfigProvider   bool     `json:"configProvider,omitempty"`
+	ModuleTypes      []string `json:"moduleTypes,omitempty"`
+	StepTypes        []string `json:"stepTypes,omitempty"`
+	TriggerTypes     []string `json:"triggerTypes,omitempty"`
+	WorkflowHandlers []string `json:"workflowHandlers,omitempty"`
 }
 
 // PluginDownload describes a platform-specific binary download for a plugin.

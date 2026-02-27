@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"testing"
 
+	engineplugin "github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/plugin/external"
 )
 
@@ -90,6 +91,10 @@ func TestPluginInstallE2E(t *testing.T) {
 		Type:        "external",
 		Tier:        "community",
 		License:     "MIT",
+		Capabilities: &RegistryCapabilities{
+			ModuleTypes: []string{"test.module"},
+			StepTypes:   []string{"step.test_action"},
+		},
 		Downloads: []PluginDownload{
 			{
 				OS:     runtime.GOOS,
@@ -167,7 +172,7 @@ func TestPluginInstallE2E(t *testing.T) {
 		t.Fatalf("writeInstalledManifest: %v", err)
 	}
 
-	// Verify plugin.json content.
+	// Verify plugin.json content — all fields should be populated.
 	raw, err := os.ReadFile(pluginJSONPath)
 	if err != nil {
 		t.Fatalf("read plugin.json: %v", err)
@@ -181,6 +186,21 @@ func TestPluginInstallE2E(t *testing.T) {
 	}
 	if pj.Version != "1.0.0" {
 		t.Errorf("plugin.json version: got %q, want %q", pj.Version, "1.0.0")
+	}
+	if pj.Author != "tester" {
+		t.Errorf("plugin.json author: got %q, want %q", pj.Author, "tester")
+	}
+	if pj.Description != "e2e test plugin" {
+		t.Errorf("plugin.json description: got %q, want %q", pj.Description, "e2e test plugin")
+	}
+	if pj.Type != "external" {
+		t.Errorf("plugin.json type: got %q, want %q", pj.Type, "external")
+	}
+	if len(pj.ModuleTypes) != 1 || pj.ModuleTypes[0] != "test.module" {
+		t.Errorf("plugin.json moduleTypes: got %v, want [test.module]", pj.ModuleTypes)
+	}
+	if len(pj.StepTypes) != 1 || pj.StepTypes[0] != "step.test_action" {
+		t.Errorf("plugin.json stepTypes: got %v, want [step.test_action]", pj.StepTypes)
 	}
 
 	// --- Step 7: ExternalPluginManager.DiscoverPlugins ---
@@ -318,6 +338,117 @@ func TestSafeJoin(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestInstalledManifestEngineValidation verifies that the plugin.json written by
+// writeInstalledManifest passes the engine's plugin.LoadManifest and Validate.
+func TestInstalledManifestEngineValidation(t *testing.T) {
+	rm := &RegistryManifest{
+		Name:        "test-plugin",
+		Version:     "1.0.0",
+		Author:      "tester",
+		Description: "test plugin for engine validation",
+		Type:        "external",
+		Tier:        "community",
+		License:     "MIT",
+		Capabilities: &RegistryCapabilities{
+			ModuleTypes: []string{"test.module"},
+			StepTypes:   []string{"step.test"},
+		},
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plugin.json")
+	if err := writeInstalledManifest(path, rm); err != nil {
+		t.Fatalf("writeInstalledManifest: %v", err)
+	}
+
+	// Load with engine manifest loader and validate.
+	manifest, err := engineplugin.LoadManifest(path)
+	if err != nil {
+		t.Fatalf("engine LoadManifest: %v", err)
+	}
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("engine Validate: %v", err)
+	}
+	if manifest.Author != "tester" {
+		t.Errorf("author: got %q, want %q", manifest.Author, "tester")
+	}
+	if manifest.Description != "test plugin for engine validation" {
+		t.Errorf("description mismatch")
+	}
+}
+
+// TestPluginInstallFlatTarball verifies that flat tarballs (no top-level directory)
+// like authz releases produce are handled correctly, including binary rename and
+// ExternalPluginManager discovery.
+func TestPluginInstallFlatTarball(t *testing.T) {
+	const pluginName = "authz"
+	binaryContent := []byte("#!/bin/sh\necho authz\n")
+
+	// Build a flat tarball (single binary, no top-level directory) like authz release produces.
+	binaryName := fmt.Sprintf("workflow-plugin-%s-%s-%s", pluginName, runtime.GOOS, runtime.GOARCH)
+	tarEntries := map[string][]byte{
+		binaryName: binaryContent,
+	}
+	tarball := buildTarGz(t, tarEntries, 0755)
+
+	pluginsDir := t.TempDir()
+	destDir := filepath.Join(pluginsDir, pluginName)
+	if err := os.MkdirAll(destDir, 0750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	if err := extractTarGz(tarball, destDir); err != nil {
+		t.Fatalf("extractTarGz: %v", err)
+	}
+
+	// Binary should be extracted with its original name.
+	extractedPath := filepath.Join(destDir, binaryName)
+	if _, err := os.Stat(extractedPath); err != nil {
+		t.Fatalf("expected binary at %s: %v", extractedPath, err)
+	}
+
+	// ensurePluginBinary should rename it to match the plugin name.
+	if err := ensurePluginBinary(destDir, pluginName); err != nil {
+		t.Fatalf("ensurePluginBinary: %v", err)
+	}
+
+	expectedPath := filepath.Join(destDir, pluginName)
+	content, err := os.ReadFile(expectedPath)
+	if err != nil {
+		t.Fatalf("read renamed binary: %v", err)
+	}
+	if !bytes.Equal(content, binaryContent) {
+		t.Errorf("binary content mismatch after rename")
+	}
+
+	// Write plugin.json and verify ExternalPluginManager can discover it.
+	rm := &RegistryManifest{
+		Name:        pluginName,
+		Version:     "0.1.0",
+		Author:      "GoCodeAlone",
+		Description: "RBAC authorization plugin using Casbin",
+		Type:        "external",
+		Tier:        "core",
+		License:     "MIT",
+		Capabilities: &RegistryCapabilities{
+			ModuleTypes: []string{"authz.casbin"},
+			StepTypes:   []string{"step.authz_check"},
+		},
+	}
+	if err := writeInstalledManifest(filepath.Join(destDir, "plugin.json"), rm); err != nil {
+		t.Fatalf("writeInstalledManifest: %v", err)
+	}
+
+	mgr := external.NewExternalPluginManager(pluginsDir, nil)
+	discovered, err := mgr.DiscoverPlugins()
+	if err != nil {
+		t.Fatalf("DiscoverPlugins: %v", err)
+	}
+	if len(discovered) != 1 || discovered[0] != pluginName {
+		t.Fatalf("expected [%q] discovered, got %v", pluginName, discovered)
 	}
 }
 
