@@ -1594,6 +1594,189 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		},
 	})
 
+	// ---- Additional Pipeline Steps ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.foreach",
+		Label:       "For Each",
+		Category:    "pipeline_steps",
+		Description: "Iterates over a collection and executes a sub-pipeline step for each item",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "items_from", Label: "Items From", Type: FieldTypeString, Required: true, Description: "Dotted path to the collection to iterate over", Placeholder: "steps.fetch.items"},
+			{Key: "step", Label: "Step Type", Type: FieldTypeString, Required: true, Description: "Step type to execute for each item"},
+			{Key: "step_config", Label: "Step Config", Type: FieldTypeJSON, Description: "Configuration for the sub-step"},
+			{Key: "output_key", Label: "Output Key", Type: FieldTypeString, Description: "Key to store the collected results in context", DefaultValue: "foreach_results"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.webhook_verify",
+		Label:       "Webhook Verify",
+		Category:    "pipeline_steps",
+		Description: "Verifies incoming webhook request signatures (supports HMAC-SHA1, HMAC-SHA256)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Label: "Provider", Type: FieldTypeSelect, Options: []string{"github", "stripe", "generic"}, Description: "Webhook provider (legacy; prefer scheme)"},
+			{Key: "scheme", Label: "Scheme", Type: FieldTypeSelect, Options: []string{"hmac-sha1", "hmac-sha256", "hmac-sha256-hex"}, Description: "HMAC signature scheme to use"},
+			{Key: "secret", Label: "Secret", Type: FieldTypeString, Sensitive: true, Description: "Webhook signing secret"},
+			{Key: "secret_from", Label: "Secret From", Type: FieldTypeString, Description: "Context key containing the secret at runtime"},
+			{Key: "signature_header", Label: "Signature Header", Type: FieldTypeString, Description: "HTTP header containing the signature", Placeholder: "X-Hub-Signature-256"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.cache_get",
+		Label:       "Cache Get",
+		Category:    "pipeline_steps",
+		Description: "Retrieves a value from the cache by key",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "key", Label: "Key", Type: FieldTypeString, Required: true, Description: "Cache key (supports template expressions)", Placeholder: "user:{{.user_id}}"},
+			{Key: "output_key", Label: "Output Key", Type: FieldTypeString, Description: "Context key for the retrieved value", DefaultValue: "cache_value"},
+			{Key: "cache", Label: "Cache Module", Type: FieldTypeString, Description: "Name of the cache module to use"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.cache_set",
+		Label:       "Cache Set",
+		Category:    "pipeline_steps",
+		Description: "Stores a value in the cache with optional TTL",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "key", Label: "Key", Type: FieldTypeString, Required: true, Description: "Cache key (supports template expressions)", Placeholder: "user:{{.user_id}}"},
+			{Key: "value_from", Label: "Value From", Type: FieldTypeString, Description: "Dotted path to the value to cache"},
+			{Key: "ttl", Label: "TTL", Type: FieldTypeDuration, Description: "Cache entry time-to-live", Placeholder: "5m"},
+			{Key: "cache", Label: "Cache Module", Type: FieldTypeString, Description: "Name of the cache module to use"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.cache_delete",
+		Label:       "Cache Delete",
+		Category:    "pipeline_steps",
+		Description: "Removes a value from the cache by key",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "key", Label: "Key", Type: FieldTypeString, Required: true, Description: "Cache key to delete (supports template expressions)", Placeholder: "user:{{.user_id}}"},
+			{Key: "cache", Label: "Cache Module", Type: FieldTypeString, Description: "Name of the cache module to use"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.event_publish",
+		Label:       "Event Publish",
+		Category:    "pipeline_steps",
+		Description: "Publishes an event to the event bus",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "event_type", Label: "Event Type", Type: FieldTypeString, Required: true, Description: "Event type identifier to publish", Placeholder: "user.created"},
+			{Key: "payload_from", Label: "Payload From", Type: FieldTypeString, Description: "Dotted path to the event payload in the pipeline context"},
+			{Key: "payload", Label: "Payload", Type: FieldTypeJSON, Description: "Static event payload (supports template expressions)"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.validate_path_param",
+		Label:       "Validate Path Param",
+		Category:    "pipeline_steps",
+		Description: "Validates and extracts a URL path parameter",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "param", Label: "Parameter Name", Type: FieldTypeString, Required: true, Description: "Path parameter name to extract", Placeholder: "id"},
+			{Key: "required", Label: "Required", Type: FieldTypeBool, DefaultValue: true, Description: "Whether the parameter is required"},
+			{Key: "output_key", Label: "Output Key", Type: FieldTypeString, Description: "Context key for the extracted value"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.validate_pagination",
+		Label:       "Validate Pagination",
+		Category:    "pipeline_steps",
+		Description: "Validates and normalizes pagination query parameters (page, page_size, limit, offset)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "default_page_size", Label: "Default Page Size", Type: FieldTypeNumber, DefaultValue: 20, Description: "Default number of items per page"},
+			{Key: "max_page_size", Label: "Max Page Size", Type: FieldTypeNumber, DefaultValue: 100, Description: "Maximum allowed page size"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.validate_request_body",
+		Label:       "Validate Request Body",
+		Category:    "pipeline_steps",
+		Description: "Parses and validates the HTTP request body against a schema",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "schema", Label: "JSON Schema", Type: FieldTypeJSON, Description: "JSON Schema to validate the request body against"},
+			{Key: "output_key", Label: "Output Key", Type: FieldTypeString, DefaultValue: "body", Description: "Context key to store the parsed body"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.dlq_send",
+		Label:       "DLQ Send",
+		Category:    "pipeline_steps",
+		Description: "Sends a failed message to the dead letter queue for later replay",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "queue", Label: "Queue Name", Type: FieldTypeString, Description: "DLQ queue name (defaults to pipeline name)"},
+			{Key: "reason_from", Label: "Reason From", Type: FieldTypeString, Description: "Context key containing the failure reason"},
+			{Key: "payload_from", Label: "Payload From", Type: FieldTypeString, Description: "Dotted path to the message payload"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.dlq_replay",
+		Label:       "DLQ Replay",
+		Category:    "pipeline_steps",
+		Description: "Replays messages from the dead letter queue",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "queue", Label: "Queue Name", Type: FieldTypeString, Description: "DLQ queue name to replay from"},
+			{Key: "limit", Label: "Limit", Type: FieldTypeNumber, DefaultValue: 10, Description: "Maximum number of messages to replay"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.retry_with_backoff",
+		Label:       "Retry With Backoff",
+		Category:    "pipeline_steps",
+		Description: "Wraps a sub-step with automatic retry logic using exponential backoff",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "step", Label: "Step Type", Type: FieldTypeString, Required: true, Description: "Step type to retry"},
+			{Key: "step_config", Label: "Step Config", Type: FieldTypeJSON, Description: "Configuration for the wrapped step"},
+			{Key: "max_attempts", Label: "Max Attempts", Type: FieldTypeNumber, DefaultValue: 3, Description: "Maximum number of retry attempts"},
+			{Key: "initial_delay", Label: "Initial Delay", Type: FieldTypeDuration, DefaultValue: "100ms", Description: "Initial delay before first retry"},
+			{Key: "max_delay", Label: "Max Delay", Type: FieldTypeDuration, DefaultValue: "30s", Description: "Maximum delay between retries"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.resilient_circuit_breaker",
+		Label:       "Resilient Circuit Breaker",
+		Category:    "pipeline_steps",
+		Description: "Wraps a sub-step with circuit breaker pattern to prevent cascading failures",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "step", Label: "Step Type", Type: FieldTypeString, Required: true, Description: "Step type to protect"},
+			{Key: "step_config", Label: "Step Config", Type: FieldTypeJSON, Description: "Configuration for the wrapped step"},
+			{Key: "threshold", Label: "Failure Threshold", Type: FieldTypeNumber, DefaultValue: 5, Description: "Number of consecutive failures to open the circuit"},
+			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, DefaultValue: "60s", Description: "Duration to keep the circuit open before trying again"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.ui_scaffold",
+		Label:       "UI Scaffold",
+		Category:    "pipeline_steps",
+		Description: "Generates UI component scaffolding from a prompt using AI assistance",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "prompt_from", Label: "Prompt From", Type: FieldTypeString, Description: "Context key containing the scaffold prompt"},
+			{Key: "output_key", Label: "Output Key", Type: FieldTypeString, DefaultValue: "scaffold_result", Description: "Context key for the generated scaffold"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.ui_scaffold_analyze",
+		Label:       "UI Scaffold Analyze",
+		Category:    "pipeline_steps",
+		Description: "Analyzes existing UI components to extract scaffold metadata",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "target_from", Label: "Target From", Type: FieldTypeString, Description: "Context key containing the component to analyze"},
+			{Key: "output_key", Label: "Output Key", Type: FieldTypeString, DefaultValue: "analysis_result", Description: "Context key for the analysis result"},
+		},
+	})
+
 	// ---- License ----
 
 	r.Register(&ModuleSchema{
