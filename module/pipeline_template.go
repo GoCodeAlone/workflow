@@ -129,9 +129,15 @@ func templateFuncMap() template.FuncMap {
 		},
 		// now returns the current UTC time formatted with the given Go time layout
 		// string or named constant (e.g. "RFC3339", "2006-01-02").
-		"now": func(layout string) string {
-			if l, ok := timeLayouts[layout]; ok {
-				layout = l
+		// When called with no argument it defaults to RFC3339.
+		"now": func(args ...string) string {
+			layout := time.RFC3339
+			if len(args) > 0 && args[0] != "" {
+				if l, ok := timeLayouts[args[0]]; ok {
+					layout = l
+				} else {
+					layout = args[0]
+				}
 			}
 			return time.Now().UTC().Format(layout)
 		},

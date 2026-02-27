@@ -235,6 +235,19 @@ func TestTemplateEngine_FuncUUID(t *testing.T) {
 	}
 }
 
+func TestTemplateEngine_FuncNowNoArgs(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+
+	result, err := te.Resolve(`{{ now }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "T") {
+		t.Errorf("expected RFC3339 timestamp from no-arg now, got %q", result)
+	}
+}
+
 func TestTemplateEngine_FuncNowRFC3339(t *testing.T) {
 	te := NewTemplateEngine()
 	pc := NewPipelineContext(nil, nil)
