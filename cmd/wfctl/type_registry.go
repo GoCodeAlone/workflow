@@ -598,7 +598,7 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.webhook_verify": {
 			Type:       "step.webhook_verify",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"secret", "header", "algorithm"},
+			ConfigKeys: []string{"provider", "scheme", "secret", "secret_from", "header", "signature_header", "url_reconstruction", "include_form_params", "error_status"},
 		},
 		"step.cache_get": {
 			Type:       "step.cache_get",
