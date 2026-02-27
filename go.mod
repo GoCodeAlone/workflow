@@ -7,7 +7,13 @@ require (
 	github.com/CrisisTextLine/modular v1.11.11
 	github.com/CrisisTextLine/modular/modules/auth v0.4.0
 	github.com/CrisisTextLine/modular/modules/cache v0.4.0
+	github.com/CrisisTextLine/modular/modules/chimux v1.4.0
 	github.com/CrisisTextLine/modular/modules/eventbus/v2 v2.0.0
+	github.com/CrisisTextLine/modular/modules/httpclient v0.5.0
+	github.com/CrisisTextLine/modular/modules/httpserver v0.4.0
+	github.com/CrisisTextLine/modular/modules/jsonschema v1.4.0
+	github.com/CrisisTextLine/modular/modules/letsencrypt v0.4.0
+	github.com/CrisisTextLine/modular/modules/logmasker v0.3.0
 	github.com/CrisisTextLine/modular/modules/reverseproxy/v2 v2.2.0
 	github.com/CrisisTextLine/modular/modules/scheduler v0.4.0
 	github.com/GoCodeAlone/go-plugin v0.0.0-20260220090904-b4c35f0e4271
@@ -81,12 +87,6 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resourcegraph/armresourcegraph v0.9.0 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.4.2 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
-	github.com/CrisisTextLine/modular/modules/chimux v1.4.0 // indirect
-	github.com/CrisisTextLine/modular/modules/httpclient v0.5.0 // indirect
-	github.com/CrisisTextLine/modular/modules/httpserver v0.4.0 // indirect
-	github.com/CrisisTextLine/modular/modules/jsonschema v1.4.0 // indirect
-	github.com/CrisisTextLine/modular/modules/letsencrypt v0.4.0 // indirect
-	github.com/CrisisTextLine/modular/modules/logmasker v0.3.0 // indirect
 	github.com/DataDog/datadog-go/v5 v5.4.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.30.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.55.0 // indirect
