@@ -32,7 +32,11 @@ func NewForEachStepFactory(registryFn func() *StepRegistry, app modular.Applicat
 			return nil, fmt.Errorf("foreach step %q: 'collection' is required", name)
 		}
 
-		itemKey, _ := config["item_key"].(string)
+		// item_var is the canonical name; item_key is kept for backward compatibility.
+		itemKey, _ := config["item_var"].(string)
+		if itemKey == "" {
+			itemKey, _ = config["item_key"].(string)
+		}
 		if itemKey == "" {
 			itemKey = "item"
 		}
@@ -42,38 +46,50 @@ func NewForEachStepFactory(registryFn func() *StepRegistry, app modular.Applicat
 			indexKey = "index"
 		}
 
-		// Build sub-steps from inline config
-		stepsRaw, _ := config["steps"].([]any)
-		subSteps := make([]PipelineStep, 0, len(stepsRaw))
-		for i, raw := range stepsRaw {
-			stepCfg, ok := raw.(map[string]any)
-			if !ok {
-				return nil, fmt.Errorf("foreach step %q: steps[%d] must be a map", name, i)
-			}
+		// Build sub-steps: support a single "step" key or a "steps" list.
+		var subSteps []PipelineStep
 
-			stepType, _ := stepCfg["type"].(string)
-			if stepType == "" {
-				return nil, fmt.Errorf("foreach step %q: steps[%d] missing 'type'", name, i)
-			}
-
-			stepName, _ := stepCfg["name"].(string)
-			if stepName == "" {
-				stepName = fmt.Sprintf("%s-sub-%d", name, i)
-			}
-
-			// Build the step config without meta fields
-			subCfg := make(map[string]any)
-			for k, v := range stepCfg {
-				if k != "type" && k != "name" {
-					subCfg[k] = v
-				}
-			}
-
-			step, err := registry.Create(stepType, stepName, subCfg, app)
+		if singleRaw, ok := config["step"].(map[string]any); ok {
+			// Single step definition
+			step, err := foreachBuildSubStep(name, "step", singleRaw, registry, app)
 			if err != nil {
-				return nil, fmt.Errorf("foreach step %q: failed to build sub-step %d (%s): %w", name, i, stepType, err)
+				return nil, err
 			}
-			subSteps = append(subSteps, step)
+			subSteps = []PipelineStep{step}
+		} else {
+			// List of step definitions
+			stepsRaw, _ := config["steps"].([]any)
+			subSteps = make([]PipelineStep, 0, len(stepsRaw))
+			for i, raw := range stepsRaw {
+				stepCfg, ok := raw.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("foreach step %q: steps[%d] must be a map", name, i)
+				}
+
+				stepType, _ := stepCfg["type"].(string)
+				if stepType == "" {
+					return nil, fmt.Errorf("foreach step %q: steps[%d] missing 'type'", name, i)
+				}
+
+				stepName, _ := stepCfg["name"].(string)
+				if stepName == "" {
+					stepName = fmt.Sprintf("%s-sub-%d", name, i)
+				}
+
+				// Build the step config without meta fields
+				subCfg := make(map[string]any)
+				for k, v := range stepCfg {
+					if k != "type" && k != "name" {
+						subCfg[k] = v
+					}
+				}
+
+				step, err := registry.Create(stepType, stepName, subCfg, app)
+				if err != nil {
+					return nil, fmt.Errorf("foreach step %q: failed to build sub-step %d (%s): %w", name, i, stepType, err)
+				}
+				subSteps = append(subSteps, step)
+			}
 		}
 
 		return &ForEachStep{
@@ -85,6 +101,32 @@ func NewForEachStepFactory(registryFn func() *StepRegistry, app modular.Applicat
 			tmpl:       NewTemplateEngine(),
 		}, nil
 	}
+}
+
+// foreachBuildSubStep builds a single sub-step from a config map.
+func foreachBuildSubStep(parentName, field string, cfg map[string]any, registry *StepRegistry, app modular.Application) (PipelineStep, error) {
+	stepType, _ := cfg["type"].(string)
+	if stepType == "" {
+		return nil, fmt.Errorf("foreach step %q: '%s' config missing 'type'", parentName, field)
+	}
+
+	stepName, _ := cfg["name"].(string)
+	if stepName == "" {
+		stepName = fmt.Sprintf("%s-%s", parentName, field)
+	}
+
+	subCfg := make(map[string]any, len(cfg))
+	for k, v := range cfg {
+		if k != "type" && k != "name" {
+			subCfg[k] = v
+		}
+	}
+
+	step, err := registry.Create(stepType, stepName, subCfg, app)
+	if err != nil {
+		return nil, fmt.Errorf("foreach step %q: failed to build '%s' sub-step (%s): %w", parentName, field, stepType, err)
+	}
+	return step, nil
 }
 
 // Name returns the step name.
@@ -177,11 +219,16 @@ func (s *ForEachStep) buildChildContext(parent *PipelineContext, item any, index
 	childMeta := make(map[string]any)
 	maps.Copy(childMeta, parent.Metadata)
 
-	// Build current: start with parent's current, inject item and index
+	// Build current: start with parent's current, inject item and index.
+	// Also inject a "foreach" map with "index" so templates can use {{.foreach.index}}.
 	childCurrent := make(map[string]any)
 	maps.Copy(childCurrent, parent.Current)
 	childCurrent[s.itemKey] = item
 	childCurrent[s.indexKey] = index
+	childCurrent["foreach"] = map[string]any{
+		"index":   index,
+		s.itemKey: item,
+	}
 
 	// Copy step outputs
 	childOutputs := make(map[string]map[string]any)
