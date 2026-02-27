@@ -1,4 +1,4 @@
-// Command mcp starts the workflow MCP (Model Context Protocol) server.
+// Command workflow-mcp-server starts the workflow MCP (Model Context Protocol) server.
 //
 // The server runs over stdio by default, making it compatible with any
 // MCP-capable AI client. It exposes workflow engine tools (validate,

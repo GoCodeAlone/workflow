@@ -17,7 +17,7 @@ build-go:
 
 # Build MCP server binary
 build-mcp:
-	go build -o workflow-mcp-server ./cmd/mcp
+	go build -o workflow-mcp-server ./cmd/workflow-mcp-server
 
 # Run all tests with race detection
 test:
