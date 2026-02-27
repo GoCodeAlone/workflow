@@ -11,7 +11,7 @@ import (
 )
 
 // AuthValidateStep validates a Bearer token against a registered AuthProvider
-// module and outputs the parsed JWT claims into the pipeline context.
+// module and outputs the claims returned by the provider into the pipeline context.
 type AuthValidateStep struct {
 	name         string
 	authModule   string // service name of the AuthProvider module
@@ -30,7 +30,7 @@ func NewAuthValidateStepFactory() StepFactory {
 
 		tokenSource, _ := config["token_source"].(string)
 		if tokenSource == "" {
-			tokenSource = "steps.parse.headers.Authorization" //nolint:gosec // G101: default dot-path, not a credential
+			return nil, fmt.Errorf("auth_validate step %q: 'token_source' is required", name)
 		}
 
 		subjectField, _ := config["subject_field"].(string)
@@ -51,8 +51,12 @@ func NewAuthValidateStepFactory() StepFactory {
 // Name returns the step name.
 func (s *AuthValidateStep) Name() string { return s.name }
 
-// Execute validates the Bearer token and outputs JWT claims.
+// Execute validates the Bearer token and outputs claims from the AuthProvider.
 func (s *AuthValidateStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+	if s.app == nil {
+		return nil, fmt.Errorf("auth_validate step %q: no application context", s.name)
+	}
+
 	// 1. Extract the token value from the pipeline context using the configured dot-path.
 	rawToken := resolveBodyFrom(s.tokenSource, pc)
 	tokenStr, _ := rawToken.(string)

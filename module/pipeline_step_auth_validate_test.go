@@ -45,7 +45,8 @@ func TestAuthValidateStep_SuccessfulAuth(t *testing.T) {
 	app := newTestAuthApp("m2m-auth", provider)
 
 	step, err := factory("auth", map[string]any{
-		"auth_module": "m2m-auth",
+		"auth_module":  "m2m-auth",
+		"token_source": "steps.parse.headers.Authorization",
 	}, app)
 	if err != nil {
 		t.Fatalf("factory error: %v", err)
@@ -90,6 +91,7 @@ func TestAuthValidateStep_CustomSubjectField(t *testing.T) {
 
 	step, err := factory("auth", map[string]any{
 		"auth_module":   "auth",
+		"token_source":  "steps.parse.headers.Authorization",
 		"subject_field": "service_id",
 	}, app)
 	if err != nil {
@@ -149,7 +151,8 @@ func TestAuthValidateStep_MissingToken(t *testing.T) {
 	app := newTestAuthApp("auth", &testAuthProvider{})
 
 	step, err := factory("auth", map[string]any{
-		"auth_module": "auth",
+		"auth_module":  "auth",
+		"token_source": "steps.parse.headers.Authorization",
 	}, app)
 	if err != nil {
 		t.Fatalf("factory error: %v", err)
@@ -175,7 +178,8 @@ func TestAuthValidateStep_MalformedHeader(t *testing.T) {
 	app := newTestAuthApp("auth", &testAuthProvider{})
 
 	step, err := factory("auth", map[string]any{
-		"auth_module": "auth",
+		"auth_module":  "auth",
+		"token_source": "steps.parse.headers.Authorization",
 	}, app)
 	if err != nil {
 		t.Fatalf("factory error: %v", err)
@@ -206,7 +210,8 @@ func TestAuthValidateStep_InvalidToken(t *testing.T) {
 	app := newTestAuthApp("auth", provider)
 
 	step, err := factory("auth", map[string]any{
-		"auth_module": "auth",
+		"auth_module":  "auth",
+		"token_source": "steps.parse.headers.Authorization",
 	}, app)
 	if err != nil {
 		t.Fatalf("factory error: %v", err)
@@ -237,7 +242,8 @@ func TestAuthValidateStep_AuthError(t *testing.T) {
 	app := newTestAuthApp("auth", provider)
 
 	step, err := factory("auth", map[string]any{
-		"auth_module": "auth",
+		"auth_module":  "auth",
+		"token_source": "steps.parse.headers.Authorization",
 	}, app)
 	if err != nil {
 		t.Fatalf("factory error: %v", err)
@@ -262,7 +268,8 @@ func TestAuthValidateStep_WritesHTTPResponse(t *testing.T) {
 	app := newTestAuthApp("auth", &testAuthProvider{})
 
 	step, err := factory("auth", map[string]any{
-		"auth_module": "auth",
+		"auth_module":  "auth",
+		"token_source": "steps.parse.headers.Authorization",
 	}, app)
 	if err != nil {
 		t.Fatalf("factory error: %v", err)
@@ -312,7 +319,8 @@ func TestAuthValidateStep_Name(t *testing.T) {
 	app := newTestAuthApp("auth", &testAuthProvider{})
 
 	step, err := factory("my-auth-step", map[string]any{
-		"auth_module": "auth",
+		"auth_module":  "auth",
+		"token_source": "steps.parse.headers.Authorization",
 	}, app)
 	if err != nil {
 		t.Fatalf("factory error: %v", err)
@@ -322,12 +330,50 @@ func TestAuthValidateStep_Name(t *testing.T) {
 	}
 }
 
+func TestAuthValidateStep_FactoryRequiresTokenSource(t *testing.T) {
+	factory := NewAuthValidateStepFactory()
+
+	_, err := factory("auth", map[string]any{"auth_module": "auth"}, nil)
+	if err == nil {
+		t.Fatal("expected error for missing token_source")
+	}
+	if !strings.Contains(err.Error(), "'token_source' is required") {
+		t.Errorf("expected token_source error, got: %v", err)
+	}
+}
+
+func TestAuthValidateStep_NilApp(t *testing.T) {
+	factory := NewAuthValidateStepFactory()
+
+	step, err := factory("auth", map[string]any{
+		"auth_module":  "auth",
+		"token_source": "steps.parse.headers.Authorization",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("parse", map[string]any{
+		"headers": map[string]any{"Authorization": "Bearer some-token"},
+	})
+
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error when app is nil")
+	}
+	if !strings.Contains(err.Error(), "no application context") {
+		t.Errorf("expected 'no application context' error, got: %v", err)
+	}
+}
+
 func TestAuthValidateStep_EmptyBearerToken(t *testing.T) {
 	factory := NewAuthValidateStepFactory()
 	app := newTestAuthApp("auth", &testAuthProvider{})
 
 	step, err := factory("auth", map[string]any{
-		"auth_module": "auth",
+		"auth_module":  "auth",
+		"token_source": "steps.parse.headers.Authorization",
 	}, app)
 	if err != nil {
 		t.Fatalf("factory error: %v", err)
