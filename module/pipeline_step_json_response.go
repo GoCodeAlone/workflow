@@ -118,16 +118,56 @@ func (s *JSONResponseStep) resolveResponseBody(pc *PipelineContext) any {
 		return resolveBodyFrom(s.bodyFrom, pc)
 	}
 	if s.body != nil {
-		resolved, err := s.tmpl.ResolveMap(s.body, pc)
-		if err != nil {
-			return s.body // fallback to unresolved
+		result := make(map[string]any, len(s.body))
+		for k, v := range s.body {
+			resolved, err := s.resolveBodyValue(v, pc)
+			if err != nil {
+				return s.body // fallback to unresolved
+			}
+			result[k] = resolved
 		}
-		return resolved
+		return result
 	}
 	if s.bodyRaw != nil {
 		return s.bodyRaw
 	}
 	return nil
+}
+
+// resolveBodyValue resolves a single body value, supporting _from references
+// that inject raw step output values, nested maps, slices, and template strings.
+func (s *JSONResponseStep) resolveBodyValue(v any, pc *PipelineContext) (any, error) {
+	switch val := v.(type) {
+	case map[string]any:
+		// Check for _from reference: {"_from": "steps.fetch.rows"}
+		if from, ok := val["_from"].(string); ok && len(val) == 1 {
+			return resolveBodyFrom(from, pc), nil
+		}
+		// Recurse into nested map
+		result := make(map[string]any, len(val))
+		for k, item := range val {
+			resolved, err := s.resolveBodyValue(item, pc)
+			if err != nil {
+				return nil, fmt.Errorf("field %q: %w", k, err)
+			}
+			result[k] = resolved
+		}
+		return result, nil
+	case []any:
+		result := make([]any, len(val))
+		for i, item := range val {
+			resolved, err := s.resolveBodyValue(item, pc)
+			if err != nil {
+				return nil, err
+			}
+			result[i] = resolved
+		}
+		return result, nil
+	case string:
+		return s.tmpl.Resolve(val, pc)
+	default:
+		return v, nil
+	}
 }
 
 // resolveBodyFrom resolves a dotted path like "steps.get-company.row" from the

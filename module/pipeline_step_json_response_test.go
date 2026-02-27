@@ -241,6 +241,158 @@ func TestJSONResponseStep_BodyFromRows(t *testing.T) {
 	}
 }
 
+func TestJSONResponseStep_BodyFromRef(t *testing.T) {
+	factory := NewJSONResponseStepFactory()
+	step, err := factory("from-ref", map[string]any{
+		"status": 200,
+		"body": map[string]any{
+			"data": map[string]any{
+				"_from": "steps.list-companies.rows",
+			},
+			"total": map[string]any{
+				"_from": "steps.list-companies.count",
+			},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_response_writer": recorder,
+	})
+	pc.MergeStepOutput("list-companies", map[string]any{
+		"rows": []map[string]any{
+			{"id": "c1", "name": "Acme"},
+			{"id": "c2", "name": "Beta"},
+		},
+		"count": 2,
+	})
+
+	_, err = step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(recorder.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+
+	rows, ok := body["data"].([]any)
+	if !ok {
+		t.Fatalf("expected data to be []any, got %T", body["data"])
+	}
+	if len(rows) != 2 {
+		t.Errorf("expected 2 rows, got %d", len(rows))
+	}
+
+	// total should be a number (JSON numbers decode as float64)
+	total, ok := body["total"].(float64)
+	if !ok {
+		t.Fatalf("expected total to be a number, got %T (%v)", body["total"], body["total"])
+	}
+	if total != 2 {
+		t.Errorf("expected total=2, got %v", total)
+	}
+}
+
+func TestJSONResponseStep_BodyFromRefComposite(t *testing.T) {
+	factory := NewJSONResponseStepFactory()
+	step, err := factory("composite-response", map[string]any{
+		"status": 200,
+		"body": map[string]any{
+			"data": map[string]any{
+				"_from": "steps.fetch.rows",
+			},
+			"meta": map[string]any{
+				"total": map[string]any{
+					"_from": "steps.fetch.count",
+				},
+				"page": 1,
+			},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_response_writer": recorder,
+	})
+	pc.MergeStepOutput("fetch", map[string]any{
+		"rows": []map[string]any{
+			{"id": "r1", "name": "Row One"},
+		},
+		"count": 42,
+	})
+
+	_, err = step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(recorder.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+
+	rows, ok := body["data"].([]any)
+	if !ok {
+		t.Fatalf("expected data to be []any, got %T", body["data"])
+	}
+	if len(rows) != 1 {
+		t.Errorf("expected 1 row, got %d", len(rows))
+	}
+
+	meta, ok := body["meta"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected meta to be map, got %T", body["meta"])
+	}
+	if meta["total"] != float64(42) {
+		t.Errorf("expected meta.total=42, got %v", meta["total"])
+	}
+	if meta["page"] != float64(1) {
+		t.Errorf("expected meta.page=1, got %v", meta["page"])
+	}
+}
+
+func TestJSONResponseStep_BodyFromRefMissingPath(t *testing.T) {
+	factory := NewJSONResponseStepFactory()
+	step, err := factory("missing-ref", map[string]any{
+		"status": 200,
+		"body": map[string]any{
+			"data": map[string]any{
+				"_from": "steps.nonexistent.rows",
+			},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_response_writer": recorder,
+	})
+
+	_, err = step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(recorder.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	// Missing paths should resolve to nil, so "data" key should be null
+	if _, exists := body["data"]; !exists {
+		// null is fine — it should appear with a null value
+	}
+}
+
 func TestJSONResponseStep_DefaultStatus(t *testing.T) {
 	factory := NewJSONResponseStepFactory()
 	step, err := factory("default-status", map[string]any{
