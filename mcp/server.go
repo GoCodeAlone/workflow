@@ -90,6 +90,7 @@ func NewServer(pluginDir string, opts ...ServerOption) *Server {
 	}
 
 	s.registerTools()
+	s.registerNewTools()
 	s.registerResources()
 
 	return s
