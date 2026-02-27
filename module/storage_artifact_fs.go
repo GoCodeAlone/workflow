@@ -98,11 +98,11 @@ func (m *ArtifactFSModule) Upload(_ context.Context, key string, reader io.Reade
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil { //nolint:gosec // G703: key sanitized by artifactPath (TrimPrefix + filepath.Join)
 		return fmt.Errorf("artifact store %q: Upload %q: failed to create directory: %w", m.name, key, err)
 	}
 
-	f, err := os.Create(path)
+	f, err := os.Create(path) //nolint:gosec // G703: key sanitized by artifactPath
 	if err != nil {
 		return fmt.Errorf("artifact store %q: Upload %q: failed to create file: %w", m.name, key, err)
 	}
@@ -117,7 +117,7 @@ func (m *ArtifactFSModule) Upload(_ context.Context, key string, reader io.Reade
 	}
 
 	if m.cfg.MaxSize > 0 && size > m.cfg.MaxSize {
-		_ = os.Remove(path)
+		_ = os.Remove(path) //nolint:gosec // G703: key sanitized by artifactPath
 		return fmt.Errorf("artifact store %q: Upload %q: size %d exceeds limit %d", m.name, key, size, m.cfg.MaxSize)
 	}
 
