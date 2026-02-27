@@ -593,7 +593,7 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.foreach": {
 			Type:       "step.foreach",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"collection", "steps"},
+			ConfigKeys: []string{"collection", "item_var", "item_key", "step", "steps", "index_key"},
 		},
 		"step.webhook_verify": {
 			Type:       "step.webhook_verify",

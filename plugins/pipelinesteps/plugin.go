@@ -124,7 +124,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		// including types registered by other plugins loaded after this one.
 		"step.foreach": wrapStepFactory(module.NewForEachStepFactory(func() *module.StepRegistry {
 			return p.concreteStepRegistry
-		}, nil)),
+		})),
 		"step.webhook_verify": wrapStepFactory(module.NewWebhookVerifyStepFactory()),
 		"step.cache_get":           wrapStepFactory(module.NewCacheGetStepFactory()),
 		"step.cache_set":           wrapStepFactory(module.NewCacheSetStepFactory()),

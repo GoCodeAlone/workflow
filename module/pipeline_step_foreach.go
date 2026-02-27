@@ -23,16 +23,18 @@ type ForEachStep struct {
 // build sub-steps. Passing a function (rather than the registry directly) allows
 // the factory to be registered before the registry is fully populated, enabling
 // sub-steps to themselves be any registered step type.
-func NewForEachStepFactory(registryFn func() *StepRegistry, app modular.Application) StepFactory {
-	return func(name string, config map[string]any, _ modular.Application) (PipelineStep, error) {
-		registry := registryFn()
-
+func NewForEachStepFactory(registryFn func() *StepRegistry) StepFactory {
+	return func(name string, config map[string]any, app modular.Application) (PipelineStep, error) {
 		collection, _ := config["collection"].(string)
 		if collection == "" {
 			return nil, fmt.Errorf("foreach step %q: 'collection' is required", name)
 		}
 
-		itemKey, _ := config["item_key"].(string)
+		// item_var is the canonical name; item_key is kept for backward compatibility.
+		itemKey, _ := config["item_var"].(string)
+		if itemKey == "" {
+			itemKey, _ = config["item_key"].(string)
+		}
 		if itemKey == "" {
 			itemKey = "item"
 		}
@@ -42,38 +44,49 @@ func NewForEachStepFactory(registryFn func() *StepRegistry, app modular.Applicat
 			indexKey = "index"
 		}
 
-		// Build sub-steps from inline config
-		stepsRaw, _ := config["steps"].([]any)
-		subSteps := make([]PipelineStep, 0, len(stepsRaw))
-		for i, raw := range stepsRaw {
-			stepCfg, ok := raw.(map[string]any)
+		// Detect presence of each key before type-asserting so we can give clear errors.
+		_, hasSingleStep := config["step"]
+		_, hasStepsList := config["steps"]
+
+		if hasSingleStep && hasStepsList {
+			return nil, fmt.Errorf("foreach step %q: 'step' and 'steps' are mutually exclusive", name)
+		}
+
+		// Build sub-steps: support a single "step" key or a "steps" list.
+		var subSteps []PipelineStep
+
+		switch {
+		case hasSingleStep:
+			singleRaw, ok := config["step"].(map[string]any)
 			if !ok {
-				return nil, fmt.Errorf("foreach step %q: steps[%d] must be a map", name, i)
+				return nil, fmt.Errorf("foreach step %q: 'step' must be a map", name)
 			}
-
-			stepType, _ := stepCfg["type"].(string)
-			if stepType == "" {
-				return nil, fmt.Errorf("foreach step %q: steps[%d] missing 'type'", name, i)
-			}
-
-			stepName, _ := stepCfg["name"].(string)
-			if stepName == "" {
-				stepName = fmt.Sprintf("%s-sub-%d", name, i)
-			}
-
-			// Build the step config without meta fields
-			subCfg := make(map[string]any)
-			for k, v := range stepCfg {
-				if k != "type" && k != "name" {
-					subCfg[k] = v
-				}
-			}
-
-			step, err := registry.Create(stepType, stepName, subCfg, app)
+			step, err := buildSubStep(name, "step", singleRaw, registryFn, app)
 			if err != nil {
-				return nil, fmt.Errorf("foreach step %q: failed to build sub-step %d (%s): %w", name, i, stepType, err)
+				return nil, fmt.Errorf("foreach step %q: %w", name, err)
 			}
-			subSteps = append(subSteps, step)
+			subSteps = []PipelineStep{step}
+
+		case hasStepsList:
+			stepsRaw, ok := config["steps"].([]any)
+			if !ok {
+				return nil, fmt.Errorf("foreach step %q: 'steps' must be a list", name)
+			}
+			subSteps = make([]PipelineStep, 0, len(stepsRaw))
+			for i, raw := range stepsRaw {
+				stepCfg, ok := raw.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("foreach step %q: steps[%d] must be a map", name, i)
+				}
+				step, err := buildSubStep(name, fmt.Sprintf("sub-%d", i), stepCfg, registryFn, app)
+				if err != nil {
+					return nil, fmt.Errorf("foreach step %q: %w", name, err)
+				}
+				subSteps = append(subSteps, step)
+			}
+
+		default:
+			subSteps = []PipelineStep{}
 		}
 
 		return &ForEachStep{
@@ -177,11 +190,23 @@ func (s *ForEachStep) buildChildContext(parent *PipelineContext, item any, index
 	childMeta := make(map[string]any)
 	maps.Copy(childMeta, parent.Metadata)
 
-	// Build current: start with parent's current, inject item and index
+	// Build current: start with parent's current, inject item and index.
 	childCurrent := make(map[string]any)
 	maps.Copy(childCurrent, parent.Current)
 	childCurrent[s.itemKey] = item
 	childCurrent[s.indexKey] = index
+
+	// Inject a "foreach" map so templates can use {{.foreach.index}}.
+	// Only set it when it won't conflict with the user-chosen item/index keys
+	// or an existing "foreach" key in the parent context.
+	if s.itemKey != "foreach" && s.indexKey != "foreach" {
+		if _, exists := childCurrent["foreach"]; !exists {
+			childCurrent["foreach"] = map[string]any{
+				"index":   index,
+				s.itemKey: item,
+			}
+		}
+	}
 
 	// Copy step outputs
 	childOutputs := make(map[string]map[string]any)
