@@ -1,6 +1,6 @@
 // Package pipelinesteps provides a plugin that registers generic pipeline step
 // types: validate, transform, conditional, set, log, delegate, jq, publish,
-// http_call, request_parse, db_query, db_exec, json_response,
+// http_call, request_parse, db_query, db_exec, json_response, raw_response,
 // validate_path_param, validate_pagination, validate_request_body,
 // foreach, webhook_verify, ui_scaffold, ui_scaffold_analyze,
 // dlq_send, dlq_replay, retry_with_backoff, circuit_breaker (wrapping).
@@ -65,7 +65,7 @@ func New() *Plugin {
 					"step.db_query",
 					"step.db_exec",
 					"step.json_response",
-				"step.raw_response",
+					"step.raw_response",
 					"step.workflow_call",
 					"step.validate_path_param",
 					"step.validate_pagination",
@@ -112,7 +112,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.delegate":              wrapStepFactory(module.NewDelegateStepFactory()),
 		"step.jq":                    wrapStepFactory(module.NewJQStepFactory()),
 		"step.publish":               wrapStepFactory(module.NewPublishStepFactory()),
-		"step.event_publish":          wrapStepFactory(module.NewEventPublishStepFactory()),
+		"step.event_publish":         wrapStepFactory(module.NewEventPublishStepFactory()),
 		"step.http_call":             wrapStepFactory(module.NewHTTPCallStepFactory()),
 		"step.request_parse":         wrapStepFactory(module.NewRequestParseStepFactory()),
 		"step.db_query":              wrapStepFactory(module.NewDBQueryStepFactory()),
@@ -127,7 +127,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.foreach": wrapStepFactory(module.NewForEachStepFactory(func() *module.StepRegistry {
 			return p.concreteStepRegistry
 		})),
-		"step.webhook_verify": wrapStepFactory(module.NewWebhookVerifyStepFactory()),
+		"step.webhook_verify":      wrapStepFactory(module.NewWebhookVerifyStepFactory()),
 		"step.cache_get":           wrapStepFactory(module.NewCacheGetStepFactory()),
 		"step.cache_set":           wrapStepFactory(module.NewCacheSetStepFactory()),
 		"step.cache_delete":        wrapStepFactory(module.NewCacheDeleteStepFactory()),
