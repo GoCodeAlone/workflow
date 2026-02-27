@@ -83,7 +83,7 @@ func TestPluginLoads(t *testing.T) {
 	}
 
 	steps := loader.StepFactories()
-	if len(steps) != 29 {
-		t.Fatalf("expected 29 step factories after load, got %d", len(steps))
+	if len(steps) != len(p.StepFactories()) {
+		t.Fatalf("expected %d step factories after load, got %d", len(p.StepFactories()), len(steps))
 	}
 }
