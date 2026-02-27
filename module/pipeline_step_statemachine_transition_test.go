@@ -167,9 +167,9 @@ func TestStateMachineTransitionStep_InvalidTransition_FailOnErrorFalse(t *testin
 	factory := NewStateMachineTransitionStepFactory()
 	// "reject" is valid, but "approve" from "approved" is not — trigger approve twice
 	step, err := factory("double-approve", map[string]any{
-		"statemachine": "order-sm",
-		"entity_id":    "order-1",
-		"event":        "approve",
+		"statemachine":  "order-sm",
+		"entity_id":     "order-1",
+		"event":         "approve",
 		"fail_on_error": false,
 	}, app)
 	if err != nil {
@@ -370,9 +370,9 @@ func TestStateMachineTransitionStep_MockTrigger_Error_NoFail(t *testing.T) {
 
 	factory := NewStateMachineTransitionStepFactory()
 	step, err := factory("mock-fail", map[string]any{
-		"statemachine": "order-sm",
-		"entity_id":    "order-1",
-		"event":        "approve",
+		"statemachine":  "order-sm",
+		"entity_id":     "order-1",
+		"event":         "approve",
 		"fail_on_error": false,
 	}, app)
 	if err != nil {

@@ -171,7 +171,7 @@ func (b *route53Backend) applyDNS(m *PlatformDNS) (*DNSState, error) {
 			Name:            aws.String(zone.Name),
 			CallerReference: aws.String(fmt.Sprintf("workflow-%s", zone.Name)),
 			HostedZoneConfig: &r53types.HostedZoneConfig{
-				Comment: aws.String(zone.Comment),
+				Comment:     aws.String(zone.Comment),
 				PrivateZone: zone.Private,
 			},
 		})

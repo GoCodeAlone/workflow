@@ -16,7 +16,7 @@ func init() {
 // azureStaticResolver resolves Azure credentials from static config fields.
 type azureStaticResolver struct{}
 
-func (r *azureStaticResolver) Provider() string      { return "azure" }
+func (r *azureStaticResolver) Provider() string       { return "azure" }
 func (r *azureStaticResolver) CredentialType() string { return "static" }
 
 func (r *azureStaticResolver) Resolve(m *CloudAccount) error {
@@ -36,7 +36,7 @@ func (r *azureStaticResolver) Resolve(m *CloudAccount) error {
 // azureEnvResolver resolves Azure credentials from environment variables.
 type azureEnvResolver struct{}
 
-func (r *azureEnvResolver) Provider() string      { return "azure" }
+func (r *azureEnvResolver) Provider() string       { return "azure" }
 func (r *azureEnvResolver) CredentialType() string { return "env" }
 
 func (r *azureEnvResolver) Resolve(m *CloudAccount) error {
@@ -52,7 +52,7 @@ func (r *azureEnvResolver) Resolve(m *CloudAccount) error {
 // azureClientCredentialsResolver resolves Azure service principal client credentials.
 type azureClientCredentialsResolver struct{}
 
-func (r *azureClientCredentialsResolver) Provider() string      { return "azure" }
+func (r *azureClientCredentialsResolver) Provider() string       { return "azure" }
 func (r *azureClientCredentialsResolver) CredentialType() string { return "client_credentials" }
 
 func (r *azureClientCredentialsResolver) Resolve(m *CloudAccount) error {
@@ -74,7 +74,7 @@ func (r *azureClientCredentialsResolver) Resolve(m *CloudAccount) error {
 // Production: use github.com/Azure/azure-sdk-for-go/sdk/azidentity ManagedIdentityCredential.
 type azureManagedIdentityResolver struct{}
 
-func (r *azureManagedIdentityResolver) Provider() string      { return "azure" }
+func (r *azureManagedIdentityResolver) Provider() string       { return "azure" }
 func (r *azureManagedIdentityResolver) CredentialType() string { return "managed_identity" }
 
 func (r *azureManagedIdentityResolver) Resolve(m *CloudAccount) error {
@@ -95,7 +95,7 @@ func (r *azureManagedIdentityResolver) Resolve(m *CloudAccount) error {
 // Production: use github.com/Azure/azure-sdk-for-go/sdk/azidentity AzureCLICredential.
 type azureCLIResolver struct{}
 
-func (r *azureCLIResolver) Provider() string      { return "azure" }
+func (r *azureCLIResolver) Provider() string       { return "azure" }
 func (r *azureCLIResolver) CredentialType() string { return "cli" }
 
 func (r *azureCLIResolver) Resolve(m *CloudAccount) error {

@@ -281,7 +281,7 @@ func (s *ArtifactListStep) Execute(ctx context.Context, pc *PipelineContext) (*S
 
 	return &StepResult{Output: map[string]any{
 		s.output: items,
-		"count":   len(items),
+		"count":  len(items),
 	}}, nil
 }
 
@@ -340,4 +340,3 @@ func (s *ArtifactDeleteStep) Execute(ctx context.Context, pc *PipelineContext) (
 		"deleted": true,
 	}}, nil
 }
-

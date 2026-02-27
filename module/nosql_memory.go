@@ -17,10 +17,10 @@ type MemoryNoSQLConfig struct {
 // MemoryNoSQL is a thread-safe in-memory NoSQL store.
 // type: nosql.memory — useful for testing and local scenarios.
 type MemoryNoSQL struct {
-	name   string
-	cfg    MemoryNoSQLConfig
-	mu     sync.RWMutex
-	items  map[string]map[string]any
+	name  string
+	cfg   MemoryNoSQLConfig
+	mu    sync.RWMutex
+	items map[string]map[string]any
 }
 
 // NewMemoryNoSQL creates a new MemoryNoSQL module.

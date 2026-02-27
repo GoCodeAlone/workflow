@@ -140,8 +140,8 @@ func (e *mockPolicyEngine) Evaluate(_ context.Context, input map[string]any) (*P
 	// Check input for explicit deny action.
 	if action, _ := input["action"].(string); action == "deny" {
 		return &PolicyDecision{
-			Allowed: false,
-			Reasons: []string{"input action is deny"},
+			Allowed:  false,
+			Reasons:  []string{"input action is deny"},
 			Metadata: map[string]any{"backend": "mock", "input": input},
 		}, nil
 	}
@@ -150,8 +150,8 @@ func (e *mockPolicyEngine) Evaluate(_ context.Context, input map[string]any) (*P
 	for name, content := range e.policies {
 		if containsString(content, "deny") {
 			return &PolicyDecision{
-				Allowed: false,
-				Reasons: []string{fmt.Sprintf("policy %q contains deny rule", name)},
+				Allowed:  false,
+				Reasons:  []string{fmt.Sprintf("policy %q contains deny rule", name)},
 				Metadata: map[string]any{"backend": "mock", "matched_policy": name},
 			}, nil
 		}
@@ -175,4 +175,3 @@ func containsString(s, substr string) bool {
 			return false
 		}())
 }
-

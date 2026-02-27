@@ -1026,6 +1026,24 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		},
 	})
 
+	r.Register(&ModuleSchema{
+    Type:        "step.s3_upload",
+		Label:       "S3 Upload",
+		Category:    "pipeline",
+		Description: "Uploads base64-encoded binary data from the pipeline context to AWS S3 or S3-compatible storage (MinIO, LocalStack). Returns the public URL, resolved object key, and bucket name.",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with binary data (base64-encoded) and optional MIME type"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Upload result with url, key, and bucket fields"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "bucket", Label: "Bucket", Type: FieldTypeString, Required: true, Description: "S3 bucket name (supports ${ENV_VAR} expansion)", Placeholder: "${AVATAR_BUCKET}"},
+			{Key: "region", Label: "Region", Type: FieldTypeString, Required: true, Description: "AWS region (supports ${ENV_VAR} expansion)", Placeholder: "${AWS_REGION}"},
+			{Key: "key", Label: "Object Key", Type: FieldTypeString, Required: true, Description: "S3 object key (supports {{ .field }} templates and {{ uuid }})", Placeholder: "avatars/{{ .user_id }}/{{ uuid }}.{{ .ext }}"},
+			{Key: "body_from", Label: "Body From", Type: FieldTypeString, Required: true, Description: "Dot-path to the base64-encoded binary data in the pipeline context (e.g. steps.parse.image_data)", Placeholder: "steps.parse.image_data"},
+			{Key: "content_type_from", Label: "Content Type From", Type: FieldTypeString, Description: "Dot-path to the MIME type in the pipeline context (takes precedence over content_type)", Placeholder: "steps.parse.mime_type"},
+			{Key: "content_type", Label: "Content Type", Type: FieldTypeString, Description: "Static MIME type for the uploaded object (e.g. image/png)", Placeholder: "image/png"},
+			{Key: "endpoint", Label: "Endpoint", Type: FieldTypeString, Description: "Custom S3 endpoint URL for MinIO, LocalStack, or other S3-compatible storage (supports ${ENV_VAR} expansion). Leave empty for AWS.", Placeholder: "http://localhost:9000"},
+		},
+	})
+
 	// ---- CI/CD Pipeline Steps Category ----
 
 	r.Register(&ModuleSchema{

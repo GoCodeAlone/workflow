@@ -18,7 +18,7 @@ import (
 type DynamoDBNoSQLConfig struct {
 	TableName   string `json:"tableName"   yaml:"tableName"`
 	Region      string `json:"region"      yaml:"region"`
-	Endpoint    string `json:"endpoint"    yaml:"endpoint"` // "local" => in-memory fallback
+	Endpoint    string `json:"endpoint"    yaml:"endpoint"`    // "local" => in-memory fallback
 	Credentials string `json:"credentials" yaml:"credentials"` // ref to cloud.account module name
 }
 
