@@ -1,9 +1,12 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +18,7 @@ import (
 const (
 	githubReleasesURL = "https://api.github.com/repos/GoCodeAlone/workflow/releases/latest"
 	envNoUpdateCheck  = "WFCTL_NO_UPDATE_CHECK"
+	downloadTimeout   = 10 * time.Minute // generous timeout for large binary downloads
 )
 
 // githubReleasesURLOverride allows tests to substitute a fake server URL.
@@ -22,9 +26,9 @@ var githubReleasesURLOverride string
 
 // githubRelease is the minimal GitHub releases API response we need.
 type githubRelease struct {
-	TagName string          `json:"tag_name"`
-	Assets  []githubAsset   `json:"assets"`
-	HTMLURL string          `json:"html_url"`
+	TagName string        `json:"tag_name"`
+	Assets  []githubAsset `json:"assets"`
+	HTMLURL string        `json:"html_url"`
 }
 
 type githubAsset struct {
@@ -80,14 +84,23 @@ Options:
 
 	asset, err := findReleaseAsset(rel.Assets)
 	if err != nil {
-		return fmt.Errorf("no binary found for %s/%s in release %s: %w\nVisit %s to download manually",
-			runtime.GOOS, runtime.GOARCH, rel.TagName, err, rel.HTMLURL)
+		fmt.Fprintf(os.Stderr, "hint: visit %s to download manually\n", rel.HTMLURL)
+		return fmt.Errorf("no binary found for %s/%s in release %s: %w", runtime.GOOS, runtime.GOARCH, rel.TagName, err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Downloading %s...\n", asset.Name)
-	data, err := downloadURL(asset.BrowserDownloadURL)
+	data, err := downloadWithTimeout(asset.BrowserDownloadURL, downloadTimeout)
 	if err != nil {
 		return fmt.Errorf("download: %w", err)
+	}
+
+	// Verify integrity using the release's checksums.txt if available.
+	if checksumAsset := findChecksumAsset(rel.Assets); checksumAsset != nil {
+		fmt.Fprintln(os.Stderr, "Verifying checksum...")
+		if err := verifyAssetChecksum(checksumAsset, asset.Name, data); err != nil {
+			return fmt.Errorf("integrity check failed: %w", err)
+		}
+		fmt.Fprintln(os.Stderr, "Checksum verified.")
 	}
 
 	// If it's an archive, extract it.
@@ -119,42 +132,30 @@ Options:
 	return nil
 }
 
-// checkForUpdateNotice prints an update notice to stderr if a newer version is
-// available. The check is performed in a background goroutine and the result is
-// printed before the main command returns. It skips gracefully on any error or
-// when WFCTL_NO_UPDATE_CHECK is set.
-func checkForUpdateNotice() {
-	if os.Getenv(envNoUpdateCheck) != "" {
-		return
+// checkForUpdateNotice starts a background goroutine that checks GitHub for a
+// newer version and prints a notice to stderr if one is available.
+// It returns a channel that is closed when the check completes (or is skipped).
+// Callers should wait on the channel after their main work is done to allow
+// the notice to be printed without delaying command execution.
+func checkForUpdateNotice() <-chan struct{} {
+	done := make(chan struct{})
+	if os.Getenv(envNoUpdateCheck) != "" || version == "dev" {
+		close(done)
+		return done
 	}
-	if version == "dev" {
-		return
-	}
-
-	type result struct {
-		rel *githubRelease
-		err error
-	}
-	ch := make(chan result, 1)
 	go func() {
-		r, e := fetchLatestRelease()
-		ch <- result{r, e}
-	}()
-
-	// Wait up to 2 seconds so we never meaningfully delay command execution.
-	select {
-	case res := <-ch:
-		if res.err != nil || res.rel == nil {
+		defer close(done)
+		rel, err := fetchLatestRelease()
+		if err != nil || rel == nil {
 			return
 		}
-		latest := strings.TrimPrefix(res.rel.TagName, "v")
+		latest := strings.TrimPrefix(rel.TagName, "v")
 		current := strings.TrimPrefix(version, "v")
 		if latest != "" && latest != current {
-			fmt.Fprintf(os.Stderr, "\n⚡ wfctl %s is available (you have %s). Run 'wfctl update' to upgrade.\n\n", res.rel.TagName, version)
+			fmt.Fprintf(os.Stderr, "\n⚡ wfctl %s is available (you have %s). Run 'wfctl update' to upgrade.\n\n", rel.TagName, version)
 		}
-	case <-time.After(2 * time.Second):
-		// Timed out – proceed silently.
-	}
+	}()
+	return done
 }
 
 // fetchLatestRelease queries the GitHub releases API for the latest release.
@@ -225,9 +226,90 @@ func findReleaseAsset(assets []githubAsset) (*githubAsset, error) {
 	return nil, fmt.Errorf("no matching asset for %s/%s", goos, goarch)
 }
 
+// findChecksumAsset looks for a checksums.txt asset in the release.
+func findChecksumAsset(assets []githubAsset) *githubAsset {
+	for i := range assets {
+		if strings.EqualFold(assets[i].Name, "checksums.txt") {
+			return &assets[i]
+		}
+	}
+	return nil
+}
+
+// verifyAssetChecksum downloads checksums.txt and verifies the SHA256 of data
+// matches the entry for assetName. The checksums file uses the format produced
+// by sha256sum: "<hash>  <filename>" per line.
+func verifyAssetChecksum(checksumAsset *githubAsset, assetName string, data []byte) error {
+	checksumData, err := downloadWithTimeout(checksumAsset.BrowserDownloadURL, 30*time.Second)
+	if err != nil {
+		return fmt.Errorf("download checksums.txt: %w", err)
+	}
+
+	for _, line := range strings.Split(string(checksumData), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) != 2 {
+			continue
+		}
+		if strings.EqualFold(parts[1], assetName) {
+			h := sha256.Sum256(data)
+			got := hex.EncodeToString(h[:])
+			if !strings.EqualFold(got, parts[0]) {
+				return fmt.Errorf("checksum mismatch for %s: got %s, want %s", assetName, got, parts[0])
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("checksum for %q not found in checksums.txt", assetName)
+}
+
+// downloadWithTimeout fetches a URL using an HTTP client with the given timeout.
+func downloadWithTimeout(url string, timeout time.Duration) ([]byte, error) {
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequest(http.MethodGet, url, nil) //nolint:noctx // timeout is set on the client
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "wfctl/"+version)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+	}
+	return io.ReadAll(resp.Body)
+}
+
 // replaceBinary writes newData to execPath atomically by writing to a temp file
 // first and then renaming it over the original.
+// On Windows, replacing a running executable via rename is not supported; the
+// new binary is written alongside the current one and the user is instructed to
+// complete the swap manually.
 func replaceBinary(execPath string, newData []byte) error {
+	// Preserve the existing file's permissions; fall back to 0755 if stat fails.
+	mode := os.FileMode(0755) //nolint:gosec // G302: executable needs at least 0755
+	if fi, err := os.Stat(execPath); err == nil {
+		mode = fi.Mode().Perm()
+	}
+
+	if runtime.GOOS == "windows" {
+		// Windows does not allow replacing a running .exe via rename.
+		// Write the new binary with a .new.exe suffix and instruct the user.
+		newPath := strings.TrimSuffix(execPath, ".exe") + ".new.exe"
+		if err := os.WriteFile(newPath, newData, mode); err != nil {
+			return fmt.Errorf("write new binary: %w", err)
+		}
+		fmt.Fprintf(os.Stderr,
+			"New binary written to %s\nTo complete the update, replace %s with %s (e.g., after closing this terminal).\n",
+			newPath, execPath, newPath)
+		return nil
+	}
+
 	dir := filepath.Dir(execPath)
 	tmp, err := os.CreateTemp(dir, ".wfctl-update-*")
 	if err != nil {
@@ -242,7 +324,7 @@ func replaceBinary(execPath string, newData []byte) error {
 		tmp.Close()
 		return fmt.Errorf("write temp file: %w", err)
 	}
-	if err := tmp.Chmod(0755); err != nil { //nolint:gosec // G302: executable needs 0755
+	if err := tmp.Chmod(mode); err != nil {
 		tmp.Close()
 		return fmt.Errorf("chmod temp file: %w", err)
 	}
@@ -292,5 +374,3 @@ func extractBinaryFromTarGz(data []byte, binaryName string) ([]byte, error) {
 
 	return os.ReadFile(found) //nolint:gosec // G304: path is within our own temp dir
 }
-
-

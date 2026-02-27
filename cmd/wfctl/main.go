@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 )
 
 var version = "dev"
@@ -91,14 +92,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Check for updates in the background for commands that are not long-running
-	// (mcp and run keep the process alive, so we skip the notice there).
+	// Start the update check in the background before running the command so
+	// that it runs concurrently. For long-running commands (mcp, run) we skip
+	// it entirely. After the command finishes we wait briefly for the result.
+	var updateNoticeDone <-chan struct{}
 	if cmd != "mcp" && cmd != "run" {
-		checkForUpdateNotice()
+		updateNoticeDone = checkForUpdateNotice()
 	}
 
 	if err := fn(os.Args[2:]); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err) //nolint:gosec // G705: CLI error output
 		os.Exit(1)
+	}
+
+	// Wait briefly for the update notice after the command completes.
+	// A 1-second ceiling ensures we never meaningfully delay the shell prompt.
+	if updateNoticeDone != nil {
+		select {
+		case <-updateNoticeDone:
+		case <-time.After(time.Second):
+		}
 	}
 }

@@ -44,6 +44,10 @@ See docs/mcp.md for full setup instructions.
 		return err
 	}
 
+	// Propagate the CLI version so the MCP handshake and version output
+	// reflect the release version set at build time.
+	workflowmcp.Version = version
+
 	srv := workflowmcp.NewServer(*pluginDir)
 	return srv.ServeStdio()
 }

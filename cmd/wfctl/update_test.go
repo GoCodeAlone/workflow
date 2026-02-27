@@ -1,13 +1,17 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func TestFindReleaseAsset_Found(t *testing.T) {
@@ -123,14 +127,24 @@ func TestCheckForUpdateNotice_SkipsDevBuild(t *testing.T) {
 	origVersion := version
 	version = "dev"
 	defer func() { version = origVersion }()
-	// Should not panic or make any network requests.
-	checkForUpdateNotice()
+	// Should close the done channel immediately without making any network requests.
+	done := checkForUpdateNotice()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("expected done channel to be closed immediately for dev build")
+	}
 }
 
 func TestCheckForUpdateNotice_RespectsEnvVar(t *testing.T) {
 	t.Setenv(envNoUpdateCheck, "1")
-	// Should return immediately without any network call.
-	checkForUpdateNotice()
+	// Should close the done channel immediately without any network call.
+	done := checkForUpdateNotice()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("expected done channel to be closed immediately when update check disabled")
+	}
 }
 
 func TestFetchLatestRelease_Success(t *testing.T) {
@@ -174,5 +188,124 @@ func TestFetchLatestRelease_ServerError(t *testing.T) {
 	_, err := fetchLatestRelease()
 	if err == nil {
 		t.Fatal("expected error for non-200 response")
+	}
+}
+
+func TestFindChecksumAsset(t *testing.T) {
+	assets := []githubAsset{
+		{Name: "wfctl-linux-amd64", BrowserDownloadURL: "http://example.com/bin"},
+		{Name: "checksums.txt", BrowserDownloadURL: "http://example.com/checksums.txt"},
+	}
+	got := findChecksumAsset(assets)
+	if got == nil {
+		t.Fatal("expected to find checksums.txt asset")
+	}
+	if got.Name != "checksums.txt" {
+		t.Errorf("unexpected name: %s", got.Name)
+	}
+}
+
+func TestFindChecksumAsset_NotFound(t *testing.T) {
+	assets := []githubAsset{
+		{Name: "wfctl-linux-amd64", BrowserDownloadURL: "http://example.com/bin"},
+	}
+	if got := findChecksumAsset(assets); got != nil {
+		t.Fatalf("expected nil, got %v", got)
+	}
+}
+
+func TestVerifyAssetChecksum_Valid(t *testing.T) {
+	data := []byte("fake binary content")
+	h := sha256.Sum256(data)
+	hash := hex.EncodeToString(h[:])
+	checksumsContent := fmt.Sprintf("%s  wfctl-linux-amd64\n", hash)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(checksumsContent))
+	}))
+	defer srv.Close()
+
+	checksumAsset := &githubAsset{Name: "checksums.txt", BrowserDownloadURL: srv.URL}
+	if err := verifyAssetChecksum(checksumAsset, "wfctl-linux-amd64", data); err != nil {
+		t.Fatalf("verifyAssetChecksum: %v", err)
+	}
+}
+
+func TestVerifyAssetChecksum_Mismatch(t *testing.T) {
+	data := []byte("fake binary content")
+	checksumsContent := "deadbeef  wfctl-linux-amd64\n"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(checksumsContent))
+	}))
+	defer srv.Close()
+
+	checksumAsset := &githubAsset{Name: "checksums.txt", BrowserDownloadURL: srv.URL}
+	err := verifyAssetChecksum(checksumAsset, "wfctl-linux-amd64", data)
+	if err == nil {
+		t.Fatal("expected checksum mismatch error")
+	}
+}
+
+func TestVerifyAssetChecksum_Missing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("abc123  other-asset\n"))
+	}))
+	defer srv.Close()
+
+	checksumAsset := &githubAsset{Name: "checksums.txt", BrowserDownloadURL: srv.URL}
+	err := verifyAssetChecksum(checksumAsset, "wfctl-linux-amd64", []byte("data"))
+	if err == nil {
+		t.Fatal("expected error when asset not in checksums.txt")
+	}
+}
+
+func TestDownloadWithTimeout_Success(t *testing.T) {
+	body := []byte("hello world")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	got, err := downloadWithTimeout(srv.URL, 5*time.Second)
+	if err != nil {
+		t.Fatalf("downloadWithTimeout: %v", err)
+	}
+	if string(got) != string(body) {
+		t.Errorf("expected %q, got %q", body, got)
+	}
+}
+
+func TestDownloadWithTimeout_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "gone", http.StatusGone)
+	}))
+	defer srv.Close()
+
+	_, err := downloadWithTimeout(srv.URL, 5*time.Second)
+	if err == nil {
+		t.Fatal("expected error for non-200 response")
+	}
+}
+
+func TestReplaceBinary_PreservesMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits not meaningful on Windows")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "wfctl-test")
+	// Write with a distinct mode.
+	if err := os.WriteFile(target, []byte("old"), 0750); err != nil { //nolint:gosec
+		t.Fatal(err)
+	}
+	if err := replaceBinary(target, []byte("new")); err != nil {
+		t.Fatalf("replaceBinary: %v", err)
+	}
+	fi, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0750 {
+		t.Errorf("expected mode 0750, got %o", fi.Mode().Perm())
 	}
 }
