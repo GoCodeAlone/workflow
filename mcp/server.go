@@ -15,11 +15,11 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 	"github.com/GoCodeAlone/workflow/schema"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // Version is the MCP server version, set at build time.
@@ -34,7 +34,8 @@ type Server struct {
 
 // NewServer creates a new MCP server with all workflow engine tools and
 // resources registered. pluginDir is the directory where installed plugins
-// reside (e.g., "data/plugins").
+// reside (e.g., "data/plugins"). If set, the server will read plugin manifests
+// from this directory and include plugin-provided types in all type listings.
 func NewServer(pluginDir string) *Server {
 	s := &Server{
 		pluginDir: pluginDir,
@@ -50,6 +51,12 @@ func NewServer(pluginDir string) *Server {
 			"workflow types, generate JSON schemas, validate YAML configurations, inspect configs, "+
 			"and manage plugins. Resources provide documentation and example configurations."),
 	)
+
+	// Load types from installed plugin manifests so that plugin-provided types
+	// appear in all type listings (list_module_types, list_step_types, etc.).
+	if pluginDir != "" {
+		s.loadInstalledPluginTypes(pluginDir)
+	}
 
 	s.registerTools()
 	s.registerResources()
@@ -72,7 +79,7 @@ func (s *Server) registerTools() {
 	// list_module_types
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_module_types",
-			mcp.WithDescription("List all available workflow module types that can be used in the 'modules' section of a workflow YAML config. Returns both built-in and plugin-provided types."),
+			mcp.WithDescription("List all available workflow module types that can be used in the 'modules' section of a workflow YAML config. Returns built-in types plus types from installed plugins (loaded from plugin_dir at server startup)."),
 			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleListModuleTypes,
@@ -81,7 +88,7 @@ func (s *Server) registerTools() {
 	// list_step_types
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_step_types",
-			mcp.WithDescription("List all available pipeline step types that can be used in pipeline definitions. Steps are the building blocks of workflow pipelines."),
+			mcp.WithDescription("List all available pipeline step types that can be used in pipeline definitions. Returns built-in steps plus steps from installed plugins (loaded from plugin_dir at server startup)."),
 			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleListStepTypes,
@@ -90,7 +97,7 @@ func (s *Server) registerTools() {
 	// list_trigger_types
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_trigger_types",
-			mcp.WithDescription("List all available trigger types (e.g., http, schedule, event, eventbus) that can start workflow execution."),
+			mcp.WithDescription("List all available trigger types (e.g., http, schedule, event, eventbus) that can start workflow execution. Includes types from installed plugins."),
 			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleListTriggerTypes,
@@ -99,7 +106,7 @@ func (s *Server) registerTools() {
 	// list_workflow_types
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_workflow_types",
-			mcp.WithDescription("List all available workflow handler types (e.g., http, messaging, statemachine, scheduler, integration, event) that define how workflows process work."),
+			mcp.WithDescription("List all available workflow handler types (e.g., http, messaging, statemachine, scheduler, integration, event, pipeline) that define how workflows process work. Includes types from installed plugins."),
 			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleListWorkflowTypes,
@@ -394,16 +401,32 @@ func (s *Server) handleListPlugins(_ context.Context, req mcp.CallToolRequest) (
 	}
 
 	type pluginInfo struct {
-		Name    string `json:"name"`
-		Version string `json:"version"`
+		Name          string   `json:"name"`
+		Version       string   `json:"version"`
+		ModuleTypes   []string `json:"module_types,omitempty"`
+		StepTypes     []string `json:"step_types,omitempty"`
+		TriggerTypes  []string `json:"trigger_types,omitempty"`
+		WorkflowTypes []string `json:"workflow_types,omitempty"`
 	}
 	var plugins []pluginInfo
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		ver := readPluginVersion(filepath.Join(dataDir, e.Name()))
-		plugins = append(plugins, pluginInfo{Name: e.Name(), Version: ver})
+		dir := filepath.Join(dataDir, e.Name())
+		ver := readPluginVersion(dir)
+		info := pluginInfo{Name: e.Name(), Version: ver}
+		// Enrich with type declarations from the plugin manifest.
+		if data, err := os.ReadFile(filepath.Join(dir, "plugin.json")); err == nil { //nolint:gosec // G304: path is within the trusted plugins directory
+			var m pluginManifestTypes
+			if json.Unmarshal(data, &m) == nil {
+				info.ModuleTypes = m.ModuleTypes
+				info.StepTypes = m.StepTypes
+				info.TriggerTypes = m.TriggerTypes
+				info.WorkflowTypes = m.WorkflowTypes
+			}
+		}
+		plugins = append(plugins, info)
 	}
 
 	result := map[string]any{
@@ -481,6 +504,54 @@ func marshalToolResult(v any) (*mcp.CallToolResult, error) {
 		return mcp.NewToolResultError(fmt.Sprintf("internal error: %v", err)), nil
 	}
 	return mcp.NewToolResultText(string(data)), nil
+}
+
+// pluginManifestTypes holds the type declarations from a plugin.json manifest file.
+// This is a minimal subset of plugin.PluginManifest used to avoid a package dependency.
+type pluginManifestTypes struct {
+	ModuleTypes   []string `json:"moduleTypes"`
+	StepTypes     []string `json:"stepTypes"`
+	TriggerTypes  []string `json:"triggerTypes"`
+	WorkflowTypes []string `json:"workflowTypes"`
+}
+
+// loadInstalledPluginTypes scans pluginDir for subdirectories containing a
+// plugin.json manifest, reads each manifest's type declarations, and registers
+// them with the schema package so that they appear in all type listings.
+// Unknown or malformed manifests are silently skipped.
+func (s *Server) loadInstalledPluginTypes(pluginDir string) {
+	entries, err := os.ReadDir(pluginDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		manifestPath := filepath.Join(pluginDir, e.Name(), "plugin.json")
+		data, err := os.ReadFile(manifestPath) //nolint:gosec // G304: path is within the trusted plugins directory
+		if err != nil {
+			continue
+		}
+		var m pluginManifestTypes
+		if err := json.Unmarshal(data, &m); err != nil {
+			continue
+		}
+		for _, t := range m.ModuleTypes {
+			schema.RegisterModuleType(t)
+		}
+		for _, t := range m.StepTypes {
+			// Step types are also surfaced as module types in the MCP server view
+			// (they share the same registry and are identified by the "step." prefix).
+			schema.RegisterModuleType(t)
+		}
+		for _, t := range m.TriggerTypes {
+			schema.RegisterTriggerType(t)
+		}
+		for _, t := range m.WorkflowTypes {
+			schema.RegisterWorkflowType(t)
+		}
+	}
 }
 
 func readPluginVersion(dir string) string {

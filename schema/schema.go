@@ -14,6 +14,18 @@ var (
 	dynamicModuleTypes = make(map[string]bool)
 )
 
+// dynamicTriggerTypes holds trigger types registered at runtime by plugins.
+var (
+	dynamicTriggerMu    sync.RWMutex
+	dynamicTriggerTypes = make(map[string]bool)
+)
+
+// dynamicWorkflowTypes holds workflow types registered at runtime by plugins.
+var (
+	dynamicWorkflowMu    sync.RWMutex
+	dynamicWorkflowTypes = make(map[string]bool)
+)
+
 // RegisterModuleType registers a module type so it is recognized by KnownModuleTypes.
 func RegisterModuleType(moduleType string) {
 	dynamicMu.Lock()
@@ -26,6 +38,34 @@ func UnregisterModuleType(moduleType string) {
 	dynamicMu.Lock()
 	defer dynamicMu.Unlock()
 	delete(dynamicModuleTypes, moduleType)
+}
+
+// RegisterTriggerType registers a trigger type so it is recognized by KnownTriggerTypes.
+func RegisterTriggerType(triggerType string) {
+	dynamicTriggerMu.Lock()
+	defer dynamicTriggerMu.Unlock()
+	dynamicTriggerTypes[triggerType] = true
+}
+
+// UnregisterTriggerType removes a dynamically registered trigger type. Intended for testing.
+func UnregisterTriggerType(triggerType string) {
+	dynamicTriggerMu.Lock()
+	defer dynamicTriggerMu.Unlock()
+	delete(dynamicTriggerTypes, triggerType)
+}
+
+// RegisterWorkflowType registers a workflow type so it is recognized by KnownWorkflowTypes.
+func RegisterWorkflowType(workflowType string) {
+	dynamicWorkflowMu.Lock()
+	defer dynamicWorkflowMu.Unlock()
+	dynamicWorkflowTypes[workflowType] = true
+}
+
+// UnregisterWorkflowType removes a dynamically registered workflow type. Intended for testing.
+func UnregisterWorkflowType(workflowType string) {
+	dynamicWorkflowMu.Lock()
+	defer dynamicWorkflowMu.Unlock()
+	delete(dynamicWorkflowTypes, workflowType)
 }
 
 // Schema represents a JSON Schema document.
@@ -109,6 +149,9 @@ var coreModuleTypes = []string{
 	"step.artifact_push",
 	"step.base64_decode",
 	"step.build_ui",
+	"step.cache_delete",
+	"step.cache_get",
+	"step.cache_set",
 	"step.circuit_breaker",
 	"step.conditional",
 	"step.constraint_check",
@@ -116,12 +159,16 @@ var coreModuleTypes = []string{
 	"step.db_query",
 	"step.delegate",
 	"step.deploy",
+	"step.dlq_replay",
+	"step.dlq_send",
 	"step.docker_build",
 	"step.docker_push",
 	"step.docker_run",
 	"step.drift_check",
+	"step.event_publish",
 	"step.feature_flag",
 	"step.ff_gate",
+	"step.foreach",
 	"step.gate",
 	"step.http_call",
 	"step.jq",
@@ -134,6 +181,8 @@ var coreModuleTypes = []string{
 	"step.publish",
 	"step.rate_limit",
 	"step.request_parse",
+	"step.resilient_circuit_breaker",
+	"step.retry_with_backoff",
 	"step.s3_upload",
 	"step.scan_container",
 	"step.scan_deps",
@@ -142,7 +191,13 @@ var coreModuleTypes = []string{
 	"step.shell_exec",
 	"step.sub_workflow",
 	"step.transform",
+	"step.ui_scaffold",
+	"step.ui_scaffold_analyze",
 	"step.validate",
+	"step.validate_pagination",
+	"step.validate_path_param",
+	"step.validate_request_body",
+	"step.webhook_verify",
 	"step.workflow_call",
 	"storage.gcs",
 	"storage.local",
@@ -189,19 +244,46 @@ func KnownModuleTypes() []string {
 	return result
 }
 
-// KnownTriggerTypes returns all built-in trigger type identifiers.
+// KnownTriggerTypes returns all built-in trigger type identifiers plus any types
+// registered at runtime by plugins. The result is sorted and deduplicated.
 func KnownTriggerTypes() []string {
-	return []string{
+	core := []string{
 		"http",
 		"schedule",
 		"event",
 		"eventbus",
 	}
+
+	dynamicTriggerMu.RLock()
+	defer dynamicTriggerMu.RUnlock()
+
+	if len(dynamicTriggerTypes) == 0 {
+		out := make([]string, len(core))
+		copy(out, core)
+		sort.Strings(out)
+		return out
+	}
+
+	seen := make(map[string]bool, len(core)+len(dynamicTriggerTypes))
+	for _, t := range core {
+		seen[t] = true
+	}
+	for t := range dynamicTriggerTypes {
+		seen[t] = true
+	}
+
+	result := make([]string, 0, len(seen))
+	for t := range seen {
+		result = append(result, t)
+	}
+	sort.Strings(result)
+	return result
 }
 
-// KnownWorkflowTypes returns all built-in workflow handler type identifiers.
+// KnownWorkflowTypes returns all built-in workflow handler type identifiers plus any types
+// registered at runtime by plugins. The result is sorted and deduplicated.
 func KnownWorkflowTypes() []string {
-	return []string{
+	core := []string{
 		"event",
 		"http",
 		"messaging",
@@ -209,6 +291,31 @@ func KnownWorkflowTypes() []string {
 		"scheduler",
 		"integration",
 	}
+
+	dynamicWorkflowMu.RLock()
+	defer dynamicWorkflowMu.RUnlock()
+
+	if len(dynamicWorkflowTypes) == 0 {
+		out := make([]string, len(core))
+		copy(out, core)
+		sort.Strings(out)
+		return out
+	}
+
+	seen := make(map[string]bool, len(core)+len(dynamicWorkflowTypes))
+	for _, t := range core {
+		seen[t] = true
+	}
+	for t := range dynamicWorkflowTypes {
+		seen[t] = true
+	}
+
+	result := make([]string, 0, len(seen))
+	for t := range seen {
+		result = append(result, t)
+	}
+	sort.Strings(result)
+	return result
 }
 
 // GenerateWorkflowSchema produces the full JSON Schema describing a valid

@@ -1628,6 +1628,201 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		},
 	})
 
+	// ---- Additional Pipeline Steps ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.foreach",
+		Label:       "For Each",
+		Category:    "pipeline_steps",
+		Description: "Iterates over a collection and executes a sub-pipeline step for each item",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "collection", Label: "Collection", Type: FieldTypeString, Required: true, Description: "Dotted path to the collection to iterate over", Placeholder: "steps.fetch.items"},
+			{Key: "item_var", Label: "Item Variable", Type: FieldTypeString, Description: "Context variable name for the current item (defaults to 'item')", DefaultValue: "item"},
+			{Key: "item_key", Label: "Item Key (legacy)", Type: FieldTypeString, Description: "Legacy alias for item_var"},
+			{Key: "index_key", Label: "Index Key", Type: FieldTypeString, Description: "Context variable name for the current index (defaults to 'index')", DefaultValue: "index"},
+			{Key: "step", Label: "Step", Type: FieldTypeMap, Description: "Single step map to execute for each item (mutually exclusive with steps); must include 'type' key"},
+			{Key: "steps", Label: "Steps", Type: FieldTypeJSON, Description: "Array of step maps to execute for each item (mutually exclusive with step)"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.webhook_verify",
+		Label:       "Webhook Verify",
+		Category:    "pipeline_steps",
+		Description: "Verifies incoming webhook request signatures (supports HMAC-SHA1, HMAC-SHA256)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "scheme", Label: "Scheme", Type: FieldTypeSelect, Options: []string{"hmac-sha1", "hmac-sha256", "hmac-sha256-hex"}, Description: "HMAC signature scheme to use (preferred over provider)"},
+			{Key: "provider", Label: "Provider", Type: FieldTypeSelect, Options: []string{"github", "stripe", "generic"}, Description: "Webhook provider (legacy; prefer scheme)"},
+			{Key: "secret", Label: "Secret", Type: FieldTypeString, Sensitive: true, Description: "Webhook signing secret"},
+			{Key: "secret_from", Label: "Secret From", Type: FieldTypeString, Description: "Context key containing the secret at runtime (scheme mode only)"},
+			{Key: "signature_header", Label: "Signature Header", Type: FieldTypeString, Description: "HTTP header containing the signature (scheme mode only)", Placeholder: "X-Hub-Signature-256"},
+			{Key: "header", Label: "Signature Header (legacy)", Type: FieldTypeString, Description: "HTTP header containing the signature (provider/legacy mode)", Placeholder: "X-Hub-Signature-256"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.cache_get",
+		Label:       "Cache Get",
+		Category:    "pipeline_steps",
+		Description: "Retrieves a value from the cache by key",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "key", Label: "Key", Type: FieldTypeString, Required: true, Description: "Cache key (supports template expressions)", Placeholder: "user:{{.user_id}}"},
+			{Key: "cache", Label: "Cache Module", Type: FieldTypeString, Required: true, Description: "Name of the cache module to use"},
+			{Key: "output", Label: "Output Key", Type: FieldTypeString, Description: "Context key to store the retrieved value", DefaultValue: "value"},
+			{Key: "miss_ok", Label: "Allow Cache Miss", Type: FieldTypeBool, Description: "If true, do not fail when the cache key is missing (default: true)"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.cache_set",
+		Label:       "Cache Set",
+		Category:    "pipeline_steps",
+		Description: "Stores a value in the cache with optional TTL",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "key", Label: "Key", Type: FieldTypeString, Required: true, Description: "Cache key (supports template expressions)", Placeholder: "user:{{.user_id}}"},
+			{Key: "value", Label: "Value", Type: FieldTypeString, Required: true, Description: "Value to cache (supports template expressions, e.g. {{.field}})"},
+			{Key: "cache", Label: "Cache Module", Type: FieldTypeString, Required: true, Description: "Name of the cache module to use"},
+			{Key: "ttl", Label: "TTL", Type: FieldTypeDuration, Description: "Cache entry time-to-live", Placeholder: "5m"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.cache_delete",
+		Label:       "Cache Delete",
+		Category:    "pipeline_steps",
+		Description: "Removes a value from the cache by key",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "key", Label: "Key", Type: FieldTypeString, Required: true, Description: "Cache key to delete (supports template expressions)", Placeholder: "user:{{.user_id}}"},
+			{Key: "cache", Label: "Cache Module", Type: FieldTypeString, Required: true, Description: "Name of the cache module to use"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.event_publish",
+		Label:       "Event Publish",
+		Category:    "pipeline_steps",
+		Description: "Publishes an event to a messaging broker or event bus",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "topic", Label: "Topic", Type: FieldTypeString, Required: true, Description: "Topic or channel to publish the event to", Placeholder: "user-events"},
+			{Key: "payload", Label: "Payload", Type: FieldTypeJSON, Description: "Event payload as a JSON object (supports template expressions); defaults to current pipeline context"},
+			{Key: "headers", Label: "Headers", Type: FieldTypeJSON, Description: "Additional headers/metadata to include with the event as a JSON object"},
+			{Key: "event_type", Label: "Event Type", Type: FieldTypeString, Description: "Optional event type identifier to include with the message", Placeholder: "user.created"},
+			{Key: "broker", Label: "Broker", Type: FieldTypeString, Description: "Name of the messaging broker module to use (falls back to eventbus if not set)"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.validate_path_param",
+		Label:       "Validate Path Param",
+		Category:    "pipeline_steps",
+		Description: "Validates URL path parameters are present and optionally conform to a format (e.g. UUID)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "params", Label: "Parameter Names", Type: FieldTypeArray, Required: true, ArrayItemType: "string", Description: "List of path parameter names to validate", Placeholder: "id"},
+			{Key: "format", Label: "Format", Type: FieldTypeString, Description: "Validation format to apply to each parameter (e.g. 'uuid')"},
+			{Key: "source", Label: "Source Path", Type: FieldTypeString, Description: "Dotted path within the context to read path parameters from (e.g. 'steps.parse-request.path_params')"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.validate_pagination",
+		Label:       "Validate Pagination",
+		Category:    "pipeline_steps",
+		Description: "Validates and normalizes pagination query parameters (page, limit, offset)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "default_page", Label: "Default Page", Type: FieldTypeNumber, DefaultValue: 1, Description: "Default page number when none is provided"},
+			{Key: "default_limit", Label: "Default Limit", Type: FieldTypeNumber, DefaultValue: 20, Description: "Default number of items to return when no limit is provided"},
+			{Key: "max_limit", Label: "Max Limit", Type: FieldTypeNumber, DefaultValue: 100, Description: "Maximum allowed number of items to return per request"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.validate_request_body",
+		Label:       "Validate Request Body",
+		Category:    "pipeline_steps",
+		Description: "Parses the HTTP request body and validates required fields are present",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "required_fields", Label: "Required Fields", Type: FieldTypeArray, ArrayItemType: "string", Description: "List of required top-level field names in the request body"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.dlq_send",
+		Label:       "DLQ Send",
+		Category:    "pipeline_steps",
+		Description: "Sends a failed message to the dead letter topic for later replay",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "topic", Label: "DLQ Topic", Type: FieldTypeString, Required: true, Description: "Dead letter topic to publish failed messages to"},
+			{Key: "original_topic", Label: "Original Topic", Type: FieldTypeString, Description: "Optional name of the original topic the message came from"},
+			{Key: "error", Label: "Error", Type: FieldTypeString, Description: "Optional error message or template expression containing the failure reason"},
+			{Key: "payload", Label: "Payload", Type: FieldTypeMap, Description: "Message payload to send to the DLQ (defaults to current pipeline context)"},
+			{Key: "broker", Label: "Broker", Type: FieldTypeString, Description: "Optional name of the messaging broker module to use (falls back to eventbus if not set)"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.dlq_replay",
+		Label:       "DLQ Replay",
+		Category:    "pipeline_steps",
+		Description: "Replays messages from a dead letter topic back to the original target topic",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "dlq_topic", Label: "DLQ Topic", Type: FieldTypeString, Required: true, Description: "Dead letter topic name to replay messages from"},
+			{Key: "target_topic", Label: "Target Topic", Type: FieldTypeString, Required: true, Description: "Target topic to publish replayed messages to"},
+			{Key: "max_messages", Label: "Max Messages", Type: FieldTypeNumber, DefaultValue: 100, Description: "Maximum number of messages to replay"},
+			{Key: "broker", Label: "Broker", Type: FieldTypeString, Description: "Name of the messaging broker module to use for replay (falls back to eventbus if not set)"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.retry_with_backoff",
+		Label:       "Retry With Backoff",
+		Category:    "pipeline_steps",
+		Description: "Wraps a sub-step with automatic retry logic using exponential backoff",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "step", Label: "Step", Type: FieldTypeMap, Required: true, Description: "Sub-step map to retry; must include 'type' key with inline step configuration"},
+			{Key: "max_retries", Label: "Max Retries", Type: FieldTypeNumber, DefaultValue: 3, Description: "Maximum number of retry attempts"},
+			{Key: "initial_delay", Label: "Initial Delay", Type: FieldTypeDuration, DefaultValue: "1s", Description: "Initial delay before first retry"},
+			{Key: "max_delay", Label: "Max Delay", Type: FieldTypeDuration, DefaultValue: "30s", Description: "Maximum delay between retries"},
+			{Key: "multiplier", Label: "Backoff Multiplier", Type: FieldTypeNumber, DefaultValue: 2.0, Description: "Multiplier applied to the delay for each retry (exponential backoff factor)"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.resilient_circuit_breaker",
+		Label:       "Resilient Circuit Breaker",
+		Category:    "pipeline_steps",
+		Description: "Wraps a sub-step with circuit breaker pattern to prevent cascading failures",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "step", Label: "Step", Type: FieldTypeMap, Required: true, Description: "Sub-step map to protect; must include 'type' key with inline step configuration"},
+			{Key: "failure_threshold", Label: "Failure Threshold", Type: FieldTypeNumber, DefaultValue: 5, Description: "Number of consecutive failures to open the circuit"},
+			{Key: "reset_timeout", Label: "Reset Timeout", Type: FieldTypeDuration, DefaultValue: "60s", Description: "Duration the circuit remains open before attempting a half-open state"},
+			{Key: "fallback", Label: "Fallback Step", Type: FieldTypeMap, Description: "Optional fallback step map executed when the circuit is open; must include 'type' key"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.ui_scaffold",
+		Label:       "UI Scaffold",
+		Category:    "pipeline_steps",
+		Description: "Generates a Vite+React+TypeScript UI scaffold from an OpenAPI spec (read from the request body or context) and returns a ZIP archive",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "title", Label: "Title", Type: FieldTypeString, Description: "Title to use for the generated UI"},
+			{Key: "theme", Label: "Theme", Type: FieldTypeString, Description: "UI theme or design system to target"},
+			{Key: "auth", Label: "Auth", Type: FieldTypeBool, Description: "Whether to generate authentication UI components"},
+			{Key: "filename", Label: "Filename", Type: FieldTypeString, DefaultValue: "scaffold.zip", Description: "Filename for the generated ZIP archive"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.ui_scaffold_analyze",
+		Label:       "UI Scaffold Analyze",
+		Category:    "pipeline_steps",
+		Description: "Analyzes an OpenAPI spec (read from the request body or context) to produce scaffold analysis metadata",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "title", Label: "Title", Type: FieldTypeString, Description: "Title to use for the generated scaffold analysis"},
+			{Key: "theme", Label: "Theme", Type: FieldTypeString, Description: "Visual theme or design system to target when generating scaffold analysis"},
+		},
+	})
+
 	// ---- License ----
 
 	r.Register(&ModuleSchema{
