@@ -187,6 +187,12 @@ func (p *Plugin) WiringHooks() []plugin.WiringHook {
 	}
 }
 
+// pipelineProvider is a local interface satisfied by the workflow engine,
+// used to resolve pipelines referenced by x-pipeline in OpenAPI operations.
+type pipelineProvider interface {
+	GetPipeline(name string) (*module.Pipeline, bool)
+}
+
 // wireOpenAPIRoutes finds all OpenAPIModule instances registered as services and
 // registers their routes on the best matching HTTPRouter.
 func wireOpenAPIRoutes(app modular.Application, cfg *config.WorkflowConfig) error {
@@ -217,6 +223,13 @@ func wireOpenAPIRoutes(app modular.Application, cfg *config.WorkflowConfig) erro
 				firstRouter = router
 			}
 		}
+	}
+
+	// Resolve the pipeline provider (engine) for x-pipeline support.
+	var pp pipelineProvider
+	var engineSvc any
+	if err := app.GetService("workflowEngine", &engineSvc); err == nil && engineSvc != nil {
+		pp, _ = engineSvc.(pipelineProvider)
 	}
 
 	for _, svc := range app.SvcRegistry() {
@@ -267,6 +280,13 @@ func wireOpenAPIRoutes(app modular.Application, cfg *config.WorkflowConfig) erro
 				"module", oaMod.Name(),
 			)
 			continue
+		}
+
+		// Inject pipeline lookup so x-pipeline operations can execute pipelines.
+		if pp != nil {
+			oaMod.SetPipelineLookup(func(name string) (*module.Pipeline, bool) {
+				return pp.GetPipeline(name)
+			})
 		}
 
 		oaMod.RegisterRoutes(targetRouter)
