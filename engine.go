@@ -917,6 +917,37 @@ func (e *StdEngine) GetApp() modular.Application {
 	return e.app
 }
 
+// ReconfigureModules attempts to reconfigure only the specified modules
+// without a full engine restart. Returns modules that could not be reconfigured.
+func (e *StdEngine) ReconfigureModules(ctx context.Context, changes []config.ModuleConfigChange) ([]string, error) {
+	var failedModules []string
+
+	for _, change := range changes {
+		mod := e.app.GetModule(change.Name)
+		if mod == nil {
+			e.logger.Warn(fmt.Sprintf("Module %q not found for reconfiguration", change.Name))
+			failedModules = append(failedModules, change.Name)
+			continue
+		}
+
+		reconf, ok := mod.(interfaces.Reconfigurable)
+		if !ok {
+			e.logger.Info(fmt.Sprintf("Module %q does not support runtime reconfiguration", change.Name))
+			failedModules = append(failedModules, change.Name)
+			continue
+		}
+
+		if err := reconf.Reconfigure(ctx, change.NewConfig); err != nil {
+			e.logger.Error(fmt.Sprintf("Failed to reconfigure module %q: %v", change.Name, err))
+			failedModules = append(failedModules, change.Name)
+		} else {
+			e.logger.Info(fmt.Sprintf("Reconfigured module %q in-place", change.Name))
+		}
+	}
+
+	return failedModules, nil
+}
+
 // GetPipeline returns the named pipeline from the engine's pipeline registry.
 // Returns nil and false if no pipeline with the given name exists.
 // This is useful for CLI tools (e.g., wfctl pipeline run) that need to
