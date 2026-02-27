@@ -52,6 +52,15 @@ func NewConfigReloader(
 	}, nil
 }
 
+// SetReconfigurer updates the ModuleReconfigurer used for partial (per-module)
+// reloads. This should be called after a successful full engine reload if the
+// underlying engine (and its reconfigurer) has changed.
+func (r *ConfigReloader) SetReconfigurer(reconfigurer ModuleReconfigurer) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reconfigurer = reconfigurer
+}
+
 // HandleChange processes a config change event. It diffs the old and new configs,
 // attempts per-module reconfiguration for module-only changes, and falls back
 // to a full reload when necessary.
@@ -75,7 +84,19 @@ func (r *ConfigReloader) HandleChange(evt ConfigChangeEvent) error {
 	}
 
 	// Only module config changes — try partial reconfiguration.
-	if len(diff.Modified) > 0 && r.reconfigurer != nil {
+	if len(diff.Modified) > 0 {
+		if r.reconfigurer == nil {
+			// No reconfigurer available — fall back to full reload.
+			r.logger.Info("module changes detected but no reconfigurer, performing full reload",
+				"modified", len(diff.Modified))
+			if err := r.fullReloadFn(evt.Config); err != nil {
+				return err
+			}
+			r.current = evt.Config
+			r.currentHash = evt.NewHash
+			return nil
+		}
+
 		failed, err := r.reconfigurer.ReconfigureModules(context.Background(), diff.Modified)
 		if err != nil {
 			return err

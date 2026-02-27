@@ -347,6 +347,12 @@ type serverApp struct {
 	currentConfig  *config.WorkflowConfig // last loaded config, used by dynamic config watcher
 }
 
+// ReconfigureModules delegates to the current engine, ensuring the reloader
+// always targets the active engine even after a full reload replaces it.
+func (app *serverApp) ReconfigureModules(ctx context.Context, changes []config.ModuleConfigChange) ([]string, error) {
+	return app.engine.ReconfigureModules(ctx, changes)
+}
+
 // setup initializes all server components: engine, AI services, and HTTP mux.
 func setup(logger *slog.Logger, cfg *config.WorkflowConfig) (*serverApp, error) {
 	app := &serverApp{
@@ -1232,9 +1238,9 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 
 		var reloaderErr error
 		reloader, reloaderErr = config.NewConfigReloader(
-			app.currentConfig,   // the loaded WorkflowConfig
-			app.reloadEngine,    // existing full reload function
-			app.engine,          // implements ModuleReconfigurer
+			app.currentConfig, // the loaded WorkflowConfig
+			app.reloadEngine,  // existing full reload function
+			app,               // stable adapter — delegates to current app.engine
 			app.logger,
 		)
 		if reloaderErr != nil {
@@ -1269,7 +1275,7 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 		// Reuse or create a reloader for the DB poller.
 		if reloader == nil {
 			var reloaderErr error
-			reloader, reloaderErr = config.NewConfigReloader(app.currentConfig, app.reloadEngine, app.engine, app.logger)
+			reloader, reloaderErr = config.NewConfigReloader(app.currentConfig, app.reloadEngine, app, app.logger)
 			if reloaderErr != nil {
 				app.logger.Error("Failed to create config reloader for DB poller", "error", reloaderErr)
 			}
@@ -1590,40 +1596,56 @@ func runMultiWorkflow(logger *slog.Logger) error {
 
 	// Module reconfiguration endpoint — allows runtime hot-reload of individual
 	// modules that implement interfaces.Reconfigurable without a full engine restart.
-	mux.HandleFunc("PUT /api/v1/modules/{name}/config", func(w http.ResponseWriter, r *http.Request) {
+	// Wrapped with the same RequireAuth middleware used by the API router.
+	reconfigPerms := apihandler.NewPermissionService(stores.Memberships, stores.Workflows, stores.Projects)
+	reconfigMw := apihandler.NewMiddleware([]byte(secret), stores.Users, reconfigPerms)
+	mux.Handle("PUT /api/v1/modules/{name}/config", reconfigMw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		moduleName := r.PathValue("name")
 		if moduleName == "" {
-			http.Error(w, `{"error":"module name required"}`, http.StatusBadRequest)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "module name required"})
 			return
 		}
 
+		const maxConfigBytes = 1 << 20 // 1 MiB
+		limitedBody := http.MaxBytesReader(w, r.Body, maxConfigBytes)
+		defer limitedBody.Close() //nolint:errcheck
+
 		var newConfig map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"invalid JSON: %v"}`, err), http.StatusBadRequest)
+		if err := json.NewDecoder(limitedBody).Decode(&newConfig); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("invalid JSON: %v", err)})
 			return
 		}
 
 		mod := app.engine.GetApp().GetModule(moduleName)
 		if mod == nil {
-			http.Error(w, fmt.Sprintf(`{"error":"module %q not found"}`, moduleName), http.StatusNotFound)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("module %q not found", moduleName)})
 			return
 		}
 
 		reconf, ok := mod.(interfaces.Reconfigurable)
 		if !ok {
-			http.Error(w, fmt.Sprintf(`{"error":"module %q does not support runtime reconfiguration"}`, moduleName), http.StatusNotImplemented)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotImplemented)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("module %q does not support runtime reconfiguration", moduleName)})
 			return
 		}
 
 		if err := reconf.Reconfigure(r.Context(), newConfig); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"reconfiguration failed: %v"}`, err), http.StatusInternalServerError)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("reconfiguration failed: %v", err)})
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		resp, _ := json.Marshal(map[string]string{"status": "ok", "module": moduleName})
-		w.Write(resp) //nolint:errcheck
-	})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "module": moduleName})
+	})))
 
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

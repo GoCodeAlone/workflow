@@ -35,6 +35,7 @@ type ConfigWatcher struct {
 
 	fsWatcher *fsnotify.Watcher
 	done      chan struct{}
+	stopOnce  sync.Once
 	wg        sync.WaitGroup
 	lastHash  string
 
@@ -87,8 +88,9 @@ func (w *ConfigWatcher) Start() error {
 }
 
 // Stop terminates the watcher and waits for the background goroutine to exit.
+// It is safe to call Stop multiple times.
 func (w *ConfigWatcher) Stop() error {
-	close(w.done)
+	w.stopOnce.Do(func() { close(w.done) })
 	w.wg.Wait()
 	if w.fsWatcher != nil {
 		return w.fsWatcher.Close()
@@ -114,9 +116,16 @@ func (w *ConfigWatcher) loop() {
 			if !isYAMLFile(event.Name) {
 				continue
 			}
-			if event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
+			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) != 0 {
+				// Also handle Rename for atomic-save editors that rename-over
+				// the config file. On a Rename we enqueue the target config path
+				// rather than the renamed-away path so processChange still matches.
+				name := event.Name
+				if event.Op&fsnotify.Rename != 0 {
+					name = w.source.Path()
+				}
 				w.mu.Lock()
-				w.pending[event.Name] = time.Now()
+				w.pending[name] = time.Now()
 				w.mu.Unlock()
 			}
 

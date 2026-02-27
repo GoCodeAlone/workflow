@@ -62,13 +62,15 @@ func DiffModuleConfigs(old, new *WorkflowConfig) *ModuleConfigDiff {
 	return diff
 }
 
-// HasNonModuleChanges returns true if workflows, triggers, pipelines, or
-// platform config changed between old and new (requiring full reload).
+// HasNonModuleChanges returns true if workflows, triggers, pipelines,
+// platform config, or requirements changed between old and new
+// (requiring full reload).
 func HasNonModuleChanges(old, new *WorkflowConfig) bool {
 	return hashAny(old.Workflows) != hashAny(new.Workflows) ||
 		hashAny(old.Triggers) != hashAny(new.Triggers) ||
 		hashAny(old.Pipelines) != hashAny(new.Pipelines) ||
-		hashAny(old.Platform) != hashAny(new.Platform)
+		hashAny(old.Platform) != hashAny(new.Platform) ||
+		hashAny(old.Requires) != hashAny(new.Requires)
 }
 
 func hashModuleConfig(m ModuleConfig) string {

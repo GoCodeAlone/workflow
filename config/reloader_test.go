@@ -237,6 +237,80 @@ func TestConfigReloader_FallbackToFull(t *testing.T) {
 	}
 }
 
+func TestConfigReloader_NilReconfigurer_FallsBackToFullReload(t *testing.T) {
+	initial := makeWorkflowConfig(
+		[]ModuleConfig{{Name: "alpha", Type: "cache", Config: map[string]any{"ttl": 60}}},
+		nil,
+	)
+
+	var fullReloadCalled int
+	fullFn := func(cfg *WorkflowConfig) error {
+		fullReloadCalled++
+		return nil
+	}
+
+	// nil reconfigurer — module changes should still trigger full reload.
+	r := newTestReloader(t, initial, fullFn, nil)
+
+	newCfg := makeWorkflowConfig(
+		[]ModuleConfig{{Name: "alpha", Type: "cache", Config: map[string]any{"ttl": 120}}},
+		nil,
+	)
+	evt, err := makeChangeEvent(newCfg)
+	if err != nil {
+		t.Fatalf("makeChangeEvent: %v", err)
+	}
+
+	if err := r.HandleChange(evt); err != nil {
+		t.Fatalf("HandleChange: %v", err)
+	}
+
+	if fullReloadCalled != 1 {
+		t.Errorf("expected 1 full reload when reconfigurer is nil, got %d", fullReloadCalled)
+	}
+}
+
+func TestConfigReloader_SetReconfigurer(t *testing.T) {
+	initial := makeWorkflowConfig(
+		[]ModuleConfig{{Name: "alpha", Type: "cache", Config: map[string]any{"ttl": 60}}},
+		nil,
+	)
+
+	var fullReloadCalled int
+	fullFn := func(cfg *WorkflowConfig) error {
+		fullReloadCalled++
+		return nil
+	}
+
+	// Start with nil reconfigurer.
+	r := newTestReloader(t, initial, fullFn, nil)
+
+	// Set a reconfigurer dynamically.
+	rec := &mockReconfigurer{}
+	r.SetReconfigurer(rec)
+
+	newCfg := makeWorkflowConfig(
+		[]ModuleConfig{{Name: "alpha", Type: "cache", Config: map[string]any{"ttl": 120}}},
+		nil,
+	)
+	evt, err := makeChangeEvent(newCfg)
+	if err != nil {
+		t.Fatalf("makeChangeEvent: %v", err)
+	}
+
+	if err := r.HandleChange(evt); err != nil {
+		t.Fatalf("HandleChange: %v", err)
+	}
+
+	// Should use partial reconfigure, not full reload.
+	if fullReloadCalled != 0 {
+		t.Errorf("expected 0 full reloads after SetReconfigurer, got %d", fullReloadCalled)
+	}
+	if len(rec.called) != 1 {
+		t.Errorf("expected ReconfigureModules called once, got %d", len(rec.called))
+	}
+}
+
 func TestConfigReloader_NoEffectiveChanges(t *testing.T) {
 	initial := makeWorkflowConfig(
 		[]ModuleConfig{{Name: "alpha", Type: "http.server", Config: map[string]any{"port": 8080}}},

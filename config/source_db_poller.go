@@ -16,8 +16,9 @@ type DatabasePoller struct {
 	logger   *slog.Logger
 	lastHash string
 
-	done chan struct{}
-	wg   sync.WaitGroup
+	done     chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
 }
 
 // NewDatabasePoller creates a DatabasePoller that calls onChange whenever the
@@ -46,8 +47,9 @@ func (p *DatabasePoller) Start(ctx context.Context) error {
 }
 
 // Stop signals the polling goroutine to exit and waits for it to finish.
+// It is safe to call Stop multiple times.
 func (p *DatabasePoller) Stop() {
-	close(p.done)
+	p.stopOnce.Do(func() { close(p.done) })
 	p.wg.Wait()
 }
 

@@ -98,15 +98,16 @@ func (s *DatabaseSource) refresh(ctx context.Context) (*WorkflowConfig, error) {
 
 // Hash returns the SHA256 hex digest of the stored config bytes. It first
 // tries the fast path of fetching the pre-computed hash from the database,
-// and falls back to loading the full document if that fails.
+// and falls back to loading the full document if that fails. The fallback
+// always fetches fresh data to ensure change detection is accurate.
 func (s *DatabaseSource) Hash(ctx context.Context) (string, error) {
 	hash, err := s.store.GetConfigDocumentHash(ctx, s.key)
 	if err == nil {
 		return hash, nil
 	}
-	// Fallback: load and hash.
-	if _, loadErr := s.Load(ctx); loadErr != nil {
-		return "", loadErr
+	// Fallback: force a fresh load (bypass cache) to get an accurate hash.
+	if _, refreshErr := s.refresh(ctx); refreshErr != nil {
+		return "", refreshErr
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
