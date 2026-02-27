@@ -3,7 +3,7 @@ package module
 import (
 	"context"
 	"crypto/hmac"
-	"crypto/sha1"  //nolint:gosec // Required for Twilio HMAC-SHA1 webhook signature verification
+	"crypto/sha1" //nolint:gosec // Required for Twilio HMAC-SHA1 webhook signature verification
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"

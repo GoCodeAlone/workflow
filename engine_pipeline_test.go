@@ -189,6 +189,96 @@ func TestPipeline_ConfigurePipelines_InlineHTTPTrigger(t *testing.T) {
 	}
 }
 
+func TestPipeline_ConfigurePipelines_InlineHTTPTrigger_SetsRoutePattern(t *testing.T) {
+	// Verify that RoutePattern is populated from the inline HTTP trigger path
+	// so that step.request_parse can extract path parameters.
+	const wantPattern = "/api/resources/{id}"
+
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	engine.AddStepType("step.set", module.NewSetStepFactory())
+	pipelineHandler := handlers.NewPipelineWorkflowHandler()
+	engine.RegisterWorkflowHandler(pipelineHandler)
+
+	mt := &mockTrigger{name: module.HTTPTriggerName, configType: "http"}
+	engine.RegisterTrigger(mt)
+
+	pipelineCfg := map[string]any{
+		"resource-pipeline": map[string]any{
+			"trigger": map[string]any{
+				"type": "http",
+				"config": map[string]any{
+					"method": "GET",
+					"path":   wantPattern,
+				},
+			},
+			"steps": []any{
+				map[string]any{
+					"name": "set-ok",
+					"type": "step.set",
+					"config": map[string]any{
+						"values": map[string]any{"status": "ok"},
+					},
+				},
+			},
+		},
+	}
+
+	if err := engine.configurePipelines(pipelineCfg); err != nil {
+		t.Fatalf("configurePipelines failed: %v", err)
+	}
+
+	pipeline, ok := engine.pipelineRegistry["resource-pipeline"]
+	if !ok {
+		t.Fatal("expected pipeline to be registered in pipelineRegistry")
+	}
+	if pipeline.RoutePattern != wantPattern {
+		t.Errorf("expected RoutePattern %q, got %q", wantPattern, pipeline.RoutePattern)
+	}
+}
+
+func TestPipeline_ConfigurePipelines_InlineHTTPTrigger_NoPathNoRoutePattern(t *testing.T) {
+	// When no path is provided in the trigger config, RoutePattern should remain empty.
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	engine.AddStepType("step.set", module.NewSetStepFactory())
+	pipelineHandler := handlers.NewPipelineWorkflowHandler()
+	engine.RegisterWorkflowHandler(pipelineHandler)
+
+	mt := &mockTrigger{name: module.HTTPTriggerName, configType: "http"}
+	engine.RegisterTrigger(mt)
+
+	pipelineCfg := map[string]any{
+		"no-path-pipeline": map[string]any{
+			"trigger": map[string]any{
+				"type":   "http",
+				"config": map[string]any{},
+			},
+			"steps": []any{
+				map[string]any{
+					"name": "set-ok",
+					"type": "step.set",
+					"config": map[string]any{
+						"values": map[string]any{"status": "ok"},
+					},
+				},
+			},
+		},
+	}
+
+	if err := engine.configurePipelines(pipelineCfg); err != nil {
+		t.Fatalf("configurePipelines failed: %v", err)
+	}
+
+	pipeline, ok := engine.pipelineRegistry["no-path-pipeline"]
+	if !ok {
+		t.Fatal("expected pipeline to be registered in pipelineRegistry")
+	}
+	if pipeline.RoutePattern != "" {
+		t.Errorf("expected empty RoutePattern, got %q", pipeline.RoutePattern)
+	}
+}
+
 func TestPipeline_ConfigurePipelines_InlineEventTrigger(t *testing.T) {
 	// Use a minimal engine without plugins to avoid trigger collisions.
 	app := newMockApplication()

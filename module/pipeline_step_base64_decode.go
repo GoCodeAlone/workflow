@@ -18,32 +18,32 @@ const (
 
 // mimeToExtension maps common MIME types to their canonical file extensions.
 var mimeToExtension = map[string]string{
-	"image/jpeg":      ".jpg",
-	"image/png":       ".png",
-	"image/gif":       ".gif",
-	"image/webp":      ".webp",
-	"image/bmp":       ".bmp",
-	"image/tiff":      ".tiff",
-	"image/svg+xml":   ".svg",
-	"image/x-icon":    ".ico",
-	"application/pdf": ".pdf",
-	"application/zip": ".zip",
-	"text/plain":      ".txt",
-	"text/html":       ".html",
-	"text/css":        ".css",
-	"text/javascript": ".js",
-	"application/json":                  ".json",
-	"application/xml":                   ".xml",
-	"audio/mpeg":                        ".mp3",
-	"audio/ogg":                         ".ogg",
-	"audio/wav":                         ".wav",
-	"video/mp4":                         ".mp4",
-	"video/webm":                        ".webm",
-	"video/ogg":                         ".ogv",
-	"application/octet-stream":          ".bin",
-	"application/gzip":                  ".gz",
-	"application/x-tar":                 ".tar",
-	"application/vnd.ms-excel":          ".xls",
+	"image/jpeg":               ".jpg",
+	"image/png":                ".png",
+	"image/gif":                ".gif",
+	"image/webp":               ".webp",
+	"image/bmp":                ".bmp",
+	"image/tiff":               ".tiff",
+	"image/svg+xml":            ".svg",
+	"image/x-icon":             ".ico",
+	"application/pdf":          ".pdf",
+	"application/zip":          ".zip",
+	"text/plain":               ".txt",
+	"text/html":                ".html",
+	"text/css":                 ".css",
+	"text/javascript":          ".js",
+	"application/json":         ".json",
+	"application/xml":          ".xml",
+	"audio/mpeg":               ".mp3",
+	"audio/ogg":                ".ogg",
+	"audio/wav":                ".wav",
+	"video/mp4":                ".mp4",
+	"video/webm":               ".webm",
+	"video/ogg":                ".ogv",
+	"application/octet-stream": ".bin",
+	"application/gzip":         ".gz",
+	"application/x-tar":        ".tar",
+	"application/vnd.ms-excel": ".xls",
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
 	"application/msword": ".doc",
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
@@ -52,12 +52,12 @@ var mimeToExtension = map[string]string{
 // Base64DecodeStep decodes base64-encoded content (raw or data-URI), optionally
 // validating the MIME type and decoded size.
 type Base64DecodeStep struct {
-	name              string
-	inputFrom         string
-	format            string
-	allowedTypes      []string
-	maxSizeBytes      int
-	validateMagic     bool
+	name          string
+	inputFrom     string
+	format        string
+	allowedTypes  []string
+	maxSizeBytes  int
+	validateMagic bool
 }
 
 // NewBase64DecodeStepFactory returns a StepFactory that creates Base64DecodeStep instances.
