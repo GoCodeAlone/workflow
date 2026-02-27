@@ -133,6 +133,7 @@ var coreModuleTypes = []string{
 	"step.publish",
 	"step.rate_limit",
 	"step.request_parse",
+	"step.s3_upload",
 	"step.scan_container",
 	"step.scan_deps",
 	"step.scan_sast",
