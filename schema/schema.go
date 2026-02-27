@@ -380,19 +380,22 @@ func moduleIfThen(moduleType string, ms *ModuleSchema) *Schema {
 			required = append(required, f.Key)
 		}
 	}
+	configSchema := &Schema{
+		Type:       "object",
+		Properties: props,
+	}
+	configSchema.setAdditionalPropertiesBool(false)
+	if len(required) > 0 {
+		configSchema.Required = required
+	}
 	then := &Schema{
 		Properties: map[string]*Schema{
-			"config": {
-				Type:       "object",
-				Properties: props,
-			},
+			"config": configSchema,
 		},
-	}
-	if len(required) > 0 {
-		then.Properties["config"].Required = required
 	}
 	return &Schema{
 		If: &Schema{
+			Required: []string{"type"},
 			Properties: map[string]*Schema{
 				"type": {Enum: []string{moduleType}},
 			},
@@ -481,6 +484,21 @@ func GenerateWorkflowSchema() *Schema {
 		},
 	}
 
+	// Build per-step if/then config conditionals from the registry.
+	// TODO: register step config field schemas in ModuleSchemaRegistry so these
+	// conditionals can enforce per-step config shapes (similar to module types).
+	stepAllOf := make([]*Schema, 0)
+	for _, t := range stepTypeEnum {
+		ms := reg.Get(t)
+		if ms == nil || len(ms.ConfigFields) == 0 {
+			continue
+		}
+		stepAllOf = append(stepAllOf, moduleIfThen(t, ms))
+	}
+	if len(stepAllOf) > 0 {
+		stepSchema.AllOf = stepAllOf
+	}
+
 	// Trigger schema — KnownTriggerTypes() returns a sorted []string.
 	triggerEnum := KnownTriggerTypes()
 
@@ -495,6 +513,7 @@ func GenerateWorkflowSchema() *Schema {
 			Description: "Configuration for the " + t + " trigger",
 		}
 	}
+	triggerSchema.setAdditionalPropertiesBool(false)
 
 	// Pipeline schema.
 	pipelineSchema := &Schema{
@@ -539,11 +558,7 @@ func GenerateWorkflowSchema() *Schema {
 				Description: "Workflow handler configurations keyed by workflow type (e.g. http, messaging, statemachine, scheduler, integration)",
 			},
 			"triggers": triggerSchema,
-			"pipelines": {
-				Type:        "object",
-				Description: "Named pipeline definitions",
-				Properties:  map[string]*Schema{"*": pipelineSchema},
-			},
+			"pipelines": buildPipelinesSchema(pipelineSchema),
 			"imports": {
 				Type:        "array",
 				Description: "List of external config files to import",
@@ -570,62 +585,38 @@ func GenerateWorkflowSchema() *Schema {
 	return root
 }
 
-// KnownStepTypes returns all built-in step type identifiers used for schema generation.
-// This is a package-level alias so the schema package doesn't import cmd/wfctl.
+// KnownStepTypes returns all step type identifiers derived from KnownModuleTypes
+// by filtering for types with the "step." prefix. This ensures the set is always
+// complete and consistent with the module type registry.
 func KnownStepTypes() map[string]bool {
-	return map[string]bool{
-		"step.set":                      true,
-		"step.log":                      true,
-		"step.transform":                true,
-		"step.validate":                 true,
-		"step.conditional":              true,
-		"step.http_call":                true,
-		"step.json_response":            true,
-		"step.request_parse":            true,
-		"step.db_query":                 true,
-		"step.db_exec":                  true,
-		"step.publish":                  true,
-		"step.event_publish":            true,
-		"step.delegate":                 true,
-		"step.jq":                       true,
-		"step.workflow_call":            true,
-		"step.foreach":                  true,
-		"step.cache_get":                true,
-		"step.cache_set":                true,
-		"step.cache_delete":             true,
-		"step.auth_required":            true,
-		"step.rate_limit":               true,
-		"step.circuit_breaker":          true,
-		"step.retry_with_backoff":       true,
-		"step.resilient_circuit_breaker": true,
-		"step.dlq_send":                 true,
-		"step.dlq_replay":               true,
-		"step.validate_path_param":      true,
-		"step.validate_pagination":      true,
-		"step.validate_request_body":    true,
-		"step.webhook_verify":           true,
-		"step.base64_decode":            true,
-		"step.ai_complete":              true,
-		"step.ai_classify":              true,
-		"step.ai_extract":               true,
-		"step.shell_exec":               true,
-		"step.docker_build":             true,
-		"step.docker_push":              true,
-		"step.docker_run":               true,
-		"step.scan_sast":                true,
-		"step.scan_container":           true,
-		"step.scan_deps":                true,
-		"step.deploy":                   true,
-		"step.gate":                     true,
-		"step.feature_flag":             true,
-		"step.ff_gate":                  true,
-		"step.policy_evaluate":          true,
-		"step.policy_load":              true,
-		"step.policy_list":              true,
-		"step.nosql_get":                true,
-		"step.nosql_put":                true,
-		"step.nosql_delete":             true,
-		"step.nosql_query":              true,
+	all := KnownModuleTypes()
+	result := make(map[string]bool, 64)
+	for _, t := range all {
+		if len(t) > 5 && t[:5] == "step." {
+			result[t] = true
+		}
+	}
+	return result
+}
+
+// buildPipelinesSchema constructs the pipelines object schema using
+// AdditionalProperties so that any pipeline name (arbitrary string key) is
+// validated against pipelineSchema rather than creating a literal "*" property.
+func buildPipelinesSchema(pipelineSchema *Schema) *Schema {
+	raw, err := json.Marshal(pipelineSchema)
+	if err != nil {
+		// Fallback: allow any object if marshal fails (should never happen).
+		s := &Schema{
+			Type:        "object",
+			Description: "Named pipeline definitions",
+		}
+		s.setAdditionalPropertiesBool(true)
+		return s
+	}
+	return &Schema{
+		Type:                 "object",
+		Description:          "Named pipeline definitions",
+		AdditionalProperties: json.RawMessage(raw),
 	}
 }
 

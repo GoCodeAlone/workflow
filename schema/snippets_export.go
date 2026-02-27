@@ -101,9 +101,9 @@ func ExportSnippetsJetBrains() ([]byte, error) {
 }
 
 // convertToJetBrainsBody converts VSCode ${N:placeholder} syntax to
-// JetBrains $VAR_N$ syntax and joins lines with newlines.
+// JetBrains $VAR_N$ syntax and joins lines with &#10; (XML attribute newline).
 func convertToJetBrainsBody(lines []string) string {
-	joined := strings.Join(lines, "\n")
+	joined := strings.Join(lines, "&#10;")
 	// Track seen tab-stop indices to assign unique variable names.
 	// Replace ${N:placeholder} with $SNIPPET_N$ and ${N} with $SNIPPET_N$.
 	result := strings.Builder{}

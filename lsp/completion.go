@@ -175,6 +175,9 @@ func Completions(reg *Registry, doc *Document, ctx PositionContext) []protocol.C
 	case SectionTopLevel:
 		return getTopLevelKeys()
 	case SectionModules:
+		if ctx.DependsOn {
+			return getModuleNamesFromContent(doc.Content)
+		}
 		switch ctx.FieldName {
 		case "type":
 			return getModuleTypeCompletions(reg)
@@ -231,7 +234,6 @@ func getWorkflowTypeCompletions(reg *Registry) []protocol.CompletionItem {
 	return items
 }
 
-// Helpers to avoid importing "strings" which creates a cycle.
 func splitLines(s string) []string {
 	var lines []string
 	start := 0
