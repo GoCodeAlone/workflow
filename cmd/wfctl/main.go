@@ -28,6 +28,7 @@ var commands = map[string]func([]string) error{
 	"compat":   runCompat,
 	"generate": runGenerate,
 	"git":      runGit,
+	"registry": runRegistry,
 }
 
 func usage() {
@@ -57,6 +58,7 @@ Commands:
   compat     Compatibility checking (check: verify config works with current engine)
   generate   Code generation (github-actions: generate CI/CD workflows from config)
   git        Git integration (connect: link to GitHub repo, push: commit and push)
+  registry   Registry management (list, add, remove plugin registry sources)
 
 Run 'wfctl <command> -h' for command-specific help.
 `, version)

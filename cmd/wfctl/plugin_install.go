@@ -22,8 +22,10 @@ const defaultDataDir = "data/plugins"
 
 func runPluginSearch(args []string) error {
 	fs := flag.NewFlagSet("plugin search", flag.ContinueOnError)
+	cfgPath := fs.String("config", "", "Registry config file path")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin search [<query>]\n\nSearch the plugin registry by name, description, or keyword.\n")
+		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin search [options] [<query>]\n\nSearch the plugin registry by name, description, or keyword.\n\nOptions:\n")
+		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -33,8 +35,14 @@ func runPluginSearch(args []string) error {
 		query = strings.Join(fs.Args(), " ")
 	}
 
+	cfg, err := LoadRegistryConfig(*cfgPath)
+	if err != nil {
+		return fmt.Errorf("load registry config: %w", err)
+	}
+	mr := NewMultiRegistry(cfg)
+
 	fmt.Fprintf(os.Stderr, "Searching registry...\n")
-	plugins, err := SearchPlugins(query)
+	plugins, err := mr.SearchPlugins(query)
 	if err != nil {
 		return fmt.Errorf("search failed: %w", err)
 	}
@@ -42,14 +50,14 @@ func runPluginSearch(args []string) error {
 		fmt.Println("No plugins found.")
 		return nil
 	}
-	fmt.Printf("%-20s %-10s %-12s %s\n", "NAME", "VERSION", "TIER", "DESCRIPTION")
-	fmt.Printf("%-20s %-10s %-12s %s\n", "----", "-------", "----", "-----------")
+	fmt.Printf("%-20s %-10s %-12s %-12s %s\n", "NAME", "VERSION", "TIER", "SOURCE", "DESCRIPTION")
+	fmt.Printf("%-20s %-10s %-12s %-12s %s\n", "----", "-------", "----", "------", "-----------")
 	for _, p := range plugins {
 		desc := p.Description
-		if len(desc) > 60 {
-			desc = desc[:57] + "..."
+		if len(desc) > 50 {
+			desc = desc[:47] + "..."
 		}
-		fmt.Printf("%-20s %-10s %-12s %s\n", p.Name, p.Version, p.Tier, desc)
+		fmt.Printf("%-20s %-10s %-12s %-12s %s\n", p.Name, p.Version, p.Tier, p.Source, desc)
 	}
 	return nil
 }
@@ -57,6 +65,8 @@ func runPluginSearch(args []string) error {
 func runPluginInstall(args []string) error {
 	fs := flag.NewFlagSet("plugin install", flag.ContinueOnError)
 	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	cfgPath := fs.String("config", "", "Registry config file path")
+	registryName := fs.String("registry", "", "Use a specific registry by name")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] <name>[@<version>]\n\nDownload and install a plugin from the registry.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -72,11 +82,35 @@ func runPluginInstall(args []string) error {
 	nameArg := fs.Arg(0)
 	pluginName, _ := parseNameVersion(nameArg)
 
+	cfg, err := LoadRegistryConfig(*cfgPath)
+	if err != nil {
+		return fmt.Errorf("load registry config: %w", err)
+	}
+
+	var mr *MultiRegistry
+	if *registryName != "" {
+		// Filter config to only the requested registry
+		filtered := &RegistryConfig{}
+		for _, r := range cfg.Registries {
+			if r.Name == *registryName {
+				filtered.Registries = append(filtered.Registries, r)
+				break
+			}
+		}
+		if len(filtered.Registries) == 0 {
+			return fmt.Errorf("registry %q not found in config", *registryName)
+		}
+		mr = NewMultiRegistry(filtered)
+	} else {
+		mr = NewMultiRegistry(cfg)
+	}
+
 	fmt.Fprintf(os.Stderr, "Fetching manifest for %q...\n", pluginName)
-	manifest, err := FetchManifest(pluginName)
+	manifest, sourceName, err := mr.FetchManifest(pluginName)
 	if err != nil {
 		return err
 	}
+	fmt.Fprintf(os.Stderr, "Found in registry %q.\n", sourceName)
 
 	dl, err := manifest.FindDownload(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
@@ -104,6 +138,12 @@ func runPluginInstall(args []string) error {
 	fmt.Fprintf(os.Stderr, "Extracting to %s...\n", destDir)
 	if err := extractTarGz(data, destDir); err != nil {
 		return fmt.Errorf("extract plugin: %w", err)
+	}
+
+	// Ensure the plugin binary is named to match the plugin name so that
+	// ExternalPluginManager.DiscoverPlugins() can find it (expects <dir>/<name>/<name>).
+	if err := ensurePluginBinary(destDir, pluginName); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not normalize binary name: %v\n", err)
 	}
 
 	// Write a minimal plugin.json if not already present (records version).
@@ -335,6 +375,46 @@ func writeInstalledManifest(path string, m *RegistryManifest) error {
 		return err
 	}
 	return os.WriteFile(path, append(data, '\n'), 0640) //nolint:gosec // G306: plugin.json is user-owned output
+}
+
+// ensurePluginBinary finds the executable binary in destDir and renames it to
+// match the plugin name. ExternalPluginManager expects <dir>/<name>/<name>.
+// GoReleaser tarballs typically contain binaries named like
+// "workflow-plugin-admin-darwin-arm64" after stripTopDir, so we rename to "admin".
+func ensurePluginBinary(destDir, pluginName string) error {
+	expectedPath := filepath.Join(destDir, pluginName)
+	if info, err := os.Stat(expectedPath); err == nil && !info.IsDir() {
+		return nil // already correctly named
+	}
+
+	// Find the largest executable file in the directory (the plugin binary).
+	entries, err := os.ReadDir(destDir)
+	if err != nil {
+		return err
+	}
+	var bestName string
+	var bestSize int64
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == "plugin.json" {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		// Skip non-executable files
+		if info.Mode()&0111 == 0 {
+			continue
+		}
+		if info.Size() > bestSize {
+			bestSize = info.Size()
+			bestName = e.Name()
+		}
+	}
+	if bestName == "" {
+		return fmt.Errorf("no executable binary found in %s", destDir)
+	}
+	return os.Rename(filepath.Join(destDir, bestName), expectedPath)
 }
 
 // readInstalledVersion reads the version from a plugin.json in the given directory.
