@@ -4,6 +4,7 @@
 package schema
 
 import (
+	"encoding/json"
 	"sort"
 	"sync"
 )
@@ -70,22 +71,70 @@ func UnregisterWorkflowType(workflowType string) {
 
 // Schema represents a JSON Schema document.
 type Schema struct {
-	Schema      string             `json:"$schema"`
-	Title       string             `json:"title"`
-	Description string             `json:"description,omitempty"`
-	Type        string             `json:"type"`
-	Required    []string           `json:"required,omitempty"`
-	Properties  map[string]*Schema `json:"properties,omitempty"`
-	Items       *Schema            `json:"items,omitempty"`
-	Enum        []string           `json:"enum,omitempty"`
-	AdditionalP *bool              `json:"additionalProperties,omitempty"`
-	AnyOf       []*Schema          `json:"anyOf,omitempty"`
-	Default     any                `json:"default,omitempty"`
-	MinItems    *int               `json:"minItems,omitempty"`
-	Minimum     *float64           `json:"minimum,omitempty"`
-	Pattern     string             `json:"pattern,omitempty"`
-	Definitions map[string]*Schema `json:"$defs,omitempty"`
-	Ref         string             `json:"$ref,omitempty"`
+	Schema               string             `json:"$schema,omitempty"`
+	Title                string             `json:"title,omitempty"`
+	Description          string             `json:"description,omitempty"`
+	Type                 string             `json:"type,omitempty"`
+	Required             []string           `json:"required,omitempty"`
+	Properties           map[string]*Schema `json:"properties,omitempty"`
+	Items                *Schema            `json:"items,omitempty"`
+	Enum                 []string           `json:"enum,omitempty"`
+	AdditionalProperties json.RawMessage    `json:"additionalProperties,omitempty"`
+	AnyOf                []*Schema          `json:"anyOf,omitempty"`
+	OneOf                []*Schema          `json:"oneOf,omitempty"`
+	AllOf                []*Schema          `json:"allOf,omitempty"`
+	If                   *Schema            `json:"if,omitempty"`
+	Then                 *Schema            `json:"then,omitempty"`
+	Default              any                `json:"default,omitempty"`
+	MinItems             *int               `json:"minItems,omitempty"`
+	Minimum              *float64           `json:"minimum,omitempty"`
+	Pattern              string             `json:"pattern,omitempty"`
+	Definitions          map[string]*Schema `json:"$defs,omitempty"`
+	Ref                  string             `json:"$ref,omitempty"`
+}
+
+// setAdditionalPropertiesBool sets additionalProperties to a boolean value.
+func (s *Schema) setAdditionalPropertiesBool(v bool) {
+	if v {
+		s.AdditionalProperties = json.RawMessage(`true`)
+	} else {
+		s.AdditionalProperties = json.RawMessage(`false`)
+	}
+}
+
+// configFieldDefToSchema converts a ConfigFieldDef to a JSON Schema property.
+func configFieldDefToSchema(f ConfigFieldDef) *Schema {
+	s := &Schema{
+		Description: f.Description,
+	}
+	if f.DefaultValue != nil {
+		s.Default = f.DefaultValue
+	}
+	switch f.Type {
+	case FieldTypeString, FieldTypeDuration, FieldTypeFilePath, FieldTypeSQL:
+		s.Type = "string"
+	case FieldTypeNumber:
+		s.Type = "number"
+	case FieldTypeBool:
+		s.Type = "boolean"
+	case FieldTypeSelect:
+		s.Type = "string"
+		if len(f.Options) > 0 {
+			s.Enum = f.Options
+		}
+	case FieldTypeArray:
+		s.Type = "array"
+		if f.ArrayItemType != "" {
+			s.Items = &Schema{Type: f.ArrayItemType}
+		} else {
+			s.Items = &Schema{Type: "string"}
+		}
+	case FieldTypeMap, FieldTypeJSON:
+		s.Type = "object"
+	default:
+		s.Type = "string"
+	}
+	return s
 }
 
 // coreModuleTypes is the hardcoded list of built-in module type identifiers
@@ -319,13 +368,46 @@ func KnownWorkflowTypes() []string {
 	return result
 }
 
+// moduleIfThen builds an if/then conditional schema for a specific module type
+// that adds per-type config property validation.
+func moduleIfThen(moduleType string, ms *ModuleSchema) *Schema {
+	props := make(map[string]*Schema, len(ms.ConfigFields))
+	required := make([]string, 0)
+	for i := range ms.ConfigFields {
+		f := &ms.ConfigFields[i]
+		props[f.Key] = configFieldDefToSchema(*f)
+		if f.Required {
+			required = append(required, f.Key)
+		}
+	}
+	then := &Schema{
+		Properties: map[string]*Schema{
+			"config": {
+				Type:       "object",
+				Properties: props,
+			},
+		},
+	}
+	if len(required) > 0 {
+		then.Properties["config"].Required = required
+	}
+	return &Schema{
+		If: &Schema{
+			Properties: map[string]*Schema{
+				"type": {Enum: []string{moduleType}},
+			},
+		},
+		Then: then,
+	}
+}
+
 // GenerateWorkflowSchema produces the full JSON Schema describing a valid
 // WorkflowConfig YAML file.
 func GenerateWorkflowSchema() *Schema {
-	f := false
 	one := 1
+	reg := NewModuleSchemaRegistry()
 
-	moduleConfigSchema := &Schema{
+	moduleBase := &Schema{
 		Type:     "object",
 		Required: []string{"name", "type"},
 		Properties: map[string]*Schema{
@@ -337,7 +419,7 @@ func GenerateWorkflowSchema() *Schema {
 			"type": {
 				Type:        "string",
 				Description: "Module type identifier (built-in or plugin-provided)",
-				Enum:        NewModuleSchemaRegistry().Types(),
+				Enum:        reg.Types(),
 			},
 			"config": {
 				Type:        "object",
@@ -353,10 +435,93 @@ func GenerateWorkflowSchema() *Schema {
 				Description: "Branch configuration for conditional routing",
 			},
 		},
-		AdditionalP: &f,
+	}
+	moduleBase.setAdditionalPropertiesBool(false)
+
+	// Build if/then conditionals per registered module type.
+	allOf := make([]*Schema, 0, len(reg.schemas))
+	types := reg.Types()
+	for _, t := range types {
+		ms := reg.Get(t)
+		if ms == nil || len(ms.ConfigFields) == 0 {
+			continue
+		}
+		allOf = append(allOf, moduleIfThen(t, ms))
+	}
+	if len(allOf) > 0 {
+		moduleBase.AllOf = allOf
 	}
 
-	return &Schema{
+	// Step schema — type enum built from KnownStepTypes.
+	stepTypes := KnownStepTypes()
+	stepTypeEnum := make([]string, 0, len(stepTypes))
+	for t := range stepTypes {
+		stepTypeEnum = append(stepTypeEnum, t)
+	}
+	sort.Strings(stepTypeEnum)
+
+	stepSchema := &Schema{
+		Type:     "object",
+		Required: []string{"type"},
+		Properties: map[string]*Schema{
+			"type": {
+				Type:        "string",
+				Description: "Step type identifier",
+				Enum:        stepTypeEnum,
+			},
+			"name": {Type: "string", Description: "Step name (used to reference output in later steps)"},
+			"config": {
+				Type:        "object",
+				Description: "Step-specific configuration",
+			},
+			"dependsOn": {
+				Type:  "array",
+				Items: &Schema{Type: "string"},
+			},
+		},
+	}
+
+	// Trigger schema — KnownTriggerTypes() returns a sorted []string.
+	triggerEnum := KnownTriggerTypes()
+
+	triggerSchema := &Schema{
+		Type:        "object",
+		Description: "Trigger configurations keyed by trigger type",
+		Properties:  map[string]*Schema{},
+	}
+	for _, t := range triggerEnum {
+		triggerSchema.Properties[t] = &Schema{
+			Type:        "object",
+			Description: "Configuration for the " + t + " trigger",
+		}
+	}
+
+	// Pipeline schema.
+	pipelineSchema := &Schema{
+		Type:        "object",
+		Description: "Named pipeline definitions",
+		Properties: map[string]*Schema{
+			"trigger": {
+				Type:        "object",
+				Description: "Inline trigger definition for this pipeline",
+				Properties: map[string]*Schema{
+					"type": {
+						Type:        "string",
+						Description: "Trigger type",
+						Enum:        triggerEnum,
+					},
+					"config": {Type: "object", Description: "Trigger-specific configuration"},
+				},
+			},
+			"steps": {
+				Type:        "array",
+				Description: "Ordered list of pipeline steps",
+				Items:       stepSchema,
+			},
+		},
+	}
+
+	root := &Schema{
 		Schema:      "https://json-schema.org/draft/2020-12/schema",
 		Title:       "Workflow Configuration",
 		Description: "Schema for GoCodeAlone/workflow engine YAML configuration files",
@@ -366,16 +531,119 @@ func GenerateWorkflowSchema() *Schema {
 			"modules": {
 				Type:        "array",
 				Description: "List of module definitions to instantiate",
-				Items:       moduleConfigSchema,
+				Items:       moduleBase,
 				MinItems:    &one,
 			},
 			"workflows": {
 				Type:        "object",
 				Description: "Workflow handler configurations keyed by workflow type (e.g. http, messaging, statemachine, scheduler, integration)",
 			},
-			"triggers": {
+			"triggers": triggerSchema,
+			"pipelines": {
 				Type:        "object",
-				Description: "Trigger configurations keyed by trigger type (e.g. http, schedule, event, eventbus)",
+				Description: "Named pipeline definitions",
+				Properties:  map[string]*Schema{"*": pipelineSchema},
+			},
+			"imports": {
+				Type:        "array",
+				Description: "List of external config files to import",
+				Items:       &Schema{Type: "string"},
+			},
+			"requires": {
+				Type:        "object",
+				Description: "Plugin dependency declarations",
+				Properties: map[string]*Schema{
+					"plugins": {
+						Type:  "array",
+						Items: &Schema{Type: "string"},
+					},
+					"version": {Type: "string", Description: "Minimum engine version"},
+				},
+			},
+			"platform": {
+				Type:        "object",
+				Description: "Platform-level configuration (kubernetes, cloud, etc.)",
+			},
+		},
+	}
+
+	return root
+}
+
+// KnownStepTypes returns all built-in step type identifiers used for schema generation.
+// This is a package-level alias so the schema package doesn't import cmd/wfctl.
+func KnownStepTypes() map[string]bool {
+	return map[string]bool{
+		"step.set":                      true,
+		"step.log":                      true,
+		"step.transform":                true,
+		"step.validate":                 true,
+		"step.conditional":              true,
+		"step.http_call":                true,
+		"step.json_response":            true,
+		"step.request_parse":            true,
+		"step.db_query":                 true,
+		"step.db_exec":                  true,
+		"step.publish":                  true,
+		"step.event_publish":            true,
+		"step.delegate":                 true,
+		"step.jq":                       true,
+		"step.workflow_call":            true,
+		"step.foreach":                  true,
+		"step.cache_get":                true,
+		"step.cache_set":                true,
+		"step.cache_delete":             true,
+		"step.auth_required":            true,
+		"step.rate_limit":               true,
+		"step.circuit_breaker":          true,
+		"step.retry_with_backoff":       true,
+		"step.resilient_circuit_breaker": true,
+		"step.dlq_send":                 true,
+		"step.dlq_replay":               true,
+		"step.validate_path_param":      true,
+		"step.validate_pagination":      true,
+		"step.validate_request_body":    true,
+		"step.webhook_verify":           true,
+		"step.base64_decode":            true,
+		"step.ai_complete":              true,
+		"step.ai_classify":              true,
+		"step.ai_extract":               true,
+		"step.shell_exec":               true,
+		"step.docker_build":             true,
+		"step.docker_push":              true,
+		"step.docker_run":               true,
+		"step.scan_sast":                true,
+		"step.scan_container":           true,
+		"step.scan_deps":                true,
+		"step.deploy":                   true,
+		"step.gate":                     true,
+		"step.feature_flag":             true,
+		"step.ff_gate":                  true,
+		"step.policy_evaluate":          true,
+		"step.policy_load":              true,
+		"step.policy_list":              true,
+		"step.nosql_get":                true,
+		"step.nosql_put":                true,
+		"step.nosql_delete":             true,
+		"step.nosql_query":              true,
+	}
+}
+
+// GenerateApplicationSchema produces a JSON Schema for application-level configs.
+func GenerateApplicationSchema() *Schema {
+	workflowSchema := GenerateWorkflowSchema()
+	return &Schema{
+		Schema:      "https://json-schema.org/draft/2020-12/schema",
+		Title:       "Application Configuration",
+		Description: "Schema for GoCodeAlone/workflow application-level YAML configuration files",
+		Type:        "object",
+		Properties: map[string]*Schema{
+			"name":    {Type: "string", Description: "Application name"},
+			"version": {Type: "string", Description: "Application version"},
+			"engine":  workflowSchema,
+			"services": {
+				Type:        "object",
+				Description: "Named service configurations",
 			},
 		},
 	}
