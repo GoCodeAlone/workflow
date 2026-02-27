@@ -16,6 +16,7 @@ var commands = map[string]func([]string) error{
 	"plugin":   runPlugin,
 	"pipeline": runPipeline,
 	"schema":   runSchema,
+	"snippets": runSnippets,
 	"manifest": runManifest,
 	"migrate":  runMigrate,
 	"build-ui": runBuildUI,
@@ -48,6 +49,7 @@ Commands:
   plugin     Plugin management (init, docs, search, install, list, update, remove)
   pipeline   Pipeline management (list, run)
   schema     Generate JSON Schema for workflow configs
+  snippets   Export IDE snippets (--format vscode|jetbrains|json)
   manifest   Analyze config and report infrastructure requirements
   migrate    Manage database schema migrations
   build-ui   Build the application UI (npm install + npm run build + validate)
