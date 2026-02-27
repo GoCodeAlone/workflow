@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	engineplugin "github.com/GoCodeAlone/workflow/plugin"
 )
 
 // defaultDataDir is the default location for installed plugin binaries.
@@ -154,6 +156,12 @@ func runPluginInstall(args []string) error {
 		}
 	}
 
+	// Verify the installed plugin.json is valid for ExternalPluginManager.
+	fmt.Fprintf(os.Stderr, "Verifying plugin manifest...\n")
+	if verifyErr := verifyInstalledPlugin(destDir, pluginName); verifyErr != nil {
+		return fmt.Errorf("post-install verification failed: %w", verifyErr)
+	}
+
 	fmt.Printf("Installed %s v%s to %s\n", manifest.Name, manifest.Version, destDir)
 	return nil
 }
@@ -179,16 +187,18 @@ func runPluginList(args []string) error {
 	}
 
 	type installed struct {
-		name    string
-		version string
+		name        string
+		version     string
+		pluginType  string
+		description string
 	}
 	var plugins []installed
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		ver := readInstalledVersion(filepath.Join(*dataDir, e.Name()))
-		plugins = append(plugins, installed{name: e.Name(), version: ver})
+		ver, pType, desc := readInstalledInfo(filepath.Join(*dataDir, e.Name()))
+		plugins = append(plugins, installed{name: e.Name(), version: ver, pluginType: pType, description: desc})
 	}
 
 	if len(plugins) == 0 {
@@ -196,10 +206,14 @@ func runPluginList(args []string) error {
 		return nil
 	}
 
-	fmt.Printf("%-20s %s\n", "NAME", "VERSION")
-	fmt.Printf("%-20s %s\n", "----", "-------")
+	fmt.Printf("%-20s %-10s %-10s %s\n", "NAME", "VERSION", "TYPE", "DESCRIPTION")
+	fmt.Printf("%-20s %-10s %-10s %s\n", "----", "-------", "----", "-----------")
 	for _, p := range plugins {
-		fmt.Printf("%-20s %s\n", p.name, p.version)
+		desc := p.description
+		if len(desc) > 40 {
+			desc = desc[:37] + "..."
+		}
+		fmt.Printf("%-20s %-10s %-10s %s\n", p.name, p.version, p.pluginType, desc)
 	}
 	return nil
 }
@@ -253,6 +267,83 @@ func runPluginRemove(args []string) error {
 		return fmt.Errorf("remove plugin %q: %w", pluginName, err)
 	}
 	fmt.Printf("Removed plugin %q\n", pluginName)
+	return nil
+}
+
+func runPluginInfo(args []string) error {
+	fs := flag.NewFlagSet("plugin info", flag.ContinueOnError)
+	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin info [options] <name>\n\nShow details about an installed plugin.\n\nOptions:\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() < 1 {
+		fs.Usage()
+		return fmt.Errorf("plugin name is required")
+	}
+
+	pluginName := fs.Arg(0)
+	pluginDir := filepath.Join(*dataDir, pluginName)
+	manifestPath := filepath.Join(pluginDir, "plugin.json")
+
+	data, err := os.ReadFile(manifestPath)
+	if os.IsNotExist(err) {
+		return fmt.Errorf("plugin %q is not installed", pluginName)
+	}
+	if err != nil {
+		return fmt.Errorf("read manifest: %w", err)
+	}
+
+	var m installedPluginJSON
+	if err := json.Unmarshal(data, &m); err != nil {
+		return fmt.Errorf("parse manifest: %w", err)
+	}
+
+	fmt.Printf("Name:         %s\n", m.Name)
+	fmt.Printf("Version:      %s\n", m.Version)
+	fmt.Printf("Author:       %s\n", m.Author)
+	fmt.Printf("Description:  %s\n", m.Description)
+	if m.License != "" {
+		fmt.Printf("License:      %s\n", m.License)
+	}
+	if m.Type != "" {
+		fmt.Printf("Type:         %s\n", m.Type)
+	}
+	if m.Tier != "" {
+		fmt.Printf("Tier:         %s\n", m.Tier)
+	}
+	if m.Repository != "" {
+		fmt.Printf("Repository:   %s\n", m.Repository)
+	}
+	if len(m.ModuleTypes) > 0 {
+		fmt.Printf("Module Types: %s\n", strings.Join(m.ModuleTypes, ", "))
+	}
+	if len(m.StepTypes) > 0 {
+		fmt.Printf("Step Types:   %s\n", strings.Join(m.StepTypes, ", "))
+	}
+	if len(m.TriggerTypes) > 0 {
+		fmt.Printf("Trigger Types: %s\n", strings.Join(m.TriggerTypes, ", "))
+	}
+	if len(m.Tags) > 0 {
+		fmt.Printf("Tags:         %s\n", strings.Join(m.Tags, ", "))
+	}
+
+	// Check binary status.
+	binaryPath := filepath.Join(pluginDir, pluginName)
+	if info, statErr := os.Stat(binaryPath); statErr == nil {
+		fmt.Printf("Binary:       %s (%d bytes)\n", binaryPath, info.Size())
+		if info.Mode()&0111 != 0 {
+			fmt.Printf("Executable:   yes\n")
+		} else {
+			fmt.Printf("Executable:   no (WARNING: not executable)\n")
+		}
+	} else {
+		fmt.Printf("Binary:       NOT FOUND (WARNING)\n")
+	}
+
 	return nil
 }
 
@@ -362,15 +453,44 @@ func safeJoin(base, name string) (string, error) {
 	return dest, nil
 }
 
-// installedPluginJSON is the minimal JSON written to plugin.json after install.
+// installedPluginJSON is the JSON format for plugin.json written after install.
+// This must be compatible with plugin.PluginManifest so that
+// ExternalPluginManager.LoadPlugin() can validate it.
 type installedPluginJSON struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	Name         string   `json:"name"`
+	Version      string   `json:"version"`
+	Author       string   `json:"author"`
+	Description  string   `json:"description"`
+	License      string   `json:"license,omitempty"`
+	Repository   string   `json:"repository,omitempty"`
+	Tier         string   `json:"tier,omitempty"`
+	Tags         []string `json:"tags,omitempty"`
+	Type         string   `json:"type,omitempty"`
+	ModuleTypes  []string `json:"moduleTypes,omitempty"`
+	StepTypes    []string `json:"stepTypes,omitempty"`
+	TriggerTypes []string `json:"triggerTypes,omitempty"`
 }
 
-// writeInstalledManifest writes a minimal plugin.json to record the installed version.
+// writeInstalledManifest writes a full plugin.json compatible with the engine's
+// plugin.PluginManifest so that ExternalPluginManager.LoadPlugin() can validate it.
 func writeInstalledManifest(path string, m *RegistryManifest) error {
-	data, err := json.MarshalIndent(installedPluginJSON{Name: m.Name, Version: m.Version}, "", "  ")
+	pj := installedPluginJSON{
+		Name:        m.Name,
+		Version:     m.Version,
+		Author:      m.Author,
+		Description: m.Description,
+		License:     m.License,
+		Repository:  m.Repository,
+		Tier:        m.Tier,
+		Tags:        m.Keywords,
+		Type:        m.Type,
+	}
+	if m.Capabilities != nil {
+		pj.ModuleTypes = m.Capabilities.ModuleTypes
+		pj.StepTypes = m.Capabilities.StepTypes
+		pj.TriggerTypes = m.Capabilities.TriggerTypes
+	}
+	data, err := json.MarshalIndent(pj, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -417,18 +537,57 @@ func ensurePluginBinary(destDir, pluginName string) error {
 	return os.Rename(filepath.Join(destDir, bestName), expectedPath)
 }
 
-// readInstalledVersion reads the version from a plugin.json in the given directory.
-func readInstalledVersion(dir string) string {
+// verifyInstalledPlugin validates the installed plugin.json using the engine's
+// manifest loader and checks that the binary exists and is executable.
+func verifyInstalledPlugin(destDir, pluginName string) error {
+	manifestPath := filepath.Join(destDir, "plugin.json")
+	binaryPath := filepath.Join(destDir, pluginName)
+
+	// Check manifest exists and is valid for the engine.
+	manifest, err := engineplugin.LoadManifest(manifestPath)
+	if err != nil {
+		return fmt.Errorf("load manifest: %w", err)
+	}
+	if err := manifest.Validate(); err != nil {
+		return fmt.Errorf("manifest validation: %w", err)
+	}
+
+	// Check binary exists and is executable.
+	info, err := os.Stat(binaryPath)
+	if err != nil {
+		return fmt.Errorf("binary not found at %s: %w", binaryPath, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("binary path %s is a directory", binaryPath)
+	}
+	if info.Mode()&0111 == 0 {
+		return fmt.Errorf("binary %s is not executable", binaryPath)
+	}
+
+	return nil
+}
+
+// readInstalledInfo reads version, type, and description from a plugin.json in the given directory.
+func readInstalledInfo(dir string) (version, pluginType, description string) {
 	data, err := os.ReadFile(filepath.Join(dir, "plugin.json"))
 	if err != nil {
-		return "unknown"
+		return "unknown", "", ""
 	}
 	var m installedPluginJSON
 	if err := json.Unmarshal(data, &m); err != nil {
-		return "unknown"
+		return "unknown", "", ""
 	}
-	if m.Version == "" {
-		return "unknown"
+	version = m.Version
+	if version == "" {
+		version = "unknown"
 	}
-	return m.Version
+	pluginType = m.Type
+	description = m.Description
+	return
+}
+
+// readInstalledVersion reads the version from a plugin.json in the given directory.
+func readInstalledVersion(dir string) string {
+	v, _, _ := readInstalledInfo(dir)
+	return v
 }
