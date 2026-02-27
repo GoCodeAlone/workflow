@@ -118,16 +118,69 @@ func (s *JSONResponseStep) resolveResponseBody(pc *PipelineContext) any {
 		return resolveBodyFrom(s.bodyFrom, pc)
 	}
 	if s.body != nil {
-		resolved, err := s.tmpl.ResolveMap(s.body, pc)
-		if err != nil {
-			return s.body // fallback to unresolved
+		result := make(map[string]any, len(s.body))
+		for k, v := range s.body {
+			resolved, err := s.resolveBodyValue(v, pc)
+			if err != nil {
+				return s.body // fallback to unresolved
+			}
+			result[k] = resolved
 		}
-		return resolved
+		return result
 	}
 	if s.bodyRaw != nil {
 		return s.bodyRaw
 	}
 	return nil
+}
+
+// resolveBodyValue resolves a single body value, supporting:
+//   - `_from` references that inject raw step output values
+//   - nested maps and slices
+//   - template strings resolved via the TemplateEngine.
+//
+// `_from` is treated as a special directive only when it is the sole key in a map,
+// e.g. `{"_from": "steps.fetch.rows"}`. This keeps the semantics simple and avoids
+// ambiguity: the entire value is replaced with the referenced data.
+//
+// As a consequence, `_from` cannot be combined with other fields or template
+// expressions in the same map node. Configuration authors can still mix raw
+// injections and templated fields by using `_from` on a sibling field in the
+// parent object instead.
+func (s *JSONResponseStep) resolveBodyValue(v any, pc *PipelineContext) (any, error) {
+	switch val := v.(type) {
+	case map[string]any:
+		// Check for _from reference, used only when it is the single key:
+		// {"_from": "steps.fetch.rows"}. Combining `_from` with other keys in
+		// the same map is intentionally not supported.
+		if from, ok := val["_from"].(string); ok && len(val) == 1 {
+			return resolveBodyFrom(from, pc), nil
+		}
+		// Recurse into nested map
+		result := make(map[string]any, len(val))
+		for k, item := range val {
+			resolved, err := s.resolveBodyValue(item, pc)
+			if err != nil {
+				return nil, fmt.Errorf("field %q: %w", k, err)
+			}
+			result[k] = resolved
+		}
+		return result, nil
+	case []any:
+		result := make([]any, len(val))
+		for i, item := range val {
+			resolved, err := s.resolveBodyValue(item, pc)
+			if err != nil {
+				return nil, err
+			}
+			result[i] = resolved
+		}
+		return result, nil
+	case string:
+		return s.tmpl.Resolve(val, pc)
+	default:
+		return v, nil
+	}
 }
 
 // resolveBodyFrom resolves a dotted path like "steps.get-company.row" from the
