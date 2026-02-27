@@ -218,6 +218,120 @@ func TestTemplateEngine_ResolveMap_ErrorPropagation(t *testing.T) {
 	}
 }
 
+func TestTemplateEngine_FuncUUID(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+
+	result, err := te.Resolve("{{ uuid }}", pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// UUID v4 has the form xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+	if len(result) != 36 {
+		t.Errorf("expected UUID of length 36, got %q (len=%d)", result, len(result))
+	}
+	if result[14] != '4' {
+		t.Errorf("expected UUID version 4, got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncNowRFC3339(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+
+	result, err := te.Resolve(`{{ now "RFC3339" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) == 0 {
+		t.Error("expected non-empty timestamp")
+	}
+	// RFC3339 strings contain 'T' and 'Z' or offset
+	if !strings.Contains(result, "T") {
+		t.Errorf("expected RFC3339 timestamp, got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncNowRawLayout(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+
+	result, err := te.Resolve(`{{ now "2006-01-02" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should be a date of the form YYYY-MM-DD
+	if len(result) != 10 {
+		t.Errorf("expected date of length 10, got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncTrimPrefix(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"phone": "+15551234567"}, nil)
+
+	result, err := te.Resolve(`{{ .phone | trimPrefix "+" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "15551234567" {
+		t.Errorf("expected '15551234567', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncTrimPrefixNotPresent(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"val": "hello"}, nil)
+
+	result, err := te.Resolve(`{{ .val | trimPrefix "world" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "hello" {
+		t.Errorf("expected 'hello', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncTrimSuffix(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"val": "hello.txt"}, nil)
+
+	result, err := te.Resolve(`{{ .val | trimSuffix ".txt" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "hello" {
+		t.Errorf("expected 'hello', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncTrimSuffixNotPresent(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"val": "hello"}, nil)
+
+	result, err := te.Resolve(`{{ .val | trimSuffix ".txt" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "hello" {
+		t.Errorf("expected 'hello', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncDefault(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("parse", map[string]any{"query_params": map[string]any{}})
+
+	result, err := te.Resolve(`{{ .steps.parse.query_params.page_size | default "25" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "25" {
+		t.Errorf("expected '25', got %q", result)
+	}
+}
+
 func TestTemplateEngine_ResolveMap_DoesNotMutateInput(t *testing.T) {
 	te := NewTemplateEngine()
 	pc := NewPipelineContext(map[string]any{"x": "resolved"}, nil)

@@ -94,16 +94,46 @@ func (te *TemplateEngine) resolveValue(v any, pc *PipelineContext) (any, error) 
 	}
 }
 
+// timeLayouts maps common Go time constant names to their layout strings.
+var timeLayouts = map[string]string{
+	"ANSIC":       time.ANSIC,
+	"UnixDate":    time.UnixDate,
+	"RubyDate":    time.RubyDate,
+	"RFC822":      time.RFC822,
+	"RFC822Z":     time.RFC822Z,
+	"RFC850":      time.RFC850,
+	"RFC1123":     time.RFC1123,
+	"RFC1123Z":    time.RFC1123Z,
+	"RFC3339":     time.RFC3339,
+	"RFC3339Nano": time.RFC3339Nano,
+	"Kitchen":     time.Kitchen,
+	"Stamp":       time.Stamp,
+	"StampMilli":  time.StampMilli,
+	"StampMicro":  time.StampMicro,
+	"StampNano":   time.StampNano,
+	"DateTime":    time.DateTime,
+	"DateOnly":    time.DateOnly,
+	"TimeOnly":    time.TimeOnly,
+}
+
 // templateFuncMap returns the function map available in pipeline templates.
 func templateFuncMap() template.FuncMap {
 	return template.FuncMap{
-		// uuidv4 generates a new UUID v4 string.
+		// uuid generates a new UUID v4 string.
+		"uuid": func() string {
+			return uuid.New().String()
+		},
+		// uuidv4 generates a new UUID v4 string (alias for uuid).
 		"uuidv4": func() string {
 			return uuid.New().String()
 		},
-		// now returns the current time in RFC3339 format (UTC).
-		"now": func() string {
-			return time.Now().UTC().Format(time.RFC3339)
+		// now returns the current UTC time formatted with the given Go time layout
+		// string or named constant (e.g. "RFC3339", "2006-01-02").
+		"now": func(layout string) string {
+			if l, ok := timeLayouts[layout]; ok {
+				layout = l
+			}
+			return time.Now().UTC().Format(layout)
 		},
 		// lower converts a string to lowercase.
 		"lower": strings.ToLower,
@@ -116,6 +146,14 @@ func templateFuncMap() template.FuncMap {
 				return fallback
 			}
 			return val
+		},
+		// trimPrefix removes the given prefix from a string if present.
+		"trimPrefix": func(prefix, s string) string {
+			return strings.TrimPrefix(s, prefix)
+		},
+		// trimSuffix removes the given suffix from a string if present.
+		"trimSuffix": func(suffix, s string) string {
+			return strings.TrimSuffix(s, suffix)
 		},
 		// json marshals a value to a JSON string.
 		"json": func(v any) string {
