@@ -25,20 +25,51 @@ import (
 // Version is the MCP server version, set at build time.
 var Version = "dev"
 
+// EngineProvider is the interface that the MCP server requires from the
+// workflow engine. It is kept intentionally narrow so that the mcp package
+// does not import the root workflow package directly.
+type EngineProvider interface {
+	// BuildFromConfig builds the engine from a parsed workflow config.
+	BuildFromConfig(cfg *config.WorkflowConfig) error
+	// Start starts the engine and all registered triggers.
+	Start(ctx context.Context) error
+	// Stop gracefully shuts down the engine.
+	Stop(ctx context.Context) error
+	// TriggerWorkflow dispatches a workflow execution.
+	TriggerWorkflow(ctx context.Context, workflowType string, action string, data map[string]any) error
+}
+
+// ServerOption configures optional Server behaviour.
+type ServerOption func(*Server)
+
+// WithEngine attaches a pre-built workflow engine to the MCP server,
+// enabling the run_workflow tool for AI-driven workflow execution.
+func WithEngine(engine EngineProvider) ServerOption {
+	return func(s *Server) {
+		s.engine = engine
+	}
+}
+
 // Server wraps an MCP server instance and provides workflow-engine-specific
 // tools and resources.
 type Server struct {
 	mcpServer *server.MCPServer
 	pluginDir string
+	engine    EngineProvider // optional; enables execution tools when set
 }
 
 // NewServer creates a new MCP server with all workflow engine tools and
 // resources registered. pluginDir is the directory where installed plugins
 // reside (e.g., "data/plugins"). If set, the server will read plugin manifests
 // from this directory and include plugin-provided types in all type listings.
-func NewServer(pluginDir string) *Server {
+// Optional ServerOption values can be provided to attach an engine, etc.
+func NewServer(pluginDir string, opts ...ServerOption) *Server {
 	s := &Server{
 		pluginDir: pluginDir,
+	}
+
+	for _, opt := range opts {
+		opt(s)
 	}
 
 	s.mcpServer = server.NewMCPServer(
@@ -174,6 +205,28 @@ func (s *Server) registerTools() {
 		),
 		s.handleGetConfigSkeleton,
 	)
+
+	// run_workflow - only available when an engine is attached
+	if s.engine != nil {
+		s.mcpServer.AddTool(
+			mcp.NewTool("run_workflow",
+				mcp.WithDescription("Trigger a workflow execution on the attached engine. Requires the server to be started with an engine (WithEngine option). "+
+					"Provide the workflow type, action, and optional data payload."),
+				mcp.WithString("workflow_type",
+					mcp.Required(),
+					mcp.Description("The workflow type to trigger (e.g., 'http', 'messaging', 'pipeline')"),
+				),
+				mcp.WithString("action",
+					mcp.Required(),
+					mcp.Description("The action to perform within the workflow"),
+				),
+				mcp.WithObject("data",
+					mcp.Description("Key-value data payload to pass to the workflow"),
+				),
+			),
+			s.handleRunWorkflow,
+		)
+	}
 }
 
 // registerResources registers documentation and example resources.
@@ -460,6 +513,47 @@ func (s *Server) handleGetConfigSkeleton(_ context.Context, req mcp.CallToolRequ
 
 	yaml := generateConfigSkeleton(moduleTypes)
 	return mcp.NewToolResultText(yaml), nil
+}
+
+func (s *Server) handleRunWorkflow(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if s.engine == nil {
+		return mcp.NewToolResultError("no engine attached; start the server with WithEngine option"), nil
+	}
+
+	workflowType := mcp.ParseString(req, "workflow_type", "")
+	if workflowType == "" {
+		return mcp.NewToolResultError("workflow_type is required"), nil
+	}
+
+	action := mcp.ParseString(req, "action", "")
+	if action == "" {
+		return mcp.NewToolResultError("action is required"), nil
+	}
+
+	var data map[string]any
+	if rawData, ok := req.Params.Arguments["data"]; ok && rawData != nil {
+		if d, ok := rawData.(map[string]any); ok {
+			data = d
+		}
+	}
+	if data == nil {
+		data = make(map[string]any)
+	}
+
+	if err := s.engine.TriggerWorkflow(ctx, workflowType, action, data); err != nil {
+		result := map[string]any{
+			"success": false,
+			"error":   err.Error(),
+		}
+		return marshalToolResult(result)
+	}
+
+	result := map[string]any{
+		"success":       true,
+		"workflow_type": workflowType,
+		"action":        action,
+	}
+	return marshalToolResult(result)
 }
 
 // --- Resource Handlers ---

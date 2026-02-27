@@ -9,12 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow"
 	"github.com/GoCodeAlone/workflow/config"
-	"github.com/GoCodeAlone/workflow/dynamic"
-	"github.com/GoCodeAlone/workflow/handlers"
-	"github.com/GoCodeAlone/workflow/module"
 )
 
 func runRun(args []string) error {
@@ -57,28 +53,11 @@ func runRun(args []string) error {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 
-	app := modular.NewStdApplication(nil, logger)
-	engine := workflow.NewStdEngine(app, logger)
-
-	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewSchedulerWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewIntegrationWorkflowHandler())
-
-	engine.RegisterTrigger(module.NewHTTPTrigger())
-	engine.RegisterTrigger(module.NewEventTrigger())
-	engine.RegisterTrigger(module.NewScheduleTrigger())
-	engine.RegisterTrigger(module.NewEventBusTrigger())
-	engine.RegisterTrigger(module.NewReconciliationTrigger())
-
-	pool := dynamic.NewInterpreterPool()
-	registry := dynamic.NewComponentRegistry()
-	loader := dynamic.NewLoader(pool, registry)
-	engine.SetDynamicRegistry(registry)
-	engine.SetDynamicLoader(loader)
-
-	if err := engine.BuildFromConfig(cfg); err != nil {
+	engine, err := workflow.NewEngineBuilder().
+		WithLogger(logger).
+		WithAllDefaults().
+		BuildFromConfig(cfg)
+	if err != nil {
 		return fmt.Errorf("failed to build workflow: %w", err)
 	}
 

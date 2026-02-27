@@ -3,10 +3,12 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/schema"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -831,4 +833,166 @@ func createTestPlugin(dir, version string) error {
 	}
 	data := []byte(`{"name":"test-plugin","version":"` + version + `"}`)
 	return os.WriteFile(dir+"/plugin.json", data, 0640) //nolint:gosec // G306: test helper
+}
+
+// --- Engine integration tests ---
+
+// mockEngine implements EngineProvider for testing.
+type mockEngine struct {
+	triggerCalled  bool
+	triggerType    string
+	triggerAction  string
+	triggerData    map[string]any
+	triggerErr     error
+}
+
+func (m *mockEngine) BuildFromConfig(_ *config.WorkflowConfig) error { return nil }
+func (m *mockEngine) Start(_ context.Context) error                  { return nil }
+func (m *mockEngine) Stop(_ context.Context) error                   { return nil }
+func (m *mockEngine) TriggerWorkflow(_ context.Context, workflowType string, action string, data map[string]any) error {
+	m.triggerCalled = true
+	m.triggerType = workflowType
+	m.triggerAction = action
+	m.triggerData = data
+	return m.triggerErr
+}
+
+func TestNewServer_WithEngine(t *testing.T) {
+	engine := &mockEngine{}
+	srv := NewServer("", WithEngine(engine))
+	if srv == nil {
+		t.Fatal("NewServer returned nil")
+	}
+	if srv.engine == nil {
+		t.Fatal("engine was not set on server")
+	}
+}
+
+func TestRunWorkflow_Success(t *testing.T) {
+	engine := &mockEngine{}
+	srv := NewServer("", WithEngine(engine))
+
+	req := makeCallToolRequest(map[string]any{
+		"workflow_type": "http",
+		"action":        "handle_request",
+		"data":          map[string]any{"key": "value"},
+	})
+
+	result, err := srv.handleRunWorkflow(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := extractText(t, result)
+	var data map[string]any
+	if err := json.Unmarshal([]byte(text), &data); err != nil {
+		t.Fatalf("failed to parse result JSON: %v", err)
+	}
+
+	if data["success"] != true {
+		t.Errorf("expected success=true, got %v", data["success"])
+	}
+	if !engine.triggerCalled {
+		t.Error("expected engine.TriggerWorkflow to be called")
+	}
+	if engine.triggerType != "http" {
+		t.Errorf("expected workflow_type 'http', got %q", engine.triggerType)
+	}
+	if engine.triggerAction != "handle_request" {
+		t.Errorf("expected action 'handle_request', got %q", engine.triggerAction)
+	}
+}
+
+func TestRunWorkflow_Error(t *testing.T) {
+	engine := &mockEngine{triggerErr: fmt.Errorf("workflow failed")}
+	srv := NewServer("", WithEngine(engine))
+
+	req := makeCallToolRequest(map[string]any{
+		"workflow_type": "http",
+		"action":        "handle_request",
+	})
+
+	result, err := srv.handleRunWorkflow(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := extractText(t, result)
+	var data map[string]any
+	if err := json.Unmarshal([]byte(text), &data); err != nil {
+		t.Fatalf("failed to parse result JSON: %v", err)
+	}
+
+	if data["success"] != false {
+		t.Errorf("expected success=false, got %v", data["success"])
+	}
+	if !contains(data["error"].(string), "workflow failed") {
+		t.Errorf("expected error message, got %v", data["error"])
+	}
+}
+
+func TestRunWorkflow_NoEngine(t *testing.T) {
+	srv := NewServer("")
+
+	req := makeCallToolRequest(map[string]any{
+		"workflow_type": "http",
+		"action":        "handle_request",
+	})
+
+	result, err := srv.handleRunWorkflow(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := extractText(t, result)
+	if !contains(text, "no engine attached") {
+		t.Errorf("expected 'no engine attached' error, got %q", text)
+	}
+}
+
+func TestRunWorkflow_MissingParams(t *testing.T) {
+	engine := &mockEngine{}
+	srv := NewServer("", WithEngine(engine))
+
+	// Missing workflow_type
+	req := makeCallToolRequest(map[string]any{
+		"action": "handle_request",
+	})
+	result, err := srv.handleRunWorkflow(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := extractText(t, result)
+	if !contains(text, "workflow_type is required") {
+		t.Errorf("expected 'workflow_type is required', got %q", text)
+	}
+
+	// Missing action
+	req = makeCallToolRequest(map[string]any{
+		"workflow_type": "http",
+	})
+	result, err = srv.handleRunWorkflow(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text = extractText(t, result)
+	if !contains(text, "action is required") {
+		t.Errorf("expected 'action is required', got %q", text)
+	}
+}
+
+func TestWithEngine_Option(t *testing.T) {
+	engine := &mockEngine{}
+
+	// Server without engine should not have run_workflow tool
+	srvNoEngine := NewServer("")
+	if srvNoEngine.engine != nil {
+		t.Error("server without engine should have nil engine")
+	}
+
+	// Server with engine should have run_workflow tool
+	srvWithEngine := NewServer("", WithEngine(engine))
+	if srvWithEngine.engine == nil {
+		t.Error("server with engine should have non-nil engine")
+	}
 }
