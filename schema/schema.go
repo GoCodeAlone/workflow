@@ -257,7 +257,10 @@ func KnownTriggerTypes() []string {
 	defer dynamicTriggerMu.RUnlock()
 
 	if len(dynamicTriggerTypes) == 0 {
-		return core
+		out := make([]string, len(core))
+		copy(out, core)
+		sort.Strings(out)
+		return out
 	}
 
 	seen := make(map[string]bool, len(core)+len(dynamicTriggerTypes))
@@ -292,7 +295,10 @@ func KnownWorkflowTypes() []string {
 	defer dynamicWorkflowMu.RUnlock()
 
 	if len(dynamicWorkflowTypes) == 0 {
-		return core
+		out := make([]string, len(core))
+		copy(out, core)
+		sort.Strings(out)
+		return out
 	}
 
 	seen := make(map[string]bool, len(core)+len(dynamicWorkflowTypes))

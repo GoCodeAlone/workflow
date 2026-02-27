@@ -1635,11 +1635,12 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Category:    "pipeline_steps",
 		Description: "Verifies incoming webhook request signatures (supports HMAC-SHA1, HMAC-SHA256)",
 		ConfigFields: []ConfigFieldDef{
+			{Key: "scheme", Label: "Scheme", Type: FieldTypeSelect, Options: []string{"hmac-sha1", "hmac-sha256", "hmac-sha256-hex"}, Description: "HMAC signature scheme to use (preferred over provider)"},
 			{Key: "provider", Label: "Provider", Type: FieldTypeSelect, Options: []string{"github", "stripe", "generic"}, Description: "Webhook provider (legacy; prefer scheme)"},
-			{Key: "scheme", Label: "Scheme", Type: FieldTypeSelect, Options: []string{"hmac-sha1", "hmac-sha256", "hmac-sha256-hex"}, Description: "HMAC signature scheme to use"},
 			{Key: "secret", Label: "Secret", Type: FieldTypeString, Sensitive: true, Description: "Webhook signing secret"},
-			{Key: "secret_from", Label: "Secret From", Type: FieldTypeString, Description: "Context key containing the secret at runtime"},
-			{Key: "signature_header", Label: "Signature Header", Type: FieldTypeString, Description: "HTTP header containing the signature", Placeholder: "X-Hub-Signature-256"},
+			{Key: "secret_from", Label: "Secret From", Type: FieldTypeString, Description: "Context key containing the secret at runtime (scheme mode only)"},
+			{Key: "signature_header", Label: "Signature Header", Type: FieldTypeString, Description: "HTTP header containing the signature (scheme mode only)", Placeholder: "X-Hub-Signature-256"},
+			{Key: "header", Label: "Signature Header (legacy)", Type: FieldTypeString, Description: "HTTP header containing the signature (provider/legacy mode)", Placeholder: "X-Hub-Signature-256"},
 		},
 	})
 
@@ -1650,8 +1651,9 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Description: "Retrieves a value from the cache by key",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "key", Label: "Key", Type: FieldTypeString, Required: true, Description: "Cache key (supports template expressions)", Placeholder: "user:{{.user_id}}"},
-			{Key: "output_key", Label: "Output Key", Type: FieldTypeString, Description: "Context key for the retrieved value", DefaultValue: "cache_value"},
-			{Key: "cache", Label: "Cache Module", Type: FieldTypeString, Description: "Name of the cache module to use"},
+			{Key: "cache", Label: "Cache Module", Type: FieldTypeString, Required: true, Description: "Name of the cache module to use"},
+			{Key: "output", Label: "Output Key", Type: FieldTypeString, Description: "Context key to store the retrieved value", DefaultValue: "value"},
+			{Key: "miss_ok", Label: "Allow Cache Miss", Type: FieldTypeBool, Description: "If true, do not fail when the cache key is missing (default: true)"},
 		},
 	})
 
@@ -1662,9 +1664,9 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Description: "Stores a value in the cache with optional TTL",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "key", Label: "Key", Type: FieldTypeString, Required: true, Description: "Cache key (supports template expressions)", Placeholder: "user:{{.user_id}}"},
-			{Key: "value_from", Label: "Value From", Type: FieldTypeString, Description: "Dotted path to the value to cache"},
+			{Key: "value", Label: "Value", Type: FieldTypeString, Required: true, Description: "Value to cache (supports template expressions, e.g. {{.field}})"},
+			{Key: "cache", Label: "Cache Module", Type: FieldTypeString, Required: true, Description: "Name of the cache module to use"},
 			{Key: "ttl", Label: "TTL", Type: FieldTypeDuration, Description: "Cache entry time-to-live", Placeholder: "5m"},
-			{Key: "cache", Label: "Cache Module", Type: FieldTypeString, Description: "Name of the cache module to use"},
 		},
 	})
 
@@ -1675,7 +1677,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Description: "Removes a value from the cache by key",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "key", Label: "Key", Type: FieldTypeString, Required: true, Description: "Cache key to delete (supports template expressions)", Placeholder: "user:{{.user_id}}"},
-			{Key: "cache", Label: "Cache Module", Type: FieldTypeString, Description: "Name of the cache module to use"},
+			{Key: "cache", Label: "Cache Module", Type: FieldTypeString, Required: true, Description: "Name of the cache module to use"},
 		},
 	})
 
@@ -1683,11 +1685,13 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "step.event_publish",
 		Label:       "Event Publish",
 		Category:    "pipeline_steps",
-		Description: "Publishes an event to the event bus",
+		Description: "Publishes an event to a messaging broker or event bus",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "event_type", Label: "Event Type", Type: FieldTypeString, Required: true, Description: "Event type identifier to publish", Placeholder: "user.created"},
-			{Key: "payload_from", Label: "Payload From", Type: FieldTypeString, Description: "Dotted path to the event payload in the pipeline context"},
-			{Key: "payload", Label: "Payload", Type: FieldTypeJSON, Description: "Static event payload (supports template expressions)"},
+			{Key: "topic", Label: "Topic", Type: FieldTypeString, Required: true, Description: "Topic or channel to publish the event to", Placeholder: "user-events"},
+			{Key: "payload", Label: "Payload", Type: FieldTypeJSON, Description: "Event payload as a JSON object (supports template expressions); defaults to current pipeline context"},
+			{Key: "headers", Label: "Headers", Type: FieldTypeJSON, Description: "Additional headers/metadata to include with the event as a JSON object"},
+			{Key: "event_type", Label: "Event Type", Type: FieldTypeString, Description: "Optional event type identifier to include with the message", Placeholder: "user.created"},
+			{Key: "broker", Label: "Broker", Type: FieldTypeString, Description: "Name of the messaging broker module to use (falls back to eventbus if not set)"},
 		},
 	})
 
@@ -1707,10 +1711,11 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "step.validate_pagination",
 		Label:       "Validate Pagination",
 		Category:    "pipeline_steps",
-		Description: "Validates and normalizes pagination query parameters (page, page_size, limit, offset)",
+		Description: "Validates and normalizes pagination query parameters (page, limit, offset)",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "default_page_size", Label: "Default Page Size", Type: FieldTypeNumber, DefaultValue: 20, Description: "Default number of items per page"},
-			{Key: "max_page_size", Label: "Max Page Size", Type: FieldTypeNumber, DefaultValue: 100, Description: "Maximum allowed page size"},
+			{Key: "default_page", Label: "Default Page", Type: FieldTypeNumber, DefaultValue: 1, Description: "Default page number when none is provided"},
+			{Key: "default_limit", Label: "Default Limit", Type: FieldTypeNumber, DefaultValue: 20, Description: "Default number of items to return when no limit is provided"},
+			{Key: "max_limit", Label: "Max Limit", Type: FieldTypeNumber, DefaultValue: 100, Description: "Maximum allowed number of items to return per request"},
 		},
 	})
 
@@ -1728,11 +1733,13 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "step.dlq_send",
 		Label:       "DLQ Send",
 		Category:    "pipeline_steps",
-		Description: "Sends a failed message to the dead letter queue for later replay",
+		Description: "Sends a failed message to the dead letter topic for later replay",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "queue", Label: "Queue Name", Type: FieldTypeString, Description: "DLQ queue name (defaults to pipeline name)"},
-			{Key: "reason_from", Label: "Reason From", Type: FieldTypeString, Description: "Context key containing the failure reason"},
-			{Key: "payload_from", Label: "Payload From", Type: FieldTypeString, Description: "Dotted path to the message payload"},
+			{Key: "topic", Label: "DLQ Topic", Type: FieldTypeString, Required: true, Description: "Dead letter topic to publish failed messages to"},
+			{Key: "original_topic", Label: "Original Topic", Type: FieldTypeString, Description: "Optional name of the original topic the message came from"},
+			{Key: "error", Label: "Error", Type: FieldTypeString, Description: "Optional error message or template expression containing the failure reason"},
+			{Key: "payload", Label: "Payload", Type: FieldTypeMap, Description: "Message payload to send to the DLQ (defaults to current pipeline context)"},
+			{Key: "broker", Label: "Broker", Type: FieldTypeString, Description: "Optional name of the messaging broker module to use (falls back to eventbus if not set)"},
 		},
 	})
 
@@ -1740,10 +1747,12 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "step.dlq_replay",
 		Label:       "DLQ Replay",
 		Category:    "pipeline_steps",
-		Description: "Replays messages from the dead letter queue",
+		Description: "Replays messages from a dead letter topic back to the original target topic",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "queue", Label: "Queue Name", Type: FieldTypeString, Description: "DLQ queue name to replay from"},
-			{Key: "limit", Label: "Limit", Type: FieldTypeNumber, DefaultValue: 10, Description: "Maximum number of messages to replay"},
+			{Key: "dlq_topic", Label: "DLQ Topic", Type: FieldTypeString, Required: true, Description: "Dead letter topic name to replay messages from"},
+			{Key: "target_topic", Label: "Target Topic", Type: FieldTypeString, Required: true, Description: "Target topic to publish replayed messages to"},
+			{Key: "max_messages", Label: "Max Messages", Type: FieldTypeNumber, DefaultValue: 100, Description: "Maximum number of messages to replay"},
+			{Key: "broker", Label: "Broker", Type: FieldTypeString, Description: "Name of the messaging broker module to use for replay (falls back to eventbus if not set)"},
 		},
 	})
 
