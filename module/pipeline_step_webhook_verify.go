@@ -3,13 +3,17 @@ package module
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/sha1"  //nolint:gosec // Required for Twilio HMAC-SHA1 webhook signature verification
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +26,11 @@ const (
 	webhookVerifyProviderStripe  = "stripe"
 	webhookVerifyProviderGeneric = "generic"
 
+	// Scheme constants for scheme-based verification.
+	webhookSchemeHMACSHA1      = "hmac-sha1"
+	webhookSchemeHMACSHA256    = "hmac-sha256"
+	webhookSchemeHMACSHA256Hex = "hmac-sha256-hex"
+
 	// stripeTimestampTolerance is the maximum allowed age of a Stripe timestamp.
 	stripeTimestampTolerance = 5 * time.Minute
 )
@@ -32,40 +41,108 @@ type WebhookVerifyStep struct {
 	provider string
 	secret   string
 	header   string
+
+	// scheme-based fields (new config model)
+	scheme            string
+	secretFrom        string
+	signatureHeader   string
+	urlReconstruction bool
+	includeFormParams bool
+	errorStatus       int
 }
 
 // NewWebhookVerifyStepFactory returns a StepFactory that creates WebhookVerifyStep instances.
 func NewWebhookVerifyStepFactory() StepFactory {
 	return func(name string, config map[string]any, _ modular.Application) (PipelineStep, error) {
+		scheme, _ := config["scheme"].(string)
 		provider, _ := config["provider"].(string)
+
+		// Determine which mode to use: scheme-based or provider-based
+		if scheme != "" {
+			return newSchemeBasedStep(name, scheme, config)
+		}
+
 		if provider == "" {
-			return nil, fmt.Errorf("webhook_verify step %q: 'provider' is required (github, stripe, or generic)", name)
+			return nil, fmt.Errorf("webhook_verify step %q: 'scheme' or 'provider' is required", name)
 		}
 
-		switch provider {
-		case webhookVerifyProviderGitHub, webhookVerifyProviderStripe, webhookVerifyProviderGeneric:
-			// valid
-		default:
-			return nil, fmt.Errorf("webhook_verify step %q: unknown provider %q (must be github, stripe, or generic)", name, provider)
-		}
-
-		secret, _ := config["secret"].(string)
-		if secret == "" {
-			return nil, fmt.Errorf("webhook_verify step %q: 'secret' is required", name)
-		}
-
-		// Expand environment variable references (e.g., "$MY_SECRET" or "${MY_SECRET}")
-		secret = expandEnvSecret(secret)
-
-		header, _ := config["header"].(string)
-
-		return &WebhookVerifyStep{
-			name:     name,
-			provider: provider,
-			secret:   secret,
-			header:   header,
-		}, nil
+		return newProviderBasedStep(name, provider, config)
 	}
+}
+
+// newSchemeBasedStep creates a WebhookVerifyStep using the scheme-based config model.
+func newSchemeBasedStep(name, scheme string, config map[string]any) (PipelineStep, error) {
+	switch scheme {
+	case webhookSchemeHMACSHA1, webhookSchemeHMACSHA256, webhookSchemeHMACSHA256Hex:
+		// valid
+	default:
+		return nil, fmt.Errorf("webhook_verify step %q: unknown scheme %q (must be hmac-sha1, hmac-sha256, or hmac-sha256-hex)", name, scheme)
+	}
+
+	secret, _ := config["secret"].(string)
+	secretFrom, _ := config["secret_from"].(string)
+	if secret == "" && secretFrom == "" {
+		return nil, fmt.Errorf("webhook_verify step %q: 'secret' or 'secret_from' is required", name)
+	}
+
+	if secret != "" {
+		secret = expandEnvSecret(secret)
+	}
+
+	signatureHeader, _ := config["signature_header"].(string)
+	if signatureHeader == "" {
+		return nil, fmt.Errorf("webhook_verify step %q: 'signature_header' is required when using scheme", name)
+	}
+
+	urlReconstruction, _ := config["url_reconstruction"].(bool)
+	includeFormParams, _ := config["include_form_params"].(bool)
+
+	errorStatus := http.StatusUnauthorized
+	if es, ok := config["error_status"]; ok {
+		switch v := es.(type) {
+		case int:
+			errorStatus = v
+		case float64:
+			errorStatus = int(v)
+		}
+	}
+
+	return &WebhookVerifyStep{
+		name:              name,
+		scheme:            scheme,
+		secret:            secret,
+		secretFrom:        secretFrom,
+		signatureHeader:   signatureHeader,
+		urlReconstruction: urlReconstruction,
+		includeFormParams: includeFormParams,
+		errorStatus:       errorStatus,
+	}, nil
+}
+
+// newProviderBasedStep creates a WebhookVerifyStep using the legacy provider-based config model.
+func newProviderBasedStep(name, provider string, config map[string]any) (PipelineStep, error) {
+	switch provider {
+	case webhookVerifyProviderGitHub, webhookVerifyProviderStripe, webhookVerifyProviderGeneric:
+		// valid
+	default:
+		return nil, fmt.Errorf("webhook_verify step %q: unknown provider %q (must be github, stripe, or generic)", name, provider)
+	}
+
+	secret, _ := config["secret"].(string)
+	if secret == "" {
+		return nil, fmt.Errorf("webhook_verify step %q: 'secret' is required", name)
+	}
+
+	secret = expandEnvSecret(secret)
+	header, _ := config["header"].(string)
+
+	return &WebhookVerifyStep{
+		name:        name,
+		provider:    provider,
+		secret:      secret,
+		header:      header,
+		errorStatus: http.StatusUnauthorized,
+	}, nil
 }
 
 // Name returns the step name.
@@ -84,6 +161,11 @@ func (s *WebhookVerifyStep) Execute(_ context.Context, pc *PipelineContext) (*St
 		return s.unauthorized(pc, fmt.Sprintf("failed to read request body: %v", err))
 	}
 
+	// Scheme-based verification takes priority
+	if s.scheme != "" {
+		return s.verifyByScheme(req, body, pc)
+	}
+
 	switch s.provider {
 	case webhookVerifyProviderGitHub:
 		return s.verifyGitHub(req, body, pc)
@@ -94,6 +176,172 @@ func (s *WebhookVerifyStep) Execute(_ context.Context, pc *PipelineContext) (*St
 	default:
 		return s.unauthorized(pc, fmt.Sprintf("unknown provider: %s", s.provider))
 	}
+}
+
+// resolveSecret returns the signing secret, resolving from pipeline context if secret_from is set.
+func (s *WebhookVerifyStep) resolveSecret(pc *PipelineContext) (string, error) {
+	if s.secret != "" {
+		return s.secret, nil
+	}
+
+	if s.secretFrom == "" {
+		return "", fmt.Errorf("no secret configured")
+	}
+
+	// Build a data map for dot-path resolution.
+	// Convert StepOutputs (map[string]map[string]any) to map[string]any for traversal.
+	stepsMap := make(map[string]any, len(pc.StepOutputs))
+	for k, v := range pc.StepOutputs {
+		stepsMap[k] = v
+	}
+
+	data := map[string]any{
+		"steps":   stepsMap,
+		"trigger": pc.TriggerData,
+		"meta":    pc.Metadata,
+	}
+	for k, v := range pc.Current {
+		data[k] = v
+	}
+
+	val, err := resolveDottedPath(data, s.secretFrom)
+	if err != nil {
+		return "", fmt.Errorf("could not resolve secret_from %q: %w", s.secretFrom, err)
+	}
+
+	secretStr, ok := val.(string)
+	if !ok {
+		return "", fmt.Errorf("secret_from %q resolved to non-string type %T", s.secretFrom, val)
+	}
+	return secretStr, nil
+}
+
+// verifyByScheme performs signature verification using the scheme-based config model.
+func (s *WebhookVerifyStep) verifyByScheme(req *http.Request, body []byte, pc *PipelineContext) (*StepResult, error) {
+	sig := req.Header.Get(s.signatureHeader)
+	if sig == "" {
+		return s.unauthorized(pc, fmt.Sprintf("missing %s header", s.signatureHeader))
+	}
+
+	secret, err := s.resolveSecret(pc)
+	if err != nil {
+		return s.unauthorized(pc, err.Error())
+	}
+
+	// Build signing input
+	var signingInput []byte
+	if s.includeFormParams {
+		signingInput = s.buildTwilioSigningInput(req, body)
+	} else {
+		signingInput = body
+	}
+
+	switch s.scheme {
+	case webhookSchemeHMACSHA1:
+		return s.verifyHMACSHA1(sig, secret, signingInput, pc)
+	case webhookSchemeHMACSHA256:
+		return s.verifyHMACSHA256Hex(sig, secret, signingInput, pc)
+	case webhookSchemeHMACSHA256Hex:
+		// Expects sha256=<hex> prefix
+		if !strings.HasPrefix(sig, "sha256=") {
+			return s.unauthorized(pc, fmt.Sprintf("%s must have format sha256=<hex>", s.signatureHeader))
+		}
+		return s.verifyHMACSHA256Hex(strings.TrimPrefix(sig, "sha256="), secret, signingInput, pc)
+	default:
+		return s.unauthorized(pc, fmt.Sprintf("unknown scheme: %s", s.scheme))
+	}
+}
+
+// verifyHMACSHA1 verifies a base64-encoded HMAC-SHA1 signature.
+func (s *WebhookVerifyStep) verifyHMACSHA1(sig, secret string, data []byte, pc *PipelineContext) (*StepResult, error) {
+	sigBytes, err := base64.StdEncoding.DecodeString(sig)
+	if err != nil {
+		return s.unauthorized(pc, fmt.Sprintf("invalid base64 in %s", s.signatureHeader))
+	}
+
+	expected := computeHMACSHA1([]byte(secret), data)
+	if subtle.ConstantTimeCompare(expected, sigBytes) != 1 {
+		return s.unauthorized(pc, "signature mismatch")
+	}
+
+	return &StepResult{
+		Output: map[string]any{"verified": true},
+	}, nil
+}
+
+// verifyHMACSHA256Hex verifies a hex-encoded HMAC-SHA256 signature.
+func (s *WebhookVerifyStep) verifyHMACSHA256Hex(sigHex, secret string, data []byte, pc *PipelineContext) (*StepResult, error) {
+	sigBytes, err := hex.DecodeString(sigHex)
+	if err != nil {
+		return s.unauthorized(pc, fmt.Sprintf("invalid hex in %s", s.signatureHeader))
+	}
+
+	expected := computeHMACSHA256([]byte(secret), data)
+	if subtle.ConstantTimeCompare(expected, sigBytes) != 1 {
+		return s.unauthorized(pc, "signature mismatch")
+	}
+
+	return &StepResult{
+		Output: map[string]any{"verified": true},
+	}, nil
+}
+
+// buildTwilioSigningInput constructs the signing input for Twilio-style webhooks:
+// the URL followed by POST form parameter values sorted alphabetically by key.
+func (s *WebhookVerifyStep) buildTwilioSigningInput(req *http.Request, body []byte) []byte {
+	requestURL := s.reconstructURL(req)
+
+	// Parse form parameters from the body
+	params, err := url.ParseQuery(string(body))
+	if err != nil {
+		return []byte(requestURL)
+	}
+
+	// Sort parameter keys and append key+value pairs
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var buf strings.Builder
+	buf.WriteString(requestURL)
+	for _, k := range keys {
+		for _, v := range params[k] {
+			buf.WriteString(k)
+			buf.WriteString(v)
+		}
+	}
+
+	return []byte(buf.String())
+}
+
+// reconstructURL returns the full URL used for signature verification.
+// When url_reconstruction is enabled, it rebuilds from X-Forwarded-Proto and X-Forwarded-Host headers.
+func (s *WebhookVerifyStep) reconstructURL(req *http.Request) string {
+	if !s.urlReconstruction {
+		return requestURL(req)
+	}
+
+	scheme := req.Header.Get("X-Forwarded-Proto")
+	if scheme == "" {
+		scheme = "https"
+	}
+	host := req.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = req.Host
+	}
+
+	return scheme + "://" + host + req.URL.RequestURI()
+}
+
+// requestURL reconstructs the URL from the request as-is.
+func requestURL(req *http.Request) string {
+	scheme := "https"
+	if req.TLS == nil {
+		scheme = "http"
+	}
+	return scheme + "://" + req.Host + req.URL.RequestURI()
 }
 
 // verifyGitHub checks the X-Hub-Signature-256 header (format: sha256=<hex>).
@@ -189,11 +437,15 @@ func (s *WebhookVerifyStep) verifyGeneric(req *http.Request, body []byte, pc *Pi
 	}, nil
 }
 
-// unauthorized writes a 401 response if a response writer is available, and returns Stop: true.
+// unauthorized writes an error response if a response writer is available, and returns Stop: true.
 func (s *WebhookVerifyStep) unauthorized(pc *PipelineContext, reason string) (*StepResult, error) {
+	status := s.errorStatus
+	if status == 0 {
+		status = http.StatusUnauthorized
+	}
 	if w, ok := pc.Metadata["_http_response_writer"].(http.ResponseWriter); ok {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
+		w.WriteHeader(status)
 		_, _ = w.Write([]byte(`{"error":"unauthorized","reason":"webhook signature verification failed"}`))
 	}
 	return &StepResult{
@@ -227,6 +479,13 @@ func (s *WebhookVerifyStep) readBody(req *http.Request, pc *PipelineContext) ([]
 // computeHMACSHA256 returns the HMAC-SHA256 of data using key.
 func computeHMACSHA256(key, data []byte) []byte {
 	mac := hmac.New(sha256.New, key)
+	mac.Write(data)
+	return mac.Sum(nil)
+}
+
+// computeHMACSHA1 returns the HMAC-SHA1 of data using key.
+func computeHMACSHA1(key, data []byte) []byte {
+	mac := hmac.New(sha1.New, key)
 	mac.Write(data)
 	return mac.Sum(nil)
 }
