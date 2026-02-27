@@ -15,6 +15,10 @@ build-ui:
 build-go:
 	go build -o server ./cmd/server
 
+# Build MCP server binary
+build-mcp:
+	go build -o workflow-mcp-server ./cmd/mcp
+
 # Run all tests with race detection
 test:
 	go test -race ./...
