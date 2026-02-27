@@ -16,7 +16,7 @@ func buildTestForEachStep(t *testing.T, name string, config map[string]any) (Pip
 	registry := NewStepRegistry()
 	registry.Register("step.set", NewSetStepFactory())
 	registry.Register("step.log", NewLogStepFactory())
-	factory := NewForEachStepFactory(func() *StepRegistry { return registry }, nil)
+	factory := NewForEachStepFactory(func() *StepRegistry { return registry })
 	return factory(name, config, nil)
 }
 
@@ -175,7 +175,7 @@ func TestForEachStep_SubStepErrorStopsIteration(t *testing.T) {
 		}, nil
 	})
 
-	factory := NewForEachStepFactory(func() *StepRegistry { return registry }, nil)
+	factory := NewForEachStepFactory(func() *StepRegistry { return registry })
 	step, err := factory("foreach-fail", map[string]any{
 		"collection": "items",
 		"steps": []any{
@@ -319,3 +319,247 @@ func TestForEachStep_CollectionFromStepOutputs(t *testing.T) {
 // Compile-time check: ensure the step_fail factory signature matches StepFactory.
 // This avoids having an unused import of fmt.
 var _ = fmt.Sprintf
+
+func TestForEachStep_ItemVar(t *testing.T) {
+	// item_var is the canonical config key name from the issue spec.
+	step, err := buildTestForEachStep(t, "foreach-item-var", map[string]any{
+		"collection": "rows",
+		"item_var":   "row",
+		"steps": []any{
+			map[string]any{
+				"type": "step.set",
+				"name": "capture",
+				"values": map[string]any{
+					"captured": "{{.row}}",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(map[string]any{
+		"rows": []any{"alpha", "beta"},
+	}, nil)
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	if result.Output["count"] != 2 {
+		t.Errorf("expected count=2, got %v", result.Output["count"])
+	}
+
+	results := result.Output["results"].([]any)
+	first := results[0].(map[string]any)
+	if first["captured"] != "alpha" {
+		t.Errorf("expected captured='alpha', got %v", first["captured"])
+	}
+}
+
+func TestForEachStep_ForeachIndexInContext(t *testing.T) {
+	// Each iteration should expose {{.foreach.index}} in the child context.
+	step, err := buildTestForEachStep(t, "foreach-index", map[string]any{
+		"collection": "items",
+		"steps": []any{
+			map[string]any{
+				"type": "step.set",
+				"name": "capture",
+				"values": map[string]any{
+					"idx": "{{.foreach.index}}",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(map[string]any{
+		"items": []any{"a", "b", "c"},
+	}, nil)
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	results := result.Output["results"].([]any)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+
+	// Verify indexes are 0, 1, 2
+	for i, r := range results {
+		m := r.(map[string]any)
+		want := fmt.Sprintf("%d", i)
+		if m["idx"] != want {
+			t.Errorf("iteration %d: expected idx=%q, got %v", i, want, m["idx"])
+		}
+	}
+}
+
+func TestForEachStep_SingleStep(t *testing.T) {
+	// The "step" (singular) config key should work as an alternative to "steps".
+	step, err := buildTestForEachStep(t, "foreach-single-step", map[string]any{
+		"collection": "names",
+		"item_var":   "name",
+		"step": map[string]any{
+			"type": "step.set",
+			"name": "process",
+			"values": map[string]any{
+				"processed": "{{.name}}",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(map[string]any{
+		"names": []any{"foo", "bar"},
+	}, nil)
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	if result.Output["count"] != 2 {
+		t.Errorf("expected count=2, got %v", result.Output["count"])
+	}
+
+	results := result.Output["results"].([]any)
+	first := results[0].(map[string]any)
+	if first["processed"] != "foo" {
+		t.Errorf("expected processed='foo', got %v", first["processed"])
+	}
+	second := results[1].(map[string]any)
+	if second["processed"] != "bar" {
+		t.Errorf("expected processed='bar', got %v", second["processed"])
+	}
+}
+
+func TestForEachStep_SingleStep_InvalidType(t *testing.T) {
+	_, err := buildTestForEachStep(t, "foreach-single-bad", map[string]any{
+		"collection": "items",
+		"step": map[string]any{
+			"type": "step.nonexistent",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown step type in 'step' config")
+	}
+}
+
+func TestForEachStep_SingleStep_MissingType(t *testing.T) {
+	_, err := buildTestForEachStep(t, "foreach-single-notype", map[string]any{
+		"collection": "items",
+		"step": map[string]any{
+			"name": "no-type-here",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error when 'step' config has no 'type'")
+	}
+}
+
+func TestForEachStep_StepAndStepsMutuallyExclusive(t *testing.T) {
+	_, err := buildTestForEachStep(t, "foreach-both", map[string]any{
+		"collection": "items",
+		"step": map[string]any{
+			"type": "step.set",
+			"name": "s",
+			"values": map[string]any{"x": "1"},
+		},
+		"steps": []any{
+			map[string]any{"type": "step.set", "name": "s2", "values": map[string]any{"y": "2"}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error when both 'step' and 'steps' are provided")
+	}
+}
+
+func TestForEachStep_StepWrongType(t *testing.T) {
+	_, err := buildTestForEachStep(t, "foreach-step-wrong-type", map[string]any{
+		"collection": "items",
+		"step":       "not-a-map",
+	})
+	if err == nil {
+		t.Fatal("expected error when 'step' is not a map")
+	}
+}
+
+func TestForEachStep_StepsWrongType(t *testing.T) {
+	_, err := buildTestForEachStep(t, "foreach-steps-wrong-type", map[string]any{
+		"collection": "items",
+		"steps":      "not-a-list",
+	})
+	if err == nil {
+		t.Fatal("expected error when 'steps' is not a list")
+	}
+}
+
+func TestForEachStep_AppPassedToSubStep(t *testing.T) {
+	// Verifies that the modular.Application passed to the StepFactory is threaded
+	// through to sub-step factories, not silently dropped.
+	var capturedApp modular.Application
+	registry := NewStepRegistry()
+	registry.Register("step.capture_app", func(name string, _ map[string]any, app modular.Application) (PipelineStep, error) {
+		capturedApp = app
+		return &mockStep{
+			name: name,
+			execFn: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+				return &StepResult{Output: map[string]any{}}, nil
+			},
+		}, nil
+	})
+
+	sentinel := &struct{ modular.Application }{}
+	factory := NewForEachStepFactory(func() *StepRegistry { return registry })
+	_, err := factory("foreach-app-test", map[string]any{
+		"collection": "items",
+		"step": map[string]any{
+			"type": "step.capture_app",
+		},
+	}, sentinel)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	if capturedApp != sentinel {
+		t.Errorf("expected app to be passed through to sub-step factory; got %v", capturedApp)
+	}
+}
+
+func TestForEachStep_ForeachMapNotSetWhenConflict(t *testing.T) {
+	// When item_var is "foreach", the "foreach" context key must NOT be overwritten.
+	step, err := buildTestForEachStep(t, "foreach-conflict", map[string]any{
+		"collection": "items",
+		"item_var":   "foreach", // would collide with the foreach map
+		"steps": []any{
+			map[string]any{
+				"type": "step.set",
+				"name": "capture",
+				"values": map[string]any{
+					"got": "{{.foreach}}",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(map[string]any{
+		"items": []any{"val"},
+	}, nil)
+
+	// Should not panic or error; the "foreach" key holds the item value, not the map.
+	_, execErr := step.Execute(context.Background(), pc)
+	if execErr != nil {
+		t.Fatalf("execute error: %v", execErr)
+	}
+}
