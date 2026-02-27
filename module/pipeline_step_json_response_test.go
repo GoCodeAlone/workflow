@@ -393,6 +393,67 @@ func TestJSONResponseStep_BodyFromRefMissingPath(t *testing.T) {
 	}
 }
 
+func TestJSONResponseStep_BodyFromRefInArray(t *testing.T) {
+	factory := NewJSONResponseStepFactory()
+	step, err := factory("array-from-ref", map[string]any{
+		"status": 200,
+		"body": map[string]any{
+			"items": []any{
+				map[string]any{"_from": "steps.first.data"},
+				map[string]any{"_from": "steps.second.data"},
+			},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_response_writer": recorder,
+	})
+	pc.MergeStepOutput("first", map[string]any{
+		"data": map[string]any{"id": "a1", "label": "Alpha"},
+	})
+	pc.MergeStepOutput("second", map[string]any{
+		"data": map[string]any{"id": "b2", "label": "Beta"},
+	})
+
+	_, err = step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(recorder.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+
+	items, ok := body["items"].([]any)
+	if !ok {
+		t.Fatalf("expected items to be []any, got %T", body["items"])
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+
+	first, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected items[0] to be map, got %T", items[0])
+	}
+	if first["id"] != "a1" {
+		t.Errorf("expected items[0].id='a1', got %v", first["id"])
+	}
+
+	second, ok := items[1].(map[string]any)
+	if !ok {
+		t.Fatalf("expected items[1] to be map, got %T", items[1])
+	}
+	if second["id"] != "b2" {
+		t.Errorf("expected items[1].id='b2', got %v", second["id"])
+	}
+}
+
 func TestJSONResponseStep_DefaultStatus(t *testing.T) {
 	factory := NewJSONResponseStepFactory()
 	step, err := factory("default-status", map[string]any{

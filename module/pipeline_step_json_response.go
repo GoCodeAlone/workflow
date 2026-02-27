@@ -134,12 +134,25 @@ func (s *JSONResponseStep) resolveResponseBody(pc *PipelineContext) any {
 	return nil
 }
 
-// resolveBodyValue resolves a single body value, supporting _from references
-// that inject raw step output values, nested maps, slices, and template strings.
+// resolveBodyValue resolves a single body value, supporting:
+//   - `_from` references that inject raw step output values
+//   - nested maps and slices
+//   - template strings resolved via the TemplateEngine.
+//
+// `_from` is treated as a special directive only when it is the sole key in a map,
+// e.g. `{"_from": "steps.fetch.rows"}`. This keeps the semantics simple and avoids
+// ambiguity: the entire value is replaced with the referenced data.
+//
+// As a consequence, `_from` cannot be combined with other fields or template
+// expressions in the same map node. Configuration authors can still mix raw
+// injections and templated fields by using `_from` on a sibling field in the
+// parent object instead.
 func (s *JSONResponseStep) resolveBodyValue(v any, pc *PipelineContext) (any, error) {
 	switch val := v.(type) {
 	case map[string]any:
-		// Check for _from reference: {"_from": "steps.fetch.rows"}
+		// Check for _from reference, used only when it is the single key:
+		// {"_from": "steps.fetch.rows"}. Combining `_from` with other keys in
+		// the same map is intentionally not supported.
 		if from, ok := val["_from"].(string); ok && len(val) == 1 {
 			return resolveBodyFrom(from, pc), nil
 		}
