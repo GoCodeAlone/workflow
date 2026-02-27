@@ -561,11 +561,11 @@ func TestPipeline_Execute_MetadataRoutePatternTakesPrecedence(t *testing.T) {
 func TestPipeline_Execute_NoRoutePatternNoMetadata(t *testing.T) {
 	// When RoutePattern is empty and Metadata has no _route_pattern,
 	// _route_pattern should not appear in the pipeline context.
-	var capturedRoutePattern any
+	var routePatternPresent bool
 	step1 := &mockStep{
 		name: "capture",
 		execFn: func(_ context.Context, pc *PipelineContext) (*StepResult, error) {
-			capturedRoutePattern = pc.Metadata["_route_pattern"]
+			_, routePatternPresent = pc.Metadata["_route_pattern"]
 			return &StepResult{}, nil
 		},
 	}
@@ -579,7 +579,7 @@ func TestPipeline_Execute_NoRoutePatternNoMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if capturedRoutePattern != nil {
-		t.Errorf("expected no _route_pattern in metadata, got %v", capturedRoutePattern)
+	if routePatternPresent {
+		t.Error("expected _route_pattern key to be absent from metadata")
 	}
 }
