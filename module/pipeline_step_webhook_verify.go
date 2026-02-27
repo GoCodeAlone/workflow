@@ -195,14 +195,15 @@ func (s *WebhookVerifyStep) resolveSecret(pc *PipelineContext) (string, error) {
 		stepsMap[k] = v
 	}
 
-	data := map[string]any{
-		"steps":   stepsMap,
-		"trigger": pc.TriggerData,
-		"meta":    pc.Metadata,
-	}
+	// Start with the current context, then overlay reserved keys so they cannot be overridden
+	// by user-controlled trigger data containing keys like "steps", "trigger", or "meta".
+	data := make(map[string]any, len(pc.Current)+3)
 	for k, v := range pc.Current {
 		data[k] = v
 	}
+	data["steps"] = stepsMap
+	data["trigger"] = pc.TriggerData
+	data["meta"] = pc.Metadata
 
 	val, err := resolveDottedPath(data, s.secretFrom)
 	if err != nil {
@@ -323,11 +324,16 @@ func (s *WebhookVerifyStep) reconstructURL(req *http.Request) string {
 		return requestURL(req)
 	}
 
-	scheme := req.Header.Get("X-Forwarded-Proto")
+	// Take the first value from comma-separated X-Forwarded-Proto header,
+	// falling back to the scheme inferred from the request itself.
+	scheme := firstHeaderValue(req.Header.Get("X-Forwarded-Proto"))
 	if scheme == "" {
-		scheme = "https"
+		scheme = requestScheme(req)
 	}
-	host := req.Header.Get("X-Forwarded-Host")
+
+	// Take the first value from comma-separated X-Forwarded-Host header,
+	// falling back to the Host from the request.
+	host := firstHeaderValue(req.Header.Get("X-Forwarded-Host"))
 	if host == "" {
 		host = req.Host
 	}
@@ -335,13 +341,31 @@ func (s *WebhookVerifyStep) reconstructURL(req *http.Request) string {
 	return scheme + "://" + host + req.URL.RequestURI()
 }
 
+// firstHeaderValue returns the first comma-separated value from a header string.
+func firstHeaderValue(h string) string {
+	if h == "" {
+		return ""
+	}
+	if idx := strings.IndexByte(h, ','); idx != -1 {
+		return strings.TrimSpace(h[:idx])
+	}
+	return strings.TrimSpace(h)
+}
+
+// requestScheme returns the scheme of the request based on TLS state and URL.
+func requestScheme(req *http.Request) string {
+	if req.TLS != nil {
+		return "https"
+	}
+	if s := req.URL.Scheme; s != "" {
+		return s
+	}
+	return "http"
+}
+
 // requestURL reconstructs the URL from the request as-is.
 func requestURL(req *http.Request) string {
-	scheme := "https"
-	if req.TLS == nil {
-		scheme = "http"
-	}
-	return scheme + "://" + req.Host + req.URL.RequestURI()
+	return requestScheme(req) + "://" + req.Host + req.URL.RequestURI()
 }
 
 // verifyGitHub checks the X-Hub-Signature-256 header (format: sha256=<hex>).

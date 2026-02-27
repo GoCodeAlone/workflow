@@ -831,3 +831,130 @@ func TestWebhookVerifyStep_SchemeNoFormParams(t *testing.T) {
 		t.Errorf("expected verified=true, got %v", result.Output["verified"])
 	}
 }
+
+func TestWebhookVerifyStep_SecretFrom_CannotBeOverriddenByCurrentData(t *testing.T) {
+	// Verify that reserved keys (steps/trigger/meta) in resolveSecret cannot be overridden
+	// by user-controlled data in pc.Current.
+	factory := NewWebhookVerifyStepFactory()
+	step, err := factory("verify-secret-override", map[string]any{
+		"scheme":           "hmac-sha256",
+		"secret_from":      "steps.load-config.auth_token",
+		"signature_header": "X-Signature",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	body := []byte(`{"event":"test"}`)
+	sig := computeTestHMAC("real-secret", string(body))
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req.Header.Set("X-Signature", sig)
+
+	// Set the actual secret via StepOutputs
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_request": req,
+	})
+	pc.StepOutputs["load-config"] = map[string]any{"auth_token": "real-secret"}
+	// Attempt to override the "steps" key via Current — this should NOT take effect
+	pc.Current["steps"] = map[string]any{
+		"load-config": map[string]any{"auth_token": "attacker-controlled-secret"},
+	}
+
+	result, err := step.Execute(t.Context(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	// The real secret should be used (from StepOutputs), so signature verification should succeed.
+	if result.Stop {
+		t.Errorf("expected Stop=false; reserved keys must not be overrideable via Current, reason: %v", result.Output["reason"])
+	}
+	if result.Output["verified"] != true {
+		t.Errorf("expected verified=true, got %v", result.Output["verified"])
+	}
+}
+
+func TestWebhookVerifyStep_URLReconstruction_CommaSeparatedHeaders(t *testing.T) {
+	// Verify that comma-separated X-Forwarded-Proto and X-Forwarded-Host values
+	// are handled correctly (first value is used).
+	factory := NewWebhookVerifyStepFactory()
+	step, err := factory("verify-url-comma", map[string]any{
+		"scheme":              "hmac-sha1",
+		"secret":              "test-secret",
+		"signature_header":    "X-Twilio-Signature",
+		"url_reconstruction":  true,
+		"include_form_params": true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	formBody := "Param=Value"
+	// First value from comma-separated headers should be used
+	expectedURL := "https://myapp.example.com/hook"
+	signingInput := expectedURL + "Param" + "Value"
+	sig := computeTestHMACSHA1Base64("test-secret", signingInput)
+
+	req := httptest.NewRequest(http.MethodPost, "/hook", bytes.NewReader([]byte(formBody)))
+	req.Header.Set("X-Twilio-Signature", sig)
+	// Comma-separated values — first should win
+	req.Header.Set("X-Forwarded-Proto", "https, http")
+	req.Header.Set("X-Forwarded-Host", "myapp.example.com, internal.host")
+
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_request": req,
+	})
+
+	result, err := step.Execute(t.Context(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if result.Stop {
+		t.Errorf("expected Stop=false (first value from comma-separated headers), reason: %v", result.Output["reason"])
+	}
+	if result.Output["verified"] != true {
+		t.Errorf("expected verified=true, got %v", result.Output["verified"])
+	}
+}
+
+func TestWebhookVerifyStep_URLReconstruction_FallsBackToRequestScheme(t *testing.T) {
+	// When X-Forwarded-Proto is absent, scheme should be inferred from the request (http for non-TLS).
+	factory := NewWebhookVerifyStepFactory()
+	step, err := factory("verify-url-fallback", map[string]any{
+		"scheme":              "hmac-sha1",
+		"secret":              "test-secret",
+		"signature_header":    "X-Twilio-Signature",
+		"url_reconstruction":  true,
+		"include_form_params": true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	formBody := "Key=Val"
+	// No X-Forwarded-Proto — req.TLS is nil so scheme should be "http"
+	// httptest.NewRequest creates a request with no TLS so requestScheme returns "http"
+	expectedURL := "http://example.com/hook"
+	signingInput := expectedURL + "Key" + "Val"
+	sig := computeTestHMACSHA1Base64("test-secret", signingInput)
+
+	req := httptest.NewRequest(http.MethodPost, "/hook", bytes.NewReader([]byte(formBody)))
+	req.Host = "example.com"
+	req.Header.Set("X-Twilio-Signature", sig)
+	// No X-Forwarded-Proto set
+
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_request": req,
+	})
+
+	result, err := step.Execute(t.Context(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if result.Stop {
+		t.Errorf("expected Stop=false (fallback to request scheme), reason: %v", result.Output["reason"])
+	}
+	if result.Output["verified"] != true {
+		t.Errorf("expected verified=true, got %v", result.Output["verified"])
+	}
+}
