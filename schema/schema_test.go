@@ -2,6 +2,7 @@ package schema
 
 import (
 	"encoding/json"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -780,4 +781,174 @@ func assertContains(t *testing.T, s, substr string) {
 	if !strings.Contains(s, substr) {
 		t.Errorf("expected %q to contain %q", s, substr)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// CamelToSnake tests
+// ---------------------------------------------------------------------------
+
+func TestCamelToSnake(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"contentType", "content_type"},
+		{"dbPath", "db_path"},
+		{"maxConnections", "max_connections"},
+		{"address", "address"},
+		{"rootDir", "root_dir"},
+		{"spaFallback", "spa_fallback"},
+		{"webhookURL", "webhook_url"},   // consecutive caps (acronym) treated as single word
+		{"HTTPRequest", "http_request"}, // leading acronym
+		{"already_snake", "already_snake"},
+	}
+	for _, c := range cases {
+		got := CamelToSnake(c.input)
+		if got != c.want {
+			t.Errorf("CamelToSnake(%q) = %q, want %q", c.input, got, c.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Snake_case config field detection tests
+// ---------------------------------------------------------------------------
+
+func TestValidateConfig_SnakeCaseConfigField_Error(t *testing.T) {
+	// "content_type" is the snake_case form of the known camelCase key "contentType"
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "h", Type: "http.handler", Config: map[string]any{
+				"content_type": "application/json",
+			}},
+		},
+		Triggers: map[string]any{"http": map[string]any{}},
+	}
+	err := ValidateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for snake_case config field")
+	}
+	assertContains(t, err.Error(), "content_type")
+	assertContains(t, err.Error(), "contentType")
+}
+
+func TestValidateConfig_SnakeCaseRequiredField_Hint(t *testing.T) {
+	// "db_path" is the snake_case form of the required key "dbPath" for storage.sqlite
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "db", Type: "storage.sqlite", Config: map[string]any{
+				"db_path": "data/test.db",
+			}},
+		},
+		Triggers: map[string]any{"http": map[string]any{}},
+	}
+	err := ValidateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for missing required field with snake_case hint")
+	}
+	// Should mention both the snake_case hint and that camelCase should be used
+	assertContains(t, err.Error(), "db_path")
+}
+
+func TestValidateConfig_CorrectCamelCase_Valid(t *testing.T) {
+	// Using the correct camelCase key should produce no snake_case error
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "h", Type: "http.handler", Config: map[string]any{
+				"contentType": "application/json",
+			}},
+		},
+		Triggers: map[string]any{"http": map[string]any{}},
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Errorf("expected valid config with camelCase key, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// LoadPluginTypesFromDir tests
+// ---------------------------------------------------------------------------
+
+func TestLoadPluginTypesFromDir_NonexistentDir(t *testing.T) {
+	err := LoadPluginTypesFromDir("/nonexistent/path")
+	if err == nil {
+		t.Fatal("expected error for nonexistent directory")
+	}
+}
+
+func TestLoadPluginTypesFromDir_Empty(t *testing.T) {
+	dir := t.TempDir()
+	if err := LoadPluginTypesFromDir(dir); err != nil {
+		t.Errorf("expected no error for empty directory, got: %v", err)
+	}
+}
+
+func TestLoadPluginTypesFromDir_RegistersTypes(t *testing.T) {
+	const customModuleType = "external.plugin.module.testonly"
+	const customTriggerType = "external.trigger.testonly"
+	const customWorkflowType = "external.workflow.testonly"
+
+	// Cleanup after test
+	t.Cleanup(func() {
+		UnregisterModuleType(customModuleType)
+		UnregisterTriggerType(customTriggerType)
+		UnregisterWorkflowType(customWorkflowType)
+	})
+
+	dir := t.TempDir()
+	// Create a fake plugin subdirectory with plugin.json
+	pluginDir := dir + "/my-plugin"
+	if err := makeDir(pluginDir); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"moduleTypes": ["` + customModuleType + `"],
+		"stepTypes": [],
+		"triggerTypes": ["` + customTriggerType + `"],
+		"workflowTypes": ["` + customWorkflowType + `"]
+	}`
+	if err := writeFile(pluginDir+"/plugin.json", []byte(manifest)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LoadPluginTypesFromDir(dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The module type should now be recognized
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "ext", Type: customModuleType},
+		},
+		Triggers: map[string]any{
+			customTriggerType: map[string]any{},
+		},
+	}
+	if err := ValidateConfig(cfg, WithExtraWorkflowTypes(customWorkflowType)); err != nil {
+		t.Errorf("expected plugin types to be recognized after LoadPluginTypesFromDir, got: %v", err)
+	}
+}
+
+func TestLoadPluginTypesFromDir_MalformedManifest(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := dir + "/bad-plugin"
+	if err := makeDir(pluginDir); err != nil {
+		t.Fatal(err)
+	}
+	// Write invalid JSON
+	if err := writeFile(pluginDir+"/plugin.json", []byte("not json")); err != nil {
+		t.Fatal(err)
+	}
+	// Should silently skip and not return error
+	if err := LoadPluginTypesFromDir(dir); err != nil {
+		t.Errorf("expected malformed manifest to be silently skipped, got: %v", err)
+	}
+}
+
+func makeDir(path string) error {
+	return os.MkdirAll(path, 0755)
+}
+
+func writeFile(path string, data []byte) error {
+	return os.WriteFile(path, data, 0644)
 }

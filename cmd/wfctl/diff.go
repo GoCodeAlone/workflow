@@ -112,7 +112,7 @@ type PipelineDiff struct {
 
 // BreakingChangeSummary aggregates breaking-change warnings across the diff.
 type BreakingChangeSummary struct {
-	ModuleName string         `json:"moduleName"`
+	ModuleName string           `json:"moduleName"`
 	Changes    []BreakingChange `json:"changes"`
 }
 

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/GoCodeAlone/workflow/schema"
 )
 
 func writeTestConfig(t *testing.T, dir, name, content string) string {
@@ -185,6 +187,33 @@ modules:
 	}
 }
 
+func TestRunValidateSnakeCaseConfig(t *testing.T) {
+	dir := t.TempDir()
+	// "content_type" is the snake_case form of the known camelCase field "contentType"
+	snakeCaseConfig := `
+modules:
+  - name: handler
+    type: http.handler
+    config:
+      content_type: "application/json"
+triggers:
+  http:
+    port: 8080
+`
+	path := writeTestConfig(t, dir, "snake.yaml", snakeCaseConfig)
+	// validateFile returns the detailed error; runValidate returns a summary
+	err := validateFile(path, false, false, false)
+	if err == nil {
+		t.Fatal("expected error for snake_case config field")
+	}
+	if !strings.Contains(err.Error(), "content_type") {
+		t.Errorf("expected error to mention snake_case field 'content_type', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "contentType") {
+		t.Errorf("expected error to suggest camelCase 'contentType', got: %v", err)
+	}
+}
+
 func TestRunPluginMissingSubcommand(t *testing.T) {
 	err := runPlugin([]string{})
 	if err == nil {
@@ -254,4 +283,39 @@ func TestRunPluginDocsMissingDir(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no directory given")
 	}
+}
+
+func TestRunValidatePluginDir(t *testing.T) {
+	// Create a fake external plugin directory with a plugin.json declaring a custom module type.
+	pluginsDir := t.TempDir()
+	pluginSubdir := filepath.Join(pluginsDir, "my-ext-plugin")
+	if err := os.MkdirAll(pluginSubdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"moduleTypes": ["custom.ext.validate.testonly"]}`
+	if err := os.WriteFile(filepath.Join(pluginSubdir, "plugin.json"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Config using the external plugin module type
+	dir := t.TempDir()
+	configContent := `
+modules:
+  - name: ext-mod
+    type: custom.ext.validate.testonly
+`
+	path := writeTestConfig(t, dir, "workflow.yaml", configContent)
+
+	// Without --plugin-dir: should fail (unknown type)
+	if err := runValidate([]string{path}); err == nil {
+		t.Fatal("expected error for unknown external module type without --plugin-dir")
+	}
+
+	// With --plugin-dir: should pass
+	if err := runValidate([]string{"--plugin-dir", pluginsDir, path}); err != nil {
+		t.Errorf("expected valid config with --plugin-dir, got: %v", err)
+	}
+	t.Cleanup(func() {
+		schema.UnregisterModuleType("custom.ext.validate.testonly")
+	})
 }

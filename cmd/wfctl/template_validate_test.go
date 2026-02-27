@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/schema"
 )
 
 func TestRunTemplateValidateAllTemplates(t *testing.T) {
@@ -234,6 +235,108 @@ func TestRunTemplateUnknownSubcommand(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown subcommand")
 	}
+}
+
+func TestValidateWorkflowConfig_SnakeCaseModuleField_Warning(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "server", Type: "http.server", Config: map[string]any{
+				// snake_case form of "readTimeout" (known field)
+				"read_timeout": "30s",
+				// correct key
+				"address": ":8080",
+			}},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "read_timeout") && strings.Contains(w, "readTimeout") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected warning for snake_case field 'read_timeout' suggesting 'readTimeout', got warnings: %v", result.Warnings)
+	}
+}
+
+func TestValidateWorkflowConfig_SnakeCaseStepField_Warning(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"my-pipeline": map[string]any{
+				"trigger": map[string]any{"type": "http"},
+				"steps": []any{
+					map[string]any{
+						"name": "my-step",
+						"type": "step.http_call",
+						"config": map[string]any{
+							// snake_case form of a known camelCase step config key
+							"target_url": "http://example.com",
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "target_url") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected warning for snake_case step config field 'target_url', got warnings: %v", result.Warnings)
+	}
+}
+
+func TestRunTemplateValidatePluginDir(t *testing.T) {
+	pluginsDir := t.TempDir()
+	// Create a fake plugin with a custom module type
+	pluginSubdir := filepath.Join(pluginsDir, "my-external-plugin")
+	if err := os.MkdirAll(pluginSubdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"moduleTypes": ["custom.external.module"]}`
+	if err := os.WriteFile(filepath.Join(pluginSubdir, "plugin.json"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Config that uses the external plugin module type
+	dir := t.TempDir()
+	configContent := `
+modules:
+  - name: ext-mod
+    type: custom.external.module
+`
+	configPath := filepath.Join(dir, "workflow.yaml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	// Without --plugin-dir: should fail with unknown type
+	err := runTemplateValidate([]string{"-config", configPath})
+	if err == nil {
+		t.Fatal("expected error for unknown external module type without --plugin-dir")
+	}
+
+	// With --plugin-dir: should pass
+	if err := runTemplateValidate([]string{"-plugin-dir", pluginsDir, "-config", configPath}); err != nil {
+		t.Errorf("expected valid config with --plugin-dir, got: %v", err)
+	}
+	t.Cleanup(func() {
+		schema.UnregisterModuleType("custom.external.module")
+	})
 }
 
 // --- Pipeline template expression linting tests ---

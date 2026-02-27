@@ -307,7 +307,7 @@ func TestMultiRegistryFetchPriority(t *testing.T) {
 func TestMultiRegistryFetchFallback(t *testing.T) {
 	// Source A errors for "unique-plugin", source B has it.
 	srcA := &mockRegistrySource{
-		name: "primary",
+		name:      "primary",
 		manifests: map[string]*RegistryManifest{},
 		fetchErr: map[string]error{
 			"unique-plugin": fmt.Errorf("not found"),
@@ -439,14 +439,14 @@ func TestMultiRegistryListDedup(t *testing.T) {
 	srcA := &mockRegistrySource{
 		name: "primary",
 		manifests: map[string]*RegistryManifest{
-			"shared":   {Name: "shared"},
+			"shared":    {Name: "shared"},
 			"only-in-a": {Name: "only-in-a"},
 		},
 	}
 	srcB := &mockRegistrySource{
 		name: "secondary",
 		manifests: map[string]*RegistryManifest{
-			"shared":   {Name: "shared"},
+			"shared":    {Name: "shared"},
 			"only-in-b": {Name: "only-in-b"},
 		},
 	}

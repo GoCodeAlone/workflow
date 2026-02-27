@@ -5,6 +5,9 @@ package schema
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 )
@@ -366,6 +369,55 @@ func KnownWorkflowTypes() []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+// pluginManifestTypes holds the type declarations from a plugin.json manifest.
+// This is a minimal subset of the full plugin manifest to avoid import cycles.
+type pluginManifestTypes struct {
+	ModuleTypes   []string `json:"moduleTypes"`
+	StepTypes     []string `json:"stepTypes"`
+	TriggerTypes  []string `json:"triggerTypes"`
+	WorkflowTypes []string `json:"workflowTypes"`
+}
+
+// LoadPluginTypesFromDir scans pluginDir for subdirectories containing a
+// plugin.json manifest, reads each manifest's type declarations, and registers
+// them with the schema package so that they appear in all type listings and
+// pass validation. Unknown or malformed manifests are silently skipped.
+// Returns an error only if pluginDir cannot be read at all.
+func LoadPluginTypesFromDir(pluginDir string) error {
+	entries, err := os.ReadDir(pluginDir)
+	if err != nil {
+		return fmt.Errorf("read plugin dir %q: %w", pluginDir, err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		manifestPath := filepath.Join(pluginDir, e.Name(), "plugin.json")
+		data, err := os.ReadFile(manifestPath) //nolint:gosec // G304: path is within the trusted plugins directory
+		if err != nil {
+			continue
+		}
+		var m pluginManifestTypes
+		if err := json.Unmarshal(data, &m); err != nil {
+			continue
+		}
+		for _, t := range m.ModuleTypes {
+			RegisterModuleType(t)
+		}
+		for _, t := range m.StepTypes {
+			// Step types share the module type registry (identified by "step." prefix).
+			RegisterModuleType(t)
+		}
+		for _, t := range m.TriggerTypes {
+			RegisterTriggerType(t)
+		}
+		for _, t := range m.WorkflowTypes {
+			RegisterWorkflowType(t)
+		}
+	}
+	return nil
 }
 
 // moduleIfThen builds an if/then conditional schema for a specific module type

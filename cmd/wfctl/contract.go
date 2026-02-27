@@ -15,9 +15,9 @@ import (
 
 // Contract is a snapshot of what a workflow application config exposes.
 type Contract struct {
-	Version     string            `json:"version"`
-	ConfigHash  string            `json:"configHash"`
-	GeneratedAt string            `json:"generatedAt"`
+	Version     string             `json:"version"`
+	ConfigHash  string             `json:"configHash"`
+	GeneratedAt string             `json:"generatedAt"`
 	Endpoints   []EndpointContract `json:"endpoints"`
 	Modules     []ModuleContract   `json:"modules"`
 	Steps       []string           `json:"steps"`
@@ -59,25 +59,25 @@ type contractComparison struct {
 type changeType string
 
 const (
-	changeAdded   changeType = "ADDED"
-	changeRemoved changeType = "REMOVED"
-	changeChanged changeType = "CHANGED"
+	changeAdded     changeType = "ADDED"
+	changeRemoved   changeType = "REMOVED"
+	changeChanged   changeType = "CHANGED"
 	changeUnchanged changeType = "UNCHANGED"
 )
 
 type endpointChange struct {
-	Method       string
-	Path         string
-	Pipeline     string
-	Change       changeType
-	Detail       string
-	IsBreaking   bool
+	Method     string
+	Path       string
+	Pipeline   string
+	Change     changeType
+	Detail     string
+	IsBreaking bool
 }
 
 type moduleChange struct {
-	Name    string
-	Type    string
-	Change  changeType
+	Name   string
+	Type   string
+	Change changeType
 }
 
 type eventChange struct {

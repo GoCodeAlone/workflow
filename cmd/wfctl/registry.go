@@ -17,21 +17,21 @@ const (
 
 // RegistryManifest is the manifest format for the GoCodeAlone/workflow-registry.
 type RegistryManifest struct {
-	Name             string          `json:"name"`
-	Version          string          `json:"version"`
-	Author           string          `json:"author"`
-	Description      string          `json:"description"`
-	Source           string          `json:"source,omitempty"`
-	Type             string          `json:"type"`
-	Tier             string          `json:"tier"`
-	License          string          `json:"license"`
-	MinEngineVersion string          `json:"minEngineVersion,omitempty"`
-	Repository       string          `json:"repository,omitempty"`
-	Keywords         []string             `json:"keywords,omitempty"`
-	Homepage         string               `json:"homepage,omitempty"`
+	Name             string                `json:"name"`
+	Version          string                `json:"version"`
+	Author           string                `json:"author"`
+	Description      string                `json:"description"`
+	Source           string                `json:"source,omitempty"`
+	Type             string                `json:"type"`
+	Tier             string                `json:"tier"`
+	License          string                `json:"license"`
+	MinEngineVersion string                `json:"minEngineVersion,omitempty"`
+	Repository       string                `json:"repository,omitempty"`
+	Keywords         []string              `json:"keywords,omitempty"`
+	Homepage         string                `json:"homepage,omitempty"`
 	Capabilities     *RegistryCapabilities `json:"capabilities,omitempty"`
-	Downloads        []PluginDownload     `json:"downloads,omitempty"`
-	Assets           *PluginAssets        `json:"assets,omitempty"`
+	Downloads        []PluginDownload      `json:"downloads,omitempty"`
+	Assets           *PluginAssets         `json:"assets,omitempty"`
 }
 
 // RegistryCapabilities describes what module/step/trigger types a plugin provides.
