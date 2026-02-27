@@ -128,8 +128,8 @@ Pipeline steps support Go template syntax with these built-in functions:
 | `lower` | Lowercase string | `{{ lower .name }}` |
 | `default` | Default value when empty | `{{ default "pending" .status }}` |
 | `json` | Marshal value to JSON string | `{{ json .data }}` |
-| `trimPrefix` | Remove prefix from string | `{{ .phone \| trimPrefix "+" }}` |
-| `trimSuffix` | Remove suffix from string | `{{ .file \| trimSuffix ".txt" }}` |
+| `trimPrefix` | Remove prefix from string | `{{ .phone | trimPrefix "+" }}` |
+| `trimSuffix` | Remove suffix from string | `{{ .file | trimSuffix ".txt" }}` |
 | `step` | Access step outputs by name and keys | `{{ step "parse-request" "path_params" "id" }}` |
 | `trigger` | Access trigger data by keys | `{{ trigger "path_params" "id" }}` |
 

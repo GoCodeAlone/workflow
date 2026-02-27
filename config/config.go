@@ -183,8 +183,18 @@ func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
 			return fmt.Errorf("import %q: %w", imp, err)
 		}
 
-		// Merge imported modules (append after main file's modules)
-		cfg.Modules = append(cfg.Modules, impCfg.Modules...)
+		// Merge imported modules — deduplicate by name (first definition wins)
+		existingModules := make(map[string]struct{}, len(cfg.Modules))
+		for _, m := range cfg.Modules {
+			existingModules[m.Name] = struct{}{}
+		}
+		for _, m := range impCfg.Modules {
+			if _, exists := existingModules[m.Name]; exists {
+				continue
+			}
+			cfg.Modules = append(cfg.Modules, m)
+			existingModules[m.Name] = struct{}{}
+		}
 
 		// Merge maps — imported values only added if not already defined in main file
 		if cfg.Workflows == nil {

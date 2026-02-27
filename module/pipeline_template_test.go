@@ -538,6 +538,22 @@ func TestTemplateEngine_TriggerFunction(t *testing.T) {
 	}
 }
 
+func TestPreprocessTemplate_UnclosedAction(t *testing.T) {
+	input := "{{ .steps.my-step.field"
+	result := preprocessTemplate(input)
+	if result != input {
+		t.Errorf("unclosed action should be returned unchanged, got %q", result)
+	}
+}
+
+func TestPreprocessTemplate_EscapedQuotesPreserved(t *testing.T) {
+	input := `{{ index .steps "my\"step" "field" }}`
+	result := preprocessTemplate(input)
+	if !strings.Contains(result, `"my\"step"`) {
+		t.Errorf("escaped quotes should be preserved, got %q", result)
+	}
+}
+
 func TestTemplateEngine_HyphenatedResolveEndToEnd(t *testing.T) {
 	te := NewTemplateEngine()
 	pc := NewPipelineContext(nil, nil)

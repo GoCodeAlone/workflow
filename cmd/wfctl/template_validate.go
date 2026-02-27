@@ -341,7 +341,7 @@ func validateWorkflowConfig(name string, cfg *config.WorkflowConfig, knownModule
 		moduleNames[mod.Name] = true
 	}
 
-	// 1. Validate module types
+	// 1. Validate module types and config fields
 	result.ModuleCount = len(cfg.Modules)
 	for _, mod := range cfg.Modules {
 		if mod.Type == "" {
@@ -353,7 +353,7 @@ func validateWorkflowConfig(name string, cfg *config.WorkflowConfig, knownModule
 			result.Errors = append(result.Errors, fmt.Sprintf("module %q uses unknown type %q", mod.Name, mod.Type))
 		} else {
 			result.ModuleValid++
-			// 5. Warn on unknown config fields
+			// Warn on unknown config fields
 			if mod.Config != nil && len(info.ConfigKeys) > 0 {
 				knownKeys := make(map[string]bool)
 				for _, k := range info.ConfigKeys {
@@ -367,7 +367,7 @@ func validateWorkflowConfig(name string, cfg *config.WorkflowConfig, knownModule
 			}
 		}
 
-		// 3. Validate dependencies
+		// 2. Validate dependencies
 		for _, dep := range mod.DependsOn {
 			result.DepCount++
 			if !moduleNames[dep] {
@@ -378,7 +378,7 @@ func validateWorkflowConfig(name string, cfg *config.WorkflowConfig, knownModule
 		}
 	}
 
-	// 2. Validate step types in pipelines
+	// 3. Validate step types in pipelines
 	for pipelineName, pipelineRaw := range cfg.Pipelines {
 		pipelineMap, ok := pipelineRaw.(map[string]any)
 		if !ok {
@@ -416,10 +416,10 @@ func validateWorkflowConfig(name string, cfg *config.WorkflowConfig, knownModule
 			}
 		}
 
-		// 6. Validate template expressions in pipeline steps
+		// 4. Validate template expressions in pipeline steps
 		validatePipelineTemplates(pipelineName, stepsRaw, &result)
 
-		// 4. Validate trigger types
+		// 5. Validate trigger types
 		if triggerRaw, ok := pipelineMap["trigger"]; ok {
 			if triggerMap, ok := triggerRaw.(map[string]any); ok {
 				triggerType, _ := triggerMap["type"].(string)

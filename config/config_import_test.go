@@ -625,6 +625,9 @@ modules:
 
 	gotModules := make(map[string]bool)
 	for _, m := range cfg.Modules {
+		if gotModules[m.Name] {
+			t.Errorf("duplicate module %q found in diamond import scenario", m.Name)
+		}
 		gotModules[m.Name] = true
 	}
 
@@ -632,5 +635,9 @@ modules:
 		if !gotModules[name] {
 			t.Errorf("expected module %q to be loaded in diamond import scenario", name)
 		}
+	}
+
+	if len(cfg.Modules) != 4 {
+		t.Errorf("expected exactly 4 modules (no duplicates), got %d", len(cfg.Modules))
 	}
 }

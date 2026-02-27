@@ -52,6 +52,8 @@ var dotChainRe = regexp.MustCompile(`\.[a-zA-Z_][a-zA-Z0-9_-]*(?:\.[a-zA-Z_][a-z
 // stringLiteralRe matches double-quoted and backtick-quoted string literals.
 // Go templates only support double-quoted and backtick strings (not single-quoted),
 // so single quotes are intentionally not handled here.
+// Note: Go's regexp package uses RE2 (linear-time matching), so there is no risk
+// of catastrophic backtracking / ReDoS with this pattern.
 var stringLiteralRe = regexp.MustCompile(`"(?:[^"\\]|\\.)*"` + "|`[^`]*`")
 
 // preprocessTemplate rewrites dot-access chains containing hyphens into index
@@ -84,7 +86,9 @@ func preprocessTemplate(tmplStr string) string {
 
 		action := rest[openIdx+2 : closeIdx] // content between {{ and }}
 
-		// Skip template comments {{/* ... */}}.
+		// Skip pure template comments {{/* ... */}}. Only actions whose entire
+		// content (after trimming) is a block comment are skipped. Mixed actions
+		// like {{ x /* comment */ y }} are not skipped since they contain code.
 		trimmed := strings.TrimSpace(action)
 		if strings.HasPrefix(trimmed, "/*") && strings.HasSuffix(trimmed, "*/") {
 			out.WriteString("{{")
@@ -141,19 +145,24 @@ func preprocessTemplate(tmplStr string) string {
 			return "(index " + prefix + " " + strings.Join(quoted, " ") + ")"
 		})
 
-		// Restore string literals from placeholders.
+		// Restore string literals from placeholders using strings.Index for O(n) scanning.
 		var restored string
 		if len(placeholders) > 0 {
 			phIdx := 0
 			var final strings.Builder
-			for i := 0; i < len(rewritten); i++ {
-				if strings.HasPrefix(rewritten[i:], placeholderSentinel) && phIdx < len(placeholders) {
+			remaining := rewritten
+			for {
+				idx := strings.Index(remaining, placeholderSentinel)
+				if idx < 0 {
+					final.WriteString(remaining)
+					break
+				}
+				final.WriteString(remaining[:idx])
+				if phIdx < len(placeholders) {
 					final.WriteString(placeholders[phIdx])
 					phIdx++
-					i += len(placeholderSentinel) - 1 // skip rest of sentinel
-				} else {
-					final.WriteByte(rewritten[i])
 				}
+				remaining = remaining[idx+len(placeholderSentinel):]
 			}
 			restored = final.String()
 		} else {
@@ -176,6 +185,8 @@ func (te *TemplateEngine) funcMapWithContext(pc *PipelineContext) template.FuncM
 
 	// step accesses step outputs by name and optional nested keys.
 	// Usage: {{ step "parse-request" "path_params" "id" }}
+	// Returns nil if the step doesn't exist, a key is missing, or an
+	// intermediate value is not a map (consistent with missingkey=zero).
 	fm["step"] = func(name string, keys ...string) any {
 		stepMap, ok := pc.StepOutputs[name]
 		if !ok || stepMap == nil {
