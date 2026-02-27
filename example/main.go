@@ -17,7 +17,7 @@ import (
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow"
 	"github.com/GoCodeAlone/workflow/config"
-	"github.com/GoCodeAlone/workflow/handlers"
+	allplugins "github.com/GoCodeAlone/workflow/plugins/all"
 )
 
 func main() {
@@ -50,12 +50,12 @@ func main() {
 	// Create workflow engine
 	engine := workflow.NewStdEngine(app, logger)
 
-	// Register workflow handlers
-	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewMessagingWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewStateMachineWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewSchedulerWorkflowHandler())
-	engine.RegisterWorkflowHandler(handlers.NewIntegrationWorkflowHandler())
+	// Load all built-in plugins in one call.
+	// To use a custom set, call allplugins.DefaultPlugins(), modify the slice,
+	// and load each plugin individually with engine.LoadPlugin.
+	if err = allplugins.LoadAll(engine); err != nil {
+		log.Fatalf("Failed to load plugins: %v", err)
+	}
 
 	// Build and start the workflows
 	if err = engine.BuildFromConfig(cfg); err != nil {
