@@ -27,6 +27,7 @@ import (
 	pluginauth "github.com/GoCodeAlone/workflow/plugins/auth"
 	plugincicd "github.com/GoCodeAlone/workflow/plugins/cicd"
 	plugincloud "github.com/GoCodeAlone/workflow/plugins/cloud"
+	pluginconfigprovider "github.com/GoCodeAlone/workflow/plugins/configprovider"
 	plugindatastores "github.com/GoCodeAlone/workflow/plugins/datastores"
 	plugindlq "github.com/GoCodeAlone/workflow/plugins/dlq"
 	pluginevstore "github.com/GoCodeAlone/workflow/plugins/eventstore"
@@ -61,6 +62,7 @@ type PluginLoader interface {
 func DefaultPlugins() []plugin.EnginePlugin {
 	return []plugin.EnginePlugin{
 		pluginlicense.New(),
+		pluginconfigprovider.New(),
 		pluginhttp.New(),
 		pluginobs.New(),
 		pluginmessaging.New(),
