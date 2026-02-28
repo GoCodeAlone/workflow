@@ -77,8 +77,9 @@ type ExecResult struct {
 
 // DockerSandbox wraps the Docker Engine SDK to execute commands in isolated containers.
 type DockerSandbox struct {
-	client *client.Client
-	config SandboxConfig
+	client      *client.Client
+	config      SandboxConfig
+	containerID string // set by CreateContainer, used by CopyIn/CopyOut/RemoveContainer
 }
 
 // NewDockerSandbox creates a new DockerSandbox with the given configuration.
@@ -180,39 +181,51 @@ func (s *DockerSandbox) Exec(ctx context.Context, cmd []string) (*ExecResult, er
 	}, nil
 }
 
-// CopyIn copies a file from the host into a running or created container.
+// CopyIn copies a file from the host into the active container.
+// Call CreateContainer first to set the active container ID.
 func (s *DockerSandbox) CopyIn(ctx context.Context, srcPath, destPath string) error {
-	f, err := os.Open(srcPath)
-	if err != nil {
-		return fmt.Errorf("sandbox: failed to open source file: %w", err)
+	if s.containerID == "" {
+		return fmt.Errorf("sandbox: CopyIn requires an active container; call CreateContainer first")
 	}
-	defer f.Close()
-
-	stat, err := f.Stat()
-	if err != nil {
-		return fmt.Errorf("sandbox: failed to stat source file: %w", err)
-	}
-
-	// Create a tar archive containing the file
-	tarReader, err := createTarFromFile(f, stat)
-	if err != nil {
-		return fmt.Errorf("sandbox: failed to create tar archive: %w", err)
-	}
-
-	// We need a container to copy into. This method is intended to be used
-	// with a container that has been created but the caller manages its lifecycle.
-	// For the typical use case, the Exec method handles the full lifecycle.
-	// This is a lower-level utility for advanced usage.
-	_ = destPath
-	_ = tarReader
-	return fmt.Errorf("sandbox: CopyIn requires an active container ID; use Exec for typical workflows")
+	return s.copyToContainer(ctx, s.containerID, srcPath, destPath)
 }
 
-// CopyOut copies a file out of a container. Returns a ReadCloser with the file contents.
+// CopyOut copies a file out of the active container. Returns a ReadCloser with the file contents.
+// Call CreateContainer first to set the active container ID.
 func (s *DockerSandbox) CopyOut(ctx context.Context, srcPath string) (io.ReadCloser, error) {
-	// Similar to CopyIn, this requires an active container.
-	_ = srcPath
-	return nil, fmt.Errorf("sandbox: CopyOut requires an active container ID; use Exec for typical workflows")
+	if s.containerID == "" {
+		return nil, fmt.Errorf("sandbox: CopyOut requires an active container; call CreateContainer first")
+	}
+	reader, _, err := s.client.CopyFromContainer(ctx, s.containerID, srcPath)
+	if err != nil {
+		return nil, fmt.Errorf("sandbox: CopyOut %q: %w", srcPath, err)
+	}
+	return reader, nil
+}
+
+// CreateContainer creates and starts a container, storing its ID for use with CopyIn/CopyOut.
+// Call RemoveContainer when done to clean up.
+func (s *DockerSandbox) CreateContainer(ctx context.Context, cmd []string) error {
+	hostConfig := s.buildHostConfig()
+	resp, err := s.client.ContainerCreate(ctx, &container.Config{
+		Image: s.config.Image,
+		Cmd:   cmd,
+	}, hostConfig, nil, nil, "")
+	if err != nil {
+		return fmt.Errorf("sandbox: create container: %w", err)
+	}
+	s.containerID = resp.ID
+	return nil
+}
+
+// RemoveContainer stops and removes the active container.
+func (s *DockerSandbox) RemoveContainer(ctx context.Context) error {
+	if s.containerID == "" {
+		return nil
+	}
+	id := s.containerID
+	s.containerID = ""
+	return s.client.ContainerRemove(ctx, id, container.RemoveOptions{Force: true})
 }
 
 // ExecInContainer creates a container, copies files in, runs the command, and allows file extraction.
