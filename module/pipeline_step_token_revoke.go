@@ -61,12 +61,12 @@ func (s *TokenRevokeStep) Execute(_ context.Context, pc *PipelineContext) (*Step
 	parser := jwt.NewParser()
 	token, _, parseErr := parser.ParseUnverified(tokenStr, jwt.MapClaims{})
 	if parseErr != nil {
-		return &StepResult{Output: map[string]any{"revoked": false, "error": "invalid token format"}}, nil
+		return &StepResult{Output: map[string]any{"revoked": false, "error": "invalid token format"}}, parseErr
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return &StepResult{Output: map[string]any{"revoked": false, "error": "invalid claims"}}, nil
+		return &StepResult{Output: map[string]any{"revoked": false, "error": "invalid claims"}}, fmt.Errorf("invalid JWT claims type")
 	}
 
 	jti, _ := claims["jti"].(string)
