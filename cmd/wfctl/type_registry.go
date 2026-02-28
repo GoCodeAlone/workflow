@@ -68,6 +68,14 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			ConfigKeys: []string{"address", "password", "db", "prefix", "defaultTTL"},
 		},
 
+		// configprovider plugin
+		"config.provider": {
+			Type:       "config.provider",
+			Plugin:     "configprovider",
+			Stateful:   false,
+			ConfigKeys: []string{"sources", "schema"},
+		},
+
 		// http plugin
 		"http.server": {
 			Type:       "http.server",

@@ -150,6 +150,7 @@ var coreModuleTypes = []string{
 	"auth.jwt",
 	"auth.user-store",
 	"cache.modular",
+	"config.provider",
 	"data.transformer",
 	"database.workflow",
 	"dlq.service",

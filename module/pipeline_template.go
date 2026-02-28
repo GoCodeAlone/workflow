@@ -354,5 +354,13 @@ func templateFuncMap() template.FuncMap {
 			}
 			return string(b)
 		},
+		// config looks up a value from the global config registry (populated by
+		// a config.provider module). Returns an empty string if the key is not found.
+		"config": func(key string) string {
+			if v, ok := GetConfigRegistry().Get(key); ok {
+				return v
+			}
+			return ""
+		},
 	}
 }

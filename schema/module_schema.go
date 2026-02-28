@@ -473,6 +473,18 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	})
 
 	r.Register(&ModuleSchema{
+		Type:        "config.provider",
+		Label:       "Config Provider",
+		Category:    "infrastructure",
+		Description: "Application configuration registry with schema validation, defaults, and source layering. Provides {{config \"key\"}} template references.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "sources", Label: "Sources", Type: FieldTypeArray, Required: true, Description: "Ordered list of config sources (later overrides earlier). Supported types: defaults, env"},
+			{Key: "schema", Label: "Schema", Type: FieldTypeMap, Required: true, Description: "Map of config key definitions with env, required, default, sensitive, desc fields"},
+		},
+		MaxIncoming: intPtr(0),
+	})
+
+	r.Register(&ModuleSchema{
 		Type:         "jsonschema.modular",
 		Label:        "JSON Schema Validator",
 		Category:     "validation",
