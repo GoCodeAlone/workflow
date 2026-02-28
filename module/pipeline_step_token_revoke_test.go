@@ -2,7 +2,6 @@ package module
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -298,12 +297,3 @@ var _ TokenBlacklist = (*TokenBlacklistModule)(nil)
 // Compile-time check: mockBlacklist satisfies TokenBlacklist.
 var _ TokenBlacklist = (*mockBlacklist)(nil)
 
-// fakeTokenRevokeBlacklistError implements TokenBlacklist but always errors on GetService.
-type alwaysErrorApp struct {
-	*MockApplication
-	serviceErr error
-}
-
-func (a *alwaysErrorApp) GetService(name string, out any) error {
-	return fmt.Errorf("forced error: %w", a.serviceErr)
-}

@@ -59,8 +59,8 @@ func (s *TokenRevokeStep) Execute(_ context.Context, pc *PipelineContext) (*Step
 
 	// 3. Parse claims without signature validation (token is being revoked, not authenticated).
 	parser := jwt.NewParser()
-	token, _, err := parser.ParseUnverified(tokenStr, jwt.MapClaims{})
-	if err != nil {
+	token, _, parseErr := parser.ParseUnverified(tokenStr, jwt.MapClaims{})
+	if parseErr != nil {
 		return &StepResult{Output: map[string]any{"revoked": false, "error": "invalid token format"}}, nil
 	}
 

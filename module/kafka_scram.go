@@ -22,7 +22,7 @@ type xDGSCRAMClient struct {
 }
 
 func (x *xDGSCRAMClient) Begin(userName, password, authzID string) error {
-	client, err := x.HashGeneratorFcn.NewClient(userName, password, authzID)
+	client, err := x.NewClient(userName, password, authzID)
 	if err != nil {
 		return err
 	}
