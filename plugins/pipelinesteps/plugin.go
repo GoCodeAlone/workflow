@@ -4,7 +4,7 @@
 // validate_path_param, validate_pagination, validate_request_body,
 // foreach, webhook_verify, base64_decode, ui_scaffold, ui_scaffold_analyze,
 // dlq_send, dlq_replay, retry_with_backoff, circuit_breaker (wrapping),
-// s3_upload, auth_validate.
+// s3_upload, auth_validate, token_revoke, sandbox_exec.
 // It also provides the PipelineWorkflowHandler for composable pipelines.
 package pipelinesteps
 
@@ -85,6 +85,9 @@ func New() *Plugin {
 					"step.resilient_circuit_breaker",
 					"step.s3_upload",
 					"step.auth_validate",
+					"step.token_revoke",
+					"step.field_reencrypt",
+					"step.sandbox_exec",
 				},
 				WorkflowTypes: []string{"pipeline"},
 				Capabilities: []plugin.CapabilityDecl{
@@ -148,7 +151,10 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 			return p.concreteStepRegistry
 		})),
 		"step.s3_upload": wrapStepFactory(module.NewS3UploadStepFactory()),
-		"step.auth_validate": wrapStepFactory(module.NewAuthValidateStepFactory()),
+		"step.auth_validate":    wrapStepFactory(module.NewAuthValidateStepFactory()),
+		"step.token_revoke":     wrapStepFactory(module.NewTokenRevokeStepFactory()),
+		"step.field_reencrypt":  wrapStepFactory(module.NewFieldReencryptStepFactory()),
+		"step.sandbox_exec":     wrapStepFactory(module.NewSandboxExecStepFactory()),
 	}
 }
 

@@ -1,5 +1,6 @@
 // Package secrets provides a plugin that registers secrets management modules:
-// secrets.vault (HashiCorp Vault) and secrets.aws (AWS Secrets Manager).
+// secrets.vault (HashiCorp Vault) and secrets.aws (AWS Secrets Manager),
+// as well as the step.secret_rotate pipeline step type.
 package secrets
 
 import (
@@ -9,7 +10,7 @@ import (
 	"github.com/GoCodeAlone/workflow/plugin"
 )
 
-// Plugin registers secrets management module factories.
+// Plugin registers secrets management module factories and step types.
 type Plugin struct {
 	plugin.BaseEnginePlugin
 }
@@ -30,6 +31,7 @@ func New() *Plugin {
 				Description: "Secrets management modules (Vault, AWS Secrets Manager)",
 				Tier:        plugin.TierCore,
 				ModuleTypes: []string{"secrets.vault", "secrets.aws"},
+				StepTypes:   []string{"step.secret_rotate"},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "secrets-management", Role: "provider", Priority: 50},
 				},
@@ -82,6 +84,15 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 				am.SetSecretAccessKey(sak)
 			}
 			return am
+		},
+	}
+}
+
+// StepFactories returns the step factories provided by this plugin.
+func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
+	return map[string]plugin.StepFactory{
+		"step.secret_rotate": func(name string, cfg map[string]any, app modular.Application) (any, error) {
+			return module.NewSecretRotateStepFactory()(name, cfg, app)
 		},
 	}
 }

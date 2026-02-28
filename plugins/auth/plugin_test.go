@@ -21,11 +21,11 @@ func TestPluginManifest(t *testing.T) {
 	if m.Name != "auth" {
 		t.Errorf("expected name %q, got %q", "auth", m.Name)
 	}
-	if len(m.ModuleTypes) != 4 {
-		t.Errorf("expected 4 module types, got %d", len(m.ModuleTypes))
+	if len(m.ModuleTypes) != 6 {
+		t.Errorf("expected 6 module types, got %d", len(m.ModuleTypes))
 	}
-	if len(m.WiringHooks) != 2 {
-		t.Errorf("expected 2 wiring hooks, got %d", len(m.WiringHooks))
+	if len(m.WiringHooks) != 4 {
+		t.Errorf("expected 4 wiring hooks, got %d", len(m.WiringHooks))
 	}
 }
 
@@ -47,10 +47,13 @@ func TestPluginCapabilities(t *testing.T) {
 }
 
 func TestModuleFactories(t *testing.T) {
+	// field-protection factory requires a master key via env var
+	t.Setenv("FIELD_ENCRYPTION_KEY", "test-master-key-32-bytes-long!!")
+
 	p := New()
 	factories := p.ModuleFactories()
 
-	expectedTypes := []string{"auth.jwt", "auth.user-store", "auth.oauth2", "auth.m2m"}
+	expectedTypes := []string{"auth.jwt", "auth.user-store", "auth.oauth2", "auth.m2m", "auth.token-blacklist", "security.field-protection"}
 	for _, typ := range expectedTypes {
 		factory, ok := factories[typ]
 		if !ok {
@@ -83,8 +86,8 @@ func TestModuleFactoryJWTWithConfig(t *testing.T) {
 func TestWiringHooks(t *testing.T) {
 	p := New()
 	hooks := p.WiringHooks()
-	if len(hooks) != 2 {
-		t.Fatalf("expected 2 wiring hooks, got %d", len(hooks))
+	if len(hooks) != 4 {
+		t.Fatalf("expected 4 wiring hooks, got %d", len(hooks))
 	}
 	hookNames := map[string]bool{}
 	for _, h := range hooks {
@@ -93,7 +96,7 @@ func TestWiringHooks(t *testing.T) {
 			t.Errorf("wiring hook %q function is nil", h.Name)
 		}
 	}
-	for _, expected := range []string{"auth-provider-wiring", "oauth2-jwt-wiring"} {
+	for _, expected := range []string{"auth-provider-wiring", "oauth2-jwt-wiring", "token-blacklist-wiring", "field-protection-wiring"} {
 		if !hookNames[expected] {
 			t.Errorf("missing wiring hook %q", expected)
 		}

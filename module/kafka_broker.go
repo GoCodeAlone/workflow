@@ -2,12 +2,27 @@ package module
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/IBM/sarama"
+	"github.com/GoCodeAlone/workflow/pkg/tlsutil"
 )
+
+// KafkaSASLConfig holds SASL authentication configuration for Kafka.
+type KafkaSASLConfig struct {
+	Mechanism string `yaml:"mechanism" json:"mechanism"` // PLAIN | SCRAM-SHA-256 | SCRAM-SHA-512
+	Username  string `yaml:"username" json:"username"`
+	Password  string `yaml:"password" json:"password"` //nolint:gosec // G117: config struct field
+}
+
+// KafkaTLSConfig holds TLS and SASL configuration for the Kafka broker.
+type KafkaTLSConfig struct {
+	tlsutil.TLSConfig `yaml:",inline" json:",inline"`
+	SASL              KafkaSASLConfig `yaml:"sasl" json:"sasl"`
+}
 
 // KafkaBroker implements the MessageBroker interface using Apache Kafka via Sarama.
 type KafkaBroker struct {
@@ -24,7 +39,9 @@ type KafkaBroker struct {
 	logger        modular.Logger
 	healthy       bool
 	healthMsg     string
-	encryptor     *FieldEncryptor
+	encryptor      *FieldEncryptor
+	fieldProtector *ProtectedFieldManager
+	tlsCfg         KafkaTLSConfig
 }
 
 // NewKafkaBroker creates a new Kafka message broker.
@@ -93,6 +110,22 @@ func (b *KafkaBroker) SetGroupID(groupID string) {
 	b.groupID = groupID
 }
 
+// SetTLSConfig sets the TLS and SASL configuration for the Kafka broker.
+// SetFieldProtection sets the field-level encryption manager for this broker.
+// When set, individual protected fields are encrypted/decrypted in JSON payloads
+// before the legacy whole-message encryptor runs.
+func (b *KafkaBroker) SetFieldProtection(mgr *ProtectedFieldManager) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.fieldProtector = mgr
+}
+
+func (b *KafkaBroker) SetTLSConfig(cfg KafkaTLSConfig) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.tlsCfg = cfg
+}
+
 // HealthStatus implements the HealthCheckable interface.
 func (b *KafkaBroker) HealthStatus() HealthCheckResult {
 	b.mu.RLock()
@@ -145,6 +178,38 @@ func (b *KafkaBroker) Start(ctx context.Context) error {
 	config.Producer.Return.Successes = true
 	config.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.NewBalanceStrategyRoundRobin()}
 	config.Consumer.Offsets.Initial = sarama.OffsetNewest
+
+	// Apply TLS configuration
+	if b.tlsCfg.Enabled {
+		tlsCfg, tlsErr := tlsutil.LoadTLSConfig(b.tlsCfg.TLSConfig)
+		if tlsErr != nil {
+			return fmt.Errorf("kafka broker %q: TLS config: %w", b.name, tlsErr)
+		}
+		config.Net.TLS.Enable = true
+		config.Net.TLS.Config = tlsCfg
+	}
+
+	// Apply SASL configuration
+	sasl := b.tlsCfg.SASL
+	if sasl.Username != "" {
+		config.Net.SASL.Enable = true
+		config.Net.SASL.User = sasl.Username
+		config.Net.SASL.Password = sasl.Password
+		switch sasl.Mechanism {
+		case "SCRAM-SHA-256":
+			config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA256
+			config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+				return &xDGSCRAMClient{HashGeneratorFcn: SHA256}
+			}
+		case "SCRAM-SHA-512":
+			config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
+			config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+				return &xDGSCRAMClient{HashGeneratorFcn: SHA512}
+			}
+		default: // PLAIN
+			config.Net.SASL.Mechanism = sarama.SASLTypePlaintext
+		}
+	}
 
 	// Create sync producer
 	producer, err := sarama.NewSyncProducer(b.brokers, config)
@@ -244,16 +309,31 @@ func (p *kafkaProducerAdapter) SendMessage(topic string, message []byte) error {
 	p.broker.mu.RLock()
 	producer := p.broker.producer
 	encryptor := p.broker.encryptor
+	fieldProt := p.broker.fieldProtector
 	p.broker.mu.RUnlock()
 
 	if producer == nil {
 		return fmt.Errorf("kafka producer not initialized; call Start first")
 	}
 
-	// Encrypt the message payload if encryption is enabled
 	payload := message
+
+	// Field-level encryption: encrypt individual protected fields in JSON payloads.
+	if fieldProt != nil {
+		var data map[string]any
+		if err := json.Unmarshal(payload, &data); err == nil {
+			if encErr := fieldProt.EncryptMap(context.Background(), "", data); encErr != nil {
+				return fmt.Errorf("failed to field-encrypt kafka message for topic %q: %w", topic, encErr)
+			}
+			if out, err := json.Marshal(data); err == nil {
+				payload = out
+			}
+		}
+	}
+
+	// Legacy whole-message encryption (if configured via ENCRYPTION_KEY).
 	if encryptor != nil && encryptor.Enabled() {
-		encrypted, err := encryptor.EncryptJSON(message)
+		encrypted, err := encryptor.EncryptJSON(payload)
 		if err != nil {
 			return fmt.Errorf("failed to encrypt kafka message for topic %q: %w", topic, err)
 		}
@@ -313,10 +393,11 @@ func (h *kafkaGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, cl
 		h.broker.mu.RLock()
 		handler, ok := h.broker.handlers[msg.Topic]
 		encryptor := h.broker.encryptor
+		fieldProt := h.broker.fieldProtector
 		h.broker.mu.RUnlock()
 
 		if ok {
-			// Decrypt message payload if encryption is enabled
+			// Legacy whole-message decryption first.
 			payload := msg.Value
 			if encryptor != nil && encryptor.Enabled() {
 				decrypted, err := encryptor.DecryptJSON(payload)
@@ -326,6 +407,17 @@ func (h *kafkaGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, cl
 					continue
 				}
 				payload = decrypted
+			}
+			// Field-level decryption: decrypt individual protected fields.
+			if fieldProt != nil {
+				var data map[string]any
+				if err := json.Unmarshal(payload, &data); err == nil {
+					if decErr := fieldProt.DecryptMap(context.Background(), "", data); decErr == nil {
+						if out, err := json.Marshal(data); err == nil {
+							payload = out
+						}
+					}
+				}
 			}
 
 			if err := handler.HandleMessage(payload); err != nil {

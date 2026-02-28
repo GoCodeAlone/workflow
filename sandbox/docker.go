@@ -34,6 +34,38 @@ type SandboxConfig struct {
 	CPULimit    float64           `yaml:"cpu_limit"`
 	Timeout     time.Duration     `yaml:"timeout"`
 	NetworkMode string            `yaml:"network_mode"`
+
+	// Security hardening fields
+	SecurityOpts    []string          `yaml:"security_opts"`    // e.g., ["seccomp=default.json"]
+	CapAdd          []string          `yaml:"cap_add"`          // capabilities to add
+	CapDrop         []string          `yaml:"cap_drop"`         // e.g., ["ALL"]
+	ReadOnlyRootfs  bool              `yaml:"read_only_rootfs"`
+	NoNewPrivileges bool              `yaml:"no_new_privileges"`
+	User            string            `yaml:"user"`             // e.g., "nobody:nogroup"
+	PidsLimit       int64             `yaml:"pids_limit"`       // max process count
+	Tmpfs           map[string]string `yaml:"tmpfs"`            // e.g., {"/tmp": "size=64m,noexec"}
+}
+
+// DefaultSecureSandboxConfig returns a hardened SandboxConfig suitable for
+// running untrusted workloads. It uses a minimal Wolfi-based image, drops all
+// Linux capabilities, enables a read-only root filesystem, mounts /tmp as
+// tmpfs with noexec, and disables network access.
+func DefaultSecureSandboxConfig(image string) SandboxConfig {
+	if image == "" {
+		image = "cgr.dev/chainguard/wolfi-base:latest"
+	}
+	return SandboxConfig{
+		Image:           image,
+		MemoryLimit:     256 * 1024 * 1024, // 256MB
+		CPULimit:        0.5,
+		NetworkMode:     "none",
+		CapDrop:         []string{"ALL"},
+		NoNewPrivileges: true,
+		ReadOnlyRootfs:  true,
+		PidsLimit:       64,
+		Tmpfs:           map[string]string{"/tmp": "size=64m,noexec"},
+		Timeout:         5 * time.Minute,
+	}
 }
 
 // ExecResult holds the output from a command execution inside the sandbox.
@@ -45,8 +77,9 @@ type ExecResult struct {
 
 // DockerSandbox wraps the Docker Engine SDK to execute commands in isolated containers.
 type DockerSandbox struct {
-	client *client.Client
-	config SandboxConfig
+	client      *client.Client
+	config      SandboxConfig
+	containerID string // set by CreateContainer, used by CopyIn/CopyOut/RemoveContainer
 }
 
 // NewDockerSandbox creates a new DockerSandbox with the given configuration.
@@ -91,6 +124,9 @@ func (s *DockerSandbox) Exec(ctx context.Context, cmd []string) (*ExecResult, er
 		Cmd:        cmd,
 		Env:        s.buildEnv(),
 		WorkingDir: s.config.WorkDir,
+	}
+	if s.config.User != "" {
+		containerConfig.User = s.config.User
 	}
 
 	hostConfig := s.buildHostConfig()
@@ -145,39 +181,51 @@ func (s *DockerSandbox) Exec(ctx context.Context, cmd []string) (*ExecResult, er
 	}, nil
 }
 
-// CopyIn copies a file from the host into a running or created container.
+// CopyIn copies a file from the host into the active container.
+// Call CreateContainer first to set the active container ID.
 func (s *DockerSandbox) CopyIn(ctx context.Context, srcPath, destPath string) error {
-	f, err := os.Open(srcPath)
-	if err != nil {
-		return fmt.Errorf("sandbox: failed to open source file: %w", err)
+	if s.containerID == "" {
+		return fmt.Errorf("sandbox: CopyIn requires an active container; call CreateContainer first")
 	}
-	defer f.Close()
-
-	stat, err := f.Stat()
-	if err != nil {
-		return fmt.Errorf("sandbox: failed to stat source file: %w", err)
-	}
-
-	// Create a tar archive containing the file
-	tarReader, err := createTarFromFile(f, stat)
-	if err != nil {
-		return fmt.Errorf("sandbox: failed to create tar archive: %w", err)
-	}
-
-	// We need a container to copy into. This method is intended to be used
-	// with a container that has been created but the caller manages its lifecycle.
-	// For the typical use case, the Exec method handles the full lifecycle.
-	// This is a lower-level utility for advanced usage.
-	_ = destPath
-	_ = tarReader
-	return fmt.Errorf("sandbox: CopyIn requires an active container ID; use Exec for typical workflows")
+	return s.copyToContainer(ctx, s.containerID, srcPath, destPath)
 }
 
-// CopyOut copies a file out of a container. Returns a ReadCloser with the file contents.
+// CopyOut copies a file out of the active container. Returns a ReadCloser with the file contents.
+// Call CreateContainer first to set the active container ID.
 func (s *DockerSandbox) CopyOut(ctx context.Context, srcPath string) (io.ReadCloser, error) {
-	// Similar to CopyIn, this requires an active container.
-	_ = srcPath
-	return nil, fmt.Errorf("sandbox: CopyOut requires an active container ID; use Exec for typical workflows")
+	if s.containerID == "" {
+		return nil, fmt.Errorf("sandbox: CopyOut requires an active container; call CreateContainer first")
+	}
+	reader, _, err := s.client.CopyFromContainer(ctx, s.containerID, srcPath)
+	if err != nil {
+		return nil, fmt.Errorf("sandbox: CopyOut %q: %w", srcPath, err)
+	}
+	return reader, nil
+}
+
+// CreateContainer creates and starts a container, storing its ID for use with CopyIn/CopyOut.
+// Call RemoveContainer when done to clean up.
+func (s *DockerSandbox) CreateContainer(ctx context.Context, cmd []string) error {
+	hostConfig := s.buildHostConfig()
+	resp, err := s.client.ContainerCreate(ctx, &container.Config{
+		Image: s.config.Image,
+		Cmd:   cmd,
+	}, hostConfig, nil, nil, "")
+	if err != nil {
+		return fmt.Errorf("sandbox: create container: %w", err)
+	}
+	s.containerID = resp.ID
+	return nil
+}
+
+// RemoveContainer stops and removes the active container.
+func (s *DockerSandbox) RemoveContainer(ctx context.Context) error {
+	if s.containerID == "" {
+		return nil
+	}
+	id := s.containerID
+	s.containerID = ""
+	return s.client.ContainerRemove(ctx, id, container.RemoveOptions{Force: true})
 }
 
 // ExecInContainer creates a container, copies files in, runs the command, and allows file extraction.
@@ -199,6 +247,9 @@ func (s *DockerSandbox) ExecInContainer(ctx context.Context, cmd []string, copyI
 		Cmd:        cmd,
 		Env:        s.buildEnv(),
 		WorkingDir: s.config.WorkDir,
+	}
+	if s.config.User != "" {
+		containerConfig.User = s.config.User
 	}
 
 	hostConfig := s.buildHostConfig()
@@ -320,6 +371,10 @@ func (s *DockerSandbox) buildHostConfig() *container.HostConfig {
 		// Docker uses NanoCPUs (1 CPU = 1e9 NanoCPUs)
 		hc.NanoCPUs = int64(s.config.CPULimit * 1e9)
 	}
+	if s.config.PidsLimit > 0 {
+		limit := s.config.PidsLimit
+		hc.PidsLimit = &limit
+	}
 
 	// Mounts
 	if len(s.config.Mounts) > 0 {
@@ -338,6 +393,30 @@ func (s *DockerSandbox) buildHostConfig() *container.HostConfig {
 	// Network mode
 	if s.config.NetworkMode != "" {
 		hc.NetworkMode = container.NetworkMode(s.config.NetworkMode)
+	}
+
+	// Security options
+	secOpts := make([]string, len(s.config.SecurityOpts))
+	copy(secOpts, s.config.SecurityOpts)
+	if s.config.NoNewPrivileges {
+		secOpts = append(secOpts, "no-new-privileges:true")
+	}
+	if len(secOpts) > 0 {
+		hc.SecurityOpt = secOpts
+	}
+
+	// Capabilities
+	if len(s.config.CapAdd) > 0 {
+		hc.CapAdd = s.config.CapAdd
+	}
+	if len(s.config.CapDrop) > 0 {
+		hc.CapDrop = s.config.CapDrop
+	}
+
+	// Filesystem hardening
+	hc.ReadonlyRootfs = s.config.ReadOnlyRootfs
+	if len(s.config.Tmpfs) > 0 {
+		hc.Tmpfs = s.config.Tmpfs
 	}
 
 	return hc

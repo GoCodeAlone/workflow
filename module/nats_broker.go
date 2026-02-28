@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/workflow/pkg/tlsutil"
 	"github.com/nats-io/nats.go"
 )
 
@@ -20,6 +21,7 @@ type NATSBroker struct {
 	producer      *natsProducer
 	consumer      *natsConsumer
 	logger        modular.Logger
+	tlsCfg        tlsutil.TLSConfig
 }
 
 // NewNATSBroker creates a new NATS message broker.
@@ -80,6 +82,13 @@ func (b *NATSBroker) SetURL(url string) {
 	b.url = url
 }
 
+// SetTLSConfig configures TLS for the NATS broker connection.
+func (b *NATSBroker) SetTLSConfig(cfg tlsutil.TLSConfig) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.tlsCfg = cfg
+}
+
 // Producer returns the message producer interface.
 func (b *NATSBroker) Producer() MessageProducer {
 	return b.producer
@@ -100,7 +109,16 @@ func (b *NATSBroker) Start(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	conn, err := nats.Connect(b.url)
+	var opts []nats.Option
+	if b.tlsCfg.Enabled {
+		tlsCfg, tlsErr := tlsutil.LoadTLSConfig(b.tlsCfg)
+		if tlsErr != nil {
+			return fmt.Errorf("nats broker %q: TLS config: %w", b.name, tlsErr)
+		}
+		opts = append(opts, nats.Secure(tlsCfg))
+	}
+
+	conn, err := nats.Connect(b.url, opts...)
 	if err != nil {
 		return fmt.Errorf("failed to connect to NATS at %s: %w", b.url, err)
 	}

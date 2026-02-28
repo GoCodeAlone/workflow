@@ -2,13 +2,25 @@ package module
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/workflow/pkg/tlsutil"
+	"golang.org/x/crypto/acme/autocert"
 )
+
+// HTTPServerTLSConfig holds TLS configuration for the HTTP server.
+type HTTPServerTLSConfig struct {
+	Mode         string               `yaml:"mode" json:"mode"` // manual | autocert | disabled
+	Manual       tlsutil.TLSConfig    `yaml:"manual" json:"manual"`
+	Autocert     tlsutil.AutocertConfig `yaml:"autocert" json:"autocert"`
+	ClientCAFile string               `yaml:"client_ca_file" json:"client_ca_file"`
+	ClientAuth   string               `yaml:"client_auth" json:"client_auth"` // require | request | none
+}
 
 // StandardHTTPServer implements the HTTPServer interface and modular.Module interfaces
 type StandardHTTPServer struct {
@@ -20,6 +32,7 @@ type StandardHTTPServer struct {
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 	idleTimeout  time.Duration
+	tlsCfg       HTTPServerTLSConfig
 }
 
 // NewStandardHTTPServer creates a new HTTP server with the given name and address
@@ -36,6 +49,11 @@ func (s *StandardHTTPServer) SetTimeouts(read, write, idle time.Duration) {
 	s.readTimeout = read
 	s.writeTimeout = write
 	s.idleTimeout = idle
+}
+
+// SetTLSConfig configures TLS for the HTTP server.
+func (s *StandardHTTPServer) SetTLSConfig(cfg HTTPServerTLSConfig) {
+	s.tlsCfg = cfg
 }
 
 // Name returns the unique identifier for this module
@@ -87,14 +105,90 @@ func (s *StandardHTTPServer) Start(ctx context.Context) error {
 		IdleTimeout:       timeoutOrDefault(s.idleTimeout, 120*time.Second),
 	}
 
-	// Start the server in a goroutine
+	switch s.tlsCfg.Mode {
+	case "autocert":
+		return s.startAutocert(ctx)
+	case "manual":
+		return s.startManualTLS(ctx)
+	default:
+		// Plain HTTP
+		go func() {
+			if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				s.logger.Error("HTTP server error", "error", err)
+			}
+		}()
+		s.logger.Info("HTTP server started", "address", s.address)
+		return nil
+	}
+}
+
+// startManualTLS starts the server with manually configured TLS certificates.
+func (s *StandardHTTPServer) startManualTLS(ctx context.Context) error {
+	manualCfg := s.tlsCfg.Manual
+	manualCfg.Enabled = true
+
+	// Overlay mTLS settings from the top-level fields when set
+	if s.tlsCfg.ClientCAFile != "" {
+		manualCfg.CAFile = s.tlsCfg.ClientCAFile
+	}
+	if s.tlsCfg.ClientAuth != "" {
+		manualCfg.ClientAuth = s.tlsCfg.ClientAuth
+	}
+
+	tlsConfig, err := tlsutil.LoadTLSConfig(manualCfg)
+	if err != nil {
+		return fmt.Errorf("http server TLS config: %w", err)
+	}
+	s.server.TLSConfig = tlsConfig
+
 	go func() {
-		if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.logger.Error("HTTP server error", "error", err)
+		if err := s.server.ListenAndServeTLS(manualCfg.CertFile, manualCfg.KeyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.logger.Error("HTTPS server error", "error", err)
+		}
+	}()
+	s.logger.Info("HTTPS server started (manual TLS)", "address", s.address)
+	return nil
+}
+
+// startAutocert starts the server using Let's Encrypt via autocert.
+func (s *StandardHTTPServer) startAutocert(ctx context.Context) error {
+	ac := s.tlsCfg.Autocert
+	if len(ac.Domains) == 0 {
+		return fmt.Errorf("http server autocert: at least one domain is required")
+	}
+
+	m := &autocert.Manager{
+		Prompt:     autocert.AcceptTOS,
+		HostPolicy: autocert.HostWhitelist(ac.Domains...),
+		Email:      ac.Email,
+	}
+	if ac.CacheDir != "" {
+		m.Cache = autocert.DirCache(ac.CacheDir)
+	}
+
+	s.server.TLSConfig = &tls.Config{
+		GetCertificate: m.GetCertificate,
+		MinVersion:     tls.VersionTLS12,
+	}
+
+	// ACME HTTP-01 challenge listener on :80
+	go func() {
+		httpSrv := &http.Server{
+			Addr:              ":80",
+			Handler:           m.HTTPHandler(nil),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.logger.Error("autocert HTTP-01 listener error", "error", err)
 		}
 	}()
 
-	s.logger.Info("HTTP server started", "address", s.address)
+	go func() {
+		if err := s.server.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.logger.Error("HTTPS server error (autocert)", "error", err)
+		}
+	}()
+	s.logger.Info("HTTPS server started (autocert)", "address", s.address, "domains", ac.Domains)
 	return nil
 }
 

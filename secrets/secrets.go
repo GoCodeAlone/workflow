@@ -34,6 +34,15 @@ type Provider interface {
 	List(ctx context.Context) ([]string, error)
 }
 
+// RotationProvider extends Provider with key rotation capabilities.
+type RotationProvider interface {
+	Provider
+	// Rotate generates a new secret value and stores it, returning the new value.
+	Rotate(ctx context.Context, key string) (string, error)
+	// GetPrevious retrieves the previous version of a rotated secret (for grace periods).
+	GetPrevious(ctx context.Context, key string) (string, error)
+}
+
 // --- Environment Variable Provider ---
 
 // EnvProvider reads secrets from environment variables.

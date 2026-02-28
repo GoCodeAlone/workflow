@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"log"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -10,6 +11,17 @@ import (
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/schema"
 )
+
+// durationFromMap parses a duration string from a config map, returning the
+// default value when the key is absent or unparseable.
+func durationFromMap(m map[string]any, key string, defaultVal time.Duration) time.Duration {
+	if s, ok := m[key].(string); ok && s != "" {
+		if d, err := time.ParseDuration(s); err == nil {
+			return d
+		}
+	}
+	return defaultVal
+}
 
 // Plugin provides authentication capabilities: auth.jwt, auth.user-store,
 // auth.oauth2, and auth.m2m modules plus the wiring hook that connects
@@ -38,12 +50,14 @@ func New() *Plugin {
 					"auth.user-store",
 					"auth.oauth2",
 					"auth.m2m",
+					"auth.token-blacklist",
+					"security.field-protection",
 				},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "authentication", Role: "provider", Priority: 10},
 					{Name: "user-management", Role: "provider", Priority: 10},
 				},
-				WiringHooks: []string{"auth-provider-wiring", "oauth2-jwt-wiring"},
+				WiringHooks: []string{"auth-provider-wiring", "oauth2-jwt-wiring", "token-blacklist-wiring", "field-protection-wiring"},
 			},
 		},
 	}
@@ -126,6 +140,20 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			}
 			// jwtAuth will be wired during the wiring hook.
 			return module.NewOAuth2Module(name, providerCfgs, nil)
+		},
+		"auth.token-blacklist": func(name string, cfg map[string]any) modular.Module {
+			backend := stringFromMap(cfg, "backend")
+			redisURL := stringFromMap(cfg, "redis_url")
+			cleanupInterval := durationFromMap(cfg, "cleanup_interval", 5*time.Minute)
+			return module.NewTokenBlacklistModule(name, backend, redisURL, cleanupInterval)
+		},
+		"security.field-protection": func(name string, cfg map[string]any) modular.Module {
+			mod, err := module.NewFieldProtectionModule(name, cfg)
+			if err != nil {
+				log.Printf("ERROR: field-protection module %q: %v", name, err)
+				return nil
+			}
+			return mod
 		},
 		"auth.m2m": func(name string, cfg map[string]any) modular.Module {
 			secret := stringFromMap(cfg, "secret")
@@ -232,6 +260,52 @@ func (p *Plugin) WiringHooks() []plugin.WiringHook {
 						om.SetJWTAuth(jwtAuth)
 					}
 				}
+				return nil
+			},
+		},
+		{
+			Name:     "token-blacklist-wiring",
+			Priority: 70,
+			Hook: func(app modular.Application, _ *config.WorkflowConfig) error {
+				var blacklist *module.TokenBlacklistModule
+				for _, svc := range app.SvcRegistry() {
+					if bl, ok := svc.(*module.TokenBlacklistModule); ok {
+						blacklist = bl
+						break
+					}
+				}
+				if blacklist == nil {
+					return nil
+				}
+				for _, svc := range app.SvcRegistry() {
+					if j, ok := svc.(*module.JWTAuthModule); ok {
+						j.SetTokenBlacklist(blacklist)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			Name:     "field-protection-wiring",
+			Priority: 50,
+			Hook: func(app modular.Application, _ *config.WorkflowConfig) error {
+				var mgr *module.ProtectedFieldManager
+				for _, svc := range app.SvcRegistry() {
+					if m, ok := svc.(*module.ProtectedFieldManager); ok {
+						mgr = m
+						break
+					}
+				}
+				if mgr == nil {
+					return nil
+				}
+				// Wire field protection to Kafka brokers for field-level encryption.
+				for _, svc := range app.SvcRegistry() {
+					if kb, ok := svc.(*module.KafkaBroker); ok {
+						kb.SetFieldProtection(mgr)
+					}
+				}
+				log.Printf("field-protection: wired to %d registered fields", mgr.Registry.Len())
 				return nil
 			},
 		},

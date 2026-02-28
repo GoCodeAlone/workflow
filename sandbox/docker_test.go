@@ -204,3 +204,129 @@ func TestBuildHostConfig_NoLimits(t *testing.T) {
 		t.Fatalf("expected 0 mounts, got %d", len(hc.Mounts))
 	}
 }
+
+func TestBuildHostConfig_SecurityFields(t *testing.T) {
+	pidsLimit := int64(32)
+	sb := &DockerSandbox{
+		config: SandboxConfig{
+			SecurityOpts:    []string{"seccomp=default.json"},
+			CapAdd:          []string{"NET_BIND_SERVICE"},
+			CapDrop:         []string{"ALL"},
+			ReadOnlyRootfs:  true,
+			NoNewPrivileges: true,
+			PidsLimit:       pidsLimit,
+			Tmpfs:           map[string]string{"/tmp": "size=32m,noexec"},
+		},
+	}
+
+	hc := sb.buildHostConfig()
+
+	// SecurityOpt should contain both seccomp and no-new-privileges
+	foundSeccomp := false
+	foundNoNewPriv := false
+	for _, opt := range hc.SecurityOpt {
+		if opt == "seccomp=default.json" {
+			foundSeccomp = true
+		}
+		if opt == "no-new-privileges:true" {
+			foundNoNewPriv = true
+		}
+	}
+	if !foundSeccomp {
+		t.Fatal("expected seccomp=default.json in SecurityOpt")
+	}
+	if !foundNoNewPriv {
+		t.Fatal("expected no-new-privileges:true in SecurityOpt")
+	}
+
+	if len(hc.CapAdd) != 1 || hc.CapAdd[0] != "NET_BIND_SERVICE" {
+		t.Fatalf("unexpected CapAdd: %v", hc.CapAdd)
+	}
+	if len(hc.CapDrop) != 1 || hc.CapDrop[0] != "ALL" {
+		t.Fatalf("unexpected CapDrop: %v", hc.CapDrop)
+	}
+	if !hc.ReadonlyRootfs {
+		t.Fatal("expected ReadonlyRootfs true")
+	}
+	if hc.PidsLimit == nil || *hc.PidsLimit != pidsLimit {
+		t.Fatalf("expected PidsLimit %d, got %v", pidsLimit, hc.PidsLimit)
+	}
+	if hc.Tmpfs["/tmp"] != "size=32m,noexec" {
+		t.Fatalf("unexpected Tmpfs: %v", hc.Tmpfs)
+	}
+}
+
+func TestBuildHostConfig_NoNewPrivilegesOnly(t *testing.T) {
+	sb := &DockerSandbox{
+		config: SandboxConfig{
+			NoNewPrivileges: true,
+		},
+	}
+
+	hc := sb.buildHostConfig()
+
+	found := false
+	for _, opt := range hc.SecurityOpt {
+		if opt == "no-new-privileges:true" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected no-new-privileges:true in SecurityOpt")
+	}
+}
+
+func TestBuildHostConfig_PidsLimitZeroNotSet(t *testing.T) {
+	sb := &DockerSandbox{
+		config: SandboxConfig{PidsLimit: 0},
+	}
+
+	hc := sb.buildHostConfig()
+
+	if hc.PidsLimit != nil {
+		t.Fatalf("expected nil PidsLimit when PidsLimit=0, got %v", hc.PidsLimit)
+	}
+}
+
+func TestDefaultSecureSandboxConfig(t *testing.T) {
+	cfg := DefaultSecureSandboxConfig("alpine:3.19")
+
+	if cfg.Image != "alpine:3.19" {
+		t.Fatalf("unexpected image: %s", cfg.Image)
+	}
+	if cfg.MemoryLimit != 256*1024*1024 {
+		t.Fatalf("unexpected MemoryLimit: %d", cfg.MemoryLimit)
+	}
+	if cfg.CPULimit != 0.5 {
+		t.Fatalf("unexpected CPULimit: %f", cfg.CPULimit)
+	}
+	if cfg.NetworkMode != "none" {
+		t.Fatalf("unexpected NetworkMode: %s", cfg.NetworkMode)
+	}
+	if len(cfg.CapDrop) != 1 || cfg.CapDrop[0] != "ALL" {
+		t.Fatalf("unexpected CapDrop: %v", cfg.CapDrop)
+	}
+	if !cfg.NoNewPrivileges {
+		t.Fatal("expected NoNewPrivileges true")
+	}
+	if !cfg.ReadOnlyRootfs {
+		t.Fatal("expected ReadOnlyRootfs true")
+	}
+	if cfg.PidsLimit != 64 {
+		t.Fatalf("unexpected PidsLimit: %d", cfg.PidsLimit)
+	}
+	if cfg.Tmpfs["/tmp"] != "size=64m,noexec" {
+		t.Fatalf("unexpected Tmpfs: %v", cfg.Tmpfs)
+	}
+	if cfg.Timeout != 5*time.Minute {
+		t.Fatalf("unexpected Timeout: %s", cfg.Timeout)
+	}
+}
+
+func TestDefaultSecureSandboxConfig_DefaultImage(t *testing.T) {
+	cfg := DefaultSecureSandboxConfig("")
+
+	if cfg.Image != "cgr.dev/chainguard/wolfi-base:latest" {
+		t.Fatalf("unexpected default image: %s", cfg.Image)
+	}
+}
