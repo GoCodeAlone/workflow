@@ -27,13 +27,15 @@ func NewCosignVerifier(oidcIssuer, identityRegexp string) *CosignVerifier {
 // If cosign is not installed, a warning is logged and nil is returned so that
 // deployments without cosign are not broken.
 func (v *CosignVerifier) Verify(binaryPath, sigPath, certPath string) error {
-	cosignBin, err := exec.LookPath("cosign")
+	_, err := exec.LookPath("cosign")
 	if err != nil {
 		slog.Warn("cosign not found — skipping binary verification", "binary", binaryPath)
-		return nil
+		return nil //nolint:nilerr // intentional: graceful degradation when cosign not installed
 	}
 
-	cmd := exec.Command(cosignBin,
+	// Arguments are not user-controlled; they come from internal plugin manifest
+	// configuration and verified file paths.
+	cmd := exec.Command("cosign", //nolint:gosec // args are internal, not user input
 		"verify-blob",
 		"--signature", sigPath,
 		"--certificate", certPath,
