@@ -1,19 +1,20 @@
-// Package module contains the config provider implementation.
+// This file implements the config.provider module type and config registry.
 package module
 
 import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/CrisisTextLine/modular"
 )
 
-// configKeyRegexp matches {{config "key"}} or {{ config "key" }} patterns.
-// It handles single or double quotes and optional whitespace.
-var configKeyRegexp = regexp.MustCompile(`\{\{\s*config\s+"([^"]+)"\s*\}\}`)
+// configKeyRegexp matches {{config "key"}}, {{ config "key" }}, {{config 'key'}},
+// or {{ config 'key' }} patterns. It handles single or double quotes and optional whitespace.
+var configKeyRegexp = regexp.MustCompile(`\{\{\s*config\s+["']([^"']+)["']\s*\}\}`)
 
 // SchemaEntry defines a single configuration key's metadata.
 type SchemaEntry struct {
@@ -211,6 +212,7 @@ func ValidateRequired(registry *ConfigRegistry, schemaEntries map[string]SchemaE
 		}
 	}
 	if len(missing) > 0 {
+		sort.Strings(missing)
 		return fmt.Errorf("missing required config keys: %s", strings.Join(missing, ", "))
 	}
 	return nil
@@ -274,7 +276,7 @@ func (m *ConfigProviderModule) Name() string { return m.name }
 // Dependencies returns an empty slice — config.provider has no dependencies.
 func (m *ConfigProviderModule) Dependencies() []string { return nil }
 
-// Configure registers the config registry as a service in the application.
+// Init registers the config registry as a service in the application.
 func (m *ConfigProviderModule) Init(app modular.Application) error {
 	return app.RegisterService("config.registry", m.registry)
 }

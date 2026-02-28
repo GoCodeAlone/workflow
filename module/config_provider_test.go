@@ -113,6 +113,9 @@ func TestExpandConfigTemplate(t *testing.T) {
 		{`no-template-here`, "no-template-here"},
 		{`{{config "missing"}}`, `{{config "missing"}}`}, // unresolved stays
 		{`dsn={{config "db_dsn"}}&port={{config "api_port"}}`, "dsn=postgres://localhost/db&port=8080"},
+		// single-quoted variants
+		{`{{config 'db_dsn'}}`, "postgres://localhost/db"},
+		{`{{ config 'api_port' }}`, "8080"},
 	}
 	for _, tt := range tests {
 		result := r.ExpandConfigTemplate(tt.input)
@@ -270,6 +273,24 @@ func TestValidateRequiredMissing(t *testing.T) {
 	}
 	if got := err.Error(); got != "missing required config keys: db_dsn" {
 		t.Fatalf("unexpected error: %q", got)
+	}
+}
+
+func TestValidateRequiredMissingSorted(t *testing.T) {
+	r := NewConfigRegistry()
+	schema := map[string]SchemaEntry{
+		"z_key": {Required: true},
+		"a_key": {Required: true},
+		"m_key": {Required: true},
+	}
+	err := ValidateRequired(r, schema)
+	if err == nil {
+		t.Fatal("expected error for missing required keys")
+	}
+	// Keys must appear in sorted order regardless of map iteration order
+	const want = "missing required config keys: a_key, m_key, z_key"
+	if got := err.Error(); got != want {
+		t.Fatalf("expected sorted error:\nwant: %q\ngot:  %q", want, got)
 	}
 }
 
