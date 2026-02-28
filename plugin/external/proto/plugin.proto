@@ -56,6 +56,9 @@ service PluginService {
 
   // GetConfigFragment returns YAML config to merge into the host config before module registration.
   rpc GetConfigFragment(google.protobuf.Empty) returns (ConfigFragmentResponse);
+
+  // GetAsset returns the content of a static asset embedded in the plugin.
+  rpc GetAsset(GetAssetRequest) returns (GetAssetResponse);
 }
 
 // EngineCallbackService is implemented by the host and called by the plugin.
@@ -85,6 +88,20 @@ message Manifest {
   string version = 2;
   string author = 3;
   string description = 4;
+  bool config_mutable = 5;
+  string sample_category = 6;
+}
+
+// GetAssetRequest asks the plugin to return an embedded static asset.
+message GetAssetRequest {
+  string path = 1;
+}
+
+// GetAssetResponse returns the content of an embedded static asset.
+message GetAssetResponse {
+  bytes content = 1;
+  string content_type = 2;
+  string error = 3;
 }
 
 // TypeList is a list of type name strings.

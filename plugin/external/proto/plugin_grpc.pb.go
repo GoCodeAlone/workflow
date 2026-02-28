@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v6.33.4
-// source: plugin/external/proto/plugin.proto
+// source: plugin.proto
 
 package proto
 
@@ -36,6 +36,7 @@ const (
 	PluginService_InvokeService_FullMethodName     = "/workflow.plugin.v1.PluginService/InvokeService"
 	PluginService_DeliverMessage_FullMethodName    = "/workflow.plugin.v1.PluginService/DeliverMessage"
 	PluginService_GetConfigFragment_FullMethodName = "/workflow.plugin.v1.PluginService/GetConfigFragment"
+	PluginService_GetAsset_FullMethodName          = "/workflow.plugin.v1.PluginService/GetAsset"
 )
 
 // PluginServiceClient is the client API for PluginService service.
@@ -76,6 +77,8 @@ type PluginServiceClient interface {
 	DeliverMessage(ctx context.Context, in *DeliverMessageRequest, opts ...grpc.CallOption) (*DeliverMessageResponse, error)
 	// GetConfigFragment returns YAML config to merge into the host config before module registration.
 	GetConfigFragment(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ConfigFragmentResponse, error)
+	// GetAsset returns the content of a static asset embedded in the plugin.
+	GetAsset(ctx context.Context, in *GetAssetRequest, opts ...grpc.CallOption) (*GetAssetResponse, error)
 }
 
 type pluginServiceClient struct {
@@ -246,6 +249,16 @@ func (c *pluginServiceClient) GetConfigFragment(ctx context.Context, in *emptypb
 	return out, nil
 }
 
+func (c *pluginServiceClient) GetAsset(ctx context.Context, in *GetAssetRequest, opts ...grpc.CallOption) (*GetAssetResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAssetResponse)
+	err := c.cc.Invoke(ctx, PluginService_GetAsset_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PluginServiceServer is the server API for PluginService service.
 // All implementations must embed UnimplementedPluginServiceServer
 // for forward compatibility.
@@ -284,6 +297,8 @@ type PluginServiceServer interface {
 	DeliverMessage(context.Context, *DeliverMessageRequest) (*DeliverMessageResponse, error)
 	// GetConfigFragment returns YAML config to merge into the host config before module registration.
 	GetConfigFragment(context.Context, *emptypb.Empty) (*ConfigFragmentResponse, error)
+	// GetAsset returns the content of a static asset embedded in the plugin.
+	GetAsset(context.Context, *GetAssetRequest) (*GetAssetResponse, error)
 	mustEmbedUnimplementedPluginServiceServer()
 }
 
@@ -341,6 +356,9 @@ func (UnimplementedPluginServiceServer) DeliverMessage(context.Context, *Deliver
 }
 func (UnimplementedPluginServiceServer) GetConfigFragment(context.Context, *emptypb.Empty) (*ConfigFragmentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConfigFragment not implemented")
+}
+func (UnimplementedPluginServiceServer) GetAsset(context.Context, *GetAssetRequest) (*GetAssetResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAsset not implemented")
 }
 func (UnimplementedPluginServiceServer) mustEmbedUnimplementedPluginServiceServer() {}
 func (UnimplementedPluginServiceServer) testEmbeddedByValue()                       {}
@@ -651,6 +669,24 @@ func _PluginService_GetConfigFragment_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PluginService_GetAsset_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAssetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServiceServer).GetAsset(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PluginService_GetAsset_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServiceServer).GetAsset(ctx, req.(*GetAssetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PluginService_ServiceDesc is the grpc.ServiceDesc for PluginService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -722,9 +758,13 @@ var PluginService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GetConfigFragment",
 			Handler:    _PluginService_GetConfigFragment_Handler,
 		},
+		{
+			MethodName: "GetAsset",
+			Handler:    _PluginService_GetAsset_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "plugin/external/proto/plugin.proto",
+	Metadata: "plugin.proto",
 }
 
 const (
@@ -1032,5 +1072,5 @@ var EngineCallbackService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "plugin/external/proto/plugin.proto",
+	Metadata: "plugin.proto",
 }

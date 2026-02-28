@@ -43,6 +43,10 @@ type PluginManifest struct {
 	TriggerTypes  []string         `json:"triggerTypes,omitempty" yaml:"triggerTypes,omitempty"`
 	WorkflowTypes []string         `json:"workflowTypes,omitempty" yaml:"workflowTypes,omitempty"`
 	WiringHooks   []string         `json:"wiringHooks,omitempty" yaml:"wiringHooks,omitempty"`
+
+	// Config mutability and sample plugin support
+	ConfigMutable  bool   `json:"configMutable,omitempty" yaml:"configMutable,omitempty"`
+	SampleCategory string `json:"sampleCategory,omitempty" yaml:"sampleCategory,omitempty"`
 }
 
 // CapabilityDecl declares a capability relationship for a plugin in the manifest.

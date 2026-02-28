@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v6.33.4
-// source: plugin/external/proto/plugin.proto
+// source: plugin.proto
 
 package proto
 
@@ -25,18 +25,20 @@ const (
 
 // Manifest describes the plugin's metadata.
 type Manifest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
-	Author        string                 `protobuf:"bytes,3,opt,name=author,proto3" json:"author,omitempty"`
-	Description   string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Name           string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Version        string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	Author         string                 `protobuf:"bytes,3,opt,name=author,proto3" json:"author,omitempty"`
+	Description    string                 `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
+	ConfigMutable  bool                   `protobuf:"varint,5,opt,name=config_mutable,json=configMutable,proto3" json:"config_mutable,omitempty"`
+	SampleCategory string                 `protobuf:"bytes,6,opt,name=sample_category,json=sampleCategory,proto3" json:"sample_category,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Manifest) Reset() {
 	*x = Manifest{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[0]
+	mi := &file_plugin_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -48,7 +50,7 @@ func (x *Manifest) String() string {
 func (*Manifest) ProtoMessage() {}
 
 func (x *Manifest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[0]
+	mi := &file_plugin_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -61,7 +63,7 @@ func (x *Manifest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Manifest.ProtoReflect.Descriptor instead.
 func (*Manifest) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{0}
+	return file_plugin_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Manifest) GetName() string {
@@ -92,6 +94,126 @@ func (x *Manifest) GetDescription() string {
 	return ""
 }
 
+func (x *Manifest) GetConfigMutable() bool {
+	if x != nil {
+		return x.ConfigMutable
+	}
+	return false
+}
+
+func (x *Manifest) GetSampleCategory() string {
+	if x != nil {
+		return x.SampleCategory
+	}
+	return ""
+}
+
+// GetAssetRequest asks the plugin to return an embedded static asset.
+type GetAssetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAssetRequest) Reset() {
+	*x = GetAssetRequest{}
+	mi := &file_plugin_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAssetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAssetRequest) ProtoMessage() {}
+
+func (x *GetAssetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_plugin_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAssetRequest.ProtoReflect.Descriptor instead.
+func (*GetAssetRequest) Descriptor() ([]byte, []int) {
+	return file_plugin_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *GetAssetRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+// GetAssetResponse returns the content of an embedded static asset.
+type GetAssetResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Content       []byte                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	ContentType   string                 `protobuf:"bytes,2,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAssetResponse) Reset() {
+	*x = GetAssetResponse{}
+	mi := &file_plugin_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAssetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAssetResponse) ProtoMessage() {}
+
+func (x *GetAssetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_plugin_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAssetResponse.ProtoReflect.Descriptor instead.
+func (*GetAssetResponse) Descriptor() ([]byte, []int) {
+	return file_plugin_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *GetAssetResponse) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *GetAssetResponse) GetContentType() string {
+	if x != nil {
+		return x.ContentType
+	}
+	return ""
+}
+
+func (x *GetAssetResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 // TypeList is a list of type name strings.
 type TypeList struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -102,7 +224,7 @@ type TypeList struct {
 
 func (x *TypeList) Reset() {
 	*x = TypeList{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[1]
+	mi := &file_plugin_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -114,7 +236,7 @@ func (x *TypeList) String() string {
 func (*TypeList) ProtoMessage() {}
 
 func (x *TypeList) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[1]
+	mi := &file_plugin_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -127,7 +249,7 @@ func (x *TypeList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TypeList.ProtoReflect.Descriptor instead.
 func (*TypeList) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{1}
+	return file_plugin_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *TypeList) GetTypes() []string {
@@ -147,7 +269,7 @@ type ModuleSchemaList struct {
 
 func (x *ModuleSchemaList) Reset() {
 	*x = ModuleSchemaList{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[2]
+	mi := &file_plugin_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -159,7 +281,7 @@ func (x *ModuleSchemaList) String() string {
 func (*ModuleSchemaList) ProtoMessage() {}
 
 func (x *ModuleSchemaList) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[2]
+	mi := &file_plugin_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -172,7 +294,7 @@ func (x *ModuleSchemaList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModuleSchemaList.ProtoReflect.Descriptor instead.
 func (*ModuleSchemaList) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{2}
+	return file_plugin_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ModuleSchemaList) GetSchemas() []*ModuleSchema {
@@ -198,7 +320,7 @@ type ModuleSchema struct {
 
 func (x *ModuleSchema) Reset() {
 	*x = ModuleSchema{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[3]
+	mi := &file_plugin_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -210,7 +332,7 @@ func (x *ModuleSchema) String() string {
 func (*ModuleSchema) ProtoMessage() {}
 
 func (x *ModuleSchema) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[3]
+	mi := &file_plugin_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -223,7 +345,7 @@ func (x *ModuleSchema) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModuleSchema.ProtoReflect.Descriptor instead.
 func (*ModuleSchema) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{3}
+	return file_plugin_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ModuleSchema) GetType() string {
@@ -287,7 +409,7 @@ type ServiceIODef struct {
 
 func (x *ServiceIODef) Reset() {
 	*x = ServiceIODef{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[4]
+	mi := &file_plugin_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -299,7 +421,7 @@ func (x *ServiceIODef) String() string {
 func (*ServiceIODef) ProtoMessage() {}
 
 func (x *ServiceIODef) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[4]
+	mi := &file_plugin_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -312,7 +434,7 @@ func (x *ServiceIODef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceIODef.ProtoReflect.Descriptor instead.
 func (*ServiceIODef) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{4}
+	return file_plugin_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ServiceIODef) GetName() string {
@@ -351,7 +473,7 @@ type ConfigFieldDef struct {
 
 func (x *ConfigFieldDef) Reset() {
 	*x = ConfigFieldDef{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[5]
+	mi := &file_plugin_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -363,7 +485,7 @@ func (x *ConfigFieldDef) String() string {
 func (*ConfigFieldDef) ProtoMessage() {}
 
 func (x *ConfigFieldDef) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[5]
+	mi := &file_plugin_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -376,7 +498,7 @@ func (x *ConfigFieldDef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigFieldDef.ProtoReflect.Descriptor instead.
 func (*ConfigFieldDef) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{5}
+	return file_plugin_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ConfigFieldDef) GetName() string {
@@ -433,7 +555,7 @@ type CreateModuleRequest struct {
 
 func (x *CreateModuleRequest) Reset() {
 	*x = CreateModuleRequest{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[6]
+	mi := &file_plugin_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -445,7 +567,7 @@ func (x *CreateModuleRequest) String() string {
 func (*CreateModuleRequest) ProtoMessage() {}
 
 func (x *CreateModuleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[6]
+	mi := &file_plugin_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -458,7 +580,7 @@ func (x *CreateModuleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateModuleRequest.ProtoReflect.Descriptor instead.
 func (*CreateModuleRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{6}
+	return file_plugin_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *CreateModuleRequest) GetType() string {
@@ -494,7 +616,7 @@ type CreateStepRequest struct {
 
 func (x *CreateStepRequest) Reset() {
 	*x = CreateStepRequest{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[7]
+	mi := &file_plugin_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -506,7 +628,7 @@ func (x *CreateStepRequest) String() string {
 func (*CreateStepRequest) ProtoMessage() {}
 
 func (x *CreateStepRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[7]
+	mi := &file_plugin_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -519,7 +641,7 @@ func (x *CreateStepRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateStepRequest.ProtoReflect.Descriptor instead.
 func (*CreateStepRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{7}
+	return file_plugin_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CreateStepRequest) GetType() string {
@@ -554,7 +676,7 @@ type HandleResponse struct {
 
 func (x *HandleResponse) Reset() {
 	*x = HandleResponse{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[8]
+	mi := &file_plugin_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -566,7 +688,7 @@ func (x *HandleResponse) String() string {
 func (*HandleResponse) ProtoMessage() {}
 
 func (x *HandleResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[8]
+	mi := &file_plugin_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -579,7 +701,7 @@ func (x *HandleResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandleResponse.ProtoReflect.Descriptor instead.
 func (*HandleResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{8}
+	return file_plugin_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *HandleResponse) GetHandleId() string {
@@ -606,7 +728,7 @@ type HandleRequest struct {
 
 func (x *HandleRequest) Reset() {
 	*x = HandleRequest{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[9]
+	mi := &file_plugin_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -618,7 +740,7 @@ func (x *HandleRequest) String() string {
 func (*HandleRequest) ProtoMessage() {}
 
 func (x *HandleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[9]
+	mi := &file_plugin_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -631,7 +753,7 @@ func (x *HandleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandleRequest.ProtoReflect.Descriptor instead.
 func (*HandleRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{9}
+	return file_plugin_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *HandleRequest) GetHandleId() string {
@@ -651,7 +773,7 @@ type ErrorResponse struct {
 
 func (x *ErrorResponse) Reset() {
 	*x = ErrorResponse{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[10]
+	mi := &file_plugin_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -663,7 +785,7 @@ func (x *ErrorResponse) String() string {
 func (*ErrorResponse) ProtoMessage() {}
 
 func (x *ErrorResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[10]
+	mi := &file_plugin_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -676,7 +798,7 @@ func (x *ErrorResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ErrorResponse.ProtoReflect.Descriptor instead.
 func (*ErrorResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{10}
+	return file_plugin_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ErrorResponse) GetError() string {
@@ -700,7 +822,7 @@ type ExecuteStepRequest struct {
 
 func (x *ExecuteStepRequest) Reset() {
 	*x = ExecuteStepRequest{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[11]
+	mi := &file_plugin_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -712,7 +834,7 @@ func (x *ExecuteStepRequest) String() string {
 func (*ExecuteStepRequest) ProtoMessage() {}
 
 func (x *ExecuteStepRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[11]
+	mi := &file_plugin_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -725,7 +847,7 @@ func (x *ExecuteStepRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteStepRequest.ProtoReflect.Descriptor instead.
 func (*ExecuteStepRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{11}
+	return file_plugin_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ExecuteStepRequest) GetHandleId() string {
@@ -775,7 +897,7 @@ type ExecuteStepResponse struct {
 
 func (x *ExecuteStepResponse) Reset() {
 	*x = ExecuteStepResponse{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[12]
+	mi := &file_plugin_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -787,7 +909,7 @@ func (x *ExecuteStepResponse) String() string {
 func (*ExecuteStepResponse) ProtoMessage() {}
 
 func (x *ExecuteStepResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[12]
+	mi := &file_plugin_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -800,7 +922,7 @@ func (x *ExecuteStepResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecuteStepResponse.ProtoReflect.Descriptor instead.
 func (*ExecuteStepResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{12}
+	return file_plugin_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ExecuteStepResponse) GetOutput() *structpb.Struct {
@@ -836,7 +958,7 @@ type InvokeServiceRequest struct {
 
 func (x *InvokeServiceRequest) Reset() {
 	*x = InvokeServiceRequest{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[13]
+	mi := &file_plugin_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -848,7 +970,7 @@ func (x *InvokeServiceRequest) String() string {
 func (*InvokeServiceRequest) ProtoMessage() {}
 
 func (x *InvokeServiceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[13]
+	mi := &file_plugin_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -861,7 +983,7 @@ func (x *InvokeServiceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvokeServiceRequest.ProtoReflect.Descriptor instead.
 func (*InvokeServiceRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{13}
+	return file_plugin_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *InvokeServiceRequest) GetHandleId() string {
@@ -896,7 +1018,7 @@ type InvokeServiceResponse struct {
 
 func (x *InvokeServiceResponse) Reset() {
 	*x = InvokeServiceResponse{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[14]
+	mi := &file_plugin_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -908,7 +1030,7 @@ func (x *InvokeServiceResponse) String() string {
 func (*InvokeServiceResponse) ProtoMessage() {}
 
 func (x *InvokeServiceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[14]
+	mi := &file_plugin_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -921,7 +1043,7 @@ func (x *InvokeServiceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvokeServiceResponse.ProtoReflect.Descriptor instead.
 func (*InvokeServiceResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{14}
+	return file_plugin_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *InvokeServiceResponse) GetResult() *structpb.Struct {
@@ -950,7 +1072,7 @@ type TriggerWorkflowRequest struct {
 
 func (x *TriggerWorkflowRequest) Reset() {
 	*x = TriggerWorkflowRequest{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[15]
+	mi := &file_plugin_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -962,7 +1084,7 @@ func (x *TriggerWorkflowRequest) String() string {
 func (*TriggerWorkflowRequest) ProtoMessage() {}
 
 func (x *TriggerWorkflowRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[15]
+	mi := &file_plugin_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -975,7 +1097,7 @@ func (x *TriggerWorkflowRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriggerWorkflowRequest.ProtoReflect.Descriptor instead.
 func (*TriggerWorkflowRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{15}
+	return file_plugin_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *TriggerWorkflowRequest) GetTriggerType() string {
@@ -1009,7 +1131,7 @@ type GetServiceRequest struct {
 
 func (x *GetServiceRequest) Reset() {
 	*x = GetServiceRequest{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[16]
+	mi := &file_plugin_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1021,7 +1143,7 @@ func (x *GetServiceRequest) String() string {
 func (*GetServiceRequest) ProtoMessage() {}
 
 func (x *GetServiceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[16]
+	mi := &file_plugin_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1034,7 +1156,7 @@ func (x *GetServiceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetServiceRequest.ProtoReflect.Descriptor instead.
 func (*GetServiceRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{16}
+	return file_plugin_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *GetServiceRequest) GetName() string {
@@ -1054,7 +1176,7 @@ type GetServiceResponse struct {
 
 func (x *GetServiceResponse) Reset() {
 	*x = GetServiceResponse{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[17]
+	mi := &file_plugin_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1066,7 +1188,7 @@ func (x *GetServiceResponse) String() string {
 func (*GetServiceResponse) ProtoMessage() {}
 
 func (x *GetServiceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[17]
+	mi := &file_plugin_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1079,7 +1201,7 @@ func (x *GetServiceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetServiceResponse.ProtoReflect.Descriptor instead.
 func (*GetServiceResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{17}
+	return file_plugin_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GetServiceResponse) GetFound() bool {
@@ -1101,7 +1223,7 @@ type LogRequest struct {
 
 func (x *LogRequest) Reset() {
 	*x = LogRequest{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[18]
+	mi := &file_plugin_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1113,7 +1235,7 @@ func (x *LogRequest) String() string {
 func (*LogRequest) ProtoMessage() {}
 
 func (x *LogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[18]
+	mi := &file_plugin_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1126,7 +1248,7 @@ func (x *LogRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogRequest.ProtoReflect.Descriptor instead.
 func (*LogRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{18}
+	return file_plugin_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *LogRequest) GetLevel() string {
@@ -1163,7 +1285,7 @@ type PublishMessageRequest struct {
 
 func (x *PublishMessageRequest) Reset() {
 	*x = PublishMessageRequest{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[19]
+	mi := &file_plugin_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1175,7 +1297,7 @@ func (x *PublishMessageRequest) String() string {
 func (*PublishMessageRequest) ProtoMessage() {}
 
 func (x *PublishMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[19]
+	mi := &file_plugin_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1188,7 +1310,7 @@ func (x *PublishMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishMessageRequest.ProtoReflect.Descriptor instead.
 func (*PublishMessageRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{19}
+	return file_plugin_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *PublishMessageRequest) GetHandleId() string {
@@ -1230,7 +1352,7 @@ type PublishMessageResponse struct {
 
 func (x *PublishMessageResponse) Reset() {
 	*x = PublishMessageResponse{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[20]
+	mi := &file_plugin_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1242,7 +1364,7 @@ func (x *PublishMessageResponse) String() string {
 func (*PublishMessageResponse) ProtoMessage() {}
 
 func (x *PublishMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[20]
+	mi := &file_plugin_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1255,7 +1377,7 @@ func (x *PublishMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishMessageResponse.ProtoReflect.Descriptor instead.
 func (*PublishMessageResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{20}
+	return file_plugin_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *PublishMessageResponse) GetError() string {
@@ -1284,7 +1406,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[21]
+	mi := &file_plugin_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1296,7 +1418,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[21]
+	mi := &file_plugin_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1309,7 +1431,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{21}
+	return file_plugin_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *SubscribeRequest) GetHandleId() string {
@@ -1344,7 +1466,7 @@ type UnsubscribeRequest struct {
 
 func (x *UnsubscribeRequest) Reset() {
 	*x = UnsubscribeRequest{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[22]
+	mi := &file_plugin_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1356,7 +1478,7 @@ func (x *UnsubscribeRequest) String() string {
 func (*UnsubscribeRequest) ProtoMessage() {}
 
 func (x *UnsubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[22]
+	mi := &file_plugin_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1369,7 +1491,7 @@ func (x *UnsubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsubscribeRequest.ProtoReflect.Descriptor instead.
 func (*UnsubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{22}
+	return file_plugin_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *UnsubscribeRequest) GetHandleId() string {
@@ -1400,7 +1522,7 @@ type DeliverMessageRequest struct {
 
 func (x *DeliverMessageRequest) Reset() {
 	*x = DeliverMessageRequest{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[23]
+	mi := &file_plugin_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1412,7 +1534,7 @@ func (x *DeliverMessageRequest) String() string {
 func (*DeliverMessageRequest) ProtoMessage() {}
 
 func (x *DeliverMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[23]
+	mi := &file_plugin_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1425,7 +1547,7 @@ func (x *DeliverMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliverMessageRequest.ProtoReflect.Descriptor instead.
 func (*DeliverMessageRequest) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{23}
+	return file_plugin_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *DeliverMessageRequest) GetHandleId() string {
@@ -1474,7 +1596,7 @@ type DeliverMessageResponse struct {
 
 func (x *DeliverMessageResponse) Reset() {
 	*x = DeliverMessageResponse{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[24]
+	mi := &file_plugin_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1486,7 +1608,7 @@ func (x *DeliverMessageResponse) String() string {
 func (*DeliverMessageResponse) ProtoMessage() {}
 
 func (x *DeliverMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[24]
+	mi := &file_plugin_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1499,7 +1621,7 @@ func (x *DeliverMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliverMessageResponse.ProtoReflect.Descriptor instead.
 func (*DeliverMessageResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{24}
+	return file_plugin_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *DeliverMessageResponse) GetError() string {
@@ -1527,7 +1649,7 @@ type ConfigFragmentResponse struct {
 
 func (x *ConfigFragmentResponse) Reset() {
 	*x = ConfigFragmentResponse{}
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[25]
+	mi := &file_plugin_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1539,7 +1661,7 @@ func (x *ConfigFragmentResponse) String() string {
 func (*ConfigFragmentResponse) ProtoMessage() {}
 
 func (x *ConfigFragmentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plugin_external_proto_plugin_proto_msgTypes[25]
+	mi := &file_plugin_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1552,7 +1674,7 @@ func (x *ConfigFragmentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigFragmentResponse.ProtoReflect.Descriptor instead.
 func (*ConfigFragmentResponse) Descriptor() ([]byte, []int) {
-	return file_plugin_external_proto_plugin_proto_rawDescGZIP(), []int{25}
+	return file_plugin_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ConfigFragmentResponse) GetYamlConfig() []byte {
@@ -1569,16 +1691,24 @@ func (x *ConfigFragmentResponse) GetPluginDir() string {
 	return ""
 }
 
-var File_plugin_external_proto_plugin_proto protoreflect.FileDescriptor
+var File_plugin_proto protoreflect.FileDescriptor
 
-const file_plugin_external_proto_plugin_proto_rawDesc = "" +
+const file_plugin_proto_rawDesc = "" +
 	"\n" +
-	"\"plugin/external/proto/plugin.proto\x12\x12workflow.plugin.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1bgoogle/protobuf/empty.proto\"r\n" +
+	"\fplugin.proto\x12\x12workflow.plugin.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1bgoogle/protobuf/empty.proto\"\xc2\x01\n" +
 	"\bManifest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n" +
 	"\x06author\x18\x03 \x01(\tR\x06author\x12 \n" +
-	"\vdescription\x18\x04 \x01(\tR\vdescription\" \n" +
+	"\vdescription\x18\x04 \x01(\tR\vdescription\x12%\n" +
+	"\x0econfig_mutable\x18\x05 \x01(\bR\rconfigMutable\x12'\n" +
+	"\x0fsample_category\x18\x06 \x01(\tR\x0esampleCategory\"%\n" +
+	"\x0fGetAssetRequest\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\"e\n" +
+	"\x10GetAssetResponse\x12\x18\n" +
+	"\acontent\x18\x01 \x01(\fR\acontent\x12!\n" +
+	"\fcontent_type\x18\x02 \x01(\tR\vcontentType\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\" \n" +
 	"\bTypeList\x12\x14\n" +
 	"\x05types\x18\x01 \x03(\tR\x05types\"N\n" +
 	"\x10ModuleSchemaList\x12:\n" +
@@ -1687,8 +1817,7 @@ const file_plugin_external_proto_plugin_proto_rawDesc = "" +
 	"\vyaml_config\x18\x01 \x01(\fR\n" +
 	"yamlConfig\x12\x1d\n" +
 	"\n" +
-	"plugin_dir\x18\x02 \x01(\tR\tpluginDir2\xe4\n" +
-	"\n" +
+	"plugin_dir\x18\x02 \x01(\tR\tpluginDir2\xbb\v\n" +
 	"\rPluginService\x12C\n" +
 	"\vGetManifest\x12\x16.google.protobuf.Empty\x1a\x1c.workflow.plugin.v1.Manifest\x12F\n" +
 	"\x0eGetModuleTypes\x12\x16.google.protobuf.Empty\x1a\x1c.workflow.plugin.v1.TypeList\x12D\n" +
@@ -1708,7 +1837,8 @@ const file_plugin_external_proto_plugin_proto_rawDesc = "" +
 	"\vDestroyStep\x12!.workflow.plugin.v1.HandleRequest\x1a!.workflow.plugin.v1.ErrorResponse\x12d\n" +
 	"\rInvokeService\x12(.workflow.plugin.v1.InvokeServiceRequest\x1a).workflow.plugin.v1.InvokeServiceResponse\x12g\n" +
 	"\x0eDeliverMessage\x12).workflow.plugin.v1.DeliverMessageRequest\x1a*.workflow.plugin.v1.DeliverMessageResponse\x12W\n" +
-	"\x11GetConfigFragment\x12\x16.google.protobuf.Empty\x1a*.workflow.plugin.v1.ConfigFragmentResponse2\xae\x04\n" +
+	"\x11GetConfigFragment\x12\x16.google.protobuf.Empty\x1a*.workflow.plugin.v1.ConfigFragmentResponse\x12U\n" +
+	"\bGetAsset\x12#.workflow.plugin.v1.GetAssetRequest\x1a$.workflow.plugin.v1.GetAssetResponse2\xae\x04\n" +
 	"\x15EngineCallbackService\x12`\n" +
 	"\x0fTriggerWorkflow\x12*.workflow.plugin.v1.TriggerWorkflowRequest\x1a!.workflow.plugin.v1.ErrorResponse\x12[\n" +
 	"\n" +
@@ -1719,141 +1849,145 @@ const file_plugin_external_proto_plugin_proto_rawDesc = "" +
 	"\vUnsubscribe\x12&.workflow.plugin.v1.UnsubscribeRequest\x1a!.workflow.plugin.v1.ErrorResponseB7Z5github.com/GoCodeAlone/workflow/plugin/external/protob\x06proto3"
 
 var (
-	file_plugin_external_proto_plugin_proto_rawDescOnce sync.Once
-	file_plugin_external_proto_plugin_proto_rawDescData []byte
+	file_plugin_proto_rawDescOnce sync.Once
+	file_plugin_proto_rawDescData []byte
 )
 
-func file_plugin_external_proto_plugin_proto_rawDescGZIP() []byte {
-	file_plugin_external_proto_plugin_proto_rawDescOnce.Do(func() {
-		file_plugin_external_proto_plugin_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_plugin_external_proto_plugin_proto_rawDesc), len(file_plugin_external_proto_plugin_proto_rawDesc)))
+func file_plugin_proto_rawDescGZIP() []byte {
+	file_plugin_proto_rawDescOnce.Do(func() {
+		file_plugin_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_plugin_proto_rawDesc), len(file_plugin_proto_rawDesc)))
 	})
-	return file_plugin_external_proto_plugin_proto_rawDescData
+	return file_plugin_proto_rawDescData
 }
 
-var file_plugin_external_proto_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
-var file_plugin_external_proto_plugin_proto_goTypes = []any{
+var file_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_plugin_proto_goTypes = []any{
 	(*Manifest)(nil),               // 0: workflow.plugin.v1.Manifest
-	(*TypeList)(nil),               // 1: workflow.plugin.v1.TypeList
-	(*ModuleSchemaList)(nil),       // 2: workflow.plugin.v1.ModuleSchemaList
-	(*ModuleSchema)(nil),           // 3: workflow.plugin.v1.ModuleSchema
-	(*ServiceIODef)(nil),           // 4: workflow.plugin.v1.ServiceIODef
-	(*ConfigFieldDef)(nil),         // 5: workflow.plugin.v1.ConfigFieldDef
-	(*CreateModuleRequest)(nil),    // 6: workflow.plugin.v1.CreateModuleRequest
-	(*CreateStepRequest)(nil),      // 7: workflow.plugin.v1.CreateStepRequest
-	(*HandleResponse)(nil),         // 8: workflow.plugin.v1.HandleResponse
-	(*HandleRequest)(nil),          // 9: workflow.plugin.v1.HandleRequest
-	(*ErrorResponse)(nil),          // 10: workflow.plugin.v1.ErrorResponse
-	(*ExecuteStepRequest)(nil),     // 11: workflow.plugin.v1.ExecuteStepRequest
-	(*ExecuteStepResponse)(nil),    // 12: workflow.plugin.v1.ExecuteStepResponse
-	(*InvokeServiceRequest)(nil),   // 13: workflow.plugin.v1.InvokeServiceRequest
-	(*InvokeServiceResponse)(nil),  // 14: workflow.plugin.v1.InvokeServiceResponse
-	(*TriggerWorkflowRequest)(nil), // 15: workflow.plugin.v1.TriggerWorkflowRequest
-	(*GetServiceRequest)(nil),      // 16: workflow.plugin.v1.GetServiceRequest
-	(*GetServiceResponse)(nil),     // 17: workflow.plugin.v1.GetServiceResponse
-	(*LogRequest)(nil),             // 18: workflow.plugin.v1.LogRequest
-	(*PublishMessageRequest)(nil),  // 19: workflow.plugin.v1.PublishMessageRequest
-	(*PublishMessageResponse)(nil), // 20: workflow.plugin.v1.PublishMessageResponse
-	(*SubscribeRequest)(nil),       // 21: workflow.plugin.v1.SubscribeRequest
-	(*UnsubscribeRequest)(nil),     // 22: workflow.plugin.v1.UnsubscribeRequest
-	(*DeliverMessageRequest)(nil),  // 23: workflow.plugin.v1.DeliverMessageRequest
-	(*DeliverMessageResponse)(nil), // 24: workflow.plugin.v1.DeliverMessageResponse
-	(*ConfigFragmentResponse)(nil), // 25: workflow.plugin.v1.ConfigFragmentResponse
-	nil,                            // 26: workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry
-	nil,                            // 27: workflow.plugin.v1.PublishMessageRequest.MetadataEntry
-	nil,                            // 28: workflow.plugin.v1.DeliverMessageRequest.MetadataEntry
-	(*structpb.Struct)(nil),        // 29: google.protobuf.Struct
-	(*emptypb.Empty)(nil),          // 30: google.protobuf.Empty
+	(*GetAssetRequest)(nil),        // 1: workflow.plugin.v1.GetAssetRequest
+	(*GetAssetResponse)(nil),       // 2: workflow.plugin.v1.GetAssetResponse
+	(*TypeList)(nil),               // 3: workflow.plugin.v1.TypeList
+	(*ModuleSchemaList)(nil),       // 4: workflow.plugin.v1.ModuleSchemaList
+	(*ModuleSchema)(nil),           // 5: workflow.plugin.v1.ModuleSchema
+	(*ServiceIODef)(nil),           // 6: workflow.plugin.v1.ServiceIODef
+	(*ConfigFieldDef)(nil),         // 7: workflow.plugin.v1.ConfigFieldDef
+	(*CreateModuleRequest)(nil),    // 8: workflow.plugin.v1.CreateModuleRequest
+	(*CreateStepRequest)(nil),      // 9: workflow.plugin.v1.CreateStepRequest
+	(*HandleResponse)(nil),         // 10: workflow.plugin.v1.HandleResponse
+	(*HandleRequest)(nil),          // 11: workflow.plugin.v1.HandleRequest
+	(*ErrorResponse)(nil),          // 12: workflow.plugin.v1.ErrorResponse
+	(*ExecuteStepRequest)(nil),     // 13: workflow.plugin.v1.ExecuteStepRequest
+	(*ExecuteStepResponse)(nil),    // 14: workflow.plugin.v1.ExecuteStepResponse
+	(*InvokeServiceRequest)(nil),   // 15: workflow.plugin.v1.InvokeServiceRequest
+	(*InvokeServiceResponse)(nil),  // 16: workflow.plugin.v1.InvokeServiceResponse
+	(*TriggerWorkflowRequest)(nil), // 17: workflow.plugin.v1.TriggerWorkflowRequest
+	(*GetServiceRequest)(nil),      // 18: workflow.plugin.v1.GetServiceRequest
+	(*GetServiceResponse)(nil),     // 19: workflow.plugin.v1.GetServiceResponse
+	(*LogRequest)(nil),             // 20: workflow.plugin.v1.LogRequest
+	(*PublishMessageRequest)(nil),  // 21: workflow.plugin.v1.PublishMessageRequest
+	(*PublishMessageResponse)(nil), // 22: workflow.plugin.v1.PublishMessageResponse
+	(*SubscribeRequest)(nil),       // 23: workflow.plugin.v1.SubscribeRequest
+	(*UnsubscribeRequest)(nil),     // 24: workflow.plugin.v1.UnsubscribeRequest
+	(*DeliverMessageRequest)(nil),  // 25: workflow.plugin.v1.DeliverMessageRequest
+	(*DeliverMessageResponse)(nil), // 26: workflow.plugin.v1.DeliverMessageResponse
+	(*ConfigFragmentResponse)(nil), // 27: workflow.plugin.v1.ConfigFragmentResponse
+	nil,                            // 28: workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry
+	nil,                            // 29: workflow.plugin.v1.PublishMessageRequest.MetadataEntry
+	nil,                            // 30: workflow.plugin.v1.DeliverMessageRequest.MetadataEntry
+	(*structpb.Struct)(nil),        // 31: google.protobuf.Struct
+	(*emptypb.Empty)(nil),          // 32: google.protobuf.Empty
 }
-var file_plugin_external_proto_plugin_proto_depIdxs = []int32{
-	3,  // 0: workflow.plugin.v1.ModuleSchemaList.schemas:type_name -> workflow.plugin.v1.ModuleSchema
-	4,  // 1: workflow.plugin.v1.ModuleSchema.inputs:type_name -> workflow.plugin.v1.ServiceIODef
-	4,  // 2: workflow.plugin.v1.ModuleSchema.outputs:type_name -> workflow.plugin.v1.ServiceIODef
-	5,  // 3: workflow.plugin.v1.ModuleSchema.config_fields:type_name -> workflow.plugin.v1.ConfigFieldDef
-	29, // 4: workflow.plugin.v1.CreateModuleRequest.config:type_name -> google.protobuf.Struct
-	29, // 5: workflow.plugin.v1.CreateStepRequest.config:type_name -> google.protobuf.Struct
-	29, // 6: workflow.plugin.v1.ExecuteStepRequest.trigger_data:type_name -> google.protobuf.Struct
-	26, // 7: workflow.plugin.v1.ExecuteStepRequest.step_outputs:type_name -> workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry
-	29, // 8: workflow.plugin.v1.ExecuteStepRequest.current:type_name -> google.protobuf.Struct
-	29, // 9: workflow.plugin.v1.ExecuteStepRequest.metadata:type_name -> google.protobuf.Struct
-	29, // 10: workflow.plugin.v1.ExecuteStepResponse.output:type_name -> google.protobuf.Struct
-	29, // 11: workflow.plugin.v1.InvokeServiceRequest.args:type_name -> google.protobuf.Struct
-	29, // 12: workflow.plugin.v1.InvokeServiceResponse.result:type_name -> google.protobuf.Struct
-	29, // 13: workflow.plugin.v1.TriggerWorkflowRequest.data:type_name -> google.protobuf.Struct
-	29, // 14: workflow.plugin.v1.LogRequest.fields:type_name -> google.protobuf.Struct
-	27, // 15: workflow.plugin.v1.PublishMessageRequest.metadata:type_name -> workflow.plugin.v1.PublishMessageRequest.MetadataEntry
-	28, // 16: workflow.plugin.v1.DeliverMessageRequest.metadata:type_name -> workflow.plugin.v1.DeliverMessageRequest.MetadataEntry
-	29, // 17: workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry.value:type_name -> google.protobuf.Struct
-	30, // 18: workflow.plugin.v1.PluginService.GetManifest:input_type -> google.protobuf.Empty
-	30, // 19: workflow.plugin.v1.PluginService.GetModuleTypes:input_type -> google.protobuf.Empty
-	30, // 20: workflow.plugin.v1.PluginService.GetStepTypes:input_type -> google.protobuf.Empty
-	30, // 21: workflow.plugin.v1.PluginService.GetTriggerTypes:input_type -> google.protobuf.Empty
-	30, // 22: workflow.plugin.v1.PluginService.GetModuleSchemas:input_type -> google.protobuf.Empty
-	6,  // 23: workflow.plugin.v1.PluginService.CreateModule:input_type -> workflow.plugin.v1.CreateModuleRequest
-	9,  // 24: workflow.plugin.v1.PluginService.InitModule:input_type -> workflow.plugin.v1.HandleRequest
-	9,  // 25: workflow.plugin.v1.PluginService.StartModule:input_type -> workflow.plugin.v1.HandleRequest
-	9,  // 26: workflow.plugin.v1.PluginService.StopModule:input_type -> workflow.plugin.v1.HandleRequest
-	9,  // 27: workflow.plugin.v1.PluginService.DestroyModule:input_type -> workflow.plugin.v1.HandleRequest
-	7,  // 28: workflow.plugin.v1.PluginService.CreateStep:input_type -> workflow.plugin.v1.CreateStepRequest
-	11, // 29: workflow.plugin.v1.PluginService.ExecuteStep:input_type -> workflow.plugin.v1.ExecuteStepRequest
-	9,  // 30: workflow.plugin.v1.PluginService.DestroyStep:input_type -> workflow.plugin.v1.HandleRequest
-	13, // 31: workflow.plugin.v1.PluginService.InvokeService:input_type -> workflow.plugin.v1.InvokeServiceRequest
-	23, // 32: workflow.plugin.v1.PluginService.DeliverMessage:input_type -> workflow.plugin.v1.DeliverMessageRequest
-	30, // 33: workflow.plugin.v1.PluginService.GetConfigFragment:input_type -> google.protobuf.Empty
-	15, // 34: workflow.plugin.v1.EngineCallbackService.TriggerWorkflow:input_type -> workflow.plugin.v1.TriggerWorkflowRequest
-	16, // 35: workflow.plugin.v1.EngineCallbackService.GetService:input_type -> workflow.plugin.v1.GetServiceRequest
-	18, // 36: workflow.plugin.v1.EngineCallbackService.Log:input_type -> workflow.plugin.v1.LogRequest
-	19, // 37: workflow.plugin.v1.EngineCallbackService.PublishMessage:input_type -> workflow.plugin.v1.PublishMessageRequest
-	21, // 38: workflow.plugin.v1.EngineCallbackService.Subscribe:input_type -> workflow.plugin.v1.SubscribeRequest
-	22, // 39: workflow.plugin.v1.EngineCallbackService.Unsubscribe:input_type -> workflow.plugin.v1.UnsubscribeRequest
-	0,  // 40: workflow.plugin.v1.PluginService.GetManifest:output_type -> workflow.plugin.v1.Manifest
-	1,  // 41: workflow.plugin.v1.PluginService.GetModuleTypes:output_type -> workflow.plugin.v1.TypeList
-	1,  // 42: workflow.plugin.v1.PluginService.GetStepTypes:output_type -> workflow.plugin.v1.TypeList
-	1,  // 43: workflow.plugin.v1.PluginService.GetTriggerTypes:output_type -> workflow.plugin.v1.TypeList
-	2,  // 44: workflow.plugin.v1.PluginService.GetModuleSchemas:output_type -> workflow.plugin.v1.ModuleSchemaList
-	8,  // 45: workflow.plugin.v1.PluginService.CreateModule:output_type -> workflow.plugin.v1.HandleResponse
-	10, // 46: workflow.plugin.v1.PluginService.InitModule:output_type -> workflow.plugin.v1.ErrorResponse
-	10, // 47: workflow.plugin.v1.PluginService.StartModule:output_type -> workflow.plugin.v1.ErrorResponse
-	10, // 48: workflow.plugin.v1.PluginService.StopModule:output_type -> workflow.plugin.v1.ErrorResponse
-	10, // 49: workflow.plugin.v1.PluginService.DestroyModule:output_type -> workflow.plugin.v1.ErrorResponse
-	8,  // 50: workflow.plugin.v1.PluginService.CreateStep:output_type -> workflow.plugin.v1.HandleResponse
-	12, // 51: workflow.plugin.v1.PluginService.ExecuteStep:output_type -> workflow.plugin.v1.ExecuteStepResponse
-	10, // 52: workflow.plugin.v1.PluginService.DestroyStep:output_type -> workflow.plugin.v1.ErrorResponse
-	14, // 53: workflow.plugin.v1.PluginService.InvokeService:output_type -> workflow.plugin.v1.InvokeServiceResponse
-	24, // 54: workflow.plugin.v1.PluginService.DeliverMessage:output_type -> workflow.plugin.v1.DeliverMessageResponse
-	25, // 55: workflow.plugin.v1.PluginService.GetConfigFragment:output_type -> workflow.plugin.v1.ConfigFragmentResponse
-	10, // 56: workflow.plugin.v1.EngineCallbackService.TriggerWorkflow:output_type -> workflow.plugin.v1.ErrorResponse
-	17, // 57: workflow.plugin.v1.EngineCallbackService.GetService:output_type -> workflow.plugin.v1.GetServiceResponse
-	30, // 58: workflow.plugin.v1.EngineCallbackService.Log:output_type -> google.protobuf.Empty
-	20, // 59: workflow.plugin.v1.EngineCallbackService.PublishMessage:output_type -> workflow.plugin.v1.PublishMessageResponse
-	10, // 60: workflow.plugin.v1.EngineCallbackService.Subscribe:output_type -> workflow.plugin.v1.ErrorResponse
-	10, // 61: workflow.plugin.v1.EngineCallbackService.Unsubscribe:output_type -> workflow.plugin.v1.ErrorResponse
-	40, // [40:62] is the sub-list for method output_type
-	18, // [18:40] is the sub-list for method input_type
+var file_plugin_proto_depIdxs = []int32{
+	5,  // 0: workflow.plugin.v1.ModuleSchemaList.schemas:type_name -> workflow.plugin.v1.ModuleSchema
+	6,  // 1: workflow.plugin.v1.ModuleSchema.inputs:type_name -> workflow.plugin.v1.ServiceIODef
+	6,  // 2: workflow.plugin.v1.ModuleSchema.outputs:type_name -> workflow.plugin.v1.ServiceIODef
+	7,  // 3: workflow.plugin.v1.ModuleSchema.config_fields:type_name -> workflow.plugin.v1.ConfigFieldDef
+	31, // 4: workflow.plugin.v1.CreateModuleRequest.config:type_name -> google.protobuf.Struct
+	31, // 5: workflow.plugin.v1.CreateStepRequest.config:type_name -> google.protobuf.Struct
+	31, // 6: workflow.plugin.v1.ExecuteStepRequest.trigger_data:type_name -> google.protobuf.Struct
+	28, // 7: workflow.plugin.v1.ExecuteStepRequest.step_outputs:type_name -> workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry
+	31, // 8: workflow.plugin.v1.ExecuteStepRequest.current:type_name -> google.protobuf.Struct
+	31, // 9: workflow.plugin.v1.ExecuteStepRequest.metadata:type_name -> google.protobuf.Struct
+	31, // 10: workflow.plugin.v1.ExecuteStepResponse.output:type_name -> google.protobuf.Struct
+	31, // 11: workflow.plugin.v1.InvokeServiceRequest.args:type_name -> google.protobuf.Struct
+	31, // 12: workflow.plugin.v1.InvokeServiceResponse.result:type_name -> google.protobuf.Struct
+	31, // 13: workflow.plugin.v1.TriggerWorkflowRequest.data:type_name -> google.protobuf.Struct
+	31, // 14: workflow.plugin.v1.LogRequest.fields:type_name -> google.protobuf.Struct
+	29, // 15: workflow.plugin.v1.PublishMessageRequest.metadata:type_name -> workflow.plugin.v1.PublishMessageRequest.MetadataEntry
+	30, // 16: workflow.plugin.v1.DeliverMessageRequest.metadata:type_name -> workflow.plugin.v1.DeliverMessageRequest.MetadataEntry
+	31, // 17: workflow.plugin.v1.ExecuteStepRequest.StepOutputsEntry.value:type_name -> google.protobuf.Struct
+	32, // 18: workflow.plugin.v1.PluginService.GetManifest:input_type -> google.protobuf.Empty
+	32, // 19: workflow.plugin.v1.PluginService.GetModuleTypes:input_type -> google.protobuf.Empty
+	32, // 20: workflow.plugin.v1.PluginService.GetStepTypes:input_type -> google.protobuf.Empty
+	32, // 21: workflow.plugin.v1.PluginService.GetTriggerTypes:input_type -> google.protobuf.Empty
+	32, // 22: workflow.plugin.v1.PluginService.GetModuleSchemas:input_type -> google.protobuf.Empty
+	8,  // 23: workflow.plugin.v1.PluginService.CreateModule:input_type -> workflow.plugin.v1.CreateModuleRequest
+	11, // 24: workflow.plugin.v1.PluginService.InitModule:input_type -> workflow.plugin.v1.HandleRequest
+	11, // 25: workflow.plugin.v1.PluginService.StartModule:input_type -> workflow.plugin.v1.HandleRequest
+	11, // 26: workflow.plugin.v1.PluginService.StopModule:input_type -> workflow.plugin.v1.HandleRequest
+	11, // 27: workflow.plugin.v1.PluginService.DestroyModule:input_type -> workflow.plugin.v1.HandleRequest
+	9,  // 28: workflow.plugin.v1.PluginService.CreateStep:input_type -> workflow.plugin.v1.CreateStepRequest
+	13, // 29: workflow.plugin.v1.PluginService.ExecuteStep:input_type -> workflow.plugin.v1.ExecuteStepRequest
+	11, // 30: workflow.plugin.v1.PluginService.DestroyStep:input_type -> workflow.plugin.v1.HandleRequest
+	15, // 31: workflow.plugin.v1.PluginService.InvokeService:input_type -> workflow.plugin.v1.InvokeServiceRequest
+	25, // 32: workflow.plugin.v1.PluginService.DeliverMessage:input_type -> workflow.plugin.v1.DeliverMessageRequest
+	32, // 33: workflow.plugin.v1.PluginService.GetConfigFragment:input_type -> google.protobuf.Empty
+	1,  // 34: workflow.plugin.v1.PluginService.GetAsset:input_type -> workflow.plugin.v1.GetAssetRequest
+	17, // 35: workflow.plugin.v1.EngineCallbackService.TriggerWorkflow:input_type -> workflow.plugin.v1.TriggerWorkflowRequest
+	18, // 36: workflow.plugin.v1.EngineCallbackService.GetService:input_type -> workflow.plugin.v1.GetServiceRequest
+	20, // 37: workflow.plugin.v1.EngineCallbackService.Log:input_type -> workflow.plugin.v1.LogRequest
+	21, // 38: workflow.plugin.v1.EngineCallbackService.PublishMessage:input_type -> workflow.plugin.v1.PublishMessageRequest
+	23, // 39: workflow.plugin.v1.EngineCallbackService.Subscribe:input_type -> workflow.plugin.v1.SubscribeRequest
+	24, // 40: workflow.plugin.v1.EngineCallbackService.Unsubscribe:input_type -> workflow.plugin.v1.UnsubscribeRequest
+	0,  // 41: workflow.plugin.v1.PluginService.GetManifest:output_type -> workflow.plugin.v1.Manifest
+	3,  // 42: workflow.plugin.v1.PluginService.GetModuleTypes:output_type -> workflow.plugin.v1.TypeList
+	3,  // 43: workflow.plugin.v1.PluginService.GetStepTypes:output_type -> workflow.plugin.v1.TypeList
+	3,  // 44: workflow.plugin.v1.PluginService.GetTriggerTypes:output_type -> workflow.plugin.v1.TypeList
+	4,  // 45: workflow.plugin.v1.PluginService.GetModuleSchemas:output_type -> workflow.plugin.v1.ModuleSchemaList
+	10, // 46: workflow.plugin.v1.PluginService.CreateModule:output_type -> workflow.plugin.v1.HandleResponse
+	12, // 47: workflow.plugin.v1.PluginService.InitModule:output_type -> workflow.plugin.v1.ErrorResponse
+	12, // 48: workflow.plugin.v1.PluginService.StartModule:output_type -> workflow.plugin.v1.ErrorResponse
+	12, // 49: workflow.plugin.v1.PluginService.StopModule:output_type -> workflow.plugin.v1.ErrorResponse
+	12, // 50: workflow.plugin.v1.PluginService.DestroyModule:output_type -> workflow.plugin.v1.ErrorResponse
+	10, // 51: workflow.plugin.v1.PluginService.CreateStep:output_type -> workflow.plugin.v1.HandleResponse
+	14, // 52: workflow.plugin.v1.PluginService.ExecuteStep:output_type -> workflow.plugin.v1.ExecuteStepResponse
+	12, // 53: workflow.plugin.v1.PluginService.DestroyStep:output_type -> workflow.plugin.v1.ErrorResponse
+	16, // 54: workflow.plugin.v1.PluginService.InvokeService:output_type -> workflow.plugin.v1.InvokeServiceResponse
+	26, // 55: workflow.plugin.v1.PluginService.DeliverMessage:output_type -> workflow.plugin.v1.DeliverMessageResponse
+	27, // 56: workflow.plugin.v1.PluginService.GetConfigFragment:output_type -> workflow.plugin.v1.ConfigFragmentResponse
+	2,  // 57: workflow.plugin.v1.PluginService.GetAsset:output_type -> workflow.plugin.v1.GetAssetResponse
+	12, // 58: workflow.plugin.v1.EngineCallbackService.TriggerWorkflow:output_type -> workflow.plugin.v1.ErrorResponse
+	19, // 59: workflow.plugin.v1.EngineCallbackService.GetService:output_type -> workflow.plugin.v1.GetServiceResponse
+	32, // 60: workflow.plugin.v1.EngineCallbackService.Log:output_type -> google.protobuf.Empty
+	22, // 61: workflow.plugin.v1.EngineCallbackService.PublishMessage:output_type -> workflow.plugin.v1.PublishMessageResponse
+	12, // 62: workflow.plugin.v1.EngineCallbackService.Subscribe:output_type -> workflow.plugin.v1.ErrorResponse
+	12, // 63: workflow.plugin.v1.EngineCallbackService.Unsubscribe:output_type -> workflow.plugin.v1.ErrorResponse
+	41, // [41:64] is the sub-list for method output_type
+	18, // [18:41] is the sub-list for method input_type
 	18, // [18:18] is the sub-list for extension type_name
 	18, // [18:18] is the sub-list for extension extendee
 	0,  // [0:18] is the sub-list for field type_name
 }
 
-func init() { file_plugin_external_proto_plugin_proto_init() }
-func file_plugin_external_proto_plugin_proto_init() {
-	if File_plugin_external_proto_plugin_proto != nil {
+func init() { file_plugin_proto_init() }
+func file_plugin_proto_init() {
+	if File_plugin_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_plugin_external_proto_plugin_proto_rawDesc), len(file_plugin_external_proto_plugin_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_plugin_proto_rawDesc), len(file_plugin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   29,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
-		GoTypes:           file_plugin_external_proto_plugin_proto_goTypes,
-		DependencyIndexes: file_plugin_external_proto_plugin_proto_depIdxs,
-		MessageInfos:      file_plugin_external_proto_plugin_proto_msgTypes,
+		GoTypes:           file_plugin_proto_goTypes,
+		DependencyIndexes: file_plugin_proto_depIdxs,
+		MessageInfos:      file_plugin_proto_msgTypes,
 	}.Build()
-	File_plugin_external_proto_plugin_proto = out.File
-	file_plugin_external_proto_plugin_proto_goTypes = nil
-	file_plugin_external_proto_plugin_proto_depIdxs = nil
+	File_plugin_proto = out.File
+	file_plugin_proto_goTypes = nil
+	file_plugin_proto_depIdxs = nil
 }
