@@ -12,10 +12,17 @@ type PluginProvider interface {
 
 // PluginManifest describes the plugin.
 type PluginManifest struct {
-	Name        string
-	Version     string
-	Author      string
-	Description string
+	Name           string
+	Version        string
+	Author         string
+	Description    string
+	ConfigMutable  bool   // whether tenants can override the config fragment
+	SampleCategory string // non-empty means this is a sample/app plugin
+}
+
+// AssetProvider allows plugins to serve embedded static assets (e.g., UI files).
+type AssetProvider interface {
+	GetAsset(path string) (content []byte, contentType string, err error)
 }
 
 // ModuleProvider is optionally implemented to provide module types.

@@ -126,11 +126,25 @@ func (s *grpcSubscriber) Unsubscribe(topic string) error {
 func (s *grpcServer) GetManifest(_ context.Context, _ *emptypb.Empty) (*pb.Manifest, error) {
 	m := s.provider.Manifest()
 	return &pb.Manifest{
-		Name:        m.Name,
-		Version:     m.Version,
-		Author:      m.Author,
-		Description: m.Description,
+		Name:           m.Name,
+		Version:        m.Version,
+		Author:         m.Author,
+		Description:    m.Description,
+		ConfigMutable:  m.ConfigMutable,
+		SampleCategory: m.SampleCategory,
 	}, nil
+}
+
+func (s *grpcServer) GetAsset(_ context.Context, req *pb.GetAssetRequest) (*pb.GetAssetResponse, error) {
+	ap, ok := s.provider.(AssetProvider)
+	if !ok {
+		return &pb.GetAssetResponse{Error: "plugin does not implement AssetProvider"}, nil
+	}
+	content, contentType, err := ap.GetAsset(req.Path)
+	if err != nil {
+		return &pb.GetAssetResponse{Error: err.Error()}, nil
+	}
+	return &pb.GetAssetResponse{Content: content, ContentType: contentType}, nil
 }
 
 func (s *grpcServer) GetModuleTypes(_ context.Context, _ *emptypb.Empty) (*pb.TypeList, error) {

@@ -84,6 +84,38 @@ func (a *ExternalPluginAdapter) EngineManifest() *plugin.PluginManifest {
 	return m
 }
 
+// GetAsset fetches a static asset from the plugin by path.
+func (a *ExternalPluginAdapter) GetAsset(path string) ([]byte, string, error) {
+	resp, err := a.client.client.GetAsset(context.Background(), &pb.GetAssetRequest{Path: path})
+	if err != nil {
+		return nil, "", err
+	}
+	if resp.Error != "" {
+		return nil, "", fmt.Errorf("%s", resp.Error)
+	}
+	return resp.Content, resp.ContentType, nil
+}
+
+// IsSamplePlugin returns true if the plugin declares a sample category.
+func (a *ExternalPluginAdapter) IsSamplePlugin() bool {
+	return a.manifest.SampleCategory != ""
+}
+
+// IsConfigMutable returns true if tenants can override the plugin's config fragment.
+func (a *ExternalPluginAdapter) IsConfigMutable() bool {
+	return a.manifest.ConfigMutable
+}
+
+// SampleCategory returns the sample category declared by the plugin.
+func (a *ExternalPluginAdapter) SampleCategory() string {
+	return a.manifest.SampleCategory
+}
+
+// ConfigFragmentBytes returns the raw YAML config fragment fetched from the plugin.
+func (a *ExternalPluginAdapter) ConfigFragmentBytes() []byte {
+	return a.configFragment
+}
+
 func (a *ExternalPluginAdapter) Capabilities() []capability.Contract {
 	return nil
 }
