@@ -24,8 +24,8 @@ func TestPluginManifest(t *testing.T) {
 	if len(m.ModuleTypes) != 6 {
 		t.Errorf("expected 6 module types, got %d", len(m.ModuleTypes))
 	}
-	if len(m.WiringHooks) != 3 {
-		t.Errorf("expected 3 wiring hooks, got %d", len(m.WiringHooks))
+	if len(m.WiringHooks) != 4 {
+		t.Errorf("expected 4 wiring hooks, got %d", len(m.WiringHooks))
 	}
 }
 
@@ -83,8 +83,8 @@ func TestModuleFactoryJWTWithConfig(t *testing.T) {
 func TestWiringHooks(t *testing.T) {
 	p := New()
 	hooks := p.WiringHooks()
-	if len(hooks) != 3 {
-		t.Fatalf("expected 3 wiring hooks, got %d", len(hooks))
+	if len(hooks) != 4 {
+		t.Fatalf("expected 4 wiring hooks, got %d", len(hooks))
 	}
 	hookNames := map[string]bool{}
 	for _, h := range hooks {
@@ -93,7 +93,7 @@ func TestWiringHooks(t *testing.T) {
 			t.Errorf("wiring hook %q function is nil", h.Name)
 		}
 	}
-	for _, expected := range []string{"auth-provider-wiring", "oauth2-jwt-wiring", "token-blacklist-wiring"} {
+	for _, expected := range []string{"auth-provider-wiring", "oauth2-jwt-wiring", "token-blacklist-wiring", "field-protection-wiring"} {
 		if !hookNames[expected] {
 			t.Errorf("missing wiring hook %q", expected)
 		}

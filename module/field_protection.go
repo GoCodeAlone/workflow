@@ -2,7 +2,7 @@ package module
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"os"
 
 	"github.com/CrisisTextLine/modular"
@@ -100,13 +100,10 @@ func NewFieldProtectionModule(name string, cfg map[string]any) (*FieldProtection
 		masterKeyStr = os.Getenv("FIELD_ENCRYPTION_KEY")
 	}
 
-	var masterKey []byte
-	if masterKeyStr != "" {
-		masterKey = []byte(masterKeyStr)
-	} else {
-		log.Println("WARNING: field-protection module using zero key — set master_key or FIELD_ENCRYPTION_KEY")
-		masterKey = make([]byte, 32)
+	if masterKeyStr == "" {
+		return nil, fmt.Errorf("field-protection: master_key config or FIELD_ENCRYPTION_KEY env var is required")
 	}
+	masterKey := []byte(masterKeyStr)
 
 	scanDepth := 10
 	if v, ok := cfg["scan_depth"].(int); ok && v > 0 {

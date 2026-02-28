@@ -190,3 +190,17 @@ func TestFieldProtectionProvidesServices(t *testing.T) {
 		t.Error("service instance should be *ProtectedFieldManager")
 	}
 }
+
+func TestFieldProtectionRequiresMasterKey(t *testing.T) {
+	cfg := map[string]any{
+		"protected_fields": []any{},
+	}
+
+	// Unset env var to ensure it's not picked up.
+	t.Setenv("FIELD_ENCRYPTION_KEY", "")
+
+	_, err := NewFieldProtectionModule("fp-nokey", cfg)
+	if err == nil {
+		t.Fatal("expected error when no master_key is provided")
+	}
+}

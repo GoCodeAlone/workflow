@@ -56,6 +56,11 @@ func (r *Registry) GetField(fieldName string) (*ProtectedField, bool) {
 	return &f, true
 }
 
+// Len returns the number of registered protected fields.
+func (r *Registry) Len() int {
+	return len(r.fields)
+}
+
 // ProtectedFields returns all registered protected fields.
 func (r *Registry) ProtectedFields() []ProtectedField {
 	out := make([]ProtectedField, 0, len(r.fields))

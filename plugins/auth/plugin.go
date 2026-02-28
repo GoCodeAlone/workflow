@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"log"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -147,7 +148,11 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			return module.NewTokenBlacklistModule(name, backend, redisURL, cleanupInterval)
 		},
 		"security.field-protection": func(name string, cfg map[string]any) modular.Module {
-			mod, _ := module.NewFieldProtectionModule(name, cfg)
+			mod, err := module.NewFieldProtectionModule(name, cfg)
+			if err != nil {
+				log.Printf("ERROR: field-protection module %q: %v", name, err)
+				return nil
+			}
 			return mod
 		},
 		"auth.m2m": func(name string, cfg map[string]any) modular.Module {
@@ -277,6 +282,30 @@ func (p *Plugin) WiringHooks() []plugin.WiringHook {
 						j.SetTokenBlacklist(blacklist)
 					}
 				}
+				return nil
+			},
+		},
+		{
+			Name:     "field-protection-wiring",
+			Priority: 50,
+			Hook: func(app modular.Application, _ *config.WorkflowConfig) error {
+				var mgr *module.ProtectedFieldManager
+				for _, svc := range app.SvcRegistry() {
+					if m, ok := svc.(*module.ProtectedFieldManager); ok {
+						mgr = m
+						break
+					}
+				}
+				if mgr == nil {
+					return nil
+				}
+				// Wire field protection to Kafka brokers for field-level encryption.
+				for _, svc := range app.SvcRegistry() {
+					if kb, ok := svc.(*module.KafkaBroker); ok {
+						kb.SetFieldProtection(mgr)
+					}
+				}
+				log.Printf("field-protection: wired to %d registered fields", mgr.Registry.Len())
 				return nil
 			},
 		},

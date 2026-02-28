@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -38,8 +39,9 @@ type KafkaBroker struct {
 	logger        modular.Logger
 	healthy       bool
 	healthMsg     string
-	encryptor     *FieldEncryptor
-	tlsCfg        KafkaTLSConfig
+	encryptor      *FieldEncryptor
+	fieldProtector *ProtectedFieldManager
+	tlsCfg         KafkaTLSConfig
 }
 
 // NewKafkaBroker creates a new Kafka message broker.
@@ -109,6 +111,15 @@ func (b *KafkaBroker) SetGroupID(groupID string) {
 }
 
 // SetTLSConfig sets the TLS and SASL configuration for the Kafka broker.
+// SetFieldProtection sets the field-level encryption manager for this broker.
+// When set, individual protected fields are encrypted/decrypted in JSON payloads
+// before the legacy whole-message encryptor runs.
+func (b *KafkaBroker) SetFieldProtection(mgr *ProtectedFieldManager) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.fieldProtector = mgr
+}
+
 func (b *KafkaBroker) SetTLSConfig(cfg KafkaTLSConfig) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -298,16 +309,31 @@ func (p *kafkaProducerAdapter) SendMessage(topic string, message []byte) error {
 	p.broker.mu.RLock()
 	producer := p.broker.producer
 	encryptor := p.broker.encryptor
+	fieldProt := p.broker.fieldProtector
 	p.broker.mu.RUnlock()
 
 	if producer == nil {
 		return fmt.Errorf("kafka producer not initialized; call Start first")
 	}
 
-	// Encrypt the message payload if encryption is enabled
 	payload := message
+
+	// Field-level encryption: encrypt individual protected fields in JSON payloads.
+	if fieldProt != nil {
+		var data map[string]any
+		if err := json.Unmarshal(payload, &data); err == nil {
+			if encErr := fieldProt.EncryptMap(context.Background(), "", data); encErr != nil {
+				return fmt.Errorf("failed to field-encrypt kafka message for topic %q: %w", topic, encErr)
+			}
+			if out, err := json.Marshal(data); err == nil {
+				payload = out
+			}
+		}
+	}
+
+	// Legacy whole-message encryption (if configured via ENCRYPTION_KEY).
 	if encryptor != nil && encryptor.Enabled() {
-		encrypted, err := encryptor.EncryptJSON(message)
+		encrypted, err := encryptor.EncryptJSON(payload)
 		if err != nil {
 			return fmt.Errorf("failed to encrypt kafka message for topic %q: %w", topic, err)
 		}
@@ -367,10 +393,11 @@ func (h *kafkaGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, cl
 		h.broker.mu.RLock()
 		handler, ok := h.broker.handlers[msg.Topic]
 		encryptor := h.broker.encryptor
+		fieldProt := h.broker.fieldProtector
 		h.broker.mu.RUnlock()
 
 		if ok {
-			// Decrypt message payload if encryption is enabled
+			// Legacy whole-message decryption first.
 			payload := msg.Value
 			if encryptor != nil && encryptor.Enabled() {
 				decrypted, err := encryptor.DecryptJSON(payload)
@@ -380,6 +407,17 @@ func (h *kafkaGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, cl
 					continue
 				}
 				payload = decrypted
+			}
+			// Field-level decryption: decrypt individual protected fields.
+			if fieldProt != nil {
+				var data map[string]any
+				if err := json.Unmarshal(payload, &data); err == nil {
+					if decErr := fieldProt.DecryptMap(context.Background(), "", data); decErr == nil {
+						if out, err := json.Marshal(data); err == nil {
+							payload = out
+						}
+					}
+				}
 			}
 
 			if err := handler.HandleMessage(payload); err != nil {
