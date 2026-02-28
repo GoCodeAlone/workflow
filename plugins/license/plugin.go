@@ -4,12 +4,21 @@
 package license
 
 import (
+	_ "embed"
+	"fmt"
+	"os"
+
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
+	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/licensing"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/schema"
 )
+
+//go:embed keys/license.pub
+var embeddedPublicKey []byte
 
 // Plugin provides the license.validator module type.
 type Plugin struct {
@@ -34,6 +43,7 @@ func New() *Plugin {
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "license-validation", Role: "provider", Priority: 10},
 				},
+				WiringHooks: []string{"license-validator-wiring"},
 			},
 		},
 	}
@@ -61,6 +71,96 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			return mod
 		},
 	}
+}
+
+// WiringHooks returns a hook that wires an Ed25519 OfflineValidator (and optional
+// CompositeValidator) to the PluginLoader when WORKFLOW_LICENSE_TOKEN is set.
+func (p *Plugin) WiringHooks() []plugin.WiringHook {
+	return []plugin.WiringHook{
+		{
+			Name:     "license-validator-wiring",
+			Priority: 20,
+			Hook:     licenseValidatorWiringHook,
+		},
+	}
+}
+
+// engineWithLoader is a local interface to retrieve a PluginLoader from the
+// registered "workflowEngine" service without importing the engine package.
+type engineWithLoader interface {
+	PluginLoader() *plugin.PluginLoader
+}
+
+// licenseValidatorAdapter implements plugin.LicenseValidator by delegating to a
+// licensing.Validator. When an OfflineValidator is available, it is used for
+// authoritative plugin validation. Otherwise the HTTP validator's LicenseInfo is
+// checked for tier and feature membership.
+type licenseValidatorAdapter struct {
+	validator licensing.Validator
+	offline   *licensing.OfflineValidator // may be nil
+}
+
+func (a *licenseValidatorAdapter) ValidatePlugin(pluginName string) error {
+	if a.offline != nil {
+		return a.offline.ValidatePlugin(pluginName)
+	}
+	info := a.validator.GetLicenseInfo()
+	if info == nil {
+		return fmt.Errorf("no license loaded")
+	}
+	if info.Tier != "professional" && info.Tier != "enterprise" {
+		return fmt.Errorf("license tier %q does not permit premium plugins", info.Tier)
+	}
+	for _, f := range info.Features {
+		if f == pluginName {
+			return nil
+		}
+	}
+	return fmt.Errorf("plugin %q is not licensed", pluginName)
+}
+
+// licenseValidatorWiringHook reads WORKFLOW_LICENSE_TOKEN, creates an
+// OfflineValidator (and optionally a CompositeValidator), and registers it on
+// the PluginLoader if the engine is available in the service registry.
+func licenseValidatorWiringHook(app modular.Application, _ *config.WorkflowConfig) error {
+	tokenStr := os.Getenv("WORKFLOW_LICENSE_TOKEN")
+
+	// Scan the service registry for the engine and any registered HTTP validator.
+	var loader *plugin.PluginLoader
+	var httpValidator *licensing.HTTPValidator
+	for _, svc := range app.SvcRegistry() {
+		if e, ok := svc.(engineWithLoader); ok && loader == nil {
+			loader = e.PluginLoader()
+		}
+		if hv, ok := svc.(*licensing.HTTPValidator); ok && httpValidator == nil {
+			httpValidator = hv
+		}
+	}
+
+	if tokenStr == "" {
+		// No offline token configured — wire HTTP validator if available.
+		if loader != nil && httpValidator != nil {
+			loader.SetLicenseValidator(&licenseValidatorAdapter{validator: httpValidator})
+		}
+		return nil
+	}
+
+	offline, err := licensing.NewOfflineValidator(embeddedPublicKey, tokenStr)
+	if err != nil {
+		return fmt.Errorf("license-validator-wiring: create offline validator: %w", err)
+	}
+
+	var lv plugin.LicenseValidator
+	if httpValidator != nil {
+		lv = licensing.NewCompositeValidator(offline, httpValidator)
+	} else {
+		lv = offline
+	}
+
+	if loader != nil {
+		loader.SetLicenseValidator(lv)
+	}
+	return nil
 }
 
 // ModuleSchemas returns the UI schema definition for license.validator.

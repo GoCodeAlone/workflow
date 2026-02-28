@@ -30,6 +30,7 @@ type PluginLoader struct {
 	schemaRegistry       *schema.ModuleSchemaRegistry
 	plugins              []EnginePlugin
 	licenseValidator     LicenseValidator
+	cosignVerifier       *CosignVerifier
 }
 
 // NewPluginLoader creates a new PluginLoader backed by the given capability and schema registries.
@@ -47,6 +48,27 @@ func NewPluginLoader(capReg *capability.Registry, schemaReg *schema.ModuleSchema
 // SetLicenseValidator registers a license validator used for premium tier plugins.
 func (l *PluginLoader) SetLicenseValidator(v LicenseValidator) {
 	l.licenseValidator = v
+}
+
+// SetCosignVerifier registers a cosign verifier for binary signature verification
+// of premium plugins. When set, LoadBinaryPlugin will verify the plugin binary
+// before loading it.
+func (l *PluginLoader) SetCosignVerifier(v *CosignVerifier) {
+	l.cosignVerifier = v
+}
+
+// LoadBinaryPlugin verifies a plugin binary with cosign (for premium plugins) and
+// then loads the plugin into the registry. binaryPath, sigPath, and certPath are
+// paths to the plugin binary, cosign signature file, and certificate file
+// respectively. If cosignVerifier is nil, verification is skipped.
+func (l *PluginLoader) LoadBinaryPlugin(p EnginePlugin, binaryPath, sigPath, certPath string) error {
+	manifest := p.EngineManifest()
+	if manifest.Tier == TierPremium && l.cosignVerifier != nil {
+		if err := l.cosignVerifier.Verify(binaryPath, sigPath, certPath); err != nil {
+			return fmt.Errorf("plugin %q: binary verification failed: %w", manifest.Name, err)
+		}
+	}
+	return l.LoadPlugin(p)
 }
 
 // ValidateTier checks whether a plugin's tier is allowed given the current
