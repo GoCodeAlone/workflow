@@ -142,7 +142,7 @@ func (s *grpcServer) GetAsset(_ context.Context, req *pb.GetAssetRequest) (*pb.G
 	}
 	content, contentType, err := ap.GetAsset(req.Path)
 	if err != nil {
-		return &pb.GetAssetResponse{Error: err.Error()}, nil
+		return &pb.GetAssetResponse{Error: err.Error()}, nil //nolint:nilerr // gRPC uses response-level errors for asset not found
 	}
 	return &pb.GetAssetResponse{Content: content, ContentType: contentType}, nil
 }

@@ -36,9 +36,7 @@ func (p *assetProvider) GetAsset(path string) ([]byte, string, error) {
 }
 
 // sampleProvider returns manifest with ConfigMutable and SampleCategory set.
-type sampleProvider struct {
-	minimalProvider
-}
+type sampleProvider struct{}
 
 func (p *sampleProvider) Manifest() PluginManifest {
 	return PluginManifest{
