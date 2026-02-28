@@ -57,7 +57,7 @@ func New() *Plugin {
 					{Name: "authentication", Role: "provider", Priority: 10},
 					{Name: "user-management", Role: "provider", Priority: 10},
 				},
-				WiringHooks: []string{"auth-provider-wiring", "oauth2-jwt-wiring", "token-blacklist-wiring"},
+				WiringHooks: []string{"auth-provider-wiring", "oauth2-jwt-wiring", "token-blacklist-wiring", "field-protection-wiring"},
 			},
 		},
 	}

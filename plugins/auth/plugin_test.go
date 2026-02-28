@@ -47,6 +47,9 @@ func TestPluginCapabilities(t *testing.T) {
 }
 
 func TestModuleFactories(t *testing.T) {
+	// field-protection factory requires a master key via env var
+	t.Setenv("FIELD_ENCRYPTION_KEY", "test-master-key-32-bytes-long!!")
+
 	p := New()
 	factories := p.ModuleFactories()
 
