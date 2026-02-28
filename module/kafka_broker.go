@@ -7,7 +7,21 @@ import (
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/IBM/sarama"
+	"github.com/GoCodeAlone/workflow/pkg/tlsutil"
 )
+
+// KafkaSASLConfig holds SASL authentication configuration for Kafka.
+type KafkaSASLConfig struct {
+	Mechanism string `yaml:"mechanism" json:"mechanism"` // PLAIN | SCRAM-SHA-256 | SCRAM-SHA-512
+	Username  string `yaml:"username" json:"username"`
+	Password  string `yaml:"password" json:"password"` //nolint:gosec // G117: config struct field
+}
+
+// KafkaTLSConfig holds TLS and SASL configuration for the Kafka broker.
+type KafkaTLSConfig struct {
+	tlsutil.TLSConfig `yaml:",inline" json:",inline"`
+	SASL              KafkaSASLConfig `yaml:"sasl" json:"sasl"`
+}
 
 // KafkaBroker implements the MessageBroker interface using Apache Kafka via Sarama.
 type KafkaBroker struct {
@@ -25,6 +39,7 @@ type KafkaBroker struct {
 	healthy       bool
 	healthMsg     string
 	encryptor     *FieldEncryptor
+	tlsCfg        KafkaTLSConfig
 }
 
 // NewKafkaBroker creates a new Kafka message broker.
@@ -93,6 +108,13 @@ func (b *KafkaBroker) SetGroupID(groupID string) {
 	b.groupID = groupID
 }
 
+// SetTLSConfig sets the TLS and SASL configuration for the Kafka broker.
+func (b *KafkaBroker) SetTLSConfig(cfg KafkaTLSConfig) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.tlsCfg = cfg
+}
+
 // HealthStatus implements the HealthCheckable interface.
 func (b *KafkaBroker) HealthStatus() HealthCheckResult {
 	b.mu.RLock()
@@ -145,6 +167,38 @@ func (b *KafkaBroker) Start(ctx context.Context) error {
 	config.Producer.Return.Successes = true
 	config.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.NewBalanceStrategyRoundRobin()}
 	config.Consumer.Offsets.Initial = sarama.OffsetNewest
+
+	// Apply TLS configuration
+	if b.tlsCfg.Enabled {
+		tlsCfg, tlsErr := tlsutil.LoadTLSConfig(b.tlsCfg.TLSConfig)
+		if tlsErr != nil {
+			return fmt.Errorf("kafka broker %q: TLS config: %w", b.name, tlsErr)
+		}
+		config.Net.TLS.Enable = true
+		config.Net.TLS.Config = tlsCfg
+	}
+
+	// Apply SASL configuration
+	sasl := b.tlsCfg.SASL
+	if sasl.Username != "" {
+		config.Net.SASL.Enable = true
+		config.Net.SASL.User = sasl.Username
+		config.Net.SASL.Password = sasl.Password
+		switch sasl.Mechanism {
+		case "SCRAM-SHA-256":
+			config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA256
+			config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+				return &xDGSCRAMClient{HashGeneratorFcn: SHA256}
+			}
+		case "SCRAM-SHA-512":
+			config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
+			config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+				return &xDGSCRAMClient{HashGeneratorFcn: SHA512}
+			}
+		default: // PLAIN
+			config.Net.SASL.Mechanism = sarama.SASLTypePlaintext
+		}
+	}
 
 	// Create sync producer
 	producer, err := sarama.NewSyncProducer(b.brokers, config)

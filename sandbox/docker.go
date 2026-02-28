@@ -34,6 +34,38 @@ type SandboxConfig struct {
 	CPULimit    float64           `yaml:"cpu_limit"`
 	Timeout     time.Duration     `yaml:"timeout"`
 	NetworkMode string            `yaml:"network_mode"`
+
+	// Security hardening fields
+	SecurityOpts    []string          `yaml:"security_opts"`    // e.g., ["seccomp=default.json"]
+	CapAdd          []string          `yaml:"cap_add"`          // capabilities to add
+	CapDrop         []string          `yaml:"cap_drop"`         // e.g., ["ALL"]
+	ReadOnlyRootfs  bool              `yaml:"read_only_rootfs"`
+	NoNewPrivileges bool              `yaml:"no_new_privileges"`
+	User            string            `yaml:"user"`             // e.g., "nobody:nogroup"
+	PidsLimit       int64             `yaml:"pids_limit"`       // max process count
+	Tmpfs           map[string]string `yaml:"tmpfs"`            // e.g., {"/tmp": "size=64m,noexec"}
+}
+
+// DefaultSecureSandboxConfig returns a hardened SandboxConfig suitable for
+// running untrusted workloads. It uses a minimal Wolfi-based image, drops all
+// Linux capabilities, enables a read-only root filesystem, mounts /tmp as
+// tmpfs with noexec, and disables network access.
+func DefaultSecureSandboxConfig(image string) SandboxConfig {
+	if image == "" {
+		image = "cgr.dev/chainguard/wolfi-base:latest"
+	}
+	return SandboxConfig{
+		Image:           image,
+		MemoryLimit:     256 * 1024 * 1024, // 256MB
+		CPULimit:        0.5,
+		NetworkMode:     "none",
+		CapDrop:         []string{"ALL"},
+		NoNewPrivileges: true,
+		ReadOnlyRootfs:  true,
+		PidsLimit:       64,
+		Tmpfs:           map[string]string{"/tmp": "size=64m,noexec"},
+		Timeout:         5 * time.Minute,
+	}
 }
 
 // ExecResult holds the output from a command execution inside the sandbox.
@@ -91,6 +123,9 @@ func (s *DockerSandbox) Exec(ctx context.Context, cmd []string) (*ExecResult, er
 		Cmd:        cmd,
 		Env:        s.buildEnv(),
 		WorkingDir: s.config.WorkDir,
+	}
+	if s.config.User != "" {
+		containerConfig.User = s.config.User
 	}
 
 	hostConfig := s.buildHostConfig()
@@ -199,6 +234,9 @@ func (s *DockerSandbox) ExecInContainer(ctx context.Context, cmd []string, copyI
 		Cmd:        cmd,
 		Env:        s.buildEnv(),
 		WorkingDir: s.config.WorkDir,
+	}
+	if s.config.User != "" {
+		containerConfig.User = s.config.User
 	}
 
 	hostConfig := s.buildHostConfig()
@@ -320,6 +358,10 @@ func (s *DockerSandbox) buildHostConfig() *container.HostConfig {
 		// Docker uses NanoCPUs (1 CPU = 1e9 NanoCPUs)
 		hc.NanoCPUs = int64(s.config.CPULimit * 1e9)
 	}
+	if s.config.PidsLimit > 0 {
+		limit := s.config.PidsLimit
+		hc.PidsLimit = &limit
+	}
 
 	// Mounts
 	if len(s.config.Mounts) > 0 {
@@ -338,6 +380,30 @@ func (s *DockerSandbox) buildHostConfig() *container.HostConfig {
 	// Network mode
 	if s.config.NetworkMode != "" {
 		hc.NetworkMode = container.NetworkMode(s.config.NetworkMode)
+	}
+
+	// Security options
+	secOpts := make([]string, len(s.config.SecurityOpts))
+	copy(secOpts, s.config.SecurityOpts)
+	if s.config.NoNewPrivileges {
+		secOpts = append(secOpts, "no-new-privileges:true")
+	}
+	if len(secOpts) > 0 {
+		hc.SecurityOpt = secOpts
+	}
+
+	// Capabilities
+	if len(s.config.CapAdd) > 0 {
+		hc.CapAdd = s.config.CapAdd
+	}
+	if len(s.config.CapDrop) > 0 {
+		hc.CapDrop = s.config.CapDrop
+	}
+
+	// Filesystem hardening
+	hc.ReadonlyRootfs = s.config.ReadOnlyRootfs
+	if len(s.config.Tmpfs) > 0 {
+		hc.Tmpfs = s.config.Tmpfs
 	}
 
 	return hc

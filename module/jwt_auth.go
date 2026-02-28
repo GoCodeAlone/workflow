@@ -13,6 +13,7 @@ import (
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -44,6 +45,7 @@ type JWTAuthModule struct {
 	persistence       *PersistenceStore // optional write-through backend
 	userStore         *UserStore        // optional external user store (from auth.user-store module)
 	allowRegistration bool              // when true, any visitor may self-register
+	tokenBlacklist    TokenBlacklist    // optional revocation check (wired by auth plugin)
 }
 
 // NewJWTAuthModule creates a new JWT auth module
@@ -82,6 +84,12 @@ func (j *JWTAuthModule) SetResponseFormat(format string) {
 // only permitted when no users exist (initial setup mode).
 func (j *JWTAuthModule) SetAllowRegistration(allow bool) {
 	j.allowRegistration = allow
+}
+
+// SetTokenBlacklist wires a TokenBlacklist to this module so that revoked
+// tokens are rejected during Authenticate.
+func (j *JWTAuthModule) SetTokenBlacklist(bl TokenBlacklist) {
+	j.tokenBlacklist = bl
 }
 
 // Name returns the module name
@@ -137,6 +145,15 @@ func (j *JWTAuthModule) Authenticate(tokenStr string) (bool, map[string]any, err
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok || !token.Valid {
 		return false, nil, nil
+	}
+
+	// Check token revocation if a blacklist is wired.
+	if j.tokenBlacklist != nil {
+		if jti, ok := claims["jti"].(string); ok && jti != "" {
+			if j.tokenBlacklist.IsBlacklisted(jti) {
+				return false, nil, nil
+			}
+		}
 	}
 
 	result := make(map[string]any)
@@ -446,6 +463,7 @@ func (j *JWTAuthModule) generateToken(user *User) (string, error) {
 		"email": user.Email,
 		"name":  user.Name,
 		"iss":   j.issuer,
+		"jti":   uuid.NewString(),
 		"iat":   time.Now().Unix(),
 		"exp":   time.Now().Add(j.tokenExpiry).Unix(),
 	}

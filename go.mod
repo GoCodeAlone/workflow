@@ -207,6 +207,9 @@ require (
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 	github.com/tliron/commonlog v0.2.8 // indirect
 	github.com/tliron/kutil v0.3.11 // indirect
+	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
+	github.com/xdg-go/scram v1.2.0 // indirect
+	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

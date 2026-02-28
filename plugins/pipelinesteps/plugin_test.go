@@ -62,7 +62,10 @@ func TestStepFactories(t *testing.T) {
 		"step.resilient_circuit_breaker",
 		"step.s3_upload",
 		"step.auth_validate",
+		"step.token_revoke",
 		"step.base64_decode",
+		"step.field_reencrypt",
+		"step.sandbox_exec",
 	}
 
 	for _, stepType := range expectedSteps {

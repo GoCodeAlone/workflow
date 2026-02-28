@@ -2,6 +2,8 @@ package secrets
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -155,6 +157,85 @@ func (p *VaultProvider) Delete(ctx context.Context, key string) error {
 // It uses the Vault logical LIST operation on the metadata path.
 func (p *VaultProvider) List(ctx context.Context) ([]string, error) {
 	return p.listRecursive(ctx, "")
+}
+
+// Rotate generates a new random 32-byte hex-encoded secret and stores it at the given key,
+// creating a new version in Vault KV v2. It returns the newly generated value.
+func (p *VaultProvider) Rotate(ctx context.Context, key string) (string, error) {
+	if key == "" {
+		return "", ErrInvalidKey
+	}
+
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("secrets: failed to generate random secret: %w", err)
+	}
+	newValue := hex.EncodeToString(raw)
+
+	path, _ := parseVaultKey(key)
+	kv := p.client.KVv2(p.config.MountPath)
+	if _, err := kv.Put(ctx, path, map[string]interface{}{
+		"value": newValue,
+	}); err != nil {
+		return "", fmt.Errorf("secrets: vault rotate failed: %w", err)
+	}
+
+	return newValue, nil
+}
+
+// GetPrevious retrieves version N-1 of the secret at the given key from Vault KV v2.
+// It reads the current version metadata to determine N, then fetches version N-1.
+// Returns ErrNotFound if the secret has only one version or does not exist.
+func (p *VaultProvider) GetPrevious(ctx context.Context, key string) (string, error) {
+	if key == "" {
+		return "", ErrInvalidKey
+	}
+
+	path, field := parseVaultKey(key)
+	kv := p.client.KVv2(p.config.MountPath)
+
+	// Get the current version to determine the previous version number.
+	current, err := kv.Get(ctx, path)
+	if err != nil {
+		if isVaultNotFound(err) {
+			return "", fmt.Errorf("%w: vault returned not found for key %q", ErrNotFound, key)
+		}
+		return "", fmt.Errorf("secrets: vault get (for previous) failed: %w", err)
+	}
+	if current == nil || current.VersionMetadata == nil {
+		return "", fmt.Errorf("%w: no version metadata for key %q", ErrNotFound, key)
+	}
+
+	currentVersion := current.VersionMetadata.Version
+	if currentVersion <= 1 {
+		return "", fmt.Errorf("%w: no previous version exists for key %q (current version is %d)", ErrNotFound, key, currentVersion)
+	}
+
+	prevVersion := currentVersion - 1
+	prev, err := kv.GetVersion(ctx, path, prevVersion)
+	if err != nil {
+		if isVaultNotFound(err) {
+			return "", fmt.Errorf("%w: previous version %d not found for key %q", ErrNotFound, prevVersion, key)
+		}
+		return "", fmt.Errorf("secrets: vault get version %d failed: %w", prevVersion, err)
+	}
+	if prev == nil || prev.Data == nil {
+		return "", fmt.Errorf("%w: no data in previous version %d for key %q", ErrNotFound, prevVersion, key)
+	}
+
+	if field != "" {
+		val, ok := prev.Data[field]
+		if !ok {
+			return "", fmt.Errorf("%w: field %q not found in previous version of key %q", ErrNotFound, field, path)
+		}
+		return fmt.Sprintf("%v", val), nil
+	}
+
+	data, err := json.Marshal(prev.Data)
+	if err != nil {
+		return "", fmt.Errorf("secrets: failed to marshal vault previous version data: %w", err)
+	}
+	return string(data), nil
 }
 
 // listRecursive walks the metadata tree and collects all leaf keys.

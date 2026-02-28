@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/workflow/pkg/tlsutil"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -30,10 +31,11 @@ type RedisClient interface {
 // RedisCacheConfig holds configuration for the cache.redis module.
 type RedisCacheConfig struct {
 	Address    string
-	Password   string //nolint:gosec // G117: config struct field, not a hardcoded secret
+	Password   string           //nolint:gosec // G117: config struct field, not a hardcoded secret
 	DB         int
 	Prefix     string
 	DefaultTTL time.Duration
+	TLS        tlsutil.TLSConfig `yaml:"tls" json:"tls"`
 }
 
 // RedisCache is a module that connects to a Redis instance and exposes
@@ -85,6 +87,14 @@ func (r *RedisCache) Start(ctx context.Context) error {
 	}
 	if r.cfg.Password != "" {
 		opts.Password = r.cfg.Password
+	}
+
+	if r.cfg.TLS.Enabled {
+		tlsCfg, err := tlsutil.LoadTLSConfig(r.cfg.TLS)
+		if err != nil {
+			return fmt.Errorf("cache.redis %q: TLS config: %w", r.name, err)
+		}
+		opts.TLSConfig = tlsCfg
 	}
 
 	r.client = redis.NewClient(opts)

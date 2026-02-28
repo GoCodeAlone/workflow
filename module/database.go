@@ -25,14 +25,22 @@ func validateIdentifier(name string) error {
 	return nil
 }
 
+// DatabaseTLSConfig holds TLS settings for database connections.
+type DatabaseTLSConfig struct {
+	// Mode controls SSL behaviour: disable | require | verify-ca | verify-full (PostgreSQL naming).
+	Mode   string `json:"mode" yaml:"mode"`
+	CAFile string `json:"ca_file" yaml:"ca_file"`
+}
+
 // DatabaseConfig holds configuration for the workflow database module
 type DatabaseConfig struct {
-	Driver          string        `json:"driver" yaml:"driver"`
-	DSN             string        `json:"dsn" yaml:"dsn"`
-	MaxOpenConns    int           `json:"maxOpenConns" yaml:"maxOpenConns"`
-	MaxIdleConns    int           `json:"maxIdleConns" yaml:"maxIdleConns"`
-	ConnMaxLifetime time.Duration `json:"connMaxLifetime" yaml:"connMaxLifetime"`
-	MigrationsDir   string        `json:"migrationsDir" yaml:"migrationsDir"`
+	Driver          string            `json:"driver" yaml:"driver"`
+	DSN             string            `json:"dsn" yaml:"dsn"`
+	MaxOpenConns    int               `json:"maxOpenConns" yaml:"maxOpenConns"`
+	MaxIdleConns    int               `json:"maxIdleConns" yaml:"maxIdleConns"`
+	ConnMaxLifetime time.Duration     `json:"connMaxLifetime" yaml:"connMaxLifetime"`
+	MigrationsDir   string            `json:"migrationsDir" yaml:"migrationsDir"`
+	TLS             DatabaseTLSConfig `json:"tls" yaml:"tls"`
 }
 
 // QueryResult represents the result of a query
@@ -85,6 +93,28 @@ func (w *WorkflowDatabase) RequiresServices() []modular.ServiceDependency {
 	return nil
 }
 
+// buildDSN returns the DSN with TLS parameters appended for supported drivers.
+func (w *WorkflowDatabase) buildDSN() string {
+	dsn := w.config.DSN
+	mode := w.config.TLS.Mode
+	if mode == "" || mode == "disable" {
+		return dsn
+	}
+
+	switch w.config.Driver {
+	case "postgres", "pgx", "pgx/v5":
+		sep := "?"
+		if strings.ContainsRune(dsn, '?') {
+			sep = "&"
+		}
+		dsn += sep + "sslmode=" + mode
+		if w.config.TLS.CAFile != "" {
+			dsn += "&sslrootcert=" + w.config.TLS.CAFile
+		}
+	}
+	return dsn
+}
+
 // Open opens the database connection using config
 func (w *WorkflowDatabase) Open() (*sql.DB, error) {
 	w.mu.Lock()
@@ -94,7 +124,7 @@ func (w *WorkflowDatabase) Open() (*sql.DB, error) {
 		return w.db, nil
 	}
 
-	db, err := sql.Open(w.config.Driver, w.config.DSN)
+	db, err := sql.Open(w.config.Driver, w.buildDSN())
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
