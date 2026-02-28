@@ -122,6 +122,9 @@ func configTransformHook(cfg *config.WorkflowConfig) error {
 		}
 	}
 
+	// Expand in platform configs
+	module.ExpandConfigRefsMap(registry, cfg.Platform)
+
 	return nil
 }
 
