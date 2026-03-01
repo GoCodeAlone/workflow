@@ -143,6 +143,22 @@ func (w *WorkflowDatabase) Open() (*sql.DB, error) {
 	return db, nil
 }
 
+// Start opens the database connection during application startup so that
+// pipeline steps (db_query, db_exec) can use DB() without requiring a
+// separate persistence.store module.
+func (w *WorkflowDatabase) Start(ctx context.Context) error {
+	if w.config.DSN == "" {
+		return nil // no DSN configured, skip auto-open
+	}
+	_, err := w.Open()
+	return err
+}
+
+// Stop closes the database connection during application shutdown.
+func (w *WorkflowDatabase) Stop(ctx context.Context) error {
+	return w.Close()
+}
+
 // Close closes the database connection
 func (w *WorkflowDatabase) Close() error {
 	w.mu.Lock()
