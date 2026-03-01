@@ -13,15 +13,21 @@ import (
 type RemoteStep struct {
 	name     string
 	handleID string
+	config   map[string]any
 	client   pb.PluginServiceClient
+	tmpl     *module.TemplateEngine
 }
 
 // NewRemoteStep creates a remote step proxy.
-func NewRemoteStep(name, handleID string, client pb.PluginServiceClient) *RemoteStep {
+// config holds the raw (possibly template-containing) step configuration that
+// will be resolved against the live pipeline context on each Execute call.
+func NewRemoteStep(name, handleID string, client pb.PluginServiceClient, config map[string]any) *RemoteStep {
 	return &RemoteStep{
 		name:     name,
 		handleID: handleID,
+		config:   config,
 		client:   client,
+		tmpl:     module.NewTemplateEngine(),
 	}
 }
 
@@ -30,6 +36,19 @@ func (s *RemoteStep) Name() string {
 }
 
 func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*module.StepResult, error) {
+	// Resolve template expressions in the step config against the current
+	// pipeline context so that dynamic values (e.g. outputs of earlier steps)
+	// are available to the plugin. When no config was provided, skip resolution
+	// and leave resolvedConfig nil so the Config proto field is omitted.
+	var resolvedConfig map[string]any
+	if s.config != nil {
+		var err error
+		resolvedConfig, err = s.tmpl.ResolveMap(s.config, pc)
+		if err != nil {
+			return nil, fmt.Errorf("remote step %q (handle %s) config resolve: %w", s.name, s.handleID, err)
+		}
+	}
+
 	// Convert step outputs to proto map
 	stepOutputs := make(map[string]*structpb.Struct)
 	for k, v := range pc.StepOutputs {
@@ -42,6 +61,7 @@ func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*
 		StepOutputs: stepOutputs,
 		Current:     mapToStruct(pc.Current),
 		Metadata:    mapToStruct(pc.Metadata),
+		Config:      mapToStruct(resolvedConfig),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("remote step execute: %w", err)

@@ -38,7 +38,7 @@ type uppercaseStep struct {
 	name string
 }
 
-func (s *uppercaseStep) Execute(_ context.Context, _ map[string]any, _ map[string]map[string]any, current map[string]any, _ map[string]any) (*sdk.StepResult, error) {
+func (s *uppercaseStep) Execute(_ context.Context, _ map[string]any, _ map[string]map[string]any, current map[string]any, _ map[string]any, _ map[string]any) (*sdk.StepResult, error) {
 	input, _ := current["input"].(string)
 	return &sdk.StepResult{
 		Output: map[string]any{

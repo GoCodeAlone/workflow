@@ -358,6 +358,9 @@ message ExecuteStepRequest {
   map<string, google.protobuf.Struct> step_outputs = 3;
   google.protobuf.Struct current = 4;
   google.protobuf.Struct metadata = 5;
+  // config carries the step's config with template expressions resolved
+  // against the current pipeline context.
+  google.protobuf.Struct config = 6;
 }
 
 // Step execution response

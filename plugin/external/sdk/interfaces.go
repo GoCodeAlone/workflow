@@ -50,7 +50,7 @@ type StepProvider interface {
 
 // StepInstance is a remote pipeline step.
 type StepInstance interface {
-	Execute(ctx context.Context, triggerData map[string]any, stepOutputs map[string]map[string]any, current map[string]any, metadata map[string]any) (*StepResult, error)
+	Execute(ctx context.Context, triggerData map[string]any, stepOutputs map[string]map[string]any, current map[string]any, metadata map[string]any, config map[string]any) (*StepResult, error)
 }
 
 // StepResult is the output of a step execution.
