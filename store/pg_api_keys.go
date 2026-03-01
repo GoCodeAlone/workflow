@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -143,9 +142,6 @@ func (s *PGAPIKeyStore) List(ctx context.Context, companyID uuid.UUID) ([]*APIKe
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate api keys: %w", err)
 	}
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].CreatedAt.Before(results[j].CreatedAt)
-	})
 	return results, nil
 }
 
