@@ -21,6 +21,11 @@ func wiringHooks() []plugin.WiringHook {
 			Hook:     wireAuthProviders,
 		},
 		{
+			Name:     "http-cors-global-wiring",
+			Priority: 80, // Run before static file server registration
+			Hook:     wireCORSGlobal,
+		},
+		{
 			Name:     "http-static-fileserver-registration",
 			Priority: 50,
 			Hook:     wireStaticFileServers,
@@ -45,6 +50,82 @@ func wireAuthProviders(app modular.Application, _ *config.WorkflowConfig) error 
 			am.RegisterProvider(ap)
 		}
 	}
+	return nil
+}
+
+// wireCORSGlobal registers each CORSMiddleware as a global middleware on its associated router.
+// This ensures OPTIONS preflight requests are handled before Go 1.22's ServeMux returns 405
+// for method-specific routes. The association is determined by dependsOn config; if no router
+// is declared in dependsOn, the CORS middleware is registered on all available routers.
+func wireCORSGlobal(app modular.Application, cfg *config.WorkflowConfig) error {
+	// Build lookup maps: router names and CORS module → dependsOn
+	routerNames := make(map[string]bool)
+	serverToRouter := make(map[string]string)
+	corsDeps := make(map[string][]string) // cors module name → dependsOn
+	for _, modCfg := range cfg.Modules {
+		switch modCfg.Type {
+		case "http.router":
+			routerNames[modCfg.Name] = true
+			for _, dep := range modCfg.DependsOn {
+				serverToRouter[dep] = modCfg.Name
+			}
+		case "http.middleware.cors":
+			corsDeps[modCfg.Name] = modCfg.DependsOn
+		}
+	}
+
+	// Collect all routers from service registry
+	allRouters := make(map[string]*module.StandardHTTPRouter)
+	for svcName, svc := range app.SvcRegistry() {
+		if router, ok := svc.(*module.StandardHTTPRouter); ok {
+			allRouters[svcName] = router
+		}
+	}
+
+	if len(allRouters) == 0 {
+		return nil // No routers to wire
+	}
+
+	// For each CORS middleware, register it as a global middleware on its target router(s).
+	for svcName, svc := range app.SvcRegistry() {
+		corsMW, ok := svc.(*module.CORSMiddleware)
+		if !ok {
+			continue
+		}
+
+		deps := corsDeps[svcName]
+		var matched bool
+
+		// 1) Check dependsOn for a direct router reference
+		for _, dep := range deps {
+			if routerNames[dep] {
+				if router, ok := allRouters[dep]; ok {
+					router.AddGlobalMiddleware(corsMW)
+					matched = true
+				}
+			}
+		}
+
+		// 2) Check dependsOn for a server reference, then follow server→router
+		if !matched {
+			for _, dep := range deps {
+				if rName, ok := serverToRouter[dep]; ok {
+					if router, ok := allRouters[rName]; ok {
+						router.AddGlobalMiddleware(corsMW)
+						matched = true
+					}
+				}
+			}
+		}
+
+		// 3) Fall back: register on all routers
+		if !matched {
+			for _, router := range allRouters {
+				router.AddGlobalMiddleware(corsMW)
+			}
+		}
+	}
+
 	return nil
 }
 

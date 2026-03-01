@@ -53,6 +53,7 @@ func New() *HTTPPlugin {
 				WorkflowTypes: []string{"http"},
 				WiringHooks: []string{
 					"http-auth-provider-wiring",
+					"http-cors-global-wiring",
 					"http-static-fileserver-registration",
 				},
 				Capabilities: []plugin.CapabilityDecl{

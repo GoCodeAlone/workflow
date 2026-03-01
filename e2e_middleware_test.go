@@ -336,12 +336,12 @@ func TestE2E_Middleware_CORS(t *testing.T) {
 		}
 	})
 
-	// Subtest 4: OPTIONS preflight on a dedicated OPTIONS route
-	// The standard router registers routes per method, so an OPTIONS preflight
-	// must be registered separately. We test that CORS + preflight works when
-	// the route accepts OPTIONS.
-	t.Run("preflight_with_options_route", func(t *testing.T) {
-		// Set up a second server with an OPTIONS route to test preflight
+	// Subtest 4: OPTIONS preflight is handled globally — no explicit OPTIONS route needed.
+	// Previously a workaround was required: registering a separate OPTIONS route for each
+	// path. With the CORS global wiring hook, the middleware intercepts OPTIONS before
+	// Go 1.22's ServeMux can return 405 Method Not Allowed.
+	t.Run("preflight_without_options_route", func(t *testing.T) {
+		// Set up a server with only a GET route; no OPTIONS route registered.
 		pfPort := getFreePort(t)
 		pfAddr := fmt.Sprintf(":%d", pfPort)
 		pfBaseURL := fmt.Sprintf("http://127.0.0.1:%d", pfPort)
@@ -351,7 +351,9 @@ func TestE2E_Middleware_CORS(t *testing.T) {
 				{Name: "pf-server", Type: "http.server", Config: map[string]any{"address": pfAddr}},
 				{Name: "pf-router", Type: "http.router", DependsOn: []string{"pf-server"}},
 				{Name: "pf-handler", Type: "http.handler", DependsOn: []string{"pf-router"}, Config: map[string]any{"contentType": "application/json"}},
-				{Name: "pf-cors", Type: "http.middleware.cors", Config: map[string]any{
+				// DependsOn pf-router so the wiring hook associates this CORS middleware
+				// with the correct router and registers it as a global middleware.
+				{Name: "pf-cors", Type: "http.middleware.cors", DependsOn: []string{"pf-router"}, Config: map[string]any{
 					"allowedOrigins": []any{"http://allowed.example.com"},
 					"allowedMethods": []any{"GET", "POST", "OPTIONS"},
 				}},
@@ -361,14 +363,9 @@ func TestE2E_Middleware_CORS(t *testing.T) {
 					"server": "pf-server",
 					"router": "pf-router",
 					"routes": []any{
+						// Only GET route — no OPTIONS route registered
 						map[string]any{
 							"method":      "GET",
-							"path":        "/api/pf-test",
-							"handler":     "pf-handler",
-							"middlewares": []any{"pf-cors"},
-						},
-						map[string]any{
-							"method":      "OPTIONS",
 							"path":        "/api/pf-test",
 							"handler":     "pf-handler",
 							"middlewares": []any{"pf-cors"},
