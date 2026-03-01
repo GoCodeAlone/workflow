@@ -38,10 +38,15 @@ func (s *RemoteStep) Name() string {
 func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*module.StepResult, error) {
 	// Resolve template expressions in the step config against the current
 	// pipeline context so that dynamic values (e.g. outputs of earlier steps)
-	// are available to the plugin.
-	resolvedConfig, err := s.tmpl.ResolveMap(s.config, pc)
-	if err != nil {
-		return nil, fmt.Errorf("remote step config resolve: %w", err)
+	// are available to the plugin. When no config was provided, skip resolution
+	// and leave resolvedConfig nil so the Config proto field is omitted.
+	var resolvedConfig map[string]any
+	if s.config != nil {
+		var err error
+		resolvedConfig, err = s.tmpl.ResolveMap(s.config, pc)
+		if err != nil {
+			return nil, fmt.Errorf("remote step %q (handle %s) config resolve: %w", s.name, s.handleID, err)
+		}
 	}
 
 	// Convert step outputs to proto map

@@ -115,7 +115,8 @@ func TestRemoteStep_Execute_ResolvesTemplatesInConfig(t *testing.T) {
 }
 
 // TestRemoteStep_Execute_NilConfig verifies that a step with no config does
-// not panic and sends an empty (or nil) config in the request.
+// not panic and sends a nil Config in the request (so the plugin receives nil,
+// not an empty map).
 func TestRemoteStep_Execute_NilConfig(t *testing.T) {
 	stub := &stubPluginServiceClient{}
 	step := NewRemoteStep("test-step", "handle-2", stub, nil)
@@ -128,6 +129,9 @@ func TestRemoteStep_Execute_NilConfig(t *testing.T) {
 	}
 	if stub.lastRequest == nil {
 		t.Fatal("expected ExecuteStep to be called")
+	}
+	if stub.lastRequest.Config != nil {
+		t.Errorf("expected nil Config for step with no config, got %v", stub.lastRequest.Config)
 	}
 }
 
