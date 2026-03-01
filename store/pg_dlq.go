@@ -277,7 +277,6 @@ func buildPGDLQQuery(base string, filter DLQFilter) (string, []any) {
 	if filter.ErrorType != "" {
 		conditions = append(conditions, fmt.Sprintf("error_type = $%d", idx))
 		args = append(args, filter.ErrorType)
-		idx++ //nolint:ineffassign // keep idx consistent for future conditions
 	}
 
 	query := base
