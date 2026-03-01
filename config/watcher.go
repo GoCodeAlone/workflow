@@ -113,19 +113,15 @@ func (w *ConfigWatcher) loop() {
 			if !ok {
 				return
 			}
-			if !isYAMLFile(event.Name) {
-				continue
-			}
 			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) != 0 {
-				// Also handle Rename for atomic-save editors that rename-over
-				// the config file. On a Rename we enqueue the target config path
-				// rather than the renamed-away path so processChange still matches.
-				name := event.Name
-				if event.Op&fsnotify.Rename != 0 {
-					name = w.source.Path()
-				}
+				// On any write/create/rename in the watched directory, enqueue
+				// the config path for a hash check. This handles:
+				// - Direct YAML file writes
+				// - Atomic saves (rename-over) by editors
+				// - Kubernetes ConfigMap updates (symlink swaps on ..data)
+				// The hash check in processChange prevents spurious reloads.
 				w.mu.Lock()
-				w.pending[name] = time.Now()
+				w.pending[w.source.Path()] = time.Now()
 				w.mu.Unlock()
 			}
 

@@ -115,6 +115,21 @@ func (w *WorkflowDatabase) buildDSN() string {
 	return dsn
 }
 
+// Start opens the database connection during application startup.
+// Implements the modular.Startable interface so the framework automatically
+// calls Open() after all modules have been initialized.
+func (w *WorkflowDatabase) Start(ctx context.Context) error {
+	_, err := w.Open()
+	return err
+}
+
+// Stop closes the database connection during application shutdown.
+// Implements the modular.Stoppable interface so the framework automatically
+// calls Close() during graceful shutdown.
+func (w *WorkflowDatabase) Stop(ctx context.Context) error {
+	return w.Close()
+}
+
 // Open opens the database connection using config
 func (w *WorkflowDatabase) Open() (*sql.DB, error) {
 	w.mu.Lock()

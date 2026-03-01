@@ -51,6 +51,7 @@ import (
 	evstore "github.com/GoCodeAlone/workflow/store"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
 
