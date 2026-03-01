@@ -165,7 +165,7 @@ func (a *ExternalPluginAdapter) StepFactories() map[string]plugin.StepFactory {
 			if createResp.Error != "" {
 				return nil, fmt.Errorf("create remote step %s: %s", tn, createResp.Error)
 			}
-			return NewRemoteStep(name, createResp.HandleId, a.client.client), nil
+			return NewRemoteStep(name, createResp.HandleId, a.client.client, cfg), nil
 		}
 	}
 	return factories

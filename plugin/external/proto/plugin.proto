@@ -179,6 +179,10 @@ message ExecuteStepRequest {
   map<string, google.protobuf.Struct> step_outputs = 3;
   google.protobuf.Struct current = 4;
   google.protobuf.Struct metadata = 5;
+  // config carries the step's config with template expressions resolved against
+  // the current pipeline context. Plugin steps should prefer this over any
+  // config stored at CreateStep time so that dynamic values are honoured.
+  google.protobuf.Struct config = 6;
 }
 
 // ExecuteStepResponse returns the step result.

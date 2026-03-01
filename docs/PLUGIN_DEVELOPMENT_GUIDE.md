@@ -616,15 +616,19 @@ When a workflow step is backed by an external plugin, the execution flow is:
 
 ```
 1. Pipeline engine calls step.Execute(ctx, pipelineContext)
-2. RemoteStep converts PipelineContext to protobuf:
+2. RemoteStep resolves template expressions in step config against the current
+   pipeline context (e.g. {{ index .steps "fetch-user" "row" "id" }} becomes
+   the actual value from a previous step's output).
+3. RemoteStep converts PipelineContext to protobuf:
    - TriggerData   -> google.protobuf.Struct
    - StepOutputs   -> map<string, google.protobuf.Struct>
    - Current        -> google.protobuf.Struct
    - Metadata       -> google.protobuf.Struct
-3. gRPC call: ExecuteStep(ExecuteStepRequest) -> ExecuteStepResponse
-4. Plugin deserializes, runs logic, returns output
-5. RemoteStep converts response back to StepResult{Output, Stop}
-6. Pipeline engine merges output into Current state
+   - Config         -> google.protobuf.Struct  (resolved step config)
+4. gRPC call: ExecuteStep(ExecuteStepRequest) -> ExecuteStepResponse
+5. Plugin deserializes, runs logic using resolved config, returns output
+6. RemoteStep converts response back to StepResult{Output, Stop}
+7. Pipeline engine merges output into Current state
 ```
 
 All complex data structures are serialized through `google.protobuf.Struct`, which represents JSON-compatible maps. This means plugin data must be expressible as JSON (strings, numbers, booleans, arrays, nested objects). Binary data should be base64-encoded.

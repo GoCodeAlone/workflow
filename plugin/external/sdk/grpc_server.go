@@ -332,7 +332,7 @@ func (s *grpcServer) ExecuteStep(ctx context.Context, req *pb.ExecuteStepRequest
 		stepOutputs[k] = structToMap(v)
 	}
 
-	result, err := inst.Execute(ctx, structToMap(req.TriggerData), stepOutputs, structToMap(req.Current), structToMap(req.Metadata))
+	result, err := inst.Execute(ctx, structToMap(req.TriggerData), stepOutputs, structToMap(req.Current), structToMap(req.Metadata), structToMap(req.Config))
 	if err != nil {
 		return &pb.ExecuteStepResponse{Error: err.Error()}, nil //nolint:nilerr // app error in response field
 	}
