@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sort"
 	"time"
@@ -54,6 +55,14 @@ func (s *PGEventStore) Append(ctx context.Context, executionID uuid.UUID, eventT
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Acquire a per-execution advisory transaction lock to serialize concurrent
+	// appends for the same execution. pg_advisory_xact_lock is released
+	// automatically when the transaction commits or rolls back.
+	lockKey := executionIDToLockKey(executionID)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, lockKey); err != nil {
+		return fmt.Errorf("acquire advisory lock: %w", err)
+	}
+
 	// Get next sequence number for this execution.
 	var maxSeq *int64
 	err = tx.QueryRow(ctx,
@@ -82,6 +91,14 @@ func (s *PGEventStore) Append(ctx context.Context, executionID uuid.UUID, eventT
 	}
 
 	return tx.Commit(ctx)
+}
+
+// executionIDToLockKey derives a stable int64 advisory lock key from a UUID by
+// XOR-ing its two 64-bit halves. Used for pg_advisory_xact_lock per execution.
+func executionIDToLockKey(id uuid.UUID) int64 {
+	hi := int64(binary.BigEndian.Uint64(id[:8]))  //nolint:gosec // intentional truncation for advisory lock key
+	lo := int64(binary.BigEndian.Uint64(id[8:])) //nolint:gosec // intentional truncation for advisory lock key
+	return hi ^ lo
 }
 
 func (s *PGEventStore) GetEvents(ctx context.Context, executionID uuid.UUID) ([]ExecutionEvent, error) {
