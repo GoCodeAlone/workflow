@@ -368,3 +368,15 @@ func appendUnique(slice []string, val string) []string {
 	}
 	return append(slice, val)
 }
+
+// analyzeSidecars extracts sidecar requirements from the config.
+func analyzeSidecars(cfg *config.WorkflowConfig, m *WorkflowManifest) {
+	for _, sc := range cfg.Sidecars {
+		m.Sidecars = append(m.Sidecars, SidecarRequirement{
+			Name:      sc.Name,
+			Type:      sc.Type,
+			Config:    sc.Config,
+			DependsOn: sc.DependsOn,
+		})
+	}
+}

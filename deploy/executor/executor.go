@@ -1,10 +1,11 @@
-package deploy
+package executor
 
 import (
 	"context"
 	"fmt"
 	"sync"
 
+	"github.com/GoCodeAlone/workflow/deploy"
 	"github.com/GoCodeAlone/workflow/provider"
 )
 
@@ -12,13 +13,13 @@ import (
 // It looks up the appropriate strategy and provider, validates the plan,
 // and delegates execution to the cloud provider.
 type Executor struct {
-	strategies *StrategyRegistry
+	strategies *deploy.StrategyRegistry
 	mu         sync.RWMutex
 	providers  map[string]provider.CloudProvider
 }
 
 // NewExecutor creates an Executor backed by the given strategy registry.
-func NewExecutor(strategies *StrategyRegistry) *Executor {
+func NewExecutor(strategies *deploy.StrategyRegistry) *Executor {
 	return &Executor{
 		strategies: strategies,
 		providers:  make(map[string]provider.CloudProvider),

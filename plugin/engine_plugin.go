@@ -6,6 +6,7 @@ import (
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/deploy"
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
@@ -46,6 +47,12 @@ type EnginePlugin interface {
 
 	// ConfigTransformHooks returns hooks that run before module registration in BuildFromConfig.
 	ConfigTransformHooks() []ConfigTransformHook
+
+	// DeployTargets returns deploy target implementations (e.g., "kubernetes", "ecs").
+	DeployTargets() map[string]deploy.DeployTarget
+
+	// SidecarProviders returns sidecar provider implementations (e.g., "sidecar.tailscale").
+	SidecarProviders() map[string]deploy.SidecarProvider
 }
 
 // ModuleFactory creates a modular.Module from a name and config map.
@@ -170,5 +177,15 @@ func (b *BaseEnginePlugin) WiringHooks() []WiringHook {
 
 // ConfigTransformHooks returns no config transform hooks.
 func (b *BaseEnginePlugin) ConfigTransformHooks() []ConfigTransformHook {
+	return nil
+}
+
+// DeployTargets returns no deploy targets.
+func (b *BaseEnginePlugin) DeployTargets() map[string]deploy.DeployTarget {
+	return nil
+}
+
+// SidecarProviders returns no sidecar providers.
+func (b *BaseEnginePlugin) SidecarProviders() map[string]deploy.SidecarProvider {
 	return nil
 }

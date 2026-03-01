@@ -35,6 +35,7 @@ import (
 	plugingitlab "github.com/GoCodeAlone/workflow/plugins/gitlab"
 	pluginhttp "github.com/GoCodeAlone/workflow/plugins/http"
 	pluginintegration "github.com/GoCodeAlone/workflow/plugins/integration"
+	plugink8s "github.com/GoCodeAlone/workflow/plugins/k8s"
 	pluginlicense "github.com/GoCodeAlone/workflow/plugins/license"
 	pluginmarketplace "github.com/GoCodeAlone/workflow/plugins/marketplace"
 	pluginmessaging "github.com/GoCodeAlone/workflow/plugins/messaging"
@@ -86,6 +87,7 @@ func DefaultPlugins() []plugin.EnginePlugin {
 		plugingitlab.New(),
 		plugindatastores.New(),
 		pluginpolicy.New(),
+		plugink8s.New(),
 		pluginmarketplace.New(),
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/GoCodeAlone/workflow/capability"
+	"github.com/GoCodeAlone/workflow/deploy"
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
@@ -31,6 +32,8 @@ type PluginLoader struct {
 	plugins              []EnginePlugin
 	licenseValidator     LicenseValidator
 	cosignVerifier       *CosignVerifier
+	deployTargets        map[string]deploy.DeployTarget
+	sidecarProviders     map[string]deploy.SidecarProvider
 }
 
 // NewPluginLoader creates a new PluginLoader backed by the given capability and schema registries.
@@ -42,6 +45,8 @@ func NewPluginLoader(capReg *capability.Registry, schemaReg *schema.ModuleSchema
 		triggerFactories: make(map[string]TriggerFactory),
 		handlerFactories: make(map[string]WorkflowHandlerFactory),
 		schemaRegistry:   schemaReg,
+		deployTargets:    make(map[string]deploy.DeployTarget),
+		sidecarProviders: make(map[string]deploy.SidecarProvider),
 	}
 }
 
@@ -170,6 +175,22 @@ func (l *PluginLoader) LoadPlugin(p EnginePlugin) error {
 	// Collect config transform hooks.
 	l.configTransformHooks = append(l.configTransformHooks, p.ConfigTransformHooks()...)
 
+	// Register deploy targets — conflict on duplicate name.
+	for name, target := range p.DeployTargets() {
+		if _, exists := l.deployTargets[name]; exists {
+			return fmt.Errorf("plugin %q: deploy target %q already registered", manifest.Name, name)
+		}
+		l.deployTargets[name] = target
+	}
+
+	// Register sidecar providers — conflict on duplicate type.
+	for typeName, provider := range p.SidecarProviders() {
+		if _, exists := l.sidecarProviders[typeName]; exists {
+			return fmt.Errorf("plugin %q: sidecar provider %q already registered", manifest.Name, typeName)
+		}
+		l.sidecarProviders[typeName] = provider
+	}
+
 	l.plugins = append(l.plugins, p)
 	return nil
 }
@@ -254,6 +275,24 @@ func (l *PluginLoader) CapabilityRegistry() *capability.Registry {
 func (l *PluginLoader) LoadedPlugins() []EnginePlugin {
 	out := make([]EnginePlugin, len(l.plugins))
 	copy(out, l.plugins)
+	return out
+}
+
+// DeployTargets returns a defensive copy of all registered deploy targets.
+func (l *PluginLoader) DeployTargets() map[string]deploy.DeployTarget {
+	out := make(map[string]deploy.DeployTarget, len(l.deployTargets))
+	for k, v := range l.deployTargets {
+		out[k] = v
+	}
+	return out
+}
+
+// SidecarProviders returns a defensive copy of all registered sidecar providers.
+func (l *PluginLoader) SidecarProviders() map[string]deploy.SidecarProvider {
+	out := make(map[string]deploy.SidecarProvider, len(l.sidecarProviders))
+	for k, v := range l.sidecarProviders {
+		out[k] = v
+	}
 	return out
 }
 
