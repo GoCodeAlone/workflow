@@ -1,8 +1,11 @@
 package module
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"maps"
 	"net/http"
@@ -264,8 +267,13 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 		// to headers (e.g. Authorization), method, URL, and body.
 		ctx = context.WithValue(ctx, HTTPRequestContextKey, r)
 
-		// Extract data from the request to pass to the workflow
-		data := make(map[string]any)
+		// Extract data from the request to pass to the workflow.
+		// Include method, path, and parsed body so pipelines have full
+		// access to request context (consistent with CommandHandler).
+		data := map[string]any{
+			"method": r.Method,
+			"path":   r.URL.Path,
+		}
 
 		// Add URL params from context
 		for k, v := range params {
@@ -276,6 +284,19 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 		for k, v := range r.URL.Query() {
 			if len(v) > 0 {
 				data[k] = v[0]
+			}
+		}
+
+		// Parse JSON request body if present
+		if r.Body != nil {
+			bodyBytes, _ := io.ReadAll(r.Body)
+			if len(bodyBytes) > 0 {
+				var body map[string]any
+				if err := json.Unmarshal(bodyBytes, &body); err == nil {
+					data["body"] = body
+				}
+				// Restore the body so downstream steps can re-read it
+				r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 			}
 		}
 
