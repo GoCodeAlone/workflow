@@ -374,15 +374,12 @@ func TestPGIdempotencyStore_Integration(t *testing.T) {
 			t.Fatalf("NewPGIdempotencyStore: %v", err)
 		}
 
-		// Each sub-test gets its own unique key prefix; clean up after.
-		prefix := "pg-idem-" + uuid.New().String()
+		// Ensure the idempotency_keys table is cleaned up after each sub-test so that
+		// fixed keys used by runIdempotencyTests do not accumulate across runs.
 		t.Cleanup(func() {
-			_, _ = pool.Exec(ctx, `DELETE FROM idempotency_keys WHERE key LIKE $1`, prefix+"%")
+			_, _ = pool.Exec(ctx, `DELETE FROM idempotency_keys`)
 		})
 
-		// Wrap the store to inject the unique prefix into keys used by runIdempotencyTests.
-		// runIdempotencyTests creates its own records directly; no wrapping needed
-		// because each test uses unique keys. Simply return the store.
 		return store
 	})
 }
