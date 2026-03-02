@@ -80,7 +80,11 @@ func NewServer(pluginDir string, opts ...ServerOption) *Server {
 		server.WithInstructions("This MCP server exposes the GoCodeAlone/workflow engine. "+
 			"Use the provided tools to list available module types, step types, trigger types, "+
 			"workflow types, generate JSON schemas, validate YAML configurations, inspect configs, "+
-			"and manage plugins. Resources provide documentation and example configurations."),
+			"and manage plugins. Resources provide documentation and example configurations. "+
+			"The workflow engine includes a CLI tool called wfctl with commands for project scaffolding, "+
+			"config validation, deployment (Docker, Kubernetes, cloud), API spec extraction, "+
+			"diff/contract testing, CI/CD generation, plugin management, and Git integration. "+
+			"Read the workflow://docs/overview resource for full CLI reference."),
 	)
 
 	// Load types from installed plugin manifests so that plugin-provided types
@@ -91,6 +95,7 @@ func NewServer(pluginDir string, opts ...ServerOption) *Server {
 
 	s.registerTools()
 	s.registerNewTools()
+	s.registerWfctlTools()
 	s.registerResources()
 
 	return s
