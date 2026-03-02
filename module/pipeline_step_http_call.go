@@ -100,6 +100,7 @@ type HTTPCallStep struct {
 	method     string
 	headers    map[string]string
 	body       map[string]any
+	bodyFrom   string // dot-path into pc.Current or a prior step result via "steps.<name>..."; if set, the resolved value is used as the request body (strings/[]byte sent as-is, other types JSON-marshaled)
 	timeout    time.Duration
 	tmpl       *TemplateEngine
 	auth       *oauthConfig
@@ -140,6 +141,10 @@ func NewHTTPCallStepFactory() StepFactory {
 
 		if body, ok := config["body"].(map[string]any); ok {
 			step.body = body
+		}
+
+		if bodyFrom, ok := config["body_from"].(string); ok {
+			step.bodyFrom = bodyFrom
 		}
 
 		if timeout, ok := config["timeout"].(string); ok && timeout != "" {
@@ -284,36 +289,56 @@ func (s *HTTPCallStep) getToken(ctx context.Context) (string, error) {
 }
 
 // buildBodyReader constructs the request body reader from the step configuration.
-func (s *HTTPCallStep) buildBodyReader(pc *PipelineContext) (io.Reader, error) {
+func (s *HTTPCallStep) buildBodyReader(pc *PipelineContext) (io.Reader, bool, error) {
+	if s.bodyFrom != "" {
+		val := resolveBodyFrom(s.bodyFrom, pc)
+		switch v := val.(type) {
+		case []byte:
+			return bytes.NewReader(v), true, nil
+		case string:
+			return strings.NewReader(v), true, nil
+		case nil:
+			return nil, true, nil
+		default:
+			data, marshalErr := json.Marshal(v)
+			if marshalErr != nil {
+				return nil, false, fmt.Errorf("http_call step %q: failed to marshal body_from value: %w", s.name, marshalErr)
+			}
+			return bytes.NewReader(data), false, nil
+		}
+	}
 	if s.body != nil {
 		resolvedBody, resolveErr := s.tmpl.ResolveMap(s.body, pc)
 		if resolveErr != nil {
-			return nil, fmt.Errorf("http_call step %q: failed to resolve body: %w", s.name, resolveErr)
+			return nil, false, fmt.Errorf("http_call step %q: failed to resolve body: %w", s.name, resolveErr)
 		}
 		data, marshalErr := json.Marshal(resolvedBody)
 		if marshalErr != nil {
-			return nil, fmt.Errorf("http_call step %q: failed to marshal body: %w", s.name, marshalErr)
+			return nil, false, fmt.Errorf("http_call step %q: failed to marshal body: %w", s.name, marshalErr)
 		}
-		return bytes.NewReader(data), nil
+		return bytes.NewReader(data), false, nil
 	}
 	if s.method != "GET" && s.method != "HEAD" {
 		data, marshalErr := json.Marshal(pc.Current)
 		if marshalErr != nil {
-			return nil, fmt.Errorf("http_call step %q: failed to marshal current data: %w", s.name, marshalErr)
+			return nil, false, fmt.Errorf("http_call step %q: failed to marshal current data: %w", s.name, marshalErr)
 		}
-		return bytes.NewReader(data), nil
+		return bytes.NewReader(data), false, nil
 	}
-	return nil, nil
+	return nil, false, nil
 }
 
 // buildRequest constructs the HTTP request with resolved headers and optional bearer token.
-func (s *HTTPCallStep) buildRequest(ctx context.Context, resolvedURL string, bodyReader io.Reader, pc *PipelineContext, bearerToken string) (*http.Request, error) {
+// rawBody, when true, indicates that the request body is a raw value (string/[]byte/nil,
+// typically provided via body_from) and should not have its Content-Type automatically
+// overridden with application/json.
+func (s *HTTPCallStep) buildRequest(ctx context.Context, resolvedURL string, bodyReader io.Reader, rawBody bool, pc *PipelineContext, bearerToken string) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, s.method, resolvedURL, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("http_call step %q: failed to create request: %w", s.name, err)
 	}
 
-	if bodyReader != nil {
+	if bodyReader != nil && !rawBody {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	for k, v := range s.headers {
@@ -373,7 +398,7 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		return nil, fmt.Errorf("http_call step %q: failed to resolve url: %w", s.name, err)
 	}
 
-	bodyReader, err := s.buildBodyReader(pc)
+	bodyReader, rawBody, err := s.buildBodyReader(pc)
 	if err != nil {
 		return nil, err
 	}
@@ -387,7 +412,7 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		}
 	}
 
-	req, err := s.buildRequest(ctx, resolvedURL, bodyReader, pc, bearerToken)
+	req, err := s.buildRequest(ctx, resolvedURL, bodyReader, rawBody, pc, bearerToken)
 	if err != nil {
 		return nil, err
 	}
@@ -413,11 +438,11 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 			return nil, tokenErr
 		}
 
-		retryBody, buildErr := s.buildBodyReader(pc)
+		retryBody, rawBody2, buildErr := s.buildBodyReader(pc)
 		if buildErr != nil {
 			return nil, buildErr
 		}
-		retryReq, buildErr := s.buildRequest(ctx, resolvedURL, retryBody, pc, newToken)
+		retryReq, buildErr := s.buildRequest(ctx, resolvedURL, retryBody, rawBody2, pc, newToken)
 		if buildErr != nil {
 			return nil, buildErr
 		}
