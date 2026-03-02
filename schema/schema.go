@@ -211,6 +211,7 @@ var coreModuleTypes = []string{
 	"step.constraint_check",
 	"step.db_exec",
 	"step.db_query",
+	"step.db_query_cached",
 	"step.delegate",
 	"step.deploy",
 	"step.dlq_replay",

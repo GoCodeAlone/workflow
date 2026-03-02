@@ -591,6 +591,11 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"database", "query", "params"},
 		},
+		"step.db_query_cached": {
+			Type:       "step.db_query_cached",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"database", "query", "params", "cache_key", "cache_ttl", "scan_fields"},
+		},
 		"step.json_response": {
 			Type:       "step.json_response",
 			Plugin:     "pipelinesteps",

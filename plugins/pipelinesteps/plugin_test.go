@@ -44,6 +44,7 @@ func TestStepFactories(t *testing.T) {
 		"step.request_parse",
 		"step.db_query",
 		"step.db_exec",
+		"step.db_query_cached",
 		"step.json_response",
 		"step.raw_response",
 		"step.validate_path_param",
