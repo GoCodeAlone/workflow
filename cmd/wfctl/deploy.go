@@ -312,9 +312,16 @@ func (f *k8sCommonFlags) toDeployRequest(cfg *config.WorkflowConfig, m *manifest
 	}
 
 	// Read raw config file and expand env vars for the ConfigMap.
+	// Use os.Expand with a safe mapper that only replaces variables
+	// actually set in the environment — preserves $1, $2, etc.
 	rawData, err := os.ReadFile(f.configFile)
 	if err == nil {
-		req.ConfigFileData = []byte(os.ExpandEnv(string(rawData)))
+		req.ConfigFileData = []byte(os.Expand(string(rawData), func(key string) string {
+			if v, ok := os.LookupEnv(key); ok {
+				return v
+			}
+			return "$" + key
+		}))
 	}
 
 	return req
