@@ -522,6 +522,140 @@ The image runs as UID 65532 (nonroot) with a read-only root filesystem.
 
 ## 7. Kubernetes Deployment
 
+### wfctl deploy k8s (Recommended)
+
+The `wfctl deploy k8s` commands handle the full deployment lifecycle — building Docker images, loading them into local clusters, generating K8s manifests, and applying via server-side apply. No `kubectl`, `docker`, or `helm` required.
+
+#### Quick Start
+
+```bash
+# Build image, auto-detect cluster runtime, deploy, wait for healthy
+wfctl deploy k8s apply --build -config app.yaml --force --wait
+```
+
+This single command:
+1. Derives an image name + tag from the directory name and git commit hash
+2. Runs `docker build`
+3. Detects your cluster runtime from the kubeconfig context (minikube, kind, docker-desktop, k3d, or remote)
+4. Loads the image using the runtime-appropriate method
+5. Auto-sets `imagePullPolicy` (Never for local, IfNotPresent for remote)
+6. Generates K8s manifests (Namespace, ConfigMap, Secret, PVC, Deployment, Service)
+7. Applies via server-side apply with field manager `wfctl`
+8. Waits for rollout to complete
+
+#### Subcommands
+
+| Command | Purpose |
+|---------|---------|
+| `apply` | Build (optional) + apply manifests to the cluster |
+| `generate` | Write manifests to disk for review or version control |
+| `status` | Show deployment phase, replica count, pod health |
+| `logs` | Stream logs with `-follow`, `-tail`, `-container` |
+| `diff` | Compare generated manifests against live cluster state |
+| `destroy` | Delete all resources for an app |
+
+#### Common Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-config` | `app.yaml` | Workflow config file |
+| `-image` | derived | Container image name:tag (auto-derived with `--build`) |
+| `-namespace` | `default` | Kubernetes namespace |
+| `-app` | from config | Application name |
+| `-replicas` | `1` | Number of replicas |
+| `-secret` | | Secret name for env vars |
+| `-image-pull-policy` | auto | Never (local) or IfNotPresent (remote) |
+| `-configmap-name` | app name | Override ConfigMap name |
+| `-health-path` | `/healthz` | Health check endpoint |
+| `-service-account` | | Pod service account name |
+| `--force` | false | Take field ownership from other managers |
+| `--wait` | false | Wait for rollout to complete |
+| `--dry-run` | false | Server-side dry run |
+
+#### Build Flags (used with `--build`)
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--build` | false | Build Docker image before deploying |
+| `--dockerfile` | `Dockerfile` | Path to Dockerfile |
+| `--build-context` | `.` | Docker build context |
+| `--runtime` | auto | Override runtime detection (minikube\|kind\|docker-desktop\|k3d\|remote) |
+| `--registry` | | Registry URL for remote clusters (e.g. `ghcr.io/org`) |
+
+#### Runtime Auto-Detection
+
+wfctl reads the current kubeconfig context name and selects the image loading strategy:
+
+| Context Pattern | Runtime | Image Loading | imagePullPolicy |
+|-----------------|---------|---------------|-----------------|
+| `minikube` / `minikube-*` | minikube | `minikube image load` | Never |
+| `kind-*` | kind | `kind load docker-image` | Never |
+| `docker-desktop` | docker-desktop | shared daemon (no-op) | IfNotPresent |
+| `k3d-*` | k3d | `k3d image import` | Never |
+| anything else | remote | `docker push` to `--registry` | IfNotPresent |
+
+Override with `--runtime <name>` if auto-detection doesn't match your setup.
+
+#### Examples
+
+```bash
+# Local development with minikube
+wfctl deploy k8s apply --build -config app.yaml --force --wait
+
+# Explicit image tag
+wfctl deploy k8s apply --build -config app.yaml -image myapp:v2 --force --wait
+
+# Remote cluster with registry push
+wfctl deploy k8s apply --build -config app.yaml --registry ghcr.io/org --wait
+
+# Generate manifests for review
+wfctl deploy k8s generate -config app.yaml -image myapp:v1 -output ./k8s/
+
+# Check deployment status
+wfctl deploy k8s status -app myapp -namespace prod
+
+# Tail logs
+wfctl deploy k8s logs -app myapp --follow --tail 50
+
+# Compare against live state
+wfctl deploy k8s diff -config app.yaml -image myapp:v1
+
+# Tear down
+wfctl deploy k8s destroy -app myapp -namespace prod
+```
+
+#### Sidecars
+
+Sidecars defined in the workflow config are automatically resolved and injected:
+
+```yaml
+sidecars:
+  - name: tailscale
+    type: sidecar.tailscale
+    config:
+      hostname: my-app
+      auth_key_secret: tailscale-auth
+      serve:
+        port: 443
+        backend_port: 8080
+```
+
+wfctl generates the sidecar container, volumes, ConfigMaps, and secret references — no manual k8s YAML needed.
+
+#### Persisting Defaults
+
+Add a `deploy.build` section to `.wfctl.yaml` to avoid repeating flags:
+
+```yaml
+deploy:
+  target: kubernetes
+  namespace: prod
+  build:
+    dockerfile: Dockerfile
+    runtime: minikube
+    registry: ghcr.io/myorg
+```
+
 ### Helm Chart
 
 The chart is at `deploy/helm/workflow/` (version 0.5.0).

@@ -51,16 +51,62 @@ Targets:
   cloud           Deploy to a cloud environment (requires .wfctl.yaml or deploy.yaml)
 
 Kubernetes subcommands:
-  wfctl deploy k8s generate  -config app.yaml -image myapp:v1 [-output ./k8s/]
-  wfctl deploy k8s apply     -config app.yaml -image myapp:v1 [-namespace prod] [--dry-run] [--wait]
-  wfctl deploy k8s destroy   -namespace prod
-  wfctl deploy k8s status    -namespace prod
-  wfctl deploy k8s logs      -namespace prod [-container app] [-follow] [-tail 100]
-  wfctl deploy k8s diff      -config app.yaml -image myapp:v1 [-namespace prod]
+  generate  Produce K8s manifests for review or version control
+  apply     Build (optional), load, and apply manifests to a cluster
+  destroy   Delete all resources for an app
+  status    Show deployment status and pod health
+  logs      Stream logs from the deployed app
+  diff      Compare generated manifests against live cluster state
 
-Examples:
+Build flags (used with --build on apply):
+  --build            Build Docker image and load into cluster before deploying
+  --dockerfile PATH  Path to Dockerfile (default: Dockerfile)
+  --build-context DIR  Docker build context directory (default: .)
+  --build-arg ARGS   Docker build args (comma-separated KEY=VALUE pairs)
+  --runtime NAME     Override auto-detected runtime (minikube|kind|docker-desktop|k3d|remote)
+  --registry URL     Registry for remote clusters (e.g. ghcr.io/org)
+
+Runtime auto-detection (from kubeconfig context name):
+  minikube / minikube-*  →  minikube image load     (imagePullPolicy: Never)
+  kind-*                 →  kind load docker-image   (imagePullPolicy: Never)
+  docker-desktop         →  shared daemon (no load)  (imagePullPolicy: IfNotPresent)
+  k3d-*                  →  k3d image import         (imagePullPolicy: Never)
+  anything else          →  docker push --registry   (imagePullPolicy: IfNotPresent)
+
+Recommended workflow (local development):
+  # One command: build, load into cluster, apply manifests, wait for healthy
+  wfctl deploy k8s apply --build -config app.yaml --force --wait
+
+  # With explicit image tag
+  wfctl deploy k8s apply --build -config app.yaml -image myapp:v2 --force --wait
+
+  # Preview manifests without applying
+  wfctl deploy k8s generate -config app.yaml -image myapp:v1
+
+  # Check what's running
+  wfctl deploy k8s status -app myapp
+
+  # Stream logs
+  wfctl deploy k8s logs -app myapp --follow
+
+Recommended workflow (remote cluster):
+  # Build, push to registry, deploy
+  wfctl deploy k8s apply --build -config app.yaml --registry ghcr.io/org --wait
+
+  # Compare local config against live cluster
+  wfctl deploy k8s diff -config app.yaml -image ghcr.io/org/myapp:v1
+
+Persisting defaults (.wfctl.yaml):
+  deploy:
+    target: kubernetes
+    namespace: prod
+    build:
+      dockerfile: Dockerfile
+      runtime: minikube
+      registry: ghcr.io/myorg
+
+Other examples:
   wfctl deploy docker -config workflow.yaml
-  wfctl deploy k8s apply -config app.yaml -image myapp:v1 -namespace prod --wait
   wfctl deploy helm -namespace prod -values custom.yaml
   wfctl deploy cloud -target staging
 `)
@@ -117,7 +163,7 @@ Options:
 	}
 
 	// Build the Docker image
-	if err := buildDockerImage(*image, filepath.Join(cwd, "Dockerfile"), cwd); err != nil {
+	if err := buildDockerImage(*image, filepath.Join(cwd, "Dockerfile"), cwd, nil); err != nil {
 		return err
 	}
 
@@ -229,9 +275,14 @@ Options:
 }
 
 // buildDockerImage builds a Docker image using the local Docker daemon.
-func buildDockerImage(image, dockerfile, buildCtx string) error {
+// buildArgs is a slice of KEY=VALUE strings passed as --build-arg flags.
+func buildDockerImage(image, dockerfile, buildCtx string, buildArgs []string) error {
 	fmt.Printf("building image %s...\n", image)
-	args := []string{"build", "-t", image, "-f", dockerfile, buildCtx}
+	args := []string{"build", "-t", image, "-f", dockerfile}
+	for _, ba := range buildArgs {
+		args = append(args, "--build-arg", ba)
+	}
+	args = append(args, buildCtx)
 	cmd := exec.Command("docker", args...) //nolint:gosec // G204: validated build inputs
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -413,6 +464,7 @@ func runK8sApply(args []string) error {
 	build := fs.Bool("build", false, "Build Docker image and load into cluster before deploying")
 	dockerfile := fs.String("dockerfile", "Dockerfile", "Path to Dockerfile")
 	buildCtx := fs.String("build-context", ".", "Docker build context directory")
+	buildArgStr := fs.String("build-arg", "", "Docker build args (comma-separated KEY=VALUE pairs)")
 	runtime := fs.String("runtime", "", "Cluster runtime override (minikube|kind|docker-desktop|k3d|remote)")
 	registry := fs.String("registry", "", "Registry for remote clusters (e.g. ghcr.io/org)")
 	if err := fs.Parse(args); err != nil {
@@ -454,7 +506,11 @@ func runK8sApply(args []string) error {
 		f.image = resolveImageTag(f.image)
 
 		// Build the Docker image
-		if err := buildDockerImage(f.image, *dockerfile, *buildCtx); err != nil {
+		var buildArgs []string
+		if *buildArgStr != "" {
+			buildArgs = strings.Split(*buildArgStr, ",")
+		}
+		if err := buildDockerImage(f.image, *dockerfile, *buildCtx, buildArgs); err != nil {
 			return err
 		}
 
