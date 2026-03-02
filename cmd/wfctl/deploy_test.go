@@ -46,7 +46,7 @@ func TestRunDeployDockerFlagParsing(t *testing.T) {
 
 // TestRunDeployKubernetesFlagParsing verifies that -h is handled without panic.
 func TestRunDeployKubernetesFlagParsing(t *testing.T) {
-	err := runDeployKubernetes([]string{"-h"})
+	err := runDeployK8s([]string{"-h"})
 	if err == nil {
 		t.Fatal("expected error from -h (flag.ErrHelp)")
 	}

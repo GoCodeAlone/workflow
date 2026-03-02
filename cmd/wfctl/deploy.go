@@ -18,6 +18,7 @@ import (
 	"github.com/GoCodeAlone/workflow/deploy/sidecars"
 	"github.com/GoCodeAlone/workflow/manifest"
 	k8s "github.com/GoCodeAlone/workflow/pkg/k8s"
+	"github.com/GoCodeAlone/workflow/pkg/k8s/imageloader"
 )
 
 func runDeploy(args []string) error {
@@ -116,15 +117,9 @@ Options:
 	}
 
 	// Build the Docker image
-	fmt.Printf("building Docker image %s...\n", *image)
-	buildCmd := exec.Command("docker", "build", "-t", *image, ".") //nolint:gosec // G204: image and cwd are validated inputs
-	buildCmd.Dir = cwd
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		return fmt.Errorf("docker build failed: %w", err)
+	if err := buildDockerImage(*image, filepath.Join(cwd, "Dockerfile"), cwd); err != nil {
+		return err
 	}
-	fmt.Printf("image %s built successfully\n", *image)
 
 	if *noCompose {
 		return nil
@@ -231,6 +226,32 @@ Options:
 		fmt.Printf("check status: kubectl -n %s get pods\n", *namespace)
 	}
 	return nil
+}
+
+// buildDockerImage builds a Docker image using the local Docker daemon.
+func buildDockerImage(image, dockerfile, buildCtx string) error {
+	fmt.Printf("building image %s...\n", image)
+	args := []string{"build", "-t", image, "-f", dockerfile, buildCtx}
+	cmd := exec.Command("docker", args...) //nolint:gosec // G204: validated build inputs
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker build failed: %w", err)
+	}
+	fmt.Printf("image %s built\n", image)
+	return nil
+}
+
+// resolveImageTag appends a git short hash tag if the image has no tag.
+func resolveImageTag(image string) string {
+	if strings.Contains(image, ":") {
+		return image
+	}
+	out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return image + ":latest"
+	}
+	return image + ":" + strings.TrimSpace(string(out))
 }
 
 // runDeployK8s dispatches kubernetes subcommands.
@@ -389,11 +410,108 @@ func runK8sApply(args []string) error {
 	dryRun := fs.Bool("dry-run", false, "Server-side dry run without applying")
 	wait := fs.Bool("wait", false, "Wait for rollout to complete")
 	force := fs.Bool("force", false, "Force take ownership of fields from other managers")
+	build := fs.Bool("build", false, "Build Docker image and load into cluster before deploying")
+	dockerfile := fs.String("dockerfile", "Dockerfile", "Path to Dockerfile")
+	buildCtx := fs.String("build-context", ".", "Docker build context directory")
+	runtime := fs.String("runtime", "", "Cluster runtime override (minikube|kind|docker-desktop|k3d|remote)")
+	registry := fs.String("registry", "", "Registry for remote clusters (e.g. ghcr.io/org)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+
+	// Load .wfctl.yaml defaults for build settings
+	if wfcfg, loadErr := loadWfctlConfig(); loadErr == nil {
+		if *dockerfile == "Dockerfile" && wfcfg.BuildDockerfile != "" {
+			*dockerfile = wfcfg.BuildDockerfile
+		}
+		if *buildCtx == "." && wfcfg.BuildContext != "" {
+			*buildCtx = wfcfg.BuildContext
+		}
+		if *runtime == "" && wfcfg.BuildRuntime != "" {
+			*runtime = wfcfg.BuildRuntime
+		}
+		if *registry == "" && wfcfg.BuildRegistry != "" {
+			*registry = wfcfg.BuildRegistry
+		}
+	}
+
+	// Derive image name when --build is set and no -image provided
 	if f.image == "" {
-		return fmt.Errorf("-image is required")
+		if *build {
+			cwd, _ := os.Getwd()
+			name := filepath.Base(cwd)
+			if wfcfg, err := loadWfctlConfig(); err == nil && wfcfg.ProjectName != "" {
+				name = wfcfg.ProjectName
+			}
+			f.image = resolveImageTag(name)
+		} else {
+			return fmt.Errorf("-image is required (or use --build to build from Dockerfile)")
+		}
+	}
+
+	if *build {
+		// Resolve image tag if none provided
+		f.image = resolveImageTag(f.image)
+
+		// Build the Docker image
+		if err := buildDockerImage(f.image, *dockerfile, *buildCtx); err != nil {
+			return err
+		}
+
+		// Detect or use explicit runtime
+		var rtInfo *k8s.RuntimeInfo
+		if *runtime != "" {
+			rtInfo = &k8s.RuntimeInfo{
+				Runtime:     imageloader.Runtime(*runtime),
+				ContextName: *runtime,
+				ClusterName: *runtime,
+			}
+		} else {
+			var detectErr error
+			rtInfo, detectErr = k8s.DetectRuntime("", "")
+			if detectErr != nil {
+				return fmt.Errorf("detect cluster runtime: %w", detectErr)
+			}
+			fmt.Printf("detected runtime: %s (context: %s)\n", rtInfo.Runtime, rtInfo.ContextName)
+		}
+
+		// Load image into cluster
+		reg := imageloader.NewRegistry()
+		reg.Register(imageloader.NewMinikube())
+		reg.Register(imageloader.NewKind())
+		reg.Register(imageloader.NewDockerDesktop())
+		reg.Register(imageloader.NewK3d())
+		reg.Register(imageloader.NewRemote())
+
+		loadCfg := &imageloader.LoadConfig{
+			Image:    f.image,
+			Runtime:  rtInfo.Runtime,
+			Registry: *registry,
+			Cluster:  rtInfo.ClusterName,
+		}
+
+		if rtInfo.Runtime == imageloader.RuntimeRemote && *registry == "" {
+			return fmt.Errorf("--registry is required for remote clusters (context %q does not match a local runtime)", rtInfo.ContextName)
+		}
+
+		if err := reg.Load(loadCfg); err != nil {
+			return fmt.Errorf("load image: %w", err)
+		}
+
+		// For remote, use the registry-qualified image name
+		if loadCfg.ResolvedImage != "" {
+			f.image = loadCfg.ResolvedImage
+		}
+
+		// Auto-set imagePullPolicy based on runtime
+		if f.imagePullPolicy == "" {
+			switch rtInfo.Runtime {
+			case imageloader.RuntimeMinikube, imageloader.RuntimeKind, imageloader.RuntimeK3d:
+				f.imagePullPolicy = "Never"
+			case imageloader.RuntimeDockerDesktop, imageloader.RuntimeRemote:
+				f.imagePullPolicy = "IfNotPresent"
+			}
+		}
 	}
 
 	cfg, err := config.LoadFromFile(f.configFile)
