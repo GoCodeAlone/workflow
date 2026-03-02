@@ -1,9 +1,11 @@
 package module
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -499,5 +501,203 @@ func TestHTTPCallStep_OAuth2_ConcurrentFetch(t *testing.T) {
 
 	if n := atomic.LoadInt32(&tokenRequests); n != 1 {
 		t.Errorf("expected exactly 1 token request via singleflight, got %d", n)
+	}
+}
+
+// TestHTTPCallStep_BodyFrom_String verifies that body_from with a string value sends raw bytes
+// without JSON-encoding and without auto-setting Content-Type: application/json.
+func TestHTTPCallStep_BodyFrom_String(t *testing.T) {
+	var receivedBody []byte
+	var receivedContentType string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedContentType = r.Header.Get("Content-Type")
+		var err error
+		receivedBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("failed to read request body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("body-from-string", map[string]any{
+		"url":       srv.URL,
+		"method":    "POST",
+		"body_from": "raw_payload",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	step.(*HTTPCallStep).httpClient = srv.Client()
+
+	pc := NewPipelineContext(nil, nil)
+	pc.Current["raw_payload"] = `{"hello":"world"}`
+
+	if _, err := step.Execute(context.Background(), pc); err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	if string(receivedBody) != `{"hello":"world"}` {
+		t.Errorf("expected raw body %q, got %q", `{"hello":"world"}`, string(receivedBody))
+	}
+	// Content-Type should NOT be auto-set to application/json for raw bodies
+	if receivedContentType == "application/json" {
+		t.Errorf("expected Content-Type not to be application/json for body_from, got %q", receivedContentType)
+	}
+}
+
+// TestHTTPCallStep_BodyFrom_Bytes verifies that body_from with a []byte value sends raw bytes.
+func TestHTTPCallStep_BodyFrom_Bytes(t *testing.T) {
+	var receivedBody []byte
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		receivedBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("failed to read request body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("body-from-bytes", map[string]any{
+		"url":       srv.URL,
+		"method":    "POST",
+		"body_from": "raw_data",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	step.(*HTTPCallStep).httpClient = srv.Client()
+
+	pc := NewPipelineContext(nil, nil)
+	pc.Current["raw_data"] = []byte("binary\x00data")
+
+	if _, err := step.Execute(context.Background(), pc); err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	if !bytes.Equal(receivedBody, []byte("binary\x00data")) {
+		t.Errorf("expected raw bytes, got %q", string(receivedBody))
+	}
+}
+
+// TestHTTPCallStep_BodyFrom_StepOutput verifies that body_from can resolve from step outputs.
+func TestHTTPCallStep_BodyFrom_StepOutput(t *testing.T) {
+	var receivedBody []byte
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		receivedBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("failed to read request body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("body-from-step", map[string]any{
+		"url":       srv.URL,
+		"method":    "POST",
+		"body_from": "steps.parse.raw_body",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	step.(*HTTPCallStep).httpClient = srv.Client()
+
+	pc := NewPipelineContext(nil, nil)
+	pc.StepOutputs["parse"] = map[string]any{
+		"raw_body": `{"event":"push"}`,
+	}
+
+	if _, err := step.Execute(context.Background(), pc); err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	if string(receivedBody) != `{"event":"push"}` {
+		t.Errorf("expected raw body from step output, got %q", string(receivedBody))
+	}
+}
+
+// TestHTTPCallStep_BodyFrom_ContentTypeOverride verifies that Content-Type set in headers
+// takes effect even with body_from.
+func TestHTTPCallStep_BodyFrom_ContentTypeOverride(t *testing.T) {
+	var receivedContentType string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedContentType = r.Header.Get("Content-Type")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("body-from-ct", map[string]any{
+		"url":       srv.URL,
+		"method":    "POST",
+		"body_from": "payload",
+		"headers": map[string]any{
+			"Content-Type": "application/xml",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	step.(*HTTPCallStep).httpClient = srv.Client()
+
+	pc := NewPipelineContext(nil, nil)
+	pc.Current["payload"] = `<root><item>1</item></root>`
+
+	if _, err := step.Execute(context.Background(), pc); err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	if receivedContentType != "application/xml" {
+		t.Errorf("expected Content-Type application/xml, got %q", receivedContentType)
+	}
+}
+
+// TestHTTPCallStep_BodyFrom_NilValue verifies that body_from with a missing path sends no body.
+func TestHTTPCallStep_BodyFrom_NilValue(t *testing.T) {
+	var receivedBody []byte
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		receivedBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("failed to read request body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("body-from-nil", map[string]any{
+		"url":       srv.URL,
+		"method":    "POST",
+		"body_from": "nonexistent.path",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	step.(*HTTPCallStep).httpClient = srv.Client()
+
+	pc := NewPipelineContext(nil, nil)
+
+	if _, err := step.Execute(context.Background(), pc); err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	if len(receivedBody) != 0 {
+		t.Errorf("expected empty body for nil body_from, got %q", string(receivedBody))
 	}
 }
