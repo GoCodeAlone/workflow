@@ -507,16 +507,18 @@ func TestHTTPCallStep_OAuth2_ConcurrentFetch(t *testing.T) {
 // TestHTTPCallStep_BodyFrom_String verifies that body_from with a string value sends raw bytes
 // without JSON-encoding and without auto-setting Content-Type: application/json.
 func TestHTTPCallStep_BodyFrom_String(t *testing.T) {
-	var receivedBody []byte
-	var receivedContentType string
+	type captured struct {
+		body        []byte
+		contentType string
+	}
+	ch := make(chan captured, 1)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedContentType = r.Header.Get("Content-Type")
-		var err error
-		receivedBody, err = io.ReadAll(r.Body)
+		b, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("failed to read request body: %v", err)
 		}
+		ch <- captured{body: b, contentType: r.Header.Get("Content-Type")}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -540,25 +542,26 @@ func TestHTTPCallStep_BodyFrom_String(t *testing.T) {
 		t.Fatalf("execute error: %v", err)
 	}
 
-	if string(receivedBody) != `{"hello":"world"}` {
-		t.Errorf("expected raw body %q, got %q", `{"hello":"world"}`, string(receivedBody))
+	got := <-ch
+	if string(got.body) != `{"hello":"world"}` {
+		t.Errorf("expected raw body %q, got %q", `{"hello":"world"}`, string(got.body))
 	}
 	// Content-Type should NOT be auto-set to application/json for raw bodies
-	if receivedContentType == "application/json" {
-		t.Errorf("expected Content-Type not to be application/json for body_from, got %q", receivedContentType)
+	if got.contentType == "application/json" {
+		t.Errorf("expected Content-Type not to be application/json for body_from, got %q", got.contentType)
 	}
 }
 
 // TestHTTPCallStep_BodyFrom_Bytes verifies that body_from with a []byte value sends raw bytes.
 func TestHTTPCallStep_BodyFrom_Bytes(t *testing.T) {
-	var receivedBody []byte
+	ch := make(chan []byte, 1)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
-		receivedBody, err = io.ReadAll(r.Body)
+		b, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("failed to read request body: %v", err)
 		}
+		ch <- b
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))
 	}))
@@ -582,21 +585,22 @@ func TestHTTPCallStep_BodyFrom_Bytes(t *testing.T) {
 		t.Fatalf("execute error: %v", err)
 	}
 
-	if !bytes.Equal(receivedBody, []byte("binary\x00data")) {
-		t.Errorf("expected raw bytes, got %q", string(receivedBody))
+	gotBody := <-ch
+	if !bytes.Equal(gotBody, []byte("binary\x00data")) {
+		t.Errorf("expected raw bytes, got %q", string(gotBody))
 	}
 }
 
 // TestHTTPCallStep_BodyFrom_StepOutput verifies that body_from can resolve from step outputs.
 func TestHTTPCallStep_BodyFrom_StepOutput(t *testing.T) {
-	var receivedBody []byte
+	ch := make(chan []byte, 1)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
-		receivedBody, err = io.ReadAll(r.Body)
+		b, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("failed to read request body: %v", err)
 		}
+		ch <- b
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))
 	}))
@@ -622,18 +626,19 @@ func TestHTTPCallStep_BodyFrom_StepOutput(t *testing.T) {
 		t.Fatalf("execute error: %v", err)
 	}
 
-	if string(receivedBody) != `{"event":"push"}` {
-		t.Errorf("expected raw body from step output, got %q", string(receivedBody))
+	gotBody := <-ch
+	if string(gotBody) != `{"event":"push"}` {
+		t.Errorf("expected raw body from step output, got %q", string(gotBody))
 	}
 }
 
 // TestHTTPCallStep_BodyFrom_ContentTypeOverride verifies that Content-Type set in headers
 // takes effect even with body_from.
 func TestHTTPCallStep_BodyFrom_ContentTypeOverride(t *testing.T) {
-	var receivedContentType string
+	ch := make(chan string, 1)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedContentType = r.Header.Get("Content-Type")
+		ch <- r.Header.Get("Content-Type")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))
 	}))
@@ -660,21 +665,22 @@ func TestHTTPCallStep_BodyFrom_ContentTypeOverride(t *testing.T) {
 		t.Fatalf("execute error: %v", err)
 	}
 
-	if receivedContentType != "application/xml" {
-		t.Errorf("expected Content-Type application/xml, got %q", receivedContentType)
+	gotCT := <-ch
+	if gotCT != "application/xml" {
+		t.Errorf("expected Content-Type application/xml, got %q", gotCT)
 	}
 }
 
 // TestHTTPCallStep_BodyFrom_NilValue verifies that body_from with a missing path sends no body.
 func TestHTTPCallStep_BodyFrom_NilValue(t *testing.T) {
-	var receivedBody []byte
+	ch := make(chan []byte, 1)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
-		receivedBody, err = io.ReadAll(r.Body)
+		b, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("failed to read request body: %v", err)
 		}
+		ch <- b
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))
 	}))
@@ -697,7 +703,8 @@ func TestHTTPCallStep_BodyFrom_NilValue(t *testing.T) {
 		t.Fatalf("execute error: %v", err)
 	}
 
-	if len(receivedBody) != 0 {
-		t.Errorf("expected empty body for nil body_from, got %q", string(receivedBody))
+	gotBody := <-ch
+	if len(gotBody) != 0 {
+		t.Errorf("expected empty body for nil body_from, got %q", string(gotBody))
 	}
 }

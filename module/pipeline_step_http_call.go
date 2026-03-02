@@ -100,7 +100,7 @@ type HTTPCallStep struct {
 	method     string
 	headers    map[string]string
 	body       map[string]any
-	bodyFrom   string // dot-path into pc.Current; when set, used as raw body (no JSON encoding)
+	bodyFrom   string // dot-path into pc.Current or a prior step result via "steps.<name>..."; if set, the resolved value is used as the request body (strings/[]byte sent as-is, other types JSON-marshaled)
 	timeout    time.Duration
 	tmpl       *TemplateEngine
 	auth       *oauthConfig
@@ -329,8 +329,9 @@ func (s *HTTPCallStep) buildBodyReader(pc *PipelineContext) (io.Reader, bool, er
 }
 
 // buildRequest constructs the HTTP request with resolved headers and optional bearer token.
-// rawBody, when true, indicates the body was provided via body_from and should not have its
-// Content-Type overridden with application/json.
+// rawBody, when true, indicates that the request body is a raw value (string/[]byte/nil,
+// typically provided via body_from) and should not have its Content-Type automatically
+// overridden with application/json.
 func (s *HTTPCallStep) buildRequest(ctx context.Context, resolvedURL string, bodyReader io.Reader, rawBody bool, pc *PipelineContext, bearerToken string) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, s.method, resolvedURL, bodyReader)
 	if err != nil {
