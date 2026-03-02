@@ -130,6 +130,64 @@ func TestRequestParseStep_MultiplePathParams(t *testing.T) {
 	}
 }
 
+func TestRequestParseStep_WildcardPathParam_MultiSegment(t *testing.T) {
+	factory := NewRequestParseStepFactory()
+	step, err := factory("parse-wildcard", map[string]any{
+		"path_params": []any{"resource"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	req, _ := http.NewRequest("GET", "/api/forms/test-form", nil)
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_request":  req,
+		"_route_pattern": "/api/{resource...}",
+	})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	pathParams, ok := result.Output["path_params"].(map[string]any)
+	if !ok {
+		t.Fatal("expected path_params in output")
+	}
+	if pathParams["resource"] != "forms/test-form" {
+		t.Errorf("expected resource='forms/test-form', got %v", pathParams["resource"])
+	}
+}
+
+func TestRequestParseStep_WildcardPathParam_SingleSegment(t *testing.T) {
+	factory := NewRequestParseStepFactory()
+	step, err := factory("parse-wildcard-single", map[string]any{
+		"path_params": []any{"resource"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	req, _ := http.NewRequest("GET", "/api/forms", nil)
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_request":  req,
+		"_route_pattern": "/api/{resource...}",
+	})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	pathParams, ok := result.Output["path_params"].(map[string]any)
+	if !ok {
+		t.Fatal("expected path_params in output")
+	}
+	if pathParams["resource"] != "forms" {
+		t.Errorf("expected resource='forms', got %v", pathParams["resource"])
+	}
+}
+
 func TestRequestParseStep_EmptyConfig(t *testing.T) {
 	factory := NewRequestParseStepFactory()
 	step, err := factory("parse-empty", map[string]any{}, nil)
