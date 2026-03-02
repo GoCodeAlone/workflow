@@ -93,8 +93,16 @@ func (s *RequestParseStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 			for i, pp := range patternParts {
 				if strings.HasPrefix(pp, "{") && strings.HasSuffix(pp, "}") {
 					paramName := pp[1 : len(pp)-1]
+					isWildcard := strings.HasSuffix(paramName, "...")
+					if isWildcard {
+						paramName = strings.TrimSuffix(paramName, "...")
+					}
 					if i < len(actualParts) {
-						paramMap[paramName] = actualParts[i]
+						if isWildcard {
+							paramMap[paramName] = strings.Join(actualParts[i:], "/")
+						} else {
+							paramMap[paramName] = actualParts[i]
+						}
 					}
 				}
 			}
