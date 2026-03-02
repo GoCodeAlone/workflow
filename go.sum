@@ -32,8 +32,8 @@ github.com/CrisisTextLine/modular/modules/cache v0.4.0 h1:vlPXAsucSM1M0RsPly9cWy
 github.com/CrisisTextLine/modular/modules/cache v0.4.0/go.mod h1:4irZOGXxUlgJqAnWlpMyPC3C1tM/f5145/wMThYnAsY=
 github.com/CrisisTextLine/modular/modules/eventbus v1.7.0 h1:SSeu7rjuECDgFa+iNyndn94YPQxffHxJgfR7U4psz6E=
 github.com/CrisisTextLine/modular/modules/eventbus v1.7.0/go.mod h1:I1tGf3DmadwyMP2NE2m6XHYl9ebXB9wBc/KZLywTR4c=
-github.com/CrisisTextLine/modular/modules/eventbus/v2 v2.0.0 h1:bDNWBparvVzXnhLxjFPJ9MDg7N4NUnNOjfn56G/CwGU=
-github.com/CrisisTextLine/modular/modules/eventbus/v2 v2.0.0/go.mod h1:5DmacIYrhhiN18i2OHyAVBiNKbN2jHuEv2UJoRToMg0=
+github.com/CrisisTextLine/modular/modules/eventbus/v2 v2.1.0 h1:jCG/5cuCITnGH4ztOrU5vY00+ykP9j+RL0zXy/CX1ak=
+github.com/CrisisTextLine/modular/modules/eventbus/v2 v2.1.0/go.mod h1:5DmacIYrhhiN18i2OHyAVBiNKbN2jHuEv2UJoRToMg0=
 github.com/CrisisTextLine/modular/modules/jsonschema v1.4.0 h1:NIhTrDgjhGwMi2D0ukGsd3n/M1W807u6Rhlqm89Sj8Q=
 github.com/CrisisTextLine/modular/modules/jsonschema v1.4.0/go.mod h1:TeM3mt/+1X5VmlWF4nZpgp4qCGPmAahQs5jAzuWLbOo=
 github.com/CrisisTextLine/modular/modules/reverseproxy/v2 v2.2.0 h1:SUJEPA61IbjdUwKdSembQTbX9rKz5v4vmyr/cbvb4tY=
