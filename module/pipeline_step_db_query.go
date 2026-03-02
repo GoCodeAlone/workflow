@@ -15,6 +15,14 @@ type DBProvider interface {
 	DB() *sql.DB
 }
 
+// DBDriverProvider is optionally implemented by DBProvider modules that expose
+// the underlying driver name (e.g. "pgx", "sqlite3"). This allows pipeline
+// steps to normalize SQL placeholder syntax automatically.
+type DBDriverProvider interface {
+	DBProvider
+	DriverName() string
+}
+
 // DBQueryStep executes a parameterized SQL SELECT against a named database service.
 type DBQueryStep struct {
 	name     string
@@ -98,6 +106,12 @@ func (s *DBQueryStep) Execute(_ context.Context, pc *PipelineContext) (*StepResu
 		return nil, fmt.Errorf("db_query step %q: database connection is nil", s.name)
 	}
 
+	// Detect driver for placeholder normalization
+	var driver string
+	if dp, ok := svc.(DBDriverProvider); ok {
+		driver = dp.DriverName()
+	}
+
 	// Resolve template params
 	resolvedParams := make([]any, len(s.params))
 	for i, p := range s.params {
@@ -108,8 +122,12 @@ func (s *DBQueryStep) Execute(_ context.Context, pc *PipelineContext) (*StepResu
 		resolvedParams[i] = resolved
 	}
 
+	// Normalize SQL placeholders: users write $1,$2,$3 (PostgreSQL style),
+	// engine converts to ? for SQLite automatically.
+	query := normalizePlaceholders(s.query, driver)
+
 	// Execute query
-	rows, err := db.Query(s.query, resolvedParams...)
+	rows, err := db.Query(query, resolvedParams...)
 	if err != nil {
 		return nil, fmt.Errorf("db_query step %q: query failed: %w", s.name, err)
 	}

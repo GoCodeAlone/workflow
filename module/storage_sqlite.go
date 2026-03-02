@@ -100,6 +100,11 @@ func (s *SQLiteStorage) DB() *sql.DB {
 	return s.db
 }
 
+// DriverName returns "sqlite3" for placeholder normalization.
+func (s *SQLiteStorage) DriverName() string {
+	return "sqlite3"
+}
+
 func (s *SQLiteStorage) ProvidesServices() []modular.ServiceProvider {
 	return []modular.ServiceProvider{
 		{Name: s.name, Description: "SQLite database connection", Instance: s},

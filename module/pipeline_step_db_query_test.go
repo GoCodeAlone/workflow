@@ -15,6 +15,22 @@ type testDBProvider struct {
 
 func (p *testDBProvider) DB() *sql.DB { return p.db }
 
+// testDBDriverProvider wraps a *sql.DB with driver name to satisfy DBDriverProvider
+type testDBDriverProvider struct {
+	db     *sql.DB
+	driver string
+}
+
+func (p *testDBDriverProvider) DB() *sql.DB       { return p.db }
+func (p *testDBDriverProvider) DriverName() string { return p.driver }
+
+// mockAppWithDBDriver creates a MockApplication with a named database that reports its driver
+func mockAppWithDBDriver(name string, db *sql.DB, driver string) *MockApplication {
+	app := NewMockApplication()
+	app.Services[name] = &testDBDriverProvider{db: db, driver: driver}
+	return app
+}
+
 // setupTestDB creates an in-memory SQLite database with test data
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()

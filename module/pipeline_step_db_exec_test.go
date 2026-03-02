@@ -204,3 +204,50 @@ func TestDBExecStep_MissingDatabase(t *testing.T) {
 		t.Fatal("expected error for missing database")
 	}
 }
+
+// TestDBExecStep_PostgresPlaceholdersOnSQLite verifies that $N placeholders
+// (canonical PostgreSQL format) are automatically converted to ? for SQLite.
+func TestDBExecStep_PostgresPlaceholdersOnSQLite(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE items (id TEXT PRIMARY KEY, name TEXT NOT NULL)`)
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	// Use driver-aware mock so normalization kicks in
+	app := mockAppWithDBDriver("test-db", db, "sqlite")
+	factory := NewDBExecStepFactory()
+	step, err := factory("insert-pg-style", map[string]any{
+		"database": "test-db",
+		"query":    "INSERT INTO items (id, name) VALUES ($1, $2)",
+		"params":   []any{"item-pg", "PostgresStyleWidget"},
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	affected, _ := result.Output["affected_rows"].(int64)
+	if affected != 1 {
+		t.Errorf("expected affected_rows=1, got %v", result.Output["affected_rows"])
+	}
+
+	var name string
+	err = db.QueryRow("SELECT name FROM items WHERE id = ?", "item-pg").Scan(&name)
+	if err != nil {
+		t.Fatalf("verify select: %v", err)
+	}
+	if name != "PostgresStyleWidget" {
+		t.Errorf("expected name='PostgresStyleWidget', got %q", name)
+	}
+}

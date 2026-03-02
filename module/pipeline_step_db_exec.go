@@ -84,6 +84,12 @@ func (s *DBExecStep) Execute(_ context.Context, pc *PipelineContext) (*StepResul
 		return nil, fmt.Errorf("db_exec step %q: database connection is nil", s.name)
 	}
 
+	// Detect driver for placeholder normalization
+	var driver string
+	if dp, ok := svc.(DBDriverProvider); ok {
+		driver = dp.DriverName()
+	}
+
 	// Resolve template params
 	resolvedParams := make([]any, len(s.params))
 	for i, p := range s.params {
@@ -94,8 +100,12 @@ func (s *DBExecStep) Execute(_ context.Context, pc *PipelineContext) (*StepResul
 		resolvedParams[i] = resolved
 	}
 
+	// Normalize SQL placeholders: users write $1,$2,$3 (PostgreSQL style),
+	// engine converts to ? for SQLite automatically.
+	query := normalizePlaceholders(s.query, driver)
+
 	// Execute statement
-	result, err := db.Exec(s.query, resolvedParams...)
+	result, err := db.Exec(query, resolvedParams...)
 	if err != nil {
 		if s.ignoreError {
 			return &StepResult{Output: map[string]any{

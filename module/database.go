@@ -179,6 +179,11 @@ func (w *WorkflowDatabase) DB() *sql.DB {
 	return w.db
 }
 
+// DriverName returns the configured database driver (e.g. "pgx", "sqlite3").
+func (w *WorkflowDatabase) DriverName() string {
+	return w.config.Driver
+}
+
 // Ping checks the database connection
 func (w *WorkflowDatabase) Ping(ctx context.Context) error {
 	w.mu.RLock()
