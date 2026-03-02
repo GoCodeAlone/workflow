@@ -225,6 +225,7 @@ var coreModuleTypes = []string{
 	"step.foreach",
 	"step.gate",
 	"step.http_call",
+	"step.http_proxy",
 	"step.jq",
 	"step.json_response",
 	"step.log",

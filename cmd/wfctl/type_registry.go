@@ -571,6 +571,11 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"url", "method", "headers", "body", "timeout", "auth"},
 		},
+		"step.http_proxy": {
+			Type:       "step.http_proxy",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"backend_url_key", "resource_key", "forward_headers", "timeout"},
+		},
 		"step.request_parse": {
 			Type:       "step.request_parse",
 			Plugin:     "pipelinesteps",
