@@ -63,6 +63,9 @@ func NewDBQueryCachedStepFactory() StepFactory {
 			if err != nil {
 				return nil, fmt.Errorf("db_query_cached step %q: invalid 'cache_ttl' %q: %w", name, ttlStr, err)
 			}
+			if parsed <= 0 {
+				return nil, fmt.Errorf("db_query_cached step %q: 'cache_ttl' must be > 0, got %q", name, ttlStr)
+			}
 			cacheTTL = parsed
 		}
 
@@ -131,7 +134,23 @@ func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*
 		return &StepResult{Output: output}, nil
 	}
 
-	// Cache miss or expired — query the database
+	// Cache miss or expired — acquire write lock and double-check to prevent stampede
+	s.mu.Lock()
+	entry, found = s.cache[key]
+	if found && time.Now().Before(entry.expiresAt) {
+		// Another goroutine populated the cache while we were waiting for the lock
+		output := copyMap(entry.value)
+		s.mu.Unlock()
+		output["cache_hit"] = true
+		return &StepResult{Output: output}, nil
+	}
+	// Evict expired entry (if any) to prevent unbounded memory growth
+	if found {
+		delete(s.cache, key)
+	}
+	s.mu.Unlock()
+
+	// Query the database
 	result, err := s.runQuery(ctx, pc)
 	if err != nil {
 		return nil, err
