@@ -90,7 +90,8 @@ func validatePlaceholderCount(query, driver string, paramCount int) error {
 	}
 
 	var count int
-	if isPostgresDriver(driver) || driver == "" {
+	switch {
+	case isPostgresDriver(driver) || driver == "":
 		// Count $N placeholders
 		matches := pgPlaceholderRe.FindAllString(query, -1)
 		// Deduplicate — same $N can appear multiple times
@@ -99,9 +100,9 @@ func validatePlaceholderCount(query, driver string, paramCount int) error {
 			unique[m] = true
 		}
 		count = len(unique)
-	} else if isSQLiteDriver(driver) {
+	case isSQLiteDriver(driver):
 		count = strings.Count(query, "?")
-	} else {
+	default:
 		return nil // Unknown driver, skip validation
 	}
 
