@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GoCodeAlone/workflow-registry/schema/registry-schema.json",
+  "title": "Plugin Manifest",
+  "description": "Schema for workflow engine plugin manifests in the GoCodeAlone/workflow-registry",
+  "type": "object",
+  "required": ["name", "version", "author", "description", "type", "tier", "license"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Unique plugin name (e.g. http, messaging, my-custom-plugin)"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+",
+      "description": "Semantic version (e.g. 1.0.0)"
+    },
+    "author": {
+      "type": "string",
+      "description": "Author or organization name"
+    },
+    "description": {
+      "type": "string",
+      "description": "Short description of what this plugin provides"
+    },
+    "source": {
+      "type": "string",
+      "description": "Source repository (Go module path or URL)"
+    },
+    "path": {
+      "type": "string",
+      "description": "Path within the source repository to the plugin package"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["builtin", "external", "ui"],
+      "description": "Plugin type: builtin (shipped with engine), external (community/third-party), ui (frontend extension)"
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["core", "community", "premium"],
+      "description": "Plugin tier: core (maintained by GoCodeAlone), community (third-party), premium (paid)"
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX license identifier (e.g. MIT, Apache-2.0)"
+    },
+    "capabilities": {
+      "type": "object",
+      "description": "Capability declarations for the plugin",
+      "properties": {
+        "moduleTypes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Module type identifiers this plugin registers (e.g. http.server, messaging.broker)"
+        },
+        "stepTypes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Pipeline step type identifiers this plugin registers (e.g. step.validate, step.http_call)"
+        },
+        "triggerTypes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Trigger type identifiers this plugin registers (e.g. http, schedule, event)"
+        },
+        "workflowHandlers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Workflow handler type identifiers this plugin registers (e.g. http, pipeline, statemachine)"
+        },
+        "wiringHooks": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Post-init wiring hook names this plugin provides"
+        }
+      },
+      "additionalProperties": false
+    },
+    "checksums": {
+      "type": "object",
+      "description": "SHA-256 checksums keyed by version string for integrity verification",
+      "additionalProperties": { "type": "string" }
+    },
+    "minEngineVersion": {
+      "type": "string",
+      "description": "Minimum workflow engine version required (semver)"
+    },
+    "keywords": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Search keywords for discovery"
+    },
+    "homepage": {
+      "type": "string",
+      "description": "Plugin documentation or homepage URL"
+    },
+    "repository": {
+      "type": "string",
+      "description": "Source code repository URL"
+    },
+    "downloads": {
+      "type": "array",
+      "description": "Binary download artifacts for this plugin version",
+      "items": {
+        "type": "object",
+        "required": ["os", "arch", "url"],
+        "properties": {
+          "os": {
+            "type": "string",
+            "enum": ["linux", "darwin", "windows"],
+            "description": "Target operating system"
+          },
+          "arch": {
+            "type": "string",
+            "enum": ["amd64", "arm64"],
+            "description": "Target CPU architecture"
+          },
+          "url": {
+            "type": "string",
+            "description": "Download URL for the binary archive"
+          },
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 checksum of the archive"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "assets": {
+      "type": "object",
+      "description": "Asset capabilities provided by this plugin",
+      "properties": {
+        "ui": {
+          "type": "boolean",
+          "description": "Plugin includes an embedded UI"
+        },
+        "config": {
+          "type": "boolean",
+          "description": "Plugin provides config fragments via ConfigProvider"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

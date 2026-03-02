@@ -204,6 +204,6 @@ func buildStrategy(strategyType appsv1.DeploymentStrategyType) appsv1.Deployment
 }
 
 func intstrPtr(val int) *intstr.IntOrString {
-	v := intstr.FromInt32(int32(val))
+	v := intstr.FromInt32(int32(val)) //nolint:gosec // G115 — val is always 0 or 1, bounded by caller
 	return &v
 }

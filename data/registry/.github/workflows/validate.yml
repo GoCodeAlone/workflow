@@ -1,0 +1,38 @@
+name: Validate Registry
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-manifests:
+    name: Validate plugin manifests against JSON Schema
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install ajv-cli
+        run: npm install --global ajv-cli
+
+      - name: Validate all plugin manifests
+        run: bash scripts/validate-manifests.sh
+
+  validate-templates:
+    name: Validate template plugin references
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate template YAML files
+        run: bash scripts/validate-templates.sh

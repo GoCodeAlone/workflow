@@ -1,0 +1,57 @@
+modules:
+  - name: mytest2-server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: mytest2-router
+    type: http.router
+    dependsOn:
+      - mytest2-server
+
+  - name: mytest2-api
+    type: http.handler
+    dependsOn:
+      - mytest2-router
+    config:
+      contentType: application/json
+
+  - name: mytest2-health
+    type: health.checker
+    config:
+      description: "Health check endpoint for mytest2"
+
+  - name: mytest2-metrics
+    type: metrics.collector
+    config:
+      description: "Prometheus metrics for mytest2"
+
+workflows:
+  http:
+    router: mytest2-router
+    server: mytest2-server
+    routes:
+      - method: GET
+        path: /health
+        handler: mytest2-health
+      - method: GET
+        path: /api/items
+        handler: mytest2-api
+      - method: POST
+        path: /api/items
+        handler: mytest2-api
+      - method: GET
+        path: /api/items/{id}
+        handler: mytest2-api
+      - method: PUT
+        path: /api/items/{id}
+        handler: mytest2-api
+      - method: DELETE
+        path: /api/items/{id}
+        handler: mytest2-api
+
+triggers:
+  - name: http-trigger
+    type: http
+    config:
+      server: mytest2-server

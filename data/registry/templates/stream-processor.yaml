@@ -1,0 +1,28 @@
+name: stream-processor
+description: Stream processing pipeline using the Bento plugin with input ingestion, Bloblang transformation, and output archival
+author: GoCodeAlone
+version: 0.1.0
+license: MIT
+keywords:
+  - bento
+  - streaming
+  - etl
+  - bloblang
+  - kafka
+  - s3
+plugins_required:
+  - bento
+  - messaging
+  - observability
+modules_used:
+  - bento.input
+  - bento.output
+  - messaging.broker
+  - metrics.collector
+  - health.checker
+trigger_types:
+  - event
+  - bento
+workflow_handlers:
+  - pipeline
+source: https://github.com/GoCodeAlone/workflow-plugin-bento/tree/main/example

@@ -1,0 +1,21 @@
+{
+  "name": "scheduler",
+  "version": "1.0.0",
+  "author": "GoCodeAlone",
+  "description": "Scheduler workflow handler and schedule trigger for cron-based job execution",
+  "source": "github.com/GoCodeAlone/workflow",
+  "path": "plugins/scheduler",
+  "type": "builtin",
+  "tier": "core",
+  "license": "MIT",
+  "minEngineVersion": "0.1.0",
+  "keywords": ["scheduler", "cron", "jobs", "schedule", "periodic", "timer"],
+  "homepage": "https://github.com/GoCodeAlone/workflow",
+  "repository": "https://github.com/GoCodeAlone/workflow",
+  "capabilities": {
+    "moduleTypes": [],
+    "stepTypes": [],
+    "triggerTypes": ["schedule"],
+    "workflowHandlers": ["scheduler"]
+  }
+}

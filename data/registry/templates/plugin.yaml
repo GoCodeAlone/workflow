@@ -1,0 +1,19 @@
+name: plugin
+description: Scaffold for a new external workflow engine plugin with module factory, step factory, and wiring hooks
+author: GoCodeAlone
+version: 0.1.0
+license: MIT
+keywords:
+  - plugin
+  - scaffold
+  - template
+  - extension
+plugins_required: []
+modules_used: []
+trigger_types: []
+workflow_handlers: []
+notes: |
+  Use this template as a starting point for building a community plugin.
+  Implement the plugin.EnginePlugin interface and register your plugin
+  with the workflow engine at startup. See the docs for full guidance.
+source: https://github.com/GoCodeAlone/workflow/tree/main/docs

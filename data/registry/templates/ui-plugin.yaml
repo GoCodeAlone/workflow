@@ -1,0 +1,20 @@
+name: ui-plugin
+description: Scaffold for a React-based UI plugin that extends the workflow builder with custom node types or pages
+author: GoCodeAlone
+version: 0.1.0
+license: MIT
+keywords:
+  - ui
+  - react
+  - plugin
+  - scaffold
+  - frontend
+plugins_required: []
+modules_used: []
+trigger_types: []
+workflow_handlers: []
+notes: |
+  Use this template to extend the workflow builder UI with custom React components,
+  new node types in the visual editor, or additional navigation pages.
+  Requires Node.js 18+ and follows the Vite + TypeScript + Zustand stack.
+source: https://github.com/GoCodeAlone/workflow/tree/main/ui

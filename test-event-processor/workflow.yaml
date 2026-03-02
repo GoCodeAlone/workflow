@@ -1,0 +1,57 @@
+modules:
+  - name: test-event-processor-server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: test-event-processor-router
+    type: http.router
+    dependsOn:
+      - test-event-processor-server
+
+  - name: test-event-processor-api
+    type: http.handler
+    dependsOn:
+      - test-event-processor-router
+    config:
+      contentType: application/json
+
+  - name: test-event-processor-health
+    type: health.checker
+    config:
+      description: "Health check endpoint for test-event-processor"
+
+  - name: test-event-processor-metrics
+    type: metrics.collector
+    config:
+      description: "Prometheus metrics for test-event-processor"
+
+workflows:
+  http:
+    router: test-event-processor-router
+    server: test-event-processor-server
+    routes:
+      - method: GET
+        path: /health
+        handler: test-event-processor-health
+      - method: GET
+        path: /api/items
+        handler: test-event-processor-api
+      - method: POST
+        path: /api/items
+        handler: test-event-processor-api
+      - method: GET
+        path: /api/items/{id}
+        handler: test-event-processor-api
+      - method: PUT
+        path: /api/items/{id}
+        handler: test-event-processor-api
+      - method: DELETE
+        path: /api/items/{id}
+        handler: test-event-processor-api
+
+triggers:
+  - name: http-trigger
+    type: http
+    config:
+      server: test-event-processor-server

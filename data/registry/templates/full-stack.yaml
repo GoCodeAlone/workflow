@@ -1,0 +1,50 @@
+name: full-stack
+description: Full-stack application with HTTP server, auth, state machine, storage, messaging, scheduling, and observability
+author: GoCodeAlone
+version: 0.1.0
+license: MIT
+keywords:
+  - full-stack
+  - http
+  - auth
+  - statemachine
+  - messaging
+  - scheduler
+  - observability
+plugins_required:
+  - http
+  - auth
+  - statemachine
+  - storage
+  - messaging
+  - scheduler
+  - observability
+  - api
+  - pipeline-steps
+modules_used:
+  - http.server
+  - http.router
+  - http.middleware.auth
+  - http.middleware.cors
+  - http.middleware.logging
+  - auth.jwt
+  - auth.user-store
+  - statemachine.engine
+  - state.tracker
+  - storage.sqlite
+  - messaging.broker
+  - metrics.collector
+  - health.checker
+  - api.handler
+  - api.gateway
+trigger_types:
+  - http
+  - schedule
+  - event
+workflow_handlers:
+  - http
+  - statemachine
+  - messaging
+  - scheduler
+  - pipeline
+source: https://github.com/GoCodeAlone/workflow/tree/main/example

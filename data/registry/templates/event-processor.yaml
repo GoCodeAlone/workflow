@@ -1,0 +1,28 @@
+name: event-processor
+description: Event-driven processor using EventBus, pipelines, and optional Kafka/NATS integration
+author: GoCodeAlone
+version: 0.1.0
+license: MIT
+keywords:
+  - events
+  - eventbus
+  - messaging
+  - pipeline
+  - async
+plugins_required:
+  - messaging
+  - pipeline-steps
+  - observability
+modules_used:
+  - messaging.broker
+  - messaging.broker.eventbus
+  - messaging.handler
+  - metrics.collector
+  - health.checker
+trigger_types:
+  - event
+  - eventbus
+workflow_handlers:
+  - messaging
+  - pipeline
+source: https://github.com/GoCodeAlone/workflow/tree/main/example

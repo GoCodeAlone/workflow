@@ -1,0 +1,24 @@
+{
+  "name": "modular-compat",
+  "version": "1.0.0",
+  "author": "GoCodeAlone",
+  "description": "CrisisTextLine/modular framework compatibility modules providing scheduler and cache integration",
+  "source": "github.com/GoCodeAlone/workflow",
+  "path": "plugins/modularcompat",
+  "type": "builtin",
+  "tier": "core",
+  "license": "MIT",
+  "minEngineVersion": "0.1.0",
+  "keywords": ["modular", "scheduler", "cache", "compatibility", "framework"],
+  "homepage": "https://github.com/GoCodeAlone/workflow",
+  "repository": "https://github.com/GoCodeAlone/workflow",
+  "capabilities": {
+    "moduleTypes": [
+      "scheduler.modular",
+      "cache.modular"
+    ],
+    "stepTypes": [],
+    "triggerTypes": [],
+    "workflowHandlers": []
+  }
+}

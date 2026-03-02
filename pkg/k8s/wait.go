@@ -61,11 +61,12 @@ func GetStatus(ctx context.Context, client *Client, appName, namespace string) (
 	result.Desired = int(*dep.Spec.Replicas)
 	result.Ready = int(dep.Status.ReadyReplicas)
 
-	if dep.Status.ReadyReplicas == *dep.Spec.Replicas {
+	switch {
+	case dep.Status.ReadyReplicas == *dep.Spec.Replicas:
 		result.Phase = "Running"
-	} else if dep.Status.UpdatedReplicas > 0 {
+	case dep.Status.UpdatedReplicas > 0:
 		result.Phase = "Updating"
-	} else {
+	default:
 		result.Phase = "Pending"
 	}
 
@@ -75,21 +76,23 @@ func GetStatus(ctx context.Context, client *Client, appName, namespace string) (
 		LabelSelector: labelSelector,
 	})
 	if err != nil {
-		return result, nil // return what we have
+		return result, nil //nolint:nilerr // intentionally return partial result without pod data when listing pods fails
 	}
 
-	for _, pod := range pods.Items {
+	for i := range pods.Items {
+		pod := &pods.Items[i]
 		ps := PodStatus{
 			Name:  pod.Name,
 			Phase: string(pod.Status.Phase),
-			Ready: isPodReady(&pod),
+			Ready: isPodReady(pod),
 			Age:   time.Since(pod.CreationTimestamp.Time),
 		}
 
 		var totalRestarts int32
-		for _, cs := range pod.Status.ContainerStatuses {
+		for j := range pod.Status.ContainerStatuses {
+			cs := &pod.Status.ContainerStatuses[j]
 			totalRestarts += cs.RestartCount
-			state, reason, msg := containerState(cs)
+			state, reason, msg := containerState(*cs)
 			ps.Containers = append(ps.Containers, ContainerStatus{
 				Name:         cs.Name,
 				Ready:        cs.Ready,

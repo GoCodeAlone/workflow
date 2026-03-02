@@ -609,14 +609,14 @@ func mcpApplyPipelineSchemas(gen *module.OpenAPIGenerator, _ string, method, pat
 						isRequired := false
 						for _, part := range parts {
 							part = strings.TrimSpace(part)
-							switch {
-							case part == "required":
+							switch part {
+							case "required":
 								isRequired = true
-							case part == "email":
+							case "email":
 								fieldSchema.Format = "email"
-							case part == "numeric" || part == "number":
+							case "numeric", "number":
 								fieldSchema.Type = "number"
-							case part == "boolean" || part == "bool":
+							case "boolean", "bool":
 								fieldSchema.Type = "boolean"
 							}
 						}
@@ -1390,7 +1390,8 @@ func mcpValidateWorkflowConfig(cfg *config.WorkflowConfig) mcpValidationResult {
 			if ms := reg.Get(mod.Type); ms != nil && mod.Config != nil && len(ms.ConfigFields) > 0 {
 				knownKeys := make(map[string]bool)
 				snakeToCamel := make(map[string]string)
-				for _, f := range ms.ConfigFields {
+				for i := range ms.ConfigFields {
+					f := &ms.ConfigFields[i]
 					knownKeys[f.Key] = true
 					if snake := schema.CamelToSnake(f.Key); snake != f.Key {
 						snakeToCamel[snake] = f.Key

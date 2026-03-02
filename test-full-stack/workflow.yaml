@@ -1,0 +1,57 @@
+modules:
+  - name: test-full-stack-server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: test-full-stack-router
+    type: http.router
+    dependsOn:
+      - test-full-stack-server
+
+  - name: test-full-stack-api
+    type: http.handler
+    dependsOn:
+      - test-full-stack-router
+    config:
+      contentType: application/json
+
+  - name: test-full-stack-health
+    type: health.checker
+    config:
+      description: "Health check endpoint for test-full-stack"
+
+  - name: test-full-stack-metrics
+    type: metrics.collector
+    config:
+      description: "Prometheus metrics for test-full-stack"
+
+workflows:
+  http:
+    router: test-full-stack-router
+    server: test-full-stack-server
+    routes:
+      - method: GET
+        path: /health
+        handler: test-full-stack-health
+      - method: GET
+        path: /api/items
+        handler: test-full-stack-api
+      - method: POST
+        path: /api/items
+        handler: test-full-stack-api
+      - method: GET
+        path: /api/items/{id}
+        handler: test-full-stack-api
+      - method: PUT
+        path: /api/items/{id}
+        handler: test-full-stack-api
+      - method: DELETE
+        path: /api/items/{id}
+        handler: test-full-stack-api
+
+triggers:
+  - name: http-trigger
+    type: http
+    config:
+      server: test-full-stack-server

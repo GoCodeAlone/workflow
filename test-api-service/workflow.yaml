@@ -1,0 +1,57 @@
+modules:
+  - name: test-api-service-server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: test-api-service-router
+    type: http.router
+    dependsOn:
+      - test-api-service-server
+
+  - name: test-api-service-api
+    type: http.handler
+    dependsOn:
+      - test-api-service-router
+    config:
+      contentType: application/json
+
+  - name: test-api-service-health
+    type: health.checker
+    config:
+      description: "Health check endpoint for test-api-service"
+
+  - name: test-api-service-metrics
+    type: metrics.collector
+    config:
+      description: "Prometheus metrics for test-api-service"
+
+workflows:
+  http:
+    router: test-api-service-router
+    server: test-api-service-server
+    routes:
+      - method: GET
+        path: /health
+        handler: test-api-service-health
+      - method: GET
+        path: /api/items
+        handler: test-api-service-api
+      - method: POST
+        path: /api/items
+        handler: test-api-service-api
+      - method: GET
+        path: /api/items/{id}
+        handler: test-api-service-api
+      - method: PUT
+        path: /api/items/{id}
+        handler: test-api-service-api
+      - method: DELETE
+        path: /api/items/{id}
+        handler: test-api-service-api
+
+triggers:
+  - name: http-trigger
+    type: http
+    config:
+      server: test-api-service-server

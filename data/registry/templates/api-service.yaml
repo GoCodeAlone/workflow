@@ -1,0 +1,34 @@
+name: api-service
+description: HTTP API with JWT auth, SQLite storage, and composable pipelines
+author: GoCodeAlone
+version: 0.1.0
+license: MIT
+keywords:
+  - api
+  - rest
+  - auth
+  - database
+  - pipeline
+plugins_required:
+  - http
+  - auth
+  - storage
+  - api
+  - pipeline-steps
+modules_used:
+  - http.server
+  - http.router
+  - http.middleware.auth
+  - http.middleware.cors
+  - auth.jwt
+  - auth.user-store
+  - storage.sqlite
+  - api.handler
+  - api.query
+  - api.command
+trigger_types:
+  - http
+workflow_handlers:
+  - http
+  - pipeline
+source: https://github.com/GoCodeAlone/workflow/tree/main/example

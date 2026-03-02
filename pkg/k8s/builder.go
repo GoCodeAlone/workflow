@@ -118,7 +118,7 @@ func Build(req *deploy.DeployRequest) (*ManifestSet, error) {
 	}
 
 	// 6. Deployment
-	replicas := int32(req.Replicas)
+	replicas := int32(req.Replicas) //nolint:gosec // G115 — replicas value bounded by config validation
 	if replicas == 0 {
 		replicas = 1
 	}
@@ -126,7 +126,7 @@ func Build(req *deploy.DeployRequest) (*ManifestSet, error) {
 	var ports []int32
 	if req.Manifest != nil {
 		for _, p := range req.Manifest.Ports {
-			ports = append(ports, int32(p.Port))
+			ports = append(ports, int32(p.Port)) //nolint:gosec // G115 — port value bounded by config validation
 		}
 	}
 	if len(ports) == 0 {

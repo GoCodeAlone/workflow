@@ -1,0 +1,57 @@
+modules:
+  - name: test-ui-plugin-server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: test-ui-plugin-router
+    type: http.router
+    dependsOn:
+      - test-ui-plugin-server
+
+  - name: test-ui-plugin-api
+    type: http.handler
+    dependsOn:
+      - test-ui-plugin-router
+    config:
+      contentType: application/json
+
+  - name: test-ui-plugin-health
+    type: health.checker
+    config:
+      description: "Health check endpoint for test-ui-plugin"
+
+  - name: test-ui-plugin-metrics
+    type: metrics.collector
+    config:
+      description: "Prometheus metrics for test-ui-plugin"
+
+workflows:
+  http:
+    router: test-ui-plugin-router
+    server: test-ui-plugin-server
+    routes:
+      - method: GET
+        path: /health
+        handler: test-ui-plugin-health
+      - method: GET
+        path: /api/items
+        handler: test-ui-plugin-api
+      - method: POST
+        path: /api/items
+        handler: test-ui-plugin-api
+      - method: GET
+        path: /api/items/{id}
+        handler: test-ui-plugin-api
+      - method: PUT
+        path: /api/items/{id}
+        handler: test-ui-plugin-api
+      - method: DELETE
+        path: /api/items/{id}
+        handler: test-ui-plugin-api
+
+triggers:
+  - name: http-trigger
+    type: http
+    config:
+      server: test-ui-plugin-server

@@ -77,7 +77,7 @@ func (m *ManifestSet) WriteYAML(dir string, singleFile bool) error {
 		if err != nil {
 			return fmt.Errorf("marshal %s/%s: %w", obj.GetKind(), obj.GetName(), err)
 		}
-		if err := os.WriteFile(path, data, 0640); err != nil {
+		if err := os.WriteFile(path, data, 0600); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}
@@ -96,7 +96,7 @@ func (m *ManifestSet) writeMultiDocYAML(path string) error {
 		}
 		buf.Write(data)
 	}
-	return os.WriteFile(path, buf.Bytes(), 0640)
+	return os.WriteFile(path, buf.Bytes(), 0600)
 }
 
 // WriteJSON writes all objects as a JSON array to the given path.
@@ -109,7 +109,7 @@ func (m *ManifestSet) WriteJSON(path string) error {
 	if err != nil {
 		return fmt.Errorf("marshal JSON: %w", err)
 	}
-	return os.WriteFile(path, data, 0640)
+	return os.WriteFile(path, data, 0600)
 }
 
 // toYAML marshals an unstructured object to YAML-compatible JSON with indentation.
@@ -133,9 +133,9 @@ func toLowerKind(kind string) string {
 			if i > 0 {
 				result = append(result, '-')
 			}
-			result = append(result, byte(c+'a'-'A'))
+			result = append(result, byte(c+'a'-'A')) //nolint:gosec // G115 — rune value is always ASCII letter (A-Z)
 		} else {
-			result = append(result, byte(c))
+			result = append(result, byte(c)) //nolint:gosec // G115 — rune value is ASCII printable character
 		}
 	}
 	return string(result)

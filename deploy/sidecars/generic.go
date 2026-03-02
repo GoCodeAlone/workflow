@@ -67,7 +67,7 @@ func (p *GenericProvider) Resolve(cfg config.SidecarConfig, platform string) (*d
 			case float64:
 				ports = append(ports, int32(v))
 			case int:
-				ports = append(ports, int32(v))
+				ports = append(ports, int32(v)) //nolint:gosec // G115 — port value bounded by config validation
 			}
 		}
 	}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -195,9 +194,4 @@ func (w *ConfigWatcher) processChange(path string) {
 		Config:  cfg,
 		Time:    time.Now(),
 	})
-}
-
-func isYAMLFile(name string) bool {
-	ext := strings.ToLower(filepath.Ext(name))
-	return ext == ".yaml" || ext == ".yml"
 }

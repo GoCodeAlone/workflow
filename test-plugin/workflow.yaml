@@ -1,0 +1,57 @@
+modules:
+  - name: test-plugin-server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: test-plugin-router
+    type: http.router
+    dependsOn:
+      - test-plugin-server
+
+  - name: test-plugin-api
+    type: http.handler
+    dependsOn:
+      - test-plugin-router
+    config:
+      contentType: application/json
+
+  - name: test-plugin-health
+    type: health.checker
+    config:
+      description: "Health check endpoint for test-plugin"
+
+  - name: test-plugin-metrics
+    type: metrics.collector
+    config:
+      description: "Prometheus metrics for test-plugin"
+
+workflows:
+  http:
+    router: test-plugin-router
+    server: test-plugin-server
+    routes:
+      - method: GET
+        path: /health
+        handler: test-plugin-health
+      - method: GET
+        path: /api/items
+        handler: test-plugin-api
+      - method: POST
+        path: /api/items
+        handler: test-plugin-api
+      - method: GET
+        path: /api/items/{id}
+        handler: test-plugin-api
+      - method: PUT
+        path: /api/items/{id}
+        handler: test-plugin-api
+      - method: DELETE
+        path: /api/items/{id}
+        handler: test-plugin-api
+
+triggers:
+  - name: http-trigger
+    type: http
+    config:
+      server: test-plugin-server

@@ -1,0 +1,29 @@
+{
+  "name": "messaging",
+  "version": "1.0.0",
+  "author": "GoCodeAlone",
+  "description": "Messaging subsystem: in-memory broker, EventBus bridge, NATS, Kafka, Slack notifications, and webhook sender",
+  "source": "github.com/GoCodeAlone/workflow",
+  "path": "plugins/messaging",
+  "type": "builtin",
+  "tier": "core",
+  "license": "MIT",
+  "minEngineVersion": "0.1.0",
+  "keywords": ["messaging", "pubsub", "eventbus", "nats", "kafka", "slack", "webhook", "broker"],
+  "homepage": "https://github.com/GoCodeAlone/workflow",
+  "repository": "https://github.com/GoCodeAlone/workflow",
+  "capabilities": {
+    "moduleTypes": [
+      "messaging.broker",
+      "messaging.broker.eventbus",
+      "messaging.handler",
+      "messaging.nats",
+      "messaging.kafka",
+      "notification.slack",
+      "webhook.sender"
+    ],
+    "stepTypes": [],
+    "triggerTypes": ["event", "eventbus"],
+    "workflowHandlers": ["messaging"]
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "name": "cicd",
+  "version": "1.0.0",
+  "author": "GoCodeAlone",
+  "description": "CI/CD pipeline step types for shell execution, Docker operations, artifact management, security scanning, deployment, and gating",
+  "source": "github.com/GoCodeAlone/workflow",
+  "path": "plugins/cicd",
+  "type": "builtin",
+  "tier": "core",
+  "license": "MIT",
+  "minEngineVersion": "0.1.0",
+  "keywords": ["cicd", "ci", "cd", "docker", "build", "deploy", "security", "scanning", "artifacts"],
+  "homepage": "https://github.com/GoCodeAlone/workflow",
+  "repository": "https://github.com/GoCodeAlone/workflow",
+  "capabilities": {
+    "moduleTypes": [],
+    "stepTypes": [
+      "step.shell_exec",
+      "step.artifact_pull",
+      "step.artifact_push",
+      "step.docker_build",
+      "step.docker_push",
+      "step.docker_run",
+      "step.scan_sast",
+      "step.scan_container",
+      "step.scan_deps",
+      "step.deploy",
+      "step.gate",
+      "step.build_ui"
+    ],
+    "triggerTypes": [],
+    "workflowHandlers": []
+  }
+}

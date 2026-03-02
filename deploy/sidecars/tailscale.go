@@ -34,7 +34,7 @@ func (p *TailscaleProvider) Resolve(cfg config.SidecarConfig, platform string) (
 	hostname, _ := cfg.Config["hostname"].(string)
 	authKeySecret, _ := cfg.Config["auth_key_secret"].(string)
 	if authKeySecret == "" {
-		authKeySecret = "tailscale-auth"
+		authKeySecret = "tailscale-auth" //nolint:gosec // G101 — k8s secret name, not a credential
 	}
 	image, _ := cfg.Config["image"].(string)
 	if image == "" {
@@ -47,12 +47,12 @@ func (p *TailscaleProvider) Resolve(cfg config.SidecarConfig, platform string) (
 		if p, ok := serveRaw["port"].(float64); ok {
 			servePort = int32(p)
 		} else if p, ok := serveRaw["port"].(int); ok {
-			servePort = int32(p)
+			servePort = int32(p) //nolint:gosec // G115 — port value bounded by config validation
 		}
 		if p, ok := serveRaw["backend_port"].(float64); ok {
 			backendPort = int32(p)
 		} else if p, ok := serveRaw["backend_port"].(int); ok {
-			backendPort = int32(p)
+			backendPort = int32(p) //nolint:gosec // G115 — port value bounded by config validation
 		}
 	}
 	if servePort == 0 {
@@ -110,7 +110,7 @@ func (p *TailscaleProvider) resolveK8s(hostname, authKeySecret, image string, se
 			"TS_SERVE_CONFIG": "/etc/ts-serve/serve-config.json",
 		},
 		SecretEnv: []deploy.SecretEnvVar{
-			{EnvName: "TS_AUTHKEY", SecretName: authKeySecret, SecretKey: "TS_AUTHKEY"},
+			{EnvName: "TS_AUTHKEY", SecretName: authKeySecret, SecretKey: "TS_AUTHKEY"}, //nolint:gosec // G101 — k8s secret name, not a credential
 		},
 		VolumeMounts: []deploy.VolumeMount{
 			{Name: "ts-serve-config", MountPath: "/etc/ts-serve", ReadOnly: true},
@@ -157,6 +157,3 @@ func (p *TailscaleProvider) resolveCompose(hostname, image string, servePort int
 	}
 }
 
-func int64Ptr(v int64) *int64 {
-	return &v
-}

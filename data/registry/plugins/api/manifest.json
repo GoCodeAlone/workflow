@@ -1,0 +1,29 @@
+{
+  "name": "api",
+  "version": "1.0.0",
+  "author": "GoCodeAlone",
+  "description": "REST API handlers, CQRS query/command, API gateway, workflow registry, and data transformation modules",
+  "source": "github.com/GoCodeAlone/workflow",
+  "path": "plugins/api",
+  "type": "builtin",
+  "tier": "core",
+  "license": "MIT",
+  "minEngineVersion": "0.1.0",
+  "keywords": ["api", "rest", "cqrs", "gateway", "query", "command", "crud", "transformer"],
+  "homepage": "https://github.com/GoCodeAlone/workflow",
+  "repository": "https://github.com/GoCodeAlone/workflow",
+  "capabilities": {
+    "moduleTypes": [
+      "api.query",
+      "api.command",
+      "api.handler",
+      "api.gateway",
+      "workflow.registry",
+      "data.transformer",
+      "processing.step"
+    ],
+    "stepTypes": [],
+    "triggerTypes": [],
+    "workflowHandlers": []
+  }
+}

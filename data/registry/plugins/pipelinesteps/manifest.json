@@ -1,0 +1,35 @@
+{
+  "name": "pipeline-steps",
+  "version": "1.0.0",
+  "author": "GoCodeAlone",
+  "description": "Generic pipeline step types (validate, transform, conditional, set, log, delegate, jq, publish, http_call, db_query, db_exec, json_response) and the pipeline workflow handler",
+  "source": "github.com/GoCodeAlone/workflow",
+  "path": "plugins/pipelinesteps",
+  "type": "builtin",
+  "tier": "core",
+  "license": "MIT",
+  "minEngineVersion": "0.1.0",
+  "keywords": ["pipeline", "steps", "validate", "transform", "conditional", "jq", "http", "database", "json"],
+  "homepage": "https://github.com/GoCodeAlone/workflow",
+  "repository": "https://github.com/GoCodeAlone/workflow",
+  "capabilities": {
+    "moduleTypes": [],
+    "stepTypes": [
+      "step.validate",
+      "step.transform",
+      "step.conditional",
+      "step.set",
+      "step.log",
+      "step.delegate",
+      "step.jq",
+      "step.publish",
+      "step.http_call",
+      "step.request_parse",
+      "step.db_query",
+      "step.db_exec",
+      "step.json_response"
+    ],
+    "triggerTypes": [],
+    "workflowHandlers": ["pipeline"]
+  }
+}

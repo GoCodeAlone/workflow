@@ -56,7 +56,7 @@ type VolumeMount struct {
 type Volume struct {
 	Name      string `json:"name"`
 	EmptyDir  bool   `json:"emptyDir,omitempty"`
-	Secret    string `json:"secret,omitempty"`
+	Secret    string `json:"secret,omitempty"` //nolint:gosec // G117 — k8s secret name reference, not a secret value
 	ConfigMap string `json:"configMap,omitempty"`
 }
 

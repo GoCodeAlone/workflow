@@ -1,0 +1,28 @@
+{
+  "name": "storage",
+  "version": "1.0.0",
+  "author": "GoCodeAlone",
+  "description": "Storage, database, and persistence modules supporting S3, GCS, local filesystem, SQLite, and generic SQL databases",
+  "source": "github.com/GoCodeAlone/workflow",
+  "path": "plugins/storage",
+  "type": "builtin",
+  "tier": "core",
+  "license": "MIT",
+  "minEngineVersion": "0.1.0",
+  "keywords": ["storage", "s3", "gcs", "sqlite", "database", "persistence", "sql"],
+  "homepage": "https://github.com/GoCodeAlone/workflow",
+  "repository": "https://github.com/GoCodeAlone/workflow",
+  "capabilities": {
+    "moduleTypes": [
+      "storage.s3",
+      "storage.local",
+      "storage.gcs",
+      "storage.sqlite",
+      "database.workflow",
+      "persistence.store"
+    ],
+    "stepTypes": [],
+    "triggerTypes": [],
+    "workflowHandlers": []
+  }
+}

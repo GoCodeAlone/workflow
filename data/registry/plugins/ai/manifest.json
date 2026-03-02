@@ -1,0 +1,28 @@
+{
+  "name": "ai",
+  "version": "1.0.0",
+  "author": "GoCodeAlone",
+  "description": "AI pipeline steps (complete, classify, extract), dynamic components with hot-reload, and sub-workflow orchestration",
+  "source": "github.com/GoCodeAlone/workflow",
+  "path": "plugins/ai",
+  "type": "builtin",
+  "tier": "core",
+  "license": "MIT",
+  "minEngineVersion": "0.1.0",
+  "keywords": ["ai", "llm", "completion", "classification", "extraction", "dynamic", "hot-reload", "yaegi"],
+  "homepage": "https://github.com/GoCodeAlone/workflow",
+  "repository": "https://github.com/GoCodeAlone/workflow",
+  "capabilities": {
+    "moduleTypes": [
+      "dynamic.component"
+    ],
+    "stepTypes": [
+      "step.ai_complete",
+      "step.ai_classify",
+      "step.ai_extract",
+      "step.sub_workflow"
+    ],
+    "triggerTypes": [],
+    "workflowHandlers": []
+  }
+}
