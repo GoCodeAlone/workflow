@@ -7,7 +7,7 @@ require (
 	github.com/CrisisTextLine/modular v1.11.11
 	github.com/CrisisTextLine/modular/modules/auth v0.4.0
 	github.com/CrisisTextLine/modular/modules/cache v0.4.0
-	github.com/CrisisTextLine/modular/modules/eventbus/v2 v2.0.0
+	github.com/CrisisTextLine/modular/modules/eventbus/v2 v2.1.0
 	github.com/CrisisTextLine/modular/modules/jsonschema v1.4.0
 	github.com/CrisisTextLine/modular/modules/reverseproxy/v2 v2.2.0
 	github.com/CrisisTextLine/modular/modules/scheduler v0.4.0
