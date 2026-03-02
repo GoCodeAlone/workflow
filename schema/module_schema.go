@@ -950,6 +950,21 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	})
 
 	r.Register(&ModuleSchema{
+		Type:        "step.http_proxy",
+		Label:       "HTTP Proxy",
+		Category:    "pipeline",
+		Description: "Forwards the original HTTP request to a dynamically resolved backend URL and writes the response directly to the client",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with _http_request and _http_response_writer metadata"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Proxy response status and target URL; Stop is always true"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "backend_url_key", Label: "Backend URL Key", Type: FieldTypeString, DefaultValue: "backend_url", Description: "Dot-path in pc.Current for the backend URL (e.g. backend_url or steps.resolve.url)"},
+			{Key: "resource_key", Label: "Resource Key", Type: FieldTypeString, DefaultValue: "path_params.resource", Description: "Dot-path in pc.Current for the resource path suffix"},
+			{Key: "forward_headers", Label: "Forward Headers", Type: FieldTypeArray, ArrayItemType: "string", Description: "Header names to copy from the original request to the proxy request"},
+			{Key: "timeout", Label: "Timeout", Type: FieldTypeString, DefaultValue: "30s", Description: "Proxy request timeout duration", Placeholder: "30s"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
 		Type:        "step.delegate",
 		Label:       "Delegate",
 		Category:    "pipeline",

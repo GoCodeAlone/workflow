@@ -1,7 +1,7 @@
 // Package pipelinesteps provides a plugin that registers generic pipeline step
 // types: validate, transform, conditional, set, log, delegate, jq, publish,
-// http_call, request_parse, db_query, db_exec, db_query_cached, json_response, raw_response,
-// validate_path_param, validate_pagination, validate_request_body,
+// http_call, http_proxy, request_parse, db_query, db_exec, db_query_cached, json_response,
+// raw_response, validate_path_param, validate_pagination, validate_request_body,
 // foreach, webhook_verify, base64_decode, ui_scaffold, ui_scaffold_analyze,
 // dlq_send, dlq_replay, retry_with_backoff, circuit_breaker (wrapping),
 // s3_upload, auth_validate, token_revoke, sandbox_exec.
@@ -89,6 +89,7 @@ func New() *Plugin {
 					"step.token_revoke",
 					"step.field_reencrypt",
 					"step.sandbox_exec",
+					"step.http_proxy",
 				},
 				WorkflowTypes: []string{"pipeline"},
 				Capabilities: []plugin.CapabilityDecl{
@@ -157,6 +158,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.token_revoke":     wrapStepFactory(module.NewTokenRevokeStepFactory()),
 		"step.field_reencrypt":  wrapStepFactory(module.NewFieldReencryptStepFactory()),
 		"step.sandbox_exec":     wrapStepFactory(module.NewSandboxExecStepFactory()),
+		"step.http_proxy":       wrapStepFactory(module.NewHTTPProxyStepFactory()),
 	}
 }
 

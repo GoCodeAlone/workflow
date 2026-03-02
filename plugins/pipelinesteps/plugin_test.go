@@ -67,6 +67,7 @@ func TestStepFactories(t *testing.T) {
 		"step.base64_decode",
 		"step.field_reencrypt",
 		"step.sandbox_exec",
+		"step.http_proxy",
 	}
 
 	for _, stepType := range expectedSteps {
