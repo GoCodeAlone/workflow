@@ -496,7 +496,7 @@ func (s *Server) handleListPlugins(_ context.Context, req mcp.CallToolRequest) (
 }
 
 func (s *Server) handleGetConfigSkeleton(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	rawTypes := req.Params.Arguments["module_types"]
+	rawTypes := req.GetArguments()["module_types"]
 	if rawTypes == nil {
 		return mcp.NewToolResultError("module_types is required"), nil
 	}
@@ -537,7 +537,7 @@ func (s *Server) handleRunWorkflow(ctx context.Context, req mcp.CallToolRequest)
 	}
 
 	var data map[string]any
-	if rawData, ok := req.Params.Arguments["data"]; ok && rawData != nil {
+	if rawData, ok := req.GetArguments()["data"]; ok && rawData != nil {
 		if d, ok := rawData.(map[string]any); ok {
 			data = d
 		}
