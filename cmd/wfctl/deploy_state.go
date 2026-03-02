@@ -35,10 +35,21 @@ type DeployedPipelineState struct {
 	Method string `json:"method,omitempty"`
 }
 
+// DeployedK8sResource records a Kubernetes resource created during deployment.
+type DeployedK8sResource struct {
+	// GVK is the GroupVersionKind string (e.g., "apps/v1/Deployment").
+	GVK string `json:"gvk"`
+	// Name is the resource name.
+	Name string `json:"name"`
+	// Namespace is the resource namespace.
+	Namespace string `json:"namespace,omitempty"`
+}
+
 // DeployedResources is the top-level resource map inside a DeploymentState.
 type DeployedResources struct {
-	Modules   map[string]DeployedModuleState   `json:"modules,omitempty"`
-	Pipelines map[string]DeployedPipelineState `json:"pipelines,omitempty"`
+	Modules      map[string]DeployedModuleState   `json:"modules,omitempty"`
+	Pipelines    map[string]DeployedPipelineState `json:"pipelines,omitempty"`
+	K8sResources []DeployedK8sResource            `json:"k8sResources,omitempty"`
 }
 
 // DeploymentState is the full state manifest written after a successful deploy.

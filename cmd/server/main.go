@@ -29,6 +29,7 @@ import (
 	"github.com/GoCodeAlone/workflow/bundle"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/deploy"
+	deployexec "github.com/GoCodeAlone/workflow/deploy/executor"
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/environment"
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -746,7 +747,7 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	// Deploy executor with strategy registry — discover cloud providers from
 	// the PluginManager rather than constructing them explicitly.
 	strategyReg := deploy.NewStrategyRegistry(logger)
-	deployExecutor := deploy.NewExecutor(strategyReg)
+	deployExecutor := deployexec.NewExecutor(strategyReg)
 	cloudMux := http.NewServeMux()
 	for _, np := range pluginMgr.EnabledPlugins() {
 		if cp, ok := np.(provider.CloudProvider); ok {

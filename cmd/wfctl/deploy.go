@@ -1,14 +1,24 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/deploy"
+	"github.com/GoCodeAlone/workflow/deploy/sidecars"
+	"github.com/GoCodeAlone/workflow/manifest"
+	k8s "github.com/GoCodeAlone/workflow/pkg/k8s"
+	"github.com/GoCodeAlone/workflow/pkg/k8s/imageloader"
 )
 
 func runDeploy(args []string) error {
@@ -19,7 +29,9 @@ func runDeploy(args []string) error {
 	case "docker":
 		return runDeployDocker(args[1:])
 	case "kubernetes", "k8s":
-		return runDeployKubernetes(args[1:])
+		return runDeployK8s(args[1:])
+	case "helm":
+		return runDeployHelm(args[1:])
 	case "cloud":
 		return runDeployCloud(args[1:])
 	default:
@@ -33,16 +45,72 @@ func deployUsage() error {
 Deploy a workflow application to a target environment.
 
 Targets:
-  docker      Build Docker image and run locally via docker compose
-  kubernetes  Deploy to a Kubernetes cluster using Helm
-  cloud       Deploy to a cloud environment (requires .wfctl.yaml or deploy.yaml)
+  docker          Build Docker image and run locally via docker compose
+  kubernetes|k8s  Deploy to Kubernetes via client-go (server-side apply)
+  helm            Deploy to Kubernetes using Helm charts
+  cloud           Deploy to a cloud environment (requires .wfctl.yaml or deploy.yaml)
 
-Examples:
+Kubernetes subcommands:
+  generate  Produce K8s manifests for review or version control
+  apply     Build (optional), load, and apply manifests to a cluster
+  destroy   Delete all resources for an app
+  status    Show deployment status and pod health
+  logs      Stream logs from the deployed app
+  diff      Compare generated manifests against live cluster state
+
+Build flags (used with --build on apply):
+  --build            Build Docker image and load into cluster before deploying
+  --dockerfile PATH  Path to Dockerfile (default: Dockerfile)
+  --build-context DIR  Docker build context directory (default: .)
+  --build-arg ARGS   Docker build args (comma-separated KEY=VALUE pairs)
+  --runtime NAME     Override auto-detected runtime (minikube|kind|docker-desktop|k3d|remote)
+  --registry URL     Registry for remote clusters (e.g. ghcr.io/org)
+
+Runtime auto-detection (from kubeconfig context name):
+  minikube / minikube-*  →  minikube image load     (imagePullPolicy: Never)
+  kind-*                 →  kind load docker-image   (imagePullPolicy: Never)
+  docker-desktop         →  shared daemon (no load)  (imagePullPolicy: IfNotPresent)
+  k3d-*                  →  k3d image import         (imagePullPolicy: Never)
+  anything else          →  docker push --registry   (imagePullPolicy: IfNotPresent)
+
+Recommended workflow (local development):
+  # One command: build, load into cluster, apply manifests, wait for healthy
+  wfctl deploy k8s apply --build -config app.yaml --force --wait
+
+  # With explicit image tag
+  wfctl deploy k8s apply --build -config app.yaml -image myapp:v2 --force --wait
+
+  # Preview manifests without applying
+  wfctl deploy k8s generate -config app.yaml -image myapp:v1
+
+  # Check what's running
+  wfctl deploy k8s status -app myapp
+
+  # Stream logs
+  wfctl deploy k8s logs -app myapp --follow
+
+Recommended workflow (remote cluster):
+  # Build, push to registry, deploy
+  wfctl deploy k8s apply --build -config app.yaml --registry ghcr.io/org --wait
+
+  # Compare local config against live cluster
+  wfctl deploy k8s diff -config app.yaml -image ghcr.io/org/myapp:v1
+
+Persisting defaults (.wfctl.yaml):
+  deploy:
+    target: kubernetes
+    namespace: prod
+    build:
+      dockerfile: Dockerfile
+      runtime: minikube
+      registry: ghcr.io/myorg
+
+Other examples:
   wfctl deploy docker -config workflow.yaml
-  wfctl deploy kubernetes -namespace prod -values custom.yaml
+  wfctl deploy helm -namespace prod -values custom.yaml
   wfctl deploy cloud -target staging
 `)
-	return fmt.Errorf("deploy target is required (docker, kubernetes, cloud)")
+	return fmt.Errorf("deploy target is required")
 }
 
 // runDeployDocker builds a Docker image and runs the app via docker compose.
@@ -95,15 +163,9 @@ Options:
 	}
 
 	// Build the Docker image
-	fmt.Printf("building Docker image %s...\n", *image)
-	buildCmd := exec.Command("docker", "build", "-t", *image, ".") //nolint:gosec // G204: image and cwd are validated inputs
-	buildCmd.Dir = cwd
-	buildCmd.Stdout = os.Stdout
-	buildCmd.Stderr = os.Stderr
-	if err := buildCmd.Run(); err != nil {
-		return fmt.Errorf("docker build failed: %w", err)
+	if err := buildDockerImage(*image, filepath.Join(cwd, "Dockerfile"), cwd, nil); err != nil {
+		return err
 	}
-	fmt.Printf("image %s built successfully\n", *image)
 
 	if *noCompose {
 		return nil
@@ -123,9 +185,9 @@ Options:
 	return nil
 }
 
-// runDeployKubernetes deploys to Kubernetes using Helm.
-func runDeployKubernetes(args []string) error {
-	fs := flag.NewFlagSet("deploy kubernetes", flag.ContinueOnError)
+// runDeployHelm deploys to Kubernetes using Helm.
+func runDeployHelm(args []string) error {
+	fs := flag.NewFlagSet("deploy helm", flag.ContinueOnError)
 	namespace := fs.String("namespace", "default", "Kubernetes namespace")
 	releaseName := fs.String("release", "workflow", "Helm release name")
 	chartDir := fs.String("chart", "", "Path to Helm chart directory (default: deploy/helm/workflow or bundled chart)")
@@ -133,7 +195,7 @@ func runDeployKubernetes(args []string) error {
 	setValues := fs.String("set", "", "Comma-separated key=value pairs to override (--set passed to helm)")
 	dryRun := fs.Bool("dry-run", false, "Pass --dry-run to helm (simulate install)")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: wfctl deploy kubernetes [options]
+		fmt.Fprintf(fs.Output(), `Usage: wfctl deploy helm [options]
 
 Deploy the workflow application to a Kubernetes cluster using Helm.
 The cluster must be reachable via kubectl and helm must be installed.
@@ -209,6 +271,488 @@ Options:
 		fmt.Printf("\nrelease %q deployed to namespace %q\n", *releaseName, *namespace)
 		fmt.Printf("check status: kubectl -n %s get pods\n", *namespace)
 	}
+	return nil
+}
+
+// buildDockerImage builds a Docker image using the local Docker daemon.
+// buildArgs is a slice of KEY=VALUE strings passed as --build-arg flags.
+func buildDockerImage(image, dockerfile, buildCtx string, buildArgs []string) error {
+	fmt.Printf("building image %s...\n", image)
+	args := []string{"build", "-t", image, "-f", dockerfile}
+	for _, ba := range buildArgs {
+		args = append(args, "--build-arg", ba)
+	}
+	args = append(args, buildCtx)
+	cmd := exec.Command("docker", args...) //nolint:gosec // G204: validated build inputs
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker build failed: %w", err)
+	}
+	fmt.Printf("image %s built\n", image)
+	return nil
+}
+
+// resolveImageTag appends a git short hash tag if the image has no tag.
+func resolveImageTag(image string) string {
+	if strings.Contains(image, ":") {
+		return image
+	}
+	out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return image + ":latest"
+	}
+	return image + ":" + strings.TrimSpace(string(out))
+}
+
+// runDeployK8s dispatches kubernetes subcommands.
+func runDeployK8s(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("kubernetes subcommand required: generate, apply, destroy, status, logs, diff")
+	}
+	switch args[0] {
+	case "generate":
+		return runK8sGenerate(args[1:])
+	case "apply":
+		return runK8sApply(args[1:])
+	case "destroy":
+		return runK8sDestroy(args[1:])
+	case "status":
+		return runK8sStatus(args[1:])
+	case "logs":
+		return runK8sLogs(args[1:])
+	case "diff":
+		return runK8sDiff(args[1:])
+	default:
+		return fmt.Errorf("unknown kubernetes subcommand %q (try: generate, apply, destroy, status, logs, diff)", args[0])
+	}
+}
+
+// k8sCommonFlags bundles the flags shared across k8s subcommands.
+type k8sCommonFlags struct {
+	configFile      string
+	image           string
+	namespace       string
+	appName         string
+	replicas        int
+	secretRef       string
+	command         string
+	args            string
+	imagePullPolicy string
+	strategy        string
+	serviceAccount  string
+	healthPath      string
+	configMapName   string
+}
+
+func addK8sCommonFlags(fs *flag.FlagSet, f *k8sCommonFlags) {
+	fs.StringVar(&f.configFile, "config", "app.yaml", "Workflow config file")
+	fs.StringVar(&f.image, "image", "", "Container image name:tag (required)")
+	fs.StringVar(&f.namespace, "namespace", "default", "Kubernetes namespace")
+	fs.StringVar(&f.appName, "app", "", "Application name (default: derived from config)")
+	fs.IntVar(&f.replicas, "replicas", 1, "Number of replicas")
+	fs.StringVar(&f.secretRef, "secret", "", "Secret name for environment variables")
+	fs.StringVar(&f.command, "command", "", "Container command (comma-separated)")
+	fs.StringVar(&f.args, "args", "", "Container args (comma-separated, overrides default)")
+	fs.StringVar(&f.imagePullPolicy, "image-pull-policy", "", "Image pull policy (Never, Always, IfNotPresent)")
+	fs.StringVar(&f.strategy, "strategy", "", "Deployment strategy (Recreate or RollingUpdate)")
+	fs.StringVar(&f.serviceAccount, "service-account", "", "Pod service account name")
+	fs.StringVar(&f.healthPath, "health-path", "", "Health check path (default: /healthz)")
+	fs.StringVar(&f.configMapName, "configmap-name", "", "Override configmap name")
+}
+
+func (f *k8sCommonFlags) toDeployRequest(cfg *config.WorkflowConfig, m *manifest.WorkflowManifest) *deploy.DeployRequest {
+	req := &deploy.DeployRequest{
+		Config:          cfg,
+		Manifest:        m,
+		Image:           f.image,
+		Namespace:       f.namespace,
+		AppName:         f.appName,
+		Replicas:        f.replicas,
+		SecretRef:       f.secretRef,
+		ImagePullPolicy: f.imagePullPolicy,
+		Strategy:        f.strategy,
+		ServiceAccount:  f.serviceAccount,
+		HealthPath:      f.healthPath,
+		ConfigMapName:   f.configMapName,
+	}
+	if f.command != "" {
+		req.Command = strings.Split(f.command, ",")
+	}
+	if f.args != "" {
+		req.Args = strings.Split(f.args, ",")
+	}
+
+	// Read raw config file and expand env vars for the ConfigMap.
+	// Use os.Expand with a safe mapper that only replaces variables
+	// actually set in the environment — preserves $1, $2, etc.
+	rawData, err := os.ReadFile(f.configFile)
+	if err == nil {
+		req.ConfigFileData = []byte(os.Expand(string(rawData), func(key string) string {
+			if v, ok := os.LookupEnv(key); ok {
+				return v
+			}
+			return "$" + key
+		}))
+	}
+
+	return req
+}
+
+func resolveSidecars(cfg *config.WorkflowConfig, platform string) ([]*deploy.SidecarSpec, error) {
+	if len(cfg.Sidecars) == 0 {
+		return nil, nil
+	}
+	registry := deploy.NewSidecarRegistry()
+	registry.Register(sidecars.NewTailscale())
+	registry.Register(sidecars.NewGeneric())
+	return registry.Resolve(cfg.Sidecars, platform)
+}
+
+func runK8sGenerate(args []string) error {
+	fs := flag.NewFlagSet("deploy k8s generate", flag.ContinueOnError)
+	var f k8sCommonFlags
+	addK8sCommonFlags(fs, &f)
+	outputDir := fs.String("output", "./k8s-generated/", "Output directory for generated manifests")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if f.image == "" {
+		return fmt.Errorf("-image is required")
+	}
+
+	cfg, err := config.LoadFromFile(f.configFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	m := manifest.Analyze(cfg)
+	if f.appName == "" {
+		f.appName = m.Name
+	}
+
+	req := f.toDeployRequest(cfg, m)
+	req.OutputDir = *outputDir
+
+	// Resolve sidecars from config
+	sidecarSpecs, err := resolveSidecars(cfg, "kubernetes")
+	if err != nil {
+		return fmt.Errorf("resolve sidecars: %w", err)
+	}
+	req.Sidecars = sidecarSpecs
+
+	ms, err := k8s.Build(req)
+	if err != nil {
+		return fmt.Errorf("build manifests: %w", err)
+	}
+
+	if err := ms.WriteYAML(*outputDir, false); err != nil {
+		return fmt.Errorf("write manifests: %w", err)
+	}
+
+	fmt.Printf("generated %d manifests in %s\n", len(ms.Objects), *outputDir)
+	return nil
+}
+
+func runK8sApply(args []string) error {
+	fs := flag.NewFlagSet("deploy k8s apply", flag.ContinueOnError)
+	var f k8sCommonFlags
+	addK8sCommonFlags(fs, &f)
+	dryRun := fs.Bool("dry-run", false, "Server-side dry run without applying")
+	wait := fs.Bool("wait", false, "Wait for rollout to complete")
+	force := fs.Bool("force", false, "Force take ownership of fields from other managers")
+	build := fs.Bool("build", false, "Build Docker image and load into cluster before deploying")
+	dockerfile := fs.String("dockerfile", "Dockerfile", "Path to Dockerfile")
+	buildCtx := fs.String("build-context", ".", "Docker build context directory")
+	buildArgStr := fs.String("build-arg", "", "Docker build args (comma-separated KEY=VALUE pairs)")
+	runtime := fs.String("runtime", "", "Cluster runtime override (minikube|kind|docker-desktop|k3d|remote)")
+	registry := fs.String("registry", "", "Registry for remote clusters (e.g. ghcr.io/org)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	// Load .wfctl.yaml defaults for build settings
+	if wfcfg, loadErr := loadWfctlConfig(); loadErr == nil {
+		if *dockerfile == "Dockerfile" && wfcfg.BuildDockerfile != "" {
+			*dockerfile = wfcfg.BuildDockerfile
+		}
+		if *buildCtx == "." && wfcfg.BuildContext != "" {
+			*buildCtx = wfcfg.BuildContext
+		}
+		if *runtime == "" && wfcfg.BuildRuntime != "" {
+			*runtime = wfcfg.BuildRuntime
+		}
+		if *registry == "" && wfcfg.BuildRegistry != "" {
+			*registry = wfcfg.BuildRegistry
+		}
+	}
+
+	// Derive image name when --build is set and no -image provided
+	if f.image == "" {
+		if *build {
+			cwd, _ := os.Getwd()
+			name := filepath.Base(cwd)
+			if wfcfg, err := loadWfctlConfig(); err == nil && wfcfg.ProjectName != "" {
+				name = wfcfg.ProjectName
+			}
+			f.image = resolveImageTag(name)
+		} else {
+			return fmt.Errorf("-image is required (or use --build to build from Dockerfile)")
+		}
+	}
+
+	if *build {
+		// Resolve image tag if none provided
+		f.image = resolveImageTag(f.image)
+
+		// Build the Docker image
+		var buildArgs []string
+		if *buildArgStr != "" {
+			buildArgs = strings.Split(*buildArgStr, ",")
+		}
+		if err := buildDockerImage(f.image, *dockerfile, *buildCtx, buildArgs); err != nil {
+			return err
+		}
+
+		// Detect or use explicit runtime
+		var rtInfo *k8s.RuntimeInfo
+		if *runtime != "" {
+			rtInfo = &k8s.RuntimeInfo{
+				Runtime:     imageloader.Runtime(*runtime),
+				ContextName: *runtime,
+				ClusterName: *runtime,
+			}
+		} else {
+			var detectErr error
+			rtInfo, detectErr = k8s.DetectRuntime("", "")
+			if detectErr != nil {
+				return fmt.Errorf("detect cluster runtime: %w", detectErr)
+			}
+			fmt.Printf("detected runtime: %s (context: %s)\n", rtInfo.Runtime, rtInfo.ContextName)
+		}
+
+		// Load image into cluster
+		reg := imageloader.NewRegistry()
+		reg.Register(imageloader.NewMinikube())
+		reg.Register(imageloader.NewKind())
+		reg.Register(imageloader.NewDockerDesktop())
+		reg.Register(imageloader.NewK3d())
+		reg.Register(imageloader.NewRemote())
+
+		loadCfg := &imageloader.LoadConfig{
+			Image:    f.image,
+			Runtime:  rtInfo.Runtime,
+			Registry: *registry,
+			Cluster:  rtInfo.ClusterName,
+		}
+
+		if rtInfo.Runtime == imageloader.RuntimeRemote && *registry == "" {
+			return fmt.Errorf("--registry is required for remote clusters (context %q does not match a local runtime)", rtInfo.ContextName)
+		}
+
+		if err := reg.Load(loadCfg); err != nil {
+			return fmt.Errorf("load image: %w", err)
+		}
+
+		// For remote, use the registry-qualified image name
+		if loadCfg.ResolvedImage != "" {
+			f.image = loadCfg.ResolvedImage
+		}
+
+		// Auto-set imagePullPolicy based on runtime
+		if f.imagePullPolicy == "" {
+			switch rtInfo.Runtime {
+			case imageloader.RuntimeMinikube, imageloader.RuntimeKind, imageloader.RuntimeK3d:
+				f.imagePullPolicy = "Never"
+			case imageloader.RuntimeDockerDesktop, imageloader.RuntimeRemote:
+				f.imagePullPolicy = "IfNotPresent"
+			}
+		}
+	}
+
+	cfg, err := config.LoadFromFile(f.configFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	m := manifest.Analyze(cfg)
+	if f.appName == "" {
+		f.appName = m.Name
+	}
+
+	req := f.toDeployRequest(cfg, m)
+
+	// Resolve sidecars from config
+	sidecarSpecs, err := resolveSidecars(cfg, "kubernetes")
+	if err != nil {
+		return fmt.Errorf("resolve sidecars: %w", err)
+	}
+	req.Sidecars = sidecarSpecs
+
+	target := k8s.NewDeployTarget()
+	artifacts, err := target.Generate(context.Background(), req)
+	if err != nil {
+		return fmt.Errorf("generate: %w", err)
+	}
+
+	opts := deploy.ApplyOpts{
+		DryRun:       *dryRun,
+		Force:        *force,
+		FieldManager: "wfctl",
+	}
+
+	result, err := target.Apply(context.Background(), artifacts, opts)
+	if err != nil {
+		return fmt.Errorf("apply: %w", err)
+	}
+
+	for _, r := range result.Resources {
+		fmt.Printf("  %s  %s/%s\n", r.Status, r.Kind, r.Name)
+	}
+	fmt.Printf("\n%s\n", result.Message)
+
+	if *wait && !*dryRun {
+		fmt.Printf("waiting for rollout...\n")
+		waitClient, clientErr := k8s.NewClient(k8s.ClientConfig{Namespace: f.namespace})
+		if clientErr != nil {
+			return fmt.Errorf("create k8s client for wait: %w", clientErr)
+		}
+		if waitErr := k8s.WaitForRollout(context.Background(), waitClient, f.appName, f.namespace, 5*60*time.Second); waitErr != nil {
+			return fmt.Errorf("rollout: %w", waitErr)
+		}
+		fmt.Printf("rollout complete\n")
+	}
+
+	return nil
+}
+
+func runK8sDestroy(args []string) error {
+	fs := flag.NewFlagSet("deploy k8s destroy", flag.ContinueOnError)
+	namespace := fs.String("namespace", "default", "Kubernetes namespace")
+	appName := fs.String("app", "", "Application name (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *appName == "" {
+		return fmt.Errorf("-app is required")
+	}
+
+	target := k8s.NewDeployTarget()
+	if err := target.Destroy(context.Background(), *appName, *namespace); err != nil {
+		return fmt.Errorf("destroy: %w", err)
+	}
+
+	fmt.Printf("destroyed resources for %q in namespace %q\n", *appName, *namespace)
+	return nil
+}
+
+func runK8sStatus(args []string) error {
+	fs := flag.NewFlagSet("deploy k8s status", flag.ContinueOnError)
+	namespace := fs.String("namespace", "default", "Kubernetes namespace")
+	appName := fs.String("app", "", "Application name (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *appName == "" {
+		return fmt.Errorf("-app is required")
+	}
+
+	target := k8s.NewDeployTarget()
+	status, err := target.Status(context.Background(), *appName, *namespace)
+	if err != nil {
+		return fmt.Errorf("status: %w", err)
+	}
+
+	fmt.Printf("App:       %s\n", status.AppName)
+	fmt.Printf("Namespace: %s\n", status.Namespace)
+	fmt.Printf("Phase:     %s\n", status.Phase)
+	fmt.Printf("Ready:     %d/%d\n", status.Ready, status.Desired)
+	if status.Message != "" {
+		fmt.Printf("Message:   %s\n", status.Message)
+	}
+
+	if len(status.Resources) > 0 {
+		fmt.Printf("\nResources:\n")
+		for _, r := range status.Resources {
+			fmt.Printf("  %-12s %-30s %s\n", r.Kind, r.Name, r.Status)
+		}
+	}
+	return nil
+}
+
+func runK8sLogs(args []string) error {
+	fs := flag.NewFlagSet("deploy k8s logs", flag.ContinueOnError)
+	namespace := fs.String("namespace", "default", "Kubernetes namespace")
+	appName := fs.String("app", "", "Application name (required)")
+	container := fs.String("container", "", "Container name (default: app name)")
+	follow := fs.Bool("follow", false, "Follow log output")
+	tail := fs.Int64("tail", 100, "Number of lines to show from end of logs")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *appName == "" {
+		return fmt.Errorf("-app is required")
+	}
+
+	target := k8s.NewDeployTarget()
+	logOpts := deploy.LogOpts{
+		Container: *container,
+		Follow:    *follow,
+		TailLines: *tail,
+	}
+
+	reader, err := target.Logs(context.Background(), *appName, *namespace, logOpts)
+	if err != nil {
+		return fmt.Errorf("logs: %w", err)
+	}
+	defer reader.Close()
+
+	_, copyErr := io.Copy(os.Stdout, reader)
+	return copyErr
+}
+
+func runK8sDiff(args []string) error {
+	fs := flag.NewFlagSet("deploy k8s diff", flag.ContinueOnError)
+	var f k8sCommonFlags
+	addK8sCommonFlags(fs, &f)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if f.image == "" {
+		return fmt.Errorf("-image is required")
+	}
+
+	cfg, err := config.LoadFromFile(f.configFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	m := manifest.Analyze(cfg)
+	if f.appName == "" {
+		f.appName = m.Name
+	}
+
+	req := f.toDeployRequest(cfg, m)
+
+	// Resolve sidecars from config
+	sidecarSpecs, err := resolveSidecars(cfg, "kubernetes")
+	if err != nil {
+		return fmt.Errorf("resolve sidecars: %w", err)
+	}
+	req.Sidecars = sidecarSpecs
+
+	target := k8s.NewDeployTarget()
+	artifacts, err := target.Generate(context.Background(), req)
+	if err != nil {
+		return fmt.Errorf("generate: %w", err)
+	}
+
+	diff, err := target.Diff(context.Background(), artifacts)
+	if err != nil {
+		return fmt.Errorf("diff: %w", err)
+	}
+
+	fmt.Print(diff)
 	return nil
 }
 

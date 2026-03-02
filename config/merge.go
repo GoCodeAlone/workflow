@@ -17,6 +17,7 @@ func DeepMergeConfigs(base, override *WorkflowConfig) *WorkflowConfig {
 		Triggers:  deepMergeMap(base.Triggers, override.Triggers),
 		Pipelines: deepMergeMap(base.Pipelines, override.Pipelines),
 		Platform:  deepMergeMap(base.Platform, override.Platform),
+		Sidecars:  deepMergeSidecars(base.Sidecars, override.Sidecars),
 		ConfigDir: base.ConfigDir,
 	}
 	if override.ConfigDir != "" {
@@ -52,6 +53,33 @@ func deepMergeModules(base, override []ModuleConfig) []ModuleConfig {
 			result[idx] = merged
 		} else {
 			result = append(result, om)
+		}
+	}
+	return result
+}
+
+func deepMergeSidecars(base, override []SidecarConfig) []SidecarConfig {
+	if len(override) == 0 {
+		return base
+	}
+	result := make([]SidecarConfig, len(base))
+	copy(result, base)
+
+	baseIdx := make(map[string]int)
+	for i, sc := range result {
+		baseIdx[sc.Name] = i
+	}
+
+	for _, osc := range override {
+		if idx, ok := baseIdx[osc.Name]; ok {
+			merged := result[idx]
+			merged.Config = deepMergeMap(merged.Config, osc.Config)
+			if osc.Type != "" {
+				merged.Type = osc.Type
+			}
+			result[idx] = merged
+		} else {
+			result = append(result, osc)
 		}
 	}
 	return result
@@ -103,6 +131,19 @@ func MergeConfigs(primary, fragment *WorkflowConfig) {
 		for k, v := range fragment.Triggers {
 			if _, exists := primary.Triggers[k]; !exists {
 				primary.Triggers[k] = v
+			}
+		}
+	}
+
+	// Merge sidecars — deduplicate by name, primary wins
+	if len(fragment.Sidecars) > 0 {
+		existing := make(map[string]struct{}, len(primary.Sidecars))
+		for _, sc := range primary.Sidecars {
+			existing[sc.Name] = struct{}{}
+		}
+		for _, sc := range fragment.Sidecars {
+			if _, ok := existing[sc.Name]; !ok {
+				primary.Sidecars = append(primary.Sidecars, sc)
 			}
 		}
 	}

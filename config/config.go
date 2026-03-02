@@ -90,6 +90,14 @@ type PluginRequirement struct {
 	Version string `json:"version,omitempty" yaml:"version,omitempty"`
 }
 
+// SidecarConfig defines a sidecar container to run alongside the workflow application.
+type SidecarConfig struct {
+	Name      string         `json:"name" yaml:"name"`
+	Type      string         `json:"type" yaml:"type"`
+	Config    map[string]any `json:"config,omitempty" yaml:"config,omitempty"`
+	DependsOn []string       `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
+}
+
 // WorkflowConfig represents the overall configuration for the workflow engine
 type WorkflowConfig struct {
 	Imports   []string        `json:"imports,omitempty" yaml:"imports,omitempty"`
@@ -99,6 +107,7 @@ type WorkflowConfig struct {
 	Pipelines map[string]any  `json:"pipelines,omitempty" yaml:"pipelines,omitempty"`
 	Platform  map[string]any  `json:"platform,omitempty" yaml:"platform,omitempty"`
 	Requires  *RequiresConfig `json:"requires,omitempty" yaml:"requires,omitempty"`
+	Sidecars  []SidecarConfig `json:"sidecars,omitempty" yaml:"sidecars,omitempty"`
 	ConfigDir string          `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
 }
 
@@ -233,6 +242,19 @@ func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
 					cfg.Platform[k] = v
 				}
 			}
+		}
+
+		// Merge sidecars — deduplicate by name (first definition wins)
+		existingSidecars := make(map[string]struct{}, len(cfg.Sidecars))
+		for _, sc := range cfg.Sidecars {
+			existingSidecars[sc.Name] = struct{}{}
+		}
+		for _, sc := range impCfg.Sidecars {
+			if _, exists := existingSidecars[sc.Name]; exists {
+				continue
+			}
+			cfg.Sidecars = append(cfg.Sidecars, sc)
+			existingSidecars[sc.Name] = struct{}{}
 		}
 	}
 

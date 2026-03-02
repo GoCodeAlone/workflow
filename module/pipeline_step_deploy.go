@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/GoCodeAlone/workflow/deploy"
+	deployexec "github.com/GoCodeAlone/workflow/deploy/executor"
 	"github.com/GoCodeAlone/workflow/provider"
 )
 
@@ -103,9 +103,9 @@ func (s *DeployStep) Name() string { return s.name }
 // Execute builds a deploy request and delegates to the deploy.Executor.
 func (s *DeployStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
 	// Look up executor from pipeline metadata or fail
-	var executor *deploy.Executor
+	var executor *deployexec.Executor
 	if ex, ok := pc.Metadata["deploy_executor"]; ok {
-		executor, _ = ex.(*deploy.Executor)
+		executor, _ = ex.(*deployexec.Executor)
 	}
 	if executor == nil {
 		return nil, fmt.Errorf("deploy step %q: deploy executor not found in pipeline context", s.name)

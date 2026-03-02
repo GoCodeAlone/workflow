@@ -9,6 +9,7 @@ import (
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/deploy"
 	"github.com/GoCodeAlone/workflow/plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/schema"
@@ -213,6 +214,14 @@ func (a *ExternalPluginAdapter) ModuleSchemas() []*schema.ModuleSchema {
 }
 
 func (a *ExternalPluginAdapter) WiringHooks() []plugin.WiringHook {
+	return nil
+}
+
+func (a *ExternalPluginAdapter) DeployTargets() map[string]deploy.DeployTarget {
+	return nil
+}
+
+func (a *ExternalPluginAdapter) SidecarProviders() map[string]deploy.SidecarProvider {
 	return nil
 }
 

@@ -66,6 +66,14 @@ type ResourceEstimate struct {
 	DiskMB   int     `json:"diskMB"`
 }
 
+// SidecarRequirement describes a sidecar container dependency.
+type SidecarRequirement struct {
+	Name      string         `json:"name"`
+	Type      string         `json:"type"`
+	Config    map[string]any `json:"config,omitempty"`
+	DependsOn []string       `json:"dependsOn,omitempty"`
+}
+
 // WorkflowManifest is the full requirements report for a workflow config.
 type WorkflowManifest struct {
 	Name         string                   `json:"name"`
@@ -76,6 +84,7 @@ type WorkflowManifest struct {
 	ExternalAPIs []ExternalAPIRequirement `json:"externalAPIs,omitempty"`
 	Ports        []PortRequirement        `json:"ports,omitempty"`
 	ResourceEst  ResourceEstimate         `json:"resourceEstimate"`
+	Sidecars     []SidecarRequirement     `json:"sidecars,omitempty"`
 }
 
 // Analyze walks a WorkflowConfig and returns its infrastructure manifest.
@@ -87,6 +96,7 @@ func Analyze(cfg *config.WorkflowConfig) *WorkflowManifest {
 	analyzeModules(cfg, m)
 	analyzePipelines(cfg, m)
 	analyzeWorkflows(cfg, m)
+	analyzeSidecars(cfg, m)
 	estimateResources(m, len(cfg.Modules))
 
 	return m
@@ -175,6 +185,13 @@ func (m *WorkflowManifest) Summary() string {
 		s += fmt.Sprintf("  Services: %d\n", len(m.Services))
 		for _, svc := range m.Services {
 			s += fmt.Sprintf("    - %s (%s)\n", svc.Name, svc.Type)
+		}
+	}
+
+	if len(m.Sidecars) > 0 {
+		s += fmt.Sprintf("  Sidecars: %d\n", len(m.Sidecars))
+		for _, sc := range m.Sidecars {
+			s += fmt.Sprintf("    - %s (%s)\n", sc.Name, sc.Type)
 		}
 	}
 

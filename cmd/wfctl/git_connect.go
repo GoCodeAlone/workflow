@@ -22,6 +22,10 @@ type wfctlConfig struct {
 	GenerateActions bool
 	DeployTarget    string
 	DeployNamespace string
+	BuildDockerfile string
+	BuildContext    string
+	BuildRuntime    string
+	BuildRegistry   string
 }
 
 func runGit(args []string) error {
@@ -144,6 +148,21 @@ func writeWfctlConfig(cfg *wfctlConfig) error {
 	b.WriteString("deploy:\n")
 	fmt.Fprintf(&b, "  target: %s\n", cfg.DeployTarget)
 	fmt.Fprintf(&b, "  namespace: %s\n", cfg.DeployNamespace)
+	if cfg.BuildDockerfile != "" || cfg.BuildContext != "" || cfg.BuildRuntime != "" || cfg.BuildRegistry != "" {
+		b.WriteString("  build:\n")
+		if cfg.BuildDockerfile != "" {
+			fmt.Fprintf(&b, "    dockerfile: %s\n", cfg.BuildDockerfile)
+		}
+		if cfg.BuildContext != "" {
+			fmt.Fprintf(&b, "    context: %s\n", cfg.BuildContext)
+		}
+		if cfg.BuildRuntime != "" {
+			fmt.Fprintf(&b, "    runtime: %s\n", cfg.BuildRuntime)
+		}
+		if cfg.BuildRegistry != "" {
+			fmt.Fprintf(&b, "    registry: %s\n", cfg.BuildRegistry)
+		}
+	}
 	return os.WriteFile(".wfctl.yaml", []byte(b.String()), 0600)
 }
 
@@ -254,6 +273,12 @@ type wfctlConfigFile struct {
 	Deploy struct {
 		Target    string `yaml:"target"`
 		Namespace string `yaml:"namespace"`
+		Build     struct {
+			Dockerfile string `yaml:"dockerfile"`
+			Context    string `yaml:"context"`
+			Runtime    string `yaml:"runtime"`
+			Registry   string `yaml:"registry"`
+		} `yaml:"build"`
 	} `yaml:"deploy"`
 }
 
@@ -279,6 +304,10 @@ func loadWfctlConfig() (*wfctlConfig, error) {
 		GenerateActions: raw.Git.GenerateActions,
 		DeployTarget:    raw.Deploy.Target,
 		DeployNamespace: raw.Deploy.Namespace,
+		BuildDockerfile: raw.Deploy.Build.Dockerfile,
+		BuildContext:    raw.Deploy.Build.Context,
+		BuildRuntime:    raw.Deploy.Build.Runtime,
+		BuildRegistry:   raw.Deploy.Build.Registry,
 	}
 
 	if cfg.GitBranch == "" {
