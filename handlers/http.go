@@ -41,11 +41,8 @@ func (h *HTTPWorkflowHandler) ConfigureWorkflow(app modular.Application, workflo
 		return fmt.Errorf("invalid HTTP workflow configuration format")
 	}
 
-	// Extract routes from the configuration
-	routesConfig, ok := httpConfig["routes"].([]any)
-	if !ok {
-		return fmt.Errorf("routes not found in HTTP workflow configuration")
-	}
+	// Extract routes from the configuration (optional — pipelines register their own routes via triggers)
+	routesConfig, _ := httpConfig["routes"].([]any)
 
 	// Find router and server modules dynamically by looking for the first services
 	// that implement the required interfaces
