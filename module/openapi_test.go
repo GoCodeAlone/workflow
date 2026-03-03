@@ -271,6 +271,82 @@ func TestOpenAPIModule_RegisterRoutes(t *testing.T) {
 	}
 }
 
+func TestOpenAPIModule_RegisterRoutesFalse(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", petstoreYAML)
+
+	falseVal := false
+	mod := NewOpenAPIModule("petstore", OpenAPIConfig{
+		SpecFile:       specPath,
+		BasePath:       "/api/v1",
+		RegisterRoutes: &falseVal,
+		SwaggerUI: OpenAPISwaggerUIConfig{
+			Enabled: true,
+			Path:    "/docs",
+		},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	paths := make(map[string]bool)
+	for _, rt := range router.routes {
+		paths[rt.method+":"+rt.path] = true
+	}
+
+	// Spec endpoints and Swagger UI should still be registered
+	if !paths["GET:/api/v1/openapi.json"] {
+		t.Error("expected GET:/api/v1/openapi.json to be registered even when register_routes=false")
+	}
+	if !paths["GET:/api/v1/openapi.yaml"] {
+		t.Error("expected GET:/api/v1/openapi.yaml to be registered even when register_routes=false")
+	}
+	if !paths["GET:/api/v1/docs"] {
+		t.Error("expected GET:/api/v1/docs (Swagger UI) to be registered even when register_routes=false")
+	}
+
+	// Spec-path routes must NOT be registered
+	specRoutes := []string{
+		"GET:/api/v1/pets",
+		"POST:/api/v1/pets",
+		"GET:/api/v1/pets/{petId}",
+	}
+	for _, route := range specRoutes {
+		if paths[route] {
+			t.Errorf("expected spec route %q NOT to be registered when register_routes=false", route)
+		}
+	}
+}
+
+func TestOpenAPIModule_RegisterRoutesNilDefaultsTrue(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", petstoreYAML)
+
+	// When RegisterRoutes is nil (not set), spec-path routes should be registered (default true).
+	mod := NewOpenAPIModule("petstore", OpenAPIConfig{
+		SpecFile: specPath,
+		BasePath: "/api/v1",
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	paths := make(map[string]bool)
+	for _, rt := range router.routes {
+		paths[rt.method+":"+rt.path] = true
+	}
+
+	for _, route := range []string{"GET:/api/v1/pets", "POST:/api/v1/pets", "GET:/api/v1/pets/{petId}"} {
+		if !paths[route] {
+			t.Errorf("expected spec route %q to be registered when register_routes is not set (default true)", route)
+		}
+	}
+}
+
 func TestOpenAPIModule_SwaggerUIRoute(t *testing.T) {
 	specPath := writeTempSpec(t, ".yaml", petstoreYAML)
 

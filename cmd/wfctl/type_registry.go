@@ -617,6 +617,11 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"status", "body", "headers"},
 		},
+		"step.static_file": {
+			Type:       "step.static_file",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"file", "content_type", "cache_control"},
+		},
 		"step.workflow_call": {
 			Type:       "step.workflow_call",
 			Plugin:     "pipelinesteps",

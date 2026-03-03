@@ -837,10 +837,12 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "spec_file", Label: "Spec File", Type: FieldTypeFilePath, Required: true, Description: "Path to the OpenAPI v3 spec file (JSON or YAML)", Placeholder: "specs/petstore.yaml"},
 			{Key: "base_path", Label: "Base Path", Type: FieldTypeString, Description: "Base path prefix for all generated routes", Placeholder: "/api/v1"},
 			{Key: "router", Label: "Router Module", Type: FieldTypeString, Description: "Name of the http.router module to register routes on (auto-detected if omitted)", Placeholder: "my-router"},
+			{Key: "register_routes", Label: "Register Routes", Type: FieldTypeBool, DefaultValue: true, Description: "When false, skip registering spec-path routes (only serve spec endpoints and Swagger UI); default true"},
 			{Key: "validation", Label: "Validation", Type: FieldTypeJSON, DefaultValue: map[string]any{"request": true, "response": false}, Description: "Request/response validation settings, e.g. {\"request\": true, \"response\": false}"},
 			{Key: "swagger_ui", Label: "Swagger UI", Type: FieldTypeJSON, DefaultValue: map[string]any{"enabled": false, "path": "/docs"}, Description: "Swagger UI settings, e.g. {\"enabled\": false, \"path\": \"/docs\"}"},
+			{Key: "max_body_bytes", Label: "Max Body Bytes", Type: FieldTypeNumber, Description: "Maximum allowed request body size in bytes for validated OpenAPI operations (leave empty to use module default)", Placeholder: "1048576"},
 		},
-		DefaultConfig: map[string]any{"validation": map[string]any{"request": true, "response": false}, "swagger_ui": map[string]any{"enabled": false, "path": "/docs"}},
+		DefaultConfig: map[string]any{"register_routes": true, "validation": map[string]any{"request": true, "response": false}, "swagger_ui": map[string]any{"enabled": false, "path": "/docs"}},
 	})
 
 	r.Register(&ModuleSchema{
@@ -1987,6 +1989,22 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "pattern", Label: "Pattern", Type: FieldTypeString, Required: true, Description: "Regular expression pattern (compiled at config time)"},
 			{Key: "input", Label: "Input", Type: FieldTypeString, Required: true, Description: "Input string to match against (template expressions supported)"},
+		},
+	})
+
+	// ---- Static File ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.static_file",
+		Label:       "Static File",
+		Category:    "pipeline",
+		Description: "Serves a static file from disk as an HTTP response; file is read at init time for performance",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context (HTTP response writer)"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Writes an HTTP response with file content and stops the pipeline; if no HTTP writer is available, returns the file content in StepResult.Output as body"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "file", Label: "File Path", Type: FieldTypeString, Required: true, Description: "Path to the file to serve; resolved relative to the config file directory"},
+			{Key: "content_type", Label: "Content-Type", Type: FieldTypeString, Required: true, Description: "MIME type of the file (e.g. application/yaml, text/html)"},
+			{Key: "cache_control", Label: "Cache-Control", Type: FieldTypeString, Description: "Optional Cache-Control header value (e.g. public, max-age=3600)"},
 		},
 	})
 }

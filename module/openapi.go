@@ -35,12 +35,13 @@ type OpenAPISwaggerUIConfig struct {
 
 // OpenAPIConfig holds the full configuration for an OpenAPI module.
 type OpenAPIConfig struct {
-	SpecFile     string                  `yaml:"spec_file"      json:"spec_file"`
-	BasePath     string                  `yaml:"base_path"      json:"base_path"`
-	Validation   OpenAPIValidationConfig `yaml:"validation"     json:"validation"`
-	SwaggerUI    OpenAPISwaggerUIConfig  `yaml:"swagger_ui"     json:"swagger_ui"`
-	RouterName   string                  `yaml:"router"         json:"router"`         // optional: explicit router to attach to
-	MaxBodyBytes int64                   `yaml:"max_body_bytes" json:"max_body_bytes"` // max request body size (bytes); 0 = use default
+	SpecFile       string                  `yaml:"spec_file"       json:"spec_file"`
+	BasePath       string                  `yaml:"base_path"       json:"base_path"`
+	Validation     OpenAPIValidationConfig `yaml:"validation"      json:"validation"`
+	SwaggerUI      OpenAPISwaggerUIConfig  `yaml:"swagger_ui"      json:"swagger_ui"`
+	RouterName     string                  `yaml:"router"          json:"router"`          // optional: explicit router to attach to
+	MaxBodyBytes   int64                   `yaml:"max_body_bytes"  json:"max_body_bytes"`  // max request body size (bytes); 0 = use default
+	RegisterRoutes *bool                   `yaml:"register_routes" json:"register_routes"` // when false, skip spec-path route registration; default true
 }
 
 // defaultMaxBodyBytes is the default request body size limit (1 MiB) applied
@@ -217,22 +218,24 @@ func (m *OpenAPIModule) RegisterRoutes(router HTTPRouter) {
 
 	basePath := strings.TrimRight(m.cfg.BasePath, "/")
 
-	// Register a route for each path+method in the spec
-	for specPath, pathItem := range m.spec.Paths {
-		for method, op := range pathItem {
-			httpMethod := strings.ToUpper(method)
-			if !isValidHTTPMethod(httpMethod) {
-				continue
+	// Register a route for each path+method in the spec, unless register_routes is explicitly false.
+	if m.cfg.RegisterRoutes == nil || *m.cfg.RegisterRoutes {
+		for specPath, pathItem := range m.spec.Paths {
+			for method, op := range pathItem {
+				httpMethod := strings.ToUpper(method)
+				if !isValidHTTPMethod(httpMethod) {
+					continue
+				}
+				routePath := basePath + openAPIPathToHTTPPath(specPath)
+				handler := m.buildRouteHandler(specPath, httpMethod, op)
+				router.AddRoute(httpMethod, routePath, handler)
+				m.logger.Debug("OpenAPI route registered",
+					"module", m.name,
+					"method", httpMethod,
+					"path", routePath,
+					"operationId", op.OperationID,
+				)
 			}
-			routePath := basePath + openAPIPathToHTTPPath(specPath)
-			handler := m.buildRouteHandler(specPath, httpMethod, op)
-			router.AddRoute(httpMethod, routePath, handler)
-			m.logger.Debug("OpenAPI route registered",
-				"module", m.name,
-				"method", httpMethod,
-				"path", routePath,
-				"operationId", op.OperationID,
-			)
 		}
 	}
 
