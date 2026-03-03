@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -20,6 +21,21 @@ import (
 	"github.com/CrisisTextLine/modular"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// TokenRevocationStore is an optional persistence backend for token revocations.
+// Implementations can persist revoked JTIs (e.g., in a relational database) so
+// that revocations survive process restarts.
+//
+// Both methods receive a context so implementations can honour timeouts and
+// propagate cancellations.
+type TokenRevocationStore interface {
+	// RevokeToken persists the revocation of the given JTI.
+	// expiry is the token's exp time; implementations should use it to avoid
+	// accumulating entries for tokens that have already expired naturally.
+	RevokeToken(ctx context.Context, jti string, expiry time.Time) error
+	// IsRevoked reports whether the given JTI has been revoked.
+	IsRevoked(ctx context.Context, jti string) (bool, error)
+}
 
 // GrantType constants for OAuth2 M2M flows.
 const (
@@ -73,12 +89,15 @@ type M2MAuthModule struct {
 	// Registered clients
 	mu           sync.RWMutex
 	clients      map[string]*M2MClient // keyed by ClientID
-	jtiBlacklist map[string]struct{}   // revoked token JTIs
+	jtiBlacklist map[string]time.Time  // revoked token JTIs → expiry time
+
+	// Optional pluggable persistence for token revocations.
+	revocationStore TokenRevocationStore
 
 	// Introspection access-control policy (see SetIntrospectPolicy).
-	introspectAllowOthers     bool   // if true, authenticated callers may inspect any token
-	introspectRequiredScope   string // scope required in caller's token to inspect others
-	introspectRequiredClaim   string // claim key required in caller's token to inspect others
+	introspectAllowOthers      bool   // if true, authenticated callers may inspect any token
+	introspectRequiredScope    string // scope required in caller's token to inspect others
+	introspectRequiredClaim    string // claim key required in caller's token to inspect others
 	introspectRequiredClaimVal string // expected value for introspectRequiredClaim (empty = key only)
 }
 
@@ -99,7 +118,7 @@ func NewM2MAuthModule(name string, hmacSecret string, tokenExpiry time.Duration,
 		hmacSecret:   []byte(hmacSecret),
 		trustedKeys:  make(map[string]*ecdsa.PublicKey),
 		clients:      make(map[string]*M2MClient),
-		jtiBlacklist: make(map[string]struct{}),
+		jtiBlacklist: make(map[string]time.Time),
 	}
 	return m
 }
@@ -176,6 +195,18 @@ func (m *M2MAuthModule) SetIntrospectPolicy(allowOthers bool, requiredScope, req
 	m.introspectRequiredScope = requiredScope
 	m.introspectRequiredClaim = requiredClaim
 	m.introspectRequiredClaimVal = requiredClaimVal
+}
+
+// SetRevocationStore configures an optional persistent backend for token revocations.
+// When set, every call to POST /oauth/revoke will also call store.RevokeToken.
+// Revocation checks consult the store in addition to the in-memory blacklist, allowing
+// revocations to survive process restarts.
+//
+// The store is called with a background context. Pass nil to remove a previously set store.
+func (m *M2MAuthModule) SetRevocationStore(store TokenRevocationStore) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.revocationStore = store
 }
 
 // Name returns the module name.
@@ -374,14 +405,31 @@ func (m *M2MAuthModule) handleJWKS(w http.ResponseWriter, _ *http.Request) {
 // handleRevoke implements token revocation per RFC 7009.
 // It adds the token's JTI to the in-memory blacklist so that subsequent
 // calls to Authenticate or handleIntrospect will treat the token as invalid.
-// Per RFC 7009 §2.2, the endpoint always returns 200 OK even if the token
-// is unknown or already invalid.
+//
+// Per RFC 7009 §2.1, the revocation endpoint MUST require client authentication.
+// Callers must authenticate via HTTP Basic Auth or form-encoded client_id/client_secret.
+// Per RFC 7009 §2.2, if the token is valid and recognised, 200 OK is returned;
+// if it is unrecognised or already invalid, 200 OK is still returned.
 func (m *M2MAuthModule) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(oauthError("invalid_request", "failed to parse form"))
 		return
 	}
+
+	// RFC 7009 §2.1: client authentication is required.
+	clientID, clientSecret, hasCredentials := m.extractClientCredentials(r)
+	if !hasCredentials {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(oauthError("invalid_client", "client authentication required"))
+		return
+	}
+	if _, err := m.authenticateClient(clientID, clientSecret); err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(oauthError("invalid_client", "invalid client credentials"))
+		return
+	}
+
 	tokenStr := r.FormValue("token")
 	if tokenStr == "" {
 		w.WriteHeader(http.StatusBadRequest)
@@ -392,9 +440,31 @@ func (m *M2MAuthModule) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	// We attempt to parse it; if valid, add its JTI to the blacklist.
 	if claims, ok := m.parseTokenClaims(tokenStr); ok {
 		if jti, _ := claims["jti"].(string); jti != "" {
+			var expiry time.Time
+			if expRaw, ok2 := claims["exp"]; ok2 {
+				switch v := expRaw.(type) {
+				case float64:
+					expiry = time.Unix(int64(v), 0)
+				case json.Number:
+					if n, e := v.Int64(); e == nil {
+						expiry = time.Unix(n, 0)
+					}
+				}
+			}
+			if expiry.IsZero() {
+				expiry = time.Now().Add(m.tokenExpiry)
+			}
+
 			m.mu.Lock()
-			m.jtiBlacklist[jti] = struct{}{}
+			m.purgeExpiredJTIsLocked()
+			m.jtiBlacklist[jti] = expiry
+			store := m.revocationStore
 			m.mu.Unlock()
+
+			// Persist to external store if configured.
+			if store != nil {
+				_ = store.RevokeToken(r.Context(), jti, expiry)
+			}
 		}
 	}
 	w.WriteHeader(http.StatusOK)
@@ -438,12 +508,9 @@ func (m *M2MAuthModule) handleIntrospect(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Check JTI blacklist.
+	// Check JTI blacklist (in-memory + optional persistent store).
 	if jti, _ := claims["jti"].(string); jti != "" {
-		m.mu.RLock()
-		_, revoked := m.jtiBlacklist[jti]
-		m.mu.RUnlock()
-		if revoked {
+		if m.isJTIRevoked(r.Context(), jti) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"active": false})
 			return
 		}
@@ -674,12 +741,9 @@ func (m *M2MAuthModule) Authenticate(tokenStr string) (bool, map[string]any, err
 		return false, nil, nil
 	}
 
-	// Check JTI blacklist.
+	// Check JTI blacklist (in-memory + optional persistent store).
 	if jti, _ := claims["jti"].(string); jti != "" {
-		m.mu.RLock()
-		_, revoked := m.jtiBlacklist[jti]
-		m.mu.RUnlock()
-		if revoked {
+		if m.isJTIRevoked(context.Background(), jti) {
 			return false, nil, nil
 		}
 	}
@@ -759,10 +823,7 @@ func (m *M2MAuthModule) authenticateIntrospectCaller(r *http.Request) (callerID 
 		if claims, valid := m.parseTokenClaims(tokenStr); valid {
 			// Reject revoked caller tokens.
 			if jti, _ := claims["jti"].(string); jti != "" {
-				m.mu.RLock()
-				_, revoked := m.jtiBlacklist[jti]
-				m.mu.RUnlock()
-				if revoked {
+				if m.isJTIRevoked(r.Context(), jti) {
 					return "", nil, false
 				}
 			}
@@ -822,11 +883,44 @@ func containsScope(scopeStr, target string) bool {
 	return false
 }
 
+// isJTIRevoked checks whether the given JTI has been revoked.
+// It consults the in-memory blacklist first (after pruning expired entries),
+// then falls back to the optional persistent store.
+func (m *M2MAuthModule) isJTIRevoked(ctx context.Context, jti string) bool {
+	m.mu.Lock()
+	m.purgeExpiredJTIsLocked()
+	expiry, inMemory := m.jtiBlacklist[jti]
+	store := m.revocationStore
+	m.mu.Unlock()
+
+	if inMemory && time.Now().Before(expiry) {
+		return true
+	}
+	if store != nil {
+		revoked, err := store.IsRevoked(ctx, jti)
+		if err == nil && revoked {
+			return true
+		}
+	}
+	return false
+}
+
+// purgeExpiredJTIsLocked removes JTIs from the in-memory blacklist whose
+// tokens have already expired naturally. It MUST be called with m.mu held for writing.
+func (m *M2MAuthModule) purgeExpiredJTIsLocked() {
+	now := time.Now()
+	for jti, expiry := range m.jtiBlacklist {
+		if now.After(expiry) {
+			delete(m.jtiBlacklist, jti)
+		}
+	}
+}
+
 // generateJTI generates a random 16-byte JWT ID encoded as base64url.
 func generateJTI() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("generate JTI: %w", err)
+		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
