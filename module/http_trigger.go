@@ -31,6 +31,33 @@ type httpReqContextKey struct{}
 // headers, path parameters, and the request body.
 var HTTPRequestContextKey = httpReqContextKey{}
 
+// pipelineResultKey is the unexported type for the pipeline result context key.
+type pipelineResultKey struct{}
+
+// PipelineResultContextKey is the context key used to capture pipeline execution
+// results from TriggerWorkflow. HTTP trigger handlers store a *PipelineResultHolder
+// in the context before calling TriggerWorkflow; the engine populates it with the
+// pipeline's result.Current map after execution. This lets the trigger apply
+// response_status/response_body/response_headers from the pipeline output when no
+// step wrote directly to the HTTP response writer.
+var PipelineResultContextKey = pipelineResultKey{}
+
+// PipelineResultHolder is a mutable container used to pass pipeline execution
+// results back through the context from the engine to the HTTP trigger handler.
+type PipelineResultHolder struct {
+	result map[string]any
+}
+
+// Set stores the pipeline result in the holder.
+func (h *PipelineResultHolder) Set(result map[string]any) {
+	h.result = result
+}
+
+// Get returns the stored pipeline result, or nil if not set.
+func (h *PipelineResultHolder) Get() map[string]any {
+	return h.result
+}
+
 // trackedResponseWriter wraps http.ResponseWriter and tracks whether a response
 // body has been written, so the HTTP trigger can fall back to the generic
 // "workflow triggered" response only when the pipeline didn't write one.
@@ -267,6 +294,11 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 		// to headers (e.g. Authorization), method, URL, and body.
 		ctx = context.WithValue(ctx, HTTPRequestContextKey, r)
 
+		// Inject a result holder so the engine can pass the pipeline's result.Current
+		// back to this handler without changing the WorkflowEngine interface.
+		resultHolder := &PipelineResultHolder{}
+		ctx = context.WithValue(ctx, PipelineResultContextKey, resultHolder)
+
 		// Extract data from the request to pass to the workflow.
 		// Include method, path, and parsed body so pipelines have full
 		// access to request context (consistent with CommandHandler).
@@ -314,6 +346,27 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 		// don't overwrite it with the generic fallback.
 		if rw.written {
 			return
+		}
+
+		// If the pipeline set response_status in its output (without writing
+		// directly to the response writer), use those values to build the response.
+		if result := resultHolder.Get(); result != nil {
+			if status, ok := result["response_status"].(int); ok {
+				if headers, ok := result["response_headers"].(map[string]any); ok {
+					for k, v := range headers {
+						if s, ok := v.(string); ok {
+							w.Header().Set(k, s)
+						}
+					}
+				}
+				w.WriteHeader(status)
+				if body, ok := result["response_body"].(string); ok {
+					if _, err := w.Write([]byte(body)); err != nil {
+						log.Printf("http trigger: failed to write response: %v", err)
+					}
+				}
+				return
+			}
 		}
 
 		// Fallback: return a generic accepted response when the pipeline doesn't

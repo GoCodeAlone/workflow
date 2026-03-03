@@ -313,3 +313,124 @@ func (e *captureContextEngine) TriggerWorkflow(ctx context.Context, _ string, _ 
 	*e.capture = ctx
 	return nil
 }
+
+// pipelineContextResultEngine is a mock WorkflowEngine that simulates a pipeline
+// setting response_status/response_body/response_headers in result.Current
+// without writing directly to the HTTP response writer. It populates the
+// PipelineResultHolder stored in the context, the way the real engine does.
+type pipelineContextResultEngine struct {
+	result map[string]any
+}
+
+func (e *pipelineContextResultEngine) TriggerWorkflow(ctx context.Context, _ string, _ string, _ map[string]any) error {
+	if holder, ok := ctx.Value(PipelineResultContextKey).(*PipelineResultHolder); ok && holder != nil {
+		holder.Set(e.result)
+	}
+	return nil
+}
+
+// TestHTTPTrigger_PipelineContextResponse verifies that when a pipeline step
+// sets response_status/response_body/response_headers in result.Current without
+// writing to the HTTP response writer, the trigger uses those values instead of
+// the generic 202 fallback.
+func TestHTTPTrigger_PipelineContextResponse(t *testing.T) {
+	app := NewMockApplication()
+	router := NewMockHTTPRouter("test-router")
+	_ = app.RegisterService("httpRouter", router)
+
+	engine := &pipelineContextResultEngine{result: map[string]any{
+		"response_status": 403,
+		"response_body":   `{"error":"forbidden"}`,
+		"response_headers": map[string]any{
+			"Content-Type": "application/json",
+		},
+	}}
+	_ = app.RegisterService("workflowEngine", engine)
+
+	trigger := NewHTTPTrigger()
+	app.RegisterModule(trigger)
+
+	cfg := map[string]any{
+		"routes": []any{
+			map[string]any{
+				"path":     "/api/secure",
+				"method":   "GET",
+				"workflow": "secure-workflow",
+				"action":   "execute",
+			},
+		},
+	}
+	if err := trigger.Configure(app, cfg); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := trigger.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	handler := router.routes["GET /api/secure"]
+	if handler == nil {
+		t.Fatal("handler not registered")
+	}
+
+	req := httptest.NewRequest("GET", "/api/secure", nil)
+	w := httptest.NewRecorder()
+	handler.Handle(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != 403 {
+		t.Errorf("expected 403 from pipeline context, got %d", resp.StatusCode)
+	}
+	if w.Body.String() != `{"error":"forbidden"}` {
+		t.Errorf("expected pipeline body, got %q", w.Body.String())
+	}
+	if w.Header().Get("Content-Type") != "application/json" {
+		t.Errorf("expected Content-Type header, got %q", w.Header().Get("Content-Type"))
+	}
+}
+
+// TestHTTPTrigger_PipelineContextResponse_NoStatus verifies that when
+// response_status is absent from the pipeline result, the trigger still
+// falls back to the generic 202 accepted response.
+func TestHTTPTrigger_PipelineContextResponse_NoStatus(t *testing.T) {
+	app := NewMockApplication()
+	router := NewMockHTTPRouter("test-router")
+	_ = app.RegisterService("httpRouter", router)
+
+	engine := &pipelineContextResultEngine{result: map[string]any{
+		"some_internal_data": "secret",
+	}}
+	_ = app.RegisterService("workflowEngine", engine)
+
+	trigger := NewHTTPTrigger()
+	app.RegisterModule(trigger)
+
+	cfg := map[string]any{
+		"routes": []any{
+			map[string]any{
+				"path":     "/api/noisy",
+				"method":   "GET",
+				"workflow": "noisy-workflow",
+				"action":   "execute",
+			},
+		},
+	}
+	if err := trigger.Configure(app, cfg); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := trigger.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	handler := router.routes["GET /api/noisy"]
+	req := httptest.NewRequest("GET", "/api/noisy", nil)
+	w := httptest.NewRecorder()
+	handler.Handle(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != 202 {
+		t.Errorf("expected fallback 202, got %d", resp.StatusCode)
+	}
+	if !strings.Contains(w.Body.String(), "workflow triggered") {
+		t.Errorf("expected fallback body, got %q", w.Body.String())
+	}
+}

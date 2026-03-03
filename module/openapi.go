@@ -380,6 +380,23 @@ func (h *openAPIRouteHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// If the pipeline set response_status in its output (without writing
+		// directly to the response writer), use those values to build the response.
+		if status, ok := result.Current["response_status"].(int); ok {
+			if headers, ok := result.Current["response_headers"].(map[string]any); ok {
+				for k, v := range headers {
+					if s, ok := v.(string); ok {
+						w.Header().Set(k, s)
+					}
+				}
+			}
+			w.WriteHeader(status)
+			if body, ok := result.Current["response_body"].(string); ok {
+				_, _ = w.Write([]byte(body)) //nolint:gosec // G705: body is pipeline step output explicitly set as response body
+			}
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(result.Current)
