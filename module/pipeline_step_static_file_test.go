@@ -53,7 +53,11 @@ func TestStaticFileStep_ServesFile(t *testing.T) {
 		t.Errorf("expected Cache-Control header, got %q", cc)
 	}
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
 	if string(body) != content {
 		t.Errorf("expected body %q, got %q", content, string(body))
 	}
@@ -97,6 +101,37 @@ func TestStaticFileStep_NoHTTPWriter(t *testing.T) {
 	}
 }
 
+func TestStaticFileStep_ConfigRelativePath(t *testing.T) {
+	// Write a temporary file to serve via a relative path resolved from _config_dir.
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "spec.yaml")
+	content := "openapi: 3.0.0\n"
+	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	factory := NewStaticFileStepFactory()
+	// Pass relative file name + _config_dir so ResolvePathInConfig joins them.
+	step, err := factory("serve_spec", map[string]any{
+		"file":         "spec.yaml",
+		"content_type": "application/yaml",
+		"_config_dir":  dir,
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, map[string]any{})
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	if result.Output["body"] != content {
+		t.Errorf("expected body %q, got %q", content, result.Output["body"])
+	}
+}
+
 func TestStaticFileStep_MissingFile(t *testing.T) {
 	factory := NewStaticFileStepFactory()
 	_, err := factory("bad_step", map[string]any{
@@ -111,7 +146,9 @@ func TestStaticFileStep_MissingFile(t *testing.T) {
 func TestStaticFileStep_MissingContentType(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "data.txt")
-	_ = os.WriteFile(filePath, []byte("hello"), 0o600)
+	if err := os.WriteFile(filePath, []byte("hello"), 0o600); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
 
 	factory := NewStaticFileStepFactory()
 	_, err := factory("bad_step", map[string]any{
