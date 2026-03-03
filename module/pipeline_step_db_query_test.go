@@ -234,10 +234,10 @@ func TestDBQueryStep_DynamicTableName(t *testing.T) {
 	app := mockAppWithDB("test-db", db)
 	factory := NewDBQueryStepFactory()
 	step, err := factory("dynamic-table", map[string]any{
-		"database":         "test-db",
-		"query":            `SELECT id, name FROM companies_{{.steps.auth.tenant}} WHERE id = ?`,
-		"params":           []any{"a1"},
-		"mode":             "single",
+		"database":          "test-db",
+		"query":             `SELECT id, name FROM companies_{{.steps.auth.tenant}} WHERE id = ?`,
+		"params":            []any{"a1"},
+		"mode":              "single",
 		"allow_dynamic_sql": true,
 	}, app)
 	if err != nil {
@@ -265,9 +265,9 @@ func TestDBQueryStep_DynamicTableName(t *testing.T) {
 func TestDBQueryStep_DynamicSQL_RejectsInjection(t *testing.T) {
 	factory := NewDBQueryStepFactory()
 	step, err := factory("injection-attempt", map[string]any{
-		"database":         "test-db",
-		"query":            `SELECT * FROM companies_{{.steps.auth.tenant}}`,
-		"mode":             "list",
+		"database":          "test-db",
+		"query":             `SELECT * FROM companies_{{.steps.auth.tenant}}`,
+		"mode":              "list",
 		"allow_dynamic_sql": true,
 	}, nil) // nil app is fine – we expect an error before the DB is touched
 	if err != nil {
@@ -289,9 +289,9 @@ func TestDBQueryStep_DynamicSQL_RejectsInjection(t *testing.T) {
 func TestDBQueryStep_DynamicSQL_RejectsEmpty(t *testing.T) {
 	factory := NewDBQueryStepFactory()
 	step, err := factory("empty-ident", map[string]any{
-		"database":         "test-db",
-		"query":            `SELECT * FROM companies_{{.steps.auth.tenant}}`,
-		"mode":             "list",
+		"database":          "test-db",
+		"query":             `SELECT * FROM companies_{{.steps.auth.tenant}}`,
+		"mode":              "list",
 		"allow_dynamic_sql": true,
 	}, nil)
 	if err != nil {
@@ -319,9 +319,9 @@ func TestDBQueryStep_MissingDatabase(t *testing.T) {
 func TestDBQueryStep_DynamicSQL_UnclosedAction(t *testing.T) {
 	factory := NewDBQueryStepFactory()
 	step, err := factory("unclosed", map[string]any{
-		"database":         "test-db",
-		"query":            `SELECT * FROM companies_{{.steps.auth.tenant`,
-		"mode":             "list",
+		"database":          "test-db",
+		"query":             `SELECT * FROM companies_{{.steps.auth.tenant`,
+		"mode":              "list",
 		"allow_dynamic_sql": true,
 	}, nil)
 	if err != nil {

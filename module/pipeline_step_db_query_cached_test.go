@@ -32,12 +32,8 @@ func TestDBQueryCachedStep_CacheMiss(t *testing.T) {
 	if result.Output["cache_hit"] != false {
 		t.Errorf("expected cache_hit=false on first call, got %v", result.Output["cache_hit"])
 	}
-	row, ok := result.Output["row"].(map[string]any)
-	if !ok {
-		t.Fatal("expected row in output")
-	}
-	if row["name"] != "Acme Corp" {
-		t.Errorf("expected name='Acme Corp', got %v", row["name"])
+	if result.Output["name"] != "Acme Corp" {
+		t.Errorf("expected name='Acme Corp', got %v", result.Output["name"])
 	}
 }
 
@@ -74,12 +70,8 @@ func TestDBQueryCachedStep_CacheHit(t *testing.T) {
 	if result.Output["cache_hit"] != true {
 		t.Errorf("expected cache_hit=true on second call, got %v", result.Output["cache_hit"])
 	}
-	row, ok := result.Output["row"].(map[string]any)
-	if !ok {
-		t.Fatal("expected row in output on cache hit")
-	}
-	if row["name"] != "Acme Corp" {
-		t.Errorf("expected name='Acme Corp' on cache hit, got %v", row["name"])
+	if result.Output["name"] != "Acme Corp" {
+		t.Errorf("expected name='Acme Corp' on cache hit, got %v", result.Output["name"])
 	}
 }
 
@@ -145,19 +137,15 @@ func TestDBQueryCachedStep_ScanFields(t *testing.T) {
 		t.Fatalf("execute error: %v", err)
 	}
 
-	row, ok := result.Output["row"].(map[string]any)
-	if !ok {
-		t.Fatal("expected row in output")
-	}
-	if row["name"] != "Acme Corp" {
-		t.Errorf("expected name='Acme Corp', got %v", row["name"])
+	if result.Output["name"] != "Acme Corp" {
+		t.Errorf("expected name='Acme Corp', got %v", result.Output["name"])
 	}
 	// id and slug should not be in output since scan_fields only has "name"
-	if _, ok := row["id"]; ok {
-		t.Errorf("expected 'id' to be excluded from row when not in scan_fields")
+	if _, ok := result.Output["id"]; ok {
+		t.Errorf("expected 'id' to be excluded from output when not in scan_fields")
 	}
-	if _, ok := row["slug"]; ok {
-		t.Errorf("expected 'slug' to be excluded from row when not in scan_fields")
+	if _, ok := result.Output["slug"]; ok {
+		t.Errorf("expected 'slug' to be excluded from output when not in scan_fields")
 	}
 }
 
@@ -186,12 +174,8 @@ func TestDBQueryCachedStep_TemplateParams(t *testing.T) {
 		t.Fatalf("execute error: %v", err)
 	}
 
-	row, ok := result.Output["row"].(map[string]any)
-	if !ok {
-		t.Fatal("expected row in output")
-	}
-	if row["name"] != "Beta Inc" {
-		t.Errorf("expected name='Beta Inc', got %v", row["name"])
+	if result.Output["name"] != "Beta Inc" {
+		t.Errorf("expected name='Beta Inc', got %v", result.Output["name"])
 	}
 }
 
@@ -309,20 +293,12 @@ func TestDBQueryCachedStep_NoRows(t *testing.T) {
 		t.Fatalf("execute error: %v", err)
 	}
 
-	// No rows in single mode means row={}, found=false, cache_hit=false
+	// No rows in legacy mode means empty output (no column keys), cache_hit=false
 	if result.Output["cache_hit"] != false {
 		t.Errorf("expected cache_hit=false, got %v", result.Output["cache_hit"])
 	}
-	found, _ := result.Output["found"].(bool)
-	if found {
-		t.Errorf("expected found=false when no rows returned")
-	}
-	row, ok := result.Output["row"].(map[string]any)
-	if !ok {
-		t.Fatal("expected row in output even when no rows found")
-	}
-	if len(row) != 0 {
-		t.Errorf("expected empty row map, got %v", row)
+	if _, ok := result.Output["id"]; ok {
+		t.Errorf("expected no 'id' field when no rows returned")
 	}
 }
 
@@ -350,12 +326,8 @@ func TestDBQueryCachedStep_PostgresPlaceholderNormalization(t *testing.T) {
 		t.Fatalf("execute error (placeholder normalization may have failed): %v", err)
 	}
 
-	row, ok := result.Output["row"].(map[string]any)
-	if !ok {
-		t.Fatal("expected row in output after $1→? normalization")
-	}
-	if row["name"] != "Acme Corp" {
-		t.Errorf("expected name='Acme Corp' after $1→? normalization, got %v", row["name"])
+	if result.Output["name"] != "Acme Corp" {
+		t.Errorf("expected name='Acme Corp' after $1→? normalization, got %v", result.Output["name"])
 	}
 }
 
@@ -402,12 +374,8 @@ func TestDBQueryCachedStep_CacheHitSkipsDB(t *testing.T) {
 	if second.Output["cache_hit"] != true {
 		t.Errorf("expected cache_hit=true on second call after DB closed")
 	}
-	secondRow, ok := second.Output["row"].(map[string]any)
-	if !ok {
-		t.Fatal("expected row in cached output")
-	}
-	if secondRow["name"] != "Acme Corp" {
-		t.Errorf("expected name='Acme Corp' from cache, got %v", secondRow["name"])
+	if second.Output["name"] != "Acme Corp" {
+		t.Errorf("expected name='Acme Corp' from cache, got %v", second.Output["name"])
 	}
 }
 
@@ -687,12 +655,8 @@ func TestDBQueryCachedStep_DynamicTableName(t *testing.T) {
 	if result.Output["cache_hit"] != false {
 		t.Errorf("expected cache_hit=false on first call, got %v", result.Output["cache_hit"])
 	}
-	row, ok := result.Output["row"].(map[string]any)
-	if !ok {
-		t.Fatal("expected row in output")
-	}
-	if row["name"] != "Beta LLC" {
-		t.Errorf("expected name='Beta LLC', got %v", row["name"])
+	if result.Output["name"] != "Beta LLC" {
+		t.Errorf("expected name='Beta LLC', got %v", result.Output["name"])
 	}
 }
 

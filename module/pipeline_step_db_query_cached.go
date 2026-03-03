@@ -85,10 +85,11 @@ func NewDBQueryCachedStepFactory() StepFactory {
 		}
 
 		mode, _ := config["mode"].(string)
-		if mode == "" {
-			mode = "single"
-		}
-		if mode != "list" && mode != "single" {
+		mode = strings.TrimSpace(mode)
+		// Backwards compatibility: if mode is omitted or empty, leave it blank.
+		// Execution logic treats a blank mode as the legacy single-row flat
+		// output, while explicit "single" uses the new row/found envelope.
+		if mode != "" && mode != "list" && mode != "single" {
 			return nil, fmt.Errorf("db_query_cached step %q: mode must be 'list' or 'single', got %q", name, mode)
 		}
 
@@ -155,7 +156,7 @@ func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*
 	s.mu.RUnlock()
 
 	if found && time.Now().Before(entry.expiresAt) {
-		output := copyMap(entry.value)
+		output := deepCopyMap(entry.value)
 		output["cache_hit"] = true
 		return &StepResult{Output: output}, nil
 	}
@@ -165,7 +166,7 @@ func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*
 	entry, found = s.cache[key]
 	if found && time.Now().Before(entry.expiresAt) {
 		// Another goroutine populated the cache while we were waiting for the lock
-		output := copyMap(entry.value)
+		output := deepCopyMap(entry.value)
 		s.mu.Unlock()
 		output["cache_hit"] = true
 		return &StepResult{Output: output}, nil
@@ -185,7 +186,7 @@ func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*
 	// Store in cache (write lock)
 	s.mu.Lock()
 	s.cache[key] = dbQueryCacheEntry{
-		value:     copyMap(result),
+		value:     deepCopyMap(result),
 		expiresAt: time.Now().Add(s.cacheTTL),
 	}
 	s.mu.Unlock()
@@ -271,8 +272,8 @@ func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext, q
 			}
 		}
 		results = append(results, row)
-		if s.mode == "single" {
-			// Only take the first row
+		if s.mode != "list" {
+			// Only take the first row for single and legacy modes
 			break
 		}
 	}
@@ -282,7 +283,14 @@ func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext, q
 	}
 
 	output := make(map[string]any)
-	if s.mode == "single" {
+	switch s.mode {
+	case "list":
+		if results == nil {
+			results = []map[string]any{}
+		}
+		output["rows"] = results
+		output["count"] = len(results)
+	case "single":
 		if len(results) > 0 {
 			output["row"] = results[0]
 			output["found"] = true
@@ -290,22 +298,35 @@ func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext, q
 			output["row"] = map[string]any{}
 			output["found"] = false
 		}
-	} else {
-		if results == nil {
-			results = []map[string]any{}
+	default: // "" — legacy flat column map (backward compatible)
+		if len(results) > 0 {
+			for k, v := range results[0] {
+				output[k] = v
+			}
 		}
-		output["rows"] = results
-		output["count"] = len(results)
 	}
 
 	return output, nil
 }
 
-// copyMap creates a shallow copy of a map.
-func copyMap(m map[string]any) map[string]any {
+// deepCopyMap creates a deep copy of a map, recursively copying nested
+// map[string]any values and []map[string]any slices to prevent callers from
+// mutating cached data or triggering data races across goroutines.
+func deepCopyMap(m map[string]any) map[string]any {
 	cp := make(map[string]any, len(m))
 	for k, v := range m {
-		cp[k] = v
+		switch val := v.(type) {
+		case map[string]any:
+			cp[k] = deepCopyMap(val)
+		case []map[string]any:
+			sliceCopy := make([]map[string]any, len(val))
+			for i, row := range val {
+				sliceCopy[i] = deepCopyMap(row)
+			}
+			cp[k] = sliceCopy
+		default:
+			cp[k] = v
+		}
 	}
 	return cp
 }

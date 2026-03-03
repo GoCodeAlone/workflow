@@ -211,9 +211,9 @@ func TestDBExecStep_DynamicTableName(t *testing.T) {
 	app := mockAppWithDB("test-db", db)
 	factory := NewDBExecStepFactory()
 	step, err := factory("dynamic-insert", map[string]any{
-		"database":         "test-db",
-		"query":            `INSERT INTO items_{{.steps.auth.tenant}} (id, name) VALUES (?, ?)`,
-		"params":           []any{"i1", "Widget"},
+		"database":          "test-db",
+		"query":             `INSERT INTO items_{{.steps.auth.tenant}} (id, name) VALUES (?, ?)`,
+		"params":            []any{"i1", "Widget"},
 		"allow_dynamic_sql": true,
 	}, app)
 	if err != nil {
@@ -237,9 +237,9 @@ func TestDBExecStep_DynamicTableName(t *testing.T) {
 func TestDBExecStep_DynamicSQL_RejectsInjection(t *testing.T) {
 	factory := NewDBExecStepFactory()
 	step, err := factory("injection-exec", map[string]any{
-		"database":         "test-db",
-		"query":            `DELETE FROM items_{{.steps.auth.tenant}} WHERE id = ?`,
-		"params":           []any{"i1"},
+		"database":          "test-db",
+		"query":             `DELETE FROM items_{{.steps.auth.tenant}} WHERE id = ?`,
+		"params":            []any{"i1"},
 		"allow_dynamic_sql": true,
 	}, nil)
 	if err != nil {
