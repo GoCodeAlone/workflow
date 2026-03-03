@@ -482,7 +482,7 @@ func templateFuncMap() template.FuncMap {
 		// toInt converts a value to int64.
 		"toInt": func(v any) int64 { return int64(toFloat64(v)) },
 		// toFloat converts a value to float64.
-		"toFloat": func(v any) float64 { return toFloat64(v) },
+		"toFloat": toFloat64,
 		// toString converts a value to its string representation.
 		"toString": func(v any) string { return fmt.Sprintf("%v", v) },
 		// length returns the length of a string, slice, array, or map. Returns 0 for other types.
