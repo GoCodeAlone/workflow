@@ -1171,3 +1171,143 @@ func TestM2M_ClientCredentials_SubMatchesClientID(t *testing.T) {
 		t.Errorf("expected sub=test-client, got %v", claims["sub"])
 	}
 }
+
+// --- per-client custom claims ---
+
+// TestM2M_ClientCredentials_CustomClaimsInToken verifies that a client's Claims
+// map is included in the issued access token.
+func TestM2M_ClientCredentials_CustomClaimsInToken(t *testing.T) {
+	m := NewM2MAuthModule("m2m", "this-is-a-valid-secret-32-bytes!", time.Hour, "test-issuer")
+	m.RegisterClient(M2MClient{
+		ClientID:     "org-alpha",
+		ClientSecret: "secret-org-alpha", //nolint:gosec // test credential
+		Scopes:       []string{"read"},
+		Claims:       map[string]any{"tenant_id": "alpha"},
+	})
+
+	params := url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {"org-alpha"},
+		"client_secret": {"secret-org-alpha"},
+	}
+	w := postToken(t, m, params)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	tokenStr, _ := resp["access_token"].(string)
+
+	_, claims, err := m.Authenticate(tokenStr)
+	if err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+	if claims["tenant_id"] != "alpha" {
+		t.Errorf("expected tenant_id=alpha, got %v", claims["tenant_id"])
+	}
+}
+
+// TestM2M_ClientCredentials_MultipleCustomClaims verifies that multiple custom
+// claims are all present in the issued token.
+func TestM2M_ClientCredentials_MultipleCustomClaims(t *testing.T) {
+	m := NewM2MAuthModule("m2m", "this-is-a-valid-secret-32-bytes!", time.Hour, "test-issuer")
+	m.RegisterClient(M2MClient{
+		ClientID:     "org-beta",
+		ClientSecret: "secret-org-beta", //nolint:gosec // test credential
+		Scopes:       []string{"read", "write"},
+		Claims: map[string]any{
+			"tenant_id":    "beta",
+			"affiliate_id": "partner-42",
+		},
+	})
+
+	params := url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {"org-beta"},
+		"client_secret": {"secret-org-beta"},
+	}
+	w := postToken(t, m, params)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	tokenStr, _ := resp["access_token"].(string)
+
+	_, claims, err := m.Authenticate(tokenStr)
+	if err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+	if claims["tenant_id"] != "beta" {
+		t.Errorf("expected tenant_id=beta, got %v", claims["tenant_id"])
+	}
+	if claims["affiliate_id"] != "partner-42" {
+		t.Errorf("expected affiliate_id=partner-42, got %v", claims["affiliate_id"])
+	}
+}
+
+// TestM2M_ClientCredentials_CustomClaimsDoNotOverrideStandard verifies that
+// custom claims on a client cannot override standard JWT claims.
+func TestM2M_ClientCredentials_CustomClaimsDoNotOverrideStandard(t *testing.T) {
+	m := NewM2MAuthModule("m2m", "this-is-a-valid-secret-32-bytes!", time.Hour, "trusted-issuer")
+	m.RegisterClient(M2MClient{
+		ClientID:     "attacker",
+		ClientSecret: "attacker-secret-here", //nolint:gosec // test credential
+		Scopes:       []string{"read"},
+		Claims: map[string]any{
+			"iss": "evil-issuer",
+			"sub": "admin",
+		},
+	})
+
+	params := url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {"attacker"},
+		"client_secret": {"attacker-secret-here"},
+	}
+	w := postToken(t, m, params)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	tokenStr, _ := resp["access_token"].(string)
+
+	_, claims, err := m.Authenticate(tokenStr)
+	if err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+	// Standard claims must not be overridden by client.Claims.
+	if claims["iss"] != "trusted-issuer" {
+		t.Errorf("iss must not be overridable via client claims, got %v", claims["iss"])
+	}
+	if claims["sub"] != "attacker" {
+		t.Errorf("sub must not be overridable via client claims, got %v", claims["sub"])
+	}
+}
+
+// TestM2M_ClientCredentials_NilClaimsOK verifies that a client with nil Claims
+// still issues tokens without error.
+func TestM2M_ClientCredentials_NilClaimsOK(t *testing.T) {
+	m := NewM2MAuthModule("m2m", "this-is-a-valid-secret-32-bytes!", time.Hour, "test-issuer")
+	m.RegisterClient(M2MClient{
+		ClientID:     "plain-client",
+		ClientSecret: "plain-client-secret!", //nolint:gosec // test credential
+		Scopes:       []string{"read"},
+		Claims:       nil,
+	})
+
+	params := url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {"plain-client"},
+		"client_secret": {"plain-client-secret!"},
+	}
+	w := postToken(t, m, params)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+}
