@@ -186,6 +186,38 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			if sc, ok := cfg["sourceColumn"].(string); ok {
 				partCfg.SourceColumn = sc
 			}
+			if partitions, ok := cfg["partitions"].([]any); ok {
+				for _, item := range partitions {
+					pMap, ok := item.(map[string]any)
+					if !ok {
+						continue
+					}
+					pc := module.PartitionConfig{}
+					if pk, ok := pMap["partitionKey"].(string); ok {
+						pc.PartitionKey = pk
+					}
+					if tables, ok := pMap["tables"].([]any); ok {
+						for _, t := range tables {
+							if s, ok := t.(string); ok {
+								pc.Tables = append(pc.Tables, s)
+							}
+						}
+					}
+					if pt, ok := pMap["partitionType"].(string); ok {
+						pc.PartitionType = pt
+					}
+					if pnf, ok := pMap["partitionNameFormat"].(string); ok {
+						pc.PartitionNameFormat = pnf
+					}
+					if st, ok := pMap["sourceTable"].(string); ok {
+						pc.SourceTable = st
+					}
+					if scol, ok := pMap["sourceColumn"].(string); ok {
+						pc.SourceColumn = scol
+					}
+					partCfg.Partitions = append(partCfg.Partitions, pc)
+				}
+			}
 			return module.NewPartitionedDatabase(name, partCfg)
 		},
 		"persistence.store": func(name string, cfg map[string]any) modular.Module {
