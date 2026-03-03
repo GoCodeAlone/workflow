@@ -20,16 +20,17 @@ type dbQueryCacheEntry struct {
 // in an in-process, TTL-aware cache keyed by a template-resolved cache key.
 // Concurrent pipeline executions are safe: access is protected by a read-write mutex.
 type DBQueryCachedStep struct {
-	name       string
-	database   string
-	query      string
-	params     []string
-	mode       string // "single" or "list"
-	cacheKey   string
-	cacheTTL   time.Duration
-	scanFields []string
-	app        modular.Application
-	tmpl       *TemplateEngine
+	name            string
+	database        string
+	query           string
+	params          []string
+	mode            string // "single" or "list"
+	cacheKey        string
+	cacheTTL        time.Duration
+	scanFields      []string
+	allowDynamicSQL bool
+	app             modular.Application
+	tmpl            *TemplateEngine
 
 	mu    sync.RWMutex
 	cache map[string]dbQueryCacheEntry
@@ -48,8 +49,10 @@ func NewDBQueryCachedStepFactory() StepFactory {
 			return nil, fmt.Errorf("db_query_cached step %q: 'query' is required", name)
 		}
 
-		// Safety: reject template expressions in SQL to prevent injection
-		if strings.Contains(query, "{{") {
+		// Safety: reject template expressions in SQL to prevent injection,
+		// unless allow_dynamic_sql is explicitly enabled.
+		allowDynamicSQL, _ := config["allow_dynamic_sql"].(bool)
+		if !allowDynamicSQL && strings.Contains(query, "{{") {
 			return nil, fmt.Errorf("db_query_cached step %q: query must not contain template expressions (use params instead)", name)
 		}
 
@@ -101,17 +104,18 @@ func NewDBQueryCachedStepFactory() StepFactory {
 		}
 
 		return &DBQueryCachedStep{
-			name:       name,
-			database:   database,
-			query:      query,
-			params:     params,
-			mode:       mode,
-			cacheKey:   cacheKey,
-			cacheTTL:   cacheTTL,
-			scanFields: scanFields,
-			app:        app,
-			tmpl:       NewTemplateEngine(),
-			cache:      make(map[string]dbQueryCacheEntry),
+			name:            name,
+			database:        database,
+			query:           query,
+			params:          params,
+			mode:            mode,
+			cacheKey:        cacheKey,
+			cacheTTL:        cacheTTL,
+			scanFields:      scanFields,
+			allowDynamicSQL: allowDynamicSQL,
+			app:             app,
+			tmpl:            NewTemplateEngine(),
+			cache:           make(map[string]dbQueryCacheEntry),
 		}, nil
 	}
 }
@@ -122,6 +126,18 @@ func (s *DBQueryCachedStep) Name() string { return s.name }
 // Execute checks the in-memory cache first; on a miss (or expiry) it queries
 // the database, stores the result, and returns it.
 func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+	// Resolve template expressions in the query early (before any DB access) when
+	// dynamic SQL is enabled. This validates resolved identifiers against an
+	// allowlist before any database interaction.
+	query := s.query
+	if s.allowDynamicSQL {
+		var err error
+		query, err = resolveDynamicSQL(s.tmpl, query, pc)
+		if err != nil {
+			return nil, fmt.Errorf("db_query_cached step %q: %w", s.name, err)
+		}
+	}
+
 	if s.app == nil {
 		return nil, fmt.Errorf("db_query_cached step %q: no application context", s.name)
 	}
@@ -161,7 +177,7 @@ func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*
 	s.mu.Unlock()
 
 	// Query the database
-	result, err := s.runQuery(ctx, pc)
+	result, err := s.runQuery(ctx, pc, query)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +195,8 @@ func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*
 }
 
 // runQuery executes the SQL query and returns the result as a map.
-func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext) (map[string]any, error) {
+// query is the (already dynamic-SQL-resolved) query string to execute.
+func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext, query string) (map[string]any, error) {
 	svc, ok := s.app.SvcRegistry()[s.database]
 	if !ok {
 		return nil, fmt.Errorf("db_query_cached step %q: database service %q not found", s.name, s.database)
@@ -210,7 +227,7 @@ func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext) (
 		resolvedParams[i] = resolved
 	}
 
-	query := normalizePlaceholders(s.query, driver)
+	query = normalizePlaceholders(query, driver)
 
 	rows, err := db.QueryContext(ctx, query, resolvedParams...)
 	if err != nil {
