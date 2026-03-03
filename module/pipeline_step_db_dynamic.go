@@ -7,8 +7,8 @@ import (
 
 // validateSQLIdentifier checks that s is safe to interpolate directly into SQL as an
 // identifier (e.g. a table name). Only ASCII letters (A-Z, a-z), ASCII digits (0-9),
-// underscores (_) and hyphens (-) are permitted. This strict allowlist prevents SQL
-// injection when dynamic values are embedded in queries via allow_dynamic_sql.
+// and underscores (_) are permitted. This strict allowlist prevents SQL injection
+// when dynamic values are embedded in queries via allow_dynamic_sql.
 func validateSQLIdentifier(s string) error {
 	if s == "" {
 		return fmt.Errorf("dynamic SQL identifier must not be empty")
@@ -17,8 +17,8 @@ func validateSQLIdentifier(s string) error {
 		if (c < 'a' || c > 'z') &&
 			(c < 'A' || c > 'Z') &&
 			(c < '0' || c > '9') &&
-			c != '_' && c != '-' {
-			return fmt.Errorf("dynamic SQL identifier %q contains unsafe character %q (only ASCII letters, digits, underscores and hyphens are allowed)", s, string(c))
+			c != '_' {
+			return fmt.Errorf("dynamic SQL identifier %q contains unsafe character %q (only ASCII letters, digits, and underscores are allowed)", s, string(c))
 		}
 	}
 	return nil
