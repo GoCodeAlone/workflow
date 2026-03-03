@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -20,6 +21,21 @@ import (
 	"github.com/CrisisTextLine/modular"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// TokenRevocationStore is an optional persistence backend for token revocations.
+// Implementations can persist revoked JTIs (e.g., in a relational database) so
+// that revocations survive process restarts.
+//
+// Both methods receive a context so implementations can honour timeouts and
+// propagate cancellations.
+type TokenRevocationStore interface {
+	// RevokeToken persists the revocation of the given JTI.
+	// expiry is the token's exp time; implementations should use it to avoid
+	// accumulating entries for tokens that have already expired naturally.
+	RevokeToken(ctx context.Context, jti string, expiry time.Time) error
+	// IsRevoked reports whether the given JTI has been revoked.
+	IsRevoked(ctx context.Context, jti string) (bool, error)
+}
 
 // GrantType constants for OAuth2 M2M flows.
 const (
@@ -71,8 +87,18 @@ type M2MAuthModule struct {
 	trustedKeys map[string]*ecdsa.PublicKey
 
 	// Registered clients
-	mu      sync.RWMutex
-	clients map[string]*M2MClient // keyed by ClientID
+	mu           sync.RWMutex
+	clients      map[string]*M2MClient // keyed by ClientID
+	jtiBlacklist map[string]time.Time  // revoked token JTIs → expiry time
+
+	// Optional pluggable persistence for token revocations.
+	revocationStore TokenRevocationStore
+
+	// Introspection access-control policy (see SetIntrospectPolicy).
+	introspectAllowOthers      bool   // if true, authenticated callers may inspect any token
+	introspectRequiredScope    string // scope required in caller's token to inspect others
+	introspectRequiredClaim    string // claim key required in caller's token to inspect others
+	introspectRequiredClaimVal string // expected value for introspectRequiredClaim (empty = key only)
 }
 
 // NewM2MAuthModule creates a new M2MAuthModule with HS256 signing.
@@ -85,13 +111,14 @@ func NewM2MAuthModule(name string, hmacSecret string, tokenExpiry time.Duration,
 		issuer = "workflow"
 	}
 	m := &M2MAuthModule{
-		name:        name,
-		algorithm:   SigningAlgHS256,
-		issuer:      issuer,
-		tokenExpiry: tokenExpiry,
-		hmacSecret:  []byte(hmacSecret),
-		trustedKeys: make(map[string]*ecdsa.PublicKey),
-		clients:     make(map[string]*M2MClient),
+		name:         name,
+		algorithm:    SigningAlgHS256,
+		issuer:       issuer,
+		tokenExpiry:  tokenExpiry,
+		hmacSecret:   []byte(hmacSecret),
+		trustedKeys:  make(map[string]*ecdsa.PublicKey),
+		clients:      make(map[string]*M2MClient),
+		jtiBlacklist: make(map[string]time.Time),
 	}
 	return m
 }
@@ -149,6 +176,39 @@ func (m *M2MAuthModule) RegisterClient(client M2MClient) {
 	m.clients[client.ClientID] = &client
 }
 
+// SetIntrospectPolicy configures access control for the POST /oauth/introspect endpoint.
+//
+// By default (allowOthers=false) only self-inspection is permitted: a caller may only
+// introspect its own token (the token being inspected must have the same sub as the
+// authenticated caller's identity).
+//
+// When allowOthers=true, any authenticated caller may introspect any token. Two optional
+// prerequisites can narrow this further when the caller authenticates with a Bearer token:
+//   - requiredScope: the caller's token must contain this scope (e.g. "introspect:admin").
+//   - requiredClaim / requiredClaimVal: the caller's token must have this claim, and if
+//     requiredClaimVal is non-empty, the claim value must equal that string.
+//
+// Callers authenticating via HTTP Basic Auth (client_id + client_secret) are always
+// considered admin-level and satisfy any scope/claim requirement when allowOthers=true.
+func (m *M2MAuthModule) SetIntrospectPolicy(allowOthers bool, requiredScope, requiredClaim, requiredClaimVal string) {
+	m.introspectAllowOthers = allowOthers
+	m.introspectRequiredScope = requiredScope
+	m.introspectRequiredClaim = requiredClaim
+	m.introspectRequiredClaimVal = requiredClaimVal
+}
+
+// SetRevocationStore configures an optional persistent backend for token revocations.
+// When set, every call to POST /oauth/revoke will also call store.RevokeToken.
+// Revocation checks consult the store in addition to the in-memory blacklist, allowing
+// revocations to survive process restarts.
+//
+// The store is called with a background context. Pass nil to remove a previously set store.
+func (m *M2MAuthModule) SetRevocationStore(store TokenRevocationStore) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.revocationStore = store
+}
+
 // Name returns the module name.
 func (m *M2MAuthModule) Name() string { return m.name }
 
@@ -185,8 +245,10 @@ func (m *M2MAuthModule) RequiresServices() []modular.ServiceDependency { return 
 //
 // Routes:
 //
-//	POST /oauth/token  — token endpoint (client_credentials + jwt-bearer grants)
-//	GET  /oauth/jwks   — JSON Web Key Set (ES256 public key)
+//	POST /oauth/token     — token endpoint (client_credentials + jwt-bearer grants)
+//	POST /oauth/revoke    — token revocation (RFC 7009)
+//	POST /oauth/introspect — token introspection (RFC 7662)
+//	GET  /oauth/jwks      — JSON Web Key Set (ES256 public key)
 func (m *M2MAuthModule) Handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -194,6 +256,10 @@ func (m *M2MAuthModule) Handle(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodPost && strings.HasSuffix(path, "/oauth/token"):
 		m.handleToken(w, r)
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/oauth/revoke"):
+		m.handleRevoke(w, r)
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/oauth/introspect"):
+		m.handleIntrospect(w, r)
 	case r.Method == http.MethodGet && strings.HasSuffix(path, "/oauth/jwks"):
 		m.handleJWKS(w, r)
 	default:
@@ -336,17 +402,175 @@ func (m *M2MAuthModule) handleJWKS(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// handleRevoke implements token revocation per RFC 7009.
+// It adds the token's JTI to the in-memory blacklist so that subsequent
+// calls to Authenticate or handleIntrospect will treat the token as invalid.
+//
+// Per RFC 7009 §2.1, the revocation endpoint MUST require client authentication.
+// Callers must authenticate via HTTP Basic Auth or form-encoded client_id/client_secret.
+// Per RFC 7009 §2.2, if the token is valid and recognised, 200 OK is returned;
+// if it is unrecognised or already invalid, 200 OK is still returned.
+func (m *M2MAuthModule) handleRevoke(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(oauthError("invalid_request", "failed to parse form"))
+		return
+	}
+
+	// RFC 7009 §2.1: client authentication is required.
+	clientID, clientSecret, hasCredentials := m.extractClientCredentials(r)
+	if !hasCredentials {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(oauthError("invalid_client", "client authentication required"))
+		return
+	}
+	if _, err := m.authenticateClient(clientID, clientSecret); err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(oauthError("invalid_client", "invalid client credentials"))
+		return
+	}
+
+	tokenStr := r.FormValue("token")
+	if tokenStr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(oauthError("invalid_request", "token is required"))
+		return
+	}
+	// Per RFC 7009 §2.2: if the token is unrecognized or already invalid, still return 200.
+	// We attempt to parse it; if valid, add its JTI to the blacklist.
+	if claims, ok := m.parseTokenClaims(tokenStr); ok {
+		if jti, _ := claims["jti"].(string); jti != "" {
+			var expiry time.Time
+			if expRaw, ok2 := claims["exp"]; ok2 {
+				switch v := expRaw.(type) {
+				case float64:
+					expiry = time.Unix(int64(v), 0)
+				case json.Number:
+					if n, e := v.Int64(); e == nil {
+						expiry = time.Unix(n, 0)
+					}
+				}
+			}
+			if expiry.IsZero() {
+				expiry = time.Now().Add(m.tokenExpiry)
+			}
+
+			m.mu.Lock()
+			m.purgeExpiredJTIsLocked()
+			m.jtiBlacklist[jti] = expiry
+			store := m.revocationStore
+			m.mu.Unlock()
+
+			// Persist to external store if configured.
+			if store != nil {
+				_ = store.RevokeToken(r.Context(), jti, expiry)
+			}
+		}
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleIntrospect implements token introspection per RFC 7662.
+//
+// The caller MUST authenticate before the token under inspection is revealed.
+// Two authentication methods are supported:
+//   - HTTP Basic Auth (client_id + client_secret): always treated as admin-level.
+//   - Bearer token (Authorization: Bearer <token>): the caller's own valid token.
+//
+// By default (allowOthers=false) a caller may only introspect its own token (the
+// token's sub must match the caller's identity). Set the introspect policy via
+// SetIntrospectPolicy to allow cross-token inspection with optional scope/claim guards.
+func (m *M2MAuthModule) handleIntrospect(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(oauthError("invalid_request", "failed to parse form"))
+		return
+	}
+	tokenStr := r.FormValue("token")
+	if tokenStr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(oauthError("invalid_request", "token is required"))
+		return
+	}
+
+	// --- Authenticate the caller ---
+	callerID, callerClaims, authed := m.authenticateIntrospectCaller(r)
+	if !authed {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(oauthError("unauthorized_client", "authentication required to use the introspection endpoint"))
+		return
+	}
+
+	// --- Validate the token being introspected ---
+	claims, ok := m.parseTokenClaims(tokenStr)
+	if !ok {
+		_ = json.NewEncoder(w).Encode(map[string]any{"active": false})
+		return
+	}
+
+	// Check JTI blacklist (in-memory + optional persistent store).
+	if jti, _ := claims["jti"].(string); jti != "" {
+		if m.isJTIRevoked(r.Context(), jti) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"active": false})
+			return
+		}
+	}
+
+	// --- Authorization check ---
+	tokenSub, _ := claims["sub"].(string)
+	if !m.introspectAllowOthers {
+		// Default: self-inspection only.
+		if callerID != tokenSub {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(oauthError("access_denied", "not authorized to introspect this token"))
+			return
+		}
+	} else {
+		// Allow-others mode: enforce optional scope/claim prerequisites.
+		if !m.callerMeetsIntrospectPolicy(callerID, callerClaims, tokenSub) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(oauthError("access_denied", "not authorized to introspect this token"))
+			return
+		}
+	}
+
+	resp := map[string]any{
+		"active": true,
+	}
+	if v, ok2 := claims["sub"].(string); ok2 {
+		resp["client_id"] = v
+	}
+	if v, ok2 := claims["scope"].(string); ok2 {
+		resp["scope"] = v
+	}
+	if v, ok2 := claims["exp"]; ok2 {
+		resp["exp"] = v
+	}
+	if v, ok2 := claims["iat"]; ok2 {
+		resp["iat"] = v
+	}
+	if v, ok2 := claims["iss"].(string); ok2 {
+		resp["iss"] = v
+	}
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // --- token issuance ---
 
 // issueToken creates and signs a JWT access token.
 // extraClaims are merged in (e.g., from a jwt-bearer assertion).
 func (m *M2MAuthModule) issueToken(subject string, scopes []string, extraClaims map[string]any) (string, error) {
 	now := time.Now()
+	jti, err := generateJTI()
+	if err != nil {
+		return "", fmt.Errorf("generate JTI: %w", err)
+	}
 	claims := jwt.MapClaims{
 		"iss": m.issuer,
 		"sub": subject,
 		"iat": now.Unix(),
 		"exp": now.Add(m.tokenExpiry).Unix(),
+		"jti": jti,
 	}
 	if len(scopes) > 0 {
 		claims["scope"] = strings.Join(scopes, " ")
@@ -354,7 +578,7 @@ func (m *M2MAuthModule) issueToken(subject string, scopes []string, extraClaims 
 	// Merge extra claims, but never let them override standard fields.
 	for k, v := range extraClaims {
 		switch k {
-		case "iss", "sub", "iat", "exp", "scope":
+		case "iss", "sub", "iat", "exp", "scope", "jti":
 			// protected — skip
 		default:
 			claims[k] = v
@@ -506,14 +730,44 @@ func (m *M2MAuthModule) validateJWTAssertion(assertion string) (jwt.MapClaims, e
 // Authenticate implements the AuthProvider interface so M2MAuthModule can be
 // used as a provider in AuthMiddleware.  It validates the token's signature
 // using the configured algorithm and returns the embedded claims.
+// Tokens whose JTI has been revoked via the /oauth/revoke endpoint are rejected.
 func (m *M2MAuthModule) Authenticate(tokenStr string) (bool, map[string]any, error) {
-	var token *jwt.Token
-	var err error
+	if m.algorithm == SigningAlgES256 && m.publicKey == nil {
+		return false, nil, fmt.Errorf("no ECDSA public key configured")
+	}
+
+	claims, ok := m.parseTokenClaims(tokenStr)
+	if !ok {
+		return false, nil, nil
+	}
+
+	// Check JTI blacklist (in-memory + optional persistent store).
+	if jti, _ := claims["jti"].(string); jti != "" {
+		if m.isJTIRevoked(context.Background(), jti) {
+			return false, nil, nil
+		}
+	}
+
+	result := make(map[string]any, len(claims))
+	for k, v := range claims {
+		result[k] = v
+	}
+	return true, result, nil
+}
+
+// parseTokenClaims parses and cryptographically validates a token string,
+// returning the claims and whether the token is valid.
+// It does NOT check the JTI blacklist; callers must do that separately.
+func (m *M2MAuthModule) parseTokenClaims(tokenStr string) (jwt.MapClaims, bool) {
+	var (
+		token *jwt.Token
+		err   error
+	)
 
 	switch m.algorithm {
 	case SigningAlgES256:
 		if m.publicKey == nil {
-			return false, nil, fmt.Errorf("no ECDSA public key configured")
+			return nil, false
 		}
 		token, err = jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
 			if _, ok := t.Method.(*jwt.SigningMethodECDSA); !ok {
@@ -531,22 +785,145 @@ func (m *M2MAuthModule) Authenticate(tokenStr string) (bool, map[string]any, err
 	}
 
 	if err != nil {
-		return false, nil, nil //nolint:nilerr // Invalid token is a failed auth, not an error
+		return nil, false
 	}
-
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok || !token.Valid {
-		return false, nil, nil
+		return nil, false
 	}
-
-	result := make(map[string]any, len(claims))
-	for k, v := range claims {
-		result[k] = v
-	}
-	return true, result, nil
+	return claims, true
 }
 
 // --- JWKS helpers ---
+
+// authenticateIntrospectCaller authenticates the caller of the /oauth/introspect endpoint.
+// It tries HTTP Basic Auth (client_id + client_secret) first, then Bearer token.
+//
+// Returns:
+//   - callerID: the authenticated client_id (Basic Auth) or sub claim (Bearer token).
+//   - callerClaims: the JWT claims of the caller's Bearer token, or nil for Basic Auth callers.
+//   - ok: whether authentication succeeded.
+//
+// If HTTP Basic Auth credentials are present but invalid, authentication fails immediately
+// without falling back to Bearer token.
+func (m *M2MAuthModule) authenticateIntrospectCaller(r *http.Request) (callerID string, callerClaims jwt.MapClaims, ok bool) {
+	// Try HTTP Basic Auth (client_id + client_secret).
+	if clientID, clientSecret, hasBasic := r.BasicAuth(); hasBasic && clientID != "" {
+		if _, err := m.authenticateClient(clientID, clientSecret); err == nil {
+			return clientID, nil, true
+		}
+		// Credentials provided but invalid — reject immediately.
+		return "", nil, false
+	}
+
+	// Try Bearer token in Authorization header.
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		if claims, valid := m.parseTokenClaims(tokenStr); valid {
+			// Reject revoked caller tokens.
+			if jti, _ := claims["jti"].(string); jti != "" {
+				if m.isJTIRevoked(r.Context(), jti) {
+					return "", nil, false
+				}
+			}
+			if sub, _ := claims["sub"].(string); sub != "" {
+				return sub, claims, true
+			}
+		}
+		return "", nil, false
+	}
+
+	return "", nil, false
+}
+
+// callerMeetsIntrospectPolicy reports whether the caller is permitted to inspect a
+// token with the given subject under the "allow-others" policy.
+//
+// Self-inspection (callerID == tokenSub) is always allowed.
+// HTTP Basic Auth callers (callerClaims == nil) are treated as admin-level and bypass
+// scope/claim prerequisites.
+// Bearer token callers must satisfy any configured requiredScope and/or requiredClaim.
+func (m *M2MAuthModule) callerMeetsIntrospectPolicy(callerID string, callerClaims jwt.MapClaims, tokenSub string) bool {
+	// Self-inspection is always permitted.
+	if callerID == tokenSub {
+		return true
+	}
+	// HTTP Basic Auth callers are admin-level.
+	if callerClaims == nil {
+		return true
+	}
+	// Bearer token callers: enforce scope prerequisite.
+	if m.introspectRequiredScope != "" {
+		scopeStr, _ := callerClaims["scope"].(string)
+		if !containsScope(scopeStr, m.introspectRequiredScope) {
+			return false
+		}
+	}
+	// Enforce claim prerequisite.
+	if m.introspectRequiredClaim != "" {
+		claimVal, exists := callerClaims[m.introspectRequiredClaim]
+		if !exists {
+			return false
+		}
+		if m.introspectRequiredClaimVal != "" && fmt.Sprintf("%v", claimVal) != m.introspectRequiredClaimVal {
+			return false
+		}
+	}
+	return true
+}
+
+// containsScope reports whether scopeStr (a space-separated list of scopes) contains target.
+func containsScope(scopeStr, target string) bool {
+	for _, s := range strings.Fields(scopeStr) {
+		if s == target {
+			return true
+		}
+	}
+	return false
+}
+
+// isJTIRevoked checks whether the given JTI has been revoked.
+// It consults the in-memory blacklist first (after pruning expired entries),
+// then falls back to the optional persistent store.
+func (m *M2MAuthModule) isJTIRevoked(ctx context.Context, jti string) bool {
+	m.mu.Lock()
+	m.purgeExpiredJTIsLocked()
+	expiry, inMemory := m.jtiBlacklist[jti]
+	store := m.revocationStore
+	m.mu.Unlock()
+
+	if inMemory && time.Now().Before(expiry) {
+		return true
+	}
+	if store != nil {
+		revoked, err := store.IsRevoked(ctx, jti)
+		if err == nil && revoked {
+			return true
+		}
+	}
+	return false
+}
+
+// purgeExpiredJTIsLocked removes JTIs from the in-memory blacklist whose
+// tokens have already expired naturally. It MUST be called with m.mu held for writing.
+func (m *M2MAuthModule) purgeExpiredJTIsLocked() {
+	now := time.Now()
+	for jti, expiry := range m.jtiBlacklist {
+		if now.After(expiry) {
+			delete(m.jtiBlacklist, jti)
+		}
+	}
+}
+
+// generateJTI generates a random 16-byte JWT ID encoded as base64url.
+func generateJTI() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
 
 // ecPublicKeyToJWK converts an ECDSA P-256 public key to a JWK (RFC 7517) map.
 // It uses the ecdh package to extract the uncompressed point bytes, avoiding
