@@ -1,8 +1,13 @@
 package auth
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 )
 
@@ -118,5 +123,48 @@ func TestModuleSchemas(t *testing.T) {
 		if !types[expected] {
 			t.Errorf("missing schema for %q", expected)
 		}
+	}
+}
+
+func TestModuleFactoryM2MWithClaims(t *testing.T) {
+	p := New()
+	factories := p.ModuleFactories()
+
+	mod := factories["auth.m2m"]("m2m-test", map[string]any{
+		"algorithm": "HS256",
+		"secret":    "this-is-a-valid-secret-32-bytes!",
+		"clients": []any{
+			map[string]any{
+				"clientId":     "org-alpha",
+				"clientSecret": "secret-alpha",
+				"scopes":       []any{"read"},
+				"claims": map[string]any{
+					"tenant_id": "alpha",
+				},
+			},
+		},
+	})
+	if mod == nil {
+		t.Fatal("auth.m2m factory returned nil")
+	}
+
+	m2mMod, ok := mod.(*module.M2MAuthModule)
+	if !ok {
+		t.Fatal("expected *module.M2MAuthModule")
+	}
+
+	// Issue a token via the Handle method.
+	params := url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {"org-alpha"},
+		"client_secret": {"secret-alpha"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(params.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	m2mMod.Handle(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
 	}
 }

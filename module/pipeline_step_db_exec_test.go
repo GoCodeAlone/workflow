@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -192,6 +193,68 @@ func TestDBExecStep_RejectsTemplateInQuery(t *testing.T) {
 	}, nil)
 	if err == nil {
 		t.Fatal("expected error for template in query")
+	}
+}
+
+func TestDBExecStep_DynamicTableName(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE items_alpha (id TEXT PRIMARY KEY, name TEXT NOT NULL)`)
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	app := mockAppWithDB("test-db", db)
+	factory := NewDBExecStepFactory()
+	step, err := factory("dynamic-insert", map[string]any{
+		"database":          "test-db",
+		"query":             `INSERT INTO items_{{.steps.auth.tenant}} (id, name) VALUES (?, ?)`,
+		"params":            []any{"i1", "Widget"},
+		"allow_dynamic_sql": true,
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("auth", map[string]any{"tenant": "alpha"})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	affected, _ := result.Output["affected_rows"].(int64)
+	if affected != 1 {
+		t.Errorf("expected affected_rows=1, got %v", affected)
+	}
+}
+
+func TestDBExecStep_DynamicSQL_RejectsInjection(t *testing.T) {
+	factory := NewDBExecStepFactory()
+	step, err := factory("injection-exec", map[string]any{
+		"database":          "test-db",
+		"query":             `DELETE FROM items_{{.steps.auth.tenant}} WHERE id = ?`,
+		"params":            []any{"i1"},
+		"allow_dynamic_sql": true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("auth", map[string]any{"tenant": "alpha'; DROP TABLE items;--"})
+
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error for unsafe SQL identifier")
+	}
+	if !strings.Contains(err.Error(), "unsafe character") {
+		t.Errorf("expected 'unsafe character' in error, got: %v", err)
 	}
 }
 

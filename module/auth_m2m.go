@@ -40,10 +40,11 @@ const (
 
 // M2MClient represents a registered machine-to-machine OAuth2 client.
 type M2MClient struct {
-	ClientID     string   `json:"clientId"`
-	ClientSecret string   `json:"clientSecret"` //nolint:gosec // G117: config DTO field
-	Description  string   `json:"description,omitempty"`
-	Scopes       []string `json:"scopes,omitempty"`
+	ClientID     string         `json:"clientId"`
+	ClientSecret string         `json:"clientSecret"` //nolint:gosec // G117: config DTO field
+	Description  string         `json:"description,omitempty"`
+	Scopes       []string       `json:"scopes,omitempty"`
+	Claims       map[string]any `json:"claims,omitempty"`
 }
 
 // M2MAuthModule provides machine-to-machine (server-to-server) OAuth2 authentication.
@@ -251,7 +252,7 @@ func (m *M2MAuthModule) handleClientCredentials(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	token, err := m.issueToken(clientID, grantedScopes, nil)
+	token, err := m.issueToken(clientID, grantedScopes, client.Claims)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(oauthError("server_error", "failed to issue token"))

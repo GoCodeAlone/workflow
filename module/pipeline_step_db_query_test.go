@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -218,6 +219,93 @@ func TestDBQueryStep_RejectsTemplateInQuery(t *testing.T) {
 	}
 }
 
+func TestDBQueryStep_DynamicTableName(t *testing.T) {
+	db := setupTestDB(t)
+	// Create a second table whose name is derived from a "tenant" value.
+	_, err := db.Exec(`CREATE TABLE companies_alpha (id TEXT PRIMARY KEY, name TEXT NOT NULL)`)
+	if err != nil {
+		t.Fatalf("create tenant table: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO companies_alpha (id, name) VALUES ('a1', 'Alpha Corp')`)
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	app := mockAppWithDB("test-db", db)
+	factory := NewDBQueryStepFactory()
+	step, err := factory("dynamic-table", map[string]any{
+		"database":          "test-db",
+		"query":             `SELECT id, name FROM companies_{{.steps.auth.tenant}} WHERE id = ?`,
+		"params":            []any{"a1"},
+		"mode":              "single",
+		"allow_dynamic_sql": true,
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("auth", map[string]any{"tenant": "alpha"})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	found, _ := result.Output["found"].(bool)
+	if !found {
+		t.Error("expected found=true")
+	}
+	row, _ := result.Output["row"].(map[string]any)
+	if row["name"] != "Alpha Corp" {
+		t.Errorf("expected name='Alpha Corp', got %v", row["name"])
+	}
+}
+
+func TestDBQueryStep_DynamicSQL_RejectsInjection(t *testing.T) {
+	factory := NewDBQueryStepFactory()
+	step, err := factory("injection-attempt", map[string]any{
+		"database":          "test-db",
+		"query":             `SELECT * FROM companies_{{.steps.auth.tenant}}`,
+		"mode":              "list",
+		"allow_dynamic_sql": true,
+	}, nil) // nil app is fine – we expect an error before the DB is touched
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("auth", map[string]any{"tenant": "alpha; DROP TABLE companies;--"})
+
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error for unsafe SQL identifier")
+	}
+	if !strings.Contains(err.Error(), "unsafe character") {
+		t.Errorf("expected 'unsafe character' in error, got: %v", err)
+	}
+}
+
+func TestDBQueryStep_DynamicSQL_RejectsEmpty(t *testing.T) {
+	factory := NewDBQueryStepFactory()
+	step, err := factory("empty-ident", map[string]any{
+		"database":          "test-db",
+		"query":             `SELECT * FROM companies_{{.steps.auth.tenant}}`,
+		"mode":              "list",
+		"allow_dynamic_sql": true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	// Tenant resolves to empty string (missing key → zero value)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error for empty SQL identifier")
+	}
+}
+
 func TestDBQueryStep_MissingDatabase(t *testing.T) {
 	factory := NewDBQueryStepFactory()
 	_, err := factory("no-db", map[string]any{
@@ -225,6 +313,28 @@ func TestDBQueryStep_MissingDatabase(t *testing.T) {
 	}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing database")
+	}
+}
+
+func TestDBQueryStep_DynamicSQL_UnclosedAction(t *testing.T) {
+	factory := NewDBQueryStepFactory()
+	step, err := factory("unclosed", map[string]any{
+		"database":          "test-db",
+		"query":             `SELECT * FROM companies_{{.steps.auth.tenant`,
+		"mode":              "list",
+		"allow_dynamic_sql": true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error for unclosed template action")
+	}
+	if !strings.Contains(err.Error(), "unclosed template action") {
+		t.Errorf("expected 'unclosed template action' in error, got: %v", err)
 	}
 }
 

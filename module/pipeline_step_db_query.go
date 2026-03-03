@@ -25,14 +25,15 @@ type DBDriverProvider interface {
 
 // DBQueryStep executes a parameterized SQL SELECT against a named database service.
 type DBQueryStep struct {
-	name      string
-	database  string
-	query     string
-	params    []string
-	mode      string // "list" or "single"
-	tenantKey string // dot-path to resolve tenant value for automatic scoping
-	app       modular.Application
-	tmpl      *TemplateEngine
+	name            string
+	database        string
+	query           string
+	params          []string
+	mode            string // "list" or "single"
+	tenantKey       string // dot-path to resolve tenant value for automatic scoping
+	allowDynamicSQL bool
+	app             modular.Application
+	tmpl            *TemplateEngine
 }
 
 // NewDBQueryStepFactory returns a StepFactory that creates DBQueryStep instances.
@@ -48,8 +49,10 @@ func NewDBQueryStepFactory() StepFactory {
 			return nil, fmt.Errorf("db_query step %q: 'query' is required", name)
 		}
 
-		// Safety: reject template expressions in SQL to prevent injection
-		if strings.Contains(query, "{{") {
+		// Safety: reject template expressions in SQL to prevent injection,
+		// unless allow_dynamic_sql is explicitly enabled.
+		allowDynamicSQL, _ := config["allow_dynamic_sql"].(bool)
+		if !allowDynamicSQL && strings.Contains(query, "{{") {
 			return nil, fmt.Errorf("db_query step %q: query must not contain template expressions (use params instead)", name)
 		}
 
@@ -75,14 +78,15 @@ func NewDBQueryStepFactory() StepFactory {
 		tenantKey, _ := config["tenantKey"].(string)
 
 		return &DBQueryStep{
-			name:      name,
-			database:  database,
-			query:     query,
-			params:    params,
-			mode:      mode,
-			tenantKey: tenantKey,
-			app:       app,
-			tmpl:      NewTemplateEngine(),
+			name:            name,
+			database:        database,
+			query:           query,
+			params:          params,
+			mode:            mode,
+			tenantKey:       tenantKey,
+			allowDynamicSQL: allowDynamicSQL,
+			app:             app,
+			tmpl:            NewTemplateEngine(),
 		}, nil
 	}
 }
@@ -90,6 +94,18 @@ func NewDBQueryStepFactory() StepFactory {
 func (s *DBQueryStep) Name() string { return s.name }
 
 func (s *DBQueryStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+	// Resolve template expressions in the query early (before any DB access) when
+	// dynamic SQL is enabled. This validates resolved identifiers against an
+	// allowlist before any database interaction.
+	query := s.query
+	if s.allowDynamicSQL {
+		var err error
+		query, err = resolveDynamicSQL(s.tmpl, query, pc)
+		if err != nil {
+			return nil, fmt.Errorf("db_query step %q: %w", s.name, err)
+		}
+	}
+
 	// Resolve database service
 	if s.app == nil {
 		return nil, fmt.Errorf("db_query step %q: no application context", s.name)
@@ -127,7 +143,6 @@ func (s *DBQueryStep) Execute(_ context.Context, pc *PipelineContext) (*StepResu
 	}
 
 	// Apply automatic tenant scoping when tenantKey is configured.
-	query := s.query
 	if s.tenantKey != "" {
 		pkp, ok := svc.(PartitionKeyProvider)
 		if !ok {
