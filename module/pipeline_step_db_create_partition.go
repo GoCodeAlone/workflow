@@ -10,11 +10,12 @@ import (
 // DBCreatePartitionStep creates a PostgreSQL LIST partition for a given tenant value
 // on all tables managed by a database.partitioned module.
 type DBCreatePartitionStep struct {
-	name      string
-	database  string
-	tenantKey string // dot-path in PipelineContext to resolve the tenant value
-	app       modular.Application
-	tmpl      *TemplateEngine
+	name         string
+	database     string
+	tenantKey    string // dot-path in PipelineContext to resolve the tenant value
+	partitionKey string // optional: target a specific partition config by key
+	app          modular.Application
+	tmpl         *TemplateEngine
 }
 
 // NewDBCreatePartitionStepFactory returns a StepFactory for DBCreatePartitionStep.
@@ -30,12 +31,15 @@ func NewDBCreatePartitionStepFactory() StepFactory {
 			return nil, fmt.Errorf("db_create_partition step %q: 'tenantKey' is required", name)
 		}
 
+		partitionKey, _ := config["partitionKey"].(string)
+
 		return &DBCreatePartitionStep{
-			name:      name,
-			database:  database,
-			tenantKey: tenantKey,
-			app:       app,
-			tmpl:      NewTemplateEngine(),
+			name:         name,
+			database:     database,
+			tenantKey:    tenantKey,
+			partitionKey: partitionKey,
+			app:          app,
+			tmpl:         NewTemplateEngine(),
 		}, nil
 	}
 }
@@ -63,8 +67,18 @@ func (s *DBCreatePartitionStep) Execute(ctx context.Context, pc *PipelineContext
 	}
 	tenantStr := fmt.Sprintf("%v", tenantVal)
 
-	if err := mgr.EnsurePartition(ctx, tenantStr); err != nil {
-		return nil, fmt.Errorf("db_create_partition step %q: %w", s.name, err)
+	if s.partitionKey != "" {
+		multiMgr, ok := svc.(MultiPartitionManager)
+		if !ok {
+			return nil, fmt.Errorf("db_create_partition step %q: service %q does not implement MultiPartitionManager (required when partitionKey is set)", s.name, s.database)
+		}
+		if err := multiMgr.EnsurePartitionForKey(ctx, s.partitionKey, tenantStr); err != nil {
+			return nil, fmt.Errorf("db_create_partition step %q: %w", s.name, err)
+		}
+	} else {
+		if err := mgr.EnsurePartition(ctx, tenantStr); err != nil {
+			return nil, fmt.Errorf("db_create_partition step %q: %w", s.name, err)
+		}
 	}
 
 	return &StepResult{Output: map[string]any{

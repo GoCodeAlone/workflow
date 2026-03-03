@@ -11,9 +11,10 @@ import (
 // for all tables managed by a database.partitioned module. This enables automatic
 // partition creation when new tenants are onboarded.
 type DBSyncPartitionsStep struct {
-	name     string
-	database string
-	app      modular.Application
+	name         string
+	database     string
+	partitionKey string // optional: target a specific partition config by key
+	app          modular.Application
 }
 
 // NewDBSyncPartitionsStepFactory returns a StepFactory for DBSyncPartitionsStep.
@@ -24,10 +25,13 @@ func NewDBSyncPartitionsStepFactory() StepFactory {
 			return nil, fmt.Errorf("db_sync_partitions step %q: 'database' is required", name)
 		}
 
+		partitionKey, _ := config["partitionKey"].(string)
+
 		return &DBSyncPartitionsStep{
-			name:     name,
-			database: database,
-			app:      app,
+			name:         name,
+			database:     database,
+			partitionKey: partitionKey,
+			app:          app,
 		}, nil
 	}
 }
@@ -49,8 +53,18 @@ func (s *DBSyncPartitionsStep) Execute(ctx context.Context, _ *PipelineContext) 
 		return nil, fmt.Errorf("db_sync_partitions step %q: service %q does not implement PartitionManager (use database.partitioned)", s.name, s.database)
 	}
 
-	if err := mgr.SyncPartitionsFromSource(ctx); err != nil {
-		return nil, fmt.Errorf("db_sync_partitions step %q: %w", s.name, err)
+	if s.partitionKey != "" {
+		multiMgr, ok := svc.(MultiPartitionManager)
+		if !ok {
+			return nil, fmt.Errorf("db_sync_partitions step %q: service %q does not implement MultiPartitionManager (required when partitionKey is set)", s.name, s.database)
+		}
+		if err := multiMgr.SyncPartitionsForKey(ctx, s.partitionKey); err != nil {
+			return nil, fmt.Errorf("db_sync_partitions step %q: %w", s.name, err)
+		}
+	} else {
+		if err := mgr.SyncPartitionsFromSource(ctx); err != nil {
+			return nil, fmt.Errorf("db_sync_partitions step %q: %w", s.name, err)
+		}
 	}
 
 	return &StepResult{Output: map[string]any{

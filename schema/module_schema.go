@@ -516,18 +516,19 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "database.partitioned",
 		Label:       "Partitioned Database",
 		Category:    "database",
-		Description: "PostgreSQL partitioned database for multi-tenant data isolation. Supports LIST and RANGE partitions with configurable naming format and optional source-table-driven auto-partition creation.",
+		Description: "PostgreSQL partitioned database for multi-tenant data isolation. Supports LIST and RANGE partitions with configurable naming format and optional source-table-driven auto-partition creation. Use partitionKey/tables for a single partition config, or partitions[] for multiple independent partition key configurations.",
 		Inputs:      []ServiceIODef{{Name: "query", Type: "SQL", Description: "SQL query to execute"}},
 		Outputs:     []ServiceIODef{{Name: "database", Type: "sql.DB", Description: "SQL database connection pool"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "driver", Label: "Driver", Type: FieldTypeSelect, Options: []string{"pgx", "pgx/v5", "postgres"}, Required: true, Description: "PostgreSQL database driver"},
 			{Key: "dsn", Label: "DSN", Type: FieldTypeString, Required: true, Description: "Data source name / connection string", Placeholder: "postgres://user:pass@localhost/db?sslmode=disable", Sensitive: true}, //nolint:gosec // G101: placeholder DSN example in schema documentation
-			{Key: "partitionKey", Label: "Partition Key", Type: FieldTypeString, Required: true, Description: "Column name used for partitioning (e.g. tenant_id)", Placeholder: "tenant_id"},
-			{Key: "tables", Label: "Tables", Type: FieldTypeArray, ArrayItemType: "string", Required: true, Description: "Tables to manage partitions for", Placeholder: "forms"},
-			{Key: "partitionType", Label: "Partition Type", Type: FieldTypeSelect, Options: []string{"list", "range"}, DefaultValue: "list", Description: "PostgreSQL partition type: list (FOR VALUES IN) or range (FOR VALUES FROM/TO)"},
-			{Key: "partitionNameFormat", Label: "Partition Name Format", Type: FieldTypeString, DefaultValue: "{table}_{tenant}", Description: "Template for partition table names. Supports {table} and {tenant} placeholders.", Placeholder: "{table}_{tenant}"},
-			{Key: "sourceTable", Label: "Source Table", Type: FieldTypeString, Description: "Table containing all tenant IDs for auto-partition sync (e.g. tenants)", Placeholder: "tenants"},
-			{Key: "sourceColumn", Label: "Source Column", Type: FieldTypeString, Description: "Column in source table to query for tenant values. Defaults to partitionKey.", Placeholder: "id"},
+			{Key: "partitionKey", Label: "Partition Key", Type: FieldTypeString, Description: "Column name used for partitioning in single-partition mode (e.g. tenant_id). Ignored when 'partitions' is set.", Placeholder: "tenant_id"},
+			{Key: "tables", Label: "Tables", Type: FieldTypeArray, ArrayItemType: "string", Description: "Tables to manage partitions for in single-partition mode. Ignored when 'partitions' is set.", Placeholder: "forms"},
+			{Key: "partitionType", Label: "Partition Type", Type: FieldTypeSelect, Options: []string{"list", "range"}, DefaultValue: "list", Description: "PostgreSQL partition type for single-partition mode: list (FOR VALUES IN) or range (FOR VALUES FROM/TO). Ignored when 'partitions' is set."},
+			{Key: "partitionNameFormat", Label: "Partition Name Format", Type: FieldTypeString, DefaultValue: "{table}_{tenant}", Description: "Template for partition table names in single-partition mode. Supports {table} and {tenant} placeholders. Ignored when 'partitions' is set.", Placeholder: "{table}_{tenant}"},
+			{Key: "sourceTable", Label: "Source Table", Type: FieldTypeString, Description: "Table containing all tenant IDs for auto-partition sync in single-partition mode. Ignored when 'partitions' is set.", Placeholder: "tenants"},
+			{Key: "sourceColumn", Label: "Source Column", Type: FieldTypeString, Description: "Column in source table to query for tenant values in single-partition mode. Defaults to partitionKey.", Placeholder: "id"},
+			{Key: "partitions", Label: "Partitions", Type: FieldTypeArray, ArrayItemType: "object", Description: "List of independent partition key configurations. When set, overrides the single-partition fields. Each entry supports: partitionKey, tables, partitionType, partitionNameFormat, sourceTable, sourceColumn."},
 			{Key: "maxOpenConns", Label: "Max Open Connections", Type: FieldTypeNumber, DefaultValue: 25, Description: "Maximum number of open database connections"},
 			{Key: "maxIdleConns", Label: "Max Idle Connections", Type: FieldTypeNumber, DefaultValue: 5, Description: "Maximum number of idle connections in the pool"},
 		},
@@ -1074,6 +1075,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "database", Label: "Database", Type: FieldTypeString, Required: true, Description: "Name of a database.partitioned service", Placeholder: "db", InheritFrom: "dependency.name"},
 			{Key: "tenantKey", Label: "Tenant Key", Type: FieldTypeString, Required: true, Description: "Dot-path in pipeline context to resolve the tenant value (e.g. the new tenant's ID)", Placeholder: "steps.body.tenant_id"},
+			{Key: "partitionKey", Label: "Partition Key", Type: FieldTypeString, Description: "Target a specific partition config by its partitionKey. Required when the database has multiple partition configs. Omit to use the primary (first) partition config.", Placeholder: "tenant_id"},
 		},
 	})
 
@@ -1086,6 +1088,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Sync result with synced boolean"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "database", Label: "Database", Type: FieldTypeString, Required: true, Description: "Name of a database.partitioned service with sourceTable configured", Placeholder: "db", InheritFrom: "dependency.name"},
+			{Key: "partitionKey", Label: "Partition Key", Type: FieldTypeString, Description: "Target a specific partition config by its partitionKey for syncing. Omit to sync all configured partition groups.", Placeholder: "tenant_id"},
 		},
 	})
 
