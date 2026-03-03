@@ -513,6 +513,28 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	})
 
 	r.Register(&ModuleSchema{
+		Type:        "database.partitioned",
+		Label:       "Partitioned Database",
+		Category:    "database",
+		Description: "PostgreSQL partitioned database for multi-tenant data isolation. Supports LIST and RANGE partitions with configurable naming format and optional source-table-driven auto-partition creation.",
+		Inputs:      []ServiceIODef{{Name: "query", Type: "SQL", Description: "SQL query to execute"}},
+		Outputs:     []ServiceIODef{{Name: "database", Type: "sql.DB", Description: "SQL database connection pool"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "driver", Label: "Driver", Type: FieldTypeSelect, Options: []string{"pgx", "pgx/v5", "postgres"}, Required: true, Description: "PostgreSQL database driver"},
+			{Key: "dsn", Label: "DSN", Type: FieldTypeString, Required: true, Description: "Data source name / connection string", Placeholder: "postgres://user:pass@localhost/db?sslmode=disable", Sensitive: true}, //nolint:gosec // G101: placeholder DSN example in schema documentation
+			{Key: "partitionKey", Label: "Partition Key", Type: FieldTypeString, Required: true, Description: "Column name used for partitioning (e.g. tenant_id)", Placeholder: "tenant_id"},
+			{Key: "tables", Label: "Tables", Type: FieldTypeArray, ArrayItemType: "string", Required: true, Description: "Tables to manage partitions for", Placeholder: "forms"},
+			{Key: "partitionType", Label: "Partition Type", Type: FieldTypeSelect, Options: []string{"list", "range"}, DefaultValue: "list", Description: "PostgreSQL partition type: list (FOR VALUES IN) or range (FOR VALUES FROM/TO)"},
+			{Key: "partitionNameFormat", Label: "Partition Name Format", Type: FieldTypeString, DefaultValue: "{table}_{tenant}", Description: "Template for partition table names. Supports {table} and {tenant} placeholders.", Placeholder: "{table}_{tenant}"},
+			{Key: "sourceTable", Label: "Source Table", Type: FieldTypeString, Description: "Table containing all tenant IDs for auto-partition sync (e.g. tenants)", Placeholder: "tenants"},
+			{Key: "sourceColumn", Label: "Source Column", Type: FieldTypeString, Description: "Column in source table to query for tenant values. Defaults to partitionKey.", Placeholder: "id"},
+			{Key: "maxOpenConns", Label: "Max Open Connections", Type: FieldTypeNumber, DefaultValue: 25, Description: "Maximum number of open database connections"},
+			{Key: "maxIdleConns", Label: "Max Idle Connections", Type: FieldTypeNumber, DefaultValue: 5, Description: "Maximum number of idle connections in the pool"},
+		},
+		DefaultConfig: map[string]any{"maxOpenConns": 25, "maxIdleConns": 5, "partitionType": "list", "partitionNameFormat": "{table}_{tenant}"},
+	})
+
+	r.Register(&ModuleSchema{
 		Type:        "persistence.store",
 		Label:       "Persistence Store",
 		Category:    "database",
@@ -1002,7 +1024,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "query", Label: "SQL Query", Type: FieldTypeSQL, Required: true, Description: "Parameterized SQL SELECT query (use ? for placeholders). Template expressions are forbidden unless allow_dynamic_sql is true.", Placeholder: "SELECT id, name FROM companies WHERE id = ?"},
 			{Key: "params", Label: "Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Template-resolved parameter values for ? placeholders in query"},
 			{Key: "mode", Label: "Mode", Type: FieldTypeSelect, Options: []string{"list", "single"}, DefaultValue: "list", Description: "Result mode: 'list' returns rows/count, 'single' returns row/found"},
-			{Key: "allow_dynamic_sql", Label: "Allow Dynamic SQL", Type: FieldTypeBool, DefaultValue: "false", Description: "When true, template expressions in 'query' are resolved at runtime. Each resolved value must contain only letters, digits, and underscores to prevent SQL injection."},
+			{Key: "tenantKey", Label: "Tenant Key", Type: FieldTypeString, Description: "Dot-path in pipeline context to resolve the tenant value for automatic scoping (requires database.partitioned)", Placeholder: "steps.auth.tenant_id"},
+			{Key: "allow_dynamic_sql", Label: "Allow Dynamic SQL", Type: FieldTypeBool, DefaultValue: "false", Description: "When true, template expressions in 'query' are resolved at runtime. Each resolved value must contain only letters, digits, underscores and hyphens to prevent SQL injection."},
 		},
 	})
 
@@ -1036,7 +1059,33 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "database", Label: "Database", Type: FieldTypeString, Required: true, Description: "Name of the database service (must implement DBProvider)", Placeholder: "admin-db", InheritFrom: "dependency.name"},
 			{Key: "query", Label: "SQL Statement", Type: FieldTypeSQL, Required: true, Description: "Parameterized SQL INSERT/UPDATE/DELETE statement (use ? for placeholders). Template expressions are forbidden unless allow_dynamic_sql is true.", Placeholder: "INSERT INTO companies (id, name) VALUES (?, ?)"},
 			{Key: "params", Label: "Parameters", Type: FieldTypeArray, ArrayItemType: "string", Description: "Template-resolved parameter values for ? placeholders"},
-			{Key: "allow_dynamic_sql", Label: "Allow Dynamic SQL", Type: FieldTypeBool, DefaultValue: "false", Description: "When true, template expressions in 'query' are resolved at runtime. Each resolved value must contain only letters, digits, and underscores to prevent SQL injection."},
+			{Key: "tenantKey", Label: "Tenant Key", Type: FieldTypeString, Description: "Dot-path in pipeline context to resolve the tenant value for automatic scoping. Supported for UPDATE/DELETE only (requires database.partitioned)", Placeholder: "steps.auth.tenant_id"},
+			{Key: "allow_dynamic_sql", Label: "Allow Dynamic SQL", Type: FieldTypeBool, DefaultValue: "false", Description: "When true, template expressions in 'query' are resolved at runtime. Each resolved value must contain only letters, digits, underscores and hyphens to prevent SQL injection."},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.db_create_partition",
+		Label:       "Create Database Partition",
+		Category:    "pipeline",
+		Description: "Creates a PostgreSQL partition for a tenant on all tables managed by a database.partitioned module. Supports both LIST and RANGE partition types. Idempotent — safe to call when a partition may already exist.",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context for tenant key resolution"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Partition creation result with tenant and partition fields"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "database", Label: "Database", Type: FieldTypeString, Required: true, Description: "Name of a database.partitioned service", Placeholder: "db", InheritFrom: "dependency.name"},
+			{Key: "tenantKey", Label: "Tenant Key", Type: FieldTypeString, Required: true, Description: "Dot-path in pipeline context to resolve the tenant value (e.g. the new tenant's ID)", Placeholder: "steps.body.tenant_id"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.db_sync_partitions",
+		Label:       "Sync Database Partitions",
+		Category:    "pipeline",
+		Description: "Synchronizes partitions from the configured source table in a database.partitioned module. Queries all distinct tenant values from the source table and creates missing partitions for all managed tables.",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context (not used but required for step interface)"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Sync result with synced boolean"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "database", Label: "Database", Type: FieldTypeString, Required: true, Description: "Name of a database.partitioned service with sourceTable configured", Placeholder: "db", InheritFrom: "dependency.name"},
 		},
 	})
 
