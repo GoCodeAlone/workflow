@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -432,5 +433,131 @@ func TestHTTPTrigger_PipelineContextResponse_NoStatus(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "workflow triggered") {
 		t.Errorf("expected fallback body, got %q", w.Body.String())
+	}
+}
+
+// TestCoercePipelineStatus verifies that coercePipelineStatus handles all
+// common numeric and string types that pipeline steps may emit.
+func TestCoercePipelineStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  any
+		want   int
+		wantOK bool
+	}{
+		{"int", 403, 403, true},
+		{"int64", int64(201), 201, true},
+		{"float64 whole", float64(200), 200, true},
+		{"float64 fractional", float64(200.5), 0, false},
+		{"json.Number int", json.Number("404"), 404, true},
+		{"json.Number float", json.Number("404.5"), 0, false},
+		{"string numeric", "500", 500, true},
+		{"string with spaces", " 403 ", 403, true},
+		{"string non-numeric", "ok", 0, false},
+		{"nil", nil, 0, false},
+		{"bool", true, 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := coercePipelineStatus(tt.input)
+			if ok != tt.wantOK {
+				t.Errorf("coercePipelineStatus(%v): ok=%v, want %v", tt.input, ok, tt.wantOK)
+			}
+			if ok && got != tt.want {
+				t.Errorf("coercePipelineStatus(%v): got %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHTTPTrigger_PipelineContextResponse_Float64Status verifies that a
+// response_status emitted as float64 (common after generic JSON decoding) is
+// correctly coerced into an HTTP status code.
+func TestHTTPTrigger_PipelineContextResponse_Float64Status(t *testing.T) {
+	app := NewMockApplication()
+	router := NewMockHTTPRouter("test-router")
+	_ = app.RegisterService("httpRouter", router)
+
+	engine := &pipelineContextResultEngine{result: map[string]any{
+		"response_status": float64(422),
+		"response_body":   `{"error":"unprocessable"}`,
+	}}
+	_ = app.RegisterService("workflowEngine", engine)
+
+	trigger := NewHTTPTrigger()
+	app.RegisterModule(trigger)
+
+	cfg := map[string]any{
+		"routes": []any{
+			map[string]any{
+				"path":     "/api/validate",
+				"method":   "POST",
+				"workflow": "validate-wf",
+				"action":   "execute",
+			},
+		},
+	}
+	if err := trigger.Configure(app, cfg); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := trigger.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	handler := router.routes["POST /api/validate"]
+	req := httptest.NewRequest("POST", "/api/validate", nil)
+	w := httptest.NewRecorder()
+	handler.Handle(w, req)
+
+	if w.Result().StatusCode != 422 {
+		t.Errorf("expected 422 from float64 status, got %d", w.Result().StatusCode)
+	}
+}
+
+// TestHTTPTrigger_PipelineContextResponse_MapStringStringHeaders verifies that
+// response_headers emitted as map[string]string are applied correctly.
+func TestHTTPTrigger_PipelineContextResponse_MapStringStringHeaders(t *testing.T) {
+	app := NewMockApplication()
+	router := NewMockHTTPRouter("test-router")
+	_ = app.RegisterService("httpRouter", router)
+
+	engine := &pipelineContextResultEngine{result: map[string]any{
+		"response_status":  200,
+		"response_body":    `ok`,
+		"response_headers": map[string]string{"X-Custom": "value"},
+	}}
+	_ = app.RegisterService("workflowEngine", engine)
+
+	trigger := NewHTTPTrigger()
+	app.RegisterModule(trigger)
+
+	cfg := map[string]any{
+		"routes": []any{
+			map[string]any{
+				"path":     "/api/hdr",
+				"method":   "GET",
+				"workflow": "hdr-wf",
+				"action":   "execute",
+			},
+		},
+	}
+	if err := trigger.Configure(app, cfg); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := trigger.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	handler := router.routes["GET /api/hdr"]
+	req := httptest.NewRequest("GET", "/api/hdr", nil)
+	w := httptest.NewRecorder()
+	handler.Handle(w, req)
+
+	if w.Result().StatusCode != 200 {
+		t.Errorf("expected 200, got %d", w.Result().StatusCode)
+	}
+	if w.Header().Get("X-Custom") != "value" {
+		t.Errorf("expected X-Custom header, got %q", w.Header().Get("X-Custom"))
 	}
 }

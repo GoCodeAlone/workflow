@@ -1247,3 +1247,59 @@ func TestOpenAPIModule_XPipeline_NoResponseStatusFallsThrough(t *testing.T) {
 		t.Errorf("expected key=value in fallback body, got %v", resp)
 	}
 }
+
+// TestOpenAPIModule_XPipeline_ResponseStatus_Float64 verifies that response_status
+// emitted as float64 (common after JSON round-trip) is correctly coerced.
+func TestOpenAPIModule_XPipeline_ResponseStatus_Float64(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", xPipelineYAML)
+
+	mod := NewOpenAPIModule("pipe-api", OpenAPIConfig{
+		SpecFile: specPath,
+		BasePath: "/api",
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	step := &stubPipelineStep{
+		name: "float-status",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{
+				Output: map[string]any{
+					"response_status": float64(422),
+					"response_body":   `{"error":"unprocessable"}`,
+					"response_headers": map[string]string{
+						"Content-Type": "application/json",
+					},
+				},
+				Stop: true,
+			}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "greet-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "greet-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/greet")
+	if h == nil {
+		t.Fatal("handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/greet", nil)
+	h.Handle(w, r)
+
+	if w.Code != 422 {
+		t.Errorf("expected 422 from float64 status, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != `{"error":"unprocessable"}` {
+		t.Errorf("unexpected body: %q", w.Body.String())
+	}
+}
