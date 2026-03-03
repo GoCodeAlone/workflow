@@ -836,10 +836,11 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "spec_file", Label: "Spec File", Type: FieldTypeFilePath, Required: true, Description: "Path to the OpenAPI v3 spec file (JSON or YAML)", Placeholder: "specs/petstore.yaml"},
 			{Key: "base_path", Label: "Base Path", Type: FieldTypeString, Description: "Base path prefix for all generated routes", Placeholder: "/api/v1"},
 			{Key: "router", Label: "Router Module", Type: FieldTypeString, Description: "Name of the http.router module to register routes on (auto-detected if omitted)", Placeholder: "my-router"},
+			{Key: "register_routes", Label: "Register Routes", Type: FieldTypeBool, DefaultValue: true, Description: "When false, skip registering spec-path routes (only serve spec endpoints and Swagger UI); default true"},
 			{Key: "validation", Label: "Validation", Type: FieldTypeJSON, DefaultValue: map[string]any{"request": true, "response": false}, Description: "Request/response validation settings, e.g. {\"request\": true, \"response\": false}"},
 			{Key: "swagger_ui", Label: "Swagger UI", Type: FieldTypeJSON, DefaultValue: map[string]any{"enabled": false, "path": "/docs"}, Description: "Swagger UI settings, e.g. {\"enabled\": false, \"path\": \"/docs\"}"},
 		},
-		DefaultConfig: map[string]any{"validation": map[string]any{"request": true, "response": false}, "swagger_ui": map[string]any{"enabled": false, "path": "/docs"}},
+		DefaultConfig: map[string]any{"register_routes": true, "validation": map[string]any{"request": true, "response": false}, "swagger_ui": map[string]any{"enabled": false, "path": "/docs"}},
 	})
 
 	r.Register(&ModuleSchema{
