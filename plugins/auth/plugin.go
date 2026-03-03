@@ -205,6 +205,15 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 					}
 				}
 			}
+
+			// Configure introspection access-control policy.
+			if introspectCfg, ok := cfg["introspect"].(map[string]any); ok {
+				allowOthers, _ := introspectCfg["allowOthers"].(bool)
+				requiredScope := stringFromMap(introspectCfg, "requiredScope")
+				requiredClaim := stringFromMap(introspectCfg, "requiredClaim")
+				requiredClaimVal := stringFromMap(introspectCfg, "requiredClaimVal")
+				m.SetIntrospectPolicy(allowOthers, requiredScope, requiredClaim, requiredClaimVal)
+			}
 			return m
 		},
 	}
@@ -370,6 +379,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "tokenExpiry", Label: "Token Expiry", Type: schema.FieldTypeDuration, DefaultValue: "1h", Description: "Access token expiration duration (e.g. 15m, 1h)", Placeholder: "1h"},
 				{Key: "issuer", Label: "Issuer", Type: schema.FieldTypeString, DefaultValue: "workflow", Description: "Token issuer (iss) claim", Placeholder: "workflow"},
 				{Key: "clients", Label: "Registered Clients", Type: schema.FieldTypeJSON, Description: "List of OAuth2 clients: [{clientId, clientSecret, scopes, description, claims}]"},
+				{Key: "introspect", Label: "Introspection Policy", Type: schema.FieldTypeJSON, Description: "Access-control policy for POST /oauth/introspect: {allowOthers: bool, requiredScope: string, requiredClaim: string, requiredClaimVal: string}. Default: self-only (allowOthers: false)."},
 			},
 			DefaultConfig: map[string]any{"algorithm": "ES256", "tokenExpiry": "1h", "issuer": "workflow", "clients": []any{}},
 		},

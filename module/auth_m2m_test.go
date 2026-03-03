@@ -785,12 +785,30 @@ func postRevoke(t *testing.T, m *M2MAuthModule, params url.Values) *httptest.Res
 	return w
 }
 
-// postIntrospect is a test helper that sends a form-encoded POST to /oauth/introspect.
-func postIntrospect(t *testing.T, m *M2MAuthModule, params url.Values) *httptest.ResponseRecorder {
+// postIntrospect is a test helper that sends a form-encoded POST to /oauth/introspect
+// authenticated with a Bearer token (the caller's own token for self-inspection, or a
+// different token for cross-inspection when the policy allows it).
+func postIntrospect(t *testing.T, m *M2MAuthModule, params url.Values, bearerToken string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/oauth/introspect",
 		strings.NewReader(params.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
+	w := httptest.NewRecorder()
+	m.Handle(w, req)
+	return w
+}
+
+// postIntrospectBasic is a test helper that authenticates the introspect endpoint
+// using HTTP Basic Auth (client_id + client_secret).
+func postIntrospectBasic(t *testing.T, m *M2MAuthModule, params url.Values, clientID, clientSecret string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/oauth/introspect",
+		strings.NewReader(params.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(clientID, clientSecret)
 	w := httptest.NewRecorder()
 	m.Handle(w, req)
 	return w
@@ -898,7 +916,8 @@ func TestM2M_Introspect_ValidToken_ActiveTrue(t *testing.T) {
 	m := newM2MHS256(t)
 	tokenStr := issueTestToken(t, m, "test-client", "test-secret")
 
-	w := postIntrospect(t, m, url.Values{"token": {tokenStr}})
+	// Self-inspection: caller authenticates with its own token.
+	w := postIntrospect(t, m, url.Values{"token": {tokenStr}}, tokenStr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
 	}
@@ -923,7 +942,9 @@ func TestM2M_Introspect_ValidToken_ActiveTrue(t *testing.T) {
 
 func TestM2M_Introspect_InvalidToken_ActiveFalse(t *testing.T) {
 	m := newM2MHS256(t)
-	w := postIntrospect(t, m, url.Values{"token": {"not.a.valid.jwt"}})
+	// Authenticate with a valid token but try to introspect an invalid one (allowOthers=false → 403, not active=false).
+	// Use Basic Auth to show the token is just invalid (not a policy error).
+	w := postIntrospectBasic(t, m, url.Values{"token": {"not.a.valid.jwt"}}, "test-client", "test-secret")
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
@@ -936,12 +957,14 @@ func TestM2M_Introspect_InvalidToken_ActiveFalse(t *testing.T) {
 
 func TestM2M_Introspect_RevokedToken_ActiveFalse(t *testing.T) {
 	m := newM2MHS256(t)
+	m.SetIntrospectPolicy(true, "", "", "") // allow others so we can still introspect after revoke
 	tokenStr := issueTestToken(t, m, "test-client", "test-secret")
 
-	// Revoke then introspect.
+	// Revoke then introspect (self-inspect: same caller, same token).
 	postRevoke(t, m, url.Values{"token": {tokenStr}})
 
-	w := postIntrospect(t, m, url.Values{"token": {tokenStr}})
+	// Use Basic Auth since the token is now revoked (can't use it as Bearer).
+	w := postIntrospectBasic(t, m, url.Values{"token": {tokenStr}}, "test-client", "test-secret")
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
@@ -954,7 +977,8 @@ func TestM2M_Introspect_RevokedToken_ActiveFalse(t *testing.T) {
 
 func TestM2M_Introspect_MissingToken_Returns400(t *testing.T) {
 	m := newM2MHS256(t)
-	w := postIntrospect(t, m, url.Values{})
+	// Authenticate via Basic Auth; the missing `token` param is what triggers the 400.
+	w := postIntrospectBasic(t, m, url.Values{}, "test-client", "test-secret")
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 when token param missing, got %d", w.Code)
 	}
@@ -969,7 +993,7 @@ func TestM2M_Introspect_ES256_ValidToken(t *testing.T) {
 	m := newM2MES256(t)
 	tokenStr := issueTestToken(t, m, "es256-client", "es256-secret")
 
-	w := postIntrospect(t, m, url.Values{"token": {tokenStr}})
+	w := postIntrospect(t, m, url.Values{"token": {tokenStr}}, tokenStr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
 	}
@@ -996,7 +1020,8 @@ func TestM2M_Introspect_ScopeIncluded(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&tokenResp)
 	tokenStr, _ := tokenResp["access_token"].(string)
 
-	introspectResp := postIntrospect(t, m, url.Values{"token": {tokenStr}})
+	// Self-inspection.
+	introspectResp := postIntrospect(t, m, url.Values{"token": {tokenStr}}, tokenStr)
 	var resp map[string]any
 	json.NewDecoder(introspectResp.Body).Decode(&resp)
 	if resp["scope"] != "read" {
@@ -1034,6 +1059,225 @@ func TestM2M_IssuedTokens_UniqueJTIs(t *testing.T) {
 	}
 	if jti1 == jti2 {
 		t.Error("expected unique JTIs for different tokens")
+	}
+}
+
+// --- Introspect access-control ---
+
+// TestM2M_Introspect_NoAuth_Returns401 verifies that unauthenticated requests are rejected.
+func TestM2M_Introspect_NoAuth_Returns401(t *testing.T) {
+	m := newM2MHS256(t)
+	tokenStr := issueTestToken(t, m, "test-client", "test-secret")
+
+	// No Authorization header, no Basic Auth.
+	w := postIntrospect(t, m, url.Values{"token": {tokenStr}}, "")
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for unauthenticated introspect, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "unauthorized_client" {
+		t.Errorf("expected error=unauthorized_client, got %q", resp["error"])
+	}
+}
+
+// TestM2M_Introspect_BasicAuth_SelfToken verifies that Basic Auth allows self-inspection.
+func TestM2M_Introspect_BasicAuth_SelfToken(t *testing.T) {
+	m := newM2MHS256(t)
+	tokenStr := issueTestToken(t, m, "test-client", "test-secret")
+
+	w := postIntrospectBasic(t, m, url.Values{"token": {tokenStr}}, "test-client", "test-secret")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for Basic Auth self-inspect, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["active"] != true {
+		t.Errorf("expected active=true, got %v", resp["active"])
+	}
+}
+
+// TestM2M_Introspect_BasicAuth_InvalidCredentials_Returns401 verifies that wrong
+// Basic Auth credentials are rejected.
+func TestM2M_Introspect_BasicAuth_InvalidCredentials_Returns401(t *testing.T) {
+	m := newM2MHS256(t)
+	tokenStr := issueTestToken(t, m, "test-client", "test-secret")
+
+	w := postIntrospectBasic(t, m, url.Values{"token": {tokenStr}}, "test-client", "wrong-secret")
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for bad Basic Auth, got %d", w.Code)
+	}
+}
+
+// TestM2M_Introspect_SelfOnly_CrossTokenForbidden verifies that in default self-only
+// mode a caller cannot introspect another client's token.
+func TestM2M_Introspect_SelfOnly_CrossTokenForbidden(t *testing.T) {
+	m := NewM2MAuthModule("m2m", "this-is-a-valid-secret-32-bytes!", time.Hour, "test-issuer")
+	m.RegisterClient(M2MClient{ClientID: "client-a", ClientSecret: "secret-a", Scopes: []string{"read"}}) //nolint:gosec // test credential
+	m.RegisterClient(M2MClient{ClientID: "client-b", ClientSecret: "secret-b", Scopes: []string{"read"}}) //nolint:gosec // test credential
+
+	tokenA := issueTestToken(t, m, "client-a", "secret-a")
+	tokenB := issueTestToken(t, m, "client-b", "secret-b")
+
+	// client-a tries to introspect client-b's token (default policy = self-only).
+	w := postIntrospect(t, m, url.Values{"token": {tokenB}}, tokenA)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 when self-only policy prevents cross-token inspect, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "access_denied" {
+		t.Errorf("expected error=access_denied, got %q", resp["error"])
+	}
+}
+
+// TestM2M_Introspect_AllowOthers_BasicAuth verifies that HTTP Basic Auth callers
+// can inspect any token when allowOthers=true.
+func TestM2M_Introspect_AllowOthers_BasicAuth(t *testing.T) {
+	m := NewM2MAuthModule("m2m", "this-is-a-valid-secret-32-bytes!", time.Hour, "test-issuer")
+	m.RegisterClient(M2MClient{ClientID: "client-a", ClientSecret: "secret-a", Scopes: []string{"read"}}) //nolint:gosec // test credential
+	m.RegisterClient(M2MClient{ClientID: "client-b", ClientSecret: "secret-b", Scopes: []string{"read"}}) //nolint:gosec // test credential
+	m.SetIntrospectPolicy(true, "", "", "")
+
+	tokenB := issueTestToken(t, m, "client-b", "secret-b")
+
+	// client-a authenticates via Basic Auth and inspects client-b's token.
+	w := postIntrospectBasic(t, m, url.Values{"token": {tokenB}}, "client-a", "secret-a")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for Basic Auth cross-token inspect, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["active"] != true {
+		t.Errorf("expected active=true, got %v", resp["active"])
+	}
+}
+
+// TestM2M_Introspect_AllowOthers_BearerWithRequiredScope verifies that a Bearer
+// token caller can inspect another token when it has the required scope.
+func TestM2M_Introspect_AllowOthers_BearerWithRequiredScope(t *testing.T) {
+	m := NewM2MAuthModule("m2m", "this-is-a-valid-secret-32-bytes!", time.Hour, "test-issuer")
+	m.RegisterClient(M2MClient{ClientID: "admin", ClientSecret: "admin-secret-long!", Scopes: []string{"read", "introspect:admin"}}) //nolint:gosec // test credential
+	m.RegisterClient(M2MClient{ClientID: "worker", ClientSecret: "worker-secret-long", Scopes: []string{"read"}})                    //nolint:gosec // test credential
+	m.SetIntrospectPolicy(true, "introspect:admin", "", "")
+
+	adminToken := issueTestToken(t, m, "admin", "admin-secret-long!")
+	workerToken := issueTestToken(t, m, "worker", "worker-secret-long")
+
+	// admin (has introspect:admin scope) inspects worker's token.
+	w := postIntrospect(t, m, url.Values{"token": {workerToken}}, adminToken)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["active"] != true {
+		t.Errorf("expected active=true, got %v", resp["active"])
+	}
+	if resp["client_id"] != "worker" {
+		t.Errorf("expected client_id=worker, got %v", resp["client_id"])
+	}
+}
+
+// TestM2M_Introspect_AllowOthers_BearerMissingScope verifies that a Bearer token
+// caller is forbidden from inspecting another token when it lacks the required scope.
+func TestM2M_Introspect_AllowOthers_BearerMissingScope(t *testing.T) {
+	m := NewM2MAuthModule("m2m", "this-is-a-valid-secret-32-bytes!", time.Hour, "test-issuer")
+	m.RegisterClient(M2MClient{ClientID: "client-a", ClientSecret: "secret-a-long-enough!", Scopes: []string{"read"}}) //nolint:gosec // test credential
+	m.RegisterClient(M2MClient{ClientID: "client-b", ClientSecret: "secret-b-long-enough!", Scopes: []string{"read"}}) //nolint:gosec // test credential
+	m.SetIntrospectPolicy(true, "introspect:admin", "", "")
+
+	tokenA := issueTestToken(t, m, "client-a", "secret-a-long-enough!")
+	tokenB := issueTestToken(t, m, "client-b", "secret-b-long-enough!")
+
+	// client-a lacks introspect:admin → forbidden.
+	w := postIntrospect(t, m, url.Values{"token": {tokenB}}, tokenA)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 when caller missing required scope, got %d", w.Code)
+	}
+}
+
+// TestM2M_Introspect_AllowOthers_BearerWithRequiredClaim verifies that a claim-based
+// prerequisite is enforced for cross-token inspection.
+func TestM2M_Introspect_AllowOthers_BearerWithRequiredClaim(t *testing.T) {
+	m := NewM2MAuthModule("m2m", "this-is-a-valid-secret-32-bytes!", time.Hour, "test-issuer")
+	m.RegisterClient(M2MClient{
+		ClientID:     "admin",
+		ClientSecret: "admin-secret-long!", //nolint:gosec // test credential
+		Scopes:       []string{"read"},
+		Claims:       map[string]any{"role": "admin"},
+	})
+	m.RegisterClient(M2MClient{ClientID: "worker", ClientSecret: "worker-secret-long", Scopes: []string{"read"}}) //nolint:gosec // test credential
+	m.SetIntrospectPolicy(true, "", "role", "admin")
+
+	adminToken := issueTestToken(t, m, "admin", "admin-secret-long!")
+	workerToken := issueTestToken(t, m, "worker", "worker-secret-long")
+
+	// admin (has role=admin claim) can inspect worker's token.
+	w := postIntrospect(t, m, url.Values{"token": {workerToken}}, adminToken)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["active"] != true {
+		t.Errorf("expected active=true, got %v", resp["active"])
+	}
+}
+
+// TestM2M_Introspect_AllowOthers_BearerMissingClaim verifies that a caller without
+// the required claim value is forbidden from cross-token inspection.
+func TestM2M_Introspect_AllowOthers_BearerMissingClaim(t *testing.T) {
+	m := NewM2MAuthModule("m2m", "this-is-a-valid-secret-32-bytes!", time.Hour, "test-issuer")
+	m.RegisterClient(M2MClient{ClientID: "client-a", ClientSecret: "secret-a-long-enough!", Scopes: []string{"read"}}) //nolint:gosec // test credential
+	m.RegisterClient(M2MClient{ClientID: "client-b", ClientSecret: "secret-b-long-enough!", Scopes: []string{"read"}}) //nolint:gosec // test credential
+	m.SetIntrospectPolicy(true, "", "role", "admin") // role=admin required
+
+	tokenA := issueTestToken(t, m, "client-a", "secret-a-long-enough!")
+	tokenB := issueTestToken(t, m, "client-b", "secret-b-long-enough!")
+
+	// client-a has no role=admin claim → forbidden.
+	w := postIntrospect(t, m, url.Values{"token": {tokenB}}, tokenA)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 when caller missing required claim, got %d", w.Code)
+	}
+}
+
+// TestM2M_Introspect_SelfAlwaysAllowed verifies that self-inspection is always
+// permitted even when allowOthers=true has scope/claim prerequisites.
+func TestM2M_Introspect_SelfAlwaysAllowed(t *testing.T) {
+	m := NewM2MAuthModule("m2m", "this-is-a-valid-secret-32-bytes!", time.Hour, "test-issuer")
+	m.RegisterClient(M2MClient{ClientID: "worker", ClientSecret: "worker-secret-long", Scopes: []string{"read"}}) //nolint:gosec // test credential
+	m.SetIntrospectPolicy(true, "introspect:admin", "role", "admin")
+
+	workerToken := issueTestToken(t, m, "worker", "worker-secret-long")
+
+	// worker inspects its own token — must succeed even without the admin scope/claim.
+	w := postIntrospect(t, m, url.Values{"token": {workerToken}}, workerToken)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for self-inspection, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["active"] != true {
+		t.Errorf("expected active=true for self-inspection, got %v", resp["active"])
+	}
+}
+
+// TestM2M_Introspect_RevokedCallerToken_Returns401 verifies that a revoked Bearer
+// token cannot be used to authenticate an introspect call.
+func TestM2M_Introspect_RevokedCallerToken_Returns401(t *testing.T) {
+	m := newM2MHS256(t)
+	callerToken := issueTestToken(t, m, "test-client", "test-secret")
+	targetToken := issueTestToken(t, m, "test-client", "test-secret")
+
+	// Revoke the caller's token.
+	postRevoke(t, m, url.Values{"token": {callerToken}})
+
+	// Attempt introspect with the now-revoked caller token.
+	w := postIntrospect(t, m, url.Values{"token": {targetToken}}, callerToken)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 when caller token is revoked, got %d", w.Code)
 	}
 }
 

@@ -71,9 +71,15 @@ type M2MAuthModule struct {
 	trustedKeys map[string]*ecdsa.PublicKey
 
 	// Registered clients
-	mu      sync.RWMutex
-	clients      map[string]*M2MClient  // keyed by ClientID
-	jtiBlacklist map[string]struct{}    // revoked token JTIs
+	mu           sync.RWMutex
+	clients      map[string]*M2MClient // keyed by ClientID
+	jtiBlacklist map[string]struct{}   // revoked token JTIs
+
+	// Introspection access-control policy (see SetIntrospectPolicy).
+	introspectAllowOthers     bool   // if true, authenticated callers may inspect any token
+	introspectRequiredScope   string // scope required in caller's token to inspect others
+	introspectRequiredClaim   string // claim key required in caller's token to inspect others
+	introspectRequiredClaimVal string // expected value for introspectRequiredClaim (empty = key only)
 }
 
 // NewM2MAuthModule creates a new M2MAuthModule with HS256 signing.
@@ -149,6 +155,27 @@ func (m *M2MAuthModule) RegisterClient(client M2MClient) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.clients[client.ClientID] = &client
+}
+
+// SetIntrospectPolicy configures access control for the POST /oauth/introspect endpoint.
+//
+// By default (allowOthers=false) only self-inspection is permitted: a caller may only
+// introspect its own token (the token being inspected must have the same sub as the
+// authenticated caller's identity).
+//
+// When allowOthers=true, any authenticated caller may introspect any token. Two optional
+// prerequisites can narrow this further when the caller authenticates with a Bearer token:
+//   - requiredScope: the caller's token must contain this scope (e.g. "introspect:admin").
+//   - requiredClaim / requiredClaimVal: the caller's token must have this claim, and if
+//     requiredClaimVal is non-empty, the claim value must equal that string.
+//
+// Callers authenticating via HTTP Basic Auth (client_id + client_secret) are always
+// considered admin-level and satisfy any scope/claim requirement when allowOthers=true.
+func (m *M2MAuthModule) SetIntrospectPolicy(allowOthers bool, requiredScope, requiredClaim, requiredClaimVal string) {
+	m.introspectAllowOthers = allowOthers
+	m.introspectRequiredScope = requiredScope
+	m.introspectRequiredClaim = requiredClaim
+	m.introspectRequiredClaimVal = requiredClaimVal
 }
 
 // Name returns the module name.
@@ -374,7 +401,15 @@ func (m *M2MAuthModule) handleRevoke(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleIntrospect implements token introspection per RFC 7662.
-// It validates the token and returns its active status along with claims.
+//
+// The caller MUST authenticate before the token under inspection is revealed.
+// Two authentication methods are supported:
+//   - HTTP Basic Auth (client_id + client_secret): always treated as admin-level.
+//   - Bearer token (Authorization: Bearer <token>): the caller's own valid token.
+//
+// By default (allowOthers=false) a caller may only introspect its own token (the
+// token's sub must match the caller's identity). Set the introspect policy via
+// SetIntrospectPolicy to allow cross-token inspection with optional scope/claim guards.
 func (m *M2MAuthModule) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -388,6 +423,15 @@ func (m *M2MAuthModule) handleIntrospect(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// --- Authenticate the caller ---
+	callerID, callerClaims, authed := m.authenticateIntrospectCaller(r)
+	if !authed {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(oauthError("unauthorized_client", "authentication required to use the introspection endpoint"))
+		return
+	}
+
+	// --- Validate the token being introspected ---
 	claims, ok := m.parseTokenClaims(tokenStr)
 	if !ok {
 		_ = json.NewEncoder(w).Encode(map[string]any{"active": false})
@@ -401,6 +445,24 @@ func (m *M2MAuthModule) handleIntrospect(w http.ResponseWriter, r *http.Request)
 		m.mu.RUnlock()
 		if revoked {
 			_ = json.NewEncoder(w).Encode(map[string]any{"active": false})
+			return
+		}
+	}
+
+	// --- Authorization check ---
+	tokenSub, _ := claims["sub"].(string)
+	if !m.introspectAllowOthers {
+		// Default: self-inspection only.
+		if callerID != tokenSub {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(oauthError("access_denied", "not authorized to introspect this token"))
+			return
+		}
+	} else {
+		// Allow-others mode: enforce optional scope/claim prerequisites.
+		if !m.callerMeetsIntrospectPolicy(callerID, callerClaims, tokenSub) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(oauthError("access_denied", "not authorized to introspect this token"))
 			return
 		}
 	}
@@ -669,6 +731,96 @@ func (m *M2MAuthModule) parseTokenClaims(tokenStr string) (jwt.MapClaims, bool) 
 }
 
 // --- JWKS helpers ---
+
+// authenticateIntrospectCaller authenticates the caller of the /oauth/introspect endpoint.
+// It tries HTTP Basic Auth (client_id + client_secret) first, then Bearer token.
+//
+// Returns:
+//   - callerID: the authenticated client_id (Basic Auth) or sub claim (Bearer token).
+//   - callerClaims: the JWT claims of the caller's Bearer token, or nil for Basic Auth callers.
+//   - ok: whether authentication succeeded.
+//
+// If HTTP Basic Auth credentials are present but invalid, authentication fails immediately
+// without falling back to Bearer token.
+func (m *M2MAuthModule) authenticateIntrospectCaller(r *http.Request) (callerID string, callerClaims jwt.MapClaims, ok bool) {
+	// Try HTTP Basic Auth (client_id + client_secret).
+	if clientID, clientSecret, hasBasic := r.BasicAuth(); hasBasic && clientID != "" {
+		if _, err := m.authenticateClient(clientID, clientSecret); err == nil {
+			return clientID, nil, true
+		}
+		// Credentials provided but invalid — reject immediately.
+		return "", nil, false
+	}
+
+	// Try Bearer token in Authorization header.
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		if claims, valid := m.parseTokenClaims(tokenStr); valid {
+			// Reject revoked caller tokens.
+			if jti, _ := claims["jti"].(string); jti != "" {
+				m.mu.RLock()
+				_, revoked := m.jtiBlacklist[jti]
+				m.mu.RUnlock()
+				if revoked {
+					return "", nil, false
+				}
+			}
+			if sub, _ := claims["sub"].(string); sub != "" {
+				return sub, claims, true
+			}
+		}
+		return "", nil, false
+	}
+
+	return "", nil, false
+}
+
+// callerMeetsIntrospectPolicy reports whether the caller is permitted to inspect a
+// token with the given subject under the "allow-others" policy.
+//
+// Self-inspection (callerID == tokenSub) is always allowed.
+// HTTP Basic Auth callers (callerClaims == nil) are treated as admin-level and bypass
+// scope/claim prerequisites.
+// Bearer token callers must satisfy any configured requiredScope and/or requiredClaim.
+func (m *M2MAuthModule) callerMeetsIntrospectPolicy(callerID string, callerClaims jwt.MapClaims, tokenSub string) bool {
+	// Self-inspection is always permitted.
+	if callerID == tokenSub {
+		return true
+	}
+	// HTTP Basic Auth callers are admin-level.
+	if callerClaims == nil {
+		return true
+	}
+	// Bearer token callers: enforce scope prerequisite.
+	if m.introspectRequiredScope != "" {
+		scopeStr, _ := callerClaims["scope"].(string)
+		if !containsScope(scopeStr, m.introspectRequiredScope) {
+			return false
+		}
+	}
+	// Enforce claim prerequisite.
+	if m.introspectRequiredClaim != "" {
+		claimVal, exists := callerClaims[m.introspectRequiredClaim]
+		if !exists {
+			return false
+		}
+		if m.introspectRequiredClaimVal != "" && fmt.Sprintf("%v", claimVal) != m.introspectRequiredClaimVal {
+			return false
+		}
+	}
+	return true
+}
+
+// containsScope reports whether scopeStr (a space-separated list of scopes) contains target.
+func containsScope(scopeStr, target string) bool {
+	for _, s := range strings.Fields(scopeStr) {
+		if s == target {
+			return true
+		}
+	}
+	return false
+}
 
 // generateJTI generates a random 16-byte JWT ID encoded as base64url.
 func generateJTI() (string, error) {
