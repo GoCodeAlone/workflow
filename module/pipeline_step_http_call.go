@@ -54,6 +54,7 @@ func (c *oauthTokenCache) getOrCreate(key string) *oauthCacheEntry {
 type oauthCacheEntry struct {
 	mu          sync.Mutex
 	accessToken string
+	instanceURL string // optional; populated when the token endpoint returns instance_url (Salesforce pattern)
 	expiry      time.Time
 	sfGroup     singleflight.Group
 }
@@ -68,19 +69,28 @@ func (e *oauthCacheEntry) get() string {
 	return ""
 }
 
-// set stores a token with the given TTL.
-func (e *oauthCacheEntry) set(token string, ttl time.Duration) {
+// getInstanceURL returns the cached instance_url (may be empty if the token endpoint did not return one).
+func (e *oauthCacheEntry) getInstanceURL() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.instanceURL
+}
+
+// set stores a token and optional instance_url with the given TTL.
+func (e *oauthCacheEntry) set(token, instanceURL string, ttl time.Duration) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.accessToken = token
+	e.instanceURL = instanceURL
 	e.expiry = time.Now().Add(ttl)
 }
 
-// invalidate clears the cached token.
+// invalidate clears the cached token and instance_url.
 func (e *oauthCacheEntry) invalidate() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.accessToken = ""
+	e.instanceURL = ""
 	e.expiry = time.Time{}
 }
 
@@ -197,6 +207,60 @@ func NewHTTPCallStepFactory() StepFactory {
 			}
 		}
 
+		// Support top-level "oauth2" key as an alternative to "auth" with type=oauth2_client_credentials.
+		// This follows the syntax proposed in the issue and is more idiomatic for Salesforce-style configs:
+		//   oauth2:
+		//     grant_type: client_credentials  (optional, defaults to client_credentials)
+		//     token_url: "..."
+		//     client_id: "..."
+		//     client_secret: "..."
+		//     scopes: ["api"]
+		if oauth2Cfg, ok := config["oauth2"].(map[string]any); ok && step.auth == nil {
+			grantType, _ := oauth2Cfg["grant_type"].(string)
+			if grantType == "" {
+				grantType = "client_credentials"
+			}
+			if grantType != "client_credentials" {
+				return nil, fmt.Errorf("http_call step %q: oauth2.grant_type must be 'client_credentials'", name)
+			}
+			tokenURL, _ := oauth2Cfg["token_url"].(string)
+			if tokenURL == "" {
+				return nil, fmt.Errorf("http_call step %q: oauth2.token_url is required", name)
+			}
+			clientID, _ := oauth2Cfg["client_id"].(string)
+			if clientID == "" {
+				return nil, fmt.Errorf("http_call step %q: oauth2.client_id is required", name)
+			}
+			clientSecret, _ := oauth2Cfg["client_secret"].(string)
+			if clientSecret == "" {
+				return nil, fmt.Errorf("http_call step %q: oauth2.client_secret is required", name)
+			}
+
+			var scopes []string
+			if raw, ok := oauth2Cfg["scopes"]; ok {
+				switch v := raw.(type) {
+				case []string:
+					scopes = v
+				case []any:
+					for _, s := range v {
+						if str, ok := s.(string); ok {
+							scopes = append(scopes, str)
+						}
+					}
+				}
+			}
+
+			cacheKey := tokenURL + "\x00" + clientID + "\x00" + clientSecret + "\x00" + strings.Join(scopes, " ")
+			step.auth = &oauthConfig{
+				tokenURL:     tokenURL,
+				clientID:     clientID,
+				clientSecret: clientSecret,
+				scopes:       scopes,
+				cacheKey:     cacheKey,
+			}
+			step.oauthEntry = globalOAuthCache.getOrCreate(cacheKey)
+		}
+
 		return step, nil
 	}
 }
@@ -243,6 +307,7 @@ func (s *HTTPCallStep) doFetchToken(ctx context.Context) (string, error) {
 		AccessToken string  `json:"access_token"` //nolint:gosec // G117: parsing OAuth2 token response, not a secret exposure
 		ExpiresIn   float64 `json:"expires_in"`
 		TokenType   string  `json:"token_type"`
+		InstanceURL string  `json:"instance_url"` // Salesforce pattern: base URL for subsequent API calls
 	}
 	if err := json.Unmarshal(body, &tokenResp); err != nil {
 		return "", fmt.Errorf("http_call step %q: failed to parse token response: %w", s.name, err)
@@ -259,7 +324,7 @@ func (s *HTTPCallStep) doFetchToken(ctx context.Context) (string, error) {
 	if ttl > 10*time.Second {
 		ttl -= 10 * time.Second
 	}
-	s.oauthEntry.set(tokenResp.AccessToken, ttl)
+	s.oauthEntry.set(tokenResp.AccessToken, tokenResp.InstanceURL, ttl)
 
 	return tokenResp.AccessToken, nil
 }
@@ -392,6 +457,22 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
+	// Obtain OAuth2 bearer token first so that instance_url is available for URL template resolution.
+	var bearerToken string
+	var err error
+	if s.auth != nil {
+		bearerToken, err = s.getToken(ctx)
+		if err != nil {
+			return nil, err
+		}
+		// Inject instance_url into the pipeline context so URL/header templates can reference it
+		// as {{ .instance_url }}. This is a Salesforce pattern where the token endpoint returns the
+		// org-specific base URL alongside the access token.
+		if instanceURL := s.oauthEntry.getInstanceURL(); instanceURL != "" {
+			pc.Current["instance_url"] = instanceURL
+		}
+	}
+
 	// Resolve URL template
 	resolvedURL, err := s.tmpl.Resolve(s.url, pc)
 	if err != nil {
@@ -401,15 +482,6 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 	bodyReader, rawBody, err := s.buildBodyReader(pc)
 	if err != nil {
 		return nil, err
-	}
-
-	// Obtain OAuth2 bearer token if auth is configured
-	var bearerToken string
-	if s.auth != nil {
-		bearerToken, err = s.getToken(ctx)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	req, err := s.buildRequest(ctx, resolvedURL, bodyReader, rawBody, pc, bearerToken)
@@ -459,6 +531,9 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		}
 
 		output := parseHTTPResponse(retryResp, respBody)
+		if instanceURL := s.oauthEntry.getInstanceURL(); instanceURL != "" {
+			output["instance_url"] = instanceURL
+		}
 		if retryResp.StatusCode >= 400 {
 			return nil, fmt.Errorf("http_call step %q: HTTP %d: %s", s.name, retryResp.StatusCode, string(respBody))
 		}
@@ -466,6 +541,11 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 	}
 
 	output := parseHTTPResponse(resp, respBody)
+	if s.auth != nil {
+		if instanceURL := s.oauthEntry.getInstanceURL(); instanceURL != "" {
+			output["instance_url"] = instanceURL
+		}
+	}
 
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("http_call step %q: HTTP %d: %s", s.name, resp.StatusCode, string(respBody))
