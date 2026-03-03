@@ -584,6 +584,7 @@ paths:
               properties:
                 Body:
                   type: string
+                  minLength: 1
                 From:
                   type: string
       responses:
@@ -642,6 +643,20 @@ func TestOpenAPIModule_RequestValidation_FormEncoded(t *testing.T) {
 		h.Handle(w, r)
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("expected 400 for empty required body, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("present-but-empty field violates minLength", func(t *testing.T) {
+		body := "Body=" // Body key present but empty value, violates minLength:1
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		h.Handle(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for empty field with minLength, got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "minLength") {
+			t.Errorf("expected minLength error, got: %s", w.Body.String())
 		}
 	})
 }
@@ -789,7 +804,7 @@ func TestValidateScalarValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			errs := validateScalarValue(tt.val, "param", tt.schema)
+			errs := validateScalarValue(tt.val, "param", "parameter", tt.schema)
 			if tt.wantErr && len(errs) == 0 {
 				t.Error("expected validation error, got none")
 			}
@@ -823,7 +838,7 @@ func TestHTMLEscape(t *testing.T) {
 func TestValidateScalarValue_Pattern(t *testing.T) {
 	t.Run("valid pattern match", func(t *testing.T) {
 		schema := &openAPISchema{Type: "string", Pattern: "^foo[0-9]+$"}
-		errs := validateScalarValue("foo123", "param", schema)
+		errs := validateScalarValue("foo123", "param", "parameter", schema)
 		if len(errs) > 0 {
 			t.Errorf("expected no errors, got %v", errs)
 		}
@@ -831,7 +846,7 @@ func TestValidateScalarValue_Pattern(t *testing.T) {
 
 	t.Run("pattern mismatch", func(t *testing.T) {
 		schema := &openAPISchema{Type: "string", Pattern: "^foo[0-9]+$"}
-		errs := validateScalarValue("bar", "param", schema)
+		errs := validateScalarValue("bar", "param", "parameter", schema)
 		if len(errs) == 0 {
 			t.Error("expected validation error for non-matching pattern, got none")
 		}
@@ -839,7 +854,7 @@ func TestValidateScalarValue_Pattern(t *testing.T) {
 
 	t.Run("invalid regex pattern returns error", func(t *testing.T) {
 		schema := &openAPISchema{Type: "string", Pattern: "["}
-		errs := validateScalarValue("anything", "param", schema)
+		errs := validateScalarValue("anything", "param", "parameter", schema)
 		if len(errs) == 0 {
 			t.Error("expected validation error for invalid regex pattern, got none")
 		}
