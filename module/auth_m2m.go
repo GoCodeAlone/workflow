@@ -72,7 +72,8 @@ type M2MAuthModule struct {
 
 	// Registered clients
 	mu      sync.RWMutex
-	clients map[string]*M2MClient // keyed by ClientID
+	clients      map[string]*M2MClient  // keyed by ClientID
+	jtiBlacklist map[string]struct{}    // revoked token JTIs
 }
 
 // NewM2MAuthModule creates a new M2MAuthModule with HS256 signing.
@@ -85,13 +86,14 @@ func NewM2MAuthModule(name string, hmacSecret string, tokenExpiry time.Duration,
 		issuer = "workflow"
 	}
 	m := &M2MAuthModule{
-		name:        name,
-		algorithm:   SigningAlgHS256,
-		issuer:      issuer,
-		tokenExpiry: tokenExpiry,
-		hmacSecret:  []byte(hmacSecret),
-		trustedKeys: make(map[string]*ecdsa.PublicKey),
-		clients:     make(map[string]*M2MClient),
+		name:         name,
+		algorithm:    SigningAlgHS256,
+		issuer:       issuer,
+		tokenExpiry:  tokenExpiry,
+		hmacSecret:   []byte(hmacSecret),
+		trustedKeys:  make(map[string]*ecdsa.PublicKey),
+		clients:      make(map[string]*M2MClient),
+		jtiBlacklist: make(map[string]struct{}),
 	}
 	return m
 }
@@ -185,8 +187,10 @@ func (m *M2MAuthModule) RequiresServices() []modular.ServiceDependency { return 
 //
 // Routes:
 //
-//	POST /oauth/token  — token endpoint (client_credentials + jwt-bearer grants)
-//	GET  /oauth/jwks   — JSON Web Key Set (ES256 public key)
+//	POST /oauth/token     — token endpoint (client_credentials + jwt-bearer grants)
+//	POST /oauth/revoke    — token revocation (RFC 7009)
+//	POST /oauth/introspect — token introspection (RFC 7662)
+//	GET  /oauth/jwks      — JSON Web Key Set (ES256 public key)
 func (m *M2MAuthModule) Handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -194,6 +198,10 @@ func (m *M2MAuthModule) Handle(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodPost && strings.HasSuffix(path, "/oauth/token"):
 		m.handleToken(w, r)
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/oauth/revoke"):
+		m.handleRevoke(w, r)
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/oauth/introspect"):
+		m.handleIntrospect(w, r)
 	case r.Method == http.MethodGet && strings.HasSuffix(path, "/oauth/jwks"):
 		m.handleJWKS(w, r)
 	default:
@@ -336,17 +344,104 @@ func (m *M2MAuthModule) handleJWKS(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// handleRevoke implements token revocation per RFC 7009.
+// It adds the token's JTI to the in-memory blacklist so that subsequent
+// calls to Authenticate or handleIntrospect will treat the token as invalid.
+// Per RFC 7009 §2.2, the endpoint always returns 200 OK even if the token
+// is unknown or already invalid.
+func (m *M2MAuthModule) handleRevoke(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(oauthError("invalid_request", "failed to parse form"))
+		return
+	}
+	tokenStr := r.FormValue("token")
+	if tokenStr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(oauthError("invalid_request", "token is required"))
+		return
+	}
+	// Per RFC 7009 §2.2: if the token is unrecognized or already invalid, still return 200.
+	// We attempt to parse it; if valid, add its JTI to the blacklist.
+	if claims, ok := m.parseTokenClaims(tokenStr); ok {
+		if jti, _ := claims["jti"].(string); jti != "" {
+			m.mu.Lock()
+			m.jtiBlacklist[jti] = struct{}{}
+			m.mu.Unlock()
+		}
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleIntrospect implements token introspection per RFC 7662.
+// It validates the token and returns its active status along with claims.
+func (m *M2MAuthModule) handleIntrospect(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(oauthError("invalid_request", "failed to parse form"))
+		return
+	}
+	tokenStr := r.FormValue("token")
+	if tokenStr == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(oauthError("invalid_request", "token is required"))
+		return
+	}
+
+	claims, ok := m.parseTokenClaims(tokenStr)
+	if !ok {
+		_ = json.NewEncoder(w).Encode(map[string]any{"active": false})
+		return
+	}
+
+	// Check JTI blacklist.
+	if jti, _ := claims["jti"].(string); jti != "" {
+		m.mu.RLock()
+		_, revoked := m.jtiBlacklist[jti]
+		m.mu.RUnlock()
+		if revoked {
+			_ = json.NewEncoder(w).Encode(map[string]any{"active": false})
+			return
+		}
+	}
+
+	resp := map[string]any{
+		"active": true,
+	}
+	if v, ok2 := claims["sub"].(string); ok2 {
+		resp["client_id"] = v
+	}
+	if v, ok2 := claims["scope"].(string); ok2 {
+		resp["scope"] = v
+	}
+	if v, ok2 := claims["exp"]; ok2 {
+		resp["exp"] = v
+	}
+	if v, ok2 := claims["iat"]; ok2 {
+		resp["iat"] = v
+	}
+	if v, ok2 := claims["iss"].(string); ok2 {
+		resp["iss"] = v
+	}
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // --- token issuance ---
 
 // issueToken creates and signs a JWT access token.
 // extraClaims are merged in (e.g., from a jwt-bearer assertion).
 func (m *M2MAuthModule) issueToken(subject string, scopes []string, extraClaims map[string]any) (string, error) {
 	now := time.Now()
+	jti, err := generateJTI()
+	if err != nil {
+		return "", fmt.Errorf("generate JTI: %w", err)
+	}
 	claims := jwt.MapClaims{
 		"iss": m.issuer,
 		"sub": subject,
 		"iat": now.Unix(),
 		"exp": now.Add(m.tokenExpiry).Unix(),
+		"jti": jti,
 	}
 	if len(scopes) > 0 {
 		claims["scope"] = strings.Join(scopes, " ")
@@ -354,7 +449,7 @@ func (m *M2MAuthModule) issueToken(subject string, scopes []string, extraClaims 
 	// Merge extra claims, but never let them override standard fields.
 	for k, v := range extraClaims {
 		switch k {
-		case "iss", "sub", "iat", "exp", "scope":
+		case "iss", "sub", "iat", "exp", "scope", "jti":
 			// protected — skip
 		default:
 			claims[k] = v
@@ -506,14 +601,47 @@ func (m *M2MAuthModule) validateJWTAssertion(assertion string) (jwt.MapClaims, e
 // Authenticate implements the AuthProvider interface so M2MAuthModule can be
 // used as a provider in AuthMiddleware.  It validates the token's signature
 // using the configured algorithm and returns the embedded claims.
+// Tokens whose JTI has been revoked via the /oauth/revoke endpoint are rejected.
 func (m *M2MAuthModule) Authenticate(tokenStr string) (bool, map[string]any, error) {
-	var token *jwt.Token
-	var err error
+	if m.algorithm == SigningAlgES256 && m.publicKey == nil {
+		return false, nil, fmt.Errorf("no ECDSA public key configured")
+	}
+
+	claims, ok := m.parseTokenClaims(tokenStr)
+	if !ok {
+		return false, nil, nil
+	}
+
+	// Check JTI blacklist.
+	if jti, _ := claims["jti"].(string); jti != "" {
+		m.mu.RLock()
+		_, revoked := m.jtiBlacklist[jti]
+		m.mu.RUnlock()
+		if revoked {
+			return false, nil, nil
+		}
+	}
+
+	result := make(map[string]any, len(claims))
+	for k, v := range claims {
+		result[k] = v
+	}
+	return true, result, nil
+}
+
+// parseTokenClaims parses and cryptographically validates a token string,
+// returning the claims and whether the token is valid.
+// It does NOT check the JTI blacklist; callers must do that separately.
+func (m *M2MAuthModule) parseTokenClaims(tokenStr string) (jwt.MapClaims, bool) {
+	var (
+		token *jwt.Token
+		err   error
+	)
 
 	switch m.algorithm {
 	case SigningAlgES256:
 		if m.publicKey == nil {
-			return false, nil, fmt.Errorf("no ECDSA public key configured")
+			return nil, false
 		}
 		token, err = jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
 			if _, ok := t.Method.(*jwt.SigningMethodECDSA); !ok {
@@ -531,22 +659,25 @@ func (m *M2MAuthModule) Authenticate(tokenStr string) (bool, map[string]any, err
 	}
 
 	if err != nil {
-		return false, nil, nil //nolint:nilerr // Invalid token is a failed auth, not an error
+		return nil, false
 	}
-
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok || !token.Valid {
-		return false, nil, nil
+		return nil, false
 	}
-
-	result := make(map[string]any, len(claims))
-	for k, v := range claims {
-		result[k] = v
-	}
-	return true, result, nil
+	return claims, true
 }
 
 // --- JWKS helpers ---
+
+// generateJTI generates a random 16-byte JWT ID encoded as base64url.
+func generateJTI() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate JTI: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
 
 // ecPublicKeyToJWK converts an ECDSA P-256 public key to a JWK (RFC 7517) map.
 // It uses the ecdh package to extract the uncompressed point bytes, avoiding

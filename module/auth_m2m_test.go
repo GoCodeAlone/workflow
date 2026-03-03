@@ -772,6 +772,271 @@ func TestM2M_UnknownRoute(t *testing.T) {
 	}
 }
 
+// --- Token revocation (RFC 7009) ---
+
+// postRevoke is a test helper that sends a form-encoded POST to /oauth/revoke.
+func postRevoke(t *testing.T, m *M2MAuthModule, params url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/oauth/revoke",
+		strings.NewReader(params.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	m.Handle(w, req)
+	return w
+}
+
+// postIntrospect is a test helper that sends a form-encoded POST to /oauth/introspect.
+func postIntrospect(t *testing.T, m *M2MAuthModule, params url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/oauth/introspect",
+		strings.NewReader(params.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	m.Handle(w, req)
+	return w
+}
+
+// issueTestToken is a test helper that obtains an access token via client_credentials.
+func issueTestToken(t *testing.T, m *M2MAuthModule, clientID, clientSecret string) string {
+	t.Helper()
+	params := url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+	}
+	w := postToken(t, m, params)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 issuing token, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	tok, _ := resp["access_token"].(string)
+	if tok == "" {
+		t.Fatal("expected non-empty access_token")
+	}
+	return tok
+}
+
+func TestM2M_Revoke_ValidToken_Returns200(t *testing.T) {
+	m := newM2MHS256(t)
+	tokenStr := issueTestToken(t, m, "test-client", "test-secret")
+
+	w := postRevoke(t, m, url.Values{"token": {tokenStr}})
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for revoke, got %d", w.Code)
+	}
+}
+
+func TestM2M_Revoke_InvalidToken_StillReturns200(t *testing.T) {
+	// RFC 7009 §2.2: revocation of an unknown/invalid token must return 200.
+	m := newM2MHS256(t)
+	w := postRevoke(t, m, url.Values{"token": {"not.a.valid.jwt"}})
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 even for invalid token, got %d", w.Code)
+	}
+}
+
+func TestM2M_Revoke_MissingToken_Returns400(t *testing.T) {
+	m := newM2MHS256(t)
+	w := postRevoke(t, m, url.Values{})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 when token param missing, got %d", w.Code)
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "invalid_request" {
+		t.Errorf("expected error=invalid_request, got %q", resp["error"])
+	}
+}
+
+func TestM2M_Revoke_BlacklistsToken_AuthenticateFails(t *testing.T) {
+	m := newM2MHS256(t)
+	tokenStr := issueTestToken(t, m, "test-client", "test-secret")
+
+	// Token is valid before revocation.
+	valid, _, _ := m.Authenticate(tokenStr)
+	if !valid {
+		t.Fatal("expected token to be valid before revocation")
+	}
+
+	// Revoke the token.
+	w := postRevoke(t, m, url.Values{"token": {tokenStr}})
+	if w.Code != http.StatusOK {
+		t.Fatalf("revoke failed with %d", w.Code)
+	}
+
+	// Token must now be rejected by Authenticate.
+	valid, _, _ = m.Authenticate(tokenStr)
+	if valid {
+		t.Error("expected token to be invalid after revocation")
+	}
+}
+
+func TestM2M_Revoke_ES256_BlacklistsToken(t *testing.T) {
+	m := newM2MES256(t)
+	tokenStr := issueTestToken(t, m, "es256-client", "es256-secret")
+
+	valid, _, _ := m.Authenticate(tokenStr)
+	if !valid {
+		t.Fatal("expected token to be valid before revocation")
+	}
+
+	w := postRevoke(t, m, url.Values{"token": {tokenStr}})
+	if w.Code != http.StatusOK {
+		t.Fatalf("revoke failed with %d", w.Code)
+	}
+
+	valid, _, _ = m.Authenticate(tokenStr)
+	if valid {
+		t.Error("expected ES256 token to be invalid after revocation")
+	}
+}
+
+// --- Token introspection (RFC 7662) ---
+
+func TestM2M_Introspect_ValidToken_ActiveTrue(t *testing.T) {
+	m := newM2MHS256(t)
+	tokenStr := issueTestToken(t, m, "test-client", "test-secret")
+
+	w := postIntrospect(t, m, url.Values{"token": {tokenStr}})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["active"] != true {
+		t.Errorf("expected active=true, got %v", resp["active"])
+	}
+	if resp["client_id"] != "test-client" {
+		t.Errorf("expected client_id=test-client, got %v", resp["client_id"])
+	}
+	if resp["iss"] != "test-issuer" {
+		t.Errorf("expected iss=test-issuer, got %v", resp["iss"])
+	}
+	if resp["exp"] == nil {
+		t.Error("expected exp in introspect response")
+	}
+	if resp["iat"] == nil {
+		t.Error("expected iat in introspect response")
+	}
+}
+
+func TestM2M_Introspect_InvalidToken_ActiveFalse(t *testing.T) {
+	m := newM2MHS256(t)
+	w := postIntrospect(t, m, url.Values{"token": {"not.a.valid.jwt"}})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["active"] != false {
+		t.Errorf("expected active=false for invalid token, got %v", resp["active"])
+	}
+}
+
+func TestM2M_Introspect_RevokedToken_ActiveFalse(t *testing.T) {
+	m := newM2MHS256(t)
+	tokenStr := issueTestToken(t, m, "test-client", "test-secret")
+
+	// Revoke then introspect.
+	postRevoke(t, m, url.Values{"token": {tokenStr}})
+
+	w := postIntrospect(t, m, url.Values{"token": {tokenStr}})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["active"] != false {
+		t.Errorf("expected active=false for revoked token, got %v", resp["active"])
+	}
+}
+
+func TestM2M_Introspect_MissingToken_Returns400(t *testing.T) {
+	m := newM2MHS256(t)
+	w := postIntrospect(t, m, url.Values{})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 when token param missing, got %d", w.Code)
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["error"] != "invalid_request" {
+		t.Errorf("expected error=invalid_request, got %q", resp["error"])
+	}
+}
+
+func TestM2M_Introspect_ES256_ValidToken(t *testing.T) {
+	m := newM2MES256(t)
+	tokenStr := issueTestToken(t, m, "es256-client", "es256-secret")
+
+	w := postIntrospect(t, m, url.Values{"token": {tokenStr}})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["active"] != true {
+		t.Errorf("expected active=true, got %v", resp["active"])
+	}
+	if resp["client_id"] != "es256-client" {
+		t.Errorf("expected client_id=es256-client, got %v", resp["client_id"])
+	}
+}
+
+func TestM2M_Introspect_ScopeIncluded(t *testing.T) {
+	m := newM2MHS256(t)
+	params := url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {"test-client"},
+		"client_secret": {"test-secret"},
+		"scope":         {"read"},
+	}
+	w := postToken(t, m, params)
+	var tokenResp map[string]any
+	json.NewDecoder(w.Body).Decode(&tokenResp)
+	tokenStr, _ := tokenResp["access_token"].(string)
+
+	introspectResp := postIntrospect(t, m, url.Values{"token": {tokenStr}})
+	var resp map[string]any
+	json.NewDecoder(introspectResp.Body).Decode(&resp)
+	if resp["scope"] != "read" {
+		t.Errorf("expected scope=read in introspect response, got %v", resp["scope"])
+	}
+}
+
+// Verify that issued tokens include a jti claim.
+func TestM2M_IssuedToken_HasJTI(t *testing.T) {
+	m := newM2MHS256(t)
+	tokenStr := issueTestToken(t, m, "test-client", "test-secret")
+
+	_, claims, err := m.Authenticate(tokenStr)
+	if err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+	jti, _ := claims["jti"].(string)
+	if jti == "" {
+		t.Error("expected non-empty jti claim in issued token")
+	}
+}
+
+// Verify that two tokens issued for the same client have different JTIs.
+func TestM2M_IssuedTokens_UniqueJTIs(t *testing.T) {
+	m := newM2MHS256(t)
+	tok1 := issueTestToken(t, m, "test-client", "test-secret")
+	tok2 := issueTestToken(t, m, "test-client", "test-secret")
+
+	_, claims1, _ := m.Authenticate(tok1)
+	_, claims2, _ := m.Authenticate(tok2)
+	jti1, _ := claims1["jti"].(string)
+	jti2, _ := claims2["jti"].(string)
+	if jti1 == "" || jti2 == "" {
+		t.Fatal("expected non-empty jti claims")
+	}
+	if jti1 == jti2 {
+		t.Error("expected unique JTIs for different tokens")
+	}
+}
+
 // --- Authenticate (AuthProvider interface) ---
 
 func TestM2M_Authenticate_HS256_Valid(t *testing.T) {
