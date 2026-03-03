@@ -45,10 +45,11 @@ type PartitionManager interface {
 	SyncPartitionsFromSource(ctx context.Context) error
 }
 
-// MultiPartitionManager extends PartitionManager for databases that have more
-// than one partition key configuration (e.g. tenant-partitioned tables AND
-// api-version-partitioned tables in the same database). It is implemented by
-// PartitionedDatabase when Partitions contains two or more entries.
+// MultiPartitionManager extends PartitionManager for databases that can have
+// more than one partition key configuration (e.g. tenant-partitioned tables
+// AND api-version-partitioned tables in the same database). It is implemented
+// by PartitionedDatabase; the additional methods are primarily meaningful when
+// multiple partition configs are configured.
 type MultiPartitionManager interface {
 	PartitionManager
 	// PartitionConfigs returns all configured partition groups.
@@ -273,9 +274,17 @@ func (p *PartitionedDatabase) Tables() []string {
 }
 
 // PartitionConfigs returns all configured partition groups (satisfies MultiPartitionManager).
+// It returns a deep copy so callers cannot mutate the internal state.
 func (p *PartitionedDatabase) PartitionConfigs() []PartitionConfig {
 	result := make([]PartitionConfig, len(p.partitions))
-	copy(result, p.partitions)
+	for i, cfg := range p.partitions {
+		result[i] = cfg
+		if cfg.Tables != nil {
+			tablesCopy := make([]string, len(cfg.Tables))
+			copy(tablesCopy, cfg.Tables)
+			result[i].Tables = tablesCopy
+		}
+	}
 	return result
 }
 

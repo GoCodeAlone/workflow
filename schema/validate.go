@@ -318,6 +318,67 @@ func validateModuleConfig(mod config.ModuleConfig, prefix string, errs *Validati
 
 	// Additional type-specific structural checks beyond simple required fields
 	switch mod.Type {
+	case "database.partitioned":
+		if mod.Config == nil {
+			break
+		}
+		hasPartitionsArr := false
+		if partitions, ok := mod.Config["partitions"]; ok {
+			if arr, ok := partitions.([]any); ok && len(arr) > 0 {
+				hasPartitionsArr = true
+				// Each entry in partitions must have partitionKey and tables.
+				for j, item := range arr {
+					entryPath := fmt.Sprintf("%s.config.partitions[%d]", prefix, j)
+					entry, ok := item.(map[string]any)
+					if !ok {
+						*errs = append(*errs, &ValidationError{
+							Path:    entryPath,
+							Message: "each partition entry must be an object",
+						})
+						continue
+					}
+					pk, _ := entry["partitionKey"].(string)
+					if pk == "" {
+						*errs = append(*errs, &ValidationError{
+							Path:    entryPath + ".partitionKey",
+							Message: "required field \"partitionKey\" is missing or empty",
+						})
+					}
+					if tables, ok := entry["tables"]; !ok {
+						*errs = append(*errs, &ValidationError{
+							Path:    entryPath + ".tables",
+							Message: "required field \"tables\" is missing",
+						})
+					} else if arr, ok := tables.([]any); !ok || len(arr) == 0 {
+						*errs = append(*errs, &ValidationError{
+							Path:    entryPath + ".tables",
+							Message: "\"tables\" must be a non-empty list",
+						})
+					}
+				}
+			}
+		}
+		if !hasPartitionsArr {
+			// Single-partition mode: partitionKey and tables are required.
+			pk, _ := mod.Config["partitionKey"].(string)
+			if pk == "" {
+				*errs = append(*errs, &ValidationError{
+					Path:    prefix + ".config.partitionKey",
+					Message: "required config field \"partitionKey\" is missing or empty (set partitionKey for single-partition mode or provide a non-empty \"partitions\" list for multi-partition mode)",
+				})
+			}
+			if tables, ok := mod.Config["tables"]; !ok {
+				*errs = append(*errs, &ValidationError{
+					Path:    prefix + ".config.tables",
+					Message: "required config field \"tables\" is missing (set tables for single-partition mode or provide a non-empty \"partitions\" list for multi-partition mode)",
+				})
+			} else if arr, ok := tables.([]any); !ok || len(arr) == 0 {
+				*errs = append(*errs, &ValidationError{
+					Path:    prefix + ".config.tables",
+					Message: "\"tables\" must be a non-empty list",
+				})
+			}
+		}
 	case "messaging.kafka":
 		if mod.Config != nil {
 			if brokers, ok := mod.Config["brokers"]; ok {

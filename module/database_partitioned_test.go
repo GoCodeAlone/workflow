@@ -376,10 +376,27 @@ func TestPartitionedDatabase_PartitionConfigs_ReturnsCopy(t *testing.T) {
 	pd := NewPartitionedDatabase("db", cfg)
 
 	cfgs1 := pd.PartitionConfigs()
-	cfgs1[0].PartitionKey = "mutated" // mutate the returned slice
+	cfgs1[0].PartitionKey = "mutated" // mutate the returned struct field
 	cfgs2 := pd.PartitionConfigs()
 	if cfgs2[0].PartitionKey == "mutated" {
-		t.Error("PartitionConfigs returned a reference instead of a copy")
+		t.Error("PartitionConfigs returned a reference instead of a copy (PartitionKey)")
+	}
+}
+
+func TestPartitionedDatabase_PartitionConfigs_DeepCopiesTables(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver: "pgx",
+		Partitions: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms", "submissions"}},
+		},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	cfgs1 := pd.PartitionConfigs()
+	cfgs1[0].Tables[0] = "mutated_table" // mutate element of the returned Tables slice
+	cfgs2 := pd.PartitionConfigs()
+	if cfgs2[0].Tables[0] == "mutated_table" {
+		t.Error("PartitionConfigs returned a shallow copy: Tables slice element was mutated in internal state")
 	}
 }
 
