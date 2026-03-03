@@ -952,3 +952,202 @@ func makeDir(path string) error {
 func writeFile(path string, data []byte) error {
 	return os.WriteFile(path, data, 0644)
 }
+
+// ---------------------------------------------------------------------------
+// database.partitioned validation tests
+// ---------------------------------------------------------------------------
+
+func TestValidateConfig_PartitionedDB_SingleMode_Valid(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "db", Type: "database.partitioned", Config: map[string]any{
+				"driver":       "pgx",
+				"dsn":          "postgres://localhost/test",
+				"partitionKey": "tenant_id",
+				"tables":       []any{"forms"},
+			}},
+		},
+	}
+	err := ValidateConfig(cfg, WithAllowNoEntryPoints())
+	if err != nil {
+		t.Fatalf("expected valid config, got: %v", err)
+	}
+}
+
+func TestValidateConfig_PartitionedDB_SingleMode_MissingPartitionKey(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "db", Type: "database.partitioned", Config: map[string]any{
+				"driver": "pgx",
+				"dsn":    "postgres://localhost/test",
+				"tables": []any{"forms"},
+			}},
+		},
+	}
+	err := ValidateConfig(cfg, WithAllowNoEntryPoints())
+	if err == nil {
+		t.Fatal("expected error for missing partitionKey in single-partition mode")
+	}
+	assertContains(t, err.Error(), "partitionKey")
+}
+
+func TestValidateConfig_PartitionedDB_SingleMode_MissingTables(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "db", Type: "database.partitioned", Config: map[string]any{
+				"driver":       "pgx",
+				"dsn":          "postgres://localhost/test",
+				"partitionKey": "tenant_id",
+			}},
+		},
+	}
+	err := ValidateConfig(cfg, WithAllowNoEntryPoints())
+	if err == nil {
+		t.Fatal("expected error for missing tables in single-partition mode")
+	}
+	assertContains(t, err.Error(), "tables")
+}
+
+func TestValidateConfig_PartitionedDB_SingleMode_EmptyTables(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "db", Type: "database.partitioned", Config: map[string]any{
+				"driver":       "pgx",
+				"dsn":          "postgres://localhost/test",
+				"partitionKey": "tenant_id",
+				"tables":       []any{},
+			}},
+		},
+	}
+	err := ValidateConfig(cfg, WithAllowNoEntryPoints())
+	if err == nil {
+		t.Fatal("expected error for empty tables list in single-partition mode")
+	}
+	assertContains(t, err.Error(), "tables")
+}
+
+func TestValidateConfig_PartitionedDB_MultiMode_Valid(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "db", Type: "database.partitioned", Config: map[string]any{
+				"driver": "pgx",
+				"dsn":    "postgres://localhost/test",
+				"partitions": []any{
+					map[string]any{"partitionKey": "tenant_id", "tables": []any{"forms"}},
+					map[string]any{"partitionKey": "api_version", "tables": []any{"contracts"}, "partitionType": "range"},
+				},
+			}},
+		},
+	}
+	err := ValidateConfig(cfg, WithAllowNoEntryPoints())
+	if err != nil {
+		t.Fatalf("expected valid multi-partition config, got: %v", err)
+	}
+}
+
+func TestValidateConfig_PartitionedDB_MultiMode_EntryMissingPartitionKey(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "db", Type: "database.partitioned", Config: map[string]any{
+				"driver": "pgx",
+				"dsn":    "postgres://localhost/test",
+				"partitions": []any{
+					map[string]any{"tables": []any{"forms"}}, // missing partitionKey
+				},
+			}},
+		},
+	}
+	err := ValidateConfig(cfg, WithAllowNoEntryPoints())
+	if err == nil {
+		t.Fatal("expected error for missing partitionKey in partition entry")
+	}
+	assertContains(t, err.Error(), "partitionKey")
+}
+
+func TestValidateConfig_PartitionedDB_MultiMode_EntryMissingTables(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "db", Type: "database.partitioned", Config: map[string]any{
+				"driver": "pgx",
+				"dsn":    "postgres://localhost/test",
+				"partitions": []any{
+					map[string]any{"partitionKey": "tenant_id"}, // missing tables
+				},
+			}},
+		},
+	}
+	err := ValidateConfig(cfg, WithAllowNoEntryPoints())
+	if err == nil {
+		t.Fatal("expected error for missing tables in partition entry")
+	}
+	assertContains(t, err.Error(), "tables")
+}
+
+func TestValidateConfig_PartitionedDB_MultiMode_EntryEmptyTables(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "db", Type: "database.partitioned", Config: map[string]any{
+				"driver": "pgx",
+				"dsn":    "postgres://localhost/test",
+				"partitions": []any{
+					map[string]any{"partitionKey": "tenant_id", "tables": []any{}},
+				},
+			}},
+		},
+	}
+	err := ValidateConfig(cfg, WithAllowNoEntryPoints())
+	if err == nil {
+		t.Fatal("expected error for empty tables list in partition entry")
+	}
+	assertContains(t, err.Error(), "tables")
+}
+
+func TestValidateConfig_PartitionedDB_MultiMode_EntryNotObject(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "db", Type: "database.partitioned", Config: map[string]any{
+				"driver":     "pgx",
+				"dsn":        "postgres://localhost/test",
+				"partitions": []any{"not-an-object"},
+			}},
+		},
+	}
+	err := ValidateConfig(cfg, WithAllowNoEntryPoints())
+	if err == nil {
+		t.Fatal("expected error for non-object partition entry")
+	}
+	assertContains(t, err.Error(), "must be an object")
+}
+
+func TestValidateConfig_PartitionedDB_EmptyPartitionsArray_FallsBackToSingleMode(t *testing.T) {
+	// An empty partitions array should fall through to single-partition validation.
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "db", Type: "database.partitioned", Config: map[string]any{
+				"driver":     "pgx",
+				"dsn":        "postgres://localhost/test",
+				"partitions": []any{}, // empty → single-partition mode applies
+			}},
+		},
+	}
+	err := ValidateConfig(cfg, WithAllowNoEntryPoints())
+	if err == nil {
+		t.Fatal("expected error for missing partitionKey/tables when partitions is empty")
+	}
+	assertContains(t, err.Error(), "partitionKey")
+}
+
+func TestValidateConfig_PartitionedDB_NilConfig(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "db", Type: "database.partitioned", Config: nil},
+		},
+	}
+	err := ValidateConfig(cfg, WithAllowNoEntryPoints())
+	// nil config → driver+dsn required errors from schema, no panic from type-specific check
+	if err == nil {
+		t.Fatal("expected errors for nil config")
+	}
+	// Should report driver/dsn as required
+	assertContains(t, err.Error(), "driver")
+}

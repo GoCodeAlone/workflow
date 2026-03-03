@@ -671,6 +671,374 @@ func TestHTTPCallStep_BodyFrom_ContentTypeOverride(t *testing.T) {
 	}
 }
 
+// TestHTTPCallStep_OAuth2Key_FetchesToken verifies that the top-level "oauth2" config key works
+// as an alternative to "auth" with type=oauth2_client_credentials.
+func TestHTTPCallStep_OAuth2Key_FetchesToken(t *testing.T) {
+	var tokenRequests int32
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tokenRequests, 1)
+		_ = r.ParseForm()
+		if r.FormValue("grant_type") != "client_credentials" {
+			t.Errorf("expected grant_type=client_credentials, got %q", r.FormValue("grant_type"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "oauth2-key-token",
+			"expires_in":   3600,
+			"token_type":   "Bearer",
+		})
+	}))
+	defer tokenSrv.Close()
+
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer oauth2-key-token" {
+			t.Errorf("expected Bearer oauth2-key-token, got %q", r.Header.Get("Authorization"))
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer apiSrv.Close()
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("oauth2-key-test", map[string]any{
+		"url":    apiSrv.URL + "/data",
+		"method": "GET",
+		"oauth2": map[string]any{
+			"grant_type":    "client_credentials",
+			"token_url":     tokenSrv.URL + "/token",
+			"client_id":     "sf-client",
+			"client_secret": "sf-secret",
+			"scopes":        []any{"api"},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	step.(*HTTPCallStep).httpClient = &http.Client{}
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if result.Output["status_code"] != http.StatusOK {
+		t.Errorf("expected 200, got %v", result.Output["status_code"])
+	}
+	if atomic.LoadInt32(&tokenRequests) != 1 {
+		t.Errorf("expected 1 token request, got %d", atomic.LoadInt32(&tokenRequests))
+	}
+}
+
+// TestHTTPCallStep_OAuth2Key_DefaultGrantType verifies that grant_type defaults to client_credentials.
+func TestHTTPCallStep_OAuth2Key_DefaultGrantType(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.FormValue("grant_type") != "client_credentials" {
+			t.Errorf("expected grant_type=client_credentials, got %q", r.FormValue("grant_type"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 3600})
+	}))
+	defer tokenSrv.Close()
+
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer apiSrv.Close()
+
+	factory := NewHTTPCallStepFactory()
+	// No grant_type specified – should default to client_credentials
+	step, err := factory("oauth2-default-grant", map[string]any{
+		"url": apiSrv.URL,
+		"oauth2": map[string]any{
+			"token_url":     tokenSrv.URL + "/token",
+			"client_id":     "cid",
+			"client_secret": "csec",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	step.(*HTTPCallStep).httpClient = &http.Client{}
+
+	if _, err := step.Execute(context.Background(), NewPipelineContext(nil, nil)); err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+}
+
+// TestHTTPCallStep_OAuth2Key_InvalidGrantType verifies that an unsupported grant_type is rejected.
+func TestHTTPCallStep_OAuth2Key_InvalidGrantType(t *testing.T) {
+	factory := NewHTTPCallStepFactory()
+	_, err := factory("bad-grant", map[string]any{
+		"url": "http://example.com/api",
+		"oauth2": map[string]any{
+			"grant_type":    "authorization_code",
+			"token_url":     "http://example.com/token",
+			"client_id":     "cid",
+			"client_secret": "csec",
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error for unsupported grant_type")
+	}
+	if !strings.Contains(err.Error(), "grant_type must be 'client_credentials'") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestHTTPCallStep_OAuth2Key_MissingFields verifies that missing oauth2 fields produce errors.
+func TestHTTPCallStep_OAuth2Key_MissingFields(t *testing.T) {
+	factory := NewHTTPCallStepFactory()
+
+	tests := []struct {
+		name   string
+		oauth2 map[string]any
+		errMsg string
+	}{
+		{
+			name: "missing token_url",
+			oauth2: map[string]any{
+				"client_id":     "cid",
+				"client_secret": "csec",
+			},
+			errMsg: "oauth2.token_url is required",
+		},
+		{
+			name: "missing client_id",
+			oauth2: map[string]any{
+				"token_url":     "http://example.com/token",
+				"client_secret": "csec",
+			},
+			errMsg: "oauth2.client_id is required",
+		},
+		{
+			name: "missing client_secret",
+			oauth2: map[string]any{
+				"token_url": "http://example.com/token",
+				"client_id": "cid",
+			},
+			errMsg: "oauth2.client_secret is required",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := factory("test", map[string]any{
+				"url":    "http://example.com/api",
+				"oauth2": tc.oauth2,
+			}, nil)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tc.errMsg) {
+				t.Errorf("expected %q in error, got: %v", tc.errMsg, err)
+			}
+		})
+	}
+}
+
+// TestHTTPCallStep_OAuth2_InstanceURL verifies that instance_url from the token response is
+// parsed, injected into the pipeline context for URL template resolution, and included in step output.
+func TestHTTPCallStep_OAuth2_InstanceURL(t *testing.T) {
+	var tokenRequests int32
+
+	// apiSrv is started first so its URL can be returned as instance_url from the token server.
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/services/data/v62.0/sobjects" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"created": true})
+	}))
+	defer apiSrv.Close()
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tokenRequests, 1)
+		w.Header().Set("Content-Type", "application/json")
+		// Return apiSrv.URL as instance_url so {{.instance_url}} resolves to the test server.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "sf-token",
+			"expires_in":   3600,
+			"token_type":   "Bearer",
+			"instance_url": apiSrv.URL,
+		})
+	}))
+	defer tokenSrv.Close()
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("sf-test", map[string]any{
+		"url":    "{{.instance_url}}/services/data/v62.0/sobjects",
+		"method": "GET",
+		"oauth2": map[string]any{
+			"token_url":     tokenSrv.URL + "/token",
+			"client_id":     "sf-cid",
+			"client_secret": "sf-csec",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	hs := step.(*HTTPCallStep)
+	hs.httpClient = &http.Client{}
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	// Token endpoint should have been called exactly once.
+	if atomic.LoadInt32(&tokenRequests) != 1 {
+		t.Errorf("expected 1 token request, got %d", atomic.LoadInt32(&tokenRequests))
+	}
+	// instance_url should be present in the step output.
+	if result.Output["instance_url"] != apiSrv.URL {
+		t.Errorf("expected instance_url=%q in output, got %v", apiSrv.URL, result.Output["instance_url"])
+	}
+	// instance_url should also have been injected into pc.Current.
+	if pc.Current["instance_url"] != apiSrv.URL {
+		t.Errorf("expected instance_url in pc.Current, got %v", pc.Current["instance_url"])
+	}
+}
+
+// TestHTTPCallStep_OAuth2_InstanceURL_Cached verifies that instance_url persists across calls
+// and is refreshed when the token is invalidated and re-fetched.
+func TestHTTPCallStep_OAuth2_InstanceURL_Cached(t *testing.T) {
+	var tokenRequests int32
+	const instanceURL1 = "https://instance1.salesforce.com"
+	const instanceURL2 = "https://instance2.salesforce.com"
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&tokenRequests, 1)
+		iurl := instanceURL1
+		if n > 1 {
+			iurl = instanceURL2
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "tok",
+			"expires_in":   3600,
+			"instance_url": iurl,
+		})
+	}))
+	defer tokenSrv.Close()
+
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer apiSrv.Close()
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("iurl-cached", map[string]any{
+		"url":    apiSrv.URL,
+		"method": "GET",
+		"oauth2": map[string]any{
+			"token_url":     tokenSrv.URL + "/token",
+			"client_id":     "cid",
+			"client_secret": "csec",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	hs := step.(*HTTPCallStep)
+	hs.httpClient = &http.Client{}
+
+	pc := NewPipelineContext(nil, nil)
+
+	// First call – token is fetched, instance_url = instanceURL1.
+	if _, err := step.Execute(context.Background(), pc); err != nil {
+		t.Fatalf("first execute error: %v", err)
+	}
+	if hs.oauthEntry.getInstanceURL() != instanceURL1 {
+		t.Errorf("expected instance_url=%q after first fetch, got %q", instanceURL1, hs.oauthEntry.getInstanceURL())
+	}
+
+	// Invalidate and fetch again – instance_url should update to instanceURL2.
+	hs.oauthEntry.invalidate()
+	if _, err := step.Execute(context.Background(), pc); err != nil {
+		t.Fatalf("second execute error: %v", err)
+	}
+	if hs.oauthEntry.getInstanceURL() != instanceURL2 {
+		t.Errorf("expected instance_url=%q after second fetch, got %q", instanceURL2, hs.oauthEntry.getInstanceURL())
+	}
+	if atomic.LoadInt32(&tokenRequests) != 2 {
+		t.Errorf("expected 2 token requests, got %d", atomic.LoadInt32(&tokenRequests))
+	}
+}
+
+// TestHTTPCallStep_OAuth2_Retry401_RefreshesInstanceURL verifies that on a 401, the retry uses
+// an updated instance_url if the refreshed token response returns a new one.
+func TestHTTPCallStep_OAuth2_Retry401_RefreshesInstanceURL(t *testing.T) {
+	var tokenRequests int32
+
+	// Two API servers represent two possible instance URLs.
+	// First call → server1 returns 401; second call (retry) → server2 returns 200.
+	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server2.Close()
+
+	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Always return 401; the real API is on server2 after token refresh.
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`unauthorized`))
+	}))
+	defer server1.Close()
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&tokenRequests, 1)
+		instanceURL := server1.URL // first token → server1
+		if n > 1 {
+			instanceURL = server2.URL // refreshed token → server2
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": fmt.Sprintf("token-v%d", n),
+			"expires_in":   3600,
+			"instance_url": instanceURL,
+		})
+	}))
+	defer tokenSrv.Close()
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("retry-iurl-test", map[string]any{
+		"url":    "{{.instance_url}}/api/resource",
+		"method": "GET",
+		"oauth2": map[string]any{
+			"token_url":     tokenSrv.URL + "/token",
+			"client_id":     "cid",
+			"client_secret": "csec",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	step.(*HTTPCallStep).httpClient = &http.Client{}
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if result.Output["status_code"] != http.StatusOK {
+		t.Errorf("expected 200 after retry, got %v", result.Output["status_code"])
+	}
+	if atomic.LoadInt32(&tokenRequests) != 2 {
+		t.Errorf("expected 2 token requests (initial + refresh), got %d", atomic.LoadInt32(&tokenRequests))
+	}
+	// After the retry, pc.Current["instance_url"] should reflect the refreshed server2 URL.
+	if pc.Current["instance_url"] != server2.URL {
+		t.Errorf("expected pc.Current[instance_url]=%q after retry, got %v", server2.URL, pc.Current["instance_url"])
+	}
+}
+
 // TestHTTPCallStep_BodyFrom_NilValue verifies that body_from with a missing path sends no body.
 func TestHTTPCallStep_BodyFrom_NilValue(t *testing.T) {
 	ch := make(chan []byte, 1)
