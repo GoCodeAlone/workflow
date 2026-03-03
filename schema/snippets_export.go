@@ -31,19 +31,19 @@ type vscodeSnippet struct {
 
 // jetbrainsTemplateSet is the root XML element for JetBrains live templates.
 type jetbrainsTemplateSet struct {
-	XMLName   xml.Name           `xml:"templateSet"`
-	Group     string             `xml:"group,attr"`
+	XMLName   xml.Name            `xml:"templateSet"`
+	Group     string              `xml:"group,attr"`
 	Templates []jetbrainsTemplate `xml:"template"`
 }
 
 type jetbrainsTemplate struct {
-	Name        string                `xml:"name,attr"`
-	Value       string                `xml:"value,attr"`
-	Description string                `xml:"description,attr"`
-	ToReformat  bool                  `xml:"toReformat,attr"`
-	ToShortenFQ bool                  `xml:"toShortenFQNames,attr"`
-	Variables   []jetbrainsVariable   `xml:"variable,omitempty"`
-	Contexts    []jetbrainsContext     `xml:"context"`
+	Name        string              `xml:"name,attr"`
+	Value       string              `xml:"value,attr"`
+	Description string              `xml:"description,attr"`
+	ToReformat  bool                `xml:"toReformat,attr"`
+	ToShortenFQ bool                `xml:"toShortenFQNames,attr"`
+	Variables   []jetbrainsVariable `xml:"variable,omitempty"`
+	Contexts    []jetbrainsContext  `xml:"context"`
 }
 
 type jetbrainsVariable struct {

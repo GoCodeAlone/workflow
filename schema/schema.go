@@ -612,7 +612,7 @@ func GenerateWorkflowSchema() *Schema {
 				Type:        "object",
 				Description: "Workflow handler configurations keyed by workflow type (e.g. http, messaging, statemachine, scheduler, integration)",
 			},
-			"triggers": triggerSchema,
+			"triggers":  triggerSchema,
 			"pipelines": buildPipelinesSchema(pipelineSchema),
 			"imports": {
 				Type:        "array",

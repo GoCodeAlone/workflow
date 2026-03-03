@@ -7,8 +7,8 @@ import (
 	"sync"
 
 	"github.com/CrisisTextLine/modular"
-	"github.com/IBM/sarama"
 	"github.com/GoCodeAlone/workflow/pkg/tlsutil"
+	"github.com/IBM/sarama"
 )
 
 // KafkaSASLConfig holds SASL authentication configuration for Kafka.
@@ -26,19 +26,19 @@ type KafkaTLSConfig struct {
 
 // KafkaBroker implements the MessageBroker interface using Apache Kafka via Sarama.
 type KafkaBroker struct {
-	name          string
-	brokers       []string
-	groupID       string
-	producer      sarama.SyncProducer
-	consumerGroup sarama.ConsumerGroup
-	handlers      map[string]MessageHandler
-	mu            sync.RWMutex
-	kafkaProducer *kafkaProducerAdapter
-	kafkaConsumer *kafkaConsumerAdapter
-	cancelFunc    context.CancelFunc
-	logger        modular.Logger
-	healthy       bool
-	healthMsg     string
+	name           string
+	brokers        []string
+	groupID        string
+	producer       sarama.SyncProducer
+	consumerGroup  sarama.ConsumerGroup
+	handlers       map[string]MessageHandler
+	mu             sync.RWMutex
+	kafkaProducer  *kafkaProducerAdapter
+	kafkaConsumer  *kafkaConsumerAdapter
+	cancelFunc     context.CancelFunc
+	logger         modular.Logger
+	healthy        bool
+	healthMsg      string
 	encryptor      *FieldEncryptor
 	fieldProtector *ProtectedFieldManager
 	tlsCfg         KafkaTLSConfig

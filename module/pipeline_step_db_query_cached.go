@@ -24,6 +24,7 @@ type DBQueryCachedStep struct {
 	database   string
 	query      string
 	params     []string
+	mode       string // "single" or "list"
 	cacheKey   string
 	cacheTTL   time.Duration
 	scanFields []string
@@ -80,6 +81,14 @@ func NewDBQueryCachedStepFactory() StepFactory {
 			}
 		}
 
+		mode, _ := config["mode"].(string)
+		if mode == "" {
+			mode = "single"
+		}
+		if mode != "list" && mode != "single" {
+			return nil, fmt.Errorf("db_query_cached step %q: mode must be 'list' or 'single', got %q", name, mode)
+		}
+
 		var scanFields []string
 		if sf, ok := config["scan_fields"]; ok {
 			if list, ok := sf.([]any); ok {
@@ -96,6 +105,7 @@ func NewDBQueryCachedStepFactory() StepFactory {
 			database:   database,
 			query:      query,
 			params:     params,
+			mode:       mode,
 			cacheKey:   cacheKey,
 			cacheTTL:   cacheTTL,
 			scanFields: scanFields,
@@ -219,7 +229,7 @@ func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext) (
 		fieldSet[f] = true
 	}
 
-	output := make(map[string]any)
+	var results []map[string]any
 	for rows.Next() {
 		values := make([]any, len(columns))
 		valuePtrs := make([]any, len(columns))
@@ -231,23 +241,44 @@ func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext) (
 			return nil, fmt.Errorf("db_query_cached step %q: scan failed: %w", s.name, err)
 		}
 
+		row := make(map[string]any, len(columns))
 		for i, col := range columns {
 			if len(fieldSet) > 0 && !fieldSet[col] {
 				continue
 			}
 			val := values[i]
 			if b, ok := val.([]byte); ok {
-				output[col] = string(b)
+				row[col] = string(b)
 			} else {
-				output[col] = val
+				row[col] = val
 			}
 		}
-		// Only take the first row
-		break
+		results = append(results, row)
+		if s.mode == "single" {
+			// Only take the first row
+			break
+		}
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("db_query_cached step %q: row iteration error: %w", s.name, err)
+	}
+
+	output := make(map[string]any)
+	if s.mode == "single" {
+		if len(results) > 0 {
+			output["row"] = results[0]
+			output["found"] = true
+		} else {
+			output["row"] = map[string]any{}
+			output["found"] = false
+		}
+	} else {
+		if results == nil {
+			results = []map[string]any{}
+		}
+		output["rows"] = results
+		output["count"] = len(results)
 	}
 
 	return output, nil
