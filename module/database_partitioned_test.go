@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -190,6 +191,453 @@ func TestIsSupportedPartitionDriver(t *testing.T) {
 		if isSupportedPartitionDriver(d) {
 			t.Errorf("expected %q to be unsupported", d)
 		}
+	}
+}
+
+// testMultiPartitionManager extends testPartitionManager with MultiPartitionManager support.
+type testMultiPartitionManager struct {
+	testPartitionManager
+	configs                 []PartitionConfig
+	ensureForKeyCalledWith  []struct{ key, value string }
+	syncForKeyCalledWith    []string
+	ensureForKeyErr         error
+	syncForKeyErr           error
+}
+
+func (m *testMultiPartitionManager) PartitionConfigs() []PartitionConfig { return m.configs }
+
+func (m *testMultiPartitionManager) EnsurePartitionForKey(_ context.Context, partitionKey, value string) error {
+	m.ensureForKeyCalledWith = append(m.ensureForKeyCalledWith, struct{ key, value string }{partitionKey, value})
+	return m.ensureForKeyErr
+}
+
+func (m *testMultiPartitionManager) SyncPartitionsForKey(_ context.Context, partitionKey string) error {
+	m.syncForKeyCalledWith = append(m.syncForKeyCalledWith, partitionKey)
+	return m.syncForKeyErr
+}
+
+// ─── Multi-partition config tests ────────────────────────────────────────────
+
+func TestPartitionedDatabase_MultiPartition_NormalizesDefaults(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver: "pgx",
+		Partitions: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms"}},
+			{PartitionKey: "api_version", Tables: []string{"contracts"}, PartitionType: PartitionTypeRange},
+		},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	cfgs := pd.PartitionConfigs()
+	if len(cfgs) != 2 {
+		t.Fatalf("expected 2 partition configs, got %d", len(cfgs))
+	}
+
+	// First config gets default type and format
+	if cfgs[0].PartitionType != PartitionTypeList {
+		t.Errorf("expected first partition type %q, got %q", PartitionTypeList, cfgs[0].PartitionType)
+	}
+	if cfgs[0].PartitionNameFormat != "{table}_{tenant}" {
+		t.Errorf("expected first partition format %q, got %q", "{table}_{tenant}", cfgs[0].PartitionNameFormat)
+	}
+
+	// Second config keeps explicit type
+	if cfgs[1].PartitionType != PartitionTypeRange {
+		t.Errorf("expected second partition type %q, got %q", PartitionTypeRange, cfgs[1].PartitionType)
+	}
+}
+
+func TestPartitionedDatabase_MultiPartition_PrimaryKeyIsFirst(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver: "pgx",
+		Partitions: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms"}},
+			{PartitionKey: "api_version", Tables: []string{"contracts"}},
+		},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	if pd.PartitionKey() != "tenant_id" {
+		t.Errorf("expected PartitionKey() = %q, got %q", "tenant_id", pd.PartitionKey())
+	}
+}
+
+func TestPartitionedDatabase_MultiPartition_TablesReturnsPrimary(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver: "pgx",
+		Partitions: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms", "submissions"}},
+			{PartitionKey: "api_version", Tables: []string{"contracts"}},
+		},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	tables := pd.Tables()
+	if len(tables) != 2 || tables[0] != "forms" || tables[1] != "submissions" {
+		t.Errorf("unexpected Tables() result: %v", tables)
+	}
+}
+
+func TestPartitionedDatabase_MultiPartition_SinglePartitionFieldsIgnored(t *testing.T) {
+	// When Partitions is set, top-level single-partition fields must be ignored.
+	cfg := PartitionedDatabaseConfig{
+		Driver:       "pgx",
+		PartitionKey: "should_be_ignored",
+		Tables:       []string{"ignored_table"},
+		Partitions: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms"}},
+		},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	if pd.PartitionKey() != "tenant_id" {
+		t.Errorf("expected PartitionKey() = %q, got %q", "tenant_id", pd.PartitionKey())
+	}
+	if len(pd.Tables()) != 1 || pd.Tables()[0] != "forms" {
+		t.Errorf("unexpected Tables(): %v", pd.Tables())
+	}
+}
+
+func TestPartitionedDatabase_EnsurePartitionForKey_InvalidKey(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver: "pgx",
+		Partitions: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms"}},
+		},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	err := pd.EnsurePartitionForKey(context.Background(), "unknown_key", "val")
+	if err == nil {
+		t.Fatal("expected error for unknown partition key")
+	}
+	if !strings.Contains(err.Error(), "no partition config found for key") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPartitionedDatabase_SyncPartitionsForKey_InvalidKey(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver: "pgx",
+		Partitions: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms"}},
+		},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	err := pd.SyncPartitionsForKey(context.Background(), "unknown_key")
+	if err == nil {
+		t.Fatal("expected error for unknown partition key")
+	}
+	if !strings.Contains(err.Error(), "no partition config found for key") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPartitionedDatabase_SyncPartitionsForKey_NoSourceTable(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver: "pgx",
+		Partitions: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms"}},
+		},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	// No sourceTable on the config → no-op
+	err := pd.SyncPartitionsForKey(context.Background(), "tenant_id")
+	if err != nil {
+		t.Fatalf("expected no-op, got: %v", err)
+	}
+}
+
+func TestPartitionedDatabase_SyncPartitionsForKey_InvalidSourceTable(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver: "pgx",
+		Partitions: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms"}, SourceTable: "invalid table!"},
+		},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	err := pd.SyncPartitionsForKey(context.Background(), "tenant_id")
+	if err == nil {
+		t.Fatal("expected error for invalid source table")
+	}
+}
+
+func TestPartitionedDatabase_PartitionConfigs_ReturnsCopy(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver: "pgx",
+		Partitions: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms"}},
+			{PartitionKey: "api_version", Tables: []string{"contracts"}},
+		},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	cfgs1 := pd.PartitionConfigs()
+	cfgs1[0].PartitionKey = "mutated" // mutate the returned slice
+	cfgs2 := pd.PartitionConfigs()
+	if cfgs2[0].PartitionKey == "mutated" {
+		t.Error("PartitionConfigs returned a reference instead of a copy")
+	}
+}
+
+func TestPartitionedDatabase_BackwardCompat_SinglePartition(t *testing.T) {
+	// Old-style config without Partitions field must behave exactly as before.
+	cfg := PartitionedDatabaseConfig{
+		Driver:       "pgx",
+		PartitionKey: "tenant_id",
+		Tables:       []string{"forms", "submissions"},
+		PartitionType: PartitionTypeList,
+		PartitionNameFormat: "{table}_{tenant}",
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	cfgs := pd.PartitionConfigs()
+	if len(cfgs) != 1 {
+		t.Fatalf("expected 1 partition config for backward compat, got %d", len(cfgs))
+	}
+	if pd.PartitionKey() != "tenant_id" {
+		t.Errorf("expected PartitionKey = 'tenant_id', got %q", pd.PartitionKey())
+	}
+	if pd.PartitionTableName("forms", "org-alpha") != "forms_org_alpha" {
+		t.Errorf("unexpected PartitionTableName: %q", pd.PartitionTableName("forms", "org-alpha"))
+	}
+}
+
+func TestPartitionedDatabase_MultiPartition_EnsurePartitionForKey_InvalidDriver(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver: "sqlite3",
+		Partitions: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms"}},
+		},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	err := pd.EnsurePartitionForKey(context.Background(), "tenant_id", "org-alpha")
+	if err == nil {
+		t.Fatal("expected error for non-postgres driver")
+	}
+}
+
+func TestPartitionedDatabase_MultiPartition_EnsurePartitionForKey_InvalidValue(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver: "pgx",
+		Partitions: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms"}},
+		},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	err := pd.EnsurePartitionForKey(context.Background(), "tenant_id", "org'; DROP TABLE forms;--")
+	if err == nil {
+		t.Fatal("expected error for invalid partition value")
+	}
+}
+
+func TestPartitionedDatabase_MultiPartition_EnsurePartitionForKey_UnsupportedType(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver: "pgx",
+		Partitions: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms"}, PartitionType: "hash"},
+		},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	// Unsupported type should error — partition type check comes before nil-db check
+	err := pd.EnsurePartitionForKey(context.Background(), "tenant_id", "org-alpha")
+	if err == nil {
+		t.Fatal("expected error for unsupported partition type")
+	}
+}
+
+func TestPartitionedDatabase_MultiPartition_SyncPartitionsFromSource_AllConfigs(t *testing.T) {
+	// SyncPartitionsFromSource with multiple configs that have no sourceTable is a no-op for each.
+	cfg := PartitionedDatabaseConfig{
+		Driver: "pgx",
+		Partitions: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms"}},
+			{PartitionKey: "api_version", Tables: []string{"contracts"}},
+		},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	err := pd.SyncPartitionsFromSource(context.Background())
+	if err != nil {
+		t.Fatalf("expected no-op with no source tables, got: %v", err)
+	}
+}
+
+// ─── Step tests for partitionKey field ───────────────────────────────────────
+
+func TestDBCreatePartitionStep_WithPartitionKey(t *testing.T) {
+	mgr := &testMultiPartitionManager{
+		testPartitionManager: testPartitionManager{partitionKey: "tenant_id"},
+		configs: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms"}},
+			{PartitionKey: "api_version", Tables: []string{"contracts"}},
+		},
+	}
+	app := NewMockApplication()
+	app.Services["multi-db"] = mgr
+
+	factory := NewDBCreatePartitionStepFactory()
+	step, err := factory("create-part", map[string]any{
+		"database":     "multi-db",
+		"tenantKey":    "steps.body.tenant_id",
+		"partitionKey": "api_version",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("body", map[string]any{"tenant_id": "v2"})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if result.Output["tenant"] != "v2" {
+		t.Errorf("expected tenant='v2', got %v", result.Output["tenant"])
+	}
+	if len(mgr.ensureForKeyCalledWith) != 1 ||
+		mgr.ensureForKeyCalledWith[0].key != "api_version" ||
+		mgr.ensureForKeyCalledWith[0].value != "v2" {
+		t.Errorf("unexpected EnsurePartitionForKey calls: %v", mgr.ensureForKeyCalledWith)
+	}
+}
+
+func TestDBCreatePartitionStep_WithPartitionKey_NotMultiManager(t *testing.T) {
+	// Service is a PartitionManager but not MultiPartitionManager; using partitionKey should fail.
+	mgr := &testPartitionManager{partitionKey: "tenant_id"}
+	app := NewMockApplication()
+	app.Services["part-db"] = mgr
+
+	factory := NewDBCreatePartitionStepFactory()
+	step, err := factory("create-part", map[string]any{
+		"database":     "part-db",
+		"tenantKey":    "steps.body.tenant_id",
+		"partitionKey": "api_version",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("body", map[string]any{"tenant_id": "v2"})
+
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error when service does not implement MultiPartitionManager")
+	}
+}
+
+func TestDBSyncPartitionsStep_WithPartitionKey(t *testing.T) {
+	mgr := &testMultiPartitionManager{
+		testPartitionManager: testPartitionManager{partitionKey: "tenant_id"},
+		configs: []PartitionConfig{
+			{PartitionKey: "tenant_id", Tables: []string{"forms"}},
+			{PartitionKey: "api_version", Tables: []string{"contracts"}},
+		},
+	}
+	app := NewMockApplication()
+	app.Services["multi-db"] = mgr
+
+	factory := NewDBSyncPartitionsStepFactory()
+	step, err := factory("sync-parts", map[string]any{
+		"database":     "multi-db",
+		"partitionKey": "api_version",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if result.Output["synced"] != true {
+		t.Errorf("expected synced=true, got %v", result.Output["synced"])
+	}
+	if len(mgr.syncForKeyCalledWith) != 1 || mgr.syncForKeyCalledWith[0] != "api_version" {
+		t.Errorf("unexpected SyncPartitionsForKey calls: %v", mgr.syncForKeyCalledWith)
+	}
+}
+
+func TestDBSyncPartitionsStep_WithPartitionKey_NotMultiManager(t *testing.T) {
+	mgr := &testPartitionManager{partitionKey: "tenant_id"}
+	app := NewMockApplication()
+	app.Services["part-db"] = mgr
+
+	factory := NewDBSyncPartitionsStepFactory()
+	step, err := factory("sync-parts", map[string]any{
+		"database":     "part-db",
+		"partitionKey": "api_version",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error when service does not implement MultiPartitionManager")
+	}
+}
+
+func TestDBCreatePartitionStep_WithPartitionKey_Error(t *testing.T) {
+	mgr := &testMultiPartitionManager{
+		testPartitionManager: testPartitionManager{partitionKey: "tenant_id"},
+		configs:              []PartitionConfig{{PartitionKey: "api_version", Tables: []string{"contracts"}}},
+		ensureForKeyErr:      fmt.Errorf("injected error"),
+	}
+	app := NewMockApplication()
+	app.Services["multi-db"] = mgr
+
+	factory := NewDBCreatePartitionStepFactory()
+	step, err := factory("create-part", map[string]any{
+		"database":     "multi-db",
+		"tenantKey":    "steps.body.val",
+		"partitionKey": "api_version",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("body", map[string]any{"val": "v1"})
+
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error propagated from EnsurePartitionForKey")
+	}
+}
+
+func TestDBSyncPartitionsStep_WithPartitionKey_Error(t *testing.T) {
+	mgr := &testMultiPartitionManager{
+		testPartitionManager: testPartitionManager{partitionKey: "tenant_id"},
+		configs:              []PartitionConfig{{PartitionKey: "api_version", Tables: []string{"contracts"}}},
+		syncForKeyErr:        fmt.Errorf("injected sync error"),
+	}
+	app := NewMockApplication()
+	app.Services["multi-db"] = mgr
+
+	factory := NewDBSyncPartitionsStepFactory()
+	step, err := factory("sync-parts", map[string]any{
+		"database":     "multi-db",
+		"partitionKey": "api_version",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error propagated from SyncPartitionsForKey")
 	}
 }
 
