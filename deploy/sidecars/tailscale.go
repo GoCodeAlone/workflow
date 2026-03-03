@@ -122,7 +122,7 @@ func (p *TailscaleProvider) resolveK8s(hostname, authKeySecret, image string, se
 			"serve-config.json": string(serveConfigJSON),
 		},
 		ServiceAccountName: "tailscale",
-		RequiredSecrets:     []string{authKeySecret},
+		RequiredSecrets:    []string{authKeySecret},
 		SecurityContext: &deploy.SecurityContext{
 			Capabilities: &deploy.Capabilities{
 				Add: []string{"NET_ADMIN"},
@@ -156,4 +156,3 @@ func (p *TailscaleProvider) resolveCompose(hostname, image string, servePort int
 		Volumes: []string{"tailscale-state:/var/lib/tailscale"},
 	}
 }
-

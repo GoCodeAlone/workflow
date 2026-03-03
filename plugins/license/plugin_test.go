@@ -81,18 +81,18 @@ func newStubApp(services map[string]any) *stubApp {
 	return &stubApp{services: services}
 }
 
-func (a *stubApp) SvcRegistry() modular.ServiceRegistry        { return a.services }
-func (a *stubApp) RegisterService(name string, svc any) error  { a.services[name] = svc; return nil }
-func (a *stubApp) ConfigProvider() modular.ConfigProvider      { return nil }
-func (a *stubApp) RegisterModule(_ modular.Module)             {}
+func (a *stubApp) SvcRegistry() modular.ServiceRegistry                     { return a.services }
+func (a *stubApp) RegisterService(name string, svc any) error               { a.services[name] = svc; return nil }
+func (a *stubApp) ConfigProvider() modular.ConfigProvider                   { return nil }
+func (a *stubApp) RegisterModule(_ modular.Module)                          {}
 func (a *stubApp) RegisterConfigSection(_ string, _ modular.ConfigProvider) {}
 func (a *stubApp) GetConfigSection(_ string) (modular.ConfigProvider, error) {
 	return nil, nil
 }
-func (a *stubApp) Init() error   { return nil }
-func (a *stubApp) Run() error    { return nil }
-func (a *stubApp) Start() error  { return nil }
-func (a *stubApp) Stop() error   { return nil }
+func (a *stubApp) Init() error            { return nil }
+func (a *stubApp) Run() error             { return nil }
+func (a *stubApp) Start() error           { return nil }
+func (a *stubApp) Stop() error            { return nil }
 func (a *stubApp) Logger() modular.Logger { return nil }
 func (a *stubApp) Service(name string) (any, bool) {
 	svc, ok := a.services[name]
@@ -105,18 +105,18 @@ func (a *stubApp) Must(name string) any {
 	}
 	return svc
 }
-func (a *stubApp) Inject(name string, svc any) { a.services[name] = svc }
-func (a *stubApp) GetService(name string, out any) error { return nil }
-func (a *stubApp) ConfigSections() map[string]modular.ConfigProvider { return nil }
-func (a *stubApp) OnConfigLoaded(_ func(app modular.Application) error)            {}
-func (a *stubApp) SetLogger(_ modular.Logger)                                      {}
-func (a *stubApp) SetVerboseConfig(_ bool)                                         {}
-func (a *stubApp) IsVerboseConfig() bool                                           { return false }
-func (a *stubApp) GetServicesByModule(_ string) []string                           { return nil }
-func (a *stubApp) StartTime() time.Time                                            { return time.Time{} }
-func (a *stubApp) GetModule(_ string) modular.Module                               { return nil }
-func (a *stubApp) GetAllModules() map[string]modular.Module                        { return nil }
-func (a *stubApp) GetServiceEntry(_ string) (*modular.ServiceRegistryEntry, bool)  { return nil, false }
+func (a *stubApp) Inject(name string, svc any)                                    { a.services[name] = svc }
+func (a *stubApp) GetService(name string, out any) error                          { return nil }
+func (a *stubApp) ConfigSections() map[string]modular.ConfigProvider              { return nil }
+func (a *stubApp) OnConfigLoaded(_ func(app modular.Application) error)           {}
+func (a *stubApp) SetLogger(_ modular.Logger)                                     {}
+func (a *stubApp) SetVerboseConfig(_ bool)                                        {}
+func (a *stubApp) IsVerboseConfig() bool                                          { return false }
+func (a *stubApp) GetServicesByModule(_ string) []string                          { return nil }
+func (a *stubApp) StartTime() time.Time                                           { return time.Time{} }
+func (a *stubApp) GetModule(_ string) modular.Module                              { return nil }
+func (a *stubApp) GetAllModules() map[string]modular.Module                       { return nil }
+func (a *stubApp) GetServiceEntry(_ string) (*modular.ServiceRegistryEntry, bool) { return nil, false }
 func (a *stubApp) GetServicesByInterface(_ reflect.Type) []*modular.ServiceRegistryEntry {
 	return nil
 }
@@ -215,11 +215,11 @@ func TestLicenseValidatorAdapter_WithOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 	tok := &license.LicenseToken{
-		LicenseID:    "lic-1",
-		Tier:         "enterprise",
-		Features:     []string{"plugin-a"},
-		IssuedAt:     time.Now().Unix(),
-		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+		LicenseID: "lic-1",
+		Tier:      "enterprise",
+		Features:  []string{"plugin-a"},
+		IssuedAt:  time.Now().Unix(),
+		ExpiresAt: time.Now().Add(time.Hour).Unix(),
 	}
 	tokenStr, err := tok.Sign(priv)
 	if err != nil {

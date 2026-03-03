@@ -36,14 +36,14 @@ type SandboxConfig struct {
 	NetworkMode string            `yaml:"network_mode"`
 
 	// Security hardening fields
-	SecurityOpts    []string          `yaml:"security_opts"`    // e.g., ["seccomp=default.json"]
-	CapAdd          []string          `yaml:"cap_add"`          // capabilities to add
-	CapDrop         []string          `yaml:"cap_drop"`         // e.g., ["ALL"]
+	SecurityOpts    []string          `yaml:"security_opts"` // e.g., ["seccomp=default.json"]
+	CapAdd          []string          `yaml:"cap_add"`       // capabilities to add
+	CapDrop         []string          `yaml:"cap_drop"`      // e.g., ["ALL"]
 	ReadOnlyRootfs  bool              `yaml:"read_only_rootfs"`
 	NoNewPrivileges bool              `yaml:"no_new_privileges"`
-	User            string            `yaml:"user"`             // e.g., "nobody:nogroup"
-	PidsLimit       int64             `yaml:"pids_limit"`       // max process count
-	Tmpfs           map[string]string `yaml:"tmpfs"`            // e.g., {"/tmp": "size=64m,noexec"}
+	User            string            `yaml:"user"`       // e.g., "nobody:nogroup"
+	PidsLimit       int64             `yaml:"pids_limit"` // max process count
+	Tmpfs           map[string]string `yaml:"tmpfs"`      // e.g., {"/tmp": "size=64m,noexec"}
 }
 
 // DefaultSecureSandboxConfig returns a hardened SandboxConfig suitable for

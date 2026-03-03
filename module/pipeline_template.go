@@ -4,13 +4,54 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// toFloat64 converts any numeric type (or numeric string) to float64.
+func toFloat64(v any) float64 {
+	switch n := v.(type) {
+	case int:
+		return float64(n)
+	case int8:
+		return float64(n)
+	case int16:
+		return float64(n)
+	case int32:
+		return float64(n)
+	case int64:
+		return float64(n)
+	case float32:
+		return float64(n)
+	case float64:
+		return n
+	case string:
+		f, _ := strconv.ParseFloat(n, 64)
+		return f
+	case json.Number:
+		f, _ := n.Float64()
+		return f
+	default:
+		return 0
+	}
+}
+
+// isIntType returns true if the value is an integer type.
+func isIntType(v any) bool {
+	switch v.(type) {
+	case int, int8, int16, int32, int64:
+		return true
+	default:
+		return false
+	}
+}
 
 // TemplateEngine resolves {{ .field }} expressions against a PipelineContext.
 type TemplateEngine struct{}
@@ -361,6 +402,111 @@ func templateFuncMap() template.FuncMap {
 				return v
 			}
 			return ""
+		},
+
+		// --- String functions ---
+
+		// upper converts a string to uppercase.
+		"upper": strings.ToUpper,
+		// title converts a string to title case (first letter of each word capitalized).
+		"title": func(s string) string {
+			words := strings.Fields(s)
+			for i, w := range words {
+				if len(w) > 0 {
+					words[i] = strings.ToUpper(w[:1]) + w[1:]
+				}
+			}
+			return strings.Join(words, " ")
+		},
+		// replace replaces all occurrences of old with new in s.
+		"replace": func(old, new_, s string) string { return strings.ReplaceAll(s, old, new_) },
+		// contains reports whether substr is within s.
+		"contains": func(substr, s string) bool { return strings.Contains(s, substr) },
+		// hasPrefix tests whether s begins with prefix.
+		"hasPrefix": func(prefix, s string) bool { return strings.HasPrefix(s, prefix) },
+		// hasSuffix tests whether s ends with suffix.
+		"hasSuffix": func(suffix, s string) bool { return strings.HasSuffix(s, suffix) },
+		// split splits s by sep and returns a slice.
+		"split": func(sep, s string) []string { return strings.Split(s, sep) },
+		// join concatenates elements of a slice with sep.
+		"join": func(sep string, v any) string {
+			rv := reflect.ValueOf(v)
+			if rv.Kind() != reflect.Slice {
+				return fmt.Sprintf("%v", v)
+			}
+			parts := make([]string, rv.Len())
+			for i := 0; i < rv.Len(); i++ {
+				parts[i] = fmt.Sprintf("%v", rv.Index(i).Interface())
+			}
+			return strings.Join(parts, sep)
+		},
+		// trimSpace removes leading and trailing whitespace.
+		"trimSpace": strings.TrimSpace,
+		// urlEncode percent-encodes a string for use in URLs.
+		"urlEncode": url.QueryEscape,
+
+		// --- Math functions ---
+
+		// add returns a + b. Returns int if both are ints, float64 otherwise.
+		"add": func(a, b any) any {
+			if isIntType(a) && isIntType(b) {
+				return int64(toFloat64(a)) + int64(toFloat64(b))
+			}
+			return toFloat64(a) + toFloat64(b)
+		},
+		// sub returns a - b. Returns int if both are ints, float64 otherwise.
+		"sub": func(a, b any) any {
+			if isIntType(a) && isIntType(b) {
+				return int64(toFloat64(a)) - int64(toFloat64(b))
+			}
+			return toFloat64(a) - toFloat64(b)
+		},
+		// mul returns a * b. Returns int if both are ints, float64 otherwise.
+		"mul": func(a, b any) any {
+			if isIntType(a) && isIntType(b) {
+				return int64(toFloat64(a)) * int64(toFloat64(b))
+			}
+			return toFloat64(a) * toFloat64(b)
+		},
+		// div returns a / b as float64. Returns 0 on divide-by-zero.
+		"div": func(a, b any) any {
+			fb := toFloat64(b)
+			if fb == 0 {
+				return float64(0)
+			}
+			return toFloat64(a) / fb
+		},
+
+		// --- Type/Utility functions ---
+
+		// toInt converts a value to int64.
+		"toInt": func(v any) int64 { return int64(toFloat64(v)) },
+		// toFloat converts a value to float64.
+		"toFloat": func(v any) float64 { return toFloat64(v) },
+		// toString converts a value to its string representation.
+		"toString": func(v any) string { return fmt.Sprintf("%v", v) },
+		// length returns the length of a string, slice, array, or map. Returns 0 for other types.
+		"length": func(v any) int {
+			rv := reflect.ValueOf(v)
+			switch rv.Kind() {
+			case reflect.String, reflect.Slice, reflect.Array, reflect.Map:
+				return rv.Len()
+			default:
+				return 0
+			}
+		},
+		// coalesce returns the first non-nil, non-empty-string value.
+		"coalesce": func(vals ...any) any {
+			for _, v := range vals {
+				if v == nil {
+					continue
+				}
+				if s, ok := v.(string); ok && s == "" {
+					continue
+				}
+				return v
+			}
+			return nil
 		},
 	}
 }

@@ -30,18 +30,18 @@ type TriggerTypeInfo struct {
 
 // Registry aggregates all known workflow types for LSP use.
 type Registry struct {
-	ModuleTypes  map[string]ModuleTypeInfo
-	StepTypes    map[string]StepTypeInfo
-	TriggerTypes map[string]TriggerTypeInfo
+	ModuleTypes   map[string]ModuleTypeInfo
+	StepTypes     map[string]StepTypeInfo
+	TriggerTypes  map[string]TriggerTypeInfo
 	WorkflowTypes []string
 }
 
 // NewRegistry builds a Registry from the schema package's known types and registry.
 func NewRegistry() *Registry {
 	r := &Registry{
-		ModuleTypes:  make(map[string]ModuleTypeInfo),
-		StepTypes:    make(map[string]StepTypeInfo),
-		TriggerTypes: make(map[string]TriggerTypeInfo),
+		ModuleTypes:   make(map[string]ModuleTypeInfo),
+		StepTypes:     make(map[string]StepTypeInfo),
+		TriggerTypes:  make(map[string]TriggerTypeInfo),
 		WorkflowTypes: schema.KnownWorkflowTypes(),
 	}
 

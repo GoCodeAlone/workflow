@@ -35,10 +35,10 @@ type AWSConfig struct {
 	Region          string `json:"region" yaml:"region"`
 	AccessKeyID     string `json:"access_key_id" yaml:"access_key_id"`
 	SecretAccessKey string `json:"secret_access_key" yaml:"secret_access_key"`
-	RoleARN    string `json:"role_arn" yaml:"role_arn"`
-	ECSCluster string `json:"ecs_cluster" yaml:"ecs_cluster"`
-	EKSCluster string `json:"eks_cluster" yaml:"eks_cluster"`
-	Service    string `json:"service" yaml:"service"`
+	RoleARN         string `json:"role_arn" yaml:"role_arn"`
+	ECSCluster      string `json:"ecs_cluster" yaml:"ecs_cluster"`
+	EKSCluster      string `json:"eks_cluster" yaml:"eks_cluster"`
+	Service         string `json:"service" yaml:"service"`
 }
 
 // AWSProvider implements CloudProvider for Amazon Web Services.

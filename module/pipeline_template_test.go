@@ -569,3 +569,342 @@ func TestTemplateEngine_HyphenatedResolveEndToEnd(t *testing.T) {
 		t.Errorf("expected '123', got %q", result)
 	}
 }
+
+// --- New template function tests ---
+
+func TestTemplateEngine_FuncUpper(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+
+	result, err := te.Resolve(`{{ "hello" | upper }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "HELLO" {
+		t.Errorf("expected 'HELLO', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncTitle(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+
+	result, err := te.Resolve(`{{ "hello world" | title }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "Hello World" {
+		t.Errorf("expected 'Hello World', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncReplace(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+
+	result, err := te.Resolve(`{{ replace "o" "0" "hello" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "hell0" {
+		t.Errorf("expected 'hell0', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncContains(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+
+	result, err := te.Resolve(`{{ contains "ell" "hello" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "true" {
+		t.Errorf("expected 'true', got %q", result)
+	}
+
+	result, err = te.Resolve(`{{ contains "xyz" "hello" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "false" {
+		t.Errorf("expected 'false', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncHasPrefix(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+
+	result, err := te.Resolve(`{{ hasPrefix "hel" "hello" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "true" {
+		t.Errorf("expected 'true', got %q", result)
+	}
+
+	result, err = te.Resolve(`{{ hasPrefix "xyz" "hello" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "false" {
+		t.Errorf("expected 'false', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncHasSuffix(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+
+	result, err := te.Resolve(`{{ hasSuffix "llo" "hello" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "true" {
+		t.Errorf("expected 'true', got %q", result)
+	}
+
+	result, err = te.Resolve(`{{ hasSuffix "xyz" "hello" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "false" {
+		t.Errorf("expected 'false', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncSplit(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"csv": "a,b,c"}, nil)
+
+	// split returns a slice; we can use join to verify
+	result, err := te.Resolve(`{{ $parts := split "," .csv }}{{ index $parts 1 }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "b" {
+		t.Errorf("expected 'b', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncJoin(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{
+		"items": []any{"a", "b", "c"},
+	}, nil)
+
+	result, err := te.Resolve(`{{ join "," .items }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "a,b,c" {
+		t.Errorf("expected 'a,b,c', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncJoinStringSlice(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"csv": "x,y,z"}, nil)
+
+	result, err := te.Resolve(`{{ join "-" (split "," .csv) }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "x-y-z" {
+		t.Errorf("expected 'x-y-z', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncTrimSpace(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+
+	result, err := te.Resolve(`{{ "  hello  " | trimSpace }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "hello" {
+		t.Errorf("expected 'hello', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncUrlEncode(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+
+	result, err := te.Resolve(`{{ "hello world&foo=bar" | urlEncode }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "hello+world%26foo%3Dbar" {
+		t.Errorf("expected 'hello+world%%26foo%%3Dbar', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncAdd(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"a": 3, "b": 4}, nil)
+
+	result, err := te.Resolve(`{{ add .a .b }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "7" {
+		t.Errorf("expected '7', got %q", result)
+	}
+
+	// float + int = float
+	pc2 := NewPipelineContext(map[string]any{"a": 1.5, "b": 2}, nil)
+	result, err = te.Resolve(`{{ add .a .b }}`, pc2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "3.5" {
+		t.Errorf("expected '3.5', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncSub(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"a": 10, "b": 3}, nil)
+
+	result, err := te.Resolve(`{{ sub .a .b }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "7" {
+		t.Errorf("expected '7', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncMul(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"a": 3, "b": 4}, nil)
+
+	result, err := te.Resolve(`{{ mul .a .b }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "12" {
+		t.Errorf("expected '12', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncDiv(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"a": 10, "b": 4}, nil)
+
+	result, err := te.Resolve(`{{ div .a .b }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "2.5" {
+		t.Errorf("expected '2.5', got %q", result)
+	}
+
+	// Divide by zero returns 0
+	pc2 := NewPipelineContext(map[string]any{"a": 10, "b": 0}, nil)
+	result, err = te.Resolve(`{{ div .a .b }}`, pc2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "0" {
+		t.Errorf("expected '0', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncToInt(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"val": 3.7}, nil)
+
+	result, err := te.Resolve(`{{ toInt .val }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "3" {
+		t.Errorf("expected '3', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncToFloat(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"val": 42}, nil)
+
+	result, err := te.Resolve(`{{ toFloat .val }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "42" {
+		t.Errorf("expected '42', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncToString(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"val": 42}, nil)
+
+	result, err := te.Resolve(`{{ toString .val }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "42" {
+		t.Errorf("expected '42', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncLength(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{
+		"str":   "hello",
+		"items": []any{1, 2, 3},
+		"m":     map[string]any{"a": 1, "b": 2},
+	}, nil)
+
+	result, err := te.Resolve(`{{ length .str }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "5" {
+		t.Errorf("expected '5', got %q", result)
+	}
+
+	result, err = te.Resolve(`{{ length .items }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "3" {
+		t.Errorf("expected '3', got %q", result)
+	}
+
+	result, err = te.Resolve(`{{ length .m }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "2" {
+		t.Errorf("expected '2', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncCoalesce(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"val": "hello"}, nil)
+
+	result, err := te.Resolve(`{{ coalesce "" "" .val }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "hello" {
+		t.Errorf("expected 'hello', got %q", result)
+	}
+
+	// When all nil/empty, renders as <no value> (missingkey=zero)
+	pc2 := NewPipelineContext(nil, nil)
+	result, err = te.Resolve(`{{ coalesce .a .b "fallback" }}`, pc2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "fallback" {
+		t.Errorf("expected 'fallback', got %q", result)
+	}
+}

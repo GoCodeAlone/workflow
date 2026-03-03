@@ -1950,4 +1950,35 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		DefaultConfig: map[string]any{"cache_ttl": "1h", "grace_period": "72h", "refresh_interval": "1h"},
 		MaxIncoming:   intPtr(0),
 	})
+
+	// ---- Hash ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.hash",
+		Label:       "Hash",
+		Category:    "pipeline",
+		Description: "Computes a cryptographic hash (md5, sha256, sha512) of a template-resolved input string",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context for template resolution"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Hash digest and algorithm name"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "algorithm", Label: "Algorithm", Type: FieldTypeString, DefaultValue: "sha256", Description: "Hash algorithm: md5, sha256, or sha512"},
+			{Key: "input", Label: "Input", Type: FieldTypeString, Required: true, Description: "Input string to hash (template expressions supported)"},
+		},
+		DefaultConfig: map[string]any{"algorithm": "sha256"},
+	})
+
+	// ---- Regex Match ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.regex_match",
+		Label:       "Regex Match",
+		Category:    "pipeline",
+		Description: "Matches a regular expression against a template-resolved input string and returns match results",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context for template resolution"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Match result with matched (bool), match (string), and groups ([]string)"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "pattern", Label: "Pattern", Type: FieldTypeString, Required: true, Description: "Regular expression pattern (compiled at config time)"},
+			{Key: "input", Label: "Input", Type: FieldTypeString, Required: true, Description: "Input string to match against (template expressions supported)"},
+		},
+	})
 }

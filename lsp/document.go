@@ -74,13 +74,13 @@ const (
 
 // PositionContext describes what context the cursor is in within the document.
 type PositionContext struct {
-	Section     SectionKind
-	ModuleType  string // if inside a modules[] item config, the type value
-	FieldName   string // the field name at the cursor
-	InTemplate  bool   // cursor is inside {{ }}
-	DependsOn   bool   // cursor is in a dependsOn array value
-	Line        int
-	Character   int
+	Section    SectionKind
+	ModuleType string // if inside a modules[] item config, the type value
+	FieldName  string // the field name at the cursor
+	InTemplate bool   // cursor is inside {{ }}
+	DependsOn  bool   // cursor is in a dependsOn array value
+	Line       int
+	Character  int
 }
 
 // ContextAt analyses the document content at the given (zero-based) line and

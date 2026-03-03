@@ -24,14 +24,14 @@ func NewServer() *Server {
 		store:    NewDocumentStore(),
 	}
 	s.handler = protocol.Handler{
-		Initialize:            s.initialize,
-		Initialized:           s.initialized,
-		Shutdown:              s.shutdown,
-		TextDocumentDidOpen:   s.didOpen,
-		TextDocumentDidChange: s.didChange,
-		TextDocumentDidSave:   s.didSave,
+		Initialize:             s.initialize,
+		Initialized:            s.initialized,
+		Shutdown:               s.shutdown,
+		TextDocumentDidOpen:    s.didOpen,
+		TextDocumentDidChange:  s.didChange,
+		TextDocumentDidSave:    s.didSave,
 		TextDocumentCompletion: s.completion,
-		TextDocumentHover:     s.hover,
+		TextDocumentHover:      s.hover,
 	}
 	s.server = glspserver.NewServer(&s.handler, "workflow-lsp", false)
 	return s

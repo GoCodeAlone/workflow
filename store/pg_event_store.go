@@ -96,7 +96,7 @@ func (s *PGEventStore) Append(ctx context.Context, executionID uuid.UUID, eventT
 // executionIDToLockKey derives a stable int64 advisory lock key from a UUID by
 // XOR-ing its two 64-bit halves. Used for pg_advisory_xact_lock per execution.
 func executionIDToLockKey(id uuid.UUID) int64 {
-	hi := int64(binary.BigEndian.Uint64(id[:8]))  //nolint:gosec // intentional truncation for advisory lock key
+	hi := int64(binary.BigEndian.Uint64(id[:8])) //nolint:gosec // intentional truncation for advisory lock key
 	lo := int64(binary.BigEndian.Uint64(id[8:])) //nolint:gosec // intentional truncation for advisory lock key
 	return hi ^ lo
 }

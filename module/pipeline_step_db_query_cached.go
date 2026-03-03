@@ -12,7 +12,7 @@ import (
 
 // dbQueryCacheEntry holds a cached query result with its expiry time.
 type dbQueryCacheEntry struct {
-	value     map[string]any
+	value     any // map[string]any for single mode, or list result map for list mode
 	expiresAt time.Time
 }
 
@@ -20,17 +20,16 @@ type dbQueryCacheEntry struct {
 // in an in-process, TTL-aware cache keyed by a template-resolved cache key.
 // Concurrent pipeline executions are safe: access is protected by a read-write mutex.
 type DBQueryCachedStep struct {
-	name            string
-	database        string
-	query           string
-	params          []string
-	mode            string // "single" or "list"
-	cacheKey        string
-	cacheTTL        time.Duration
-	scanFields      []string
-	allowDynamicSQL bool
-	app             modular.Application
-	tmpl            *TemplateEngine
+	name       string
+	database   string
+	query      string
+	params     []string
+	cacheKey   string
+	cacheTTL   time.Duration
+	scanFields []string
+	mode       string // "single" or "list"
+	app        modular.Application
+	tmpl       *TemplateEngine
 
 	mu    sync.RWMutex
 	cache map[string]dbQueryCacheEntry
@@ -49,10 +48,8 @@ func NewDBQueryCachedStepFactory() StepFactory {
 			return nil, fmt.Errorf("db_query_cached step %q: 'query' is required", name)
 		}
 
-		// Safety: reject template expressions in SQL to prevent injection,
-		// unless allow_dynamic_sql is explicitly enabled.
-		allowDynamicSQL, _ := config["allow_dynamic_sql"].(bool)
-		if !allowDynamicSQL && strings.Contains(query, "{{") {
+		// Safety: reject template expressions in SQL to prevent injection
+		if strings.Contains(query, "{{") {
 			return nil, fmt.Errorf("db_query_cached step %q: query must not contain template expressions (use params instead)", name)
 		}
 
@@ -84,15 +81,6 @@ func NewDBQueryCachedStepFactory() StepFactory {
 			}
 		}
 
-		mode, _ := config["mode"].(string)
-		mode = strings.TrimSpace(mode)
-		// Backwards compatibility: if mode is omitted or empty, leave it blank.
-		// Execution logic treats a blank mode as the legacy single-row flat
-		// output, while explicit "single" uses the new row/found envelope.
-		if mode != "" && mode != "list" && mode != "single" {
-			return nil, fmt.Errorf("db_query_cached step %q: mode must be 'list' or 'single', got %q", name, mode)
-		}
-
 		var scanFields []string
 		if sf, ok := config["scan_fields"]; ok {
 			if list, ok := sf.([]any); ok {
@@ -104,19 +92,26 @@ func NewDBQueryCachedStepFactory() StepFactory {
 			}
 		}
 
+		mode, _ := config["mode"].(string)
+		if mode == "" {
+			mode = "single"
+		}
+		if mode != "single" && mode != "list" {
+			return nil, fmt.Errorf("db_query_cached step %q: mode must be 'single' or 'list', got %q", name, mode)
+		}
+
 		return &DBQueryCachedStep{
-			name:            name,
-			database:        database,
-			query:           query,
-			params:          params,
-			mode:            mode,
-			cacheKey:        cacheKey,
-			cacheTTL:        cacheTTL,
-			scanFields:      scanFields,
-			allowDynamicSQL: allowDynamicSQL,
-			app:             app,
-			tmpl:            NewTemplateEngine(),
-			cache:           make(map[string]dbQueryCacheEntry),
+			name:       name,
+			database:   database,
+			query:      query,
+			params:     params,
+			cacheKey:   cacheKey,
+			cacheTTL:   cacheTTL,
+			scanFields: scanFields,
+			mode:       mode,
+			app:        app,
+			tmpl:       NewTemplateEngine(),
+			cache:      make(map[string]dbQueryCacheEntry),
 		}, nil
 	}
 }
@@ -127,18 +122,6 @@ func (s *DBQueryCachedStep) Name() string { return s.name }
 // Execute checks the in-memory cache first; on a miss (or expiry) it queries
 // the database, stores the result, and returns it.
 func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
-	// Resolve template expressions in the query early (before any DB access) when
-	// dynamic SQL is enabled. This validates resolved identifiers against an
-	// allowlist before any database interaction.
-	query := s.query
-	if s.allowDynamicSQL {
-		var err error
-		query, err = resolveDynamicSQL(s.tmpl, query, pc)
-		if err != nil {
-			return nil, fmt.Errorf("db_query_cached step %q: %w", s.name, err)
-		}
-	}
-
 	if s.app == nil {
 		return nil, fmt.Errorf("db_query_cached step %q: no application context", s.name)
 	}
@@ -156,7 +139,7 @@ func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*
 	s.mu.RUnlock()
 
 	if found && time.Now().Before(entry.expiresAt) {
-		output := deepCopyMap(entry.value)
+		output := copyCacheValue(entry.value)
 		output["cache_hit"] = true
 		return &StepResult{Output: output}, nil
 	}
@@ -166,7 +149,7 @@ func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*
 	entry, found = s.cache[key]
 	if found && time.Now().Before(entry.expiresAt) {
 		// Another goroutine populated the cache while we were waiting for the lock
-		output := deepCopyMap(entry.value)
+		output := copyCacheValue(entry.value)
 		s.mu.Unlock()
 		output["cache_hit"] = true
 		return &StepResult{Output: output}, nil
@@ -178,7 +161,7 @@ func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*
 	s.mu.Unlock()
 
 	// Query the database
-	result, err := s.runQuery(ctx, pc, query)
+	result, err := s.runQuery(ctx, pc)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +169,7 @@ func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*
 	// Store in cache (write lock)
 	s.mu.Lock()
 	s.cache[key] = dbQueryCacheEntry{
-		value:     deepCopyMap(result),
+		value:     copyCacheRaw(result),
 		expiresAt: time.Now().Add(s.cacheTTL),
 	}
 	s.mu.Unlock()
@@ -196,8 +179,7 @@ func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*
 }
 
 // runQuery executes the SQL query and returns the result as a map.
-// query is the (already dynamic-SQL-resolved) query string to execute.
-func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext, query string) (map[string]any, error) {
+func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext) (map[string]any, error) {
 	svc, ok := s.app.SvcRegistry()[s.database]
 	if !ok {
 		return nil, fmt.Errorf("db_query_cached step %q: database service %q not found", s.name, s.database)
@@ -228,7 +210,7 @@ func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext, q
 		resolvedParams[i] = resolved
 	}
 
-	query = normalizePlaceholders(query, driver)
+	query := normalizePlaceholders(s.query, driver)
 
 	rows, err := db.QueryContext(ctx, query, resolvedParams...)
 	if err != nil {
@@ -247,7 +229,50 @@ func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext, q
 		fieldSet[f] = true
 	}
 
-	var results []map[string]any
+	if s.mode == "list" {
+		var results []map[string]any
+		for rows.Next() {
+			values := make([]any, len(columns))
+			valuePtrs := make([]any, len(columns))
+			for i := range values {
+				valuePtrs[i] = &values[i]
+			}
+
+			if err := rows.Scan(valuePtrs...); err != nil {
+				return nil, fmt.Errorf("db_query_cached step %q: scan failed: %w", s.name, err)
+			}
+
+			row := make(map[string]any, len(columns))
+			for i, col := range columns {
+				if len(fieldSet) > 0 && !fieldSet[col] {
+					continue
+				}
+				val := values[i]
+				if b, ok := val.([]byte); ok {
+					row[col] = string(b)
+				} else {
+					row[col] = val
+				}
+			}
+			results = append(results, row)
+		}
+
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("db_query_cached step %q: row iteration error: %w", s.name, err)
+		}
+
+		if results == nil {
+			results = []map[string]any{}
+		}
+
+		return map[string]any{
+			"rows":  results,
+			"count": len(results),
+		}, nil
+	}
+
+	// single mode — take only the first row
+	output := make(map[string]any)
 	for rows.Next() {
 		values := make([]any, len(columns))
 		valuePtrs := make([]any, len(columns))
@@ -259,74 +284,46 @@ func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext, q
 			return nil, fmt.Errorf("db_query_cached step %q: scan failed: %w", s.name, err)
 		}
 
-		row := make(map[string]any, len(columns))
 		for i, col := range columns {
 			if len(fieldSet) > 0 && !fieldSet[col] {
 				continue
 			}
 			val := values[i]
 			if b, ok := val.([]byte); ok {
-				row[col] = string(b)
+				output[col] = string(b)
 			} else {
-				row[col] = val
+				output[col] = val
 			}
 		}
-		results = append(results, row)
-		if s.mode != "list" {
-			// Only take the first row for single and legacy modes
-			break
-		}
+		break
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("db_query_cached step %q: row iteration error: %w", s.name, err)
 	}
 
-	output := make(map[string]any)
-	switch s.mode {
-	case "list":
-		if results == nil {
-			results = []map[string]any{}
-		}
-		output["rows"] = results
-		output["count"] = len(results)
-	case "single":
-		if len(results) > 0 {
-			output["row"] = results[0]
-			output["found"] = true
-		} else {
-			output["row"] = map[string]any{}
-			output["found"] = false
-		}
-	default: // "" — legacy flat column map (backward compatible)
-		if len(results) > 0 {
-			for k, v := range results[0] {
-				output[k] = v
-			}
-		}
-	}
-
 	return output, nil
 }
 
-// deepCopyMap creates a deep copy of a map, recursively copying nested
-// map[string]any values and []map[string]any slices to prevent callers from
-// mutating cached data or triggering data races across goroutines.
-func deepCopyMap(m map[string]any) map[string]any {
+// copyMap creates a shallow copy of a map.
+func copyMap(m map[string]any) map[string]any {
 	cp := make(map[string]any, len(m))
 	for k, v := range m {
-		switch val := v.(type) {
-		case map[string]any:
-			cp[k] = deepCopyMap(val)
-		case []map[string]any:
-			sliceCopy := make([]map[string]any, len(val))
-			for i, row := range val {
-				sliceCopy[i] = deepCopyMap(row)
-			}
-			cp[k] = sliceCopy
-		default:
-			cp[k] = v
-		}
+		cp[k] = v
 	}
 	return cp
+}
+
+// copyCacheValue creates a shallow copy of a cached value for output.
+// The cached value is always a map[string]any (either flat single-row or list-mode with rows/count).
+func copyCacheValue(v any) map[string]any {
+	if m, ok := v.(map[string]any); ok {
+		return copyMap(m)
+	}
+	return make(map[string]any)
+}
+
+// copyCacheRaw creates a copy of the query result for cache storage.
+func copyCacheRaw(m map[string]any) any {
+	return copyMap(m)
 }

@@ -11,9 +11,9 @@ import (
 
 // mockReconfigurer is a test double for ModuleReconfigurer.
 type mockReconfigurer struct {
-	called  [][]ModuleConfigChange
-	failed  []string
-	err     error
+	called [][]ModuleConfigChange
+	failed []string
+	err    error
 }
 
 func (m *mockReconfigurer) ReconfigureModules(_ context.Context, changes []ModuleConfigChange) ([]string, error) {

@@ -11,8 +11,8 @@ type mockLoader struct {
 	validErr error
 }
 
-func (m *mockLoader) Type() Runtime      { return m.runtime }
-func (m *mockLoader) Validate() error    { return m.validErr }
+func (m *mockLoader) Type() Runtime   { return m.runtime }
+func (m *mockLoader) Validate() error { return m.validErr }
 func (m *mockLoader) Load(cfg *LoadConfig) error {
 	m.loaded = true
 	return m.loadErr
