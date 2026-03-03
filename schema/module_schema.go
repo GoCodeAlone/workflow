@@ -1810,7 +1810,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Category:    "pipeline_steps",
 		Description: "Publishes a structured event in CloudEvents format to a messaging broker, EventPublisher, or event bus",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "topic", Label: "Topic", Type: FieldTypeString, Required: true, Description: "Topic or channel to publish the event to (also accepts 'stream' alias)", Placeholder: "user-events"},
+			{Key: "topic", Label: "Topic", Type: FieldTypeString, Description: "Topic or channel to publish the event to (also accepts 'stream' alias)", Placeholder: "user-events"},
 			{Key: "stream", Label: "Stream", Type: FieldTypeString, Description: "Alias for 'topic' — name of the stream to publish to (e.g., Kinesis stream name)", Placeholder: "messaging.texter-messages"},
 			{Key: "payload", Label: "Payload", Type: FieldTypeJSON, Description: "Event payload as a JSON object (supports template expressions); defaults to current pipeline context"},
 			{Key: "data", Label: "Data", Type: FieldTypeJSON, Description: "Alias for 'payload' — event data fields (supports template expressions)"},

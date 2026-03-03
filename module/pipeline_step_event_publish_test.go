@@ -188,6 +188,8 @@ func TestEventPublishStep_EventTypeEnvelope(t *testing.T) {
 	app := mockAppWithBroker("bus", broker)
 
 	factory := NewEventPublishStepFactory()
+	// Without source, only event_type is insufficient for a full CloudEvents envelope.
+	// The step wraps as {data: payload} without CloudEvents-required fields.
 	step, err := factory("pub-typed", map[string]any{
 		"topic":      "events",
 		"broker":     "bus",
@@ -210,9 +212,14 @@ func TestEventPublishStep_EventTypeEnvelope(t *testing.T) {
 	if err := json.Unmarshal(broker.producer.published[0].message, &envelope); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
-	if envelope["type"] != "order.created" {
-		t.Errorf("expected type=order.created, got %v", envelope["type"])
+	// Without source, CloudEvents required fields (specversion, id, time, type, source) are not added.
+	if _, ok := envelope["specversion"]; ok {
+		t.Error("expected no specversion when source is not set")
 	}
+	if _, ok := envelope["type"]; ok {
+		t.Error("expected no type when source is not set (incomplete CloudEvents config)")
+	}
+	// But the payload is still wrapped under "data"
 	if _, ok := envelope["data"]; !ok {
 		t.Error("expected data field in envelope")
 	}
@@ -507,5 +514,33 @@ func TestEventPublishStep_SourceTemplateResolution(t *testing.T) {
 	}
 	if envelope["source"] != "/api/orders" {
 		t.Errorf("expected source=/api/orders, got %v", envelope["source"])
+	}
+}
+
+func TestEventPublishStep_SourceTemplateError(t *testing.T) {
+	broker := newMockBroker()
+	app := mockAppWithBroker("bus", broker)
+
+	factory := NewEventPublishStepFactory()
+	step, err := factory("pub-src-err", map[string]any{
+		"topic":      "events",
+		"broker":     "bus",
+		"event_type": "test.event",
+		"source":     "/api/{{ .service", // malformed template
+		"payload": map[string]any{
+			"id": "1",
+		},
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error when source template resolution fails")
+	}
+	if !strings.Contains(err.Error(), "failed to resolve source") {
+		t.Errorf("expected 'failed to resolve source' error, got: %v", err)
 	}
 }

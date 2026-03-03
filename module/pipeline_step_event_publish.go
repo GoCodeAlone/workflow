@@ -109,11 +109,11 @@ func (s *EventPublishStep) Execute(ctx context.Context, pc *PipelineContext) (*S
 	if s.source != "" {
 		resolvedSource, err = s.tmpl.Resolve(s.source, pc)
 		if err != nil {
-			resolvedSource = s.source
+			return nil, fmt.Errorf("event_publish step %q: failed to resolve source: %w", s.name, err)
 		}
 	}
 
-	// Build CloudEvents envelope when event_type, source, or headers are present
+	// Build event envelope for broker/EventPublisher paths
 	event := s.buildEventEnvelope(resolvedPayload, resolvedHeaders, resolvedSource)
 
 	if s.broker != "" {
@@ -125,7 +125,9 @@ func (s *EventPublishStep) Execute(ctx context.Context, pc *PipelineContext) (*S
 		return s.publishViaBroker(resolvedTopic, event)
 	}
 
-	return s.publishViaEventBus(ctx, resolvedTopic, event)
+	// The EventBus module builds its own CloudEvents envelope internally,
+	// so pass the resolved payload directly (not the pre-built envelope).
+	return s.publishViaEventBus(ctx, resolvedTopic, resolvedPayload)
 }
 
 // tryGetEventPublisher attempts to resolve the broker service as an EventPublisher.
@@ -142,9 +144,11 @@ func (s *EventPublishStep) tryGetEventPublisher() (pub EventPublisher) {
 	return pub
 }
 
-// buildEventEnvelope wraps the payload in a CloudEvents-compatible envelope
-// when event_type or source is configured. The envelope includes specversion,
-// type, source, id, time, and data fields per the CloudEvents specification.
+// buildEventEnvelope wraps the payload in an envelope for publishing.
+// When both event_type and source are configured, a full CloudEvents 1.0-compatible
+// envelope is emitted with specversion, type, source, id, time, and data fields.
+// When only headers are provided (without event_type/source), the payload is
+// wrapped as {data, headers} without adding CloudEvents-required attributes.
 func (s *EventPublishStep) buildEventEnvelope(payload map[string]any, headers map[string]string, resolvedSource string) map[string]any {
 	if s.eventType == "" && resolvedSource == "" && len(headers) == 0 {
 		return payload
@@ -152,15 +156,12 @@ func (s *EventPublishStep) buildEventEnvelope(payload map[string]any, headers ma
 	envelope := map[string]any{
 		"data": payload,
 	}
-	if s.eventType != "" || resolvedSource != "" {
+	// Only emit a CloudEvents envelope when both required attributes are present.
+	if s.eventType != "" && resolvedSource != "" {
 		envelope["specversion"] = "1.0"
 		envelope["id"] = uuid.New().String()
 		envelope["time"] = time.Now().UTC().Format(time.RFC3339)
-	}
-	if s.eventType != "" {
 		envelope["type"] = s.eventType
-	}
-	if resolvedSource != "" {
 		envelope["source"] = resolvedSource
 	}
 	if len(headers) > 0 {
