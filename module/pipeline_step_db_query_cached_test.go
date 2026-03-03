@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -403,5 +404,70 @@ func TestDBQueryCachedStep_NegativeTTLRejected(t *testing.T) {
 	}, nil)
 	if err == nil {
 		t.Fatal("expected error for negative cache_ttl")
+	}
+}
+
+func TestDBQueryCachedStep_DynamicTableName(t *testing.T) {
+	db := setupTestDB(t)
+	_, err := db.Exec(`CREATE TABLE companies_beta (id TEXT PRIMARY KEY, name TEXT NOT NULL)`)
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO companies_beta (id, name) VALUES ('b1', 'Beta LLC')`)
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	app := mockAppWithDB("test-db", db)
+	factory := NewDBQueryCachedStepFactory()
+	step, err := factory("dynamic-cached", map[string]any{
+		"database":         "test-db",
+		"query":            `SELECT id, name FROM companies_{{.steps.auth.tenant}} WHERE id = $1`,
+		"params":           []any{"b1"},
+		"cache_key":        `tenant:{{.steps.auth.tenant}}:b1`,
+		"cache_ttl":        "5m",
+		"allow_dynamic_sql": true,
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("auth", map[string]any{"tenant": "beta"})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	if result.Output["cache_hit"] != false {
+		t.Errorf("expected cache_hit=false on first call, got %v", result.Output["cache_hit"])
+	}
+	if result.Output["name"] != "Beta LLC" {
+		t.Errorf("expected name='Beta LLC', got %v", result.Output["name"])
+	}
+}
+
+func TestDBQueryCachedStep_DynamicSQL_RejectsInjection(t *testing.T) {
+	factory := NewDBQueryCachedStepFactory()
+	step, err := factory("injection-cached", map[string]any{
+		"database":         "test-db",
+		"query":            `SELECT * FROM companies_{{.steps.auth.tenant}}`,
+		"cache_key":        "k",
+		"allow_dynamic_sql": true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("auth", map[string]any{"tenant": "alpha'; DROP TABLE companies;--"})
+
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error for unsafe SQL identifier")
+	}
+	if !strings.Contains(err.Error(), "unsafe character") {
+		t.Errorf("expected 'unsafe character' in error, got: %v", err)
 	}
 }
