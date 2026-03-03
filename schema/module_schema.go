@@ -839,6 +839,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "register_routes", Label: "Register Routes", Type: FieldTypeBool, DefaultValue: true, Description: "When false, skip registering spec-path routes (only serve spec endpoints and Swagger UI); default true"},
 			{Key: "validation", Label: "Validation", Type: FieldTypeJSON, DefaultValue: map[string]any{"request": true, "response": false}, Description: "Request/response validation settings, e.g. {\"request\": true, \"response\": false}"},
 			{Key: "swagger_ui", Label: "Swagger UI", Type: FieldTypeJSON, DefaultValue: map[string]any{"enabled": false, "path": "/docs"}, Description: "Swagger UI settings, e.g. {\"enabled\": false, \"path\": \"/docs\"}"},
+			{Key: "max_body_bytes", Label: "Max Body Bytes", Type: FieldTypeNumber, Description: "Maximum allowed request body size in bytes for validated OpenAPI operations (leave empty to use module default)", Placeholder: "1048576"},
 		},
 		DefaultConfig: map[string]any{"register_routes": true, "validation": map[string]any{"request": true, "response": false}, "swagger_ui": map[string]any{"enabled": false, "path": "/docs"}},
 	})
