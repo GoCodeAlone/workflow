@@ -518,14 +518,18 @@ func knownStepTypeDescriptions() map[string]stepTypeInfoFull {
 		"step.event_publish": {
 			Type:        "step.event_publish",
 			Plugin:      "pipelinesteps",
-			Description: "Publishes a structured event to a messaging broker topic.",
-			ConfigKeys:  []string{"topic", "broker", "payload", "headers", "event_type"},
+			Description: "Publishes a structured event in CloudEvents format to a messaging broker or EventPublisher.",
+			ConfigKeys:  []string{"topic", "stream", "broker", "provider", "payload", "data", "headers", "event_type", "source"},
 			ConfigDefs: []stepConfigKeyDef{
-				{Key: "topic", Type: "string", Description: "Topic name to publish to", Required: true},
+				{Key: "topic", Type: "string", Description: "Topic name to publish to (or use 'stream' alias)", Required: true},
+				{Key: "stream", Type: "string", Description: "Alias for topic — stream name (e.g., Kinesis stream)"},
 				{Key: "broker", Type: "string", Description: "Messaging broker module name"},
+				{Key: "provider", Type: "string", Description: "Alias for broker — EventPublisher or MessageBroker service name"},
 				{Key: "payload", Type: "string|map", Description: "Event payload (template expressions supported)"},
+				{Key: "data", Type: "string|map", Description: "Alias for payload — event data fields"},
 				{Key: "headers", Type: "map", Description: "Event headers"},
-				{Key: "event_type", Type: "string", Description: "Event type identifier"},
+				{Key: "event_type", Type: "string", Description: "CloudEvents type identifier"},
+				{Key: "source", Type: "string", Description: "CloudEvents source URI (template expressions supported)"},
 			},
 		},
 		"step.cache_get": {
