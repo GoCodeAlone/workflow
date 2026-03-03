@@ -316,6 +316,28 @@ func TestDBQueryStep_MissingDatabase(t *testing.T) {
 	}
 }
 
+func TestDBQueryStep_DynamicSQL_UnclosedAction(t *testing.T) {
+	factory := NewDBQueryStepFactory()
+	step, err := factory("unclosed", map[string]any{
+		"database":         "test-db",
+		"query":            `SELECT * FROM companies_{{.steps.auth.tenant`,
+		"mode":             "list",
+		"allow_dynamic_sql": true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error for unclosed template action")
+	}
+	if !strings.Contains(err.Error(), "unclosed template action") {
+		t.Errorf("expected 'unclosed template action' in error, got: %v", err)
+	}
+}
+
 func TestDBQueryStep_EmptyResult(t *testing.T) {
 	db := setupTestDB(t)
 	app := mockAppWithDB("test-db", db)
