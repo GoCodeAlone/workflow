@@ -82,7 +82,70 @@ func normalizePlaceholders(query, driver string) string {
 	return result
 }
 
-// validatePlaceholderCount checks that the number of params matches the
+// sqlTrailingClauses are SQL clause keywords that must come after WHERE.
+// We search for the last occurrence of these to insert the tenant predicate
+// before them. The order does not matter; we find the earliest position among
+// all matches that appear after any existing WHERE.
+var sqlTrailingClauses = []string{
+	" ORDER BY ",
+	" GROUP BY ",
+	" HAVING ",
+	" LIMIT ",
+	" OFFSET ",
+	" UNION ",
+	" INTERSECT ",
+	" EXCEPT ",
+	" FOR UPDATE",
+	" FOR SHARE",
+	" FOR NO KEY UPDATE",
+	" RETURNING ",
+}
+
+// appendTenantFilter inserts a tenant predicate into a SQL SELECT/UPDATE/DELETE
+// query. The predicate is placed:
+//   - After an existing WHERE clause and before any trailing clause
+//     (ORDER BY, LIMIT, etc.), or
+//   - As a new WHERE clause before any trailing clause when none exists.
+//
+// Returns an error string (empty on success) when the query is an INSERT or
+// other unsupported statement type.
+func appendTenantFilter(query, column string, paramIndex int) string {
+	trimmed := strings.TrimRight(query, " \t\n\r;")
+	upper := strings.ToUpper(trimmed)
+
+	// Find the position right after the WHERE clause (if any).
+	whereIdx := strings.Index(upper, " WHERE ")
+	hasWhere := whereIdx >= 0
+
+	// Find the earliest trailing clause position that appears after the WHERE.
+	insertPos := len(trimmed)
+	whereLen := len(" WHERE ")
+	for _, kw := range sqlTrailingClauses {
+		// Search starting from the position after WHERE (or from the start if no WHERE).
+		searchStart := 0
+		if hasWhere {
+			searchStart = whereIdx + whereLen
+		}
+		idx := strings.Index(upper[searchStart:], kw)
+		if idx >= 0 {
+			absPos := searchStart + idx
+			if absPos < insertPos {
+				insertPos = absPos
+			}
+		}
+	}
+
+	predicate := fmt.Sprintf("%s = $%d", column, paramIndex)
+
+	before := trimmed[:insertPos]
+	after := trimmed[insertPos:]
+
+	if hasWhere {
+		return fmt.Sprintf("%s AND %s%s", before, predicate, after)
+	}
+	return fmt.Sprintf("%s WHERE %s%s", before, predicate, after)
+}
+
 // placeholder count in the query. Returns an error if there's a mismatch.
 func validatePlaceholderCount(query, driver string, paramCount int) error {
 	if paramCount == 0 {

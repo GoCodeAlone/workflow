@@ -296,4 +296,3 @@ var _ TokenBlacklist = (*TokenBlacklistModule)(nil)
 
 // Compile-time check: mockBlacklist satisfies TokenBlacklist.
 var _ TokenBlacklist = (*mockBlacklist)(nil)
-

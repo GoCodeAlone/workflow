@@ -421,11 +421,11 @@ func TestDBQueryCachedStep_DynamicTableName(t *testing.T) {
 	app := mockAppWithDB("test-db", db)
 	factory := NewDBQueryCachedStepFactory()
 	step, err := factory("dynamic-cached", map[string]any{
-		"database":         "test-db",
-		"query":            `SELECT id, name FROM companies_{{.steps.auth.tenant}} WHERE id = $1`,
-		"params":           []any{"b1"},
-		"cache_key":        `tenant:{{.steps.auth.tenant}}:b1`,
-		"cache_ttl":        "5m",
+		"database":          "test-db",
+		"query":             `SELECT id, name FROM companies_{{.steps.auth.tenant}} WHERE id = $1`,
+		"params":            []any{"b1"},
+		"cache_key":         `tenant:{{.steps.auth.tenant}}:b1`,
+		"cache_ttl":         "5m",
 		"allow_dynamic_sql": true,
 	}, app)
 	if err != nil {
@@ -451,9 +451,9 @@ func TestDBQueryCachedStep_DynamicTableName(t *testing.T) {
 func TestDBQueryCachedStep_DynamicSQL_RejectsInjection(t *testing.T) {
 	factory := NewDBQueryCachedStepFactory()
 	step, err := factory("injection-cached", map[string]any{
-		"database":         "test-db",
-		"query":            `SELECT * FROM companies_{{.steps.auth.tenant}}`,
-		"cache_key":        "k",
+		"database":          "test-db",
+		"query":             `SELECT * FROM companies_{{.steps.auth.tenant}}`,
+		"cache_key":         "k",
 		"allow_dynamic_sql": true,
 	}, nil)
 	if err != nil {

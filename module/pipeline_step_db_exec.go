@@ -15,6 +15,7 @@ type DBExecStep struct {
 	query           string
 	params          []string
 	ignoreError     bool
+	tenantKey       string // dot-path to resolve tenant value for automatic scoping
 	allowDynamicSQL bool
 	app             modular.Application
 	tmpl            *TemplateEngine
@@ -52,6 +53,7 @@ func NewDBExecStepFactory() StepFactory {
 		}
 
 		ignoreError, _ := config["ignore_error"].(bool)
+		tenantKey, _ := config["tenantKey"].(string)
 
 		return &DBExecStep{
 			name:            name,
@@ -59,6 +61,7 @@ func NewDBExecStepFactory() StepFactory {
 			query:           query,
 			params:          params,
 			ignoreError:     ignoreError,
+			tenantKey:       tenantKey,
 			allowDynamicSQL: allowDynamicSQL,
 			app:             app,
 			tmpl:            NewTemplateEngine(),
@@ -114,6 +117,31 @@ func (s *DBExecStep) Execute(_ context.Context, pc *PipelineContext) (*StepResul
 			return nil, fmt.Errorf("db_exec step %q: failed to resolve param %d: %w", s.name, i, err)
 		}
 		resolvedParams[i] = resolved
+	}
+
+	// Apply automatic tenant scoping when tenantKey is configured.
+	if s.tenantKey != "" {
+		// Reject tenantKey for INSERT statements — WHERE doesn't apply.
+		upperQ := strings.TrimLeft(strings.ToUpper(strings.TrimSpace(s.query)), "(")
+		if strings.HasPrefix(upperQ, "INSERT") {
+			return nil, fmt.Errorf("db_exec step %q: tenantKey is not supported for INSERT statements (include the tenant column in your VALUES instead)", s.name)
+		}
+		pkp, ok := svc.(PartitionKeyProvider)
+		if !ok {
+			return nil, fmt.Errorf("db_exec step %q: tenantKey requires database %q to implement PartitionKeyProvider (use database.partitioned)", s.name, s.database)
+		}
+		partKey := pkp.PartitionKey()
+		if err := validateIdentifier(partKey); err != nil {
+			return nil, fmt.Errorf("db_exec step %q: invalid partition key %q: %w", s.name, partKey, err)
+		}
+		tenantVal := resolveBodyFrom(s.tenantKey, pc)
+		if tenantVal == nil {
+			return nil, fmt.Errorf("db_exec step %q: tenantKey %q resolved to nil in pipeline context", s.name, s.tenantKey)
+		}
+		tenantStr := fmt.Sprintf("%v", tenantVal)
+		nextParam := len(resolvedParams) + 1
+		query = appendTenantFilter(query, partKey, nextParam)
+		resolvedParams = append(resolvedParams, tenantStr)
 	}
 
 	// Normalize SQL placeholders: users write $1,$2,$3 (PostgreSQL style),
