@@ -383,6 +383,12 @@ func (h *openAPIRouteHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// If the pipeline set response_status in its output (without writing
+		// directly to the response writer), use those values to build the response.
+		if writePipelineContextResponse(w, result.Current) {
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(result.Current)

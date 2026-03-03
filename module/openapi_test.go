@@ -1124,3 +1124,182 @@ func (s *stubPipelineStep) Name() string { return s.name }
 func (s *stubPipelineStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
 	return s.exec(ctx, pc)
 }
+
+// TestOpenAPIModule_XPipeline_ResponseStatusFromContext verifies that when a
+// pipeline step sets response_status/response_body/response_headers in its
+// output and no step writes directly to the HTTP response writer, the openapi
+// handler uses those values instead of falling through to 200 with all state.
+func TestOpenAPIModule_XPipeline_ResponseStatusFromContext(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", xPipelineYAML)
+
+	mod := NewOpenAPIModule("pipe-api", OpenAPIConfig{
+		SpecFile: specPath,
+		BasePath: "/api",
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Pipeline step that returns a 403 with a custom body via result.Current,
+	// without writing to the HTTP response writer directly.
+	authStep := &stubPipelineStep{
+		name: "auth-check",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{
+				Output: map[string]any{
+					"response_status": 403,
+					"response_body":   `{"error":"forbidden"}`,
+					"response_headers": map[string]any{
+						"Content-Type": "application/json",
+					},
+				},
+				Stop: true,
+			}, nil
+		},
+	}
+	authPipeline := &Pipeline{
+		Name:  "greet-pipeline",
+		Steps: []PipelineStep{authStep},
+	}
+
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "greet-pipeline" {
+			return authPipeline, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/greet")
+	if h == nil {
+		t.Fatal("GET /api/greet handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/greet", nil)
+	h.Handle(w, r)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 from pipeline context, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != `{"error":"forbidden"}` {
+		t.Errorf("expected pipeline body, got %q", w.Body.String())
+	}
+	if w.Header().Get("Content-Type") != "application/json" {
+		t.Errorf("expected Content-Type header, got %q", w.Header().Get("Content-Type"))
+	}
+}
+
+// TestOpenAPIModule_XPipeline_NoResponseStatusFallsThrough verifies that when
+// response_status is absent from result.Current, the handler still falls through
+// to the default 200 JSON encoding of result.Current.
+func TestOpenAPIModule_XPipeline_NoResponseStatusFallsThrough(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", xPipelineYAML)
+
+	mod := NewOpenAPIModule("pipe-api", OpenAPIConfig{
+		SpecFile: specPath,
+		BasePath: "/api",
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	dataStep := &stubPipelineStep{
+		name: "produce-data",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{Output: map[string]any{"key": "value"}}, nil
+		},
+	}
+	dataPipeline := &Pipeline{
+		Name:  "greet-pipeline",
+		Steps: []PipelineStep{dataStep},
+	}
+
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "greet-pipeline" {
+			return dataPipeline, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/greet")
+	if h == nil {
+		t.Fatal("GET /api/greet handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/greet", nil)
+	h.Handle(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 fallback, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("expected JSON fallback body, got error: %v", err)
+	}
+	if resp["key"] != "value" {
+		t.Errorf("expected key=value in fallback body, got %v", resp)
+	}
+}
+
+// TestOpenAPIModule_XPipeline_ResponseStatus_Float64 verifies that response_status
+// emitted as float64 (common after JSON round-trip) is correctly coerced.
+func TestOpenAPIModule_XPipeline_ResponseStatus_Float64(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", xPipelineYAML)
+
+	mod := NewOpenAPIModule("pipe-api", OpenAPIConfig{
+		SpecFile: specPath,
+		BasePath: "/api",
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	step := &stubPipelineStep{
+		name: "float-status",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{
+				Output: map[string]any{
+					"response_status": float64(422),
+					"response_body":   `{"error":"unprocessable"}`,
+					"response_headers": map[string]string{
+						"Content-Type": "application/json",
+					},
+				},
+				Stop: true,
+			}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "greet-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "greet-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/greet")
+	if h == nil {
+		t.Fatal("handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/greet", nil)
+	h.Handle(w, r)
+
+	if w.Code != 422 {
+		t.Errorf("expected 422 from float64 status, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != `{"error":"unprocessable"}` {
+		t.Errorf("unexpected body: %q", w.Body.String())
+	}
+}
