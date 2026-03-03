@@ -40,6 +40,7 @@ func New() *Plugin {
 					"storage.sqlite",
 					"storage.artifact",
 					"database.workflow",
+					"database.partitioned",
 					"persistence.store",
 					"cache.redis",
 				},
@@ -148,6 +149,32 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 				dbConfig.MaxIdleConns = int(maxIdle)
 			}
 			return module.NewWorkflowDatabase(name, dbConfig)
+		},
+		"database.partitioned": func(name string, cfg map[string]any) modular.Module {
+			partCfg := module.PartitionedDatabaseConfig{}
+			if driver, ok := cfg["driver"].(string); ok {
+				partCfg.Driver = driver
+			}
+			if dsn, ok := cfg["dsn"].(string); ok {
+				partCfg.DSN = dsn
+			}
+			if maxOpen, ok := cfg["maxOpenConns"].(float64); ok {
+				partCfg.MaxOpenConns = int(maxOpen)
+			}
+			if maxIdle, ok := cfg["maxIdleConns"].(float64); ok {
+				partCfg.MaxIdleConns = int(maxIdle)
+			}
+			if pk, ok := cfg["partitionKey"].(string); ok {
+				partCfg.PartitionKey = pk
+			}
+			if tables, ok := cfg["tables"].([]any); ok {
+				for _, t := range tables {
+					if s, ok := t.(string); ok {
+						partCfg.Tables = append(partCfg.Tables, s)
+					}
+				}
+			}
+			return module.NewPartitionedDatabase(name, partCfg)
 		},
 		"persistence.store": func(name string, cfg map[string]any) modular.Module {
 			dbServiceName := "database"
@@ -307,6 +334,23 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			ConfigFields: []schema.ConfigFieldDef{
 				{Key: "driver", Label: "Driver", Type: schema.FieldTypeSelect, Options: []string{"postgres", "mysql", "sqlite3"}, Required: true, Description: "Database driver to use"},
 				{Key: "dsn", Label: "DSN", Type: schema.FieldTypeString, Required: true, Description: "Data source name / connection string", Placeholder: "postgres://user:pass@localhost/db?sslmode=disable", Sensitive: true}, //nolint:gosec // G101: placeholder DSN example in schema documentation
+				{Key: "maxOpenConns", Label: "Max Open Connections", Type: schema.FieldTypeNumber, DefaultValue: 25, Description: "Maximum number of open database connections"},
+				{Key: "maxIdleConns", Label: "Max Idle Connections", Type: schema.FieldTypeNumber, DefaultValue: 5, Description: "Maximum number of idle connections in the pool"},
+			},
+			DefaultConfig: map[string]any{"maxOpenConns": 25, "maxIdleConns": 5},
+		},
+		{
+			Type:        "database.partitioned",
+			Label:       "Partitioned Database",
+			Category:    "database",
+			Description: "PostgreSQL LIST-partitioned database for multi-tenant data isolation. Automatically manages per-tenant partitions and enables automatic tenant scoping in step.db_query and step.db_exec.",
+			Inputs:      []schema.ServiceIODef{{Name: "query", Type: "SQL", Description: "SQL query to execute"}},
+			Outputs:     []schema.ServiceIODef{{Name: "database", Type: "sql.DB", Description: "SQL database connection pool"}},
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "driver", Label: "Driver", Type: schema.FieldTypeSelect, Options: []string{"pgx", "pgx/v5", "postgres"}, Required: true, Description: "PostgreSQL database driver"},
+				{Key: "dsn", Label: "DSN", Type: schema.FieldTypeString, Required: true, Description: "Data source name / connection string", Placeholder: "postgres://user:pass@localhost/db?sslmode=disable", Sensitive: true}, //nolint:gosec // G101: placeholder DSN example in schema documentation
+				{Key: "partitionKey", Label: "Partition Key", Type: schema.FieldTypeString, Required: true, Description: "Column name used for LIST partitioning (e.g. tenant_id)", Placeholder: "tenant_id"},
+				{Key: "tables", Label: "Tables", Type: schema.FieldTypeArray, ArrayItemType: "string", Required: true, Description: "Tables to manage LIST partitions for", Placeholder: "forms"},
 				{Key: "maxOpenConns", Label: "Max Open Connections", Type: schema.FieldTypeNumber, DefaultValue: 25, Description: "Maximum number of open database connections"},
 				{Key: "maxIdleConns", Label: "Max Idle Connections", Type: schema.FieldTypeNumber, DefaultValue: 5, Description: "Maximum number of idle connections in the pool"},
 			},

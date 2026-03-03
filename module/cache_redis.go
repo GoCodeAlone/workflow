@@ -31,7 +31,7 @@ type RedisClient interface {
 // RedisCacheConfig holds configuration for the cache.redis module.
 type RedisCacheConfig struct {
 	Address    string
-	Password   string           //nolint:gosec // G117: config struct field, not a hardcoded secret
+	Password   string //nolint:gosec // G117: config struct field, not a hardcoded secret
 	DB         int
 	Prefix     string
 	DefaultTTL time.Duration

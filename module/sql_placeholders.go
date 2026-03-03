@@ -82,7 +82,18 @@ func normalizePlaceholders(query, driver string) string {
 	return result
 }
 
-// validatePlaceholderCount checks that the number of params matches the
+// appendTenantFilter appends "AND <column> = $N" to a SQL query, where N is
+// the next positional parameter index. The function handles queries with and
+// without an existing WHERE clause.
+func appendTenantFilter(query, column string, paramIndex int) string {
+	query = strings.TrimRight(query, " \t\n\r;")
+	upper := strings.ToUpper(query)
+	if strings.Contains(upper, " WHERE ") {
+		return fmt.Sprintf("%s AND %s = $%d", query, column, paramIndex)
+	}
+	return fmt.Sprintf("%s WHERE %s = $%d", query, column, paramIndex)
+}
+
 // placeholder count in the query. Returns an error if there's a mismatch.
 func validatePlaceholderCount(query, driver string, paramCount int) error {
 	if paramCount == 0 {

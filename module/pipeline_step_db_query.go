@@ -25,13 +25,14 @@ type DBDriverProvider interface {
 
 // DBQueryStep executes a parameterized SQL SELECT against a named database service.
 type DBQueryStep struct {
-	name     string
-	database string
-	query    string
-	params   []string
-	mode     string // "list" or "single"
-	app      modular.Application
-	tmpl     *TemplateEngine
+	name      string
+	database  string
+	query     string
+	params    []string
+	mode      string // "list" or "single"
+	tenantKey string // dot-path to resolve tenant value for automatic scoping
+	app       modular.Application
+	tmpl      *TemplateEngine
 }
 
 // NewDBQueryStepFactory returns a StepFactory that creates DBQueryStep instances.
@@ -71,14 +72,17 @@ func NewDBQueryStepFactory() StepFactory {
 			return nil, fmt.Errorf("db_query step %q: mode must be 'list' or 'single', got %q", name, mode)
 		}
 
+		tenantKey, _ := config["tenantKey"].(string)
+
 		return &DBQueryStep{
-			name:     name,
-			database: database,
-			query:    query,
-			params:   params,
-			mode:     mode,
-			app:      app,
-			tmpl:     NewTemplateEngine(),
+			name:      name,
+			database:  database,
+			query:     query,
+			params:    params,
+			mode:      mode,
+			tenantKey: tenantKey,
+			app:       app,
+			tmpl:      NewTemplateEngine(),
 		}, nil
 	}
 }
@@ -122,9 +126,26 @@ func (s *DBQueryStep) Execute(_ context.Context, pc *PipelineContext) (*StepResu
 		resolvedParams[i] = resolved
 	}
 
+	// Apply automatic tenant scoping when tenantKey is configured.
+	query := s.query
+	if s.tenantKey != "" {
+		pkp, ok := svc.(PartitionKeyProvider)
+		if !ok {
+			return nil, fmt.Errorf("db_query step %q: tenantKey requires database %q to implement PartitionKeyProvider (use database.partitioned)", s.name, s.database)
+		}
+		tenantVal := resolveBodyFrom(s.tenantKey, pc)
+		if tenantVal == nil {
+			return nil, fmt.Errorf("db_query step %q: tenantKey %q resolved to nil in pipeline context", s.name, s.tenantKey)
+		}
+		tenantStr := fmt.Sprintf("%v", tenantVal)
+		nextParam := len(resolvedParams) + 1
+		query = appendTenantFilter(query, pkp.PartitionKey(), nextParam)
+		resolvedParams = append(resolvedParams, tenantStr)
+	}
+
 	// Normalize SQL placeholders: users write $1,$2,$3 (PostgreSQL style),
 	// engine converts to ? for SQLite automatically.
-	query := normalizePlaceholders(s.query, driver)
+	query = normalizePlaceholders(query, driver)
 
 	// Execute query
 	rows, err := db.Query(query, resolvedParams...)

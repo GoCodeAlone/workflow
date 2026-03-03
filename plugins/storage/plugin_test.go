@@ -21,8 +21,8 @@ func TestPluginManifest(t *testing.T) {
 	if m.Name != "storage" {
 		t.Errorf("expected name %q, got %q", "storage", m.Name)
 	}
-	if len(m.ModuleTypes) != 8 {
-		t.Errorf("expected 8 module types, got %d", len(m.ModuleTypes))
+	if len(m.ModuleTypes) != 9 {
+		t.Errorf("expected 9 module types, got %d", len(m.ModuleTypes))
 	}
 	if len(m.StepTypes) != 4 {
 		t.Errorf("expected 4 step types, got %d", len(m.StepTypes))
@@ -134,8 +134,8 @@ func TestStepFactories(t *testing.T) {
 func TestModuleSchemas(t *testing.T) {
 	p := New()
 	schemas := p.ModuleSchemas()
-	if len(schemas) != 8 {
-		t.Fatalf("expected 8 module schemas, got %d", len(schemas))
+	if len(schemas) != 9 {
+		t.Fatalf("expected 9 module schemas, got %d", len(schemas))
 	}
 
 	types := map[string]bool{}
@@ -144,8 +144,8 @@ func TestModuleSchemas(t *testing.T) {
 	}
 	expectedTypes := []string{
 		"storage.s3", "storage.local", "storage.gcs",
-		"storage.sqlite", "database.workflow", "persistence.store",
-		"cache.redis",
+		"storage.sqlite", "database.workflow", "database.partitioned",
+		"persistence.store", "cache.redis",
 	}
 	for _, expected := range expectedTypes {
 		if !types[expected] {

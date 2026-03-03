@@ -15,11 +15,11 @@ import (
 
 // HTTPServerTLSConfig holds TLS configuration for the HTTP server.
 type HTTPServerTLSConfig struct {
-	Mode         string               `yaml:"mode" json:"mode"` // manual | autocert | disabled
-	Manual       tlsutil.TLSConfig    `yaml:"manual" json:"manual"`
+	Mode         string                 `yaml:"mode" json:"mode"` // manual | autocert | disabled
+	Manual       tlsutil.TLSConfig      `yaml:"manual" json:"manual"`
 	Autocert     tlsutil.AutocertConfig `yaml:"autocert" json:"autocert"`
-	ClientCAFile string               `yaml:"client_ca_file" json:"client_ca_file"`
-	ClientAuth   string               `yaml:"client_auth" json:"client_auth"` // require | request | none
+	ClientCAFile string                 `yaml:"client_ca_file" json:"client_ca_file"`
+	ClientAuth   string                 `yaml:"client_auth" json:"client_auth"` // require | request | none
 }
 
 // StandardHTTPServer implements the HTTPServer interface and modular.Module interfaces

@@ -55,6 +55,12 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Stateful:   true,
 			ConfigKeys: []string{"driver", "dsn", "maxOpenConns", "maxIdleConns"},
 		},
+		"database.partitioned": {
+			Type:       "database.partitioned",
+			Plugin:     "storage",
+			Stateful:   true,
+			ConfigKeys: []string{"driver", "dsn", "partitionKey", "tables", "maxOpenConns", "maxIdleConns"},
+		},
 		"persistence.store": {
 			Type:       "persistence.store",
 			Plugin:     "storage",
@@ -584,17 +590,22 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.db_query": {
 			Type:       "step.db_query",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"database", "query", "params"},
+			ConfigKeys: []string{"database", "query", "params", "tenantKey"},
 		},
 		"step.db_exec": {
 			Type:       "step.db_exec",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"database", "query", "params"},
+			ConfigKeys: []string{"database", "query", "params", "tenantKey"},
 		},
 		"step.db_query_cached": {
 			Type:       "step.db_query_cached",
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"database", "query", "params", "cache_key", "cache_ttl", "scan_fields"},
+		},
+		"step.db_create_partition": {
+			Type:       "step.db_create_partition",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"database", "tenantKey"},
 		},
 		"step.json_response": {
 			Type:       "step.json_response",

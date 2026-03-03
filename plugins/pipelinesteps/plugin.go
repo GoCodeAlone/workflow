@@ -66,6 +66,7 @@ func New() *Plugin {
 					"step.db_query",
 					"step.db_exec",
 					"step.db_query_cached",
+					"step.db_create_partition",
 					"step.json_response",
 					"step.raw_response",
 					"step.workflow_call",
@@ -127,6 +128,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.db_query":              wrapStepFactory(module.NewDBQueryStepFactory()),
 		"step.db_exec":               wrapStepFactory(module.NewDBExecStepFactory()),
 		"step.db_query_cached":       wrapStepFactory(module.NewDBQueryCachedStepFactory()),
+		"step.db_create_partition":   wrapStepFactory(module.NewDBCreatePartitionStepFactory()),
 		"step.json_response":         wrapStepFactory(module.NewJSONResponseStepFactory()),
 		"step.raw_response":          wrapStepFactory(module.NewRawResponseStepFactory()),
 		"step.validate_path_param":   wrapStepFactory(module.NewValidatePathParamStepFactory()),
@@ -137,8 +139,8 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.foreach": wrapStepFactory(module.NewForEachStepFactory(func() *module.StepRegistry {
 			return p.concreteStepRegistry
 		})),
-		"step.webhook_verify": wrapStepFactory(module.NewWebhookVerifyStepFactory()),
-		"step.base64_decode":  wrapStepFactory(module.NewBase64DecodeStepFactory()),
+		"step.webhook_verify":      wrapStepFactory(module.NewWebhookVerifyStepFactory()),
+		"step.base64_decode":       wrapStepFactory(module.NewBase64DecodeStepFactory()),
 		"step.cache_get":           wrapStepFactory(module.NewCacheGetStepFactory()),
 		"step.cache_set":           wrapStepFactory(module.NewCacheSetStepFactory()),
 		"step.cache_delete":        wrapStepFactory(module.NewCacheDeleteStepFactory()),
@@ -153,12 +155,12 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.resilient_circuit_breaker": wrapStepFactory(module.NewResilienceCircuitBreakerStepFactory(func() *module.StepRegistry {
 			return p.concreteStepRegistry
 		})),
-		"step.s3_upload": wrapStepFactory(module.NewS3UploadStepFactory()),
-		"step.auth_validate":    wrapStepFactory(module.NewAuthValidateStepFactory()),
-		"step.token_revoke":     wrapStepFactory(module.NewTokenRevokeStepFactory()),
-		"step.field_reencrypt":  wrapStepFactory(module.NewFieldReencryptStepFactory()),
-		"step.sandbox_exec":     wrapStepFactory(module.NewSandboxExecStepFactory()),
-		"step.http_proxy":       wrapStepFactory(module.NewHTTPProxyStepFactory()),
+		"step.s3_upload":       wrapStepFactory(module.NewS3UploadStepFactory()),
+		"step.auth_validate":   wrapStepFactory(module.NewAuthValidateStepFactory()),
+		"step.token_revoke":    wrapStepFactory(module.NewTokenRevokeStepFactory()),
+		"step.field_reencrypt": wrapStepFactory(module.NewFieldReencryptStepFactory()),
+		"step.sandbox_exec":    wrapStepFactory(module.NewSandboxExecStepFactory()),
+		"step.http_proxy":      wrapStepFactory(module.NewHTTPProxyStepFactory()),
 	}
 }
 
