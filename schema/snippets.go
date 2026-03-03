@@ -288,14 +288,16 @@ func GetSnippets() []Snippet {
 		{
 			Name:        "Step: Event Publish",
 			Prefix:      "step-event-publish",
-			Description: "Publish an event to the message broker",
+			Description: "Publish a CloudEvents-formatted event to a message broker or EventPublisher",
 			Body: []string{
 				"- type: step.event_publish",
 				"  config:",
-				"    broker: ${1:broker}",
-				"    topic: ${2:events.created}",
+				"    provider: ${1:broker}",
+				"    stream: ${2:messaging.events}",
 				"    event_type: ${3:resource.created}",
-				"    payload: ${4:{{ json . }}}",
+				"    source: ${4:/api/resource}",
+				"    data:",
+				"      id: ${5:{{ .id }}}",
 			},
 		},
 		{

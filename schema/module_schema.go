@@ -964,11 +964,12 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context with data for URL/body template resolution"}},
 		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "HTTP response body parsed as JSON and merged into pipeline context"}},
 		ConfigFields: []ConfigFieldDef{
-			{Key: "url", Label: "URL", Type: FieldTypeString, Required: true, Description: "Request URL (supports {{ .field }} templates)", Placeholder: "https://api.example.com/{{ .resource }}"},
+			{Key: "url", Label: "URL", Type: FieldTypeString, Required: true, Description: "Request URL (supports {{ .field }} templates; {{ .instance_url }} is available when OAuth2 client_credentials auth uses a token endpoint that returns instance_url)", Placeholder: "https://api.example.com/{{ .resource }}"},
 			{Key: "method", Label: "Method", Type: FieldTypeSelect, Options: []string{"GET", "POST", "PUT", "PATCH", "DELETE"}, DefaultValue: "GET", Description: "HTTP method"},
 			{Key: "headers", Label: "Headers", Type: FieldTypeMap, MapValueType: "string", Description: "Request headers (values support templates)"},
 			{Key: "body", Label: "Body", Type: FieldTypeJSON, Description: "Request body (supports templates). For POST/PUT without body, sends pipeline context."},
 			{Key: "timeout", Label: "Timeout", Type: FieldTypeString, DefaultValue: "30s", Description: "Request timeout duration", Placeholder: "30s"},
+			{Key: "oauth2", Label: "OAuth2", Type: FieldTypeJSON, Description: "OAuth2 client_credentials configuration. Tokens are cached and refreshed automatically. Fields: grant_type (default: client_credentials), token_url, client_id, client_secret, scopes. When the token endpoint returns instance_url (Salesforce pattern), it is injected as {{ .instance_url }} for URL templates and included in the step output. If both the legacy auth block and oauth2 are configured, auth takes precedence and oauth2 is ignored."},
 		},
 	})
 
@@ -1811,13 +1812,17 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "step.event_publish",
 		Label:       "Event Publish",
 		Category:    "pipeline_steps",
-		Description: "Publishes an event to a messaging broker or event bus",
+		Description: "Publishes a structured event in CloudEvents format to a messaging broker, EventPublisher, or event bus",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "topic", Label: "Topic", Type: FieldTypeString, Required: true, Description: "Topic or channel to publish the event to", Placeholder: "user-events"},
+			{Key: "topic", Label: "Topic", Type: FieldTypeString, Description: "Topic or channel to publish the event to (also accepts 'stream' alias)", Placeholder: "user-events"},
+			{Key: "stream", Label: "Stream", Type: FieldTypeString, Description: "Alias for 'topic' — name of the stream to publish to (e.g., Kinesis stream name)", Placeholder: "messaging.texter-messages"},
 			{Key: "payload", Label: "Payload", Type: FieldTypeJSON, Description: "Event payload as a JSON object (supports template expressions); defaults to current pipeline context"},
+			{Key: "data", Label: "Data", Type: FieldTypeJSON, Description: "Alias for 'payload' — event data fields (supports template expressions)"},
 			{Key: "headers", Label: "Headers", Type: FieldTypeJSON, Description: "Additional headers/metadata to include with the event as a JSON object"},
-			{Key: "event_type", Label: "Event Type", Type: FieldTypeString, Description: "Optional event type identifier to include with the message", Placeholder: "user.created"},
+			{Key: "event_type", Label: "Event Type", Type: FieldTypeString, Description: "CloudEvents type identifier (e.g., messaging.texter-message.received)", Placeholder: "user.created"},
+			{Key: "source", Label: "Source", Type: FieldTypeString, Description: "CloudEvents source URI identifying the event producer (supports template expressions)", Placeholder: "/chimera/messaging"},
 			{Key: "broker", Label: "Broker", Type: FieldTypeString, Description: "Name of the messaging broker module to use (falls back to eventbus if not set)"},
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "Alias for 'broker' — name of the EventPublisher or MessageBroker service (e.g., kinesis, bento-output)"},
 		},
 	})
 
