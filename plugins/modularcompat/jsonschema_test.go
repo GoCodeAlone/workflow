@@ -233,11 +233,11 @@ func TestJSONSchemaRegistryWorkflow(t *testing.T) {
 	}
 	cases := []testCase{
 		{"user", `{"name":"Alice","age":30}`, false},
-		{"user", `{"name":"Bob"}`, true},                     // missing age
-		{"user", `{"name":"Carol","age":25,"x":"y"}`, true},  // extra field
+		{"user", `{"name":"Bob"}`, true},                    // missing age
+		{"user", `{"name":"Carol","age":25,"x":"y"}`, true}, // extra field
 		{"product", `{"id":"sku-1","price":9.99}`, false},
-		{"product", `{"id":"sku-2"}`, true},                   // missing price
-		{"product", `{"id":"sku-3","price":-1}`, true},        // price below minimum
+		{"product", `{"id":"sku-2"}`, true},            // missing price
+		{"product", `{"id":"sku-3","price":-1}`, true}, // price below minimum
 	}
 
 	for _, tc := range cases {

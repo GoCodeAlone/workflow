@@ -163,15 +163,15 @@ func (s *SandboxExecStep) buildSandboxConfig() sandbox.SandboxConfig {
 		}
 	case "standard":
 		cfg = sandbox.SandboxConfig{
-			Image:       s.image,
-			MemoryLimit: 256 * 1024 * 1024,
-			CPULimit:    0.5,
-			NetworkMode: "bridge",
-			CapDrop:     []string{"NET_ADMIN", "SYS_ADMIN", "SYS_PTRACE", "SETUID", "SETGID"},
-			CapAdd:      []string{"NET_BIND_SERVICE"},
+			Image:           s.image,
+			MemoryLimit:     256 * 1024 * 1024,
+			CPULimit:        0.5,
+			NetworkMode:     "bridge",
+			CapDrop:         []string{"NET_ADMIN", "SYS_ADMIN", "SYS_PTRACE", "SETUID", "SETGID"},
+			CapAdd:          []string{"NET_BIND_SERVICE"},
 			NoNewPrivileges: true,
-			PidsLimit:   64,
-			Timeout:     5 * time.Minute,
+			PidsLimit:       64,
+			Timeout:         5 * time.Minute,
 		}
 	default: // "strict"
 		cfg = sandbox.DefaultSecureSandboxConfig(s.image)

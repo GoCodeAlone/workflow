@@ -163,13 +163,13 @@ func TestModuleSchemas(t *testing.T) {
 	schemas := p.ModuleSchemas()
 
 	expectedTypes := map[string]bool{
-		"metrics.collector":   false,
-		"health.checker":      false,
-		"log.collector":       false,
-		"observability.otel":  false,
-		"openapi.generator":   false,
+		"metrics.collector":    false,
+		"health.checker":       false,
+		"log.collector":        false,
+		"observability.otel":   false,
+		"openapi.generator":    false,
 		"http.middleware.otel": false,
-		"tracing.propagation": false,
+		"tracing.propagation":  false,
 	}
 
 	if len(schemas) != len(expectedTypes) {

@@ -388,11 +388,11 @@ type mcpDiffResult struct {
 }
 
 type mcpModuleDiff struct {
-	Name            string             `json:"name"`
-	Status          string             `json:"status"`
-	Type            string             `json:"type,omitempty"`
-	Stateful        bool               `json:"stateful"`
-	Detail          string             `json:"detail,omitempty"`
+	Name            string              `json:"name"`
+	Status          string              `json:"status"`
+	Type            string              `json:"type,omitempty"`
+	Stateful        bool                `json:"stateful"`
+	Detail          string              `json:"detail,omitempty"`
 	BreakingChanges []mcpBreakingChange `json:"breakingChanges,omitempty"`
 }
 
@@ -445,12 +445,12 @@ type mcpEventContract struct {
 }
 
 type mcpContractComparison struct {
-	BaseVersion    string               `json:"baseVersion"`
-	CurrentVersion string               `json:"currentVersion"`
-	Endpoints      []mcpEndpointChange  `json:"endpoints"`
-	Modules        []mcpModuleChange    `json:"modules"`
-	Events         []mcpEventChange     `json:"events"`
-	BreakingCount  int                  `json:"breakingCount"`
+	BaseVersion    string              `json:"baseVersion"`
+	CurrentVersion string              `json:"currentVersion"`
+	Endpoints      []mcpEndpointChange `json:"endpoints"`
+	Modules        []mcpModuleChange   `json:"modules"`
+	Events         []mcpEventChange    `json:"events"`
+	BreakingCount  int                 `json:"breakingCount"`
 }
 
 type mcpEndpointChange struct {
@@ -476,11 +476,11 @@ type mcpEventChange struct {
 }
 
 type mcpCompatResult struct {
-	EngineVersion   string           `json:"engineVersion"`
-	RequiredModules []mcpCompatItem  `json:"requiredModules"`
-	RequiredSteps   []mcpCompatItem  `json:"requiredSteps"`
-	Compatible      bool             `json:"compatible"`
-	Issues          []string         `json:"issues,omitempty"`
+	EngineVersion   string          `json:"engineVersion"`
+	RequiredModules []mcpCompatItem `json:"requiredModules"`
+	RequiredSteps   []mcpCompatItem `json:"requiredSteps"`
+	Compatible      bool            `json:"compatible"`
+	Issues          []string        `json:"issues,omitempty"`
 }
 
 type mcpCompatItem struct {

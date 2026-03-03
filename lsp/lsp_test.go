@@ -278,4 +278,3 @@ func diagMessages(diags []protocol.Diagnostic) []string {
 	}
 	return msgs
 }
-

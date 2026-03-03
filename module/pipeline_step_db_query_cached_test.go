@@ -405,3 +405,168 @@ func TestDBQueryCachedStep_NegativeTTLRejected(t *testing.T) {
 		t.Fatal("expected error for negative cache_ttl")
 	}
 }
+
+func TestDBQueryCachedStep_ListMode(t *testing.T) {
+	db := setupTestDB(t)
+	app := mockAppWithDB("test-db", db)
+
+	factory := NewDBQueryCachedStepFactory()
+	step, err := factory("list-companies", map[string]any{
+		"database":  "test-db",
+		"query":     "SELECT id, name FROM companies WHERE parent_id IS NULL ORDER BY name",
+		"cache_key": "companies:all",
+		"cache_ttl": "5m",
+		"mode":      "list",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	if result.Output["cache_hit"] != false {
+		t.Errorf("expected cache_hit=false on first call, got %v", result.Output["cache_hit"])
+	}
+
+	rows, ok := result.Output["rows"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected rows to be []map[string]any, got %T", result.Output["rows"])
+	}
+	count, ok := result.Output["count"].(int)
+	if !ok {
+		t.Fatalf("expected count to be int, got %T", result.Output["count"])
+	}
+	if count != 2 {
+		t.Errorf("expected count=2, got %d", count)
+	}
+	if len(rows) != 2 {
+		t.Errorf("expected 2 rows, got %d", len(rows))
+	}
+	if rows[0]["name"] != "Acme Corp" {
+		t.Errorf("expected first row name='Acme Corp', got %v", rows[0]["name"])
+	}
+}
+
+func TestDBQueryCachedStep_ListModeCacheHit(t *testing.T) {
+	db := setupTestDB(t)
+	app := mockAppWithDB("test-db", db)
+
+	factory := NewDBQueryCachedStepFactory()
+	step, err := factory("list-companies", map[string]any{
+		"database":  "test-db",
+		"query":     "SELECT id, name FROM companies WHERE parent_id IS NULL ORDER BY name",
+		"cache_key": "companies:list-hit",
+		"cache_ttl": "5m",
+		"mode":      "list",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+
+	// First call — cache miss
+	_, err = step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("first execute error: %v", err)
+	}
+
+	// Second call — cache hit
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("second execute error: %v", err)
+	}
+
+	if result.Output["cache_hit"] != true {
+		t.Errorf("expected cache_hit=true on second call, got %v", result.Output["cache_hit"])
+	}
+	count, ok := result.Output["count"].(int)
+	if !ok {
+		t.Fatalf("expected count to be int, got %T", result.Output["count"])
+	}
+	if count != 2 {
+		t.Errorf("expected count=2 on cache hit, got %d", count)
+	}
+}
+
+func TestDBQueryCachedStep_ListModeNoRows(t *testing.T) {
+	db := setupTestDB(t)
+	app := mockAppWithDB("test-db", db)
+
+	factory := NewDBQueryCachedStepFactory()
+	step, err := factory("list-empty", map[string]any{
+		"database":  "test-db",
+		"query":     "SELECT id, name FROM companies WHERE id = ?",
+		"params":    []any{"nonexistent"},
+		"cache_key": "companies:empty",
+		"mode":      "list",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	rows, ok := result.Output["rows"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected rows to be []map[string]any, got %T", result.Output["rows"])
+	}
+	if len(rows) != 0 {
+		t.Errorf("expected 0 rows, got %d", len(rows))
+	}
+	count, _ := result.Output["count"].(int)
+	if count != 0 {
+		t.Errorf("expected count=0, got %d", count)
+	}
+}
+
+func TestDBQueryCachedStep_InvalidMode(t *testing.T) {
+	factory := NewDBQueryCachedStepFactory()
+	_, err := factory("bad-mode", map[string]any{
+		"database":  "db",
+		"query":     "SELECT 1",
+		"cache_key": "k",
+		"mode":      "invalid",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error for invalid mode")
+	}
+}
+
+func TestDBQueryCachedStep_DefaultModeIsSingle(t *testing.T) {
+	db := setupTestDB(t)
+	app := mockAppWithDB("test-db", db)
+
+	factory := NewDBQueryCachedStepFactory()
+	step, err := factory("default-mode", map[string]any{
+		"database":  "test-db",
+		"query":     "SELECT id, name FROM companies WHERE id = ?",
+		"params":    []any{"c1"},
+		"cache_key": "company:default-mode",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	// Default mode is single — expect flat columns, not rows/count
+	if result.Output["name"] != "Acme Corp" {
+		t.Errorf("expected name='Acme Corp' in single mode, got %v", result.Output["name"])
+	}
+	if _, ok := result.Output["rows"]; ok {
+		t.Error("expected no 'rows' key in single mode output")
+	}
+}

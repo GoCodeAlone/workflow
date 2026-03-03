@@ -3,9 +3,9 @@ package k8s
 import (
 	"fmt"
 
+	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"gopkg.in/yaml.v3"
 
 	"github.com/GoCodeAlone/workflow/deploy"
 	"github.com/GoCodeAlone/workflow/pkg/k8s/resources"

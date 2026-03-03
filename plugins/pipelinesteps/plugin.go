@@ -90,6 +90,8 @@ func New() *Plugin {
 					"step.field_reencrypt",
 					"step.sandbox_exec",
 					"step.http_proxy",
+					"step.hash",
+					"step.regex_match",
 				},
 				WorkflowTypes: []string{"pipeline"},
 				Capabilities: []plugin.CapabilityDecl{
@@ -137,8 +139,8 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.foreach": wrapStepFactory(module.NewForEachStepFactory(func() *module.StepRegistry {
 			return p.concreteStepRegistry
 		})),
-		"step.webhook_verify": wrapStepFactory(module.NewWebhookVerifyStepFactory()),
-		"step.base64_decode":  wrapStepFactory(module.NewBase64DecodeStepFactory()),
+		"step.webhook_verify":      wrapStepFactory(module.NewWebhookVerifyStepFactory()),
+		"step.base64_decode":       wrapStepFactory(module.NewBase64DecodeStepFactory()),
 		"step.cache_get":           wrapStepFactory(module.NewCacheGetStepFactory()),
 		"step.cache_set":           wrapStepFactory(module.NewCacheSetStepFactory()),
 		"step.cache_delete":        wrapStepFactory(module.NewCacheDeleteStepFactory()),
@@ -153,12 +155,14 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.resilient_circuit_breaker": wrapStepFactory(module.NewResilienceCircuitBreakerStepFactory(func() *module.StepRegistry {
 			return p.concreteStepRegistry
 		})),
-		"step.s3_upload": wrapStepFactory(module.NewS3UploadStepFactory()),
-		"step.auth_validate":    wrapStepFactory(module.NewAuthValidateStepFactory()),
-		"step.token_revoke":     wrapStepFactory(module.NewTokenRevokeStepFactory()),
-		"step.field_reencrypt":  wrapStepFactory(module.NewFieldReencryptStepFactory()),
-		"step.sandbox_exec":     wrapStepFactory(module.NewSandboxExecStepFactory()),
-		"step.http_proxy":       wrapStepFactory(module.NewHTTPProxyStepFactory()),
+		"step.s3_upload":       wrapStepFactory(module.NewS3UploadStepFactory()),
+		"step.auth_validate":   wrapStepFactory(module.NewAuthValidateStepFactory()),
+		"step.token_revoke":    wrapStepFactory(module.NewTokenRevokeStepFactory()),
+		"step.field_reencrypt": wrapStepFactory(module.NewFieldReencryptStepFactory()),
+		"step.sandbox_exec":    wrapStepFactory(module.NewSandboxExecStepFactory()),
+		"step.http_proxy":      wrapStepFactory(module.NewHTTPProxyStepFactory()),
+		"step.hash":            wrapStepFactory(module.NewHashStepFactory()),
+		"step.regex_match":     wrapStepFactory(module.NewRegexMatchStepFactory()),
 	}
 }
 

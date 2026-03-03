@@ -29,8 +29,8 @@ func TestDatabasePoller_DetectsChange(t *testing.T) {
 	store.set("default", []byte(testConfigYAML))
 
 	var (
-		mu      sync.Mutex
-		events  []ConfigChangeEvent
+		mu     sync.Mutex
+		events []ConfigChangeEvent
 	)
 	onChange := func(e ConfigChangeEvent) {
 		mu.Lock()

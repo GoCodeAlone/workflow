@@ -12,7 +12,7 @@ import (
 
 // dbQueryCacheEntry holds a cached query result with its expiry time.
 type dbQueryCacheEntry struct {
-	value     map[string]any
+	value     any // map[string]any for single mode, or list result map for list mode
 	expiresAt time.Time
 }
 
@@ -27,6 +27,7 @@ type DBQueryCachedStep struct {
 	cacheKey   string
 	cacheTTL   time.Duration
 	scanFields []string
+	mode       string // "single" or "list"
 	app        modular.Application
 	tmpl       *TemplateEngine
 
@@ -91,6 +92,14 @@ func NewDBQueryCachedStepFactory() StepFactory {
 			}
 		}
 
+		mode, _ := config["mode"].(string)
+		if mode == "" {
+			mode = "single"
+		}
+		if mode != "single" && mode != "list" {
+			return nil, fmt.Errorf("db_query_cached step %q: mode must be 'single' or 'list', got %q", name, mode)
+		}
+
 		return &DBQueryCachedStep{
 			name:       name,
 			database:   database,
@@ -99,6 +108,7 @@ func NewDBQueryCachedStepFactory() StepFactory {
 			cacheKey:   cacheKey,
 			cacheTTL:   cacheTTL,
 			scanFields: scanFields,
+			mode:       mode,
 			app:        app,
 			tmpl:       NewTemplateEngine(),
 			cache:      make(map[string]dbQueryCacheEntry),
@@ -129,7 +139,7 @@ func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*
 	s.mu.RUnlock()
 
 	if found && time.Now().Before(entry.expiresAt) {
-		output := copyMap(entry.value)
+		output := copyCacheValue(entry.value)
 		output["cache_hit"] = true
 		return &StepResult{Output: output}, nil
 	}
@@ -139,7 +149,7 @@ func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*
 	entry, found = s.cache[key]
 	if found && time.Now().Before(entry.expiresAt) {
 		// Another goroutine populated the cache while we were waiting for the lock
-		output := copyMap(entry.value)
+		output := copyCacheValue(entry.value)
 		s.mu.Unlock()
 		output["cache_hit"] = true
 		return &StepResult{Output: output}, nil
@@ -159,7 +169,7 @@ func (s *DBQueryCachedStep) Execute(ctx context.Context, pc *PipelineContext) (*
 	// Store in cache (write lock)
 	s.mu.Lock()
 	s.cache[key] = dbQueryCacheEntry{
-		value:     copyMap(result),
+		value:     copyCacheRaw(result),
 		expiresAt: time.Now().Add(s.cacheTTL),
 	}
 	s.mu.Unlock()
@@ -219,6 +229,49 @@ func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext) (
 		fieldSet[f] = true
 	}
 
+	if s.mode == "list" {
+		var results []map[string]any
+		for rows.Next() {
+			values := make([]any, len(columns))
+			valuePtrs := make([]any, len(columns))
+			for i := range values {
+				valuePtrs[i] = &values[i]
+			}
+
+			if err := rows.Scan(valuePtrs...); err != nil {
+				return nil, fmt.Errorf("db_query_cached step %q: scan failed: %w", s.name, err)
+			}
+
+			row := make(map[string]any, len(columns))
+			for i, col := range columns {
+				if len(fieldSet) > 0 && !fieldSet[col] {
+					continue
+				}
+				val := values[i]
+				if b, ok := val.([]byte); ok {
+					row[col] = string(b)
+				} else {
+					row[col] = val
+				}
+			}
+			results = append(results, row)
+		}
+
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("db_query_cached step %q: row iteration error: %w", s.name, err)
+		}
+
+		if results == nil {
+			results = []map[string]any{}
+		}
+
+		return map[string]any{
+			"rows":  results,
+			"count": len(results),
+		}, nil
+	}
+
+	// single mode — take only the first row
 	output := make(map[string]any)
 	for rows.Next() {
 		values := make([]any, len(columns))
@@ -242,7 +295,6 @@ func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext) (
 				output[col] = val
 			}
 		}
-		// Only take the first row
 		break
 	}
 
@@ -260,4 +312,18 @@ func copyMap(m map[string]any) map[string]any {
 		cp[k] = v
 	}
 	return cp
+}
+
+// copyCacheValue creates a shallow copy of a cached value for output.
+// The cached value is always a map[string]any (either flat single-row or list-mode with rows/count).
+func copyCacheValue(v any) map[string]any {
+	if m, ok := v.(map[string]any); ok {
+		return copyMap(m)
+	}
+	return make(map[string]any)
+}
+
+// copyCacheRaw creates a copy of the query result for cache storage.
+func copyCacheRaw(m map[string]any) any {
+	return copyMap(m)
 }

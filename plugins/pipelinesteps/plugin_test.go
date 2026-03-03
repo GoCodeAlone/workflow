@@ -68,6 +68,8 @@ func TestStepFactories(t *testing.T) {
 		"step.field_reencrypt",
 		"step.sandbox_exec",
 		"step.http_proxy",
+		"step.hash",
+		"step.regex_match",
 	}
 
 	for _, stepType := range expectedSteps {

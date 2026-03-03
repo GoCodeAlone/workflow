@@ -51,8 +51,8 @@ import (
 	"github.com/GoCodeAlone/workflow/schema"
 	evstore "github.com/GoCodeAlone/workflow/store"
 	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
 
@@ -77,7 +77,7 @@ var (
 	// v1 API flags
 	dataDir       = flag.String("data-dir", "./data", "Directory for SQLite database and persistent data")
 	loadWorkflows = flag.String("load-workflows", "", "Comma-separated paths to workflow YAML files or directories to load alongside admin")
-	importBundle = flag.String("import-bundle", "", "Comma-separated paths to .tar.gz workflow bundles to import and deploy on startup")
+	importBundle  = flag.String("import-bundle", "", "Comma-separated paths to .tar.gz workflow bundles to import and deploy on startup")
 	// Deprecated: admin UI is now served by the external workflow-plugin-admin binary.
 	// This flag is accepted for backwards compatibility but has no effect.
 	_ = flag.String("admin-ui-dir", "", "Deprecated: admin UI is now served by the external workflow-plugin-admin binary")
@@ -1346,10 +1346,10 @@ func applyEnvOverrides() {
 		"anthropic-model": "WORKFLOW_AI_MODEL",
 		"jwt-secret":      "WORKFLOW_JWT_SECRET",
 		"data-dir":        "WORKFLOW_DATA_DIR",
-		"load-workflows": "WORKFLOW_LOAD_WORKFLOWS",
-		"import-bundle":  "WORKFLOW_IMPORT_BUNDLE",
-		"license-key":    "WORKFLOW_LICENSE_KEY",
-		"watch":          "WORKFLOW_WATCH",
+		"load-workflows":  "WORKFLOW_LOAD_WORKFLOWS",
+		"import-bundle":   "WORKFLOW_IMPORT_BUNDLE",
+		"license-key":     "WORKFLOW_LICENSE_KEY",
+		"watch":           "WORKFLOW_WATCH",
 	}
 
 	// Track which flags were explicitly set on the command line.

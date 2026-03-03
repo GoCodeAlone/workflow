@@ -21,7 +21,7 @@ type testDBDriverProvider struct {
 	driver string
 }
 
-func (p *testDBDriverProvider) DB() *sql.DB       { return p.db }
+func (p *testDBDriverProvider) DB() *sql.DB        { return p.db }
 func (p *testDBDriverProvider) DriverName() string { return p.driver }
 
 // mockAppWithDBDriver creates a MockApplication with a named database that reports its driver

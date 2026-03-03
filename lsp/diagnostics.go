@@ -240,7 +240,7 @@ func checkUnclosedTemplates(content string) []protocol.Diagnostic {
 				sev := protocol.DiagnosticSeverityWarning
 				diags = append(diags, protocol.Diagnostic{
 					Range: protocol.Range{
-						Start: protocol.Position{Line: uint32(lineIdx), Character: uint32(startCol)}, //nolint:gosec // G115: line/col indexes are non-negative
+						Start: protocol.Position{Line: uint32(lineIdx), Character: uint32(startCol)},  //nolint:gosec // G115: line/col indexes are non-negative
 						End:   protocol.Position{Line: uint32(lineIdx), Character: uint32(len(line))}, //nolint:gosec // G115: line/col indexes are non-negative
 					},
 					Severity: &sev,

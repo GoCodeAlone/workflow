@@ -102,15 +102,15 @@ func (s *Server) handleGetModuleSchema(_ context.Context, req mcp.CallToolReques
 	example := generateModuleExample(ms)
 
 	result := map[string]any{
-		"type":        ms.Type,
-		"label":       ms.Label,
-		"category":    ms.Category,
-		"description": ms.Description,
-		"inputs":      ms.Inputs,
-		"outputs":     ms.Outputs,
-		"configFields": ms.ConfigFields,
+		"type":          ms.Type,
+		"label":         ms.Label,
+		"category":      ms.Category,
+		"description":   ms.Description,
+		"inputs":        ms.Inputs,
+		"outputs":       ms.Outputs,
+		"configFields":  ms.ConfigFields,
 		"defaultConfig": ms.DefaultConfig,
-		"example":     example,
+		"example":       example,
 	}
 	return marshalToolResult(result)
 }
@@ -778,6 +778,26 @@ func knownStepTypeDescriptions() map[string]stepTypeInfoFull {
 				{Key: "timeout", Type: "string", Description: "Execution timeout (e.g. 5m)"},
 			},
 		},
+		"step.hash": {
+			Type:        "step.hash",
+			Plugin:      "pipelinesteps",
+			Description: "Computes a cryptographic hash of a template-resolved input string.",
+			ConfigKeys:  []string{"algorithm", "input"},
+			ConfigDefs: []stepConfigKeyDef{
+				{Key: "algorithm", Type: "string", Description: "Hash algorithm: md5, sha256, sha512 (default: sha256)"},
+				{Key: "input", Type: "string", Description: "Input string to hash (template expressions supported)", Required: true},
+			},
+		},
+		"step.regex_match": {
+			Type:        "step.regex_match",
+			Plugin:      "pipelinesteps",
+			Description: "Matches a regular expression against a template-resolved input string. Returns matched (bool), match (string), and groups ([]string).",
+			ConfigKeys:  []string{"pattern", "input"},
+			ConfigDefs: []stepConfigKeyDef{
+				{Key: "pattern", Type: "string", Description: "Regular expression pattern (compiled at config time)", Required: true},
+				{Key: "input", Type: "string", Description: "Input string to match against (template expressions supported)", Required: true},
+			},
+		},
 	}
 }
 
@@ -851,6 +871,120 @@ func templateFunctionDescriptions() []TemplateFunctionDef {
 			Signature:   "trigger(keys ...string) any",
 			Description: "Accesses trigger data by nested keys. Returns nil if keys do not exist.",
 			Example:     `{{ trigger "path_params" "id" }}`,
+		},
+		{
+			Name:        "upper",
+			Signature:   "upper(s string) string",
+			Description: "Converts a string to uppercase.",
+			Example:     `{{ .name | upper }}`,
+		},
+		{
+			Name:        "title",
+			Signature:   "title(s string) string",
+			Description: "Converts a string to title case (first letter of each word capitalized).",
+			Example:     `{{ "hello world" | title }}`,
+		},
+		{
+			Name:        "replace",
+			Signature:   "replace(old string, new string, s string) string",
+			Description: "Replaces all occurrences of old with new in s.",
+			Example:     `{{ replace "-" "_" .slug }}`,
+		},
+		{
+			Name:        "contains",
+			Signature:   "contains(substr string, s string) bool",
+			Description: "Reports whether substr is within s.",
+			Example:     `{{ contains "admin" .role }}`,
+		},
+		{
+			Name:        "hasPrefix",
+			Signature:   "hasPrefix(prefix string, s string) bool",
+			Description: "Tests whether s begins with prefix.",
+			Example:     `{{ hasPrefix "/api" .path }}`,
+		},
+		{
+			Name:        "hasSuffix",
+			Signature:   "hasSuffix(suffix string, s string) bool",
+			Description: "Tests whether s ends with suffix.",
+			Example:     `{{ hasSuffix ".json" .filename }}`,
+		},
+		{
+			Name:        "split",
+			Signature:   "split(sep string, s string) []string",
+			Description: "Splits s by sep and returns a string slice.",
+			Example:     `{{ $parts := split "," .tags }}{{ index $parts 0 }}`,
+		},
+		{
+			Name:        "join",
+			Signature:   "join(sep string, v any) string",
+			Description: "Concatenates elements of a slice with sep. Works with []string and []any.",
+			Example:     `{{ join ", " .items }}`,
+		},
+		{
+			Name:        "trimSpace",
+			Signature:   "trimSpace(s string) string",
+			Description: "Removes leading and trailing whitespace from a string.",
+			Example:     `{{ .input | trimSpace }}`,
+		},
+		{
+			Name:        "urlEncode",
+			Signature:   "urlEncode(s string) string",
+			Description: "Percent-encodes a string for safe use in URL query parameters.",
+			Example:     `{{ .query | urlEncode }}`,
+		},
+		{
+			Name:        "add",
+			Signature:   "add(a any, b any) any",
+			Description: "Returns a + b. Returns int64 if both are integer types, float64 otherwise.",
+			Example:     `{{ add .offset .limit }}`,
+		},
+		{
+			Name:        "sub",
+			Signature:   "sub(a any, b any) any",
+			Description: "Returns a - b. Returns int64 if both are integer types, float64 otherwise.",
+			Example:     `{{ sub .total .discount }}`,
+		},
+		{
+			Name:        "mul",
+			Signature:   "mul(a any, b any) any",
+			Description: "Returns a * b. Returns int64 if both are integer types, float64 otherwise.",
+			Example:     `{{ mul .quantity .price }}`,
+		},
+		{
+			Name:        "div",
+			Signature:   "div(a any, b any) any",
+			Description: "Returns a / b as float64. Returns 0 on divide-by-zero.",
+			Example:     `{{ div .total .count }}`,
+		},
+		{
+			Name:        "toInt",
+			Signature:   "toInt(v any) int64",
+			Description: "Converts a value (number or string) to int64.",
+			Example:     `{{ toInt .page_size }}`,
+		},
+		{
+			Name:        "toFloat",
+			Signature:   "toFloat(v any) float64",
+			Description: "Converts a value (number or string) to float64.",
+			Example:     `{{ toFloat .price }}`,
+		},
+		{
+			Name:        "toString",
+			Signature:   "toString(v any) string",
+			Description: "Converts any value to its string representation.",
+			Example:     `{{ toString .count }}`,
+		},
+		{
+			Name:        "length",
+			Signature:   "length(v any) int",
+			Description: "Returns the length of a string, slice, array, or map. Returns 0 for other types.",
+			Example:     `{{ length .items }}`,
+		},
+		{
+			Name:        "coalesce",
+			Signature:   "coalesce(vals ...any) any",
+			Description: "Returns the first non-nil, non-empty-string value from the arguments.",
+			Example:     `{{ coalesce .preferred_name .display_name .username }}`,
 		},
 	}
 }
