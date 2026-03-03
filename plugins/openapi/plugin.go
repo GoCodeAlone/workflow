@@ -103,6 +103,10 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 				}
 			}
 
+			if v, ok := cfg["register_routes"].(bool); ok {
+				oacfg.RegisterRoutes = &v
+			}
+
 			return module.NewOpenAPIModule(name, oacfg)
 		},
 	}
@@ -143,6 +147,13 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 					InheritFrom: "dependency.name",
 				},
 				{
+					Key:          "register_routes",
+					Label:        "Register Routes",
+					Type:         schema.FieldTypeBool,
+					Description:  "When false, skip registering spec-path routes; only serve spec endpoints and Swagger UI (default: true)",
+					DefaultValue: true,
+				},
+				{
 					Key:          "validation",
 					Label:        "Validation",
 					Type:         schema.FieldTypeJSON,
@@ -168,8 +179,9 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				},
 			},
 			DefaultConfig: map[string]any{
-				"validation": map[string]any{"request": true, "response": false},
-				"swagger_ui": map[string]any{"enabled": false, "path": "/docs"},
+				"register_routes": true,
+				"validation":      map[string]any{"request": true, "response": false},
+				"swagger_ui":      map[string]any{"enabled": false, "path": "/docs"},
 			},
 		},
 	}
