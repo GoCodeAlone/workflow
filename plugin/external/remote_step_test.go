@@ -2,6 +2,8 @@ package external
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/module"
@@ -156,5 +158,120 @@ func TestRemoteStep_Execute_StaticConfigPassthrough(t *testing.T) {
 	}
 	if sent["timeout"] != float64(30) {
 		t.Errorf("expected timeout=30, got %v", sent["timeout"])
+	}
+}
+
+// TestRemoteStep_Execute_WritesHTTPResponseOnStopPipeline verifies that when a
+// remote plugin returns StopPipeline=true with response_status, response_body,
+// and response_headers in the output, the RemoteStep writes those to the
+// _http_response_writer and sets _response_handled=true in pipeline metadata.
+func TestRemoteStep_Execute_WritesHTTPResponseOnStopPipeline(t *testing.T) {
+	output, _ := structpb.NewStruct(map[string]any{
+		"response_status": float64(http.StatusForbidden),
+		"response_body":   `{"error":"forbidden: insufficient permissions"}`,
+		"response_headers": map[string]any{
+			"Content-Type": "application/json",
+		},
+	})
+	stub := &stubPluginServiceClient{
+		response: &pb.ExecuteStepResponse{
+			Output:       output,
+			StopPipeline: true,
+		},
+	}
+	step := NewRemoteStep("authz-step", "handle-authz", stub, nil)
+
+	recorder := httptest.NewRecorder()
+	pc := module.NewPipelineContext(nil, nil)
+	pc.Metadata["_http_response_writer"] = http.ResponseWriter(recorder)
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !result.Stop {
+		t.Error("expected Stop=true")
+	}
+
+	if recorder.Code != http.StatusForbidden {
+		t.Errorf("expected HTTP 403, got %d", recorder.Code)
+	}
+
+	body := recorder.Body.String()
+	if body != `{"error":"forbidden: insufficient permissions"}` {
+		t.Errorf("unexpected body: %q", body)
+	}
+
+	if pc.Metadata["_response_handled"] != true {
+		t.Error("expected _response_handled=true in metadata")
+	}
+}
+
+// TestRemoteStep_Execute_NoHTTPWriterOnStopPipeline verifies that when there is
+// no _http_response_writer in the pipeline metadata, the step still returns the
+// correct StepResult without panicking.
+func TestRemoteStep_Execute_NoHTTPWriterOnStopPipeline(t *testing.T) {
+	output, _ := structpb.NewStruct(map[string]any{
+		"response_status": float64(http.StatusForbidden),
+		"response_body":   `{"error":"forbidden"}`,
+	})
+	stub := &stubPluginServiceClient{
+		response: &pb.ExecuteStepResponse{
+			Output:       output,
+			StopPipeline: true,
+		},
+	}
+	step := NewRemoteStep("authz-step", "handle-authz2", stub, nil)
+
+	pc := module.NewPipelineContext(nil, nil)
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Stop {
+		t.Error("expected Stop=true")
+	}
+	if pc.Metadata["_response_handled"] == true {
+		t.Error("expected _response_handled to remain unset when no writer present")
+	}
+}
+
+// TestRemoteStep_Execute_StopPipelineWithoutResponseStatus verifies that a
+// StopPipeline=true result without response_status does NOT write to the
+// response writer and does NOT set _response_handled.
+func TestRemoteStep_Execute_StopPipelineWithoutResponseStatus(t *testing.T) {
+	output, _ := structpb.NewStruct(map[string]any{
+		"some_output": "value",
+	})
+	stub := &stubPluginServiceClient{
+		response: &pb.ExecuteStepResponse{
+			Output:       output,
+			StopPipeline: true,
+		},
+	}
+	step := NewRemoteStep("authz-step", "handle-authz3", stub, nil)
+
+	recorder := httptest.NewRecorder()
+	pc := module.NewPipelineContext(nil, nil)
+	pc.Metadata["_http_response_writer"] = http.ResponseWriter(recorder)
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Stop {
+		t.Error("expected Stop=true")
+	}
+	// No response_status in output → should not write anything
+	if recorder.Code != http.StatusOK { // recorder default is 200 until WriteHeader is called
+		t.Errorf("expected recorder to be untouched (200), got %d", recorder.Code)
+	}
+	if recorder.Body.Len() != 0 {
+		t.Errorf("expected empty body, got %q", recorder.Body.String())
+	}
+	if pc.Metadata["_response_handled"] == true {
+		t.Error("expected _response_handled to remain unset")
 	}
 }

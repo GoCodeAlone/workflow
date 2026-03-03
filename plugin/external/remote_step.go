@@ -3,6 +3,8 @@ package external
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 
 	"github.com/GoCodeAlone/workflow/module"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
@@ -70,8 +72,50 @@ func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*
 		return nil, fmt.Errorf("remote step execute: %s", resp.Error)
 	}
 
+	output := structToMap(resp.Output)
+
+	// When the plugin signals a pipeline stop with an HTTP response encoded in
+	// the output (response_status, response_body, response_headers), write that
+	// response to _http_response_writer so the caller sees the correct status
+	// code rather than a default 200/202. This mirrors the pattern used by
+	// step.auth_validate for 401 responses.
+	if resp.StopPipeline {
+		if w, ok := pc.Metadata["_http_response_writer"].(http.ResponseWriter); ok {
+			if statusRaw, hasStatus := output["response_status"]; hasStatus {
+				var statusCode int
+				switch v := statusRaw.(type) {
+				case float64:
+					statusCode = int(v)
+				case int:
+					statusCode = v
+				}
+				if statusCode > 0 {
+					if headersRaw, ok := output["response_headers"]; ok {
+						if headers, ok := headersRaw.(map[string]any); ok {
+							for k, v := range headers {
+								if vs, ok := v.(string); ok {
+									w.Header().Set(k, vs)
+								}
+							}
+						}
+					}
+					if w.Header().Get("Content-Type") == "" {
+						w.Header().Set("Content-Type", "application/json")
+					}
+					w.WriteHeader(statusCode)
+					if bodyRaw, ok := output["response_body"]; ok {
+						if bodyStr, ok := bodyRaw.(string); ok {
+							_, _ = io.WriteString(w, bodyStr)
+						}
+					}
+					pc.Metadata["_response_handled"] = true
+				}
+			}
+		}
+	}
+
 	return &module.StepResult{
-		Output: structToMap(resp.Output),
+		Output: output,
 		Stop:   resp.StopPipeline,
 	}, nil
 }
