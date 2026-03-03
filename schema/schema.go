@@ -250,6 +250,7 @@ var coreModuleTypes = []string{
 	"step.scan_sast",
 	"step.set",
 	"step.shell_exec",
+	"step.static_file",
 	"step.sub_workflow",
 	"step.transform",
 	"step.ui_scaffold",
