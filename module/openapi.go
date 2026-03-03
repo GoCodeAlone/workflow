@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -473,11 +474,20 @@ func (h *openAPIRouteHandler) validate(r *http.Request) []string {
 			if h.op.RequestBody.Required && len(bodyBytes) == 0 {
 				errs = append(errs, "request body is required but missing")
 			} else if mediaType != nil && mediaType.Schema != nil && len(bodyBytes) > 0 {
-				var bodyData any
-				if jsonErr := json.Unmarshal(bodyBytes, &bodyData); jsonErr != nil {
-					errs = append(errs, fmt.Sprintf("request body contains invalid JSON: %v", jsonErr))
-				} else if bodyErrs := validateJSONValue(bodyData, "body", mediaType.Schema); len(bodyErrs) > 0 {
-					errs = append(errs, bodyErrs...)
+				if ct == "application/x-www-form-urlencoded" {
+					formValues, parseErr := url.ParseQuery(string(bodyBytes))
+					if parseErr != nil {
+						errs = append(errs, fmt.Sprintf("request body contains invalid form data: %v", parseErr))
+					} else if formErrs := validateFormBody(formValues, mediaType.Schema); len(formErrs) > 0 {
+						errs = append(errs, formErrs...)
+					}
+				} else {
+					var bodyData any
+					if jsonErr := json.Unmarshal(bodyBytes, &bodyData); jsonErr != nil {
+						errs = append(errs, fmt.Sprintf("request body contains invalid JSON: %v", jsonErr))
+					} else if bodyErrs := validateJSONValue(bodyData, "body", mediaType.Schema); len(bodyErrs) > 0 {
+						errs = append(errs, bodyErrs...)
+					}
 				}
 			}
 		}
@@ -685,6 +695,29 @@ func validateJSONBody(body any, schema *openAPISchema) []string {
 			continue
 		}
 		if fieldErrs := validateJSONValue(val, field, propSchema); len(fieldErrs) > 0 {
+			errs = append(errs, fieldErrs...)
+		}
+	}
+	return errs
+}
+
+// validateFormBody validates url.Values (from application/x-www-form-urlencoded) against an object schema.
+// Form values are always strings, so each field is validated using validateScalarValue.
+func validateFormBody(values url.Values, schema *openAPISchema) []string {
+	var errs []string
+	// Check required fields
+	for _, req := range schema.Required {
+		if _, present := values[req]; !present {
+			errs = append(errs, fmt.Sprintf("request body: required field %q is missing", req))
+		}
+	}
+	// Validate individual properties
+	for field, propSchema := range schema.Properties {
+		val := values.Get(field)
+		if val == "" {
+			continue
+		}
+		if fieldErrs := validateScalarValue(val, field, propSchema); len(fieldErrs) > 0 {
 			errs = append(errs, fieldErrs...)
 		}
 	}

@@ -564,6 +564,88 @@ func TestOpenAPIModule_RequestValidation_Body(t *testing.T) {
 	})
 }
 
+const webhookFormYAML = `
+openapi: "3.0.0"
+info:
+  title: Webhook API
+  version: "1.0.0"
+paths:
+  /webhook:
+    post:
+      operationId: receiveWebhook
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - Body
+              properties:
+                Body:
+                  type: string
+                From:
+                  type: string
+      responses:
+        "200":
+          description: OK
+`
+
+func TestOpenAPIModule_RequestValidation_FormEncoded(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", webhookFormYAML)
+
+	mod := NewOpenAPIModule("webhook", OpenAPIConfig{
+		SpecFile:   specPath,
+		Validation: OpenAPIValidationConfig{Request: true},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("POST", "/webhook")
+	if h == nil {
+		t.Fatal("POST /webhook handler not found")
+	}
+
+	t.Run("valid form body", func(t *testing.T) {
+		body := "Body=Hello+World&From=%2B15551234567"
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		h.Handle(w, r)
+		if w.Code != http.StatusNotImplemented {
+			t.Errorf("expected 501 stub (validation OK), got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("missing required field", func(t *testing.T) {
+		body := "From=%2B15551234567" // missing required 'Body'
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		h.Handle(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 validation error for missing required field, got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "Body") {
+			t.Errorf("expected error mentioning 'Body', got: %s", w.Body.String())
+		}
+	})
+
+	t.Run("empty body when required", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(""))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		h.Handle(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for empty required body, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+}
+
 func TestOpenAPIModule_MaxBodySize(t *testing.T) {
 	specPath := writeTempSpec(t, ".yaml", petstoreYAML)
 
