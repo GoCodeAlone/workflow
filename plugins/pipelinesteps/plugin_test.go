@@ -46,6 +46,7 @@ func TestStepFactories(t *testing.T) {
 		"step.db_exec",
 		"step.db_query_cached",
 		"step.db_create_partition",
+		"step.db_sync_partitions",
 		"step.json_response",
 		"step.raw_response",
 		"step.validate_path_param",

@@ -106,6 +106,11 @@ func (s *DBExecStep) Execute(_ context.Context, pc *PipelineContext) (*StepResul
 	// Apply automatic tenant scoping when tenantKey is configured.
 	query := s.query
 	if s.tenantKey != "" {
+		// Reject tenantKey for INSERT statements — WHERE doesn't apply.
+		upperQ := strings.TrimLeft(strings.ToUpper(strings.TrimSpace(s.query)), "(")
+		if strings.HasPrefix(upperQ, "INSERT") {
+			return nil, fmt.Errorf("db_exec step %q: tenantKey is not supported for INSERT statements (include the tenant column in your VALUES instead)", s.name)
+		}
 		pkp, ok := svc.(PartitionKeyProvider)
 		if !ok {
 			return nil, fmt.Errorf("db_exec step %q: tenantKey requires database %q to implement PartitionKeyProvider (use database.partitioned)", s.name, s.database)

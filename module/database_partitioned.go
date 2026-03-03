@@ -14,20 +14,35 @@ import (
 // validPartitionValue matches safe LIST partition values (alphanumeric, hyphens, underscores, dots).
 var validPartitionValue = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
 
+// Partition types supported by PostgreSQL.
+const (
+	PartitionTypeList  = "list"
+	PartitionTypeRange = "range"
+)
+
 // PartitionKeyProvider is optionally implemented by database modules that support
-// LIST partitioning. Steps can use PartitionKey() to determine the column name
-// for automatic tenant scoping.
+// partitioning. Steps can use PartitionKey() to determine the column name
+// for automatic tenant scoping, and PartitionTableName() to resolve
+// tenant-specific partition table names at query time.
 type PartitionKeyProvider interface {
 	DBProvider
 	PartitionKey() string
+	// PartitionTableName resolves the partition table name for a given parent
+	// table and tenant value, using the configured partitionNameFormat.
+	// Returns the parent table name unchanged when no format is configured.
+	PartitionTableName(parentTable, tenantValue string) string
 }
 
 // PartitionManager is optionally implemented by database modules that support
-// runtime creation of LIST partitions. The EnsurePartition method is idempotent —
+// runtime creation of partitions. The EnsurePartition method is idempotent —
 // if the partition already exists the call succeeds without error.
 type PartitionManager interface {
 	PartitionKeyProvider
 	EnsurePartition(ctx context.Context, tenantValue string) error
+	// SyncPartitionsFromSource queries the configured sourceTable for all
+	// distinct tenant values and ensures that partitions exist for each one.
+	// No-ops if sourceTable is not configured.
+	SyncPartitionsFromSource(ctx context.Context) error
 }
 
 // PartitionedDatabaseConfig holds configuration for the database.partitioned module.
@@ -38,9 +53,25 @@ type PartitionedDatabaseConfig struct {
 	MaxIdleConns int      `json:"maxIdleConns" yaml:"maxIdleConns"`
 	PartitionKey string   `json:"partitionKey" yaml:"partitionKey"`
 	Tables       []string `json:"tables" yaml:"tables"`
+	// PartitionType is "list" (default) or "range".
+	// LIST partitions are created with FOR VALUES IN ('value').
+	// RANGE partitions are created with FOR VALUES FROM ('value') TO ('value_next').
+	PartitionType string `json:"partitionType" yaml:"partitionType"`
+	// PartitionNameFormat is a template for generating partition table names.
+	// Supports {table} and {tenant} placeholders.
+	// Default: "{table}_{tenant}" (e.g. forms_org_alpha).
+	PartitionNameFormat string `json:"partitionNameFormat" yaml:"partitionNameFormat"`
+	// SourceTable is the table that contains all tenant IDs.
+	// When set, SyncPartitionsFromSource queries this table for all distinct
+	// values in the partition key column and ensures partitions exist.
+	// Example: "tenants" — will query "SELECT DISTINCT tenant_id FROM tenants".
+	SourceTable string `json:"sourceTable" yaml:"sourceTable"`
+	// SourceColumn overrides the column queried in sourceTable.
+	// Defaults to PartitionKey if empty.
+	SourceColumn string `json:"sourceColumn" yaml:"sourceColumn"`
 }
 
-// PartitionedDatabase wraps WorkflowDatabase and adds PostgreSQL LIST partition
+// PartitionedDatabase wraps WorkflowDatabase and adds PostgreSQL partition
 // management. It satisfies DBProvider, DBDriverProvider, PartitionKeyProvider,
 // and PartitionManager.
 type PartitionedDatabase struct {
@@ -57,6 +88,12 @@ func NewPartitionedDatabase(name string, cfg PartitionedDatabaseConfig) *Partiti
 		DSN:          cfg.DSN,
 		MaxOpenConns: cfg.MaxOpenConns,
 		MaxIdleConns: cfg.MaxIdleConns,
+	}
+	if cfg.PartitionType == "" {
+		cfg.PartitionType = PartitionTypeList
+	}
+	if cfg.PartitionNameFormat == "" {
+		cfg.PartitionNameFormat = "{table}_{tenant}"
 	}
 	return &PartitionedDatabase{
 		name:   name,
@@ -109,9 +146,29 @@ func (p *PartitionedDatabase) DriverName() string {
 	return p.config.Driver
 }
 
-// PartitionKey returns the column name used for LIST partitioning (satisfies PartitionKeyProvider).
+// PartitionKey returns the column name used for partitioning (satisfies PartitionKeyProvider).
 func (p *PartitionedDatabase) PartitionKey() string {
 	return p.config.PartitionKey
+}
+
+// PartitionType returns the partition type ("list" or "range").
+func (p *PartitionedDatabase) PartitionType() string {
+	return p.config.PartitionType
+}
+
+// PartitionNameFormat returns the configured partition name format template.
+func (p *PartitionedDatabase) PartitionNameFormat() string {
+	return p.config.PartitionNameFormat
+}
+
+// PartitionTableName resolves the partition table name for a given parent
+// table and tenant value using the configured partitionNameFormat.
+func (p *PartitionedDatabase) PartitionTableName(parentTable, tenantValue string) string {
+	suffix := sanitizePartitionSuffix(tenantValue)
+	name := p.config.PartitionNameFormat
+	name = strings.ReplaceAll(name, "{table}", parentTable)
+	name = strings.ReplaceAll(name, "{tenant}", suffix)
+	return name
 }
 
 // Tables returns the list of tables managed by this partitioned database.
@@ -121,9 +178,12 @@ func (p *PartitionedDatabase) Tables() []string {
 	return result
 }
 
-// EnsurePartition creates a LIST partition for the given tenant value on all
+// EnsurePartition creates a partition for the given tenant value on all
 // configured tables. The operation is idempotent — IF NOT EXISTS prevents errors
 // when the partition already exists.
+//
+// For LIST partitions: CREATE TABLE IF NOT EXISTS <name> PARTITION OF <table> FOR VALUES IN ('<value>')
+// For RANGE partitions: CREATE TABLE IF NOT EXISTS <name> PARTITION OF <table> FOR VALUES FROM ('<value>') TO ('<value>\x00')
 //
 // Only PostgreSQL (pgx, pgx/v5, postgres) is supported. The method validates
 // the tenant value and table/column names to prevent SQL injection.
@@ -133,7 +193,7 @@ func (p *PartitionedDatabase) EnsurePartition(ctx context.Context, tenantValue s
 	}
 
 	if !isSupportedPartitionDriver(p.config.Driver) {
-		return fmt.Errorf("partitioned database %q: driver %q does not support LIST partitioning (use pgx, pgx/v5, or postgres)", p.name, p.config.Driver)
+		return fmt.Errorf("partitioned database %q: driver %q does not support partitioning (use pgx, pgx/v5, or postgres)", p.name, p.config.Driver)
 	}
 
 	if err := validateIdentifier(p.config.PartitionKey); err != nil {
@@ -153,24 +213,101 @@ func (p *PartitionedDatabase) EnsurePartition(ctx context.Context, tenantValue s
 			return fmt.Errorf("partitioned database %q: invalid table name: %w", p.name, err)
 		}
 
-		// Sanitize the partition suffix: replace hyphens and dots with underscores.
-		partitionSuffix := sanitizePartitionSuffix(tenantValue)
-		partitionName := table + "_" + partitionSuffix
+		partitionName := p.PartitionTableName(table, tenantValue)
 
-		// Use IF NOT EXISTS to make this idempotent.
-		// The tenant value is embedded as a quoted literal (single-quoted).
+		// Validate the computed partition name is a safe identifier.
+		if err := validateIdentifier(partitionName); err != nil {
+			return fmt.Errorf("partitioned database %q: invalid partition name %q: %w", p.name, partitionName, err)
+		}
+
+		var ddl string
 		// We have already validated tenantValue against validPartitionValue so
 		// it cannot contain single-quote characters.
-		sql := fmt.Sprintf(
-			"CREATE TABLE IF NOT EXISTS %s PARTITION OF %s FOR VALUES IN ('%s')",
-			partitionName,
-			table,
-			strings.ReplaceAll(tenantValue, "'", ""),
-		)
+		safeValue := strings.ReplaceAll(tenantValue, "'", "")
 
-		if _, err := db.ExecContext(ctx, sql); err != nil {
+		switch p.config.PartitionType {
+		case PartitionTypeList:
+			ddl = fmt.Sprintf(
+				"CREATE TABLE IF NOT EXISTS %s PARTITION OF %s FOR VALUES IN ('%s')",
+				partitionName, table, safeValue,
+			)
+		case PartitionTypeRange:
+			// RANGE partition: from the tenant value (inclusive) to the same
+			// value followed by a null byte (exclusive). This creates a
+			// single-value range partition, which is the closest equivalent
+			// to LIST semantics for RANGE-partitioned tables.
+			ddl = fmt.Sprintf(
+				"CREATE TABLE IF NOT EXISTS %s PARTITION OF %s FOR VALUES FROM ('%s') TO ('%s\\x00')",
+				partitionName, table, safeValue, safeValue,
+			)
+		default:
+			return fmt.Errorf("partitioned database %q: unsupported partition type %q (use %q or %q)",
+				p.name, p.config.PartitionType, PartitionTypeList, PartitionTypeRange)
+		}
+
+		if _, err := db.ExecContext(ctx, ddl); err != nil {
 			return fmt.Errorf("partitioned database %q: failed to create partition %q for table %q: %w",
 				p.name, partitionName, table, err)
+		}
+	}
+
+	return nil
+}
+
+// SyncPartitionsFromSource queries the configured sourceTable for all distinct
+// tenant values and ensures that partitions exist for each one.
+// This enables automatic partition creation when new tenants are added to a
+// source table (e.g., a "tenants" table).
+//
+// No-ops if sourceTable is not configured.
+func (p *PartitionedDatabase) SyncPartitionsFromSource(ctx context.Context) error {
+	if p.config.SourceTable == "" {
+		return nil
+	}
+
+	if err := validateIdentifier(p.config.SourceTable); err != nil {
+		return fmt.Errorf("partitioned database %q: invalid source table: %w", p.name, err)
+	}
+
+	srcCol := p.config.SourceColumn
+	if srcCol == "" {
+		srcCol = p.config.PartitionKey
+	}
+	if err := validateIdentifier(srcCol); err != nil {
+		return fmt.Errorf("partitioned database %q: invalid source column: %w", p.name, err)
+	}
+
+	db := p.base.DB()
+	if db == nil {
+		return fmt.Errorf("partitioned database %q: database connection is nil", p.name)
+	}
+
+	// All identifiers (srcCol, SourceTable) have been validated by validateIdentifier above.
+	query := fmt.Sprintf("SELECT DISTINCT %s FROM %s WHERE %s IS NOT NULL", //nolint:gosec // G201: identifiers validated above
+		srcCol, p.config.SourceTable, srcCol)
+
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("partitioned database %q: failed to query source table %q: %w",
+			p.name, p.config.SourceTable, err)
+	}
+	defer rows.Close()
+
+	var tenants []string
+	for rows.Next() {
+		var val string
+		if err := rows.Scan(&val); err != nil {
+			return fmt.Errorf("partitioned database %q: failed to scan tenant value: %w", p.name, err)
+		}
+		tenants = append(tenants, val)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("partitioned database %q: row iteration error: %w", p.name, err)
+	}
+
+	for _, tenant := range tenants {
+		if err := p.EnsurePartition(ctx, tenant); err != nil {
+			return err
 		}
 	}
 
@@ -180,7 +317,7 @@ func (p *PartitionedDatabase) EnsurePartition(ctx context.Context, tenantValue s
 // isSupportedPartitionDriver returns true for PostgreSQL-compatible drivers.
 func isSupportedPartitionDriver(driver string) bool {
 	switch driver {
-	case "pgx", "pgx/v5", "postgres", "postgresql":
+	case "pgx", "pgx/v5", "postgres":
 		return true
 	}
 	return false

@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 )
 
@@ -24,6 +25,49 @@ func TestPartitionedDatabase_PartitionKey(t *testing.T) {
 	tables := pd.Tables()
 	if len(tables) != 2 {
 		t.Errorf("expected 2 tables, got %d", len(tables))
+	}
+}
+
+func TestPartitionedDatabase_Defaults(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver:       "pgx",
+		PartitionKey: "tenant_id",
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	if pd.PartitionType() != PartitionTypeList {
+		t.Errorf("expected default partition type %q, got %q", PartitionTypeList, pd.PartitionType())
+	}
+	if pd.PartitionNameFormat() != "{table}_{tenant}" {
+		t.Errorf("expected default format, got %q", pd.PartitionNameFormat())
+	}
+}
+
+func TestPartitionedDatabase_PartitionTableName(t *testing.T) {
+	tests := []struct {
+		format   string
+		table    string
+		tenant   string
+		expected string
+	}{
+		{"{table}_{tenant}", "forms", "org-alpha", "forms_org_alpha"},
+		{"{tenant}_{table}", "forms", "org-alpha", "org_alpha_forms"},
+		{"{table}_{tenant}", "submissions", "org.beta", "submissions_org_beta"},
+		{"", "forms", "org-alpha", "forms_org_alpha"}, // default format
+	}
+
+	for _, tc := range tests {
+		cfg := PartitionedDatabaseConfig{
+			Driver:              "pgx",
+			PartitionKey:        "tenant_id",
+			PartitionNameFormat: tc.format,
+		}
+		pd := NewPartitionedDatabase("db", cfg)
+		got := pd.PartitionTableName(tc.table, tc.tenant)
+		if got != tc.expected {
+			t.Errorf("PartitionTableName(format=%q, table=%q, tenant=%q) = %q, want %q",
+				tc.format, tc.table, tc.tenant, got, tc.expected)
+		}
 	}
 }
 
@@ -69,6 +113,51 @@ func TestPartitionedDatabase_EnsurePartition_InvalidPartitionKey(t *testing.T) {
 	}
 }
 
+func TestPartitionedDatabase_EnsurePartition_UnsupportedType(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver:        "pgx",
+		PartitionKey:  "tenant_id",
+		Tables:        []string{"forms"},
+		PartitionType: "hash",
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+	// DB is nil — but the partition type check should happen before the nil check
+	err := pd.EnsurePartition(context.Background(), "org-alpha")
+	if err == nil {
+		t.Fatal("expected error for unsupported partition type")
+	}
+}
+
+func TestPartitionedDatabase_SyncPartitionsFromSource_NoSourceTable(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver:       "pgx",
+		PartitionKey: "tenant_id",
+		Tables:       []string{"forms"},
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	// No source table => no-op
+	err := pd.SyncPartitionsFromSource(context.Background())
+	if err != nil {
+		t.Fatalf("expected no-op when sourceTable is empty, got: %v", err)
+	}
+}
+
+func TestPartitionedDatabase_SyncPartitionsFromSource_InvalidSourceTable(t *testing.T) {
+	cfg := PartitionedDatabaseConfig{
+		Driver:       "pgx",
+		PartitionKey: "tenant_id",
+		Tables:       []string{"forms"},
+		SourceTable:  "invalid table!",
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	err := pd.SyncPartitionsFromSource(context.Background())
+	if err == nil {
+		t.Fatal("expected error for invalid source table name")
+	}
+}
+
 func TestSanitizePartitionSuffix(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -89,14 +178,14 @@ func TestSanitizePartitionSuffix(t *testing.T) {
 }
 
 func TestIsSupportedPartitionDriver(t *testing.T) {
-	supported := []string{"pgx", "pgx/v5", "postgres", "postgresql"}
+	supported := []string{"pgx", "pgx/v5", "postgres"}
 	for _, d := range supported {
 		if !isSupportedPartitionDriver(d) {
 			t.Errorf("expected %q to be supported", d)
 		}
 	}
 
-	unsupported := []string{"sqlite3", "sqlite", "mysql", ""}
+	unsupported := []string{"sqlite3", "sqlite", "mysql", "", "postgresql"}
 	for _, d := range unsupported {
 		if isSupportedPartitionDriver(d) {
 			t.Errorf("expected %q to be unsupported", d)
@@ -106,17 +195,33 @@ func TestIsSupportedPartitionDriver(t *testing.T) {
 
 // testPartitionManager is a mock PartitionManager for testing step.db_create_partition.
 type testPartitionManager struct {
-	partitionKey string
-	partitions   map[string]bool
+	partitionKey        string
+	partitionNameFormat string
+	partitions          map[string]bool
+	syncCalled          bool
 }
 
 func (p *testPartitionManager) DB() *sql.DB          { return nil }
 func (p *testPartitionManager) PartitionKey() string { return p.partitionKey }
+func (p *testPartitionManager) PartitionTableName(parentTable, tenantValue string) string {
+	format := p.partitionNameFormat
+	if format == "" {
+		format = "{table}_{tenant}"
+	}
+	suffix := sanitizePartitionSuffix(tenantValue)
+	name := strings.ReplaceAll(format, "{table}", parentTable)
+	name = strings.ReplaceAll(name, "{tenant}", suffix)
+	return name
+}
 func (p *testPartitionManager) EnsurePartition(_ context.Context, tenantValue string) error {
 	if p.partitions == nil {
 		p.partitions = make(map[string]bool)
 	}
 	p.partitions[tenantValue] = true
+	return nil
+}
+func (p *testPartitionManager) SyncPartitionsFromSource(_ context.Context) error {
+	p.syncCalled = true
 	return nil
 }
 
@@ -153,7 +258,7 @@ func TestDBCreatePartitionStep_Execute(t *testing.T) {
 func TestDBCreatePartitionStep_MissingDatabase(t *testing.T) {
 	factory := NewDBCreatePartitionStepFactory()
 	_, err := factory("create-part", map[string]any{
-		"tenantKey": "body.tenant_id",
+		"tenantKey": "steps.body.tenant_id",
 	}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing database")
@@ -177,7 +282,7 @@ func TestDBCreatePartitionStep_NotPartitionManager(t *testing.T) {
 	factory := NewDBCreatePartitionStepFactory()
 	step, err := factory("create-part", map[string]any{
 		"database":  "plain-db",
-		"tenantKey": "body.tenant_id",
+		"tenantKey": "steps.body.tenant_id",
 	}, app)
 	if err != nil {
 		t.Fatalf("factory error: %v", err)
@@ -212,5 +317,59 @@ func TestDBCreatePartitionStep_NilTenantValue(t *testing.T) {
 	_, err = step.Execute(context.Background(), pc)
 	if err == nil {
 		t.Fatal("expected error when tenant value is nil")
+	}
+}
+
+func TestDBSyncPartitionsStep_Execute(t *testing.T) {
+	mgr := &testPartitionManager{partitionKey: "tenant_id"}
+	app := NewMockApplication()
+	app.Services["part-db"] = mgr
+
+	factory := NewDBSyncPartitionsStepFactory()
+	step, err := factory("sync-parts", map[string]any{
+		"database": "part-db",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	if !mgr.syncCalled {
+		t.Error("expected SyncPartitionsFromSource to be called")
+	}
+	if result.Output["synced"] != true {
+		t.Errorf("expected synced=true, got %v", result.Output["synced"])
+	}
+}
+
+func TestDBSyncPartitionsStep_MissingDatabase(t *testing.T) {
+	factory := NewDBSyncPartitionsStepFactory()
+	_, err := factory("sync-parts", map[string]any{}, nil)
+	if err == nil {
+		t.Fatal("expected error for missing database")
+	}
+}
+
+func TestDBSyncPartitionsStep_NotPartitionManager(t *testing.T) {
+	db := setupTenantTestDB(t)
+	app := mockAppWithDB("plain-db", db)
+
+	factory := NewDBSyncPartitionsStepFactory()
+	step, err := factory("sync-parts", map[string]any{
+		"database": "plain-db",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error when service does not implement PartitionManager")
 	}
 }

@@ -59,7 +59,7 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Type:       "database.partitioned",
 			Plugin:     "storage",
 			Stateful:   true,
-			ConfigKeys: []string{"driver", "dsn", "partitionKey", "tables", "maxOpenConns", "maxIdleConns"},
+			ConfigKeys: []string{"driver", "dsn", "partitionKey", "tables", "partitionType", "partitionNameFormat", "sourceTable", "sourceColumn", "maxOpenConns", "maxIdleConns"},
 		},
 		"persistence.store": {
 			Type:       "persistence.store",
@@ -606,6 +606,11 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Type:       "step.db_create_partition",
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"database", "tenantKey"},
+		},
+		"step.db_sync_partitions": {
+			Type:       "step.db_sync_partitions",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"database"},
 		},
 		"step.json_response": {
 			Type:       "step.json_response",
