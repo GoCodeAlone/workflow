@@ -196,6 +196,9 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 								}
 							}
 						}
+						if claimsRaw, ok := cm["claims"].(map[string]any); ok {
+							client.Claims = claimsRaw
+						}
 						if client.ClientID != "" && client.ClientSecret != "" {
 							m.RegisterClient(client)
 						}
@@ -366,7 +369,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "privateKey", Label: "EC Private Key (PEM)", Type: schema.FieldTypeString, Description: "PEM-encoded EC private key for ES256 signing; if omitted a key is auto-generated", Sensitive: true},
 				{Key: "tokenExpiry", Label: "Token Expiry", Type: schema.FieldTypeDuration, DefaultValue: "1h", Description: "Access token expiration duration (e.g. 15m, 1h)", Placeholder: "1h"},
 				{Key: "issuer", Label: "Issuer", Type: schema.FieldTypeString, DefaultValue: "workflow", Description: "Token issuer (iss) claim", Placeholder: "workflow"},
-				{Key: "clients", Label: "Registered Clients", Type: schema.FieldTypeJSON, Description: "List of OAuth2 clients: [{clientId, clientSecret, scopes, description}]"},
+				{Key: "clients", Label: "Registered Clients", Type: schema.FieldTypeJSON, Description: "List of OAuth2 clients: [{clientId, clientSecret, scopes, description, claims}]"},
 			},
 			DefaultConfig: map[string]any{"algorithm": "ES256", "tokenExpiry": "1h", "issuer": "workflow", "clients": []any{}},
 		},
