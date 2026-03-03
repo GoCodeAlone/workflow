@@ -110,13 +110,17 @@ func (s *DBExecStep) Execute(_ context.Context, pc *PipelineContext) (*StepResul
 		if !ok {
 			return nil, fmt.Errorf("db_exec step %q: tenantKey requires database %q to implement PartitionKeyProvider (use database.partitioned)", s.name, s.database)
 		}
+		partKey := pkp.PartitionKey()
+		if err := validateIdentifier(partKey); err != nil {
+			return nil, fmt.Errorf("db_exec step %q: invalid partition key %q: %w", s.name, partKey, err)
+		}
 		tenantVal := resolveBodyFrom(s.tenantKey, pc)
 		if tenantVal == nil {
 			return nil, fmt.Errorf("db_exec step %q: tenantKey %q resolved to nil in pipeline context", s.name, s.tenantKey)
 		}
 		tenantStr := fmt.Sprintf("%v", tenantVal)
 		nextParam := len(resolvedParams) + 1
-		query = appendTenantFilter(query, pkp.PartitionKey(), nextParam)
+		query = appendTenantFilter(query, partKey, nextParam)
 		resolvedParams = append(resolvedParams, tenantStr)
 	}
 
