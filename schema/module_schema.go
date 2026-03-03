@@ -1991,4 +1991,20 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "input", Label: "Input", Type: FieldTypeString, Required: true, Description: "Input string to match against (template expressions supported)"},
 		},
 	})
+
+	// ---- Static File ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.static_file",
+		Label:       "Static File",
+		Category:    "pipeline",
+		Description: "Serves a static file from disk as an HTTP response; file is read at init time for performance",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context (HTTP response writer)"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Writes an HTTP response with file content and stops the pipeline; if no HTTP writer is available, returns the file content in StepResult.Output as body"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "file", Label: "File Path", Type: FieldTypeString, Required: true, Description: "Path to the file to serve; resolved relative to the config file directory"},
+			{Key: "content_type", Label: "Content-Type", Type: FieldTypeString, Required: true, Description: "MIME type of the file (e.g. application/yaml, text/html)"},
+			{Key: "cache_control", Label: "Cache-Control", Type: FieldTypeString, Description: "Optional Cache-Control header value (e.g. public, max-age=3600)"},
+		},
+	})
 }
