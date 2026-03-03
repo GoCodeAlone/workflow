@@ -9,6 +9,8 @@ import (
 	"log"
 	"maps"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/CrisisTextLine/modular"
 )
@@ -30,6 +32,129 @@ type httpReqContextKey struct{}
 // it into PipelineContext.Metadata["_http_request"] so that steps can read request
 // headers, path parameters, and the request body.
 var HTTPRequestContextKey = httpReqContextKey{}
+
+// pipelineResultKey is the unexported type for the pipeline result context key.
+type pipelineResultKey struct{}
+
+// PipelineResultContextKey is the context key used to capture pipeline execution
+// results from TriggerWorkflow. HTTP trigger handlers store a *PipelineResultHolder
+// in the context before calling TriggerWorkflow; the engine populates it with the
+// pipeline's result.Current map after execution. This lets the trigger apply
+// response_status/response_body/response_headers from the pipeline output when no
+// step wrote directly to the HTTP response writer.
+var PipelineResultContextKey = pipelineResultKey{}
+
+// PipelineResultHolder is a mutable container used to pass pipeline execution
+// results back through the context from the engine to the HTTP trigger handler.
+type PipelineResultHolder struct {
+	result map[string]any
+}
+
+// Set stores the pipeline result in the holder.
+func (h *PipelineResultHolder) Set(result map[string]any) {
+	h.result = result
+}
+
+// Get returns the stored pipeline result, or nil if not set.
+func (h *PipelineResultHolder) Get() map[string]any {
+	return h.result
+}
+
+// coercePipelineStatus coerces common numeric/string types into an HTTP status
+// code. Pipeline steps may emit response_status as int, int64, float64 (common
+// after generic JSON decoding), json.Number, or a numeric string.
+func coercePipelineStatus(v any) (int, bool) {
+	switch s := v.(type) {
+	case int:
+		return s, true
+	case int64:
+		status := int(s)
+		if int64(status) != s {
+			return 0, false
+		}
+		return status, true
+	case float64:
+		status := int(s)
+		if float64(status) != s {
+			return 0, false
+		}
+		return status, true
+	case json.Number:
+		i64, err := s.Int64()
+		if err != nil {
+			return 0, false
+		}
+		status := int(i64)
+		if int64(status) != i64 {
+			return 0, false
+		}
+		return status, true
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(s))
+		if err != nil {
+			return 0, false
+		}
+		return n, true
+	default:
+		return 0, false
+	}
+}
+
+// applyPipelineHeaders writes response headers from common map/header shapes
+// that pipeline steps may emit for response_headers.
+func applyPipelineHeaders(w http.ResponseWriter, rawHeaders any) {
+	switch headers := rawHeaders.(type) {
+	case map[string]any:
+		for k, v := range headers {
+			switch hv := v.(type) {
+			case string:
+				w.Header().Set(k, hv)
+			case []string:
+				for _, sv := range hv {
+					w.Header().Add(k, sv)
+				}
+			case []any:
+				for _, sv := range hv {
+					w.Header().Add(k, fmt.Sprint(sv))
+				}
+			default:
+				w.Header().Set(k, fmt.Sprint(hv))
+			}
+		}
+	case map[string]string:
+		for k, v := range headers {
+			w.Header().Set(k, v)
+		}
+	case http.Header:
+		for k, vals := range headers {
+			for _, v := range vals {
+				w.Header().Add(k, v)
+			}
+		}
+	}
+}
+
+// writePipelineContextResponse checks the result map for response_status and,
+// if present, applies response_headers and writes the response. Returns true if
+// the response was written from the pipeline context fields.
+func writePipelineContextResponse(w http.ResponseWriter, result map[string]any) bool {
+	rawStatus, ok := result["response_status"]
+	if !ok {
+		return false
+	}
+	status, ok := coercePipelineStatus(rawStatus)
+	if !ok {
+		return false
+	}
+	if rawHeaders, ok := result["response_headers"]; ok {
+		applyPipelineHeaders(w, rawHeaders)
+	}
+	w.WriteHeader(status)
+	if body, ok := result["response_body"].(string); ok {
+		_, _ = w.Write([]byte(body)) //nolint:gosec // G705: body is pipeline step output explicitly set as response body
+	}
+	return true
+}
 
 // trackedResponseWriter wraps http.ResponseWriter and tracks whether a response
 // body has been written, so the HTTP trigger can fall back to the generic
@@ -267,6 +392,11 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 		// to headers (e.g. Authorization), method, URL, and body.
 		ctx = context.WithValue(ctx, HTTPRequestContextKey, r)
 
+		// Inject a result holder so the engine can pass the pipeline's result.Current
+		// back to this handler without changing the WorkflowEngine interface.
+		resultHolder := &PipelineResultHolder{}
+		ctx = context.WithValue(ctx, PipelineResultContextKey, resultHolder)
+
 		// Extract data from the request to pass to the workflow.
 		// Include method, path, and parsed body so pipelines have full
 		// access to request context (consistent with CommandHandler).
@@ -314,6 +444,14 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 		// don't overwrite it with the generic fallback.
 		if rw.written {
 			return
+		}
+
+		// If the pipeline set response_status in its output (without writing
+		// directly to the response writer), use those values to build the response.
+		if result := resultHolder.Get(); result != nil {
+			if writePipelineContextResponse(w, result) {
+				return
+			}
 		}
 
 		// Fallback: return a generic accepted response when the pipeline doesn't
