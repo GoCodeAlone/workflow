@@ -166,44 +166,12 @@ func NewHTTPCallStepFactory() StepFactory {
 		if authCfg, ok := config["auth"].(map[string]any); ok {
 			authType, _ := authCfg["type"].(string)
 			if authType == "oauth2_client_credentials" {
-				tokenURL, _ := authCfg["token_url"].(string)
-				if tokenURL == "" {
-					return nil, fmt.Errorf("http_call step %q: auth.token_url is required for oauth2_client_credentials", name)
+				cfg, oauthErr := buildOAuthConfig(name, "auth", authCfg)
+				if oauthErr != nil {
+					return nil, oauthErr
 				}
-				clientID, _ := authCfg["client_id"].(string)
-				if clientID == "" {
-					return nil, fmt.Errorf("http_call step %q: auth.client_id is required for oauth2_client_credentials", name)
-				}
-				clientSecret, _ := authCfg["client_secret"].(string)
-				if clientSecret == "" {
-					return nil, fmt.Errorf("http_call step %q: auth.client_secret is required for oauth2_client_credentials", name)
-				}
-
-				var scopes []string
-				if raw, ok := authCfg["scopes"]; ok {
-					switch v := raw.(type) {
-					case []string:
-						scopes = v
-					case []any:
-						for _, s := range v {
-							if str, ok := s.(string); ok {
-								scopes = append(scopes, str)
-							}
-						}
-					}
-				}
-
-				// Cache key incorporates all credential fields so each distinct tenant/client
-				// gets its own isolated token cache entry.
-				cacheKey := tokenURL + "\x00" + clientID + "\x00" + clientSecret + "\x00" + strings.Join(scopes, " ")
-				step.auth = &oauthConfig{
-					tokenURL:     tokenURL,
-					clientID:     clientID,
-					clientSecret: clientSecret,
-					scopes:       scopes,
-					cacheKey:     cacheKey,
-				}
-				step.oauthEntry = globalOAuthCache.getOrCreate(cacheKey)
+				step.auth = cfg
+				step.oauthEntry = globalOAuthCache.getOrCreate(cfg.cacheKey)
 			}
 		}
 
@@ -215,6 +183,7 @@ func NewHTTPCallStepFactory() StepFactory {
 		//     client_id: "..."
 		//     client_secret: "..."
 		//     scopes: ["api"]
+		// Note: if the "auth" block is also present, it takes precedence and "oauth2" is ignored.
 		if oauth2Cfg, ok := config["oauth2"].(map[string]any); ok && step.auth == nil {
 			grantType, _ := oauth2Cfg["grant_type"].(string)
 			if grantType == "" {
@@ -223,46 +192,58 @@ func NewHTTPCallStepFactory() StepFactory {
 			if grantType != "client_credentials" {
 				return nil, fmt.Errorf("http_call step %q: oauth2.grant_type must be 'client_credentials'", name)
 			}
-			tokenURL, _ := oauth2Cfg["token_url"].(string)
-			if tokenURL == "" {
-				return nil, fmt.Errorf("http_call step %q: oauth2.token_url is required", name)
+			cfg, oauthErr := buildOAuthConfig(name, "oauth2", oauth2Cfg)
+			if oauthErr != nil {
+				return nil, oauthErr
 			}
-			clientID, _ := oauth2Cfg["client_id"].(string)
-			if clientID == "" {
-				return nil, fmt.Errorf("http_call step %q: oauth2.client_id is required", name)
-			}
-			clientSecret, _ := oauth2Cfg["client_secret"].(string)
-			if clientSecret == "" {
-				return nil, fmt.Errorf("http_call step %q: oauth2.client_secret is required", name)
-			}
-
-			var scopes []string
-			if raw, ok := oauth2Cfg["scopes"]; ok {
-				switch v := raw.(type) {
-				case []string:
-					scopes = v
-				case []any:
-					for _, s := range v {
-						if str, ok := s.(string); ok {
-							scopes = append(scopes, str)
-						}
-					}
-				}
-			}
-
-			cacheKey := tokenURL + "\x00" + clientID + "\x00" + clientSecret + "\x00" + strings.Join(scopes, " ")
-			step.auth = &oauthConfig{
-				tokenURL:     tokenURL,
-				clientID:     clientID,
-				clientSecret: clientSecret,
-				scopes:       scopes,
-				cacheKey:     cacheKey,
-			}
-			step.oauthEntry = globalOAuthCache.getOrCreate(cacheKey)
+			step.auth = cfg
+			step.oauthEntry = globalOAuthCache.getOrCreate(cfg.cacheKey)
 		}
 
 		return step, nil
 	}
+}
+
+// buildOAuthConfig parses OAuth2 client_credentials fields from a config map and returns an
+// oauthConfig. The prefix parameter ("auth" or "oauth2") is used in error messages.
+func buildOAuthConfig(stepName, prefix string, cfg map[string]any) (*oauthConfig, error) {
+	tokenURL, _ := cfg["token_url"].(string)
+	if tokenURL == "" {
+		return nil, fmt.Errorf("http_call step %q: %s.token_url is required", stepName, prefix)
+	}
+	clientID, _ := cfg["client_id"].(string)
+	if clientID == "" {
+		return nil, fmt.Errorf("http_call step %q: %s.client_id is required", stepName, prefix)
+	}
+	clientSecret, _ := cfg["client_secret"].(string)
+	if clientSecret == "" {
+		return nil, fmt.Errorf("http_call step %q: %s.client_secret is required", stepName, prefix)
+	}
+
+	var scopes []string
+	if raw, ok := cfg["scopes"]; ok {
+		switch v := raw.(type) {
+		case []string:
+			scopes = v
+		case []any:
+			for _, s := range v {
+				if str, ok := s.(string); ok {
+					scopes = append(scopes, str)
+				}
+			}
+		}
+	}
+
+	// Cache key incorporates all credential fields so each distinct tenant/client
+	// gets its own isolated token cache entry.
+	cacheKey := tokenURL + "\x00" + clientID + "\x00" + clientSecret + "\x00" + strings.Join(scopes, " ")
+	return &oauthConfig{
+		tokenURL:     tokenURL,
+		clientID:     clientID,
+		clientSecret: clientSecret,
+		scopes:       scopes,
+		cacheKey:     cacheKey,
+	}, nil
 }
 
 // Name returns the step name.
@@ -510,11 +491,22 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 			return nil, tokenErr
 		}
 
+		// After a token refresh, instance_url may have changed (Salesforce can rotate it).
+		// Re-inject it into pc.Current and re-resolve the URL template so the retry
+		// hits the correct host.
+		if instanceURL := s.oauthEntry.getInstanceURL(); instanceURL != "" {
+			pc.Current["instance_url"] = instanceURL
+		}
+		retryURL, resolveErr := s.tmpl.Resolve(s.url, pc)
+		if resolveErr != nil {
+			return nil, fmt.Errorf("http_call step %q: failed to resolve url for retry: %w", s.name, resolveErr)
+		}
+
 		retryBody, rawBody2, buildErr := s.buildBodyReader(pc)
 		if buildErr != nil {
 			return nil, buildErr
 		}
-		retryReq, buildErr := s.buildRequest(ctx, resolvedURL, retryBody, rawBody2, pc, newToken)
+		retryReq, buildErr := s.buildRequest(ctx, retryURL, retryBody, rawBody2, pc, newToken)
 		if buildErr != nil {
 			return nil, buildErr
 		}

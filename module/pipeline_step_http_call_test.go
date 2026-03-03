@@ -842,23 +842,11 @@ func TestHTTPCallStep_OAuth2Key_MissingFields(t *testing.T) {
 }
 
 // TestHTTPCallStep_OAuth2_InstanceURL verifies that instance_url from the token response is
-// injected into the pipeline context for URL template resolution and included in step output.
+// parsed, injected into the pipeline context for URL template resolution, and included in step output.
 func TestHTTPCallStep_OAuth2_InstanceURL(t *testing.T) {
-	const fakeInstanceURL = "https://myorg.my.salesforce.com"
+	var tokenRequests int32
 
-	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"access_token": "sf-token",
-			"expires_in":   3600,
-			"token_type":   "Bearer",
-			"instance_url": fakeInstanceURL,
-		})
-	}))
-	defer tokenSrv.Close()
-
-	// The API server will verify the incoming URL path to confirm instance_url was used in
-	// template resolution.
+	// apiSrv is started first so its URL can be returned as instance_url from the token server.
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/services/data/v62.0/sobjects" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
@@ -868,9 +856,20 @@ func TestHTTPCallStep_OAuth2_InstanceURL(t *testing.T) {
 	}))
 	defer apiSrv.Close()
 
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tokenRequests, 1)
+		w.Header().Set("Content-Type", "application/json")
+		// Return apiSrv.URL as instance_url so {{.instance_url}} resolves to the test server.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "sf-token",
+			"expires_in":   3600,
+			"token_type":   "Bearer",
+			"instance_url": apiSrv.URL,
+		})
+	}))
+	defer tokenSrv.Close()
+
 	factory := NewHTTPCallStepFactory()
-	// URL uses {{ .instance_url }} template – will be resolved to apiSrv.URL for testing.
-	// We override fakeInstanceURL to point at apiSrv.URL so the request actually succeeds.
 	step, err := factory("sf-test", map[string]any{
 		"url":    "{{.instance_url}}/services/data/v62.0/sobjects",
 		"method": "GET",
@@ -886,15 +885,16 @@ func TestHTTPCallStep_OAuth2_InstanceURL(t *testing.T) {
 	hs := step.(*HTTPCallStep)
 	hs.httpClient = &http.Client{}
 
-	// Pre-populate the cache entry so instance_url resolves to apiSrv.URL instead of the fake.
-	hs.oauthEntry.set("sf-token", apiSrv.URL, 3600*time.Second)
-
 	pc := NewPipelineContext(nil, nil)
 	result, err := step.Execute(context.Background(), pc)
 	if err != nil {
 		t.Fatalf("execute error: %v", err)
 	}
 
+	// Token endpoint should have been called exactly once.
+	if atomic.LoadInt32(&tokenRequests) != 1 {
+		t.Errorf("expected 1 token request, got %d", atomic.LoadInt32(&tokenRequests))
+	}
 	// instance_url should be present in the step output.
 	if result.Output["instance_url"] != apiSrv.URL {
 		t.Errorf("expected instance_url=%q in output, got %v", apiSrv.URL, result.Output["instance_url"])
@@ -969,6 +969,73 @@ func TestHTTPCallStep_OAuth2_InstanceURL_Cached(t *testing.T) {
 	}
 	if atomic.LoadInt32(&tokenRequests) != 2 {
 		t.Errorf("expected 2 token requests, got %d", atomic.LoadInt32(&tokenRequests))
+	}
+}
+
+// TestHTTPCallStep_OAuth2_Retry401_RefreshesInstanceURL verifies that on a 401, the retry uses
+// an updated instance_url if the refreshed token response returns a new one.
+func TestHTTPCallStep_OAuth2_Retry401_RefreshesInstanceURL(t *testing.T) {
+	var tokenRequests int32
+
+	// Two API servers represent two possible instance URLs.
+	// First call → server1 returns 401; second call (retry) → server2 returns 200.
+	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server2.Close()
+
+	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Always return 401; the real API is on server2 after token refresh.
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`unauthorized`))
+	}))
+	defer server1.Close()
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&tokenRequests, 1)
+		instanceURL := server1.URL // first token → server1
+		if n > 1 {
+			instanceURL = server2.URL // refreshed token → server2
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": fmt.Sprintf("token-v%d", n),
+			"expires_in":   3600,
+			"instance_url": instanceURL,
+		})
+	}))
+	defer tokenSrv.Close()
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("retry-iurl-test", map[string]any{
+		"url":    "{{.instance_url}}/api/resource",
+		"method": "GET",
+		"oauth2": map[string]any{
+			"token_url":     tokenSrv.URL + "/token",
+			"client_id":     "cid",
+			"client_secret": "csec",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	step.(*HTTPCallStep).httpClient = &http.Client{}
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if result.Output["status_code"] != http.StatusOK {
+		t.Errorf("expected 200 after retry, got %v", result.Output["status_code"])
+	}
+	if atomic.LoadInt32(&tokenRequests) != 2 {
+		t.Errorf("expected 2 token requests (initial + refresh), got %d", atomic.LoadInt32(&tokenRequests))
+	}
+	// After the retry, pc.Current["instance_url"] should reflect the refreshed server2 URL.
+	if pc.Current["instance_url"] != server2.URL {
+		t.Errorf("expected pc.Current[instance_url]=%q after retry, got %v", server2.URL, pc.Current["instance_url"])
 	}
 }
 
