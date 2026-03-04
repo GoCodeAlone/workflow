@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Workflow Engine is a configuration-driven orchestration platform built in Go. It turns YAML configuration files into running applications with no code changes required. The engine provides 48+ built-in module types, a visual workflow builder UI, a multi-tenant admin platform, AI-assisted configuration generation, and dynamic hot-reload of Go components at runtime.
+The Workflow Engine is a configuration-driven orchestration platform built in Go. It turns YAML configuration files into running applications with no code changes required. The engine provides 50+ built-in module types, a visual workflow builder UI, a multi-tenant admin platform, AI-assisted configuration generation, and dynamic hot-reload of Go components at runtime.
 
 ## Core Engine
 
@@ -11,7 +11,7 @@ The engine is built on the [CrisisTextLine/modular](https://github.com/CrisisTex
 **Key capabilities:**
 - YAML-driven configuration with environment variable expansion (`${JWT_SECRET}`)
 - Config validation via JSON Schema
-- Module factory registry with 48 built-in types
+- Module factory registry with 50+ built-in types
 - Trigger-based workflow dispatch (HTTP, EventBus, cron schedule)
 - Graceful lifecycle management (start/stop)
 
@@ -19,7 +19,7 @@ The engine is built on the [CrisisTextLine/modular](https://github.com/CrisisTex
 - `cmd/server` -- runs workflow configs as a server process
 - `cmd/wfctl` -- validates and inspects workflow configs offline
 
-## Module Types (48+)
+## Module Types (50+)
 
 All modules are registered in `engine.go` and instantiated from YAML config. Organized by category:
 
@@ -85,6 +85,28 @@ All modules are registered in `engine.go` and instantiated from YAML config. Org
 | `persistence.store` | Write-through persistence (SQLite/PostgreSQL) |
 
 ### Pipeline Steps
+
+Pipeline execution flow:
+
+```mermaid
+flowchart TD
+    A[HTTP Request] --> B[Trigger]
+    B --> C[WorkflowHandler]
+    C --> D[PipelineContext\ncurrent / steps / trigger / meta]
+    D --> E[Step 1\nresolve templates]
+    E --> F{StepResult}
+    F --> G[Merge output\ninto context]
+    G --> H[Step 2\nresolve templates]
+    H --> I{StepResult}
+    I --> J[Merge output\ninto context]
+    J --> K[... more steps ...]
+    K --> L[Final Response]
+
+    style D fill:#f0f4ff,stroke:#4a6fa5
+    style F fill:#e8f5e9,stroke:#388e3c
+    style I fill:#e8f5e9,stroke:#388e3c
+```
+
 | Type | Description |
 |------|-------------|
 | `processing.step` | Configurable processing step |
@@ -94,12 +116,42 @@ All modules are registered in `engine.go` and instantiated from YAML config. Org
 | `step.set` | Sets values in pipeline context with template support |
 | `step.log` | Logs pipeline data for debugging |
 | `step.publish` | Publishes events to EventBus |
+| `step.event_publish` | Publishes events to EventBus with full envelope control |
 | `step.http_call` | Makes outbound HTTP requests |
 | `step.delegate` | Delegates to a named service |
 | `step.request_parse` | Extracts path params, query params, and request body from HTTP requests |
 | `step.db_query` | Executes parameterized SQL SELECT queries against a named database |
 | `step.db_exec` | Executes parameterized SQL INSERT/UPDATE/DELETE against a named database |
+| `step.db_query_cached` | Executes a cached SQL SELECT query |
+| `step.db_create_partition` | Creates a time-based table partition |
+| `step.db_sync_partitions` | Ensures future partitions exist for a partitioned table |
 | `step.json_response` | Writes HTTP JSON response with custom status code and headers |
+| `step.raw_response` | Writes a raw HTTP response with arbitrary content type |
+| `step.static_file` | Serves a pre-loaded file from disk as an HTTP response |
+| `step.workflow_call` | Invokes another workflow pipeline by name |
+| `step.validate_path_param` | Validates a URL path parameter against a set of rules |
+| `step.validate_pagination` | Validates and normalizes pagination query params |
+| `step.validate_request_body` | Validates request body against a JSON schema |
+| `step.foreach` | Iterates over a slice and runs a sub-pipeline per element |
+| `step.webhook_verify` | Verifies an inbound webhook signature |
+| `step.base64_decode` | Decodes a base64-encoded field |
+| `step.cache_get` | Reads a value from the cache module |
+| `step.cache_set` | Writes a value to the cache module |
+| `step.cache_delete` | Deletes a value from the cache module |
+| `step.ui_scaffold` | Generates UI scaffolding from a workflow config |
+| `step.ui_scaffold_analyze` | Analyzes UI scaffold state for a workflow |
+| `step.dlq_send` | Sends a message to the dead-letter queue |
+| `step.dlq_replay` | Replays messages from the dead-letter queue |
+| `step.retry_with_backoff` | Retries a sub-pipeline with exponential backoff |
+| `step.resilient_circuit_breaker` | Wraps a sub-pipeline with a circuit breaker |
+| `step.s3_upload` | Uploads a file or data to an S3-compatible bucket |
+| `step.auth_validate` | Validates an authentication token and populates claims |
+| `step.token_revoke` | Revokes an auth token |
+| `step.field_reencrypt` | Re-encrypts a field with a new key |
+| `step.sandbox_exec` | Executes a command inside a sandboxed container |
+| `step.http_proxy` | Proxies an HTTP request to an upstream service |
+| `step.hash` | Computes a cryptographic hash (md5/sha256/sha512) of a template-resolved input |
+| `step.regex_match` | Matches a regular expression against a template-resolved input |
 | `step.jq` | Applies a JQ expression to pipeline data for complex transformations |
 | `step.ai_complete` | AI text completion using a configured provider |
 | `step.ai_classify` | AI text classification into named categories |
@@ -121,17 +173,60 @@ All modules are registered in `engine.go` and instantiated from YAML config. Org
 
 Pipeline steps support Go template syntax with these built-in functions:
 
-| Function | Description | Example |
-|----------|-------------|---------|
-| `uuidv4` | Generates a UUID v4 | `{{ uuidv4 }}` |
-| `now` | Current time (RFC3339 default, or named/custom layout) | `{{ now }}`, `{{ now "DateOnly" }}`, `{{ now "2006-01-02" }}` |
-| `lower` | Lowercase string | `{{ lower .name }}` |
-| `default` | Default value when empty | `{{ default "pending" .status }}` |
-| `json` | Marshal value to JSON string | `{{ json .data }}` |
-| `trimPrefix` | Remove prefix from string | `{{ .phone | trimPrefix "+" }}` |
-| `trimSuffix` | Remove suffix from string | `{{ .file | trimSuffix ".txt" }}` |
-| `step` | Access step outputs by name and keys | `{{ step "parse-request" "path_params" "id" }}` |
-| `trigger` | Access trigger data by keys | `{{ trigger "path_params" "id" }}` |
+#### Core
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `uuid` | `uuid` | Generate UUID v4 |
+| `uuidv4` | `uuidv4` | Generate UUID v4 (alias for `uuid`) |
+| `now` | `now [layout]` | Current UTC time (default RFC3339); accepts named constants (`RFC3339`, `DateOnly`, etc.) or a Go layout string |
+| `lower` | `lower STRING` | Lowercase |
+| `default` | `default FALLBACK VALUE` | Return fallback if value is nil/empty |
+| `json` | `json VALUE` | Marshal to JSON string |
+| `config` | `config KEY` | Look up a value from the config registry (populated by a `config.provider` module) |
+
+#### String
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `upper` | `upper STRING` | Uppercase |
+| `title` | `title STRING` | Title case (first letter of each word capitalized) |
+| `replace` | `replace OLD NEW STRING` | Replace all occurrences of OLD with NEW |
+| `contains` | `contains SUBSTR STRING` | Check if STRING contains SUBSTR |
+| `hasPrefix` | `hasPrefix PREFIX STRING` | Check if STRING starts with PREFIX |
+| `hasSuffix` | `hasSuffix SUFFIX STRING` | Check if STRING ends with SUFFIX |
+| `split` | `split SEP STRING` | Split STRING by SEP into a slice |
+| `join` | `join SEP SLICE` | Join slice elements with SEP |
+| `trimSpace` | `trimSpace STRING` | Trim leading and trailing whitespace |
+| `trimPrefix` | `trimPrefix PREFIX STRING` | Remove PREFIX from STRING if present |
+| `trimSuffix` | `trimSuffix SUFFIX STRING` | Remove SUFFIX from STRING if present |
+| `urlEncode` | `urlEncode STRING` | URL percent-encode a string |
+
+#### Math
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `add` | `add A B` | Addition (int if both ints, float64 otherwise) |
+| `sub` | `sub A B` | Subtraction |
+| `mul` | `mul A B` | Multiplication |
+| `div` | `div A B` | Division as float64; returns 0 on divide-by-zero |
+
+#### Type / Utility
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `toInt` | `toInt VALUE` | Convert to int64 |
+| `toFloat` | `toFloat VALUE` | Convert to float64 |
+| `toString` | `toString VALUE` | Convert to string |
+| `length` | `length VALUE` | Length of string, slice, array, or map |
+| `coalesce` | `coalesce VAL1 VAL2 ...` | First non-nil, non-empty value |
+
+#### Context (added per-pipeline by the engine)
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `step` | `step NAME KEY...` | Access a prior step's output by step name and nested keys |
+| `trigger` | `trigger KEY...` | Access trigger data by keys |
 
 #### Template Data Context
 

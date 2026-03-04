@@ -3,6 +3,7 @@
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built on Modular](https://img.shields.io/badge/Built%20on-CrisisTextLine%2Fmodular-green)](https://github.com/CrisisTextLine/modular)
+[![Go Reference](https://pkg.go.dev/badge/github.com/GoCodeAlone/workflow.svg)](https://pkg.go.dev/github.com/GoCodeAlone/workflow)
 
 A production-grade, configuration-driven workflow orchestration engine built on [CrisisTextLine/modular](https://github.com/CrisisTextLine/modular) v1.11.11. Define entire applications in YAML -- from API servers to multi-service chat platforms -- with 48+ module types, dynamic hot-reload, AI-powered generation, and a visual builder UI.
 
@@ -161,6 +162,40 @@ cd example/ecommerce-app
 docker compose up
 ```
 
+## CLI Tool (wfctl)
+
+`wfctl` is a command-line tool for inspecting, validating, and generating workflow configurations.
+
+**Install from GitHub Releases:**
+```bash
+curl -sL https://github.com/GoCodeAlone/workflow/releases/latest/download/wfctl-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') -o wfctl && chmod +x wfctl
+```
+
+**Install from source:**
+```bash
+go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
+```
+
+**Commands:**
+- `wfctl inspect <config.yaml>` — summarize modules, workflows, triggers, and dependencies
+- `wfctl validate <config.yaml>` — deep validation against known module/step types
+- `wfctl api-extract <config.yaml>` — generate OpenAPI 3.0 spec from HTTP workflows
+- `wfctl diff <old.yaml> <new.yaml>` — compare configs and detect breaking changes
+- `wfctl manifest <config.yaml>` — produce infrastructure requirements manifest
+- `wfctl scaffold --modules <types>` — generate a skeleton config for given module types
+
+See [docs/WFCTL.md](docs/WFCTL.md) for the full CLI reference.
+
+## Library Usage
+
+Use the workflow engine as a Go library:
+
+```go
+go get github.com/GoCodeAlone/workflow@latest
+```
+
+See the [Go package documentation](https://pkg.go.dev/github.com/GoCodeAlone/workflow) for API reference.
+
 ## Example Applications
 
 ### Chat Platform -- Production-Grade Mental Health Support
@@ -208,23 +243,30 @@ Each example includes a companion `.md` file documenting its architecture and us
 
 ## Architecture
 
-```
-cmd/server/          Server binary, HTTP mux, graceful shutdown
-  main.go            Entry point with CLI flags and AI provider init
+```mermaid
+graph TD
+    A[YAML Config] --> B[StdEngine / BuildFromConfig]
+    B --> C[Module Factories]
+    C --> D[Modules]
+    D --> E[Application\nDependency Injection]
 
-config/              YAML config structs (WorkflowConfig, ModuleConfig)
-module/              65+ built-in module implementations
-handlers/            5 workflow handler types:
-                       HTTP, Messaging, StateMachine, Scheduler, Integration
-dynamic/             Yaegi-based hot-reload system
-ai/                  AI integration layer
-  llm/                 Anthropic Claude direct API with tool use
-  copilot/             GitHub Copilot SDK with session management
-  service.go           Provider selection and orchestration
-  deploy.go            Validation loop and deployment to dynamic components
-ui/                  React + ReactFlow + Zustand visual builder (Vite, TypeScript)
-example/             Top-level example YAML configs and full application examples
-mock/                Test helpers and mock implementations
+    E --> F[Workflow Handlers]
+    F --> F1[HTTP]
+    F --> F2[Messaging]
+    F --> F3[StateMachine]
+    F --> F4[Scheduler]
+    F --> F5[Integration]
+
+    G[Triggers] --> G1[HTTP Endpoints]
+    G --> G2[EventBus Subscriptions]
+    G --> G3[Cron Schedules]
+
+    G1 --> H[TriggerWorkflow]
+    G2 --> H
+    G3 --> H
+    H --> I[Handler Dispatch]
+    I --> J[Pipeline Execution]
+    J --> J1[Steps: validate, transform,\nconditional, http_call, db_query...]
 ```
 
 **Core flow:**
@@ -298,6 +340,13 @@ cd ui && npm run lint
 | AI | Anthropic Claude API, GitHub Copilot SDK |
 | Containers | Docker multi-stage builds, Docker Compose |
 | Testing | Go testing, Vitest, Playwright |
+
+## Documentation
+
+- [DOCUMENTATION.md](DOCUMENTATION.md) — Full module, step, and template reference
+- [docs/WFCTL.md](docs/WFCTL.md) — CLI tool reference
+- [deploy/README.md](deploy/README.md) — Deployment guide
+- [docs/tutorials/](docs/tutorials/) — Getting started and walkthrough tutorials
 
 ## Roadmap
 
