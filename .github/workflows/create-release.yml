@@ -1,0 +1,78 @@
+name: Create Release Tag
+
+# Manually trigger a new semantic version tag, which will auto-trigger the
+# existing release workflow (release.yml) via the `v*` tag push event.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Generate and push next semver tag
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine next version
+        id: next_version
+        run: |
+          # Find the latest v* semver tag (ignore pre-release tags like snapshot)
+          LATEST=$(git tag --list 'v*' --sort=-version:refname \
+            | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+            | head -n1)
+
+          if [ -z "$LATEST" ]; then
+            LATEST="v0.0.0"
+          fi
+
+          echo "Latest tag: ${LATEST}"
+
+          # Strip the leading 'v'
+          VERSION="${LATEST#v}"
+          MAJOR="${VERSION%%.*}"
+          MINOR="${VERSION#*.}"; MINOR="${MINOR%.*}"
+          PATCH="${VERSION##*.}"
+
+          BUMP="${{ inputs.bump }}"
+          case "${BUMP}" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+
+          NEXT_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "Next tag: ${NEXT_TAG}"
+          echo "tag=${NEXT_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.next_version.outputs.tag }}"
+          git push origin "${{ steps.next_version.outputs.tag }}"
