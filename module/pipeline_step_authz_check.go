@@ -63,7 +63,10 @@ func (s *AuthzCheckStep) Execute(ctx context.Context, pc *PipelineContext) (*Ste
 
 	// Build the policy input: use a named field if configured, otherwise use
 	// the full pipeline context (same strategy as step.policy_evaluate).
+	// Track whether the input shares the same backing data as pc.Current so we
+	// can clone before adding the subject key.
 	var input map[string]any
+	inputIsShared := false
 	if s.inputFrom != "" {
 		if raw, ok := pc.Current[s.inputFrom]; ok {
 			if m, ok := raw.(map[string]any); ok {
@@ -73,6 +76,25 @@ func (s *AuthzCheckStep) Execute(ctx context.Context, pc *PipelineContext) (*Ste
 	}
 	if input == nil {
 		input = pc.Current
+		inputIsShared = true
+	}
+
+	// Map the configured subject field into the policy input so that
+	// authorization decisions can depend on it. We read the subject from
+	// pc.Current[s.subjectField] and expose it under the canonical "subject"
+	// key in the input. Clone the input first when it shares data with
+	// pc.Current to avoid side effects on the pipeline context.
+	if s.subjectField != "" && s.subjectField != "subject" {
+		if subj, ok := pc.Current[s.subjectField]; ok {
+			if inputIsShared {
+				cloned := make(map[string]any, len(input)+1)
+				for k, v := range input {
+					cloned[k] = v
+				}
+				input = cloned
+			}
+			input["subject"] = subj
+		}
 	}
 
 	// Evaluate the policy.
@@ -116,7 +138,10 @@ func (s *AuthzCheckStep) forbiddenResponse(pc *PipelineContext, message string) 
 		Output: map[string]any{
 			"response_status": http.StatusForbidden,
 			"response_body":   fmt.Sprintf(`{"error":%q}`, errorMsg),
-			"error":           errorMsg,
+			"response_headers": map[string]string{
+				"Content-Type": "application/json",
+			},
+			"error": errorMsg,
 		},
 		Stop: true,
 	}, nil

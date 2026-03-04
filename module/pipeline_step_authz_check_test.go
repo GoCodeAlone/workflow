@@ -138,6 +138,10 @@ func TestAuthzCheckStep_WritesHTTPResponse_NoResponseWriter(t *testing.T) {
 	if result.Output["response_status"] != http.StatusForbidden {
 		t.Errorf("expected response_status=403, got %v", result.Output["response_status"])
 	}
+	headers, _ := result.Output["response_headers"].(map[string]string)
+	if headers["Content-Type"] != "application/json" {
+		t.Errorf("expected response_headers Content-Type=application/json, got %v", headers)
+	}
 }
 
 func TestAuthzCheckStep_InputFrom(t *testing.T) {
@@ -244,5 +248,79 @@ func TestAuthzCheckStep_CustomSubjectField(t *testing.T) {
 	s := step.(*AuthzCheckStep)
 	if s.subjectField != "user_id" {
 		t.Errorf("expected subject_field='user_id', got %q", s.subjectField)
+	}
+}
+
+// capturingPolicyEngine records the last input passed to Evaluate.
+type capturingPolicyEngine struct {
+	lastInput map[string]any
+}
+
+func (e *capturingPolicyEngine) Evaluate(_ context.Context, input map[string]any) (*PolicyDecision, error) {
+	e.lastInput = input
+	return &PolicyDecision{Allowed: true, Reasons: []string{"allow"}, Metadata: nil}, nil
+}
+func (e *capturingPolicyEngine) LoadPolicy(_, _ string) error { return nil }
+func (e *capturingPolicyEngine) ListPolicies() []PolicyInfo   { return nil }
+
+func TestAuthzCheckStep_SubjectFieldMappedToInput(t *testing.T) {
+	eng := &capturingPolicyEngine{}
+	app := newTestPolicyApp("policy", eng)
+
+	factory := NewAuthzCheckStepFactory()
+	step, err := factory("authz", map[string]any{
+		"policy_engine": "policy",
+		"subject_field": "auth_user_id",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(map[string]any{
+		"auth_user_id": "user-99",
+		"other_field":  "value",
+	}, nil)
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Stop {
+		t.Error("expected Stop=false when policy allows")
+	}
+	// The input passed to the engine should have "subject" mapped from auth_user_id.
+	if eng.lastInput["subject"] != "user-99" {
+		t.Errorf("expected input[subject]=user-99, got %v", eng.lastInput["subject"])
+	}
+	// Original field should still be present.
+	if eng.lastInput["auth_user_id"] != "user-99" {
+		t.Errorf("expected input[auth_user_id]=user-99, got %v", eng.lastInput["auth_user_id"])
+	}
+}
+
+func TestAuthzCheckStep_SubjectFieldMappingDoesNotMutatePipelineContext(t *testing.T) {
+	eng := &capturingPolicyEngine{}
+	app := newTestPolicyApp("policy", eng)
+
+	factory := NewAuthzCheckStepFactory()
+	step, err := factory("authz", map[string]any{
+		"policy_engine": "policy",
+		"subject_field": "auth_user_id",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(map[string]any{
+		"auth_user_id": "user-99",
+	}, nil)
+
+	_, err = step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// pc.Current should NOT have had "subject" injected.
+	if _, ok := pc.Current["subject"]; ok {
+		t.Error("expected pc.Current to not be mutated with 'subject' key")
 	}
 }
