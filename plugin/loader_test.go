@@ -1,11 +1,14 @@
 package plugin
 
 import (
+	"context"
+	"io"
 	"testing"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/deploy"
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
@@ -228,6 +231,10 @@ func TestPluginLoader_LoadPluginWithOverride_StepType(t *testing.T) {
 	if err := loader.LoadPlugin(p1); err != nil {
 		t.Fatalf("first load should succeed: %v", err)
 	}
+	// LoadPlugin should still reject duplicate step types.
+	if err := loader.LoadPlugin(p2); err == nil {
+		t.Fatal("expected duplicate step type error from LoadPlugin")
+	}
 	if err := loader.LoadPluginWithOverride(p2); err != nil {
 		t.Fatalf("LoadPluginWithOverride should succeed: %v", err)
 	}
@@ -249,7 +256,7 @@ func TestPluginLoader_LoadPluginWithOverride_StepType(t *testing.T) {
 func TestPluginLoader_LoadPluginWithOverride_AllTypes(t *testing.T) {
 	loader := newTestEngineLoader()
 
-	p1 := &modulePlugin{
+	p1 := &fullPlugin{
 		BaseEnginePlugin: *makeEnginePlugin("builtin", "1.0.0", nil),
 		modules: map[string]ModuleFactory{
 			"mod.type": func(name string, cfg map[string]any) modular.Module { return nil },
@@ -263,8 +270,10 @@ func TestPluginLoader_LoadPluginWithOverride_AllTypes(t *testing.T) {
 		handlers: map[string]WorkflowHandlerFactory{
 			"handler.type": func() any { return nil },
 		},
+		deployTargets:    map[string]deploy.DeployTarget{"deploy.target": &mockDeployTarget{name: "builtin-target"}},
+		sidecarProviders: map[string]deploy.SidecarProvider{"sidecar.type": &mockSidecarProvider{typeName: "builtin-sidecar"}},
 	}
-	p2 := &modulePlugin{
+	p2 := &fullPlugin{
 		BaseEnginePlugin: *makeEnginePlugin("external", "1.0.0", nil),
 		modules: map[string]ModuleFactory{
 			"mod.type": func(name string, cfg map[string]any) modular.Module { return nil },
@@ -278,10 +287,16 @@ func TestPluginLoader_LoadPluginWithOverride_AllTypes(t *testing.T) {
 		handlers: map[string]WorkflowHandlerFactory{
 			"handler.type": func() any { return nil },
 		},
+		deployTargets:    map[string]deploy.DeployTarget{"deploy.target": &mockDeployTarget{name: "external-target"}},
+		sidecarProviders: map[string]deploy.SidecarProvider{"sidecar.type": &mockSidecarProvider{typeName: "external-sidecar"}},
 	}
 
 	if err := loader.LoadPlugin(p1); err != nil {
 		t.Fatalf("first load should succeed: %v", err)
+	}
+	// Verify LoadPlugin rejects all duplicate types.
+	if err := loader.LoadPlugin(p2); err == nil {
+		t.Fatal("expected duplicate type error from LoadPlugin")
 	}
 	if err := loader.LoadPluginWithOverride(p2); err != nil {
 		t.Fatalf("LoadPluginWithOverride should succeed for all types: %v", err)
@@ -297,6 +312,12 @@ func TestPluginLoader_LoadPluginWithOverride_AllTypes(t *testing.T) {
 	}
 	if got := len(loader.WorkflowHandlerFactories()); got != 1 {
 		t.Errorf("expected 1 handler factory, got %d", got)
+	}
+	if got := len(loader.DeployTargets()); got != 1 {
+		t.Errorf("expected 1 deploy target, got %d", got)
+	}
+	if got := len(loader.SidecarProviders()); got != 1 {
+		t.Errorf("expected 1 sidecar provider, got %d", got)
 	}
 }
 
@@ -369,3 +390,54 @@ type hookPlugin struct {
 }
 
 func (p *hookPlugin) WiringHooks() []WiringHook { return p.hooks }
+
+// fullPlugin embeds BaseEnginePlugin and overrides all factory methods including
+// deploy targets and sidecar providers.
+type fullPlugin struct {
+	BaseEnginePlugin
+	modules          map[string]ModuleFactory
+	steps            map[string]StepFactory
+	triggers         map[string]TriggerFactory
+	handlers         map[string]WorkflowHandlerFactory
+	deployTargets    map[string]deploy.DeployTarget
+	sidecarProviders map[string]deploy.SidecarProvider
+}
+
+func (p *fullPlugin) ModuleFactories() map[string]ModuleFactory           { return p.modules }
+func (p *fullPlugin) StepFactories() map[string]StepFactory               { return p.steps }
+func (p *fullPlugin) TriggerFactories() map[string]TriggerFactory         { return p.triggers }
+func (p *fullPlugin) WorkflowHandlers() map[string]WorkflowHandlerFactory { return p.handlers }
+func (p *fullPlugin) DeployTargets() map[string]deploy.DeployTarget       { return p.deployTargets }
+func (p *fullPlugin) SidecarProviders() map[string]deploy.SidecarProvider {
+	return p.sidecarProviders
+}
+
+// mockDeployTarget is a no-op deploy target for tests.
+type mockDeployTarget struct{ name string }
+
+func (m *mockDeployTarget) Name() string { return m.name }
+func (m *mockDeployTarget) Generate(_ context.Context, _ *deploy.DeployRequest) (*deploy.DeployArtifacts, error) {
+	return nil, nil
+}
+func (m *mockDeployTarget) Apply(_ context.Context, _ *deploy.DeployArtifacts, _ deploy.ApplyOpts) (*deploy.DeployResult, error) {
+	return nil, nil
+}
+func (m *mockDeployTarget) Destroy(_ context.Context, _, _ string) error            { return nil }
+func (m *mockDeployTarget) Status(_ context.Context, _, _ string) (*deploy.DeployStatus, error) {
+	return nil, nil
+}
+func (m *mockDeployTarget) Diff(_ context.Context, _ *deploy.DeployArtifacts) (string, error) {
+	return "", nil
+}
+func (m *mockDeployTarget) Logs(_ context.Context, _, _ string, _ deploy.LogOpts) (io.ReadCloser, error) {
+	return nil, nil
+}
+
+// mockSidecarProvider is a no-op sidecar provider for tests.
+type mockSidecarProvider struct{ typeName string }
+
+func (m *mockSidecarProvider) Type() string                                             { return m.typeName }
+func (m *mockSidecarProvider) Validate(_ config.SidecarConfig) error                   { return nil }
+func (m *mockSidecarProvider) Resolve(_ config.SidecarConfig, _ string) (*deploy.SidecarSpec, error) {
+	return nil, nil
+}

@@ -76,7 +76,23 @@ func (l *PluginLoader) LoadBinaryPlugin(p EnginePlugin, binaryPath, sigPath, cer
 	return l.LoadPlugin(p)
 }
 
-// ValidateTier checks whether a plugin's tier is allowed given the current
+// LoadBinaryPluginWithOverride is the override-capable counterpart to
+// LoadBinaryPlugin. It verifies the plugin binary with cosign (for premium
+// plugins) and then loads the plugin, allowing it to override existing module,
+// step, trigger, handler, deploy target, and sidecar provider registrations.
+// When a duplicate type is encountered, the new factory replaces the previous
+// one and a warning is logged instead of returning an error.
+func (l *PluginLoader) LoadBinaryPluginWithOverride(p EnginePlugin, binaryPath, sigPath, certPath string) error {
+	manifest := p.EngineManifest()
+	if manifest.Tier == TierPremium && l.cosignVerifier != nil {
+		if err := l.cosignVerifier.Verify(binaryPath, sigPath, certPath); err != nil {
+			return fmt.Errorf("plugin %q: binary verification failed: %w", manifest.Name, err)
+		}
+	}
+	return l.LoadPluginWithOverride(p)
+}
+
+
 // license validator configuration:
 //   - Core and Community plugins are always allowed.
 //   - Premium plugins are validated against the LicenseValidator if one is set.
