@@ -76,7 +76,23 @@ func (l *PluginLoader) LoadBinaryPlugin(p EnginePlugin, binaryPath, sigPath, cer
 	return l.LoadPlugin(p)
 }
 
-// ValidateTier checks whether a plugin's tier is allowed given the current
+// LoadBinaryPluginWithOverride is the override-capable counterpart to
+// LoadBinaryPlugin. It verifies the plugin binary with cosign (for premium
+// plugins) and then loads the plugin, allowing it to override existing module,
+// step, trigger, handler, deploy target, and sidecar provider registrations.
+// When a duplicate type is encountered, the new factory replaces the previous
+// one and a warning is logged instead of returning an error.
+func (l *PluginLoader) LoadBinaryPluginWithOverride(p EnginePlugin, binaryPath, sigPath, certPath string) error {
+	manifest := p.EngineManifest()
+	if manifest.Tier == TierPremium && l.cosignVerifier != nil {
+		if err := l.cosignVerifier.Verify(binaryPath, sigPath, certPath); err != nil {
+			return fmt.Errorf("plugin %q: binary verification failed: %w", manifest.Name, err)
+		}
+	}
+	return l.LoadPluginWithOverride(p)
+}
+
+
 // license validator configuration:
 //   - Core and Community plugins are always allowed.
 //   - Premium plugins are validated against the LicenseValidator if one is set.
@@ -106,6 +122,20 @@ func (l *PluginLoader) ValidateTier(manifest *PluginManifest) error {
 // schemas, and wiring hooks. Returns an error if any factory type conflicts with
 // an existing registration.
 func (l *PluginLoader) LoadPlugin(p EnginePlugin) error {
+	return l.loadPlugin(p, false)
+}
+
+// LoadPluginWithOverride is like LoadPlugin but allows the plugin to override
+// existing module, step, trigger, handler, deploy target, and sidecar provider
+// registrations. When a duplicate type is encountered, the new factory replaces
+// the previous one and a warning is logged instead of returning an error.
+// This is intended for external plugins that intentionally replace built-in
+// defaults (e.g., replacing a mock authz step with a production implementation).
+func (l *PluginLoader) LoadPluginWithOverride(p EnginePlugin) error {
+	return l.loadPlugin(p, true)
+}
+
+func (l *PluginLoader) loadPlugin(p EnginePlugin, allowOverride bool) error {
 	manifest := p.EngineManifest()
 	if err := manifest.Validate(); err != nil {
 		return fmt.Errorf("plugin %q: %w", manifest.Name, err)
@@ -132,34 +162,46 @@ func (l *PluginLoader) LoadPlugin(p EnginePlugin) error {
 		}
 	}
 
-	// Register module factories — conflict on duplicate type.
+	// Register module factories — conflict on duplicate type unless override allowed.
 	for typeName, factory := range p.ModuleFactories() {
 		if _, exists := l.moduleFactories[typeName]; exists {
-			return fmt.Errorf("plugin %q: module type %q already registered", manifest.Name, typeName)
+			if !allowOverride {
+				return fmt.Errorf("plugin %q: module type %q already registered", manifest.Name, typeName)
+			}
+			slog.Warn("plugin overriding existing module type", "plugin", manifest.Name, "type", typeName)
 		}
 		l.moduleFactories[typeName] = factory
 	}
 
-	// Register step factories — conflict on duplicate type.
+	// Register step factories — conflict on duplicate type unless override allowed.
 	for typeName, factory := range p.StepFactories() {
 		if _, exists := l.stepFactories[typeName]; exists {
-			return fmt.Errorf("plugin %q: step type %q already registered", manifest.Name, typeName)
+			if !allowOverride {
+				return fmt.Errorf("plugin %q: step type %q already registered", manifest.Name, typeName)
+			}
+			slog.Warn("plugin overriding existing step type", "plugin", manifest.Name, "type", typeName)
 		}
 		l.stepFactories[typeName] = factory
 	}
 
-	// Register trigger factories — conflict on duplicate type.
+	// Register trigger factories — conflict on duplicate type unless override allowed.
 	for typeName, factory := range p.TriggerFactories() {
 		if _, exists := l.triggerFactories[typeName]; exists {
-			return fmt.Errorf("plugin %q: trigger type %q already registered", manifest.Name, typeName)
+			if !allowOverride {
+				return fmt.Errorf("plugin %q: trigger type %q already registered", manifest.Name, typeName)
+			}
+			slog.Warn("plugin overriding existing trigger type", "plugin", manifest.Name, "type", typeName)
 		}
 		l.triggerFactories[typeName] = factory
 	}
 
-	// Register workflow handler factories — conflict on duplicate type.
+	// Register workflow handler factories — conflict on duplicate type unless override allowed.
 	for typeName, factory := range p.WorkflowHandlers() {
 		if _, exists := l.handlerFactories[typeName]; exists {
-			return fmt.Errorf("plugin %q: workflow handler type %q already registered", manifest.Name, typeName)
+			if !allowOverride {
+				return fmt.Errorf("plugin %q: workflow handler type %q already registered", manifest.Name, typeName)
+			}
+			slog.Warn("plugin overriding existing workflow handler type", "plugin", manifest.Name, "type", typeName)
 		}
 		l.handlerFactories[typeName] = factory
 	}
@@ -175,18 +217,24 @@ func (l *PluginLoader) LoadPlugin(p EnginePlugin) error {
 	// Collect config transform hooks.
 	l.configTransformHooks = append(l.configTransformHooks, p.ConfigTransformHooks()...)
 
-	// Register deploy targets — conflict on duplicate name.
+	// Register deploy targets — conflict on duplicate name unless override allowed.
 	for name, target := range p.DeployTargets() {
 		if _, exists := l.deployTargets[name]; exists {
-			return fmt.Errorf("plugin %q: deploy target %q already registered", manifest.Name, name)
+			if !allowOverride {
+				return fmt.Errorf("plugin %q: deploy target %q already registered", manifest.Name, name)
+			}
+			slog.Warn("plugin overriding existing deploy target", "plugin", manifest.Name, "target", name)
 		}
 		l.deployTargets[name] = target
 	}
 
-	// Register sidecar providers — conflict on duplicate type.
+	// Register sidecar providers — conflict on duplicate type unless override allowed.
 	for typeName, provider := range p.SidecarProviders() {
 		if _, exists := l.sidecarProviders[typeName]; exists {
-			return fmt.Errorf("plugin %q: sidecar provider %q already registered", manifest.Name, typeName)
+			if !allowOverride {
+				return fmt.Errorf("plugin %q: sidecar provider %q already registered", manifest.Name, typeName)
+			}
+			slog.Warn("plugin overriding existing sidecar provider", "plugin", manifest.Name, "type", typeName)
 		}
 		l.sidecarProviders[typeName] = provider
 	}
