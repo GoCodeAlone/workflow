@@ -564,6 +564,103 @@ func TestOpenAPIModule_RequestValidation_Body(t *testing.T) {
 	})
 }
 
+const webhookFormYAML = `
+openapi: "3.0.0"
+info:
+  title: Webhook API
+  version: "1.0.0"
+paths:
+  /webhook:
+    post:
+      operationId: receiveWebhook
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - Body
+              properties:
+                Body:
+                  type: string
+                  minLength: 1
+                From:
+                  type: string
+      responses:
+        "200":
+          description: OK
+`
+
+func TestOpenAPIModule_RequestValidation_FormEncoded(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", webhookFormYAML)
+
+	mod := NewOpenAPIModule("webhook", OpenAPIConfig{
+		SpecFile:   specPath,
+		Validation: OpenAPIValidationConfig{Request: true},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("POST", "/webhook")
+	if h == nil {
+		t.Fatal("POST /webhook handler not found")
+	}
+
+	t.Run("valid form body", func(t *testing.T) {
+		body := "Body=Hello+World&From=%2B15551234567"
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		h.Handle(w, r)
+		if w.Code != http.StatusNotImplemented {
+			t.Errorf("expected 501 stub (validation OK), got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("missing required field", func(t *testing.T) {
+		body := "From=%2B15551234567" // missing required 'Body'
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		h.Handle(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 validation error for missing required field, got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "Body") {
+			t.Errorf("expected error mentioning 'Body', got: %s", w.Body.String())
+		}
+	})
+
+	t.Run("empty body when required", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(""))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		h.Handle(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for empty required body, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("present-but-empty field violates minLength", func(t *testing.T) {
+		body := "Body=" // Body key present but empty value, violates minLength:1
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		h.Handle(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for empty field with minLength, got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "minLength") {
+			t.Errorf("expected minLength error, got: %s", w.Body.String())
+		}
+	})
+}
+
 func TestOpenAPIModule_MaxBodySize(t *testing.T) {
 	specPath := writeTempSpec(t, ".yaml", petstoreYAML)
 
@@ -707,7 +804,7 @@ func TestValidateScalarValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			errs := validateScalarValue(tt.val, "param", tt.schema)
+			errs := validateScalarValue(tt.val, "param", "parameter", tt.schema)
 			if tt.wantErr && len(errs) == 0 {
 				t.Error("expected validation error, got none")
 			}
@@ -741,7 +838,7 @@ func TestHTMLEscape(t *testing.T) {
 func TestValidateScalarValue_Pattern(t *testing.T) {
 	t.Run("valid pattern match", func(t *testing.T) {
 		schema := &openAPISchema{Type: "string", Pattern: "^foo[0-9]+$"}
-		errs := validateScalarValue("foo123", "param", schema)
+		errs := validateScalarValue("foo123", "param", "parameter", schema)
 		if len(errs) > 0 {
 			t.Errorf("expected no errors, got %v", errs)
 		}
@@ -749,7 +846,7 @@ func TestValidateScalarValue_Pattern(t *testing.T) {
 
 	t.Run("pattern mismatch", func(t *testing.T) {
 		schema := &openAPISchema{Type: "string", Pattern: "^foo[0-9]+$"}
-		errs := validateScalarValue("bar", "param", schema)
+		errs := validateScalarValue("bar", "param", "parameter", schema)
 		if len(errs) == 0 {
 			t.Error("expected validation error for non-matching pattern, got none")
 		}
@@ -757,7 +854,7 @@ func TestValidateScalarValue_Pattern(t *testing.T) {
 
 	t.Run("invalid regex pattern returns error", func(t *testing.T) {
 		schema := &openAPISchema{Type: "string", Pattern: "["}
-		errs := validateScalarValue("anything", "param", schema)
+		errs := validateScalarValue("anything", "param", "parameter", schema)
 		if len(errs) == 0 {
 			t.Error("expected validation error for invalid regex pattern, got none")
 		}
@@ -1123,4 +1220,183 @@ type stubPipelineStep struct {
 func (s *stubPipelineStep) Name() string { return s.name }
 func (s *stubPipelineStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
 	return s.exec(ctx, pc)
+}
+
+// TestOpenAPIModule_XPipeline_ResponseStatusFromContext verifies that when a
+// pipeline step sets response_status/response_body/response_headers in its
+// output and no step writes directly to the HTTP response writer, the openapi
+// handler uses those values instead of falling through to 200 with all state.
+func TestOpenAPIModule_XPipeline_ResponseStatusFromContext(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", xPipelineYAML)
+
+	mod := NewOpenAPIModule("pipe-api", OpenAPIConfig{
+		SpecFile: specPath,
+		BasePath: "/api",
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Pipeline step that returns a 403 with a custom body via result.Current,
+	// without writing to the HTTP response writer directly.
+	authStep := &stubPipelineStep{
+		name: "auth-check",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{
+				Output: map[string]any{
+					"response_status": 403,
+					"response_body":   `{"error":"forbidden"}`,
+					"response_headers": map[string]any{
+						"Content-Type": "application/json",
+					},
+				},
+				Stop: true,
+			}, nil
+		},
+	}
+	authPipeline := &Pipeline{
+		Name:  "greet-pipeline",
+		Steps: []PipelineStep{authStep},
+	}
+
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "greet-pipeline" {
+			return authPipeline, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/greet")
+	if h == nil {
+		t.Fatal("GET /api/greet handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/greet", nil)
+	h.Handle(w, r)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 from pipeline context, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != `{"error":"forbidden"}` {
+		t.Errorf("expected pipeline body, got %q", w.Body.String())
+	}
+	if w.Header().Get("Content-Type") != "application/json" {
+		t.Errorf("expected Content-Type header, got %q", w.Header().Get("Content-Type"))
+	}
+}
+
+// TestOpenAPIModule_XPipeline_NoResponseStatusFallsThrough verifies that when
+// response_status is absent from result.Current, the handler still falls through
+// to the default 200 JSON encoding of result.Current.
+func TestOpenAPIModule_XPipeline_NoResponseStatusFallsThrough(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", xPipelineYAML)
+
+	mod := NewOpenAPIModule("pipe-api", OpenAPIConfig{
+		SpecFile: specPath,
+		BasePath: "/api",
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	dataStep := &stubPipelineStep{
+		name: "produce-data",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{Output: map[string]any{"key": "value"}}, nil
+		},
+	}
+	dataPipeline := &Pipeline{
+		Name:  "greet-pipeline",
+		Steps: []PipelineStep{dataStep},
+	}
+
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "greet-pipeline" {
+			return dataPipeline, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/greet")
+	if h == nil {
+		t.Fatal("GET /api/greet handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/greet", nil)
+	h.Handle(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 fallback, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("expected JSON fallback body, got error: %v", err)
+	}
+	if resp["key"] != "value" {
+		t.Errorf("expected key=value in fallback body, got %v", resp)
+	}
+}
+
+// TestOpenAPIModule_XPipeline_ResponseStatus_Float64 verifies that response_status
+// emitted as float64 (common after JSON round-trip) is correctly coerced.
+func TestOpenAPIModule_XPipeline_ResponseStatus_Float64(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", xPipelineYAML)
+
+	mod := NewOpenAPIModule("pipe-api", OpenAPIConfig{
+		SpecFile: specPath,
+		BasePath: "/api",
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	step := &stubPipelineStep{
+		name: "float-status",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{
+				Output: map[string]any{
+					"response_status": float64(422),
+					"response_body":   `{"error":"unprocessable"}`,
+					"response_headers": map[string]string{
+						"Content-Type": "application/json",
+					},
+				},
+				Stop: true,
+			}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "greet-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "greet-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/greet")
+	if h == nil {
+		t.Fatal("handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/greet", nil)
+	h.Handle(w, r)
+
+	if w.Code != 422 {
+		t.Errorf("expected 422 from float64 status, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != `{"error":"unprocessable"}` {
+		t.Errorf("unexpected body: %q", w.Body.String())
+	}
 }

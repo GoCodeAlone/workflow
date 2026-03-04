@@ -583,6 +583,13 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 				e.logger.Debug(fmt.Sprintf("  Result %s: %v", k, v))
 			}
 
+			// If the caller stored a PipelineResultHolder in the context, populate it
+			// so HTTP trigger handlers can read response_status/body/headers without
+			// requiring the WorkflowEngine interface to return a result map.
+			if holder, ok := ctx.Value(module.PipelineResultContextKey).(*module.PipelineResultHolder); ok && holder != nil {
+				holder.Set(results)
+			}
+
 			if e.eventEmitter != nil {
 				e.eventEmitter.EmitWorkflowCompleted(ctx, workflowType, action, time.Since(startTime), results)
 			}

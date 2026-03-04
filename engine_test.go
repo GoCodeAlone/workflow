@@ -1268,6 +1268,62 @@ func TestCanHandleTrigger_EventBus(t *testing.T) {
 	}
 }
 
+// TestEngine_TriggerWorkflow_PopulatesPipelineResultHolder verifies that
+// TriggerWorkflow populates a *module.PipelineResultHolder stored in the context
+// with the workflow handler's result map after successful execution.
+func TestEngine_TriggerWorkflow_PopulatesPipelineResultHolder(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
+
+	handler := &errorMockWorkflowHandler{
+		mockWorkflowHandler: mockWorkflowHandler{
+			name:       "holder-handler",
+			handlesFor: []string{"holder-wf"},
+		},
+		// returns a result map with response fields
+	}
+	engine.RegisterWorkflowHandler(handler)
+
+	holder := &module.PipelineResultHolder{}
+	ctx := context.WithValue(context.Background(), module.PipelineResultContextKey, holder)
+
+	err := engine.TriggerWorkflow(ctx, "holder-wf", "run", map[string]any{})
+	if err != nil {
+		t.Fatalf("TriggerWorkflow failed: %v", err)
+	}
+
+	got := holder.Get()
+	if got == nil {
+		t.Fatal("expected PipelineResultHolder to be populated, got nil")
+	}
+	if got["status"] != "ok" {
+		t.Errorf("expected result[status]='ok', got %v", got["status"])
+	}
+}
+
+// TestEngine_TriggerWorkflow_HolderAbsent verifies that TriggerWorkflow does not
+// panic and succeeds normally when no PipelineResultHolder is in the context.
+func TestEngine_TriggerWorkflow_HolderAbsent(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
+
+	handler := &errorMockWorkflowHandler{
+		mockWorkflowHandler: mockWorkflowHandler{
+			name:       "no-holder-handler",
+			handlesFor: []string{"no-holder-wf"},
+		},
+	}
+	engine.RegisterWorkflowHandler(handler)
+
+	// No holder in context — should succeed without panicking.
+	err := engine.TriggerWorkflow(context.Background(), "no-holder-wf", "run", map[string]any{})
+	if err != nil {
+		t.Fatalf("TriggerWorkflow failed: %v", err)
+	}
+}
+
 // ============================================================================
 // Tests for requires.plugins validation (Phase 4 - Engine Decomposition)
 // ============================================================================
