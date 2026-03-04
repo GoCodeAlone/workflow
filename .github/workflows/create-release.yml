@@ -1,7 +1,9 @@
 name: Create Release Tag
 
-# Manually trigger a new semantic version tag, which will auto-trigger the
-# existing release workflow (release.yml) via the `v*` tag push event.
+# Manually trigger a new semantic version tag and immediately kick off the
+# release workflow (release.yml) via workflow_call.  GitHub Actions does not
+# fire push-tag events for tags created by GITHUB_TOKEN, so we call the
+# release workflow directly instead of relying on that trigger.
 
 on:
   workflow_dispatch:
@@ -23,6 +25,8 @@ jobs:
   tag:
     name: Generate and push next semver tag
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next_version.outputs.tag }}
 
     steps:
       - name: Check out code
@@ -76,3 +80,13 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "${{ steps.next_version.outputs.tag }}"
           git push origin "${{ steps.next_version.outputs.tag }}"
+
+  release:
+    name: Build and publish release
+    needs: tag
+    uses: ./.github/workflows/release.yml
+    with:
+      tag_name: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: write
+      packages: write
