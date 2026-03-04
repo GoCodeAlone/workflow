@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/CrisisTextLine/modular"
@@ -155,12 +156,41 @@ func (s *RequestParseStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 			output["body"] = body
 		} else {
 			req, _ := pc.Metadata["_http_request"].(*http.Request)
-			if req != nil && req.Body != nil {
-				bodyBytes, err := io.ReadAll(req.Body)
-				if err == nil && len(bodyBytes) > 0 {
-					var bodyData map[string]any
-					if json.Unmarshal(bodyBytes, &bodyData) == nil {
-						output["body"] = bodyData
+			if req != nil {
+				// Prefer cached raw body (set by a prior step, e.g. step.webhook_verify)
+				// to avoid consuming req.Body a second time.
+				var bodyBytes []byte
+				if cached, ok := pc.Metadata["_raw_body"].([]byte); ok && len(cached) > 0 {
+					bodyBytes = cached
+				} else if req.Body != nil {
+					b, err := io.ReadAll(req.Body)
+					if err == nil && len(b) > 0 {
+						bodyBytes = b
+						pc.Metadata["_raw_body"] = bodyBytes
+					}
+				}
+				if len(bodyBytes) > 0 {
+					ct := req.Header.Get("Content-Type")
+					if idx := strings.Index(ct, ";"); idx != -1 {
+						ct = strings.TrimSpace(ct[:idx])
+					}
+					if strings.EqualFold(ct, "application/x-www-form-urlencoded") {
+						if formValues, parseErr := url.ParseQuery(string(bodyBytes)); parseErr == nil {
+							bodyData := make(map[string]any)
+							for k, v := range formValues {
+								if len(v) == 1 {
+									bodyData[k] = v[0]
+								} else {
+									bodyData[k] = v
+								}
+							}
+							output["body"] = bodyData
+						}
+					} else {
+						var bodyData map[string]any
+						if json.Unmarshal(bodyBytes, &bodyData) == nil {
+							output["body"] = bodyData
+						}
 					}
 				}
 			}
