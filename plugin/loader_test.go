@@ -166,6 +166,140 @@ func TestPluginLoader_DuplicateModuleTypeConflict(t *testing.T) {
 	}
 }
 
+func TestPluginLoader_LoadPluginWithOverride_ModuleType(t *testing.T) {
+	loader := newTestEngineLoader()
+
+	p1 := &modulePlugin{
+		BaseEnginePlugin: *makeEnginePlugin("builtin-plugin", "1.0.0", nil),
+		modules: map[string]ModuleFactory{
+			"shared.module": func(name string, cfg map[string]any) modular.Module {
+				return nil
+			},
+		},
+	}
+	p2 := &modulePlugin{
+		BaseEnginePlugin: *makeEnginePlugin("external-plugin", "1.0.0", nil),
+		modules: map[string]ModuleFactory{
+			"shared.module": func(name string, cfg map[string]any) modular.Module {
+				return nil
+			},
+		},
+	}
+
+	if err := loader.LoadPlugin(p1); err != nil {
+		t.Fatalf("first load should succeed: %v", err)
+	}
+	// LoadPlugin should still reject duplicates.
+	if err := loader.LoadPlugin(p2); err == nil {
+		t.Fatal("expected duplicate module type error from LoadPlugin")
+	}
+	// LoadPluginWithOverride should allow replacing the type.
+	if err := loader.LoadPluginWithOverride(p2); err != nil {
+		t.Fatalf("LoadPluginWithOverride should succeed: %v", err)
+	}
+	if got := len(loader.ModuleFactories()); got != 1 {
+		t.Errorf("expected 1 module factory after override, got %d", got)
+	}
+	if got := len(loader.LoadedPlugins()); got != 2 {
+		t.Errorf("expected 2 loaded plugins, got %d", got)
+	}
+}
+
+func TestPluginLoader_LoadPluginWithOverride_StepType(t *testing.T) {
+	loader := newTestEngineLoader()
+
+	p1 := &modulePlugin{
+		BaseEnginePlugin: *makeEnginePlugin("builtin-steps", "1.0.0", nil),
+		steps: map[string]StepFactory{
+			"step.authz_check": func(name string, cfg map[string]any, _ modular.Application) (any, error) {
+				return "builtin", nil
+			},
+		},
+	}
+	p2 := &modulePlugin{
+		BaseEnginePlugin: *makeEnginePlugin("external-authz", "1.0.0", nil),
+		steps: map[string]StepFactory{
+			"step.authz_check": func(name string, cfg map[string]any, _ modular.Application) (any, error) {
+				return "external", nil
+			},
+		},
+	}
+
+	if err := loader.LoadPlugin(p1); err != nil {
+		t.Fatalf("first load should succeed: %v", err)
+	}
+	if err := loader.LoadPluginWithOverride(p2); err != nil {
+		t.Fatalf("LoadPluginWithOverride should succeed: %v", err)
+	}
+
+	// Verify the override replaced the factory.
+	factories := loader.StepFactories()
+	if got := len(factories); got != 1 {
+		t.Fatalf("expected 1 step factory, got %d", got)
+	}
+	result, err := factories["step.authz_check"]("test", nil, nil)
+	if err != nil {
+		t.Fatalf("step factory returned error: %v", err)
+	}
+	if result != "external" {
+		t.Errorf("expected overridden factory to return %q, got %q", "external", result)
+	}
+}
+
+func TestPluginLoader_LoadPluginWithOverride_AllTypes(t *testing.T) {
+	loader := newTestEngineLoader()
+
+	p1 := &modulePlugin{
+		BaseEnginePlugin: *makeEnginePlugin("builtin", "1.0.0", nil),
+		modules: map[string]ModuleFactory{
+			"mod.type": func(name string, cfg map[string]any) modular.Module { return nil },
+		},
+		steps: map[string]StepFactory{
+			"step.type": func(name string, cfg map[string]any, _ modular.Application) (any, error) { return nil, nil },
+		},
+		triggers: map[string]TriggerFactory{
+			"trigger.type": func() any { return nil },
+		},
+		handlers: map[string]WorkflowHandlerFactory{
+			"handler.type": func() any { return nil },
+		},
+	}
+	p2 := &modulePlugin{
+		BaseEnginePlugin: *makeEnginePlugin("external", "1.0.0", nil),
+		modules: map[string]ModuleFactory{
+			"mod.type": func(name string, cfg map[string]any) modular.Module { return nil },
+		},
+		steps: map[string]StepFactory{
+			"step.type": func(name string, cfg map[string]any, _ modular.Application) (any, error) { return nil, nil },
+		},
+		triggers: map[string]TriggerFactory{
+			"trigger.type": func() any { return nil },
+		},
+		handlers: map[string]WorkflowHandlerFactory{
+			"handler.type": func() any { return nil },
+		},
+	}
+
+	if err := loader.LoadPlugin(p1); err != nil {
+		t.Fatalf("first load should succeed: %v", err)
+	}
+	if err := loader.LoadPluginWithOverride(p2); err != nil {
+		t.Fatalf("LoadPluginWithOverride should succeed for all types: %v", err)
+	}
+	if got := len(loader.ModuleFactories()); got != 1 {
+		t.Errorf("expected 1 module factory, got %d", got)
+	}
+	if got := len(loader.StepFactories()); got != 1 {
+		t.Errorf("expected 1 step factory, got %d", got)
+	}
+	if got := len(loader.TriggerFactories()); got != 1 {
+		t.Errorf("expected 1 trigger factory, got %d", got)
+	}
+	if got := len(loader.WorkflowHandlerFactories()); got != 1 {
+		t.Errorf("expected 1 handler factory, got %d", got)
+	}
+}
+
 func TestPluginLoader_WiringHooksSortedByPriority(t *testing.T) {
 	loader := newTestEngineLoader()
 

@@ -212,8 +212,28 @@ func (e *StdEngine) SetPluginLoader(loader *plugin.PluginLoader) {
 
 // LoadPlugin loads an EnginePlugin into the engine.
 func (e *StdEngine) LoadPlugin(p plugin.EnginePlugin) error {
+	return e.loadPluginInternal(p, false)
+}
+
+// LoadPluginWithOverride loads an EnginePlugin into the engine, allowing it to
+// override existing module, step, trigger, and handler type registrations.
+// When a duplicate type is encountered, the new factory silently replaces the
+// previous one (with a warning log) instead of returning an error.
+// This is intended for external plugins that intentionally replace built-in
+// defaults (e.g., replacing a mock step with a production implementation).
+func (e *StdEngine) LoadPluginWithOverride(p plugin.EnginePlugin) error {
+	return e.loadPluginInternal(p, true)
+}
+
+func (e *StdEngine) loadPluginInternal(p plugin.EnginePlugin, allowOverride bool) error {
 	loader := e.PluginLoader()
-	if err := loader.LoadPlugin(p); err != nil {
+	var err error
+	if allowOverride {
+		err = loader.LoadPluginWithOverride(p)
+	} else {
+		err = loader.LoadPlugin(p)
+	}
+	if err != nil {
 		return fmt.Errorf("load plugin: %w", err)
 	}
 	for typeName, factory := range p.ModuleFactories() {
