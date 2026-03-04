@@ -66,6 +66,7 @@ func TestStepFactories(t *testing.T) {
 		"step.resilient_circuit_breaker",
 		"step.s3_upload",
 		"step.auth_validate",
+		"step.authz_check",
 		"step.token_revoke",
 		"step.base64_decode",
 		"step.field_reencrypt",
