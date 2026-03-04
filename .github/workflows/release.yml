@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_call:
+    inputs:
+      tag_name:
+        description: 'Tag name to release (e.g. v1.2.3)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -12,6 +18,7 @@ permissions:
 env:
   GOPRIVATE: github.com/GoCodeAlone/*
   GONOSUMCHECK: github.com/GoCodeAlone/*
+  TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
 
 jobs:
   test:
@@ -72,7 +79,7 @@ jobs:
 
     - name: Package admin UI
       run: |
-        VERSION=${GITHUB_REF#refs/tags/}
+        VERSION=${TAG_NAME}
         tar -czf "workflow-admin-ui-${VERSION}.tar.gz" -C ui dist
         echo "UI_TARBALL=workflow-admin-ui-${VERSION}.tar.gz" >> "$GITHUB_ENV"
 
@@ -114,8 +121,8 @@ jobs:
       with:
         images: ghcr.io/${{ github.repository }}
         tags: |
-          type=semver,pattern={{version}}
-          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{version}},value=${{ env.TAG_NAME }}
+          type=semver,pattern={{major}}.{{minor}},value=${{ env.TAG_NAME }}
           type=sha
 
     # The Dockerfile is a multi-stage build that builds the UI and embeds it
@@ -184,7 +191,7 @@ jobs:
     - name: Build binaries
       run: |
         mkdir -p dist
-        VERSION=${GITHUB_REF#refs/tags/}
+        VERSION=${TAG_NAME}
         LDFLAGS="-s -w -X main.version=${VERSION}"
 
         for platform in ${{ matrix.platforms }}; do
@@ -237,9 +244,10 @@ jobs:
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
+        tag_name: ${{ env.TAG_NAME }}
         files: |
           dist/*
         draft: false
-        prerelease: ${{ contains(github.ref, '-') }}
+        prerelease: ${{ contains(env.TAG_NAME, '-') }}
         generate_release_notes: true
 
