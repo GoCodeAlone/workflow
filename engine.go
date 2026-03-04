@@ -217,8 +217,8 @@ func (e *StdEngine) LoadPlugin(p plugin.EnginePlugin) error {
 
 // LoadPluginWithOverride loads an EnginePlugin into the engine, allowing it to
 // override existing module, step, trigger, and handler type registrations.
-// When a duplicate type is encountered, the new factory silently replaces the
-// previous one (with a warning log) instead of returning an error.
+// When a duplicate type is encountered, the new factory replaces the previous
+// one and a warning is logged, instead of returning an error.
 // This is intended for external plugins that intentionally replace built-in
 // defaults (e.g., replacing a mock step with a production implementation).
 func (e *StdEngine) LoadPluginWithOverride(p plugin.EnginePlugin) error {
