@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -419,7 +420,7 @@ func (h *openAPIRouteHandler) validate(r *http.Request) []string {
 			continue
 		}
 		if val != "" && p.Schema != nil {
-			if schemaErrs := validateScalarValue(val, p.Name, p.Schema); len(schemaErrs) > 0 {
+			if schemaErrs := validateScalarValue(val, p.Name, "parameter", p.Schema); len(schemaErrs) > 0 {
 				errs = append(errs, schemaErrs...)
 			}
 		}
@@ -479,11 +480,20 @@ func (h *openAPIRouteHandler) validate(r *http.Request) []string {
 			if h.op.RequestBody.Required && len(bodyBytes) == 0 {
 				errs = append(errs, "request body is required but missing")
 			} else if mediaType != nil && mediaType.Schema != nil && len(bodyBytes) > 0 {
-				var bodyData any
-				if jsonErr := json.Unmarshal(bodyBytes, &bodyData); jsonErr != nil {
-					errs = append(errs, fmt.Sprintf("request body contains invalid JSON: %v", jsonErr))
-				} else if bodyErrs := validateJSONValue(bodyData, "body", mediaType.Schema); len(bodyErrs) > 0 {
-					errs = append(errs, bodyErrs...)
+				if ct == "application/x-www-form-urlencoded" {
+					formValues, parseErr := url.ParseQuery(string(bodyBytes))
+					if parseErr != nil {
+						errs = append(errs, fmt.Sprintf("request body contains invalid form data: %v", parseErr))
+					} else if formErrs := validateFormBody(formValues, mediaType.Schema); len(formErrs) > 0 {
+						errs = append(errs, formErrs...)
+					}
+				} else {
+					var bodyData any
+					if jsonErr := json.Unmarshal(bodyBytes, &bodyData); jsonErr != nil {
+						errs = append(errs, fmt.Sprintf("request body contains invalid JSON: %v", jsonErr))
+					} else if bodyErrs := validateJSONValue(bodyData, "body", mediaType.Schema); len(bodyErrs) > 0 {
+						errs = append(errs, bodyErrs...)
+					}
 				}
 			}
 		}
@@ -614,42 +624,43 @@ func validateStringConstraints(s, name, kind string, schema *openAPISchema) []st
 }
 
 // validateScalarValue validates a string value against a schema (type/format/enum checks).
-func validateScalarValue(val, name string, schema *openAPISchema) []string {
+// The kind parameter ("parameter" or "field") is used in error messages.
+func validateScalarValue(val, name, kind string, schema *openAPISchema) []string {
 	var errs []string
 	switch schema.Type {
 	case "integer":
 		n, err := strconv.ParseInt(val, 10, 64)
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("parameter %q must be an integer, got %q", name, val))
+			errs = append(errs, fmt.Sprintf("%s %q must be an integer, got %q", kind, name, val))
 			return errs
 		}
 		if schema.Minimum != nil && float64(n) < *schema.Minimum {
-			errs = append(errs, fmt.Sprintf("parameter %q must be >= %v", name, *schema.Minimum))
+			errs = append(errs, fmt.Sprintf("%s %q must be >= %v", kind, name, *schema.Minimum))
 		}
 		if schema.Maximum != nil && float64(n) > *schema.Maximum {
-			errs = append(errs, fmt.Sprintf("parameter %q must be <= %v", name, *schema.Maximum))
+			errs = append(errs, fmt.Sprintf("%s %q must be <= %v", kind, name, *schema.Maximum))
 		}
 	case "number":
 		f, err := strconv.ParseFloat(val, 64)
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("parameter %q must be a number, got %q", name, val))
+			errs = append(errs, fmt.Sprintf("%s %q must be a number, got %q", kind, name, val))
 			return errs
 		}
 		if schema.Minimum != nil && f < *schema.Minimum {
-			errs = append(errs, fmt.Sprintf("parameter %q must be >= %v", name, *schema.Minimum))
+			errs = append(errs, fmt.Sprintf("%s %q must be >= %v", kind, name, *schema.Minimum))
 		}
 		if schema.Maximum != nil && f > *schema.Maximum {
-			errs = append(errs, fmt.Sprintf("parameter %q must be <= %v", name, *schema.Maximum))
+			errs = append(errs, fmt.Sprintf("%s %q must be <= %v", kind, name, *schema.Maximum))
 		}
 	case "boolean":
 		if val != "true" && val != "false" {
-			errs = append(errs, fmt.Sprintf("parameter %q must be 'true' or 'false', got %q", name, val))
+			errs = append(errs, fmt.Sprintf("%s %q must be 'true' or 'false', got %q", kind, name, val))
 		}
 	case "string":
-		errs = append(errs, validateStringConstraints(val, name, "parameter", schema)...)
+		errs = append(errs, validateStringConstraints(val, name, kind, schema)...)
 	}
-	// Enum validation: query/path parameters are always strings, so compare the
-	// string form of each enum value against the string parameter value.
+	// Enum validation: scalar values are always strings, so compare the
+	// string form of each enum value against the string value.
 	if len(schema.Enum) > 0 {
 		found := false
 		for _, e := range schema.Enum {
@@ -662,7 +673,7 @@ func validateScalarValue(val, name string, schema *openAPISchema) []string {
 			}
 		}
 		if !found {
-			errs = append(errs, fmt.Sprintf("parameter %q must be one of %v", name, schema.Enum))
+			errs = append(errs, fmt.Sprintf("%s %q must be one of %v", kind, name, schema.Enum))
 		}
 	}
 	return errs
@@ -691,6 +702,34 @@ func validateJSONBody(body any, schema *openAPISchema) []string {
 			continue
 		}
 		if fieldErrs := validateJSONValue(val, field, propSchema); len(fieldErrs) > 0 {
+			errs = append(errs, fieldErrs...)
+		}
+	}
+	return errs
+}
+
+// validateFormBody validates url.Values (from application/x-www-form-urlencoded) against an object schema.
+// Form values are always strings, so each field is validated using validateScalarValue.
+func validateFormBody(values url.Values, schema *openAPISchema) []string {
+	var errs []string
+	// Check required fields
+	for _, req := range schema.Required {
+		if _, present := values[req]; !present {
+			errs = append(errs, fmt.Sprintf("request body: required field %q is missing", req))
+		}
+	}
+	// Validate individual properties: check presence (not empty-string) so that
+	// present-but-empty fields are still validated against constraints like minLength/pattern/enum.
+	for field, propSchema := range schema.Properties {
+		vals, present := values[field]
+		if !present {
+			continue
+		}
+		var val string
+		if len(vals) > 0 {
+			val = vals[0]
+		}
+		if fieldErrs := validateScalarValue(val, field, "field", propSchema); len(fieldErrs) > 0 {
 			errs = append(errs, fieldErrs...)
 		}
 	}
