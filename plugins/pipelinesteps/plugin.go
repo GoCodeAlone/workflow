@@ -97,7 +97,8 @@ func New() *Plugin {
 					"step.hash",
 					"step.regex_match",
 				},
-				WorkflowTypes: []string{"pipeline"},
+				WorkflowTypes:    []string{"pipeline"},
+				OverridableTypes: []string{"step.authz_check"},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "pipeline-steps", Role: "provider", Priority: 50},
 				},
