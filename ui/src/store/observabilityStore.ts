@@ -38,6 +38,7 @@ interface ObservabilityStore {
   // Active view
   activeView: ActiveView;
   selectedWorkflowId: string | null;
+  selectedTraceExecutionId: string | null;
 
   // Dashboard
   systemDashboard: SystemDashboard | null;
@@ -66,6 +67,7 @@ interface ObservabilityStore {
   // Actions
   setActiveView: (view: ActiveView) => void;
   setSelectedWorkflowId: (id: string | null) => void;
+  setSelectedTraceExecutionId: (id: string | null) => void;
 
   fetchSystemDashboard: () => Promise<void>;
   fetchWorkflowDashboard: (workflowId: string) => Promise<void>;
@@ -109,6 +111,7 @@ let pendingEvents: WorkflowEventEntry[] = [];
 const useObservabilityStore = create<ObservabilityStore>((set, get) => ({
   activeView: 'dashboard',
   selectedWorkflowId: null,
+  selectedTraceExecutionId: null,
 
   systemDashboard: null,
   workflowDashboard: null,
@@ -131,6 +134,7 @@ const useObservabilityStore = create<ObservabilityStore>((set, get) => ({
 
   setActiveView: (view) => set({ activeView: view }),
   setSelectedWorkflowId: (id) => set({ selectedWorkflowId: id }),
+  setSelectedTraceExecutionId: (id) => set({ selectedTraceExecutionId: id }),
 
   fetchSystemDashboard: async () => {
     set({ dashboardLoading: true });

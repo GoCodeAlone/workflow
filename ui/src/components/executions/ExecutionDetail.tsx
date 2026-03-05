@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import useObservabilityStore from '../../store/observabilityStore.ts';
 import type { ExecutionStep } from '../../types/observability.ts';
 
@@ -172,10 +172,26 @@ function StepRow({ step }: { step: ExecutionStep }) {
 }
 
 export default function ExecutionDetail() {
-  const { selectedExecution, executionSteps, fetchExecutionDetail, fetchExecutionSteps } =
-    useObservabilityStore();
+  const {
+    selectedExecution,
+    executionSteps,
+    fetchExecutionDetail,
+    fetchExecutionSteps,
+    setSelectedTraceExecutionId,
+    setActiveView,
+  } = useObservabilityStore();
 
   const [activeTab, setActiveTab] = useState<'steps' | 'input' | 'output'>('steps');
+
+  const handleViewTrace = useCallback(() => {
+    if (!selectedExecution) return;
+    setSelectedTraceExecutionId(selectedExecution.id);
+    setActiveView('executions');
+  }, [selectedExecution, setSelectedTraceExecutionId, setActiveView]);
+
+  const hasExplicitTrace =
+    selectedExecution != null &&
+    (selectedExecution.metadata as Record<string, unknown> | null | undefined)?.explicit_trace === true;
   const [execIdInput, setExecIdInput] = useState('');
 
   const handleLoad = () => {
@@ -242,6 +258,26 @@ export default function ExecutionDetail() {
 
       {selectedExecution && (
         <>
+          {hasExplicitTrace && (
+            <div style={{ marginBottom: 12 }}>
+              <button
+                onClick={handleViewTrace}
+                style={{
+                  background: 'rgba(203, 166, 247, 0.2)',
+                  border: '1px solid rgba(203, 166, 247, 0.4)',
+                  borderRadius: 6,
+                  color: '#cba6f7',
+                  padding: '6px 16px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                View Trace
+              </button>
+            </div>
+          )}
+
           {/* Header info */}
           <div
             style={{

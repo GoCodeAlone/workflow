@@ -15,6 +15,7 @@ import WorkflowList from './components/workflows/WorkflowList.tsx';
 import AppNav from './components/navigation/AppNav.tsx';
 import SystemDashboard from './components/dashboard/SystemDashboard.tsx';
 import WorkflowDashboard from './components/dashboard/WorkflowDashboard.tsx';
+import TraceView from './components/trace/TraceView.tsx';
 import LogViewer from './components/logs/LogViewer.tsx';
 import EventInspector from './components/events/EventInspector.tsx';
 import IAMSettings from './components/iam/IAMSettings.tsx';
@@ -214,8 +215,23 @@ function ObservabilityView({ children }: { children: ReactNode }) {
   );
 }
 
+function TraceViewWrapper() {
+  const selectedTraceExecutionId = useObservabilityStore((s) => s.selectedTraceExecutionId);
+  if (!selectedTraceExecutionId) return null;
+  return <TraceView executionId={selectedTraceExecutionId} />;
+}
+
 function ExecutionsView() {
   const selectedWorkflowId = useObservabilityStore((s) => s.selectedWorkflowId);
+  const selectedTraceExecutionId = useObservabilityStore((s) => s.selectedTraceExecutionId);
+
+  if (selectedTraceExecutionId) {
+    return (
+      <ObservabilityView>
+        <TraceView executionId={selectedTraceExecutionId} />
+      </ObservabilityView>
+    );
+  }
 
   return (
     <ObservabilityView>
@@ -300,6 +316,7 @@ const VIEW_REGISTRY: Record<string, React.ComponentType> = {
   dashboard: SystemDashboard,
   editor: EditorView,
   executions: ExecutionsView,
+  trace: TraceViewWrapper,
   logs: LogsView,
   events: EventsView,
   marketplace: Marketplace,

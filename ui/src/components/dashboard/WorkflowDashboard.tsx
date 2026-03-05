@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import useObservabilityStore from '../../store/observabilityStore.ts';
-import { apiDeployWorkflow, apiStopWorkflow } from '../../utils/api.ts';
+import { apiDeployWorkflow, apiStopWorkflow, apiTriggerTracedExecution } from '../../utils/api.ts';
 import type { WorkflowExecution, ExecutionStep } from '../../types/observability.ts';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -172,6 +172,222 @@ function StepTimeline({ steps }: { steps: ExecutionStep[] }) {
   );
 }
 
+function TraceRequestModal({
+  open,
+  onClose,
+  onSend,
+  sending,
+  error,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSend: (opts: { method: string; path: string; headers: Record<string, string>; body: string }) => void;
+  sending: boolean;
+  error: string | null;
+}) {
+  const [method, setMethod] = useState('GET');
+  const [path, setPath] = useState('/');
+  const [headersText, setHeadersText] = useState('{}');
+  const [body, setBody] = useState('');
+  const [headersError, setHeadersError] = useState('');
+
+  if (!open) return null;
+
+  const handleSend = () => {
+    let headers: Record<string, string> = {};
+    try {
+      headers = JSON.parse(headersText || '{}');
+      setHeadersError('');
+    } catch {
+      setHeadersError('Headers must be valid JSON');
+      return;
+    }
+    onSend({ method, path, headers, body });
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: '#1e1e2e',
+          border: '1px solid #45475a',
+          borderRadius: 10,
+          padding: 24,
+          width: 480,
+          maxWidth: '90vw',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 style={{ color: '#cdd6f4', margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>
+          Trace Request
+        </h3>
+        <p style={{ color: '#a6adc8', fontSize: 12, margin: '0 0 16px' }}>
+          Configure the request to send with{' '}
+          <code style={{ background: '#313244', padding: '1px 5px', borderRadius: 3, color: '#89b4fa' }}>
+            X-Workflow-Trace: true
+          </code>
+          . Step I/O will be captured for this execution.
+        </p>
+
+        {/* Method + Path row */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <select
+            value={method}
+            onChange={(e) => setMethod(e.target.value)}
+            style={{
+              background: '#313244',
+              border: '1px solid #45475a',
+              borderRadius: 6,
+              color: '#cdd6f4',
+              padding: '8px 10px',
+              fontSize: 13,
+              outline: 'none',
+              width: 100,
+            }}
+          >
+            {['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            placeholder="/api/v1/..."
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            style={{
+              flex: 1,
+              background: '#313244',
+              border: '1px solid #45475a',
+              borderRadius: 6,
+              color: '#cdd6f4',
+              padding: '8px 12px',
+              fontSize: 13,
+              outline: 'none',
+              fontFamily: 'monospace',
+            }}
+          />
+        </div>
+
+        {/* Headers */}
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ color: '#a6adc8', fontSize: 11, display: 'block', marginBottom: 4 }}>
+            Headers (JSON)
+          </label>
+          <textarea
+            value={headersText}
+            onChange={(e) => setHeadersText(e.target.value)}
+            rows={3}
+            style={{
+              width: '100%',
+              background: '#313244',
+              border: headersError ? '1px solid #f38ba8' : '1px solid #45475a',
+              borderRadius: 6,
+              color: '#cdd6f4',
+              padding: '8px 12px',
+              fontSize: 12,
+              outline: 'none',
+              fontFamily: 'monospace',
+              resize: 'vertical',
+              boxSizing: 'border-box',
+            }}
+          />
+          {headersError && (
+            <div style={{ color: '#f38ba8', fontSize: 11, marginTop: 2 }}>{headersError}</div>
+          )}
+        </div>
+
+        {/* Body */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ color: '#a6adc8', fontSize: 11, display: 'block', marginBottom: 4 }}>
+            Body
+          </label>
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            rows={4}
+            placeholder='{"key": "value"}'
+            style={{
+              width: '100%',
+              background: '#313244',
+              border: '1px solid #45475a',
+              borderRadius: 6,
+              color: '#cdd6f4',
+              padding: '8px 12px',
+              fontSize: 12,
+              outline: 'none',
+              fontFamily: 'monospace',
+              resize: 'vertical',
+              boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        {error && (
+          <div
+            style={{
+              background: '#f38ba822',
+              border: '1px solid #f38ba8',
+              borderRadius: 6,
+              padding: '8px 12px',
+              color: '#f38ba8',
+              fontSize: 12,
+              marginBottom: 12,
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button
+            onClick={onClose}
+            disabled={sending}
+            style={{
+              background: '#313244',
+              border: '1px solid #45475a',
+              borderRadius: 6,
+              color: '#cdd6f4',
+              padding: '8px 16px',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSend}
+            disabled={sending}
+            style={{
+              background: sending ? '#45475a' : '#cba6f7',
+              border: 'none',
+              borderRadius: 6,
+              color: '#1e1e2e',
+              padding: '8px 16px',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: sending ? 'default' : 'pointer',
+            }}
+          >
+            {sending ? 'Sending...' : 'Send Traced Request'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function WorkflowDashboard() {
   const {
     selectedWorkflowId,
@@ -187,11 +403,15 @@ export default function WorkflowDashboard() {
     setSelectedWorkflowId,
     workflowDashboard,
     fetchWorkflowDashboard,
+    setSelectedTraceExecutionId,
   } = useObservabilityStore();
 
   const [expandedExecId, setExpandedExecId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [deployAction, setDeployAction] = useState<string | null>(null);
+  const [traceModalOpen, setTraceModalOpen] = useState(false);
+  const [traceSending, setTraceSending] = useState(false);
+  const [traceError, setTraceError] = useState<string | null>(null);
 
   const handleDeploy = useCallback(async () => {
     if (!selectedWorkflowId) return;
@@ -258,6 +478,24 @@ export default function WorkflowDashboard() {
     setSelectedWorkflowId(null);
     setActiveView('dashboard');
   }, [setActiveView, setSelectedWorkflowId]);
+
+  const handleSendTrace = useCallback(
+    async (opts: { method: string; path: string; headers: Record<string, string>; body: string }) => {
+      if (!selectedWorkflowId) return;
+      setTraceSending(true);
+      setTraceError(null);
+      try {
+        const exec = await apiTriggerTracedExecution(selectedWorkflowId, opts);
+        setTraceModalOpen(false);
+        setSelectedTraceExecutionId(exec.id);
+      } catch (err) {
+        setTraceError(err instanceof Error ? err.message : 'Request failed');
+      } finally {
+        setTraceSending(false);
+      }
+    },
+    [selectedWorkflowId, setSelectedTraceExecutionId],
+  );
 
   const wfName = workflowDashboard?.workflow?.name ?? 'Workflow';
   const wfStatus = workflowDashboard?.workflow?.status ?? '';
@@ -353,6 +591,23 @@ export default function WorkflowDashboard() {
             }}
           >
             Trigger Execution
+          </button>
+        )}
+        {selectedWorkflowId && (
+          <button
+            onClick={() => { setTraceError(null); setTraceModalOpen(true); }}
+            style={{
+              background: 'rgba(203, 166, 247, 0.2)',
+              border: '1px solid rgba(203, 166, 247, 0.4)',
+              borderRadius: 6,
+              color: '#cba6f7',
+              padding: '6px 16px',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Trace Request
           </button>
         )}
       </div>
@@ -481,6 +736,14 @@ export default function WorkflowDashboard() {
           </div>
         )}
       </div>
+
+      <TraceRequestModal
+        open={traceModalOpen}
+        onClose={() => setTraceModalOpen(false)}
+        onSend={handleSendTrace}
+        sending={traceSending}
+        error={traceError}
+      />
     </div>
   );
 }

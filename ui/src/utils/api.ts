@@ -378,6 +378,44 @@ export function apiCancelExecution(executionId: string): Promise<WorkflowExecuti
   return apiPost<WorkflowExecution>(`/admin/executions/${encodeURIComponent(executionId)}/cancel`);
 }
 
+export async function apiTriggerTracedExecution(
+  workflowId: string,
+  opts: { method: string; path: string; headers: Record<string, string>; body: string },
+): Promise<WorkflowExecution> {
+  const { baseUrl } = getApiConfig();
+  const token = localStorage.getItem('auth_token');
+  const reqHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Workflow-Trace': 'true',
+  };
+  if (token) reqHeaders['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(`${baseUrl}/admin/workflows/${encodeURIComponent(workflowId)}/trigger`, {
+    method: 'POST',
+    headers: reqHeaders,
+    body: JSON.stringify({ trigger_data: opts }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+export async function apiGetExecutionLogs(
+  executionId: string,
+  level?: string,
+  limit?: number,
+): Promise<ExecutionLog[]> {
+  const params = new URLSearchParams();
+  if (level) params.set('level', level);
+  if (limit) params.set('limit', String(limit));
+  const qs = params.toString();
+  const result = await apiGet<{ logs: ExecutionLog[] }>(
+    `/admin/executions/${encodeURIComponent(executionId)}/logs${qs ? '?' + qs : ''}`,
+  );
+  return result.logs ?? [];
+}
+
 // --- Logs ---
 
 export function apiFetchLogs(workflowId: string, filter?: LogFilter): Promise<ExecutionLog[]> {
