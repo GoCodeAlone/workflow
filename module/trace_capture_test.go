@@ -79,11 +79,12 @@ func TestStepIO_CapturedWhenExplicit(t *testing.T) {
 	_, err := tracker.TrackPipelineExecution(context.Background(), pipeline, map[string]any{"input_key": "val"}, req)
 	require.NoError(t, err)
 
-	var outputData string
+	var inputData, outputData string
 	err = store.DB().QueryRow(
-		"SELECT output_data FROM execution_steps WHERE step_name = 'step1'",
-	).Scan(&outputData)
+		"SELECT input_data, output_data FROM execution_steps WHERE step_name = 'step1'",
+	).Scan(&inputData, &outputData)
 	require.NoError(t, err)
+	require.Contains(t, inputData, "input_key")
 	require.Contains(t, outputData, "captured")
 }
 

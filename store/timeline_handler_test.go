@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 )
 
 // mockLogQuerier is a simple in-memory LogQuerier for tests.
@@ -105,7 +106,7 @@ func TestTimelineHandler_ListExecutions_FilterPipeline(t *testing.T) {
 	}
 
 	var resp map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	count := int(resp["count"].(float64))
 	if count != 1 {
 		t.Errorf("expected 1 execution for pipeline-a, got %d", count)
@@ -127,7 +128,7 @@ func TestTimelineHandler_ListExecutions_Empty(t *testing.T) {
 	}
 
 	var resp map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	count := int(resp["count"].(float64))
 	if count != 0 {
 		t.Errorf("expected 0 executions, got %d", count)
@@ -215,7 +216,7 @@ func TestTimelineHandler_GetEvents(t *testing.T) {
 	}
 
 	var resp map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	count := int(resp["count"].(float64))
 	if count != 6 {
 		t.Errorf("expected 6 events, got %d", count)
@@ -240,7 +241,7 @@ func TestTimelineHandler_GetEvents_TypeFilter(t *testing.T) {
 	}
 
 	var resp map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	count := int(resp["count"].(float64))
 	if count != 2 {
 		t.Errorf("expected 2 step.started events, got %d", count)
@@ -478,7 +479,7 @@ func TestTimelineHandler_GetExecutionLogs(t *testing.T) {
 	}
 
 	var resp map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	count := int(resp["count"].(float64))
 	if count != 3 {
 		t.Errorf("expected 3 logs, got %d", count)
@@ -512,7 +513,7 @@ func TestTimelineHandler_GetExecutionLogs_LevelFilter(t *testing.T) {
 	}
 
 	var resp map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	count := int(resp["count"].(float64))
 	if count != 1 {
 		t.Errorf("expected 1 error log, got %d", count)
@@ -555,7 +556,7 @@ func TestTimelineHandler_GetExecutionLogs_Empty(t *testing.T) {
 	}
 
 	var resp map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	count := int(resp["count"].(float64))
 	if count != 0 {
 		t.Errorf("expected 0 logs, got %d", count)
@@ -602,14 +603,15 @@ func TestAPI_ExplicitTrace_EndToEnd(t *testing.T) {
 	}
 
 	var resp map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 
 	count := int(resp["count"].(float64))
 	if count != 6 {
 		t.Errorf("expected 6 log entries (including I/O events), got %d", count)
 	}
 
-	logs, _ := resp["logs"].([]any)
+	logs, ok := resp["logs"].([]any)
+	require.True(t, ok, "expected logs field to be an array")
 	if len(logs) != 6 {
 		t.Errorf("expected logs array length 6, got %d", len(logs))
 	}

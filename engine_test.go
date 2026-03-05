@@ -1648,3 +1648,64 @@ func TestEngine_BuildFromConfig_RequiresPlugins_ExactVersionMatch(t *testing.T) 
 		})
 	}
 }
+
+// TestStdEngine_ConfigHash_Format verifies that BuildFromConfig computes a
+// SHA-256 config hash in the expected "sha256:<64-hex>" format.
+func TestStdEngine_ConfigHash_Format(t *testing.T) {
+	engine, _, _, cancel := setupEngineTest(t)
+	defer cancel()
+
+	cfg := &config.WorkflowConfig{}
+	if err := engine.BuildFromConfig(cfg); err != nil {
+		t.Fatalf("BuildFromConfig failed: %v", err)
+	}
+
+	hash := engine.ConfigHash()
+	if !strings.HasPrefix(hash, "sha256:") {
+		t.Errorf("ConfigHash() = %q; expected prefix 'sha256:'", hash)
+	}
+	// "sha256:" (7 chars) + 64 hex chars from SHA-256 32-byte digest
+	if len(hash) != 71 {
+		t.Errorf("ConfigHash() len = %d; expected 71 (7 + 64)", len(hash))
+	}
+}
+
+// TestStdEngine_ConfigHash_Deterministic verifies that the same config produces
+// the same hash on separate engine instances, and a different config produces
+// a different hash.
+func TestStdEngine_ConfigHash_Deterministic(t *testing.T) {
+	engine1, _, _, cancel1 := setupEngineTest(t)
+	defer cancel1()
+	engine2, _, _, cancel2 := setupEngineTest(t)
+	defer cancel2()
+	engine3, _, _, cancel3 := setupEngineTest(t)
+	defer cancel3()
+
+	cfgA := &config.WorkflowConfig{}
+	// cfgB uses the Platform field (not read by BuildFromConfig) to produce
+	// different YAML bytes without triggering module/handler registration errors.
+	cfgB := &config.WorkflowConfig{
+		Platform: map[string]any{"env": "test"},
+	}
+
+	if err := engine1.BuildFromConfig(cfgA); err != nil {
+		t.Fatalf("engine1.BuildFromConfig(cfgA): %v", err)
+	}
+	if err := engine2.BuildFromConfig(cfgA); err != nil {
+		t.Fatalf("engine2.BuildFromConfig(cfgA): %v", err)
+	}
+	if err := engine3.BuildFromConfig(cfgB); err != nil {
+		t.Fatalf("engine3.BuildFromConfig(cfgB): %v", err)
+	}
+
+	hashA1 := engine1.ConfigHash()
+	hashA2 := engine2.ConfigHash()
+	hashB := engine3.ConfigHash()
+
+	if hashA1 != hashA2 {
+		t.Errorf("same config produced different hashes: %q vs %q", hashA1, hashA2)
+	}
+	if hashA1 == hashB {
+		t.Errorf("different configs produced the same hash: %q", hashA1)
+	}
+}
