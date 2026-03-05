@@ -33,7 +33,7 @@ func TestConfigHash_InExecutionMetadata(t *testing.T) {
 		"SELECT metadata FROM workflow_executions WHERE workflow_id = 'test-wf'",
 	).Scan(&metadata)
 	require.NoError(t, err)
-	require.Contains(t, metadata, `"config_hash":"sha256:abc123"`)
+	require.Contains(t, metadata, `"config_version":"sha256:abc123"`)
 }
 
 func TestConfigHash_IncludedAlongsideExplicitTrace(t *testing.T) {
@@ -61,7 +61,7 @@ func TestConfigHash_IncludedAlongsideExplicitTrace(t *testing.T) {
 		"SELECT metadata FROM workflow_executions WHERE workflow_id = 'test-wf'",
 	).Scan(&metadata)
 	require.NoError(t, err)
-	require.Contains(t, metadata, `"config_hash":"sha256:deadbeef"`)
+	require.Contains(t, metadata, `"config_version":"sha256:deadbeef"`)
 	require.Contains(t, metadata, `"explicit_trace":true`)
 	require.Contains(t, metadata, `"capture_io":true`)
 }

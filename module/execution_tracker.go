@@ -393,7 +393,7 @@ func (t *ExecutionTracker) TrackPipelineExecution(
 	if t.ConfigHash != "" || explicitTrace {
 		meta := map[string]any{}
 		if t.ConfigHash != "" {
-			meta["config_hash"] = t.ConfigHash
+			meta["config_version"] = t.ConfigHash
 		}
 		if explicitTrace {
 			meta["explicit_trace"] = true
