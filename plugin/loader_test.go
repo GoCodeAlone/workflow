@@ -422,7 +422,7 @@ func (m *mockDeployTarget) Generate(_ context.Context, _ *deploy.DeployRequest) 
 func (m *mockDeployTarget) Apply(_ context.Context, _ *deploy.DeployArtifacts, _ deploy.ApplyOpts) (*deploy.DeployResult, error) {
 	return nil, nil
 }
-func (m *mockDeployTarget) Destroy(_ context.Context, _, _ string) error            { return nil }
+func (m *mockDeployTarget) Destroy(_ context.Context, _, _ string) error { return nil }
 func (m *mockDeployTarget) Status(_ context.Context, _, _ string) (*deploy.DeployStatus, error) {
 	return nil, nil
 }
@@ -436,8 +436,8 @@ func (m *mockDeployTarget) Logs(_ context.Context, _, _ string, _ deploy.LogOpts
 // mockSidecarProvider is a no-op sidecar provider for tests.
 type mockSidecarProvider struct{ typeName string }
 
-func (m *mockSidecarProvider) Type() string                                             { return m.typeName }
-func (m *mockSidecarProvider) Validate(_ config.SidecarConfig) error                   { return nil }
+func (m *mockSidecarProvider) Type() string                          { return m.typeName }
+func (m *mockSidecarProvider) Validate(_ config.SidecarConfig) error { return nil }
 func (m *mockSidecarProvider) Resolve(_ config.SidecarConfig, _ string) (*deploy.SidecarSpec, error) {
 	return nil, nil
 }

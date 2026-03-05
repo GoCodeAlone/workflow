@@ -2,6 +2,7 @@ package module
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -988,6 +989,13 @@ func (s *V1Store) ListExecutionLogs(executionID string, level string, limit int)
 		if err := rows.Scan(&id, &workflowID, &executionIDStr, &lvl, &message, &moduleName, &fields, &createdAt); err != nil {
 			return nil, err
 		}
+		var fieldsObj map[string]any
+		if fields != "" {
+			_ = json.Unmarshal([]byte(fields), &fieldsObj)
+		}
+		if fieldsObj == nil {
+			fieldsObj = map[string]any{}
+		}
 		logs = append(logs, map[string]any{
 			"id":           id,
 			"workflow_id":  workflowID,
@@ -995,7 +1003,7 @@ func (s *V1Store) ListExecutionLogs(executionID string, level string, limit int)
 			"level":        lvl,
 			"message":      message,
 			"module_name":  moduleName,
-			"fields":       fields,
+			"fields":       fieldsObj,
 			"created_at":   createdAt,
 		})
 	}

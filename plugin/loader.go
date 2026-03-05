@@ -92,7 +92,6 @@ func (l *PluginLoader) LoadBinaryPluginWithOverride(p EnginePlugin, binaryPath, 
 	return l.LoadPluginWithOverride(p)
 }
 
-
 // license validator configuration:
 //   - Core and Community plugins are always allowed.
 //   - Premium plugins are validated against the LicenseValidator if one is set.
