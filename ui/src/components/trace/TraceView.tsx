@@ -13,7 +13,7 @@ import { apiGetExecutionLogs, apiGetWorkflow } from '../../utils/api.ts';
 import { configToNodes, parseYaml } from '../../utils/serialization.ts';
 import type { ExecutionStep, ExecutionLog } from '../../types/observability.ts';
 
-function toTraceStep(step: ExecutionStep): TraceStep {
+export function toTraceStep(step: ExecutionStep): TraceStep {
   return {
     stepName: step.step_name,
     stepType: step.step_type,
@@ -27,7 +27,7 @@ function toTraceStep(step: ExecutionStep): TraceStep {
   };
 }
 
-function toLogEntry(log: ExecutionLog): LogEntry {
+export function toLogEntry(log: ExecutionLog): LogEntry {
   const level = log.level === 'fatal' ? 'error' : log.level;
   return {
     id: log.id,

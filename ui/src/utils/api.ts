@@ -396,6 +396,7 @@ export async function apiTriggerTracedExecution(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
+    getApiConfig().onResponseError?.(res.status, text);
     throw new Error(`API ${res.status}: ${text}`);
   }
   return res.json();
