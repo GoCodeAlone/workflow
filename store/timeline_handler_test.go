@@ -561,3 +561,70 @@ func TestTimelineHandler_GetExecutionLogs_Empty(t *testing.T) {
 		t.Errorf("expected 0 logs, got %d", count)
 	}
 }
+
+// TestAPI_ExplicitTrace_EndToEnd verifies the full logs-endpoint flow for an
+// explicitly-traced execution: all log entries (including step I/O events) are
+// returned when querying /executions/{id}/logs without a level filter.
+func TestAPI_ExplicitTrace_EndToEnd(t *testing.T) {
+	eventStore := NewInMemoryEventStore()
+	execID := uuid.New().String()
+
+	// Simulate the log entries that ExecutionTracker writes for an explicit trace:
+	// - execution.started
+	// - step.input_recorded (event)
+	// - step.started        (info)
+	// - step.output_recorded (event)
+	// - step.completed      (info)
+	// - execution.completed (info)
+	lq := &mockLogQuerier{
+		logs: map[string][]map[string]any{
+			execID: {
+				{"id": 1, "level": "event", "message": "execution.started", "module_name": ""},
+				{"id": 2, "level": "event", "message": "step.input_recorded", "module_name": "step1"},
+				{"id": 3, "level": "info", "message": "Step started: step1", "module_name": "step1"},
+				{"id": 4, "level": "event", "message": "step.output_recorded", "module_name": "step1"},
+				{"id": 5, "level": "info", "message": "Step completed: step1 (3ms)", "module_name": "step1"},
+				{"id": 6, "level": "info", "message": "Execution completed (3ms)", "module_name": ""},
+			},
+		},
+	}
+
+	h := NewTimelineHandler(eventStore, nil).WithLogQuerier(lq)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/executions/"+execID+"/logs", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+
+	count := int(resp["count"].(float64))
+	if count != 6 {
+		t.Errorf("expected 6 log entries (including I/O events), got %d", count)
+	}
+
+	logs, _ := resp["logs"].([]any)
+	if len(logs) != 6 {
+		t.Errorf("expected logs array length 6, got %d", len(logs))
+	}
+
+	// Verify I/O event entries are present among the returned logs.
+	messages := make(map[string]bool)
+	for _, entry := range logs {
+		if m, ok := entry.(map[string]any)["message"].(string); ok {
+			messages[m] = true
+		}
+	}
+	if !messages["step.input_recorded"] {
+		t.Error("expected step.input_recorded in logs")
+	}
+	if !messages["step.output_recorded"] {
+		t.Error("expected step.output_recorded in logs")
+	}
+}

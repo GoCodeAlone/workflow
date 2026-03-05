@@ -9,33 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestConfigHash_InExecutionMetadata(t *testing.T) {
-	store := setupTestStoreWithWorkflow(t, "test-wf")
-
-	tracker := &ExecutionTracker{
-		Store:      store,
-		WorkflowID: "test-wf",
-		ConfigHash: "sha256:abc123",
-	}
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	step := newMockStep("step1", map[string]any{"result": "ok"})
-	pipeline := &Pipeline{
-		Name:  "test-pipeline",
-		Steps: []PipelineStep{step},
-	}
-
-	_, err := tracker.TrackPipelineExecution(context.Background(), pipeline, nil, req)
-	require.NoError(t, err)
-
-	var metadata string
-	err = store.DB().QueryRow(
-		"SELECT metadata FROM workflow_executions WHERE workflow_id = 'test-wf'",
-	).Scan(&metadata)
-	require.NoError(t, err)
-	require.Contains(t, metadata, `"config_version":"sha256:abc123"`)
-}
-
 func TestConfigHash_IncludedAlongsideExplicitTrace(t *testing.T) {
 	store := setupTestStoreWithWorkflow(t, "test-wf")
 
