@@ -197,11 +197,11 @@ func TestIsSupportedPartitionDriver(t *testing.T) {
 // testMultiPartitionManager extends testPartitionManager with MultiPartitionManager support.
 type testMultiPartitionManager struct {
 	testPartitionManager
-	configs                 []PartitionConfig
-	ensureForKeyCalledWith  []struct{ key, value string }
-	syncForKeyCalledWith    []string
-	ensureForKeyErr         error
-	syncForKeyErr           error
+	configs                []PartitionConfig
+	ensureForKeyCalledWith []struct{ key, value string }
+	syncForKeyCalledWith   []string
+	ensureForKeyErr        error
+	syncForKeyErr          error
 }
 
 func (m *testMultiPartitionManager) PartitionConfigs() []PartitionConfig { return m.configs }
@@ -403,10 +403,10 @@ func TestPartitionedDatabase_PartitionConfigs_DeepCopiesTables(t *testing.T) {
 func TestPartitionedDatabase_BackwardCompat_SinglePartition(t *testing.T) {
 	// Old-style config without Partitions field must behave exactly as before.
 	cfg := PartitionedDatabaseConfig{
-		Driver:       "pgx",
-		PartitionKey: "tenant_id",
-		Tables:       []string{"forms", "submissions"},
-		PartitionType: PartitionTypeList,
+		Driver:              "pgx",
+		PartitionKey:        "tenant_id",
+		Tables:              []string{"forms", "submissions"},
+		PartitionType:       PartitionTypeList,
 		PartitionNameFormat: "{table}_{tenant}",
 	}
 	pd := NewPartitionedDatabase("db", cfg)

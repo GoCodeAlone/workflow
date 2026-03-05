@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/observability/tracing"
@@ -15,15 +14,47 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// traceContextKey is the unexported context key type for the explicit-trace flag.
+type traceContextKey struct{}
+
+// withExplicitTrace returns a context with the explicit-trace flag set.
+// Pipeline steps check this to decide whether to emit step I/O events.
+func withExplicitTrace(ctx context.Context) context.Context {
+	return context.WithValue(ctx, traceContextKey{}, true)
+}
+
+// isExplicitTrace returns true when the context carries the explicit-trace flag.
+func isExplicitTrace(ctx context.Context) bool {
+	v, _ := ctx.Value(traceContextKey{}).(bool)
+	return v
+}
+
 // ExecutionTrackerProvider is the minimal interface required to track pipeline executions.
 // *ExecutionTracker satisfies this interface.
 type ExecutionTrackerProvider interface {
 	TrackPipelineExecution(ctx context.Context, pipeline *Pipeline, triggerData map[string]any, r *http.Request) (*PipelineContext, error)
 }
 
+// executionState holds all mutable state for a single in-flight pipeline execution.
+// Storing it in a per-execution map (keyed by executionID) allows the shared
+// ExecutionTracker to service concurrent requests without state cross-contamination.
+type executionState struct {
+	mu            sync.Mutex
+	stepIDs       map[string]string     // step name -> step record ID
+	stepSpans     map[string]trace.Span // step name -> OTEL span
+	seqCounter    int                   // auto-incrementing sequence number
+	execSpan      trace.Span            // OTEL span for this execution
+	explicitTrace bool                  // true when X-Workflow-Trace: true
+	chained       EventRecorder         // upstream recorder to forward events to
+}
+
 // ExecutionTracker wraps pipeline execution with V1Store recording.
 // It also implements EventRecorder so the pipeline can push step-level
 // events that are persisted to execution_steps and execution_logs.
+//
+// All per-execution mutable state is stored in executionState values inside
+// the executions map, keyed by executionID. This makes concurrent requests
+// fully independent with no shared mutable state between executions.
 type ExecutionTracker struct {
 	Store      *V1Store
 	WorkflowID string
@@ -39,26 +70,14 @@ type ExecutionTracker struct {
 	// creates spans for each execution and step alongside DB writes.
 	Tracer *tracing.WorkflowTracer
 
-	// mu protects stepIDs and seqCounter during concurrent event recording.
-	mu         sync.Mutex
-	stepIDs    map[string]string     // step name -> step record ID
-	stepSpans  map[string]trace.Span // step name -> OTEL span
-	seqCounter int                   // auto-incrementing sequence number
-	execID     string                // current execution ID
-	execSpan   trace.Span            // OTEL span for current execution
-
-	// chained is an optional upstream EventRecorder to forward events to.
-	chained EventRecorder
-
 	// ConfigHash is an optional SHA-256 hash of the workflow config that produced
 	// this tracker. When set, it is stored in every execution's metadata to
 	// link traces back to the config version that generated them.
 	ConfigHash string
 
-	// explicitTrace indicates this execution was explicitly requested to be traced
-	// via the X-Workflow-Trace: true request header. When true, step I/O is captured.
-	// Uses atomic.Bool to allow concurrent reads from RecordEvent without holding mu.
-	explicitTrace atomic.Bool
+	// execMu protects the executions map (not the individual execution states).
+	execMu     sync.Mutex
+	executions map[string]*executionState // executionID -> per-execution state
 }
 
 // SetEventStoreRecorder sets the optional event store recorder that receives
@@ -68,13 +87,23 @@ func (t *ExecutionTracker) SetEventStoreRecorder(r EventRecorder) {
 	t.EventStoreRecorder = r
 }
 
+// getExecutionState returns the per-execution state for the given executionID, or nil.
+func (t *ExecutionTracker) getExecutionState(executionID string) *executionState {
+	t.execMu.Lock()
+	defer t.execMu.Unlock()
+	return t.executions[executionID]
+}
+
 // RecordEvent implements EventRecorder. It is called by the Pipeline for each
 // execution event (step.started, step.completed, step.failed, etc.).
 // Events are recorded best-effort — errors are silently ignored.
 func (t *ExecutionTracker) RecordEvent(ctx context.Context, executionID string, eventType string, data map[string]any) error {
-	// Forward to chained recorder first (if any)
-	if t.chained != nil {
-		_ = t.chained.RecordEvent(ctx, executionID, eventType, data)
+	// Look up per-execution state — may be nil for events emitted outside TrackPipelineExecution.
+	state := t.getExecutionState(executionID)
+
+	// Forward to per-execution chained recorder first (if any).
+	if state != nil && state.chained != nil {
+		_ = state.chained.RecordEvent(ctx, executionID, eventType, data)
 	}
 
 	if t.Store == nil || t.WorkflowID == "" {
@@ -85,28 +114,32 @@ func (t *ExecutionTracker) RecordEvent(ctx context.Context, executionID string, 
 
 	switch eventType {
 	case "step.started":
-		t.handleStepStarted(ctx, executionID, data, now)
+		t.handleStepStarted(ctx, state, executionID, data, now)
 	case "step.completed":
-		t.handleStepCompleted(data, now)
+		t.handleStepCompleted(state, data, now)
 	case "step.failed":
-		t.handleStepFailed(data, now)
+		t.handleStepFailed(state, data, now)
 	case "step.input_recorded":
-		if t.explicitTrace.Load() {
-			t.handleStepInputRecorded(data)
+		// Only process and log I/O events for explicitly-traced executions.
+		// This prevents PII leakage and unnecessary storage for normal runs.
+		if state != nil && state.explicitTrace {
+			t.handleStepInputRecorded(state, data)
 		}
+		return nil
 	case "step.output_recorded":
-		if t.explicitTrace.Load() {
-			t.handleStepOutputRecorded(data)
+		if state != nil && state.explicitTrace {
+			t.handleStepOutputRecorded(state, data)
 		}
+		return nil
 	}
 
-	// Write to execution_logs for ALL event types.
+	// Write to execution_logs for all non-I/O event types.
 	t.writeLog(executionID, eventType, data, now)
 
 	return nil
 }
 
-func (t *ExecutionTracker) handleStepStarted(ctx context.Context, executionID string, data map[string]any, now time.Time) {
+func (t *ExecutionTracker) handleStepStarted(ctx context.Context, state *executionState, executionID string, data map[string]any, now time.Time) {
 	stepName, _ := data["step_name"].(string)
 	if stepName == "" {
 		return
@@ -118,43 +151,41 @@ func (t *ExecutionTracker) handleStepStarted(ctx context.Context, executionID st
 		stepType = stepName
 	}
 
-	t.mu.Lock()
-	if t.stepIDs == nil {
-		t.stepIDs = make(map[string]string)
-	}
-	if t.stepSpans == nil {
-		t.stepSpans = make(map[string]trace.Span)
-	}
-	t.seqCounter++
-	seq := t.seqCounter
-	t.stepIDs[stepName] = stepID
+	if state != nil {
+		state.mu.Lock()
+		state.seqCounter++
+		seq := state.seqCounter
+		state.stepIDs[stepName] = stepID
 
-	// Start OTEL step span if tracer is configured
-	if t.Tracer != nil {
-		_, stepSpan := t.Tracer.StartStep(ctx, stepName, stepType)
-		stepSpan.SetAttributes(
-			attribute.String("execution.id", executionID),
-			attribute.String("step.id", stepID),
-			attribute.Int("step.sequence", seq),
-		)
-		t.stepSpans[stepName] = stepSpan
-	}
-	t.mu.Unlock()
+		// Start OTEL step span if tracer is configured
+		if t.Tracer != nil {
+			_, stepSpan := t.Tracer.StartStep(ctx, stepName, stepType)
+			stepSpan.SetAttributes(
+				attribute.String("execution.id", executionID),
+				attribute.String("step.id", stepID),
+				attribute.Int("step.sequence", seq),
+			)
+			state.stepSpans[stepName] = stepSpan
+		}
+		state.mu.Unlock()
 
-	_ = t.Store.InsertExecutionStep(stepID, executionID, stepName, stepType, "running", seq, now)
+		_ = t.Store.InsertExecutionStep(stepID, executionID, stepName, stepType, "running", seq, now)
+	} else {
+		_ = t.Store.InsertExecutionStep(stepID, executionID, stepName, stepType, "running", 0, now)
+	}
 }
 
-func (t *ExecutionTracker) handleStepCompleted(data map[string]any, now time.Time) {
+func (t *ExecutionTracker) handleStepCompleted(state *executionState, data map[string]any, now time.Time) {
 	stepName, _ := data["step_name"].(string)
-	if stepName == "" {
+	if stepName == "" || state == nil {
 		return
 	}
 
-	t.mu.Lock()
-	stepID := t.stepIDs[stepName]
-	stepSpan := t.stepSpans[stepName]
-	delete(t.stepSpans, stepName)
-	t.mu.Unlock()
+	state.mu.Lock()
+	stepID := state.stepIDs[stepName]
+	stepSpan := state.stepSpans[stepName]
+	delete(state.stepSpans, stepName)
+	state.mu.Unlock()
 
 	if stepID == "" {
 		return
@@ -172,17 +203,17 @@ func (t *ExecutionTracker) handleStepCompleted(data map[string]any, now time.Tim
 	}
 }
 
-func (t *ExecutionTracker) handleStepFailed(data map[string]any, now time.Time) {
+func (t *ExecutionTracker) handleStepFailed(state *executionState, data map[string]any, now time.Time) {
 	stepName, _ := data["step_name"].(string)
-	if stepName == "" {
+	if stepName == "" || state == nil {
 		return
 	}
 
-	t.mu.Lock()
-	stepID := t.stepIDs[stepName]
-	stepSpan := t.stepSpans[stepName]
-	delete(t.stepSpans, stepName)
-	t.mu.Unlock()
+	state.mu.Lock()
+	stepID := state.stepIDs[stepName]
+	stepSpan := state.stepSpans[stepName]
+	delete(state.stepSpans, stepName)
+	state.mu.Unlock()
 
 	if stepID == "" {
 		return
@@ -215,14 +246,14 @@ func truncateIO(b []byte) []byte {
 	return out
 }
 
-func (t *ExecutionTracker) handleStepInputRecorded(data map[string]any) {
+func (t *ExecutionTracker) handleStepInputRecorded(state *executionState, data map[string]any) {
 	stepName, _ := data["step_name"].(string)
-	if stepName == "" {
+	if stepName == "" || state == nil {
 		return
 	}
-	t.mu.Lock()
-	stepID := t.stepIDs[stepName]
-	t.mu.Unlock()
+	state.mu.Lock()
+	stepID := state.stepIDs[stepName]
+	state.mu.Unlock()
 	if stepID == "" {
 		return
 	}
@@ -235,14 +266,14 @@ func (t *ExecutionTracker) handleStepInputRecorded(data map[string]any) {
 	_ = t.Store.UpdateStepInput(stepID, inputJSON)
 }
 
-func (t *ExecutionTracker) handleStepOutputRecorded(data map[string]any) {
+func (t *ExecutionTracker) handleStepOutputRecorded(state *executionState, data map[string]any) {
 	stepName, _ := data["step_name"].(string)
-	if stepName == "" {
+	if stepName == "" || state == nil {
 		return
 	}
-	t.mu.Lock()
-	stepID := t.stepIDs[stepName]
-	t.mu.Unlock()
+	state.mu.Lock()
+	stepID := state.stepIDs[stepName]
+	state.mu.Unlock()
 	if stepID == "" {
 		return
 	}
@@ -355,15 +386,37 @@ func (t *ExecutionTracker) TrackPipelineExecution(
 	// Detect explicit trace request header
 	explicitTrace := r != nil && r.Header.Get("X-Workflow-Trace") == "true"
 
-	// Reset per-execution state
-	t.explicitTrace.Store(explicitTrace) // atomic; must be set before pipeline starts
-	t.mu.Lock()
-	t.stepIDs = make(map[string]string)
-	t.stepSpans = make(map[string]trace.Span)
-	t.seqCounter = 0
-	t.execID = execID
-	t.execSpan = nil
-	t.mu.Unlock()
+	// Determine the chained recorder for this execution.
+	// IMPORTANT: Never chain to ourselves — that causes infinite recursion.
+	var chained EventRecorder
+	switch {
+	case pipeline.EventRecorder != nil && pipeline.EventRecorder != EventRecorder(t):
+		chained = pipeline.EventRecorder
+	case t.EventStoreRecorder != nil && t.EventStoreRecorder != EventRecorder(t):
+		chained = t.EventStoreRecorder
+	}
+
+	// Create and register per-execution state. This must be done before calling
+	// pipeline.Execute so that RecordEvent can find the state by executionID.
+	state := &executionState{
+		stepIDs:       make(map[string]string),
+		stepSpans:     make(map[string]trace.Span),
+		explicitTrace: explicitTrace,
+		chained:       chained,
+	}
+	t.execMu.Lock()
+	if t.executions == nil {
+		t.executions = make(map[string]*executionState)
+	}
+	t.executions[execID] = state
+	t.execMu.Unlock()
+
+	// Ensure the per-execution state is cleaned up when this call returns.
+	defer func() {
+		t.execMu.Lock()
+		delete(t.executions, execID)
+		t.execMu.Unlock()
+	}()
 
 	// Extract user info from JWT claims on the request context
 	triggeredBy := ""
@@ -383,9 +436,16 @@ func (t *ExecutionTracker) TrackPipelineExecution(
 		if triggeredBy != "" {
 			span.SetAttributes(attribute.String("triggered_by", triggeredBy))
 		}
-		t.mu.Lock()
-		t.execSpan = span
-		t.mu.Unlock()
+		state.mu.Lock()
+		state.execSpan = span
+		state.mu.Unlock()
+	}
+
+	// Propagate explicit-trace flag via context so pipeline steps can gate
+	// step.input_recorded / step.output_recorded emission without needing a
+	// direct reference to the tracker.
+	if explicitTrace {
+		execCtx = withExplicitTrace(execCtx)
 	}
 
 	// Best-effort: don't fail the request if tracking fails
@@ -405,21 +465,9 @@ func (t *ExecutionTracker) TrackPipelineExecution(
 		_ = t.Store.UpdateExecutionMetadata(execID, string(metaJSON))
 	}
 
-	// Set execution ID on pipeline for event correlation
+	// Set execution ID on pipeline for event correlation, and wire ourselves
+	// as the EventRecorder so step events flow to the tracker.
 	pipeline.ExecutionID = execID
-
-	// Set ourselves as EventRecorder, chaining to any existing one.
-	// If the pipeline already has an EventRecorder (e.g., from PipelineWorkflowHandler),
-	// chain to that. Otherwise, chain to the EventStoreRecorder if available.
-	// IMPORTANT: Never chain to ourselves — that causes infinite recursion.
-	switch {
-	case pipeline.EventRecorder != nil && pipeline.EventRecorder != EventRecorder(t):
-		t.chained = pipeline.EventRecorder
-	case t.EventStoreRecorder != nil && t.EventStoreRecorder != EventRecorder(t):
-		t.chained = t.EventStoreRecorder
-	default:
-		t.chained = nil
-	}
 	pipeline.EventRecorder = t
 
 	pc, pipeErr := pipeline.Execute(execCtx, triggerData)
@@ -436,10 +484,10 @@ func (t *ExecutionTracker) TrackPipelineExecution(
 	_ = t.Store.CompleteExecution(execID, status, completedAt, durationMs, errMsg)
 
 	// End OTEL execution span
-	t.mu.Lock()
-	span := t.execSpan
-	t.execSpan = nil
-	t.mu.Unlock()
+	state.mu.Lock()
+	span := state.execSpan
+	state.execSpan = nil
+	state.mu.Unlock()
 	if span != nil {
 		span.SetAttributes(
 			attribute.Int64("execution.duration_ms", durationMs),
