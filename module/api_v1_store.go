@@ -915,6 +915,24 @@ func (s *V1Store) CompleteExecutionStep(id, status string, completedAt time.Time
 	return err
 }
 
+// UpdateStepIO updates both input and output data for an execution step.
+func (s *V1Store) UpdateStepIO(stepID, inputData, outputData string) error {
+	_, err := s.db.Exec(
+		"UPDATE execution_steps SET input_data = ?, output_data = ? WHERE id = ?",
+		inputData, outputData, stepID,
+	)
+	return err
+}
+
+// UpdateStepOutput updates only the output data for an execution step.
+func (s *V1Store) UpdateStepOutput(stepID, outputData string) error {
+	_, err := s.db.Exec(
+		"UPDATE execution_steps SET output_data = ? WHERE id = ?",
+		outputData, stepID,
+	)
+	return err
+}
+
 // InsertLog inserts a log entry into the execution_logs table.
 func (s *V1Store) InsertLog(workflowID, executionID, level, message, moduleName, fields string, createdAt time.Time) error {
 	_, err := s.db.Exec(

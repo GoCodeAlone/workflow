@@ -48,6 +48,10 @@ type ExecutionTracker struct {
 
 	// chained is an optional upstream EventRecorder to forward events to.
 	chained EventRecorder
+
+	// explicitTrace indicates this execution was explicitly requested to be traced
+	// via the X-Workflow-Trace: true request header. When true, step I/O is captured.
+	explicitTrace bool
 }
 
 // SetEventStoreRecorder sets the optional event store recorder that receives
@@ -79,6 +83,14 @@ func (t *ExecutionTracker) RecordEvent(ctx context.Context, executionID string, 
 		t.handleStepCompleted(data, now)
 	case "step.failed":
 		t.handleStepFailed(data, now)
+	case "step.input_recorded":
+		if t.explicitTrace {
+			t.handleStepInputRecorded(data)
+		}
+	case "step.output_recorded":
+		if t.explicitTrace {
+			t.handleStepOutputRecorded(data)
+		}
 	}
 
 	// Write to execution_logs for ALL event types.
@@ -182,6 +194,60 @@ func (t *ExecutionTracker) handleStepFailed(data map[string]any, now time.Time) 
 	}
 }
 
+// truncateIO truncates JSON bytes to maxIOBytes, appending [truncated] marker when needed.
+const maxIOBytes = 10240
+
+func truncateIO(b []byte) []byte {
+	const marker = "[truncated]"
+	if len(b) <= maxIOBytes {
+		return b
+	}
+	out := make([]byte, maxIOBytes-len(marker)+len(marker))
+	copy(out, b[:maxIOBytes-len(marker)])
+	copy(out[maxIOBytes-len(marker):], marker)
+	return out
+}
+
+func (t *ExecutionTracker) handleStepInputRecorded(data map[string]any) {
+	stepName, _ := data["step_name"].(string)
+	if stepName == "" {
+		return
+	}
+	t.mu.Lock()
+	stepID := t.stepIDs[stepName]
+	t.mu.Unlock()
+	if stepID == "" {
+		return
+	}
+	inputJSON := "{}"
+	if input, ok := data["input"]; ok {
+		if b, err := json.Marshal(input); err == nil {
+			inputJSON = string(truncateIO(b))
+		}
+	}
+	_ = t.Store.UpdateStepIO(stepID, inputJSON, "{}")
+}
+
+func (t *ExecutionTracker) handleStepOutputRecorded(data map[string]any) {
+	stepName, _ := data["step_name"].(string)
+	if stepName == "" {
+		return
+	}
+	t.mu.Lock()
+	stepID := t.stepIDs[stepName]
+	t.mu.Unlock()
+	if stepID == "" {
+		return
+	}
+	outputJSON := "{}"
+	if output, ok := data["output"]; ok {
+		if b, err := json.Marshal(output); err == nil {
+			outputJSON = string(truncateIO(b))
+		}
+	}
+	_ = t.Store.UpdateStepOutput(stepID, outputJSON)
+}
+
 func (t *ExecutionTracker) writeLog(executionID, eventType string, data map[string]any, now time.Time) {
 	level := "event"
 	message := eventType
@@ -279,6 +345,9 @@ func (t *ExecutionTracker) TrackPipelineExecution(
 	}
 	startedAt := time.Now()
 
+	// Detect explicit trace request header
+	explicitTrace := r != nil && r.Header.Get("X-Workflow-Trace") == "true"
+
 	// Reset per-execution state
 	t.mu.Lock()
 	t.stepIDs = make(map[string]string)
@@ -286,6 +355,7 @@ func (t *ExecutionTracker) TrackPipelineExecution(
 	t.seqCounter = 0
 	t.execID = execID
 	t.execSpan = nil
+	t.explicitTrace = explicitTrace
 	t.mu.Unlock()
 
 	// Extract user info from JWT claims on the request context
@@ -313,6 +383,12 @@ func (t *ExecutionTracker) TrackPipelineExecution(
 
 	// Best-effort: don't fail the request if tracking fails
 	_ = t.Store.InsertExecution(execID, t.WorkflowID, triggerType, "running", triggeredBy, startedAt)
+
+	// If explicit trace requested, update execution metadata
+	if explicitTrace {
+		metaJSON, _ := json.Marshal(map[string]any{"explicit_trace": true, "capture_io": true})
+		_, _ = t.Store.db.Exec("UPDATE workflow_executions SET metadata = ? WHERE id = ?", string(metaJSON), execID)
+	}
 
 	// Set execution ID on pipeline for event correlation
 	pipeline.ExecutionID = execID

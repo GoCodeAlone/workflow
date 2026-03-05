@@ -105,13 +105,20 @@ func TestPipeline_EventRecorder_SuccessfulExecution(t *testing.T) {
 	types := recorder.eventTypes()
 
 	// Expected event sequence:
-	// execution.started, step.started, step.completed, step.started, step.completed, execution.completed
+	// execution.started,
+	// step.started, step.input_recorded, step.completed, step.output_recorded,
+	// step.started, step.input_recorded, step.completed, step.output_recorded,
+	// execution.completed
 	expectedTypes := []string{
 		"execution.started",
 		"step.started",
+		"step.input_recorded",
 		"step.completed",
+		"step.output_recorded",
 		"step.started",
+		"step.input_recorded",
 		"step.completed",
+		"step.output_recorded",
 		"execution.completed",
 	}
 
@@ -143,8 +150,8 @@ func TestPipeline_EventRecorder_SuccessfulExecution(t *testing.T) {
 		t.Errorf("expected step_name=step1, got %v", step1Started.Data["step_name"])
 	}
 
-	// Verify step.completed has elapsed duration
-	step1Completed := events[2]
+	// Verify step.completed has elapsed duration (index 3 due to step.input_recorded at index 2)
+	step1Completed := events[3]
 	if step1Completed.Data["step_name"] != "step1" {
 		t.Errorf("expected step_name=step1 in completed, got %v", step1Completed.Data["step_name"])
 	}
@@ -183,13 +190,18 @@ func TestPipeline_EventRecorder_StepFailed_StopStrategy(t *testing.T) {
 
 	types := recorder.eventTypes()
 
-	// Expected: execution.started, step.started(step1), step.completed(step1),
-	//           step.started(step2), step.failed(step2), execution.failed
+	// Expected: execution.started,
+	//   step.started(step1), step.input_recorded(step1), step.completed(step1), step.output_recorded(step1),
+	//   step.started(step2), step.input_recorded(step2), step.failed(step2),
+	//   execution.failed
 	expectedTypes := []string{
 		"execution.started",
 		"step.started",
+		"step.input_recorded",
 		"step.completed",
+		"step.output_recorded",
 		"step.started",
+		"step.input_recorded",
 		"step.failed",
 		"execution.failed",
 	}
@@ -206,7 +218,7 @@ func TestPipeline_EventRecorder_StepFailed_StopStrategy(t *testing.T) {
 
 	// Verify step.failed has error info
 	events := recorder.getEvents()
-	stepFailed := events[4]
+	stepFailed := events[7]
 	if stepFailed.Data["step_name"] != "step2" {
 		t.Errorf("expected step_name=step2, got %v", stepFailed.Data["step_name"])
 	}
@@ -238,19 +250,24 @@ func TestPipeline_EventRecorder_SkipStrategy(t *testing.T) {
 	types := recorder.eventTypes()
 
 	// Expected: execution.started,
-	//   step.started(1), step.completed(1),
-	//   step.started(2), step.failed(2), step.skipped(2),
-	//   step.started(3), step.completed(3),
+	//   step.started(1), step.input_recorded(1), step.completed(1), step.output_recorded(1),
+	//   step.started(2), step.input_recorded(2), step.failed(2), step.skipped(2),
+	//   step.started(3), step.input_recorded(3), step.completed(3), step.output_recorded(3),
 	//   execution.completed
 	expectedTypes := []string{
 		"execution.started",
 		"step.started",
+		"step.input_recorded",
 		"step.completed",
+		"step.output_recorded",
 		"step.started",
+		"step.input_recorded",
 		"step.failed",
 		"step.skipped",
 		"step.started",
+		"step.input_recorded",
 		"step.completed",
+		"step.output_recorded",
 		"execution.completed",
 	}
 
@@ -266,7 +283,7 @@ func TestPipeline_EventRecorder_SkipStrategy(t *testing.T) {
 
 	// Verify the skipped event has step_name and reason
 	events := recorder.getEvents()
-	skippedEvent := events[5]
+	skippedEvent := events[8]
 	if skippedEvent.Data["step_name"] != "step2" {
 		t.Errorf("expected step_name=step2 in skipped event, got %v", skippedEvent.Data["step_name"])
 	}
@@ -301,18 +318,21 @@ func TestPipeline_EventRecorder_CompensationStrategy(t *testing.T) {
 	types := recorder.eventTypes()
 
 	// Expected: execution.started,
-	//   step.started(step1), step.completed(step1),
-	//   step.started(step2), step.failed(step2),
+	//   step.started(step1), step.input_recorded(step1), step.completed(step1), step.output_recorded(step1),
+	//   step.started(step2), step.input_recorded(step2), step.failed(step2),
 	//   execution.failed,
 	//   saga.compensating,
-	//   step.started(comp2), step.compensated(comp2),   (reverse order)
+	//   step.started(comp2), step.compensated(comp2),   (reverse order, no I/O events in compensation)
 	//   step.started(comp1), step.compensated(comp1),
 	//   saga.compensated
 	expectedTypes := []string{
 		"execution.started",
 		"step.started",
+		"step.input_recorded",
 		"step.completed",
+		"step.output_recorded",
 		"step.started",
+		"step.input_recorded",
 		"step.failed",
 		"execution.failed",
 		"saga.compensating",
@@ -335,11 +355,11 @@ func TestPipeline_EventRecorder_CompensationStrategy(t *testing.T) {
 
 	// Verify compensation steps ran in reverse order
 	events := recorder.getEvents()
-	compStep1 := events[7] // first comp step.started = comp2 (reverse)
+	compStep1 := events[10] // first comp step.started = comp2 (reverse)
 	if compStep1.Data["step_name"] != "comp2" {
 		t.Errorf("expected first compensation step to be comp2, got %v", compStep1.Data["step_name"])
 	}
-	compStep2 := events[9] // second comp step.started = comp1
+	compStep2 := events[12] // second comp step.started = comp1
 	if compStep2.Data["step_name"] != "comp1" {
 		t.Errorf("expected second compensation step to be comp1, got %v", compStep2.Data["step_name"])
 	}
@@ -368,14 +388,15 @@ func TestPipeline_EventRecorder_CompensationFailed(t *testing.T) {
 	types := recorder.eventTypes()
 
 	// Expected: execution.started,
-	//   step.started(step1), step.failed(step1),
+	//   step.started(step1), step.input_recorded(step1), step.failed(step1),
 	//   execution.failed,
 	//   saga.compensating,
 	//   step.started(comp1), step.failed(comp1)
-	//   (no saga.compensated because comp failed)
+	//   (no saga.compensated because comp failed; no I/O events in compensation path)
 	expectedTypes := []string{
 		"execution.started",
 		"step.started",
+		"step.input_recorded",
 		"step.failed",
 		"execution.failed",
 		"saga.compensating",
@@ -395,7 +416,7 @@ func TestPipeline_EventRecorder_CompensationFailed(t *testing.T) {
 
 	// Verify compensation step.failed has step_type=compensation
 	events := recorder.getEvents()
-	compFailed := events[6]
+	compFailed := events[7]
 	if compFailed.Data["step_type"] != "compensation" {
 		t.Errorf("expected step_type=compensation, got %v", compFailed.Data["step_type"])
 	}

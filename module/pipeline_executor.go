@@ -165,6 +165,12 @@ func (p *Pipeline) Execute(ctx context.Context, triggerData map[string]any) (*Pi
 			"index":     i,
 		})
 
+		// Record step input (snapshot of current pipeline context)
+		p.recordEvent(ctx, "step.input_recorded", map[string]any{
+			"step_name": step.Name(),
+			"input":     pc.Current,
+		})
+
 		result, err := step.Execute(ctx, pc)
 		elapsed := time.Since(startTime)
 
@@ -221,6 +227,16 @@ func (p *Pipeline) Execute(ctx context.Context, triggerData map[string]any) (*Pi
 		p.recordEvent(ctx, "step.completed", map[string]any{
 			"step_name": step.Name(),
 			"elapsed":   elapsed.String(),
+		})
+
+		// Record step output
+		var stepOutput map[string]any
+		if result != nil {
+			stepOutput = result.Output
+		}
+		p.recordEvent(ctx, "step.output_recorded", map[string]any{
+			"step_name": step.Name(),
+			"output":    stepOutput,
 		})
 
 		// Merge output into context
