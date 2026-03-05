@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -83,11 +84,21 @@ type StdEngine struct {
 	// pipelineRegistry holds all registered pipelines by name, enabling
 	// step.workflow_call to look up sibling pipelines at execution time.
 	pipelineRegistry map[string]*module.Pipeline
+
+	// configHash is the SHA-256 hash of the last config built via BuildFromConfig.
+	// Format: "sha256:<hex>". Empty until BuildFromConfig is called.
+	configHash string
 }
 
 // App returns the underlying modular.Application.
 func (e *StdEngine) App() modular.Application {
 	return e.app
+}
+
+// ConfigHash returns the SHA-256 hash of the most recently loaded config.
+// Format: "sha256:<hex>". Empty until BuildFromConfig is called.
+func (e *StdEngine) ConfigHash() string {
+	return e.configHash
 }
 
 // SetDynamicRegistry sets the dynamic component registry on the engine
@@ -374,6 +385,12 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		if err := e.validateRequirements(cfg.Requires); err != nil {
 			return fmt.Errorf("requirements check failed: %w", err)
 		}
+	}
+
+	// Compute config hash for tracing/versioning
+	if configBytes, err := yaml.Marshal(cfg); err == nil {
+		h := sha256.Sum256(configBytes)
+		e.configHash = fmt.Sprintf("sha256:%x", h)
 	}
 
 	// Store config directory for consistent path resolution in pipeline steps

@@ -12,6 +12,25 @@ import (
 	"github.com/google/uuid"
 )
 
+// mockLogQuerier is a simple in-memory LogQuerier for tests.
+type mockLogQuerier struct {
+	logs map[string][]map[string]any // executionID → logs
+}
+
+func (m *mockLogQuerier) ListExecutionLogs(executionID string, level string, limit int) ([]map[string]any, error) {
+	all := m.logs[executionID]
+	var result []map[string]any
+	for _, log := range all {
+		if level == "" || log["level"] == level {
+			result = append(result, log)
+		}
+	}
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
 func seedExecution(t *testing.T, store EventStore, execID uuid.UUID, pipeline string) {
 	t.Helper()
 	ctx := context.Background()
@@ -427,5 +446,118 @@ func TestReplayHandler_GetReplayInfo_NotReplay(t *testing.T) {
 	isReplay := info["is_replay"].(bool)
 	if isReplay {
 		t.Error("expected is_replay to be false for non-replay execution")
+	}
+}
+
+// --- Execution Logs API tests ---
+
+func TestTimelineHandler_GetExecutionLogs(t *testing.T) {
+	eventStore := NewInMemoryEventStore()
+	execID := uuid.New().String()
+
+	lq := &mockLogQuerier{
+		logs: map[string][]map[string]any{
+			execID: {
+				{"id": 1, "level": "info", "message": "Step started", "module_name": "step1", "created_at": "2026-01-01T00:00:00Z"},
+				{"id": 2, "level": "error", "message": "Something failed", "module_name": "step2", "created_at": "2026-01-01T00:00:01Z"},
+				{"id": 3, "level": "info", "message": "Step completed", "module_name": "step1", "created_at": "2026-01-01T00:00:02Z"},
+			},
+		},
+	}
+
+	h := NewTimelineHandler(eventStore, nil).WithLogQuerier(lq)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/executions/"+execID+"/logs", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	count := int(resp["count"].(float64))
+	if count != 3 {
+		t.Errorf("expected 3 logs, got %d", count)
+	}
+}
+
+func TestTimelineHandler_GetExecutionLogs_LevelFilter(t *testing.T) {
+	eventStore := NewInMemoryEventStore()
+	execID := uuid.New().String()
+
+	lq := &mockLogQuerier{
+		logs: map[string][]map[string]any{
+			execID: {
+				{"id": 1, "level": "info", "message": "Step started"},
+				{"id": 2, "level": "error", "message": "Something failed"},
+				{"id": 3, "level": "info", "message": "Step completed"},
+			},
+		},
+	}
+
+	h := NewTimelineHandler(eventStore, nil).WithLogQuerier(lq)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/executions/"+execID+"/logs?level=error", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	count := int(resp["count"].(float64))
+	if count != 1 {
+		t.Errorf("expected 1 error log, got %d", count)
+	}
+}
+
+func TestTimelineHandler_GetExecutionLogs_NoQuerier(t *testing.T) {
+	eventStore := NewInMemoryEventStore()
+	execID := uuid.New().String()
+
+	h := NewTimelineHandler(eventStore, nil)
+	// No WithLogQuerier call
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/executions/"+execID+"/logs", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotImplemented {
+		t.Fatalf("expected 501 without log querier, got %d", w.Code)
+	}
+}
+
+func TestTimelineHandler_GetExecutionLogs_Empty(t *testing.T) {
+	eventStore := NewInMemoryEventStore()
+	execID := uuid.New().String()
+
+	lq := &mockLogQuerier{logs: map[string][]map[string]any{}}
+	h := NewTimelineHandler(eventStore, nil).WithLogQuerier(lq)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/api/v1/admin/executions/"+execID+"/logs", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	count := int(resp["count"].(float64))
+	if count != 0 {
+		t.Errorf("expected 0 logs, got %d", count)
 	}
 }

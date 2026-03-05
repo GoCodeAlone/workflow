@@ -49,6 +49,11 @@ type ExecutionTracker struct {
 	// chained is an optional upstream EventRecorder to forward events to.
 	chained EventRecorder
 
+	// ConfigHash is an optional SHA-256 hash of the workflow config that produced
+	// this tracker. When set, it is stored in every execution's metadata to
+	// link traces back to the config version that generated them.
+	ConfigHash string
+
 	// explicitTrace indicates this execution was explicitly requested to be traced
 	// via the X-Workflow-Trace: true request header. When true, step I/O is captured.
 	explicitTrace bool
@@ -384,9 +389,17 @@ func (t *ExecutionTracker) TrackPipelineExecution(
 	// Best-effort: don't fail the request if tracking fails
 	_ = t.Store.InsertExecution(execID, t.WorkflowID, triggerType, "running", triggeredBy, startedAt)
 
-	// If explicit trace requested, update execution metadata
-	if explicitTrace {
-		metaJSON, _ := json.Marshal(map[string]any{"explicit_trace": true, "capture_io": true})
+	// Build execution metadata (config hash always included when set; explicit trace flags when active)
+	if t.ConfigHash != "" || explicitTrace {
+		meta := map[string]any{}
+		if t.ConfigHash != "" {
+			meta["config_hash"] = t.ConfigHash
+		}
+		if explicitTrace {
+			meta["explicit_trace"] = true
+			meta["capture_io"] = true
+		}
+		metaJSON, _ := json.Marshal(meta)
 		_, _ = t.Store.db.Exec("UPDATE workflow_executions SET metadata = ? WHERE id = ?", string(metaJSON), execID)
 	}
 

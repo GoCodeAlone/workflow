@@ -607,6 +607,9 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	if !timelineDiscovered {
 		if eventStore != nil {
 			timelineHandler := evstore.NewTimelineHandler(eventStore, logger)
+			if store != nil {
+				timelineHandler.WithLogQuerier(store)
+			}
 			timelineMux := http.NewServeMux()
 			timelineHandler.RegisterRoutes(timelineMux)
 			app.services.timelineMux = timelineMux
@@ -843,6 +846,7 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 		Store:      store,
 		WorkflowID: workflowID,
 		Tracer:     tracing.NewWorkflowTracer(nil), // uses global OTEL provider
+		ConfigHash: app.engine.ConfigHash(),
 	}
 
 	// -----------------------------------------------------------------------

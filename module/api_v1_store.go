@@ -942,6 +942,48 @@ func (s *V1Store) InsertLog(workflowID, executionID, level, message, moduleName,
 	return err
 }
 
+// ListExecutionLogs returns log entries for an execution with optional level filter.
+// Results are ordered by created_at ASC. limit=0 means no limit.
+func (s *V1Store) ListExecutionLogs(executionID string, level string, limit int) ([]map[string]any, error) {
+	query := "SELECT id, workflow_id, execution_id, level, message, module_name, fields, created_at FROM execution_logs WHERE execution_id = ?"
+	args := []any{executionID}
+	if level != "" {
+		query += " AND level = ?"
+		args = append(args, level)
+	}
+	query += " ORDER BY created_at ASC"
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []map[string]any
+	for rows.Next() {
+		var id int64
+		var workflowID, executionIDStr, lvl, message, moduleName, fields, createdAt string
+		if err := rows.Scan(&id, &workflowID, &executionIDStr, &lvl, &message, &moduleName, &fields, &createdAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, map[string]any{
+			"id":           id,
+			"workflow_id":  workflowID,
+			"execution_id": executionIDStr,
+			"level":        lvl,
+			"message":      message,
+			"module_name":  moduleName,
+			"fields":       fields,
+			"created_at":   createdAt,
+		})
+	}
+	return logs, rows.Err()
+}
+
 // CountExecutionsByWorkflow returns execution counts grouped by status for a workflow.
 func (s *V1Store) CountExecutionsByWorkflow(workflowID string) (map[string]int, error) {
 	rows, err := s.db.Query(

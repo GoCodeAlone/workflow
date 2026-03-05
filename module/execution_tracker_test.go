@@ -9,6 +9,63 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestConfigHash_InExecutionMetadata(t *testing.T) {
+	store := setupTestStoreWithWorkflow(t, "test-wf")
+
+	tracker := &ExecutionTracker{
+		Store:      store,
+		WorkflowID: "test-wf",
+		ConfigHash: "sha256:abc123",
+	}
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	step := newMockStep("step1", map[string]any{"result": "ok"})
+	pipeline := &Pipeline{
+		Name:  "test-pipeline",
+		Steps: []PipelineStep{step},
+	}
+
+	_, err := tracker.TrackPipelineExecution(context.Background(), pipeline, nil, req)
+	require.NoError(t, err)
+
+	var metadata string
+	err = store.DB().QueryRow(
+		"SELECT metadata FROM workflow_executions WHERE workflow_id = 'test-wf'",
+	).Scan(&metadata)
+	require.NoError(t, err)
+	require.Contains(t, metadata, `"config_hash":"sha256:abc123"`)
+}
+
+func TestConfigHash_IncludedAlongsideExplicitTrace(t *testing.T) {
+	store := setupTestStoreWithWorkflow(t, "test-wf")
+
+	tracker := &ExecutionTracker{
+		Store:      store,
+		WorkflowID: "test-wf",
+		ConfigHash: "sha256:deadbeef",
+	}
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("X-Workflow-Trace", "true")
+	step := newMockStep("step1", map[string]any{"result": "ok"})
+	pipeline := &Pipeline{
+		Name:  "test-pipeline",
+		Steps: []PipelineStep{step},
+	}
+
+	_, err := tracker.TrackPipelineExecution(context.Background(), pipeline, nil, req)
+	require.NoError(t, err)
+
+	var metadata string
+	err = store.DB().QueryRow(
+		"SELECT metadata FROM workflow_executions WHERE workflow_id = 'test-wf'",
+	).Scan(&metadata)
+	require.NoError(t, err)
+	require.Contains(t, metadata, `"config_hash":"sha256:deadbeef"`)
+	require.Contains(t, metadata, `"explicit_trace":true`)
+	require.Contains(t, metadata, `"capture_io":true`)
+}
+
 // setupTestStoreWithWorkflow creates a test V1Store and inserts a minimal
 // workflow record (bypassing FK chain) so execution tracking can store records.
 func setupTestStoreWithWorkflow(t *testing.T, workflowID string) *V1Store {

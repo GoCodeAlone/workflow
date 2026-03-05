@@ -9,10 +9,20 @@ import (
 	"github.com/google/uuid"
 )
 
+// LogQuerier is an optional interface for querying execution log entries.
+// *module.V1Store implements this interface; it is defined here to avoid
+// a circular import between the store and module packages.
+type LogQuerier interface {
+	// ListExecutionLogs returns log entries for an execution, optionally filtered by level.
+	// limit=0 means no limit. Results are ordered by created_at ASC.
+	ListExecutionLogs(executionID string, level string, limit int) ([]map[string]any, error)
+}
+
 // TimelineHandler provides HTTP endpoints for the Execution Timeline API.
 type TimelineHandler struct {
-	store  EventStore
-	logger *slog.Logger
+	store      EventStore
+	logQuerier LogQuerier // optional; enables GET /executions/{id}/logs
+	logger     *slog.Logger
 }
 
 // NewTimelineHandler creates a new TimelineHandler.
@@ -23,11 +33,18 @@ func NewTimelineHandler(store EventStore, logger *slog.Logger) *TimelineHandler 
 	return &TimelineHandler{store: store, logger: logger}
 }
 
+// WithLogQuerier sets the optional LogQuerier used to serve the logs endpoint.
+func (h *TimelineHandler) WithLogQuerier(lq LogQuerier) *TimelineHandler {
+	h.logQuerier = lq
+	return h
+}
+
 // RegisterRoutes registers the timeline API routes on the given mux.
 func (h *TimelineHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/admin/executions", h.listExecutions)
 	mux.HandleFunc("GET /api/v1/admin/executions/{id}/timeline", h.getTimeline)
 	mux.HandleFunc("GET /api/v1/admin/executions/{id}/events", h.getEvents)
+	mux.HandleFunc("GET /api/v1/admin/executions/{id}/logs", h.getExecutionLogs)
 }
 
 // listExecutions handles GET /api/v1/admin/executions
@@ -139,6 +156,46 @@ func (h *TimelineHandler) getEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"events": events,
 		"count":  len(events),
+	})
+}
+
+// getExecutionLogs handles GET /api/v1/admin/executions/{id}/logs
+// Supports ?level= filter and ?limit= pagination. Requires a LogQuerier set via WithLogQuerier.
+func (h *TimelineHandler) getExecutionLogs(w http.ResponseWriter, r *http.Request) {
+	if h.logQuerier == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "log querier not configured"})
+		return
+	}
+
+	idStr := r.PathValue("id")
+	if idStr == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing execution ID"})
+		return
+	}
+
+	q := r.URL.Query()
+	level := q.Get("level")
+	limit := 0
+	if limitStr := q.Get("limit"); limitStr != "" {
+		if n, err := json.Number(limitStr).Int64(); err == nil {
+			limit = int(n)
+		}
+	}
+
+	logs, err := h.logQuerier.ListExecutionLogs(idStr, level, limit)
+	if err != nil {
+		h.logger.Error("Failed to list execution logs", "error", err, "execution_id", idStr)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+
+	if logs == nil {
+		logs = []map[string]any{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"logs":  logs,
+		"count": len(logs),
 	})
 }
 
