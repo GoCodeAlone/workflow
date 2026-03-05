@@ -924,11 +924,29 @@ func (s *V1Store) UpdateStepIO(stepID, inputData, outputData string) error {
 	return err
 }
 
+// UpdateStepInput updates only the input data for an execution step.
+func (s *V1Store) UpdateStepInput(stepID, inputData string) error {
+	_, err := s.db.Exec(
+		"UPDATE execution_steps SET input_data = ? WHERE id = ?",
+		inputData, stepID,
+	)
+	return err
+}
+
 // UpdateStepOutput updates only the output data for an execution step.
 func (s *V1Store) UpdateStepOutput(stepID, outputData string) error {
 	_, err := s.db.Exec(
 		"UPDATE execution_steps SET output_data = ? WHERE id = ?",
 		outputData, stepID,
+	)
+	return err
+}
+
+// UpdateExecutionMetadata sets the metadata JSON for a workflow execution record.
+func (s *V1Store) UpdateExecutionMetadata(execID, metaJSON string) error {
+	_, err := s.db.Exec(
+		"UPDATE workflow_executions SET metadata = ? WHERE id = ?",
+		metaJSON, execID,
 	)
 	return err
 }

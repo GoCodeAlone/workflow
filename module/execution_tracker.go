@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/observability/tracing"
@@ -56,7 +57,8 @@ type ExecutionTracker struct {
 
 	// explicitTrace indicates this execution was explicitly requested to be traced
 	// via the X-Workflow-Trace: true request header. When true, step I/O is captured.
-	explicitTrace bool
+	// Uses atomic.Bool to allow concurrent reads from RecordEvent without holding mu.
+	explicitTrace atomic.Bool
 }
 
 // SetEventStoreRecorder sets the optional event store recorder that receives
@@ -89,11 +91,11 @@ func (t *ExecutionTracker) RecordEvent(ctx context.Context, executionID string, 
 	case "step.failed":
 		t.handleStepFailed(data, now)
 	case "step.input_recorded":
-		if t.explicitTrace {
+		if t.explicitTrace.Load() {
 			t.handleStepInputRecorded(data)
 		}
 	case "step.output_recorded":
-		if t.explicitTrace {
+		if t.explicitTrace.Load() {
 			t.handleStepOutputRecorded(data)
 		}
 	}
@@ -207,7 +209,7 @@ func truncateIO(b []byte) []byte {
 	if len(b) <= maxIOBytes {
 		return b
 	}
-	out := make([]byte, maxIOBytes-len(marker)+len(marker))
+	out := make([]byte, maxIOBytes)
 	copy(out, b[:maxIOBytes-len(marker)])
 	copy(out[maxIOBytes-len(marker):], marker)
 	return out
@@ -230,7 +232,7 @@ func (t *ExecutionTracker) handleStepInputRecorded(data map[string]any) {
 			inputJSON = string(truncateIO(b))
 		}
 	}
-	_ = t.Store.UpdateStepIO(stepID, inputJSON, "{}")
+	_ = t.Store.UpdateStepInput(stepID, inputJSON)
 }
 
 func (t *ExecutionTracker) handleStepOutputRecorded(data map[string]any) {
@@ -354,13 +356,13 @@ func (t *ExecutionTracker) TrackPipelineExecution(
 	explicitTrace := r != nil && r.Header.Get("X-Workflow-Trace") == "true"
 
 	// Reset per-execution state
+	t.explicitTrace.Store(explicitTrace) // atomic; must be set before pipeline starts
 	t.mu.Lock()
 	t.stepIDs = make(map[string]string)
 	t.stepSpans = make(map[string]trace.Span)
 	t.seqCounter = 0
 	t.execID = execID
 	t.execSpan = nil
-	t.explicitTrace = explicitTrace
 	t.mu.Unlock()
 
 	// Extract user info from JWT claims on the request context
@@ -400,7 +402,7 @@ func (t *ExecutionTracker) TrackPipelineExecution(
 			meta["capture_io"] = true
 		}
 		metaJSON, _ := json.Marshal(meta)
-		_, _ = t.Store.db.Exec("UPDATE workflow_executions SET metadata = ? WHERE id = ?", string(metaJSON), execID)
+		_ = t.Store.UpdateExecutionMetadata(execID, string(metaJSON))
 	}
 
 	// Set execution ID on pipeline for event correlation
