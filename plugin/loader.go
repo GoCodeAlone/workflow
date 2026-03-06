@@ -34,6 +34,7 @@ type PluginLoader struct {
 	cosignVerifier       *CosignVerifier
 	deployTargets        map[string]deploy.DeployTarget
 	sidecarProviders     map[string]deploy.SidecarProvider
+	overridableTypes     map[string]bool // types declared overridable by any loaded plugin
 }
 
 // NewPluginLoader creates a new PluginLoader backed by the given capability and schema registries.
@@ -47,7 +48,18 @@ func NewPluginLoader(capReg *capability.Registry, schemaReg *schema.ModuleSchema
 		schemaRegistry:   schemaReg,
 		deployTargets:    make(map[string]deploy.DeployTarget),
 		sidecarProviders: make(map[string]deploy.SidecarProvider),
+		overridableTypes: make(map[string]bool),
 	}
+}
+
+// OverridableTypes returns a read-only copy of all type names that have been
+// declared overridable by loaded plugins.
+func (l *PluginLoader) OverridableTypes() map[string]bool {
+	out := make(map[string]bool, len(l.overridableTypes))
+	for k, v := range l.overridableTypes {
+		out[k] = v
+	}
+	return out
 }
 
 // SetLicenseValidator registers a license validator used for premium tier plugins.
@@ -161,46 +173,67 @@ func (l *PluginLoader) loadPlugin(p EnginePlugin, allowOverride bool) error {
 		}
 	}
 
-	// Register module factories — conflict on duplicate type unless override allowed.
+	// Record any types this plugin declares as overridable.
+	for _, t := range manifest.OverridableTypes {
+		l.overridableTypes[t] = true
+	}
+
+	// Register module factories — conflict on duplicate type unless override allowed or type is overridable.
 	for typeName, factory := range p.ModuleFactories() {
 		if _, exists := l.moduleFactories[typeName]; exists {
-			if !allowOverride {
+			if !allowOverride && !l.overridableTypes[typeName] {
 				return fmt.Errorf("plugin %q: module type %q already registered", manifest.Name, typeName)
 			}
-			slog.Warn("plugin overriding existing module type", "plugin", manifest.Name, "type", typeName)
+			if l.overridableTypes[typeName] {
+				slog.Info("plugin replacing overridable module type", "plugin", manifest.Name, "type", typeName)
+			} else {
+				slog.Warn("plugin overriding existing module type", "plugin", manifest.Name, "type", typeName)
+			}
 		}
 		l.moduleFactories[typeName] = factory
 	}
 
-	// Register step factories — conflict on duplicate type unless override allowed.
+	// Register step factories — conflict on duplicate type unless override allowed or type is overridable.
 	for typeName, factory := range p.StepFactories() {
 		if _, exists := l.stepFactories[typeName]; exists {
-			if !allowOverride {
+			if !allowOverride && !l.overridableTypes[typeName] {
 				return fmt.Errorf("plugin %q: step type %q already registered", manifest.Name, typeName)
 			}
-			slog.Warn("plugin overriding existing step type", "plugin", manifest.Name, "type", typeName)
+			if l.overridableTypes[typeName] {
+				slog.Info("plugin replacing overridable step type", "plugin", manifest.Name, "type", typeName)
+			} else {
+				slog.Warn("plugin overriding existing step type", "plugin", manifest.Name, "type", typeName)
+			}
 		}
 		l.stepFactories[typeName] = factory
 	}
 
-	// Register trigger factories — conflict on duplicate type unless override allowed.
+	// Register trigger factories — conflict on duplicate type unless override allowed or type is overridable.
 	for typeName, factory := range p.TriggerFactories() {
 		if _, exists := l.triggerFactories[typeName]; exists {
-			if !allowOverride {
+			if !allowOverride && !l.overridableTypes[typeName] {
 				return fmt.Errorf("plugin %q: trigger type %q already registered", manifest.Name, typeName)
 			}
-			slog.Warn("plugin overriding existing trigger type", "plugin", manifest.Name, "type", typeName)
+			if l.overridableTypes[typeName] {
+				slog.Info("plugin replacing overridable trigger type", "plugin", manifest.Name, "type", typeName)
+			} else {
+				slog.Warn("plugin overriding existing trigger type", "plugin", manifest.Name, "type", typeName)
+			}
 		}
 		l.triggerFactories[typeName] = factory
 	}
 
-	// Register workflow handler factories — conflict on duplicate type unless override allowed.
+	// Register workflow handler factories — conflict on duplicate type unless override allowed or type is overridable.
 	for typeName, factory := range p.WorkflowHandlers() {
 		if _, exists := l.handlerFactories[typeName]; exists {
-			if !allowOverride {
+			if !allowOverride && !l.overridableTypes[typeName] {
 				return fmt.Errorf("plugin %q: workflow handler type %q already registered", manifest.Name, typeName)
 			}
-			slog.Warn("plugin overriding existing workflow handler type", "plugin", manifest.Name, "type", typeName)
+			if l.overridableTypes[typeName] {
+				slog.Info("plugin replacing overridable workflow handler type", "plugin", manifest.Name, "type", typeName)
+			} else {
+				slog.Warn("plugin overriding existing workflow handler type", "plugin", manifest.Name, "type", typeName)
+			}
 		}
 		l.handlerFactories[typeName] = factory
 	}
@@ -216,24 +249,32 @@ func (l *PluginLoader) loadPlugin(p EnginePlugin, allowOverride bool) error {
 	// Collect config transform hooks.
 	l.configTransformHooks = append(l.configTransformHooks, p.ConfigTransformHooks()...)
 
-	// Register deploy targets — conflict on duplicate name unless override allowed.
+	// Register deploy targets — conflict on duplicate name unless override allowed or type is overridable.
 	for name, target := range p.DeployTargets() {
 		if _, exists := l.deployTargets[name]; exists {
-			if !allowOverride {
+			if !allowOverride && !l.overridableTypes[name] {
 				return fmt.Errorf("plugin %q: deploy target %q already registered", manifest.Name, name)
 			}
-			slog.Warn("plugin overriding existing deploy target", "plugin", manifest.Name, "target", name)
+			if l.overridableTypes[name] {
+				slog.Info("plugin replacing overridable deploy target", "plugin", manifest.Name, "target", name)
+			} else {
+				slog.Warn("plugin overriding existing deploy target", "plugin", manifest.Name, "target", name)
+			}
 		}
 		l.deployTargets[name] = target
 	}
 
-	// Register sidecar providers — conflict on duplicate type unless override allowed.
+	// Register sidecar providers — conflict on duplicate type unless override allowed or type is overridable.
 	for typeName, provider := range p.SidecarProviders() {
 		if _, exists := l.sidecarProviders[typeName]; exists {
-			if !allowOverride {
+			if !allowOverride && !l.overridableTypes[typeName] {
 				return fmt.Errorf("plugin %q: sidecar provider %q already registered", manifest.Name, typeName)
 			}
-			slog.Warn("plugin overriding existing sidecar provider", "plugin", manifest.Name, "type", typeName)
+			if l.overridableTypes[typeName] {
+				slog.Info("plugin replacing overridable sidecar provider", "plugin", manifest.Name, "type", typeName)
+			} else {
+				slog.Warn("plugin overriding existing sidecar provider", "plugin", manifest.Name, "type", typeName)
+			}
 		}
 		l.sidecarProviders[typeName] = provider
 	}

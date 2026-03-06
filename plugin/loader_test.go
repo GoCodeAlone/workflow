@@ -367,6 +367,198 @@ func TestPluginLoader_EmptyBasePluginLoads(t *testing.T) {
 	}
 }
 
+func TestPluginLoader_OverridableType_AllowsOverride(t *testing.T) {
+	loader := newTestEngineLoader()
+
+	// Plugin A declares step.authz_check as overridable.
+	p1 := &modulePlugin{
+		BaseEnginePlugin: BaseEnginePlugin{
+			BaseNativePlugin: BaseNativePlugin{
+				PluginName:        "builtin-steps",
+				PluginVersion:     "1.0.0",
+				PluginDescription: "test",
+			},
+			Manifest: PluginManifest{
+				Name:             "builtin-steps",
+				Version:          "1.0.0",
+				Author:           "test",
+				Description:      "test",
+				OverridableTypes: []string{"step.authz_check"},
+			},
+		},
+		steps: map[string]StepFactory{
+			"step.authz_check": func(name string, cfg map[string]any, _ modular.Application) (any, error) {
+				return "builtin", nil
+			},
+		},
+	}
+	// Plugin B provides the real implementation of step.authz_check.
+	p2 := &modulePlugin{
+		BaseEnginePlugin: *makeEnginePlugin("authz-plugin", "1.0.0", nil),
+		steps: map[string]StepFactory{
+			"step.authz_check": func(name string, cfg map[string]any, _ modular.Application) (any, error) {
+				return "real", nil
+			},
+		},
+	}
+
+	if err := loader.LoadPlugin(p1); err != nil {
+		t.Fatalf("first load should succeed: %v", err)
+	}
+	// Overridable types should be tracked.
+	if !loader.OverridableTypes()["step.authz_check"] {
+		t.Fatal("expected step.authz_check to be marked overridable")
+	}
+	// LoadPlugin (no-override flag) should succeed because the type is declared overridable.
+	if err := loader.LoadPlugin(p2); err != nil {
+		t.Fatalf("LoadPlugin should succeed for overridable type: %v", err)
+	}
+	// Verify the factory was replaced.
+	factories := loader.StepFactories()
+	result, err := factories["step.authz_check"]("test", nil, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	if result != "real" {
+		t.Errorf("expected overriding factory to return %q, got %q", "real", result)
+	}
+}
+
+func TestPluginLoader_NonOverridableType_RejectsOverride(t *testing.T) {
+	loader := newTestEngineLoader()
+
+	// Plugin A does NOT declare step.authz_check as overridable.
+	p1 := &modulePlugin{
+		BaseEnginePlugin: *makeEnginePlugin("builtin-steps", "1.0.0", nil),
+		steps: map[string]StepFactory{
+			"step.authz_check": func(name string, cfg map[string]any, _ modular.Application) (any, error) {
+				return "builtin", nil
+			},
+		},
+	}
+	p2 := &modulePlugin{
+		BaseEnginePlugin: *makeEnginePlugin("authz-plugin", "1.0.0", nil),
+		steps: map[string]StepFactory{
+			"step.authz_check": func(name string, cfg map[string]any, _ modular.Application) (any, error) {
+				return "real", nil
+			},
+		},
+	}
+
+	if err := loader.LoadPlugin(p1); err != nil {
+		t.Fatalf("first load should succeed: %v", err)
+	}
+	// LoadPlugin should reject because the type is not declared overridable.
+	if err := loader.LoadPlugin(p2); err == nil {
+		t.Fatal("expected duplicate step type error from LoadPlugin for non-overridable type")
+	}
+}
+
+func TestPluginLoader_OverridableType_InfoLog(t *testing.T) {
+	// This test verifies that loading a plugin that replaces an overridable type
+	// does not return an error (info-level logging is used, not a warning/error).
+	loader := newTestEngineLoader()
+
+	p1 := &modulePlugin{
+		BaseEnginePlugin: BaseEnginePlugin{
+			BaseNativePlugin: BaseNativePlugin{
+				PluginName:        "builtin",
+				PluginVersion:     "1.0.0",
+				PluginDescription: "test",
+			},
+			Manifest: PluginManifest{
+				Name:             "builtin",
+				Version:          "1.0.0",
+				Author:           "test",
+				Description:      "test",
+				OverridableTypes: []string{"step.placeholder"},
+			},
+		},
+		steps: map[string]StepFactory{
+			"step.placeholder": func(name string, cfg map[string]any, _ modular.Application) (any, error) {
+				return "placeholder", nil
+			},
+		},
+	}
+	p2 := &modulePlugin{
+		BaseEnginePlugin: *makeEnginePlugin("real-plugin", "1.0.0", nil),
+		steps: map[string]StepFactory{
+			"step.placeholder": func(name string, cfg map[string]any, _ modular.Application) (any, error) {
+				return "real", nil
+			},
+		},
+	}
+
+	if err := loader.LoadPlugin(p1); err != nil {
+		t.Fatalf("first load should succeed: %v", err)
+	}
+	// Second load replaces the overridable type — must succeed without error.
+	if err := loader.LoadPlugin(p2); err != nil {
+		t.Fatalf("expected no error when replacing overridable type: %v", err)
+	}
+}
+
+func TestPluginLoader_OverridableTypes_MultipleCategories(t *testing.T) {
+	loader := newTestEngineLoader()
+
+	// Plugin A declares overridable types across multiple categories.
+	p1 := &fullPlugin{
+		BaseEnginePlugin: BaseEnginePlugin{
+			BaseNativePlugin: BaseNativePlugin{
+				PluginName:        "builtin-all",
+				PluginVersion:     "1.0.0",
+				PluginDescription: "test",
+			},
+			Manifest: PluginManifest{
+				Name:        "builtin-all",
+				Version:     "1.0.0",
+				Author:      "test",
+				Description: "test",
+				OverridableTypes: []string{
+					"mod.placeholder",
+					"trigger.placeholder",
+					"handler.placeholder",
+				},
+			},
+		},
+		modules: map[string]ModuleFactory{
+			"mod.placeholder": func(name string, cfg map[string]any) modular.Module { return nil },
+		},
+		triggers: map[string]TriggerFactory{
+			"trigger.placeholder": func() any { return nil },
+		},
+		handlers: map[string]WorkflowHandlerFactory{
+			"handler.placeholder": func() any { return nil },
+		},
+	}
+	// Plugin B replaces all three overridable types without using LoadPluginWithOverride.
+	p2 := &fullPlugin{
+		BaseEnginePlugin: *makeEnginePlugin("real-all", "1.0.0", nil),
+		modules: map[string]ModuleFactory{
+			"mod.placeholder": func(name string, cfg map[string]any) modular.Module { return nil },
+		},
+		triggers: map[string]TriggerFactory{
+			"trigger.placeholder": func() any { return nil },
+		},
+		handlers: map[string]WorkflowHandlerFactory{
+			"handler.placeholder": func() any { return nil },
+		},
+	}
+
+	if err := loader.LoadPlugin(p1); err != nil {
+		t.Fatalf("first load should succeed: %v", err)
+	}
+	overridable := loader.OverridableTypes()
+	for _, typ := range []string{"mod.placeholder", "trigger.placeholder", "handler.placeholder"} {
+		if !overridable[typ] {
+			t.Errorf("expected %q to be marked overridable", typ)
+		}
+	}
+	if err := loader.LoadPlugin(p2); err != nil {
+		t.Fatalf("LoadPlugin should succeed for all overridable categories: %v", err)
+	}
+}
+
 // -- helper plugin types for tests --
 
 // modulePlugin embeds BaseEnginePlugin and overrides factory methods.

@@ -44,6 +44,11 @@ type PluginManifest struct {
 	WorkflowTypes []string         `json:"workflowTypes,omitempty" yaml:"workflowTypes,omitempty"`
 	WiringHooks   []string         `json:"wiringHooks,omitempty" yaml:"wiringHooks,omitempty"`
 
+	// OverridableTypes lists type names (modules, steps, triggers, handlers) that may be
+	// overridden by later-loaded plugins without requiring LoadPluginWithOverride.
+	// Typically used for placeholder/mock implementations.
+	OverridableTypes []string `json:"overridableTypes,omitempty" yaml:"overridableTypes,omitempty"`
+
 	// Config mutability and sample plugin support
 	ConfigMutable  bool   `json:"configMutable,omitempty" yaml:"configMutable,omitempty"`
 	SampleCategory string `json:"sampleCategory,omitempty" yaml:"sampleCategory,omitempty"`

@@ -160,7 +160,7 @@ describe('TraceView', () => {
   it('handleStepClick selects a step on first click (via TraceCanvas)', async () => {
     // Make configToNodes return non-empty nodes so TraceCanvas renders
     vi.mocked(configToNodes).mockReturnValue({
-      nodes: [{ id: 'n1', type: 'default', position: { x: 0, y: 0 }, data: { moduleType: '', label: '', config: {} } }],
+      nodes: [{ id: 'n1', type: 'default', position: { x: 0, y: 0 }, data: { moduleType: 'http.server', label: 'n1', config: {} } }],
       edges: [],
     });
 
@@ -178,7 +178,7 @@ describe('TraceView', () => {
 
   it('handleStepClick toggles: clicking same step twice deselects it (via TraceCanvas)', async () => {
     vi.mocked(configToNodes).mockReturnValue({
-      nodes: [{ id: 'n1', type: 'default', position: { x: 0, y: 0 }, data: { moduleType: '', label: '', config: {} } }],
+      nodes: [{ id: 'n1', type: 'default', position: { x: 0, y: 0 }, data: { moduleType: 'http.server', label: 'n1', config: {} } }],
       edges: [],
     });
 
