@@ -20,6 +20,8 @@ type StepTypeInfo struct {
 	Type        string
 	Description string
 	ConfigKeys  []string
+	ConfigDefs  []schema.ConfigFieldDef // rich per-key metadata
+	Outputs     []schema.StepOutputDef  // step output keys
 }
 
 // TriggerTypeInfo holds metadata about a known trigger type.
@@ -71,11 +73,28 @@ func NewRegistry() *Registry {
 		}
 	}
 
-	// Build step type info.
+	// Build step type info from StepSchemaRegistry (rich metadata).
+	stepReg := schema.GetStepSchemaRegistry()
+	for _, ss := range stepReg.All() {
+		keys := make([]string, 0, len(ss.ConfigFields))
+		for i := range ss.ConfigFields {
+			keys = append(keys, ss.ConfigFields[i].Key)
+		}
+		r.StepTypes[ss.Type] = StepTypeInfo{
+			Type:        ss.Type,
+			Description: ss.Description,
+			ConfigKeys:  keys,
+			ConfigDefs:  ss.ConfigFields,
+			Outputs:     ss.Outputs,
+		}
+	}
+	// Supplement with types from KnownStepTypes that aren't in the schema registry.
 	for t := range schema.KnownStepTypes() {
-		r.StepTypes[t] = StepTypeInfo{
-			Type:        t,
-			Description: "Pipeline step: " + t,
+		if _, exists := r.StepTypes[t]; !exists {
+			r.StepTypes[t] = StepTypeInfo{
+				Type:        t,
+				Description: "Pipeline step: " + t,
+			}
 		}
 	}
 

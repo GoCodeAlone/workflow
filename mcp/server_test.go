@@ -80,19 +80,21 @@ func TestListStepTypes(t *testing.T) {
 		t.Fatal("expected at least one step type")
 	}
 
-	// All step types should start with "step."
+	// All step types should start with "step." and each entry is an object.
+	stepSet := make(map[string]bool)
 	for _, s := range steps {
-		str := s.(string)
-		if !strings.HasPrefix(str, "step.") {
-			t.Errorf("step type %q does not start with 'step.'", str)
+		entry, ok := s.(map[string]any)
+		if !ok {
+			t.Fatalf("expected step entry to be object, got %T", s)
 		}
+		typeName, _ := entry["type"].(string)
+		if !strings.HasPrefix(typeName, "step.") {
+			t.Errorf("step type %q does not start with 'step.'", typeName)
+		}
+		stepSet[typeName] = true
 	}
 
 	// Verify that step.foreach (previously missing) is now listed.
-	stepSet := make(map[string]bool)
-	for _, s := range steps {
-		stepSet[s.(string)] = true
-	}
 	for _, expected := range []string{
 		"step.foreach",
 		"step.webhook_verify",
@@ -105,6 +107,23 @@ func TestListStepTypes(t *testing.T) {
 	} {
 		if !stepSet[expected] {
 			t.Errorf("expected step type %q not found in list", expected)
+		}
+	}
+
+	// Verify that registry entries include descriptions.
+	for _, s := range steps {
+		entry := s.(map[string]any)
+		typeName := entry["type"].(string)
+		if typeName == "step.db_query" {
+			desc, _ := entry["description"].(string)
+			if desc == "" {
+				t.Error("step.db_query should have a description")
+			}
+			outputKeys, _ := entry["output_keys"].([]any)
+			if len(outputKeys) == 0 {
+				t.Error("step.db_query should have output keys")
+			}
+			break
 		}
 	}
 }
@@ -150,7 +169,12 @@ func TestListStepTypes_PluginDir(t *testing.T) {
 	}
 	stepSet := make(map[string]bool)
 	for _, s := range steps {
-		stepSet[s.(string)] = true
+		entry, ok := s.(map[string]any)
+		if !ok {
+			t.Fatalf("expected step entry to be object, got %T", s)
+		}
+		typeName, _ := entry["type"].(string)
+		stepSet[typeName] = true
 	}
 	if !stepSet["step.authz_check"] {
 		t.Error("expected plugin step type 'step.authz_check' to be listed")

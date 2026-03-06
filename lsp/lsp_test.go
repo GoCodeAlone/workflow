@@ -256,6 +256,143 @@ func TestTemplateFunctions(t *testing.T) {
 	}
 }
 
+// TestRegistry_StepTypes_RichMetadata checks that step types have config and output metadata.
+func TestRegistry_StepTypes_RichMetadata(t *testing.T) {
+	reg := NewRegistry()
+	info, ok := reg.StepTypes["step.db_query"]
+	if !ok {
+		t.Fatal("step.db_query not in step type registry")
+	}
+	if len(info.ConfigDefs) == 0 {
+		t.Error("step.db_query should have config field definitions")
+	}
+	if len(info.Outputs) == 0 {
+		t.Error("step.db_query should have output definitions")
+	}
+	if len(info.ConfigKeys) == 0 {
+		t.Error("step.db_query should have config keys")
+	}
+}
+
+// TestHover_StepType checks hover for step types.
+func TestHover_StepType(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", testYAML)
+
+	ctx := PositionContext{
+		Section:  SectionPipeline,
+		StepType: "step.db_query",
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for step.db_query")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "step.db_query") {
+		t.Error("hover should contain step type name")
+	}
+	if !containsStr(content, "database") {
+		t.Error("hover should contain config key 'database'")
+	}
+	if !containsStr(content, "Outputs") {
+		t.Error("hover should contain outputs section")
+	}
+}
+
+// TestHover_StepConfigField checks hover for step config fields.
+func TestHover_StepConfigField(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", testYAML)
+
+	ctx := PositionContext{
+		Section:   SectionPipeline,
+		StepType:  "step.http_call",
+		FieldName: "url",
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for step.http_call url field")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "url") {
+		t.Error("hover should mention the field name")
+	}
+	if !containsStr(content, "step.http_call") {
+		t.Error("hover should mention the step type")
+	}
+}
+
+// TestCompletions_StepConfigKeys checks step config key completions.
+func TestCompletions_StepConfigKeys(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", testYAML)
+
+	ctx := PositionContext{
+		Section:  SectionPipeline,
+		StepType: "step.db_query",
+	}
+	items := Completions(reg, doc, ctx)
+	if len(items) == 0 {
+		t.Fatal("expected config key completions for step.db_query")
+	}
+	labels := make(map[string]bool)
+	for _, item := range items {
+		labels[item.Label] = true
+	}
+	for _, expected := range []string{"database", "query"} {
+		if !labels[expected] {
+			t.Errorf("expected config key %q in completions", expected)
+		}
+	}
+}
+
+// TestContextAt_PipelineStep checks context detection for pipeline step config.
+func TestContextAt_PipelineStep(t *testing.T) {
+	yaml := `pipelines:
+  my-pipeline:
+    steps:
+      - name: lookup
+        type: step.db_query
+        config:
+          database: mydb
+`
+	// Cursor on "database: mydb" (line 6, indent 10)
+	ctx := ContextAt(yaml, 6, 12)
+	if ctx.Section != SectionPipeline {
+		t.Errorf("expected SectionPipeline, got %q", ctx.Section)
+	}
+	if ctx.StepType != "step.db_query" {
+		t.Errorf("expected StepType step.db_query, got %q", ctx.StepType)
+	}
+	if ctx.FieldName != "database" {
+		t.Errorf("expected FieldName 'database', got %q", ctx.FieldName)
+	}
+}
+
+// TestContextAt_PipelineStepTypeLine checks context detection on a step type line.
+func TestContextAt_PipelineStepTypeLine(t *testing.T) {
+	yaml := `pipelines:
+  my-pipeline:
+    steps:
+      - name: lookup
+        type: step.db_query
+`
+	// Cursor on "type: step.db_query" (line 4)
+	ctx := ContextAt(yaml, 4, 14)
+	if ctx.Section != SectionPipeline {
+		t.Errorf("expected SectionPipeline, got %q", ctx.Section)
+	}
+	if ctx.StepType != "step.db_query" {
+		t.Errorf("expected StepType step.db_query, got %q", ctx.StepType)
+	}
+	if ctx.FieldName != "type" {
+		t.Errorf("expected FieldName 'type', got %q", ctx.FieldName)
+	}
+}
+
 // helpers
 
 func containsStr(s, sub string) bool {

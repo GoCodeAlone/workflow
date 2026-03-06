@@ -124,36 +124,70 @@ func (s *Server) handleGetStepSchema(_ context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError(fmt.Sprintf("step type must begin with 'step.', got %q", stepType)), nil
 	}
 
-	info, ok := knownStepTypeDescriptions()[stepType]
-	if !ok {
-		// Fall back to checking if the type is in the known module types list.
-		known := schema.KnownModuleTypes()
-		found := false
-		for _, t := range known {
-			if t == stepType {
-				found = true
-				break
+	// Try the step schema registry first (rich metadata with outputs).
+	reg := schema.GetStepSchemaRegistry()
+	ss := reg.Get(stepType)
+	if ss != nil {
+		configKeys := make([]string, 0, len(ss.ConfigFields))
+		configDefs := make([]map[string]any, 0, len(ss.ConfigFields))
+		for _, cf := range ss.ConfigFields {
+			configKeys = append(configKeys, cf.Key)
+			def := map[string]any{
+				"key":         cf.Key,
+				"type":        string(cf.Type),
+				"description": cf.Description,
+				"required":    cf.Required,
 			}
+			if cf.DefaultValue != nil {
+				def["default"] = cf.DefaultValue
+			}
+			if len(cf.Options) > 0 {
+				def["options"] = cf.Options
+			}
+			configDefs = append(configDefs, def)
 		}
-		if !found {
-			return mcp.NewToolResultError(fmt.Sprintf("unknown step type %q", stepType)), nil
+
+		outputs := make([]map[string]any, 0, len(ss.Outputs))
+		for _, o := range ss.Outputs {
+			outputs = append(outputs, map[string]any{
+				"key":         o.Key,
+				"type":        o.Type,
+				"description": o.Description,
+			})
 		}
-		// Return minimal info for step types not in the description table.
+
 		result := map[string]any{
-			"type":       stepType,
-			"configKeys": []string{},
-			"example":    generateStepExample(stepType, []string{}),
+			"type":        ss.Type,
+			"description": ss.Description,
+			"plugin":      ss.Plugin,
+			"configKeys":  configKeys,
+			"configDefs":  configDefs,
+			"outputs":     outputs,
+			"example":     generateStepExample(ss.Type, configKeys),
+		}
+		if len(ss.ReadKeys) > 0 {
+			result["readKeys"] = ss.ReadKeys
 		}
 		return marshalToolResult(result)
 	}
 
+	// Fall back to checking if the type is in the known module types list.
+	known := schema.KnownModuleTypes()
+	found := false
+	for _, t := range known {
+		if t == stepType {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return mcp.NewToolResultError(fmt.Sprintf("unknown step type %q", stepType)), nil
+	}
+	// Return minimal info for step types not in the schema registry.
 	result := map[string]any{
-		"type":        info.Type,
-		"description": info.Description,
-		"plugin":      info.Plugin,
-		"configKeys":  info.ConfigKeys,
-		"configDefs":  info.ConfigDefs,
-		"example":     generateStepExample(info.Type, info.ConfigKeys),
+		"type":       stepType,
+		"configKeys": []string{},
+		"example":    generateStepExample(stepType, []string{}),
 	}
 	return marshalToolResult(result)
 }

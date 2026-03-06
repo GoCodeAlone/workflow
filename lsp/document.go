@@ -76,6 +76,7 @@ const (
 type PositionContext struct {
 	Section    SectionKind
 	ModuleType string // if inside a modules[] item config, the type value
+	StepType   string // if inside a pipeline step config, the step type value
 	FieldName  string // the field name at the cursor
 	InTemplate bool   // cursor is inside {{ }}
 	DependsOn  bool   // cursor is in a dependsOn array value
@@ -113,10 +114,26 @@ func ContextAt(content string, line, char int) PositionContext {
 	}
 
 	// Walk up the lines to find parent keys.
-	section, moduleType, field := inferContext(lines, line, indent)
+	section, moduleType, stepType, field := inferContext(lines, line, indent)
 	ctx.Section = section
 	ctx.ModuleType = moduleType
+	ctx.StepType = stepType
 	ctx.FieldName = field
+
+	// If we're on a "type:" line, extract the value for hover support.
+	if field == "type" {
+		trimmedCur := strings.TrimSpace(currentLine)
+		if strings.HasPrefix(trimmedCur, "type:") {
+			val := strings.TrimSpace(strings.TrimPrefix(trimmedCur, "type:"))
+			if val != "" {
+				if ctx.Section == SectionPipeline && strings.HasPrefix(val, "step.") {
+					ctx.StepType = val
+				} else if ctx.Section == SectionModules {
+					ctx.ModuleType = val
+				}
+			}
+		}
+	}
 
 	// Check if in dependsOn.
 	for i := line; i >= 0; i-- {
@@ -159,10 +176,10 @@ func leadingSpaces(s string) int {
 }
 
 // inferContext walks upward through lines to determine the YAML section,
-// current module type (if any), and field name at the given line.
-func inferContext(lines []string, line, curIndent int) (SectionKind, string, string) {
+// current module/step type (if any), and field name at the given line.
+func inferContext(lines []string, line, curIndent int) (SectionKind, string, string, string) {
 	section := SectionUnknown
-	moduleType := ""
+	contextType := "" // type value found in the block (module or step type)
 	field := ""
 
 	// Get the field on the current line.
@@ -194,34 +211,55 @@ func inferContext(lines []string, line, curIndent int) (SectionKind, string, str
 
 			switch key {
 			case "modules":
-				section = SectionModules
-				return section, moduleType, field
+				if section == SectionUnknown {
+					section = SectionModules
+				}
+				return section, contextType, "", field
 			case "workflows":
-				section = SectionWorkflow
-				return section, moduleType, field
+				if section == SectionUnknown {
+					section = SectionWorkflow
+				}
+				return section, contextType, "", field
 			case "triggers":
-				section = SectionTriggers
-				return section, moduleType, field
+				if section == SectionUnknown {
+					section = SectionTriggers
+				}
+				return section, contextType, "", field
 			case "pipelines":
-				section = SectionPipeline
-				return section, moduleType, field
+				if section == SectionUnknown {
+					section = SectionPipeline
+				}
+				// If contextType starts with "step.", it's a step type.
+				if strings.HasPrefix(contextType, "step.") {
+					return section, "", contextType, field
+				}
+				return section, contextType, "", field
 			case "requires":
-				section = SectionRequires
-				return section, moduleType, field
+				if section == SectionUnknown {
+					section = SectionRequires
+				}
+				return section, contextType, "", field
 			case "imports":
-				section = SectionImports
-				return section, moduleType, field
+				if section == SectionUnknown {
+					section = SectionImports
+				}
+				return section, contextType, "", field
 			case "config":
-				// The parent is config — find the type field in the same module block.
-				moduleType = findTypeInBlock(lines, i)
-				return section, moduleType, field
+				// The parent is config — find the type field in the same block.
+				contextType = findTypeInBlock(lines, i)
+				// Don't return — continue walking to find the section.
 			case "type":
-				// Inside a type field value — look for surrounding module block.
+				// Inside a type field value — look for surrounding block.
 			}
 		}
 	}
 
-	return section, moduleType, field
+	// If we exhausted lines without finding a section but have a contextType,
+	// check if it's a step type.
+	if strings.HasPrefix(contextType, "step.") {
+		return section, "", contextType, field
+	}
+	return section, contextType, "", field
 }
 
 // findTypeInBlock searches upward from lineIdx to find a "type:" key

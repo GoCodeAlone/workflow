@@ -280,16 +280,43 @@ func (s *Server) handleListModuleTypes(_ context.Context, _ mcp.CallToolRequest)
 }
 
 func (s *Server) handleListStepTypes(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	types := schema.KnownModuleTypes()
-	var stepTypes []string
-	for _, t := range types {
-		if strings.HasPrefix(t, "step.") {
-			stepTypes = append(stepTypes, t)
+	// Collect step types from the step schema registry (rich metadata).
+	reg := schema.GetStepSchemaRegistry()
+	registryTypes := reg.Types()
+
+	// Also include step types from KnownModuleTypes that aren't in the registry.
+	known := schema.KnownModuleTypes()
+	registrySet := make(map[string]bool, len(registryTypes))
+	for _, t := range registryTypes {
+		registrySet[t] = true
+	}
+	for _, t := range known {
+		if strings.HasPrefix(t, "step.") && !registrySet[t] {
+			registryTypes = append(registryTypes, t)
 		}
 	}
+
+	// Build step info with descriptions and output keys.
+	type stepInfo struct {
+		Type        string   `json:"type"`
+		Description string   `json:"description,omitempty"`
+		OutputKeys  []string `json:"output_keys,omitempty"`
+	}
+	steps := make([]stepInfo, 0, len(registryTypes))
+	for _, t := range registryTypes {
+		info := stepInfo{Type: t}
+		if ss := reg.Get(t); ss != nil {
+			info.Description = ss.Description
+			for _, o := range ss.Outputs {
+				info.OutputKeys = append(info.OutputKeys, o.Key)
+			}
+		}
+		steps = append(steps, info)
+	}
+
 	result := map[string]any{
-		"step_types": stepTypes,
-		"count":      len(stepTypes),
+		"step_types": steps,
+		"count":      len(steps),
 	}
 	return marshalToolResult(result)
 }

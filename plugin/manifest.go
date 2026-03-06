@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/dynamic"
+	"github.com/GoCodeAlone/workflow/schema"
 )
 
 // PluginTier indicates the support and licensing tier for a plugin.
@@ -43,6 +44,10 @@ type PluginManifest struct {
 	TriggerTypes  []string         `json:"triggerTypes,omitempty" yaml:"triggerTypes,omitempty"`
 	WorkflowTypes []string         `json:"workflowTypes,omitempty" yaml:"workflowTypes,omitempty"`
 	WiringHooks   []string         `json:"wiringHooks,omitempty" yaml:"wiringHooks,omitempty"`
+
+	// StepSchemas provides schema definitions for step types registered by this plugin.
+	// Used by MCP/LSP for hover docs, completions, and output documentation.
+	StepSchemas []*schema.StepSchema `json:"stepSchemas,omitempty" yaml:"stepSchemas,omitempty"`
 
 	// OverridableTypes lists type names (modules, steps, triggers, handlers) that may be
 	// overridden by later-loaded plugins without requiring LoadPluginWithOverride.
