@@ -101,13 +101,15 @@ workflows:
               name: data
               config:
                 values:
-                  sales: |
-                    {{ json (list
-                      (dict "region" "east" "amount" 100)
-                      (dict "region" "west" "amount" 200)
-                      (dict "region" "east" "amount" 150)
-                      (dict "region" "west" "amount" 50)
-                    ) }}
+                  sales:
+                    - region: east
+                      amount: 100
+                    - region: west
+                      amount: 200
+                    - region: east
+                      amount: 150
+                    - region: west
+                      amount: 50
 
             - type: step.set
               name: stats
