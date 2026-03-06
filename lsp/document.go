@@ -163,7 +163,6 @@ func ContextAt(content string, line, char int) PositionContext {
 // findPipelineName walks upward from lineIdx to find the pipeline name key
 // (the key directly under "pipelines:" at indent 2).
 func findPipelineName(lines []string, lineIdx int) string {
-	inPipelines := false
 	for i := lineIdx; i >= 0; i-- {
 		l := lines[i]
 		ind := leadingSpaces(l)
@@ -172,15 +171,7 @@ func findPipelineName(lines []string, lineIdx int) string {
 			continue
 		}
 		if ind == 0 {
-			if trimmed == "pipelines:" || strings.HasPrefix(trimmed, "pipelines:") {
-				inPipelines = true
-			}
 			break
-		}
-		if ind == 2 && inPipelines {
-			if colonIdx := strings.Index(trimmed, ":"); colonIdx > 0 {
-				return strings.TrimSpace(trimmed[:colonIdx])
-			}
 		}
 		if ind == 2 {
 			// At indent 2: this could be the pipeline name key

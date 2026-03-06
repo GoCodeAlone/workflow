@@ -114,13 +114,14 @@ func parseDotPath(path string) *TemplateExprPath {
 
 	switch result.Namespace {
 	case "steps":
-		if len(parts) == 1 {
+		switch len(parts) {
+		case 1:
 			// .steps. (trailing dot included in split as empty last element) or .steps
 			// if path ends with ".", last part is ""
 			if strings.HasSuffix(path, ".") {
 				result.StepName = ""
 			}
-		} else if len(parts) == 2 {
+		case 2:
 			if strings.HasSuffix(path, ".") {
 				// .steps.lookup. → listing step fields
 				result.StepName = parts[1]
@@ -129,7 +130,7 @@ func parseDotPath(path string) *TemplateExprPath {
 				result.StepName = ""
 				result.FieldPrefix = parts[1]
 			}
-		} else {
+		default:
 			// .steps.lookup.fieldOrPrefix
 			result.StepName = parts[1]
 			last := parts[len(parts)-1]
@@ -148,12 +149,13 @@ func parseDotPath(path string) *TemplateExprPath {
 		}
 
 	case "body", "trigger", "meta":
-		if len(parts) == 1 {
+		switch len(parts) {
+		case 1:
 			// just .body or .trigger etc with no trailing dot
 			if !strings.HasSuffix(path, ".") {
 				result.FieldPrefix = ""
 			}
-		} else if len(parts) == 2 {
+		case 2:
 			if strings.HasSuffix(path, ".") {
 				// .body.address. → SubField is address, listing nested fields
 				result.SubField = parts[1]
@@ -162,7 +164,7 @@ func parseDotPath(path string) *TemplateExprPath {
 				// .body.em → FieldPrefix
 				result.FieldPrefix = parts[1]
 			}
-		} else {
+		default:
 			// .trigger.path_params.key
 			last := parts[len(parts)-1]
 			if strings.HasSuffix(path, ".") {

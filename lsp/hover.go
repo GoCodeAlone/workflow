@@ -118,7 +118,8 @@ func hoverStepType(reg *Registry, stepType string) *protocol.Hover {
 	}
 	if len(info.ConfigDefs) > 0 {
 		sb.WriteString("\n**Config:**\n")
-		for _, cf := range info.ConfigDefs {
+		for i := range info.ConfigDefs {
+			cf := &info.ConfigDefs[i]
 			req := ""
 			if cf.Required {
 				req = " *(required)*"
@@ -143,7 +144,8 @@ func hoverStepConfigField(reg *Registry, stepType, field string) *protocol.Hover
 		return nil
 	}
 
-	for _, cf := range info.ConfigDefs {
+	for i := range info.ConfigDefs {
+		cf := &info.ConfigDefs[i]
 		if cf.Key == field {
 			var sb strings.Builder
 			fmt.Fprintf(&sb, "**%s** — config key for `%s`\n\n", field, stepType)
@@ -266,12 +268,6 @@ func hoverTemplateTrigger(ctx PositionContext, tp *TemplateExprPath) *protocol.H
 	var sb strings.Builder
 	sb.WriteString("**Trigger context** — `.trigger.*`\n\n")
 
-	// If we have a pipeline context with trigger schema, use it.
-	fieldName := tp.FieldPrefix
-	if fieldName == "" {
-		fieldName = tp.SubField
-	}
-
 	if tp.SubField != "" {
 		fmt.Fprintf(&sb, "**Sub-namespace:** `.trigger.%s`\n\n", tp.SubField)
 		switch tp.SubField {
@@ -302,11 +298,12 @@ func hoverTemplateTrigger(ctx PositionContext, tp *TemplateExprPath) *protocol.H
 func hoverTemplateBody(tp *TemplateExprPath) *protocol.Hover {
 	var sb strings.Builder
 	sb.WriteString("**Body context** — `.body.*`\n\n")
-	if tp.SubField != "" {
+	switch {
+	case tp.SubField != "":
 		fmt.Fprintf(&sb, "**Field:** `.body.%s`\n\nNested field within the request body.\n", tp.SubField)
-	} else if tp.FieldPrefix != "" {
+	case tp.FieldPrefix != "":
 		fmt.Fprintf(&sb, "**Field:** `.body.%s` — request body field\n", tp.FieldPrefix)
-	} else {
+	default:
 		sb.WriteString("Request body data. Access individual fields via `.body.<field-name>`.\n")
 	}
 	return markdownHover(sb.String())

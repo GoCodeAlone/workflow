@@ -155,11 +155,7 @@ func (r *StepSchemaRegistry) staticOutputs(stepType string) []InferredOutput {
 		if o.Key == "(dynamic)" || o.Key == "(nested)" {
 			continue
 		}
-		out = append(out, InferredOutput{
-			Key:         o.Key,
-			Type:        o.Type,
-			Description: o.Description,
-		})
+		out = append(out, InferredOutput(o))
 	}
 	return out
 }
