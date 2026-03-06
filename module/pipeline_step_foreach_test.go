@@ -9,6 +9,16 @@ import (
 	"github.com/CrisisTextLine/modular"
 )
 
+// foreachFailStep is a race-safe PipelineStep that always returns an error.
+// Unlike resilienceFailStep, it has no mutable state so it is safe to call
+// concurrently from multiple goroutines (as happens in concurrent foreach tests).
+type foreachFailStep struct{ stepName string }
+
+func (s *foreachFailStep) Name() string { return s.stepName }
+func (s *foreachFailStep) Execute(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+	return nil, errors.New("step failed")
+}
+
 // buildTestForEachStep creates a ForEachStep with a fresh StepRegistry for testing.
 // It registers a simple "step.set" factory so sub-steps can be built.
 func buildTestForEachStep(t *testing.T, name string, config map[string]any) (PipelineStep, error) {
@@ -531,6 +541,188 @@ func TestForEachStep_AppPassedToSubStep(t *testing.T) {
 	}
 	if capturedApp != sentinel {
 		t.Errorf("expected app to be passed through to sub-step factory; got %v", capturedApp)
+	}
+}
+
+func TestForEachStep_ConcurrentExecution(t *testing.T) {
+	// 5 items each taking 100ms, concurrency=5 — should complete in ~100ms not 500ms
+	registry := NewStepRegistry()
+	registry.Register("step.set", NewSetStepFactory())
+
+	factory := NewForEachStepFactory(func() *StepRegistry { return registry })
+	step, err := factory("par-foreach", map[string]any{
+		"collection":  "items",
+		"item_var":    "item",
+		"concurrency": 5,
+		"step": map[string]any{
+			"name": "process",
+			"type": "step.set",
+			"values": map[string]any{
+				"processed": "true",
+			},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := make([]any, 5)
+	for i := range items {
+		items[i] = map[string]any{"id": i}
+	}
+	pc := NewPipelineContext(map[string]any{"items": items}, nil)
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results := result.Output["results"].([]any)
+	if len(results) != 5 {
+		t.Fatalf("expected 5 results, got %d", len(results))
+	}
+	count := result.Output["count"]
+	if count != 5 {
+		t.Fatalf("expected count=5, got %v", count)
+	}
+}
+
+func TestForEachStep_ConcurrentPreservesOrder(t *testing.T) {
+	// Items processed concurrently should maintain original index order in results
+	registry := NewStepRegistry()
+	registry.Register("step.set", NewSetStepFactory())
+
+	factory := NewForEachStepFactory(func() *StepRegistry { return registry })
+	step, err := factory("ordered", map[string]any{
+		"collection":  "items",
+		"item_var":    "item",
+		"concurrency": 3,
+		"step": map[string]any{
+			"name": "echo",
+			"type": "step.set",
+			"values": map[string]any{
+				"id": "{{ .item.id }}",
+			},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := []any{
+		map[string]any{"id": "first"},
+		map[string]any{"id": "second"},
+		map[string]any{"id": "third"},
+	}
+	pc := NewPipelineContext(map[string]any{"items": items}, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results := result.Output["results"].([]any)
+	ids := make([]string, len(results))
+	for i, r := range results {
+		rm := r.(map[string]any)
+		ids[i], _ = rm["id"].(string)
+	}
+	if ids[0] != "first" || ids[1] != "second" || ids[2] != "third" {
+		t.Fatalf("order not preserved: %v", ids)
+	}
+}
+
+func TestForEachStep_ConcurrentCollectErrors(t *testing.T) {
+	// With error_strategy=collect_errors, failed items should be marked not crash
+	registry := NewStepRegistry()
+	registry.Register("step.fail", func(name string, cfg map[string]any, app modular.Application) (PipelineStep, error) {
+		return &foreachFailStep{stepName: name}, nil
+	})
+
+	factory := NewForEachStepFactory(func() *StepRegistry { return registry })
+	step, err := factory("err-foreach", map[string]any{
+		"collection":     "items",
+		"item_var":       "item",
+		"concurrency":    2,
+		"error_strategy": "collect_errors",
+		"step": map[string]any{
+			"name": "fail",
+			"type": "step.fail",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := []any{"a", "b", "c"}
+	pc := NewPipelineContext(map[string]any{"items": items}, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("collect_errors should not return error: %v", err)
+	}
+
+	errorCount := result.Output["error_count"]
+	if errorCount != 3 {
+		t.Fatalf("expected error_count=3, got %v", errorCount)
+	}
+}
+
+func TestForEachStep_ConcurrentFailFast(t *testing.T) {
+	// With default fail_fast and concurrency, first error cancels others
+	registry := NewStepRegistry()
+	registry.Register("step.fail", func(name string, cfg map[string]any, app modular.Application) (PipelineStep, error) {
+		return &foreachFailStep{stepName: name}, nil
+	})
+
+	factory := NewForEachStepFactory(func() *StepRegistry { return registry })
+	step, err := factory("ff-foreach", map[string]any{
+		"collection":  "items",
+		"item_var":    "item",
+		"concurrency": 2,
+		"step": map[string]any{
+			"name": "fail",
+			"type": "step.fail",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := []any{"a", "b", "c"}
+	pc := NewPipelineContext(map[string]any{"items": items}, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error with fail_fast")
+	}
+}
+
+func TestForEachStep_ConcurrencyZeroIsSequential(t *testing.T) {
+	// concurrency=0 means sequential (backward compat)
+	registry := NewStepRegistry()
+	registry.Register("step.set", NewSetStepFactory())
+
+	factory := NewForEachStepFactory(func() *StepRegistry { return registry })
+	step, err := factory("seq", map[string]any{
+		"collection":  "items",
+		"item_var":    "item",
+		"concurrency": 0,
+		"step": map[string]any{
+			"name": "s",
+			"type": "step.set",
+			"values": map[string]any{"ok": "true"},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := []any{"a", "b"}
+	pc := NewPipelineContext(map[string]any{"items": items}, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output["count"] != 2 {
+		t.Fatalf("expected count=2, got %v", result.Output["count"])
 	}
 }
 
