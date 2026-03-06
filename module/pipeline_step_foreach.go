@@ -63,6 +63,8 @@ func NewForEachStepFactory(registryFn func() *StepRegistry) StepFactory {
 		errorStrategy, _ := config["error_strategy"].(string)
 		if errorStrategy == "" {
 			errorStrategy = "fail_fast"
+		} else if errorStrategy != "fail_fast" && errorStrategy != "collect_errors" {
+			return nil, fmt.Errorf("foreach step %q: invalid error_strategy %q (must be fail_fast or collect_errors)", name, errorStrategy)
 		}
 
 		// Detect presence of each key before type-asserting so we can give clear errors.

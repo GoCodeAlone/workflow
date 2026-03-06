@@ -123,7 +123,7 @@ workflows:
                   total: '{{ sum .steps.data.sales "amount" }}'
                   max_sale: '{{ max .steps.data.sales "amount" }}'
                   min_sale: '{{ min .steps.data.sales "amount" }}'
-                  regions: '{{ json (unique .steps.data.sales "region") }}'
+                  regions: '{{ json (unique (pluck .steps.data.sales "region")) }}'
                   by_region: '{{ json (groupBy .steps.data.sales "region") }}'
 
             - type: step.json_response

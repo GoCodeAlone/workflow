@@ -183,7 +183,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "index_key", Type: FieldTypeString, Description: "Context key for the numeric loop index"},
 			{Key: "step", Type: FieldTypeJSON, Description: "Single step definition to execute per item"},
 			{Key: "steps", Type: FieldTypeArray, Description: "List of step definitions to execute per item"},
-			{Key: "concurrency", Type: FieldTypeNumber, Description: "Worker pool size. 0 = sequential. Time: O(⌈n/c⌉ × per_item). Space: O(c × context_size).", DefaultValue: "0"},
+			{Key: "concurrency", Type: FieldTypeNumber, Description: "Worker pool size. 0 = sequential. Time: O(⌈n/c⌉ × per_item). Space: O(c × context_size).", DefaultValue: 0},
 			{Key: "error_strategy", Type: FieldTypeSelect, Description: "Error handling for concurrent mode. fail_fast: cancel on first error. collect_errors: continue, mark failed items.", Options: []string{"fail_fast", "collect_errors"}, DefaultValue: "fail_fast"},
 		},
 		Outputs: []StepOutputDef{
@@ -195,7 +195,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 
 	r.Register(&StepSchema{
 		Type:        "step.parallel",
-		Plugin:      "pipeline-steps",
+		Plugin:      "pipelinesteps",
 		Description: "Execute multiple named sub-steps concurrently and collect results. Time: O(max(branch)). Space: O(branches × context_size).",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "steps", Type: FieldTypeArray, Required: true, Description: "List of sub-steps to run concurrently. Each must have a unique 'name'."},

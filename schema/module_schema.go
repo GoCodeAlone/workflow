@@ -1759,6 +1759,17 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	})
 
 	r.Register(&ModuleSchema{
+		Type:        "step.parallel",
+		Label:       "Parallel",
+		Category:    "pipeline_steps",
+		Description: "Execute multiple named sub-steps concurrently and collect results",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "steps", Label: "Steps", Type: FieldTypeJSON, Required: true, Description: "List of sub-steps to run concurrently. Each must have a unique 'name'."},
+			{Key: "error_strategy", Label: "Error Strategy", Type: FieldTypeSelect, Description: "fail_fast: cancel on first error. collect_errors: run all, collect partial results.", Options: []string{"fail_fast", "collect_errors"}, DefaultValue: "fail_fast"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
 		Type:        "step.webhook_verify",
 		Label:       "Webhook Verify",
 		Category:    "pipeline_steps",
