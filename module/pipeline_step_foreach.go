@@ -240,15 +240,16 @@ func (s *ForEachStep) executeConcurrent(ctx context.Context, pc *PipelineContext
 	collected := make([]any, 0, n)
 	errorCount := 0
 	for i := 0; i < n; i++ {
-		if errs[i] != nil {
+		switch {
+		case errs[i] != nil:
 			errorCount++
 			collected = append(collected, map[string]any{
 				"_error": errs[i].Error(),
 				"_index": i,
 			})
-		} else if results[i] != nil {
+		case results[i] != nil:
 			collected = append(collected, results[i])
-		} else {
+		default:
 			collected = append(collected, map[string]any{})
 		}
 	}
