@@ -361,4 +361,16 @@ describe('toLogEntry', () => {
       expect(toLogEntry(log).level).toBe(level);
     }
   });
+
+  it('passes "event" level through unchanged (caller should filter before mapping)', () => {
+    const log = {
+      id: 1,
+      workflow_id: 'wf-1',
+      level: 'event' as const,
+      message: 'step.started',
+      created_at: '',
+    };
+    // event level is not remapped; callers must filter these rows out before display
+    expect(toLogEntry(log).level).toBe('event');
+  });
 });
