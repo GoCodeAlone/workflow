@@ -29,6 +29,7 @@ type PluginLoader struct {
 	wiringHooks          []WiringHook
 	configTransformHooks []ConfigTransformHook
 	schemaRegistry       *schema.ModuleSchemaRegistry
+	stepSchemaRegistry   *schema.StepSchemaRegistry
 	plugins              []EnginePlugin
 	licenseValidator     LicenseValidator
 	cosignVerifier       *CosignVerifier
@@ -38,17 +39,24 @@ type PluginLoader struct {
 }
 
 // NewPluginLoader creates a new PluginLoader backed by the given capability and schema registries.
-func NewPluginLoader(capReg *capability.Registry, schemaReg *schema.ModuleSchemaRegistry) *PluginLoader {
+func NewPluginLoader(capReg *capability.Registry, schemaReg *schema.ModuleSchemaRegistry, stepSchemaReg ...*schema.StepSchemaRegistry) *PluginLoader {
+	var ssr *schema.StepSchemaRegistry
+	if len(stepSchemaReg) > 0 && stepSchemaReg[0] != nil {
+		ssr = stepSchemaReg[0]
+	} else {
+		ssr = schema.NewStepSchemaRegistry()
+	}
 	return &PluginLoader{
-		capabilityReg:    capReg,
-		moduleFactories:  make(map[string]ModuleFactory),
-		stepFactories:    make(map[string]StepFactory),
-		triggerFactories: make(map[string]TriggerFactory),
-		handlerFactories: make(map[string]WorkflowHandlerFactory),
-		schemaRegistry:   schemaReg,
-		deployTargets:    make(map[string]deploy.DeployTarget),
-		sidecarProviders: make(map[string]deploy.SidecarProvider),
-		overridableTypes: make(map[string]bool),
+		capabilityReg:      capReg,
+		moduleFactories:    make(map[string]ModuleFactory),
+		stepFactories:      make(map[string]StepFactory),
+		triggerFactories:   make(map[string]TriggerFactory),
+		handlerFactories:   make(map[string]WorkflowHandlerFactory),
+		schemaRegistry:     schemaReg,
+		stepSchemaRegistry: ssr,
+		deployTargets:      make(map[string]deploy.DeployTarget),
+		sidecarProviders:   make(map[string]deploy.SidecarProvider),
+		overridableTypes:   make(map[string]bool),
 	}
 }
 
@@ -243,6 +251,17 @@ func (l *PluginLoader) loadPlugin(p EnginePlugin, allowOverride bool) error {
 		l.schemaRegistry.Register(s)
 	}
 
+	// Register step schemas.
+	for _, s := range p.StepSchemas() {
+		l.stepSchemaRegistry.Register(s)
+	}
+	// Also load step schemas from manifest (for external plugins with plugin.json).
+	if manifest != nil {
+		for _, s := range manifest.StepSchemas {
+			l.stepSchemaRegistry.Register(s)
+		}
+	}
+
 	// Collect wiring hooks.
 	l.wiringHooks = append(l.wiringHooks, p.WiringHooks()...)
 
@@ -357,6 +376,11 @@ func (l *PluginLoader) ConfigTransformHooks() []ConfigTransformHook {
 // CapabilityRegistry returns the loader's capability registry.
 func (l *PluginLoader) CapabilityRegistry() *capability.Registry {
 	return l.capabilityReg
+}
+
+// StepSchemaRegistry returns the loader's step schema registry.
+func (l *PluginLoader) StepSchemaRegistry() *schema.StepSchemaRegistry {
+	return l.stepSchemaRegistry
 }
 
 // LoadedPlugins returns all successfully loaded plugins in load order.

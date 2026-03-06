@@ -66,6 +66,15 @@ func GetModuleSchemaRegistry() *ModuleSchemaRegistry {
 	return moduleSchemaRegistry
 }
 
+// stepSchemaRegistry is the singleton registry for step schemas.
+var stepSchemaRegistry = NewStepSchemaRegistry()
+
+// GetStepSchemaRegistry returns the global step schema registry,
+// allowing callers to register additional schemas (e.g., plugin step types).
+func GetStepSchemaRegistry() *StepSchemaRegistry {
+	return stepSchemaRegistry
+}
+
 // HandleGetModuleSchemas serves module config schemas.
 // Query parameters:
 //   - type: return schema for a specific module type (e.g. ?type=http.server)

@@ -213,6 +213,12 @@ func (a *ExternalPluginAdapter) ModuleSchemas() []*schema.ModuleSchema {
 	return schemas
 }
 
+func (a *ExternalPluginAdapter) StepSchemas() []*schema.StepSchema {
+	// External plugins provide step schemas via their plugin.json manifest (StepSchemas field).
+	// The manifest is loaded by the PluginLoader, so we return nil here.
+	return nil
+}
+
 func (a *ExternalPluginAdapter) WiringHooks() []plugin.WiringHook {
 	return nil
 }

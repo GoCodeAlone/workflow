@@ -29,6 +29,16 @@ func Hover(reg *Registry, _ *Document, ctx PositionContext) *protocol.Hover {
 		if ctx.FieldName != "" {
 			return hoverTriggerType(reg, ctx.FieldName)
 		}
+	case SectionPipeline:
+		if ctx.FieldName == "type" && ctx.StepType != "" {
+			return hoverStepType(reg, ctx.StepType)
+		}
+		if ctx.StepType != "" && ctx.FieldName != "" {
+			return hoverStepConfigField(reg, ctx.StepType, ctx.FieldName)
+		}
+		if ctx.StepType != "" {
+			return hoverStepType(reg, ctx.StepType)
+		}
 	}
 	return nil
 }
@@ -87,6 +97,81 @@ func hoverTriggerType(reg *Registry, triggerType string) *protocol.Hover {
 		return nil
 	}
 	return markdownHover(fmt.Sprintf("**%s** trigger\n\n%s", info.Type, info.Description))
+}
+
+// hoverStepType generates hover markdown for a pipeline step type.
+func hoverStepType(reg *Registry, stepType string) *protocol.Hover {
+	info, ok := reg.StepTypes[stepType]
+	if !ok {
+		return nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("**")
+	sb.WriteString(stepType)
+	sb.WriteString("**\n\n")
+	if info.Description != "" {
+		sb.WriteString(info.Description)
+		sb.WriteString("\n")
+	}
+	if len(info.ConfigDefs) > 0 {
+		sb.WriteString("\n**Config:**\n")
+		for _, cf := range info.ConfigDefs {
+			req := ""
+			if cf.Required {
+				req = " *(required)*"
+			}
+			fmt.Fprintf(&sb, "- `%s` (%s): %s%s\n", cf.Key, cf.Type, cf.Description, req)
+		}
+	}
+	if len(info.Outputs) > 0 {
+		sb.WriteString("\n**Outputs:**\n")
+		for _, o := range info.Outputs {
+			fmt.Fprintf(&sb, "- `%s` (%s): %s\n", o.Key, o.Type, o.Description)
+		}
+	}
+
+	return markdownHover(sb.String())
+}
+
+// hoverStepConfigField generates hover markdown for a step config field.
+func hoverStepConfigField(reg *Registry, stepType, field string) *protocol.Hover {
+	info, ok := reg.StepTypes[stepType]
+	if !ok {
+		return nil
+	}
+
+	for _, cf := range info.ConfigDefs {
+		if cf.Key == field {
+			var sb strings.Builder
+			fmt.Fprintf(&sb, "**%s** — config key for `%s`\n\n", field, stepType)
+			fmt.Fprintf(&sb, "**Type:** %s\n\n", cf.Type)
+			if cf.Description != "" {
+				sb.WriteString(cf.Description)
+				sb.WriteString("\n")
+			}
+			if cf.Required {
+				sb.WriteString("\n*Required*\n")
+			}
+			if cf.DefaultValue != nil {
+				fmt.Fprintf(&sb, "\n**Default:** `%v`\n", cf.DefaultValue)
+			}
+			if len(cf.Options) > 0 {
+				sb.WriteString("\n**Options:** `")
+				sb.WriteString(strings.Join(cf.Options, "`, `"))
+				sb.WriteString("`\n")
+			}
+			return markdownHover(sb.String())
+		}
+	}
+
+	// Fallback for config keys without rich metadata.
+	for _, k := range info.ConfigKeys {
+		if k == field {
+			return markdownHover(fmt.Sprintf("**%s** — config key for `%s`", field, stepType))
+		}
+	}
+	return nil
 }
 
 // hoverTemplateFunction generates hover for template function names.

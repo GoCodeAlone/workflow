@@ -128,6 +128,44 @@ func getModuleConfigKeyCompletions(reg *Registry, moduleType string) []protocol.
 	return items
 }
 
+// getStepConfigKeyCompletions returns completions for config keys of a given step type.
+func getStepConfigKeyCompletions(reg *Registry, stepType string) []protocol.CompletionItem {
+	info, ok := reg.StepTypes[stepType]
+	if !ok {
+		return nil
+	}
+
+	kind := protocol.CompletionItemKindProperty
+	items := make([]protocol.CompletionItem, 0, len(info.ConfigDefs))
+
+	// Prefer rich config defs with descriptions.
+	for _, cf := range info.ConfigDefs {
+		detail := string(cf.Type)
+		if cf.Required {
+			detail += " (required)"
+		}
+		doc := cf.Description
+		items = append(items, protocol.CompletionItem{
+			Label:         cf.Key,
+			Kind:          &kind,
+			Detail:        &detail,
+			Documentation: doc,
+		})
+	}
+
+	// Fallback to plain config key names if no ConfigDefs.
+	if len(items) == 0 {
+		for _, k := range info.ConfigKeys {
+			key := k
+			items = append(items, protocol.CompletionItem{
+				Label: key,
+				Kind:  &kind,
+			})
+		}
+	}
+	return items
+}
+
 // getTemplateFunctionCompletions returns completion items for template functions.
 func getTemplateFunctionCompletions() []protocol.CompletionItem {
 	fns := templateFunctions()
@@ -195,6 +233,9 @@ func Completions(reg *Registry, doc *Document, ctx PositionContext) []protocol.C
 			items := getStepTypeCompletions(reg)
 			items = append(items, getTriggerTypeCompletions(reg)...)
 			return items
+		}
+		if ctx.StepType != "" {
+			return getStepConfigKeyCompletions(reg, ctx.StepType)
 		}
 	case SectionTriggers:
 		return getTriggerTypeCompletions(reg)

@@ -42,6 +42,9 @@ type EnginePlugin interface {
 	// ModuleSchemas returns UI schema definitions for this plugin's module types.
 	ModuleSchemas() []*schema.ModuleSchema
 
+	// StepSchemas returns schema definitions for this plugin's pipeline step types.
+	StepSchemas() []*schema.StepSchema
+
 	// WiringHooks returns post-init wiring functions.
 	WiringHooks() []WiringHook
 
@@ -167,6 +170,11 @@ func (b *BaseEnginePlugin) WorkflowHandlers() map[string]WorkflowHandlerFactory 
 
 // ModuleSchemas returns no module schemas.
 func (b *BaseEnginePlugin) ModuleSchemas() []*schema.ModuleSchema {
+	return nil
+}
+
+// StepSchemas returns no step schemas.
+func (b *BaseEnginePlugin) StepSchemas() []*schema.StepSchema {
 	return nil
 }
 
