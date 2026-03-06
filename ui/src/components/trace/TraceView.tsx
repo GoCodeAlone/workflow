@@ -19,7 +19,6 @@ export function toTraceStep(step: ExecutionStep): TraceStep {
     stepType: step.step_type,
     status: step.status as TraceStep['status'],
     durationMs: step.duration_ms,
-    startedAt: step.started_at,
     inputData: step.input_data as Record<string, unknown> | null | undefined,
     outputData: step.output_data as Record<string, unknown> | null | undefined,
     errorMessage: step.error_message,
@@ -30,7 +29,7 @@ export function toTraceStep(step: ExecutionStep): TraceStep {
 export function toLogEntry(log: ExecutionLog): LogEntry {
   const level = log.level === 'fatal' ? 'error' : log.level;
   return {
-    id: log.id,
+    id: String(log.id),
     level: level as LogEntry['level'],
     message: log.message,
     moduleName: log.module_name,

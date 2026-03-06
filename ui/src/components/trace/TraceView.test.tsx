@@ -288,7 +288,6 @@ describe('toTraceStep', () => {
     expect(result.status).toBe('completed');
     expect(result.sequenceNum).toBe(3);
     expect(result.durationMs).toBe(120);
-    expect(result.startedAt).toBe('2026-01-01T00:00:00Z');
     expect(result.inputData).toEqual({ key: 'value' });
     expect(result.outputData).toEqual({ result: 42 });
   });
@@ -306,7 +305,6 @@ describe('toTraceStep', () => {
     const result = toTraceStep(step);
 
     expect(result.durationMs).toBeUndefined();
-    expect(result.startedAt).toBeUndefined();
     expect(result.inputData).toBeUndefined();
     expect(result.outputData).toBeUndefined();
     expect(result.errorMessage).toBeUndefined();
@@ -330,7 +328,7 @@ describe('toLogEntry', () => {
 
     const result = toLogEntry(log);
 
-    expect(result.id).toBe(7);
+    expect(result.id).toBe('7');
     expect(result.level).toBe('info');
     expect(result.message).toBe('Step started');
     expect(result.moduleName).toBe('step1');
