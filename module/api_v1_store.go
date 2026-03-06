@@ -962,8 +962,16 @@ func (s *V1Store) InsertLog(workflowID, executionID, level, message, moduleName,
 }
 
 // ListExecutionLogs returns log entries for an execution with optional level filter.
-// Results are ordered by created_at ASC. limit=0 means no limit.
+// Results are ordered by created_at ASC. limit=0 means no limit; negative values
+// are treated as 0; values above maxExecutionLogLimit are clamped to that maximum.
 func (s *V1Store) ListExecutionLogs(executionID string, level string, limit int) ([]map[string]any, error) {
+	const maxExecutionLogLimit = 1000
+	if limit < 0 {
+		limit = 0
+	} else if limit > maxExecutionLogLimit {
+		limit = maxExecutionLogLimit
+	}
+
 	query := "SELECT id, workflow_id, execution_id, level, message, module_name, fields, created_at FROM execution_logs WHERE execution_id = ?"
 	args := []any{executionID}
 	if level != "" {

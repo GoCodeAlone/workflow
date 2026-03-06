@@ -124,11 +124,23 @@ func (t *ExecutionTracker) RecordEvent(ctx context.Context, executionID string, 
 		// This prevents PII leakage and unnecessary storage for normal runs.
 		if state != nil && state.explicitTrace {
 			t.handleStepInputRecorded(state, data)
+			// Write a minimal log entry (step name only, no payload) so
+			// GET /executions/{id}/logs can surface that an input was recorded.
+			minimal := map[string]any{}
+			if stepName, ok := data["step_name"]; ok {
+				minimal["step_name"] = stepName
+			}
+			t.writeLog(executionID, eventType, minimal, now)
 		}
 		return nil
 	case "step.output_recorded":
 		if state != nil && state.explicitTrace {
 			t.handleStepOutputRecorded(state, data)
+			minimal := map[string]any{}
+			if stepName, ok := data["step_name"]; ok {
+				minimal["step_name"] = stepName
+			}
+			t.writeLog(executionID, eventType, minimal, now)
 		}
 		return nil
 	}
@@ -466,9 +478,17 @@ func (t *ExecutionTracker) TrackPipelineExecution(
 	}
 
 	// Set execution ID on pipeline for event correlation, and wire ourselves
-	// as the EventRecorder so step events flow to the tracker.
+	// as the EventRecorder so step events flow to the tracker. Save and
+	// restore previous values so we don't permanently mutate the pipeline's
+	// long-lived configuration.
+	prevExecID := pipeline.ExecutionID
+	prevRecorder := pipeline.EventRecorder
 	pipeline.ExecutionID = execID
 	pipeline.EventRecorder = t
+	defer func() {
+		pipeline.ExecutionID = prevExecID
+		pipeline.EventRecorder = prevRecorder
+	}()
 
 	pc, pipeErr := pipeline.Execute(execCtx, triggerData)
 
