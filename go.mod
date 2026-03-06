@@ -48,6 +48,7 @@ require (
 	github.com/nats-io/nats.go v1.48.0
 	github.com/prometheus/client_golang v1.19.1
 	github.com/redis/go-redis/v9 v9.18.0
+	github.com/stretchr/testify v1.11.1
 	github.com/stripe/stripe-go/v82 v82.5.1
 	github.com/tliron/glsp v0.2.2
 	github.com/xdg-go/scram v1.2.0
@@ -209,6 +210,7 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.25 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.48.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
