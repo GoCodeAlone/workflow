@@ -13,15 +13,18 @@ modules:
     config:
       module: server
 
+  - name: api-handler
+    type: http.handler
+    config:
+      contentType: application/json
+
 workflows:
-  - name: api
-    type: pipeline
-    trigger:
-      type: http
+  http:
     routes:
       # Fan-out: parallel API aggregation
       - path: /aggregate/{id}
         method: GET
+        handler: api-handler
         pipeline:
           steps:
             - type: step.request_parse
@@ -59,6 +62,7 @@ workflows:
       # Fan-out: concurrent foreach
       - path: /batch
         method: POST
+        handler: api-handler
         pipeline:
           steps:
             - type: step.request_parse
@@ -95,6 +99,7 @@ workflows:
       # Map/reduce with template functions
       - path: /stats
         method: GET
+        handler: api-handler
         pipeline:
           steps:
             - type: step.set
