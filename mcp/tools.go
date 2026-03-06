@@ -70,6 +70,31 @@ func (s *Server) registerNewTools() {
 		s.handleValidateTemplateExpressions,
 	)
 
+	// infer_pipeline_context
+	s.mcpServer.AddTool(
+		mcp.NewTool("infer_pipeline_context",
+			mcp.WithDescription("Infer the available template variables at a specific point in a pipeline. "+
+				"Analyzes preceding step outputs to tell you what .steps.* fields are available, "+
+				"plus trigger, body, and meta context. Useful for authoring template expressions."),
+			mcp.WithString("yaml_content",
+				mcp.Required(),
+				mcp.Description("The YAML content of the workflow configuration"),
+			),
+			mcp.WithString("pipeline_name",
+				mcp.Required(),
+				mcp.Description("The name of the pipeline to analyze"),
+			),
+			mcp.WithString("after_step",
+				mcp.Description("Step name to analyze context after. Omit to get context at the start of the pipeline."),
+			),
+			mcp.WithString("openapi_spec",
+				mcp.Description("Optional OpenAPI 3.0 JSON/YAML spec to enrich request body schema context"),
+			),
+			mcp.WithReadOnlyHintAnnotation(true),
+		),
+		s.handleInferPipelineContext,
+	)
+
 	// get_config_examples
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_config_examples",
@@ -1151,4 +1176,117 @@ func generateStepExample(stepType string, configKeys []string) string {
 		}
 	}
 	return b.String()
+}
+
+// handleInferPipelineContext analyzes a pipeline and returns the available
+// template variables at the specified position (after a given step).
+func (s *Server) handleInferPipelineContext(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	yamlContent := mcp.ParseString(req, "yaml_content", "")
+	if yamlContent == "" {
+		return mcp.NewToolResultError("yaml_content is required"), nil
+	}
+	pipelineName := mcp.ParseString(req, "pipeline_name", "")
+	if pipelineName == "" {
+		return mcp.NewToolResultError("pipeline_name is required"), nil
+	}
+	afterStep := mcp.ParseString(req, "after_step", "")
+
+	cfg, err := config.LoadFromString(yamlContent)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("YAML parse error: %v", err)), nil
+	}
+
+	rawPipeline, ok := cfg.Pipelines[pipelineName]
+	if !ok {
+		names := make([]string, 0, len(cfg.Pipelines))
+		for k := range cfg.Pipelines {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		return mcp.NewToolResultError(fmt.Sprintf("pipeline %q not found; available: %v", pipelineName, names)), nil
+	}
+
+	// Decode the pipeline raw value into PipelineConfig.
+	pipeline, err := decodePipelineConfig(rawPipeline)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to decode pipeline %q: %v", pipelineName, err)), nil
+	}
+
+	// Collect steps preceding the target position.
+	precedingSteps := pipeline.Steps
+	if afterStep != "" {
+		idx := -1
+		for i, step := range pipeline.Steps {
+			if step.Name == afterStep {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			stepNames := make([]string, 0, len(pipeline.Steps))
+			for _, st := range pipeline.Steps {
+				stepNames = append(stepNames, st.Name)
+			}
+			return mcp.NewToolResultError(fmt.Sprintf("step %q not found in pipeline %q; steps: %v", afterStep, pipelineName, stepNames)), nil
+		}
+		precedingSteps = pipeline.Steps[:idx+1]
+	}
+
+	// Infer outputs for each preceding step.
+	stepReg := schema.GetStepSchemaRegistry()
+	type stepContext struct {
+		Name    string                   `json:"name"`
+		Type    string                   `json:"type"`
+		Outputs []schema.InferredOutput  `json:"outputs"`
+	}
+	stepsCtx := make([]stepContext, 0, len(precedingSteps))
+	for _, step := range precedingSteps {
+		outputs := stepReg.InferStepOutputs(step.Type, step.Config)
+		stepsCtx = append(stepsCtx, stepContext{
+			Name:    step.Name,
+			Type:    step.Type,
+			Outputs: outputs,
+		})
+	}
+
+	// Build trigger context info.
+	triggerCtx := map[string]any{
+		"type":        pipeline.Trigger.Type,
+		"description": "Trigger data available via .trigger.*",
+		"fields": []string{
+			"path_params", "query", "headers", "body",
+		},
+	}
+
+	// Meta context.
+	metaCtx := map[string]any{
+		"description": "Pipeline metadata available via .meta.*",
+		"fields": []string{
+			"pipeline_name", "trigger_type", "timestamp",
+		},
+	}
+
+	result := map[string]any{
+		"pipeline_name": pipelineName,
+		"after_step":    afterStep,
+		"steps":         stepsCtx,
+		"trigger":       triggerCtx,
+		"meta":          metaCtx,
+		"summary": fmt.Sprintf("%d steps analyzed, %d preceding steps included",
+			len(pipeline.Steps), len(precedingSteps)),
+	}
+	return marshalToolResult(result)
+}
+
+// decodePipelineConfig converts a raw map (from YAML unmarshalling) to a PipelineConfig.
+func decodePipelineConfig(raw any) (*config.PipelineConfig, error) {
+	data, err := yaml.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var pc config.PipelineConfig
+	if err := yaml.Unmarshal(data, &pc); err != nil {
+		return nil, err
+	}
+	return &pc, nil
 }
