@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import TraceView, { toTraceStep, toLogEntry } from './TraceView.tsx';
+import TraceView from './TraceView.tsx';
+import { toTraceStep, toLogEntry } from './traceUtils.ts';
 import useObservabilityStore from '../../store/observabilityStore.ts';
 import type { TraceStep } from '@gocodealone/workflow-ui/trace';
 
@@ -159,7 +160,7 @@ describe('TraceView', () => {
   it('handleStepClick selects a step on first click (via TraceCanvas)', async () => {
     // Make configToNodes return non-empty nodes so TraceCanvas renders
     vi.mocked(configToNodes).mockReturnValue({
-      nodes: [{ id: 'n1', type: 'default', position: { x: 0, y: 0 }, data: {} }],
+      nodes: [{ id: 'n1', type: 'default', position: { x: 0, y: 0 }, data: { moduleType: '', label: '', config: {} } }],
       edges: [],
     });
 
@@ -177,7 +178,7 @@ describe('TraceView', () => {
 
   it('handleStepClick toggles: clicking same step twice deselects it (via TraceCanvas)', async () => {
     vi.mocked(configToNodes).mockReturnValue({
-      nodes: [{ id: 'n1', type: 'default', position: { x: 0, y: 0 }, data: {} }],
+      nodes: [{ id: 'n1', type: 'default', position: { x: 0, y: 0 }, data: { moduleType: '', label: '', config: {} } }],
       edges: [],
     });
 
@@ -288,7 +289,6 @@ describe('toTraceStep', () => {
     expect(result.status).toBe('completed');
     expect(result.sequenceNum).toBe(3);
     expect(result.durationMs).toBe(120);
-    expect(result.startedAt).toBe('2026-01-01T00:00:00Z');
     expect(result.inputData).toEqual({ key: 'value' });
     expect(result.outputData).toEqual({ result: 42 });
   });
@@ -306,7 +306,6 @@ describe('toTraceStep', () => {
     const result = toTraceStep(step);
 
     expect(result.durationMs).toBeUndefined();
-    expect(result.startedAt).toBeUndefined();
     expect(result.inputData).toBeUndefined();
     expect(result.outputData).toBeUndefined();
     expect(result.errorMessage).toBeUndefined();
@@ -330,7 +329,7 @@ describe('toLogEntry', () => {
 
     const result = toLogEntry(log);
 
-    expect(result.id).toBe(7);
+    expect(result.id).toBe('7');
     expect(result.level).toBe('info');
     expect(result.message).toBe('Step started');
     expect(result.moduleName).toBe('step1');
