@@ -477,20 +477,16 @@ func (t *ExecutionTracker) TrackPipelineExecution(
 		_ = t.Store.UpdateExecutionMetadata(execID, string(metaJSON))
 	}
 
-	// Set execution ID on pipeline for event correlation, and wire ourselves
-	// as the EventRecorder so step events flow to the tracker. Save and
-	// restore previous values so we don't permanently mutate the pipeline's
-	// long-lived configuration.
-	prevExecID := pipeline.ExecutionID
-	prevRecorder := pipeline.EventRecorder
-	pipeline.ExecutionID = execID
-	pipeline.EventRecorder = t
-	defer func() {
-		pipeline.ExecutionID = prevExecID
-		pipeline.EventRecorder = prevRecorder
-	}()
+	// Create a per-execution shallow copy of the pipeline so that setting
+	// ExecutionID and EventRecorder on it does not race with concurrent
+	// requests that share the same pipeline instance (route pipelines are
+	// created once and reused). seqNum is reset inside Execute(), so the
+	// value inherited by the copy is harmless.
+	execPipeline := *pipeline
+	execPipeline.ExecutionID = execID
+	execPipeline.EventRecorder = t
 
-	pc, pipeErr := pipeline.Execute(execCtx, triggerData)
+	pc, pipeErr := execPipeline.Execute(execCtx, triggerData)
 
 	completedAt := time.Now()
 	durationMs := completedAt.Sub(startedAt).Milliseconds()
