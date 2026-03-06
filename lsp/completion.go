@@ -292,19 +292,26 @@ func getTemplateCompletions(doc *Document, ctx PositionContext) []protocol.Compl
 	case "steps":
 		pipCtx := BuildPipelineContext(doc.Content, ctx.PipelineName, ctx.CurrentStepName, "", "", "")
 		if tp.StepName == "" {
-			// Suggest step names.
-			return stepNameCompletions(pipCtx)
+			// Suggest step names, filtered by FieldPrefix.
+			return filterCompletions(stepNameCompletions(pipCtx), tp.FieldPrefix)
 		}
-		// Suggest output keys for the named step.
-		return stepOutputKeyCompletions(pipCtx, tp.StepName)
+		// Suggest output keys for the named step, filtered by FieldPrefix.
+		return filterCompletions(stepOutputKeyCompletions(pipCtx, tp.StepName), tp.FieldPrefix)
 
 	case "trigger":
 		pipCtx := BuildPipelineContext(doc.Content, ctx.PipelineName, ctx.CurrentStepName, "", "", "")
-		return triggerFieldCompletions(pipCtx)
+		if tp.SubField != "" {
+			// Drill into trigger sub-namespace (e.g. .trigger.path_params.)
+			return filterCompletions(triggerSubFieldCompletions(pipCtx, tp.SubField), tp.FieldPrefix)
+		}
+		return filterCompletions(triggerFieldCompletions(pipCtx), tp.FieldPrefix)
 
 	case "body":
 		pipCtx := BuildPipelineContext(doc.Content, ctx.PipelineName, ctx.CurrentStepName, "", "", "")
-		return bodyFieldCompletions(pipCtx)
+		return filterCompletions(bodyFieldCompletions(pipCtx), tp.FieldPrefix)
+
+	case "meta":
+		return filterCompletions(metaFieldCompletions(), tp.FieldPrefix)
 
 	default:
 		return getTemplateFunctionCompletions()
@@ -447,6 +454,83 @@ func bodyFieldCompletions(pipCtx *PipelineDataContext) []protocol.CompletionItem
 			Kind:          &kind,
 			Detail:        &detail,
 			Documentation: fs.Description,
+		})
+	}
+	return items
+}
+
+// filterCompletions filters completion items by a prefix string.
+// If prefix is empty, all items are returned.
+func filterCompletions(items []protocol.CompletionItem, prefix string) []protocol.CompletionItem {
+	if prefix == "" {
+		return items
+	}
+	var filtered []protocol.CompletionItem
+	for _, item := range items {
+		if len(item.Label) >= len(prefix) && item.Label[:len(prefix)] == prefix {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+// triggerSubFieldCompletions returns completions for trigger sub-namespace fields
+// (e.g. .trigger.path_params. → list specific path parameter names from OpenAPI).
+func triggerSubFieldCompletions(pipCtx *PipelineDataContext, subField string) []protocol.CompletionItem {
+	if pipCtx == nil || pipCtx.Trigger == nil {
+		return nil
+	}
+	kind := protocol.CompletionItemKindField
+	var source map[string]FieldSchema
+	switch subField {
+	case "path_params":
+		source = pipCtx.Trigger.PathParams
+	case "query":
+		source = pipCtx.Trigger.QueryParams
+	case "body":
+		source = pipCtx.Trigger.BodyFields
+	default:
+		return nil
+	}
+	if len(source) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(source))
+	for k := range source {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	items := make([]protocol.CompletionItem, 0, len(keys))
+	for _, k := range keys {
+		key := k
+		fs := source[k]
+		detail := fs.Type
+		items = append(items, protocol.CompletionItem{
+			Label:         key,
+			Kind:          &kind,
+			Detail:        &detail,
+			Documentation: fs.Description,
+		})
+	}
+	return items
+}
+
+// metaFieldCompletions returns completion items for pipeline metadata fields.
+func metaFieldCompletions() []protocol.CompletionItem {
+	kind := protocol.CompletionItemKindField
+	entries := []struct{ label, doc string }{
+		{"pipeline_name", "Name of the currently executing pipeline"},
+		{"trigger_type", "Type of trigger that started this pipeline (e.g. 'http')"},
+		{"timestamp", "ISO 8601 timestamp of when the pipeline was triggered"},
+	}
+	items := make([]protocol.CompletionItem, 0, len(entries))
+	for _, e := range entries {
+		label := e.label
+		doc := e.doc
+		items = append(items, protocol.CompletionItem{
+			Label:         label,
+			Kind:          &kind,
+			Documentation: doc,
 		})
 	}
 	return items

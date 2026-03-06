@@ -23,7 +23,7 @@ func (r *StepSchemaRegistry) InferStepOutputs(stepType string, stepConfig map[st
 	case "step.request_parse":
 		return inferRequestParseOutputs(stepConfig)
 	case "step.validate":
-		return inferValidateOutputs(stepConfig)
+		return r.inferValidateOutputs(stepConfig)
 	case "step.nosql_get":
 		return inferNoSQLGetOutputs(stepConfig)
 	case "step.nosql_query":
@@ -85,10 +85,41 @@ func inferRequestParseOutputs(_ map[string]any) []InferredOutput {
 	}
 }
 
-func inferValidateOutputs(_ map[string]any) []InferredOutput {
-	return []InferredOutput{
+func (r *StepSchemaRegistry) inferValidateOutputs(cfg map[string]any) []InferredOutput {
+	out := []InferredOutput{
 		{Key: "valid", Type: "boolean", Description: "Whether validation passed"},
 	}
+
+	// If strategy is json_schema and schema.properties is defined, list the validated fields.
+	strategy, _ := cfg["strategy"].(string)
+	if strategy != "json_schema" {
+		return out
+	}
+	schemaMap, _ := cfg["schema"].(map[string]any)
+	if schemaMap == nil {
+		return out
+	}
+	props, _ := schemaMap["properties"].(map[string]any)
+	if len(props) == 0 {
+		return out
+	}
+
+	keys := make([]string, 0, len(props))
+	for k := range props {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		propType := "any"
+		if pm, ok := props[k].(map[string]any); ok {
+			if t, ok := pm["type"].(string); ok {
+				propType = t
+			}
+		}
+		out = append(out, InferredOutput{Key: k, Type: propType, Description: "Validated field"})
+	}
+	return out
 }
 
 func inferNoSQLGetOutputs(_ map[string]any) []InferredOutput {
