@@ -1020,3 +1020,201 @@ func TestWithEngine_Option(t *testing.T) {
 		t.Error("server with engine should have non-nil engine")
 	}
 }
+
+// --- infer_pipeline_context tests ---
+
+const inferPipelineYAML = `
+pipelines:
+  user-lookup:
+    trigger:
+      type: http
+    steps:
+      - name: parse
+        type: step.request_parse
+        config: {}
+      - name: lookup
+        type: step.db_query
+        config:
+          mode: single
+      - name: setResult
+        type: step.set
+        config:
+          values:
+            email: "{{ .steps.lookup.row.email }}"
+            found: "{{ .steps.lookup.found }}"
+`
+
+func TestInferPipelineContext_AllSteps(t *testing.T) {
+	srv := NewServer("")
+	req := makeCallToolRequest(map[string]any{
+		"yaml_content":  inferPipelineYAML,
+		"pipeline_name": "user-lookup",
+	})
+
+	result, err := srv.handleInferPipelineContext(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := extractText(t, result)
+	var data map[string]any
+	if err := json.Unmarshal([]byte(text), &data); err != nil {
+		t.Fatalf("failed to parse result JSON: %v", err)
+	}
+
+	if data["pipeline_name"] != "user-lookup" {
+		t.Errorf("expected pipeline_name 'user-lookup', got %v", data["pipeline_name"])
+	}
+
+	steps, ok := data["steps"].([]any)
+	if !ok || len(steps) != 3 {
+		t.Fatalf("expected 3 steps, got %v", data["steps"])
+	}
+
+	// Verify first step (parse) has request_parse outputs
+	firstStep := steps[0].(map[string]any)
+	if firstStep["name"] != "parse" {
+		t.Errorf("expected first step 'parse', got %v", firstStep["name"])
+	}
+	outputs := firstStep["outputs"].([]any)
+	outputKeys := make(map[string]bool)
+	for _, o := range outputs {
+		om := o.(map[string]any)
+		outputKeys[om["key"].(string)] = true
+	}
+	for _, expected := range []string{"body", "headers", "path_params", "query"} {
+		if !outputKeys[expected] {
+			t.Errorf("expected output key %q in parse step, got %v", expected, outputKeys)
+		}
+	}
+}
+
+func TestInferPipelineContext_AfterStep(t *testing.T) {
+	srv := NewServer("")
+	req := makeCallToolRequest(map[string]any{
+		"yaml_content":  inferPipelineYAML,
+		"pipeline_name": "user-lookup",
+		"after_step":    "lookup",
+	})
+
+	result, err := srv.handleInferPipelineContext(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := extractText(t, result)
+	var data map[string]any
+	if err := json.Unmarshal([]byte(text), &data); err != nil {
+		t.Fatalf("failed to parse result JSON: %v", err)
+	}
+
+	steps, ok := data["steps"].([]any)
+	if !ok || len(steps) != 2 {
+		t.Fatalf("expected 2 steps (up to 'lookup'), got %d", len(steps))
+	}
+	if steps[1].(map[string]any)["name"] != "lookup" {
+		t.Errorf("expected second step 'lookup', got %v", steps[1].(map[string]any)["name"])
+	}
+
+	// Verify lookup step has db_query outputs (single mode)
+	lookupStep := steps[1].(map[string]any)
+	outputs := lookupStep["outputs"].([]any)
+	outputKeys := make(map[string]bool)
+	for _, o := range outputs {
+		om := o.(map[string]any)
+		outputKeys[om["key"].(string)] = true
+	}
+	if !outputKeys["found"] || !outputKeys["row"] {
+		t.Errorf("expected 'found' and 'row' outputs from db_query, got %v", outputKeys)
+	}
+}
+
+func TestInferPipelineContext_MissingYAML(t *testing.T) {
+	srv := NewServer("")
+	req := makeCallToolRequest(map[string]any{
+		"pipeline_name": "user-lookup",
+	})
+	result, err := srv.handleInferPipelineContext(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := extractText(t, result)
+	if !contains(text, "yaml_content is required") {
+		t.Errorf("expected 'yaml_content is required', got %q", text)
+	}
+}
+
+func TestInferPipelineContext_MissingPipelineName(t *testing.T) {
+	srv := NewServer("")
+	req := makeCallToolRequest(map[string]any{
+		"yaml_content": inferPipelineYAML,
+	})
+	result, err := srv.handleInferPipelineContext(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := extractText(t, result)
+	if !contains(text, "pipeline_name is required") {
+		t.Errorf("expected 'pipeline_name is required', got %q", text)
+	}
+}
+
+func TestInferPipelineContext_UnknownPipeline(t *testing.T) {
+	srv := NewServer("")
+	req := makeCallToolRequest(map[string]any{
+		"yaml_content":  inferPipelineYAML,
+		"pipeline_name": "nonexistent",
+	})
+	result, err := srv.handleInferPipelineContext(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := extractText(t, result)
+	if !contains(text, "nonexistent") {
+		t.Errorf("expected error mentioning 'nonexistent', got %q", text)
+	}
+}
+
+func TestInferPipelineContext_UnknownStep(t *testing.T) {
+	srv := NewServer("")
+	req := makeCallToolRequest(map[string]any{
+		"yaml_content":  inferPipelineYAML,
+		"pipeline_name": "user-lookup",
+		"after_step":    "no-such-step",
+	})
+	result, err := srv.handleInferPipelineContext(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := extractText(t, result)
+	if !contains(text, "no-such-step") {
+		t.Errorf("expected error mentioning 'no-such-step', got %q", text)
+	}
+}
+
+func TestInferPipelineContext_TriggerAndMeta(t *testing.T) {
+	srv := NewServer("")
+	req := makeCallToolRequest(map[string]any{
+		"yaml_content":  inferPipelineYAML,
+		"pipeline_name": "user-lookup",
+	})
+	result, err := srv.handleInferPipelineContext(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := extractText(t, result)
+	var data map[string]any
+	if err := json.Unmarshal([]byte(text), &data); err != nil {
+		t.Fatalf("failed to parse result JSON: %v", err)
+	}
+	if data["trigger"] == nil {
+		t.Error("expected trigger context in result")
+	}
+	if data["meta"] == nil {
+		t.Error("expected meta context in result")
+	}
+	triggerCtx := data["trigger"].(map[string]any)
+	if triggerCtx["type"] != "http" {
+		t.Errorf("expected trigger type 'http', got %v", triggerCtx["type"])
+	}
+}

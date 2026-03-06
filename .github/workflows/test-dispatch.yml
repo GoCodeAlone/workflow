@@ -1,0 +1,49 @@
+name: Test Dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to dispatch (e.g. v0.3.20)'
+        required: true
+        default: 'v0.3.20'
+
+jobs:
+  test-dispatch:
+    name: Test Repository Dispatch
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check token availability
+      run: |
+        if [ -z "${{ secrets.REPO_DISPATCH_TOKEN }}" ]; then
+          echo "::error::REPO_DISPATCH_TOKEN secret is not set. Create a PAT with 'repo' scope and add it as a repository or org secret."
+          exit 1
+        fi
+        echo "REPO_DISPATCH_TOKEN is set"
+
+    - name: Dispatch to workflow-vscode
+      uses: peter-evans/repository-dispatch@v4
+      with:
+        token: ${{ secrets.REPO_DISPATCH_TOKEN }}
+        repository: GoCodeAlone/workflow-vscode
+        event-type: workflow-release
+        client-payload: '{"version": "${{ inputs.version }}"}'
+
+    - name: Dispatch to workflow-jetbrains
+      uses: peter-evans/repository-dispatch@v4
+      with:
+        token: ${{ secrets.REPO_DISPATCH_TOKEN }}
+        repository: GoCodeAlone/workflow-jetbrains
+        event-type: workflow-release
+        client-payload: '{"version": "${{ inputs.version }}"}'
+
+    - name: Verify dispatches triggered
+      env:
+        GH_TOKEN: ${{ secrets.REPO_DISPATCH_TOKEN }}
+      run: |
+        sleep 5
+        echo "=== workflow-vscode recent runs ==="
+        gh run list --repo GoCodeAlone/workflow-vscode --limit 3 --json status,displayTitle,event --jq '.[] | "\(.event) \(.status) \(.displayTitle)"'
+        echo ""
+        echo "=== workflow-jetbrains recent runs ==="
+        gh run list --repo GoCodeAlone/workflow-jetbrains --limit 3 --json status,displayTitle,event --jq '.[] | "\(.event) \(.status) \(.displayTitle)"'

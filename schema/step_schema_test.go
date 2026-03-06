@@ -169,3 +169,186 @@ func TestLoadPluginStepSchemasFromDir_EmptyDir(t *testing.T) {
 	LoadPluginStepSchemasFromDir(t.TempDir())
 	LoadPluginStepSchemasFromDir("/nonexistent/path")
 }
+
+func TestInferStepOutputs_Set(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	outputs := reg.InferStepOutputs("step.set", map[string]any{
+		"values": map[string]any{"user_id": "123", "status": "active"},
+	})
+	if len(outputs) != 2 {
+		t.Fatalf("expected 2 outputs, got %d", len(outputs))
+	}
+	keys := map[string]bool{}
+	for _, o := range outputs {
+		keys[o.Key] = true
+	}
+	if !keys["user_id"] || !keys["status"] {
+		t.Errorf("expected user_id and status keys, got %v", outputs)
+	}
+}
+
+func TestInferStepOutputs_DBQuery_Single(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	outputs := reg.InferStepOutputs("step.db_query", map[string]any{
+		"mode": "single",
+	})
+	keys := map[string]bool{}
+	for _, o := range outputs {
+		keys[o.Key] = true
+	}
+	if !keys["row"] || !keys["found"] {
+		t.Errorf("expected row and found, got %v", outputs)
+	}
+}
+
+func TestInferStepOutputs_DBQuery_List(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	outputs := reg.InferStepOutputs("step.db_query", map[string]any{
+		"mode": "list",
+	})
+	keys := map[string]bool{}
+	for _, o := range outputs {
+		keys[o.Key] = true
+	}
+	if !keys["rows"] || !keys["count"] {
+		t.Errorf("expected rows and count, got %v", outputs)
+	}
+}
+
+func TestInferStepOutputs_DBQueryCached(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	outputs := reg.InferStepOutputs("step.db_query_cached", map[string]any{
+		"mode": "list",
+	})
+	keys := map[string]bool{}
+	for _, o := range outputs {
+		keys[o.Key] = true
+	}
+	if !keys["rows"] || !keys["count"] || !keys["cache_hit"] {
+		t.Errorf("expected rows, count, cache_hit, got %v", outputs)
+	}
+}
+
+func TestInferStepOutputs_RequestParse(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	outputs := reg.InferStepOutputs("step.request_parse", map[string]any{
+		"path_params":   []any{"id", "slug"},
+		"query_params":  []any{"page"},
+		"parse_body":    true,
+		"parse_headers": []any{"Authorization"},
+	})
+	keys := map[string]bool{}
+	for _, o := range outputs {
+		keys[o.Key] = true
+	}
+	for _, expected := range []string{"path_params", "query", "body", "headers"} {
+		if !keys[expected] {
+			t.Errorf("missing expected output key %q", expected)
+		}
+	}
+}
+
+func TestInferStepOutputs_Fallback(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	outputs := reg.InferStepOutputs("step.http_call", nil)
+	keys := map[string]bool{}
+	for _, o := range outputs {
+		keys[o.Key] = true
+	}
+	if !keys["status"] || !keys["body"] || !keys["headers"] {
+		t.Errorf("expected static outputs for step.http_call, got %v", outputs)
+	}
+}
+
+func TestInferStepOutputs_Unknown(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	outputs := reg.InferStepOutputs("step.nonexistent", nil)
+	if outputs != nil {
+		t.Errorf("expected nil for unknown step type, got %v", outputs)
+	}
+}
+
+func TestInferStepOutputs_Validate_JsonSchema(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	outputs := reg.InferStepOutputs("step.validate", map[string]any{
+		"strategy": "json_schema",
+		"schema": map[string]any{
+			"properties": map[string]any{
+				"email": map[string]any{"type": "string"},
+				"name":  map[string]any{"type": "string"},
+			},
+		},
+	})
+	if len(outputs) == 0 {
+		t.Fatal("expected outputs from json_schema strategy")
+	}
+	keys := map[string]bool{}
+	for _, o := range outputs {
+		keys[o.Key] = true
+	}
+	if !keys["valid"] {
+		t.Error("expected 'valid' output to always be present")
+	}
+	if !keys["email"] || !keys["name"] {
+		t.Errorf("expected email and name from schema properties, got %v", outputs)
+	}
+}
+
+func TestInferStepOutputs_Validate_Fallback(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	outputs := reg.InferStepOutputs("step.validate", map[string]any{
+		"rules": map[string]any{"field": "required"},
+	})
+	keys := map[string]bool{}
+	for _, o := range outputs {
+		keys[o.Key] = true
+	}
+	if !keys["valid"] {
+		t.Errorf("expected valid output from fallback strategy, got %v", outputs)
+	}
+}
+
+func TestInferStepOutputs_NoSQLGet(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	outputs := reg.InferStepOutputs("step.nosql_get", map[string]any{
+		"store": "mystore",
+		"key":   "{{.user_id}}",
+	})
+	keys := map[string]bool{}
+	for _, o := range outputs {
+		keys[o.Key] = true
+	}
+	if !keys["item"] || !keys["found"] {
+		t.Errorf("expected item and found, got %v", outputs)
+	}
+}
+
+func TestInferStepOutputs_NoSQLQuery(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	outputs := reg.InferStepOutputs("step.nosql_query", map[string]any{
+		"store":  "mystore",
+		"prefix": "users/",
+	})
+	keys := map[string]bool{}
+	for _, o := range outputs {
+		keys[o.Key] = true
+	}
+	if !keys["items"] || !keys["count"] {
+		t.Errorf("expected items and count, got %v", outputs)
+	}
+}
+
+func TestInferStepOutputs_NoSQLPut(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	outputs := reg.InferStepOutputs("step.nosql_put", map[string]any{
+		"store": "mystore",
+		"key":   "{{.id}}",
+	})
+	keys := map[string]bool{}
+	for _, o := range outputs {
+		keys[o.Key] = true
+	}
+	if !keys["stored"] || !keys["key"] {
+		t.Errorf("expected stored and key, got %v", outputs)
+	}
+}

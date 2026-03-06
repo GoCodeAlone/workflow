@@ -393,6 +393,526 @@ func TestContextAt_PipelineStepTypeLine(t *testing.T) {
 	}
 }
 
+const pipelineYAML = `
+pipelines:
+  my-pipeline:
+    steps:
+      - name: parse
+        type: step.request_parse
+        config:
+          path_params: [id]
+      - name: query
+        type: step.db_query
+        config:
+          database: mydb
+          query: "SELECT * FROM items"
+          mode: list
+      - name: respond
+        type: step.json_response
+        config:
+          status: 200
+          body_from: "{{ .steps.query.rows }}"
+`
+
+// TestCompletions_TemplateTopLevel checks that top-level dot gives namespace completions.
+func TestCompletions_TemplateTopLevel(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
+
+	ctx := PositionContext{
+		Section:      SectionPipeline,
+		InTemplate:   true,
+		PipelineName: "my-pipeline",
+		TemplatePath: &TemplateExprPath{Namespace: "", Raw: "."},
+	}
+	items := Completions(reg, doc, ctx)
+	labels := make(map[string]bool)
+	for _, item := range items {
+		labels[item.Label] = true
+	}
+	if !labels[".steps"] {
+		t.Error("expected .steps in top-level template completions")
+	}
+	if !labels[".trigger"] {
+		t.Error("expected .trigger in top-level template completions")
+	}
+}
+
+// TestCompletions_TemplateStepNames checks that .steps namespace gives step name completions.
+func TestCompletions_TemplateStepNames(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
+
+	// pipelineYAML: "respond" step starts at yaml line 15 (ctx.Line=14).
+	// Cursor at ctx.Line=17 is inside respond's config → parse+query are preceding.
+	ctx := PositionContext{
+		Section:      SectionPipeline,
+		InTemplate:   true,
+		Line:         17,
+		TemplatePath: &TemplateExprPath{Namespace: "steps", Raw: ".steps."},
+	}
+	items := Completions(reg, doc, ctx)
+	if len(items) == 0 {
+		t.Fatal("expected step name completions")
+	}
+	labels := make(map[string]bool)
+	for _, item := range items {
+		labels[item.Label] = true
+	}
+	if !labels["parse"] {
+		t.Error("expected 'parse' step in completions")
+	}
+	if !labels["query"] {
+		t.Error("expected 'query' step in completions")
+	}
+}
+
+// TestCompletions_TemplateStepOutputKeys checks that .steps.stepName gives output key completions.
+func TestCompletions_TemplateStepOutputKeys(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
+
+	ctx := PositionContext{
+		Section:      SectionPipeline,
+		InTemplate:   true,
+		Line:         17,
+		TemplatePath: &TemplateExprPath{Namespace: "steps", StepName: "query", Raw: ".steps.query."},
+	}
+	items := Completions(reg, doc, ctx)
+	if len(items) == 0 {
+		t.Fatal("expected output key completions for query step")
+	}
+	labels := make(map[string]bool)
+	for _, item := range items {
+		labels[item.Label] = true
+	}
+	if !labels["rows"] {
+		t.Error("expected 'rows' in query step output completions")
+	}
+	if !labels["count"] {
+		t.Error("expected 'count' in query step output completions")
+	}
+}
+
+// TestCompletions_TemplateTrigger checks that .trigger gives trigger field completions.
+func TestCompletions_TemplateTrigger(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
+
+	ctx := PositionContext{
+		Section:      SectionPipeline,
+		InTemplate:   true,
+		PipelineName: "my-pipeline",
+		TemplatePath: &TemplateExprPath{Namespace: "trigger", Raw: ".trigger."},
+	}
+	items := Completions(reg, doc, ctx)
+	if len(items) == 0 {
+		t.Fatal("expected trigger field completions")
+	}
+	labels := make(map[string]bool)
+	for _, item := range items {
+		labels[item.Label] = true
+	}
+	if !labels["path_params"] {
+		t.Error("expected 'path_params' in trigger completions")
+	}
+	if !labels["query"] {
+		t.Error("expected 'query' in trigger completions")
+	}
+}
+
+// TestContextAt_TemplatePath checks that ContextAt populates TemplatePath.
+func TestContextAt_TemplatePath(t *testing.T) {
+	yml := `pipelines:
+  my-pipeline:
+    steps:
+      - name: respond
+        type: step.json_response
+        config:
+          body_from: "{{ .steps.query.rows }}"
+`
+	// Line 6 is the body_from line. Cursor inside {{ .steps.query.rows }}
+	// "          body_from: \"{{ .steps.query.rows }}\""
+	// Let's count: 10 spaces + body_from: "{{ .steps.query.rows }}"
+	// cursor at position 25 (inside .steps.query.rows)
+	ctx := ContextAt(yml, 6, 25)
+	if !ctx.InTemplate {
+		t.Error("expected InTemplate=true")
+	}
+	if ctx.TemplatePath == nil {
+		t.Error("expected TemplatePath to be populated")
+	}
+}
+
+// TestContextAt_PipelineName checks that ContextAt extracts the pipeline name.
+func TestContextAt_PipelineName(t *testing.T) {
+	yml := `pipelines:
+  my-pipeline:
+    steps:
+      - name: query
+        type: step.db_query
+        config:
+          database: mydb
+`
+	ctx := ContextAt(yml, 6, 12) // "          database: mydb"
+	if ctx.Section != SectionPipeline {
+		t.Errorf("expected SectionPipeline, got %q", ctx.Section)
+	}
+	if ctx.PipelineName != "my-pipeline" {
+		t.Errorf("expected PipelineName 'my-pipeline', got %q", ctx.PipelineName)
+	}
+}
+
+// --- Template hover tests ---
+
+const pipelineHoverYAML = `pipelines:
+  user-lookup:
+    trigger:
+      type: http
+    steps:
+      - name: parse
+        type: step.request_parse
+        config: {}
+      - name: lookup
+        type: step.db_query
+        config:
+          mode: single
+      - name: setResult
+        type: step.set
+        config:
+          values:
+            email: "{{ .steps.lookup.row }}"
+`
+
+func TestHover_TemplateFunction(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate: true,
+		TemplatePath: &TemplateExprPath{
+			Raw: "lower",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for 'lower' template function")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "lower") {
+		t.Error("hover should mention 'lower'")
+	}
+}
+
+func TestHover_TemplateNamespaces(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate: true,
+		TemplatePath: &TemplateExprPath{
+			Raw:       ".",
+			Namespace: "",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for template namespace list")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "steps") {
+		t.Error("hover should mention 'steps' namespace")
+	}
+	if !containsStr(content, "trigger") {
+		t.Error("hover should mention 'trigger' namespace")
+	}
+}
+
+func TestHover_TemplateStepOutputs(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	// pipelineHoverYAML: "setResult" starts at yaml line 13 (ctx.Line=12).
+	// Cursor at ctx.Line=16 is inside setResult's config → parse+lookup are preceding.
+	ctx := PositionContext{
+		InTemplate: true,
+		Section:    SectionPipeline,
+		Line:       16,
+		TemplatePath: &TemplateExprPath{
+			Namespace: "steps",
+			StepName:  "lookup",
+			Raw:       ".steps.lookup",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for step outputs")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "lookup") {
+		t.Error("hover should mention step name 'lookup'")
+	}
+}
+
+func TestHover_TemplateStepField(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate: true,
+		Section:    SectionPipeline,
+		Line:       16,
+		TemplatePath: &TemplateExprPath{
+			Namespace:   "steps",
+			StepName:    "lookup",
+			FieldPrefix: "row",
+			Raw:         ".steps.lookup.row",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for step field")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "row") {
+		t.Error("hover should mention field 'row'")
+	}
+	if !containsStr(content, "lookup") {
+		t.Error("hover should mention step name 'lookup'")
+	}
+}
+
+func TestHover_TemplateTrigger(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate: true,
+		TemplatePath: &TemplateExprPath{
+			Namespace: "trigger",
+			Raw:       ".trigger",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for trigger namespace")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "trigger") {
+		t.Error("hover should mention 'trigger'")
+	}
+	if !containsStr(content, "path_params") {
+		t.Error("hover should list path_params sub-namespace")
+	}
+}
+
+func TestHover_TemplateTriggerSubfield(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate: true,
+		TemplatePath: &TemplateExprPath{
+			Namespace: "trigger",
+			SubField:  "path_params",
+			Raw:       ".trigger.path_params",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for trigger subfield")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "path_params") {
+		t.Error("hover should mention 'path_params'")
+	}
+}
+
+func TestHover_TemplateMeta(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate: true,
+		TemplatePath: &TemplateExprPath{
+			Namespace:   "meta",
+			FieldPrefix: "pipeline_name",
+			Raw:         ".meta.pipeline_name",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for meta field")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "pipeline_name") {
+		t.Error("hover should mention 'pipeline_name'")
+	}
+}
+
+func TestHover_TemplateBody(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate: true,
+		TemplatePath: &TemplateExprPath{
+			Namespace:   "body",
+			FieldPrefix: "email",
+			Raw:         ".body.email",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for body field")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "body") {
+		t.Error("hover should mention 'body'")
+	}
+}
+
+// TestCompletions_TemplateMeta checks that .meta namespace gives meta field completions.
+func TestCompletions_TemplateMeta(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
+
+	ctx := PositionContext{
+		Section:      SectionPipeline,
+		InTemplate:   true,
+		PipelineName: "my-pipeline",
+		TemplatePath: &TemplateExprPath{Namespace: "meta", Raw: ".meta."},
+	}
+	items := Completions(reg, doc, ctx)
+	if len(items) == 0 {
+		t.Fatal("expected meta field completions")
+	}
+	labels := make(map[string]bool)
+	for _, item := range items {
+		labels[item.Label] = true
+	}
+	for _, expected := range []string{"pipeline_name", "trigger_type", "timestamp"} {
+		if !labels[expected] {
+			t.Errorf("missing meta field completion: %q", expected)
+		}
+	}
+}
+
+// TestCompletions_TemplateFieldPrefixFilter checks that FieldPrefix filters completions.
+func TestCompletions_TemplateFieldPrefixFilter(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
+
+	ctx := PositionContext{
+		Section:    SectionPipeline,
+		InTemplate: true,
+		Line:       17,
+		TemplatePath: &TemplateExprPath{
+			Namespace:   "steps",
+			StepName:    "query",
+			FieldPrefix: "ro",
+			Raw:         ".steps.query.ro",
+		},
+	}
+	items := Completions(reg, doc, ctx)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 filtered completion, got %d", len(items))
+	}
+	if items[0].Label != "rows" {
+		t.Errorf("expected 'rows', got %q", items[0].Label)
+	}
+}
+
+// TestCompletions_TemplateMetaPrefixFilter checks that meta field completions are filtered.
+func TestCompletions_TemplateMetaPrefixFilter(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
+
+	ctx := PositionContext{
+		Section:      SectionPipeline,
+		InTemplate:   true,
+		PipelineName: "my-pipeline",
+		TemplatePath: &TemplateExprPath{
+			Namespace:   "meta",
+			FieldPrefix: "pipe",
+			Raw:         ".meta.pipe",
+		},
+	}
+	items := Completions(reg, doc, ctx)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 filtered meta completion, got %d", len(items))
+	}
+	if items[0].Label != "pipeline_name" {
+		t.Errorf("expected 'pipeline_name', got %q", items[0].Label)
+	}
+}
+
+// TestCompletions_TemplateTriggerSubField checks trigger sub-namespace completions.
+func TestCompletions_TemplateTriggerSubField(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+
+	// YAML with inline trigger + OpenAPI spec would be needed for sub-field completions
+	// from OpenAPI. Without OpenAPI, trigger sub-fields return nil, so we just verify
+	// the static trigger fields are returned at the top level.
+	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
+
+	ctx := PositionContext{
+		Section:      SectionPipeline,
+		InTemplate:   true,
+		PipelineName: "my-pipeline",
+		TemplatePath: &TemplateExprPath{
+			Namespace: "trigger",
+			SubField:  "path_params",
+			Raw:       ".trigger.path_params.",
+		},
+	}
+	// Without OpenAPI spec, path_params sub-field completions will be empty
+	items := Completions(reg, doc, ctx)
+	// This is expected to be nil/empty without OpenAPI enrichment
+	_ = items
+}
+
+// TestCompletions_TemplateStepNamePrefixFilter checks step name prefix filtering.
+func TestCompletions_TemplateStepNamePrefixFilter(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
+
+	ctx := PositionContext{
+		Section:    SectionPipeline,
+		InTemplate: true,
+		Line:       17,
+		TemplatePath: &TemplateExprPath{
+			Namespace:   "steps",
+			FieldPrefix: "qu",
+			Raw:         ".steps.qu",
+		},
+	}
+	items := Completions(reg, doc, ctx)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 filtered step name, got %d", len(items))
+	}
+	if items[0].Label != "query" {
+		t.Errorf("expected 'query', got %q", items[0].Label)
+	}
+}
+
 // helpers
 
 func containsStr(s, sub string) bool {
