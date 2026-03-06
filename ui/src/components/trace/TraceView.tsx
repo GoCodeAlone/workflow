@@ -7,36 +7,11 @@ import {
   StepDetailPanel,
 } from '@gocodealone/workflow-ui/trace';
 import type { TraceStep, TraceData, LogEntry } from '@gocodealone/workflow-ui/trace';
+import { toTraceStep, toLogEntry } from './traceUtils.ts';
 import useObservabilityStore from '../../store/observabilityStore.ts';
 import useWorkflowStore from '../../store/workflowStore.ts';
 import { apiGetExecutionLogs, apiGetWorkflow } from '../../utils/api.ts';
 import { configToNodes, parseYaml } from '../../utils/serialization.ts';
-import type { ExecutionStep, ExecutionLog } from '../../types/observability.ts';
-
-export function toTraceStep(step: ExecutionStep): TraceStep {
-  return {
-    stepName: step.step_name,
-    stepType: step.step_type,
-    status: step.status as TraceStep['status'],
-    durationMs: step.duration_ms,
-    inputData: step.input_data as Record<string, unknown> | null | undefined,
-    outputData: step.output_data as Record<string, unknown> | null | undefined,
-    errorMessage: step.error_message,
-    sequenceNum: step.sequence_num,
-  };
-}
-
-export function toLogEntry(log: ExecutionLog): LogEntry {
-  const level = log.level === 'fatal' ? 'error' : log.level;
-  return {
-    id: String(log.id),
-    level: level as LogEntry['level'],
-    message: log.message,
-    moduleName: log.module_name,
-    fields: log.fields,
-    createdAt: log.created_at,
-  };
-}
 
 const STATUS_COLORS: Record<string, string> = {
   pending: '#6c7086',
@@ -67,7 +42,9 @@ export default function TraceView({ executionId }: { executionId: string }) {
   useEffect(() => {
     fetchExecutionDetail(executionId);
     fetchExecutionSteps(executionId);
-    apiGetExecutionLogs(executionId).then((raw) => setLogs(raw.map(toLogEntry))).catch(() => {});
+    apiGetExecutionLogs(executionId)
+      .then((raw) => setLogs(raw.filter((log) => log.level !== 'event').map(toLogEntry)))
+      .catch(() => {});
   }, [executionId, fetchExecutionDetail, fetchExecutionSteps]);
 
   // Build canvas nodes/edges from workflow config
@@ -101,7 +78,7 @@ export default function TraceView({ executionId }: { executionId: string }) {
 
   const handleStepClick = useCallback(
     (step: TraceStep) => {
-      setSelectedStep((prev) => (prev?.stepName === step.stepName ? null : step));
+      setSelectedStep((prev: TraceStep | null) => (prev?.stepName === step.stepName ? null : step));
     },
     [],
   );
@@ -109,7 +86,7 @@ export default function TraceView({ executionId }: { executionId: string }) {
   const handleWaterfallStepClick = useCallback(
     (stepName: string) => {
       const step = executionSteps.map(toTraceStep).find((s) => s.stepName === stepName);
-      if (step) setSelectedStep((prev) => (prev?.stepName === stepName ? null : step));
+      if (step) setSelectedStep((prev: TraceStep | null) => (prev?.stepName === stepName ? null : step));
     },
     [executionSteps],
   );

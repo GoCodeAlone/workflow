@@ -1270,7 +1270,7 @@ func TestM2M_Introspect_AllowOthers_BearerMissingClaim(t *testing.T) {
 	m := NewM2MAuthModule("m2m", "this-is-a-valid-secret-32-bytes!", time.Hour, "test-issuer")
 	m.RegisterClient(M2MClient{ClientID: "client-a", ClientSecret: "secret-a-long-enough!", Scopes: []string{"read"}}) //nolint:gosec // test credential
 	m.RegisterClient(M2MClient{ClientID: "client-b", ClientSecret: "secret-b-long-enough!", Scopes: []string{"read"}}) //nolint:gosec // test credential
-	m.SetIntrospectPolicy(true, "", "role", "admin") // role=admin required
+	m.SetIntrospectPolicy(true, "", "role", "admin")                                                                   // role=admin required
 
 	tokenA := issueTestToken(t, m, "client-a", "secret-a-long-enough!")
 	tokenB := issueTestToken(t, m, "client-b", "secret-b-long-enough!")
