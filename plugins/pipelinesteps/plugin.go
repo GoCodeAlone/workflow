@@ -96,6 +96,7 @@ func New() *Plugin {
 					"step.http_proxy",
 					"step.hash",
 					"step.regex_match",
+					"step.parallel",
 				},
 				WorkflowTypes:    []string{"pipeline"},
 				OverridableTypes: []string{"step.authz_check"},
@@ -172,6 +173,10 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.http_proxy":      wrapStepFactory(module.NewHTTPProxyStepFactory()),
 		"step.hash":            wrapStepFactory(module.NewHashStepFactory()),
 		"step.regex_match":     wrapStepFactory(module.NewRegexMatchStepFactory()),
+		// step.parallel uses a lazy registry getter so sub-steps can reference any registered type.
+		"step.parallel": wrapStepFactory(module.NewParallelStepFactory(func() *module.StepRegistry {
+			return p.concreteStepRegistry
+		})),
 	}
 }
 

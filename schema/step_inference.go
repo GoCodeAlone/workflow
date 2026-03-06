@@ -30,6 +30,8 @@ func (r *StepSchemaRegistry) InferStepOutputs(stepType string, stepConfig map[st
 		return inferNoSQLQueryOutputs(stepConfig)
 	case "step.nosql_put":
 		return inferNoSQLPutOutputs()
+	case "step.parallel":
+		return inferParallelOutputs(stepConfig)
 	}
 
 	return r.staticOutputs(stepType)
@@ -141,6 +143,30 @@ func inferNoSQLPutOutputs() []InferredOutput {
 		{Key: "key", Type: "string", Description: "The document key that was stored"},
 		{Key: "stored", Type: "boolean", Description: "Whether the document was stored successfully"},
 	}
+}
+
+func inferParallelOutputs(stepConfig map[string]any) []InferredOutput {
+	outputs := []InferredOutput{
+		{Key: "results", Type: "map", Description: "Map of branch_name → branch output"},
+		{Key: "errors", Type: "map", Description: "Map of branch_name → error string"},
+		{Key: "completed", Type: "integer", Description: "Count of successful branches"},
+		{Key: "failed", Type: "integer", Description: "Count of failed branches"},
+	}
+	// If steps are provided in config, list branch names
+	if stepsRaw, ok := stepConfig["steps"].([]any); ok {
+		for _, raw := range stepsRaw {
+			if stepCfg, ok := raw.(map[string]any); ok {
+				if name, ok := stepCfg["name"].(string); ok {
+					outputs = append(outputs, InferredOutput{
+						Key:         "results." + name,
+						Type:        "(dynamic)",
+						Description: "Output from branch " + name,
+					})
+				}
+			}
+		}
+	}
+	return outputs
 }
 
 // staticOutputs converts a step's registered schema outputs to InferredOutputs,
