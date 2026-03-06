@@ -15,10 +15,10 @@ export function toTraceStep(step: ExecutionStep): TraceStep {
 }
 
 export function toLogEntry(log: ExecutionLog): LogEntry {
-  const level = log.level === 'fatal' ? 'error' : log.level === 'event' ? 'info' : log.level;
+  const level: LogEntry['level'] = log.level === 'fatal' ? 'error' : log.level as LogEntry['level'];
   return {
     id: String(log.id),
-    level: level as LogEntry['level'],
+    level,
     message: log.message,
     moduleName: log.module_name,
     fields: log.fields,

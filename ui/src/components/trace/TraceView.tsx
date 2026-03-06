@@ -42,7 +42,9 @@ export default function TraceView({ executionId }: { executionId: string }) {
   useEffect(() => {
     fetchExecutionDetail(executionId);
     fetchExecutionSteps(executionId);
-    apiGetExecutionLogs(executionId).then((raw) => setLogs(raw.map(toLogEntry))).catch(() => {});
+    apiGetExecutionLogs(executionId)
+      .then((raw) => setLogs(raw.filter((log) => log.level !== 'event').map(toLogEntry)))
+      .catch(() => {});
   }, [executionId, fetchExecutionDetail, fetchExecutionSteps]);
 
   // Build canvas nodes/edges from workflow config

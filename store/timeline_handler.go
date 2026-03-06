@@ -185,10 +185,6 @@ func (h *TimelineHandler) getExecutionLogs(w http.ResponseWriter, r *http.Reques
 		if n < 0 {
 			n = 0
 		}
-		const maxLimit = 1000
-		if n > maxLimit {
-			n = maxLimit
-		}
 		limit = int(n)
 	}
 

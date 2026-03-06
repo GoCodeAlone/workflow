@@ -2,7 +2,7 @@
 
 export type ExecutionStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'fatal';
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'event';
 export type IAMProviderType = 'aws_iam' | 'kubernetes' | 'oidc' | 'saml' | 'ldap' | 'custom';
 
 export interface WorkflowExecution {
