@@ -196,7 +196,18 @@ function TraceRequestModal({
   const handleSend = () => {
     let headers: Record<string, string> = {};
     try {
-      headers = JSON.parse(headersText || '{}');
+      const parsed = JSON.parse(headersText || '{}');
+      if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
+        setHeadersError('Headers must be a JSON object');
+        return;
+      }
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v !== 'string') {
+          setHeadersError(`Header value for "${k}" must be a string`);
+          return;
+        }
+      }
+      headers = parsed as Record<string, string>;
       setHeadersError('');
     } catch {
       setHeadersError('Headers must be valid JSON');

@@ -177,9 +177,19 @@ func (h *TimelineHandler) getExecutionLogs(w http.ResponseWriter, r *http.Reques
 	level := q.Get("level")
 	limit := 0
 	if limitStr := q.Get("limit"); limitStr != "" {
-		if n, err := json.Number(limitStr).Int64(); err == nil {
-			limit = int(n)
+		n, err := json.Number(limitStr).Int64()
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid limit parameter"})
+			return
 		}
+		if n < 0 {
+			n = 0
+		}
+		const maxLimit = 1000
+		if n > maxLimit {
+			n = maxLimit
+		}
+		limit = int(n)
 	}
 
 	logs, err := h.logQuerier.ListExecutionLogs(idStr, level, limit)
