@@ -12,32 +12,6 @@ import useObservabilityStore from '../../store/observabilityStore.ts';
 import useWorkflowStore from '../../store/workflowStore.ts';
 import { apiGetExecutionLogs, apiGetWorkflow } from '../../utils/api.ts';
 import { configToNodes, parseYaml } from '../../utils/serialization.ts';
-import type { ExecutionStep, ExecutionLog } from '../../types/observability.ts';
-
-export function toTraceStep(step: ExecutionStep): TraceStep {
-  return {
-    stepName: step.step_name,
-    stepType: step.step_type,
-    status: step.status as TraceStep['status'],
-    durationMs: step.duration_ms,
-    inputData: step.input_data as Record<string, unknown> | null | undefined,
-    outputData: step.output_data as Record<string, unknown> | null | undefined,
-    errorMessage: step.error_message,
-    sequenceNum: step.sequence_num,
-  };
-}
-
-export function toLogEntry(log: ExecutionLog): LogEntry {
-  const level = log.level === 'fatal' ? 'error' : log.level;
-  return {
-    id: String(log.id),
-    level: level as LogEntry['level'],
-    message: log.message,
-    moduleName: log.module_name,
-    fields: log.fields,
-    createdAt: log.created_at,
-  };
-}
 
 const STATUS_COLORS: Record<string, string> = {
   pending: '#6c7086',
