@@ -393,6 +393,180 @@ func TestContextAt_PipelineStepTypeLine(t *testing.T) {
 	}
 }
 
+const pipelineYAML = `
+pipelines:
+  my-pipeline:
+    steps:
+      - name: parse
+        type: step.request_parse
+        config:
+          path_params: [id]
+      - name: query
+        type: step.db_query
+        config:
+          database: mydb
+          query: "SELECT * FROM items"
+          mode: list
+      - name: respond
+        type: step.json_response
+        config:
+          status: 200
+          body_from: "{{ .steps.query.rows }}"
+`
+
+// TestCompletions_TemplateTopLevel checks that top-level dot gives namespace completions.
+func TestCompletions_TemplateTopLevel(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
+
+	ctx := PositionContext{
+		Section:      SectionPipeline,
+		InTemplate:   true,
+		PipelineName: "my-pipeline",
+		TemplatePath: &TemplateExprPath{Namespace: "", Raw: "."},
+	}
+	items := Completions(reg, doc, ctx)
+	labels := make(map[string]bool)
+	for _, item := range items {
+		labels[item.Label] = true
+	}
+	if !labels[".steps"] {
+		t.Error("expected .steps in top-level template completions")
+	}
+	if !labels[".trigger"] {
+		t.Error("expected .trigger in top-level template completions")
+	}
+}
+
+// TestCompletions_TemplateStepNames checks that .steps namespace gives step name completions.
+func TestCompletions_TemplateStepNames(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
+
+	ctx := PositionContext{
+		Section:         SectionPipeline,
+		InTemplate:      true,
+		PipelineName:    "my-pipeline",
+		CurrentStepName: "respond",
+		TemplatePath:    &TemplateExprPath{Namespace: "steps", Raw: ".steps."},
+	}
+	items := Completions(reg, doc, ctx)
+	if len(items) == 0 {
+		t.Fatal("expected step name completions")
+	}
+	labels := make(map[string]bool)
+	for _, item := range items {
+		labels[item.Label] = true
+	}
+	if !labels["parse"] {
+		t.Error("expected 'parse' step in completions")
+	}
+	if !labels["query"] {
+		t.Error("expected 'query' step in completions")
+	}
+}
+
+// TestCompletions_TemplateStepOutputKeys checks that .steps.stepName gives output key completions.
+func TestCompletions_TemplateStepOutputKeys(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
+
+	ctx := PositionContext{
+		Section:         SectionPipeline,
+		InTemplate:      true,
+		PipelineName:    "my-pipeline",
+		CurrentStepName: "respond",
+		TemplatePath:    &TemplateExprPath{Namespace: "steps", StepName: "query", Raw: ".steps.query."},
+	}
+	items := Completions(reg, doc, ctx)
+	if len(items) == 0 {
+		t.Fatal("expected output key completions for query step")
+	}
+	labels := make(map[string]bool)
+	for _, item := range items {
+		labels[item.Label] = true
+	}
+	if !labels["rows"] {
+		t.Error("expected 'rows' in query step output completions")
+	}
+	if !labels["count"] {
+		t.Error("expected 'count' in query step output completions")
+	}
+}
+
+// TestCompletions_TemplateTrigger checks that .trigger gives trigger field completions.
+func TestCompletions_TemplateTrigger(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
+
+	ctx := PositionContext{
+		Section:      SectionPipeline,
+		InTemplate:   true,
+		PipelineName: "my-pipeline",
+		TemplatePath: &TemplateExprPath{Namespace: "trigger", Raw: ".trigger."},
+	}
+	items := Completions(reg, doc, ctx)
+	if len(items) == 0 {
+		t.Fatal("expected trigger field completions")
+	}
+	labels := make(map[string]bool)
+	for _, item := range items {
+		labels[item.Label] = true
+	}
+	if !labels["path_params"] {
+		t.Error("expected 'path_params' in trigger completions")
+	}
+	if !labels["query"] {
+		t.Error("expected 'query' in trigger completions")
+	}
+}
+
+// TestContextAt_TemplatePath checks that ContextAt populates TemplatePath.
+func TestContextAt_TemplatePath(t *testing.T) {
+	yml := `pipelines:
+  my-pipeline:
+    steps:
+      - name: respond
+        type: step.json_response
+        config:
+          body_from: "{{ .steps.query.rows }}"
+`
+	// Line 6 is the body_from line. Cursor inside {{ .steps.query.rows }}
+	// "          body_from: \"{{ .steps.query.rows }}\""
+	// Let's count: 10 spaces + body_from: "{{ .steps.query.rows }}"
+	// cursor at position 25 (inside .steps.query.rows)
+	ctx := ContextAt(yml, 6, 25)
+	if !ctx.InTemplate {
+		t.Error("expected InTemplate=true")
+	}
+	if ctx.TemplatePath == nil {
+		t.Error("expected TemplatePath to be populated")
+	}
+}
+
+// TestContextAt_PipelineName checks that ContextAt extracts the pipeline name.
+func TestContextAt_PipelineName(t *testing.T) {
+	yml := `pipelines:
+  my-pipeline:
+    steps:
+      - name: query
+        type: step.db_query
+        config:
+          database: mydb
+`
+	ctx := ContextAt(yml, 6, 12) // "          database: mydb"
+	if ctx.Section != SectionPipeline {
+		t.Errorf("expected SectionPipeline, got %q", ctx.Section)
+	}
+	if ctx.PipelineName != "my-pipeline" {
+		t.Errorf("expected PipelineName 'my-pipeline', got %q", ctx.PipelineName)
+	}
+}
+
 // helpers
 
 func containsStr(s, sub string) bool {

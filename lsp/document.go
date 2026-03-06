@@ -74,14 +74,17 @@ const (
 
 // PositionContext describes what context the cursor is in within the document.
 type PositionContext struct {
-	Section    SectionKind
-	ModuleType string // if inside a modules[] item config, the type value
-	StepType   string // if inside a pipeline step config, the step type value
-	FieldName  string // the field name at the cursor
-	InTemplate bool   // cursor is inside {{ }}
-	DependsOn  bool   // cursor is in a dependsOn array value
-	Line       int
-	Character  int
+	Section          SectionKind
+	ModuleType       string // if inside a modules[] item config, the type value
+	StepType         string // if inside a pipeline step config, the step type value
+	FieldName        string // the field name at the cursor
+	InTemplate       bool   // cursor is inside {{ }}
+	DependsOn        bool   // cursor is in a dependsOn array value
+	PipelineName     string // name of the pipeline containing the cursor (if any)
+	CurrentStepName  string // name of the step containing the cursor (if any)
+	TemplatePath     *TemplateExprPath // parsed template expression at cursor, if InTemplate
+	Line             int
+	Character        int
 }
 
 // ContextAt analyses the document content at the given (zero-based) line and
@@ -103,6 +106,7 @@ func ContextAt(content string, line, char int) PositionContext {
 	// Check for template expression.
 	if isInTemplate(lines, line, char) {
 		ctx.InTemplate = true
+		ctx.TemplatePath = ParseTemplateExprAt(currentLine, char)
 	}
 
 	// Determine indentation level and section.
@@ -147,7 +151,85 @@ func ContextAt(content string, line, char int) PositionContext {
 		}
 	}
 
+	// Populate pipeline/step names for template completion support.
+	if ctx.Section == SectionPipeline {
+		ctx.PipelineName = findPipelineName(lines, line)
+		ctx.CurrentStepName = findCurrentStepName(lines, line)
+	}
+
 	return ctx
+}
+
+// findPipelineName walks upward from lineIdx to find the pipeline name key
+// (the key directly under "pipelines:" at indent 2).
+func findPipelineName(lines []string, lineIdx int) string {
+	inPipelines := false
+	for i := lineIdx; i >= 0; i-- {
+		l := lines[i]
+		ind := leadingSpaces(l)
+		trimmed := strings.TrimSpace(l)
+		if trimmed == "" {
+			continue
+		}
+		if ind == 0 {
+			if trimmed == "pipelines:" || strings.HasPrefix(trimmed, "pipelines:") {
+				inPipelines = true
+			}
+			break
+		}
+		if ind == 2 && inPipelines {
+			if colonIdx := strings.Index(trimmed, ":"); colonIdx > 0 {
+				return strings.TrimSpace(trimmed[:colonIdx])
+			}
+		}
+		if ind == 2 {
+			// At indent 2: this could be the pipeline name key
+			// Keep walking to find "pipelines:" at indent 0
+			if colonIdx := strings.Index(trimmed, ":"); colonIdx > 0 {
+				candidate := strings.TrimSpace(trimmed[:colonIdx])
+				// Continue searching; mark as candidate if we find pipelines: above
+				for j := i - 1; j >= 0; j-- {
+					jl := lines[j]
+					jind := leadingSpaces(jl)
+					jt := strings.TrimSpace(jl)
+					if jt == "" {
+						continue
+					}
+					if jind == 0 {
+						if strings.HasPrefix(jt, "pipelines:") {
+							return candidate
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// findCurrentStepName walks upward from lineIdx to find the closest "name:"
+// field at step-item indentation level.
+func findCurrentStepName(lines []string, lineIdx int) string {
+	curIndent := leadingSpaces(lines[lineIdx])
+	for i := lineIdx; i >= 0; i-- {
+		l := lines[i]
+		ind := leadingSpaces(l)
+		trimmed := strings.TrimSpace(l)
+		if trimmed == "" {
+			continue
+		}
+		// Step items are sequence entries (typically at indent 6+).
+		// "name:" at the same or lower indent within the step block.
+		if ind <= curIndent && strings.HasPrefix(trimmed, "name:") {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "name:"))
+		}
+		// If we go up to steps: level, stop.
+		if strings.HasPrefix(trimmed, "steps:") {
+			break
+		}
+	}
+	return ""
 }
 
 // isInTemplate returns true if position (line, char) is inside a {{ }} expression.

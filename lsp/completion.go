@@ -206,7 +206,7 @@ func getModuleNamesFromContent(content string) []protocol.CompletionItem {
 // Completions returns completion items for the given document and position context.
 func Completions(reg *Registry, doc *Document, ctx PositionContext) []protocol.CompletionItem {
 	if ctx.InTemplate {
-		return getTemplateFunctionCompletions()
+		return getTemplateCompletions(doc, ctx)
 	}
 
 	switch ctx.Section {
@@ -270,6 +270,183 @@ func getWorkflowTypeCompletions(reg *Registry) []protocol.CompletionItem {
 		items = append(items, protocol.CompletionItem{
 			Label: wt,
 			Kind:  &kind,
+		})
+	}
+	return items
+}
+
+// getTemplateCompletions returns context-aware completions for template expressions.
+func getTemplateCompletions(doc *Document, ctx PositionContext) []protocol.CompletionItem {
+	tp := ctx.TemplatePath
+	if tp == nil {
+		return getTemplateFunctionCompletions()
+	}
+
+	switch tp.Namespace {
+	case "":
+		// Top-level: suggest namespace prefixes + template functions.
+		items := namespaceCompletions()
+		items = append(items, getTemplateFunctionCompletions()...)
+		return items
+
+	case "steps":
+		pipCtx := BuildPipelineContext(doc.Content, ctx.PipelineName, ctx.CurrentStepName, "", "", "")
+		if tp.StepName == "" {
+			// Suggest step names.
+			return stepNameCompletions(pipCtx)
+		}
+		// Suggest output keys for the named step.
+		return stepOutputKeyCompletions(pipCtx, tp.StepName)
+
+	case "trigger":
+		pipCtx := BuildPipelineContext(doc.Content, ctx.PipelineName, ctx.CurrentStepName, "", "", "")
+		return triggerFieldCompletions(pipCtx)
+
+	case "body":
+		pipCtx := BuildPipelineContext(doc.Content, ctx.PipelineName, ctx.CurrentStepName, "", "", "")
+		return bodyFieldCompletions(pipCtx)
+
+	default:
+		return getTemplateFunctionCompletions()
+	}
+}
+
+// namespaceCompletions returns completion items for top-level template namespaces.
+func namespaceCompletions() []protocol.CompletionItem {
+	kind := protocol.CompletionItemKindKeyword
+	entries := []struct{ label, doc string }{
+		{".steps", "Access step output by step name"},
+		{".trigger", "Access trigger data (path params, query, body)"},
+		{".body", "Access parsed request body fields"},
+		{".meta", "Access request metadata"},
+	}
+	items := make([]protocol.CompletionItem, 0, len(entries))
+	for _, e := range entries {
+		label := e.label
+		doc := e.doc
+		items = append(items, protocol.CompletionItem{
+			Label:         label,
+			Kind:          &kind,
+			Documentation: doc,
+		})
+	}
+	return items
+}
+
+// stepNameCompletions returns completion items for step names in a pipeline.
+func stepNameCompletions(pipCtx *PipelineDataContext) []protocol.CompletionItem {
+	if pipCtx == nil {
+		return nil
+	}
+	kind := protocol.CompletionItemKindVariable
+	items := make([]protocol.CompletionItem, 0, len(pipCtx.StepOutputs))
+	for _, so := range pipCtx.StepOutputs {
+		name := so.StepName
+		stype := so.StepType
+		items = append(items, protocol.CompletionItem{
+			Label:         name,
+			Kind:          &kind,
+			Documentation: "Step output from " + stype,
+		})
+	}
+	return items
+}
+
+// stepOutputKeyCompletions returns completion items for a step's output keys.
+func stepOutputKeyCompletions(pipCtx *PipelineDataContext, stepName string) []protocol.CompletionItem {
+	if pipCtx == nil {
+		return nil
+	}
+	for _, so := range pipCtx.StepOutputs {
+		if so.StepName != stepName {
+			continue
+		}
+		kind := protocol.CompletionItemKindField
+		keys := make([]string, 0, len(so.Outputs))
+		for k := range so.Outputs {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		items := make([]protocol.CompletionItem, 0, len(keys))
+		for _, k := range keys {
+			key := k
+			fs := so.Outputs[k]
+			detail := fs.Type
+			items = append(items, protocol.CompletionItem{
+				Label:         key,
+				Kind:          &kind,
+				Detail:        &detail,
+				Documentation: fs.Description,
+			})
+		}
+		return items
+	}
+	return nil
+}
+
+// triggerFieldCompletions returns completion items for trigger data fields.
+func triggerFieldCompletions(pipCtx *PipelineDataContext) []protocol.CompletionItem {
+	kind := protocol.CompletionItemKindField
+	// Static trigger subfields.
+	entries := []struct{ label, doc string }{
+		{"path_params", "URL path parameters"},
+		{"query", "Query string parameters"},
+		{"body", "Request body fields"},
+		{"headers", "Request headers"},
+	}
+	items := make([]protocol.CompletionItem, 0, len(entries))
+	for _, e := range entries {
+		label := e.label
+		doc := e.doc
+		items = append(items, protocol.CompletionItem{
+			Label:         label,
+			Kind:          &kind,
+			Documentation: doc,
+		})
+	}
+	// Append OpenAPI-derived path/query params if available.
+	if pipCtx != nil && pipCtx.Trigger != nil {
+		for k := range pipCtx.Trigger.PathParams {
+			key := k
+			items = append(items, protocol.CompletionItem{
+				Label:         key,
+				Kind:          &kind,
+				Documentation: "Path parameter",
+			})
+		}
+		for k := range pipCtx.Trigger.QueryParams {
+			key := k
+			items = append(items, protocol.CompletionItem{
+				Label:         key,
+				Kind:          &kind,
+				Documentation: "Query parameter",
+			})
+		}
+	}
+	return items
+}
+
+// bodyFieldCompletions returns completion items for request body fields.
+func bodyFieldCompletions(pipCtx *PipelineDataContext) []protocol.CompletionItem {
+	if pipCtx == nil || pipCtx.Trigger == nil || len(pipCtx.Trigger.BodyFields) == 0 {
+		return nil
+	}
+	kind := protocol.CompletionItemKindField
+	keys := make([]string, 0, len(pipCtx.Trigger.BodyFields))
+	for k := range pipCtx.Trigger.BodyFields {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	items := make([]protocol.CompletionItem, 0, len(keys))
+	for _, k := range keys {
+		key := k
+		fs := pipCtx.Trigger.BodyFields[k]
+		detail := fs.Type
+		items = append(items, protocol.CompletionItem{
+			Label:         key,
+			Kind:          &kind,
+			Detail:        &detail,
+			Documentation: fs.Description,
 		})
 	}
 	return items
