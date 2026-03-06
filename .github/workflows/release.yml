@@ -251,3 +251,25 @@ jobs:
         prerelease: ${{ contains(env.TAG_NAME, '-') }}
         generate_release_notes: true
 
+  notify-ide-plugins:
+    name: Notify IDE Plugins
+    runs-on: ubuntu-latest
+    needs: release
+    if: ${{ !contains(inputs.tag_name || github.ref_name, '-') }}
+    steps:
+    - name: Trigger workflow-vscode update
+      uses: peter-evans/repository-dispatch@v3
+      with:
+        token: ${{ secrets.REPO_DISPATCH_TOKEN }}
+        repository: GoCodeAlone/workflow-vscode
+        event-type: workflow-release
+        client-payload: '{"version": "${{ env.TAG_NAME }}"}'
+
+    - name: Trigger workflow-jetbrains update
+      uses: peter-evans/repository-dispatch@v3
+      with:
+        token: ${{ secrets.REPO_DISPATCH_TOKEN }}
+        repository: GoCodeAlone/workflow-jetbrains
+        event-type: workflow-release
+        client-payload: '{"version": "${{ env.TAG_NAME }}"}'
+
