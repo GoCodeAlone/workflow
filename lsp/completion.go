@@ -139,7 +139,8 @@ func getStepConfigKeyCompletions(reg *Registry, stepType string) []protocol.Comp
 	items := make([]protocol.CompletionItem, 0, len(info.ConfigDefs))
 
 	// Prefer rich config defs with descriptions.
-	for _, cf := range info.ConfigDefs {
+	for i := range info.ConfigDefs {
+		cf := &info.ConfigDefs[i]
 		detail := string(cf.Type)
 		if cf.Required {
 			detail += " (required)"

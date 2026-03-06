@@ -130,7 +130,8 @@ func (s *Server) handleGetStepSchema(_ context.Context, req mcp.CallToolRequest)
 	if ss != nil {
 		configKeys := make([]string, 0, len(ss.ConfigFields))
 		configDefs := make([]map[string]any, 0, len(ss.ConfigFields))
-		for _, cf := range ss.ConfigFields {
+		for i := range ss.ConfigFields {
+			cf := &ss.ConfigFields[i]
 			configKeys = append(configKeys, cf.Key)
 			def := map[string]any{
 				"key":         cf.Key,

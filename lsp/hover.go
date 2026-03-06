@@ -116,7 +116,8 @@ func hoverStepType(reg *Registry, stepType string) *protocol.Hover {
 	}
 	if len(info.ConfigDefs) > 0 {
 		sb.WriteString("\n**Config:**\n")
-		for _, cf := range info.ConfigDefs {
+		for i := range info.ConfigDefs {
+			cf := &info.ConfigDefs[i]
 			req := ""
 			if cf.Required {
 				req = " *(required)*"
@@ -141,7 +142,8 @@ func hoverStepConfigField(reg *Registry, stepType, field string) *protocol.Hover
 		return nil
 	}
 
-	for _, cf := range info.ConfigDefs {
+	for i := range info.ConfigDefs {
+		cf := &info.ConfigDefs[i]
 		if cf.Key == field {
 			var sb strings.Builder
 			fmt.Fprintf(&sb, "**%s** — config key for `%s`\n\n", field, stepType)
