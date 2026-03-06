@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	protocol "github.com/tliron/glsp/protocol_3_16"
@@ -9,9 +10,9 @@ import (
 
 // Hover returns markdown hover content for the given position context, or nil
 // if there is nothing to show.
-func Hover(reg *Registry, _ *Document, ctx PositionContext) *protocol.Hover {
+func Hover(reg *Registry, doc *Document, ctx PositionContext) *protocol.Hover {
 	if ctx.InTemplate {
-		return hoverTemplateFunction(ctx.FieldName)
+		return hoverTemplateExpr(doc, ctx)
 	}
 
 	switch ctx.Section {
@@ -172,6 +173,194 @@ func hoverStepConfigField(reg *Registry, stepType, field string) *protocol.Hover
 		}
 	}
 	return nil
+}
+
+// hoverTemplateExpr provides hover documentation for template expressions.
+func hoverTemplateExpr(doc *Document, ctx PositionContext) *protocol.Hover {
+	tp := ctx.TemplatePath
+	if tp == nil {
+		return hoverTemplateFunction(ctx.FieldName)
+	}
+
+	// Non-dot expression with no namespace — check if it's a function name.
+	if tp.Namespace == "" && tp.Raw != "" && tp.Raw != "." {
+		return hoverTemplateFunction(tp.Raw)
+	}
+
+	switch tp.Namespace {
+	case "steps":
+		return hoverTemplateStepOutput(doc, ctx, tp)
+	case "trigger":
+		return hoverTemplateTrigger(ctx, tp)
+	case "body":
+		return hoverTemplateBody(tp)
+	case "meta":
+		return hoverTemplateMeta(tp)
+	case "":
+		return hoverTemplateNamespaces()
+	}
+	return nil
+}
+
+// hoverTemplateStepOutput shows docs for .steps.stepName.field.
+func hoverTemplateStepOutput(doc *Document, ctx PositionContext, tp *TemplateExprPath) *protocol.Hover {
+	if tp.StepName == "" {
+		return markdownHover("**Steps namespace**\n\nAccess step outputs via `.steps.<step-name>.<field>`")
+	}
+
+	if doc == nil || ctx.PipelineName == "" {
+		return markdownHover(fmt.Sprintf("**Step:** `%s`\n\nStep output data.", tp.StepName))
+	}
+
+	pctx := BuildPipelineContext(doc.Content, ctx.PipelineName, ctx.CurrentStepName, "", "", "")
+
+	// Find the requested step.
+	var stepCtx *StepOutputSchema
+	for i := range pctx.StepOutputs {
+		if pctx.StepOutputs[i].StepName == tp.StepName {
+			stepCtx = &pctx.StepOutputs[i]
+			break
+		}
+	}
+
+	if stepCtx == nil {
+		return markdownHover(fmt.Sprintf("**Step:** `%s`\n\nNo output info available (step may not precede current position).", tp.StepName))
+	}
+
+	// Show a specific field if one is targeted.
+	fieldName := tp.FieldPrefix
+	if fieldName == "" {
+		fieldName = tp.SubField
+	}
+	if fieldName != "" {
+		if fs, ok := stepCtx.Outputs[fieldName]; ok {
+			var sb strings.Builder
+			fmt.Fprintf(&sb, "**`.steps.%s.%s`** (`%s`)\n\n", tp.StepName, fieldName, fs.Type)
+			if fs.Description != "" {
+				sb.WriteString(fs.Description)
+				sb.WriteString("\n")
+			}
+			fmt.Fprintf(&sb, "\n*Step type:* `%s`", stepCtx.StepType)
+			return markdownHover(sb.String())
+		}
+	}
+
+	// Show all outputs for the step.
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "**Step outputs:** `%s` (`%s`)\n\n", tp.StepName, stepCtx.StepType)
+	if len(stepCtx.Outputs) == 0 {
+		sb.WriteString("No outputs defined.\n")
+	} else {
+		sb.WriteString("**Available fields:**\n\n")
+		keys := make([]string, 0, len(stepCtx.Outputs))
+		for k := range stepCtx.Outputs {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			o := stepCtx.Outputs[k]
+			if o.Description != "" {
+				fmt.Fprintf(&sb, "- `%s` (%s): %s\n", k, o.Type, o.Description)
+			} else {
+				fmt.Fprintf(&sb, "- `%s` (%s)\n", k, o.Type)
+			}
+		}
+	}
+	return markdownHover(sb.String())
+}
+
+// hoverTemplateTrigger shows docs for .trigger.* expressions.
+func hoverTemplateTrigger(ctx PositionContext, tp *TemplateExprPath) *protocol.Hover {
+	var sb strings.Builder
+	sb.WriteString("**Trigger context** — `.trigger.*`\n\n")
+
+	// If we have a pipeline context with trigger schema, use it.
+	fieldName := tp.FieldPrefix
+	if fieldName == "" {
+		fieldName = tp.SubField
+	}
+
+	if tp.SubField != "" {
+		fmt.Fprintf(&sb, "**Sub-namespace:** `.trigger.%s`\n\n", tp.SubField)
+		switch tp.SubField {
+		case "path_params":
+			sb.WriteString("URL path parameters (e.g. `/users/{id}` → `.trigger.path_params.id`)\n")
+		case "query":
+			sb.WriteString("URL query parameters (e.g. `?page=1` → `.trigger.query.page`)\n")
+		case "headers":
+			sb.WriteString("HTTP request headers (e.g. `.trigger.headers.Authorization`)\n")
+		case "body":
+			sb.WriteString("Request body fields (accessible via `.trigger.body.<field>`)\n")
+		}
+	} else {
+		sb.WriteString("**Available sub-namespaces:**\n\n")
+		sb.WriteString("- `.trigger.path_params` — URL path parameters\n")
+		sb.WriteString("- `.trigger.query` — Query string parameters\n")
+		sb.WriteString("- `.trigger.headers` — HTTP headers\n")
+		sb.WriteString("- `.trigger.body` — Request body fields\n")
+	}
+
+	// Suppress unused parameter warning.
+	_ = ctx
+
+	return markdownHover(sb.String())
+}
+
+// hoverTemplateBody shows docs for .body.* expressions.
+func hoverTemplateBody(tp *TemplateExprPath) *protocol.Hover {
+	var sb strings.Builder
+	sb.WriteString("**Body context** — `.body.*`\n\n")
+	if tp.SubField != "" {
+		fmt.Fprintf(&sb, "**Field:** `.body.%s`\n\nNested field within the request body.\n", tp.SubField)
+	} else if tp.FieldPrefix != "" {
+		fmt.Fprintf(&sb, "**Field:** `.body.%s` — request body field\n", tp.FieldPrefix)
+	} else {
+		sb.WriteString("Request body data. Access individual fields via `.body.<field-name>`.\n")
+	}
+	return markdownHover(sb.String())
+}
+
+// hoverTemplateMeta shows docs for .meta.* expressions.
+func hoverTemplateMeta(tp *TemplateExprPath) *protocol.Hover {
+	var sb strings.Builder
+	sb.WriteString("**Meta context** — `.meta.*`\n\n")
+
+	fieldName := tp.FieldPrefix
+	if fieldName == "" {
+		fieldName = tp.SubField
+	}
+
+	metaDocs := map[string]string{
+		"pipeline_name": "Name of the currently executing pipeline.",
+		"trigger_type":  "Type of trigger that started this pipeline (e.g. 'http').",
+		"timestamp":     "ISO 8601 timestamp of when the pipeline was triggered.",
+	}
+	if fieldName != "" {
+		if doc, ok := metaDocs[fieldName]; ok {
+			fmt.Fprintf(&sb, "**`.meta.%s`**\n\n%s\n", fieldName, doc)
+		} else {
+			fmt.Fprintf(&sb, "**`.meta.%s`** — pipeline metadata field\n", fieldName)
+		}
+	} else {
+		sb.WriteString("**Available fields:**\n\n")
+		sb.WriteString("- `.meta.pipeline_name` — Name of the current pipeline\n")
+		sb.WriteString("- `.meta.trigger_type` — Trigger type that started this pipeline\n")
+		sb.WriteString("- `.meta.timestamp` — Pipeline start timestamp\n")
+	}
+	return markdownHover(sb.String())
+}
+
+// hoverTemplateNamespaces shows the top-level template namespaces.
+func hoverTemplateNamespaces() *protocol.Hover {
+	md := "**Template context namespaces**\n\n" +
+		"- `.steps.<name>.<field>` — Output fields from a completed pipeline step\n" +
+		"- `.trigger.path_params.*` — URL path parameters from the trigger\n" +
+		"- `.trigger.query.*` — Query string parameters from the trigger\n" +
+		"- `.trigger.headers.*` — HTTP headers from the trigger\n" +
+		"- `.trigger.body.*` — Request body fields from the trigger\n" +
+		"- `.body.*` — Request body shorthand\n" +
+		"- `.meta.*` — Pipeline metadata (name, trigger_type, timestamp)\n"
+	return markdownHover(md)
 }
 
 // hoverTemplateFunction generates hover for template function names.

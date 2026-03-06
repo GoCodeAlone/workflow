@@ -567,6 +567,223 @@ func TestContextAt_PipelineName(t *testing.T) {
 	}
 }
 
+// --- Template hover tests ---
+
+const pipelineHoverYAML = `pipelines:
+  user-lookup:
+    trigger:
+      type: http
+    steps:
+      - name: parse
+        type: step.request_parse
+        config: {}
+      - name: lookup
+        type: step.db_query
+        config:
+          mode: single
+      - name: setResult
+        type: step.set
+        config:
+          values:
+            email: "{{ .steps.lookup.row }}"
+`
+
+func TestHover_TemplateFunction(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate: true,
+		TemplatePath: &TemplateExprPath{
+			Raw: "lower",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for 'lower' template function")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "lower") {
+		t.Error("hover should mention 'lower'")
+	}
+}
+
+func TestHover_TemplateNamespaces(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate: true,
+		TemplatePath: &TemplateExprPath{
+			Raw:       ".",
+			Namespace: "",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for template namespace list")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "steps") {
+		t.Error("hover should mention 'steps' namespace")
+	}
+	if !containsStr(content, "trigger") {
+		t.Error("hover should mention 'trigger' namespace")
+	}
+}
+
+func TestHover_TemplateStepOutputs(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate:      true,
+		Section:         SectionPipeline,
+		PipelineName:    "user-lookup",
+		CurrentStepName: "setResult",
+		TemplatePath: &TemplateExprPath{
+			Namespace: "steps",
+			StepName:  "lookup",
+			Raw:       ".steps.lookup",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for step outputs")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "lookup") {
+		t.Error("hover should mention step name 'lookup'")
+	}
+}
+
+func TestHover_TemplateStepField(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate:      true,
+		Section:         SectionPipeline,
+		PipelineName:    "user-lookup",
+		CurrentStepName: "setResult",
+		TemplatePath: &TemplateExprPath{
+			Namespace:   "steps",
+			StepName:    "lookup",
+			FieldPrefix: "row",
+			Raw:         ".steps.lookup.row",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for step field")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "row") {
+		t.Error("hover should mention field 'row'")
+	}
+	if !containsStr(content, "lookup") {
+		t.Error("hover should mention step name 'lookup'")
+	}
+}
+
+func TestHover_TemplateTrigger(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate: true,
+		TemplatePath: &TemplateExprPath{
+			Namespace: "trigger",
+			Raw:       ".trigger",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for trigger namespace")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "trigger") {
+		t.Error("hover should mention 'trigger'")
+	}
+	if !containsStr(content, "path_params") {
+		t.Error("hover should list path_params sub-namespace")
+	}
+}
+
+func TestHover_TemplateTriggerSubfield(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate: true,
+		TemplatePath: &TemplateExprPath{
+			Namespace: "trigger",
+			SubField:  "path_params",
+			Raw:       ".trigger.path_params",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for trigger subfield")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "path_params") {
+		t.Error("hover should mention 'path_params'")
+	}
+}
+
+func TestHover_TemplateMeta(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate: true,
+		TemplatePath: &TemplateExprPath{
+			Namespace:   "meta",
+			FieldPrefix: "pipeline_name",
+			Raw:         ".meta.pipeline_name",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for meta field")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "pipeline_name") {
+		t.Error("hover should mention 'pipeline_name'")
+	}
+}
+
+func TestHover_TemplateBody(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
+
+	ctx := PositionContext{
+		InTemplate: true,
+		TemplatePath: &TemplateExprPath{
+			Namespace:   "body",
+			FieldPrefix: "email",
+			Raw:         ".body.email",
+		},
+	}
+	hover := Hover(reg, doc, ctx)
+	if hover == nil {
+		t.Fatal("expected hover for body field")
+	}
+	content := hover.Contents.(protocol.MarkupContent).Value
+	if !containsStr(content, "body") {
+		t.Error("hover should mention 'body'")
+	}
+}
+
 // helpers
 
 func containsStr(s, sub string) bool {
