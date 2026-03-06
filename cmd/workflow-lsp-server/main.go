@@ -14,6 +14,7 @@ var version = "dev"
 
 func main() {
 	showVersion := flag.Bool("version", false, "Print version and exit")
+	pluginDir := flag.String("plugin-dir", "", "Directory containing external plugin manifests for step schema support")
 	flag.Parse()
 
 	if *showVersion {
@@ -22,7 +23,7 @@ func main() {
 	}
 
 	lsp.Version = version
-	s := lsp.NewServer()
+	s := lsp.NewServer(*pluginDir)
 	if err := s.RunStdio(); err != nil {
 		fmt.Fprintf(os.Stderr, "workflow-lsp-server error: %v\n", err)
 		os.Exit(1)

@@ -1,6 +1,8 @@
 package schema
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -107,4 +109,63 @@ func TestGetStepSchemaRegistry_Singleton(t *testing.T) {
 	if reg1.Get("step.set") == nil {
 		t.Error("singleton registry should have built-in step.set")
 	}
+}
+
+func TestLoadPluginStepSchemasFromDir(t *testing.T) {
+	// Create a temp plugin directory with a fake plugin manifest.
+	tmpDir := t.TempDir()
+	pluginDir := filepath.Join(tmpDir, "my-plugin")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name": "my-plugin",
+		"stepSchemas": [
+			{
+				"type": "step.my_plugin_action",
+				"description": "A custom plugin action",
+				"configFields": [
+					{"key": "target", "type": "string", "description": "Target URL", "required": true}
+				],
+				"outputs": [
+					{"key": "result", "type": "any", "description": "Action result"}
+				]
+			}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := GetStepSchemaRegistry()
+	// Ensure not already registered.
+	if reg.Get("step.my_plugin_action") != nil {
+		t.Fatal("step.my_plugin_action should not exist before loading")
+	}
+
+	LoadPluginStepSchemasFromDir(tmpDir)
+
+	s := reg.Get("step.my_plugin_action")
+	if s == nil {
+		t.Fatal("step.my_plugin_action should be registered after loading")
+	}
+	if s.Description != "A custom plugin action" {
+		t.Errorf("unexpected description: %q", s.Description)
+	}
+	if len(s.ConfigFields) != 1 || s.ConfigFields[0].Key != "target" {
+		t.Error("config fields not loaded correctly")
+	}
+	if len(s.Outputs) != 1 || s.Outputs[0].Key != "result" {
+		t.Error("outputs not loaded correctly")
+	}
+
+	// Clean up the global registry.
+	reg.Unregister("step.my_plugin_action")
+}
+
+func TestLoadPluginStepSchemasFromDir_EmptyDir(t *testing.T) {
+	// Should not panic on empty or nonexistent directory.
+	LoadPluginStepSchemasFromDir("")
+	LoadPluginStepSchemasFromDir(t.TempDir())
+	LoadPluginStepSchemasFromDir("/nonexistent/path")
 }

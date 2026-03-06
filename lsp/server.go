@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"github.com/GoCodeAlone/workflow/schema"
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 	glspserver "github.com/tliron/glsp/server"
@@ -18,7 +19,12 @@ type Server struct {
 }
 
 // NewServer creates a new LSP server with all handlers registered.
-func NewServer() *Server {
+// An optional pluginDir can be provided to load step schemas from external
+// plugin manifests (plugin.json files).
+func NewServer(pluginDir ...string) *Server {
+	if len(pluginDir) > 0 && pluginDir[0] != "" {
+		schema.LoadPluginStepSchemasFromDir(pluginDir[0])
+	}
 	s := &Server{
 		registry: NewRegistry(),
 		store:    NewDocumentStore(),
