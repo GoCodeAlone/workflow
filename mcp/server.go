@@ -679,6 +679,8 @@ func (s *Server) loadInstalledPluginTypes(pluginDir string) {
 			schema.RegisterWorkflowType(t)
 		}
 	}
+	// Also load rich step schemas (config fields, outputs) from plugin manifests.
+	schema.LoadPluginStepSchemasFromDir(pluginDir)
 }
 
 func readPluginVersion(dir string) string {

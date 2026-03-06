@@ -1,6 +1,11 @@
 package schema
 
-import "sort"
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sort"
+)
 
 // StepOutputDef describes a single output key produced by a pipeline step.
 type StepOutputDef struct {
@@ -73,4 +78,40 @@ func (r *StepSchemaRegistry) Types() []string {
 	}
 	sort.Strings(types)
 	return types
+}
+
+// LoadPluginStepSchemasFromDir scans pluginDir for subdirectories containing a
+// plugin.json manifest, reads each manifest's stepSchemas field, and registers
+// them in the global StepSchemaRegistry. Unknown or malformed manifests are
+// silently skipped.
+func LoadPluginStepSchemasFromDir(pluginDir string) {
+	if pluginDir == "" {
+		return
+	}
+	entries, err := os.ReadDir(pluginDir)
+	if err != nil {
+		return
+	}
+	reg := GetStepSchemaRegistry()
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		manifestPath := filepath.Join(pluginDir, e.Name(), "plugin.json")
+		data, err := os.ReadFile(manifestPath) //nolint:gosec // G304: path is within the trusted plugins directory
+		if err != nil {
+			continue
+		}
+		var m struct {
+			StepSchemas []*StepSchema `json:"stepSchemas"`
+		}
+		if err := json.Unmarshal(data, &m); err != nil {
+			continue
+		}
+		for _, s := range m.StepSchemas {
+			if s != nil && s.Type != "" {
+				reg.Register(s)
+			}
+		}
+	}
 }
