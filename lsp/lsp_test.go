@@ -445,12 +445,13 @@ func TestCompletions_TemplateStepNames(t *testing.T) {
 	store := NewDocumentStore()
 	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
 
+	// pipelineYAML: "respond" step starts at yaml line 15 (ctx.Line=14).
+	// Cursor at ctx.Line=17 is inside respond's config → parse+query are preceding.
 	ctx := PositionContext{
-		Section:         SectionPipeline,
-		InTemplate:      true,
-		PipelineName:    "my-pipeline",
-		CurrentStepName: "respond",
-		TemplatePath:    &TemplateExprPath{Namespace: "steps", Raw: ".steps."},
+		Section:      SectionPipeline,
+		InTemplate:   true,
+		Line:         17,
+		TemplatePath: &TemplateExprPath{Namespace: "steps", Raw: ".steps."},
 	}
 	items := Completions(reg, doc, ctx)
 	if len(items) == 0 {
@@ -475,11 +476,10 @@ func TestCompletions_TemplateStepOutputKeys(t *testing.T) {
 	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
 
 	ctx := PositionContext{
-		Section:         SectionPipeline,
-		InTemplate:      true,
-		PipelineName:    "my-pipeline",
-		CurrentStepName: "respond",
-		TemplatePath:    &TemplateExprPath{Namespace: "steps", StepName: "query", Raw: ".steps.query."},
+		Section:      SectionPipeline,
+		InTemplate:   true,
+		Line:         17,
+		TemplatePath: &TemplateExprPath{Namespace: "steps", StepName: "query", Raw: ".steps.query."},
 	}
 	items := Completions(reg, doc, ctx)
 	if len(items) == 0 {
@@ -639,11 +639,12 @@ func TestHover_TemplateStepOutputs(t *testing.T) {
 	store := NewDocumentStore()
 	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
 
+	// pipelineHoverYAML: "setResult" starts at yaml line 13 (ctx.Line=12).
+	// Cursor at ctx.Line=16 is inside setResult's config → parse+lookup are preceding.
 	ctx := PositionContext{
-		InTemplate:      true,
-		Section:         SectionPipeline,
-		PipelineName:    "user-lookup",
-		CurrentStepName: "setResult",
+		InTemplate: true,
+		Section:    SectionPipeline,
+		Line:       16,
 		TemplatePath: &TemplateExprPath{
 			Namespace: "steps",
 			StepName:  "lookup",
@@ -666,10 +667,9 @@ func TestHover_TemplateStepField(t *testing.T) {
 	doc := store.Set("file:///test.yaml", pipelineHoverYAML)
 
 	ctx := PositionContext{
-		InTemplate:      true,
-		Section:         SectionPipeline,
-		PipelineName:    "user-lookup",
-		CurrentStepName: "setResult",
+		InTemplate: true,
+		Section:    SectionPipeline,
+		Line:       16,
 		TemplatePath: &TemplateExprPath{
 			Namespace:   "steps",
 			StepName:    "lookup",
@@ -818,10 +818,9 @@ func TestCompletions_TemplateFieldPrefixFilter(t *testing.T) {
 	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
 
 	ctx := PositionContext{
-		Section:         SectionPipeline,
-		InTemplate:      true,
-		PipelineName:    "my-pipeline",
-		CurrentStepName: "respond",
+		Section:    SectionPipeline,
+		InTemplate: true,
+		Line:       17,
 		TemplatePath: &TemplateExprPath{
 			Namespace:   "steps",
 			StepName:    "query",
@@ -896,10 +895,9 @@ func TestCompletions_TemplateStepNamePrefixFilter(t *testing.T) {
 	doc := store.Set("file:///pipeline.yaml", pipelineYAML)
 
 	ctx := PositionContext{
-		Section:         SectionPipeline,
-		InTemplate:      true,
-		PipelineName:    "my-pipeline",
-		CurrentStepName: "respond",
+		Section:    SectionPipeline,
+		InTemplate: true,
+		Line:       17,
 		TemplatePath: &TemplateExprPath{
 			Namespace:   "steps",
 			FieldPrefix: "qu",

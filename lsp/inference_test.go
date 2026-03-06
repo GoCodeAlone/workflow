@@ -6,9 +6,19 @@ import (
 	"testing"
 )
 
-const inferenceTestYAML = `
+// inferenceYAML has two pipelines so we can test cursor-based selection.
+const inferenceYAML = `modules:
+  - name: server
+    type: http.server
+    config:
+      address: :8080
+
 pipelines:
   api-pipeline:
+    trigger:
+      type: http
+      method: GET
+      path: /items
     steps:
       - name: parse
         type: step.request_parse
@@ -26,83 +36,91 @@ pipelines:
         config:
           status: 200
           body_from: "{{step \"query\" \"rows\"}}"
+
+  other-pipeline:
+    steps:
+      - name: init
+        type: step.set
+        config:
+          values:
+            foo: bar
 `
 
+func makeDoc(t *testing.T, content string) (*Registry, *Document) {
+	t.Helper()
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", content)
+	return reg, doc
+}
+
+// TestBuildPipelineContext_Basic verifies step output collection for the pipeline
+// containing the cursor. Cursor is inside "respond" step so parse+query are included.
 func TestBuildPipelineContext_Basic(t *testing.T) {
-	ctx := BuildPipelineContext(inferenceTestYAML, "api-pipeline", "", "", "", "")
+	reg, doc := makeDoc(t, inferenceYAML)
+
+	// In inferenceYAML (cat -n shows 1-based):
+	//   yaml line 8 = "  api-pipeline:" (ctx.Line=7)
+	//   yaml line 14 = "      - name: parse" (ctx.Line=13)
+	//   yaml line 19 = "      - name: query" (ctx.Line=18)
+	//   yaml line 25 = "      - name: respond" (ctx.Line=24)
+	//   yaml line 31 = "  other-pipeline:" (ctx.Line=30)
+	// Cursor at ctx.Line=28 (yaml line 29) is inside "respond" but before "other-pipeline".
+	ctx := BuildPipelineContext(reg, doc, 28)
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
 	if ctx.PipelineName != "api-pipeline" {
 		t.Errorf("expected pipelineName api-pipeline, got %q", ctx.PipelineName)
 	}
-	if len(ctx.StepOutputs) != 3 {
-		t.Fatalf("expected 3 step outputs, got %d", len(ctx.StepOutputs))
+	if len(ctx.StepOrder) != 2 {
+		t.Fatalf("expected 2 preceding steps (parse, query), got %d: %v", len(ctx.StepOrder), ctx.StepOrder)
 	}
-
-	// First step: request_parse → path_params, query, body, headers
-	parse := ctx.StepOutputs[0]
-	if parse.StepName != "parse" {
-		t.Errorf("expected step name 'parse', got %q", parse.StepName)
+	if ctx.StepOrder[0] != "parse" || ctx.StepOrder[1] != "query" {
+		t.Errorf("unexpected step order: %v", ctx.StepOrder)
 	}
-	if parse.StepType != "step.request_parse" {
-		t.Errorf("expected step type 'step.request_parse', got %q", parse.StepType)
-	}
-	for _, key := range []string{"path_params", "query", "body", "headers"} {
-		if _, ok := parse.Outputs[key]; !ok {
-			t.Errorf("expected output key %q in parse step", key)
-		}
-	}
-
-	// Second step: db_query list mode → rows, count
-	query := ctx.StepOutputs[1]
-	if query.StepName != "query" {
-		t.Errorf("expected step name 'query', got %q", query.StepName)
-	}
-	for _, key := range []string{"rows", "count"} {
-		if _, ok := query.Outputs[key]; !ok {
-			t.Errorf("expected output key %q in query step", key)
-		}
+	if ctx.Steps["parse"] == nil || ctx.Steps["query"] == nil {
+		t.Error("expected parse and query in Steps map")
 	}
 }
 
-func TestBuildPipelineContext_UpToStep(t *testing.T) {
-	ctx := BuildPipelineContext(inferenceTestYAML, "api-pipeline", "query", "", "", "")
+// TestBuildPipelineContext_CursorBased verifies that cursor line selects the correct pipeline.
+func TestBuildPipelineContext_CursorBased(t *testing.T) {
+	reg, doc := makeDoc(t, inferenceYAML)
+
+	// "other-pipeline:" is at yaml line 31 (ctx.Line=30).
+	// Cursor at ctx.Line=34 is inside other-pipeline's steps.
+	ctx := BuildPipelineContext(reg, doc, 34)
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
-	// Should include only 'parse' step (stops before 'query')
-	if len(ctx.StepOutputs) != 1 {
-		t.Fatalf("expected 1 step output, got %d", len(ctx.StepOutputs))
-	}
-	if ctx.StepOutputs[0].StepName != "parse" {
-		t.Errorf("expected parse step, got %q", ctx.StepOutputs[0].StepName)
+	if ctx.PipelineName != "other-pipeline" {
+		t.Errorf("expected other-pipeline, got %q", ctx.PipelineName)
 	}
 }
 
-func TestBuildPipelineContext_UnknownPipeline(t *testing.T) {
-	ctx := BuildPipelineContext(inferenceTestYAML, "nonexistent", "", "", "", "")
-	if ctx == nil {
-		t.Fatal("expected non-nil context even for unknown pipeline")
+// TestBuildPipelineContext_StepFields verifies that step fields use []schema.InferredOutput.
+func TestBuildPipelineContext_StepFields(t *testing.T) {
+	reg, doc := makeDoc(t, inferenceYAML)
+
+	// Cursor inside respond step (ctx.Line=28); parse+query should be in Steps.
+	ctx := BuildPipelineContext(reg, doc, 28)
+	query := ctx.Steps["query"]
+	if query == nil {
+		t.Fatal("expected query step in context")
 	}
-	if len(ctx.StepOutputs) != 0 {
-		t.Errorf("expected 0 step outputs for unknown pipeline, got %d", len(ctx.StepOutputs))
+	fieldKeys := map[string]bool{}
+	for _, f := range query.Fields {
+		fieldKeys[f.Key] = true
+	}
+	if !fieldKeys["rows"] || !fieldKeys["count"] {
+		t.Errorf("expected rows and count in query step fields, got %v", query.Fields)
 	}
 }
 
-func TestBuildPipelineContext_InvalidYAML(t *testing.T) {
-	ctx := BuildPipelineContext("{invalid yaml: [", "pipeline", "", "", "", "")
-	if ctx == nil {
-		t.Fatal("expected non-nil context even for invalid YAML")
-	}
-	if len(ctx.StepOutputs) != 0 {
-		t.Errorf("expected 0 steps for invalid YAML")
-	}
-}
-
+// TestBuildPipelineContext_SetStep verifies step.set output inference.
 func TestBuildPipelineContext_SetStep(t *testing.T) {
-	yml := `
-pipelines:
+	yml := `pipelines:
   p:
     steps:
       - name: init
@@ -111,20 +129,57 @@ pipelines:
           values:
             user_id: "123"
             role: admin
+      - name: respond
+        type: step.json_response
+        config:
+          status: 200
 `
-	ctx := BuildPipelineContext(yml, "p", "", "", "", "")
-	if len(ctx.StepOutputs) != 1 {
-		t.Fatalf("expected 1 step output, got %d", len(ctx.StepOutputs))
+	reg, doc := makeDoc(t, yml)
+	// Cursor inside respond (line 11+).
+	ctx := BuildPipelineContext(reg, doc, 12)
+	if len(ctx.StepOrder) != 1 || ctx.StepOrder[0] != "init" {
+		t.Fatalf("expected [init], got %v", ctx.StepOrder)
 	}
-	outputs := ctx.StepOutputs[0].Outputs
-	if _, ok := outputs["user_id"]; !ok {
-		t.Error("expected user_id output from step.set")
+	init := ctx.Steps["init"]
+	if init == nil {
+		t.Fatal("expected init step")
 	}
-	if _, ok := outputs["role"]; !ok {
-		t.Error("expected role output from step.set")
+	fieldKeys := map[string]bool{}
+	for _, f := range init.Fields {
+		fieldKeys[f.Key] = true
+	}
+	if !fieldKeys["user_id"] || !fieldKeys["role"] {
+		t.Errorf("expected user_id and role, got %v", init.Fields)
 	}
 }
 
+// TestBuildPipelineContext_NoOpenAPI verifies that a generic http trigger is returned
+// when no openapi module is present.
+func TestBuildPipelineContext_NoOpenAPI(t *testing.T) {
+	yml := `pipelines:
+  p:
+    steps:
+      - name: a
+        type: step.set
+        config:
+          values:
+            x: "1"
+      - name: b
+        type: step.json_response
+        config:
+          status: 200
+`
+	reg, doc := makeDoc(t, yml)
+	ctx := BuildPipelineContext(reg, doc, 11)
+	if ctx.Trigger == nil {
+		t.Fatal("expected trigger to be set")
+	}
+	if ctx.Trigger.Type != "http" {
+		t.Errorf("expected generic http trigger, got %q", ctx.Trigger.Type)
+	}
+}
+
+// TestBuildPipelineContext_OpenAPITrigger tests OpenAPI auto-discovery via modules section.
 func TestBuildPipelineContext_OpenAPITrigger(t *testing.T) {
 	specYAML := `
 openapi: "3.0.0"
@@ -143,6 +198,10 @@ paths:
           in: query
           schema:
             type: string
+        - name: Authorization
+          in: header
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -156,61 +215,119 @@ paths:
                 quantity:
                   type: integer
 `
-	// Write spec to a temp file.
 	tmpDir := t.TempDir()
 	specPath := filepath.Join(tmpDir, "spec.yaml")
 	if err := os.WriteFile(specPath, []byte(specYAML), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	ctx := BuildPipelineContext(inferenceTestYAML, "api-pipeline", "query", specPath, "POST", "/items/{id}")
-	if ctx == nil {
-		t.Fatal("expected non-nil context")
-	}
+	yml := `modules:
+  - name: api
+    type: openapi
+    config:
+      spec_file: ` + specPath + `
+
+pipelines:
+  create-item:
+    trigger:
+      type: http
+      method: POST
+      path: /items/{id}
+    steps:
+      - name: parse
+        type: step.request_parse
+        config: {}
+      - name: respond
+        type: step.json_response
+        config:
+          status: 200
+`
+	reg, doc := makeDoc(t, yml)
+	// Cursor inside respond step.
+	ctx := BuildPipelineContext(reg, doc, 20)
 	if ctx.Trigger == nil {
-		t.Fatal("expected trigger schema to be populated")
+		t.Fatal("expected trigger schema")
 	}
 	if ctx.Trigger.Type != "http" {
-		t.Errorf("expected trigger type 'http', got %q", ctx.Trigger.Type)
+		t.Errorf("expected http trigger, got %q", ctx.Trigger.Type)
 	}
-	if _, ok := ctx.Trigger.PathParams["id"]; !ok {
-		t.Error("expected path param 'id'")
+
+	// Check path params.
+	ppNames := map[string]bool{}
+	for _, p := range ctx.Trigger.PathParams {
+		ppNames[p.Name] = true
 	}
-	if _, ok := ctx.Trigger.QueryParams["filter"]; !ok {
-		t.Error("expected query param 'filter'")
+	if !ppNames["id"] {
+		t.Errorf("expected path param 'id', got %v", ctx.Trigger.PathParams)
 	}
-	if _, ok := ctx.Trigger.BodyFields["name"]; !ok {
-		t.Error("expected body field 'name'")
+
+	// Check query params.
+	qpNames := map[string]bool{}
+	for _, p := range ctx.Trigger.QueryParams {
+		qpNames[p.Name] = true
 	}
-	if _, ok := ctx.Trigger.BodyFields["quantity"]; !ok {
-		t.Error("expected body field 'quantity'")
+	if !qpNames["filter"] {
+		t.Errorf("expected query param 'filter', got %v", ctx.Trigger.QueryParams)
+	}
+
+	// Check headers.
+	hNames := map[string]bool{}
+	for _, h := range ctx.Trigger.Headers {
+		hNames[h.Name] = true
+	}
+	if !hNames["Authorization"] {
+		t.Errorf("expected header 'Authorization', got %v", ctx.Trigger.Headers)
+	}
+
+	// Check body fields.
+	bfNames := map[string]bool{}
+	for _, b := range ctx.Trigger.BodyFields {
+		bfNames[b.Name] = true
+	}
+	if !bfNames["name"] || !bfNames["quantity"] {
+		t.Errorf("expected body fields name and quantity, got %v", ctx.Trigger.BodyFields)
 	}
 }
 
-func TestBuildPipelineContext_OpenAPITrigger_MissingFile(t *testing.T) {
-	ctx := BuildPipelineContext(inferenceTestYAML, "api-pipeline", "", "/nonexistent/spec.yaml", "GET", "/items")
+// TestBuildPipelineContext_UnknownPipeline verifies empty context for cursor outside any pipeline.
+func TestBuildPipelineContext_UnknownPipeline(t *testing.T) {
+	yml := `modules:
+  - name: server
+    type: http.server
+`
+	reg, doc := makeDoc(t, yml)
+	ctx := BuildPipelineContext(reg, doc, 2)
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
-	if ctx.Trigger != nil {
-		t.Error("expected nil trigger for missing spec file")
+	if ctx.PipelineName != "" {
+		t.Errorf("expected empty pipeline name, got %q", ctx.PipelineName)
+	}
+	if len(ctx.StepOrder) != 0 {
+		t.Errorf("expected 0 steps, got %d", len(ctx.StepOrder))
 	}
 }
 
-func TestBuildPipelineContext_OpenAPITrigger_MissingPath(t *testing.T) {
-	specYAML := `
-openapi: "3.0.0"
-paths:
-  /other:
-    get: {}
-`
-	tmpDir := t.TempDir()
-	specPath := filepath.Join(tmpDir, "spec.yaml")
-	if err := os.WriteFile(specPath, []byte(specYAML), 0o644); err != nil {
-		t.Fatal(err)
+// TestBuildPipelineContext_InvalidYAML verifies graceful handling of bad YAML.
+func TestBuildPipelineContext_InvalidYAML(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	// Store with invalid YAML still creates a doc (Node may be nil).
+	doc := store.Set("file:///bad.yaml", "{invalid yaml: [")
+	ctx := BuildPipelineContext(reg, doc, 0)
+	if ctx == nil {
+		t.Fatal("expected non-nil context for invalid YAML")
 	}
-	ctx := BuildPipelineContext(inferenceTestYAML, "api-pipeline", "", specPath, "GET", "/items")
-	if ctx.Trigger != nil {
-		t.Error("expected nil trigger for missing path in spec")
+	if len(ctx.StepOrder) != 0 {
+		t.Errorf("expected 0 steps for invalid YAML")
+	}
+}
+
+// TestBuildPipelineContext_NilDoc verifies nil doc returns empty context.
+func TestBuildPipelineContext_NilDoc(t *testing.T) {
+	reg := NewRegistry()
+	ctx := BuildPipelineContext(reg, nil, 0)
+	if ctx == nil {
+		t.Fatal("expected non-nil context for nil doc")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/GoCodeAlone/workflow/schema"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
@@ -12,7 +13,7 @@ import (
 // if there is nothing to show.
 func Hover(reg *Registry, doc *Document, ctx PositionContext) *protocol.Hover {
 	if ctx.InTemplate {
-		return hoverTemplateExpr(doc, ctx)
+		return hoverTemplateExpr(reg, doc, ctx)
 	}
 
 	switch ctx.Section {
@@ -176,7 +177,7 @@ func hoverStepConfigField(reg *Registry, stepType, field string) *protocol.Hover
 }
 
 // hoverTemplateExpr provides hover documentation for template expressions.
-func hoverTemplateExpr(doc *Document, ctx PositionContext) *protocol.Hover {
+func hoverTemplateExpr(reg *Registry, doc *Document, ctx PositionContext) *protocol.Hover {
 	tp := ctx.TemplatePath
 	if tp == nil {
 		return hoverTemplateFunction(ctx.FieldName)
@@ -189,7 +190,7 @@ func hoverTemplateExpr(doc *Document, ctx PositionContext) *protocol.Hover {
 
 	switch tp.Namespace {
 	case "steps":
-		return hoverTemplateStepOutput(doc, ctx, tp)
+		return hoverTemplateStepOutput(reg, doc, ctx, tp)
 	case "trigger":
 		return hoverTemplateTrigger(ctx, tp)
 	case "body":
@@ -203,26 +204,18 @@ func hoverTemplateExpr(doc *Document, ctx PositionContext) *protocol.Hover {
 }
 
 // hoverTemplateStepOutput shows docs for .steps.stepName.field.
-func hoverTemplateStepOutput(doc *Document, ctx PositionContext, tp *TemplateExprPath) *protocol.Hover {
+func hoverTemplateStepOutput(reg *Registry, doc *Document, ctx PositionContext, tp *TemplateExprPath) *protocol.Hover {
 	if tp.StepName == "" {
 		return markdownHover("**Steps namespace**\n\nAccess step outputs via `.steps.<step-name>.<field>`")
 	}
 
-	if doc == nil || ctx.PipelineName == "" {
+	if doc == nil {
 		return markdownHover(fmt.Sprintf("**Step:** `%s`\n\nStep output data.", tp.StepName))
 	}
 
-	pctx := BuildPipelineContext(doc.Content, ctx.PipelineName, ctx.CurrentStepName, "", "", "")
+	pctx := BuildPipelineContext(reg, doc, ctx.Line)
 
-	// Find the requested step.
-	var stepCtx *StepOutputSchema
-	for i := range pctx.StepOutputs {
-		if pctx.StepOutputs[i].StepName == tp.StepName {
-			stepCtx = &pctx.StepOutputs[i]
-			break
-		}
-	}
-
+	stepCtx := pctx.Steps[tp.StepName]
 	if stepCtx == nil {
 		return markdownHover(fmt.Sprintf("**Step:** `%s`\n\nNo output info available (step may not precede current position).", tp.StepName))
 	}
@@ -233,36 +226,35 @@ func hoverTemplateStepOutput(doc *Document, ctx PositionContext, tp *TemplateExp
 		fieldName = tp.SubField
 	}
 	if fieldName != "" {
-		if fs, ok := stepCtx.Outputs[fieldName]; ok {
-			var sb strings.Builder
-			fmt.Fprintf(&sb, "**`.steps.%s.%s`** (`%s`)\n\n", tp.StepName, fieldName, fs.Type)
-			if fs.Description != "" {
-				sb.WriteString(fs.Description)
-				sb.WriteString("\n")
+		for _, f := range stepCtx.Fields {
+			if f.Key == fieldName {
+				var sb strings.Builder
+				fmt.Fprintf(&sb, "**`.steps.%s.%s`** (`%s`)\n\n", tp.StepName, fieldName, f.Type)
+				if f.Description != "" {
+					sb.WriteString(f.Description)
+					sb.WriteString("\n")
+				}
+				fmt.Fprintf(&sb, "\n*Step type:* `%s`", stepCtx.StepType)
+				return markdownHover(sb.String())
 			}
-			fmt.Fprintf(&sb, "\n*Step type:* `%s`", stepCtx.StepType)
-			return markdownHover(sb.String())
 		}
 	}
 
 	// Show all outputs for the step.
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "**Step outputs:** `%s` (`%s`)\n\n", tp.StepName, stepCtx.StepType)
-	if len(stepCtx.Outputs) == 0 {
+	if len(stepCtx.Fields) == 0 {
 		sb.WriteString("No outputs defined.\n")
 	} else {
 		sb.WriteString("**Available fields:**\n\n")
-		keys := make([]string, 0, len(stepCtx.Outputs))
-		for k := range stepCtx.Outputs {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			o := stepCtx.Outputs[k]
-			if o.Description != "" {
-				fmt.Fprintf(&sb, "- `%s` (%s): %s\n", k, o.Type, o.Description)
+		fields := make([]schema.InferredOutput, len(stepCtx.Fields))
+		copy(fields, stepCtx.Fields)
+		sort.Slice(fields, func(i, j int) bool { return fields[i].Key < fields[j].Key })
+		for _, f := range fields {
+			if f.Description != "" {
+				fmt.Fprintf(&sb, "- `%s` (%s): %s\n", f.Key, f.Type, f.Description)
 			} else {
-				fmt.Fprintf(&sb, "- `%s` (%s)\n", k, o.Type)
+				fmt.Fprintf(&sb, "- `%s` (%s)\n", f.Key, f.Type)
 			}
 		}
 	}
