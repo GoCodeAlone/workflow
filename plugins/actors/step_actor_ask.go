@@ -100,10 +100,10 @@ func (s *ActorAskStep) Execute(ctx context.Context, pc *module.PipelineContext) 
 		return nil, fmt.Errorf("step.actor_ask %q: no application context available to resolve actor pool", s.name)
 	}
 
-	sys := pool.system.ActorSystem()
-	if sys == nil {
+	if pool.system == nil || pool.system.ActorSystem() == nil {
 		return nil, fmt.Errorf("step.actor_ask %q: actor system not started", s.name)
 	}
+	sys := pool.system.ActorSystem()
 
 	msg := &ActorMessage{Type: msgType, Payload: payload}
 	var resp any
@@ -114,15 +114,12 @@ func (s *ActorAskStep) Execute(ctx context.Context, pc *module.PipelineContext) 
 		if err != nil {
 			return nil, fmt.Errorf("step.actor_ask %q: failed to get grain %q: %w", s.name, identity, err)
 		}
-		resp, err = pool.system.ActorSystem().AskGrain(ctx, grainID, msg, s.timeout)
+		resp, err = sys.AskGrain(ctx, grainID, msg, s.timeout)
 		if err != nil {
 			return nil, fmt.Errorf("step.actor_ask %q: ask failed: %w", s.name, err)
 		}
 	} else {
-		if pool.system == nil || pool.system.ActorSystem() == nil {
-			return nil, fmt.Errorf("step.actor_ask %q: actor system not started", s.name)
-		}
-		pid, err := pool.system.ActorSystem().ActorOf(ctx, s.pool)
+		pid, err := sys.ActorOf(ctx, s.pool)
 		if err != nil {
 			return nil, fmt.Errorf("step.actor_ask %q: actor pool %q not found in system: %w", s.name, s.pool, err)
 		}

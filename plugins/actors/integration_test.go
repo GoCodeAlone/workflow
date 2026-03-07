@@ -83,7 +83,10 @@ func TestIntegration_FullActorLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Increment failed: %v", err)
 	}
-	result := resp.(map[string]any)
+	result, ok := resp.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map response, got %T", resp)
+	}
 	if result["count"] != "incremented" {
 		t.Errorf("expected count=incremented, got %v", result["count"])
 	}
@@ -96,7 +99,10 @@ func TestIntegration_FullActorLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetCount failed: %v", err)
 	}
-	result = resp.(map[string]any)
+	result, ok = resp.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map response, got %T", resp)
+	}
 	if result["count"] != "incremented" {
 		t.Errorf("expected count=incremented from state, got %v", result["count"])
 	}
@@ -179,8 +185,14 @@ func TestIntegration_MultipleActorsIndependentState(t *testing.T) {
 		t.Fatalf("GetValue for actor-b failed: %v", err)
 	}
 
-	r1 := resp1.(map[string]any)
-	r2 := resp2.(map[string]any)
+	r1, ok := resp1.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map response for actor-a, got %T", resp1)
+	}
+	r2, ok := resp2.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map response for actor-b, got %T", resp2)
+	}
 
 	if r1["value"] != "alpha" {
 		t.Errorf("actor-a: expected value=alpha, got %v", r1["value"])

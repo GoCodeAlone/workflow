@@ -268,7 +268,10 @@ func TestBridgeActor_StatePersistsAcrossMessages(t *testing.T) {
 		t.Fatalf("GetName failed: %v", err)
 	}
 
-	result := resp.(map[string]any)
+	result, ok := resp.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map response, got %T", resp)
+	}
 	if result["name"] != "Alice" {
 		t.Errorf("expected name=Alice from state, got %v", result["name"])
 	}

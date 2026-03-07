@@ -88,6 +88,11 @@ func (s *ActorSendStep) Execute(ctx context.Context, pc *module.PipelineContext)
 		return nil, fmt.Errorf("step.actor_send %q: no application context available to resolve actor pool", s.name)
 	}
 
+	if pool.system == nil || pool.system.ActorSystem() == nil {
+		return nil, fmt.Errorf("step.actor_send %q: actor system not started", s.name)
+	}
+	sys := pool.system.ActorSystem()
+
 	msg := &ActorMessage{Type: msgType, Payload: payload}
 
 	// Use Grain API for auto-managed pools; regular actor for permanent pools
@@ -96,14 +101,11 @@ func (s *ActorSendStep) Execute(ctx context.Context, pc *module.PipelineContext)
 		if err != nil {
 			return nil, fmt.Errorf("step.actor_send %q: failed to get grain %q: %w", s.name, identity, err)
 		}
-		if err := pool.system.ActorSystem().TellGrain(ctx, grainID, msg); err != nil {
+		if err := sys.TellGrain(ctx, grainID, msg); err != nil {
 			return nil, fmt.Errorf("step.actor_send %q: tell failed: %w", s.name, err)
 		}
 	} else {
-		if pool.system == nil || pool.system.ActorSystem() == nil {
-			return nil, fmt.Errorf("step.actor_send %q: actor system not started", s.name)
-		}
-		pid, err := pool.system.ActorSystem().ActorOf(ctx, s.pool)
+		pid, err := sys.ActorOf(ctx, s.pool)
 		if err != nil {
 			return nil, fmt.Errorf("step.actor_send %q: actor pool %q not found in system: %w", s.name, s.pool, err)
 		}

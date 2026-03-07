@@ -24,6 +24,22 @@ func TestActorAskStep_RequiresMessage(t *testing.T) {
 	}
 }
 
+func TestActorAskStep_RequiresMessageType(t *testing.T) {
+	_, err := NewActorAskStepFactory()(
+		"test-ask",
+		map[string]any{
+			"pool": "my-pool",
+			"message": map[string]any{
+				"payload": map[string]any{},
+			},
+		},
+		nil,
+	)
+	if err == nil {
+		t.Fatal("expected error for missing message.type")
+	}
+}
+
 func TestActorAskStep_DefaultTimeout(t *testing.T) {
 	step, err := NewActorAskStepFactory()(
 		"test-ask",
