@@ -4,10 +4,12 @@
 package actors
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
@@ -20,6 +22,7 @@ type Plugin struct {
 	stepRegistry         interfaces.StepRegistryProvider
 	concreteStepRegistry *module.StepRegistry
 	logger               *slog.Logger
+	actorHandler         *ActorWorkflowHandler
 }
 
 // New creates a new actors plugin.
@@ -126,7 +129,44 @@ func wrapStepFactory(f module.StepFactory) plugin.StepFactory {
 
 // WorkflowHandlers returns the actor workflow handler factory.
 func (p *Plugin) WorkflowHandlers() map[string]plugin.WorkflowHandlerFactory {
-	return map[string]plugin.WorkflowHandlerFactory{}
+	return map[string]plugin.WorkflowHandlerFactory{
+		"actors": func() any {
+			p.actorHandler = NewActorWorkflowHandler()
+			if p.logger != nil {
+				p.actorHandler.SetLogger(p.logger)
+			}
+			return p.actorHandler
+		},
+	}
+}
+
+// WiringHooks returns hooks to wire actor handlers to pool modules.
+func (p *Plugin) WiringHooks() []plugin.WiringHook {
+	return []plugin.WiringHook{
+		{
+			Name:     "actors-handler-wiring",
+			Priority: 40,
+			Hook: func(app modular.Application, _ *config.WorkflowConfig) error {
+				if p.actorHandler == nil {
+					return nil
+				}
+				// Wire handler pipelines into pool modules.
+				for poolName, handlers := range p.actorHandler.PoolHandlers() {
+					svcName := fmt.Sprintf("actor-pool:%s", poolName)
+					var pool *ActorPoolModule
+					if err := app.GetService(svcName, &pool); err != nil {
+						// Pool may not exist if config doesn't define it — skip silently.
+						continue
+					}
+					pool.SetHandlers(handlers)
+					if p.concreteStepRegistry != nil {
+						pool.SetStepRegistry(p.concreteStepRegistry, app)
+					}
+				}
+				return nil
+			},
+		},
+	}
 }
 
 // ModuleSchemas returns schemas for actor modules.
