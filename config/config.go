@@ -262,6 +262,18 @@ func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
 	return nil
 }
 
+// LoadFromBytes loads a workflow configuration from a YAML byte slice.
+// This is useful for loading embedded configs (e.g. via //go:embed).
+// Note: imports are NOT processed because there is no file path context
+// to resolve relative import paths against.
+func LoadFromBytes(data []byte) (*WorkflowConfig, error) {
+	var cfg WorkflowConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse config bytes: %w", err)
+	}
+	return &cfg, nil
+}
+
 // LoadFromString loads a workflow configuration from a YAML string.
 // Note: imports are NOT processed when loading from a string because there is
 // no file path context to resolve relative import paths against.

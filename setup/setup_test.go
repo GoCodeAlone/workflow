@@ -9,9 +9,10 @@ func TestDefaultHandlers(t *testing.T) {
 	if len(handlers) == 0 {
 		t.Fatal("expected at least one default handler")
 	}
-	// Should have 8 built-in handlers
-	if len(handlers) != 8 {
-		t.Errorf("expected 8 default handlers, got %d", len(handlers))
+	// Should have 9 built-in handlers (HTTP, Messaging, StateMachine, Scheduler,
+	// Integration, Pipeline, Event, Platform, CLI)
+	if len(handlers) != 9 {
+		t.Errorf("expected 9 default handlers, got %d", len(handlers))
 	}
 }
 

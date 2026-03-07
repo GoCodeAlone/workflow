@@ -40,6 +40,7 @@ func DefaultHandlers() []workflow.WorkflowHandler {
 		handlers.NewPipelineWorkflowHandler(),
 		handlers.NewEventWorkflowHandler(),
 		handlers.NewPlatformWorkflowHandler(),
+		handlers.NewCLIWorkflowHandler(),
 	}
 }
 

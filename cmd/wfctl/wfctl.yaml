@@ -1,0 +1,53 @@
+workflows:
+  cli:
+    name: wfctl
+    description: Workflow Engine CLI
+    commands:
+      - name: init
+        description: Scaffold a new workflow project from a template
+      - name: validate
+        description: Validate a workflow configuration file
+      - name: inspect
+        description: Inspect modules, workflows, and triggers in a config
+      - name: run
+        description: Run a workflow engine from a config file
+      - name: plugin
+        description: "Plugin management (init, docs, search, install, list, update, remove)"
+      - name: pipeline
+        description: "Pipeline management (list, run)"
+      - name: schema
+        description: Generate JSON Schema for workflow configs
+      - name: snippets
+        description: "Export IDE snippets (--format vscode|jetbrains|json)"
+      - name: manifest
+        description: Analyze config and report infrastructure requirements
+      - name: migrate
+        description: Manage database schema migrations
+      - name: build-ui
+        description: "Build the application UI (npm install + npm run build + validate)"
+      - name: ui
+        description: "UI tooling (scaffold: generate Vite+React+TypeScript SPA from OpenAPI spec)"
+      - name: publish
+        description: Prepare and publish a plugin manifest to the workflow-registry
+      - name: deploy
+        description: "Deploy the workflow application (docker, kubernetes, cloud)"
+      - name: api
+        description: "API tooling (extract: generate OpenAPI 3.0 spec from config)"
+      - name: diff
+        description: Compare two workflow config files and show what changed
+      - name: template
+        description: "Template management (validate: check templates against known types)"
+      - name: contract
+        description: "Contract testing (test: generate/compare API contracts)"
+      - name: compat
+        description: "Compatibility checking (check: verify config works with current engine)"
+      - name: generate
+        description: "Code generation (github-actions: generate CI/CD workflows from config)"
+      - name: git
+        description: "Git integration (connect: link to GitHub repo, push: commit and push)"
+      - name: registry
+        description: "Registry management (list, add, remove plugin registry sources)"
+      - name: update
+        description: "Update wfctl to the latest version (use --check to only check)"
+      - name: mcp
+        description: Start the MCP server over stdio for AI assistant integration
