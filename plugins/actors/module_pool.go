@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/workflow/module"
+	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
 
@@ -40,7 +43,15 @@ type ActorPoolModule struct {
 	logger *slog.Logger
 
 	// Message handlers set by the actor workflow handler
-	handlers map[string]any // message type -> step pipeline config
+	handlers map[string]*HandlerPipeline
+
+	// Step registry for building pipeline steps inside actors
+	stepRegistry *module.StepRegistry
+	app          modular.Application
+
+	// PIDs tracks live actor instances: identity -> PID
+	pids   map[string]*actor.PID
+	pidsMu sync.Mutex
 }
 
 // NewActorPoolModule creates a new actor pool module from config.
@@ -63,7 +74,8 @@ func NewActorPoolModule(name string, cfg map[string]any) (*ActorPoolModule, erro
 		poolSize:    10,
 		routing:     "round-robin",
 		failover:    true,
-		handlers:    make(map[string]any),
+		handlers:    make(map[string]*HandlerPipeline),
+		pids:        make(map[string]*actor.PID),
 	}
 
 	// Parse mode
@@ -167,8 +179,37 @@ func (m *ActorPoolModule) Stop(_ context.Context) error {
 }
 
 // SetHandlers sets the message receive handlers (called by the actor workflow handler).
-func (m *ActorPoolModule) SetHandlers(handlers map[string]any) {
+func (m *ActorPoolModule) SetHandlers(handlers map[string]*HandlerPipeline) {
 	m.handlers = handlers
+}
+
+// SetStepRegistry injects the step registry and app for actor spawn-time pipeline building.
+func (m *ActorPoolModule) SetStepRegistry(registry *module.StepRegistry, app modular.Application) {
+	m.stepRegistry = registry
+	m.app = app
+}
+
+// GetOrSpawnActor returns an existing actor PID for the given identity, or spawns a new one.
+func (m *ActorPoolModule) GetOrSpawnActor(ctx context.Context, identity string) (*actor.PID, error) {
+	if m.system == nil || m.system.ActorSystem() == nil {
+		return nil, fmt.Errorf("actor.pool %q: actor system not started", m.name)
+	}
+
+	m.pidsMu.Lock()
+	defer m.pidsMu.Unlock()
+
+	if pid, ok := m.pids[identity]; ok {
+		return pid, nil
+	}
+
+	bridge := NewBridgeActor(m.name, identity, m.handlers, m.stepRegistry, m.app, m.logger)
+	actorName := fmt.Sprintf("%s/%s", m.name, identity)
+	pid, err := m.system.ActorSystem().Spawn(ctx, actorName, bridge)
+	if err != nil {
+		return nil, fmt.Errorf("actor.pool %q: failed to spawn actor %q: %w", m.name, identity, err)
+	}
+	m.pids[identity] = pid
+	return pid, nil
 }
 
 // SystemName returns the referenced actor.system module name.

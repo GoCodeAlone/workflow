@@ -111,7 +111,17 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 
 // StepFactories returns actor step factories.
 func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
-	return map[string]plugin.StepFactory{}
+	return map[string]plugin.StepFactory{
+		"step.actor_send": wrapStepFactory(NewActorSendStepFactory()),
+		"step.actor_ask":  wrapStepFactory(NewActorAskStepFactory()),
+	}
+}
+
+// wrapStepFactory converts a module.StepFactory to a plugin.StepFactory.
+func wrapStepFactory(f module.StepFactory) plugin.StepFactory {
+	return func(name string, cfg map[string]any, app modular.Application) (any, error) {
+		return f(name, cfg, app)
+	}
 }
 
 // WorkflowHandlers returns the actor workflow handler factory.
