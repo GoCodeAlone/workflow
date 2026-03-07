@@ -1,0 +1,180 @@
+name: Benchmark
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+  packages: read
+
+env:
+  GOPRIVATE: github.com/GoCodeAlone/*
+  GONOSUMCHECK: github.com/GoCodeAlone/*
+
+jobs:
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      packages: read
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.26'
+        cache: true
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: 'https://npm.pkg.github.com'
+        cache: 'npm'
+        cache-dependency-path: ui/package-lock.json
+
+    - name: Build UI assets
+      run: cd ui && npm ci && npm run build
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install benchstat
+      run: go install golang.org/x/perf/cmd/benchstat@latest
+
+    - name: Run benchmarks
+      run: go test -bench=. -benchmem -count=6 -run=^$ -timeout=30m ./... | tee benchmark-results.txt
+
+    - name: Restore baseline
+      if: github.event_name == 'pull_request'
+      id: restore-baseline
+      uses: actions/cache/restore@v4
+      with:
+        path: baseline-bench.txt
+        key: go-benchmark-${{ github.event.pull_request.base.ref }}-never
+        restore-keys: |
+          go-benchmark-${{ github.event.pull_request.base.ref }}-
+
+    - name: Compare with baseline
+      if: github.event_name == 'pull_request' && steps.restore-baseline.outputs.cache-matched-key != ''
+      id: compare
+      run: |
+        echo "## benchstat: baseline → PR" > benchstat-output.txt
+        benchstat baseline-bench.txt benchmark-results.txt >> benchstat-output.txt 2>&1 || true
+
+        # Detect regressions: benchstat v2 output lines look like:
+        #   BenchmarkName  1.00ns ± 1%  1.25ns ± 2%  +25.00% (p=0.002 n=6)
+        # We look for lines containing a benchmark name (starts with Benchmark)
+        # followed by a percentage increase >= 20%.
+        regression=false
+        while IFS= read -r line; do
+          if echo "$line" | grep -qP '^\s*(│\s+)?Benchmark.*\+\d+\.\d+%'; then
+            pct=$(echo "$line" | grep -oP '\+\K\d+\.\d+(?=%)' | tail -1)
+            if [ -n "$pct" ] && echo "$pct" | awk '{ exit ($1 < 20.0) }'; then
+              regression=true
+              break
+            fi
+          fi
+        done < benchstat-output.txt
+
+        echo "regression=$regression" >> "$GITHUB_OUTPUT"
+        if [ "$regression" = "true" ]; then
+          echo "::warning::Potential performance regression detected (>= 20% slower)"
+        fi
+
+    - name: Comment PR with results
+      if: github.event_name == 'pull_request' && steps.restore-baseline.outputs.cache-matched-key != ''
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const benchstat = fs.readFileSync('benchstat-output.txt', 'utf8');
+          const regression = '${{ steps.compare.outputs.regression }}' === 'true';
+
+          const body = [
+            '## ⏱ Benchmark Results',
+            '',
+            regression
+              ? '⚠️ **Potential performance regression detected** — one or more benchmarks regressed ≥ 20%.'
+              : '✅ **No significant performance regressions detected.**',
+            '',
+            '<details>',
+            '<summary>benchstat comparison (baseline → PR)</summary>',
+            '',
+            '```',
+            benchstat,
+            '```',
+            '',
+            '</details>',
+            '',
+            '> Benchmarks run with `go test -bench=. -benchmem -count=6`.',
+            '> Regressions ≥ 20% are flagged. Results compared via [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat).',
+          ].join('\n');
+
+          // Upsert: update existing comment or create a new one.
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+
+          const marker = '## ⏱ Benchmark Results';
+          const existing = comments.find(c => c.body.includes(marker));
+
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+          }
+
+    - name: No baseline available
+      if: github.event_name == 'pull_request' && steps.restore-baseline.outputs.cache-matched-key == ''
+      run: |
+        echo "::notice::No benchmark baseline found for branch '${{ github.event.pull_request.base.ref }}'. Baseline will be created on next push to that branch."
+
+    # On push to main/develop, save the results as the new baseline.
+    - name: Prepare baseline for cache
+      if: github.event_name == 'push'
+      run: cp benchmark-results.txt baseline-bench.txt
+
+    - name: Save baseline
+      if: github.event_name == 'push'
+      uses: actions/cache/save@v4
+      with:
+        path: baseline-bench.txt
+        key: go-benchmark-${{ github.ref_name }}-${{ github.sha }}
+
+    - name: Upload benchmark results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-results
+        path: |
+          benchmark-results.txt
+          benchstat-output.txt
+        retention-days: 30
+        if-no-files-found: ignore
+
+    - name: Fail on regression
+      if: github.event_name == 'pull_request' && steps.compare.outputs.regression == 'true'
+      run: |
+        echo "::error::Performance regression detected. Review the benchmark results in the PR comment."
+        exit 1

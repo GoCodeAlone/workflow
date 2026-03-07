@@ -1,4 +1,7 @@
-.PHONY: build build-ui build-go test lint fmt vet fix install-hooks clean
+.PHONY: build build-ui build-go test bench bench-baseline bench-compare lint fmt vet fix install-hooks clean
+
+# Common benchmark flags
+BENCH_FLAGS = -bench=. -benchmem -run=^$$ -timeout=30m
 
 # Full build: UI + Go binary (use this when admin UI has changed)
 build: build-ui build-go
@@ -22,6 +25,20 @@ build-mcp:
 # Run all tests with race detection
 test:
 	go test -race ./...
+
+# Run all benchmarks (single iteration for quick local feedback)
+bench:
+	go test $(BENCH_FLAGS) ./...
+
+# Run benchmarks with multiple iterations and save as baseline for comparison
+bench-baseline:
+	go test $(BENCH_FLAGS) -count=6 ./... | tee baseline-bench.txt
+
+# Compare current benchmarks against saved baseline (requires baseline-bench.txt)
+bench-compare:
+	@if [ ! -f baseline-bench.txt ]; then echo "No baseline found. Run 'make bench-baseline' first."; exit 1; fi
+	go test $(BENCH_FLAGS) -count=6 ./... | tee current-bench.txt
+	benchstat baseline-bench.txt current-bench.txt
 
 # Run golangci-lint
 lint:
