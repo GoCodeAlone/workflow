@@ -132,7 +132,8 @@ flowchart TD
 | `step.validate_path_param` | Validates a URL path parameter against a set of rules |
 | `step.validate_pagination` | Validates and normalizes pagination query params |
 | `step.validate_request_body` | Validates request body against a JSON schema |
-| `step.foreach` | Iterates over a slice and runs a sub-pipeline per element |
+| `step.foreach` | Iterates over a slice and runs sub-steps per element. Optional `concurrency: N` for parallel processing |
+| `step.parallel` | Executes named sub-steps concurrently and collects results. O(max(branch)) time |
 | `step.webhook_verify` | Verifies an inbound webhook signature |
 | `step.base64_decode` | Decodes a base64-encoded field |
 | `step.cache_get` | Reads a value from the cache module |
@@ -220,6 +221,21 @@ Pipeline steps support Go template syntax with these built-in functions:
 | `toString` | `toString VALUE` | Convert to string |
 | `length` | `length VALUE` | Length of string, slice, array, or map |
 | `coalesce` | `coalesce VAL1 VAL2 ...` | First non-nil, non-empty value |
+
+#### Collection Functions
+
+| Function | Signature | Complexity | Description |
+|----------|-----------|-----------|-------------|
+| `sum` | `sum SLICE [KEY]` | O(n) | Sum numeric values. Optional KEY for maps |
+| `pluck` | `pluck SLICE KEY` | O(n) | Extract one field from each map |
+| `flatten` | `flatten SLICE` | O(n×m) | Flatten one level of nested slices |
+| `unique` | `unique SLICE [KEY]` | O(n) | Deduplicate, preserving insertion order |
+| `groupBy` | `groupBy SLICE KEY` | O(n) | Group maps by key → `map[string][]any` |
+| `sortBy` | `sortBy SLICE KEY` | O(n log n) | Stable sort ascending by key |
+| `first` | `first SLICE` | O(1) | First element, nil if empty |
+| `last` | `last SLICE` | O(1) | Last element, nil if empty |
+| `min` | `min SLICE [KEY]` | O(n) | Minimum numeric value |
+| `max` | `max SLICE [KEY]` | O(n) | Maximum numeric value |
 
 #### Context (added per-pipeline by the engine)
 

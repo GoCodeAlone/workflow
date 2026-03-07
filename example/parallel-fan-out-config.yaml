@@ -1,0 +1,132 @@
+app:
+  name: parallel-demo
+  version: "1.0"
+
+modules:
+  - name: server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: router
+    type: http.router
+    config:
+      module: server
+
+  - name: api-handler
+    type: http.handler
+    config:
+      contentType: application/json
+
+workflows:
+  http:
+    routes:
+      # Fan-out: parallel API aggregation
+      - path: /aggregate/{id}
+        method: GET
+        handler: api-handler
+        pipeline:
+          steps:
+            - type: step.request_parse
+              name: parse
+              config:
+                path_params: [id]
+
+            - type: step.parallel
+              name: fetch-all
+              config:
+                error_strategy: collect_errors
+                steps:
+                  - name: profile
+                    type: step.set
+                    values:
+                      name: "User {{ .path_params.id }}"
+                      email: "user@example.com"
+                  - name: orders
+                    type: step.set
+                    values:
+                      items: "3"
+                      total: "150.00"
+                  - name: preferences
+                    type: step.set
+                    values:
+                      theme: dark
+                      language: en
+
+            - type: step.json_response
+              name: respond
+              config:
+                status_code: 200
+                body: '{{ json .steps.fetch-all.results }}'
+
+      # Fan-out: concurrent foreach
+      - path: /batch
+        method: POST
+        handler: api-handler
+        pipeline:
+          steps:
+            - type: step.request_parse
+              name: parse
+              config:
+                parse_body: true
+
+            - type: step.foreach
+              name: process-items
+              config:
+                collection: body.items
+                item_var: item
+                concurrency: 5
+                error_strategy: collect_errors
+                step:
+                  name: process
+                  type: step.set
+                  values:
+                    processed: "true"
+                    id: "{{ .item.id }}"
+
+            - type: step.set
+              name: summary
+              config:
+                values:
+                  total: '{{ .steps.process-items.count }}'
+                  processed: '{{ json (pluck .steps.process-items.results "id") }}'
+
+            - type: step.json_response
+              name: respond
+              config:
+                status_code: 200
+
+      # Map/reduce with template functions
+      - path: /stats
+        method: GET
+        handler: api-handler
+        pipeline:
+          steps:
+            - type: step.set
+              name: data
+              config:
+                values:
+                  sales:
+                    - region: east
+                      amount: 100
+                    - region: west
+                      amount: 200
+                    - region: east
+                      amount: 150
+                    - region: west
+                      amount: 50
+
+            - type: step.set
+              name: stats
+              config:
+                values:
+                  total: '{{ sum .steps.data.sales "amount" }}'
+                  max_sale: '{{ max .steps.data.sales "amount" }}'
+                  min_sale: '{{ min .steps.data.sales "amount" }}'
+                  regions: '{{ json (unique (pluck .steps.data.sales "region")) }}'
+                  by_region: '{{ json (groupBy .steps.data.sales "region") }}'
+
+            - type: step.json_response
+              name: respond
+              config:
+                status_code: 200

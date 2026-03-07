@@ -56,3 +56,4 @@ baseline-bench.txt
 current-bench.txt
 benchmark-results.txt
 benchstat-output.txt
+.worktrees

@@ -4,18 +4,21 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"sync"
 
 	"github.com/CrisisTextLine/modular"
 )
 
 // ForEachStep iterates over a collection and executes sub-steps for each item.
 type ForEachStep struct {
-	name       string
-	collection string
-	itemKey    string
-	indexKey   string
-	subSteps   []PipelineStep
-	tmpl       *TemplateEngine
+	name          string
+	collection    string
+	itemKey       string
+	indexKey      string
+	subSteps      []PipelineStep
+	tmpl          *TemplateEngine
+	concurrency   int    // 0 = sequential (default)
+	errorStrategy string // "fail_fast" (default) or "collect_errors"
 }
 
 // NewForEachStepFactory returns a StepFactory that creates ForEachStep instances.
@@ -42,6 +45,26 @@ func NewForEachStepFactory(registryFn func() *StepRegistry) StepFactory {
 		indexKey, _ := config["index_key"].(string)
 		if indexKey == "" {
 			indexKey = "index"
+		}
+
+		concurrency := 0
+		if v, ok := config["concurrency"]; ok {
+			switch val := v.(type) {
+			case int:
+				concurrency = val
+			case float64:
+				concurrency = int(val)
+			}
+		}
+		if concurrency < 0 {
+			concurrency = 0
+		}
+
+		errorStrategy, _ := config["error_strategy"].(string)
+		if errorStrategy == "" {
+			errorStrategy = "fail_fast"
+		} else if errorStrategy != "fail_fast" && errorStrategy != "collect_errors" {
+			return nil, fmt.Errorf("foreach step %q: invalid error_strategy %q (must be fail_fast or collect_errors)", name, errorStrategy)
 		}
 
 		// Detect presence of each key before type-asserting so we can give clear errors.
@@ -90,12 +113,14 @@ func NewForEachStepFactory(registryFn func() *StepRegistry) StepFactory {
 		}
 
 		return &ForEachStep{
-			name:       name,
-			collection: collection,
-			itemKey:    itemKey,
-			indexKey:   indexKey,
-			subSteps:   subSteps,
-			tmpl:       NewTemplateEngine(),
+			name:          name,
+			collection:    collection,
+			itemKey:       itemKey,
+			indexKey:      indexKey,
+			subSteps:      subSteps,
+			tmpl:          NewTemplateEngine(),
+			concurrency:   concurrency,
+			errorStrategy: errorStrategy,
 		}, nil
 	}
 }
@@ -121,13 +146,17 @@ func (s *ForEachStep) Execute(ctx context.Context, pc *PipelineContext) (*StepRe
 		}, nil
 	}
 
+	if s.concurrency > 0 {
+		return s.executeConcurrent(ctx, pc, items)
+	}
+	return s.executeSequential(ctx, pc, items)
+}
+
+// executeSequential processes items one at a time. O(n × per_item) time, O(context_size) space.
+func (s *ForEachStep) executeSequential(ctx context.Context, pc *PipelineContext, items []any) (*StepResult, error) {
 	collected := make([]any, 0, len(items))
-
 	for i, item := range items {
-		// Create a child context with item and index injected
 		childPC := s.buildChildContext(pc, item, i)
-
-		// Execute each sub-step sequentially for this item
 		iterResult := make(map[string]any)
 		for _, step := range s.subSteps {
 			result, execErr := step.Execute(ctx, childPC)
@@ -145,13 +174,110 @@ func (s *ForEachStep) Execute(ctx context.Context, pc *PipelineContext) (*StepRe
 		}
 		collected = append(collected, iterResult)
 	}
-
 	return &StepResult{
 		Output: map[string]any{
 			"results": collected,
 			"count":   len(collected),
 		},
 	}, nil
+}
+
+// executeConcurrent processes items with a bounded worker pool.
+// O(⌈n/c⌉ × per_item) time, O(c × context_size) space where c = concurrency.
+func (s *ForEachStep) executeConcurrent(ctx context.Context, pc *PipelineContext, items []any) (*StepResult, error) {
+	n := len(items)
+	results := make([]any, n)
+	errs := make([]error, n)
+
+	sem := make(chan struct{}, s.concurrency)
+	branchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	var firstErr error
+	var errOnce sync.Once
+
+outer:
+	for i, item := range items {
+		// Stop launching new goroutines if the context is already cancelled
+		// (e.g., from a previous fail_fast error or external cancellation).
+		if branchCtx.Err() != nil {
+			break outer
+		}
+
+		i, item := i, item
+
+		// Acquire a semaphore slot, but respect context cancellation so we don't
+		// block indefinitely when fail_fast has already cancelled the context.
+		select {
+		case sem <- struct{}{}: // acquired slot; fall through to launch goroutine
+		case <-branchCtx.Done():
+			break outer
+		}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }() // release slot
+
+			childPC := s.buildChildContext(pc, item, i)
+			iterResult := make(map[string]any)
+			for _, step := range s.subSteps {
+				result, execErr := step.Execute(branchCtx, childPC)
+				if execErr != nil {
+					errs[i] = fmt.Errorf("iteration %d, sub-step %q: %w", i, step.Name(), execErr)
+					if s.errorStrategy == "fail_fast" {
+						errOnce.Do(func() {
+							firstErr = fmt.Errorf("foreach step %q: %w", s.name, errs[i])
+							cancel()
+						})
+					}
+					return
+				}
+				if result != nil && result.Output != nil {
+					childPC.MergeStepOutput(step.Name(), result.Output)
+					maps.Copy(iterResult, result.Output)
+				}
+				if result != nil && result.Stop {
+					break
+				}
+			}
+			results[i] = iterResult
+		}()
+	}
+
+	wg.Wait()
+
+	if s.errorStrategy == "fail_fast" && firstErr != nil {
+		return nil, firstErr
+	}
+
+	// Build output
+	collected := make([]any, 0, n)
+	errorCount := 0
+	for i := 0; i < n; i++ {
+		switch {
+		case errs[i] != nil:
+			errorCount++
+			collected = append(collected, map[string]any{
+				"_error": errs[i].Error(),
+				"_index": i,
+			})
+		case results[i] != nil:
+			collected = append(collected, results[i])
+		default:
+			collected = append(collected, map[string]any{})
+		}
+	}
+
+	output := map[string]any{
+		"results": collected,
+		"count":   n,
+	}
+	if errorCount > 0 {
+		output["error_count"] = errorCount
+	}
+	return &StepResult{Output: output}, nil
 }
 
 // resolveCollection resolves the collection field to a []any.

@@ -183,10 +183,29 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "index_key", Type: FieldTypeString, Description: "Context key for the numeric loop index"},
 			{Key: "step", Type: FieldTypeJSON, Description: "Single step definition to execute per item"},
 			{Key: "steps", Type: FieldTypeArray, Description: "List of step definitions to execute per item"},
+			{Key: "concurrency", Type: FieldTypeNumber, Description: "Worker pool size. 0 = sequential. Time: O(⌈n/c⌉ × per_item). Space: O(c × context_size).", DefaultValue: 0},
+			{Key: "error_strategy", Type: FieldTypeSelect, Description: "Error handling for concurrent mode. fail_fast: cancel on first error. collect_errors: continue, mark failed items.", Options: []string{"fail_fast", "collect_errors"}, DefaultValue: "fail_fast"},
 		},
 		Outputs: []StepOutputDef{
-			{Key: "iterations", Type: "number", Description: "Number of iterations completed"},
+			{Key: "count", Type: "number", Description: "Number of iterations completed"},
 			{Key: "results", Type: "[]any", Description: "Output from each iteration"},
+			{Key: "error_count", Type: "integer", Description: "Count of failed items (only present with error_strategy: collect_errors)"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.parallel",
+		Plugin:      "pipelinesteps",
+		Description: "Execute multiple named sub-steps concurrently and collect results. Time: O(max(branch)). Space: O(branches × context_size).",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "steps", Type: FieldTypeArray, Required: true, Description: "List of sub-steps to run concurrently. Each must have a unique 'name'."},
+			{Key: "error_strategy", Type: FieldTypeSelect, Required: false, DefaultValue: "fail_fast", Options: []string{"fail_fast", "collect_errors"}, Description: "fail_fast: cancel on first error. collect_errors: run all, collect partial results."},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "results", Type: "map", Description: "Map of branch_name → branch output (successful branches)"},
+			{Key: "errors", Type: "map", Description: "Map of branch_name → error string (failed branches)"},
+			{Key: "completed", Type: "integer", Description: "Count of successful branches"},
+			{Key: "failed", Type: "integer", Description: "Count of failed branches"},
 		},
 	})
 

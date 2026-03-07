@@ -1,6 +1,7 @@
 package module
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -906,5 +907,257 @@ func TestTemplateEngine_FuncCoalesce(t *testing.T) {
 	}
 	if result != "fallback" {
 		t.Errorf("expected 'fallback', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncSum(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{
+		"nums": []any{10, 20, 30},
+		"items": []any{
+			map[string]any{"amount": 10.5},
+			map[string]any{"amount": 20.0},
+			map[string]any{"amount": 5.5},
+		},
+	}, nil)
+
+	// Sum scalars
+	got, err := te.Resolve(`{{ sum .nums }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "60" {
+		t.Fatalf("expected 60, got %q", got)
+	}
+
+	// Sum with key
+	got, err = te.Resolve(`{{ sum .items "amount" }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "36" {
+		t.Fatalf("expected 36, got %q", got)
+	}
+}
+
+func TestTemplateEngine_FuncPluck(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{
+		"users": []any{
+			map[string]any{"name": "Alice", "age": 30},
+			map[string]any{"name": "Bob", "age": 25},
+		},
+	}, nil)
+	got, err := te.Resolve(`{{ json (pluck .users "name") }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `["Alice","Bob"]` {
+		t.Fatalf("expected [\"Alice\",\"Bob\"], got %q", got)
+	}
+}
+
+func TestTemplateEngine_FuncFlatten(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{
+		"nested": []any{
+			[]any{1, 2},
+			[]any{3, 4},
+		},
+	}, nil)
+	got, err := te.Resolve(`{{ json (flatten .nested) }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `[1,2,3,4]` {
+		t.Fatalf("expected [1,2,3,4], got %q", got)
+	}
+}
+
+func TestTemplateEngine_FuncUnique(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{
+		"tags": []any{"go", "rust", "go", "python", "rust"},
+	}, nil)
+	got, err := te.Resolve(`{{ json (unique .tags) }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `["go","rust","python"]` {
+		t.Fatalf("expected deduplicated, got %q", got)
+	}
+}
+
+func TestTemplateEngine_FuncGroupBy(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{
+		"items": []any{
+			map[string]any{"cat": "books", "title": "Go"},
+			map[string]any{"cat": "toys", "title": "Ball"},
+			map[string]any{"cat": "books", "title": "Rust"},
+		},
+	}, nil)
+	got, err := te.Resolve(`{{ json (groupBy .items "cat") }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, `"books"`) || !strings.Contains(got, `"toys"`) {
+		t.Fatalf("expected grouped output, got %q", got)
+	}
+}
+
+func TestTemplateEngine_FuncSortBy(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{
+		"items": []any{
+			map[string]any{"name": "Charlie", "score": 3},
+			map[string]any{"name": "Alice", "score": 1},
+			map[string]any{"name": "Bob", "score": 2},
+		},
+	}, nil)
+	got, err := te.Resolve(`{{ json (pluck (sortBy .items "score") "name") }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `["Alice","Bob","Charlie"]` {
+		t.Fatalf("expected sorted, got %q", got)
+	}
+}
+
+func TestTemplateEngine_FuncFirstLast(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{
+		"items": []any{"a", "b", "c"},
+		"empty": []any{},
+	}, nil)
+
+	got, err := te.Resolve(`{{ first .items }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "a" {
+		t.Fatalf("expected a, got %q", got)
+	}
+
+	got, err = te.Resolve(`{{ last .items }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "c" {
+		t.Fatalf("expected c, got %q", got)
+	}
+
+	got, err = te.Resolve(`{{ first .empty }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "<no value>" {
+		t.Fatalf("expected <no value>, got %q", got)
+	}
+}
+
+func TestTemplateEngine_FuncMinMax(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{
+		"nums": []any{5, 2, 8, 1, 9},
+		"items": []any{
+			map[string]any{"price": 10.5},
+			map[string]any{"price": 3.0},
+			map[string]any{"price": 7.5},
+		},
+	}, nil)
+
+	got, err := te.Resolve(`{{ min .nums }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "1" {
+		t.Fatalf("expected 1, got %q", got)
+	}
+
+	got, err = te.Resolve(`{{ max .nums }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "9" {
+		t.Fatalf("expected 9, got %q", got)
+	}
+
+	got, err = te.Resolve(`{{ min .items "price" }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "3" {
+		t.Fatalf("expected 3, got %q", got)
+	}
+
+	got, err = te.Resolve(`{{ max .items "price" }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "10.5" {
+		t.Fatalf("expected 10.5, got %q", got)
+	}
+}
+
+func TestTemplateEngine_FuncSortByStrings(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{
+		"items": []any{
+			map[string]any{"name": "Charlie"},
+			map[string]any{"name": "Alice"},
+			map[string]any{"name": "Bob"},
+		},
+	}, nil)
+	got, err := te.Resolve(`{{ json (pluck (sortBy .items "name") "name") }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `["Alice","Bob","Charlie"]` {
+		t.Fatalf("expected lexicographic sort, got %q", got)
+	}
+}
+
+func TestTemplateEngine_FuncSumInt64Precision(t *testing.T) {
+	// Verify that summing large int64 values does not lose precision through float64.
+	// float64 can only represent integers exactly up to 2^53 (9007199254740992).
+	te := NewTemplateEngine()
+	large := int64(9007199254740993) // 2^53 + 1 — not representable as float64
+	pc := NewPipelineContext(map[string]any{
+		"nums": []any{large, int64(1)},
+	}, nil)
+	got, err := te.Resolve(`{{ sum .nums }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := fmt.Sprintf("%d", large+1)
+	if got != expected {
+		t.Fatalf("expected %s, got %q (float64 precision loss?)", expected, got)
+	}
+}
+
+func TestTemplateEngine_FuncMinMaxInt64Precision(t *testing.T) {
+	// Verify that min/max over large int64 values do not lose precision via float64.
+	te := NewTemplateEngine()
+	large := int64(9007199254740993) // 2^53 + 1
+	small := int64(9007199254740991) // 2^53 - 1
+	pc := NewPipelineContext(map[string]any{
+		"nums": []any{large, small},
+	}, nil)
+
+	got, err := te.Resolve(`{{ min .nums }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != fmt.Sprintf("%d", small) {
+		t.Fatalf("min: expected %d, got %q", small, got)
+	}
+
+	got, err = te.Resolve(`{{ max .nums }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != fmt.Sprintf("%d", large) {
+		t.Fatalf("max: expected %d, got %q", large, got)
 	}
 }

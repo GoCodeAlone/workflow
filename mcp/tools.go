@@ -1236,9 +1236,9 @@ func (s *Server) handleInferPipelineContext(_ context.Context, req mcp.CallToolR
 	// Infer outputs for each preceding step.
 	stepReg := schema.GetStepSchemaRegistry()
 	type stepContext struct {
-		Name    string                   `json:"name"`
-		Type    string                   `json:"type"`
-		Outputs []schema.InferredOutput  `json:"outputs"`
+		Name    string                  `json:"name"`
+		Type    string                  `json:"type"`
+		Outputs []schema.InferredOutput `json:"outputs"`
 	}
 	stepsCtx := make([]stepContext, 0, len(precedingSteps))
 	for _, step := range precedingSteps {
