@@ -8,130 +8,185 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 )
 
-func setupTestSystem(t *testing.T) (actor.ActorSystem, func()) {
-	t.Helper()
-	sys, err := actor.NewActorSystem("test-bridge",
-		actor.WithLoggingDisabled(),
-	)
-	if err != nil {
-		t.Fatalf("create system: %v", err)
-	}
-	ctx := context.Background()
-	if err := sys.Start(ctx); err != nil {
-		t.Fatalf("start system: %v", err)
-	}
-	return sys, func() {
-		_ = sys.Stop(ctx)
-	}
-}
-
 func TestBridgeActor_ReceiveMessage(t *testing.T) {
-	sys, cleanup := setupTestSystem(t)
-	defer cleanup()
+	ctx := context.Background()
 
+	// Create a simple handler that echoes the message type
 	handlers := map[string]*HandlerPipeline{
-		"greet": {
-			Description: "simple greeting",
-			Steps:       []map[string]any{},
+		"Ping": {
+			Steps: []map[string]any{
+				{
+					"name": "echo",
+					"type": "step.set",
+					"config": map[string]any{
+						"values": map[string]any{
+							"pong": "true",
+						},
+					},
+				},
+			},
 		},
 	}
 
-	ba := NewBridgeActor("test-pool", "actor-1", handlers, nil, nil)
-	pid, err := sys.Spawn(context.Background(), "actor-1", ba)
-	if err != nil {
-		t.Fatalf("spawn: %v", err)
+	bridge := &BridgeActor{
+		poolName: "test-pool",
+		identity: "test-1",
+		state:    map[string]any{},
+		handlers: handlers,
 	}
 
-	resp, err := actor.Ask(context.Background(), pid, &ActorMessage{
-		Type:    "greet",
-		Payload: map[string]any{"name": "world"},
-	}, 5*time.Second)
+	// Create an actor system for testing
+	sys, err := actor.NewActorSystem("test-bridge",
+		actor.WithShutdownTimeout(5*time.Second),
+	)
 	if err != nil {
-		t.Fatalf("ask: %v", err)
+		t.Fatalf("failed to create actor system: %v", err)
+	}
+	if err := sys.Start(ctx); err != nil {
+		t.Fatalf("failed to start actor system: %v", err)
+	}
+	defer sys.Stop(ctx) //nolint:errcheck
+
+	pid, err := sys.Spawn(ctx, "test-actor", bridge)
+	if err != nil {
+		t.Fatalf("failed to spawn bridge actor: %v", err)
 	}
 
-	ar, ok := resp.(*ActorResponse)
+	// Ask the actor
+	msg := &ActorMessage{
+		Type:    "Ping",
+		Payload: map[string]any{"data": "hello"},
+	}
+	resp, err := actor.Ask(ctx, pid, msg, 5*time.Second)
+	if err != nil {
+		t.Fatalf("ask failed: %v", err)
+	}
+
+	result, ok := resp.(map[string]any)
 	if !ok {
-		t.Fatalf("expected *ActorResponse, got %T", resp)
+		t.Fatalf("expected map[string]any response, got %T", resp)
 	}
-	if ar.Error != "" {
-		t.Errorf("unexpected error in response: %s", ar.Error)
-	}
-	if ar.Type != "greet" {
-		t.Errorf("expected type 'greet', got %q", ar.Type)
+	if result["pong"] != "true" {
+		t.Errorf("expected pong=true, got %v", result["pong"])
 	}
 }
 
 func TestBridgeActor_UnknownMessageType(t *testing.T) {
-	sys, cleanup := setupTestSystem(t)
-	defer cleanup()
+	ctx := context.Background()
 
-	ba := NewBridgeActor("test-pool", "actor-2", map[string]*HandlerPipeline{}, nil, nil)
-	pid, err := sys.Spawn(context.Background(), "actor-2", ba)
-	if err != nil {
-		t.Fatalf("spawn: %v", err)
+	bridge := &BridgeActor{
+		poolName: "test-pool",
+		identity: "test-1",
+		state:    map[string]any{},
+		handlers: map[string]*HandlerPipeline{},
 	}
 
-	resp, err := actor.Ask(context.Background(), pid, &ActorMessage{
-		Type: "unknown-type",
-	}, 5*time.Second)
+	sys, err := actor.NewActorSystem("test-unknown",
+		actor.WithShutdownTimeout(5*time.Second),
+	)
 	if err != nil {
-		t.Fatalf("ask: %v", err)
+		t.Fatalf("failed to create actor system: %v", err)
+	}
+	if err := sys.Start(ctx); err != nil {
+		t.Fatalf("failed to start actor system: %v", err)
+	}
+	defer sys.Stop(ctx) //nolint:errcheck
+
+	pid, err := sys.Spawn(ctx, "test-actor", bridge)
+	if err != nil {
+		t.Fatalf("failed to spawn: %v", err)
 	}
 
-	ar, ok := resp.(*ActorResponse)
+	msg := &ActorMessage{Type: "Unknown", Payload: map[string]any{}}
+	resp, err := actor.Ask(ctx, pid, msg, 5*time.Second)
+	if err != nil {
+		t.Fatalf("ask failed: %v", err)
+	}
+
+	result, ok := resp.(map[string]any)
 	if !ok {
-		t.Fatalf("expected *ActorResponse, got %T", resp)
+		t.Fatalf("expected map response, got %T", resp)
 	}
-	if ar.Error == "" {
-		t.Error("expected error for unknown message type")
+	if _, hasErr := result["error"]; !hasErr {
+		t.Error("expected error in response for unknown message type")
 	}
 }
 
 func TestBridgeActor_StatePersistsAcrossMessages(t *testing.T) {
-	sys, cleanup := setupTestSystem(t)
-	defer cleanup()
+	ctx := context.Background()
 
 	handlers := map[string]*HandlerPipeline{
-		"update": {
-			Steps: []map[string]any{},
+		"SetName": {
+			Steps: []map[string]any{
+				{
+					"name": "set",
+					"type": "step.set",
+					"config": map[string]any{
+						"values": map[string]any{
+							"name": "{{ .message.payload.name }}",
+						},
+					},
+				},
+			},
+		},
+		"GetName": {
+			Steps: []map[string]any{
+				{
+					"name": "get",
+					"type": "step.set",
+					"config": map[string]any{
+						"values": map[string]any{
+							"name": "{{ .state.name }}",
+						},
+					},
+				},
+			},
 		},
 	}
 
-	ba := NewBridgeActor("test-pool", "actor-3", handlers, nil, nil)
-	pid, err := sys.Spawn(context.Background(), "actor-3", ba)
-	if err != nil {
-		t.Fatalf("spawn: %v", err)
+	bridge := &BridgeActor{
+		poolName: "test-pool",
+		identity: "test-1",
+		state:    map[string]any{},
+		handlers: handlers,
 	}
 
-	// First message — sends payload that should be merged into state.
-	_, err = actor.Ask(context.Background(), pid, &ActorMessage{
-		Type:    "update",
-		Payload: map[string]any{"counter": 1},
+	sys, err := actor.NewActorSystem("test-state",
+		actor.WithShutdownTimeout(5*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("failed to create actor system: %v", err)
+	}
+	if err := sys.Start(ctx); err != nil {
+		t.Fatalf("failed to start actor system: %v", err)
+	}
+	defer sys.Stop(ctx) //nolint:errcheck
+
+	pid, err := sys.Spawn(ctx, "test-actor", bridge)
+	if err != nil {
+		t.Fatalf("failed to spawn: %v", err)
+	}
+
+	// Send SetName
+	_, err = actor.Ask(ctx, pid, &ActorMessage{
+		Type:    "SetName",
+		Payload: map[string]any{"name": "Alice"},
 	}, 5*time.Second)
 	if err != nil {
-		t.Fatalf("first ask: %v", err)
+		t.Fatalf("SetName failed: %v", err)
 	}
 
-	// Second message — with empty payload.
-	resp, err := actor.Ask(context.Background(), pid, &ActorMessage{
-		Type:    "update",
-		Payload: map[string]any{"counter": 2},
+	// Send GetName — should return state from previous message
+	resp, err := actor.Ask(ctx, pid, &ActorMessage{
+		Type:    "GetName",
+		Payload: map[string]any{},
 	}, 5*time.Second)
 	if err != nil {
-		t.Fatalf("second ask: %v", err)
+		t.Fatalf("GetName failed: %v", err)
 	}
 
-	ar, ok := resp.(*ActorResponse)
-	if !ok {
-		t.Fatalf("expected *ActorResponse, got %T", resp)
-	}
-	if ar.Error != "" {
-		t.Errorf("unexpected error: %s", ar.Error)
-	}
-
-	// State should have the latest counter value.
-	if ba.State()["counter"] != 2 {
-		t.Errorf("expected state counter=2, got %v", ba.State()["counter"])
+	result := resp.(map[string]any)
+	if result["name"] != "Alice" {
+		t.Errorf("expected name=Alice from state, got %v", result["name"])
 	}
 }
