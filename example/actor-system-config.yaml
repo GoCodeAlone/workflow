@@ -35,6 +35,15 @@ modules:
         maxRetries: 3
         retryWindow: 10s
 
+  # Permanent pool: fixed-size worker pool with round-robin routing
+  - name: workers
+    type: actor.pool
+    config:
+      system: actors
+      mode: permanent
+      poolSize: 4
+      routing: round-robin
+
 workflows:
   actors:
     pools:
@@ -70,6 +79,19 @@ workflows:
                   values:
                     status: "cancelled"
                     cancelled_at: '{{ now "2006-01-02T15:04:05Z" }}'
+
+      workers:
+        receive:
+          ProcessJob:
+            description: "Process a background job"
+            steps:
+              - type: step.set
+                name: result
+                config:
+                  values:
+                    job_id: "{{ .message.payload.job_id }}"
+                    status: "completed"
+                    worker: "{{ .actor.identity }}"
 
   http:
     routes:
@@ -114,6 +136,30 @@ workflows:
               name: respond
               config:
                 body: '{{ json .steps.status }}'
+
+      # Permanent pool with round-robin routing
+      - path: /jobs
+        method: POST
+        pipeline:
+          steps:
+            - type: step.request_parse
+              name: parse
+              config:
+                parse_body: true
+            - type: step.actor_ask
+              name: process
+              config:
+                pool: workers
+                timeout: 10s
+                message:
+                  type: ProcessJob
+                  payload:
+                    job_id: "{{ .body.job_id }}"
+            - type: step.json_response
+              name: respond
+              config:
+                status_code: 200
+                body: '{{ json .steps.process }}'
 
       - path: /orders/{id}
         method: DELETE

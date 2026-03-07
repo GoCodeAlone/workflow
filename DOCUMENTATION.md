@@ -306,7 +306,7 @@ value: '{{ index .steps "parse-request" "path_params" "id" }}'
 ### Actor Model
 | Type | Description |
 |------|-------------|
-| `actor.system` | goakt v4 actor system — manages actor lifecycle, fault recovery, and clustering |
+| `actor.system` | goakt v4 actor system — manages actor lifecycle and fault recovery |
 | `actor.pool` | Defines a group of actors with shared behavior, routing strategy, and recovery policy |
 
 ### Scheduling

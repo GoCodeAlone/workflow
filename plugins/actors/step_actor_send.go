@@ -100,7 +100,7 @@ func (s *ActorSendStep) Execute(ctx context.Context, pc *module.PipelineContext)
 		return nil, fmt.Errorf("step.actor_send %q: 'identity' is required for auto-managed pool %q", s.name, s.pool)
 	}
 
-	// Use Grain API for auto-managed pools; regular actor for permanent pools
+	// Use Grain API for auto-managed pools; routed actor selection for permanent pools
 	if pool.Mode() == "auto-managed" && identity != "" {
 		grainID, err := pool.GetGrainIdentity(ctx, identity)
 		if err != nil {
@@ -110,12 +110,14 @@ func (s *ActorSendStep) Execute(ctx context.Context, pc *module.PipelineContext)
 			return nil, fmt.Errorf("step.actor_send %q: tell failed: %w", s.name, err)
 		}
 	} else {
-		pid, err := sys.ActorOf(ctx, s.pool)
+		pids, err := pool.SelectActor(msg)
 		if err != nil {
-			return nil, fmt.Errorf("step.actor_send %q: actor pool %q not found in system: %w", s.name, s.pool, err)
+			return nil, fmt.Errorf("step.actor_send %q: %w", s.name, err)
 		}
-		if err := actor.Tell(ctx, pid, msg); err != nil {
-			return nil, fmt.Errorf("step.actor_send %q: tell failed: %w", s.name, err)
+		for _, pid := range pids {
+			if err := actor.Tell(ctx, pid, msg); err != nil {
+				return nil, fmt.Errorf("step.actor_send %q: tell failed: %w", s.name, err)
+			}
 		}
 	}
 

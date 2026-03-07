@@ -3,7 +3,10 @@ package actors
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
+	"math/rand"
+	"sync/atomic"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -24,18 +27,15 @@ type ActorPoolModule struct {
 
 	// Permanent pool settings
 	poolSize int
+	pids     []*actor.PID // tracked PIDs for routing
 
 	// Routing
 	routing    string // "round-robin", "random", "broadcast", "sticky"
 	routingKey string // required for sticky
+	rrCounter  atomic.Uint64
 
 	// Recovery
 	recovery *supervisor.Supervisor
-
-	// Placement (cluster mode)
-	placement   string
-	targetRoles []string
-	failover    bool
 
 	// Resolved at Init
 	system *ActorSystemModule
@@ -68,8 +68,7 @@ func NewActorPoolModule(name string, cfg map[string]any) (*ActorPoolModule, erro
 		idleTimeout: 10 * time.Minute,
 		poolSize:    10,
 		routing:     "round-robin",
-		failover:    true,
-		handlers: make(map[string]*HandlerPipeline),
+		handlers:    make(map[string]*HandlerPipeline),
 	}
 
 	// Parse mode
@@ -126,19 +125,6 @@ func NewActorPoolModule(name string, cfg map[string]any) (*ActorPoolModule, erro
 		m.recovery = sup
 	}
 
-	// Parse placement
-	m.placement, _ = cfg["placement"].(string)
-	if roles, ok := cfg["targetRoles"].([]any); ok {
-		for _, r := range roles {
-			if s, ok := r.(string); ok {
-				m.targetRoles = append(m.targetRoles, s)
-			}
-		}
-	}
-	if v, ok := cfg["failover"].(bool); ok {
-		m.failover = v
-	}
-
 	return m, nil
 }
 
@@ -164,28 +150,27 @@ func (m *ActorPoolModule) Start(ctx context.Context) error {
 		return fmt.Errorf("actor.pool %q: actor system not started", m.name)
 	}
 
-	// For permanent pools, spawn a primary actor under the pool name (for step lookups
-	// via sys.ActorOf) plus poolSize worker actors for capacity.
 	if m.mode == "permanent" {
 		sys := m.system.ActorSystem()
+		m.pids = make([]*actor.PID, 0, m.poolSize)
 
-		// Primary actor registered under the pool name so that step.actor_send/ask
-		// lookups via sys.ActorOf(ctx, poolName) succeed.
-		primary := NewBridgeActor(m.name, m.name, m.handlers, m.stepRegistry, m.app, m.logger)
-		if _, err := sys.Spawn(ctx, m.name, primary); err != nil {
-			return fmt.Errorf("actor.pool %q: failed to spawn primary actor: %w", m.name, err)
+		// Build spawn options: apply per-pool recovery supervisor if configured
+		var spawnOpts []actor.SpawnOption
+		if m.recovery != nil {
+			spawnOpts = append(spawnOpts, actor.WithSupervisor(m.recovery))
 		}
 
-		// Additional worker actors for pool capacity
-		for i := 1; i < m.poolSize; i++ {
+		for i := 0; i < m.poolSize; i++ {
 			actorName := fmt.Sprintf("%s-%d", m.name, i)
 			bridge := NewBridgeActor(m.name, actorName, m.handlers, m.stepRegistry, m.app, m.logger)
-			if _, err := sys.Spawn(ctx, actorName, bridge); err != nil {
+			pid, err := sys.Spawn(ctx, actorName, bridge, spawnOpts...)
+			if err != nil {
 				return fmt.Errorf("actor.pool %q: failed to spawn actor %q: %w", m.name, actorName, err)
 			}
+			m.pids = append(m.pids, pid)
 		}
 		if m.logger != nil {
-			m.logger.Info("permanent actor pool started", "pool", m.name, "size", m.poolSize)
+			m.logger.Info("permanent actor pool started", "pool", m.name, "size", m.poolSize, "routing", m.routing)
 		}
 	}
 
@@ -195,6 +180,40 @@ func (m *ActorPoolModule) Start(ctx context.Context) error {
 // Stop is a no-op — actors are stopped when the ActorSystem shuts down.
 func (m *ActorPoolModule) Stop(_ context.Context) error {
 	return nil
+}
+
+// SelectActor picks one or more PIDs from the permanent pool based on the routing strategy.
+// For broadcast, returns all PIDs. For other strategies, returns a single PID.
+// The msg parameter is used for sticky routing to extract the routing key.
+func (m *ActorPoolModule) SelectActor(msg *ActorMessage) ([]*actor.PID, error) {
+	if len(m.pids) == 0 {
+		return nil, fmt.Errorf("actor.pool %q: no actors available", m.name)
+	}
+
+	switch m.routing {
+	case "broadcast":
+		return m.pids, nil
+
+	case "random":
+		idx := rand.Intn(len(m.pids)) //nolint:gosec
+		return []*actor.PID{m.pids[idx]}, nil
+
+	case "sticky":
+		key := ""
+		if msg != nil && msg.Payload != nil && m.routingKey != "" {
+			if v, ok := msg.Payload[m.routingKey]; ok {
+				key = fmt.Sprintf("%v", v)
+			}
+		}
+		h := fnv.New32a()
+		h.Write([]byte(key))
+		idx := int(h.Sum32()) % len(m.pids)
+		return []*actor.PID{m.pids[idx]}, nil
+
+	default: // round-robin
+		idx := m.rrCounter.Add(1) - 1
+		return []*actor.PID{m.pids[idx%uint64(len(m.pids))]}, nil
+	}
 }
 
 // SetHandlers sets the message receive handlers (called by the actor workflow handler).

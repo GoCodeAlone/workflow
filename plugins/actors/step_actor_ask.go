@@ -113,7 +113,12 @@ func (s *ActorAskStep) Execute(ctx context.Context, pc *module.PipelineContext) 
 		return nil, fmt.Errorf("step.actor_ask %q: 'identity' is required for auto-managed pool %q", s.name, s.pool)
 	}
 
-	// Use Grain API for auto-managed pools; regular actor for permanent pools
+	// Broadcast routing is incompatible with Ask (which expects a single response)
+	if pool.Mode() == "permanent" && pool.Routing() == "broadcast" {
+		return nil, fmt.Errorf("step.actor_ask %q: broadcast routing is not supported for ask (use step.actor_send instead)", s.name)
+	}
+
+	// Use Grain API for auto-managed pools; routed actor selection for permanent pools
 	if pool.Mode() == "auto-managed" && identity != "" {
 		grainID, err := pool.GetGrainIdentity(ctx, identity)
 		if err != nil {
@@ -124,11 +129,11 @@ func (s *ActorAskStep) Execute(ctx context.Context, pc *module.PipelineContext) 
 			return nil, fmt.Errorf("step.actor_ask %q: ask failed: %w", s.name, err)
 		}
 	} else {
-		pid, err := sys.ActorOf(ctx, s.pool)
+		pids, err := pool.SelectActor(msg)
 		if err != nil {
-			return nil, fmt.Errorf("step.actor_ask %q: actor pool %q not found in system: %w", s.name, s.pool, err)
+			return nil, fmt.Errorf("step.actor_ask %q: %w", s.name, err)
 		}
-		resp, err = actor.Ask(ctx, pid, msg, s.timeout)
+		resp, err = actor.Ask(ctx, pids[0], msg, s.timeout)
 		if err != nil {
 			return nil, fmt.Errorf("step.actor_ask %q: ask failed: %w", s.name, err)
 		}

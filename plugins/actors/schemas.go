@@ -5,20 +5,12 @@ import "github.com/GoCodeAlone/workflow/schema"
 func actorSystemSchema() *schema.ModuleSchema {
 	return &schema.ModuleSchema{
 		Type:     "actor.system",
-		Label:    "Actor Cluster",
+		Label:    "Actor System",
 		Category: "actor",
-		Description: "Distributed actor runtime that coordinates stateful services across nodes. " +
+		Description: "Actor runtime for stateful, message-driven services. " +
 			"Actors are lightweight, isolated units of computation that communicate through messages. " +
-			"Each actor processes one message at a time, eliminating concurrency bugs. " +
-			"In a cluster, actors are automatically placed on available nodes and relocated if a node fails.",
+			"Each actor processes one message at a time, eliminating concurrency bugs.",
 		ConfigFields: []schema.ConfigFieldDef{
-			{
-				Key:         "cluster",
-				Label:       "Cluster Config",
-				Type:        schema.FieldTypeJSON,
-				Description: "Optional: enable multi-node clustering. Omit for single-node local mode.",
-				Group:       "Clustering",
-			},
 			{
 				Key:          "shutdownTimeout",
 				Label:        "Shutdown Timeout",
@@ -33,20 +25,6 @@ func actorSystemSchema() *schema.ModuleSchema {
 				Type:        schema.FieldTypeJSON,
 				Description: "What happens when any actor in this system crashes. Applied to pools that don't set their own recovery policy.",
 				Group:       "Fault Tolerance",
-			},
-			{
-				Key:          "metrics",
-				Label:        "Enable Metrics",
-				Type:         schema.FieldTypeBool,
-				Description:  "Expose actor system metrics via OpenTelemetry",
-				DefaultValue: false,
-			},
-			{
-				Key:          "tracing",
-				Label:        "Enable Tracing",
-				Type:         schema.FieldTypeBool,
-				Description:  "Propagate trace context through actor messages for distributed tracing",
-				DefaultValue: false,
 			},
 		},
 		DefaultConfig: map[string]any{
@@ -117,33 +95,11 @@ func actorPoolSchema() *schema.ModuleSchema {
 				Description: "What happens when an actor crashes. Overrides the system default.",
 				Group:       "Fault Tolerance",
 			},
-			{
-				Key:          "placement",
-				Label:        "Node Selection",
-				Type:         schema.FieldTypeSelect,
-				Description:  "Which cluster node actors are placed on (cluster mode only)",
-				Options:      []string{"round-robin", "random", "local", "least-load"},
-				DefaultValue: "round-robin",
-			},
-			{
-				Key:         "targetRoles",
-				Label:       "Target Roles",
-				Type:        schema.FieldTypeArray,
-				Description: "Only place actors on cluster nodes with these roles (cluster mode only)",
-			},
-			{
-				Key:          "failover",
-				Label:        "Failover",
-				Type:         schema.FieldTypeBool,
-				Description:  "Automatically relocate actors to healthy nodes when their node fails (cluster mode only)",
-				DefaultValue: true,
-			},
 		},
 		DefaultConfig: map[string]any{
 			"mode":        "auto-managed",
 			"idleTimeout": "10m",
 			"routing":     "round-robin",
-			"failover":    true,
 		},
 	}
 }

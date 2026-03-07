@@ -1,6 +1,6 @@
 // Package actors provides actor model support for the workflow engine via goakt v4.
-// It enables stateful long-lived entities, distributed execution, structured fault
-// recovery, and message-driven workflows alongside existing pipeline-based workflows.
+// It enables stateful long-lived entities, structured fault recovery, and
+// message-driven workflows alongside existing pipeline-based workflows.
 package actors
 
 import (
@@ -32,7 +32,7 @@ func New() *Plugin {
 			BaseNativePlugin: plugin.BaseNativePlugin{
 				PluginName:        "actors",
 				PluginVersion:     "1.0.0",
-				PluginDescription: "Actor model support with goakt v4 — stateful entities, distributed execution, and fault-tolerant message-driven workflows",
+				PluginDescription: "Actor model support with goakt v4 — stateful entities, fault-tolerant message-driven workflows",
 			},
 			Manifest: plugin.PluginManifest{
 				Name:        "actors",
@@ -75,7 +75,7 @@ func (p *Plugin) Capabilities() []capability.Contract {
 	return []capability.Contract{
 		{
 			Name:        "actor-system",
-			Description: "Actor model runtime: stateful actors, distributed execution, fault-tolerant message-driven workflows",
+			Description: "Actor model runtime: stateful actors, fault-tolerant message-driven workflows",
 		},
 	}
 }
