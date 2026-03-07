@@ -105,19 +105,21 @@ func (s *ActorAskStep) Execute(ctx context.Context, pc *module.PipelineContext) 
 	msg := &ActorMessage{Type: msgType, Payload: payload}
 	var resp any
 
+	// Use identity-based actor spawn for auto-managed pools; pool-level actor for permanent
 	if pool.Mode() == "auto-managed" && identity != "" {
-		grainID, err := sys.GrainIdentity(ctx, identity, func(_ context.Context) (actor.Grain, error) {
-			return nil, fmt.Errorf("grain activation not yet implemented")
-		})
+		pid, err := pool.GetOrSpawnActor(ctx, identity)
 		if err != nil {
-			return nil, fmt.Errorf("step.actor_ask %q: failed to get grain %q: %w", s.name, identity, err)
+			return nil, fmt.Errorf("step.actor_ask %q: failed to get actor %q: %w", s.name, identity, err)
 		}
-		resp, err = sys.AskGrain(ctx, grainID, msg, s.timeout)
+		resp, err = actor.Ask(ctx, pid, msg, s.timeout)
 		if err != nil {
 			return nil, fmt.Errorf("step.actor_ask %q: ask failed: %w", s.name, err)
 		}
 	} else {
-		pid, err := sys.ActorOf(ctx, s.pool)
+		if pool.system == nil || pool.system.ActorSystem() == nil {
+			return nil, fmt.Errorf("step.actor_ask %q: actor system not started", s.name)
+		}
+		pid, err := pool.system.ActorSystem().ActorOf(ctx, s.pool)
 		if err != nil {
 			return nil, fmt.Errorf("step.actor_ask %q: actor pool %q not found in system: %w", s.name, s.pool, err)
 		}
