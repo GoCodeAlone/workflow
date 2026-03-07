@@ -1,5 +1,7 @@
 package actors
 
+import "github.com/GoCodeAlone/workflow/module"
+
 // ActorMessage is the standard message envelope for actor communication.
 // All messages sent to bridge actors use this type.
 type ActorMessage struct {
@@ -15,4 +17,8 @@ type HandlerPipeline struct {
 	Description string
 	// Steps is an ordered list of step configs (each is a map with "type" and other fields).
 	Steps []map[string]any
+	// BuiltSteps holds pre-built step instances (same length as Steps).
+	// Built once during pool initialization to avoid concurrent map writes
+	// when multiple actors share the same handler config.
+	BuiltSteps []module.PipelineStep
 }

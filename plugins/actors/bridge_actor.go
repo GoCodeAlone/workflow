@@ -138,36 +138,34 @@ func executePipeline(ctx context.Context, msg *ActorMessage, poolName, identity 
 	})
 
 	var lastOutput map[string]any
-	for _, stepCfg := range handler.Steps {
+	for i, stepCfg := range handler.Steps {
 		stepType, _ := stepCfg["type"].(string)
 		stepName, _ := stepCfg["name"].(string)
-		config, _ := stepCfg["config"].(map[string]any)
 
 		if stepType == "" || stepName == "" {
 			return nil, fmt.Errorf("handler %q: step missing 'type' or 'name'", msg.Type)
 		}
 
-		// Reuse cached step instance if available (avoids rebuilding per message)
+		// Use pre-built step instance if available (built during pool init).
+		// Fall back to building on-demand for tests or when registry is nil.
 		var step module.PipelineStep
-		if cached, ok := stepCfg["_step"].(module.PipelineStep); ok {
-			step = cached
+		if i < len(handler.BuiltSteps) && handler.BuiltSteps[i] != nil {
+			step = handler.BuiltSteps[i]
 		} else {
+			config, _ := stepCfg["config"].(map[string]any)
 			var err error
-			if registry != nil {
+			switch {
+			case registry != nil:
 				step, err = registry.Create(stepType, stepName, config, app)
-				if err != nil {
-					return nil, fmt.Errorf("handler %q step %q: %w", msg.Type, stepName, err)
-				}
-			} else if stepType == "step.set" {
+			case stepType == "step.set":
 				factory := module.NewSetStepFactory()
 				step, err = factory(stepName, config, nil)
-				if err != nil {
-					return nil, fmt.Errorf("handler %q step %q: %w", msg.Type, stepName, err)
-				}
-			} else {
+			default:
 				return nil, fmt.Errorf("handler %q step %q: no step registry available for type %q", msg.Type, stepName, stepType)
 			}
-			stepCfg["_step"] = step
+			if err != nil {
+				return nil, fmt.Errorf("handler %q step %q: %w", msg.Type, stepName, err)
+			}
 		}
 
 		result, err := step.Execute(ctx, pc)
@@ -185,10 +183,8 @@ func executePipeline(ctx context.Context, msg *ActorMessage, poolName, identity 
 		}
 	}
 
-	if lastOutput != nil {
-		for k, v := range lastOutput {
-			state[k] = v
-		}
+	for k, v := range lastOutput {
+		state[k] = v
 	}
 
 	if lastOutput == nil {

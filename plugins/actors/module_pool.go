@@ -144,11 +144,42 @@ func (m *ActorPoolModule) Init(app modular.Application) error {
 	return app.RegisterService(fmt.Sprintf("actor-pool:%s", m.name), m)
 }
 
+// preBuildSteps creates step instances for all handler pipelines upfront.
+// This must be called before spawning actors so that the shared handler configs
+// are fully initialized and no concurrent map writes occur at runtime.
+func (m *ActorPoolModule) preBuildSteps() {
+	for _, handler := range m.handlers {
+		handler.BuiltSteps = make([]module.PipelineStep, len(handler.Steps))
+		for i, stepCfg := range handler.Steps {
+			stepType, _ := stepCfg["type"].(string)
+			stepName, _ := stepCfg["name"].(string)
+			config, _ := stepCfg["config"].(map[string]any)
+			if stepType == "" || stepName == "" {
+				continue
+			}
+			var step module.PipelineStep
+			var err error
+			if m.stepRegistry != nil {
+				step, err = m.stepRegistry.Create(stepType, stepName, config, m.app)
+			} else if stepType == "step.set" {
+				factory := module.NewSetStepFactory()
+				step, err = factory(stepName, config, nil)
+			}
+			if err == nil && step != nil {
+				handler.BuiltSteps[i] = step
+			}
+		}
+	}
+}
+
 // Start spawns actors in the pool.
 func (m *ActorPoolModule) Start(ctx context.Context) error {
 	if m.system == nil || m.system.ActorSystem() == nil {
 		return fmt.Errorf("actor.pool %q: actor system not started", m.name)
 	}
+
+	// Pre-build step instances before spawning actors to avoid concurrent writes
+	m.preBuildSteps()
 
 	if m.mode == "permanent" {
 		sys := m.system.ActorSystem()

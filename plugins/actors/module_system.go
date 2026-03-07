@@ -144,9 +144,13 @@ func parseRecoveryConfig(cfg map[string]any) (*supervisor.Supervisor, error) {
 	if v, ok := cfg["maxRetries"]; ok {
 		switch val := v.(type) {
 		case int:
-			maxRetries = uint32(val)
+			if val >= 0 {
+				maxRetries = uint32(val) //nolint:gosec // validated non-negative
+			}
 		case float64:
-			maxRetries = uint32(val)
+			if val >= 0 {
+				maxRetries = uint32(val) //nolint:gosec // validated non-negative
+			}
 		}
 	}
 	retryWindow := 30 * time.Second
