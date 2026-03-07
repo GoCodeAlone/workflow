@@ -165,8 +165,13 @@ func resolveDottedPath(data any, path string) (any, error) {
 }
 
 // normalizeForJQ converts an arbitrary Go value into JSON-compatible types
-// that gojq can process. It does this via JSON marshal/unmarshal round-trip.
+// that gojq can process. When the value is already composed of JSON-compatible
+// types (map[string]any, []any, string, float64, bool, nil) it is returned
+// as-is to avoid an expensive JSON marshal/unmarshal round-trip.
 func normalizeForJQ(v any) (any, error) {
+	if isJSONCompatible(v) {
+		return v, nil
+	}
 	b, err := json.Marshal(v)
 	if err != nil {
 		return nil, err
@@ -176,4 +181,31 @@ func normalizeForJQ(v any) (any, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+// isJSONCompatible reports whether v consists entirely of types that gojq can
+// handle natively: nil, bool, float64, int, string, []any, and map[string]any.
+// This allows normalizeForJQ to skip the costly JSON round-trip for the common
+// case where pipeline data is already in the right shape.
+func isJSONCompatible(v any) bool {
+	switch val := v.(type) {
+	case nil, bool, float64, int, string:
+		return true
+	case map[string]any:
+		for _, elem := range val {
+			if !isJSONCompatible(elem) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		for _, elem := range val {
+			if !isJSONCompatible(elem) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }

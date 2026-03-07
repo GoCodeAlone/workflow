@@ -50,3 +50,9 @@ module/ui_dist/*
 !module/ui_dist/.gitkeep
 *.db-shm
 *.db-wal
+
+# Benchmark output files
+baseline-bench.txt
+current-bench.txt
+benchmark-results.txt
+benchstat-output.txt
