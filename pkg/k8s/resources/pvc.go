@@ -34,7 +34,7 @@ func NewPVC(opts PVCOpts) *corev1.PersistentVolumeClaim {
 		ObjectMeta: metav1.ObjectMeta{Name: opts.Name, Namespace: opts.Namespace, Labels: opts.Labels},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: accessModes,
-			Resources: corev1.ResourceRequirements{
+			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: resource.MustParse(storageSize),
 				},

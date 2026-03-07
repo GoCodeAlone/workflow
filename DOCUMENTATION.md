@@ -157,6 +157,8 @@ flowchart TD
 | `step.ai_complete` | AI text completion using a configured provider |
 | `step.ai_classify` | AI text classification into named categories |
 | `step.ai_extract` | AI structured data extraction using tool use or prompt-based parsing |
+| `step.actor_send` | Sends a fire-and-forget message to an actor pool (Tell) |
+| `step.actor_ask` | Sends a request-response message to an actor and returns the response (Ask) |
 
 ### CI/CD Pipeline Steps
 | Type | Description |
@@ -300,6 +302,12 @@ value: '{{ index .steps "parse-request" "path_params" "id" }}'
 | `storage.gcs` | Google Cloud Storage |
 | `storage.local` | Local filesystem storage |
 | `storage.sqlite` | SQLite storage |
+
+### Actor Model
+| Type | Description |
+|------|-------------|
+| `actor.system` | goakt v4 actor system — manages actor lifecycle and fault recovery |
+| `actor.pool` | Defines a group of actors with shared behavior, routing strategy, and recovery policy |
 
 ### Scheduling
 | Type | Description |
@@ -891,6 +899,7 @@ Workflows are configured in YAML and dispatched by the engine through registered
 | **State Machine** | State definitions, transitions, hooks, auto-transitions |
 | **Scheduler** | Cron-based recurring task execution |
 | **Integration** | External service composition and orchestration |
+| **Actors** | Message-driven stateful actor pools with per-message handler pipelines (goakt v4) |
 
 ## Trigger Types
 

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/plugin"
+	pluginactors "github.com/GoCodeAlone/workflow/plugins/actors"
 	pluginai "github.com/GoCodeAlone/workflow/plugins/ai"
 	pluginapi "github.com/GoCodeAlone/workflow/plugins/api"
 	pluginauth "github.com/GoCodeAlone/workflow/plugins/auth"
@@ -45,6 +46,7 @@ func allPlugins() []plugin.EnginePlugin {
 		pluginplatform.New(),
 		pluginlicense.New(),
 		pluginopenapi.New(),
+		pluginactors.New(),
 	}
 }
 
