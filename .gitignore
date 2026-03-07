@@ -50,3 +50,4 @@ module/ui_dist/*
 !module/ui_dist/.gitkeep
 *.db-shm
 *.db-wal
+.worktrees

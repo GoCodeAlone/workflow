@@ -74,6 +74,7 @@ func TestStepFactories(t *testing.T) {
 		"step.http_proxy",
 		"step.hash",
 		"step.regex_match",
+		"step.parallel",
 	}
 
 	for _, stepType := range expectedSteps {

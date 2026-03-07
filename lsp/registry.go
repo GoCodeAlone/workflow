@@ -152,5 +152,15 @@ func templateFunctions() []string {
 		"length",
 		"coalesce",
 		"config",
+		"sum",
+		"pluck",
+		"flatten",
+		"unique",
+		"groupBy",
+		"sortBy",
+		"first",
+		"last",
+		"min",
+		"max",
 	}
 }

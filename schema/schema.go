@@ -234,6 +234,7 @@ var coreModuleTypes = []string{
 	"step.jq",
 	"step.json_response",
 	"step.log",
+	"step.parallel",
 	"step.platform_apply",
 	"step.platform_destroy",
 	"step.platform_plan",

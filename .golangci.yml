@@ -27,13 +27,13 @@ linters:
         - G104 # Duplicates errcheck
         - G304 # File inclusion from variable - expected for config/dynamic loading
         - G704 # SSRF via taint analysis - URLs from admin config are intentional
-        - G118 # Goroutine context: background goroutines are intentional for long-lived tasks
-        - G120 # Form data size limit: internal admin APIs with trusted callers
-        - G122 # Walk/WalkDir race: application-controlled paths, not attacker-influenced
-        - G701 # SQL injection taint: all dynamic queries use parameterized args
-        - G703 # Path traversal taint: paths are application-constructed, not raw user input
-        - G705 # XSS taint: response bodies are intentionally written from resolved templates
-        - G706 # Log injection taint: log messages are from trusted application context
+        - G118 # Context cancel/goroutine patterns - cancel is returned to caller or used in signal handler; background goroutines are intentional
+        - G120 # Form data size - ParseMultipartForm already sets explicit limits; FormValue after that is already bounded
+        - G122 # WalkDir/Walk TOCTOU - OS-provided walk paths; acceptable for CI/CD pipeline tooling
+        - G701 # SQL injection via taint - queries are admin-configured workflow step definitions, not user input
+        - G703 # Path traversal via taint - paths come from admin config or are internal CI/CD pipeline paths, not user input
+        - G705 # XSS via taint - raw-response/static-file steps write admin-configured content by design
+        - G706 # Log injection via taint - step.log and publish steps are designed to log arbitrary admin-configured content
     gocritic:
       enabled-tags:
         - diagnostic

@@ -74,17 +74,17 @@ const (
 
 // PositionContext describes what context the cursor is in within the document.
 type PositionContext struct {
-	Section          SectionKind
-	ModuleType       string // if inside a modules[] item config, the type value
-	StepType         string // if inside a pipeline step config, the step type value
-	FieldName        string // the field name at the cursor
-	InTemplate       bool   // cursor is inside {{ }}
-	DependsOn        bool   // cursor is in a dependsOn array value
-	PipelineName     string // name of the pipeline containing the cursor (if any)
-	CurrentStepName  string // name of the step containing the cursor (if any)
-	TemplatePath     *TemplateExprPath // parsed template expression at cursor, if InTemplate
-	Line             int
-	Character        int
+	Section         SectionKind
+	ModuleType      string            // if inside a modules[] item config, the type value
+	StepType        string            // if inside a pipeline step config, the step type value
+	FieldName       string            // the field name at the cursor
+	InTemplate      bool              // cursor is inside {{ }}
+	DependsOn       bool              // cursor is in a dependsOn array value
+	PipelineName    string            // name of the pipeline containing the cursor (if any)
+	CurrentStepName string            // name of the step containing the cursor (if any)
+	TemplatePath    *TemplateExprPath // parsed template expression at cursor, if InTemplate
+	Line            int
+	Character       int
 }
 
 // ContextAt analyses the document content at the given (zero-based) line and
