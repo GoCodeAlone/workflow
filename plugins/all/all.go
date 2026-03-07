@@ -22,6 +22,7 @@ package all
 
 import (
 	"github.com/GoCodeAlone/workflow/plugin"
+	pluginactors "github.com/GoCodeAlone/workflow/plugins/actors"
 	pluginai "github.com/GoCodeAlone/workflow/plugins/ai"
 	pluginapi "github.com/GoCodeAlone/workflow/plugins/api"
 	pluginauth "github.com/GoCodeAlone/workflow/plugins/auth"
@@ -89,6 +90,7 @@ func DefaultPlugins() []plugin.EnginePlugin {
 		pluginpolicy.New(),
 		plugink8s.New(),
 		pluginmarketplace.New(),
+		pluginactors.New(),
 	}
 }
 
