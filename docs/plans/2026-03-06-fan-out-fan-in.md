@@ -1,7 +1,5 @@
 # Fan-Out / Fan-In / Map-Reduce Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add parallel execution capabilities (`step.parallel`, concurrent `step.foreach`) and collection template functions (`sum`, `pluck`, `groupBy`, etc.) to the workflow engine.
 
 **Architecture:** Concurrency is opt-in at the step level — the pipeline executor stays sequential. `step.parallel` spawns goroutines for fixed branches; `step.foreach` gets an optional worker pool. Each goroutine operates on a deep-copied PipelineContext, eliminating shared mutable state. 10 collection template functions are added for inline aggregation.

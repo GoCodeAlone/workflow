@@ -1,6 +1,7 @@
 package module
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -1096,5 +1097,67 @@ func TestTemplateEngine_FuncMinMax(t *testing.T) {
 	}
 	if got != "10.5" {
 		t.Fatalf("expected 10.5, got %q", got)
+	}
+}
+
+func TestTemplateEngine_FuncSortByStrings(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{
+		"items": []any{
+			map[string]any{"name": "Charlie"},
+			map[string]any{"name": "Alice"},
+			map[string]any{"name": "Bob"},
+		},
+	}, nil)
+	got, err := te.Resolve(`{{ json (pluck (sortBy .items "name") "name") }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `["Alice","Bob","Charlie"]` {
+		t.Fatalf("expected lexicographic sort, got %q", got)
+	}
+}
+
+func TestTemplateEngine_FuncSumInt64Precision(t *testing.T) {
+	// Verify that summing large int64 values does not lose precision through float64.
+	// float64 can only represent integers exactly up to 2^53 (9007199254740992).
+	te := NewTemplateEngine()
+	large := int64(9007199254740993) // 2^53 + 1 — not representable as float64
+	pc := NewPipelineContext(map[string]any{
+		"nums": []any{large, int64(1)},
+	}, nil)
+	got, err := te.Resolve(`{{ sum .nums }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := fmt.Sprintf("%d", large+1)
+	if got != expected {
+		t.Fatalf("expected %s, got %q (float64 precision loss?)", expected, got)
+	}
+}
+
+func TestTemplateEngine_FuncMinMaxInt64Precision(t *testing.T) {
+	// Verify that min/max over large int64 values do not lose precision via float64.
+	te := NewTemplateEngine()
+	large := int64(9007199254740993) // 2^53 + 1
+	small := int64(9007199254740991) // 2^53 - 1
+	pc := NewPipelineContext(map[string]any{
+		"nums": []any{large, small},
+	}, nil)
+
+	got, err := te.Resolve(`{{ min .nums }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != fmt.Sprintf("%d", small) {
+		t.Fatalf("min: expected %d, got %q", small, got)
+	}
+
+	got, err = te.Resolve(`{{ max .nums }}`, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != fmt.Sprintf("%d", large) {
+		t.Fatalf("max: expected %d, got %q", large, got)
 	}
 }

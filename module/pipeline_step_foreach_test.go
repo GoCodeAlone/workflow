@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/CrisisTextLine/modular"
 )
@@ -17,6 +19,24 @@ type foreachFailStep struct{ stepName string }
 func (s *foreachFailStep) Name() string { return s.stepName }
 func (s *foreachFailStep) Execute(_ context.Context, _ *PipelineContext) (*StepResult, error) {
 	return nil, errors.New("step failed")
+}
+
+// foreachSlowStep is a PipelineStep that sleeps for a fixed duration then succeeds.
+// It is used in timing-based concurrency tests to verify that items actually run
+// in parallel rather than sequentially.
+type foreachSlowStep struct {
+	stepName string
+	delay    time.Duration
+}
+
+func (s *foreachSlowStep) Name() string { return s.stepName }
+func (s *foreachSlowStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
+	select {
+	case <-time.After(s.delay):
+		return &StepResult{Output: map[string]any{"done": true}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // buildTestForEachStep creates a ForEachStep with a fresh StepRegistry for testing.
@@ -545,45 +565,58 @@ func TestForEachStep_AppPassedToSubStep(t *testing.T) {
 }
 
 func TestForEachStep_ConcurrentExecution(t *testing.T) {
-	// 5 items each taking 100ms, concurrency=5 — should complete in ~100ms not 500ms
+	// 5 items each taking 50ms, concurrency=5 — should complete in ~50ms not 250ms.
+	// We use a custom slow step that sleeps to ensure actual concurrency is tested.
+	const itemDelay = 50 * time.Millisecond
+	const numItems = 5
+
 	registry := NewStepRegistry()
-	registry.Register("step.set", NewSetStepFactory())
+	registry.Register("step.slow", func(name string, cfg map[string]any, app modular.Application) (PipelineStep, error) {
+		return &foreachSlowStep{stepName: name, delay: itemDelay}, nil
+	})
 
 	factory := NewForEachStepFactory(func() *StepRegistry { return registry })
 	step, err := factory("par-foreach", map[string]any{
 		"collection":  "items",
 		"item_var":    "item",
-		"concurrency": 5,
+		"concurrency": numItems, // full concurrency — all items run in parallel
 		"step": map[string]any{
 			"name": "process",
-			"type": "step.set",
-			"values": map[string]any{
-				"processed": "true",
-			},
+			"type": "step.slow",
 		},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	items := make([]any, 5)
+	items := make([]any, numItems)
 	for i := range items {
 		items[i] = map[string]any{"id": i}
 	}
 	pc := NewPipelineContext(map[string]any{"items": items}, nil)
 
+	start := time.Now()
 	result, err := step.Execute(context.Background(), pc)
+	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	results := result.Output["results"].([]any)
-	if len(results) != 5 {
-		t.Fatalf("expected 5 results, got %d", len(results))
+	if len(results) != numItems {
+		t.Fatalf("expected %d results, got %d", numItems, len(results))
 	}
 	count := result.Output["count"]
-	if count != 5 {
-		t.Fatalf("expected count=5, got %v", count)
+	if count != numItems {
+		t.Fatalf("expected count=%d, got %v", numItems, count)
+	}
+
+	// With full concurrency the wall-clock time should be roughly one item's delay.
+	// Allow 3× headroom for slow CI environments; reject if it took as long as sequential.
+	maxExpected := itemDelay * 3
+	if elapsed > time.Duration(numItems)*itemDelay {
+		t.Fatalf("concurrent execution took %v; expected <%v (sequential would be %v)",
+			elapsed, maxExpected, time.Duration(numItems)*itemDelay)
 	}
 }
 
@@ -706,8 +739,8 @@ func TestForEachStep_ConcurrencyZeroIsSequential(t *testing.T) {
 		"item_var":    "item",
 		"concurrency": 0,
 		"step": map[string]any{
-			"name": "s",
-			"type": "step.set",
+			"name":   "s",
+			"type":   "step.set",
 			"values": map[string]any{"ok": "true"},
 		},
 	}, nil)
@@ -753,5 +786,72 @@ func TestForEachStep_ForeachMapNotSetWhenConflict(t *testing.T) {
 	_, execErr := step.Execute(context.Background(), pc)
 	if execErr != nil {
 		t.Fatalf("execute error: %v", execErr)
+	}
+}
+
+func TestForEachStep_ConcurrentFailFastStopsEarly(t *testing.T) {
+	// With fail_fast and slow remaining items, context cancellation should prevent
+	// the producer from launching unnecessary goroutines after the first error.
+	const itemDelay = 100 * time.Millisecond
+	registry := NewStepRegistry()
+	// first item fails immediately; remaining items sleep
+	callCount := int32(0)
+	registry.Register("step.slow_or_fail", func(name string, cfg map[string]any, app modular.Application) (PipelineStep, error) {
+		return &foreachSlowOrFailStep{stepName: name, delay: itemDelay, callCount: &callCount}, nil
+	})
+
+	factory := NewForEachStepFactory(func() *StepRegistry { return registry })
+	step, err := factory("ff-early-stop", map[string]any{
+		"collection":     "items",
+		"item_var":       "item",
+		"concurrency":    1, // 1 worker so cancellation stops the queue
+		"error_strategy": "fail_fast",
+		"step": map[string]any{
+			"name": "work",
+			"type": "step.slow_or_fail",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 10 items; with concurrency=1 the producer should stop after the first failure.
+	items := make([]any, 10)
+	for i := range items {
+		items[i] = map[string]any{"id": i}
+	}
+	pc := NewPipelineContext(map[string]any{"items": items}, nil)
+
+	start := time.Now()
+	_, err = step.Execute(context.Background(), pc)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected error with fail_fast")
+	}
+	// If context cancellation works, we should not execute all 10 slow items.
+	// Sequential execution of all 10 would take ~1s; early stop should be much faster.
+	if elapsed >= time.Duration(len(items))*itemDelay {
+		t.Fatalf("fail_fast did not stop early: took %v (expected less than %v)", elapsed, time.Duration(len(items))*itemDelay)
+	}
+}
+
+// foreachSlowOrFailStep fails on the first call and sleeps on subsequent calls.
+type foreachSlowOrFailStep struct {
+	stepName  string
+	delay     time.Duration
+	callCount *int32
+}
+
+func (s *foreachSlowOrFailStep) Name() string { return s.stepName }
+func (s *foreachSlowOrFailStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
+	n := atomic.AddInt32(s.callCount, 1)
+	if n == 1 {
+		return nil, fmt.Errorf("first item fails immediately")
+	}
+	select {
+	case <-time.After(s.delay):
+		return &StepResult{Output: map[string]any{"done": true}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }

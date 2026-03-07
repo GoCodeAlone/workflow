@@ -54,6 +54,84 @@ func isIntType(v any) bool {
 	}
 }
 
+// toInt64Direct converts integer types to int64 without a float64 intermediate.
+// This preserves precision for large int64 values (>2^53) that float64 cannot
+// represent exactly. Returns 0 for non-integer types.
+func toInt64Direct(v any) int64 {
+	switch n := v.(type) {
+	case int:
+		return int64(n)
+	case int8:
+		return int64(n)
+	case int16:
+		return int64(n)
+	case int32:
+		return int64(n)
+	case int64:
+		return n
+	default:
+		return 0
+	}
+}
+
+// compareValues compares two arbitrary values for sorting. Returns -1, 0, or 1.
+// Numeric types (including numeric strings) sort before non-numeric strings.
+// Nil values sort last. Other types are compared as their string representation.
+func compareValues(a, b any) int {
+	rankA, numA, strA := classifyForSort(a)
+	rankB, numB, strB := classifyForSort(b)
+	if rankA != rankB {
+		if rankA < rankB {
+			return -1
+		}
+		return 1
+	}
+	switch rankA {
+	case 0: // numeric
+		if numA < numB {
+			return -1
+		}
+		if numA > numB {
+			return 1
+		}
+		return 0
+	case 1: // string
+		if strA < strB {
+			return -1
+		}
+		if strA > strB {
+			return 1
+		}
+		return 0
+	default: // nil — keep original order (stable sort)
+		return 0
+	}
+}
+
+// classifyForSort returns a rank and comparable value for a sort key:
+//
+//	rank 0: numeric (numbers and numeric strings), compared by numeric value
+//	rank 1: non-numeric strings and other types, compared lexicographically
+//	rank 2: nil values, sorted last
+func classifyForSort(v any) (rank int, num float64, str string) {
+	if v == nil {
+		return 2, 0, ""
+	}
+	switch vv := v.(type) {
+	case string:
+		if f, err := strconv.ParseFloat(vv, 64); err == nil {
+			return 0, f, ""
+		}
+		return 1, 0, vv
+	case int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64:
+		return 0, toFloat64(v), ""
+	default:
+		return 1, 0, fmt.Sprintf("%v", vv)
+	}
+}
+
 // TemplateEngine resolves {{ .field }} expressions against a PipelineContext.
 type TemplateEngine struct{}
 
@@ -550,19 +628,29 @@ func templateFuncMap() template.FuncMap {
 			if items == nil {
 				return float64(0)
 			}
-			total := float64(0)
+			// Use an int64 accumulator when all values are integer types to avoid
+			// float64 precision loss for large integers (>2^53).
 			allInt := true
+			var intTotal int64
+			var floatTotal float64
 			for _, item := range items {
 				v := extractField(item, keys)
-				if !isIntType(v) {
-					allInt = false
+				if allInt {
+					if isIntType(v) {
+						intTotal += toInt64Direct(v)
+					} else {
+						// Switch to float64 mode, carrying over the int accumulator.
+						allInt = false
+						floatTotal = float64(intTotal) + toFloat64(v)
+					}
+				} else {
+					floatTotal += toFloat64(v)
 				}
-				total += toFloat64(v)
 			}
 			if allInt {
-				return int64(total)
+				return intTotal
 			}
-			return total
+			return floatTotal
 		},
 		// pluck extracts a single field from each map in a slice. O(n).
 		// Usage: {{ pluck .users "name" }}
@@ -633,7 +721,9 @@ func templateFuncMap() template.FuncMap {
 			return groups
 		},
 		// sortBy sorts a slice of maps by a key value ascending. O(n log n) stable sort.
-		// Usage: {{ sortBy .items "price" }}
+		// Supports numeric keys (sorted numerically), string keys (sorted lexicographically),
+		// and mixed types (numeric values sort before strings; nils sort last).
+		// Usage: {{ sortBy .items "price" }} or {{ sortBy .items "name" }}
 		"sortBy": func(slice any, key string) []any {
 			items := toAnySlice(slice)
 			if items == nil {
@@ -644,7 +734,7 @@ func templateFuncMap() template.FuncMap {
 			sort.SliceStable(sorted, func(i, j int) bool {
 				vi := extractField(sorted[i], []string{key})
 				vj := extractField(sorted[j], []string{key})
-				return toFloat64(vi) < toFloat64(vj)
+				return compareValues(vi, vj) < 0
 			})
 			return sorted
 		},
@@ -665,52 +755,88 @@ func templateFuncMap() template.FuncMap {
 			return items[len(items)-1]
 		},
 		// min returns the minimum numeric value in a slice. O(n) single pass.
+		// Uses int64 comparison when all values are integer types to avoid float64
+		// precision loss for large integers (>2^53).
 		// Usage: {{ min .nums }} or {{ min .items "price" }}
 		"min": func(slice any, keys ...string) any {
 			items := toAnySlice(slice)
 			if len(items) == 0 {
 				return nil
 			}
-			minVal := toFloat64(extractField(items[0], keys))
-			allInt := isIntType(extractField(items[0], keys))
+			first := extractField(items[0], keys)
+			allInt := isIntType(first)
+			intMin := toInt64Direct(first)
+			floatMin := toFloat64(first)
 			for _, item := range items[1:] {
 				v := extractField(item, keys)
-				f := toFloat64(v)
-				if !isIntType(v) {
-					allInt = false
-				}
-				if f < minVal {
-					minVal = f
+				if allInt {
+					if isIntType(v) {
+						n := toInt64Direct(v)
+						if n < intMin {
+							intMin = n
+						}
+					} else {
+						// Switch to float64 mode.
+						allInt = false
+						floatMin = float64(intMin)
+						f := toFloat64(v)
+						if f < floatMin {
+							floatMin = f
+						}
+					}
+				} else {
+					f := toFloat64(v)
+					if f < floatMin {
+						floatMin = f
+					}
 				}
 			}
 			if allInt {
-				return int64(minVal)
+				return intMin
 			}
-			return minVal
+			return floatMin
 		},
 		// max returns the maximum numeric value in a slice. O(n) single pass.
+		// Uses int64 comparison when all values are integer types to avoid float64
+		// precision loss for large integers (>2^53).
 		// Usage: {{ max .nums }} or {{ max .items "price" }}
 		"max": func(slice any, keys ...string) any {
 			items := toAnySlice(slice)
 			if len(items) == 0 {
 				return nil
 			}
-			maxVal := toFloat64(extractField(items[0], keys))
-			allInt := isIntType(extractField(items[0], keys))
+			first := extractField(items[0], keys)
+			allInt := isIntType(first)
+			intMax := toInt64Direct(first)
+			floatMax := toFloat64(first)
 			for _, item := range items[1:] {
 				v := extractField(item, keys)
-				f := toFloat64(v)
-				if !isIntType(v) {
-					allInt = false
-				}
-				if f > maxVal {
-					maxVal = f
+				if allInt {
+					if isIntType(v) {
+						n := toInt64Direct(v)
+						if n > intMax {
+							intMax = n
+						}
+					} else {
+						// Switch to float64 mode.
+						allInt = false
+						floatMax = float64(intMax)
+						f := toFloat64(v)
+						if f > floatMax {
+							floatMax = f
+						}
+					}
+				} else {
+					f := toFloat64(v)
+					if f > floatMax {
+						floatMax = f
+					}
 				}
 			}
 			if allInt {
-				return int64(maxVal)
+				return intMax
 			}
-			return maxVal
+			return floatMax
 		},
 	}
 }
