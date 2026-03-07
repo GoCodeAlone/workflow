@@ -51,3 +51,274 @@ workflows:
         description: "Update wfctl to the latest version (use --check to only check)"
       - name: mcp
         description: Start the MCP server over stdio for AI assistant integration
+
+# Each command is expressed as a workflow pipeline triggered by the CLI.
+# The pipeline delegates to the registered Go implementation via step.cli_invoke,
+# which looks up the command function from the CLICommandRegistry service.
+# Pre/post steps can be added here to intercept or augment any command without
+# changing Go code — e.g. audit logging, feature flags, telemetry.
+pipelines:
+  cmd-init:
+    trigger:
+      type: cli
+      config:
+        command: init
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: init
+
+  cmd-validate:
+    trigger:
+      type: cli
+      config:
+        command: validate
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: validate
+
+  cmd-inspect:
+    trigger:
+      type: cli
+      config:
+        command: inspect
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: inspect
+
+  cmd-run:
+    trigger:
+      type: cli
+      config:
+        command: run
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: run
+
+  cmd-plugin:
+    trigger:
+      type: cli
+      config:
+        command: plugin
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: plugin
+
+  cmd-pipeline:
+    trigger:
+      type: cli
+      config:
+        command: pipeline
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: pipeline
+
+  cmd-schema:
+    trigger:
+      type: cli
+      config:
+        command: schema
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: schema
+
+  cmd-snippets:
+    trigger:
+      type: cli
+      config:
+        command: snippets
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: snippets
+
+  cmd-manifest:
+    trigger:
+      type: cli
+      config:
+        command: manifest
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: manifest
+
+  cmd-migrate:
+    trigger:
+      type: cli
+      config:
+        command: migrate
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: migrate
+
+  cmd-build-ui:
+    trigger:
+      type: cli
+      config:
+        command: build-ui
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: build-ui
+
+  cmd-ui:
+    trigger:
+      type: cli
+      config:
+        command: ui
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: ui
+
+  cmd-publish:
+    trigger:
+      type: cli
+      config:
+        command: publish
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: publish
+
+  cmd-deploy:
+    trigger:
+      type: cli
+      config:
+        command: deploy
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: deploy
+
+  cmd-api:
+    trigger:
+      type: cli
+      config:
+        command: api
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: api
+
+  cmd-diff:
+    trigger:
+      type: cli
+      config:
+        command: diff
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: diff
+
+  cmd-template:
+    trigger:
+      type: cli
+      config:
+        command: template
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: template
+
+  cmd-contract:
+    trigger:
+      type: cli
+      config:
+        command: contract
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: contract
+
+  cmd-compat:
+    trigger:
+      type: cli
+      config:
+        command: compat
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: compat
+
+  cmd-generate:
+    trigger:
+      type: cli
+      config:
+        command: generate
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: generate
+
+  cmd-git:
+    trigger:
+      type: cli
+      config:
+        command: git
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: git
+
+  cmd-registry:
+    trigger:
+      type: cli
+      config:
+        command: registry
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: registry
+
+  cmd-update:
+    trigger:
+      type: cli
+      config:
+        command: update
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: update
+
+  cmd-mcp:
+    trigger:
+      type: cli
+      config:
+        command: mcp
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: mcp
+

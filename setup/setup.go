@@ -52,5 +52,6 @@ func DefaultTriggers() []interfaces.Trigger {
 		module.NewScheduleTrigger(),
 		module.NewEventBusTrigger(),
 		module.NewReconciliationTrigger(),
+		module.NewCLITrigger(),
 	}
 }

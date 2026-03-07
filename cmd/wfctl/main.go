@@ -3,25 +3,31 @@ package main
 import (
 	_ "embed"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"time"
 
+	workflow "github.com/GoCodeAlone/workflow"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/handlers"
+	"github.com/GoCodeAlone/workflow/module"
 )
 
-// wfctlConfigBytes is the embedded workflow config that defines wfctl's CLI
-// structure. The CLIWorkflowHandler reads this at startup to configure command
-// dispatch and build the usage message from the declarative YAML definition.
+// wfctlConfigBytes is the embedded workflow config that declares wfctl's CLI
+// structure and maps every command to a pipeline triggered via the "cli"
+// trigger type. The engine resolves these pipelines at startup so each command
+// flows through the workflow engine as a proper workflow primitive.
 //
 //go:embed wfctl.yaml
 var wfctlConfigBytes []byte
 
 var version = "dev"
 
-// commands maps each CLI command name to its Go implementation. The set of
-// recognised commands and their descriptions are declared in wfctl.yaml; this
-// map provides the runtime implementations that are wired to those declarations.
+// commands maps each CLI command name to its Go implementation. The command
+// metadata (name, description) is declared in wfctl.yaml; this map provides
+// the runtime functions that are registered in the CLICommandRegistry service
+// and invoked by step.cli_invoke from within each command's pipeline.
 var commands = map[string]func([]string) error{
 	"init":     runInit,
 	"validate": runValidate,
@@ -49,44 +55,80 @@ var commands = map[string]func([]string) error{
 	"mcp":      runMCP,
 }
 
-// buildCLIHandler loads the embedded wfctl.yaml config, injects the build-time
-// version, and returns a configured CLIWorkflowHandler with all command runners
-// registered. This wires the declarative YAML definition to Go implementations.
-func buildCLIHandler() (*handlers.CLIWorkflowHandler, error) {
+func main() {
+	// Load the embedded config. All command definitions and pipeline wiring
+	// live in wfctl.yaml — no hardcoded routing in this file.
 	cfg, err := config.LoadFromBytes(wfctlConfigBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load embedded config: %w", err)
-	}
-
-	cliHandler := handlers.NewCLIWorkflowHandler()
-	cliHandler.SetOutput(os.Stderr)
-
-	// Inject the build-time version into the config map before passing it to
-	// ConfigureWorkflow so that --version and usage output the correct value.
-	if wfCfg, ok := cfg.Workflows["cli"].(map[string]any); ok {
-		wfCfg["version"] = version
-		if err := cliHandler.ConfigureWorkflow(nil, wfCfg); err != nil {
-			return nil, fmt.Errorf("failed to configure CLI handler: %w", err)
-		}
-	}
-
-	// Register all command runners with the handler.
-	for name, fn := range commands {
-		cliHandler.RegisterCommand(name, fn)
-	}
-
-	return cliHandler, nil
-}
-
-func main() {
-	cliHandler, err := buildCLIHandler()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "internal error: %v\n", err) //nolint:gosec // G705
+		fmt.Fprintf(os.Stderr, "internal error: failed to load embedded config: %v\n", err) //nolint:gosec // G705
 		os.Exit(1)
 	}
 
+	// Inject the build-time version into the cli workflow config map so that
+	// --version and the usage header display the correct release string.
+	if wfCfg, ok := cfg.Workflows["cli"].(map[string]any); ok {
+		wfCfg["version"] = version
+	}
+
+	// Build the engine with all default handlers and triggers.
+	// Engine startup logs are suppressed (discarded) — wfctl is a CLI tool
+	// and should only emit output from the command itself.
+	engineLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// Suppress pipeline execution logs globally: wfctl is a CLI tool and
+	// internal pipeline step/run logs should not leak to the user's terminal.
+	// Each command creates its own logger when it needs output.
+	slog.SetDefault(engineLogger)
+	engineInst, err := workflow.NewEngineBuilder().
+		WithLogger(engineLogger).
+		WithAllDefaults().
+		Build()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "internal error: failed to build engine: %v\n", err) //nolint:gosec // G705
+		os.Exit(1)
+	}
+
+	// Register all Go command implementations in the CLICommandRegistry service
+	// before BuildFromConfig so that step.cli_invoke can look them up at
+	// pipeline execution time (service is resolved lazily on each Execute call).
+	registry := module.NewCLICommandRegistry()
+	for name, fn := range commands {
+		registry.Register(name, module.CLICommandFunc(fn))
+	}
+	if err := engineInst.App().RegisterService(module.CLICommandRegistryServiceName, registry); err != nil {
+		fmt.Fprintf(os.Stderr, "internal error: failed to register command registry: %v\n", err) //nolint:gosec // G705
+		os.Exit(1)
+	}
+
+	// Register the CLI-specific step types on the engine's step registry.
+	// step.cli_invoke calls a Go function by name from CLICommandRegistry.
+	// step.cli_print writes a template-resolved message to stdout/stderr.
+	// These are registered here rather than via the pipelinesteps plugin to
+	// keep wfctl lean — only what the binary actually needs is loaded.
+	engineInst.AddStepType("step.cli_invoke", module.NewCLIInvokeStepFactory())
+	engineInst.AddStepType("step.cli_print", module.NewCLIPrintStepFactory())
+
+	// BuildFromConfig wires the engine from wfctl.yaml:
+	//   1. CLIWorkflowHandler is configured from workflows.cli (registers itself
+	//      as "cliWorkflowHandler" in the app service registry).
+	//   2. Each cmd-* pipeline is created and registered.
+	//   3. CLITrigger is configured once per pipeline (via the "cli" inline
+	//      trigger), accumulating command→pipeline mappings.
+	if err := engineInst.BuildFromConfig(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "internal error: failed to configure engine: %v\n", err) //nolint:gosec // G705
+		os.Exit(1)
+	}
+
+	// Retrieve the CLIWorkflowHandler that registered itself during BuildFromConfig.
+	var cliHandler *handlers.CLIWorkflowHandler
+	if err := engineInst.App().GetService(handlers.CLIWorkflowHandlerServiceName, &cliHandler); err != nil || cliHandler == nil {
+		fmt.Fprintf(os.Stderr, "internal error: CLIWorkflowHandler not found in service registry\n") //nolint:gosec // G705
+		os.Exit(1)
+	}
+	// Error/usage output goes to stderr; command output goes to stdout.
+	cliHandler.SetOutput(os.Stderr)
+
 	if len(os.Args) < 2 {
-		// No subcommand: print usage and exit non-zero.
+		// No subcommand — print usage and exit non-zero.
 		_ = cliHandler.Dispatch([]string{"-h"})
 		os.Exit(1)
 	}

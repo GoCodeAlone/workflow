@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/CrisisTextLine/modular"
 )
 
 func TestCLIWorkflowHandler_CanHandle(t *testing.T) {
@@ -242,6 +244,72 @@ func TestCLIWorkflowHandler_InvalidConfig(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid config type")
 	}
+}
+
+// TestCLIWorkflowHandler_PipelineDispatch verifies that CLIWorkflowHandler falls
+// back to CLIPipelineDispatcher when no direct Go runner is registered.
+func TestCLIWorkflowHandler_PipelineDispatch(t *testing.T) {
+	h := NewCLIWorkflowHandler()
+	var buf bytes.Buffer
+	h.SetOutput(&buf)
+
+	app := modular.NewStdApplication(nil, nil)
+
+	// Configure the handler with a command that has no direct runner.
+	if err := h.ConfigureWorkflow(app, map[string]any{
+		"name": "app",
+		"commands": []any{
+			map[string]any{"name": "deploy", "description": "Deploy something"},
+		},
+	}); err != nil {
+		t.Fatalf("ConfigureWorkflow failed: %v", err)
+	}
+
+	// Register a CLIPipelineDispatcher service in the app.
+	dispatched := ""
+	dispatcher := &mockCLIPipelineDispatcher{
+		dispatch: func(ctx context.Context, cmd string, args []string) error {
+			dispatched = cmd
+			return nil
+		},
+	}
+	if err := app.RegisterService("cliTrigger", dispatcher); err != nil {
+		t.Fatalf("RegisterService failed: %v", err)
+	}
+
+	if err := h.Dispatch([]string{"deploy", "--env", "prod"}); err != nil {
+		t.Fatalf("Dispatch failed: %v", err)
+	}
+	if dispatched != "deploy" {
+		t.Errorf("expected deploy to be dispatched, got %q", dispatched)
+	}
+}
+
+// TestCLIWorkflowHandler_RegisterServiceOnConfigure verifies the handler
+// registers itself as CLIWorkflowHandlerServiceName in ConfigureWorkflow.
+func TestCLIWorkflowHandler_RegisterServiceOnConfigure(t *testing.T) {
+	h := NewCLIWorkflowHandler()
+	app := modular.NewStdApplication(nil, nil)
+
+	if err := h.ConfigureWorkflow(app, map[string]any{"name": "app"}); err != nil {
+		t.Fatalf("ConfigureWorkflow failed: %v", err)
+	}
+	var registered *CLIWorkflowHandler
+	if err := app.GetService(CLIWorkflowHandlerServiceName, &registered); err != nil {
+		t.Errorf("expected handler registered as service, got error: %v", err)
+	}
+	if registered != h {
+		t.Error("expected registered service to be the handler itself")
+	}
+}
+
+// mockCLIPipelineDispatcher is a test double for CLIPipelineDispatcher.
+type mockCLIPipelineDispatcher struct {
+	dispatch func(ctx context.Context, cmd string, args []string) error
+}
+
+func (m *mockCLIPipelineDispatcher) DispatchCommand(ctx context.Context, cmd string, args []string) error {
+	return m.dispatch(ctx, cmd, args)
 }
 
 // containsStr is a simple substring helper.

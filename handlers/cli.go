@@ -31,14 +31,35 @@ type CLIWorkflowConfig struct {
 // CLICommandFunc is the signature for CLI command handler functions.
 type CLICommandFunc func(args []string) error
 
+// CLIPipelineDispatcher is implemented by module.CLITrigger. It allows
+// CLIWorkflowHandler to fall back to pipeline-based command execution when no
+// direct Go runner is registered for a command.
+type CLIPipelineDispatcher interface {
+	DispatchCommand(ctx context.Context, cmd string, args []string) error
+}
+
+// CLIWorkflowHandlerServiceName is the well-known app service name under which
+// CLIWorkflowHandler registers itself during ConfigureWorkflow. External callers
+// (e.g. cmd/wfctl/main.go) can retrieve the handler with:
+//
+//	var h *handlers.CLIWorkflowHandler
+//	app.GetService(handlers.CLIWorkflowHandlerServiceName, &h)
+const CLIWorkflowHandlerServiceName = "cliWorkflowHandler"
+
 // CLIWorkflowHandler handles "cli" workflow types. It registers Go function
 // handlers for CLI commands, configures them from a YAML workflow config, and
 // dispatches os.Args to the correct handler at runtime.
+//
+// Commands can be backed by either a directly-registered Go function
+// (RegisterCommand) or a pipeline defined in the workflow config with a "cli"
+// trigger type. Pipeline dispatch is handled by the CLITrigger (module.CLITrigger),
+// which CLIWorkflowHandler discovers lazily from the app service registry.
 type CLIWorkflowHandler struct {
 	config   *CLIWorkflowConfig
 	commands map[string]*CLICommandDef // keyed by command name
 	runners  map[string]CLICommandFunc // keyed by handler name (or command name)
 	output   io.Writer                 // for usage output; defaults to os.Stderr
+	app      modular.Application       // stored in ConfigureWorkflow; used for lazy service lookup
 }
 
 // NewCLIWorkflowHandler creates a new CLIWorkflowHandler with no registered commands.
@@ -58,6 +79,10 @@ func (h *CLIWorkflowHandler) SetOutput(w io.Writer) {
 
 // RegisterCommand registers a Go function as the handler for a CLI command.
 // The key must match either the command's Handler field (if set) or its Name.
+//
+// This is the simple/standalone path. When the full workflow engine is used,
+// register functions in a module.CLICommandRegistry service instead so that
+// step.cli_invoke can call them from within a pipeline.
 func (h *CLIWorkflowHandler) RegisterCommand(key string, fn CLICommandFunc) {
 	h.runners[key] = fn
 }
@@ -68,7 +93,9 @@ func (h *CLIWorkflowHandler) CanHandle(workflowType string) bool {
 }
 
 // ConfigureWorkflow stores the CLI workflow config and indexes commands by name.
-func (h *CLIWorkflowHandler) ConfigureWorkflow(_ modular.Application, workflowConfig any) error {
+// It also registers the handler as a service so that callers can retrieve it
+// from the app service registry via CLIWorkflowHandlerServiceName.
+func (h *CLIWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig any) error {
 	cfg, err := parseCLIWorkflowConfig(workflowConfig)
 	if err != nil {
 		return fmt.Errorf("cli workflow: %w", err)
@@ -77,6 +104,12 @@ func (h *CLIWorkflowHandler) ConfigureWorkflow(_ modular.Application, workflowCo
 	for i := range cfg.Commands {
 		cmd := &cfg.Commands[i]
 		h.commands[cmd.Name] = cmd
+	}
+	// Store app for lazy pipeline-dispatcher lookup in runCommand.
+	h.app = app
+	// Register self so engine consumers can retrieve this handler by name.
+	if app != nil {
+		_ = app.RegisterService(CLIWorkflowHandlerServiceName, h)
 	}
 	return nil
 }
@@ -116,7 +149,14 @@ func (h *CLIWorkflowHandler) Dispatch(args []string) error {
 	return h.runCommand(cmd, args[1:])
 }
 
-// runCommand looks up and calls the registered runner for the named command.
+// runCommand looks up and calls the registered runner or pipeline dispatcher
+// for the named command.
+//
+// Priority:
+//  1. Directly registered Go runner (RegisterCommand).
+//  2. Pipeline dispatch via CLIPipelineDispatcher (module.CLITrigger) found in
+//     the app service registry — used when commands are defined as pipelines in
+//     the workflow config.
 func (h *CLIWorkflowHandler) runCommand(name string, args []string) error {
 	def, known := h.commands[name]
 	if !known {
@@ -130,12 +170,21 @@ func (h *CLIWorkflowHandler) runCommand(name string, args []string) error {
 		handlerKey = def.Name
 	}
 
-	fn, ok := h.runners[handlerKey]
-	if !ok {
-		return fmt.Errorf("no runner registered for command %q (handler key: %q)", name, handlerKey)
+	// Fast path: directly registered Go runner.
+	if fn, ok := h.runners[handlerKey]; ok {
+		return fn(args)
 	}
 
-	return fn(args)
+	// Fallback: pipeline dispatch via CLITrigger found in app services.
+	if h.app != nil {
+		for _, svc := range h.app.SvcRegistry() {
+			if d, ok := svc.(CLIPipelineDispatcher); ok {
+				return d.DispatchCommand(context.Background(), name, args)
+			}
+		}
+	}
+
+	return fmt.Errorf("no runner registered for command %q (handler key: %q)", name, handlerKey)
 }
 
 // printUsage writes the CLI usage message to the configured output writer.

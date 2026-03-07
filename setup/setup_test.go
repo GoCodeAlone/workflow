@@ -21,8 +21,8 @@ func TestDefaultTriggers(t *testing.T) {
 	if len(triggers) == 0 {
 		t.Fatal("expected at least one default trigger")
 	}
-	// Should have 5 built-in triggers
-	if len(triggers) != 5 {
-		t.Errorf("expected 5 default triggers, got %d", len(triggers))
+	// Should have 6 built-in triggers
+	if len(triggers) != 6 {
+		t.Errorf("expected 6 default triggers, got %d", len(triggers))
 	}
 }
