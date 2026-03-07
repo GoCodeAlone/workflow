@@ -171,10 +171,16 @@ func (p *Plugin) WiringHooks() []plugin.WiringHook {
 
 // ModuleSchemas returns schemas for actor modules.
 func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
-	return []*schema.ModuleSchema{}
+	return []*schema.ModuleSchema{
+		actorSystemSchema(),
+		actorPoolSchema(),
+	}
 }
 
 // StepSchemas returns schemas for actor steps.
 func (p *Plugin) StepSchemas() []*schema.StepSchema {
-	return []*schema.StepSchema{}
+	return []*schema.StepSchema{
+		actorSendStepSchema(),
+		actorAskStepSchema(),
+	}
 }
