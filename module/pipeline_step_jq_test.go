@@ -689,7 +689,7 @@ func TestNormalizeForJQ_SkipsRoundTrip(t *testing.T) {
 	}
 	// Pointer identity: the returned map must be exactly the original map,
 	// confirming no marshal/unmarshal copy was made.
-	if &m == nil || reflect.ValueOf(m).Pointer() != reflect.ValueOf(input).Pointer() {
+	if reflect.ValueOf(m).Pointer() != reflect.ValueOf(input).Pointer() {
 		t.Error("expected normalizeForJQ to return the original map (same pointer), but got a copy")
 	}
 	if m["name"] != "Alice" {
