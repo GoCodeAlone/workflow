@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"reflect"
 	"testing"
 )
 
@@ -397,13 +398,13 @@ func TestJQStepAdd(t *testing.T) {
 		t.Fatalf("execute error: %v", err)
 	}
 
-	// JSON numbers unmarshalled to float64 after normalization, then added.
-	sum, ok := result.Output["result"].(float64)
+	// gojq's add on integer inputs returns int.
+	sum, ok := result.Output["result"].(int)
 	if !ok {
-		t.Fatalf("expected result to be float64, got %T (%v)", result.Output["result"], result.Output["result"])
+		t.Fatalf("expected result to be int, got %T (%v)", result.Output["result"], result.Output["result"])
 	}
 	if sum != 60 {
-		t.Errorf("expected sum=60, got %f", sum)
+		t.Errorf("expected sum=60, got %d", sum)
 	}
 }
 
@@ -470,10 +471,10 @@ func TestJQStepComplexPipeline(t *testing.T) {
 		t.Errorf("expected total_items=4, got %v", totalItems)
 	}
 
-	// total_value
-	totalValue, ok := result.Output["total_value"].(float64)
+	// total_value — gojq's add on integer inputs returns int
+	totalValue, ok := result.Output["total_value"].(int)
 	if !ok {
-		t.Fatalf("expected total_value to be float64, got %T", result.Output["total_value"])
+		t.Fatalf("expected total_value to be int, got %T", result.Output["total_value"])
 	}
 	if totalValue != 475 {
 		t.Errorf("expected total_value=475, got %v", totalValue)
@@ -513,8 +514,8 @@ func TestJQStepIdentity(t *testing.T) {
 
 	// Identity returns the full input map. Since it's a map result,
 	// its keys should be merged into output.
-	if result.Output["x"] != float64(1) {
-		t.Errorf("expected x=1 (float64 after JSON roundtrip), got %v (%T)", result.Output["x"], result.Output["x"])
+	if result.Output["x"] != 1 {
+		t.Errorf("expected x=1, got %v (%T)", result.Output["x"], result.Output["x"])
 	}
 	if result.Output["y"] != "two" {
 		t.Errorf("expected y='two', got %v", result.Output["y"])
@@ -616,5 +617,110 @@ func TestJQStepInputFrom(t *testing.T) {
 	}
 	if arr[0] != "Alice" || arr[1] != "Bob" {
 		t.Errorf("expected ['Alice','Bob'], got %v", arr)
+	}
+}
+
+func TestIsJSONCompatible(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    any
+		expected bool
+	}{
+		{"nil", nil, true},
+		{"bool", true, true},
+		{"int", 42, true},
+		{"float64", 3.14, true},
+		{"string", "hello", true},
+		{"empty map", map[string]any{}, true},
+		{"nested map", map[string]any{"a": map[string]any{"b": 1}}, true},
+		{"empty slice", []any{}, true},
+		{"mixed slice", []any{1, "two", 3.0, true, nil}, true},
+		{"map with slice", map[string]any{"items": []any{1, 2}}, true},
+		{"struct", struct{ X int }{1}, false},
+		{"int32", int32(1), false},
+		{"map with struct value", map[string]any{"s": struct{}{}}, false},
+		{"slice with struct", []any{struct{}{}}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isJSONCompatible(tt.input)
+			if got != tt.expected {
+				t.Errorf("isJSONCompatible(%v) = %v, want %v", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsJSONCompatible_CycleDetection(t *testing.T) {
+	// A self-referential map should be detected as incompatible (cycle)
+	// rather than causing infinite recursion/stack overflow.
+	m := map[string]any{"key": "value"}
+	m["self"] = m // create a cycle
+	got := isJSONCompatible(m)
+	if got {
+		t.Error("expected isJSONCompatible to return false for cyclic map")
+	}
+
+	// A self-referential slice should also be detected as incompatible.
+	s := make([]any, 1)
+	s[0] = s // create a cycle
+	got = isJSONCompatible(s)
+	if got {
+		t.Error("expected isJSONCompatible to return false for cyclic slice")
+	}
+}
+
+func TestNormalizeForJQ_SkipsRoundTrip(t *testing.T) {
+	// Already JSON-compatible data should be returned as-is — the round-trip
+	// is skipped, so the returned interface{} wraps the original map pointer.
+	input := map[string]any{
+		"name":  "Alice",
+		"age":   30,
+		"items": []any{"a", "b"},
+	}
+	result, err := normalizeForJQ(input)
+	if err != nil {
+		t.Fatalf("normalizeForJQ error: %v", err)
+	}
+	m, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map[string]any, got %T", result)
+	}
+	// Pointer identity: the returned map must be exactly the original map,
+	// confirming no marshal/unmarshal copy was made.
+	if reflect.ValueOf(m).Pointer() != reflect.ValueOf(input).Pointer() {
+		t.Error("expected normalizeForJQ to return the original map (same pointer), but got a copy")
+	}
+	if m["name"] != "Alice" {
+		t.Errorf("expected name=Alice, got %v", m["name"])
+	}
+	// int should remain int (not converted to float64).
+	if _, ok := m["age"].(int); !ok {
+		t.Errorf("expected age to remain int, got %T", m["age"])
+	}
+}
+
+func TestNormalizeForJQ_FallsBackForStruct(t *testing.T) {
+	// Non-JSON-compatible input should fall back to JSON round-trip.
+	type custom struct {
+		Name string `json:"name"`
+		Val  int    `json:"val"`
+	}
+	input := custom{Name: "test", Val: 42}
+	result, err := normalizeForJQ(input)
+	if err != nil {
+		t.Fatalf("normalizeForJQ error: %v", err)
+	}
+	m, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map[string]any, got %T", result)
+	}
+	if m["name"] != "test" {
+		t.Errorf("expected name=test, got %v", m["name"])
+	}
+	// JSON round-trip converts int to float64.
+	if _, ok := m["val"].(float64); !ok {
+		t.Errorf("expected val to be float64 after JSON round-trip, got %T", m["val"])
 	}
 }

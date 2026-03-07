@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/CrisisTextLine/modular"
 	"github.com/itchyny/gojq"
@@ -165,8 +166,13 @@ func resolveDottedPath(data any, path string) (any, error) {
 }
 
 // normalizeForJQ converts an arbitrary Go value into JSON-compatible types
-// that gojq can process. It does this via JSON marshal/unmarshal round-trip.
+// that gojq can process. When the value is already composed of JSON-compatible
+// types (map[string]any, []any, string, float64, int, bool, nil) it is returned
+// as-is to avoid an expensive JSON marshal/unmarshal round-trip.
 func normalizeForJQ(v any) (any, error) {
+	if isJSONCompatible(v) {
+		return v, nil
+	}
 	b, err := json.Marshal(v)
 	if err != nil {
 		return nil, err
@@ -176,4 +182,50 @@ func normalizeForJQ(v any) (any, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+// isJSONCompatible reports whether v consists entirely of types that gojq can
+// handle natively: nil, bool, float64, int, string, []any, and map[string]any.
+// This allows normalizeForJQ to skip the costly JSON round-trip for the common
+// case where pipeline data is already in the right shape.
+// Self-referential (cyclic) maps or slices are detected via pointer tracking
+// and treated as incompatible so normalizeForJQ falls back to json.Marshal,
+// which returns a clear error instead of recursing infinitely.
+func isJSONCompatible(v any) bool {
+	return isJSONCompatibleVisited(v, make(map[uintptr]struct{}))
+}
+
+func isJSONCompatibleVisited(v any, visited map[uintptr]struct{}) bool {
+	switch val := v.(type) {
+	case nil, bool, float64, int, string:
+		return true
+	case map[string]any:
+		ptr := reflect.ValueOf(val).Pointer()
+		if _, seen := visited[ptr]; seen {
+			return false // cycle detected
+		}
+		visited[ptr] = struct{}{}
+		for _, elem := range val {
+			if !isJSONCompatibleVisited(elem, visited) {
+				return false
+			}
+		}
+		delete(visited, ptr)
+		return true
+	case []any:
+		ptr := reflect.ValueOf(val).Pointer()
+		if _, seen := visited[ptr]; seen {
+			return false // cycle detected
+		}
+		visited[ptr] = struct{}{}
+		for _, elem := range val {
+			if !isJSONCompatibleVisited(elem, visited) {
+				return false
+			}
+		}
+		delete(visited, ptr)
+		return true
+	default:
+		return false
+	}
 }
