@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/CrisisTextLine/modular"
@@ -83,7 +84,7 @@ func TestCLIWorkflowHandler_UnknownCommand(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown command")
 	}
-	if !containsStr(err.Error(), "unknown command") {
+	if !strings.Contains(err.Error(), "unknown command") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -124,7 +125,7 @@ func TestCLIWorkflowHandler_HelpFlag(t *testing.T) {
 		if err := h.Dispatch([]string{flag}); err != nil {
 			t.Errorf("Dispatch(%q) returned error: %v", flag, err)
 		}
-		if !containsStr(buf.String(), "wfctl") {
+		if !strings.Contains(buf.String(), "wfctl") {
 			t.Errorf("usage output missing app name for flag %q: %s", flag, buf.String())
 		}
 	}
@@ -147,7 +148,7 @@ func TestCLIWorkflowHandler_VersionFlag(t *testing.T) {
 		if err := h.Dispatch([]string{flag}); err != nil {
 			t.Errorf("Dispatch(%q) returned error: %v", flag, err)
 		}
-		if !containsStr(buf.String(), "2.0.0") {
+		if !strings.Contains(buf.String(), "2.0.0") {
 			t.Errorf("version output missing version for flag %q: %s", flag, buf.String())
 		}
 	}
@@ -312,15 +313,122 @@ func (m *mockCLIPipelineDispatcher) DispatchCommand(ctx context.Context, cmd str
 	return m.dispatch(ctx, cmd, args)
 }
 
-// containsStr is a simple substring helper.
-func containsStr(s, sub string) bool {
-	return len(sub) == 0 || (len(s) >= len(sub) && (s == sub || len(s) > 0 &&
-		func() bool {
-			for i := 0; i <= len(s)-len(sub); i++ {
-				if s[i:i+len(sub)] == sub {
-					return true
-				}
-			}
-			return false
-		}()))
+// TestCLIWorkflowHandler_CtxThreaded verifies that the context passed to
+// ExecuteWorkflow and DispatchContext reaches the CLIPipelineDispatcher.
+func TestCLIWorkflowHandler_CtxThreaded(t *testing.T) {
+	h := NewCLIWorkflowHandler()
+	var buf bytes.Buffer
+	h.SetOutput(&buf)
+
+	app := modular.NewStdApplication(nil, nil)
+	if err := h.ConfigureWorkflow(app, map[string]any{
+		"name": "app",
+		"commands": []any{
+			map[string]any{"name": "run"},
+		},
+	}); err != nil {
+		t.Fatalf("ConfigureWorkflow failed: %v", err)
+	}
+
+	type ctxKey struct{}
+	sentinelCtx := context.WithValue(context.Background(), ctxKey{}, "sentinel")
+	var receivedCtx context.Context
+	dispatcher := &mockCLIPipelineDispatcher{
+		dispatch: func(ctx context.Context, cmd string, args []string) error {
+			receivedCtx = ctx
+			return nil
+		},
+	}
+	if err := app.RegisterService("cliTrigger", dispatcher); err != nil {
+		t.Fatalf("RegisterService failed: %v", err)
+	}
+
+	// Via DispatchContext — ctx should be threaded through.
+	if err := h.DispatchContext(sentinelCtx, []string{"run"}); err != nil {
+		t.Fatalf("DispatchContext failed: %v", err)
+	}
+	if receivedCtx.Value(ctxKey{}) != "sentinel" {
+		t.Error("expected sentinel context to be threaded through DispatchContext")
+	}
+
+	// Via ExecuteWorkflow — ctx should also be threaded through.
+	receivedCtx = nil
+	if _, err := h.ExecuteWorkflow(sentinelCtx, "cli", "run", map[string]any{}); err != nil {
+		t.Fatalf("ExecuteWorkflow failed: %v", err)
+	}
+	if receivedCtx.Value(ctxKey{}) != "sentinel" {
+		t.Error("expected sentinel context to be threaded through ExecuteWorkflow")
+	}
+}
+
+// TestCLIWorkflowHandler_ConfigureWorkflow_Reconfigure verifies that calling
+// ConfigureWorkflow a second time replaces the command index cleanly.
+func TestCLIWorkflowHandler_ConfigureWorkflow_Reconfigure(t *testing.T) {
+	h := NewCLIWorkflowHandler()
+	called := false
+	h.RegisterCommand("new-cmd", func(args []string) error { called = true; return nil })
+
+	// First configure: adds "old-cmd"
+	if err := h.ConfigureWorkflow(nil, map[string]any{
+		"name":     "app",
+		"commands": []any{map[string]any{"name": "old-cmd"}},
+	}); err != nil {
+		t.Fatalf("first ConfigureWorkflow failed: %v", err)
+	}
+
+	// Second configure: only has "new-cmd" — "old-cmd" should disappear.
+	if err := h.ConfigureWorkflow(nil, map[string]any{
+		"name":     "app",
+		"commands": []any{map[string]any{"name": "new-cmd"}},
+	}); err != nil {
+		t.Fatalf("second ConfigureWorkflow failed: %v", err)
+	}
+
+	var errBuf bytes.Buffer
+	h.SetOutput(&errBuf)
+	// "old-cmd" must no longer be reachable.
+	if err := h.Dispatch([]string{"old-cmd"}); err == nil {
+		t.Error("expected error for old-cmd after reconfigure")
+	}
+	// "new-cmd" must work.
+	if err := h.Dispatch([]string{"new-cmd"}); err != nil {
+		t.Fatalf("Dispatch(new-cmd) failed: %v", err)
+	}
+	if !called {
+		t.Error("expected new-cmd runner to be called")
+	}
+}
+
+// TestCLIWorkflowHandler_DuplicateCommandName verifies that parseCLIWorkflowConfig
+// returns an error when two commands share the same name.
+func TestCLIWorkflowHandler_DuplicateCommandName(t *testing.T) {
+	h := NewCLIWorkflowHandler()
+	err := h.ConfigureWorkflow(nil, map[string]any{
+		"name": "app",
+		"commands": []any{
+			map[string]any{"name": "validate"},
+			map[string]any{"name": "validate"}, // duplicate
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for duplicate command name")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("expected 'duplicate' in error message, got: %v", err)
+	}
+}
+
+// TestCLIWorkflowHandler_EmptyCommandName verifies that parseCLIWorkflowConfig
+// rejects commands with an empty name.
+func TestCLIWorkflowHandler_EmptyCommandName(t *testing.T) {
+	h := NewCLIWorkflowHandler()
+	err := h.ConfigureWorkflow(nil, map[string]any{
+		"name": "app",
+		"commands": []any{
+			map[string]any{"name": ""}, // empty name
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for empty command name")
+	}
 }

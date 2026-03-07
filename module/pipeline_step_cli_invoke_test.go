@@ -151,3 +151,54 @@ func TestCLIInvokeStep_ArgsPassthrough(t *testing.T) {
 		t.Errorf("unexpected args: %v", receivedArgs)
 	}
 }
+
+// TestCLIInvokeStep_ArgsSliceAny verifies that args arriving as []any
+// (e.g. after JSON/YAML round-trip) are correctly coerced to []string.
+func TestCLIInvokeStep_ArgsSliceAny(t *testing.T) {
+	registry := NewCLICommandRegistry()
+	var receivedArgs []string
+	registry.Register("deploy", func(args []string) error {
+		receivedArgs = args
+		return nil
+	})
+
+	app := NewMockApplication()
+	app.Services[CLICommandRegistryServiceName] = registry
+
+	factory := NewCLIInvokeStepFactory()
+	step, err := factory("invoke", map[string]any{"command": "deploy"}, app)
+	if err != nil {
+		t.Fatalf("factory failed: %v", err)
+	}
+
+	// Simulate JSON-decoded args ([]any instead of []string).
+	pc := NewPipelineContext(map[string]any{"args": []any{"--env", "prod"}}, nil)
+	if _, err := step.Execute(context.Background(), pc); err != nil {
+		t.Fatalf("Execute with []any args failed: %v", err)
+	}
+	if len(receivedArgs) != 2 || receivedArgs[0] != "--env" || receivedArgs[1] != "prod" {
+		t.Errorf("unexpected receivedArgs: %v", receivedArgs)
+	}
+}
+
+// TestCLIInvokeStep_ArgsSliceAnyNonString verifies that []any with a non-string
+// element returns a clear error.
+func TestCLIInvokeStep_ArgsSliceAnyNonString(t *testing.T) {
+	registry := NewCLICommandRegistry()
+	registry.Register("deploy", func(args []string) error { return nil })
+
+	app := NewMockApplication()
+	app.Services[CLICommandRegistryServiceName] = registry
+
+	factory := NewCLIInvokeStepFactory()
+	step, err := factory("invoke", map[string]any{"command": "deploy"}, app)
+	if err != nil {
+		t.Fatalf("factory failed: %v", err)
+	}
+
+	pc := NewPipelineContext(map[string]any{"args": []any{"ok", 42}}, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error for non-string element in args")
+	}
+}

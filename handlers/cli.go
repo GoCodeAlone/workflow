@@ -95,38 +95,67 @@ func (h *CLIWorkflowHandler) CanHandle(workflowType string) bool {
 // ConfigureWorkflow stores the CLI workflow config and indexes commands by name.
 // It also registers the handler as a service so that callers can retrieve it
 // from the app service registry via CLIWorkflowHandlerServiceName.
+//
+// Calling ConfigureWorkflow more than once (e.g. during a hot-reload) is safe:
+// the command index is fully rebuilt from the new config so that removed or
+// renamed commands do not persist from a previous configuration.
 func (h *CLIWorkflowHandler) ConfigureWorkflow(app modular.Application, workflowConfig any) error {
 	cfg, err := parseCLIWorkflowConfig(workflowConfig)
 	if err != nil {
 		return fmt.Errorf("cli workflow: %w", err)
 	}
 	h.config = cfg
+
+	// Reinitialize the command index on every call so that removed/renamed
+	// commands from a previous configuration do not linger.
+	h.commands = make(map[string]*CLICommandDef)
 	for i := range cfg.Commands {
 		cmd := &cfg.Commands[i]
 		h.commands[cmd.Name] = cmd
 	}
+
 	// Store app for lazy pipeline-dispatcher lookup in runCommand.
 	h.app = app
+
 	// Register self so engine consumers can retrieve this handler by name.
+	// If a service under the same name already exists, only tolerate it when
+	// it is this same instance (idempotent re-registration); otherwise surface
+	// the error so misconfiguration is not silently hidden.
 	if app != nil {
-		_ = app.RegisterService(CLIWorkflowHandlerServiceName, h)
+		if err := app.RegisterService(CLIWorkflowHandlerServiceName, h); err != nil {
+			var existing *CLIWorkflowHandler
+			if getErr := app.GetService(CLIWorkflowHandlerServiceName, &existing); getErr == nil && existing == h {
+				// Same instance already registered; idempotent, continue.
+			} else {
+				return fmt.Errorf("cli workflow: register service %q: %w", CLIWorkflowHandlerServiceName, err)
+			}
+		}
 	}
 	return nil
 }
 
 // ExecuteWorkflow implements WorkflowHandler. The action is the command name;
 // data["args"] may hold a []string of additional arguments.
-func (h *CLIWorkflowHandler) ExecuteWorkflow(_ context.Context, _ string, action string, data map[string]any) (map[string]any, error) {
+// The provided context is threaded through to the pipeline dispatcher so that
+// cancellation and tracing signals are preserved for programmatic invocations.
+func (h *CLIWorkflowHandler) ExecuteWorkflow(ctx context.Context, _ string, action string, data map[string]any) (map[string]any, error) {
 	args, _ := data["args"].([]string)
-	if err := h.runCommand(action, args); err != nil {
+	if err := h.runCommand(ctx, action, args); err != nil {
 		return nil, err
 	}
 	return map[string]any{"success": true}, nil
 }
 
-// Dispatch inspects args (typically os.Args[1:]) to choose and run a command.
-// A missing or unknown command prints usage and returns an error.
+// Dispatch inspects args (typically os.Args[1:]) to choose and run a command
+// using context.Background(). For cancellable dispatches (e.g., with
+// os/signal), use DispatchContext instead.
 func (h *CLIWorkflowHandler) Dispatch(args []string) error {
+	return h.DispatchContext(context.Background(), args)
+}
+
+// DispatchContext is like Dispatch but accepts an explicit context, enabling
+// cancellation (e.g. Ctrl+C via signal.NotifyContext) and tracing propagation.
+func (h *CLIWorkflowHandler) DispatchContext(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		h.printUsage()
 		return fmt.Errorf("no command specified")
@@ -146,18 +175,18 @@ func (h *CLIWorkflowHandler) Dispatch(args []string) error {
 		return nil
 	}
 
-	return h.runCommand(cmd, args[1:])
+	return h.runCommand(ctx, cmd, args[1:])
 }
 
 // runCommand looks up and calls the registered runner or pipeline dispatcher
-// for the named command.
+// for the named command. ctx is threaded through to the pipeline dispatcher.
 //
 // Priority:
 //  1. Directly registered Go runner (RegisterCommand).
 //  2. Pipeline dispatch via CLIPipelineDispatcher (module.CLITrigger) found in
 //     the app service registry — used when commands are defined as pipelines in
 //     the workflow config.
-func (h *CLIWorkflowHandler) runCommand(name string, args []string) error {
+func (h *CLIWorkflowHandler) runCommand(ctx context.Context, name string, args []string) error {
 	def, known := h.commands[name]
 	if !known {
 		fmt.Fprintf(h.output, "unknown command: %s\n\n", name) //nolint:gosec // G705
@@ -176,10 +205,11 @@ func (h *CLIWorkflowHandler) runCommand(name string, args []string) error {
 	}
 
 	// Fallback: pipeline dispatch via CLITrigger found in app services.
+	// Pass the caller's ctx so that cancellation and tracing are preserved.
 	if h.app != nil {
 		for _, svc := range h.app.SvcRegistry() {
 			if d, ok := svc.(CLIPipelineDispatcher); ok {
-				return d.DispatchCommand(context.Background(), name, args)
+				return d.DispatchCommand(ctx, name, args)
 			}
 		}
 	}
@@ -254,6 +284,7 @@ func parseCLIWorkflowConfig(raw any) (*CLIWorkflowConfig, error) {
 	cfg.Description, _ = cfgMap["description"].(string)
 
 	if rawCmds, ok := cfgMap["commands"].([]any); ok {
+		seen := make(map[string]struct{}, len(rawCmds))
 		for i, rc := range rawCmds {
 			cmdMap, ok := rc.(map[string]any)
 			if !ok {
@@ -263,6 +294,13 @@ func parseCLIWorkflowConfig(raw any) (*CLIWorkflowConfig, error) {
 			def.Name, _ = cmdMap["name"].(string)
 			def.Description, _ = cmdMap["description"].(string)
 			def.Handler, _ = cmdMap["handler"].(string)
+			if def.Name == "" {
+				return nil, fmt.Errorf("command at index %d has an empty name", i)
+			}
+			if _, dup := seen[def.Name]; dup {
+				return nil, fmt.Errorf("duplicate command name %q at index %d", def.Name, i)
+			}
+			seen[def.Name] = struct{}{}
 			cfg.Commands = append(cfg.Commands, def)
 		}
 	}

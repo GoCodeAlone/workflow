@@ -74,9 +74,22 @@ func (t *CLITrigger) Configure(app modular.Application, triggerConfig any) error
 	}
 
 	// Register as a service so CLIWorkflowHandler can find us lazily.
-	// RegisterService may return an error if the name is already taken, but
-	// since we re-register the *same* pointer this is idempotent and safe to ignore.
-	_ = app.RegisterService(t.name, t)
+	// If a service under the same name already exists, tolerate it only when
+	// the existing entry is this same *CLITrigger instance (idempotent
+	// re-registration across multiple pipeline Configure calls). A different
+	// instance occupying the slot is a configuration error.
+	if err := app.RegisterService(t.name, t); err != nil {
+		sameInstance := false
+		for _, svc := range app.SvcRegistry() {
+			if existing, ok := svc.(*CLITrigger); ok && existing == t {
+				sameInstance = true
+				break
+			}
+		}
+		if !sameInstance {
+			return fmt.Errorf("cli trigger: registering service %q: %w", t.name, err)
+		}
+	}
 
 	// Find the workflow engine in app services (engine registers itself as
 	// "workflowEngine" during configureTriggers, before configurePipelines runs).
@@ -99,6 +112,12 @@ func (t *CLITrigger) Configure(app modular.Application, triggerConfig any) error
 		return fmt.Errorf("cli trigger: 'workflowType' is required in trigger config (injected by the engine)")
 	}
 
+	// Prevent ambiguous CLI routing: reject a different workflowType for a
+	// command that is already registered. Re-registering the exact same
+	// mapping (idempotent from hot-reload) is allowed.
+	if existing, ok := t.commands[command]; ok && existing != workflowType {
+		return fmt.Errorf("cli trigger: command %q already registered for workflow %q (cannot re-register for %q)", command, existing, workflowType)
+	}
 	t.commands[command] = workflowType
 	return nil
 }

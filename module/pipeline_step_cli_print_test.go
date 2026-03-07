@@ -3,6 +3,7 @@ package module
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -84,5 +85,16 @@ func TestCLIPrintStep_MissingMessage(t *testing.T) {
 	_, err := factory("print", map[string]any{}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing message")
+	}
+}
+
+func TestCLIPrintStep_InvalidTarget(t *testing.T) {
+	factory := newCLIPrintStepFactoryWithWriters(nil, nil)
+	_, err := factory("print", map[string]any{"message": "hi", "target": "invalid"}, nil)
+	if err == nil {
+		t.Fatal("expected error for invalid target")
+	}
+	if !strings.Contains(err.Error(), "invalid 'target'") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }

@@ -61,7 +61,22 @@ func (s *CLIInvokeStep) Execute(_ context.Context, pc *PipelineContext) (*StepRe
 	}
 
 	// Extract args from the pipeline context (injected by CLITrigger.DispatchCommand).
-	args, _ := pc.Current["args"].([]string)
+	// The value may be []string (from a direct Go call) or []any (when trigger
+	// data was round-tripped through JSON/YAML decoding). Both are accepted.
+	var args []string
+	switch v := pc.Current["args"].(type) {
+	case []string:
+		args = v
+	case []any:
+		args = make([]string, 0, len(v))
+		for i, a := range v {
+			str, ok := a.(string)
+			if !ok {
+				return nil, fmt.Errorf("cli_invoke step %q: args[%d] is not a string (got %T)", s.name, i, a)
+			}
+			args = append(args, str)
+		}
+	}
 
 	if err := fn(args); err != nil {
 		return nil, fmt.Errorf("cli_invoke step %q (command %q): %w", s.name, s.commandName, err)

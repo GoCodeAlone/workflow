@@ -135,3 +135,49 @@ func TestCLITrigger_Configure_MissingWorkflowType(t *testing.T) {
 		t.Fatal("expected error for missing workflowType")
 	}
 }
+
+// TestCLITrigger_Configure_DuplicateCommandConflict verifies that registering
+// two different workflow types for the same command returns an error.
+func TestCLITrigger_Configure_DuplicateCommandConflict(t *testing.T) {
+	engine := &mockCLIEngine{}
+	app := NewMockApplication()
+	app.Services["workflowEngine"] = engine
+	tr := NewCLITrigger()
+
+	if err := tr.Configure(app, map[string]any{
+		"command":      "validate",
+		"workflowType": "pipeline:cmd-validate",
+	}); err != nil {
+		t.Fatalf("first Configure failed: %v", err)
+	}
+
+	// Same command, different workflowType → must error.
+	err := tr.Configure(app, map[string]any{
+		"command":      "validate",
+		"workflowType": "pipeline:cmd-other",
+	})
+	if err == nil {
+		t.Fatal("expected error for conflicting command registration")
+	}
+}
+
+// TestCLITrigger_Configure_IdempotentReregistration verifies that registering
+// the same command→workflowType mapping twice is allowed (idempotent).
+func TestCLITrigger_Configure_IdempotentReregistration(t *testing.T) {
+	engine := &mockCLIEngine{}
+	app := NewMockApplication()
+	app.Services["workflowEngine"] = engine
+	tr := NewCLITrigger()
+
+	cfg := map[string]any{
+		"command":      "validate",
+		"workflowType": "pipeline:cmd-validate",
+	}
+	if err := tr.Configure(app, cfg); err != nil {
+		t.Fatalf("first Configure failed: %v", err)
+	}
+	// Exact same mapping again — must not error.
+	if err := tr.Configure(app, cfg); err != nil {
+		t.Fatalf("idempotent Configure failed: %v", err)
+	}
+}

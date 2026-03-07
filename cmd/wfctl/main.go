@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	workflow "github.com/GoCodeAlone/workflow"
@@ -71,13 +74,10 @@ func main() {
 	}
 
 	// Build the engine with all default handlers and triggers.
-	// Engine startup logs are suppressed (discarded) — wfctl is a CLI tool
-	// and should only emit output from the command itself.
+	// The discard logger is propagated to all cmd-* pipelines automatically
+	// via configurePipelines, so internal plumbing logs do not appear in the
+	// terminal. Each command creates its own logger when it needs output.
 	engineLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	// Suppress pipeline execution logs globally: wfctl is a CLI tool and
-	// internal pipeline step/run logs should not leak to the user's terminal.
-	// Each command creates its own logger when it needs output.
-	slog.SetDefault(engineLogger)
 	engineInst, err := workflow.NewEngineBuilder().
 		WithLogger(engineLogger).
 		WithAllDefaults().
@@ -143,11 +143,19 @@ func main() {
 		updateNoticeDone = checkForUpdateNotice()
 	}
 
-	if err := cliHandler.Dispatch(os.Args[1:]); err != nil {
+	// Set up a context that is cancelled on SIGINT/SIGTERM so that long-running
+	// commands (e.g. wfctl mcp, wfctl run) can be interrupted cleanly.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+
+	dispatchErr := cliHandler.DispatchContext(ctx, os.Args[1:])
+	// Release signal resources before waiting for the update notice or exiting.
+	stop()
+
+	if dispatchErr != nil {
 		// The handler already printed routing errors (unknown/missing command).
 		// Only emit the "error:" prefix for actual command execution failures.
 		if _, isKnown := commands[cmd]; isKnown {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err) //nolint:gosec // G705
+			fmt.Fprintf(os.Stderr, "error: %v\n", dispatchErr) //nolint:gosec // G705
 		}
 		os.Exit(1)
 	}

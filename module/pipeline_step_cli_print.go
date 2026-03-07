@@ -46,8 +46,17 @@ func newCLIPrintStepFactoryWithWriters(stdout, stderr io.Writer) StepFactory {
 		}
 
 		target := stdout
-		if t, ok := config["target"].(string); ok && t == "stderr" {
-			target = stderr
+		if rawTarget, ok := config["target"]; ok {
+			if t, ok := rawTarget.(string); ok && t != "" {
+				switch t {
+				case "stdout":
+					target = stdout
+				case "stderr":
+					target = stderr
+				default:
+					return nil, fmt.Errorf("cli_print step %q: invalid 'target' %q; must be \"stdout\" or \"stderr\"", name, t)
+				}
+			}
 		}
 
 		return &CLIPrintStep{
