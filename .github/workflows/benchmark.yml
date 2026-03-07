@@ -70,19 +70,24 @@ jobs:
         echo "## benchstat: baseline → PR" > benchstat-output.txt
         benchstat baseline-bench.txt benchmark-results.txt >> benchstat-output.txt 2>&1 || true
 
-        # Detect regressions: look for changes >= +20% that benchstat considers
-        # statistically significant (marked with a ~ or no qualifier).
-        # benchstat output lines with a significant positive percentage like +25.00% indicate regressions.
-        if grep -P '\+\d+\.\d+%' benchstat-output.txt | grep -qvP '^\s*#'; then
-          # Extract the numeric percentage values and check if any exceed 20%
-          if grep -oP '\+\K\d+\.\d+(?=%)' benchstat-output.txt | awk '{ if ($1 >= 20.0) found=1 } END { exit !found }'; then
-            echo "regression=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::Potential performance regression detected (>= 20% slower)"
-          else
-            echo "regression=false" >> "$GITHUB_OUTPUT"
+        # Detect regressions: benchstat v2 output lines look like:
+        #   BenchmarkName  1.00ns ± 1%  1.25ns ± 2%  +25.00% (p=0.002 n=6)
+        # We look for lines containing a benchmark name (starts with Benchmark)
+        # followed by a percentage increase >= 20%.
+        regression=false
+        while IFS= read -r line; do
+          if echo "$line" | grep -qP '^\s*(│\s+)?Benchmark.*\+\d+\.\d+%'; then
+            pct=$(echo "$line" | grep -oP '\+\K\d+\.\d+(?=%)' | tail -1)
+            if [ -n "$pct" ] && echo "$pct" | awk '{ exit ($1 < 20.0) }'; then
+              regression=true
+              break
+            fi
           fi
-        else
-          echo "regression=false" >> "$GITHUB_OUTPUT"
+        done < benchstat-output.txt
+
+        echo "regression=$regression" >> "$GITHUB_OUTPUT"
+        if [ "$regression" = "true" ]; then
+          echo "::warning::Potential performance regression detected (>= 20% slower)"
         fi
 
     - name: Comment PR with results
