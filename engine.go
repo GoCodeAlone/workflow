@@ -759,6 +759,15 @@ func (e *StdEngine) configurePipelines(pipelineCfg map[string]any) error {
 			Compensation: compSteps,
 		}
 
+		// Propagate the engine's logger to the pipeline so that execution logs
+		// (Pipeline started, Step completed, etc.) use the same logger instance
+		// as the rest of the engine rather than falling back to slog.Default().
+		// This ensures that callers who pass a discard logger via WithLogger get
+		// full suppression without needing to mutate the global slog default.
+		if sl, ok := e.logger.(*slog.Logger); ok {
+			pipeline.Logger = sl
+		}
+
 		// Set RoutePattern from inline HTTP trigger path so that step.request_parse
 		// can extract path parameters via _route_pattern in the pipeline context.
 		if pipeCfg.Trigger.Type == "http" {

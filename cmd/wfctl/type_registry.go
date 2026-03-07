@@ -552,6 +552,16 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"message", "level"},
 		},
+		"step.cli_print": {
+			Type:       "step.cli_print",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"message", "newline", "target"},
+		},
+		"step.cli_invoke": {
+			Type:       "step.cli_invoke",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"command"},
+		},
 		"step.delegate": {
 			Type:       "step.delegate",
 			Plugin:     "pipelinesteps",

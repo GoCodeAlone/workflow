@@ -40,6 +40,7 @@ func DefaultHandlers() []workflow.WorkflowHandler {
 		handlers.NewPipelineWorkflowHandler(),
 		handlers.NewEventWorkflowHandler(),
 		handlers.NewPlatformWorkflowHandler(),
+		handlers.NewCLIWorkflowHandler(),
 	}
 }
 
@@ -51,5 +52,6 @@ func DefaultTriggers() []interfaces.Trigger {
 		module.NewScheduleTrigger(),
 		module.NewEventBusTrigger(),
 		module.NewReconciliationTrigger(),
+		module.NewCLITrigger(),
 	}
 }

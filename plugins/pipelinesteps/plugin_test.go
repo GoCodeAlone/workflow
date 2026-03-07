@@ -74,6 +74,8 @@ func TestStepFactories(t *testing.T) {
 		"step.http_proxy",
 		"step.hash",
 		"step.regex_match",
+		"step.cli_print",
+		"step.cli_invoke",
 		"step.parallel",
 	}
 
