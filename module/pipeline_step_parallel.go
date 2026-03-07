@@ -171,29 +171,54 @@ func (s *ParallelStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 	}, nil
 }
 
-// buildParallelChildContext creates a deep copy of the PipelineContext for a parallel branch.
-// Each branch gets its own isolated copy so goroutines don't share mutable state.
+// deepCopyValue recursively copies maps and slices so that goroutines operating
+// on different branches cannot mutate each other's data through shared references.
+// Primitive values (bool, string, numbers, nil) are returned as-is since they
+// are immutable in Go.
+func deepCopyValue(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		cp := make(map[string]any, len(val))
+		for k, v2 := range val {
+			cp[k] = deepCopyValue(v2)
+		}
+		return cp
+	case []any:
+		cp := make([]any, len(val))
+		for i, v2 := range val {
+			cp[i] = deepCopyValue(v2)
+		}
+		return cp
+	default:
+		// Primitive values are safe to share.
+		return v
+	}
+}
+
+// buildParallelChildContext creates a true deep copy of the PipelineContext for a
+// parallel branch. Each branch gets its own isolated copy so goroutines cannot
+// race on nested maps or slices.
 func buildParallelChildContext(parent *PipelineContext) *PipelineContext {
 	childTrigger := make(map[string]any, len(parent.TriggerData))
 	for k, v := range parent.TriggerData {
-		childTrigger[k] = v
+		childTrigger[k] = deepCopyValue(v)
 	}
 
 	childMeta := make(map[string]any, len(parent.Metadata))
 	for k, v := range parent.Metadata {
-		childMeta[k] = v
+		childMeta[k] = deepCopyValue(v)
 	}
 
 	childCurrent := make(map[string]any, len(parent.Current))
 	for k, v := range parent.Current {
-		childCurrent[k] = v
+		childCurrent[k] = deepCopyValue(v)
 	}
 
 	childOutputs := make(map[string]map[string]any, len(parent.StepOutputs))
 	for k, v := range parent.StepOutputs {
 		out := make(map[string]any, len(v))
 		for k2, v2 := range v {
-			out[k2] = v2
+			out[k2] = deepCopyValue(v2)
 		}
 		childOutputs[k] = out
 	}

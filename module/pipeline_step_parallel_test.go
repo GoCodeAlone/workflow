@@ -325,3 +325,30 @@ func TestParallelStep_DefaultErrorStrategy(t *testing.T) {
 		t.Fatal("expected error with default fail_fast strategy")
 	}
 }
+
+func TestBuildParallelChildContext_DeepCopy(t *testing.T) {
+	// Verify that buildParallelChildContext performs a true deep copy so that
+	// mutations to nested maps/slices in a child context don't affect the parent.
+	nested := map[string]any{"inner": "original"}
+	slice := []any{"a", "b"}
+	parent := &PipelineContext{
+		TriggerData: map[string]any{"data": nested},
+		Current:     map[string]any{"list": slice},
+		Metadata:    map[string]any{},
+		StepOutputs: map[string]map[string]any{},
+	}
+
+	child := buildParallelChildContext(parent)
+
+	// Mutate the child's nested map — parent should be unaffected.
+	child.TriggerData["data"].(map[string]any)["inner"] = "mutated"
+	if parent.TriggerData["data"].(map[string]any)["inner"] != "original" {
+		t.Fatal("deep copy failed: mutation of child TriggerData nested map affected parent")
+	}
+
+	// Mutate the child's slice — parent should be unaffected.
+	child.Current["list"].([]any)[0] = "z"
+	if parent.Current["list"].([]any)[0] != "a" {
+		t.Fatal("deep copy failed: mutation of child Current slice affected parent")
+	}
+}

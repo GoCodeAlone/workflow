@@ -197,11 +197,25 @@ func (s *ForEachStep) executeConcurrent(ctx context.Context, pc *PipelineContext
 	var firstErr error
 	var errOnce sync.Once
 
+outer:
 	for i, item := range items {
-		wg.Add(1)
+		// Stop launching new goroutines if the context is already cancelled
+		// (e.g., from a previous fail_fast error or external cancellation).
+		if branchCtx.Err() != nil {
+			break outer
+		}
+
 		i, item := i, item
 
-		sem <- struct{}{} // acquire semaphore slot
+		// Acquire a semaphore slot, but respect context cancellation so we don't
+		// block indefinitely when fail_fast has already cancelled the context.
+		select {
+		case sem <- struct{}{}: // acquired slot; fall through to launch goroutine
+		case <-branchCtx.Done():
+			break outer
+		}
+
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }() // release slot
