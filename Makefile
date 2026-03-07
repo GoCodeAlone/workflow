@@ -1,4 +1,4 @@
-.PHONY: build build-ui build-go test bench bench-baseline lint fmt vet fix install-hooks clean
+.PHONY: build build-ui build-go test bench bench-baseline bench-compare lint fmt vet fix install-hooks clean
 
 # Common benchmark flags
 BENCH_FLAGS = -bench=. -benchmem -run=^$$ -timeout=30m

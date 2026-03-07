@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"reflect"
 	"testing"
 )
 
@@ -651,8 +652,28 @@ func TestIsJSONCompatible(t *testing.T) {
 	}
 }
 
+func TestIsJSONCompatible_CycleDetection(t *testing.T) {
+	// A self-referential map should be detected as incompatible (cycle)
+	// rather than causing infinite recursion/stack overflow.
+	m := map[string]any{"key": "value"}
+	m["self"] = m // create a cycle
+	got := isJSONCompatible(m)
+	if got {
+		t.Error("expected isJSONCompatible to return false for cyclic map")
+	}
+
+	// A self-referential slice should also be detected as incompatible.
+	s := make([]any, 1)
+	s[0] = s // create a cycle
+	got = isJSONCompatible(s)
+	if got {
+		t.Error("expected isJSONCompatible to return false for cyclic slice")
+	}
+}
+
 func TestNormalizeForJQ_SkipsRoundTrip(t *testing.T) {
-	// Already JSON-compatible data should be returned as-is (same pointer).
+	// Already JSON-compatible data should be returned as-is — the round-trip
+	// is skipped, so the returned interface{} wraps the original map pointer.
 	input := map[string]any{
 		"name":  "Alice",
 		"age":   30,
@@ -662,10 +683,14 @@ func TestNormalizeForJQ_SkipsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalizeForJQ error: %v", err)
 	}
-	// When skipping round-trip, the returned map is the same object.
 	m, ok := result.(map[string]any)
 	if !ok {
 		t.Fatalf("expected map[string]any, got %T", result)
+	}
+	// Pointer identity: the returned map must be exactly the original map,
+	// confirming no marshal/unmarshal copy was made.
+	if &m == nil || reflect.ValueOf(m).Pointer() != reflect.ValueOf(input).Pointer() {
+		t.Error("expected normalizeForJQ to return the original map (same pointer), but got a copy")
 	}
 	if m["name"] != "Alice" {
 		t.Errorf("expected name=Alice, got %v", m["name"])
