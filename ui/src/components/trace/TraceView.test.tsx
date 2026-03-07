@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import TraceView, { toTraceStep, toLogEntry } from './TraceView.tsx';
+import TraceView from './TraceView.tsx';
+import { toTraceStep, toLogEntry } from './traceUtils.ts';
 import useObservabilityStore from '../../store/observabilityStore.ts';
 import type { TraceStep } from '@gocodealone/workflow-ui/trace';
 
@@ -359,5 +360,17 @@ describe('toLogEntry', () => {
       };
       expect(toLogEntry(log).level).toBe(level);
     }
+  });
+
+  it('passes "event" level through unchanged (caller should filter before mapping)', () => {
+    const log = {
+      id: 1,
+      workflow_id: 'wf-1',
+      level: 'event' as const,
+      message: 'step.started',
+      created_at: '',
+    };
+    // event level is not remapped; callers must filter these rows out before display
+    expect(toLogEntry(log).level).toBe('event');
   });
 });

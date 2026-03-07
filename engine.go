@@ -387,12 +387,6 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		}
 	}
 
-	// Compute config hash for tracing/versioning
-	if configBytes, err := yaml.Marshal(cfg); err == nil {
-		h := sha256.Sum256(configBytes)
-		e.configHash = fmt.Sprintf("sha256:%x", h)
-	}
-
 	// Store config directory for consistent path resolution in pipeline steps
 	e.configDir = cfg.ConfigDir
 
@@ -403,6 +397,15 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				return fmt.Errorf("config transform hook %q failed: %w", hook.Name, err)
 			}
 		}
+	}
+
+	// Compute config hash after transform hooks so the hash reflects the effective
+	// runtime config (hooks may mutate cfg before modules are registered).
+	// Reset first so a marshal failure never leaves a stale hash from a previous build.
+	e.configHash = ""
+	if configBytes, err := yaml.Marshal(cfg); err == nil {
+		h := sha256.Sum256(configBytes)
+		e.configHash = fmt.Sprintf("sha256:%x", h)
 	}
 
 	// Register all modules from config

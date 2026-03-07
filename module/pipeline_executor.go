@@ -165,11 +165,14 @@ func (p *Pipeline) Execute(ctx context.Context, triggerData map[string]any) (*Pi
 			"index":     i,
 		})
 
-		// Record step input (snapshot of current pipeline context)
-		p.recordEvent(ctx, "step.input_recorded", map[string]any{
-			"step_name": step.Name(),
-			"input":     pc.Current,
-		})
+		// Record step input (snapshot of current pipeline context) only when
+		// explicit tracing is enabled to avoid persisting PII for normal runs.
+		if isExplicitTrace(ctx) {
+			p.recordEvent(ctx, "step.input_recorded", map[string]any{
+				"step_name": step.Name(),
+				"input":     pc.Current,
+			})
+		}
 
 		result, err := step.Execute(ctx, pc)
 		elapsed := time.Since(startTime)
@@ -229,15 +232,17 @@ func (p *Pipeline) Execute(ctx context.Context, triggerData map[string]any) (*Pi
 			"elapsed":   elapsed.String(),
 		})
 
-		// Record step output
-		var stepOutput map[string]any
-		if result != nil {
-			stepOutput = result.Output
+		// Record step output only when explicit tracing is enabled.
+		if isExplicitTrace(ctx) {
+			var stepOutput map[string]any
+			if result != nil {
+				stepOutput = result.Output
+			}
+			p.recordEvent(ctx, "step.output_recorded", map[string]any{
+				"step_name": step.Name(),
+				"output":    stepOutput,
+			})
 		}
-		p.recordEvent(ctx, "step.output_recorded", map[string]any{
-			"step_name": step.Name(),
-			"output":    stepOutput,
-		})
 
 		// Merge output into context
 		if result != nil && result.Output != nil {
