@@ -9,16 +9,6 @@ type ActorMessage struct {
 	Payload map[string]any `json:"payload"`
 }
 
-// ActorResponse is the standard response envelope returned by bridge actors.
-type ActorResponse struct {
-	// Type echoes the request message type.
-	Type string `json:"type"`
-	// Result is the merged output from the handler pipeline.
-	Result map[string]any `json:"result"`
-	// Error holds a non-nil error string if the handler pipeline failed.
-	Error string `json:"error,omitempty"`
-}
-
 // HandlerPipeline defines a message handler as an ordered set of step configs.
 type HandlerPipeline struct {
 	// Description is an optional human-readable description.

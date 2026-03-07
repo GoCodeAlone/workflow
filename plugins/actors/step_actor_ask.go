@@ -18,11 +18,12 @@ type ActorAskStep struct {
 	timeout  time.Duration
 	message  map[string]any
 	tmpl     *module.TemplateEngine
+	app      modular.Application
 }
 
 // NewActorAskStepFactory returns a factory for step.actor_ask.
 func NewActorAskStepFactory() module.StepFactory {
-	return func(name string, config map[string]any, _ modular.Application) (module.PipelineStep, error) {
+	return func(name string, config map[string]any, app modular.Application) (module.PipelineStep, error) {
 		pool, _ := config["pool"].(string)
 		if pool == "" {
 			return nil, fmt.Errorf("step.actor_ask %q: 'pool' is required", name)
@@ -56,6 +57,7 @@ func NewActorAskStepFactory() module.StepFactory {
 			timeout:  timeout,
 			message:  message,
 			tmpl:     module.NewTemplateEngine(),
+			app:      app,
 		}, nil
 	}
 }
@@ -87,14 +89,15 @@ func (s *ActorAskStep) Execute(ctx context.Context, pc *module.PipelineContext) 
 		identity = resolvedID
 	}
 
-	// Look up the actor pool
-	poolSvc, ok := pc.Metadata["__actor_pools"].(map[string]*ActorPoolModule)
-	if !ok {
-		return nil, fmt.Errorf("step.actor_ask %q: actor pools not available in pipeline context", s.name)
-	}
-	pool, ok := poolSvc[s.pool]
-	if !ok {
-		return nil, fmt.Errorf("step.actor_ask %q: actor pool %q not found", s.name, s.pool)
+	// Look up the actor pool via service registry
+	var pool *ActorPoolModule
+	svcName := fmt.Sprintf("actor-pool:%s", s.pool)
+	if s.app != nil {
+		if err := s.app.GetService(svcName, &pool); err != nil {
+			return nil, fmt.Errorf("step.actor_ask %q: actor pool %q not found: %w", s.name, s.pool, err)
+		}
+	} else {
+		return nil, fmt.Errorf("step.actor_ask %q: no application context available to resolve actor pool", s.name)
 	}
 
 	sys := pool.system.ActorSystem()
@@ -105,13 +108,13 @@ func (s *ActorAskStep) Execute(ctx context.Context, pc *module.PipelineContext) 
 	msg := &ActorMessage{Type: msgType, Payload: payload}
 	var resp any
 
-	// Use identity-based actor spawn for auto-managed pools; pool-level actor for permanent
+	// Use Grain API for auto-managed pools; regular actor for permanent pools
 	if pool.Mode() == "auto-managed" && identity != "" {
-		pid, err := pool.GetOrSpawnActor(ctx, identity)
+		grainID, err := pool.GetGrainIdentity(ctx, identity)
 		if err != nil {
-			return nil, fmt.Errorf("step.actor_ask %q: failed to get actor %q: %w", s.name, identity, err)
+			return nil, fmt.Errorf("step.actor_ask %q: failed to get grain %q: %w", s.name, identity, err)
 		}
-		resp, err = actor.Ask(ctx, pid, msg, s.timeout)
+		resp, err = pool.system.ActorSystem().AskGrain(ctx, grainID, msg, s.timeout)
 		if err != nil {
 			return nil, fmt.Errorf("step.actor_ask %q: ask failed: %w", s.name, err)
 		}

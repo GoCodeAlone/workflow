@@ -10,7 +10,7 @@ import (
 	goaktactor "github.com/tochemey/goakt/v4/actor"
 )
 
-// NewBridgeActor creates a BridgeActor ready to be spawned.
+// NewBridgeActor creates a BridgeActor ready to be spawned into a permanent pool.
 func NewBridgeActor(poolName, identity string, handlers map[string]*HandlerPipeline, registry *module.StepRegistry, app modular.Application, logger *slog.Logger) *BridgeActor {
 	return &BridgeActor{
 		poolName: poolName,
@@ -25,9 +25,8 @@ func NewBridgeActor(poolName, identity string, handlers map[string]*HandlerPipel
 // State returns a copy of the actor's current internal state (for testing/inspection).
 func (a *BridgeActor) State() map[string]any { return copyMap(a.state) }
 
-// BridgeActor is a goakt Actor that executes workflow step pipelines
-// when it receives messages. It bridges the actor model with the
-// pipeline execution model.
+// BridgeActor is a goakt Actor (PreStart/Receive/PostStop) used for permanent pools.
+// It executes workflow step pipelines when it receives messages.
 type BridgeActor struct {
 	poolName string
 	identity string
@@ -53,55 +52,91 @@ func (a *BridgeActor) PostStop(_ *goaktactor.Context) error {
 	return nil
 }
 
-// Receive handles incoming messages by dispatching to the appropriate
-// handler pipeline.
+// Receive handles incoming messages by dispatching to the appropriate handler pipeline.
 func (a *BridgeActor) Receive(ctx *goaktactor.ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *ActorMessage:
-		result, err := a.handleMessage(ctx.Context(), msg)
+		result, err := executePipeline(ctx.Context(), msg, a.poolName, a.identity, a.state, a.handlers, a.registry, a.app)
 		if err != nil {
 			ctx.Err(err)
-			ctx.Response(map[string]any{"error": err.Error()})
 			return
 		}
 		ctx.Response(result)
-
 	default:
 		// Ignore system messages (PostStart, PoisonPill, etc.)
-		// They are handled by goakt internally
 		_ = msg
 	}
 }
 
-// handleMessage finds the handler pipeline for the message type and executes it.
-func (a *BridgeActor) handleMessage(ctx context.Context, msg *ActorMessage) (map[string]any, error) {
-	handler, ok := a.handlers[msg.Type]
+// BridgeGrain is a goakt Grain (OnActivate/OnReceive/OnDeactivate) used for auto-managed pools.
+// Grains are virtual actors: activated on first message, passivated after idleTimeout.
+type BridgeGrain struct {
+	poolName string
+	state    map[string]any
+	handlers map[string]*HandlerPipeline
+
+	registry *module.StepRegistry
+	app      modular.Application
+	logger   *slog.Logger
+}
+
+// OnActivate initializes grain state when the grain is loaded into memory.
+func (g *BridgeGrain) OnActivate(_ context.Context, _ *goaktactor.GrainProps) error {
+	if g.state == nil {
+		g.state = make(map[string]any)
+	}
+	return nil
+}
+
+// OnReceive dispatches an ActorMessage to the matching handler pipeline.
+func (g *BridgeGrain) OnReceive(ctx *goaktactor.GrainContext) {
+	msg, ok := ctx.Message().(*ActorMessage)
+	if !ok {
+		ctx.Unhandled()
+		return
+	}
+	identity := ctx.Self().Name()
+	result, err := executePipeline(ctx.Context(), msg, g.poolName, identity, g.state, g.handlers, g.registry, g.app)
+	if err != nil {
+		ctx.Err(err)
+		return
+	}
+	ctx.Response(result)
+}
+
+// OnDeactivate is called when the grain is passivated (idle timeout reached).
+func (g *BridgeGrain) OnDeactivate(_ context.Context, _ *goaktactor.GrainProps) error {
+	return nil
+}
+
+// executePipeline finds the handler for msg.Type, runs the step pipeline, updates state,
+// and returns the last step's output. Shared by BridgeActor and BridgeGrain.
+func executePipeline(ctx context.Context, msg *ActorMessage, poolName, identity string, state map[string]any, handlers map[string]*HandlerPipeline, registry *module.StepRegistry, app modular.Application) (map[string]any, error) {
+	handler, ok := handlers[msg.Type]
 	if !ok {
 		return map[string]any{
 			"error": fmt.Sprintf("no handler for message type %q", msg.Type),
 		}, nil
 	}
 
-	// Build the pipeline context with actor-specific template variables
 	triggerData := map[string]any{
 		"message": map[string]any{
 			"type":    msg.Type,
 			"payload": msg.Payload,
 		},
-		"state": copyMap(a.state),
+		"state": copyMap(state),
 		"actor": map[string]any{
-			"identity": a.identity,
-			"pool":     a.poolName,
+			"identity": identity,
+			"pool":     poolName,
 		},
 	}
 
 	pc := module.NewPipelineContext(triggerData, map[string]any{
-		"actor_pool":     a.poolName,
-		"actor_identity": a.identity,
+		"actor_pool":     poolName,
+		"actor_identity": identity,
 		"message_type":   msg.Type,
 	})
 
-	// Execute each step in sequence
 	var lastOutput map[string]any
 	for _, stepCfg := range handler.Steps {
 		stepType, _ := stepCfg["type"].(string)
@@ -115,13 +150,12 @@ func (a *BridgeActor) handleMessage(ctx context.Context, msg *ActorMessage) (map
 		var step module.PipelineStep
 		var err error
 
-		if a.registry != nil {
-			step, err = a.registry.Create(stepType, stepName, config, a.app)
+		if registry != nil {
+			step, err = registry.Create(stepType, stepName, config, app)
 			if err != nil {
 				return nil, fmt.Errorf("handler %q step %q: %w", msg.Type, stepName, err)
 			}
 		} else {
-			// Fallback: create step.set inline for testing without a registry
 			if stepType == "step.set" {
 				factory := module.NewSetStepFactory()
 				step, err = factory(stepName, config, nil)
@@ -148,10 +182,9 @@ func (a *BridgeActor) handleMessage(ctx context.Context, msg *ActorMessage) (map
 		}
 	}
 
-	// Merge last step output back into actor state
 	if lastOutput != nil {
 		for k, v := range lastOutput {
-			a.state[k] = v
+			state[k] = v
 		}
 	}
 

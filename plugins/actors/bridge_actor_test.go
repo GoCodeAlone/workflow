@@ -8,6 +8,89 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 )
 
+func TestBridgeGrain_ReceiveAndStatePersistence(t *testing.T) {
+	ctx := context.Background()
+
+	handlers := map[string]*HandlerPipeline{
+		"SetValue": {
+			Steps: []map[string]any{
+				{
+					"name": "set",
+					"type": "step.set",
+					"config": map[string]any{
+						"values": map[string]any{
+							"value": "{{ .message.payload.value }}",
+						},
+					},
+				},
+			},
+		},
+		"GetValue": {
+			Steps: []map[string]any{
+				{
+					"name": "get",
+					"type": "step.set",
+					"config": map[string]any{
+						"values": map[string]any{
+							"value": "{{ .state.value }}",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	sys, err := actor.NewActorSystem("test-grain-sys",
+		actor.WithShutdownTimeout(5*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("failed to create actor system: %v", err)
+	}
+	if err := sys.Start(ctx); err != nil {
+		t.Fatalf("failed to start actor system: %v", err)
+	}
+	defer sys.Stop(ctx) //nolint:errcheck
+
+	factory := func(_ context.Context) (actor.Grain, error) {
+		return &BridgeGrain{
+			poolName: "test-pool",
+			handlers: handlers,
+		}, nil
+	}
+
+	grainID, err := sys.GrainIdentity(ctx, "grain-1", factory,
+		actor.WithGrainDeactivateAfter(10*time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("failed to get grain identity: %v", err)
+	}
+
+	// SetValue
+	if _, err := sys.AskGrain(ctx, grainID, &ActorMessage{
+		Type:    "SetValue",
+		Payload: map[string]any{"value": "hello"},
+	}, 5*time.Second); err != nil {
+		t.Fatalf("SetValue failed: %v", err)
+	}
+
+	// GetValue — state should persist
+	resp, err := sys.AskGrain(ctx, grainID, &ActorMessage{
+		Type:    "GetValue",
+		Payload: map[string]any{},
+	}, 5*time.Second)
+	if err != nil {
+		t.Fatalf("GetValue failed: %v", err)
+	}
+
+	result, ok := resp.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map response, got %T", resp)
+	}
+	if result["value"] != "hello" {
+		t.Errorf("expected value=hello from state, got %v", result["value"])
+	}
+}
+
 func TestBridgeActor_ReceiveMessage(t *testing.T) {
 	ctx := context.Background()
 

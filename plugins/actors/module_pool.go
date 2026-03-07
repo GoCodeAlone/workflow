@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/CrisisTextLine/modular"
@@ -48,10 +47,6 @@ type ActorPoolModule struct {
 	// Step registry for building pipeline steps inside actors
 	stepRegistry *module.StepRegistry
 	app          modular.Application
-
-	// PIDs tracks live actor instances: identity -> PID
-	pids   map[string]*actor.PID
-	pidsMu sync.Mutex
 }
 
 // NewActorPoolModule creates a new actor pool module from config.
@@ -74,8 +69,7 @@ func NewActorPoolModule(name string, cfg map[string]any) (*ActorPoolModule, erro
 		poolSize:    10,
 		routing:     "round-robin",
 		failover:    true,
-		handlers:    make(map[string]*HandlerPipeline),
-		pids:        make(map[string]*actor.PID),
+		handlers: make(map[string]*HandlerPipeline),
 	}
 
 	// Parse mode
@@ -169,7 +163,24 @@ func (m *ActorPoolModule) Start(ctx context.Context) error {
 	if m.system == nil || m.system.ActorSystem() == nil {
 		return fmt.Errorf("actor.pool %q: actor system not started", m.name)
 	}
-	// Actor spawning will be implemented in Task 4 (bridge actor)
+
+	// For permanent pools, spawn poolSize actors into the system
+	if m.mode == "permanent" {
+		sys := m.system.ActorSystem()
+		for i := 0; i < m.poolSize; i++ {
+			actorName := fmt.Sprintf("%s-%d", m.name, i)
+			bridge := NewBridgeActor(m.name, actorName, m.handlers, m.stepRegistry, m.app, m.logger)
+			pid, err := sys.Spawn(ctx, actorName, bridge)
+			if err != nil {
+				return fmt.Errorf("actor.pool %q: failed to spawn actor %q: %w", m.name, actorName, err)
+			}
+			_ = pid
+		}
+		if m.logger != nil {
+			m.logger.Info("permanent actor pool started", "pool", m.name, "size", m.poolSize)
+		}
+	}
+
 	return nil
 }
 
@@ -189,27 +200,27 @@ func (m *ActorPoolModule) SetStepRegistry(registry *module.StepRegistry, app mod
 	m.app = app
 }
 
-// GetOrSpawnActor returns an existing actor PID for the given identity, or spawns a new one.
-func (m *ActorPoolModule) GetOrSpawnActor(ctx context.Context, identity string) (*actor.PID, error) {
+// GetGrainIdentity retrieves or activates a grain for the given identity.
+// The grain system handles lifecycle automatically: it activates on first use
+// and passivates after idleTimeout of inactivity.
+func (m *ActorPoolModule) GetGrainIdentity(ctx context.Context, identity string) (*actor.GrainIdentity, error) {
 	if m.system == nil || m.system.ActorSystem() == nil {
 		return nil, fmt.Errorf("actor.pool %q: actor system not started", m.name)
 	}
 
-	m.pidsMu.Lock()
-	defer m.pidsMu.Unlock()
-
-	if pid, ok := m.pids[identity]; ok {
-		return pid, nil
+	factory := func(_ context.Context) (actor.Grain, error) {
+		return &BridgeGrain{
+			poolName: m.name,
+			handlers: m.handlers,
+			registry: m.stepRegistry,
+			app:      m.app,
+			logger:   m.logger,
+		}, nil
 	}
 
-	bridge := NewBridgeActor(m.name, identity, m.handlers, m.stepRegistry, m.app, m.logger)
-	actorName := fmt.Sprintf("%s/%s", m.name, identity)
-	pid, err := m.system.ActorSystem().Spawn(ctx, actorName, bridge)
-	if err != nil {
-		return nil, fmt.Errorf("actor.pool %q: failed to spawn actor %q: %w", m.name, identity, err)
-	}
-	m.pids[identity] = pid
-	return pid, nil
+	return m.system.ActorSystem().GrainIdentity(ctx, identity, factory,
+		actor.WithGrainDeactivateAfter(m.idleTimeout),
+	)
 }
 
 // SystemName returns the referenced actor.system module name.
