@@ -1,140 +1,133 @@
-# Actor System Config Example
+# Actor Model Example
 #
-# Demonstrates the actor model plugin: stateful actors with message-based
-# workflows, triggered via HTTP endpoints.
+# Demonstrates stateful actors processing orders via message passing.
+# HTTP routes send messages to actors using step.actor_ask.
+# Each order gets its own actor that maintains state across messages.
+
+app:
+  name: actor-demo
 
 modules:
-  # HTTP infrastructure
-  - name: api-http-server
+  - name: http
     type: http.server
     config:
       address: ":8080"
-  - name: api-router
-    type: http.router
-  - name: orders-handler
-    type: http.handler
-    config:
-      contentType: application/json
 
-  # Actor infrastructure
-  - name: main-actors
+  - name: router
+    type: http.router
+
+  - name: actors
     type: actor.system
     config:
-      shutdownTimeout: 30s
-      defaultRecovery:
-        failureScope: isolated
-        action: restart
-        maxRetries: 5
-        retryWindow: 30s
+      shutdownTimeout: 15s
 
   - name: order-processors
     type: actor.pool
     config:
-      system: main-actors
+      system: actors
       mode: auto-managed
       idleTimeout: 10m
       routing: sticky
       routingKey: order_id
+      recovery:
+        failureScope: isolated
+        action: restart
+        maxRetries: 3
+        retryWindow: 10s
 
 workflows:
-  # HTTP routes for triggering actor interactions
-  http:
-    routes:
-      - method: POST
-        path: /api/orders
-        handler: orders-handler
-      - method: GET
-        path: /api/orders/{order_id}
-        handler: orders-handler
-
-  # Actor message handlers
   actors:
     pools:
       order-processors:
         receive:
-          PlaceOrder:
-            description: Place a new order and set it to pending status
+          ProcessOrder:
+            description: "Create or update an order"
             steps:
-              - name: set-status
-                type: step.set
+              - type: step.set
+                name: result
                 config:
                   values:
-                    status: pending
                     order_id: "{{ .message.payload.order_id }}"
-                    item: "{{ .message.payload.item }}"
-                    quantity: "{{ .message.payload.quantity }}"
+                    status: "confirmed"
+                    items: "{{ json .message.payload.items }}"
 
-          GetOrderStatus:
-            description: Retrieve the current order status from actor state
+          GetStatus:
+            description: "Return current order state"
             steps:
-              - name: respond
-                type: step.set
+              - type: step.set
+                name: result
                 config:
                   values:
-                    order_id: "{{ .state.order_id }}"
+                    order_id: "{{ .actor.identity }}"
                     status: "{{ .state.status }}"
-                    item: "{{ .state.item }}"
 
-  # HTTP pipeline for order placement (calls actor)
-  pipeline:
-    - name: place-order
-      trigger:
-        type: http
-        config:
-          method: POST
-          path: /api/orders
-          handler: orders-handler
-      steps:
-        - name: parse-body
-          type: step.request_parse
-          config:
-            format: json
-        - name: send-to-actor
-          type: step.actor_ask
-          config:
-            pool: order-processors
-            identity: "{{ .order_id }}"
-            timeout: 10s
-            message:
-              type: PlaceOrder
-              payload:
-                order_id: "{{ .order_id }}"
-                item: "{{ .item }}"
-                quantity: "{{ .quantity }}"
-        - name: respond
-          type: step.json_response
-          config:
-            status: 201
-            body:
-              order_id: "{{ .state.order_id }}"
-              status: "{{ .state.status }}"
+          CancelOrder:
+            description: "Cancel the order"
+            steps:
+              - type: step.set
+                name: result
+                config:
+                  values:
+                    status: "cancelled"
+                    cancelled_at: '{{ now "2006-01-02T15:04:05Z" }}'
 
-    - name: get-order
-      trigger:
-        type: http
-        config:
-          method: GET
-          path: /api/orders/{order_id}
-          handler: orders-handler
-      steps:
-        - name: parse-path
-          type: step.validate_path_param
-          config:
-            param: order_id
-        - name: ask-actor
-          type: step.actor_ask
-          config:
-            pool: order-processors
-            identity: "{{ .order_id }}"
-            timeout: 10s
-            message:
-              type: GetOrderStatus
-              payload: {}
-        - name: respond
-          type: step.json_response
-          config:
-            status: 200
-            body:
-              order_id: "{{ .state.order_id }}"
-              status: "{{ .state.status }}"
-              item: "{{ .state.item }}"
+  http:
+    routes:
+      - path: /orders
+        method: POST
+        pipeline:
+          steps:
+            - type: step.request_parse
+              name: parse
+              config:
+                parse_body: true
+            - type: step.actor_ask
+              name: process
+              config:
+                pool: order-processors
+                identity: "{{ .body.order_id }}"
+                timeout: 10s
+                message:
+                  type: ProcessOrder
+                  payload:
+                    order_id: "{{ .body.order_id }}"
+                    items: "{{ json .body.items }}"
+            - type: step.json_response
+              name: respond
+              config:
+                status_code: 201
+                body: '{{ json .steps.process }}'
+
+      - path: /orders/{id}
+        method: GET
+        pipeline:
+          steps:
+            - type: step.actor_ask
+              name: status
+              config:
+                pool: order-processors
+                identity: "{{ .id }}"
+                timeout: 5s
+                message:
+                  type: GetStatus
+            - type: step.json_response
+              name: respond
+              config:
+                body: '{{ json .steps.status }}'
+
+      - path: /orders/{id}
+        method: DELETE
+        pipeline:
+          steps:
+            - type: step.actor_ask
+              name: cancel
+              config:
+                pool: order-processors
+                identity: "{{ .id }}"
+                timeout: 5s
+                message:
+                  type: CancelOrder
+            - type: step.json_response
+              name: respond
+              config:
+                body: '{{ json .steps.cancel }}'
