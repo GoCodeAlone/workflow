@@ -95,6 +95,11 @@ func (s *ActorSendStep) Execute(ctx context.Context, pc *module.PipelineContext)
 
 	msg := &ActorMessage{Type: msgType, Payload: payload}
 
+	// Auto-managed pools require an identity to address a specific grain
+	if pool.Mode() == "auto-managed" && identity == "" {
+		return nil, fmt.Errorf("step.actor_send %q: 'identity' is required for auto-managed pool %q", s.name, s.pool)
+	}
+
 	// Use Grain API for auto-managed pools; regular actor for permanent pools
 	if pool.Mode() == "auto-managed" && identity != "" {
 		grainID, err := pool.GetGrainIdentity(ctx, identity)

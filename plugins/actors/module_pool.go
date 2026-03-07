@@ -164,17 +164,25 @@ func (m *ActorPoolModule) Start(ctx context.Context) error {
 		return fmt.Errorf("actor.pool %q: actor system not started", m.name)
 	}
 
-	// For permanent pools, spawn poolSize actors into the system
+	// For permanent pools, spawn a primary actor under the pool name (for step lookups
+	// via sys.ActorOf) plus poolSize worker actors for capacity.
 	if m.mode == "permanent" {
 		sys := m.system.ActorSystem()
-		for i := 0; i < m.poolSize; i++ {
+
+		// Primary actor registered under the pool name so that step.actor_send/ask
+		// lookups via sys.ActorOf(ctx, poolName) succeed.
+		primary := NewBridgeActor(m.name, m.name, m.handlers, m.stepRegistry, m.app, m.logger)
+		if _, err := sys.Spawn(ctx, m.name, primary); err != nil {
+			return fmt.Errorf("actor.pool %q: failed to spawn primary actor: %w", m.name, err)
+		}
+
+		// Additional worker actors for pool capacity
+		for i := 1; i < m.poolSize; i++ {
 			actorName := fmt.Sprintf("%s-%d", m.name, i)
 			bridge := NewBridgeActor(m.name, actorName, m.handlers, m.stepRegistry, m.app, m.logger)
-			pid, err := sys.Spawn(ctx, actorName, bridge)
-			if err != nil {
+			if _, err := sys.Spawn(ctx, actorName, bridge); err != nil {
 				return fmt.Errorf("actor.pool %q: failed to spawn actor %q: %w", m.name, actorName, err)
 			}
-			_ = pid
 		}
 		if m.logger != nil {
 			m.logger.Info("permanent actor pool started", "pool", m.name, "size", m.poolSize)

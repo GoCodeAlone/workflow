@@ -147,16 +147,18 @@ func executePipeline(ctx context.Context, msg *ActorMessage, poolName, identity 
 			return nil, fmt.Errorf("handler %q: step missing 'type' or 'name'", msg.Type)
 		}
 
+		// Reuse cached step instance if available (avoids rebuilding per message)
 		var step module.PipelineStep
-		var err error
-
-		if registry != nil {
-			step, err = registry.Create(stepType, stepName, config, app)
-			if err != nil {
-				return nil, fmt.Errorf("handler %q step %q: %w", msg.Type, stepName, err)
-			}
+		if cached, ok := stepCfg["_step"].(module.PipelineStep); ok {
+			step = cached
 		} else {
-			if stepType == "step.set" {
+			var err error
+			if registry != nil {
+				step, err = registry.Create(stepType, stepName, config, app)
+				if err != nil {
+					return nil, fmt.Errorf("handler %q step %q: %w", msg.Type, stepName, err)
+				}
+			} else if stepType == "step.set" {
 				factory := module.NewSetStepFactory()
 				step, err = factory(stepName, config, nil)
 				if err != nil {
@@ -165,6 +167,7 @@ func executePipeline(ctx context.Context, msg *ActorMessage, poolName, identity 
 			} else {
 				return nil, fmt.Errorf("handler %q step %q: no step registry available for type %q", msg.Type, stepName, stepType)
 			}
+			stepCfg["_step"] = step
 		}
 
 		result, err := step.Execute(ctx, pc)

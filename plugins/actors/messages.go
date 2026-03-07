@@ -4,9 +4,9 @@ package actors
 // All messages sent to bridge actors use this type.
 type ActorMessage struct {
 	// Type identifies which handler pipeline to invoke.
-	Type string `json:"type"`
+	Type string `json:"type" cbor:"type"`
 	// Payload is the data passed to the handler pipeline as trigger data.
-	Payload map[string]any `json:"payload"`
+	Payload map[string]any `json:"payload" cbor:"payload"`
 }
 
 // HandlerPipeline defines a message handler as an ordered set of step configs.
