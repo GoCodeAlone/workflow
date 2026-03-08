@@ -139,7 +139,11 @@ func (a *ExternalPluginAdapter) ModuleFactories() map[string]plugin.ModuleFactor
 			if createErr != nil || createResp.Error != "" {
 				return nil
 			}
-			return NewRemoteModule(name, createResp.HandleId, a.client.client)
+			remote := NewRemoteModule(name, createResp.HandleId, a.client.client)
+			if tn == "security.scanner" {
+				return NewSecurityScannerRemoteModule(remote)
+			}
+			return remote
 		}
 	}
 	return factories
