@@ -86,6 +86,8 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 		"actor.system": func(name string, cfg map[string]any) modular.Module {
 			mod, err := NewActorSystemModule(name, cfg)
 			if err != nil {
+				// ModuleFactory interface has no error return; the engine checks for nil
+				// and produces a clear error: "factory for module type returned nil".
 				if p.logger != nil {
 					p.logger.Error("failed to create actor.system module", "name", name, "error", err)
 				}

@@ -181,17 +181,9 @@ func TestBridgeActor_UnknownMessageType(t *testing.T) {
 	}
 
 	msg := &ActorMessage{Type: "Unknown", Payload: map[string]any{}}
-	resp, err := actor.Ask(ctx, pid, msg, 5*time.Second)
-	if err != nil {
-		t.Fatalf("ask failed: %v", err)
-	}
-
-	result, ok := resp.(map[string]any)
-	if !ok {
-		t.Fatalf("expected map response, got %T", resp)
-	}
-	if _, hasErr := result["error"]; !hasErr {
-		t.Error("expected error in response for unknown message type")
+	_, err = actor.Ask(ctx, pid, msg, 5*time.Second)
+	if err == nil {
+		t.Fatal("expected error for unknown message type, got nil")
 	}
 }
 

@@ -109,14 +109,26 @@ func (g *BridgeGrain) OnDeactivate(_ context.Context, _ *goaktactor.GrainProps) 
 	return nil
 }
 
+// buildStep creates a step instance from a step config map.
+func buildStep(stepType, stepName string, stepCfg map[string]any, registry *module.StepRegistry, app modular.Application) (module.PipelineStep, error) {
+	config, _ := stepCfg["config"].(map[string]any)
+	switch {
+	case registry != nil:
+		return registry.Create(stepType, stepName, config, app)
+	case stepType == "step.set":
+		factory := module.NewSetStepFactory()
+		return factory(stepName, config, nil)
+	default:
+		return nil, fmt.Errorf("no step registry available for type %q", stepType)
+	}
+}
+
 // executePipeline finds the handler for msg.Type, runs the step pipeline, updates state,
-// and returns the last step's output. Shared by BridgeActor and BridgeGrain.
+// and returns the accumulated output. Shared by BridgeActor and BridgeGrain.
 func executePipeline(ctx context.Context, msg *ActorMessage, poolName, identity string, state map[string]any, handlers map[string]*HandlerPipeline, registry *module.StepRegistry, app modular.Application) (map[string]any, error) {
 	handler, ok := handlers[msg.Type]
 	if !ok {
-		return map[string]any{
-			"error": fmt.Sprintf("no handler for message type %q", msg.Type),
-		}, nil
+		return nil, fmt.Errorf("no handler for message type %q", msg.Type)
 	}
 
 	triggerData := map[string]any{
@@ -137,8 +149,8 @@ func executePipeline(ctx context.Context, msg *ActorMessage, poolName, identity 
 		"message_type":   msg.Type,
 	})
 
-	var lastOutput map[string]any
-	for i, stepCfg := range handler.Steps {
+	output := map[string]any{}
+	for _, stepCfg := range handler.Steps {
 		stepType, _ := stepCfg["type"].(string)
 		stepName, _ := stepCfg["name"].(string)
 
@@ -146,26 +158,11 @@ func executePipeline(ctx context.Context, msg *ActorMessage, poolName, identity 
 			return nil, fmt.Errorf("handler %q: step missing 'type' or 'name'", msg.Type)
 		}
 
-		// Use pre-built step instance if available (built during pool init).
-		// Fall back to building on-demand for tests or when registry is nil.
-		var step module.PipelineStep
-		if i < len(handler.BuiltSteps) && handler.BuiltSteps[i] != nil {
-			step = handler.BuiltSteps[i]
-		} else {
-			config, _ := stepCfg["config"].(map[string]any)
-			var err error
-			switch {
-			case registry != nil:
-				step, err = registry.Create(stepType, stepName, config, app)
-			case stepType == "step.set":
-				factory := module.NewSetStepFactory()
-				step, err = factory(stepName, config, nil)
-			default:
-				return nil, fmt.Errorf("handler %q step %q: no step registry available for type %q", msg.Type, stepName, stepType)
-			}
-			if err != nil {
-				return nil, fmt.Errorf("handler %q step %q: %w", msg.Type, stepName, err)
-			}
+		// Build a fresh step instance per execution to avoid sharing mutable
+		// state across concurrent actors in the same pool.
+		step, err := buildStep(stepType, stepName, stepCfg, registry, app)
+		if err != nil {
+			return nil, fmt.Errorf("handler %q step %q: %w", msg.Type, stepName, err)
 		}
 
 		result, err := step.Execute(ctx, pc)
@@ -175,7 +172,10 @@ func executePipeline(ctx context.Context, msg *ActorMessage, poolName, identity 
 
 		if result != nil && result.Output != nil {
 			pc.MergeStepOutput(stepName, result.Output)
-			lastOutput = result.Output
+			// Accumulate all step outputs into the combined output
+			for k, v := range result.Output {
+				output[k] = v
+			}
 		}
 
 		if result != nil && result.Stop {
@@ -183,14 +183,12 @@ func executePipeline(ctx context.Context, msg *ActorMessage, poolName, identity 
 		}
 	}
 
-	for k, v := range lastOutput {
+	// Merge accumulated output into actor state
+	for k, v := range output {
 		state[k] = v
 	}
 
-	if lastOutput == nil {
-		lastOutput = map[string]any{}
-	}
-	return lastOutput, nil
+	return output, nil
 }
 
 // copyMap creates a shallow copy of a map.
