@@ -13,6 +13,8 @@ func allModernizeRules() []Rule {
 	return []Rule{
 		hyphenStepsRule(),
 		conditionalFieldRule(),
+		dbQueryModeRule(),
+		dbQueryIndexRule(),
 	}
 }
 
@@ -213,6 +215,137 @@ func conditionalFieldRule() Rule {
 						RuleID:      "conditional-field",
 						Line:        field.Line,
 						Description: fmt.Sprintf("Converted field %q -> %q", oldVal, field.Value),
+					})
+				}
+			})
+			return changes
+		},
+	}
+}
+
+func dbQueryModeRule() Rule {
+	return Rule{
+		ID:          "db-query-mode",
+		Description: "Add mode:single to step.db_query when downstream uses .row or .found",
+		Severity:    "warning",
+		Check: func(root *yaml.Node, raw []byte) []Finding {
+			var findings []Finding
+			rawStr := string(raw)
+			forEachStepOfType(root, "step.db_query", func(step *yaml.Node) {
+				cfg := findMapValue(step, "config")
+				if cfg == nil {
+					return
+				}
+				mode := findMapValue(cfg, "mode")
+				if mode != nil {
+					return // already has mode set
+				}
+				nameNode := findMapValue(step, "name")
+				if nameNode == nil {
+					return
+				}
+				stepName := nameNode.Value
+				// Check if raw YAML references .row or .found for this step
+				if strings.Contains(rawStr, stepName+`" "row"`) ||
+					strings.Contains(rawStr, stepName+".row") ||
+					strings.Contains(rawStr, stepName+".found") {
+					findings = append(findings, Finding{
+						RuleID:  "db-query-mode",
+						Line:    step.Line,
+						Message: fmt.Sprintf("step.db_query %q missing mode:single (downstream uses .row/.found)", stepName),
+						Fixable: true,
+					})
+				}
+			})
+			return findings
+		},
+		Fix: func(root *yaml.Node) []Change {
+			var changes []Change
+			// We need the raw text for reference checking — marshal current state
+			rawBytes, _ := yaml.Marshal(root)
+			rawStr := string(rawBytes)
+
+			forEachStepOfType(root, "step.db_query", func(step *yaml.Node) {
+				cfg := findMapValue(step, "config")
+				if cfg == nil {
+					return
+				}
+				mode := findMapValue(cfg, "mode")
+				if mode != nil {
+					return
+				}
+				nameNode := findMapValue(step, "name")
+				if nameNode == nil {
+					return
+				}
+				stepName := nameNode.Value
+				if strings.Contains(rawStr, stepName+`" "row"`) ||
+					strings.Contains(rawStr, stepName+".row") ||
+					strings.Contains(rawStr, stepName+".found") {
+					// Add mode: single to config mapping
+					cfg.Content = append(cfg.Content,
+						&yaml.Node{Kind: yaml.ScalarNode, Value: "mode"},
+						&yaml.Node{Kind: yaml.ScalarNode, Value: "single"},
+					)
+					changes = append(changes, Change{
+						RuleID:      "db-query-mode",
+						Line:        step.Line,
+						Description: fmt.Sprintf("Added mode: single to step.db_query %q", stepName),
+					})
+				}
+			})
+			return changes
+		},
+	}
+}
+
+// dotRowAccessRegex matches patterns like .steps.stepname.row.column inside {{ }}.
+var dotRowAccessRegex = regexp.MustCompile(`\.steps\.(\w+)\.row\.(\w+)`)
+
+func dbQueryIndexRule() Rule {
+	return Rule{
+		ID:          "db-query-index",
+		Description: "Convert .steps.X.row.Y dot-access to index syntax (dot-access causes nil pointer)",
+		Severity:    "error",
+		Check: func(root *yaml.Node, raw []byte) []Finding {
+			var findings []Finding
+			walkNodes(root, func(n *yaml.Node) {
+				if n.Kind != yaml.ScalarNode {
+					return
+				}
+				if matches := dotRowAccessRegex.FindAllString(n.Value, -1); len(matches) > 0 {
+					for _, m := range matches {
+						findings = append(findings, Finding{
+							RuleID:  "db-query-index",
+							Line:    n.Line,
+							Message: fmt.Sprintf("Dot-access %q will cause nil pointer (use index syntax)", m),
+							Fixable: true,
+						})
+					}
+				}
+			})
+			return findings
+		},
+		Fix: func(root *yaml.Node) []Change {
+			var changes []Change
+			walkNodes(root, func(n *yaml.Node) {
+				if n.Kind != yaml.ScalarNode {
+					return
+				}
+				if !dotRowAccessRegex.MatchString(n.Value) {
+					return
+				}
+				oldVal := n.Value
+				n.Value = dotRowAccessRegex.ReplaceAllStringFunc(n.Value, func(match string) string {
+					parts := dotRowAccessRegex.FindStringSubmatch(match)
+					// parts[1] = step name, parts[2] = column name
+					return fmt.Sprintf(`index .steps "%s" "row" "%s"`, parts[1], parts[2])
+				})
+				if n.Value != oldVal {
+					changes = append(changes, Change{
+						RuleID:      "db-query-index",
+						Line:        n.Line,
+						Description: "Converted dot-access to index syntax",
 					})
 				}
 			})

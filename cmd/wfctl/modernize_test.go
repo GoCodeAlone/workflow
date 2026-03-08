@@ -265,3 +265,141 @@ pipelines:
 		t.Errorf("expected field reference to be updated, got:\n%s", result)
 	}
 }
+
+func TestDbQueryModeCheck(t *testing.T) {
+	input := `
+pipelines:
+  test:
+    steps:
+      - name: fetch_user
+        type: step.db_query
+        config:
+          database: my-db
+          query: "SELECT * FROM users WHERE id = ?"
+      - name: respond
+        type: step.json_response
+        config:
+          body:
+            name: '{{ index .steps "fetch_user" "row" "name" }}'
+`
+	rule := findRule("db-query-mode")
+	if rule == nil {
+		t.Fatal("db-query-mode rule not found")
+	}
+
+	doc := parseTestYAML(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) == 0 {
+		t.Fatal("expected findings for missing mode:single")
+	}
+}
+
+func TestDbQueryModeNoFalsePositive(t *testing.T) {
+	input := `
+pipelines:
+  test:
+    steps:
+      - name: fetch_user
+        type: step.db_query
+        config:
+          database: my-db
+          query: "SELECT * FROM users WHERE id = ?"
+          mode: single
+      - name: respond
+        type: step.json_response
+        config:
+          body:
+            name: '{{ index .steps "fetch_user" "row" "name" }}'
+`
+	rule := findRule("db-query-mode")
+	doc := parseTestYAML(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) != 0 {
+		t.Errorf("expected no findings when mode:single is set, got: %v", findings)
+	}
+}
+
+func TestDbQueryModeFix(t *testing.T) {
+	input := `
+pipelines:
+  test:
+    steps:
+      - name: fetch_user
+        type: step.db_query
+        config:
+          database: my-db
+          query: "SELECT * FROM users WHERE id = ?"
+      - name: respond
+        type: step.json_response
+        config:
+          body:
+            found: "{{ .steps.fetch_user.found }}"
+`
+	rule := findRule("db-query-mode")
+	doc := parseTestYAML(t, input)
+	changes := rule.Fix(doc)
+	if len(changes) == 0 {
+		t.Fatal("expected changes from fix")
+	}
+
+	out, _ := yaml.Marshal(doc)
+	result := string(out)
+
+	if !strings.Contains(result, "mode: single") {
+		t.Errorf("expected mode: single to be added, got:\n%s", result)
+	}
+}
+
+func TestDbQueryIndexCheck(t *testing.T) {
+	input := `
+pipelines:
+  test:
+    steps:
+      - name: respond
+        type: step.json_response
+        config:
+          body:
+            name: "{{ .steps.fetch_user.row.name }}"
+`
+	rule := findRule("db-query-index")
+	if rule == nil {
+		t.Fatal("db-query-index rule not found")
+	}
+
+	doc := parseTestYAML(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) == 0 {
+		t.Fatal("expected findings for .row. dot-access")
+	}
+}
+
+func TestDbQueryIndexFix(t *testing.T) {
+	input := `
+pipelines:
+  test:
+    steps:
+      - name: respond
+        type: step.json_response
+        config:
+          body:
+            name: "{{ .steps.fetch_user.row.name }}"
+            email: "{{ .steps.fetch_user.row.email }}"
+`
+	rule := findRule("db-query-index")
+	doc := parseTestYAML(t, input)
+	changes := rule.Fix(doc)
+	if len(changes) == 0 {
+		t.Fatal("expected changes from fix")
+	}
+
+	out, _ := yaml.Marshal(doc)
+	result := string(out)
+
+	if strings.Contains(result, ".steps.fetch_user.row.name") {
+		t.Errorf("expected dot-access to be replaced, got:\n%s", result)
+	}
+	// yaml.Marshal may escape inner quotes; check for the index call pattern
+	if !strings.Contains(result, `index .steps`) || !strings.Contains(result, `fetch_user`) {
+		t.Errorf("expected index syntax, got:\n%s", result)
+	}
+}
