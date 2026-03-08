@@ -47,6 +47,7 @@ import (
 	pluginpolicy "github.com/GoCodeAlone/workflow/plugins/policy"
 	pluginscheduler "github.com/GoCodeAlone/workflow/plugins/scheduler"
 	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
+	pluginscanner "github.com/GoCodeAlone/workflow/plugins/scanner"
 	pluginsm "github.com/GoCodeAlone/workflow/plugins/statemachine"
 	pluginstorage "github.com/GoCodeAlone/workflow/plugins/storage"
 	plugintimeline "github.com/GoCodeAlone/workflow/plugins/timeline"
@@ -90,6 +91,7 @@ func DefaultPlugins() []plugin.EnginePlugin {
 		pluginpolicy.New(),
 		plugink8s.New(),
 		pluginmarketplace.New(),
+		pluginscanner.New(),
 		pluginactors.New(),
 	}
 }
