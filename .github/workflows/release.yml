@@ -100,7 +100,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-      id-token: write
 
     steps:
     - name: Check out code
@@ -126,10 +125,12 @@ jobs:
         GOFLAGS: -mod=mod
       run: |
         VERSION="${TAG_NAME#v}"
-        MAJOR_MINOR="${VERSION%.*}"
+        CORE_VERSION="${VERSION%%[-+]*}"
+        MAJOR_MINOR="$(echo "$CORE_VERSION" | cut -d. -f1-2)"
         SHA_SHORT="${GITHUB_SHA:0:7}"
 
         ko build ./cmd/server \
+          --bare \
           --platform=linux/amd64,linux/arm64 \
           --tags="${TAG_NAME},${VERSION},${MAJOR_MINOR},sha-${SHA_SHORT}" \
           --sbom=spdx \

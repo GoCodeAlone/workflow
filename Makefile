@@ -81,7 +81,7 @@ run-admin: build
 
 # Build container image with ko (requires ko: brew install ko)
 ko-build:
-	KO_DOCKER_REPO=ko.local ko build ./cmd/server --platform=linux/$(shell go env GOARCH)
+	KO_DOCKER_REPO=ko.local ko build ./cmd/server --bare --platform=linux/$(shell go env GOARCH)
 
 # Clean build artifacts
 clean:
