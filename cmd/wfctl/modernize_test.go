@@ -2,7 +2,10 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestRunModernize_ListRules(t *testing.T) {
@@ -93,4 +96,116 @@ func TestModernizeFile_InvalidYAML(t *testing.T) {
 
 func writeTestFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
+}
+
+func parseTestYAML(t *testing.T, input string) *yaml.Node {
+	t.Helper()
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(input), &doc); err != nil {
+		t.Fatalf("parse YAML: %v", err)
+	}
+	return &doc
+}
+
+// findRule is a test helper that looks up a rule by ID.
+func findRule(id string) *Rule {
+	for _, r := range allModernizeRules() {
+		if r.ID == id {
+			return &r
+		}
+	}
+	return nil
+}
+
+func TestHyphenStepsCheck(t *testing.T) {
+	input := `
+pipelines:
+  test:
+    steps:
+      - name: check-xss
+        type: step.regex_match
+      - name: route_xss
+        type: step.conditional
+        config:
+          field: steps.check-xss.matched
+`
+	rules := allModernizeRules()
+	var rule Rule
+	for _, r := range rules {
+		if r.ID == "hyphen-steps" {
+			rule = r
+			break
+		}
+	}
+	if rule.ID == "" {
+		t.Fatal("hyphen-steps rule not found")
+	}
+
+	doc := parseTestYAML(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) == 0 {
+		t.Fatal("expected findings for hyphenated step name")
+	}
+	found := false
+	for _, f := range findings {
+		if strings.Contains(f.Message, "check-xss") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected finding for check-xss, got: %v", findings)
+	}
+}
+
+func TestHyphenStepsFix(t *testing.T) {
+	input := `
+pipelines:
+  test:
+    steps:
+      - name: check-xss
+        type: step.regex_match
+      - name: route-result
+        type: step.conditional
+        config:
+          field: steps.check-xss.matched
+      - name: respond
+        type: step.json_response
+        config:
+          body:
+            value: "{{ .steps.check-xss.result }}"
+`
+	rules := allModernizeRules()
+	var rule Rule
+	for _, r := range rules {
+		if r.ID == "hyphen-steps" {
+			rule = r
+			break
+		}
+	}
+
+	doc := parseTestYAML(t, input)
+	changes := rule.Fix(doc)
+	if len(changes) == 0 {
+		t.Fatal("expected changes from fix")
+	}
+
+	out, _ := yaml.Marshal(doc)
+	result := string(out)
+
+	if strings.Contains(result, "check-xss") {
+		t.Errorf("expected hyphens to be replaced, got:\n%s", result)
+	}
+	if !strings.Contains(result, "check_xss") {
+		t.Errorf("expected underscored name, got:\n%s", result)
+	}
+	if strings.Contains(result, "route-result") {
+		t.Errorf("expected route-result to be renamed, got:\n%s", result)
+	}
+	if !strings.Contains(result, "route_result") {
+		t.Errorf("expected route_result, got:\n%s", result)
+	}
+	// Check that references in field paths and templates are updated
+	if strings.Contains(result, "steps.check-xss") {
+		t.Errorf("expected field reference to be updated, got:\n%s", result)
+	}
 }

@@ -1,6 +1,138 @@
 package main
 
+import (
+	"fmt"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
 // allModernizeRules returns all registered modernize rules.
 func allModernizeRules() []Rule {
-	return []Rule{}
+	return []Rule{
+		hyphenStepsRule(),
+	}
+}
+
+// --- yaml.Node helpers ---
+
+// walkNodes calls fn for every node in the tree (depth-first).
+func walkNodes(node *yaml.Node, fn func(n *yaml.Node)) {
+	if node == nil {
+		return
+	}
+	fn(node)
+	for _, child := range node.Content {
+		walkNodes(child, fn)
+	}
+}
+
+// findMapValue returns the value node for a given key in a mapping node.
+func findMapValue(node *yaml.Node, key string) *yaml.Node {
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// collectStepNames walks pipelines and collects all step names.
+func collectStepNames(root *yaml.Node) []string {
+	var names []string
+	// root is DocumentNode → first child is the mapping
+	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
+		root = root.Content[0]
+	}
+	pipelines := findMapValue(root, "pipelines")
+	if pipelines == nil || pipelines.Kind != yaml.MappingNode {
+		return names
+	}
+	// Iterate pipeline values
+	for i := 1; i < len(pipelines.Content); i += 2 {
+		pipelineVal := pipelines.Content[i]
+		steps := findMapValue(pipelineVal, "steps")
+		if steps == nil || steps.Kind != yaml.SequenceNode {
+			continue
+		}
+		for _, step := range steps.Content {
+			nameNode := findMapValue(step, "name")
+			if nameNode != nil && nameNode.Kind == yaml.ScalarNode {
+				names = append(names, nameNode.Value)
+			}
+		}
+	}
+	return names
+}
+
+func hyphenStepsRule() Rule {
+	return Rule{
+		ID:          "hyphen-steps",
+		Description: "Rename hyphenated step names to underscores (hyphens break Go templates)",
+		Severity:    "error",
+		Check: func(root *yaml.Node, raw []byte) []Finding {
+			var findings []Finding
+			names := collectStepNames(root)
+			for _, name := range names {
+				if strings.Contains(name, "-") {
+					findings = append(findings, Finding{
+						RuleID:  "hyphen-steps",
+						Message: fmt.Sprintf("Step %q uses hyphens (causes Go template parse errors)", name),
+						Fixable: true,
+					})
+				}
+			}
+			return findings
+		},
+		Fix: func(root *yaml.Node) []Change {
+			names := collectStepNames(root)
+			// Build rename map: old -> new
+			renames := make(map[string]string)
+			for _, name := range names {
+				if strings.Contains(name, "-") {
+					renames[name] = strings.ReplaceAll(name, "-", "_")
+				}
+			}
+			if len(renames) == 0 {
+				return nil
+			}
+
+			var changes []Change
+
+			// Walk all scalar nodes and replace references
+			walkNodes(root, func(n *yaml.Node) {
+				if n.Kind != yaml.ScalarNode {
+					return
+				}
+				for oldName, newName := range renames {
+					if n.Value == oldName {
+						n.Value = newName
+						changes = append(changes, Change{
+							RuleID:      "hyphen-steps",
+							Line:        n.Line,
+							Description: fmt.Sprintf("Renamed step %q -> %q", oldName, newName),
+						})
+						return
+					}
+					// Update references in field paths (steps.old-name.field)
+					if strings.Contains(n.Value, oldName) {
+						updated := strings.ReplaceAll(n.Value, oldName, newName)
+						if updated != n.Value {
+							n.Value = updated
+							changes = append(changes, Change{
+								RuleID:      "hyphen-steps",
+								Line:        n.Line,
+								Description: fmt.Sprintf("Updated reference %q in value", oldName),
+							})
+						}
+					}
+				}
+			})
+
+			return changes
+		},
+	}
 }
