@@ -15,6 +15,7 @@ func allModernizeRules() []Rule {
 		conditionalFieldRule(),
 		dbQueryModeRule(),
 		dbQueryIndexRule(),
+		databaseToSqliteRule(),
 	}
 }
 
@@ -348,6 +349,107 @@ func dbQueryIndexRule() Rule {
 						Description: "Converted dot-access to index syntax",
 					})
 				}
+			})
+			return changes
+		},
+	}
+}
+
+// forEachModule calls fn for each module mapping node.
+func forEachModule(root *yaml.Node, fn func(mod *yaml.Node)) {
+	docRoot := root
+	if docRoot.Kind == yaml.DocumentNode && len(docRoot.Content) > 0 {
+		docRoot = docRoot.Content[0]
+	}
+	modules := findMapValue(docRoot, "modules")
+	if modules == nil || modules.Kind != yaml.SequenceNode {
+		return
+	}
+	for _, mod := range modules.Content {
+		if mod.Kind == yaml.MappingNode {
+			fn(mod)
+		}
+	}
+}
+
+func databaseToSqliteRule() Rule {
+	return Rule{
+		ID:          "database-to-sqlite",
+		Description: "Convert database.workflow modules to storage.sqlite",
+		Severity:    "warning",
+		Check: func(root *yaml.Node, raw []byte) []Finding {
+			var findings []Finding
+			forEachModule(root, func(mod *yaml.Node) {
+				typeNode := findMapValue(mod, "type")
+				if typeNode != nil && typeNode.Value == "database.workflow" {
+					nameNode := findMapValue(mod, "name")
+					name := ""
+					if nameNode != nil {
+						name = nameNode.Value
+					}
+					findings = append(findings, Finding{
+						RuleID:  "database-to-sqlite",
+						Line:    typeNode.Line,
+						Message: fmt.Sprintf("Module %q uses database.workflow (use storage.sqlite instead)", name),
+						Fixable: true,
+					})
+				}
+			})
+			return findings
+		},
+		Fix: func(root *yaml.Node) []Change {
+			var changes []Change
+			forEachModule(root, func(mod *yaml.Node) {
+				typeNode := findMapValue(mod, "type")
+				if typeNode == nil || typeNode.Value != "database.workflow" {
+					return
+				}
+				nameNode := findMapValue(mod, "name")
+				name := "unknown"
+				if nameNode != nil {
+					name = nameNode.Value
+				}
+
+				// Change type
+				typeNode.Value = "storage.sqlite"
+
+				// Rebuild config: extract DSN to derive dbPath
+				cfg := findMapValue(mod, "config")
+				if cfg == nil || cfg.Kind != yaml.MappingNode {
+					cfg = &yaml.Node{Kind: yaml.MappingNode}
+					mod.Content = append(mod.Content,
+						&yaml.Node{Kind: yaml.ScalarNode, Value: "config"},
+						cfg,
+					)
+				}
+
+				// Try to extract filename from DSN
+				dbPath := name + ".db"
+				dsnNode := findMapValue(cfg, "dsn")
+				if dsnNode != nil {
+					dsn := dsnNode.Value
+					dsn = strings.TrimPrefix(dsn, "file:")
+					dsn = strings.Split(dsn, "?")[0]
+					if dsn != "" {
+						dbPath = dsn
+					}
+				}
+
+				// Replace config contents with storage.sqlite config
+				cfg.Content = []*yaml.Node{
+					{Kind: yaml.ScalarNode, Value: "dbPath"},
+					{Kind: yaml.ScalarNode, Value: dbPath},
+					{Kind: yaml.ScalarNode, Value: "maxConnections"},
+					{Kind: yaml.ScalarNode, Value: "5"},
+					{Kind: yaml.ScalarNode, Value: "walMode"},
+					{Kind: yaml.ScalarNode, Value: "true", Tag: "!!bool"},
+				}
+
+				changes = append(changes, Change{
+					RuleID:      "database-to-sqlite",
+					Line:        typeNode.Line,
+					Description: fmt.Sprintf("Converted module %q from database.workflow to storage.sqlite (dbPath: %s)", name, dbPath),
+				})
 			})
 			return changes
 		},

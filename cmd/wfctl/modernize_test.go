@@ -403,3 +403,132 @@ pipelines:
 		t.Errorf("expected index syntax, got:\n%s", result)
 	}
 }
+
+func TestDatabaseToSqliteCheck(t *testing.T) {
+	input := `
+modules:
+  - name: my-db
+    type: database.workflow
+    config:
+      driver: sqlite
+      dsn: "file:data.db"
+`
+	rule := findRule("database-to-sqlite")
+	if rule == nil {
+		t.Fatal("database-to-sqlite rule not found")
+	}
+
+	doc := parseTestYAML(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) == 0 {
+		t.Fatal("expected findings for database.workflow")
+	}
+}
+
+func TestDatabaseToSqliteFix(t *testing.T) {
+	input := `
+modules:
+  - name: my-db
+    type: database.workflow
+    config:
+      driver: sqlite
+      dsn: "file:data.db"
+`
+	rule := findRule("database-to-sqlite")
+	doc := parseTestYAML(t, input)
+	changes := rule.Fix(doc)
+	if len(changes) == 0 {
+		t.Fatal("expected changes from fix")
+	}
+
+	out, _ := yaml.Marshal(doc)
+	result := string(out)
+
+	if strings.Contains(result, "database.workflow") {
+		t.Errorf("expected type to be changed, got:\n%s", result)
+	}
+	if !strings.Contains(result, "storage.sqlite") {
+		t.Errorf("expected storage.sqlite type, got:\n%s", result)
+	}
+	if !strings.Contains(result, "dbPath") {
+		t.Errorf("expected dbPath in config, got:\n%s", result)
+	}
+}
+
+func TestAbsoluteDbPathCheck(t *testing.T) {
+	input := `
+modules:
+  - name: my-db
+    type: storage.sqlite
+    config:
+      dbPath: /data/myapp.db
+`
+	rule := findRule("absolute-dbpath")
+	if rule == nil {
+		t.Fatal("absolute-dbpath rule not found")
+	}
+	doc := parseTestYAML(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) == 0 {
+		t.Fatal("expected warning for absolute dbPath")
+	}
+}
+
+func TestAbsoluteDbPathNoFalsePositive(t *testing.T) {
+	input := `
+modules:
+  - name: my-db
+    type: storage.sqlite
+    config:
+      dbPath: data.db
+`
+	rule := findRule("absolute-dbpath")
+	doc := parseTestYAML(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) != 0 {
+		t.Errorf("expected no findings for relative dbPath, got: %v", findings)
+	}
+}
+
+func TestEmptyRoutesCheck(t *testing.T) {
+	input := `
+pipelines:
+  test:
+    steps:
+      - name: route
+        type: step.conditional
+        config:
+          field: steps.check.matched
+          routes: {}
+          default: next
+`
+	rule := findRule("empty-routes")
+	if rule == nil {
+		t.Fatal("empty-routes rule not found")
+	}
+	doc := parseTestYAML(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) == 0 {
+		t.Fatal("expected findings for empty routes")
+	}
+}
+
+func TestCamelCaseConfigCheck(t *testing.T) {
+	input := `
+modules:
+  - name: my-server
+    type: http.server
+    config:
+      max_connections: 10
+      listen_address: ":8080"
+`
+	rule := findRule("camelcase-config")
+	if rule == nil {
+		t.Fatal("camelcase-config rule not found")
+	}
+	doc := parseTestYAML(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) == 0 {
+		t.Fatal("expected findings for snake_case config keys")
+	}
+}
