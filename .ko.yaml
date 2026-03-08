@@ -1,0 +1,9 @@
+defaultBaseImage: cgr.dev/chainguard/static:latest
+builds:
+  - id: server
+    main: ./cmd/server
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s
+      - -w

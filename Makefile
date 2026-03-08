@@ -1,4 +1,4 @@
-.PHONY: build build-ui build-go test bench bench-baseline bench-compare lint fmt vet fix install-hooks clean
+.PHONY: build build-ui build-go test bench bench-baseline bench-compare lint fmt vet fix install-hooks clean ko-build
 
 # Common benchmark flags
 BENCH_FLAGS = -bench=. -benchmem -run=^$$ -timeout=30m
@@ -78,6 +78,10 @@ ci: fmt vet test lint
 # Run with admin UI enabled
 run-admin: build
 	JWT_SECRET=$${JWT_SECRET:-workflow-admin-secret} ./server -config $(or $(CONFIG),example/chat-platform/workflow.yaml) --admin
+
+# Build container image with ko (requires ko: brew install ko)
+ko-build:
+	KO_DOCKER_REPO=ko.local ko build ./cmd/server --platform=linux/$(shell go env GOARCH)
 
 # Clean build artifacts
 clean:
