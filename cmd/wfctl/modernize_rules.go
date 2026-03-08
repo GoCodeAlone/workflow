@@ -16,6 +16,9 @@ func allModernizeRules() []Rule {
 		dbQueryModeRule(),
 		dbQueryIndexRule(),
 		databaseToSqliteRule(),
+		absoluteDbPathRule(),
+		emptyRoutesRule(),
+		camelCaseConfigRule(),
 	}
 }
 
@@ -369,6 +372,125 @@ func forEachModule(root *yaml.Node, fn func(mod *yaml.Node)) {
 		if mod.Kind == yaml.MappingNode {
 			fn(mod)
 		}
+	}
+}
+
+func absoluteDbPathRule() Rule {
+	return Rule{
+		ID:          "absolute-dbpath",
+		Description: "Warn on absolute dbPath in storage.sqlite (should be relative to config dir)",
+		Severity:    "warning",
+		Check: func(root *yaml.Node, raw []byte) []Finding {
+			var findings []Finding
+			forEachModule(root, func(mod *yaml.Node) {
+				typeNode := findMapValue(mod, "type")
+				if typeNode == nil || typeNode.Value != "storage.sqlite" {
+					return
+				}
+				cfg := findMapValue(mod, "config")
+				if cfg == nil {
+					return
+				}
+				dbPath := findMapValue(cfg, "dbPath")
+				if dbPath != nil && strings.HasPrefix(dbPath.Value, "/") {
+					nameNode := findMapValue(mod, "name")
+					name := ""
+					if nameNode != nil {
+						name = nameNode.Value
+					}
+					findings = append(findings, Finding{
+						RuleID:  "absolute-dbpath",
+						Line:    dbPath.Line,
+						Message: fmt.Sprintf("Module %q has absolute dbPath %q (use relative path)", name, dbPath.Value),
+						Fixable: false,
+					})
+				}
+			})
+			return findings
+		},
+	}
+}
+
+func emptyRoutesRule() Rule {
+	return Rule{
+		ID:          "empty-routes",
+		Description: "Detect empty routes map in step.conditional (engine requires at least one route)",
+		Severity:    "error",
+		Check: func(root *yaml.Node, raw []byte) []Finding {
+			var findings []Finding
+			forEachStepOfType(root, "step.conditional", func(step *yaml.Node) {
+				cfg := findMapValue(step, "config")
+				if cfg == nil {
+					return
+				}
+				routes := findMapValue(cfg, "routes")
+				if routes == nil {
+					nameNode := findMapValue(step, "name")
+					name := ""
+					if nameNode != nil {
+						name = nameNode.Value
+					}
+					findings = append(findings, Finding{
+						RuleID:  "empty-routes",
+						Line:    step.Line,
+						Message: fmt.Sprintf("step.conditional %q missing routes map", name),
+						Fixable: false,
+					})
+					return
+				}
+				if routes.Kind == yaml.MappingNode && len(routes.Content) == 0 {
+					nameNode := findMapValue(step, "name")
+					name := ""
+					if nameNode != nil {
+						name = nameNode.Value
+					}
+					findings = append(findings, Finding{
+						RuleID:  "empty-routes",
+						Line:    routes.Line,
+						Message: fmt.Sprintf("step.conditional %q has empty routes (at least one route required)", name),
+						Fixable: false,
+					})
+				}
+			})
+			return findings
+		},
+	}
+}
+
+// snakeCaseKeyRegex matches keys with underscores (snake_case).
+var snakeCaseKeyRegex = regexp.MustCompile(`^[a-z]+(_[a-z0-9]+)+$`)
+
+func camelCaseConfigRule() Rule {
+	return Rule{
+		ID:          "camelcase-config",
+		Description: "Detect snake_case config field names (engine requires camelCase)",
+		Severity:    "warning",
+		Check: func(root *yaml.Node, raw []byte) []Finding {
+			var findings []Finding
+			forEachModule(root, func(mod *yaml.Node) {
+				cfg := findMapValue(mod, "config")
+				if cfg == nil || cfg.Kind != yaml.MappingNode {
+					return
+				}
+				nameNode := findMapValue(mod, "name")
+				modName := ""
+				if nameNode != nil {
+					modName = nameNode.Value
+				}
+				for i := 0; i+1 < len(cfg.Content); i += 2 {
+					key := cfg.Content[i]
+					if key.Kind == yaml.ScalarNode && snakeCaseKeyRegex.MatchString(key.Value) {
+						findings = append(findings, Finding{
+							RuleID:  "camelcase-config",
+							Line:    key.Line,
+							Message: fmt.Sprintf("Module %q config key %q is snake_case (use camelCase)", modName, key.Value),
+							Fixable: false,
+						})
+					}
+				}
+			})
+			return findings
+		},
 	}
 }
 
