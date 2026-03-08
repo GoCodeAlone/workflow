@@ -158,7 +158,7 @@ func modernizeFile(path string, rules []modernize.Rule, apply bool) ([]modernize
 		if err != nil {
 			return allFindings, 0, fmt.Errorf("marshal fixed YAML: %w", err)
 		}
-		if err := os.WriteFile(path, out, 0644); err != nil {
+		if err := os.WriteFile(path, out, 0600); err != nil {
 			return allFindings, 0, fmt.Errorf("write fixed file: %w", err)
 		}
 	}

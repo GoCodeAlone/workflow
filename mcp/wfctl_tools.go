@@ -1784,12 +1784,12 @@ func (s *Server) handleRegistrySearch(_ context.Context, req mcp.CallToolRequest
 		}
 
 		// Filter by type
-		if typeFilter != "" && strings.ToLower(m.Type) != typeFilter {
+		if typeFilter != "" && !strings.EqualFold(m.Type, typeFilter) {
 			continue
 		}
 
 		// Filter by tier
-		if tierFilter != "" && strings.ToLower(m.Tier) != tierFilter {
+		if tierFilter != "" && !strings.EqualFold(m.Tier, tierFilter) {
 			continue
 		}
 

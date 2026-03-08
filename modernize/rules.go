@@ -353,7 +353,7 @@ func dbQueryIndexRule() Rule {
 				n.Value = dotRowAccessRegex.ReplaceAllStringFunc(n.Value, func(match string) string {
 					parts := dotRowAccessRegex.FindStringSubmatch(match)
 					// parts[1] = step name, parts[2] = column name
-					return fmt.Sprintf(`index .steps "%s" "row" "%s"`, parts[1], parts[2])
+					return fmt.Sprintf(`index .steps %q "row" %q`, parts[1], parts[2])
 				})
 				if n.Value != oldVal {
 					changes = append(changes, Change{
