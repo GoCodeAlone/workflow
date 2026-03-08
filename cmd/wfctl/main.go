@@ -55,7 +55,8 @@ var commands = map[string]func([]string) error{
 	"git":      runGit,
 	"registry": runRegistry,
 	"update":   runUpdate,
-	"mcp":      runMCP,
+	"mcp":       runMCP,
+	"modernize": runModernize,
 }
 
 func main() {

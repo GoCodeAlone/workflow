@@ -51,6 +51,8 @@ workflows:
         description: "Update wfctl to the latest version (use --check to only check)"
       - name: mcp
         description: Start the MCP server over stdio for AI assistant integration
+      - name: modernize
+        description: "Detect and fix known YAML config anti-patterns (dry-run by default)"
 
 # Each command is expressed as a workflow pipeline triggered by the CLI.
 # The pipeline delegates to the registered Go implementation via step.cli_invoke,
@@ -321,4 +323,15 @@ pipelines:
         type: step.cli_invoke
         config:
           command: mcp
+
+  cmd-modernize:
+    trigger:
+      type: cli
+      config:
+        command: modernize
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: modernize
 
