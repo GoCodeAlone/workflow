@@ -1,7 +1,5 @@
 # Codebase Audit Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Fix all stubbed code in the workflow engine, implement DockerSandbox, and build test scenarios for all untested plugins.
 
 **Architecture:** Provider interface for security scanning, Docker sandbox module in existing sandbox plugin, new security scanner plugin, 4 public scenarios, 5 private scenarios.
@@ -33,7 +31,7 @@ Create `module/scan_provider.go` with:
 **Step 2: Rewrite scan_sast to delegate to provider**
 
 Rewrite `ScanSASTStep.Execute()`:
-1. Look up `SecurityScannerProvider` from app service registry via `security-scanner:<module>` key
+1. Look up `SecurityScannerProvider` from app service registry via `security-scanner` key
 2. Build `SASTScanOpts` from step config
 3. Call `provider.ScanSAST(ctx, opts)`
 4. Evaluate severity gate: if any finding severity >= fail_on_severity, set `response_status: 400`
@@ -69,9 +67,9 @@ git commit -m "feat: SecurityScannerProvider interface — scan steps delegate t
 ### Task 2: DockerSandbox Module (workflow-plugin-sandbox)
 
 **Files:**
-- Create: `/Users/jon/workspace/workflow-plugin-sandbox/internal/module_docker.go`
-- Create: `/Users/jon/workspace/workflow-plugin-sandbox/internal/module_docker_test.go`
-- Modify: `/Users/jon/workspace/workflow-plugin-sandbox/internal/plugin.go`
+- Create: `workflow-plugin-sandbox/internal/module_docker.go`
+- Create: `workflow-plugin-sandbox/internal/module_docker_test.go`
+- Modify: `workflow-plugin-sandbox/internal/plugin.go`
 
 **Step 1: Define DockerSandbox types**
 
@@ -120,7 +118,7 @@ Test mock mode returns expected results. Test config validation (reject host net
 ### Task 3: Security Scanner Plugin (New Public Plugin)
 
 **Files:**
-- Create: `/Users/jon/workspace/workflow-plugin-security-scanner/` (new repo)
+- Create: `workflow-plugin-security-scanner/` (new repo)
 - Key files: `cmd/workflow-plugin-security-scanner/main.go`, `internal/plugin.go`, `internal/module_scanner.go`, `internal/scanner_semgrep.go`, `internal/scanner_trivy.go`, `internal/scanner_grype.go`, `internal/scanner_mock.go`
 
 **Step 1: Create repository structure**
@@ -186,7 +184,7 @@ Test all three scan methods with mock backend. Verify output format matches Scan
 ### Task 4: Public Scenario 46 — GitHub CI/CD
 
 **Files:**
-- Create: `/Users/jon/workspace/workflow-scenarios/scenarios/46-github-cicd/`
+- Create: `workflow-scenarios/scenarios/46-github-cicd/`
   - `scenario.yaml`, `config/app.yaml`, `k8s/deployment.yaml`, `k8s/service.yaml`, `test/run.sh`
 
 **Step 1: Write scenario config**
@@ -228,7 +226,7 @@ Test cases with jq validation:
 ### Task 5: Public Scenario 47 — Authz RBAC
 
 **Files:**
-- Create: `/Users/jon/workspace/workflow-scenarios/scenarios/47-authz-rbac/`
+- Create: `workflow-scenarios/scenarios/47-authz-rbac/`
 
 **Step 1: Write workflow config**
 
@@ -261,7 +259,7 @@ Pipelines:
 ### Task 6: Public Scenario 48 — Payment Processing
 
 **Files:**
-- Create: `/Users/jon/workspace/workflow-scenarios/scenarios/48-payment-processing/`
+- Create: `workflow-scenarios/scenarios/48-payment-processing/`
 
 **Step 1: Write workflow config**
 
@@ -294,7 +292,7 @@ Pipelines:
 ### Task 7: Public Scenario 49 — Security Scanning
 
 **Files:**
-- Create: `/Users/jon/workspace/workflow-scenarios/scenarios/49-security-scanning/`
+- Create: `workflow-scenarios/scenarios/49-security-scanning/`
 
 **Step 1: Write workflow config**
 
@@ -320,7 +318,7 @@ Pipelines:
 ### Task 8: Create Private Scenarios Repository
 
 **Files:**
-- Create: `/Users/jon/workspace/workflow-scenarios-private/` (new repo)
+- Create: `workflow-scenarios-private/` (new repo)
 
 **Step 1: Create repo structure**
 
@@ -352,7 +350,7 @@ Copy deploy.sh, test.sh, Makefile from workflow-scenarios (adapted for private p
 ### Task 9: Private Scenario 01 — WAF Protection
 
 **Files:**
-- Create: `/Users/jon/workspace/workflow-scenarios-private/scenarios/01-waf-protection/`
+- Create: `workflow-scenarios-private/scenarios/01-waf-protection/`
 
 **Step 1: Write workflow config**
 
@@ -382,7 +380,7 @@ Pipelines:
 ### Task 10: Private Scenario 02 — MFA & Encryption
 
 **Files:**
-- Create: `/Users/jon/workspace/workflow-scenarios-private/scenarios/02-mfa-encryption/`
+- Create: `workflow-scenarios-private/scenarios/02-mfa-encryption/`
 
 **Step 1: Write workflow config**
 
@@ -409,7 +407,7 @@ Pipelines:
 ### Task 11: Private Scenario 03 — WASM Sandbox
 
 **Files:**
-- Create: `/Users/jon/workspace/workflow-scenarios-private/scenarios/03-wasm-sandbox/`
+- Create: `workflow-scenarios-private/scenarios/03-wasm-sandbox/`
 
 **Step 1: Write workflow config**
 
@@ -433,7 +431,7 @@ Pipelines:
 ### Task 12: Private Scenario 04 — Data Protection
 
 **Files:**
-- Create: `/Users/jon/workspace/workflow-scenarios-private/scenarios/04-data-protection/`
+- Create: `workflow-scenarios-private/scenarios/04-data-protection/`
 
 **Step 1: Write workflow config**
 
@@ -462,7 +460,7 @@ Pipelines:
 ### Task 13: Private Scenario 05 — Supply Chain
 
 **Files:**
-- Create: `/Users/jon/workspace/workflow-scenarios-private/scenarios/05-supply-chain/`
+- Create: `workflow-scenarios-private/scenarios/05-supply-chain/`
 
 **Step 1: Write workflow config**
 
@@ -500,14 +498,14 @@ Add entries for scenarios 46-49.
 **Step 3: Run all tests**
 
 ```bash
-# Core engine
-cd /Users/jon/workspace/workflow && go test ./...
+# Core engine (workflow repo)
+go test ./...
 
-# Sandbox plugin
-cd /Users/jon/workspace/workflow-plugin-sandbox && go test ./...
+# Sandbox plugin (workflow-plugin-sandbox repo)
+go test ./...
 
-# Security scanner plugin
-cd /Users/jon/workspace/workflow-plugin-security-scanner && go test ./...
+# Security scanner plugin (workflow-plugin-security-scanner repo)
+go test ./...
 ```
 
 **Step 4: Final commit and push all repos**

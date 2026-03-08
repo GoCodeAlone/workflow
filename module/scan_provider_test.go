@@ -235,6 +235,7 @@ func TestScanContainerStep_GateFails(t *testing.T) {
 
 	factory := NewScanContainerStepFactory()
 	step, err := factory("container-step", map[string]any{
+		"target_image":       "vulnerable:latest",
 		"severity_threshold": "high",
 	}, app)
 	if err != nil {

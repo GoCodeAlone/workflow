@@ -35,6 +35,10 @@ func NewScanContainerStepFactory() StepFactory {
 			// Fall back to "image" config key for the scan target (as in the YAML spec)
 			targetImage, _ = config["image"].(string)
 		}
+		targetImage = strings.TrimSpace(targetImage)
+		if targetImage == "" {
+			return nil, fmt.Errorf("scan_container step %q: target image is required; set 'target_image' or 'image' in config", name)
+		}
 
 		severityThreshold, _ := config["severity_threshold"].(string)
 		if severityThreshold == "" {

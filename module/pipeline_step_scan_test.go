@@ -29,7 +29,7 @@ func TestScanSASTStep_NoProvider(t *testing.T) {
 
 func TestScanContainerStep_NoProvider(t *testing.T) {
 	factory := NewScanContainerStepFactory()
-	step, err := factory("container-step", map[string]any{}, newNoProviderApp())
+	step, err := factory("container-step", map[string]any{"target_image": "myapp:latest"}, newNoProviderApp())
 	if err != nil {
 		t.Fatalf("factory returned error: %v", err)
 	}
@@ -40,6 +40,17 @@ func TestScanContainerStep_NoProvider(t *testing.T) {
 	}
 	if !strings.Contains(execErr.Error(), "no security scanner provider configured") {
 		t.Errorf("unexpected error: %v", execErr)
+	}
+}
+
+func TestScanContainerStep_MissingTargetImage(t *testing.T) {
+	factory := NewScanContainerStepFactory()
+	_, err := factory("container-step", map[string]any{}, nil)
+	if err == nil {
+		t.Fatal("expected error for missing target_image, got nil")
+	}
+	if !strings.Contains(err.Error(), "target image is required") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 

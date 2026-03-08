@@ -48,7 +48,11 @@ func NewScannerModule(name string, cfg map[string]any) (*ScannerModule, error) {
 	}
 
 	if mockCfg, ok := cfg["mockFindings"].(map[string]any); ok {
+		validScanTypes := map[string]bool{"sast": true, "container": true, "deps": true}
 		for scanType, findingsRaw := range mockCfg {
+			if !validScanTypes[scanType] {
+				return nil, fmt.Errorf("security.scanner %q: unknown mockFindings scan type %q (expected sast, container, or deps)", name, scanType)
+			}
 			findings, err := parseMockFindings(findingsRaw)
 			if err != nil {
 				return nil, fmt.Errorf("security.scanner %q: invalid mockFindings.%s: %w", name, scanType, err)
@@ -162,10 +166,10 @@ func parseMockFindings(raw any) ([]module.Finding, error) {
 	}
 
 	var findings []module.Finding
-	for _, item := range items {
+	for i, item := range items {
 		m, ok := item.(map[string]any)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("expected finding object at index %d, got %T", i, item)
 		}
 		f := module.Finding{
 			RuleID:   getString(m, "rule_id"),
@@ -173,8 +177,11 @@ func parseMockFindings(raw any) ([]module.Finding, error) {
 			Message:  getString(m, "message"),
 			Location: getString(m, "location"),
 		}
-		if line, ok := m["line"].(float64); ok {
-			f.Line = int(line)
+		switch v := m["line"].(type) {
+		case float64:
+			f.Line = int(v)
+		case int:
+			f.Line = v
 		}
 		findings = append(findings, f)
 	}

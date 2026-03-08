@@ -243,6 +243,56 @@ func TestScannerModule_Lifecycle(t *testing.T) {
 	}
 }
 
+func TestNewScannerModule_InvalidMode(t *testing.T) {
+	_, err := NewScannerModule("test", map[string]any{
+		"mode": "invalid",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid mode, got nil")
+	}
+}
+
+func TestNewScannerModule_UnknownMockFindingsScanType(t *testing.T) {
+	_, err := NewScannerModule("test", map[string]any{
+		"mockFindings": map[string]any{
+			"containers": []any{}, // typo: should be "container"
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown scan type, got nil")
+	}
+}
+
+func TestParseMockFindings_MalformedItem(t *testing.T) {
+	_, err := parseMockFindings([]any{
+		"not a map", // should be map[string]any
+	})
+	if err == nil {
+		t.Fatal("expected error for malformed finding item, got nil")
+	}
+}
+
+func TestParseMockFindings_IntLine(t *testing.T) {
+	findings, err := parseMockFindings([]any{
+		map[string]any{
+			"rule_id":  "TEST-001",
+			"severity": "high",
+			"message":  "test",
+			"location": "/src/main.go",
+			"line":     55, // int, not float64
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].Line != 55 {
+		t.Errorf("expected line=55, got %d", findings[0].Line)
+	}
+}
+
 func TestPlugin_New(t *testing.T) {
 	p := New()
 	if p.PluginName != "scanner" {
