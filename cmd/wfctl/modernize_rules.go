@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -11,6 +12,7 @@ import (
 func allModernizeRules() []Rule {
 	return []Rule{
 		hyphenStepsRule(),
+		conditionalFieldRule(),
 	}
 }
 
@@ -66,6 +68,31 @@ func collectStepNames(root *yaml.Node) []string {
 		}
 	}
 	return names
+}
+
+// forEachStepOfType calls fn for each step node of the given type across all pipelines.
+func forEachStepOfType(root *yaml.Node, stepType string, fn func(step *yaml.Node)) {
+	docRoot := root
+	if docRoot.Kind == yaml.DocumentNode && len(docRoot.Content) > 0 {
+		docRoot = docRoot.Content[0]
+	}
+	pipelines := findMapValue(docRoot, "pipelines")
+	if pipelines == nil || pipelines.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 1; i < len(pipelines.Content); i += 2 {
+		pipelineVal := pipelines.Content[i]
+		steps := findMapValue(pipelineVal, "steps")
+		if steps == nil || steps.Kind != yaml.SequenceNode {
+			continue
+		}
+		for _, step := range steps.Content {
+			typeNode := findMapValue(step, "type")
+			if typeNode != nil && typeNode.Value == stepType {
+				fn(step)
+			}
+		}
+	}
 }
 
 func hyphenStepsRule() Rule {
@@ -132,6 +159,63 @@ func hyphenStepsRule() Rule {
 				}
 			})
 
+			return changes
+		},
+	}
+}
+
+// conditionalFieldTemplateRegex matches {{ .some.path }} in a field value.
+var conditionalFieldTemplateRegex = regexp.MustCompile(`^\{\{\s*\.?([\w.]+)\s*\}\}$`)
+
+func conditionalFieldRule() Rule {
+	return Rule{
+		ID:          "conditional-field",
+		Description: "Convert template syntax in step.conditional field to dot-path",
+		Severity:    "error",
+		Check: func(root *yaml.Node, raw []byte) []Finding {
+			var findings []Finding
+			forEachStepOfType(root, "step.conditional", func(step *yaml.Node) {
+				cfg := findMapValue(step, "config")
+				if cfg == nil {
+					return
+				}
+				field := findMapValue(cfg, "field")
+				if field == nil || field.Kind != yaml.ScalarNode {
+					return
+				}
+				if strings.Contains(field.Value, "{{") {
+					findings = append(findings, Finding{
+						RuleID:  "conditional-field",
+						Line:    field.Line,
+						Message: fmt.Sprintf("step.conditional field uses template syntax %q (should be dot-path)", field.Value),
+						Fixable: true,
+					})
+				}
+			})
+			return findings
+		},
+		Fix: func(root *yaml.Node) []Change {
+			var changes []Change
+			forEachStepOfType(root, "step.conditional", func(step *yaml.Node) {
+				cfg := findMapValue(step, "config")
+				if cfg == nil {
+					return
+				}
+				field := findMapValue(cfg, "field")
+				if field == nil || field.Kind != yaml.ScalarNode {
+					return
+				}
+				if m := conditionalFieldTemplateRegex.FindStringSubmatch(field.Value); m != nil {
+					oldVal := field.Value
+					field.Value = m[1]
+					field.Style = 0 // remove quotes
+					changes = append(changes, Change{
+						RuleID:      "conditional-field",
+						Line:        field.Line,
+						Description: fmt.Sprintf("Converted field %q -> %q", oldVal, field.Value),
+					})
+				}
+			})
 			return changes
 		},
 	}

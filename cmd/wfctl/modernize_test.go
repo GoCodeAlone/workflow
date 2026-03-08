@@ -117,6 +117,62 @@ func findRule(id string) *Rule {
 	return nil
 }
 
+func TestConditionalFieldCheck(t *testing.T) {
+	input := `
+pipelines:
+  test:
+    steps:
+      - name: route
+        type: step.conditional
+        config:
+          field: "{{ .steps.check_xss.matched }}"
+          routes:
+            "true": deny
+          default: allow
+`
+	rule := findRule("conditional-field")
+	if rule == nil {
+		t.Fatal("conditional-field rule not found")
+	}
+
+	doc := parseTestYAML(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) == 0 {
+		t.Fatal("expected findings for template in conditional field")
+	}
+}
+
+func TestConditionalFieldFix(t *testing.T) {
+	input := `
+pipelines:
+  test:
+    steps:
+      - name: route
+        type: step.conditional
+        config:
+          field: "{{ .steps.check_xss.matched }}"
+          routes:
+            "true": deny
+          default: allow
+`
+	rule := findRule("conditional-field")
+	doc := parseTestYAML(t, input)
+	changes := rule.Fix(doc)
+	if len(changes) == 0 {
+		t.Fatal("expected changes from fix")
+	}
+
+	out, _ := yaml.Marshal(doc)
+	result := string(out)
+
+	if strings.Contains(result, "{{") {
+		t.Errorf("expected template syntax to be removed, got:\n%s", result)
+	}
+	if !strings.Contains(result, "steps.check_xss.matched") {
+		t.Errorf("expected dot-path field value, got:\n%s", result)
+	}
+}
+
 func TestHyphenStepsCheck(t *testing.T) {
 	input := `
 pipelines:
