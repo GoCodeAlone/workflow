@@ -1,4 +1,4 @@
-.PHONY: build build-ui build-go test bench bench-baseline bench-compare lint fmt vet fix install-hooks clean ko-build
+.PHONY: build build-ui build-go test bench bench-baseline bench-compare lint fmt vet fix install-hooks clean ko-build build-wfctl
 
 # Common benchmark flags
 BENCH_FLAGS = -bench=. -benchmem -run=^$$ -timeout=30m
@@ -18,9 +18,9 @@ build-ui:
 build-go:
 	go build -o server ./cmd/server
 
-# Build MCP server binary
-build-mcp:
-	go build -o workflow-mcp-server ./cmd/workflow-mcp-server
+# Build wfctl CLI (includes MCP server)
+build-wfctl:
+	go build -o wfctl ./cmd/wfctl
 
 # Run all tests with race detection
 test:

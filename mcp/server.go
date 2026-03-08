@@ -50,12 +50,20 @@ func WithEngine(engine EngineProvider) ServerOption {
 	}
 }
 
+// WithRegistryDir sets the path to a cloned workflow-registry for plugin search.
+func WithRegistryDir(dir string) ServerOption {
+	return func(s *Server) {
+		s.registryDir = dir
+	}
+}
+
 // Server wraps an MCP server instance and provides workflow-engine-specific
 // tools and resources.
 type Server struct {
-	mcpServer *server.MCPServer
-	pluginDir string
-	engine    EngineProvider // optional; enables execution tools when set
+	mcpServer   *server.MCPServer
+	pluginDir   string
+	registryDir string
+	engine      EngineProvider // optional; enables execution tools when set
 }
 
 // NewServer creates a new MCP server with all workflow engine tools and
@@ -73,14 +81,18 @@ func NewServer(pluginDir string, opts ...ServerOption) *Server {
 	}
 
 	s.mcpServer = server.NewMCPServer(
-		"workflow-mcp-server",
+		"wfctl-mcp",
 		Version,
 		server.WithToolCapabilities(true),
 		server.WithResourceCapabilities(false, true),
-		server.WithInstructions("This MCP server exposes the GoCodeAlone/workflow engine. "+
+		server.WithInstructions("This MCP server exposes the GoCodeAlone/workflow engine via wfctl. "+
 			"Use the provided tools to list available module types, step types, trigger types, "+
 			"workflow types, generate JSON schemas, validate YAML configurations, inspect configs, "+
-			"and manage plugins. Resources provide documentation and example configurations. "+
+			"and manage plugins. Use the modernize tool to detect and fix known YAML config "+
+			"anti-patterns (hyphenated step names, template syntax in conditionals, missing db_query mode, "+
+			"dot-access patterns, absolute dbPaths, empty routes, snake_case config keys). "+
+			"Use the registry_search tool to discover available plugins from the workflow-registry. "+
+			"Resources provide documentation and example configurations. "+
 			"The workflow engine includes a CLI tool called wfctl with commands for project scaffolding, "+
 			"config validation, deployment (Docker, Kubernetes, cloud), API spec extraction, "+
 			"diff/contract testing, CI/CD generation, plugin management, and Git integration. "+

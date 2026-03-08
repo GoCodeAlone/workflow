@@ -5,15 +5,19 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/manifest"
+	"github.com/GoCodeAlone/workflow/modernize"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/schema"
 	"github.com/mark3labs/mcp-go/mcp"
+	"gopkg.in/yaml.v3"
 )
 
 // registerWfctlTools registers the wfctl CLI-equivalent tools.
@@ -156,6 +160,52 @@ func (s *Server) registerWfctlTools() {
 			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleDetectProjectFeatures,
+	)
+
+	s.mcpServer.AddTool(
+		mcp.NewTool("modernize",
+			mcp.WithDescription("Detect and optionally fix known YAML config anti-patterns. "+
+				"Reports issues like hyphenated step names, template syntax in conditional fields, "+
+				"missing db_query mode, dot-access patterns, absolute dbPaths, empty routes, "+
+				"and snake_case config keys. Returns findings with line numbers and fix suggestions."),
+			mcp.WithString("yaml_content",
+				mcp.Required(),
+				mcp.Description("The YAML content of the workflow configuration to analyze"),
+			),
+			mcp.WithBoolean("apply",
+				mcp.Description("Apply fixes to the YAML and return the modified content (default: false, dry-run only)"),
+			),
+			mcp.WithString("rules",
+				mcp.Description("Comma-separated list of rule IDs to run (default: all). Available: hyphen-steps, conditional-field, db-query-mode, db-query-index, absolute-dbpath, empty-routes, camelcase-config"),
+			),
+			mcp.WithString("exclude_rules",
+				mcp.Description("Comma-separated list of rule IDs to skip"),
+			),
+			mcp.WithReadOnlyHintAnnotation(false),
+		),
+		s.handleModernize,
+	)
+
+	s.mcpServer.AddTool(
+		mcp.NewTool("registry_search",
+			mcp.WithDescription("Search the workflow plugin registry for available plugins. "+
+				"Returns plugin manifests matching the query, with capabilities, versions, and download information. "+
+				"Queries the local clone of the GoCodeAlone/workflow-registry repository."),
+			mcp.WithString("query",
+				mcp.Description("Search term to filter plugins by name, description, or keywords"),
+			),
+			mcp.WithString("type",
+				mcp.Description("Filter by plugin type: builtin, external, internal"),
+			),
+			mcp.WithString("tier",
+				mcp.Description("Filter by tier: core, community, premium"),
+			),
+			mcp.WithBoolean("include_private",
+				mcp.Description("Include private/proprietary plugins (default: false)"),
+			),
+			mcp.WithReadOnlyHintAnnotation(true),
+		),
+		s.handleRegistrySearch,
 	)
 }
 
@@ -1633,6 +1683,141 @@ func mcpGenerateCDWorkflow(features *mcpProjectFeatures, registry, platforms str
 	b.WriteString("            ${{ env.REGISTRY }}/${{ github.repository }}:latest\n")
 
 	return b.String()
+}
+
+func (s *Server) handleModernize(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	yamlContent := mcp.ParseString(req, "yaml_content", "")
+	if yamlContent == "" {
+		return mcp.NewToolResultError("yaml_content is required"), nil
+	}
+
+	apply := mcp.ParseBoolean(req, "apply", false)
+	rulesFilter := mcp.ParseString(req, "rules", "")
+	excludeFilter := mcp.ParseString(req, "exclude_rules", "")
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(yamlContent), &doc); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("YAML parse error: %v", err)), nil
+	}
+
+	rules := modernize.AllRules()
+	rules = modernize.FilterRules(rules, rulesFilter, excludeFilter)
+
+	// Check phase
+	var allFindings []modernize.Finding
+	for _, r := range rules {
+		allFindings = append(allFindings, r.Check(&doc, []byte(yamlContent))...)
+	}
+
+	result := map[string]any{
+		"findings": allFindings,
+		"count":    len(allFindings),
+	}
+
+	if apply && len(allFindings) > 0 {
+		var changes []modernize.Change
+		for _, r := range rules {
+			if r.Fix == nil {
+				continue
+			}
+			changes = append(changes, r.Fix(&doc)...)
+		}
+		out, err := yaml.Marshal(&doc)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("marshal error: %v", err)), nil
+		}
+		result["changes"] = changes
+		result["change_count"] = len(changes)
+		result["fixed_yaml"] = string(out)
+	}
+
+	return marshalToolResult(result)
+}
+
+// registryManifest is a subset of fields from a plugin registry manifest.json.
+type registryManifest struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Version     string   `json:"version"`
+	Type        string   `json:"type"`
+	Tier        string   `json:"tier"`
+	License     string   `json:"license"`
+	Private     bool     `json:"private"`
+	Keywords    []string `json:"keywords"`
+	Repository  string   `json:"repository"`
+}
+
+func (s *Server) handleRegistrySearch(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if s.registryDir == "" {
+		return mcp.NewToolResultError("no registry directory configured; start the server with --registry-dir or WithRegistryDir option"), nil
+	}
+
+	query := strings.ToLower(mcp.ParseString(req, "query", ""))
+	typeFilter := strings.ToLower(mcp.ParseString(req, "type", ""))
+	tierFilter := strings.ToLower(mcp.ParseString(req, "tier", ""))
+	includePrivate := mcp.ParseBoolean(req, "include_private", false)
+
+	pluginsDir := filepath.Join(s.registryDir, "plugins")
+	entries, err := os.ReadDir(pluginsDir)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to read registry plugins directory %s: %v", pluginsDir, err)), nil
+	}
+
+	var matches []registryManifest
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		manifestPath := filepath.Join(pluginsDir, e.Name(), "manifest.json")
+		data, err := os.ReadFile(manifestPath) //nolint:gosec // G304: path is within registry directory
+		if err != nil {
+			continue
+		}
+		var m registryManifest
+		if err := json.Unmarshal(data, &m); err != nil {
+			continue
+		}
+
+		// Filter private plugins
+		if m.Private && !includePrivate {
+			continue
+		}
+
+		// Filter by type
+		if typeFilter != "" && strings.ToLower(m.Type) != typeFilter {
+			continue
+		}
+
+		// Filter by tier
+		if tierFilter != "" && strings.ToLower(m.Tier) != tierFilter {
+			continue
+		}
+
+		// Filter by query (match name, description, or keywords)
+		if query != "" {
+			matched := strings.Contains(strings.ToLower(m.Name), query) ||
+				strings.Contains(strings.ToLower(m.Description), query)
+			if !matched {
+				for _, kw := range m.Keywords {
+					if strings.Contains(strings.ToLower(kw), query) {
+						matched = true
+						break
+					}
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+
+		matches = append(matches, m)
+	}
+
+	result := map[string]any{
+		"plugins": matches,
+		"count":   len(matches),
+	}
+	return marshalToolResult(result)
 }
 
 func mcpGenerateReleaseWorkflow() string {

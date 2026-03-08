@@ -2,7 +2,7 @@
 
 The workflow engine includes a built-in [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes engine functionality to AI assistants and tools.
 
-> **Note**: The MCP server is now integrated into the `wfctl` CLI as the `mcp` subcommand. The standalone `workflow-mcp-server` binary is still available for backward compatibility but the recommended approach is to use `wfctl mcp`. This ensures the MCP server version always matches the CLI and engine version, and benefits from automatic updates via `wfctl update`.
+The MCP server is integrated into the `wfctl` CLI as the `mcp` subcommand. Use `wfctl mcp` to start it. This ensures the MCP server version always matches the CLI and engine version, and benefits from automatic updates via `wfctl update`.
 
 ## Features
 
@@ -21,6 +21,8 @@ The MCP server provides:
 | `inspect_config` | Inspect a config and get structured summary of modules, workflows, triggers |
 | `list_plugins` | List installed external plugins |
 | `get_config_skeleton` | Generate a skeleton YAML config for given module types |
+| `modernize` | Detect and fix known YAML config anti-patterns |
+| `registry_search` | Search the plugin registry for available plugins |
 
 ### Resources
 
@@ -50,10 +52,7 @@ wfctl update
 ```bash
 # Build wfctl (includes the mcp command)
 go build -o wfctl ./cmd/wfctl
-
-# Build the standalone MCP server binary (legacy)
-make build-mcp
-# Or: go build -o workflow-mcp-server ./cmd/workflow-mcp-server
+# Or: make build-wfctl
 ```
 
 ## Configuring AI Clients
@@ -71,18 +70,6 @@ Add the following to your Claude Desktop configuration file:
     "workflow": {
       "command": "wfctl",
       "args": ["mcp", "-plugin-dir", "/path/to/data/plugins"]
-    }
-  }
-}
-```
-
-**Legacy (standalone binary)**:
-```json
-{
-  "mcpServers": {
-    "workflow": {
-      "command": "/path/to/workflow-mcp-server",
-      "args": ["-plugin-dir", "/path/to/data/plugins"]
     }
   }
 }
@@ -204,8 +191,7 @@ cmd/wfctl/mcp.go     → "wfctl mcp" command handler (delegates to mcp package)
 mcp/server.go        → MCP server setup, tool handlers, resource handlers
 mcp/docs.go          → Embedded documentation content
 mcp/server_test.go   → Unit tests
-
-cmd/workflow-mcp-server/main.go  → Standalone binary entry point (legacy)
+modernize/           → Shared modernize rules (used by both wfctl CLI and MCP server)
 ```
 
 The server uses the [mcp-go](https://github.com/mark3labs/mcp-go) library for MCP protocol implementation over stdio transport.

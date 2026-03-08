@@ -4,34 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 
+	"github.com/GoCodeAlone/workflow/modernize"
 	"gopkg.in/yaml.v3"
 )
-
-// Finding represents a single issue detected by a modernize rule.
-type Finding struct {
-	RuleID  string
-	Line    int
-	Message string
-	Fixable bool
-}
-
-// Change represents a modification applied by a rule's Fix function.
-type Change struct {
-	RuleID      string
-	Line        int
-	Description string
-}
-
-// Rule defines a modernize transformation rule.
-type Rule struct {
-	ID          string
-	Description string
-	Severity    string // "error" or "warning"
-	Check       func(root *yaml.Node, raw []byte) []Finding
-	Fix         func(root *yaml.Node) []Change
-}
 
 func runModernize(args []string) error {
 	fs := flag.NewFlagSet("modernize", flag.ContinueOnError)
@@ -64,7 +40,7 @@ Options:
 		return err
 	}
 
-	rules := allModernizeRules()
+	rules := modernize.AllRules()
 
 	if *listRules {
 		fmt.Println("Available modernize rules:")
@@ -80,7 +56,7 @@ Options:
 	}
 
 	// Filter rules
-	rules = filterRules(rules, *rulesFlag, *excludeFlag)
+	rules = modernize.FilterRules(rules, *rulesFlag, *excludeFlag)
 
 	// Collect files
 	var files []string
@@ -145,7 +121,7 @@ Options:
 }
 
 // modernizeFile checks (and optionally fixes) a single YAML file.
-func modernizeFile(path string, rules []Rule, apply bool) ([]Finding, int, error) {
+func modernizeFile(path string, rules []modernize.Rule, apply bool) ([]modernize.Finding, int, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, 0, err
@@ -157,7 +133,7 @@ func modernizeFile(path string, rules []Rule, apply bool) ([]Finding, int, error
 	}
 
 	// Check phase
-	var allFindings []Finding
+	var allFindings []modernize.Finding
 	for _, r := range rules {
 		findings := r.Check(&doc, data)
 		allFindings = append(allFindings, findings...)
@@ -188,37 +164,4 @@ func modernizeFile(path string, rules []Rule, apply bool) ([]Finding, int, error
 	}
 
 	return allFindings, fixCount, nil
-}
-
-// filterRules filters the rule list based on include/exclude flags.
-func filterRules(rules []Rule, include, exclude string) []Rule {
-	if include == "" && exclude == "" {
-		return rules
-	}
-
-	includeSet := make(map[string]bool)
-	if include != "" {
-		for _, id := range strings.Split(include, ",") {
-			includeSet[strings.TrimSpace(id)] = true
-		}
-	}
-
-	excludeSet := make(map[string]bool)
-	if exclude != "" {
-		for _, id := range strings.Split(exclude, ",") {
-			excludeSet[strings.TrimSpace(id)] = true
-		}
-	}
-
-	var filtered []Rule
-	for _, r := range rules {
-		if len(includeSet) > 0 && !includeSet[r.ID] {
-			continue
-		}
-		if excludeSet[r.ID] {
-			continue
-		}
-		filtered = append(filtered, r)
-	}
-	return filtered
 }

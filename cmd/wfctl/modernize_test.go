@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/modernize"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,37 +26,37 @@ func TestRunModernize_NoFiles(t *testing.T) {
 }
 
 func TestFilterRules_Empty(t *testing.T) {
-	rules := []Rule{
+	rules := []modernize.Rule{
 		{ID: "rule-a", Description: "A"},
 		{ID: "rule-b", Description: "B"},
 	}
 
 	// No filters — all rules returned
-	result := filterRules(rules, "", "")
+	result := modernize.FilterRules(rules, "", "")
 	if len(result) != 2 {
 		t.Fatalf("expected 2 rules, got %d", len(result))
 	}
 }
 
 func TestFilterRules_Include(t *testing.T) {
-	rules := []Rule{
+	rules := []modernize.Rule{
 		{ID: "rule-a", Description: "A"},
 		{ID: "rule-b", Description: "B"},
 	}
 
-	result := filterRules(rules, "rule-a", "")
+	result := modernize.FilterRules(rules, "rule-a", "")
 	if len(result) != 1 || result[0].ID != "rule-a" {
 		t.Fatalf("expected only rule-a, got %v", result)
 	}
 }
 
 func TestFilterRules_Exclude(t *testing.T) {
-	rules := []Rule{
+	rules := []modernize.Rule{
 		{ID: "rule-a", Description: "A"},
 		{ID: "rule-b", Description: "B"},
 	}
 
-	result := filterRules(rules, "", "rule-b")
+	result := modernize.FilterRules(rules, "", "rule-b")
 	if len(result) != 1 || result[0].ID != "rule-a" {
 		t.Fatalf("expected only rule-a, got %v", result)
 	}
@@ -69,7 +70,7 @@ func TestModernizeFile_ValidYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	findings, fixes, err := modernizeFile(tmpFile, []Rule{}, false)
+	findings, fixes, err := modernizeFile(tmpFile, []modernize.Rule{}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -88,7 +89,7 @@ func TestModernizeFile_InvalidYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err := modernizeFile(tmpFile, []Rule{}, false)
+	_, _, err := modernizeFile(tmpFile, []modernize.Rule{}, false)
 	if err == nil {
 		t.Fatal("expected error for invalid YAML")
 	}
@@ -108,8 +109,8 @@ func parseTestYAML(t *testing.T, input string) *yaml.Node {
 }
 
 // findRule is a test helper that looks up a rule by ID.
-func findRule(id string) *Rule {
-	for _, r := range allModernizeRules() {
+func findRule(id string) *modernize.Rule {
+	for _, r := range modernize.AllRules() {
 		if r.ID == id {
 			return &r
 		}
@@ -185,8 +186,8 @@ pipelines:
         config:
           field: steps.check-xss.matched
 `
-	rules := allModernizeRules()
-	var rule Rule
+	rules := modernize.AllRules()
+	var rule modernize.Rule
 	for _, r := range rules {
 		if r.ID == "hyphen-steps" {
 			rule = r
@@ -230,8 +231,8 @@ pipelines:
           body:
             value: "{{ .steps.check-xss.result }}"
 `
-	rules := allModernizeRules()
-	var rule Rule
+	rules := modernize.AllRules()
+	var rule modernize.Rule
 	for _, r := range rules {
 		if r.ID == "hyphen-steps" {
 			rule = r
@@ -483,7 +484,7 @@ modules:
 }
 
 func TestModernizeAllRulesRegistered(t *testing.T) {
-	rules := allModernizeRules()
+	rules := modernize.AllRules()
 	expectedIDs := []string{
 		"hyphen-steps",
 		"conditional-field",
@@ -508,16 +509,16 @@ func TestModernizeAllRulesRegistered(t *testing.T) {
 }
 
 func TestFilterRulesIntegration(t *testing.T) {
-	rules := allModernizeRules()
+	rules := modernize.AllRules()
 
 	// Include filter
-	filtered := filterRules(rules, "hyphen-steps,empty-routes", "")
+	filtered := modernize.FilterRules(rules, "hyphen-steps,empty-routes", "")
 	if len(filtered) != 2 {
 		t.Errorf("expected 2 rules with include filter, got %d", len(filtered))
 	}
 
 	// Exclude filter
-	filtered = filterRules(rules, "", "camelcase-config")
+	filtered = modernize.FilterRules(rules, "", "camelcase-config")
 	if len(filtered) != len(rules)-1 {
 		t.Errorf("expected %d rules with exclude filter, got %d", len(rules)-1, len(filtered))
 	}
@@ -553,11 +554,11 @@ pipelines:
           body:
             name: "{{ .steps.fetch.row.name }}"
 `
-	rules := allModernizeRules()
+	rules := modernize.AllRules()
 	doc := parseTestYAML(t, input)
 
 	// Check phase
-	var allFindings []Finding
+	var allFindings []modernize.Finding
 	for _, r := range rules {
 		allFindings = append(allFindings, r.Check(doc, []byte(input))...)
 	}

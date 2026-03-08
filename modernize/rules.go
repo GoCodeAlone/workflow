@@ -1,4 +1,4 @@
-package main
+package modernize
 
 import (
 	"fmt"
@@ -7,19 +7,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
-
-// allModernizeRules returns all registered modernize rules.
-func allModernizeRules() []Rule {
-	return []Rule{
-		hyphenStepsRule(),
-		conditionalFieldRule(),
-		dbQueryModeRule(),
-		dbQueryIndexRule(),
-		absoluteDbPathRule(),
-		emptyRoutesRule(),
-		camelCaseConfigRule(),
-	}
-}
 
 // --- yaml.Node helpers ---
 
@@ -56,7 +43,7 @@ type stepNameInfo struct {
 // collectStepNames walks pipelines and collects all step names with line info.
 func collectStepNames(root *yaml.Node) []stepNameInfo {
 	var names []stepNameInfo
-	// root is DocumentNode → first child is the mapping
+	// root is DocumentNode -> first child is the mapping
 	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
 		root = root.Content[0]
 	}
@@ -102,6 +89,23 @@ func forEachStepOfType(root *yaml.Node, stepType string, fn func(step *yaml.Node
 			if typeNode != nil && typeNode.Value == stepType {
 				fn(step)
 			}
+		}
+	}
+}
+
+// forEachModule calls fn for each module mapping node.
+func forEachModule(root *yaml.Node, fn func(mod *yaml.Node)) {
+	docRoot := root
+	if docRoot.Kind == yaml.DocumentNode && len(docRoot.Content) > 0 {
+		docRoot = docRoot.Content[0]
+	}
+	modules := findMapValue(docRoot, "modules")
+	if modules == nil || modules.Kind != yaml.SequenceNode {
+		return
+	}
+	for _, mod := range modules.Content {
+		if mod.Kind == yaml.MappingNode {
+			fn(mod)
 		}
 	}
 }
@@ -364,23 +368,6 @@ func dbQueryIndexRule() Rule {
 	}
 }
 
-// forEachModule calls fn for each module mapping node.
-func forEachModule(root *yaml.Node, fn func(mod *yaml.Node)) {
-	docRoot := root
-	if docRoot.Kind == yaml.DocumentNode && len(docRoot.Content) > 0 {
-		docRoot = docRoot.Content[0]
-	}
-	modules := findMapValue(docRoot, "modules")
-	if modules == nil || modules.Kind != yaml.SequenceNode {
-		return
-	}
-	for _, mod := range modules.Content {
-		if mod.Kind == yaml.MappingNode {
-			fn(mod)
-		}
-	}
-}
-
 func absoluteDbPathRule() Rule {
 	return Rule{
 		ID:          "absolute-dbpath",
@@ -499,4 +486,3 @@ func camelCaseConfigRule() Rule {
 		},
 	}
 }
-

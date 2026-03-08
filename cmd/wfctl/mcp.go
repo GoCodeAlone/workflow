@@ -12,6 +12,7 @@ import (
 func runMCP(args []string) error {
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	pluginDir := fs.String("plugin-dir", "data/plugins", "Plugin data directory")
+	registryDir := fs.String("registry-dir", "", "Path to cloned workflow-registry for plugin search")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl mcp [options]
 
@@ -20,7 +21,8 @@ This exposes workflow engine tools and resources to AI assistants such as
 Claude Desktop, VS Code with GitHub Copilot, and Cursor.
 
 The server provides tools for listing module types, validating configs,
-generating schemas, and inspecting workflow YAML configurations.
+generating schemas, inspecting workflow YAML configurations, modernizing
+configs (detecting/fixing anti-patterns), and searching the plugin registry.
 
 Options:
 `)
@@ -32,7 +34,7 @@ Example Claude Desktop configuration (~/.config/claude/claude_desktop_config.jso
     "mcpServers": {
       "workflow": {
         "command": "wfctl",
-        "args": ["mcp", "-plugin-dir", "/path/to/data/plugins"]
+        "args": ["mcp", "-plugin-dir", "/path/to/data/plugins", "-registry-dir", "/path/to/workflow-registry"]
       }
     }
   }
@@ -48,6 +50,11 @@ See docs/mcp.md for full setup instructions.
 	// reflect the release version set at build time.
 	workflowmcp.Version = version
 
-	srv := workflowmcp.NewServer(*pluginDir)
+	var opts []workflowmcp.ServerOption
+	if *registryDir != "" {
+		opts = append(opts, workflowmcp.WithRegistryDir(*registryDir))
+	}
+
+	srv := workflowmcp.NewServer(*pluginDir, opts...)
 	return srv.ServeStdio()
 }
