@@ -2,13 +2,18 @@ package module
 
 import (
 	"context"
-	"errors"
+	"strings"
 	"testing"
 )
 
-func TestScanSASTStep_ExecuteReturnsErrNotImplemented(t *testing.T) {
+// newNoProviderApp returns a mock app with no services registered.
+func newNoProviderApp() *scanMockApp {
+	return &scanMockApp{services: map[string]any{}}
+}
+
+func TestScanSASTStep_NoProvider(t *testing.T) {
 	factory := NewScanSASTStepFactory()
-	step, err := factory("sast-step", map[string]any{"scanner": "semgrep"}, nil)
+	step, err := factory("sast-step", map[string]any{"scanner": "semgrep"}, newNoProviderApp())
 	if err != nil {
 		t.Fatalf("factory returned error: %v", err)
 	}
@@ -17,14 +22,14 @@ func TestScanSASTStep_ExecuteReturnsErrNotImplemented(t *testing.T) {
 	if execErr == nil {
 		t.Fatal("expected Execute to return an error, got nil")
 	}
-	if !errors.Is(execErr, ErrNotImplemented) {
-		t.Errorf("expected errors.Is(err, ErrNotImplemented), got: %v", execErr)
+	if !strings.Contains(execErr.Error(), "no security scanner provider configured") {
+		t.Errorf("unexpected error: %v", execErr)
 	}
 }
 
-func TestScanContainerStep_ExecuteReturnsErrNotImplemented(t *testing.T) {
+func TestScanContainerStep_NoProvider(t *testing.T) {
 	factory := NewScanContainerStepFactory()
-	step, err := factory("container-step", map[string]any{}, nil)
+	step, err := factory("container-step", map[string]any{}, newNoProviderApp())
 	if err != nil {
 		t.Fatalf("factory returned error: %v", err)
 	}
@@ -33,14 +38,14 @@ func TestScanContainerStep_ExecuteReturnsErrNotImplemented(t *testing.T) {
 	if execErr == nil {
 		t.Fatal("expected Execute to return an error, got nil")
 	}
-	if !errors.Is(execErr, ErrNotImplemented) {
-		t.Errorf("expected errors.Is(err, ErrNotImplemented), got: %v", execErr)
+	if !strings.Contains(execErr.Error(), "no security scanner provider configured") {
+		t.Errorf("unexpected error: %v", execErr)
 	}
 }
 
-func TestScanDepsStep_ExecuteReturnsErrNotImplemented(t *testing.T) {
+func TestScanDepsStep_NoProvider(t *testing.T) {
 	factory := NewScanDepsStepFactory()
-	step, err := factory("deps-step", map[string]any{}, nil)
+	step, err := factory("deps-step", map[string]any{}, newNoProviderApp())
 	if err != nil {
 		t.Fatalf("factory returned error: %v", err)
 	}
@@ -49,7 +54,7 @@ func TestScanDepsStep_ExecuteReturnsErrNotImplemented(t *testing.T) {
 	if execErr == nil {
 		t.Fatal("expected Execute to return an error, got nil")
 	}
-	if !errors.Is(execErr, ErrNotImplemented) {
-		t.Errorf("expected errors.Is(err, ErrNotImplemented), got: %v", execErr)
+	if !strings.Contains(execErr.Error(), "no security scanner provider configured") {
+		t.Errorf("unexpected error: %v", execErr)
 	}
 }

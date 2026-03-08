@@ -8,32 +8,24 @@ import (
 )
 
 // ScanSASTStep runs a SAST (Static Application Security Testing) scanner
-// inside a Docker container and evaluates findings against a severity gate.
-//
-// NOTE: This step is not yet implemented. Docker-based execution requires
-// sandbox.DockerSandbox, which is not yet available. Calls to Execute will
-// always return ErrNotImplemented.
+// and evaluates findings against a severity gate. Execution is delegated to
+// a SecurityScannerProvider registered under the "security-scanner" service.
 type ScanSASTStep struct {
 	name           string
 	scanner        string
-	image          string
 	sourcePath     string
 	rules          []string
 	failOnSeverity string
 	outputFormat   string
+	app            modular.Application
 }
 
 // NewScanSASTStepFactory returns a StepFactory that creates ScanSASTStep instances.
 func NewScanSASTStepFactory() StepFactory {
-	return func(name string, config map[string]any, _ modular.Application) (PipelineStep, error) {
+	return func(name string, config map[string]any, app modular.Application) (PipelineStep, error) {
 		scanner, _ := config["scanner"].(string)
 		if scanner == "" {
 			return nil, fmt.Errorf("scan_sast step %q: 'scanner' is required", name)
-		}
-
-		image, _ := config["image"].(string)
-		if image == "" {
-			image = "semgrep/semgrep:latest"
 		}
 
 		sourcePath, _ := config["source_path"].(string)
@@ -63,11 +55,11 @@ func NewScanSASTStepFactory() StepFactory {
 		return &ScanSASTStep{
 			name:           name,
 			scanner:        scanner,
-			image:          image,
 			sourcePath:     sourcePath,
 			rules:          rules,
 			failOnSeverity: failOnSeverity,
 			outputFormat:   outputFormat,
+			app:            app,
 		}, nil
 	}
 }
@@ -75,11 +67,37 @@ func NewScanSASTStepFactory() StepFactory {
 // Name returns the step name.
 func (s *ScanSASTStep) Name() string { return s.name }
 
-// Execute runs the SAST scanner and returns findings as a ScanResult.
-//
-// NOTE: This step is not yet implemented. Execution via sandbox.DockerSandbox
-// is required but the sandbox package is not yet available. This method always
-// returns ErrNotImplemented to prevent silent no-ops in CI/CD pipelines.
-func (s *ScanSASTStep) Execute(_ context.Context, _ *PipelineContext) (*StepResult, error) {
-	return nil, fmt.Errorf("scan_sast step %q: %w", s.name, ErrNotImplemented)
+// Execute runs the SAST scanner via the SecurityScannerProvider and evaluates
+// the severity gate. Returns an error if the gate fails or no provider is configured.
+func (s *ScanSASTStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
+	var provider SecurityScannerProvider
+	if err := s.app.GetService("security-scanner", &provider); err != nil {
+		return nil, fmt.Errorf("scan_sast step %q: no security scanner provider configured — load a scanner plugin", s.name)
+	}
+
+	result, err := provider.ScanSAST(ctx, SASTScanOpts{
+		Scanner:        s.scanner,
+		SourcePath:     s.sourcePath,
+		Rules:          s.rules,
+		FailOnSeverity: s.failOnSeverity,
+		OutputFormat:   s.outputFormat,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan_sast step %q: %w", s.name, err)
+	}
+
+	passed := result.EvaluateGate(s.failOnSeverity)
+
+	output := map[string]any{
+		"passed":   passed,
+		"findings": result.Findings,
+		"summary":  result.Summary,
+		"scanner":  result.Scanner,
+	}
+
+	if !passed {
+		return nil, fmt.Errorf("scan_sast step %q: severity gate failed (threshold: %s)", s.name, s.failOnSeverity)
+	}
+
+	return &StepResult{Output: output}, nil
 }
