@@ -32,6 +32,9 @@ func NewScannerModule(name string, cfg map[string]any) (*ScannerModule, error) {
 	}
 
 	if v, ok := cfg["mode"].(string); ok && v != "" {
+		if v != "mock" && v != "cli" {
+			return nil, fmt.Errorf("security.scanner %q: invalid mode %q (expected \"mock\" or \"cli\")", name, v)
+		}
 		m.mode = v
 	}
 	if v, ok := cfg["semgrepBinary"].(string); ok && v != "" {
@@ -61,6 +64,8 @@ func NewScannerModule(name string, cfg map[string]any) (*ScannerModule, error) {
 func (m *ScannerModule) Name() string { return m.name }
 
 // Init registers the module as a SecurityScannerProvider in the service registry.
+// Only one security.scanner module may be loaded at a time; this is intentional —
+// the engine uses a single provider under the "security-scanner" service key.
 func (m *ScannerModule) Init(app modular.Application) error {
 	return app.RegisterService("security-scanner", m)
 }

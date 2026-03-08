@@ -1,10 +1,12 @@
 // Package scanner provides a built-in engine plugin that registers
 // the security.scanner module type, implementing SecurityScannerProvider.
-// It supports mock mode for testing and can optionally shell out to
-// real scanner tools (semgrep, trivy, grype) when available.
+// It supports mock mode for testing. CLI mode (shelling out to semgrep,
+// trivy, grype) is not yet implemented.
 package scanner
 
 import (
+	"log/slog"
+
 	"github.com/CrisisTextLine/modular"
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/plugin"
@@ -23,7 +25,7 @@ func New() *Plugin {
 			BaseNativePlugin: plugin.BaseNativePlugin{
 				PluginName:        "scanner",
 				PluginVersion:     "1.0.0",
-				PluginDescription: "Security scanner provider: SAST, container, and dependency scanning with mock, semgrep, trivy, and grype backends",
+				PluginDescription: "Security scanner provider: SAST, container, and dependency scanning with mock mode for testing",
 			},
 			Manifest: plugin.PluginManifest{
 				Name:        "scanner",
@@ -56,6 +58,7 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 		"security.scanner": func(name string, cfg map[string]any) modular.Module {
 			mod, err := NewScannerModule(name, cfg)
 			if err != nil {
+				slog.Error("security.scanner: failed to create module", "name", name, "error", err)
 				return nil
 			}
 			return mod

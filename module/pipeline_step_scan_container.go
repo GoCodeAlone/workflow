@@ -41,6 +41,10 @@ func NewScanContainerStepFactory() StepFactory {
 			severityThreshold = "HIGH"
 		}
 
+		if err := validateSeverity(severityThreshold); err != nil {
+			return nil, fmt.Errorf("scan_container step %q: %w", name, err)
+		}
+
 		ignoreUnfixed, _ := config["ignore_unfixed"].(bool)
 
 		outputFormat, _ := config["output_format"].(string)
@@ -66,6 +70,9 @@ func (s *ScanContainerStep) Name() string { return s.name }
 // Execute runs the container scanner via the SecurityScannerProvider and evaluates
 // the severity gate. Returns an error if the gate fails or no provider is configured.
 func (s *ScanContainerStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
+	if s.app == nil {
+		return nil, fmt.Errorf("scan_container step %q: no application context", s.name)
+	}
 	var provider SecurityScannerProvider
 	if err := s.app.GetService("security-scanner", &provider); err != nil {
 		return nil, fmt.Errorf("scan_container step %q: no security scanner provider configured — load a scanner plugin", s.name)

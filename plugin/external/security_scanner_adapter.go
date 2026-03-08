@@ -44,6 +44,8 @@ func (p *remoteSecurityScannerProvider) ScanSAST(ctx context.Context, opts modul
 		"fail_on_severity": opts.FailOnSeverity,
 		"output_format":    opts.OutputFormat,
 	}
+	// TODO: add context-aware InvokeService — the context (deadline/cancellation) is
+	// not propagated to the remote plugin because InvokeService does not accept a ctx parameter.
 	result, err := p.module.InvokeService("ScanSAST", args)
 	if err != nil {
 		return nil, fmt.Errorf("remote ScanSAST: %w", err)

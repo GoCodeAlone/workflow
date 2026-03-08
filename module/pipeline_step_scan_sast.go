@@ -44,7 +44,11 @@ func NewScanSASTStepFactory() StepFactory {
 
 		failOnSeverity, _ := config["fail_on_severity"].(string)
 		if failOnSeverity == "" {
-			failOnSeverity = "error"
+			failOnSeverity = "high"
+		}
+
+		if err := validateSeverity(failOnSeverity); err != nil {
+			return nil, fmt.Errorf("scan_sast step %q: %w", name, err)
 		}
 
 		outputFormat, _ := config["output_format"].(string)
@@ -70,6 +74,9 @@ func (s *ScanSASTStep) Name() string { return s.name }
 // Execute runs the SAST scanner via the SecurityScannerProvider and evaluates
 // the severity gate. Returns an error if the gate fails or no provider is configured.
 func (s *ScanSASTStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
+	if s.app == nil {
+		return nil, fmt.Errorf("scan_sast step %q: no application context", s.name)
+	}
 	var provider SecurityScannerProvider
 	if err := s.app.GetService("security-scanner", &provider); err != nil {
 		return nil, fmt.Errorf("scan_sast step %q: no security scanner provider configured — load a scanner plugin", s.name)

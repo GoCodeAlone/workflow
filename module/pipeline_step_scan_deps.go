@@ -64,6 +64,9 @@ func (s *ScanDepsStep) Name() string { return s.name }
 // Execute runs the dependency scanner via the SecurityScannerProvider and evaluates
 // the severity gate. Returns an error if the gate fails or no provider is configured.
 func (s *ScanDepsStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
+	if s.app == nil {
+		return nil, fmt.Errorf("scan_deps step %q: no application context", s.name)
+	}
 	var provider SecurityScannerProvider
 	if err := s.app.GetService("security-scanner", &provider); err != nil {
 		return nil, fmt.Errorf("scan_deps step %q: no security scanner provider configured — load a scanner plugin", s.name)
