@@ -121,6 +121,10 @@ func TestExampleConfigsValidate(t *testing.T) {
 			opts := []schema.ValidationOption{
 				// Pipeline handler type is registered dynamically by the engine
 				schema.WithExtraWorkflowTypes("pipeline"),
+				// Actor workflow handler type is registered by the actors plugin
+				schema.WithExtraWorkflowTypes("actors"),
+				// Actor module types registered by the actors plugin
+				schema.WithExtraModuleTypes("actor.system", "actor.pool"),
 				// Pipeline trigger types
 				schema.WithExtraTriggerTypes("mock"),
 				// Many configs are sub-workflows or modular-style configs without explicit entry points
@@ -163,6 +167,8 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 		"workflow-c-notifications-with-branching.yaml": "step.conditional not supported as standalone module type",
 		// feature_flag step requires featureflag.service module to be initialized first
 		"feature-flag-workflow.yaml": "step.feature_flag requires featureflag.service module loaded before pipeline configuration",
+		// actor-system config uses inline pipeline routes that require actor workflow handler wiring
+		"actor-system-config.yaml": "actor workflow handler wires routes via plugin hooks, not traditional handler registration",
 	}
 
 	for _, cfgPath := range configs {

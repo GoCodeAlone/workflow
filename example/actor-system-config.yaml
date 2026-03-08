@@ -1,0 +1,179 @@
+# Actor Model Example
+#
+# Demonstrates stateful actors processing orders via message passing.
+# HTTP routes send messages to actors using step.actor_ask.
+# Each order gets its own actor that maintains state across messages.
+
+app:
+  name: actor-demo
+
+modules:
+  - name: http
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: router
+    type: http.router
+
+  - name: actors
+    type: actor.system
+    config:
+      shutdownTimeout: 15s
+
+  - name: order-processors
+    type: actor.pool
+    config:
+      system: actors
+      mode: auto-managed
+      idleTimeout: 10m
+      routing: sticky
+      routingKey: order_id
+      recovery:
+        failureScope: isolated
+        action: restart
+        maxRetries: 3
+        retryWindow: 10s
+
+  # Permanent pool: fixed-size worker pool with round-robin routing
+  - name: workers
+    type: actor.pool
+    config:
+      system: actors
+      mode: permanent
+      poolSize: 4
+      routing: round-robin
+
+workflows:
+  actors:
+    pools:
+      order-processors:
+        receive:
+          ProcessOrder:
+            description: "Create or update an order"
+            steps:
+              - type: step.set
+                name: result
+                config:
+                  values:
+                    order_id: "{{ .message.payload.order_id }}"
+                    status: "confirmed"
+                    items: "{{ json .message.payload.items }}"
+
+          GetStatus:
+            description: "Return current order state"
+            steps:
+              - type: step.set
+                name: result
+                config:
+                  values:
+                    order_id: "{{ .actor.identity }}"
+                    status: "{{ .state.status }}"
+
+          CancelOrder:
+            description: "Cancel the order"
+            steps:
+              - type: step.set
+                name: result
+                config:
+                  values:
+                    status: "cancelled"
+                    cancelled_at: '{{ now "2006-01-02T15:04:05Z" }}'
+
+      workers:
+        receive:
+          ProcessJob:
+            description: "Process a background job"
+            steps:
+              - type: step.set
+                name: result
+                config:
+                  values:
+                    job_id: "{{ .message.payload.job_id }}"
+                    status: "completed"
+                    worker: "{{ .actor.identity }}"
+
+  http:
+    routes:
+      - path: /orders
+        method: POST
+        pipeline:
+          steps:
+            - type: step.request_parse
+              name: parse
+              config:
+                parse_body: true
+            - type: step.actor_ask
+              name: process
+              config:
+                pool: order-processors
+                identity: "{{ .body.order_id }}"
+                timeout: 10s
+                message:
+                  type: ProcessOrder
+                  payload:
+                    order_id: "{{ .body.order_id }}"
+                    items: "{{ json .body.items }}"
+            - type: step.json_response
+              name: respond
+              config:
+                status_code: 201
+                body: '{{ json .steps.process }}'
+
+      - path: /orders/{id}
+        method: GET
+        pipeline:
+          steps:
+            - type: step.actor_ask
+              name: status
+              config:
+                pool: order-processors
+                identity: "{{ .id }}"
+                timeout: 5s
+                message:
+                  type: GetStatus
+            - type: step.json_response
+              name: respond
+              config:
+                body: '{{ json .steps.status }}'
+
+      # Permanent pool with round-robin routing
+      - path: /jobs
+        method: POST
+        pipeline:
+          steps:
+            - type: step.request_parse
+              name: parse
+              config:
+                parse_body: true
+            - type: step.actor_ask
+              name: process
+              config:
+                pool: workers
+                timeout: 10s
+                message:
+                  type: ProcessJob
+                  payload:
+                    job_id: "{{ .body.job_id }}"
+            - type: step.json_response
+              name: respond
+              config:
+                status_code: 200
+                body: '{{ json .steps.process }}'
+
+      - path: /orders/{id}
+        method: DELETE
+        pipeline:
+          steps:
+            - type: step.actor_ask
+              name: cancel
+              config:
+                pool: order-processors
+                identity: "{{ .id }}"
+                timeout: 5s
+                message:
+                  type: CancelOrder
+            - type: step.json_response
+              name: respond
+              config:
+                body: '{{ json .steps.cancel }}'
