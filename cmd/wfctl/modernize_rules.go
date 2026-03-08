@@ -48,9 +48,15 @@ func findMapValue(node *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
-// collectStepNames walks pipelines and collects all step names.
-func collectStepNames(root *yaml.Node) []string {
-	var names []string
+// stepNameInfo holds a step name and its YAML line number.
+type stepNameInfo struct {
+	Name string
+	Line int
+}
+
+// collectStepNames walks pipelines and collects all step names with line info.
+func collectStepNames(root *yaml.Node) []stepNameInfo {
+	var names []stepNameInfo
 	// root is DocumentNode → first child is the mapping
 	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
 		root = root.Content[0]
@@ -69,7 +75,7 @@ func collectStepNames(root *yaml.Node) []string {
 		for _, step := range steps.Content {
 			nameNode := findMapValue(step, "name")
 			if nameNode != nil && nameNode.Kind == yaml.ScalarNode {
-				names = append(names, nameNode.Value)
+				names = append(names, stepNameInfo{Name: nameNode.Value, Line: nameNode.Line})
 			}
 		}
 	}
@@ -109,11 +115,12 @@ func hyphenStepsRule() Rule {
 		Check: func(root *yaml.Node, raw []byte) []Finding {
 			var findings []Finding
 			names := collectStepNames(root)
-			for _, name := range names {
-				if strings.Contains(name, "-") {
+			for _, info := range names {
+				if strings.Contains(info.Name, "-") {
 					findings = append(findings, Finding{
 						RuleID:  "hyphen-steps",
-						Message: fmt.Sprintf("Step %q uses hyphens (causes Go template parse errors)", name),
+						Line:    info.Line,
+						Message: fmt.Sprintf("Step %q uses hyphens (causes Go template parse errors)", info.Name),
 						Fixable: true,
 					})
 				}
@@ -124,9 +131,9 @@ func hyphenStepsRule() Rule {
 			names := collectStepNames(root)
 			// Build rename map: old -> new
 			renames := make(map[string]string)
-			for _, name := range names {
-				if strings.Contains(name, "-") {
-					renames[name] = strings.ReplaceAll(name, "-", "_")
+			for _, info := range names {
+				if strings.Contains(info.Name, "-") {
+					renames[info.Name] = strings.ReplaceAll(info.Name, "-", "_")
 				}
 			}
 			if len(renames) == 0 {

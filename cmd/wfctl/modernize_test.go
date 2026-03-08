@@ -532,3 +532,121 @@ modules:
 		t.Fatal("expected findings for snake_case config keys")
 	}
 }
+
+func TestModernizeAllRulesRegistered(t *testing.T) {
+	rules := allModernizeRules()
+	expectedIDs := []string{
+		"hyphen-steps",
+		"conditional-field",
+		"db-query-mode",
+		"db-query-index",
+		"database-to-sqlite",
+		"absolute-dbpath",
+		"empty-routes",
+		"camelcase-config",
+	}
+	if len(rules) != len(expectedIDs) {
+		t.Errorf("expected %d rules, got %d", len(expectedIDs), len(rules))
+	}
+	ruleMap := make(map[string]bool)
+	for _, r := range rules {
+		ruleMap[r.ID] = true
+	}
+	for _, id := range expectedIDs {
+		if !ruleMap[id] {
+			t.Errorf("missing rule: %s", id)
+		}
+	}
+}
+
+func TestFilterRulesIntegration(t *testing.T) {
+	rules := allModernizeRules()
+
+	// Include filter
+	filtered := filterRules(rules, "hyphen-steps,empty-routes", "")
+	if len(filtered) != 2 {
+		t.Errorf("expected 2 rules with include filter, got %d", len(filtered))
+	}
+
+	// Exclude filter
+	filtered = filterRules(rules, "", "camelcase-config")
+	if len(filtered) != len(rules)-1 {
+		t.Errorf("expected %d rules with exclude filter, got %d", len(rules)-1, len(filtered))
+	}
+}
+
+func TestModernizeFullPipeline(t *testing.T) {
+	// A config with multiple issues
+	input := `
+name: test-app
+modules:
+  - name: my-db
+    type: database.workflow
+    config:
+      driver: sqlite
+      dsn: "file:app.db"
+pipelines:
+  check:
+    steps:
+      - name: check-input
+        type: step.regex_match
+        config:
+          pattern: "test"
+          input: "{{ .body.data }}"
+      - name: route-check
+        type: step.conditional
+        config:
+          field: "{{ .steps.check-input.matched }}"
+          routes:
+            "true": block
+          default: allow
+      - name: fetch
+        type: step.db_query
+        config:
+          database: my-db
+          query: "SELECT name FROM users WHERE id = ?"
+      - name: respond
+        type: step.json_response
+        config:
+          body:
+            name: "{{ .steps.fetch.row.name }}"
+`
+	rules := allModernizeRules()
+	doc := parseTestYAML(t, input)
+
+	// Check phase
+	var allFindings []Finding
+	for _, r := range rules {
+		allFindings = append(allFindings, r.Check(doc, []byte(input))...)
+	}
+	if len(allFindings) < 4 {
+		t.Errorf("expected at least 4 findings, got %d: %v", len(allFindings), allFindings)
+	}
+
+	// Fix phase
+	totalChanges := 0
+	for _, r := range rules {
+		if r.Fix == nil {
+			continue
+		}
+		changes := r.Fix(doc)
+		totalChanges += len(changes)
+	}
+	if totalChanges == 0 {
+		t.Fatal("expected changes from fixes")
+	}
+
+	out, _ := yaml.Marshal(doc)
+	result := string(out)
+
+	// Verify fixes applied
+	if strings.Contains(result, "check-input") {
+		t.Error("hyphen-steps: check-input not renamed")
+	}
+	if strings.Contains(result, "database.workflow") {
+		t.Error("database-to-sqlite: type not changed")
+	}
+	if strings.Contains(result, `field: "{{ .steps`) {
+		t.Error("conditional-field: template not converted")
+	}
+}

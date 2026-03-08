@@ -1103,6 +1103,36 @@ The MCP server provides tools for listing module types, validating configs, gene
 
 See [docs/mcp.md](mcp.md) for full setup instructions.
 
+### `modernize`
+
+Detect and fix known YAML config anti-patterns.
+
+```
+wfctl modernize [options] <config.yaml|directory>
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--apply` | `false` | Write fixes in-place (default: dry-run) |
+| `--list-rules` | `false` | List all available rules |
+| `--rules` | all | Comma-separated rule IDs to run |
+| `--exclude-rules` | none | Comma-separated rule IDs to skip |
+| `--dir` | | Scan all YAML files recursively |
+| `--format` | `text` | Output format: text or json |
+
+**Rules:**
+
+| ID | Severity | Fixable | Description |
+|----|----------|---------|-------------|
+| `hyphen-steps` | error | yes | Rename hyphenated step names to underscores |
+| `conditional-field` | error | yes | Convert template syntax in conditional field to dot-path |
+| `db-query-mode` | warning | yes | Add mode:single when downstream uses .row/.found |
+| `db-query-index` | error | yes | Convert .steps.X.row.Y to index syntax |
+| `database-to-sqlite` | warning | yes | Convert database.workflow to storage.sqlite |
+| `absolute-dbpath` | warning | no | Warn on absolute dbPath values |
+| `empty-routes` | error | no | Detect empty routes in step.conditional |
+| `camelcase-config` | warning | no | Detect snake_case config keys |
+
 ---
 
 ## Project Config File (`.wfctl.yaml`)
