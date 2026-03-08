@@ -404,57 +404,6 @@ pipelines:
 	}
 }
 
-func TestDatabaseToSqliteCheck(t *testing.T) {
-	input := `
-modules:
-  - name: my-db
-    type: database.workflow
-    config:
-      driver: sqlite
-      dsn: "file:data.db"
-`
-	rule := findRule("database-to-sqlite")
-	if rule == nil {
-		t.Fatal("database-to-sqlite rule not found")
-	}
-
-	doc := parseTestYAML(t, input)
-	findings := rule.Check(doc, []byte(input))
-	if len(findings) == 0 {
-		t.Fatal("expected findings for database.workflow")
-	}
-}
-
-func TestDatabaseToSqliteFix(t *testing.T) {
-	input := `
-modules:
-  - name: my-db
-    type: database.workflow
-    config:
-      driver: sqlite
-      dsn: "file:data.db"
-`
-	rule := findRule("database-to-sqlite")
-	doc := parseTestYAML(t, input)
-	changes := rule.Fix(doc)
-	if len(changes) == 0 {
-		t.Fatal("expected changes from fix")
-	}
-
-	out, _ := yaml.Marshal(doc)
-	result := string(out)
-
-	if strings.Contains(result, "database.workflow") {
-		t.Errorf("expected type to be changed, got:\n%s", result)
-	}
-	if !strings.Contains(result, "storage.sqlite") {
-		t.Errorf("expected storage.sqlite type, got:\n%s", result)
-	}
-	if !strings.Contains(result, "dbPath") {
-		t.Errorf("expected dbPath in config, got:\n%s", result)
-	}
-}
-
 func TestAbsoluteDbPathCheck(t *testing.T) {
 	input := `
 modules:
@@ -540,7 +489,6 @@ func TestModernizeAllRulesRegistered(t *testing.T) {
 		"conditional-field",
 		"db-query-mode",
 		"db-query-index",
-		"database-to-sqlite",
 		"absolute-dbpath",
 		"empty-routes",
 		"camelcase-config",
@@ -579,12 +527,6 @@ func TestModernizeFullPipeline(t *testing.T) {
 	// A config with multiple issues
 	input := `
 name: test-app
-modules:
-  - name: my-db
-    type: database.workflow
-    config:
-      driver: sqlite
-      dsn: "file:app.db"
 pipelines:
   check:
     steps:
@@ -642,9 +584,6 @@ pipelines:
 	// Verify fixes applied
 	if strings.Contains(result, "check-input") {
 		t.Error("hyphen-steps: check-input not renamed")
-	}
-	if strings.Contains(result, "database.workflow") {
-		t.Error("database-to-sqlite: type not changed")
 	}
 	if strings.Contains(result, `field: "{{ .steps`) {
 		t.Error("conditional-field: template not converted")
