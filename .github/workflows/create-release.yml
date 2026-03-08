@@ -87,6 +87,8 @@ jobs:
     uses: ./.github/workflows/release.yml
     with:
       tag_name: ${{ needs.tag.outputs.tag }}
+    secrets:
+      repo_dispatch_token: ${{ secrets.repo_dispatch_token }}
     permissions:
       contents: write
       packages: write
