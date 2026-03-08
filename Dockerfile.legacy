@@ -1,6 +1,7 @@
-# Multi-stage build for the Workflow engine server.
+# Legacy Dockerfile for local docker-compose development.
+# Production container builds use ko (see .ko.yaml).
 #
-# Build:   docker build -t workflow .
+# Build:   docker build -f Dockerfile.legacy -t workflow .
 # Run:     docker run -p 8080:8080 workflow -config /etc/workflow/config.yaml
 #
 # The admin UI is served by the external workflow-plugin-admin binary,

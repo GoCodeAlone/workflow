@@ -11,7 +11,7 @@ services:
   workflow-server:
     build:
       context: ../..
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.legacy
     image: workflow-server:local
     container_name: workflow-server
     ports:
