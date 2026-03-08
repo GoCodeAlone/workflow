@@ -111,6 +111,21 @@ jobs:
         go-version: '1.26'
         cache: true
 
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: 'https://npm.pkg.github.com'
+        cache: 'npm'
+        cache-dependency-path: ui/package-lock.json
+
+    - name: Build UI assets (required for Go embed)
+      run: |
+        cd ui && npm ci && npm run build
+        cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Set up ko
       uses: ko-build/setup-ko@v0.9
 
@@ -119,11 +134,11 @@ jobs:
 
     - name: Build and push
       env:
-        KO_DOCKER_REPO: ghcr.io/${{ github.repository }}
         GOPRIVATE: github.com/GoCodeAlone/*
         GONOSUMCHECK: github.com/GoCodeAlone/*
         GOFLAGS: -mod=mod
       run: |
+        export KO_DOCKER_REPO="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
         VERSION="${TAG_NAME#v}"
         CORE_VERSION="${VERSION%%[-+]*}"
         MAJOR_MINOR="$(echo "$CORE_VERSION" | cut -d. -f1-2)"
