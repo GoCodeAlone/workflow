@@ -113,13 +113,17 @@ func (m *PlatformDODNS) Init(app modular.Application) error {
 		return fmt.Errorf("platform.do_dns %q: unsupported provider %q", m.name, providerType)
 	}
 
-	return app.RegisterService(m.name, m)
+	if err := app.RegisterService(m.name, m); err != nil {
+		return err
+	}
+	return app.RegisterService(m.name+".iac", &DODNSPlatformAdapter{m})
 }
 
 // ProvidesServices declares the service this module provides.
 func (m *PlatformDODNS) ProvidesServices() []modular.ServiceProvider {
 	return []modular.ServiceProvider{
 		{Name: m.name, Description: "DO DNS: " + m.name, Instance: m},
+		{Name: m.name + ".iac", Description: "DO DNS IaC adapter: " + m.name, Instance: &DODNSPlatformAdapter{m}},
 	}
 }
 
@@ -165,6 +169,61 @@ func (m *PlatformDODNS) recordConfigs() []DODNSRecordState {
 		})
 	}
 	return records
+}
+
+// ─── PlatformProvider adapter ──────────────────────────────────────────────────
+
+// DODNSPlatformAdapter wraps PlatformDODNS to implement PlatformProvider.
+type DODNSPlatformAdapter struct {
+	*PlatformDODNS
+}
+
+// Plan implements PlatformProvider.
+func (a *DODNSPlatformAdapter) Plan() (*PlatformPlan, error) {
+	p, err := a.PlatformDODNS.Plan()
+	if err != nil {
+		return nil, err
+	}
+	var actions []PlatformAction
+	for _, change := range p.Changes {
+		actionType := "create"
+		if change == "no changes" {
+			actionType = "noop"
+		}
+		actions = append(actions, PlatformAction{
+			Type:     actionType,
+			Resource: p.Domain,
+			Detail:   change,
+		})
+	}
+	return &PlatformPlan{
+		Provider: "digitalocean",
+		Resource: "dns",
+		Actions:  actions,
+	}, nil
+}
+
+// Apply implements PlatformProvider.
+func (a *DODNSPlatformAdapter) Apply() (*PlatformResult, error) {
+	st, err := a.PlatformDODNS.Apply()
+	if err != nil {
+		return &PlatformResult{Success: false, Message: err.Error()}, err
+	}
+	return &PlatformResult{
+		Success: true,
+		Message: fmt.Sprintf("DNS domain %s configured with %d records", st.DomainName, len(st.Records)),
+		State:   st,
+	}, nil
+}
+
+// Status implements PlatformProvider.
+func (a *DODNSPlatformAdapter) Status() (any, error) {
+	return a.PlatformDODNS.Status()
+}
+
+// Destroy implements PlatformProvider.
+func (a *DODNSPlatformAdapter) Destroy() error {
+	return a.PlatformDODNS.Destroy()
 }
 
 // ─── mock backend ──────────────────────────────────────────────────────────────

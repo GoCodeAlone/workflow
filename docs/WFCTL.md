@@ -788,6 +788,37 @@ wfctl deploy cloud --target production --yes
 
 ---
 
+### `infra`
+
+Manage infrastructure lifecycle defined in a workflow config. Discovers `cloud.account`, `iac.state`, and `platform.*` modules, then executes the corresponding IaC pipeline.
+
+```
+wfctl infra <action> [options] [config.yaml]
+```
+
+| Action | Description |
+|--------|-------------|
+| `plan` | Show planned infrastructure changes |
+| `apply` | Apply infrastructure changes |
+| `status` | Show current infrastructure status |
+| `drift` | Detect configuration drift |
+| `destroy` | Tear down all managed infrastructure |
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `--auto-approve` | `false` | Skip confirmation prompt (apply/destroy only) |
+
+```bash
+wfctl infra plan infra.yaml
+wfctl infra apply --auto-approve infra.yaml
+wfctl infra status --config infra.yaml
+wfctl infra drift infra.yaml
+wfctl infra destroy --auto-approve infra.yaml
+```
+
+---
+
 ### `api extract`
 
 Parse a workflow config file offline and output an OpenAPI 3.0 specification of all HTTP endpoints defined in the config.

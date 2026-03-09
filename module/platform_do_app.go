@@ -123,13 +123,17 @@ func (m *PlatformDOApp) Init(app modular.Application) error {
 		return fmt.Errorf("platform.do_app %q: unsupported provider %q", m.name, providerType)
 	}
 
-	return app.RegisterService(m.name, m)
+	if err := app.RegisterService(m.name, m); err != nil {
+		return err
+	}
+	return app.RegisterService(m.name+".iac", &DOAppPlatformAdapter{m})
 }
 
 // ProvidesServices declares the service this module provides.
 func (m *PlatformDOApp) ProvidesServices() []modular.ServiceProvider {
 	return []modular.ServiceProvider{
 		{Name: m.name, Description: "DO App: " + m.name, Instance: m},
+		{Name: m.name + ".iac", Description: "DO App IaC adapter: " + m.name, Instance: &DOAppPlatformAdapter{m}},
 	}
 }
 
@@ -205,6 +209,55 @@ func (m *PlatformDOApp) buildAppSpec() *godo.AppSpec {
 			},
 		},
 	}
+}
+
+// ─── PlatformProvider adapter ──────────────────────────────────────────────────
+
+// DOAppPlatformAdapter wraps PlatformDOApp to implement PlatformProvider.
+type DOAppPlatformAdapter struct {
+	*PlatformDOApp
+}
+
+// Plan implements PlatformProvider. Returns a plan based on current state.
+func (a *DOAppPlatformAdapter) Plan() (*PlatformPlan, error) {
+	actionType := "create"
+	detail := fmt.Sprintf("Deploy app %s to region %s (image: %s, instances: %d)",
+		a.state.Name, a.state.Region, a.state.Image, a.state.Instances)
+	if a.state.ID != "" {
+		actionType = "update"
+		detail = fmt.Sprintf("Update app %s (image: %s, instances: %d)",
+			a.state.Name, a.state.Image, a.state.Instances)
+	}
+	return &PlatformPlan{
+		Provider: "digitalocean",
+		Resource: "app_platform",
+		Actions: []PlatformAction{
+			{Type: actionType, Resource: a.state.Name, Detail: detail},
+		},
+	}, nil
+}
+
+// Apply implements PlatformProvider. Deploys via the backend.
+func (a *DOAppPlatformAdapter) Apply() (*PlatformResult, error) {
+	st, err := a.Deploy()
+	if err != nil {
+		return &PlatformResult{Success: false, Message: err.Error()}, err
+	}
+	return &PlatformResult{
+		Success: true,
+		Message: fmt.Sprintf("App %s deployed (id: %s, url: %s)", st.Name, st.ID, st.LiveURL),
+		State:   st,
+	}, nil
+}
+
+// Status implements PlatformProvider.
+func (a *DOAppPlatformAdapter) Status() (any, error) {
+	return a.PlatformDOApp.Status()
+}
+
+// Destroy implements PlatformProvider.
+func (a *DOAppPlatformAdapter) Destroy() error {
+	return a.PlatformDOApp.Destroy()
 }
 
 // ─── mock backend ──────────────────────────────────────────────────────────────

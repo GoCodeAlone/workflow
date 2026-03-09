@@ -142,6 +142,104 @@ func TestDO_Networking_DestroyIdempotent(t *testing.T) {
 	}
 }
 
+// ─── PlatformProvider adapter ─────────────────────────────────────────────────
+
+func TestDO_Networking_AdapterImplementsPlatformProvider(t *testing.T) {
+	app, _ := newDONetworkingApp(t)
+	svc, ok := app.Services["staging-vpc.iac"]
+	if !ok {
+		t.Fatal("expected staging-vpc.iac in service registry")
+	}
+	if _, ok := svc.(module.PlatformProvider); !ok {
+		t.Fatalf("staging-vpc.iac service (%T) does not implement PlatformProvider", svc)
+	}
+}
+
+func TestDO_Networking_AdapterPlan(t *testing.T) {
+	app, _ := newDONetworkingApp(t)
+	prov := app.Services["staging-vpc.iac"].(module.PlatformProvider)
+	plan, err := prov.Plan()
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+	if plan.Provider != "digitalocean" {
+		t.Errorf("expected provider digitalocean, got %s", plan.Provider)
+	}
+	if plan.Resource != "networking" {
+		t.Errorf("expected resource networking, got %s", plan.Resource)
+	}
+	if len(plan.Actions) == 0 {
+		t.Fatal("expected at least one action")
+	}
+}
+
+func TestDO_Networking_AdapterPlanNoop(t *testing.T) {
+	app, m := newDONetworkingApp(t)
+	if _, err := m.Apply(); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	prov := app.Services["staging-vpc.iac"].(module.PlatformProvider)
+	plan, err := prov.Plan()
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+	if len(plan.Actions) != 1 {
+		t.Fatalf("expected 1 noop action, got %d", len(plan.Actions))
+	}
+	if plan.Actions[0].Type != "noop" {
+		t.Errorf("expected noop action after apply, got %s", plan.Actions[0].Type)
+	}
+}
+
+func TestDO_Networking_AdapterApply(t *testing.T) {
+	app, _ := newDONetworkingApp(t)
+	prov := app.Services["staging-vpc.iac"].(module.PlatformProvider)
+	result, err := prov.Apply()
+	if err != nil {
+		t.Fatalf("Apply() error: %v", err)
+	}
+	if !result.Success {
+		t.Errorf("expected success, got message: %s", result.Message)
+	}
+	if result.State == nil {
+		t.Error("expected non-nil state")
+	}
+}
+
+func TestDO_Networking_AdapterStatus(t *testing.T) {
+	app, _ := newDONetworkingApp(t)
+	prov := app.Services["staging-vpc.iac"].(module.PlatformProvider)
+	st, err := prov.Status()
+	if err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+	if st == nil {
+		t.Error("expected non-nil status")
+	}
+}
+
+func TestDO_Networking_AdapterDestroy(t *testing.T) {
+	app, _ := newDONetworkingApp(t)
+	prov := app.Services["staging-vpc.iac"].(module.PlatformProvider)
+	if _, err := prov.Apply(); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if err := prov.Destroy(); err != nil {
+		t.Fatalf("Destroy() error: %v", err)
+	}
+	st, err := prov.Status()
+	if err != nil {
+		t.Fatalf("Status after destroy: %v", err)
+	}
+	vpcState, ok := st.(*module.DOVPCState)
+	if !ok {
+		t.Fatalf("expected *DOVPCState, got %T", st)
+	}
+	if vpcState.Status != "deleted" {
+		t.Errorf("expected status deleted, got %s", vpcState.Status)
+	}
+}
+
 func TestDO_Networking_UnsupportedProvider(t *testing.T) {
 	app := module.NewMockApplication()
 	m := module.NewPlatformDONetworking("bad-vpc", map[string]any{

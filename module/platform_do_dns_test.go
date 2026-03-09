@@ -138,6 +138,104 @@ func TestDO_DNS_DestroyIdempotent(t *testing.T) {
 	}
 }
 
+// ─── PlatformProvider adapter ─────────────────────────────────────────────────
+
+func TestDO_DNS_AdapterImplementsPlatformProvider(t *testing.T) {
+	app, _ := newDODNSApp(t)
+	svc, ok := app.Services["prod-do-dns.iac"]
+	if !ok {
+		t.Fatal("expected prod-do-dns.iac in service registry")
+	}
+	if _, ok := svc.(module.PlatformProvider); !ok {
+		t.Fatalf("prod-do-dns.iac service (%T) does not implement PlatformProvider", svc)
+	}
+}
+
+func TestDO_DNS_AdapterPlan(t *testing.T) {
+	app, _ := newDODNSApp(t)
+	prov := app.Services["prod-do-dns.iac"].(module.PlatformProvider)
+	plan, err := prov.Plan()
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+	if plan.Provider != "digitalocean" {
+		t.Errorf("expected provider digitalocean, got %s", plan.Provider)
+	}
+	if plan.Resource != "dns" {
+		t.Errorf("expected resource dns, got %s", plan.Resource)
+	}
+	if len(plan.Actions) == 0 {
+		t.Fatal("expected at least one action")
+	}
+}
+
+func TestDO_DNS_AdapterPlanNoop(t *testing.T) {
+	app, m := newDODNSApp(t)
+	if _, err := m.Apply(); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	prov := app.Services["prod-do-dns.iac"].(module.PlatformProvider)
+	plan, err := prov.Plan()
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+	if len(plan.Actions) != 1 {
+		t.Fatalf("expected 1 noop action, got %d", len(plan.Actions))
+	}
+	if plan.Actions[0].Type != "noop" {
+		t.Errorf("expected noop action after apply, got %s", plan.Actions[0].Type)
+	}
+}
+
+func TestDO_DNS_AdapterApply(t *testing.T) {
+	app, _ := newDODNSApp(t)
+	prov := app.Services["prod-do-dns.iac"].(module.PlatformProvider)
+	result, err := prov.Apply()
+	if err != nil {
+		t.Fatalf("Apply() error: %v", err)
+	}
+	if !result.Success {
+		t.Errorf("expected success, got message: %s", result.Message)
+	}
+	if result.State == nil {
+		t.Error("expected non-nil state")
+	}
+}
+
+func TestDO_DNS_AdapterStatus(t *testing.T) {
+	app, _ := newDODNSApp(t)
+	prov := app.Services["prod-do-dns.iac"].(module.PlatformProvider)
+	st, err := prov.Status()
+	if err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+	if st == nil {
+		t.Error("expected non-nil status")
+	}
+}
+
+func TestDO_DNS_AdapterDestroy(t *testing.T) {
+	app, _ := newDODNSApp(t)
+	prov := app.Services["prod-do-dns.iac"].(module.PlatformProvider)
+	if _, err := prov.Apply(); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if err := prov.Destroy(); err != nil {
+		t.Fatalf("Destroy() error: %v", err)
+	}
+	st, err := prov.Status()
+	if err != nil {
+		t.Fatalf("Status after destroy: %v", err)
+	}
+	dnsState, ok := st.(*module.DODNSState)
+	if !ok {
+		t.Fatalf("expected *DODNSState, got %T", st)
+	}
+	if dnsState.Status != "deleted" {
+		t.Errorf("expected status deleted, got %s", dnsState.Status)
+	}
+}
+
 func TestDO_DNS_MissingDomain(t *testing.T) {
 	app := module.NewMockApplication()
 	m := module.NewPlatformDODNS("bad-dns", map[string]any{

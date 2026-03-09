@@ -120,13 +120,17 @@ func (m *PlatformDONetworking) Init(app modular.Application) error {
 		return fmt.Errorf("platform.do_networking %q: unsupported provider %q", m.name, providerType)
 	}
 
-	return app.RegisterService(m.name, m)
+	if err := app.RegisterService(m.name, m); err != nil {
+		return err
+	}
+	return app.RegisterService(m.name+".iac", &DONetworkingPlatformAdapter{m})
 }
 
 // ProvidesServices declares the service this module provides.
 func (m *PlatformDONetworking) ProvidesServices() []modular.ServiceProvider {
 	return []modular.ServiceProvider{
 		{Name: m.name, Description: "DO networking: " + m.name, Instance: m},
+		{Name: m.name + ".iac", Description: "DO networking IaC adapter: " + m.name, Instance: &DONetworkingPlatformAdapter{m}},
 	}
 }
 
@@ -184,6 +188,61 @@ func (m *PlatformDONetworking) firewallConfigs() []DOFirewallConfig {
 		fws = append(fws, DOFirewallConfig{Name: name})
 	}
 	return fws
+}
+
+// ─── PlatformProvider adapter ──────────────────────────────────────────────────
+
+// DONetworkingPlatformAdapter wraps PlatformDONetworking to implement PlatformProvider.
+type DONetworkingPlatformAdapter struct {
+	*PlatformDONetworking
+}
+
+// Plan implements PlatformProvider.
+func (a *DONetworkingPlatformAdapter) Plan() (*PlatformPlan, error) {
+	p, err := a.PlatformDONetworking.Plan()
+	if err != nil {
+		return nil, err
+	}
+	var actions []PlatformAction
+	for _, change := range p.Changes {
+		actionType := "create"
+		if change == "no changes" {
+			actionType = "noop"
+		}
+		actions = append(actions, PlatformAction{
+			Type:     actionType,
+			Resource: p.VPC,
+			Detail:   change,
+		})
+	}
+	return &PlatformPlan{
+		Provider: "digitalocean",
+		Resource: "networking",
+		Actions:  actions,
+	}, nil
+}
+
+// Apply implements PlatformProvider.
+func (a *DONetworkingPlatformAdapter) Apply() (*PlatformResult, error) {
+	st, err := a.PlatformDONetworking.Apply()
+	if err != nil {
+		return &PlatformResult{Success: false, Message: err.Error()}, err
+	}
+	return &PlatformResult{
+		Success: true,
+		Message: fmt.Sprintf("VPC %s created in %s", st.Name, st.Region),
+		State:   st,
+	}, nil
+}
+
+// Status implements PlatformProvider.
+func (a *DONetworkingPlatformAdapter) Status() (any, error) {
+	return a.PlatformDONetworking.Status()
+}
+
+// Destroy implements PlatformProvider.
+func (a *DONetworkingPlatformAdapter) Destroy() error {
+	return a.PlatformDONetworking.Destroy()
 }
 
 // ─── mock backend ──────────────────────────────────────────────────────────────
