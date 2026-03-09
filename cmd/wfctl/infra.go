@@ -185,8 +185,10 @@ func runInfraApply(args []string) error {
 	if !*autoApprove {
 		fmt.Printf("Apply infrastructure changes from %s? [y/N]: ", cfgFile)
 		var answer string
-		fmt.Scanln(&answer)
-		if strings.ToLower(answer) != "y" && strings.ToLower(answer) != "yes" {
+		if _, err := fmt.Scanln(&answer); err != nil {
+			return fmt.Errorf("reading input: %w", err)
+		}
+		if !strings.EqualFold(answer, "y") && !strings.EqualFold(answer, "yes") {
 			fmt.Println("Cancelled.")
 			return nil
 		}
@@ -248,8 +250,10 @@ func runInfraDestroy(args []string) error {
 	if !*autoApprove {
 		fmt.Printf("DESTROY all infrastructure defined in %s? This cannot be undone. [y/N]: ", cfgFile)
 		var answer string
-		fmt.Scanln(&answer)
-		if strings.ToLower(answer) != "y" && strings.ToLower(answer) != "yes" {
+		if _, err := fmt.Scanln(&answer); err != nil {
+			return fmt.Errorf("reading input: %w", err)
+		}
+		if !strings.EqualFold(answer, "y") && !strings.EqualFold(answer, "yes") {
 			fmt.Println("Cancelled.")
 			return nil
 		}

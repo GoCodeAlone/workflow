@@ -239,7 +239,7 @@ func (a *DOAppPlatformAdapter) Plan() (*PlatformPlan, error) {
 
 // Apply implements PlatformProvider. Deploys via the backend.
 func (a *DOAppPlatformAdapter) Apply() (*PlatformResult, error) {
-	st, err := a.PlatformDOApp.Deploy()
+	st, err := a.Deploy()
 	if err != nil {
 		return &PlatformResult{Success: false, Message: err.Error()}, err
 	}
