@@ -285,6 +285,10 @@ value: '{{ index .steps "parse-request" "path_params" "id" }}'
 | `platform.provider` | Cloud infrastructure provider declaration (e.g., Terraform, Pulumi) |
 | `platform.resource` | Infrastructure resource managed by a platform provider |
 | `platform.context` | Execution context for platform operations (org, environment, tier) |
+| `platform.do_app` | DigitalOcean App Platform deployment (deploy, scale, logs, destroy) |
+| `platform.do_networking` | DigitalOcean VPC and firewall management |
+| `platform.do_dns` | DigitalOcean domain and DNS record management |
+| `platform.do_database` | DigitalOcean Managed Database (PostgreSQL, MySQL, Redis) |
 
 ### Observability
 | Type | Description |
