@@ -45,7 +45,7 @@ Options:
   --config <file>    Config file (default: infra.yaml or config/infra.yaml)
   --auto-approve     Skip confirmation prompt (apply/destroy only)
 `)
-	return fmt.Errorf("missing action")
+	return fmt.Errorf("missing or unknown action")
 }
 
 // resolveInfraConfig finds the config file from flags or defaults.

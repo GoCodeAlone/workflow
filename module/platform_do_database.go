@@ -135,8 +135,8 @@ func (m *PlatformDODatabase) Plan() (*PlatformPlan, error) {
 		m.state.Engine, m.state.Version, m.state.Name, m.state.Region, m.state.Size, m.state.NumNodes)
 	if m.state.ID != "" {
 		actionType = "update"
-		detail = fmt.Sprintf("Update database %q (%s → %s, %d nodes)",
-			m.state.Name, m.state.Size, m.state.Size, m.state.NumNodes)
+		detail = fmt.Sprintf("Update database %q (size: %s, %d nodes)",
+			m.state.Name, m.state.Size, m.state.NumNodes)
 	}
 	return &PlatformPlan{
 		Provider: "digitalocean",
