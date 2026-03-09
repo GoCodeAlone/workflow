@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // TestHTTPTrigger tests the HTTP trigger functionality

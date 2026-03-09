@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // LogEntry represents a single log message collected from a module.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // MemoryNoSQLConfig holds configuration for the nosql.memory module.

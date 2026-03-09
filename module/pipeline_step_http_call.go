@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // globalOAuthCache is a process-wide registry of OAuth2 token cache entries, shared across all

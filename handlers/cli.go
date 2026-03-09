@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // CLICommandDef defines a single CLI command in a workflow config.

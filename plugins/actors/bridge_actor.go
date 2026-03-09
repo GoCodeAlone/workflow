@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/module"
 	goaktactor "github.com/tochemey/goakt/v4/actor"
 )

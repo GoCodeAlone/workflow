@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/module"
@@ -152,7 +152,7 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 		// dynamic.component needs Go source files at runtime
 		"chat-platform/workflow.yaml": "dynamic.component requires Go source files at runtime",
 		"ecommerce-app/workflow.yaml": "dynamic.component requires Go source files at runtime",
-		// scheduler.modular (CrisisTextLine/modular) doesn't implement workflow Scheduler interface
+		// scheduler.modular (GoCodeAlone/modular) doesn't implement workflow Scheduler interface
 		"advanced-scheduler-workflow.yaml": "scheduler.modular doesn't expose workflow Scheduler service",
 		"scheduled-jobs-config.yaml":       "scheduler.modular doesn't expose workflow Scheduler service",
 		"trigger-workflow-example.yaml":    "schedule trigger needs Scheduler interface not provided by scheduler.modular",

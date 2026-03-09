@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // DBCreatePartitionStep creates a PostgreSQL LIST partition for a given tenant value

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // DBExecStep executes parameterized SQL INSERT/UPDATE/DELETE against a named database service.

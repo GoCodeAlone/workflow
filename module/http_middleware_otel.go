@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 

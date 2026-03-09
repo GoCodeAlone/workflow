@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 func TestCLIWorkflowHandler_CanHandle(t *testing.T) {

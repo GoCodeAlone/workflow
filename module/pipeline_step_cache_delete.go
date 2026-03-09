@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // CacheDeleteStep removes a key from a named CacheModule.

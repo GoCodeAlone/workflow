@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"maps"
 
-	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/modules/eventbus/v2"
+	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/modular/modules/eventbus/v2"
 )
 
 const (

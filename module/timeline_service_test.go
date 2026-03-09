@@ -3,7 +3,7 @@ package module
 import (
 	"testing"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	evstore "github.com/GoCodeAlone/workflow/store"
 )
 

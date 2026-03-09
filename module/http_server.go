@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/pkg/tlsutil"
 	"golang.org/x/crypto/acme/autocert"
 )

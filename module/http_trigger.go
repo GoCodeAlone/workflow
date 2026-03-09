@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // httpRWContextKey is the unexported type for the HTTP response writer context key.

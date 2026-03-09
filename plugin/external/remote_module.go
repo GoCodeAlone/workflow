@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 )

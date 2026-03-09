@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"hash"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // HashStep computes a cryptographic hash of a template-resolved input string.

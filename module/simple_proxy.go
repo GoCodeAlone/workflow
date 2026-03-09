@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // SimpleProxy is a lightweight reverse proxy module that forwards requests

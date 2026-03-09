@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // NewGitLabTriggerPipelineStepFactory returns a StepFactory for step.gitlab_trigger_pipeline.

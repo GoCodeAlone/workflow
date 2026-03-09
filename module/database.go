@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // validIdentifier matches safe SQL identifiers (alphanumeric, underscore, dot for schema.table).

@@ -7,7 +7,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // Executor is the interface that dynamic components satisfy.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // IaCModule registers an IaCStateStore in the service registry.

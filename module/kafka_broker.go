@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/pkg/tlsutil"
 	"github.com/IBM/sarama"
 )

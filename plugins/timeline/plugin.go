@@ -3,7 +3,7 @@
 package timeline
 
 import (
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 	evstore "github.com/GoCodeAlone/workflow/store"

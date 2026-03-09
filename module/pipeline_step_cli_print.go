@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // CLIPrintStep writes a template-resolved message to stdout or stderr.

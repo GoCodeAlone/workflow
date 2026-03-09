@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // CircuitState represents the current state of a circuit breaker.

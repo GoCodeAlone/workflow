@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // RateLimitStep is a pipeline step that enforces rate limiting using a

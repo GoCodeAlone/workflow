@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // AuthValidateStep validates a Bearer token against a registered AuthProvider

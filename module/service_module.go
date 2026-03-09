@@ -1,6 +1,6 @@
 package module
 
-import "github.com/CrisisTextLine/modular"
+import "github.com/GoCodeAlone/modular"
 
 // ServiceModule wraps any Go object as a modular.Module, registering it
 // in the service registry under the given name. This allows delegate-based

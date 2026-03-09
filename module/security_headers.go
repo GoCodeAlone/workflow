@@ -3,7 +3,7 @@ package module
 import (
 	"net/http"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // SecurityHeadersMiddleware adds standard security headers to HTTP responses.

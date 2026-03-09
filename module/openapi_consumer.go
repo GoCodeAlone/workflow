@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"gopkg.in/yaml.v3"
 )
 

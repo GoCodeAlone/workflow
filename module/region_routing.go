@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // RegionRouterInterface defines the interface for routing requests across regions.

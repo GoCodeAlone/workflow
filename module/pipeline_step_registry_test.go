@@ -4,7 +4,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 func TestStepRegistry_RegisterAndCreate(t *testing.T) {

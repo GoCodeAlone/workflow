@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/module"
 )
 

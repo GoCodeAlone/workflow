@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // CloudCredentialProvider provides cloud credentials to other modules.

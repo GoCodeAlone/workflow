@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // BuildBinaryStep reads a workflow config YAML, generates a self-contained Go
@@ -182,7 +182,7 @@ func (s *BuildBinaryStep) generateMainGo() string {
 	sb.WriteString("\t\"os/signal\"\n")
 	sb.WriteString("\t\"syscall\"\n")
 	sb.WriteString("\n")
-	sb.WriteString("\t\"github.com/CrisisTextLine/modular\"\n")
+	sb.WriteString("\t\"github.com/GoCodeAlone/modular\"\n")
 	sb.WriteString("\tworkflow \"github.com/GoCodeAlone/workflow\"\n")
 	sb.WriteString("\t\"github.com/GoCodeAlone/workflow/config\"\n")
 	sb.WriteString(")\n\n")

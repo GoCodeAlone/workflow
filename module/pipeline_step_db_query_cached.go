@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // dbQueryCacheEntry holds a cached query result with its expiry time.

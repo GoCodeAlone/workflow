@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/docker/docker/api/types/image"
 	dockerclient "github.com/docker/docker/client"
 )

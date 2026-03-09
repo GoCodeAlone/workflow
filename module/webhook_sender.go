@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // WebhookConfig holds configuration for the webhook sender

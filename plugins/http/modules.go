@@ -3,8 +3,8 @@ package http
 import (
 	"time"
 
-	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/modules/reverseproxy/v2"
+	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/modular/modules/reverseproxy/v2"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"

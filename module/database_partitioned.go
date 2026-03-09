@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // validPartitionValue matches safe LIST partition values (alphanumeric, hyphens, underscores, dots).

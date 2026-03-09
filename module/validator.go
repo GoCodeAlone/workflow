@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // ValidationSeverity indicates how severe a validation issue is.

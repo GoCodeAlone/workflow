@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // RetryWithBackoffStep executes a sub-step with exponential backoff retry logic.

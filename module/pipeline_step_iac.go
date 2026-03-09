@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

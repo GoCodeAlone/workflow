@@ -3,7 +3,7 @@ package module
 import (
 	"testing"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 func TestDLQServiceModule_Name(t *testing.T) {

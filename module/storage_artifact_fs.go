@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // ArtifactFSConfig holds configuration for the filesystem artifact store module.

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/modules/eventbus/v2"
+	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/modular/modules/eventbus/v2"
 )
 
 // DLQSendStep sends a failed message to a dead letter queue topic.

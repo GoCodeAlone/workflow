@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // CacheSetStep writes a value to a named CacheModule.
