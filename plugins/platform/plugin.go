@@ -31,7 +31,7 @@ func New() *Plugin {
 				Author:        "GoCodeAlone",
 				Description:   "Platform infrastructure modules, workflow handler, reconciliation trigger, and template step",
 				Tier:          plugin.TierCore,
-				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes", "platform.ecs", "platform.dns", "platform.networking", "platform.apigateway", "platform.autoscaling", "platform.region", "platform.region_router", "platform.doks", "platform.do_networking", "platform.do_dns", "platform.do_app", "iac.state", "app.container", "argo.workflows"},
+				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes", "platform.ecs", "platform.dns", "platform.networking", "platform.apigateway", "platform.autoscaling", "platform.region", "platform.region_router", "platform.doks", "platform.do_networking", "platform.do_dns", "platform.do_app", "platform.do_database", "iac.state", "app.container", "argo.workflows"},
 				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy", "step.ecs_plan", "step.ecs_apply", "step.ecs_status", "step.ecs_destroy", "step.iac_plan", "step.iac_apply", "step.iac_status", "step.iac_destroy", "step.iac_drift_detect", "step.dns_plan", "step.dns_apply", "step.dns_status", "step.network_plan", "step.network_apply", "step.network_status", "step.apigw_plan", "step.apigw_apply", "step.apigw_status", "step.apigw_destroy", "step.scaling_plan", "step.scaling_apply", "step.scaling_status", "step.scaling_destroy", "step.app_deploy", "step.app_status", "step.app_rollback", "step.region_deploy", "step.region_promote", "step.region_failover", "step.region_status", "step.region_weight", "step.region_sync", "step.argo_submit", "step.argo_status", "step.argo_logs", "step.argo_delete", "step.argo_list", "step.do_deploy", "step.do_status", "step.do_logs", "step.do_scale", "step.do_destroy"},
 				TriggerTypes:  []string{"reconciliation"},
 				WorkflowTypes: []string{"platform"},
@@ -105,6 +105,9 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 		},
 		"platform.do_app": func(name string, cfg map[string]any) modular.Module {
 			return module.NewPlatformDOApp(name, cfg)
+		},
+		"platform.do_database": func(name string, cfg map[string]any) modular.Module {
+			return module.NewPlatformDODatabase(name, cfg)
 		},
 		"platform.region_router": func(name string, cfg map[string]any) modular.Module {
 			return module.NewMultiRegionRoutingModule(name, cfg)
@@ -473,6 +476,22 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "instances", Label: "Instances", Type: schema.FieldTypeNumber, Description: "Number of instances (default: 1)"},
 				{Key: "http_port", Label: "HTTP Port", Type: schema.FieldTypeNumber, Description: "Container HTTP port (default: 8080)"},
 				{Key: "envs", Label: "Environment Variables", Type: schema.FieldTypeMap, Description: "Environment variables for the app"},
+			},
+		},
+		{
+			Type:        "platform.do_database",
+			Label:       "DigitalOcean Managed Database",
+			Category:    "infrastructure",
+			Description: "Manages DigitalOcean Managed Databases (PostgreSQL, MySQL, Redis, MongoDB, Kafka)",
+			ConfigFields: []schema.ConfigFieldDef{
+				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (provider=digitalocean)"},
+				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock | digitalocean"},
+				{Key: "engine", Label: "Engine", Type: schema.FieldTypeString, Description: "Database engine: pg | mysql | redis | mongodb | kafka"},
+				{Key: "version", Label: "Version", Type: schema.FieldTypeString, Description: "Engine version (e.g. 16 for PostgreSQL)"},
+				{Key: "size", Label: "Size", Type: schema.FieldTypeString, Description: "Droplet size slug (e.g. db-s-1vcpu-1gb)"},
+				{Key: "region", Label: "Region", Type: schema.FieldTypeString, Description: "DO region slug (e.g. nyc1)"},
+				{Key: "num_nodes", Label: "Node Count", Type: schema.FieldTypeNumber, Description: "Number of nodes (default: 1)"},
+				{Key: "name", Label: "Cluster Name", Type: schema.FieldTypeString, Description: "Database cluster name"},
 			},
 		},
 	}
