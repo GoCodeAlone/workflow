@@ -43,7 +43,7 @@ require (
 	github.com/itchyny/gojq v0.12.18
 	github.com/jackc/pgx/v5 v5.7.5
 	github.com/launchdarkly/go-sdk-common/v3 v3.5.0
-	github.com/launchdarkly/go-server-sdk/v7 v7.14.5
+	github.com/launchdarkly/go-server-sdk/v7 v7.14.6
 	github.com/mark3labs/mcp-go v0.44.1
 	github.com/nats-io/nats.go v1.49.0
 	github.com/prometheus/client_golang v1.19.1
