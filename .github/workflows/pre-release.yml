@@ -108,15 +108,19 @@ jobs:
         cd dist
         sha256sum * > checksums.txt
 
-    - name: Delete existing snapshot release and tag
+    - name: Clean up old snapshot releases
       run: |
-        gh release delete snapshot --yes --cleanup-tag || true
+        # Delete all previous snapshot-* releases (keep only latest)
+        gh release list --limit 50 | grep '^snapshot-' | awk '{print $1}' | while read tag; do
+          gh release delete "$tag" --yes --cleanup-tag || true
+        done
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Create snapshot release
       run: |
-        gh release create snapshot \
+        TAG="snapshot-$(git rev-parse --short HEAD)"
+        gh release create "$TAG" \
           --title "Snapshot (${{ steps.version.outputs.version }})" \
           --notes "Automated pre-release snapshot built from the latest commit on \`main\`.
 
@@ -156,7 +160,7 @@ jobs:
 
     - name: Build and push snapshot
       env:
-        KO_DOCKER_REPO: ghcr.io/${{ github.repository }}
+        KO_DOCKER_REPO: ghcr.io/gocodealone/workflow
         GOPRIVATE: github.com/GoCodeAlone/*
         GONOSUMCHECK: github.com/GoCodeAlone/*
         GOFLAGS: -mod=mod
