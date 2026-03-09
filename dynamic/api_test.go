@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 func TestAPI_ComponentsMethodNotAllowed(t *testing.T) {

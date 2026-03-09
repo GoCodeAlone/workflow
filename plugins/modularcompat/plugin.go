@@ -1,12 +1,12 @@
-// Package modularcompat provides a plugin that registers CrisisTextLine/modular
+// Package modularcompat provides a plugin that registers GoCodeAlone/modular
 // framework module adapters: scheduler.modular, cache.modular, jsonschema.modular.
 package modularcompat
 
 import (
-	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/modules/cache"
-	"github.com/CrisisTextLine/modular/modules/jsonschema"
-	"github.com/CrisisTextLine/modular/modules/scheduler"
+	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/modular/modules/cache"
+	"github.com/GoCodeAlone/modular/modules/jsonschema"
+	"github.com/GoCodeAlone/modular/modules/scheduler"
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/plugin"
 )
@@ -23,13 +23,13 @@ func New() *Plugin {
 			BaseNativePlugin: plugin.BaseNativePlugin{
 				PluginName:        "modular-compat",
 				PluginVersion:     "1.0.0",
-				PluginDescription: "CrisisTextLine/modular framework compatibility modules (scheduler, cache, jsonschema)",
+				PluginDescription: "GoCodeAlone/modular framework compatibility modules (scheduler, cache, jsonschema)",
 			},
 			Manifest: plugin.PluginManifest{
 				Name:        "modular-compat",
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
-				Description: "CrisisTextLine/modular framework compatibility modules (scheduler, cache, jsonschema)",
+				Description: "GoCodeAlone/modular framework compatibility modules (scheduler, cache, jsonschema)",
 				Tier:        plugin.TierCore,
 				ModuleTypes: []string{"cache.modular", "jsonschema.modular", "scheduler.modular"},
 				Capabilities: []plugin.CapabilityDecl{
@@ -46,11 +46,11 @@ func (p *Plugin) Capabilities() []capability.Contract {
 	return []capability.Contract{
 		{
 			Name:        "scheduler",
-			Description: "Job scheduling via CrisisTextLine/modular scheduler module",
+			Description: "Job scheduling via GoCodeAlone/modular scheduler module",
 		},
 		{
 			Name:        "cache",
-			Description: "Caching via CrisisTextLine/modular cache module",
+			Description: "Caching via GoCodeAlone/modular cache module",
 		},
 	}
 }

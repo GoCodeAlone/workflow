@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // RequestParseStep extracts path parameters, query parameters, request body,

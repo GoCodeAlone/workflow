@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 func TestNewModuleAdapter(t *testing.T) {

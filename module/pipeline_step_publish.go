@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/modules/eventbus/v2"
+	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/modular/modules/eventbus/v2"
 )
 
 // PublishStep publishes data to an EventBus topic or a MessageBroker.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 func TestInMemoryMessageBroker(t *testing.T) {

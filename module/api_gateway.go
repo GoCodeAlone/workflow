@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // GatewayRoute defines a single route in the API gateway.

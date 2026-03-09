@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // resilienceFailStep is a PipelineStep that always returns an error.

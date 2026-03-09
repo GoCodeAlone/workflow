@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow"
 	"github.com/GoCodeAlone/workflow/ai"
 	copilotai "github.com/GoCodeAlone/workflow/ai/copilot"

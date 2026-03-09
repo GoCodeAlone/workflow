@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/pkg/tlsutil"
 	"github.com/redis/go-redis/v9"
 )

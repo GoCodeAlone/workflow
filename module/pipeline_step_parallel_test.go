@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // parallelSuccessStep returns fixed output after an optional delay.

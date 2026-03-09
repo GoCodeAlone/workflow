@@ -3,7 +3,7 @@ package module
 import (
 	"context"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // TestLogger is a simple logger for testing

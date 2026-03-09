@@ -6,7 +6,7 @@ import (
 	"maps"
 	"sync"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // ForEachStep iterates over a collection and executes sub-steps for each item.

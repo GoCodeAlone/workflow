@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 func TestEventStoreServiceModule_Name(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // ArtifactS3Config holds configuration for the S3 artifact store module.

@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // MockApplication is a mock implementation of modular.Application for testing

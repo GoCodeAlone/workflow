@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // ParallelStep executes multiple named sub-steps concurrently and collects results.

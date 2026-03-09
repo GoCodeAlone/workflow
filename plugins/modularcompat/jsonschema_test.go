@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CrisisTextLine/modular"
-	"github.com/CrisisTextLine/modular/modules/jsonschema"
+	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/modular/modules/jsonschema"
 )
 
 // userSchema is a sample JSON Schema used across tests to validate user payloads.

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow"
 	"github.com/GoCodeAlone/workflow/config"
 	allplugins "github.com/GoCodeAlone/workflow/plugins/all"

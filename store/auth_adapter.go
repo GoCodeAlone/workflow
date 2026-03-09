@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/CrisisTextLine/modular/modules/auth"
+	"github.com/GoCodeAlone/modular/modules/auth"
 	"github.com/google/uuid"
 )
 

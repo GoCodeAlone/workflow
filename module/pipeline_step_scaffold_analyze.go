@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/scaffold"
 )
 

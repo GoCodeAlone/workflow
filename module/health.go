@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // HealthCheckerConfig holds configuration for the HealthChecker module.

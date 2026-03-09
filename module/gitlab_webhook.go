@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // GitEvent is the normalized representation of a git provider webhook event.

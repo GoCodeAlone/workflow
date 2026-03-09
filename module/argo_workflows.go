@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // ArgoWorkflowState holds the current state of a managed Argo Workflows installation.

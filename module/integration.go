@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // isPrivateIP checks if an IP address belongs to a private/reserved range.

@@ -3,7 +3,7 @@ package dynamic
 import (
 	"context"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // ModuleAdapter wraps a DynamicComponent as a modular.Module so it can

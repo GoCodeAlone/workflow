@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/docker/docker/api/types/build"
 	dockerclient "github.com/docker/docker/client"
 )

@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/supervisor"
 )

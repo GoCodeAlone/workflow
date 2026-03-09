@@ -4,14 +4,14 @@ go 1.26.0
 
 require (
 	cloud.google.com/go/storage v1.60.0
-	github.com/CrisisTextLine/modular v1.11.11
-	github.com/CrisisTextLine/modular/modules/auth v0.4.0
-	github.com/CrisisTextLine/modular/modules/cache v0.4.0
-	github.com/CrisisTextLine/modular/modules/eventbus/v2 v2.1.0
-	github.com/CrisisTextLine/modular/modules/jsonschema v1.4.0
-	github.com/CrisisTextLine/modular/modules/reverseproxy/v2 v2.2.0
-	github.com/CrisisTextLine/modular/modules/scheduler v0.4.0
 	github.com/GoCodeAlone/go-plugin v0.0.0-20260220090904-b4c35f0e4271
+	github.com/GoCodeAlone/modular v1.12.0
+	github.com/GoCodeAlone/modular/modules/auth v1.12.0
+	github.com/GoCodeAlone/modular/modules/cache v1.12.0
+	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.5.0
+	github.com/GoCodeAlone/modular/modules/jsonschema v1.12.0
+	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.5.0
+	github.com/GoCodeAlone/modular/modules/scheduler v1.12.0
 	github.com/GoCodeAlone/yaegi v0.17.1
 	github.com/IBM/sarama v1.47.0
 	github.com/alicebob/miniredis/v2 v2.36.1

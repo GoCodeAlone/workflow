@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // KubernetesClusterState holds the current state of a managed Kubernetes cluster.

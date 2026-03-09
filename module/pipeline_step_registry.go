@@ -3,7 +3,7 @@ package module
 import (
 	"fmt"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // StepFactory creates a PipelineStep from its name and config.

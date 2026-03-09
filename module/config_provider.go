@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // configKeyRegexp matches {{config "key"}}, {{ config "key" }}, {{config 'key'}},

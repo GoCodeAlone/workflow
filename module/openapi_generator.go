@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"gopkg.in/yaml.v3"
 )

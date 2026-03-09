@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // SlackNotification sends messages to a Slack webhook URL.

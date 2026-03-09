@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // mockSecurityScanner is a test implementation of SecurityScannerProvider.

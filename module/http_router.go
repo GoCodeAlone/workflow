@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // contextKey is a private type for context keys defined in this package,

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // JSONResponseStep writes an HTTP JSON response with a custom status code and stops the pipeline.

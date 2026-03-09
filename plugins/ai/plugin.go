@@ -4,7 +4,7 @@
 package ai
 
 import (
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	aiPkg "github.com/GoCodeAlone/workflow/ai"
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/config"

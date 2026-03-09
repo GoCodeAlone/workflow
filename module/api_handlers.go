@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // RESTResource represents a simple in-memory resource store for REST APIs

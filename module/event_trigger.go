@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"maps"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 const (

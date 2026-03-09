@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/golang-jwt/jwt/v5"
 )
 

@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // SimpleHTTPHandler provides a basic implementation of an HTTP handler

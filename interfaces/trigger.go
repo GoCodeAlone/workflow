@@ -1,6 +1,6 @@
 package interfaces
 
-import "github.com/CrisisTextLine/modular"
+import "github.com/GoCodeAlone/modular"
 
 // Trigger defines what can start a workflow execution.
 // Moving this interface here breaks the engine→module import dependency while

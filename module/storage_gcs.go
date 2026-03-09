@@ -6,7 +6,7 @@ import (
 	"io"
 
 	"cloud.google.com/go/storage"
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/store"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"

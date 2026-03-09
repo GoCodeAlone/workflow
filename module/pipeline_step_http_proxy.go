@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // HTTPProxyStep forwards the original HTTP request to a dynamically resolved

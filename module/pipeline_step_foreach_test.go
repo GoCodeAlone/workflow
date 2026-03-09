@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // foreachFailStep is a race-safe PipelineStep that always returns an error.

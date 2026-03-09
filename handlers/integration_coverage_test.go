@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/mock"
 	"github.com/GoCodeAlone/workflow/module"
 )

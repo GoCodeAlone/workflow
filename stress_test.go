@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CrisisTextLine/modular"
+	"github.com/GoCodeAlone/modular"
 )
 
 // stressWorkflowHandler is a lightweight handler for stress testing that
