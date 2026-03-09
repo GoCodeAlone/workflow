@@ -289,6 +289,7 @@ value: '{{ index .steps "parse-request" "path_params" "id" }}'
 | `platform.do_networking` | DigitalOcean VPC and firewall management |
 | `platform.do_dns` | DigitalOcean domain and DNS record management |
 | `platform.do_database` | DigitalOcean Managed Database (PostgreSQL, MySQL, Redis) |
+| `iac.state` | IaC state persistence (memory, filesystem, or spaces/S3-compatible backends) |
 
 ### Observability
 | Type | Description |
@@ -467,6 +468,37 @@ modules:
       org: "acme-corp"
       environment: "production"
       tier: "application"
+```
+
+---
+
+### `iac.state`
+
+Persists infrastructure-as-code state records. Supports three backends: `memory` (default, ephemeral), `filesystem` (local JSON files), and `spaces` (DigitalOcean Spaces / any S3-compatible store).
+
+**Configuration (spaces backend):**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `backend` | string | no | `memory`, `filesystem`, or `spaces` (default: `memory`). |
+| `region` | string | no | DO region (e.g. `nyc3`). Constructs endpoint `https://<region>.digitaloceanspaces.com`. |
+| `bucket` | string | yes (spaces) | Spaces bucket name. |
+| `prefix` | string | no | Object key prefix (default: `iac-state/`). |
+| `accessKey` | string | no | Spaces access key. Falls back to `DO_SPACES_ACCESS_KEY` env var. |
+| `secretKey` | string | no | Spaces secret key. Falls back to `DO_SPACES_SECRET_KEY` env var. |
+| `endpoint` | string | no | Custom S3-compatible endpoint (overrides region-based URL). |
+
+**Example:**
+
+```yaml
+modules:
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: spaces
+      region: nyc3
+      bucket: my-iac-state
+      prefix: "prod/"
 ```
 
 ---

@@ -8,7 +8,8 @@ import (
 )
 
 // IaCModule registers an IaCStateStore in the service registry.
-// Supported backends: "memory" (default) and "filesystem".
+// Supported backends: "memory" (default), "filesystem", and "spaces"
+// (DigitalOcean Spaces / S3-compatible).
 //
 // Config example:
 //
@@ -49,8 +50,23 @@ func (m *IaCModule) Init(app modular.Application) error {
 			dir = "/var/lib/workflow/iac-state"
 		}
 		m.store = NewFSIaCStateStore(dir)
+	case "spaces":
+		region, _ := m.config["region"].(string)
+		bucket, _ := m.config["bucket"].(string)
+		prefix, _ := m.config["prefix"].(string)
+		accessKey, _ := m.config["accessKey"].(string)
+		secretKey, _ := m.config["secretKey"].(string)
+		endpoint, _ := m.config["endpoint"].(string)
+		if bucket == "" {
+			return fmt.Errorf("iac.state %q: spaces backend requires 'bucket' config", m.name)
+		}
+		store, err := NewSpacesIaCStateStore(region, bucket, prefix, accessKey, secretKey, endpoint)
+		if err != nil {
+			return fmt.Errorf("iac.state %q: spaces backend: %w", m.name, err)
+		}
+		m.store = store
 	default:
-		return fmt.Errorf("iac.state %q: unsupported backend %q (use 'memory' or 'filesystem')", m.name, m.backend)
+		return fmt.Errorf("iac.state %q: unsupported backend %q (use 'memory', 'filesystem', or 'spaces')", m.name, m.backend)
 	}
 
 	return app.RegisterService(m.name, m.store)
