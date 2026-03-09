@@ -38,8 +38,8 @@ github.com/GoCodeAlone/modular/modules/auth v1.12.0 h1:eO4iq8tkz8W5sLKRSG5dC+ACI
 github.com/GoCodeAlone/modular/modules/auth v1.12.0/go.mod h1:D+yfkgN3MTkyl1xe8h2UL7uqB9Vj1lO3wUrscfnJ/NU=
 github.com/GoCodeAlone/modular/modules/cache v1.12.0 h1:Ue6aXytFq1I+OnC3PcV2KlUg4lHiuGWH0Qq+v/lqyp0=
 github.com/GoCodeAlone/modular/modules/cache v1.12.0/go.mod h1:kSaT8wNy/3YGmtIpDqPbW6MRqKOp2yc8a5MHdAag2CE=
-github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.5.0 h1:K6X+X1sOq+lpI1Oa+XUzH+GlSRYJQfDTTcvMjZfkbFU=
-github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.5.0/go.mod h1:Q0TpCFTtd0q20okDyi63ALS+1xmkYU4wNUOqwczyih0=
+github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.5.1 h1:GTSJh+QbPj7nuXoiiz53+DPxJ3xw7JPemzBuWg6vKS4=
+github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.5.1/go.mod h1:PvgkUxMg2RL/TjKevO3PBTy+RazZX5YXi8IK/Bz1qcw=
 github.com/GoCodeAlone/modular/modules/jsonschema v1.12.0 h1:urGK8Xtwku4tn8nBeVZn9UqvldnCptZ3rLCXO21vSz4=
 github.com/GoCodeAlone/modular/modules/jsonschema v1.12.0/go.mod h1:+/0p1alfSbhhshcNRId1HRRIupeu0DPC7BH8AYiBQ1I=
 github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.5.0 h1:zcF46oZ7MJFfZCmzqc1n9ZTw6wrTJSFr04yaz6EYKeo=

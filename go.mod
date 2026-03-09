@@ -8,7 +8,7 @@ require (
 	github.com/GoCodeAlone/modular v1.12.0
 	github.com/GoCodeAlone/modular/modules/auth v1.12.0
 	github.com/GoCodeAlone/modular/modules/cache v1.12.0
-	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.5.0
+	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.5.1
 	github.com/GoCodeAlone/modular/modules/jsonschema v1.12.0
 	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.5.0
 	github.com/GoCodeAlone/modular/modules/scheduler v1.12.0
