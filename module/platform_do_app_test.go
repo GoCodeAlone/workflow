@@ -151,6 +151,108 @@ func TestDO_App_DestroyIdempotent(t *testing.T) {
 	}
 }
 
+// ─── PlatformProvider adapter ─────────────────────────────────────────────────
+
+func TestDO_App_AdapterImplementsPlatformProvider(t *testing.T) {
+	app, _ := newDOAppApp(t)
+	svc, ok := app.Services["my-app.iac"]
+	if !ok {
+		t.Fatal("expected my-app.iac in service registry")
+	}
+	if _, ok := svc.(module.PlatformProvider); !ok {
+		t.Fatalf("my-app.iac service (%T) does not implement PlatformProvider", svc)
+	}
+}
+
+func TestDO_App_AdapterPlan(t *testing.T) {
+	app, _ := newDOAppApp(t)
+	prov := app.Services["my-app.iac"].(module.PlatformProvider)
+	plan, err := prov.Plan()
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+	if plan.Provider != "digitalocean" {
+		t.Errorf("expected provider digitalocean, got %s", plan.Provider)
+	}
+	if plan.Resource != "app_platform" {
+		t.Errorf("expected resource app_platform, got %s", plan.Resource)
+	}
+	if len(plan.Actions) == 0 {
+		t.Fatal("expected at least one action")
+	}
+	if plan.Actions[0].Type != "create" {
+		t.Errorf("expected action type create, got %s", plan.Actions[0].Type)
+	}
+}
+
+func TestDO_App_AdapterPlanUpdate(t *testing.T) {
+	app, _ := newDOAppApp(t)
+	m := app.Services["my-app"].(*module.PlatformDOApp)
+	// Deploy first so the app has an ID
+	if _, err := m.Deploy(); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	prov := app.Services["my-app.iac"].(module.PlatformProvider)
+	plan, err := prov.Plan()
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+	if plan.Actions[0].Type != "update" {
+		t.Errorf("expected action type update after deploy, got %s", plan.Actions[0].Type)
+	}
+}
+
+func TestDO_App_AdapterApply(t *testing.T) {
+	app, _ := newDOAppApp(t)
+	prov := app.Services["my-app.iac"].(module.PlatformProvider)
+	result, err := prov.Apply()
+	if err != nil {
+		t.Fatalf("Apply() error: %v", err)
+	}
+	if !result.Success {
+		t.Errorf("expected success, got message: %s", result.Message)
+	}
+	if result.State == nil {
+		t.Error("expected non-nil state")
+	}
+}
+
+func TestDO_App_AdapterStatus(t *testing.T) {
+	app, _ := newDOAppApp(t)
+	prov := app.Services["my-app.iac"].(module.PlatformProvider)
+	st, err := prov.Status()
+	if err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+	if st == nil {
+		t.Error("expected non-nil status")
+	}
+}
+
+func TestDO_App_AdapterDestroy(t *testing.T) {
+	app, _ := newDOAppApp(t)
+	prov := app.Services["my-app.iac"].(module.PlatformProvider)
+	// Deploy first
+	if _, err := prov.Apply(); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if err := prov.Destroy(); err != nil {
+		t.Fatalf("Destroy() error: %v", err)
+	}
+	// Verify status shows deleted
+	st, err := prov.Status()
+	if err != nil {
+		t.Fatalf("Status after destroy: %v", err)
+	}
+	appState, ok := st.(*module.DOAppState)
+	if !ok {
+		t.Fatalf("expected *DOAppState, got %T", st)
+	}
+	if appState.Status != "deleted" {
+		t.Errorf("expected status deleted, got %s", appState.Status)
+	}
+}
+
 func TestDO_App_UnsupportedProvider(t *testing.T) {
 	app := module.NewMockApplication()
 	m := module.NewPlatformDOApp("bad-app", map[string]any{
