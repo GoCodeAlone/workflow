@@ -512,8 +512,8 @@ github.com/launchdarkly/go-semver v1.0.3 h1:agIy/RN3SqeQDIfKkl+oFslEdeIs7pgsJBs3
 github.com/launchdarkly/go-semver v1.0.3/go.mod h1:xFmMwXba5Mb+3h72Z+VeSs9ahCvKo2QFUTHRNHVqR28=
 github.com/launchdarkly/go-server-sdk-evaluation/v3 v3.0.1 h1:rTgcYAFraGFj7sBMB2b7JCYCm0b9kph4FaMX02t4osQ=
 github.com/launchdarkly/go-server-sdk-evaluation/v3 v3.0.1/go.mod h1:fPS5d+zOsgFnMunj+Ki6jjlZtFvo4h9iNbtNXxzYn58=
-github.com/launchdarkly/go-server-sdk/v7 v7.14.5 h1:QtdAS2R4cnGe3j+UGx8mkL9I78L+kgB9w6D2OpJS/10=
-github.com/launchdarkly/go-server-sdk/v7 v7.14.5/go.mod h1:0CUdE5PI0SVG1Tb6CwKz8wZ9zEHUzfMutl6wY2MzUF0=
+github.com/launchdarkly/go-server-sdk/v7 v7.14.6 h1:JWapfYHw45r3vYX6Nn6ZkokhoyXwlnOnXzb+0KNzQIc=
+github.com/launchdarkly/go-server-sdk/v7 v7.14.6/go.mod h1:0CUdE5PI0SVG1Tb6CwKz8wZ9zEHUzfMutl6wY2MzUF0=
 github.com/launchdarkly/go-test-helpers/v3 v3.1.0 h1:E3bxJMzMoA+cJSF3xxtk2/chr1zshl1ZWa0/oR+8bvg=
 github.com/launchdarkly/go-test-helpers/v3 v3.1.0/go.mod h1:Ake5+hZFS/DmIGKx/cizhn5W9pGA7pplcR7xCxWiLIo=
 github.com/lucasb-eyer/go-colorful v1.2.0 h1:1nnpGOrhyZZuNyfu1QjKiUICQ74+3FNCN69Aj6K7nkY=
