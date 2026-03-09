@@ -108,29 +108,27 @@ jobs:
         cd dist
         sha256sum * > checksums.txt
 
-    - name: Delete existing snapshot release
+    - name: Delete existing snapshot release and tag
       run: |
-        gh release delete snapshot --yes || true
-        git push --delete origin refs/tags/snapshot || true
+        gh release delete snapshot --yes --cleanup-tag || true
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Create snapshot release
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: snapshot
-        name: "Snapshot (${{ steps.version.outputs.version }})"
-        body: |
-          Automated pre-release snapshot built from the latest commit on `main`.
+      run: |
+        gh release create snapshot \
+          --title "Snapshot (${{ steps.version.outputs.version }})" \
+          --notes "Automated pre-release snapshot built from the latest commit on \`main\`.
 
-          **Commit**: ${{ github.sha }}
-          **Build**: ${{ steps.version.outputs.version }}
+        **Commit**: ${{ github.sha }}
+        **Build**: ${{ steps.version.outputs.version }}
 
-          > **Warning**: This is an unstable development build. Use tagged releases for production.
-        files: |
+        > **Warning**: This is an unstable development build. Use tagged releases for production." \
+          --target main \
+          --prerelease \
           dist/*
-        draft: false
-        prerelease: true
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   docker-snapshot:
     name: Build & Push Snapshot Image (ko)
