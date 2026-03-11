@@ -17,6 +17,8 @@ type DBExecStep struct {
 	ignoreError     bool
 	tenantKey       string // dot-path to resolve tenant value for automatic scoping
 	allowDynamicSQL bool
+	returning       bool   // when true, uses Query() and returns rows (for RETURNING clause)
+	mode            string // "list" or "single" — used only when returning is true
 	app             modular.Application
 	tmpl            *TemplateEngine
 }
@@ -54,6 +56,17 @@ func NewDBExecStepFactory() StepFactory {
 
 		ignoreError, _ := config["ignore_error"].(bool)
 		tenantKey, _ := config["tenantKey"].(string)
+		returning, _ := config["returning"].(bool)
+
+		mode, _ := config["mode"].(string)
+		if returning {
+			if mode == "" {
+				mode = "list"
+			}
+			if mode != "list" && mode != "single" {
+				return nil, fmt.Errorf("db_exec step %q: mode must be 'list' or 'single', got %q", name, mode)
+			}
+		}
 
 		return &DBExecStep{
 			name:            name,
@@ -63,6 +76,8 @@ func NewDBExecStepFactory() StepFactory {
 			ignoreError:     ignoreError,
 			tenantKey:       tenantKey,
 			allowDynamicSQL: allowDynamicSQL,
+			returning:       returning,
+			mode:            mode,
 			app:             app,
 			tmpl:            NewTemplateEngine(),
 		}, nil
@@ -147,6 +162,74 @@ func (s *DBExecStep) Execute(_ context.Context, pc *PipelineContext) (*StepResul
 	// Normalize SQL placeholders: users write $1,$2,$3 (PostgreSQL style),
 	// engine converts to ? for SQLite automatically.
 	query = normalizePlaceholders(query, driver)
+
+	// When returning is true, use Query() so that RETURNING clause rows are available.
+	if s.returning {
+		rows, err := db.Query(query, resolvedParams...)
+		if err != nil {
+			if s.ignoreError {
+				output := map[string]any{"ignored_error": err.Error()}
+				if s.mode == "single" {
+					output["row"] = map[string]any{}
+					output["found"] = false
+				} else {
+					output["rows"] = []map[string]any{}
+					output["count"] = 0
+				}
+				return &StepResult{Output: output}, nil
+			}
+			return nil, fmt.Errorf("db_exec step %q: exec failed: %w", s.name, err)
+		}
+		defer rows.Close()
+
+		columns, err := rows.Columns()
+		if err != nil {
+			return nil, fmt.Errorf("db_exec step %q: failed to get columns: %w", s.name, err)
+		}
+
+		var results []map[string]any
+		for rows.Next() {
+			values := make([]any, len(columns))
+			valuePtrs := make([]any, len(columns))
+			for i := range values {
+				valuePtrs[i] = &values[i]
+			}
+			if err := rows.Scan(valuePtrs...); err != nil {
+				return nil, fmt.Errorf("db_exec step %q: scan failed: %w", s.name, err)
+			}
+			row := make(map[string]any, len(columns))
+			for i, col := range columns {
+				val := values[i]
+				if b, ok := val.([]byte); ok {
+					row[col] = string(b)
+				} else {
+					row[col] = val
+				}
+			}
+			results = append(results, row)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("db_exec step %q: row iteration error: %w", s.name, err)
+		}
+
+		output := make(map[string]any)
+		if s.mode == "single" {
+			if len(results) > 0 {
+				output["row"] = results[0]
+				output["found"] = true
+			} else {
+				output["row"] = map[string]any{}
+				output["found"] = false
+			}
+		} else {
+			if results == nil {
+				results = []map[string]any{}
+			}
+			output["rows"] = results
+			output["count"] = len(results)
+		}
+		return &StepResult{Output: output}, nil
+	}
 
 	// Execute statement
 	result, err := db.Exec(query, resolvedParams...)
