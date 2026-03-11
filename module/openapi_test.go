@@ -1766,7 +1766,7 @@ func TestOpenAPIModule_ResponseValidation_InvalidResponse_WarnAction(t *testing.
 	}
 }
 
-func TestOpenAPIModule_ResponseValidation_DefaultFallback_Valid(t *testing.T) {
+func TestOpenAPIModule_ResponseValidation_DefaultFallback_InvalidFallback(t *testing.T) {
 	specPath := writeTempSpec(t, ".yaml", responseValidationYAML)
 
 	mod := NewOpenAPIModule("resp-api", OpenAPIConfig{
@@ -2246,6 +2246,9 @@ paths:
 		router := &testRouter{}
 		mod.RegisterRoutes(router)
 		h := router.findHandler("GET", "/api/items")
+		if h == nil {
+			t.Fatal("route GET /api/items not registered")
+		}
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/api/items", nil)
 		h.Handle(w, r)
@@ -2286,6 +2289,9 @@ paths:
 		router := &testRouter{}
 		mod.RegisterRoutes(router)
 		h := router.findHandler("GET", "/api/items")
+		if h == nil {
+			t.Fatal("route GET /api/items not registered")
+		}
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/api/items", nil)
 		h.Handle(w, r)
@@ -2326,6 +2332,9 @@ paths:
 		router := &testRouter{}
 		mod.RegisterRoutes(router)
 		h := router.findHandler("GET", "/api/items")
+		if h == nil {
+			t.Fatal("route GET /api/items not registered")
+		}
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/api/items", nil)
 		h.Handle(w, r)
@@ -2373,6 +2382,9 @@ func TestOpenAPIModule_ResponseValidation_DefaultAction_IsWarn(t *testing.T) {
 	mod.RegisterRoutes(router)
 
 	h := router.findHandler("GET", "/api/pets")
+	if h == nil {
+		t.Fatal("handler for GET /api/pets not found")
+	}
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/pets", nil)
 	h.Handle(w, r)

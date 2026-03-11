@@ -569,7 +569,7 @@ func (h *openAPIRouteHandler) validate(r *http.Request) []string {
 					var bodyData any
 					if jsonErr := json.Unmarshal(bodyBytes, &bodyData); jsonErr != nil {
 						errs = append(errs, fmt.Sprintf("request body contains invalid JSON: %v", jsonErr))
-					} else if bodyErrs := validateJSONValue(bodyData, "body", mediaType.Schema); len(bodyErrs) > 0 {
+					} else if bodyErrs := validateJSONValue(bodyData, "request body", mediaType.Schema); len(bodyErrs) > 0 {
 						errs = append(errs, bodyErrs...)
 					}
 				}
@@ -584,8 +584,11 @@ func (h *openAPIRouteHandler) validate(r *http.Request) []string {
 
 // responseCapturingWriter buffers the response body, status code, and headers
 // so we can validate them against the OpenAPI spec before sending to the client.
+// It uses its own header map to prevent leaked headers reaching the client when
+// validation fails and a different (500) response needs to be sent.
 type responseCapturingWriter struct {
 	underlying http.ResponseWriter
+	headers    http.Header // own header map; copied to underlying only on flush
 	body       bytes.Buffer
 	statusCode int
 	headerSent bool
@@ -594,14 +597,15 @@ type responseCapturingWriter struct {
 func newResponseCapturingWriter(w http.ResponseWriter) *responseCapturingWriter {
 	return &responseCapturingWriter{
 		underlying: w,
+		headers:    make(http.Header),
 		statusCode: http.StatusOK,
 	}
 }
 
-// Header returns the underlying response writer's header map so that callers
-// can set headers which will be flushed later.
+// Header returns this writer's own header map so that callers can set headers
+// which are only forwarded to the underlying writer when flush() is called.
 func (c *responseCapturingWriter) Header() http.Header {
-	return c.underlying.Header()
+	return c.headers
 }
 
 // Write captures the response body into an internal buffer.
@@ -614,12 +618,18 @@ func (c *responseCapturingWriter) WriteHeader(code int) {
 	c.statusCode = code
 }
 
-// flush sends the buffered status code, headers, and body to the underlying writer.
+// flush copies captured headers and sends the buffered status code and body to the underlying writer.
 func (c *responseCapturingWriter) flush() {
 	if c.headerSent {
 		return
 	}
 	c.headerSent = true
+	// Copy captured headers to the underlying writer before sending the status code.
+	for k, vals := range c.headers {
+		for _, v := range vals {
+			c.underlying.Header().Add(k, v)
+		}
+	}
 	c.underlying.WriteHeader(c.statusCode)
 	_, _ = c.underlying.Write(c.body.Bytes()) //nolint:gosec // G705: body is pipeline output, written back to same response
 }
@@ -694,7 +704,7 @@ func (h *openAPIRouteHandler) validateResponse(statusCode int, headers http.Head
 		return errs
 	}
 
-	if bodyErrs := validateJSONValue(bodyData, "response", mediaType.Schema); len(bodyErrs) > 0 {
+	if bodyErrs := validateJSONValue(bodyData, "response body", mediaType.Schema); len(bodyErrs) > 0 {
 		errs = append(errs, bodyErrs...)
 	}
 
@@ -942,19 +952,21 @@ func validateScalarValue(val, name, kind string, schema *openAPISchema) []string
 }
 
 // validateJSONBody validates a decoded JSON body against an object schema.
-func validateJSONBody(body any, schema *openAPISchema) []string {
+// The bodyLabel parameter (e.g. "request body" or "response body") is used in
+// error messages to distinguish validation context.
+func validateJSONBody(body any, schema *openAPISchema, bodyLabel string) []string {
 	var errs []string
 	obj, ok := body.(map[string]any)
 	if !ok {
 		if schema.Type == "object" {
-			return []string{"request body must be a JSON object"}
+			return []string{bodyLabel + " must be a JSON object"}
 		}
 		return nil
 	}
 	// Check required fields
 	for _, req := range schema.Required {
 		if _, present := obj[req]; !present {
-			errs = append(errs, fmt.Sprintf("request body: required field %q is missing", req))
+			errs = append(errs, fmt.Sprintf("%s: required field %q is missing", bodyLabel, req))
 		}
 	}
 	// Validate individual properties
@@ -965,6 +977,18 @@ func validateJSONBody(body any, schema *openAPISchema) []string {
 		}
 		if fieldErrs := validateJSONValue(val, field, propSchema); len(fieldErrs) > 0 {
 			errs = append(errs, fieldErrs...)
+		}
+	}
+	// Validate additionalProperties: keys not declared in Properties are checked
+	// against the additionalProperties schema when it is specified.
+	if schema.AdditionalProperties != nil {
+		for key, val := range obj {
+			if _, defined := schema.Properties[key]; defined {
+				continue
+			}
+			if fieldErrs := validateJSONValue(val, key, schema.AdditionalProperties); len(fieldErrs) > 0 {
+				errs = append(errs, fieldErrs...)
+			}
 		}
 	}
 	return errs
@@ -1038,7 +1062,7 @@ func validateJSONValue(val any, name string, schema *openAPISchema) []string {
 			errs = append(errs, fmt.Sprintf("field %q must be a boolean, got %T", name, val))
 		}
 	case "object":
-		if subErrs := validateJSONBody(val, schema); len(subErrs) > 0 {
+		if subErrs := validateJSONBody(val, schema, name); len(subErrs) > 0 {
 			errs = append(errs, subErrs...)
 		}
 	case "array":
