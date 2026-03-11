@@ -13,12 +13,12 @@ import (
 type DODatabaseState struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`
-	Engine       string    `json:"engine"`       // pg, mysql, redis, mongodb, kafka
+	Engine       string    `json:"engine"` // pg, mysql, redis, mongodb, kafka
 	Version      string    `json:"version"`
-	Size         string    `json:"size"`          // e.g. db-s-1vcpu-1gb
+	Size         string    `json:"size"` // e.g. db-s-1vcpu-1gb
 	Region       string    `json:"region"`
 	NumNodes     int       `json:"numNodes"`
-	Status       string    `json:"status"`        // pending, online, resizing, migrating, error
+	Status       string    `json:"status"` // pending, online, resizing, migrating, error
 	Host         string    `json:"host"`
 	Port         int       `json:"port"`
 	DatabaseName string    `json:"databaseName"`
