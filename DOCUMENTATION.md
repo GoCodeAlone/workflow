@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Workflow Engine is a configuration-driven orchestration platform built in Go. It turns YAML configuration files into running applications with no code changes required. The engine provides 100+ built-in module types, a visual workflow builder UI, a multi-tenant admin platform, AI-assisted configuration generation, and dynamic hot-reload of Go components at runtime.
+The Workflow Engine is a configuration-driven orchestration platform built in Go. It turns YAML configuration files into running applications with no code changes required. The engine provides 90+ module types and 130+ pipeline step types, a visual workflow builder UI, a multi-tenant admin platform, AI-assisted configuration generation, and dynamic hot-reload of Go components at runtime.
 
 ## Core Engine
 
@@ -19,7 +19,7 @@ The engine is built on the [CrisisTextLine/modular](https://github.com/CrisisTex
 - `cmd/server` -- runs workflow configs as a server process
 - `cmd/wfctl` -- validates and inspects workflow configs offline
 
-## Module Types (100+)
+## Module Types (90+)
 
 All modules are instantiated from YAML config via the plugin factory registry. Organized by category. Each module type is provided by a plugin (see **Plugin** column); all are included when using `plugins/all`.
 
@@ -37,7 +37,7 @@ All modules are instantiated from YAML config via the plugin factory registry. O
 | `static.fileserver` | Static file serving | http |
 | `openapi` | OpenAPI v3 spec-driven HTTP route generation with request/response validation and Swagger UI | openapi |
 
-> `httpserver.modular`, `httpclient.modular`, and `chimux.router` were removed in favour of `http.server`, `http.router`, and `reverseproxy`.
+> `httpserver.modular`, `httpclient.modular`, and `chimux.router` were removed in favor of `http.server`, `http.router`, and `reverseproxy`.
 
 ### Middleware
 | Type | Description | Plugin |
@@ -60,7 +60,7 @@ All modules are instantiated from YAML config via the plugin factory registry. O
 | `auth.token-blacklist` | Token revocation blacklist backed by SQLite or in-memory store | auth |
 | `security.field-protection` | Field-level encryption/decryption for sensitive data fields | auth |
 
-> `auth.modular` was removed in favour of `auth.jwt`.
+> `auth.modular` was removed in favor of `auth.jwt`.
 
 ### API & CQRS
 | Type | Description | Plugin |
@@ -91,7 +91,7 @@ All modules are instantiated from YAML config via the plugin factory registry. O
 | `notification.slack` | Slack notification sender | messaging |
 | `webhook.sender` | Outbound webhook delivery with retry and dead letter | messaging |
 
-> `eventbus.modular` was removed in favour of `messaging.broker.eventbus`.
+> `eventbus.modular` was removed in favor of `messaging.broker.eventbus`.
 
 ### Database & Persistence
 | Type | Description | Plugin |
@@ -100,7 +100,7 @@ All modules are instantiated from YAML config via the plugin factory registry. O
 | `persistence.store` | Write-through persistence (SQLite/PostgreSQL) | storage |
 | `database.partitioned` | PostgreSQL partitioned database for multi-tenant data isolation (LIST/RANGE partitions) | storage |
 
-> `database.modular` was removed in favour of `database.workflow`.
+> `database.modular` was removed in favor of `database.workflow`.
 
 ### NoSQL / Datastores
 | Type | Description | Plugin |
@@ -504,7 +504,7 @@ value: '{{ index .steps "parse-request" "path_params" "id" }}'
 | `jsonschema.modular` | JSON Schema validation | modularcompat |
 | `dynamic.component` | Yaegi hot-reload Go component | ai |
 
-> `eventbus.modular` was removed in favour of `messaging.broker.eventbus`.
+> `eventbus.modular` was removed in favor of `messaging.broker.eventbus`.
 > `data.transformer` and `workflow.registry` are provided by the `api` plugin (see API & CQRS section above).
 
 ## Module Type Reference
