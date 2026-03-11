@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPartitionedDatabase_PartitionKey(t *testing.T) {
@@ -836,5 +837,209 @@ func TestDBSyncPartitionsStep_NotPartitionManager(t *testing.T) {
 	_, err = step.Execute(context.Background(), pc)
 	if err == nil {
 		t.Fatal("expected error when service does not implement PartitionManager")
+	}
+}
+
+// ─── Auto-sync and periodic sync tests ───────────────────────────────────────
+
+// boolPtr is a test helper that returns a pointer to a bool value.
+func boolPtr(v bool) *bool { return &v }
+
+func TestPartitionedDatabase_Start_NoSourceTable_NoSync(t *testing.T) {
+	// When no sourceTable is configured, Start should succeed without attempting sync.
+	cfg := PartitionedDatabaseConfig{
+		Driver:       "pgx",
+		PartitionKey: "tenant_id",
+		Tables:       []string{"forms"},
+		// No DSN: base.Start is a no-op; no sourceTable: no sync attempted.
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	app := NewMockApplication()
+	if err := pd.Init(app); err != nil {
+		t.Fatalf("Init error: %v", err)
+	}
+
+	if err := pd.Start(context.Background()); err != nil {
+		t.Fatalf("unexpected Start error: %v", err)
+	}
+	_ = pd.Stop(context.Background())
+}
+
+func TestPartitionedDatabase_Start_AutoSyncDisabled_NoSync(t *testing.T) {
+	// When autoSync is explicitly false, Start should not call SyncPartitionsFromSource
+	// even when sourceTable is configured.
+	cfg := PartitionedDatabaseConfig{
+		Driver:       "pgx",
+		PartitionKey: "tenant_id",
+		Tables:       []string{"forms"},
+		SourceTable:  "tenants",
+		AutoSync:     boolPtr(false),
+		// No DSN: base.Start is a no-op; sourceTable set but autoSync=false.
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	app := NewMockApplication()
+	if err := pd.Init(app); err != nil {
+		t.Fatalf("Init error: %v", err)
+	}
+
+	if err := pd.Start(context.Background()); err != nil {
+		t.Fatalf("unexpected Start error: %v", err)
+	}
+	_ = pd.Stop(context.Background())
+}
+
+func TestPartitionedDatabase_Start_AutoSyncEnabled_NilDB(t *testing.T) {
+	// When autoSync defaults to true and sourceTable is configured, Start must
+	// attempt SyncPartitionsFromSource. With no DB connection the sync returns
+	// "database connection is nil", which Start wraps and returns.
+	cfg := PartitionedDatabaseConfig{
+		Driver:       "pgx",
+		PartitionKey: "tenant_id",
+		Tables:       []string{"forms"},
+		SourceTable:  "tenants",
+		// No DSN: base.Start is a no-op so DB stays nil.
+		// AutoSync not set: defaults to true when sourceTable is present.
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	app := NewMockApplication()
+	if err := pd.Init(app); err != nil {
+		t.Fatalf("Init error: %v", err)
+	}
+
+	err := pd.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected Start to return an error when DB connection is nil")
+	}
+	if !strings.Contains(err.Error(), "auto-sync on startup failed") {
+		t.Errorf("expected auto-sync error message, got: %v", err)
+	}
+}
+
+func TestPartitionedDatabase_Start_InvalidSyncInterval(t *testing.T) {
+	// An invalid syncInterval string must cause Start to return a parse error.
+	cfg := PartitionedDatabaseConfig{
+		Driver:       "pgx",
+		PartitionKey: "tenant_id",
+		Tables:       []string{"forms"},
+		SourceTable:  "tenants",
+		AutoSync:     boolPtr(false), // skip startup sync so we reach interval parsing
+		SyncInterval: "not-a-duration",
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	app := NewMockApplication()
+	if err := pd.Init(app); err != nil {
+		t.Fatalf("Init error: %v", err)
+	}
+
+	err := pd.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected Start to return an error for invalid syncInterval")
+	}
+	if !strings.Contains(err.Error(), "invalid syncInterval") {
+		t.Errorf("expected syncInterval parse error, got: %v", err)
+	}
+}
+
+func TestPartitionedDatabase_SyncInterval_NoSourceTable_NoGoroutine(t *testing.T) {
+	// When syncInterval is set but no sourceTable is configured, no background
+	// goroutine is started (hasSourceTable=false gates the goroutine launch).
+	cfg := PartitionedDatabaseConfig{
+		Driver:       "pgx",
+		PartitionKey: "tenant_id",
+		Tables:       []string{"forms"},
+		SyncInterval: "100ms",
+		// No sourceTable: no goroutine should be started.
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	app := NewMockApplication()
+	if err := pd.Init(app); err != nil {
+		t.Fatalf("Init error: %v", err)
+	}
+
+	if err := pd.Start(context.Background()); err != nil {
+		t.Fatalf("unexpected Start error: %v", err)
+	}
+
+	if pd.syncStop != nil {
+		t.Error("expected syncStop channel to be nil when no sourceTable is configured")
+	}
+
+	if err := pd.Stop(context.Background()); err != nil {
+		t.Fatalf("unexpected Stop error: %v", err)
+	}
+}
+
+func TestPartitionedDatabase_PeriodicSync_GoroutineLifecycle(t *testing.T) {
+	// When sourceTable is configured, autoSync is false, and syncInterval is set,
+	// a background goroutine must be launched. Stop must cleanly terminate it.
+	cfg := PartitionedDatabaseConfig{
+		Driver:       "pgx",
+		PartitionKey: "tenant_id",
+		Tables:       []string{"forms"},
+		SourceTable:  "tenants",
+		AutoSync:     boolPtr(false), // skip startup sync
+		SyncInterval: "100ms",
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	app := NewMockApplication()
+	if err := pd.Init(app); err != nil {
+		t.Fatalf("Init error: %v", err)
+	}
+
+	if err := pd.Start(context.Background()); err != nil {
+		t.Fatalf("unexpected Start error: %v", err)
+	}
+
+	if pd.syncStop == nil {
+		t.Fatal("expected syncStop channel to be set after Start with syncInterval")
+	}
+
+	// Allow at least one tick; the goroutine will log nil-DB error but must
+	// not panic or deadlock.
+	time.Sleep(150 * time.Millisecond)
+
+	done := make(chan error, 1)
+	go func() { done <- pd.Stop(context.Background()) }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("unexpected Stop error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not return within 2 seconds")
+	}
+}
+
+func TestPartitionedDatabase_AutoSync_DefaultTrueWhenSourceTableSet(t *testing.T) {
+	// Confirm that AutoSync==nil is treated as "true" when sourceTable is
+	// configured: Start must attempt sync (and fail with nil DB error).
+	cfg := PartitionedDatabaseConfig{
+		Driver:      "pgx",
+		SourceTable: "tenants",
+		// AutoSync is nil: should behave as true when sourceTable is present.
+	}
+	if cfg.AutoSync != nil {
+		t.Fatal("AutoSync must be nil for this test to be meaningful")
+	}
+
+	pd := NewPartitionedDatabase("db", cfg)
+	app := NewMockApplication()
+	if err := pd.Init(app); err != nil {
+		t.Fatalf("Init error: %v", err)
+	}
+
+	err := pd.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected Start to fail when autoSync defaults to true and DB is nil")
+	}
+	if !strings.Contains(err.Error(), "auto-sync on startup failed") {
+		t.Errorf("expected auto-sync startup error, got: %v", err)
 	}
 }

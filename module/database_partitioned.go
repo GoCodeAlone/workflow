@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/GoCodeAlone/modular"
 )
@@ -120,6 +121,17 @@ type PartitionedDatabaseConfig struct {
 	// Defaults to PartitionKey if empty.
 	SourceColumn string `json:"sourceColumn" yaml:"sourceColumn"`
 
+	// ── Lifecycle sync settings ───────────────────────────────────────────────
+	// AutoSync controls whether SyncPartitionsFromSource is called automatically
+	// during Start(). Defaults to true when any sourceTable is configured.
+	// Set to false to disable automatic sync on startup.
+	AutoSync *bool `json:"autoSync" yaml:"autoSync"`
+	// SyncInterval is a duration string (e.g. "60s", "5m") for periodic
+	// re-sync of partitions from the source table. When set, a background
+	// goroutine calls SyncPartitionsFromSource at this interval after Start().
+	// Requires at least one sourceTable to be configured. Example: "60s".
+	SyncInterval string `json:"syncInterval" yaml:"syncInterval"`
+
 	// ── Multi-partition mode ─────────────────────────────────────────────────
 	// Partitions lists independent partition key configurations. When non-empty,
 	// the single-partition fields above are ignored.
@@ -135,6 +147,11 @@ type PartitionedDatabase struct {
 	partitions []PartitionConfig // normalized; always len >= 1 after construction
 	base       *WorkflowDatabase
 	mu         sync.RWMutex
+	logger     modular.Logger
+
+	// periodic sync state
+	syncStop chan struct{}
+	syncWg   sync.WaitGroup
 }
 
 // normalizePartitionConfig applies defaults to a PartitionConfig and returns the result.
@@ -190,6 +207,7 @@ func (p *PartitionedDatabase) Name() string { return p.name }
 
 // Init registers this module as a service.
 func (p *PartitionedDatabase) Init(app modular.Application) error {
+	p.logger = app.Logger()
 	return app.RegisterService(p.name, p)
 }
 
@@ -209,13 +227,83 @@ func (p *PartitionedDatabase) RequiresServices() []modular.ServiceDependency {
 	return nil
 }
 
-// Start opens the database connection during application startup.
+// Start opens the database connection during application startup. When autoSync
+// is enabled (the default when any sourceTable is configured), it calls
+// SyncPartitionsFromSource to create partitions for all existing tenant values.
+// When syncInterval is configured, a background goroutine periodically re-syncs
+// partitions at that interval.
 func (p *PartitionedDatabase) Start(ctx context.Context) error {
-	return p.base.Start(ctx)
+	if err := p.base.Start(ctx); err != nil {
+		return err
+	}
+
+	// Determine whether any partition config has a sourceTable.
+	hasSourceTable := false
+	for _, cfg := range p.partitions {
+		if cfg.SourceTable != "" {
+			hasSourceTable = true
+			break
+		}
+	}
+
+	// Auto-sync on startup: default true when sourceTable is configured.
+	autoSync := hasSourceTable
+	if p.config.AutoSync != nil {
+		autoSync = *p.config.AutoSync
+	}
+
+	if autoSync && hasSourceTable {
+		if err := p.SyncPartitionsFromSource(ctx); err != nil {
+			return fmt.Errorf("partitioned database %q: auto-sync on startup failed: %w", p.name, err)
+		}
+	}
+
+	// Start periodic sync goroutine if syncInterval is configured.
+	if p.config.SyncInterval != "" && hasSourceTable {
+		interval, err := time.ParseDuration(p.config.SyncInterval)
+		if err != nil {
+			return fmt.Errorf("partitioned database %q: invalid syncInterval %q: %w", p.name, p.config.SyncInterval, err)
+		}
+		if interval > 0 {
+			p.syncStop = make(chan struct{})
+			p.syncWg.Add(1)
+			go p.runPeriodicSync(ctx, interval)
+		}
+	}
+
+	return nil
+}
+
+// runPeriodicSync runs SyncPartitionsFromSource on a ticker until stopSync is
+// closed or the parent context is cancelled.
+func (p *PartitionedDatabase) runPeriodicSync(ctx context.Context, interval time.Duration) {
+	defer p.syncWg.Done()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.syncStop:
+			return
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := p.SyncPartitionsFromSource(ctx); err != nil {
+				if p.logger != nil {
+					p.logger.Error("partitioned database periodic sync failed",
+						"module", p.name, "error", err)
+				}
+			}
+		}
+	}
 }
 
 // Stop closes the database connection during application shutdown.
 func (p *PartitionedDatabase) Stop(ctx context.Context) error {
+	if p.syncStop != nil {
+		close(p.syncStop)
+		p.syncWg.Wait()
+		p.syncStop = nil
+	}
 	return p.base.Stop(ctx)
 }
 
