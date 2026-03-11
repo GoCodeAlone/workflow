@@ -173,25 +173,41 @@ func rateLimitMiddlewareFactory(name string, cfg map[string]any) modular.Module 
 }
 
 func corsMiddlewareFactory(name string, cfg map[string]any) modular.Module {
-	allowedOrigins := []string{"*"}
-	allowedMethods := []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
+	corsCfg := module.CORSMiddlewareConfig{
+		AllowedOrigins: []string{"*"},
+		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+	}
 	if origins, ok := cfg["allowedOrigins"].([]any); ok {
-		allowedOrigins = make([]string, len(origins))
+		corsCfg.AllowedOrigins = make([]string, len(origins))
 		for i, origin := range origins {
 			if str, ok := origin.(string); ok {
-				allowedOrigins[i] = str
+				corsCfg.AllowedOrigins[i] = str
 			}
 		}
 	}
 	if methods, ok := cfg["allowedMethods"].([]any); ok {
-		allowedMethods = make([]string, len(methods))
+		corsCfg.AllowedMethods = make([]string, len(methods))
 		for i, method := range methods {
 			if str, ok := method.(string); ok {
-				allowedMethods[i] = str
+				corsCfg.AllowedMethods[i] = str
 			}
 		}
 	}
-	return module.NewCORSMiddleware(name, allowedOrigins, allowedMethods)
+	if headers, ok := cfg["allowedHeaders"].([]any); ok {
+		corsCfg.AllowedHeaders = make([]string, len(headers))
+		for i, header := range headers {
+			if str, ok := header.(string); ok {
+				corsCfg.AllowedHeaders[i] = str
+			}
+		}
+	}
+	if allowCreds, ok := cfg["allowCredentials"].(bool); ok {
+		corsCfg.AllowCredentials = allowCreds
+	}
+	if maxAge, ok := cfg["maxAge"].(int); ok {
+		corsCfg.MaxAge = maxAge
+	}
+	return module.NewCORSMiddlewareWithConfig(name, corsCfg)
 }
 
 func requestIDMiddlewareFactory(name string, _ map[string]any) modular.Module {

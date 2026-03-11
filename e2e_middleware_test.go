@@ -416,6 +416,144 @@ func TestE2E_Middleware_CORS(t *testing.T) {
 	t.Log("E2E Middleware CORS: Allowed, disallowed, headers, and preflight scenarios verified")
 }
 
+// TestE2E_Middleware_CORS_FullConfig verifies that the CORS middleware factory correctly
+// applies allowedHeaders, allowCredentials, maxAge, and wildcard subdomain origin matching.
+func TestE2E_Middleware_CORS_FullConfig(t *testing.T) {
+	port := getFreePort(t)
+	addr := fmt.Sprintf(":%d", port)
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "fc-server", Type: "http.server", Config: map[string]any{"address": addr}},
+			{Name: "fc-router", Type: "http.router", DependsOn: []string{"fc-server"}},
+			{Name: "fc-handler", Type: "http.handler", DependsOn: []string{"fc-router"}, Config: map[string]any{"contentType": "application/json"}},
+			{Name: "fc-cors", Type: "http.middleware.cors", DependsOn: []string{"fc-router"}, Config: map[string]any{
+				"allowedOrigins":   []any{"*.example.com", "https://trusted.io"},
+				"allowedMethods":   []any{"GET", "POST", "OPTIONS"},
+				"allowedHeaders":   []any{"Authorization", "Content-Type", "X-CSRF-Token", "X-Request-Id"},
+				"allowCredentials": true,
+				"maxAge":           3600,
+			}},
+		},
+		Workflows: map[string]any{
+			"http": map[string]any{
+				"server": "fc-server",
+				"router": "fc-router",
+				"routes": []any{
+					map[string]any{
+						"method":      "GET",
+						"path":        "/api/fc-test",
+						"handler":     "fc-handler",
+						"middlewares": []any{"fc-cors"},
+					},
+				},
+			},
+		},
+		Triggers: map[string]any{},
+	}
+
+	logger := &mockLogger{}
+	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), logger)
+	engine := NewStdEngine(app, logger)
+	loadAllPlugins(t, engine)
+	engine.RegisterWorkflowHandler(handlers.NewHTTPWorkflowHandler())
+
+	if err := engine.BuildFromConfig(cfg); err != nil {
+		t.Fatalf("BuildFromConfig failed: %v", err)
+	}
+
+	ctx := t.Context()
+	if err := engine.Start(ctx); err != nil {
+		t.Fatalf("Engine start failed: %v", err)
+	}
+	defer engine.Stop(context.Background())
+
+	waitForServer(t, baseURL, 5*time.Second)
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	// Subtest 1: Configurable allowedHeaders are reflected
+	t.Run("configurable_headers", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", baseURL+"/api/fc-test", nil)
+		req.Header.Set("Origin", "http://app.example.com")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		acah := resp.Header.Get("Access-Control-Allow-Headers")
+		want := "Authorization, Content-Type, X-CSRF-Token, X-Request-Id"
+		if acah != want {
+			t.Errorf("Expected Access-Control-Allow-Headers %q, got %q", want, acah)
+		}
+	})
+
+	// Subtest 2: allowCredentials sets the Credentials header
+	t.Run("allow_credentials", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", baseURL+"/api/fc-test", nil)
+		req.Header.Set("Origin", "https://trusted.io")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.Header.Get("Access-Control-Allow-Credentials") != "true" {
+			t.Errorf("Expected Access-Control-Allow-Credentials: true, got %q", resp.Header.Get("Access-Control-Allow-Credentials"))
+		}
+	})
+
+	// Subtest 3: maxAge is set on responses
+	t.Run("max_age", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", baseURL+"/api/fc-test", nil)
+		req.Header.Set("Origin", "https://trusted.io")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.Header.Get("Access-Control-Max-Age") != "3600" {
+			t.Errorf("Expected Access-Control-Max-Age: 3600, got %q", resp.Header.Get("Access-Control-Max-Age"))
+		}
+	})
+
+	// Subtest 4: Wildcard subdomain matching
+	t.Run("wildcard_subdomain", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", baseURL+"/api/fc-test", nil)
+		req.Header.Set("Origin", "http://admin.example.com")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		acao := resp.Header.Get("Access-Control-Allow-Origin")
+		if acao != "http://admin.example.com" {
+			t.Errorf("Expected Access-Control-Allow-Origin 'http://admin.example.com', got %q", acao)
+		}
+	})
+
+	// Subtest 5: Wildcard subdomain does not match unrelated domains
+	t.Run("wildcard_subdomain_no_match", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", baseURL+"/api/fc-test", nil)
+		req.Header.Set("Origin", "http://evil.com")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		acao := resp.Header.Get("Access-Control-Allow-Origin")
+		if acao != "" {
+			t.Errorf("Expected no Access-Control-Allow-Origin for disallowed domain, got %q", acao)
+		}
+	})
+
+	t.Log("E2E Middleware CORS FullConfig: all new features verified")
+}
+
 // TestE2E_Middleware_RequestID verifies the RequestID middleware adds an
 // X-Request-ID header to every response, and preserves a client-supplied one.
 func TestE2E_Middleware_RequestID(t *testing.T) {

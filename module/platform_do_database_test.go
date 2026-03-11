@@ -6,13 +6,13 @@ func TestPlatformDODatabase_MockBackend(t *testing.T) {
 	m := &PlatformDODatabase{
 		name: "test-db",
 		config: map[string]any{
-			"provider": "mock",
-			"engine":   "pg",
-			"version":  "16",
-			"size":     "db-s-1vcpu-1gb",
-			"region":   "nyc1",
+			"provider":  "mock",
+			"engine":    "pg",
+			"version":   "16",
+			"size":      "db-s-1vcpu-1gb",
+			"region":    "nyc1",
 			"num_nodes": 1,
-			"name":     "test-db",
+			"name":      "test-db",
 		},
 		state: &DODatabaseState{
 			Name:     "test-db",

@@ -318,19 +318,59 @@ func (m *LoggingMiddleware) RequiresServices() []modular.ServiceDependency {
 	return nil
 }
 
-// CORSMiddleware provides CORS support
-type CORSMiddleware struct {
-	name           string
-	allowedOrigins []string
-	allowedMethods []string
+// CORSMiddlewareConfig holds configuration for the CORS middleware.
+type CORSMiddlewareConfig struct {
+	// AllowedOrigins is the list of origins allowed to make cross-origin requests.
+	// Use "*" to allow all origins. Supports wildcard subdomain patterns like "*.example.com".
+	AllowedOrigins []string
+	// AllowedMethods is the list of HTTP methods allowed in CORS requests.
+	AllowedMethods []string
+	// AllowedHeaders is the list of HTTP headers allowed in CORS requests.
+	// Defaults to ["Content-Type", "Authorization"] when empty.
+	AllowedHeaders []string
+	// AllowCredentials indicates whether the request can include user credentials.
+	// When true, the actual request Origin is reflected (never "*").
+	AllowCredentials bool
+	// MaxAge specifies how long (in seconds) the preflight response may be cached.
+	// Zero means no caching directive is sent.
+	MaxAge int
 }
 
-// NewCORSMiddleware creates a new CORS middleware
+// CORSMiddleware provides CORS support
+type CORSMiddleware struct {
+	name             string
+	allowedOrigins   []string
+	allowedMethods   []string
+	allowedHeaders   []string
+	allowCredentials bool
+	maxAge           int
+}
+
+// defaultCORSHeaders is the default set of allowed headers for backward compatibility.
+var defaultCORSHeaders = []string{"Content-Type", "Authorization"}
+
+// NewCORSMiddleware creates a new CORS middleware with default allowed headers.
 func NewCORSMiddleware(name string, allowedOrigins, allowedMethods []string) *CORSMiddleware {
+	return NewCORSMiddlewareWithConfig(name, CORSMiddlewareConfig{
+		AllowedOrigins: allowedOrigins,
+		AllowedMethods: allowedMethods,
+	})
+}
+
+// NewCORSMiddlewareWithConfig creates a new CORS middleware with full configuration.
+// If AllowedHeaders is empty, it defaults to ["Content-Type", "Authorization"].
+func NewCORSMiddlewareWithConfig(name string, cfg CORSMiddlewareConfig) *CORSMiddleware {
+	headers := cfg.AllowedHeaders
+	if len(headers) == 0 {
+		headers = defaultCORSHeaders
+	}
 	return &CORSMiddleware{
-		name:           name,
-		allowedOrigins: allowedOrigins,
-		allowedMethods: allowedMethods,
+		name:             name,
+		allowedOrigins:   cfg.AllowedOrigins,
+		allowedMethods:   cfg.AllowedMethods,
+		allowedHeaders:   headers,
+		allowCredentials: cfg.AllowCredentials,
+		maxAge:           cfg.MaxAge,
 	}
 }
 
@@ -344,24 +384,42 @@ func (m *CORSMiddleware) Init(app modular.Application) error {
 	return nil
 }
 
+// corsOriginAllowed checks if the given origin is in the allowed list.
+// It supports exact matching, "*" wildcard, and subdomain wildcards like "*.example.com".
+func corsOriginAllowed(origin string, allowedOrigins []string) bool {
+	for _, allowed := range allowedOrigins {
+		if allowed == "*" || allowed == origin {
+			return true
+		}
+		// Wildcard subdomain matching: "*.example.com" matches "sub.example.com"
+		if strings.HasPrefix(allowed, "*.") {
+			suffix := allowed[1:] // ".example.com"
+			if strings.HasSuffix(origin, suffix) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Process implements middleware processing
 func (m *CORSMiddleware) Process(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 
 		// Check if origin is allowed
-		allowed := false
-		for _, allowedOrigin := range m.allowedOrigins {
-			if allowedOrigin == "*" || allowedOrigin == origin {
-				allowed = true
-				break
-			}
-		}
+		allowed := corsOriginAllowed(origin, m.allowedOrigins)
 
 		if allowed {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", strings.Join(m.allowedMethods, ", "))
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Headers", strings.Join(m.allowedHeaders, ", "))
+			if m.allowCredentials {
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
+			if m.maxAge > 0 {
+				w.Header().Set("Access-Control-Max-Age", strconv.Itoa(m.maxAge))
+			}
 		}
 
 		// Handle preflight requests
