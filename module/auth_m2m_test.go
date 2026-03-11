@@ -1458,8 +1458,183 @@ func TestM2M_AddTrustedKey(t *testing.T) {
 	stored := m.trustedKeys["svc"]
 	m.mu.RUnlock()
 
-	if stored == nil {
+	if stored == nil || stored.pubKey == nil {
 		t.Error("expected key to be stored")
+	}
+}
+
+// ecPublicKeyToPEM marshals an ECDSA public key to a PEM-encoded string.
+func ecPublicKeyToPEM(t *testing.T, pub *ecdsa.PublicKey) string {
+	t.Helper()
+	pkixBytes, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		t.Fatalf("MarshalPKIXPublicKey: %v", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pkixBytes}))
+}
+
+func TestM2M_AddTrustedKeyFromPEM_Valid(t *testing.T) {
+	m := newM2MES256(t)
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pemStr := ecPublicKeyToPEM(t, &key.PublicKey)
+
+	if err := m.AddTrustedKeyFromPEM("issuer-a", pemStr, nil, nil); err != nil {
+		t.Fatalf("AddTrustedKeyFromPEM: %v", err)
+	}
+
+	m.mu.RLock()
+	stored := m.trustedKeys["issuer-a"]
+	m.mu.RUnlock()
+
+	if stored == nil || stored.pubKey == nil {
+		t.Error("expected key to be stored")
+	}
+}
+
+func TestM2M_AddTrustedKeyFromPEM_EscapedNewlines(t *testing.T) {
+	m := newM2MES256(t)
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pemStr := ecPublicKeyToPEM(t, &key.PublicKey)
+	// Simulate Docker/Kubernetes env var with literal \n instead of real newlines.
+	escapedPEM := strings.ReplaceAll(pemStr, "\n", `\n`)
+
+	if err := m.AddTrustedKeyFromPEM("issuer-b", escapedPEM, nil, nil); err != nil {
+		t.Fatalf("AddTrustedKeyFromPEM with escaped newlines: %v", err)
+	}
+
+	m.mu.RLock()
+	stored := m.trustedKeys["issuer-b"]
+	m.mu.RUnlock()
+
+	if stored == nil || stored.pubKey == nil {
+		t.Error("expected key to be stored after escaped-newline normalisation")
+	}
+}
+
+func TestM2M_AddTrustedKeyFromPEM_Invalid(t *testing.T) {
+	m := newM2MES256(t)
+	err := m.AddTrustedKeyFromPEM("issuer-bad", "not-a-pem", nil, nil)
+	if err == nil {
+		t.Error("expected error for invalid PEM, got nil")
+	}
+}
+
+func TestM2M_JWTBearer_AudienceValid(t *testing.T) {
+	server := newM2MES256(t)
+	clientKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pemStr := ecPublicKeyToPEM(t, &clientKey.PublicKey)
+
+	if err := server.AddTrustedKeyFromPEM("client-svc", pemStr, []string{"test-issuer"}, nil); err != nil {
+		t.Fatalf("AddTrustedKeyFromPEM: %v", err)
+	}
+
+	claims := jwt.MapClaims{
+		"iss": "client-svc",
+		"sub": "client-svc",
+		"aud": "test-issuer",
+		"iat": time.Now().Unix(),
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	assertion, err := tok.SignedString(clientKey)
+	if err != nil {
+		t.Fatalf("sign assertion: %v", err)
+	}
+
+	params := url.Values{
+		"grant_type": {GrantTypeJWTBearer},
+		"assertion":  {assertion},
+	}
+	w := postToken(t, server, params)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 with valid audience, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestM2M_JWTBearer_AudienceMismatch(t *testing.T) {
+	server := newM2MES256(t)
+	clientKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pemStr := ecPublicKeyToPEM(t, &clientKey.PublicKey)
+
+	// Require audience "test-issuer" but assertion will have "wrong-audience".
+	if err := server.AddTrustedKeyFromPEM("client-svc", pemStr, []string{"test-issuer"}, nil); err != nil {
+		t.Fatalf("AddTrustedKeyFromPEM: %v", err)
+	}
+
+	claims := jwt.MapClaims{
+		"iss": "client-svc",
+		"sub": "client-svc",
+		"aud": "wrong-audience",
+		"iat": time.Now().Unix(),
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	assertion, _ := tok.SignedString(clientKey)
+
+	params := url.Values{
+		"grant_type": {GrantTypeJWTBearer},
+		"assertion":  {assertion},
+	}
+	w := postToken(t, server, params)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for audience mismatch, got %d", w.Code)
+	}
+}
+
+func TestM2M_JWTBearer_ClaimMapping(t *testing.T) {
+	server := newM2MES256(t)
+	clientKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pemStr := ecPublicKeyToPEM(t, &clientKey.PublicKey)
+
+	// Map external claim "user_id" → local claim "ext_user".
+	claimMapping := map[string]string{"user_id": "ext_user"}
+	if err := server.AddTrustedKeyFromPEM("client-svc", pemStr, nil, claimMapping); err != nil {
+		t.Fatalf("AddTrustedKeyFromPEM: %v", err)
+	}
+
+	claims := jwt.MapClaims{
+		"iss":     "client-svc",
+		"sub":     "client-svc",
+		"aud":     "test-issuer",
+		"iat":     time.Now().Unix(),
+		"exp":     time.Now().Add(5 * time.Minute).Unix(),
+		"user_id": "u-42",
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	assertion, _ := tok.SignedString(clientKey)
+
+	params := url.Values{
+		"grant_type": {GrantTypeJWTBearer},
+		"assertion":  {assertion},
+	}
+	w := postToken(t, server, params)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Parse the issued access token to verify claim mapping was applied.
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	accessToken, _ := resp["access_token"].(string)
+	if accessToken == "" {
+		t.Fatal("no access_token in response")
+	}
+
+	// Parse unverified to inspect claims.
+	parser := new(jwt.Parser)
+	parsed, _, err := parser.ParseUnverified(accessToken, jwt.MapClaims{})
+	if err != nil {
+		t.Fatalf("parse issued token: %v", err)
+	}
+	issuedClaims, _ := parsed.Claims.(jwt.MapClaims)
+
+	if issuedClaims["ext_user"] != "u-42" {
+		t.Errorf("expected ext_user=u-42 in issued token, got %v", issuedClaims["ext_user"])
+	}
+	if _, exists := issuedClaims["user_id"]; exists {
+		t.Error("expected user_id to be removed by claim mapping")
 	}
 }
 

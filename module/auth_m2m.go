@@ -63,6 +63,32 @@ type M2MClient struct {
 	Claims       map[string]any `json:"claims,omitempty"`
 }
 
+// TrustedKeyConfig holds the configuration for a trusted external JWT issuer.
+// It is used to register trusted keys for the JWT-bearer grant via YAML configuration.
+type TrustedKeyConfig struct {
+	// Issuer is the expected `iss` claim value (e.g. "https://legacy-platform.example.com").
+	Issuer string `json:"issuer" yaml:"issuer"`
+	// Algorithm is the expected signing algorithm (e.g. "ES256"). Currently only ES256 is supported.
+	Algorithm string `json:"algorithm,omitempty" yaml:"algorithm,omitempty"`
+	// PublicKeyPEM is the PEM-encoded EC public key for the trusted issuer.
+	// Literal `\n` sequences (common in Docker/Kubernetes env vars) are normalised to newlines.
+	PublicKeyPEM string `json:"publicKeyPEM,omitempty" yaml:"publicKeyPEM,omitempty"` //nolint:gosec // G117: config DTO field
+	// Audiences is an optional list of accepted audience values.
+	// When non-empty, the assertion's `aud` claim must contain at least one of these values.
+	Audiences []string `json:"audiences,omitempty" yaml:"audiences,omitempty"`
+	// ClaimMapping renames claims from the external assertion before they are included in the
+	// issued token.  The map key is the external claim name; the value is the local claim name.
+	// For example {"user_id": "sub"} promotes the external `user_id` claim to `sub`.
+	ClaimMapping map[string]string `json:"claimMapping,omitempty" yaml:"claimMapping,omitempty"`
+}
+
+// trustedKeyEntry is the internal representation of a trusted external JWT issuer.
+type trustedKeyEntry struct {
+	pubKey       *ecdsa.PublicKey
+	audiences    []string
+	claimMapping map[string]string
+}
+
 // M2MAuthModule provides machine-to-machine (server-to-server) OAuth2 authentication.
 // It supports the client_credentials grant and the JWT-bearer grant, and can issue
 // tokens signed with either HS256 (shared secret) or ES256 (ECDSA P-256).
@@ -84,7 +110,7 @@ type M2MAuthModule struct {
 	publicKey  *ecdsa.PublicKey
 
 	// Trusted public keys for JWT-bearer grant (keyed by key ID or issuer)
-	trustedKeys map[string]*ecdsa.PublicKey
+	trustedKeys map[string]*trustedKeyEntry
 
 	// Registered clients
 	mu           sync.RWMutex
@@ -116,7 +142,7 @@ func NewM2MAuthModule(name string, hmacSecret string, tokenExpiry time.Duration,
 		issuer:       issuer,
 		tokenExpiry:  tokenExpiry,
 		hmacSecret:   []byte(hmacSecret),
-		trustedKeys:  make(map[string]*ecdsa.PublicKey),
+		trustedKeys:  make(map[string]*trustedKeyEntry),
 		clients:      make(map[string]*M2MClient),
 		jtiBlacklist: make(map[string]time.Time),
 	}
@@ -166,7 +192,43 @@ func (m *M2MAuthModule) SetInitErr(err error) {
 func (m *M2MAuthModule) AddTrustedKey(keyID string, pubKey *ecdsa.PublicKey) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.trustedKeys[keyID] = pubKey
+	m.trustedKeys[keyID] = &trustedKeyEntry{pubKey: pubKey}
+}
+
+// AddTrustedKeyFromPEM parses a PEM-encoded EC public key and registers it as a trusted
+// key for JWT-bearer assertion validation.  Literal `\n` sequences in the PEM string are
+// normalised to real newlines so that env-var-injected keys (Docker/Kubernetes) work without
+// additional preprocessing by the caller.
+//
+// audiences is an optional list; when non-empty the assertion's `aud` claim must match at
+// least one entry.  claimMapping renames external claims before they are forwarded into the
+// issued token (map key = external name, map value = local name).
+func (m *M2MAuthModule) AddTrustedKeyFromPEM(issuer, publicKeyPEM string, audiences []string, claimMapping map[string]string) error {
+	// Normalise escaped newlines that are common in Docker/Kubernetes env vars.
+	normalised := strings.ReplaceAll(publicKeyPEM, `\n`, "\n")
+
+	block, _ := pem.Decode([]byte(normalised))
+	if block == nil {
+		return fmt.Errorf("auth.m2m: failed to decode PEM block for issuer %q", issuer)
+	}
+
+	pubAny, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return fmt.Errorf("auth.m2m: parse public key for issuer %q: %w", issuer, err)
+	}
+	ecKey, ok := pubAny.(*ecdsa.PublicKey)
+	if !ok {
+		return fmt.Errorf("auth.m2m: public key for issuer %q is not an ECDSA key", issuer)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.trustedKeys[issuer] = &trustedKeyEntry{
+		pubKey:       ecKey,
+		audiences:    audiences,
+		claimMapping: claimMapping,
+	}
+	return nil
 }
 
 // RegisterClient registers a new OAuth2 client.
@@ -676,19 +738,19 @@ func (m *M2MAuthModule) validateJWTAssertion(assertion string) (jwt.MapClaims, e
 
 	m.mu.RLock()
 	// Try kid first, then iss.
-	var selectedKey *ecdsa.PublicKey
+	var selectedEntry *trustedKeyEntry
 	if kid != "" {
-		selectedKey = m.trustedKeys[kid]
+		selectedEntry = m.trustedKeys[kid]
 	}
-	if selectedKey == nil && iss != "" {
-		selectedKey = m.trustedKeys[iss]
+	if selectedEntry == nil && iss != "" {
+		selectedEntry = m.trustedKeys[iss]
 	}
 	hmacSecret := m.hmacSecret
 	m.mu.RUnlock()
 
 	// Try EC key if found.
-	if selectedKey != nil {
-		k := selectedKey
+	if selectedEntry != nil && selectedEntry.pubKey != nil {
+		k := selectedEntry.pubKey
 		token, err := jwt.Parse(assertion, func(token *jwt.Token) (any, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -702,6 +764,19 @@ func (m *M2MAuthModule) validateJWTAssertion(assertion string) (jwt.MapClaims, e
 		if !ok || !token.Valid {
 			return nil, fmt.Errorf("invalid assertion claims")
 		}
+
+		// Validate audience if configured.
+		if len(selectedEntry.audiences) > 0 {
+			if err := validateAssertionAudience(claims, selectedEntry.audiences); err != nil {
+				return nil, err
+			}
+		}
+
+		// Apply claim mapping if configured.
+		if len(selectedEntry.claimMapping) > 0 {
+			claims = applyAssertionClaimMapping(claims, selectedEntry.claimMapping)
+		}
+
 		return claims, nil
 	}
 
@@ -1031,4 +1106,51 @@ func oauthError(code, description string) map[string]string {
 		"error":             code,
 		"error_description": description,
 	}
+}
+
+// validateAssertionAudience checks that the JWT claims contain at least one of the
+// required audience values.  The `aud` claim can be a single string or a JSON array.
+func validateAssertionAudience(claims jwt.MapClaims, requiredAudiences []string) error {
+	aud := claims["aud"]
+	if aud == nil {
+		return fmt.Errorf("assertion missing aud claim, expected one of %v", requiredAudiences)
+	}
+	var tokenAuds []string
+	switch v := aud.(type) {
+	case string:
+		tokenAuds = []string{v}
+	case []any:
+		for _, a := range v {
+			if s, ok := a.(string); ok {
+				tokenAuds = append(tokenAuds, s)
+			}
+		}
+	}
+	for _, required := range requiredAudiences {
+		for _, tokenAud := range tokenAuds {
+			if tokenAud == required {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("assertion audience %v does not include required audience %v", tokenAuds, requiredAudiences)
+}
+
+// applyAssertionClaimMapping renames claims from an external assertion before they are
+// forwarded into the issued token.  The mapping key is the external claim name; the
+// value is the local claim name.  The original claim is removed when the names differ.
+func applyAssertionClaimMapping(claims jwt.MapClaims, mapping map[string]string) jwt.MapClaims {
+	result := make(jwt.MapClaims, len(claims))
+	for k, v := range claims {
+		result[k] = v
+	}
+	for externalKey, localKey := range mapping {
+		if val, exists := claims[externalKey]; exists {
+			result[localKey] = val
+			if externalKey != localKey {
+				delete(result, externalKey)
+			}
+		}
+	}
+	return result
 }
