@@ -88,8 +88,65 @@ Every external plugin must include a `plugin.json` file in its directory. This f
 | `tags` | No | Array of search/categorization tags. |
 | `repository` | No | URL to the source code repository. |
 | `dependencies` | No | Array of `{"name": "other-plugin", "constraint": ">=1.0.0"}` objects. |
+| `modernizeRules` | No | Array of migration rules for `wfctl modernize` (see below). |
 
 The `name` field must match the directory name under `data/plugins/`. Names are validated against the pattern `^[a-z][a-z0-9-]*[a-z0-9]$` (minimum 2 characters) or a single lowercase letter.
+
+### Declaring Modernize Rules
+
+When you rename module types, step types, or config keys in a new version of your plugin, declare migration rules in `plugin.json` so that users can detect and auto-fix stale configs with `wfctl modernize --plugin-dir data/plugins`.
+
+```json
+{
+  "name": "my-plugin",
+  "version": "2.0.0",
+  "author": "Your Name",
+  "description": "My plugin v2",
+  "moduleTypes": ["my.connector"],
+  "modernizeRules": [
+    {
+      "id": "my-plugin-rename-type",
+      "description": "Rename my.old_connector to my.connector (v2 migration)",
+      "severity": "error",
+      "oldModuleType": "my.old_connector",
+      "newModuleType": "my.connector"
+    },
+    {
+      "id": "my-plugin-rename-key",
+      "description": "Rename apiEndpoint to endpoint in my.connector config",
+      "moduleType": "my.connector",
+      "oldKey": "apiEndpoint",
+      "newKey": "endpoint"
+    }
+  ]
+}
+```
+
+Each rule object supports these fields:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | Yes | Unique kebab-case rule identifier |
+| `description` | Yes | Human-readable description of the migration |
+| `severity` | No | `"error"` or `"warning"` (default: `"warning"`) |
+| `message` | No | Custom finding message (auto-generated if omitted) |
+| `oldModuleType` + `newModuleType` | — | Module type rename rule |
+| `oldStepType` + `newStepType` | — | Step type rename rule |
+| `moduleType` + `oldKey` + `newKey` | — | Config key rename in a specific module type |
+| `stepType` + `oldKey` + `newKey` | — | Config key rename in a specific step type |
+
+Users run modernize with your plugin directory to apply these rules:
+
+```bash
+# Detect issues (dry-run)
+wfctl modernize --plugin-dir data/plugins config.yaml
+
+# Apply fixes
+wfctl modernize --apply --plugin-dir data/plugins config.yaml
+
+# See all available rules (built-in + plugin)
+wfctl modernize --plugin-dir data/plugins --list-rules
+```
 
 ## Directory Layout
 
@@ -661,3 +718,27 @@ Verify the directory layout matches the expected convention:
 - Directory name matches the `name` field in `plugin.json`
 - Binary inside has the same name as the directory
 - Binary has execute permissions (`chmod +x data/plugins/my-plugin/my-plugin`)
+
+## Ecosystem Modernization
+
+### What External Plugin Authors Need to Do
+
+To participate in the `wfctl modernize` ecosystem, external plugin authors must:
+
+1. **Add `modernizeRules` to `plugin.json`** whenever a new release renames module/step types or config keys (see [Declaring Modernize Rules](#declaring-modernize-rules) above).
+
+2. **Ship the updated `plugin.json`** alongside the plugin binary in each release. Users who run `wfctl modernize --plugin-dir data/plugins config.yaml` will automatically pick up the rules from the installed version.
+
+3. **Include rule history**: Rules should remain in `plugin.json` as long as users may still be running configs with the old names. Only remove a rule when you are confident that no users have configs referencing the old type/key.
+
+### What the GoCodeAlone/workflow-registry Needs
+
+The `GoCodeAlone/workflow-registry` repository stores registry manifests (`manifest.json`) for discovery purposes. To surface modernize rules in the registry:
+
+1. **Extend `RegistryCapabilities`** in the registry manifest format to include a `modernizeRules` summary (e.g., list of rule IDs) so that the registry can inform users "this plugin version includes N migration rules."
+
+2. **Update `wfctl publish`** to optionally include the `modernizeRules` from `plugin.json` in the registry manifest so that it is available for discovery via `wfctl registry search`.
+
+3. **Registry manifest convention**: Until the registry manifest format is extended, external plugins should embed their `modernizeRules` in `plugin.json` (the installed copy). The registry entry is informational; the rules are read from the local installed file at modernize time.
+
+> **Note**: The `wfctl modernize --plugin-dir` flag reads installed `plugin.json` files from disk. It does not fetch rules from the registry. This design keeps the command offline-capable and deterministic.

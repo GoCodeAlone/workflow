@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -645,5 +647,223 @@ pipelines:
 	}
 	if strings.Contains(result, `field: "{{ .steps`) {
 		t.Error("conditional-field: template not converted")
+	}
+}
+
+// --- Plugin directory (--plugin-dir) tests ---
+
+// writeTempYAMLFile writes YAML content to a temp file and returns the file path.
+func writeTempYAMLFile(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	f, err := os.CreateTemp(dir, "*.yaml")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatalf("WriteString: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	return f.Name()
+}
+
+// writeTestPluginManifest creates a plugin subdirectory with a plugin.json file.
+func writeTestPluginManifest(t *testing.T, pluginsDir, pluginName string, manifest map[string]any) {
+	t.Helper()
+	dir := filepath.Join(pluginsDir, pluginName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), data, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+}
+
+// TestRunModernize_PluginDir_Empty tests --plugin-dir with an empty directory.
+func TestRunModernize_PluginDir_Empty(t *testing.T) {
+	pluginDir := t.TempDir()
+	cfgFile := writeTempYAMLFile(t, `
+modules:
+  - name: my-server
+    type: http.server
+    config:
+      address: :8080
+`)
+	err := runModernize([]string{"--plugin-dir", pluginDir, cfgFile})
+	if err != nil {
+		t.Fatalf("unexpected error with empty plugin dir: %v", err)
+	}
+}
+
+// TestRunModernize_PluginDir_WithRules tests --plugin-dir with a plugin that
+// declares a modernize rule. This simulates an external plugin migration
+// scenario where the plugin author has renamed a module type in v2.
+func TestRunModernize_PluginDir_WithRules(t *testing.T) {
+	pluginDir := t.TempDir()
+	writeTestPluginManifest(t, pluginDir, "test-ext-plugin", map[string]any{
+		"name":        "test-ext-plugin",
+		"version":     "2.0.0",
+		"author":      "Test",
+		"description": "External test plugin",
+		"modernizeRules": []map[string]any{
+			{
+				"id":            "ext-rename-type",
+				"description":   "Rename ext.old_module to ext.new_module",
+				"severity":      "error",
+				"oldModuleType": "ext.old_module",
+				"newModuleType": "ext.new_module",
+			},
+		},
+	})
+
+	// Write a config that uses the old (deprecated) module type.
+	cfgFile := writeTempYAMLFile(t, `
+modules:
+  - name: my-connector
+    type: ext.old_module
+    config:
+      endpoint: https://api.example.com
+`)
+	// Dry-run should succeed and report findings.
+	err := runModernize([]string{"--plugin-dir", pluginDir, cfgFile})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestRunModernize_PluginDir_NonexistentDir tests --plugin-dir with a missing
+// directory, which should produce an error.
+func TestRunModernize_PluginDir_NonexistentDir(t *testing.T) {
+	cfgFile := writeTempYAMLFile(t, "modules: []\n")
+	err := runModernize([]string{"--plugin-dir", "/nonexistent/dir/12345", cfgFile})
+	if err == nil {
+		t.Fatal("expected error for nonexistent plugin directory")
+	}
+}
+
+// TestRunModernize_PluginDir_ListRulesIncludesPluginRules tests that
+// --list-rules works when a plugin directory is supplied.
+func TestRunModernize_PluginDir_ListRulesIncludesPluginRules(t *testing.T) {
+	pluginDir := t.TempDir()
+	writeTestPluginManifest(t, pluginDir, "my-plugin", map[string]any{
+		"name":        "my-plugin",
+		"version":     "1.0.0",
+		"author":      "Dev",
+		"description": "My plugin",
+		"modernizeRules": []map[string]any{
+			{
+				"id":            "my-plugin-rename",
+				"description":   "Rename my.old to my.new",
+				"oldModuleType": "my.old",
+				"newModuleType": "my.new",
+			},
+		},
+	})
+	// --list-rules should succeed even when a plugin dir is supplied.
+	err := runModernize([]string{"--plugin-dir", pluginDir, "--list-rules"})
+	if err != nil {
+		t.Fatalf("unexpected error with plugin dir + list-rules: %v", err)
+	}
+}
+
+// TestRunModernize_PluginDir_Apply tests that --apply with a plugin rule
+// actually fixes the config file in-place.
+func TestRunModernize_PluginDir_Apply(t *testing.T) {
+	pluginDir := t.TempDir()
+	writeTestPluginManifest(t, pluginDir, "myplugin", map[string]any{
+		"name":        "myplugin",
+		"version":     "1.0.0",
+		"author":      "Dev",
+		"description": "Plugin",
+		"modernizeRules": []map[string]any{
+			{
+				"id":            "myplugin-rename",
+				"description":   "Rename myplugin.old to myplugin.new",
+				"severity":      "error",
+				"oldModuleType": "myplugin.old",
+				"newModuleType": "myplugin.new",
+			},
+		},
+	})
+
+	cfgFile := writeTempYAMLFile(t, `modules:
+  - name: x
+    type: myplugin.old
+    config:
+      key: val
+`)
+	if err := runModernize([]string{"--apply", "--plugin-dir", pluginDir, cfgFile}); err != nil {
+		t.Fatalf("runModernize --apply: %v", err)
+	}
+
+	// Verify the file was updated.
+	data, err := os.ReadFile(cfgFile)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	result := string(data)
+	if strings.Contains(result, "myplugin.old") {
+		t.Error("old module type should have been renamed to myplugin.new")
+	}
+	if !strings.Contains(result, "myplugin.new") {
+		t.Error("new module type should appear after --apply")
+	}
+}
+
+// TestRunModernize_PluginDir_MultiplePlugins tests that rules from multiple
+// plugins are all loaded and applied.
+func TestRunModernize_PluginDir_MultiplePlugins(t *testing.T) {
+	pluginDir := t.TempDir()
+	writeTestPluginManifest(t, pluginDir, "plugin-a", map[string]any{
+		"name":        "plugin-a",
+		"version":     "1.0.0",
+		"author":      "Dev",
+		"description": "Plugin A",
+		"modernizeRules": []map[string]any{
+			{
+				"id":            "plugin-a-rule",
+				"description":   "Rename a.old to a.new",
+				"oldModuleType": "a.old",
+				"newModuleType": "a.new",
+			},
+		},
+	})
+	writeTestPluginManifest(t, pluginDir, "plugin-b", map[string]any{
+		"name":        "plugin-b",
+		"version":     "1.0.0",
+		"author":      "Dev",
+		"description": "Plugin B",
+		"modernizeRules": []map[string]any{
+			{
+				"id":          "plugin-b-rule",
+				"description": "Rename step.b_old to step.b_new",
+				"oldStepType": "step.b_old",
+				"newStepType": "step.b_new",
+			},
+		},
+	})
+
+	cfgFile := writeTempYAMLFile(t, `
+modules:
+  - name: conn
+    type: a.old
+pipelines:
+  main:
+    steps:
+      - name: run
+        type: step.b_old
+        config:
+          key: val
+`)
+	// Should report 2 findings (one per plugin rule) without error.
+	err := runModernize([]string{"--plugin-dir", pluginDir, cfgFile})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
