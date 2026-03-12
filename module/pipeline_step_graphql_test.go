@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGraphQLStep_BasicQuery(t *testing.T) {
@@ -540,6 +541,125 @@ func TestGraphQLStep_Introspection(t *testing.T) {
 	}
 	if len(types) != 2 {
 		t.Errorf("expected 2 types, got %d", len(types))
+	}
+}
+
+func TestGraphQLStep_TemplateVariables(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		if req.Variables["user_id"] != "from-current" {
+			t.Errorf("expected resolved variable, got %v", req.Variables["user_id"])
+		}
+		if !strings.Contains(req.Query, "fragment UserFields") {
+			t.Error("expected fragment to be prepended to query")
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{"user": map[string]any{"name": "Test"}},
+		})
+	}))
+	defer server.Close()
+
+	factory := NewGraphQLStepFactory()
+	step, err := factory("tmpl_test", map[string]any{
+		"url": server.URL,
+		"query": `query GetUser($user_id: ID!) {
+		user(id: $user_id) { ...UserFields }
+	}`,
+		"variables": map[string]any{
+			"user_id": "{{ .user_id }}",
+		},
+		"fragments": []any{
+			"fragment UserFields on User { name email }",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pc := &PipelineContext{
+		Current:     map[string]any{"user_id": "from-current"},
+		StepOutputs: map[string]map[string]any{},
+	}
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output["status_code"] != 200 {
+		t.Errorf("expected 200, got %v", result.Output["status_code"])
+	}
+}
+
+func TestGraphQLStep_Timeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(500 * time.Millisecond)
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"ok": true}})
+	}))
+	defer server.Close()
+
+	factory := NewGraphQLStepFactory()
+	step, err := factory("timeout_test", map[string]any{
+		"url":     server.URL,
+		"query":   "{ status }",
+		"timeout": "50ms",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pc := &PipelineContext{Current: map[string]any{}, StepOutputs: map[string]map[string]any{}}
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "context deadline exceeded") && !strings.Contains(err.Error(), "request failed") {
+		t.Errorf("expected timeout-related error, got: %v", err)
+	}
+}
+
+func TestGraphQLStep_RetryOnNetworkError(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			// Force connection close to simulate network error
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				t.Fatal("server doesn't support hijacking")
+			}
+			conn, _, _ := hj.Hijack()
+			conn.Close()
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"ok": true}})
+	}))
+	defer server.Close()
+
+	factory := NewGraphQLStepFactory()
+	step, err := factory("retry_test", map[string]any{
+		"url":                    server.URL,
+		"query":                  "{ status }",
+		"retry_on_network_error": true,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pc := &PipelineContext{Current: map[string]any{}, StepOutputs: map[string]map[string]any{}}
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("expected retry to succeed, got: %v", err)
+	}
+	if result.Output["has_errors"] != false {
+		t.Error("expected no errors after retry")
+	}
+	if callCount != 2 {
+		t.Errorf("expected 2 calls (fail + retry), got %d", callCount)
 	}
 }
 
