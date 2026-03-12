@@ -236,9 +236,10 @@ func (w *WorkflowDatabase) Query(ctx context.Context, sqlStr string, args ...any
 		row := make(map[string]any)
 		for i, col := range columns {
 			val := values[i]
-			// Convert byte slices to strings for readability
+			// Convert byte slices: try JSON parse first (handles PostgreSQL
+			// json/jsonb columns), fall back to string for non-JSON byte data.
 			if b, ok := val.([]byte); ok {
-				row[col] = string(b)
+				row[col] = parseJSONBytesOrString(b)
 			} else {
 				row[col] = val
 			}
