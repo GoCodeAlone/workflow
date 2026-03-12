@@ -78,6 +78,7 @@ func TestStepFactories(t *testing.T) {
 		"step.cli_print",
 		"step.cli_invoke",
 		"step.parallel",
+		"step.graphql",
 	}
 
 	for _, stepType := range expectedSteps {
