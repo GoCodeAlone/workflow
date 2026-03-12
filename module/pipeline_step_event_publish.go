@@ -91,12 +91,18 @@ func NewEventPublishStepFactory() StepFactory {
 				Algorithm: "AES-256-GCM",
 			}
 			if p, ok := encCfg["provider"].(string); ok && p != "" {
+				if p != "aes" && p != "envelope" {
+					return nil, fmt.Errorf("event_publish step %q: unsupported encryption provider %q (supported: aes, envelope)", name, p)
+				}
 				enc.Provider = p
 			}
 			if k, ok := encCfg["key_id"].(string); ok {
 				enc.KeyID = k
 			}
 			if a, ok := encCfg["algorithm"].(string); ok && a != "" {
+				if a != "AES-256-GCM" {
+					return nil, fmt.Errorf("event_publish step %q: unsupported encryption algorithm %q (supported: AES-256-GCM)", name, a)
+				}
 				enc.Algorithm = a
 			}
 			if fields, ok := encCfg["fields"].([]any); ok {
@@ -109,6 +115,12 @@ func NewEventPublishStepFactory() StepFactory {
 				enc.Fields = fields
 			}
 			if len(enc.Fields) > 0 && enc.KeyID != "" {
+				// Encryption requires a broker/provider so that the full envelope
+				// (including encryption metadata) is published. The EventBus path
+				// does not carry the envelope's extension attributes.
+				if step.broker == "" {
+					return nil, fmt.Errorf("event_publish step %q: 'broker' or 'provider' is required when encryption is configured", name)
+				}
 				step.encryption = enc
 			}
 		}

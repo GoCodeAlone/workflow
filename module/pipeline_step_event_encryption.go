@@ -27,14 +27,21 @@ type eventEncryptionMeta struct {
 }
 
 // resolveEncryptionKey resolves the master encryption key from the KeyID.
-// Supports "${ENV_VAR}" and "$ENV_VAR" env-var references as well as literal keys.
+// Only env-var references are accepted ($VAR or ${VAR}) to prevent operators
+// from accidentally treating a non-secret identifier (e.g. a KMS ARN) as key
+// material. Literal key strings are rejected with a descriptive error.
 func resolveEncryptionKey(keyID string) ([]byte, error) {
-	raw := keyID
-	if strings.HasPrefix(raw, "${") && strings.HasSuffix(raw, "}") {
-		raw = os.Getenv(raw[2 : len(raw)-1])
-	} else if strings.HasPrefix(raw, "$") {
-		raw = os.Getenv(raw[1:])
+	var raw string
+
+	switch {
+	case strings.HasPrefix(keyID, "${") && strings.HasSuffix(keyID, "}"):
+		raw = os.Getenv(keyID[2 : len(keyID)-1])
+	case strings.HasPrefix(keyID, "$"):
+		raw = os.Getenv(keyID[1:])
+	default:
+		return nil, fmt.Errorf("key_id %q must be an environment variable reference (use $VAR or ${VAR})", keyID)
 	}
+
 	if raw == "" {
 		return nil, fmt.Errorf("encryption key is empty (key_id=%q resolved to empty string)", keyID)
 	}

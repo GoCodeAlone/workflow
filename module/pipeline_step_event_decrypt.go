@@ -40,6 +40,9 @@ func NewEventDecryptStepFactory() StepFactory {
 // Name returns the step name.
 func (s *EventDecryptStep) Name() string { return s.name }
 
+// supportedEncryptionAlgorithm is the only algorithm this step can decrypt.
+const supportedEncryptionAlgorithm = "AES-256-GCM"
+
 // Execute decrypts the fields in the incoming CloudEvent.
 //
 // Expected shape of pc.Current (CloudEvents envelope from step.event_publish):
@@ -50,7 +53,7 @@ func (s *EventDecryptStep) Name() string { return s.name }
 //	  "source":          "...",           // optional
 //	  "id":              "...",           // optional
 //	  "time":            "...",           // optional
-//	  "encryption":      "AES-256-GCM",  // extension
+//	  "encryption":      "AES-256-GCM",  // extension — validated before decryption
 //	  "keyid":           "<key-id>",      // extension
 //	  "encrypteddek":    "<base64>",      // extension
 //	  "encryptedfields": "field1,field2", // extension
@@ -73,6 +76,7 @@ func (s *EventDecryptStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 	encryptedDEKB64, _ := event["encrypteddek"].(string)
 	encryptedFields, _ := event["encryptedfields"].(string)
 	keyID, _ := event["keyid"].(string)
+	algorithm, _ := event["encryption"].(string)
 
 	// Override keyID from step configuration if provided.
 	if s.keyID != "" {
@@ -82,6 +86,13 @@ func (s *EventDecryptStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 	// If the event has no encryption metadata, pass through unchanged.
 	if encryptedDEKB64 == "" || encryptedFields == "" || keyID == "" {
 		return &StepResult{Output: event}, nil
+	}
+
+	// Validate the encryption algorithm before attempting decryption.
+	// Events produced by an unknown scheme should not silently fail or
+	// produce garbage — return a clear error instead.
+	if algorithm != "" && algorithm != supportedEncryptionAlgorithm {
+		return nil, fmt.Errorf("event_decrypt step %q: unsupported encryption algorithm %q (supported: %s)", s.name, algorithm, supportedEncryptionAlgorithm)
 	}
 
 	// Locate the payload — either under "data" (CloudEvents envelope) or the event itself.

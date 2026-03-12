@@ -10,13 +10,14 @@ import (
 
 // ---- encryption helper tests ------------------------------------------------
 
-func TestResolveEncryptionKey_Literal(t *testing.T) {
-	key, err := resolveEncryptionKey("mysecretkey")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestResolveEncryptionKey_LiteralRejected(t *testing.T) {
+	// Literal key strings must now be rejected — only env-var references are accepted.
+	_, err := resolveEncryptionKey("mysecretkey")
+	if err == nil {
+		t.Fatal("expected error for literal key_id; only env-var references are allowed")
 	}
-	if len(key) != 32 {
-		t.Errorf("expected 32-byte key, got %d bytes", len(key))
+	if !strings.Contains(err.Error(), "environment variable reference") {
+		t.Errorf("expected message about env-var reference, got: %v", err)
 	}
 }
 
@@ -80,9 +81,11 @@ func TestEncryptDecryptFieldRoundTrip(t *testing.T) {
 }
 
 func TestApplyEventFieldEncryption(t *testing.T) {
+	t.Setenv("TEST_MASTER_KEY", "test-master-key-value")
+
 	cfg := &EventEncryptionConfig{
 		Provider:  "aes",
-		KeyID:     "test-master-key",
+		KeyID:     "${TEST_MASTER_KEY}",
 		Fields:    []string{"phone", "message_body"},
 		Algorithm: "AES-256-GCM",
 	}
@@ -118,8 +121,8 @@ func TestApplyEventFieldEncryption(t *testing.T) {
 	if meta.Algorithm != "AES-256-GCM" {
 		t.Errorf("expected algorithm AES-256-GCM, got %v", meta.Algorithm)
 	}
-	if meta.KeyID != "test-master-key" {
-		t.Errorf("expected keyID test-master-key, got %v", meta.KeyID)
+	if meta.KeyID != "${TEST_MASTER_KEY}" {
+		t.Errorf("expected keyID ${TEST_MASTER_KEY}, got %v", meta.KeyID)
 	}
 	if meta.EncryptedDEK == "" {
 		t.Error("expected non-empty EncryptedDEK")
@@ -130,9 +133,11 @@ func TestApplyEventFieldEncryption(t *testing.T) {
 }
 
 func TestDecryptEventFields(t *testing.T) {
+	t.Setenv("TEST_ROUND_TRIP_KEY", "round-trip-secret-value")
+
 	cfg := &EventEncryptionConfig{
 		Provider:  "aes",
-		KeyID:     "round-trip-key",
+		KeyID:     "${TEST_ROUND_TRIP_KEY}",
 		Fields:    []string{"phone", "message_body"},
 		Algorithm: "AES-256-GCM",
 	}
@@ -166,6 +171,8 @@ func TestDecryptEventFields(t *testing.T) {
 // ---- step.event_publish with encryption -------------------------------------
 
 func TestEventPublishStep_EncryptionConfig_CloudEventsEnvelope(t *testing.T) {
+	t.Setenv("PUB_ENC_TEST_KEY", "test-key-secret-value")
+
 	broker := newMockBroker()
 	app := mockAppWithBroker("bus", broker)
 
@@ -182,7 +189,7 @@ func TestEventPublishStep_EncryptionConfig_CloudEventsEnvelope(t *testing.T) {
 		},
 		"encryption": map[string]any{
 			"provider":  "aes",
-			"key_id":    "test-key-value",
+			"key_id":    "${PUB_ENC_TEST_KEY}",
 			"fields":    []any{"phone", "message"},
 			"algorithm": "AES-256-GCM",
 		},
@@ -217,8 +224,9 @@ func TestEventPublishStep_EncryptionConfig_CloudEventsEnvelope(t *testing.T) {
 	if envelope["encryption"] != "AES-256-GCM" {
 		t.Errorf("expected encryption=AES-256-GCM, got %v", envelope["encryption"])
 	}
-	if envelope["keyid"] != "test-key-value" {
-		t.Errorf("expected keyid=test-key-value, got %v", envelope["keyid"])
+	// keyid stores the original key_id config string (env-var reference).
+	if envelope["keyid"] != "${PUB_ENC_TEST_KEY}" {
+		t.Errorf("expected keyid=${PUB_ENC_TEST_KEY}, got %v", envelope["keyid"])
 	}
 	if envelope["encrypteddek"] == "" {
 		t.Error("expected non-empty encrypteddek")
@@ -235,6 +243,9 @@ func TestEventPublishStep_EncryptionConfig_CloudEventsEnvelope(t *testing.T) {
 	}
 	if data["phone"] == "+15551234567" {
 		t.Error("phone should be encrypted in published envelope")
+	}
+	if data["phone"] == nil {
+		t.Error("phone field missing from published data; encryption may not have run")
 	}
 	if data["message"] == "please help" {
 		t.Error("message should be encrypted in published envelope")
@@ -273,14 +284,20 @@ func TestEventPublishStep_EncryptionConfig_EnvVarKey(t *testing.T) {
 		t.Fatalf("execute error: %v", err)
 	}
 
-	var payload map[string]any
-	if err := json.Unmarshal(broker.producer.published[0].message, &payload); err != nil {
+	var envelope map[string]any
+	if err := json.Unmarshal(broker.producer.published[0].message, &envelope); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	// When no event_type/source, no CloudEvents wrapper — data is flat.
-	data := payload
+	// When encryption is enabled, buildEventEnvelope always wraps under "data".
+	data, ok := envelope["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected envelope with data field; phone encrypted events always produce a wrapper")
+	}
+	if data["phone"] == nil {
+		t.Error("phone field missing from data; encryption may not have run")
+	}
 	if data["phone"] == "+15550000001" {
-		t.Error("phone should be encrypted")
+		t.Error("phone should be encrypted, not plaintext")
 	}
 }
 
@@ -353,13 +370,72 @@ func TestEventPublishStep_EncryptionConfigMissingKey_Ignored(t *testing.T) {
 	}
 }
 
+func TestEventPublishStep_UnsupportedProvider_Error(t *testing.T) {
+	factory := NewEventPublishStepFactory()
+	_, err := factory("pub-bad-provider", map[string]any{
+		"topic":  "events",
+		"broker": "bus",
+		"encryption": map[string]any{
+			"provider": "kms", // unsupported
+			"key_id":   "${SOME_KEY}",
+			"fields":   []any{"phone"},
+		},
+	}, NewMockApplication())
+	if err == nil {
+		t.Fatal("expected error for unsupported provider")
+	}
+	if !strings.Contains(err.Error(), "unsupported encryption provider") {
+		t.Errorf("expected 'unsupported encryption provider' error, got: %v", err)
+	}
+}
+
+func TestEventPublishStep_UnsupportedAlgorithm_Error(t *testing.T) {
+	factory := NewEventPublishStepFactory()
+	_, err := factory("pub-bad-algo", map[string]any{
+		"topic":  "events",
+		"broker": "bus",
+		"encryption": map[string]any{
+			"key_id":    "${SOME_KEY}",
+			"fields":    []any{"phone"},
+			"algorithm": "ChaCha20-Poly1305", // unsupported
+		},
+	}, NewMockApplication())
+	if err == nil {
+		t.Fatal("expected error for unsupported algorithm")
+	}
+	if !strings.Contains(err.Error(), "unsupported encryption algorithm") {
+		t.Errorf("expected 'unsupported encryption algorithm' error, got: %v", err)
+	}
+}
+
+func TestEventPublishStep_EncryptionWithoutBroker_Error(t *testing.T) {
+	// Encryption requires a broker so the full envelope (with metadata) is published.
+	factory := NewEventPublishStepFactory()
+	_, err := factory("pub-enc-no-broker", map[string]any{
+		"topic": "events",
+		// no broker configured
+		"encryption": map[string]any{
+			"key_id": "${SOME_KEY}",
+			"fields": []any{"phone"},
+		},
+	}, NewMockApplication())
+	if err == nil {
+		t.Fatal("expected error when encryption is configured without a broker")
+	}
+	if !strings.Contains(err.Error(), "'broker' or 'provider' is required when encryption") {
+		t.Errorf("expected broker-required error, got: %v", err)
+	}
+}
+
 // ---- step.event_decrypt -----------------------------------------------------
 
 func TestEventDecryptStep_RoundTrip(t *testing.T) {
+	t.Setenv("DECRYPT_STEP_KEY", "decrypt-step-secret-value")
+
 	// Simulate the publish side: encrypt an event.
 	cfg := &EventEncryptionConfig{
 		Provider:  "aes",
-		KeyID:     "decrypt-step-key",
+		KeyID:     "${DECRYPT_STEP_KEY}",
 		Fields:    []string{"phone", "message_body"},
 		Algorithm: "AES-256-GCM",
 	}
@@ -426,11 +502,12 @@ func TestEventDecryptStep_RoundTrip(t *testing.T) {
 }
 
 func TestEventDecryptStep_KeyIDOverride(t *testing.T) {
-	t.Setenv("OVERRIDE_KEY", "override-master-key")
+	t.Setenv("OVERRIDE_KEY", "override-master-key-secret")
 
+	// Encrypt using the env-var key.
 	cfg := &EventEncryptionConfig{
 		Provider:  "aes",
-		KeyID:     "override-master-key", // literal key used during encrypt
+		KeyID:     "${OVERRIDE_KEY}",
 		Fields:    []string{"phone"},
 		Algorithm: "AES-256-GCM",
 	}
@@ -439,16 +516,18 @@ func TestEventDecryptStep_KeyIDOverride(t *testing.T) {
 		t.Fatalf("encrypt: %v", err)
 	}
 
+	// Simulate an event where the keyid extension has been tampered/replaced with
+	// a wrong value — the step config key_id should override it.
 	event := map[string]any{
 		"encryption":      meta.Algorithm,
-		"keyid":           "wrong-key-in-event", // will be overridden by step config
+		"keyid":           "$SOME_OTHER_UNSET_VAR", // wrong key in event
 		"encrypteddek":    meta.EncryptedDEK,
 		"encryptedfields": strings.Join(meta.EncryptedFields, ","),
 		"data":            encData,
 	}
 
 	factory := NewEventDecryptStepFactory()
-	// The step uses key_id="${OVERRIDE_KEY}" which resolves to "override-master-key".
+	// The step uses key_id="${OVERRIDE_KEY}" which resolves to the correct value.
 	step, err := factory("decrypt-override", map[string]any{
 		"key_id": "${OVERRIDE_KEY}",
 	}, NewMockApplication())
@@ -519,9 +598,12 @@ func TestEventDecryptStep_NilData_Passthrough(t *testing.T) {
 }
 
 func TestEventDecryptStep_WrongKey_Error(t *testing.T) {
+	t.Setenv("CORRECT_ENC_KEY", "correct-secret-value-abc")
+	t.Setenv("WRONG_ENC_KEY", "completely-different-value-xyz")
+
 	cfg := &EventEncryptionConfig{
 		Provider:  "aes",
-		KeyID:     "correct-key",
+		KeyID:     "${CORRECT_ENC_KEY}",
 		Fields:    []string{"phone"},
 		Algorithm: "AES-256-GCM",
 	}
@@ -530,9 +612,10 @@ func TestEventDecryptStep_WrongKey_Error(t *testing.T) {
 		t.Fatalf("encrypt: %v", err)
 	}
 
+	// The event's keyid extension points to a different key than was used for encryption.
 	event := map[string]any{
 		"encryption":      meta.Algorithm,
-		"keyid":           "wrong-key",
+		"keyid":           "${WRONG_ENC_KEY}", // different key → DEK unwrap must fail
 		"encrypteddek":    meta.EncryptedDEK,
 		"encryptedfields": strings.Join(meta.EncryptedFields, ","),
 		"data":            encData,
@@ -554,9 +637,41 @@ func TestEventDecryptStep_WrongKey_Error(t *testing.T) {
 	}
 }
 
+func TestEventDecryptStep_UnsupportedAlgorithm_Error(t *testing.T) {
+	// An event with an unknown encryption algorithm should return a clear error.
+	t.Setenv("SOME_TEST_KEY", "some-test-secret")
+
+	event := map[string]any{
+		"encryption":      "ChaCha20-Poly1305", // unsupported
+		"keyid":           "${SOME_TEST_KEY}",
+		"encrypteddek":    "dGVzdA==",
+		"encryptedfields": "phone",
+		"data": map[string]any{
+			"phone": "some-value",
+		},
+	}
+
+	factory := NewEventDecryptStepFactory()
+	step, err := factory("decrypt-bad-algo", map[string]any{}, NewMockApplication())
+	if err != nil {
+		t.Fatalf("factory: %v", err)
+	}
+
+	pc := NewPipelineContext(event, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error for unsupported algorithm")
+	}
+	if !strings.Contains(err.Error(), "unsupported encryption algorithm") {
+		t.Errorf("expected 'unsupported encryption algorithm' error, got: %v", err)
+	}
+}
+
 // TestEventPublishAndDecrypt_FullPipeline tests the full publish→decrypt round trip
 // using both steps together.
 func TestEventPublishAndDecrypt_FullPipeline(t *testing.T) {
+	t.Setenv("PIPELINE_ENC_KEY", "full-pipeline-integration-secret")
+
 	broker := newMockBroker()
 	app := mockAppWithBroker("bus", broker)
 
@@ -574,7 +689,7 @@ func TestEventPublishAndDecrypt_FullPipeline(t *testing.T) {
 		},
 		"encryption": map[string]any{
 			"provider":  "aes",
-			"key_id":    "pipeline-integration-key",
+			"key_id":    "${PIPELINE_ENC_KEY}",
 			"fields":    []any{"phone", "responder_name"},
 			"algorithm": "AES-256-GCM",
 		},
