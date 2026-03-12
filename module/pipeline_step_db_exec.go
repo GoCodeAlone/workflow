@@ -86,7 +86,7 @@ func NewDBExecStepFactory() StepFactory {
 
 func (s *DBExecStep) Name() string { return s.name }
 
-func (s *DBExecStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+func (s *DBExecStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
 	// Resolve template expressions in the query early (before any DB access) when
 	// dynamic SQL is enabled. This validates resolved identifiers against an
 	// allowlist before any database interaction.
@@ -163,9 +163,9 @@ func (s *DBExecStep) Execute(_ context.Context, pc *PipelineContext) (*StepResul
 	// engine converts to ? for SQLite automatically.
 	query = normalizePlaceholders(query, driver)
 
-	// When returning is true, use Query() so that RETURNING clause rows are available.
+	// When returning is true, use QueryContext() so that RETURNING clause rows are available.
 	if s.returning {
-		rows, err := db.Query(query, resolvedParams...)
+		rows, err := db.QueryContext(ctx, query, resolvedParams...)
 		if err != nil {
 			if s.ignoreError {
 				output := map[string]any{"ignored_error": err.Error()}
@@ -178,61 +178,20 @@ func (s *DBExecStep) Execute(_ context.Context, pc *PipelineContext) (*StepResul
 				}
 				return &StepResult{Output: output}, nil
 			}
-			return nil, fmt.Errorf("db_exec step %q: exec failed: %w", s.name, err)
+			return nil, fmt.Errorf("db_exec step %q: query failed: %w", s.name, err)
 		}
 		defer rows.Close()
 
-		columns, err := rows.Columns()
+		results, err := scanSQLRows(rows)
 		if err != nil {
-			return nil, fmt.Errorf("db_exec step %q: failed to get columns: %w", s.name, err)
+			return nil, fmt.Errorf("db_exec step %q: %w", s.name, err)
 		}
 
-		var results []map[string]any
-		for rows.Next() {
-			values := make([]any, len(columns))
-			valuePtrs := make([]any, len(columns))
-			for i := range values {
-				valuePtrs[i] = &values[i]
-			}
-			if err := rows.Scan(valuePtrs...); err != nil {
-				return nil, fmt.Errorf("db_exec step %q: scan failed: %w", s.name, err)
-			}
-			row := make(map[string]any, len(columns))
-			for i, col := range columns {
-				val := values[i]
-				if b, ok := val.([]byte); ok {
-					row[col] = string(b)
-				} else {
-					row[col] = val
-				}
-			}
-			results = append(results, row)
-		}
-		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("db_exec step %q: row iteration error: %w", s.name, err)
-		}
-
-		output := make(map[string]any)
-		if s.mode == "single" {
-			if len(results) > 0 {
-				output["row"] = results[0]
-				output["found"] = true
-			} else {
-				output["row"] = map[string]any{}
-				output["found"] = false
-			}
-		} else {
-			if results == nil {
-				results = []map[string]any{}
-			}
-			output["rows"] = results
-			output["count"] = len(results)
-		}
-		return &StepResult{Output: output}, nil
+		return &StepResult{Output: formatQueryOutput(results, s.mode)}, nil
 	}
 
 	// Execute statement
-	result, err := db.Exec(query, resolvedParams...)
+	result, err := db.ExecContext(ctx, query, resolvedParams...)
 	if err != nil {
 		if s.ignoreError {
 			return &StepResult{Output: map[string]any{

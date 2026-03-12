@@ -93,7 +93,7 @@ func NewDBQueryStepFactory() StepFactory {
 
 func (s *DBQueryStep) Name() string { return s.name }
 
-func (s *DBQueryStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+func (s *DBQueryStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
 	// Resolve template expressions in the query early (before any DB access) when
 	// dynamic SQL is enabled. This validates resolved identifiers against an
 	// allowlist before any database interaction.
@@ -167,62 +167,16 @@ func (s *DBQueryStep) Execute(_ context.Context, pc *PipelineContext) (*StepResu
 	query = normalizePlaceholders(query, driver)
 
 	// Execute query
-	rows, err := db.Query(query, resolvedParams...)
+	rows, err := db.QueryContext(ctx, query, resolvedParams...)
 	if err != nil {
 		return nil, fmt.Errorf("db_query step %q: query failed: %w", s.name, err)
 	}
 	defer rows.Close()
 
-	columns, err := rows.Columns()
+	results, err := scanSQLRows(rows)
 	if err != nil {
-		return nil, fmt.Errorf("db_query step %q: failed to get columns: %w", s.name, err)
+		return nil, fmt.Errorf("db_query step %q: %w", s.name, err)
 	}
 
-	var results []map[string]any
-	for rows.Next() {
-		values := make([]any, len(columns))
-		valuePtrs := make([]any, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return nil, fmt.Errorf("db_query step %q: scan failed: %w", s.name, err)
-		}
-
-		row := make(map[string]any, len(columns))
-		for i, col := range columns {
-			val := values[i]
-			// Convert []byte to string for readability
-			if b, ok := val.([]byte); ok {
-				row[col] = string(b)
-			} else {
-				row[col] = val
-			}
-		}
-		results = append(results, row)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("db_query step %q: row iteration error: %w", s.name, err)
-	}
-
-	output := make(map[string]any)
-	if s.mode == "single" {
-		if len(results) > 0 {
-			output["row"] = results[0]
-			output["found"] = true
-		} else {
-			output["row"] = map[string]any{}
-			output["found"] = false
-		}
-	} else {
-		if results == nil {
-			results = []map[string]any{}
-		}
-		output["rows"] = results
-		output["count"] = len(results)
-	}
-
-	return &StepResult{Output: output}, nil
+	return &StepResult{Output: formatQueryOutput(results, s.mode)}, nil
 }
