@@ -314,3 +314,126 @@ func TestDBExecStep_PostgresPlaceholdersOnSQLite(t *testing.T) {
 		t.Errorf("expected name='PostgresStyleWidget', got %q", name)
 	}
 }
+
+// TestDBExecStep_Returning_SingleMode verifies that returning:true with mode:single
+// uses Query() and returns the first row via RETURNING clause.
+func TestDBExecStep_Returning_SingleMode(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE items (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT 'now')`)
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	app := mockAppWithDB("test-db", db)
+	factory := NewDBExecStepFactory()
+	step, err := factory("insert-returning", map[string]any{
+		"database":  "test-db",
+		"query":     "INSERT INTO items (id, name) VALUES (?, ?) RETURNING id, name",
+		"params":    []any{"r1", "ReturnedItem"},
+		"returning": true,
+		"mode":      "single",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	found, _ := result.Output["found"].(bool)
+	if !found {
+		t.Error("expected found=true")
+	}
+	row, ok := result.Output["row"].(map[string]any)
+	if !ok {
+		t.Fatal("expected 'row' in output")
+	}
+	if row["id"] != "r1" {
+		t.Errorf("expected row.id='r1', got %v", row["id"])
+	}
+	if row["name"] != "ReturnedItem" {
+		t.Errorf("expected row.name='ReturnedItem', got %v", row["name"])
+	}
+}
+
+// TestDBExecStep_Returning_ListMode verifies that returning:true with mode:list (default)
+// returns all affected rows via RETURNING clause.
+func TestDBExecStep_Returning_ListMode(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`
+		CREATE TABLE items (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active');
+		INSERT INTO items (id, name) VALUES ('i1', 'Alpha');
+		INSERT INTO items (id, name) VALUES ('i2', 'Beta');
+		INSERT INTO items (id, name) VALUES ('i3', 'Gamma');
+	`)
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	app := mockAppWithDB("test-db", db)
+	factory := NewDBExecStepFactory()
+	step, err := factory("update-returning", map[string]any{
+		"database":  "test-db",
+		"query":     "UPDATE items SET status = ? RETURNING id, name, status",
+		"params":    []any{"archived"},
+		"returning": true,
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	count, _ := result.Output["count"].(int)
+	if count != 3 {
+		t.Errorf("expected count=3, got %v", result.Output["count"])
+	}
+	rows, ok := result.Output["rows"].([]map[string]any)
+	if !ok {
+		t.Fatal("expected 'rows' in output")
+	}
+	if len(rows) != 3 {
+		t.Errorf("expected 3 rows, got %d", len(rows))
+	}
+	// Verify status was updated
+	for _, row := range rows {
+		if row["status"] != "archived" {
+			t.Errorf("expected status='archived', got %v", row["status"])
+		}
+	}
+}
+
+// TestDBExecStep_Returning_InvalidMode verifies that an invalid mode is rejected at factory time.
+func TestDBExecStep_Returning_InvalidMode(t *testing.T) {
+	factory := NewDBExecStepFactory()
+	_, err := factory("bad-mode", map[string]any{
+		"database":  "test-db",
+		"query":     "INSERT INTO x VALUES (?) RETURNING id",
+		"params":    []any{"1"},
+		"returning": true,
+		"mode":      "invalid",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error for invalid mode")
+	}
+	if !strings.Contains(err.Error(), "mode must be") {
+		t.Errorf("expected 'mode must be' in error, got: %v", err)
+	}
+}

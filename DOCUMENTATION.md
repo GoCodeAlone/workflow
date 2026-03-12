@@ -147,7 +147,7 @@ flowchart TD
 | `step.delegate` | Delegates to a named service | pipelinesteps |
 | `step.request_parse` | Extracts path params, query params, and request body from HTTP requests | pipelinesteps |
 | `step.db_query` | Executes parameterized SQL SELECT queries against a named database | pipelinesteps |
-| `step.db_exec` | Executes parameterized SQL INSERT/UPDATE/DELETE against a named database | pipelinesteps |
+| `step.db_exec` | Executes parameterized SQL INSERT/UPDATE/DELETE against a named database. Supports `returning: true` with `mode: single` or `mode: list` to capture rows from a `RETURNING` clause | pipelinesteps |
 | `step.db_query_cached` | Executes a cached SQL SELECT query | pipelinesteps |
 | `step.db_create_partition` | Creates a time-based table partition | pipelinesteps |
 | `step.db_sync_partitions` | Ensures future partitions exist for a partitioned table | pipelinesteps |

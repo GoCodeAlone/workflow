@@ -17,6 +17,8 @@ type DBExecStep struct {
 	ignoreError     bool
 	tenantKey       string // dot-path to resolve tenant value for automatic scoping
 	allowDynamicSQL bool
+	returning       bool   // when true, uses Query() and returns rows (for RETURNING clause)
+	mode            string // "list" or "single" — used only when returning is true
 	app             modular.Application
 	tmpl            *TemplateEngine
 }
@@ -54,6 +56,17 @@ func NewDBExecStepFactory() StepFactory {
 
 		ignoreError, _ := config["ignore_error"].(bool)
 		tenantKey, _ := config["tenantKey"].(string)
+		returning, _ := config["returning"].(bool)
+
+		mode, _ := config["mode"].(string)
+		if returning {
+			if mode == "" {
+				mode = "list"
+			}
+			if mode != "list" && mode != "single" {
+				return nil, fmt.Errorf("db_exec step %q: mode must be 'list' or 'single', got %q", name, mode)
+			}
+		}
 
 		return &DBExecStep{
 			name:            name,
@@ -63,6 +76,8 @@ func NewDBExecStepFactory() StepFactory {
 			ignoreError:     ignoreError,
 			tenantKey:       tenantKey,
 			allowDynamicSQL: allowDynamicSQL,
+			returning:       returning,
+			mode:            mode,
 			app:             app,
 			tmpl:            NewTemplateEngine(),
 		}, nil
@@ -71,7 +86,7 @@ func NewDBExecStepFactory() StepFactory {
 
 func (s *DBExecStep) Name() string { return s.name }
 
-func (s *DBExecStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+func (s *DBExecStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
 	// Resolve template expressions in the query early (before any DB access) when
 	// dynamic SQL is enabled. This validates resolved identifiers against an
 	// allowlist before any database interaction.
@@ -148,8 +163,35 @@ func (s *DBExecStep) Execute(_ context.Context, pc *PipelineContext) (*StepResul
 	// engine converts to ? for SQLite automatically.
 	query = normalizePlaceholders(query, driver)
 
+	// When returning is true, use QueryContext() so that RETURNING clause rows are available.
+	if s.returning {
+		rows, err := db.QueryContext(ctx, query, resolvedParams...)
+		if err != nil {
+			if s.ignoreError {
+				output := map[string]any{"ignored_error": err.Error()}
+				if s.mode == "single" {
+					output["row"] = map[string]any{}
+					output["found"] = false
+				} else {
+					output["rows"] = []map[string]any{}
+					output["count"] = 0
+				}
+				return &StepResult{Output: output}, nil
+			}
+			return nil, fmt.Errorf("db_exec step %q: query failed: %w", s.name, err)
+		}
+		defer rows.Close()
+
+		results, err := scanSQLRows(rows)
+		if err != nil {
+			return nil, fmt.Errorf("db_exec step %q: %w", s.name, err)
+		}
+
+		return &StepResult{Output: formatQueryOutput(results, s.mode)}, nil
+	}
+
 	// Execute statement
-	result, err := db.Exec(query, resolvedParams...)
+	result, err := db.ExecContext(ctx, query, resolvedParams...)
 	if err != nil {
 		if s.ignoreError {
 			return &StepResult{Output: map[string]any{
