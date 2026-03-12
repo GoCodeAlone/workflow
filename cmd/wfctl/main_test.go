@@ -319,3 +319,36 @@ modules:
 		schema.UnregisterModuleType("custom.ext.validate.testonly")
 	})
 }
+
+func TestRunValidatePluginDirCapabilities(t *testing.T) {
+	// Create a fake external plugin directory with a plugin.json using the
+	// v0.3.0+ nested "capabilities" object format (as produced by wfctl plugin install).
+	pluginsDir := t.TempDir()
+	pluginSubdir := filepath.Join(pluginsDir, "my-ext-plugin-caps")
+	if err := os.MkdirAll(pluginSubdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"my-ext-plugin-caps","version":"1.0.0","type":"external","capabilities":{"configProvider":false,"moduleTypes":["custom.caps.validate.testonly"],"stepTypes":["step.caps_validate_testonly"],"triggerTypes":[]}}`
+	if err := os.WriteFile(filepath.Join(pluginSubdir, "plugin.json"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Config using the module type declared in capabilities
+	dir := t.TempDir()
+	configContent := "modules:\n  - name: caps-mod\n    type: custom.caps.validate.testonly\n"
+	path := writeTestConfig(t, dir, "workflow.yaml", configContent)
+
+	// Without --plugin-dir: should fail (unknown type)
+	if err := runValidate([]string{path}); err == nil {
+		t.Fatal("expected error for unknown external module type without --plugin-dir")
+	}
+
+	// With --plugin-dir: should pass (types from capabilities object are recognized)
+	if err := runValidate([]string{"--plugin-dir", pluginsDir, path}); err != nil {
+		t.Errorf("expected valid config with --plugin-dir (capabilities format), got: %v", err)
+	}
+	t.Cleanup(func() {
+		schema.UnregisterModuleType("custom.caps.validate.testonly")
+		schema.UnregisterModuleType("step.caps_validate_testonly")
+	})
+}
