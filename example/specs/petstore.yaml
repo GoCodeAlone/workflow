@@ -20,6 +20,25 @@ paths:
       responses:
         "200":
           description: A list of pets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                    - id
+                    - name
+                  properties:
+                    id:
+                      type: integer
+                    name:
+                      type: string
+                      minLength: 1
+                      maxLength: 100
+                    tag:
+                      type: string
+                      maxLength: 50
         "400":
           description: Invalid request
     post:
@@ -43,7 +62,21 @@ paths:
                   maxLength: 50
       responses:
         "201":
-          description: Null response
+          description: Created pet
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - name
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  tag:
+                    type: string
         "400":
           description: Validation error
 
@@ -60,8 +93,31 @@ paths:
       responses:
         "200":
           description: Expected response to a valid request
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - name
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  tag:
+                    type: string
         "404":
           description: Pet not found
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - error
+                properties:
+                  error:
+                    type: string
 
   /pets/{petId}/status:
     put:
@@ -91,6 +147,22 @@ paths:
       responses:
         "200":
           description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - status
+                properties:
+                  id:
+                    type: integer
+                  status:
+                    type: string
+                    enum:
+                      - available
+                      - pending
+                      - sold
         "400":
           description: Invalid status
         "404":
