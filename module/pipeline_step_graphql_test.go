@@ -429,6 +429,120 @@ func TestGraphQLStep_BatchQueries(t *testing.T) {
 	}
 }
 
+func TestGraphQLStep_APQ(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		var req map[string]any
+		json.NewDecoder(r.Body).Decode(&req)
+
+		ext, _ := req["extensions"].(map[string]any)
+		pq, _ := ext["persistedQuery"].(map[string]any)
+
+		if callCount == 1 {
+			// First call: hash only, no query body — return PersistedQueryNotFound
+			if req["query"] != nil {
+				t.Error("first APQ call should not include query body")
+			}
+			if pq == nil {
+				t.Fatal("expected persistedQuery extension")
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"errors": []map[string]any{
+					{"message": "PersistedQueryNotFound"},
+				},
+			})
+			return
+		}
+
+		// Second call: hash + query body
+		if req["query"] == nil {
+			t.Error("retry should include query body")
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{"ok": true},
+		})
+	}))
+	defer server.Close()
+
+	factory := NewGraphQLStepFactory()
+	step, err := factory("apq_test", map[string]any{
+		"url":   server.URL,
+		"query": "{ status }",
+		"persisted_query": map[string]any{
+			"enabled": true,
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pc := &PipelineContext{Current: map[string]any{}, StepOutputs: map[string]map[string]any{}}
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output["has_errors"] != false {
+		t.Error("expected no errors after APQ negotiation")
+	}
+	if callCount != 2 {
+		t.Errorf("expected 2 calls (hash miss + retry), got %d", callCount)
+	}
+}
+
+func TestGraphQLStep_Introspection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query string `json:"query"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		if !strings.Contains(req.Query, "__schema") {
+			t.Error("expected introspection query with __schema")
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"__schema": map[string]any{
+					"types": []any{
+						map[string]any{"name": "Query", "kind": "OBJECT"},
+						map[string]any{"name": "User", "kind": "OBJECT"},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	factory := NewGraphQLStepFactory()
+	step, err := factory("introspect_test", map[string]any{
+		"url": server.URL,
+		"introspection": map[string]any{
+			"enabled": true,
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pc := &PipelineContext{Current: map[string]any{}, StepOutputs: map[string]map[string]any{}}
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.Output["schema"] == nil {
+		t.Error("expected schema in output")
+	}
+	types, ok := result.Output["types"].([]any)
+	if !ok {
+		t.Fatalf("expected types array, got %T", result.Output["types"])
+	}
+	if len(types) != 2 {
+		t.Errorf("expected 2 types, got %d", len(types))
+	}
+}
+
 func TestGraphQLStep_DataPathExtraction(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
