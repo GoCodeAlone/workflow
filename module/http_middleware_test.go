@@ -272,7 +272,212 @@ func TestCORSMiddleware_Process_Preflight(t *testing.T) {
 	}
 }
 
-func TestCORSMiddleware_ProvidesServices(t *testing.T) {
+func TestCORSMiddlewareWithConfig_AllowedHeaders(t *testing.T) {
+	m := NewCORSMiddlewareWithConfig("cors", CORSMiddlewareConfig{
+		AllowedOrigins: []string{"http://localhost:3000"},
+		AllowedMethods: []string{"GET", "POST"},
+		AllowedHeaders: []string{"Content-Type", "Authorization", "X-CSRF-Token", "X-Request-Id"},
+	})
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	got := rec.Header().Get("Access-Control-Allow-Headers")
+	want := "Content-Type, Authorization, X-CSRF-Token, X-Request-Id"
+	if got != want {
+		t.Errorf("expected Access-Control-Allow-Headers %q, got %q", want, got)
+	}
+}
+
+func TestCORSMiddlewareWithConfig_DefaultHeaders(t *testing.T) {
+	// When AllowedHeaders is omitted, defaults to Content-Type and Authorization.
+	m := NewCORSMiddlewareWithConfig("cors", CORSMiddlewareConfig{
+		AllowedOrigins: []string{"http://localhost:3000"},
+		AllowedMethods: []string{"GET"},
+	})
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	got := rec.Header().Get("Access-Control-Allow-Headers")
+	want := "Content-Type, Authorization"
+	if got != want {
+		t.Errorf("expected default Access-Control-Allow-Headers %q, got %q", want, got)
+	}
+}
+
+func TestCORSMiddlewareWithConfig_AllowCredentials(t *testing.T) {
+	m := NewCORSMiddlewareWithConfig("cors", CORSMiddlewareConfig{
+		AllowedOrigins:   []string{"http://app.example.com"},
+		AllowedMethods:   []string{"GET", "POST"},
+		AllowCredentials: true,
+	})
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Origin", "http://app.example.com")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Access-Control-Allow-Origin") != "http://app.example.com" {
+		t.Errorf("expected origin reflected, got %q", rec.Header().Get("Access-Control-Allow-Origin"))
+	}
+	if rec.Header().Get("Access-Control-Allow-Credentials") != "true" {
+		t.Errorf("expected Access-Control-Allow-Credentials: true, got %q", rec.Header().Get("Access-Control-Allow-Credentials"))
+	}
+}
+
+func TestCORSMiddlewareWithConfig_NoCredentialsFlagNotSet(t *testing.T) {
+	m := NewCORSMiddlewareWithConfig("cors", CORSMiddlewareConfig{
+		AllowedOrigins: []string{"http://app.example.com"},
+		AllowedMethods: []string{"GET"},
+	})
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Origin", "http://app.example.com")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Errorf("expected no Access-Control-Allow-Credentials header, got %q", rec.Header().Get("Access-Control-Allow-Credentials"))
+	}
+}
+
+func TestCORSMiddlewareWithConfig_MaxAge(t *testing.T) {
+	m := NewCORSMiddlewareWithConfig("cors", CORSMiddlewareConfig{
+		AllowedOrigins: []string{"*"},
+		AllowedMethods: []string{"GET", "POST"},
+		MaxAge:         3600,
+	})
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Origin", "http://anything.com")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Access-Control-Max-Age") != "3600" {
+		t.Errorf("expected Access-Control-Max-Age: 3600, got %q", rec.Header().Get("Access-Control-Max-Age"))
+	}
+}
+
+func TestCORSMiddlewareWithConfig_NoMaxAge(t *testing.T) {
+	m := NewCORSMiddlewareWithConfig("cors", CORSMiddlewareConfig{
+		AllowedOrigins: []string{"*"},
+		AllowedMethods: []string{"GET"},
+	})
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Origin", "http://anything.com")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Access-Control-Max-Age") != "" {
+		t.Errorf("expected no Access-Control-Max-Age header, got %q", rec.Header().Get("Access-Control-Max-Age"))
+	}
+}
+
+func TestCORSMiddlewareWithConfig_WildcardSubdomain(t *testing.T) {
+	m := NewCORSMiddlewareWithConfig("cors", CORSMiddlewareConfig{
+		AllowedOrigins: []string{"*.example.com"},
+		AllowedMethods: []string{"GET"},
+	})
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	tests := []struct {
+		origin  string
+		allowed bool
+	}{
+		{"http://app.example.com", true},
+		{"http://admin.example.com", true},
+		// Port should be handled correctly via hostname parsing
+		{"http://app.example.com:3000", true},
+		{"http://evil.com", false},
+		{"http://notexample.com", false},
+		// Empty origin must not match wildcard
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		req := httptest.NewRequest("GET", "/test", nil)
+		if tt.origin != "" {
+			req.Header.Set("Origin", tt.origin)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		hasHeader := rec.Header().Get("Access-Control-Allow-Origin") != ""
+		if hasHeader != tt.allowed {
+			t.Errorf("origin %q: expected allowed=%v, got header=%q", tt.origin, tt.allowed, rec.Header().Get("Access-Control-Allow-Origin"))
+		}
+	}
+}
+
+func TestCORSMiddleware_VaryHeader(t *testing.T) {
+	m := NewCORSMiddleware("cors", []string{"http://localhost:3000"}, []string{"GET"})
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Vary") != "Origin" {
+		t.Errorf("expected Vary: Origin header, got %q", rec.Header().Get("Vary"))
+	}
+}
+
+func TestCORSMiddleware_EmptyOriginSkipped(t *testing.T) {
+	// When no Origin header is sent, CORS headers must not be set.
+	m := NewCORSMiddleware("cors", []string{"*"}, []string{"GET"})
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	// No Origin header set
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("expected no CORS headers when Origin is absent, got %q", rec.Header().Get("Access-Control-Allow-Origin"))
+	}
+}
+
+func TestCORSMiddlewareWithConfig_ProvidesServices(t *testing.T) {
 	m := NewCORSMiddleware("cors-mw", nil, nil)
 	svcs := m.ProvidesServices()
 	if len(svcs) != 1 {
