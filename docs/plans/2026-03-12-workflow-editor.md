@@ -2754,6 +2754,142 @@ npx playwright test
 
 ---
 
+### Task 28: VS Code extension integration tests
+
+**Files:**
+- Create: `workflow-vscode/src/test/suite/visual-editor.test.ts`
+- Modify: `workflow-vscode/package.json` (add `@vscode/test-electron` devDep)
+
+**Step 1: Add test infrastructure**
+
+```bash
+cd workflow-vscode
+npm install --save-dev @vscode/test-electron @vscode/test-cli
+```
+
+**Step 2: Write integration tests**
+
+```ts
+import * as vscode from 'vscode';
+import * as assert from 'assert';
+
+suite('Visual Editor', () => {
+  test('openVisualEditor command is registered', async () => {
+    const commands = await vscode.commands.getCommands(true);
+    assert.ok(commands.includes('workflow.openVisualEditor'));
+  });
+
+  test('opens webview panel for workflow YAML', async () => {
+    // Create a temp workflow.yaml with modules: + workflows: keys
+    // Open it, run the command, verify a webview panel opens
+  });
+
+  test('does not activate for non-workflow YAML', async () => {
+    // Create a generic YAML file without modules:/workflows: keys
+    // Verify isWorkflowFile returns false
+  });
+
+  test('configPaths setting overrides content detection', async () => {
+    // Set workflow.configPaths to ["custom/path.yaml"]
+    // Verify that file matches even without modules:/workflows: content
+  });
+
+  test('detection prompt appears for content-matched files', async () => {
+    // Open a YAML with modules: + workflows: that isn't in configPaths
+    // Verify information message is shown (mock or spy)
+  });
+});
+```
+
+**Step 3: Add test script to package.json**
+
+```json
+"test": "vscode-test"
+```
+
+**Step 4: Add to CI**
+
+Update `release.yml` to run tests before packaging.
+
+**Step 5: Commit**
+
+```bash
+git add src/test/ package.json
+git commit -m "test: add VS Code extension integration tests"
+```
+
+---
+
+### Task 29: JetBrains plugin integration tests
+
+**Files:**
+- Create: `workflow-jetbrains/src/test/kotlin/com/gocodalone/workflow/ide/editor/WorkflowFileDetectorTest.kt`
+- Create: `workflow-jetbrains/src/test/kotlin/com/gocodalone/workflow/ide/editor/WorkflowVisualEditorTest.kt`
+
+**Step 1: Write file detector tests**
+
+```kotlin
+class WorkflowFileDetectorTest : BasePlatformTestCase() {
+    fun testDetectsWorkflowYaml() {
+        val file = myFixture.configureByText("app.yaml", """
+            modules:
+              - name: web
+                type: http.server
+            workflows:
+              http:
+                routes: []
+        """.trimIndent())
+        assertTrue(WorkflowFileDetector.isWorkflowFile(project, file.virtualFile))
+    }
+
+    fun testRejectsGenericYaml() {
+        val file = myFixture.configureByText("config.yaml", """
+            database:
+              host: localhost
+              port: 5432
+        """.trimIndent())
+        assertFalse(WorkflowFileDetector.isWorkflowFile(project, file.virtualFile))
+    }
+
+    fun testConfigPathsOverrideContentDetection() {
+        WorkflowSettings.getInstance().configPaths = listOf("custom/*.yaml")
+        val file = myFixture.configureByText("custom/test.yaml", "key: value")
+        // Verify configPaths glob matching works
+    }
+}
+```
+
+**Step 2: Write visual editor action test**
+
+```kotlin
+class WorkflowVisualEditorTest : BasePlatformTestCase() {
+    fun testActionEnabledForYamlFiles() {
+        val file = myFixture.configureByText("app.yaml", "modules: []")
+        // Verify action is enabled
+    }
+
+    fun testActionDisabledForNonYamlFiles() {
+        val file = myFixture.configureByText("main.go", "package main")
+        // Verify action is disabled
+    }
+}
+```
+
+**Step 3: Verify tests run**
+
+```bash
+./gradlew test
+```
+
+**Step 4: Commit**
+
+```bash
+git add src/test/
+git commit -m "test: add JetBrains plugin integration tests"
+```
+
+---
+
 ## Task Summary
 
 | # | Phase | Task | Repo |
@@ -2785,3 +2921,5 @@ npx playwright test
 | 25 | 6 | Node validation indicators | workflow-editor |
 | 26 | 6 | Cursor→node highlight | workflow-editor, workflow-vscode, workflow-jetbrains |
 | 27 | 6 | Component tests and E2E | workflow-editor |
+| 28 | 6 | VS Code extension integration tests | workflow-vscode |
+| 29 | 6 | JetBrains plugin integration tests | workflow-jetbrains |
