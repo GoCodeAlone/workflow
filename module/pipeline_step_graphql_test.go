@@ -162,6 +162,65 @@ func TestGraphQLStep_GraphQLErrors_PartialData(t *testing.T) {
 	}
 }
 
+func TestGraphQLStep_OAuth2ClientCredentials(t *testing.T) {
+	tokenCalled := 0
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenCalled++
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if r.Form.Get("grant_type") != "client_credentials" {
+			t.Errorf("expected grant_type=client_credentials, got %s", r.Form.Get("grant_type"))
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "test-token-123",
+			"expires_in":   3600,
+			"token_type":   "Bearer",
+		})
+	}))
+	defer tokenServer.Close()
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer test-token-123" {
+			w.WriteHeader(401)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{"ok": true},
+		})
+	}))
+	defer apiServer.Close()
+
+	factory := NewGraphQLStepFactory()
+	step, err := factory("oauth_test", map[string]any{
+		"url":   apiServer.URL,
+		"query": "{ status }",
+		"auth": map[string]any{
+			"type":          "oauth2_client_credentials",
+			"token_url":     tokenServer.URL,
+			"client_id":     "test-client",
+			"client_secret": "test-secret",
+			"scopes":        []any{"api.read"},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pc := &PipelineContext{Current: map[string]any{}, StepOutputs: map[string]map[string]any{}}
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output["has_errors"] != false {
+		t.Error("expected no errors")
+	}
+	if tokenCalled != 1 {
+		t.Errorf("expected 1 token call, got %d", tokenCalled)
+	}
+}
+
 func TestGraphQLStep_DataPathExtraction(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
