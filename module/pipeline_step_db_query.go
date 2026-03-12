@@ -178,53 +178,5 @@ func (s *DBQueryStep) Execute(ctx context.Context, pc *PipelineContext) (*StepRe
 		return nil, fmt.Errorf("db_query step %q: %w", s.name, err)
 	}
 
-	var results []map[string]any
-	for rows.Next() {
-		values := make([]any, len(columns))
-		valuePtrs := make([]any, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return nil, fmt.Errorf("db_query step %q: scan failed: %w", s.name, err)
-		}
-
-		row := make(map[string]any, len(columns))
-		for i, col := range columns {
-			val := values[i]
-			// Convert []byte: try JSON parse first (handles PostgreSQL json/jsonb
-			// column types returned by the pgx driver as raw JSON bytes), then
-			// fall back to string conversion for non-JSON byte data (e.g. bytea).
-			if b, ok := val.([]byte); ok {
-				row[col] = parseJSONBytesOrString(b)
-			} else {
-				row[col] = val
-			}
-		}
-		results = append(results, row)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("db_query step %q: row iteration error: %w", s.name, err)
-	}
-
-	output := make(map[string]any)
-	if s.mode == "single" {
-		if len(results) > 0 {
-			output["row"] = results[0]
-			output["found"] = true
-		} else {
-			output["row"] = map[string]any{}
-			output["found"] = false
-		}
-	} else {
-		if results == nil {
-			results = []map[string]any{}
-		}
-		output["rows"] = results
-		output["count"] = len(results)
-	}
-
-	return &StepResult{Output: formatQueryOutput(output, s.mode)}, nil
+	return &StepResult{Output: formatQueryOutput(results, s.mode)}, nil
 }
