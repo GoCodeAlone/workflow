@@ -158,6 +158,118 @@ pipelines:
 	}
 }
 
+func TestHyphenSteps_RenamesSequenceElements(t *testing.T) {
+	input := `
+pipelines:
+  create-item:
+    steps:
+      - name: require-auth
+        type: step.auth_validate
+        config:
+          auth_module: auth-jwt
+      - name: insert-item
+        type: step.db_exec
+        config:
+          database: db
+          query: "INSERT INTO items (id, user_id) VALUES ($1, $2)"
+          params:
+            - "{{ uuidv4 }}"
+            - '{{ index .steps "require-auth" "sub" }}'
+`
+	root := parseYAML(t, input)
+	rule := hyphenStepsRule()
+	changes := rule.Fix(root)
+
+	out, err := yaml.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(out)
+
+	if !strings.Contains(output, `index .steps "require_auth" "sub"`) {
+		t.Errorf("template reference in params array not updated\noutput:\n%s", output)
+	}
+	if !strings.Contains(output, "name: require_auth") {
+		t.Error("step name not renamed")
+	}
+
+	// Should have at least 3 changes: 2 name renames + 1 params reference
+	if len(changes) < 3 {
+		t.Errorf("expected at least 3 changes, got %d", len(changes))
+		for _, c := range changes {
+			t.Logf("  %s (line %d): %s", c.RuleID, c.Line, c.Description)
+		}
+	}
+}
+
+func TestHyphenSteps_RenamesStepFunction(t *testing.T) {
+	input := `
+pipelines:
+  update-profile:
+    steps:
+      - name: fetch-current
+        type: step.db_query
+        config:
+          database: db
+          query: "SELECT * FROM users WHERE id = $1"
+          mode: single
+      - name: merge-values
+        type: step.set
+        config:
+          values:
+            merged_name: '{{ trigger "body" "name" | default (step "fetch-current" "row" "name") }}'
+            merged_bio: '{{ trigger "body" "bio" | default (step "fetch-current" "row" "bio") | default "" }}'
+`
+	root := parseYAML(t, input)
+	rule := hyphenStepsRule()
+	rule.Fix(root)
+
+	out, err := yaml.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(out)
+
+	if !strings.Contains(output, `step "fetch_current" "row" "name"`) {
+		t.Errorf("step function reference not updated\noutput:\n%s", output)
+	}
+	if !strings.Contains(output, `step "fetch_current" "row" "bio"`) {
+		t.Errorf("step function reference in second value not updated\noutput:\n%s", output)
+	}
+}
+
+func TestHyphenSteps_RenamesBodyFromPaths(t *testing.T) {
+	input := `
+pipelines:
+  analytics:
+    steps:
+      - name: fetch-stats
+        type: step.db_query
+        config:
+          database: db
+          query: "SELECT * FROM stats"
+          mode: single
+      - name: respond
+        type: step.json_response
+        config:
+          status: 200
+          body_from: 'steps.fetch-stats.row'
+`
+	root := parseYAML(t, input)
+	rule := hyphenStepsRule()
+	rule.Fix(root)
+
+	out, err := yaml.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(out)
+
+	if !strings.Contains(output, "steps.fetch_stats.row") {
+		t.Errorf("body_from path not updated\noutput:\n%s", output)
+	}
+}
+
 func TestHyphenSteps_Check(t *testing.T) {
 	input := `
 pipelines:

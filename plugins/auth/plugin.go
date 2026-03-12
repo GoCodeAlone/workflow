@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -223,6 +224,48 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 					Introspect: stringFromMap(endpointsCfg, "introspect"),
 					JWKS:       stringFromMap(endpointsCfg, "jwks"),
 				})
+      }
+      
+			// Register YAML-configured trusted keys for JWT-bearer grants.
+			if trustedKeys, ok := cfg["trustedKeys"].([]any); ok {
+				for i, tk := range trustedKeys {
+					tkMap, ok := tk.(map[string]any)
+					if !ok {
+						m.SetInitErr(fmt.Errorf("auth.m2m: trustedKeys[%d] must be an object", i))
+						break
+					}
+					issuer := stringFromMap(tkMap, "issuer")
+					publicKeyPEM := stringFromMap(tkMap, "publicKeyPEM")
+					if issuer == "" {
+						m.SetInitErr(fmt.Errorf("auth.m2m: trustedKeys[%d] missing required field \"issuer\"", i))
+						break
+					}
+					if publicKeyPEM == "" {
+						m.SetInitErr(fmt.Errorf("auth.m2m: trustedKeys[%d] (issuer %q) missing required field \"publicKeyPEM\"", i, issuer))
+						break
+					}
+					var audiences []string
+					if auds, ok := tkMap["audiences"].([]any); ok {
+						for _, a := range auds {
+							if s, ok := a.(string); ok {
+								audiences = append(audiences, s)
+							}
+						}
+					}
+					var claimMapping map[string]string
+					if cm, ok := tkMap["claimMapping"].(map[string]any); ok {
+						claimMapping = make(map[string]string, len(cm))
+						for k, v := range cm {
+							if s, ok := v.(string); ok {
+								claimMapping[k] = s
+							}
+						}
+					}
+					if err := m.AddTrustedKeyFromPEM(issuer, publicKeyPEM, audiences, claimMapping); err != nil {
+						m.SetInitErr(err)
+						break
+					}
+				}
 			}
 			return m
 		},
@@ -391,6 +434,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "clients", Label: "Registered Clients", Type: schema.FieldTypeJSON, Description: "List of OAuth2 clients: [{clientId, clientSecret, scopes, description, claims}]"},
 				{Key: "introspect", Label: "Introspection Policy", Type: schema.FieldTypeJSON, Description: "Access-control policy for POST /oauth/introspect: {allowOthers: bool, requiredScope: string, requiredClaim: string, requiredClaimVal: string}. Default: self-only (allowOthers: false)."},
 				{Key: "endpoints", Label: "Endpoint Paths", Type: schema.FieldTypeJSON, Description: "Custom OAuth2 endpoint path suffixes: {token, revoke, introspect, jwks}. Defaults: /oauth/token, /oauth/revoke, /oauth/introspect, /oauth/jwks."},
+				{Key: "trustedKeys", Label: "Trusted External Issuers", Type: schema.FieldTypeJSON, Description: "List of trusted external JWT issuers for JWT-bearer grants: [{issuer, publicKeyPEM, audiences, claimMapping}]. Supports literal \\n in PEM values for Docker/Kubernetes env vars."},
 			},
 			DefaultConfig: map[string]any{"algorithm": "ES256", "tokenExpiry": "1h", "issuer": "workflow", "clients": []any{}},
 		},

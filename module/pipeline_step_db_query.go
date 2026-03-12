@@ -193,9 +193,11 @@ func (s *DBQueryStep) Execute(_ context.Context, pc *PipelineContext) (*StepResu
 		row := make(map[string]any, len(columns))
 		for i, col := range columns {
 			val := values[i]
-			// Convert []byte to string for readability
+			// Convert []byte: try JSON parse first (handles PostgreSQL json/jsonb
+			// column types returned by the pgx driver as raw JSON bytes), then
+			// fall back to string conversion for non-JSON byte data (e.g. bytea).
 			if b, ok := val.([]byte); ok {
-				row[col] = string(b)
+				row[col] = parseJSONBytesOrString(b)
 			} else {
 				row[col] = val
 			}

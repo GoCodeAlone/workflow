@@ -370,3 +370,85 @@ func TestDBQueryStep_EmptyResult(t *testing.T) {
 		t.Errorf("expected count=0, got %d", count)
 	}
 }
+
+// TestParseJSONBytesOrString exercises the helper used by the db_query scanner
+// to transparently parse PostgreSQL json/jsonb column bytes.
+func TestParseJSONBytesOrString(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []byte
+		want  any
+	}{
+		{
+			name:  "json object",
+			input: []byte(`{"id":1,"type":"follow-ups"}`),
+			want:  map[string]any{"id": float64(1), "type": "follow-ups"},
+		},
+		{
+			name:  "json array",
+			input: []byte(`[{"id":1},{"id":2}]`),
+			want:  []any{map[string]any{"id": float64(1)}, map[string]any{"id": float64(2)}},
+		},
+		{
+			name:  "json string",
+			input: []byte(`"hello"`),
+			want:  "hello",
+		},
+		{
+			name:  "json number",
+			input: []byte(`42`),
+			want:  float64(42),
+		},
+		{
+			name:  "json bool",
+			input: []byte(`true`),
+			want:  true,
+		},
+		{
+			name:  "json null",
+			input: []byte(`null`),
+			want:  nil,
+		},
+		{
+			name:  "binary / non-json bytes",
+			input: []byte{0x89, 0x50, 0x4e, 0x47}, // PNG magic bytes
+			want:  string([]byte{0x89, 0x50, 0x4e, 0x47}),
+		},
+		{
+			name:  "empty bytes",
+			input: []byte{},
+			want:  "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseJSONBytesOrString(tc.input)
+			// Use JSON round-trip for equality check to handle map/slice cases.
+			switch expected := tc.want.(type) {
+			case map[string]any:
+				m, ok := got.(map[string]any)
+				if !ok {
+					t.Fatalf("expected map[string]any, got %T", got)
+				}
+				for k, v := range expected {
+					if m[k] != v {
+						t.Errorf("key %q: expected %v, got %v", k, v, m[k])
+					}
+				}
+			case []any:
+				sl, ok := got.([]any)
+				if !ok {
+					t.Fatalf("expected []any, got %T", got)
+				}
+				if len(sl) != len(expected) {
+					t.Fatalf("expected len %d, got %d", len(expected), len(sl))
+				}
+			default:
+				if got != tc.want {
+					t.Errorf("expected %v (%T), got %v (%T)", tc.want, tc.want, got, got)
+				}
+			}
+		})
+	}
+}
