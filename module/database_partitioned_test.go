@@ -977,8 +977,10 @@ func TestPartitionedDatabase_SyncInterval_NoSourceTable_NoGoroutine(t *testing.T
 func TestPartitionedDatabase_PeriodicSync_GoroutineLifecycle(t *testing.T) {
 	// When sourceTable is configured, autoSync is false, and syncInterval is set,
 	// a background goroutine must be launched. Stop must cleanly terminate it.
+	// Use sqlite so the DB connection is real (nil-DB guard requires an open connection).
 	cfg := PartitionedDatabaseConfig{
-		Driver:       "pgx",
+		Driver:       "sqlite",
+		DSN:          ":memory:",
 		PartitionKey: "tenant_id",
 		Tables:       []string{"forms"},
 		SourceTable:  "tenants",
@@ -1000,10 +1002,7 @@ func TestPartitionedDatabase_PeriodicSync_GoroutineLifecycle(t *testing.T) {
 		t.Fatal("expected syncStop channel to be set after Start with syncInterval")
 	}
 
-	// Allow at least one tick; the goroutine will log nil-DB error but must
-	// not panic or deadlock.
-	time.Sleep(150 * time.Millisecond)
-
+	// Ensure Stop cleanly terminates the background goroutine without panic or deadlock.
 	done := make(chan error, 1)
 	go func() { done <- pd.Stop(context.Background()) }()
 
@@ -1041,5 +1040,34 @@ func TestPartitionedDatabase_AutoSync_DefaultTrueWhenSourceTableSet(t *testing.T
 	}
 	if !strings.Contains(err.Error(), "auto-sync on startup failed") {
 		t.Errorf("expected auto-sync startup error, got: %v", err)
+	}
+}
+
+func TestPartitionedDatabase_SyncInterval_NilDB_ReturnsError(t *testing.T) {
+	// When syncInterval is configured and sourceTable is set, but no DSN is
+	// provided (DB is nil), Start must return a clear error instead of starting
+	// a goroutine that would repeatedly fail and produce log noise.
+	cfg := PartitionedDatabaseConfig{
+		Driver:       "pgx",
+		PartitionKey: "tenant_id",
+		Tables:       []string{"forms"},
+		SourceTable:  "tenants",
+		AutoSync:     boolPtr(false), // skip startup sync to isolate interval check
+		SyncInterval: "100ms",
+		// No DSN: base.Start is a no-op → DB remains nil.
+	}
+	pd := NewPartitionedDatabase("db", cfg)
+
+	app := NewMockApplication()
+	if err := pd.Init(app); err != nil {
+		t.Fatalf("Init error: %v", err)
+	}
+
+	err := pd.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected Start to return an error when syncInterval is set but DB is nil")
+	}
+	if !strings.Contains(err.Error(), "syncInterval requires an open database connection") {
+		t.Errorf("expected nil-DB syncInterval error, got: %v", err)
 	}
 }

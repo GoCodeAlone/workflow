@@ -254,6 +254,8 @@ func (p *PartitionedDatabase) Start(ctx context.Context) error {
 
 	if autoSync && hasSourceTable {
 		if err := p.SyncPartitionsFromSource(ctx); err != nil {
+			// DB was opened; close it to avoid leaking the connection on startup failure.
+			_ = p.base.Stop(ctx)
 			return fmt.Errorf("partitioned database %q: auto-sync on startup failed: %w", p.name, err)
 		}
 	}
@@ -262,9 +264,17 @@ func (p *PartitionedDatabase) Start(ctx context.Context) error {
 	if p.config.SyncInterval != "" && hasSourceTable {
 		interval, err := time.ParseDuration(p.config.SyncInterval)
 		if err != nil {
+			// DB was opened; close it to avoid leaking the connection on startup failure.
+			_ = p.base.Stop(ctx)
 			return fmt.Errorf("partitioned database %q: invalid syncInterval %q: %w", p.name, p.config.SyncInterval, err)
 		}
 		if interval > 0 {
+			if p.base.DB() == nil {
+				// No database connection is available; starting the goroutine would
+				// produce repeated error logs with no useful work.
+				_ = p.base.Stop(ctx)
+				return fmt.Errorf("partitioned database %q: syncInterval requires an open database connection (is DSN configured?)", p.name)
+			}
 			p.syncStop = make(chan struct{})
 			p.syncWg.Add(1)
 			go p.runPeriodicSync(ctx, interval)
