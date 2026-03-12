@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import useWorkflowStore from '../../store/workflowStore.ts';
+import { useWorkflowStore } from '@gocodealone/workflow-editor/stores';
 import { listDynamicComponents, createDynamicComponent, deleteDynamicComponent } from '../../utils/api.ts';
 import type { DynamicComponent } from '../../utils/api.ts';
 

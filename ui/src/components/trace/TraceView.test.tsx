@@ -64,8 +64,8 @@ vi.mock('@gocodealone/workflow-ui/trace', () => ({
   ),
 }));
 
-vi.mock('../../store/workflowStore.ts', () => ({
-  default: vi.fn(() => null), // activeWorkflowRecord = null
+vi.mock('@gocodealone/workflow-editor/stores', () => ({
+  useWorkflowStore: vi.fn(() => null), // activeWorkflowRecord = null
 }));
 
 vi.mock('../../utils/api.ts', () => ({
@@ -95,12 +95,12 @@ vi.mock('../../utils/api.ts', () => ({
   apiStopRuntimeInstance: vi.fn(),
 }));
 
-vi.mock('../../utils/serialization.ts', () => ({
+vi.mock('@gocodealone/workflow-editor/utils', () => ({
   parseYaml: vi.fn().mockReturnValue({}),
   configToNodes: vi.fn().mockReturnValue({ nodes: [], edges: [] }),
 }));
 
-import { configToNodes } from '../../utils/serialization.ts';
+import { configToNodes } from '@gocodealone/workflow-editor/utils';
 
 // --- Store reset ---
 

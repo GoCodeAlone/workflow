@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import useObservabilityStore from '../../store/observabilityStore.ts';
-import useWorkflowStore from '../../store/workflowStore.ts';
+import { useWorkflowStore } from '@gocodealone/workflow-editor/stores';
 import usePluginStore, { type UIPageDef } from '../../store/pluginStore.ts';
 import useAuthStore from '../../store/authStore.ts';
 import type { ActiveView } from '../../types/observability.ts';

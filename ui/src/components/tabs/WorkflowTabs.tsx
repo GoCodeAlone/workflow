@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import useWorkflowStore from '../../store/workflowStore.ts';
+import { useWorkflowStore } from '@gocodealone/workflow-editor/stores';
 import useObservabilityStore from '../../store/observabilityStore.ts';
 
 export default function WorkflowTabs() {

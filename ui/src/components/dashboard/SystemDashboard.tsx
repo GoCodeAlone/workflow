@@ -1,8 +1,8 @@
 import { useEffect, useCallback, useMemo, useState } from 'react';
 import useObservabilityStore from '../../store/observabilityStore.ts';
-import useWorkflowStore from '../../store/workflowStore.ts';
+import { useWorkflowStore } from '@gocodealone/workflow-editor/stores';
 import type { WorkflowDashSummary } from '../../types/observability.ts';
-import { apiFetchRuntimeInstances, apiStopRuntimeInstance, apiDeployWorkflow, apiStopWorkflow, type RuntimeInstanceResponse, type ApiWorkflowRecord } from '../../utils/api.ts';
+import { apiFetchRuntimeInstances, apiStopRuntimeInstance, apiDeployWorkflow, apiStopWorkflow, type RuntimeInstanceResponse } from '../../utils/api.ts';
 
 const STATUS_COLORS: Record<string, string> = {
   draft: '#6c7086',
@@ -214,7 +214,7 @@ export default function SystemDashboard() {
       const workflowName = wf?.workflow_name ?? wfId;
       setSelectedWorkflowId(wfId);
       renameTab(activeTabId, workflowName);
-      setActiveWorkflowRecord({ id: wfId, name: workflowName } as Pick<ApiWorkflowRecord, 'id' | 'name'> as ApiWorkflowRecord);
+      setActiveWorkflowRecord({ id: wfId, name: workflowName } as unknown as Record<string, unknown>);
       setActiveView('executions');
     },
     [setActiveView, setSelectedWorkflowId, summaries, renameTab, activeTabId, setActiveWorkflowRecord],

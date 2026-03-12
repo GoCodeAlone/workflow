@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
-import useWorkflowStore from '../../store/workflowStore.ts';
+import { useWorkflowStore } from '@gocodealone/workflow-editor/stores';
 import useObservabilityStore from '../../store/observabilityStore.ts';
-import { parseYaml } from '../../utils/serialization.ts';
+import { parseYaml } from '@gocodealone/workflow-editor/utils';
 
 // ---------------------------------------------------------------------------
 // Types

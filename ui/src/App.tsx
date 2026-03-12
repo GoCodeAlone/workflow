@@ -1,8 +1,8 @@
 import { Component, type ReactNode, useEffect, useState, useCallback } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
-import NodePalette from './components/sidebar/NodePalette.tsx';
-import WorkflowCanvas from './components/canvas/WorkflowCanvas.tsx';
-import PropertyPanel from './components/properties/PropertyPanel.tsx';
+import { NodePalette, WorkflowCanvas, PropertyPanel } from '@gocodealone/workflow-editor';
+import { useWorkflowStore, useModuleSchemaStore, useUILayoutStore, PANEL_WIDTH_LIMITS } from '@gocodealone/workflow-editor/stores';
+import { parseYaml } from '@gocodealone/workflow-editor/utils';
 import Toolbar from './components/toolbar/Toolbar.tsx';
 import WorkflowTabs from './components/tabs/WorkflowTabs.tsx';
 import ToastContainer from './components/toast/ToastContainer.tsx';
@@ -29,14 +29,10 @@ import ScaffoldPage from './components/scaffold/ScaffoldPage.tsx';
 import TemplatePage from './components/dynamic/TemplatePage.tsx';
 import WorkflowPickerBar from './components/shared/WorkflowPickerBar.tsx';
 import CollapsiblePanel from './components/layout/CollapsiblePanel.tsx';
-import useWorkflowStore from './store/workflowStore.ts';
 import useAuthStore from './store/authStore.ts';
 import useObservabilityStore from './store/observabilityStore.ts';
-import useModuleSchemaStore from './store/moduleSchemaStore.ts';
 import usePluginStore from './store/pluginStore.ts';
 import type { UIPageDef } from './store/pluginStore.ts';
-import useUILayoutStore, { PANEL_WIDTH_LIMITS } from './store/uiLayoutStore.ts';
-import { parseYaml } from './utils/serialization.ts';
 import type { ApiProject, ApiWorkflowRecord } from './utils/api.ts';
 
 function EditorView() {
@@ -65,9 +61,8 @@ function EditorView() {
   // Sync activeWorkflowRecord to observability selectedWorkflowId
   // Only set (not clear) — clearing is handled by explicit close actions
   useEffect(() => {
-    if (activeWorkflowRecord?.id) {
-      setSelectedWorkflowId(activeWorkflowRecord.id);
-    }
+    const id = (activeWorkflowRecord as ApiWorkflowRecord | null)?.id;
+    if (id) setSelectedWorkflowId(id);
   }, [activeWorkflowRecord, setSelectedWorkflowId]);
 
   // Keyboard shortcuts: Ctrl+1/2/3 toggle panels
@@ -113,7 +108,7 @@ function EditorView() {
         // Invalid config — canvas already cleared above
       }
     }
-    setActiveWorkflowRecord(wf);
+    setActiveWorkflowRecord(wf as unknown as Record<string, unknown>);
     renameTab(activeTabId, wf.name);
   }, [clearCanvas, importFromConfig, setActiveWorkflowRecord, renameTab, activeTabId]);
 

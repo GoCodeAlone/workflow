@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import useWorkflowStore from '../../store/workflowStore.ts';
+import { useWorkflowStore } from '@gocodealone/workflow-editor/stores';
 import { generateWorkflow, suggestWorkflows } from '../../utils/api.ts';
-import type { WorkflowConfig } from '../../types/workflow.ts';
+import type { WorkflowConfig } from '@gocodealone/workflow-editor/types';
 import type { WorkflowSuggestion } from '../../utils/api.ts';
 
 const QUICK_SUGGESTIONS = [

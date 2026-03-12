@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { act } from '@testing-library/react';
 import Toolbar from './Toolbar.tsx';
-import useWorkflowStore from '../../store/workflowStore.ts';
+import { useWorkflowStore } from '@gocodealone/workflow-editor/stores';
 
 // Mock the API module
 vi.mock('../../utils/api.ts', () => ({

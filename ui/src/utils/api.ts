@@ -1,5 +1,5 @@
 import { apiGet, apiPost, apiPut, apiDelete, getApiConfig } from '@gocodealone/workflow-ui/api';
-import type { WorkflowConfig } from '../types/workflow.ts';
+import type { WorkflowConfig } from '@gocodealone/workflow-editor/types';
 import type {
   SystemDashboard,
   WorkflowDashboardResponse,

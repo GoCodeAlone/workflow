@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import useWorkflowStore from '../../store/workflowStore.ts';
+import { useWorkflowStore } from '@gocodealone/workflow-editor/stores';
 
 export interface Toast {
   id: string;

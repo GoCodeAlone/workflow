@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import useWorkflowStore from '../../store/workflowStore.ts';
-import { configToYaml, parseYaml } from '../../utils/serialization.ts';
+import { useWorkflowStore } from '@gocodealone/workflow-editor/stores';
+import { configToYaml, parseYaml } from '@gocodealone/workflow-editor/utils';
 import {
   getWorkflowConfig,
   validateWorkflow,
@@ -8,6 +8,7 @@ import {
   apiLoadWorkflowFromPath,
   apiDeployWorkflow,
   apiStopWorkflow,
+  type ApiWorkflowRecord,
 } from '../../utils/api.ts';
 import WorkflowHistory from '../workflows/WorkflowHistory.tsx';
 
@@ -31,7 +32,7 @@ export default function Toolbar() {
   const setViewLevel = useWorkflowStore((s) => s.setViewLevel);
   const autoGroupOrphans = useWorkflowStore((s) => s.autoGroupOrphans);
   const autoLayout = useWorkflowStore((s) => s.autoLayout);
-  const activeWorkflowRecord = useWorkflowStore((s) => s.activeWorkflowRecord);
+  const activeWorkflowRecord = useWorkflowStore((s) => s.activeWorkflowRecord) as ApiWorkflowRecord | null;
   const setActiveWorkflowRecord = useWorkflowStore((s) => s.setActiveWorkflowRecord);
 
   const [showHistory, setShowHistory] = useState(false);
@@ -42,7 +43,7 @@ export default function Toolbar() {
     setDeployInProgress(true);
     try {
       const updated = await apiDeployWorkflow(activeWorkflowRecord.id);
-      setActiveWorkflowRecord(updated);
+      setActiveWorkflowRecord(updated as unknown as Record<string, unknown>);
       addToast(`Deployed v${updated.version} - status: ${updated.status}`, 'success');
     } catch (e) {
       addToast(`Deploy failed: ${(e as Error).message}`, 'error');
@@ -56,7 +57,7 @@ export default function Toolbar() {
     setDeployInProgress(true);
     try {
       const updated = await apiStopWorkflow(activeWorkflowRecord.id);
-      setActiveWorkflowRecord(updated);
+      setActiveWorkflowRecord(updated as unknown as Record<string, unknown>);
       addToast(`Stopped "${updated.name}"`, 'success');
     } catch (e) {
       addToast(`Stop failed: ${(e as Error).message}`, 'error');
@@ -145,7 +146,7 @@ export default function Toolbar() {
         name: activeWorkflowRecord.name,
         config_yaml: yaml,
       });
-      setActiveWorkflowRecord(updated);
+      setActiveWorkflowRecord(updated as unknown as Record<string, unknown>);
       addToast(`Saved v${updated.version}`, 'success');
     } catch (e) {
       addToast(`Save failed: ${(e as Error).message}`, 'error');
@@ -334,7 +335,7 @@ export default function Toolbar() {
                 name: activeWorkflowRecord.name,
                 config_yaml: configYaml,
               });
-              setActiveWorkflowRecord(updated);
+              setActiveWorkflowRecord(updated as unknown as Record<string, unknown>);
               const config = parseYaml(configYaml);
               clearCanvas();
               importFromConfig(config);

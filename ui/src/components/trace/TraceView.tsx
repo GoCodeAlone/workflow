@@ -9,9 +9,9 @@ import {
 import type { TraceStep, TraceData, LogEntry } from '@gocodealone/workflow-ui/trace';
 import { toTraceStep, toLogEntry } from './traceUtils.ts';
 import useObservabilityStore from '../../store/observabilityStore.ts';
-import useWorkflowStore from '../../store/workflowStore.ts';
-import { apiGetExecutionLogs, apiGetWorkflow } from '../../utils/api.ts';
-import { configToNodes, parseYaml } from '../../utils/serialization.ts';
+import { useWorkflowStore } from '@gocodealone/workflow-editor/stores';
+import { apiGetExecutionLogs, apiGetWorkflow, type ApiWorkflowRecord } from '../../utils/api.ts';
+import { configToNodes, parseYaml } from '@gocodealone/workflow-editor/utils';
 
 const STATUS_COLORS: Record<string, string> = {
   pending: '#6c7086',
@@ -31,7 +31,7 @@ export default function TraceView({ executionId }: { executionId: string }) {
     selectedWorkflowId,
   } = useObservabilityStore();
 
-  const activeWorkflowRecord = useWorkflowStore((s) => s.activeWorkflowRecord);
+  const activeWorkflowRecord = useWorkflowStore((s) => s.activeWorkflowRecord) as ApiWorkflowRecord | null;
 
   const [selectedStep, setSelectedStep] = useState<TraceStep | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
