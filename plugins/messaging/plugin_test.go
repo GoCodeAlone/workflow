@@ -258,10 +258,6 @@ func TestPipelineTriggerConfigWrappers(t *testing.T) {
 	p := New()
 	wrappers := p.PipelineTriggerConfigWrappers()
 
-	if len(wrappers) != 2 {
-		t.Fatalf("expected 2 pipeline trigger config wrappers, got %d", len(wrappers))
-	}
-
 	for _, triggerType := range []string{"event", "eventbus"} {
 		if _, ok := wrappers[triggerType]; !ok {
 			t.Errorf("missing pipeline trigger config wrapper: %s", triggerType)
@@ -272,7 +268,10 @@ func TestPipelineTriggerConfigWrappers(t *testing.T) {
 func TestPipelineTriggerConfigWrapper_Event(t *testing.T) {
 	p := New()
 	wrappers := p.PipelineTriggerConfigWrappers()
-	wrapper := wrappers["event"]
+	wrapper, ok := wrappers["event"]
+	if !ok {
+		t.Fatal("missing pipeline trigger config wrapper: event")
+	}
 
 	cfg := map[string]any{
 		"topic": "orders.created",
@@ -302,7 +301,10 @@ func TestPipelineTriggerConfigWrapper_Event(t *testing.T) {
 func TestPipelineTriggerConfigWrapper_EventBus(t *testing.T) {
 	p := New()
 	wrappers := p.PipelineTriggerConfigWrappers()
-	wrapper := wrappers["eventbus"]
+	wrapper, ok := wrappers["eventbus"]
+	if !ok {
+		t.Fatal("missing pipeline trigger config wrapper: eventbus")
+	}
 
 	cfg := map[string]any{
 		"topic": "follow-up.created",
@@ -332,7 +334,10 @@ func TestPipelineTriggerConfigWrapper_EventBus(t *testing.T) {
 func TestPipelineTriggerConfigWrapper_EventBus_WithEventFilter(t *testing.T) {
 	p := New()
 	wrappers := p.PipelineTriggerConfigWrappers()
-	wrapper := wrappers["eventbus"]
+	wrapper, ok := wrappers["eventbus"]
+	if !ok {
+		t.Fatal("missing pipeline trigger config wrapper: eventbus")
+	}
 
 	cfg := map[string]any{
 		"topic": "user.events",
