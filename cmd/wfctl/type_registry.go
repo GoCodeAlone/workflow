@@ -750,7 +750,7 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.sandbox_exec": {
 			Type:       "step.sandbox_exec",
 			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"image", "command", "security_profile", "memory_limit", "cpu_limit", "timeout", "network", "env", "mounts"},
+			ConfigKeys: []string{"image", "command", "security_profile", "memory_limit", "cpu_limit", "timeout", "network", "env", "mounts", "fail_on_error"},
 		},
 		"step.ui_scaffold": {
 			Type:       "step.ui_scaffold",
@@ -1246,16 +1246,38 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			ConfigKeys: []string{"template_name", "template_version", "parameters"},
 		},
 
+		// platform plugin steps (kubernetes)
+		"step.k8s_plan": {
+			Type:       "step.k8s_plan",
+			Plugin:     "platform",
+			ConfigKeys: []string{"cluster"},
+		},
+		"step.k8s_apply": {
+			Type:       "step.k8s_apply",
+			Plugin:     "platform",
+			ConfigKeys: []string{"cluster"},
+		},
+		"step.k8s_status": {
+			Type:       "step.k8s_status",
+			Plugin:     "platform",
+			ConfigKeys: []string{"cluster"},
+		},
+		"step.k8s_destroy": {
+			Type:       "step.k8s_destroy",
+			Plugin:     "platform",
+			ConfigKeys: []string{"cluster"},
+		},
+
 		// platform plugin steps (scaling)
 		"step.scaling_plan": {
 			Type:       "step.scaling_plan",
 			Plugin:     "platform",
-			ConfigKeys: []string{"scaling", "provider_service", "resources_from", "context_org", "context_env", "context_app", "tier", "dry_run"},
+			ConfigKeys: []string{"scaling"},
 		},
 		"step.scaling_apply": {
 			Type:       "step.scaling_apply",
 			Plugin:     "platform",
-			ConfigKeys: []string{"scaling", "provider_service", "plan_from"},
+			ConfigKeys: []string{"scaling"},
 		},
 		"step.scaling_status": {
 			Type:       "step.scaling_status",

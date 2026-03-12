@@ -3,6 +3,11 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/GoCodeAlone/workflow/capability"
+	"github.com/GoCodeAlone/workflow/plugin"
+	"github.com/GoCodeAlone/workflow/plugins/all"
+	"github.com/GoCodeAlone/workflow/schema"
 )
 
 func TestKnownModuleTypesPopulated(t *testing.T) {
@@ -191,5 +196,30 @@ func TestStepTypeCount(t *testing.T) {
 	// This threshold guards against accidental removal; update it when new steps are added.
 	if len(types) < 120 {
 		t.Errorf("expected at least 120 step types, got %d — some step types may have been dropped", len(types))
+	}
+}
+
+// TestKnownStepTypesCoverAllPlugins ensures KnownStepTypes() is in sync with all step
+// types registered by the built-in plugins. Any step type registered by a DefaultPlugin
+// that is not listed in KnownStepTypes() will cause this test to fail, preventing silent
+// omissions from being introduced in the future.
+func TestKnownStepTypesCoverAllPlugins(t *testing.T) {
+	// Collect all step types registered by DefaultPlugins via the PluginLoader.
+	capReg := capability.NewRegistry()
+	schemaReg := schema.NewModuleSchemaRegistry()
+	loader := plugin.NewPluginLoader(capReg, schemaReg)
+	for _, p := range all.DefaultPlugins() {
+		if err := loader.LoadPlugin(p); err != nil {
+			t.Fatalf("LoadPlugin(%q) error: %v", p.Name(), err)
+		}
+	}
+
+	pluginSteps := loader.StepFactories()
+	known := KnownStepTypes()
+
+	for stepType := range pluginSteps {
+		if _, ok := known[stepType]; !ok {
+			t.Errorf("step type %q is registered by a built-in plugin but missing from KnownStepTypes()", stepType)
+		}
 	}
 }
