@@ -40,6 +40,7 @@ func TestStepFactories(t *testing.T) {
 		"step.jq",
 		"step.publish",
 		"step.event_publish",
+		"step.event_decrypt",
 		"step.http_call",
 		"step.request_parse",
 		"step.db_query",

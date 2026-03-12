@@ -143,6 +143,7 @@ flowchart TD
 | `step.log` | Logs pipeline data for debugging | pipelinesteps |
 | `step.publish` | Publishes events to EventBus | pipelinesteps |
 | `step.event_publish` | Publishes events to EventBus with full envelope control | pipelinesteps |
+| `step.event_decrypt` | Decrypts field-level-encrypted CloudEvents produced by step.event_publish | pipelinesteps |
 | `step.http_call` | Makes outbound HTTP requests | pipelinesteps |
 | `step.graphql` | Execute GraphQL queries/mutations with data extraction, pagination, batching, APQ | pipelinesteps |
 | `step.delegate` | Delegates to a named service | pipelinesteps |
