@@ -171,6 +171,8 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 		"feature-flag-workflow.yaml": "step.feature_flag requires featureflag.service module loaded before pipeline configuration",
 		// actor-system config uses inline pipeline routes that require actor workflow handler wiring
 		"actor-system-config.yaml": "actor workflow handler wires routes via plugin hooks, not traditional handler registration",
+		// docs-with-plugins example references authz.enforcer from an external plugin not available in test engine
+		"docs-with-plugins/workflow.yaml": "authz.enforcer module type requires GoCodeAlone/workflow-plugin-authz external plugin",
 	}
 
 	for _, cfgPath := range configs {

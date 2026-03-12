@@ -453,11 +453,11 @@ modules:
 // the Fix function does not create duplicate keys.
 func TestManifestRule_ModuleConfigKeyRename_Collision(t *testing.T) {
 	mr := ManifestRule{
-		ID:         "test-collision-mod",
+		ID:          "test-collision-mod",
 		Description: "Rename old_key to new_key in my.module",
-		ModuleType: "my.module",
-		OldKey:     "old_key",
-		NewKey:     "new_key",
+		ModuleType:  "my.module",
+		OldKey:      "old_key",
+		NewKey:      "new_key",
 	}
 	rule, err := mr.ToRule()
 	if err != nil {
