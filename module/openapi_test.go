@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ---- spec fixtures ----
@@ -2392,5 +2394,295 @@ func TestOpenAPIModule_ResponseValidation_DefaultAction_IsWarn(t *testing.T) {
 	// Default action is warn, so response should pass through
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 with default warn action, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// ---- additionalProperties tests ----
+
+// additionalPropertiesTrueYAML exercises additionalProperties: true (bool shorthand).
+const additionalPropertiesTrueYAML = `
+openapi: "3.0.0"
+info:
+  title: AdditionalProperties True
+  version: "1.0.0"
+paths:
+  /metadata:
+    post:
+      operationId: postMetadata
+      summary: Post metadata with any extra keys
+      x-pipeline: metadata-pipeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+              additionalProperties: true
+      responses:
+        "200":
+          description: OK
+`
+
+// additionalPropertiesFalseYAML exercises additionalProperties: false (reject extras).
+const additionalPropertiesFalseYAML = `
+openapi: "3.0.0"
+info:
+  title: AdditionalProperties False
+  version: "1.0.0"
+paths:
+  /strict:
+    post:
+      operationId: postStrict
+      summary: Post object with no extra keys allowed
+      x-pipeline: strict-pipeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+              additionalProperties: false
+      responses:
+        "200":
+          description: OK
+`
+
+// additionalPropertiesSchemaYAML exercises additionalProperties: <schema>.
+const additionalPropertiesSchemaYAML = `
+openapi: "3.0.0"
+info:
+  title: AdditionalProperties Schema
+  version: "1.0.0"
+paths:
+  /typed-extra:
+    post:
+      operationId: postTypedExtra
+      summary: Post object where extra keys must be strings
+      x-pipeline: typed-extra-pipeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+              additionalProperties:
+                type: string
+      responses:
+        "200":
+          description: OK
+`
+
+// TestOpenAPIModule_AdditionalProperties_True verifies that a spec with
+// "additionalProperties: true" is parsed without error and that arbitrary
+// extra keys in the request body are accepted.
+func TestOpenAPIModule_AdditionalProperties_True(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", additionalPropertiesTrueYAML)
+
+	mod := NewOpenAPIModule("ap-true", OpenAPIConfig{
+		SpecFile:   specPath,
+		Validation: OpenAPIValidationConfig{Request: true},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init with additionalProperties:true should succeed, got: %v", err)
+	}
+
+	step := &stubPipelineStep{
+		name: "metadata",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{Output: map[string]any{"response_status": 200}, Stop: true}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "metadata-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "metadata-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("POST", "/metadata")
+	if h == nil {
+		t.Fatal("POST /metadata handler not found")
+	}
+
+	// Body contains declared key "name" plus extra keys — all should pass
+	body := `{"name":"test","extra_field":"value","another_key":42}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/metadata", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	h.Handle(w, r)
+
+	if w.Code == http.StatusBadRequest {
+		t.Errorf("expected extra keys to pass with additionalProperties:true, got 400: %s", w.Body.String())
+	}
+}
+
+// TestOpenAPIModule_AdditionalProperties_False verifies that extra keys are
+// rejected when "additionalProperties: false" is set.
+func TestOpenAPIModule_AdditionalProperties_False(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", additionalPropertiesFalseYAML)
+
+	mod := NewOpenAPIModule("ap-false", OpenAPIConfig{
+		SpecFile:   specPath,
+		Validation: OpenAPIValidationConfig{Request: true},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init with additionalProperties:false should succeed, got: %v", err)
+	}
+
+	step := &stubPipelineStep{
+		name: "strict",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{Output: map[string]any{"response_status": 200}, Stop: true}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "strict-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "strict-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("POST", "/strict")
+	if h == nil {
+		t.Fatal("POST /strict handler not found")
+	}
+
+	// Body contains extra key "unknown" which should be rejected
+	body := `{"name":"test","unknown":"value"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/strict", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	h.Handle(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for extra key with additionalProperties:false, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestOpenAPIModule_AdditionalProperties_Schema verifies that extra keys are
+// validated against the schema when "additionalProperties: {type: string}" is set.
+func TestOpenAPIModule_AdditionalProperties_Schema(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", additionalPropertiesSchemaYAML)
+
+	mod := NewOpenAPIModule("ap-schema", OpenAPIConfig{
+		SpecFile:   specPath,
+		Validation: OpenAPIValidationConfig{Request: true},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init with additionalProperties schema should succeed, got: %v", err)
+	}
+
+	step := &stubPipelineStep{
+		name: "typed-extra",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{Output: map[string]any{"response_status": 200}, Stop: true}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "typed-extra-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "typed-extra-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("POST", "/typed-extra")
+	if h == nil {
+		t.Fatal("POST /typed-extra handler not found")
+	}
+
+	// Valid: extra key is a string
+	body := `{"name":"test","extra":"string-value"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/typed-extra", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	h.Handle(w, r)
+
+	if w.Code == http.StatusBadRequest {
+		t.Errorf("expected string extra key to pass additionalProperties:{type:string}, got 400: %s", w.Body.String())
+	}
+}
+
+// TestOpenAPIAdditionalProperties_UnmarshalYAML checks that the custom YAML
+// unmarshaller handles bool and object forms correctly.
+func TestOpenAPIAdditionalProperties_UnmarshalYAML(t *testing.T) {
+	tests := []struct {
+		input      string
+		wantBool   bool
+		wantSchema bool   // whether Schema should be non-nil
+		wantType   string // expected Schema.Type when wantSchema is true
+	}{
+		{"true", true, false, ""},
+		{"false", false, false, ""},
+		{"type: string", false, true, "string"},
+		{"type: integer", false, true, "integer"},
+	}
+
+	for _, tc := range tests {
+		var ap openAPIAdditionalProperties
+		if err := yaml.Unmarshal([]byte(tc.input), &ap); err != nil {
+			t.Errorf("UnmarshalYAML(%q): unexpected error: %v", tc.input, err)
+			continue
+		}
+		if ap.Bool != tc.wantBool {
+			t.Errorf("UnmarshalYAML(%q): Bool = %v, want %v", tc.input, ap.Bool, tc.wantBool)
+		}
+		if (ap.Schema != nil) != tc.wantSchema {
+			t.Errorf("UnmarshalYAML(%q): Schema non-nil = %v, want %v", tc.input, ap.Schema != nil, tc.wantSchema)
+		}
+		if tc.wantSchema && ap.Schema != nil && ap.Schema.Type != tc.wantType {
+			t.Errorf("UnmarshalYAML(%q): Schema.Type = %q, want %q", tc.input, ap.Schema.Type, tc.wantType)
+		}
+	}
+}
+
+// TestOpenAPIAdditionalProperties_UnmarshalJSON checks the JSON unmarshaller.
+func TestOpenAPIAdditionalProperties_UnmarshalJSON(t *testing.T) {
+	tests := []struct {
+		input      string
+		wantBool   bool
+		wantSchema bool
+		wantType   string
+	}{
+		{`true`, true, false, ""},
+		{`false`, false, false, ""},
+		{`{"type":"string"}`, false, true, "string"},
+	}
+
+	for _, tc := range tests {
+		var ap openAPIAdditionalProperties
+		if err := json.Unmarshal([]byte(tc.input), &ap); err != nil {
+			t.Errorf("UnmarshalJSON(%q): unexpected error: %v", tc.input, err)
+			continue
+		}
+		if ap.Bool != tc.wantBool {
+			t.Errorf("UnmarshalJSON(%q): Bool = %v, want %v", tc.input, ap.Bool, tc.wantBool)
+		}
+		if (ap.Schema != nil) != tc.wantSchema {
+			t.Errorf("UnmarshalJSON(%q): Schema non-nil = %v, want %v", tc.input, ap.Schema != nil, tc.wantSchema)
+		}
+		if tc.wantSchema && ap.Schema != nil && ap.Schema.Type != tc.wantType {
+			t.Errorf("UnmarshalJSON(%q): Schema.Type = %q, want %q", tc.input, ap.Schema.Type, tc.wantType)
+		}
 	}
 }

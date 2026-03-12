@@ -102,22 +102,81 @@ type openAPIResponse struct {
 	Content     map[string]openAPIMediaType `yaml:"content"     json:"content"`
 }
 
+// openAPIAdditionalProperties represents the OpenAPI / JSON Schema
+// "additionalProperties" keyword, which may be either a boolean shorthand
+// (true = allow any extra keys, false = forbid extra keys) or a full Schema
+// object that every additional key's value must satisfy.
+type openAPIAdditionalProperties struct {
+	// Bool is set when the YAML/JSON value is a plain boolean.
+	// When Schema is non-nil, Bool is ignored.
+	Bool   bool
+	Schema *openAPISchema
+}
+
+// UnmarshalYAML handles both the boolean shorthand and the object form.
+func (a *openAPIAdditionalProperties) UnmarshalYAML(value *yaml.Node) error {
+	// Boolean shorthand: additionalProperties: true / false
+	if value.Kind == yaml.ScalarNode && value.Tag == "!!bool" {
+		var b bool
+		if err := value.Decode(&b); err != nil {
+			return err
+		}
+		a.Bool = b
+		a.Schema = nil
+		return nil
+	}
+	// Object form: additionalProperties: { type: string, … }
+	var s openAPISchema
+	if err := value.Decode(&s); err != nil {
+		return err
+	}
+	a.Schema = &s
+	return nil
+}
+
+// UnmarshalJSON handles both the boolean shorthand and the object form.
+func (a *openAPIAdditionalProperties) UnmarshalJSON(data []byte) error {
+	if len(data) > 0 && (data[0] == 't' || data[0] == 'f') {
+		var b bool
+		if err := json.Unmarshal(data, &b); err != nil {
+			return err
+		}
+		a.Bool = b
+		a.Schema = nil
+		return nil
+	}
+	var s openAPISchema
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	a.Schema = &s
+	return nil
+}
+
+// MarshalJSON serialises back to the compact boolean or object form.
+func (a openAPIAdditionalProperties) MarshalJSON() ([]byte, error) {
+	if a.Schema == nil {
+		return json.Marshal(a.Bool)
+	}
+	return json.Marshal(a.Schema)
+}
+
 // openAPISchema is a minimal JSON Schema subset used for parameter/body validation.
 type openAPISchema struct {
-	Type                 string                    `yaml:"type"                 json:"type"`
-	Required             []string                  `yaml:"required"             json:"required"`
-	Properties           map[string]*openAPISchema `yaml:"properties"           json:"properties"`
-	Format               string                    `yaml:"format"               json:"format"`
-	Minimum              *float64                  `yaml:"minimum"              json:"minimum"`
-	Maximum              *float64                  `yaml:"maximum"              json:"maximum"`
-	MinLength            *int                      `yaml:"minLength"            json:"minLength"`
-	MaxLength            *int                      `yaml:"maxLength"            json:"maxLength"`
-	Pattern              string                    `yaml:"pattern"              json:"pattern"`
-	Enum                 []any                     `yaml:"enum"                 json:"enum"`
-	Items                *openAPISchema            `yaml:"items"                json:"items"`
-	MinItems             *int                      `yaml:"minItems"             json:"minItems"`
-	MaxItems             *int                      `yaml:"maxItems"             json:"maxItems"`
-	AdditionalProperties *openAPISchema            `yaml:"additionalProperties" json:"additionalProperties"`
+	Type                 string                       `yaml:"type"                 json:"type"`
+	Required             []string                     `yaml:"required"             json:"required"`
+	Properties           map[string]*openAPISchema    `yaml:"properties"           json:"properties"`
+	Format               string                       `yaml:"format"               json:"format"`
+	Minimum              *float64                     `yaml:"minimum"              json:"minimum"`
+	Maximum              *float64                     `yaml:"maximum"              json:"maximum"`
+	MinLength            *int                         `yaml:"minLength"            json:"minLength"`
+	MaxLength            *int                         `yaml:"maxLength"            json:"maxLength"`
+	Pattern              string                       `yaml:"pattern"              json:"pattern"`
+	Enum                 []any                        `yaml:"enum"                 json:"enum"`
+	Items                *openAPISchema               `yaml:"items"                json:"items"`
+	MinItems             *int                         `yaml:"minItems"             json:"minItems"`
+	MaxItems             *int                         `yaml:"maxItems"             json:"maxItems"`
+	AdditionalProperties *openAPIAdditionalProperties `yaml:"additionalProperties" json:"additionalProperties"`
 }
 
 // ---- OpenAPIModule ----
@@ -982,14 +1041,26 @@ func validateJSONBody(body any, schema *openAPISchema, bodyLabel string) []strin
 	// Validate additionalProperties: keys not declared in Properties are checked
 	// against the additionalProperties schema when it is specified.
 	if schema.AdditionalProperties != nil {
-		for key, val := range obj {
-			if _, defined := schema.Properties[key]; defined {
-				continue
+		ap := schema.AdditionalProperties
+		if ap.Schema == nil && !ap.Bool {
+			// additionalProperties: false — reject any key not listed in Properties
+			for key := range obj {
+				if _, defined := schema.Properties[key]; !defined {
+					errs = append(errs, fmt.Sprintf("additional property %q is not allowed", key))
+				}
 			}
-			if fieldErrs := validateJSONValue(val, key, schema.AdditionalProperties); len(fieldErrs) > 0 {
-				errs = append(errs, fieldErrs...)
+		} else if ap.Schema != nil {
+			// additionalProperties: <schema> — validate each extra key against the schema
+			for key, val := range obj {
+				if _, defined := schema.Properties[key]; defined {
+					continue
+				}
+				if fieldErrs := validateJSONValue(val, key, ap.Schema); len(fieldErrs) > 0 {
+					errs = append(errs, fieldErrs...)
+				}
 			}
 		}
+		// additionalProperties: true — any extra key is allowed; nothing to validate
 	}
 	return errs
 }
