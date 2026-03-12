@@ -1519,6 +1519,24 @@ func TestM2M_AddTrustedKeyFromPEM_Invalid(t *testing.T) {
 	}
 }
 
+func TestM2M_AddTrustedKeyFromPEM_NonP256Rejected(t *testing.T) {
+	m := newM2MES256(t)
+	// Generate a P-384 key, which should be rejected.
+	key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate P-384 key: %v", err)
+	}
+	pkixBytes, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		t.Fatalf("MarshalPKIXPublicKey: %v", err)
+	}
+	pemStr := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pkixBytes}))
+
+	if err := m.AddTrustedKeyFromPEM("issuer-p384", pemStr, nil, nil); err == nil {
+		t.Error("expected error for P-384 key, got nil")
+	}
+}
+
 func TestM2M_JWTBearer_AudienceValid(t *testing.T) {
 	server := newM2MES256(t)
 	clientKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -1569,7 +1587,10 @@ func TestM2M_JWTBearer_AudienceMismatch(t *testing.T) {
 		"exp": time.Now().Add(5 * time.Minute).Unix(),
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
-	assertion, _ := tok.SignedString(clientKey)
+	assertion, err := tok.SignedString(clientKey)
+	if err != nil {
+		t.Fatalf("sign assertion: %v", err)
+	}
 
 	params := url.Values{
 		"grant_type": {GrantTypeJWTBearer},
@@ -1601,7 +1622,10 @@ func TestM2M_JWTBearer_ClaimMapping(t *testing.T) {
 		"user_id": "u-42",
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
-	assertion, _ := tok.SignedString(clientKey)
+	assertion, err := tok.SignedString(clientKey)
+	if err != nil {
+		t.Fatalf("sign assertion: %v", err)
+	}
 
 	params := url.Values{
 		"grant_type": {GrantTypeJWTBearer},

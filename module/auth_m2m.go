@@ -220,6 +220,9 @@ func (m *M2MAuthModule) AddTrustedKeyFromPEM(issuer, publicKeyPEM string, audien
 	if !ok {
 		return fmt.Errorf("auth.m2m: public key for issuer %q is not an ECDSA key", issuer)
 	}
+	if ecKey.Curve != elliptic.P256() {
+		return fmt.Errorf("auth.m2m: public key for issuer %q must use P-256 (ES256) curve", issuer)
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()

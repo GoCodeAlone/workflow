@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -217,15 +218,21 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 
 			// Register YAML-configured trusted keys for JWT-bearer grants.
 			if trustedKeys, ok := cfg["trustedKeys"].([]any); ok {
-				for _, tk := range trustedKeys {
+				for i, tk := range trustedKeys {
 					tkMap, ok := tk.(map[string]any)
 					if !ok {
-						continue
+						m.SetInitErr(fmt.Errorf("auth.m2m: trustedKeys[%d] must be an object", i))
+						break
 					}
 					issuer := stringFromMap(tkMap, "issuer")
 					publicKeyPEM := stringFromMap(tkMap, "publicKeyPEM")
-					if issuer == "" || publicKeyPEM == "" {
-						continue
+					if issuer == "" {
+						m.SetInitErr(fmt.Errorf("auth.m2m: trustedKeys[%d] missing required field \"issuer\"", i))
+						break
+					}
+					if publicKeyPEM == "" {
+						m.SetInitErr(fmt.Errorf("auth.m2m: trustedKeys[%d] (issuer %q) missing required field \"publicKeyPEM\"", i, issuer))
+						break
 					}
 					var audiences []string
 					if auds, ok := tkMap["audiences"].([]any); ok {

@@ -240,3 +240,57 @@ func TestModuleFactoryM2MWithTrustedKeys(t *testing.T) {
 		t.Fatalf("expected 200 for JWT-bearer with trusted key, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestModuleFactoryM2MWithTrustedKeys_MissingIssuer(t *testing.T) {
+	p := New()
+	factories := p.ModuleFactories()
+
+	mod := factories["auth.m2m"]("m2m-test", map[string]any{
+		"algorithm": "ES256",
+		"trustedKeys": []any{
+			map[string]any{
+				// issuer is missing
+				"publicKeyPEM": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEtest==\n-----END PUBLIC KEY-----",
+			},
+		},
+	})
+	if mod == nil {
+		t.Fatal("auth.m2m factory returned nil")
+	}
+	m2mMod, ok := mod.(*module.M2MAuthModule)
+	if !ok {
+		t.Fatal("expected *module.M2MAuthModule")
+	}
+
+	// Init should fail because trustedKeys[0] is missing issuer.
+	if err := m2mMod.Init(nil); err == nil {
+		t.Error("expected Init to return error for trustedKeys entry missing issuer")
+	}
+}
+
+func TestModuleFactoryM2MWithTrustedKeys_MissingPEM(t *testing.T) {
+	p := New()
+	factories := p.ModuleFactories()
+
+	mod := factories["auth.m2m"]("m2m-test", map[string]any{
+		"algorithm": "ES256",
+		"trustedKeys": []any{
+			map[string]any{
+				"issuer": "https://external.example.com",
+				// publicKeyPEM is missing
+			},
+		},
+	})
+	if mod == nil {
+		t.Fatal("auth.m2m factory returned nil")
+	}
+	m2mMod, ok := mod.(*module.M2MAuthModule)
+	if !ok {
+		t.Fatal("expected *module.M2MAuthModule")
+	}
+
+	// Init should fail because trustedKeys[0] is missing publicKeyPEM.
+	if err := m2mMod.Init(nil); err == nil {
+		t.Error("expected Init to return error for trustedKeys entry missing publicKeyPEM")
+	}
+}
