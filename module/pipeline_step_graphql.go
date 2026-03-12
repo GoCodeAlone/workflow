@@ -14,6 +14,18 @@ import (
 	"github.com/GoCodeAlone/modular"
 )
 
+// paginationConfig holds cursor or offset pagination settings.
+type paginationConfig struct {
+	strategy       string // "cursor" or "offset"
+	pageInfoPath   string
+	cursorVariable string
+	hasNextField   string
+	cursorField    string
+	maxPages       int
+	maxPerPage     int
+	offsetVariable string
+}
+
 // GraphQLStep executes GraphQL queries and mutations as a pipeline step.
 type GraphQLStep struct {
 	name                string
@@ -28,6 +40,7 @@ type GraphQLStep struct {
 	retryOnNetworkError bool
 	tmpl                *TemplateEngine
 	httpClient          *http.Client
+	pagination          *paginationConfig
 
 	// OAuth2 (reuses globalOAuthCache from pipeline_step_http_call.go)
 	auth       *oauthConfig
@@ -83,6 +96,50 @@ func NewGraphQLStepFactory() StepFactory {
 					step.fragments = append(step.fragments, s)
 				}
 			}
+		}
+
+		if pagCfg, ok := config["pagination"].(map[string]any); ok {
+			pc := &paginationConfig{
+				strategy:       "cursor",
+				maxPages:       10,
+				maxPerPage:     100,
+				offsetVariable: "offset",
+			}
+			if s, ok := pagCfg["strategy"].(string); ok {
+				pc.strategy = s
+			}
+			if s, ok := pagCfg["page_info_path"].(string); ok {
+				pc.pageInfoPath = s
+			}
+			if s, ok := pagCfg["cursor_variable"].(string); ok {
+				pc.cursorVariable = s
+			}
+			if s, ok := pagCfg["has_next_field"].(string); ok {
+				pc.hasNextField = s
+			}
+			if s, ok := pagCfg["cursor_field"].(string); ok {
+				pc.cursorField = s
+			}
+			if s, ok := pagCfg["offset_variable"].(string); ok {
+				pc.offsetVariable = s
+			}
+			if v, ok := pagCfg["max_pages"]; ok {
+				switch val := v.(type) {
+				case int:
+					pc.maxPages = val
+				case float64:
+					pc.maxPages = int(val)
+				}
+			}
+			if v, ok := pagCfg["max_per_page"]; ok {
+				switch val := v.(type) {
+				case int:
+					pc.maxPerPage = val
+				case float64:
+					pc.maxPerPage = int(val)
+				}
+			}
+			step.pagination = pc
 		}
 
 		if v, ok := config["fail_on_graphql_errors"]; ok {
@@ -151,6 +208,10 @@ func (s *GraphQLStep) Name() string { return s.name }
 
 // Execute runs the GraphQL query/mutation and returns the result.
 func (s *GraphQLStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+	if s.pagination != nil {
+		return s.executePaginated(ctx, pc)
+	}
+
 	if s.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, s.timeout)
@@ -225,6 +286,140 @@ func (s *GraphQLStep) Execute(ctx context.Context, pc *PipelineContext) (*StepRe
 	return &StepResult{Output: output}, nil
 }
 
+// executePaginated handles cursor and offset pagination, collecting all pages.
+func (s *GraphQLStep) executePaginated(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+	if s.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.timeout)
+		defer cancel()
+	}
+
+	resolvedURL, err := s.tmpl.Resolve(s.url, pc)
+	if err != nil {
+		return nil, fmt.Errorf("graphql step %q: failed to resolve url: %w", s.name, err)
+	}
+
+	bearerToken, err := s.getBearerToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	fullQuery := s.query
+	if len(s.fragments) > 0 {
+		fullQuery = strings.Join(s.fragments, "\n") + "\n" + s.query
+	}
+	fullQuery, err = s.tmpl.Resolve(fullQuery, pc)
+	if err != nil {
+		return nil, fmt.Errorf("graphql step %q: failed to resolve query: %w", s.name, err)
+	}
+
+	var allData []any
+	var allErrors []any
+	pageCount := 0
+	var cursor any
+	offset := 0
+
+	for page := 0; page < s.pagination.maxPages; page++ {
+		vars := make(map[string]any)
+		if s.variables != nil {
+			resolved, resolveErr := s.tmpl.ResolveMap(s.variables, pc)
+			if resolveErr != nil {
+				return nil, fmt.Errorf("graphql step %q: failed to resolve variables: %w", s.name, resolveErr)
+			}
+			for k, v := range resolved {
+				vars[k] = v
+			}
+		}
+
+		switch s.pagination.strategy {
+		case "cursor":
+			if cursor != nil {
+				vars[s.pagination.cursorVariable] = cursor
+			}
+		case "offset":
+			vars[s.pagination.offsetVariable] = offset
+		}
+
+		reqBody := map[string]any{"query": fullQuery}
+		if len(vars) > 0 {
+			reqBody["variables"] = vars
+		}
+
+		output, _, reqErr := s.doRequest(ctx, resolvedURL, reqBody, bearerToken)
+		if reqErr != nil {
+			return nil, reqErr
+		}
+
+		// Collect errors
+		if errs, ok := output["errors"].([]any); ok && len(errs) > 0 {
+			allErrors = append(allErrors, errs...)
+		}
+
+		pageCount++
+
+		// Get full response data (before data_path extraction) from "full_data" key
+		fullData := output["full_data"]
+
+		switch s.pagination.strategy {
+		case "cursor":
+			// Extract page items via data_path
+			pageData := fullData
+			if s.dataPath != "" {
+				pageData = extractDataPath(fullData, s.dataPath)
+			}
+			if arr, ok := pageData.([]any); ok {
+				allData = append(allData, arr...)
+			}
+
+			// Check for next page via pageInfo
+			pageInfo := extractDataPath(fullData, s.pagination.pageInfoPath)
+			pageInfoMap, ok := pageInfo.(map[string]any)
+			if !ok {
+				goto done
+			}
+			hasNext, _ := pageInfoMap[s.pagination.hasNextField].(bool)
+			if !hasNext {
+				goto done
+			}
+			cursor = pageInfoMap[s.pagination.cursorField]
+			if cursor == nil {
+				goto done
+			}
+
+		case "offset":
+			// Extract page items via data_path
+			pageData := fullData
+			if s.dataPath != "" {
+				pageData = extractDataPath(fullData, s.dataPath)
+			}
+			arr, ok := pageData.([]any)
+			if !ok || len(arr) == 0 {
+				goto done
+			}
+			allData = append(allData, arr...)
+			if len(arr) < s.pagination.maxPerPage {
+				goto done
+			}
+			offset += len(arr)
+		}
+	}
+
+done:
+	result := map[string]any{
+		"data":        allData,
+		"errors":      allErrors,
+		"has_errors":  len(allErrors) > 0,
+		"page_count":  pageCount,
+		"total_items": len(allData),
+		"status_code": 200,
+	}
+	if allErrors == nil {
+		result["errors"] = []any{}
+	}
+
+	return &StepResult{Output: result}, nil
+}
+
 // getBearerToken returns the OAuth2 bearer token if auth is configured.
 func (s *GraphQLStep) getBearerToken(ctx context.Context) (string, error) {
 	if s.auth == nil {
@@ -297,6 +492,7 @@ func (s *GraphQLStep) fetchTokenDirect(ctx context.Context) (string, error) {
 }
 
 // doRequest sends the GraphQL HTTP request and parses the response.
+// Output includes "full_data" (raw data before data_path extraction) for pagination.
 func (s *GraphQLStep) doRequest(ctx context.Context, url string, reqBody map[string]any, bearerToken string) (map[string]any, int, error) {
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -341,45 +537,47 @@ func (s *GraphQLStep) doRequest(ctx context.Context, url string, reqBody map[str
 		return nil, resp.StatusCode, fmt.Errorf("graphql step %q: HTTP %d: %s", s.name, resp.StatusCode, string(respBody))
 	}
 
-	// Parse GraphQL response
-	var gqlResp struct {
-		Data       any   `json:"data"`
-		Errors     []any `json:"errors"`
-		Extensions any   `json:"extensions"`
-	}
-	if err := json.Unmarshal(respBody, &gqlResp); err != nil {
+	// Parse GraphQL response into a map so full_data is accessible as map[string]any
+	var rawMap map[string]any
+	if err := json.Unmarshal(respBody, &rawMap); err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("graphql step %q: failed to parse response JSON: %w", s.name, err)
 	}
 
-	hasErrors := len(gqlResp.Errors) > 0
+	var gqlErrors []any
+	if errs, ok := rawMap["errors"].([]any); ok {
+		gqlErrors = errs
+	}
+	gqlData := rawMap["data"]
+	gqlExtensions := rawMap["extensions"]
+
+	hasErrors := len(gqlErrors) > 0
 
 	if hasErrors && s.failOnGraphQLErrors {
 		errMsg := "graphql error"
-		if len(gqlResp.Errors) > 0 {
-			if errMap, ok := gqlResp.Errors[0].(map[string]any); ok {
-				if msg, ok := errMap["message"].(string); ok {
-					errMsg = msg
-				}
+		if errMap, ok := gqlErrors[0].(map[string]any); ok {
+			if msg, ok := errMap["message"].(string); ok {
+				errMsg = msg
 			}
 		}
 		return nil, resp.StatusCode, fmt.Errorf("graphql step %q: %s", s.name, errMsg)
 	}
 
 	// Extract data via data_path
-	extractedData := gqlResp.Data
-	if s.dataPath != "" && gqlResp.Data != nil {
-		extractedData = extractDataPath(gqlResp.Data, s.dataPath)
+	extractedData := gqlData
+	if s.dataPath != "" && gqlData != nil {
+		extractedData = extractDataPath(gqlData, s.dataPath)
 	}
 
 	output := map[string]any{
 		"data":        extractedData,
-		"errors":      gqlResp.Errors,
-		"raw":         gqlResp,
+		"full_data":   gqlData, // full data before data_path extraction (used by pagination)
+		"errors":      gqlErrors,
+		"raw":         rawMap,
 		"status_code": resp.StatusCode,
 		"has_errors":  hasErrors,
-		"extensions":  gqlResp.Extensions,
+		"extensions":  gqlExtensions,
 	}
-	if gqlResp.Errors == nil {
+	if gqlErrors == nil {
 		output["errors"] = []any{}
 	}
 
