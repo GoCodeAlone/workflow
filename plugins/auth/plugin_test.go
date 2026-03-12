@@ -1,14 +1,21 @@
 package auth
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func TestPluginImplementsEnginePlugin(t *testing.T) {
@@ -166,5 +173,124 @@ func TestModuleFactoryM2MWithClaims(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestModuleFactoryM2MWithTrustedKeys(t *testing.T) {
+	// Generate a key pair to represent an external trusted issuer.
+	clientKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	pkixBytes, err := x509.MarshalPKIXPublicKey(&clientKey.PublicKey)
+	if err != nil {
+		t.Fatalf("MarshalPKIXPublicKey: %v", err)
+	}
+	pubKeyPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pkixBytes}))
+
+	p := New()
+	factories := p.ModuleFactories()
+
+	mod := factories["auth.m2m"]("m2m-test", map[string]any{
+		"algorithm": "ES256",
+		"trustedKeys": []any{
+			map[string]any{
+				"issuer":       "https://external-issuer.example.com",
+				"publicKeyPEM": pubKeyPEM,
+				"audiences":    []any{"test-audience"},
+				"claimMapping": map[string]any{
+					"user_id": "ext_user",
+				},
+			},
+		},
+	})
+	if mod == nil {
+		t.Fatal("auth.m2m factory returned nil")
+	}
+
+	m2mMod, ok := mod.(*module.M2MAuthModule)
+	if !ok {
+		t.Fatal("expected *module.M2MAuthModule")
+	}
+
+	// Issue a JWT assertion signed by the external issuer's key.
+	claims := jwt.MapClaims{
+		"iss": "https://external-issuer.example.com",
+		"sub": "external-service",
+		"aud": "test-audience",
+		"iat": time.Now().Unix(),
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	assertion, err := tok.SignedString(clientKey)
+	if err != nil {
+		t.Fatalf("sign assertion: %v", err)
+	}
+
+	params := url.Values{
+		"grant_type": {module.GrantTypeJWTBearer},
+		"assertion":  {assertion},
+	}
+	req := httptest.NewRequest("POST", "/oauth/token", strings.NewReader(params.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	m2mMod.Handle(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for JWT-bearer with trusted key, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestModuleFactoryM2MWithTrustedKeys_MissingIssuer(t *testing.T) {
+	p := New()
+	factories := p.ModuleFactories()
+
+	mod := factories["auth.m2m"]("m2m-test", map[string]any{
+		"algorithm": "ES256",
+		"trustedKeys": []any{
+			map[string]any{
+				// issuer is missing
+				"publicKeyPEM": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEtest==\n-----END PUBLIC KEY-----",
+			},
+		},
+	})
+	if mod == nil {
+		t.Fatal("auth.m2m factory returned nil")
+	}
+	m2mMod, ok := mod.(*module.M2MAuthModule)
+	if !ok {
+		t.Fatal("expected *module.M2MAuthModule")
+	}
+
+	// Init should fail because trustedKeys[0] is missing issuer.
+	if err := m2mMod.Init(nil); err == nil {
+		t.Error("expected Init to return error for trustedKeys entry missing issuer")
+	}
+}
+
+func TestModuleFactoryM2MWithTrustedKeys_MissingPEM(t *testing.T) {
+	p := New()
+	factories := p.ModuleFactories()
+
+	mod := factories["auth.m2m"]("m2m-test", map[string]any{
+		"algorithm": "ES256",
+		"trustedKeys": []any{
+			map[string]any{
+				"issuer": "https://external.example.com",
+				// publicKeyPEM is missing
+			},
+		},
+	})
+	if mod == nil {
+		t.Fatal("auth.m2m factory returned nil")
+	}
+	m2mMod, ok := mod.(*module.M2MAuthModule)
+	if !ok {
+		t.Fatal("expected *module.M2MAuthModule")
+	}
+
+	// Init should fail because trustedKeys[0] is missing publicKeyPEM.
+	if err := m2mMod.Init(nil); err == nil {
+		t.Error("expected Init to return error for trustedKeys entry missing publicKeyPEM")
 	}
 }
