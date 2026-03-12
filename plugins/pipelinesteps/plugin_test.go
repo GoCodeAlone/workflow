@@ -80,6 +80,7 @@ func TestStepFactories(t *testing.T) {
 		"step.cli_invoke",
 		"step.parallel",
 		"step.graphql",
+		"step.secret_fetch",
 	}
 
 	for _, stepType := range expectedSteps {
