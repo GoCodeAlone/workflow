@@ -425,3 +425,105 @@ func TestManifestEngineFieldsLoadFromFile(t *testing.T) {
 		t.Errorf("Capabilities = %v, want [{storage provider 5}]", loaded.Capabilities)
 	}
 }
+
+// TestManifestLegacyCapabilitiesObject verifies that a plugin.json whose
+// "capabilities" field is a plain JSON object (the format used by external
+// plugins such as workflow-plugin-authz) is parsed without error and that the
+// type lists nested inside the object are promoted to the manifest's top-level
+// ModuleTypes/StepTypes/TriggerTypes fields.
+func TestManifestLegacyCapabilitiesObject(t *testing.T) {
+	const legacyJSON = `{
+		"name": "workflow-plugin-authz",
+		"version": "1.0.0",
+		"description": "RBAC authorization plugin using Casbin",
+		"author": "GoCodeAlone",
+		"license": "MIT",
+		"type": "external",
+		"tier": "core",
+		"minEngineVersion": "0.3.11",
+		"keywords": ["authz", "rbac", "casbin", "authorization", "policy"],
+		"homepage": "https://github.com/GoCodeAlone/workflow-plugin-authz",
+		"repository": "https://github.com/GoCodeAlone/workflow-plugin-authz",
+		"capabilities": {
+			"configProvider": false,
+			"moduleTypes": ["authz.casbin"],
+			"stepTypes": [
+				"step.authz_check_casbin",
+				"step.authz_add_policy",
+				"step.authz_remove_policy",
+				"step.authz_role_assign"
+			],
+			"triggerTypes": []
+		}
+	}`
+
+	var m PluginManifest
+	if err := json.Unmarshal([]byte(legacyJSON), &m); err != nil {
+		t.Fatalf("unexpected unmarshal error for legacy capabilities object: %v", err)
+	}
+
+	// Capabilities array should be nil / empty – the object format has no CapabilityDecl items.
+	if len(m.Capabilities) != 0 {
+		t.Errorf("Capabilities = %v, want empty", m.Capabilities)
+	}
+
+	// moduleTypes from the nested object should be promoted to the top level.
+	if len(m.ModuleTypes) != 1 || m.ModuleTypes[0] != "authz.casbin" {
+		t.Errorf("ModuleTypes = %v, want [authz.casbin]", m.ModuleTypes)
+	}
+
+	// stepTypes should be promoted.
+	wantSteps := []string{
+		"step.authz_check_casbin",
+		"step.authz_add_policy",
+		"step.authz_remove_policy",
+		"step.authz_role_assign",
+	}
+	if len(m.StepTypes) != len(wantSteps) {
+		t.Errorf("StepTypes len = %d, want %d; got %v", len(m.StepTypes), len(wantSteps), m.StepTypes)
+	} else {
+		for i, want := range wantSteps {
+			if m.StepTypes[i] != want {
+				t.Errorf("StepTypes[%d] = %q, want %q", i, m.StepTypes[i], want)
+			}
+		}
+	}
+
+	// triggerTypes is an empty array – TriggerTypes should remain nil/empty.
+	if len(m.TriggerTypes) != 0 {
+		t.Errorf("TriggerTypes = %v, want empty", m.TriggerTypes)
+	}
+}
+
+// TestManifestLegacyCapabilitiesObjectFile verifies that LoadManifest succeeds
+// for a plugin.json that uses the legacy object-style capabilities field.
+func TestManifestLegacyCapabilitiesObjectFile(t *testing.T) {
+	const legacyJSON = `{
+		"name": "workflow-plugin-authz",
+		"version": "1.0.0",
+		"description": "RBAC authorization plugin",
+		"author": "GoCodeAlone",
+		"capabilities": {
+			"moduleTypes": ["authz.casbin"],
+			"stepTypes": ["step.authz_check"],
+			"triggerTypes": []
+		}
+	}`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plugin.json")
+	if err := os.WriteFile(path, []byte(legacyJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := LoadManifest(path)
+	if err != nil {
+		t.Fatalf("LoadManifest error: %v", err)
+	}
+	if len(m.ModuleTypes) != 1 || m.ModuleTypes[0] != "authz.casbin" {
+		t.Errorf("ModuleTypes = %v, want [authz.casbin]", m.ModuleTypes)
+	}
+	if len(m.StepTypes) != 1 || m.StepTypes[0] != "step.authz_check" {
+		t.Errorf("StepTypes = %v, want [step.authz_check]", m.StepTypes)
+	}
+}

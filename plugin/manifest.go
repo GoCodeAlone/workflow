@@ -74,6 +74,78 @@ type CapabilityDecl struct {
 	Priority int    `json:"priority,omitempty" yaml:"priority,omitempty"`
 }
 
+// legacyCapabilitiesObject represents the alternative object-style capabilities
+// field used by some external plugin manifests (e.g. workflow-plugin-authz) where
+// capabilities is a single JSON object instead of an array of CapabilityDecl.
+type legacyCapabilitiesObject struct {
+	ConfigProvider bool     `json:"configProvider"`
+	ModuleTypes    []string `json:"moduleTypes"`
+	StepTypes      []string `json:"stepTypes"`
+	TriggerTypes   []string `json:"triggerTypes"`
+	WorkflowTypes  []string `json:"workflowTypes"`
+}
+
+// UnmarshalJSON implements custom JSON decoding for PluginManifest so that the
+// "capabilities" field can be either:
+//   - an array of CapabilityDecl objects (the canonical engine format), or
+//   - a plain JSON object with moduleTypes/stepTypes/triggerTypes keys
+//     (the legacy external-plugin format used by e.g. workflow-plugin-authz).
+//
+// In the legacy-object case the type lists are merged into the manifest's
+// top-level ModuleTypes/StepTypes/TriggerTypes fields so the information is
+// not lost, and Capabilities is left nil.
+func (m *PluginManifest) UnmarshalJSON(data []byte) error {
+	// Use a type alias to avoid infinite recursion through UnmarshalJSON.
+	type Alias PluginManifest
+	type rawManifest struct {
+		Alias
+		Capabilities json.RawMessage `json:"capabilities,omitempty"`
+	}
+
+	var raw rawManifest
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*m = PluginManifest(raw.Alias)
+
+	if len(raw.Capabilities) == 0 {
+		return nil
+	}
+
+	// Try the canonical array-of-CapabilityDecl format first.
+	var caps []CapabilityDecl
+	if err := json.Unmarshal(raw.Capabilities, &caps); err == nil {
+		m.Capabilities = caps
+		return nil
+	}
+
+	// Fall back to legacy object format – extract type lists into top-level fields.
+	var legacy legacyCapabilitiesObject
+	if err := json.Unmarshal(raw.Capabilities, &legacy); err == nil {
+		m.ModuleTypes = appendUnique(m.ModuleTypes, legacy.ModuleTypes...)
+		m.StepTypes = appendUnique(m.StepTypes, legacy.StepTypes...)
+		m.TriggerTypes = appendUnique(m.TriggerTypes, legacy.TriggerTypes...)
+		m.WorkflowTypes = appendUnique(m.WorkflowTypes, legacy.WorkflowTypes...)
+	}
+	// Unknown capability format is silently ignored – capabilities is left nil.
+	return nil
+}
+
+// appendUnique appends values to dst, skipping any that are already present.
+func appendUnique(dst []string, values ...string) []string {
+	existing := make(map[string]struct{}, len(dst))
+	for _, v := range dst {
+		existing[v] = struct{}{}
+	}
+	for _, v := range values {
+		if _, ok := existing[v]; !ok {
+			dst = append(dst, v)
+			existing[v] = struct{}{}
+		}
+	}
+	return dst
+}
+
 // Dependency declares a versioned dependency on another plugin.
 type Dependency struct {
 	Name       string `json:"name" yaml:"name"`
