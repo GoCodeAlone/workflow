@@ -7,6 +7,7 @@ import (
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/deploy"
+	"github.com/GoCodeAlone/workflow/modernize"
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
@@ -105,6 +106,19 @@ type TriggerConfigWrapperFunc func(pipelineName string, flatConfig map[string]an
 // configuration format (e.g., {routes: [{...}]}).
 type PipelineTriggerConfigProvider interface {
 	PipelineTriggerConfigWrappers() map[string]TriggerConfigWrapperFunc
+}
+
+// ModernizeRulesProvider is optionally implemented by EnginePlugins that
+// supply custom modernize rules for the wfctl modernize command. Rules
+// returned here are merged with the core built-in rules and applied when
+// modernizing workflow configs that use this plugin's module/step types.
+//
+// External (process-isolated) plugins declare their rules in plugin.json
+// under the "modernizeRules" key and have them loaded automatically via
+// modernize.LoadRulesFromDir. In-process Go plugins implement this interface
+// to supply function-based rules that can perform arbitrary YAML transforms.
+type ModernizeRulesProvider interface {
+	ModernizeRules() []modernize.Rule
 }
 
 // NativePluginProvider is optionally implemented by EnginePlugins that also

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/dynamic"
+	"github.com/GoCodeAlone/workflow/modernize"
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
@@ -48,6 +49,13 @@ type PluginManifest struct {
 	// StepSchemas provides schema definitions for step types registered by this plugin.
 	// Used by MCP/LSP for hover docs, completions, and output documentation.
 	StepSchemas []*schema.StepSchema `json:"stepSchemas,omitempty" yaml:"stepSchemas,omitempty"`
+
+	// ModernizeRules declares migration rules for the wfctl modernize command.
+	// Each rule describes a common migration pattern (type renames, config key
+	// renames) that users of this plugin may need to apply when upgrading.
+	// These rules are loaded automatically when --plugin-dir is passed to
+	// wfctl modernize or wfctl mcp.
+	ModernizeRules []modernize.ManifestRule `json:"modernizeRules,omitempty" yaml:"modernizeRules,omitempty"`
 
 	// OverridableTypes lists type names (modules, steps, triggers, handlers) that may be
 	// overridden by later-loaded plugins without requiring LoadPluginWithOverride.

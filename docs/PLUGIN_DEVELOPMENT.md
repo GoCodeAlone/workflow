@@ -19,6 +19,7 @@ Each plugin implements the `plugin.EnginePlugin` interface and contributes:
 | Capabilities | `Capabilities()` | Capability contracts this plugin satisfies |
 | UI schemas | `ModuleSchemas()` | Schema definitions for the workflow builder UI |
 | Wiring hooks | `WiringHooks()` | Post-init cross-module integration logic |
+| Modernize rules | `ModernizeRules()` _(optional)_ | Migration rules for `wfctl modernize` |
 
 ## The EnginePlugin Interface
 
@@ -276,28 +277,131 @@ if err := engine.LoadPlugin(pluginmyplugin.New()); err != nil {
 
 Also add it to `testhelpers_test.go` → `allPlugins()` for test coverage.
 
+### 11. Declare modernize rules (optional)
+
+If your plugin introduces or renames module/step types over time, you can declare **modernize rules** so that users can automatically detect and fix stale configs using `wfctl modernize`.
+
+#### In-process Go plugins
+
+Implement the optional `plugin.ModernizeRulesProvider` interface:
+
+```go
+import "github.com/GoCodeAlone/workflow/modernize"
+
+// ModernizeRules returns migration rules for the wfctl modernize command.
+func (p *Plugin) ModernizeRules() []modernize.Rule {
+    return []modernize.Rule{
+        modernize.ManifestRule{
+            ID:            "myplugin-rename-v2",
+            Description:   "Rename myplugin.old_worker to myplugin.worker (v2.0 migration)",
+            Severity:      "error",
+            OldModuleType: "myplugin.old_worker",
+            NewModuleType: "myplugin.worker",
+        }.MustToRule(),
+        modernize.ManifestRule{
+            ID:          "myplugin-rename-endpoint",
+            Description: "Rename apiEndpoint to endpoint in myplugin.worker config",
+            ModuleType:  "myplugin.worker",
+            OldKey:      "apiEndpoint",
+            NewKey:      "endpoint",
+        }.MustToRule(),
+    }
+}
+```
+
+The engine will call `ModernizeRules()` on plugins that implement `ModernizeRulesProvider`. You can also write arbitrary Check/Fix functions for complex migrations that go beyond type and key renaming.
+
+#### External plugins via `plugin.json`
+
+External (process-isolated) plugins declare rules in their `plugin.json` manifest under the `modernizeRules` key:
+
+```json
+{
+  "name": "my-vendor-plugin",
+  "version": "2.0.0",
+  "author": "Vendor Inc.",
+  "description": "Vendor plugin for workflow",
+  "moduleTypes": ["vendor.connector"],
+  "modernizeRules": [
+    {
+      "id": "vendor-rename-type",
+      "description": "Rename vendor.old_connector to vendor.connector (v2 migration)",
+      "severity": "error",
+      "oldModuleType": "vendor.old_connector",
+      "newModuleType": "vendor.connector"
+    },
+    {
+      "id": "vendor-rename-key",
+      "description": "Rename apiEndpoint to endpoint in vendor.connector config",
+      "moduleType": "vendor.connector",
+      "oldKey": "apiEndpoint",
+      "newKey": "endpoint"
+    },
+    {
+      "id": "vendor-rename-step",
+      "description": "Rename step.vendor_fetch to step.vendor_get",
+      "oldStepType": "step.vendor_fetch",
+      "newStepType": "step.vendor_get"
+    }
+  ]
+}
+```
+
+Users with the plugin installed run:
+
+```bash
+wfctl modernize --plugin-dir data/plugins config.yaml
+wfctl modernize --apply --plugin-dir data/plugins config.yaml
+```
+
+#### ManifestRule fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Required. Unique kebab-case rule identifier |
+| `description` | string | Required. Human-readable description |
+| `severity` | string | `"error"` or `"warning"` (default: `"warning"`) |
+| `message` | string | Override the auto-generated finding message |
+| `oldModuleType` | string | Trigger a module type rename: old type to detect |
+| `newModuleType` | string | Target module type after rename |
+| `oldStepType` | string | Trigger a step type rename: old type to detect |
+| `newStepType` | string | Target step type after rename |
+| `moduleType` | string | Scope a config key rename to modules of this type |
+| `stepType` | string | Scope a config key rename to steps of this type |
+| `oldKey` | string | Config key to detect (used with `moduleType` or `stepType`) |
+| `newKey` | string | Replacement config key |
+
+**Exactly one rule kind must be configured per rule:**
+- Module type rename: `oldModuleType` + `newModuleType`
+- Step type rename: `oldStepType` + `newStepType`
+- Module config key rename: `moduleType` + `oldKey` + `newKey`
+- Step config key rename: `stepType` + `oldKey` + `newKey`
+
 ## Plugin Manifest
 
 The `PluginManifest` struct declares metadata used for discovery, dependency resolution, and the admin UI:
 
 ```go
 type PluginManifest struct {
-    Name          string            // unique plugin name (kebab-case)
-    Version       string            // semver, e.g. "1.0.0"
-    Author        string            // required
-    Description   string            // required
-    Tier          PluginTier        // TierCore, TierOfficial, TierCommunity
-    ModuleTypes   []string          // module types this plugin provides
-    StepTypes     []string          // step types this plugin provides
-    TriggerTypes  []string          // trigger types this plugin provides
-    WorkflowTypes []string          // workflow handler types
-    WiringHooks   []string          // names of wiring hooks
-    Capabilities  []CapabilityDecl  // capability declarations
-    Dependencies  []Dependency      // plugin dependencies with version constraints
+    Name           string                    // unique plugin name (kebab-case)
+    Version        string                    // semver, e.g. "1.0.0"
+    Author         string                    // required
+    Description    string                    // required
+    Tier           PluginTier                // TierCore, TierOfficial, TierCommunity
+    ModuleTypes    []string                  // module types this plugin provides
+    StepTypes      []string                  // step types this plugin provides
+    TriggerTypes   []string                  // trigger types this plugin provides
+    WorkflowTypes  []string                  // workflow handler types
+    WiringHooks    []string                  // names of wiring hooks
+    Capabilities   []CapabilityDecl          // capability declarations
+    Dependencies   []Dependency              // plugin dependencies with version constraints
+    ModernizeRules []modernize.ManifestRule  // migration rules for wfctl modernize
 }
 ```
 
 **All of `Name`, `Version`, `Author`, and `Description` are required** — the plugin loader validates these during `LoadPlugin()`.
+
+The `ModernizeRules` field allows plugins to embed migration rules directly in the Go manifest struct. For external plugins (process-isolated), declare the equivalent rules in `plugin.json` — see [Declare modernize rules](#11-declare-modernize-rules-optional) above.
 
 ## Workflow Dependency Validation
 
