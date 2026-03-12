@@ -6,6 +6,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -386,15 +387,22 @@ func (m *CORSMiddleware) Init(app modular.Application) error {
 
 // corsOriginAllowed checks if the given origin is in the allowed list.
 // It supports exact matching, "*" wildcard, and subdomain wildcards like "*.example.com".
+// Wildcard patterns are matched against the parsed hostname only, so ports are handled correctly:
+// "*.example.com" will match "http://sub.example.com:3000".
 func corsOriginAllowed(origin string, allowedOrigins []string) bool {
+	if origin == "" {
+		return false
+	}
 	for _, allowed := range allowedOrigins {
 		if allowed == "*" || allowed == origin {
 			return true
 		}
-		// Wildcard subdomain matching: "*.example.com" matches "sub.example.com"
+		// Wildcard subdomain matching: "*.example.com" matches "sub.example.com" (any port).
+		// Parse the request origin to extract just the hostname for comparison.
 		if strings.HasPrefix(allowed, "*.") {
 			suffix := allowed[1:] // ".example.com"
-			if strings.HasSuffix(origin, suffix) {
+			u, err := url.Parse(origin)
+			if err == nil && strings.HasSuffix(u.Hostname(), suffix) {
 				return true
 			}
 		}
@@ -407,10 +415,10 @@ func (m *CORSMiddleware) Process(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 
-		// Check if origin is allowed
-		allowed := corsOriginAllowed(origin, m.allowedOrigins)
-
-		if allowed {
+		// Only apply CORS headers when the request includes an Origin header.
+		// Requests without Origin are not cross-origin requests and need no CORS response.
+		if origin != "" && corsOriginAllowed(origin, m.allowedOrigins) {
+			w.Header().Add("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", strings.Join(m.allowedMethods, ", "))
 			w.Header().Set("Access-Control-Allow-Headers", strings.Join(m.allowedHeaders, ", "))

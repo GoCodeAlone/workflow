@@ -206,6 +206,8 @@ func corsMiddlewareFactory(name string, cfg map[string]any) modular.Module {
 	}
 	if maxAge, ok := cfg["maxAge"].(int); ok {
 		corsCfg.MaxAge = maxAge
+	} else if maxAgeFloat, ok := cfg["maxAge"].(float64); ok {
+		corsCfg.MaxAge = int(maxAgeFloat)
 	}
 	return module.NewCORSMiddlewareWithConfig(name, corsCfg)
 }

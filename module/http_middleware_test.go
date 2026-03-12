@@ -419,13 +419,19 @@ func TestCORSMiddlewareWithConfig_WildcardSubdomain(t *testing.T) {
 	}{
 		{"http://app.example.com", true},
 		{"http://admin.example.com", true},
+		// Port should be handled correctly via hostname parsing
+		{"http://app.example.com:3000", true},
 		{"http://evil.com", false},
 		{"http://notexample.com", false},
+		// Empty origin must not match wildcard
+		{"", false},
 	}
 
 	for _, tt := range tests {
 		req := httptest.NewRequest("GET", "/test", nil)
-		req.Header.Set("Origin", tt.origin)
+		if tt.origin != "" {
+			req.Header.Set("Origin", tt.origin)
+		}
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -433,6 +439,41 @@ func TestCORSMiddlewareWithConfig_WildcardSubdomain(t *testing.T) {
 		if hasHeader != tt.allowed {
 			t.Errorf("origin %q: expected allowed=%v, got header=%q", tt.origin, tt.allowed, rec.Header().Get("Access-Control-Allow-Origin"))
 		}
+	}
+}
+
+func TestCORSMiddleware_VaryHeader(t *testing.T) {
+	m := NewCORSMiddleware("cors", []string{"http://localhost:3000"}, []string{"GET"})
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Vary") != "Origin" {
+		t.Errorf("expected Vary: Origin header, got %q", rec.Header().Get("Vary"))
+	}
+}
+
+func TestCORSMiddleware_EmptyOriginSkipped(t *testing.T) {
+	// When no Origin header is sent, CORS headers must not be set.
+	m := NewCORSMiddleware("cors", []string{"*"}, []string{"GET"})
+
+	handler := m.Process(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	// No Origin header set
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Errorf("expected no CORS headers when Origin is absent, got %q", rec.Header().Get("Access-Control-Allow-Origin"))
 	}
 }
 
