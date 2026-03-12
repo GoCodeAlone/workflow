@@ -762,6 +762,11 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"title", "theme"},
 		},
+		"step.graphql": {
+			Type:       "step.graphql",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"url", "query", "variables", "headers", "data_path", "fragments", "batch", "persisted_query", "introspection", "pagination", "fail_on_graphql_errors", "timeout", "retry_on_network_error", "auth"},
+		},
 
 		// actors plugin steps
 		"step.actor_send": {
