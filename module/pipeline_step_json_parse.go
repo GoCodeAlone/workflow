@@ -54,6 +54,9 @@ func (s *JSONParseStep) Name() string { return s.name }
 // and stores the result under the configured target key.
 func (s *JSONParseStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
 	raw := resolveBodyFrom(s.source, pc)
+	if raw == nil {
+		return nil, fmt.Errorf("json_parse step %q: source %q not found or resolved to nil", s.name, s.source)
+	}
 
 	var parsed any
 	switch v := raw.(type) {

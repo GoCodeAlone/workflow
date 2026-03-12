@@ -3,7 +3,6 @@ package module
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -228,22 +227,4 @@ func (s *DBQueryStep) Execute(_ context.Context, pc *PipelineContext) (*StepResu
 	}
 
 	return &StepResult{Output: output}, nil
-}
-
-// parseJSONBytesOrString attempts to unmarshal b as JSON. If successful the
-// parsed Go value is returned (map[string]any, []any, string, float64, bool,
-// or nil). This transparently handles PostgreSQL json/jsonb columns, which the
-// pgx driver delivers as raw JSON bytes rather than pre-typed Go values.
-//
-// If b is not valid JSON (e.g. PostgreSQL bytea binary data), string(b) is
-// returned so that the existing string-fallback behaviour is preserved.
-func parseJSONBytesOrString(b []byte) any {
-	if len(b) == 0 {
-		return string(b)
-	}
-	var v any
-	if err := json.Unmarshal(b, &v); err == nil {
-		return v
-	}
-	return string(b)
 }

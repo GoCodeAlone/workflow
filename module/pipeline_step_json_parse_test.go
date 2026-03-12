@@ -173,6 +173,23 @@ func TestJSONParseStep_MissingSource(t *testing.T) {
 	}
 }
 
+func TestJSONParseStep_UnresolvablePath(t *testing.T) {
+	// A typo in source should fail fast rather than silently producing nil.
+	factory := NewJSONParseStepFactory()
+	step, err := factory("bad-path", map[string]any{
+		"source": "steps.nonexistent.field",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error when source path resolves to nil")
+	}
+}
+
 func TestJSONParseStep_DefaultTargetKey(t *testing.T) {
 	factory := NewJSONParseStepFactory()
 	step, err := factory("default-target", map[string]any{
