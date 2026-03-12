@@ -324,6 +324,7 @@ value: '{{ index .steps "parse-request" "path_params" "id" }}'
 |------|-------------|
 | `webhook.sender` | Outbound webhook delivery with retry and dead letter |
 | `notification.slack` | Slack notifications |
+| `openapi` | OpenAPI v3 spec-driven route registration with request and response validation |
 | `openapi.consumer` | OpenAPI spec consumer for external service integration |
 | `openapi.generator` | OpenAPI spec generation from workflow config |
 

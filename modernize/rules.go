@@ -210,11 +210,11 @@ func hyphenStepsFixConfig(cfg *yaml.Node, renames map[string]string, changes *[]
 		key := cfg.Content[i]
 		val := cfg.Content[i+1]
 
-		switch {
-		case val.Kind == yaml.MappingNode:
+		switch val.Kind {
+		case yaml.MappingNode:
 			// Recurse into nested maps (e.g., routes map in step.conditional)
 			hyphenStepsFixConfig(val, renames, changes)
-		case val.Kind == yaml.ScalarNode:
+		case yaml.ScalarNode:
 			for oldName, newName := range renames {
 				updated := hyphenStepsFixScalar(key.Value, val.Value, oldName, newName)
 				if updated != val.Value {
