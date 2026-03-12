@@ -125,6 +125,8 @@ func TestExampleConfigsValidate(t *testing.T) {
 				schema.WithExtraWorkflowTypes("actors"),
 				// Actor module types registered by the actors plugin
 				schema.WithExtraModuleTypes("actor.system", "actor.pool"),
+				// Module types from the workflow-plugin-authz external plugin (docs-with-plugins example)
+				schema.WithExtraModuleTypes("authz.enforcer", "authz.policy"),
 				// Pipeline trigger types
 				schema.WithExtraTriggerTypes("mock"),
 				// Many configs are sub-workflows or modular-style configs without explicit entry points

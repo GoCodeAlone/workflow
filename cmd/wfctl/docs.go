@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/plugin"
+	"gopkg.in/yaml.v3"
 )
 
 func runDocs(args []string) error {
@@ -112,7 +112,8 @@ Options:
 }
 
 // loadPluginManifests recursively walks a directory tree looking for
-// plugin.json files and returns the parsed manifests.
+// plugin.json files and returns the parsed manifests. Files that cannot
+// be parsed are skipped with a warning printed to stderr.
 func loadPluginManifests(dir string) ([]*plugin.PluginManifest, error) {
 	var manifests []*plugin.PluginManifest
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
@@ -124,7 +125,8 @@ func loadPluginManifests(dir string) ([]*plugin.PluginManifest, error) {
 		}
 		m, loadErr := plugin.LoadManifest(path)
 		if loadErr != nil {
-			return nil //nolint:nilerr // intentionally skip invalid manifests
+			fmt.Fprintf(os.Stderr, "warning: skipping invalid plugin manifest %s: %v\n", path, loadErr)
+			return nil //nolint:nilerr // intentionally skip invalid manifests (already warned)
 		}
 		manifests = append(manifests, m)
 		return nil
@@ -1024,28 +1026,17 @@ func sortedMapKeys(m map[string]any) []string {
 	return keys
 }
 
-func writeConfigYAML(b *strings.Builder, m map[string]any, indent string) {
-	keys := sortedMapKeys(m)
-	for _, k := range keys {
-		v := m[k]
-		switch val := v.(type) {
-		case map[string]any:
-			fmt.Fprintf(b, "%s%s:\n", indent, k)
-			writeConfigYAML(b, val, indent+"  ")
-		case []any:
-			fmt.Fprintf(b, "%s%s:\n", indent, k)
-			for _, item := range val {
-				if subMap, ok := item.(map[string]any); ok {
-					fmt.Fprintf(b, "%s  -\n", indent)
-					writeConfigYAML(b, subMap, indent+"    ")
-				} else {
-					fmt.Fprintf(b, "%s  - %v\n", indent, item)
-				}
-			}
-		default:
-			fmt.Fprintf(b, "%s%s: %v\n", indent, k, v)
+func writeConfigYAML(b *strings.Builder, m map[string]any, _ string) {
+	// Use yaml.Marshal for faithful, properly-quoted YAML output.
+	data, err := yaml.Marshal(m)
+	if err != nil {
+		// Fallback: best-effort key=value dump if marshaling fails.
+		for _, k := range sortedMapKeys(m) {
+			fmt.Fprintf(b, "%s: %v\n", k, m[k])
 		}
+		return
 	}
+	b.Write(data)
 }
 
 func toBool(v any) bool {
@@ -1056,14 +1047,4 @@ func toBool(v any) bool {
 		return strings.EqualFold(b, "true")
 	}
 	return false
-}
-
-// writeJSON writes an indented JSON representation of v to the given path.
-// This is used only by test helpers that need to create plugin.json fixtures.
-func writeJSON(path string, v any) error {
-	data, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0600)
 }

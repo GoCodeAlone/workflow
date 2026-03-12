@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,16 @@ import (
 
 	"github.com/GoCodeAlone/workflow/plugin"
 )
+
+// writeJSON writes an indented JSON representation of v to the given path.
+// Used only in tests to create plugin.json fixtures.
+func writeJSON(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
+}
 
 // --- test config strings ---
 

@@ -35,6 +35,7 @@ modules:
     dependsOn:
       - api-router
     config:
+      secret: "${JWT_SECRET}"
       issuer: "https://auth.example.com"
       audience: "order-api"
 
