@@ -2371,6 +2371,389 @@ git commit -m "ci: add sync-editor workflow for editor-release dispatch"
 
 ---
 
+## Phase 6: Schema-Aware Features & Polish
+
+### Task 22: Content detection notification prompt (VS Code + JetBrains)
+
+**Files:**
+- Modify: `workflow-vscode/src/visual-editor.ts`
+- Modify: `workflow-jetbrains/src/main/kotlin/com/gocodalone/workflow/ide/editor/WorkflowFileDetector.kt`
+
+The design requires a non-intrusive notification when content detection matches (Layer 2). Currently the plan only has a boolean `isWorkflowFile()` — the prompt UX is missing.
+
+**Step 1: VS Code — add notification prompt on content detection**
+
+In `visual-editor.ts`, when a YAML file is opened that matches content detection (but NOT explicit `configPaths`), show an information message:
+
+```ts
+export function promptWorkflowDetection(document: vscode.TextDocument) {
+  const configPaths: string[] = vscode.workspace.getConfiguration('workflow').get('configPaths', []);
+  // Skip if already in explicit config paths
+  if (isExplicitMatch(document, configPaths)) return;
+  // Skip if user chose "Don't ask again"
+  if (vscode.workspace.getConfiguration('workflow').get('suppressDetectionPrompt', false)) return;
+
+  if (!isContentMatch(document)) return;
+
+  vscode.window.showInformationMessage(
+    'This looks like a Workflow config. Open the visual editor?',
+    'Open Visual Editor',
+    'Always for this file',
+    "Don't ask again"
+  ).then((choice) => {
+    if (choice === 'Open Visual Editor') {
+      vscode.commands.executeCommand('workflow.openVisualEditor');
+    } else if (choice === 'Always for this file') {
+      // Add to configPaths setting
+      const relative = vscode.workspace.asRelativePath(document.uri);
+      configPaths.push(relative);
+      vscode.workspace.getConfiguration('workflow').update('configPaths', configPaths, vscode.ConfigurationTarget.Workspace);
+      vscode.commands.executeCommand('workflow.openVisualEditor');
+    } else if (choice === "Don't ask again") {
+      vscode.workspace.getConfiguration('workflow').update('suppressDetectionPrompt', true, vscode.ConfigurationTarget.Workspace);
+    }
+  });
+}
+```
+
+Register in `extension.ts` `activate()`:
+
+```ts
+vscode.workspace.onDidOpenTextDocument((doc) => {
+  if (doc.languageId === 'yaml') promptWorkflowDetection(doc);
+});
+```
+
+**Step 2: JetBrains — add EditorNotifications provider**
+
+Create `WorkflowDetectionNotificationProvider.kt`:
+
+```kotlin
+class WorkflowDetectionNotificationProvider : EditorNotifications.Provider<EditorNotificationPanel>() {
+    override fun createNotificationPanel(file: VirtualFile, editor: FileEditor, project: Project): EditorNotificationPanel? {
+        if (WorkflowSettings.getInstance().suppressDetectionPrompt) return null
+        if (isExplicitMatch(file, project)) return null
+        if (!isContentMatch(file)) return null
+
+        return EditorNotificationPanel(editor, EditorNotificationPanel.Status.Info).apply {
+            text = "This looks like a Workflow config"
+            createActionLabel("Open Visual Editor") {
+                // trigger visual editor action
+            }
+            createActionLabel("Always for this file") {
+                // add to configPaths
+            }
+            createActionLabel("Don't ask again") {
+                WorkflowSettings.getInstance().suppressDetectionPrompt = true
+                EditorNotifications.getInstance(project).updateAllNotifications()
+            }
+        }
+    }
+}
+```
+
+Register in `plugin.xml`:
+```xml
+<editorNotificationProvider implementation="com.gocodalone.workflow.ide.editor.WorkflowDetectionNotificationProvider"/>
+```
+
+**Step 3: Add `suppressDetectionPrompt` setting to both IDE plugins**
+
+VS Code: add to `contributes.configuration`:
+```json
+"workflow.suppressDetectionPrompt": {
+  "type": "boolean",
+  "default": false,
+  "description": "Don't show detection prompt for workflow YAML files"
+}
+```
+
+JetBrains: add to `WorkflowSettings`:
+```kotlin
+var suppressDetectionPrompt: Boolean = false
+```
+
+**Step 4: Commit in each repo**
+
+---
+
+### Task 23: External plugin schema discovery
+
+**Files:**
+- Modify: `workflow-vscode/src/visual-editor.ts` (or new `src/plugin-discovery.ts`)
+- Modify: `workflow-jetbrains/src/main/kotlin/com/gocodalone/workflow/ide/editor/WorkflowBridge.kt`
+- Modify: `workflow-editor/src/stores/moduleSchemaStore.ts` (if needed)
+
+The design specifies three-tier schema loading. Tier 1 (built-in) is covered. Tier 2 (installed plugins) and tier 3 (registry lookup) are missing.
+
+**Step 1: Create plugin discovery module (shared logic)**
+
+In both IDE plugins, add logic to:
+1. Parse `go.mod` in the workspace root for `github.com/GoCodeAlone/workflow-plugin-*` imports
+2. For each found plugin, fetch its manifest from `workflow-registry` (GitHub raw URL)
+3. Extract `stepTypes`/`moduleTypes` with their JSON Schema definitions
+4. Inject via `loadPluginSchemas()` on the editor's `moduleSchemaStore`
+
+**VS Code (`src/plugin-discovery.ts`):**
+
+```ts
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+
+const REGISTRY_BASE = 'https://raw.githubusercontent.com/GoCodeAlone/workflow-registry/main/plugins';
+
+export async function discoverPluginSchemas(workspaceRoot: string): Promise<PluginSchemaData[]> {
+  const goModPath = path.join(workspaceRoot, 'go.mod');
+  if (!fs.existsSync(goModPath)) return [];
+
+  const goMod = fs.readFileSync(goModPath, 'utf-8');
+  const pluginImports = goMod.match(/github\.com\/GoCodeAlone\/workflow-plugin-(\w+)/g) || [];
+
+  const schemas: PluginSchemaData[] = [];
+  for (const imp of pluginImports) {
+    const name = imp.split('workflow-plugin-')[1];
+    try {
+      const resp = await fetch(`${REGISTRY_BASE}/${name}/manifest.json`);
+      if (!resp.ok) continue;
+      const manifest = await resp.json();
+      schemas.push({
+        pluginName: manifest.name || name,
+        pluginIcon: manifest.icon,
+        pluginColor: manifest.color,
+        modules: manifest.schemas || {},
+      });
+    } catch {
+      // Skip unavailable manifests
+    }
+  }
+  return schemas;
+}
+```
+
+**Step 2: Wire into the editor bridge**
+
+In `visual-editor.ts`, after sending built-in schemas, also send plugin schemas:
+
+```ts
+private async sendPluginSchemas() {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) return;
+  const plugins = await discoverPluginSchemas(workspaceRoot);
+  this.panel?.webview.postMessage({ type: 'pluginSchemasLoaded', plugins });
+}
+```
+
+**Step 3: Cache manifests locally**
+
+Store fetched manifests in `context.globalStorageUri/plugin-manifests/` with a timestamp. Refresh on `workflow-release` dispatch or when user runs "Workflow: Refresh Plugin Schemas" command. Cache TTL: 24 hours.
+
+**Step 4: JetBrains equivalent**
+
+Same logic in Kotlin, using `HttpClient` to fetch manifests, caching in `PathManager.getPluginsPath()`.
+
+**Step 5: Commit in each repo**
+
+---
+
+### Task 24: Plugin-aware palette grouping
+
+**Files:**
+- Modify: `workflow-editor/src/components/sidebar/NodePalette.tsx`
+
+The design specifies visual distinction in the palette: built-in types grouped by category, plugin types grouped under plugin name with icon/color, private plugins only shown if detected in project dependencies.
+
+**Step 1: Update NodePalette to group plugin types separately**
+
+The `moduleSchemaStore` already merges plugin types via `loadPluginSchemas()`. Add a `pluginSource` field to track which types came from plugins vs built-in:
+
+```tsx
+// In NodePalette.tsx, after the existing category-based grouping:
+const builtinTypes = moduleTypes.filter(t => !t.pluginSource);
+const pluginGroups = new Map<string, ModuleTypeInfo[]>();
+for (const t of moduleTypes.filter(t => t.pluginSource)) {
+  const group = pluginGroups.get(t.pluginSource!) || [];
+  group.push(t);
+  pluginGroups.set(t.pluginSource!, group);
+}
+```
+
+Render plugin groups after built-in categories with distinct styling (plugin name header, optional icon/color).
+
+**Step 2: Add `pluginSource` field to ModuleTypeInfo**
+
+In `types/workflow.ts`, add optional `pluginSource?: string` to `ModuleTypeInfo`.
+
+In `moduleSchemaStore.ts`, `loadPluginSchemas()` sets `pluginSource` to the plugin name for each type it adds.
+
+**Step 3: Test palette renders plugin groups**
+
+**Step 4: Commit**
+
+---
+
+### Task 25: Node validation indicators
+
+**Files:**
+- Modify: `workflow-editor/src/components/nodes/BaseNode.tsx`
+- Modify: `workflow-editor/src/stores/workflowStore.ts`
+
+The design specifies validation indicators on nodes with invalid config.
+
+**Step 1: Add validation to workflowStore**
+
+Add a `validationErrors` map to the store: `Record<string, string[]>` keyed by node ID. Add a `validateNodes()` action that checks each node's config against its `configFields` schema:
+
+```ts
+validateNodes: () => {
+  const { nodes } = get();
+  const moduleTypeMap = useModuleSchemaStore.getState().moduleTypeMap;
+  const errors: Record<string, string[]> = {};
+  for (const node of nodes) {
+    const info = moduleTypeMap[node.data.moduleType];
+    if (!info?.configFields) continue;
+    const nodeErrors: string[] = [];
+    for (const field of info.configFields) {
+      if (field.required && !node.data.config?.[field.key]) {
+        nodeErrors.push(`Missing required field: ${field.label || field.key}`);
+      }
+    }
+    if (nodeErrors.length > 0) errors[node.id] = nodeErrors;
+  }
+  set({ validationErrors: errors });
+},
+```
+
+**Step 2: Display validation indicators on BaseNode**
+
+In `BaseNode.tsx`, read validation errors from the store and render a warning badge:
+
+```tsx
+const errors = useWorkflowStore((s) => s.validationErrors[id]);
+// ...
+{errors && errors.length > 0 && (
+  <div className="validation-badge" title={errors.join('\n')}>
+    ⚠ {errors.length}
+  </div>
+)}
+```
+
+**Step 3: Trigger validation on config changes**
+
+Call `validateNodes()` after `importFromConfig()`, `addNode()`, and config edits in `PropertyPanel`.
+
+**Step 4: Test validation indicators**
+
+**Step 5: Commit**
+
+---
+
+### Task 26: Cursor→node highlight (implement TODO)
+
+**Files:**
+- Modify: `workflow-editor/src/components/WorkflowEditor.tsx` (add `onCursorMoved` prop)
+- Modify: `workflow-editor/src/stores/workflowStore.ts` (add `highlightedNodeId`)
+- Modify: `workflow-editor/src/components/nodes/BaseNode.tsx` (render highlight)
+- Modify: `workflow-vscode/webview-src/index.tsx` (wire `onCursorMoved`)
+- Modify: `workflow-jetbrains/webview-src/index.tsx` (wire `onCursorMoved`)
+
+**Step 1: Add `onCursorMoved` to WorkflowEditorProps**
+
+```ts
+onCursorMoved?: (line: number, col: number) => void;
+```
+
+**Step 2: Map YAML line → node ID**
+
+When the host sends `cursorMoved(line, col)`, the editor needs to find which node corresponds to that YAML line. The `configToNodes` serialization already tracks `ui_position`, but we also need a `yamlLineMap: Record<string, { startLine: number; endLine: number }>` that maps node IDs to their YAML line ranges.
+
+Add a `buildYamlLineMap(yaml: string)` utility that parses YAML with line tracking and returns the map.
+
+**Step 3: Add `highlightedNodeId` to workflowStore**
+
+When a cursor position maps to a node, set `highlightedNodeId`. BaseNode renders a highlight ring when its ID matches.
+
+**Step 4: Wire in both IDE webview entry points**
+
+Replace the TODO comments in `index.tsx` for both VS Code and JetBrains:
+
+```ts
+onCursorMoved: (line, col) => {
+  // Find node at this line and highlight it
+  const { yamlLineMap, setHighlightedNode } = useWorkflowStore.getState();
+  for (const [nodeId, range] of Object.entries(yamlLineMap)) {
+    if (line >= range.startLine && line <= range.endLine) {
+      setHighlightedNode(nodeId);
+      return;
+    }
+  }
+  setHighlightedNode(null);
+},
+```
+
+**Step 5: Commit in all three repos**
+
+---
+
+### Task 27: Testing — component tests and E2E
+
+**Files:**
+- Create: `workflow-editor/src/components/nodes/BaseNode.test.tsx`
+- Create: `workflow-editor/src/components/sidebar/NodePalette.test.tsx`
+- Create: `workflow-editor/e2e/editor.spec.ts` (Playwright)
+- Modify: `workflow-editor/package.json` (add Playwright devDep)
+
+**Step 1: Write component tests**
+
+BaseNode test:
+```tsx
+import { render, screen } from '@testing-library/react';
+import { ReactFlowProvider } from '@xyflow/react';
+import { describe, it, expect } from 'vitest';
+
+describe('BaseNode', () => {
+  it('renders node label', () => { /* ... */ });
+  it('shows validation badge when errors present', () => { /* ... */ });
+  it('shows highlight ring when highlightedNodeId matches', () => { /* ... */ });
+});
+```
+
+NodePalette test:
+```tsx
+describe('NodePalette', () => {
+  it('renders built-in categories', () => { /* ... */ });
+  it('renders plugin groups separately', () => { /* ... */ });
+  it('filters by search text', () => { /* ... */ });
+  it('sets drag data on drag start', () => { /* ... */ });
+});
+```
+
+**Step 2: Write E2E Playwright test**
+
+```ts
+import { test, expect } from '@playwright/test';
+
+test('editor loads YAML and renders nodes', async ({ page }) => {
+  // Serve the workflow/ui app locally with the editor package
+  await page.goto('http://localhost:5173');
+  // Load a sample config
+  // Verify nodes appear on the canvas
+  // Add a node from palette
+  // Verify YAML updates
+});
+```
+
+**Step 3: Run tests**
+
+```bash
+npm test
+npx playwright test
+```
+
+**Step 4: Commit**
+
+---
+
 ## Task Summary
 
 | # | Phase | Task | Repo |
@@ -2396,3 +2779,9 @@ git commit -m "ci: add sync-editor workflow for editor-release dispatch"
 | 19 | 4 | Add sync-editor CI to JetBrains | workflow-jetbrains |
 | 20 | 5 | Update workflow release.yml dispatch | workflow |
 | 21 | 5 | Update workflow-plugin-admin CI | workflow-plugin-admin |
+| 22 | 6 | Content detection notification prompt | workflow-vscode, workflow-jetbrains |
+| 23 | 6 | External plugin schema discovery | workflow-vscode, workflow-jetbrains |
+| 24 | 6 | Plugin-aware palette grouping | workflow-editor |
+| 25 | 6 | Node validation indicators | workflow-editor |
+| 26 | 6 | Cursor→node highlight | workflow-editor, workflow-vscode, workflow-jetbrains |
+| 27 | 6 | Component tests and E2E | workflow-editor |
