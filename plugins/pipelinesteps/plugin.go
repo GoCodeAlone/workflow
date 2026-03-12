@@ -100,6 +100,7 @@ func New() *Plugin {
 					"step.cli_print",
 					"step.cli_invoke",
 					"step.parallel",
+				"step.graphql",
 				},
 				WorkflowTypes:    []string{"pipeline"},
 				OverridableTypes: []string{"step.authz_check"},
@@ -184,6 +185,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.parallel": wrapStepFactory(module.NewParallelStepFactory(func() *module.StepRegistry {
 			return p.concreteStepRegistry
 		})),
+		"step.graphql": wrapStepFactory(module.NewGraphQLStepFactory()),
 	}
 }
 
