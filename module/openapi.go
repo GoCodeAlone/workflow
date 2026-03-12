@@ -1046,7 +1046,7 @@ func validateJSONBody(body any, schema *openAPISchema, bodyLabel string) []strin
 			// additionalProperties: false — reject any key not listed in Properties
 			for key := range obj {
 				if _, defined := schema.Properties[key]; !defined {
-					errs = append(errs, fmt.Sprintf("additional property %q is not allowed", key))
+					errs = append(errs, fmt.Sprintf("%s: additional property %q is not allowed", bodyLabel, key))
 				}
 			}
 		} else if ap.Schema != nil {

@@ -2524,8 +2524,8 @@ func TestOpenAPIModule_AdditionalProperties_True(t *testing.T) {
 	r.Header.Set("Content-Type", "application/json")
 	h.Handle(w, r)
 
-	if w.Code == http.StatusBadRequest {
-		t.Errorf("expected extra keys to pass with additionalProperties:true, got 400: %s", w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Errorf("expected extra keys to pass with additionalProperties:true, got status %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -2618,8 +2618,19 @@ func TestOpenAPIModule_AdditionalProperties_Schema(t *testing.T) {
 	r.Header.Set("Content-Type", "application/json")
 	h.Handle(w, r)
 
-	if w.Code == http.StatusBadRequest {
-		t.Errorf("expected string extra key to pass additionalProperties:{type:string}, got 400: %s", w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Errorf("expected string extra key to pass additionalProperties:{type:string}, got status %d: %s", w.Code, w.Body.String())
+	}
+
+	// Invalid: extra key value is an integer, not a string — should be rejected
+	bodyInvalid := `{"name":"test","extra":42}`
+	w2 := httptest.NewRecorder()
+	r2 := httptest.NewRequest(http.MethodPost, "/typed-extra", strings.NewReader(bodyInvalid))
+	r2.Header.Set("Content-Type", "application/json")
+	h.Handle(w2, r2)
+
+	if w2.Code != http.StatusBadRequest {
+		t.Errorf("expected integer extra key to fail additionalProperties:{type:string}, got status %d: %s", w2.Code, w2.Body.String())
 	}
 }
 
