@@ -3,7 +3,9 @@ package module
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -48,6 +50,9 @@ type GraphQLStep struct {
 	httpClient          *http.Client
 	pagination          *paginationConfig
 	batch               []batchQuery
+	apqEnabled          bool
+	apqSHA256           string
+	introspection       bool
 
 	// OAuth2 (reuses globalOAuthCache from pipeline_step_http_call.go)
 	auth       *oauthConfig
@@ -119,6 +124,21 @@ func NewGraphQLStepFactory() StepFactory {
 					}
 					step.batch = append(step.batch, bq)
 				}
+			}
+		}
+
+		if pqCfg, ok := config["persisted_query"].(map[string]any); ok {
+			if enabled, ok := pqCfg["enabled"].(bool); ok && enabled {
+				step.apqEnabled = true
+				if hash, ok := pqCfg["sha256"].(string); ok && hash != "" {
+					step.apqSHA256 = hash
+				}
+			}
+		}
+
+		if introCfg, ok := config["introspection"].(map[string]any); ok {
+			if enabled, ok := introCfg["enabled"].(bool); ok && enabled {
+				step.introspection = true
 			}
 		}
 
@@ -232,12 +252,20 @@ func (s *GraphQLStep) Name() string { return s.name }
 
 // Execute runs the GraphQL query/mutation and returns the result.
 func (s *GraphQLStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+	if s.introspection {
+		return s.executeIntrospection(ctx, pc)
+	}
+
 	if len(s.batch) > 0 {
 		return s.executeBatch(ctx, pc)
 	}
 
 	if s.pagination != nil {
 		return s.executePaginated(ctx, pc)
+	}
+
+	if s.apqEnabled {
+		return s.executeAPQ(ctx, pc)
 	}
 
 	if s.timeout > 0 {
@@ -446,6 +474,157 @@ done:
 	}
 
 	return &StepResult{Output: result}, nil
+}
+
+const introspectionQuery = `query IntrospectionQuery {
+  __schema {
+    queryType { name }
+    mutationType { name }
+    subscriptionType { name }
+    types {
+      kind name description
+      fields(includeDeprecated: true) {
+        name description
+        args { name description type { kind name ofType { kind name ofType { kind name } } } defaultValue }
+        type { kind name ofType { kind name ofType { kind name ofType { kind name } } } }
+        isDeprecated deprecationReason
+      }
+      inputFields { name description type { kind name ofType { kind name } } defaultValue }
+      interfaces { kind name }
+      enumValues(includeDeprecated: true) { name description isDeprecated deprecationReason }
+      possibleTypes { kind name }
+    }
+    directives {
+      name description locations
+      args { name description type { kind name ofType { kind name } } defaultValue }
+    }
+  }
+}`
+
+// executeIntrospection sends the standard introspection query.
+func (s *GraphQLStep) executeIntrospection(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+	if s.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.timeout)
+		defer cancel()
+	}
+
+	resolvedURL, err := s.tmpl.Resolve(s.url, pc)
+	if err != nil {
+		return nil, fmt.Errorf("graphql step %q: failed to resolve url: %w", s.name, err)
+	}
+
+	bearerToken, err := s.getBearerToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	reqBody := map[string]any{"query": introspectionQuery}
+	output, _, err := s.doRequest(ctx, resolvedURL, reqBody, bearerToken)
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract __schema and types for convenience
+	if fullData, ok := output["full_data"].(map[string]any); ok {
+		if schema, ok := fullData["__schema"]; ok {
+			output["schema"] = schema
+			if schemaMap, ok := schema.(map[string]any); ok {
+				output["types"] = schemaMap["types"]
+			}
+		}
+	}
+
+	return &StepResult{Output: output}, nil
+}
+
+// executeAPQ sends an Automatic Persisted Query: first hash-only, then with full query on cache miss.
+func (s *GraphQLStep) executeAPQ(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+	if s.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.timeout)
+		defer cancel()
+	}
+
+	resolvedURL, err := s.tmpl.Resolve(s.url, pc)
+	if err != nil {
+		return nil, fmt.Errorf("graphql step %q: failed to resolve url: %w", s.name, err)
+	}
+
+	fullQuery := s.query
+	if len(s.fragments) > 0 {
+		fullQuery = strings.Join(s.fragments, "\n") + "\n" + s.query
+	}
+	fullQuery, err = s.tmpl.Resolve(fullQuery, pc)
+	if err != nil {
+		return nil, fmt.Errorf("graphql step %q: failed to resolve query: %w", s.name, err)
+	}
+
+	var resolvedVars map[string]any
+	if s.variables != nil {
+		resolvedVars, err = s.tmpl.ResolveMap(s.variables, pc)
+		if err != nil {
+			return nil, fmt.Errorf("graphql step %q: failed to resolve variables: %w", s.name, err)
+		}
+	}
+
+	hash := s.apqSHA256
+	if hash == "" {
+		h := sha256.Sum256([]byte(fullQuery))
+		hash = hex.EncodeToString(h[:])
+	}
+
+	bearerToken, err := s.getBearerToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// First attempt: send hash only (no query body)
+	reqBody := map[string]any{
+		"extensions": map[string]any{
+			"persistedQuery": map[string]any{
+				"version":    1,
+				"sha256Hash": hash,
+			},
+		},
+	}
+	if resolvedVars != nil {
+		reqBody["variables"] = resolvedVars
+	}
+
+	// Temporarily disable fail_on_graphql_errors so we can inspect PersistedQueryNotFound
+	origFail := s.failOnGraphQLErrors
+	s.failOnGraphQLErrors = false
+	output, _, firstErr := s.doRequest(ctx, resolvedURL, reqBody, bearerToken)
+	s.failOnGraphQLErrors = origFail
+
+	if firstErr == nil && !isPersistedQueryNotFound(output) {
+		return &StepResult{Output: output}, nil
+	}
+
+	// Retry with full query body
+	reqBody["query"] = fullQuery
+	output, _, err = s.doRequest(ctx, resolvedURL, reqBody, bearerToken)
+	if err != nil {
+		return nil, err
+	}
+	return &StepResult{Output: output}, nil
+}
+
+// isPersistedQueryNotFound checks if the output contains a PersistedQueryNotFound error.
+func isPersistedQueryNotFound(output map[string]any) bool {
+	errors, ok := output["errors"].([]any)
+	if !ok || len(errors) == 0 {
+		return false
+	}
+	for _, e := range errors {
+		if errMap, ok := e.(map[string]any); ok {
+			if msg, ok := errMap["message"].(string); ok && strings.Contains(msg, "PersistedQueryNotFound") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // executeBatch sends all batch queries in a single HTTP request.
