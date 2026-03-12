@@ -214,6 +214,16 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 				requiredClaimVal := stringFromMap(introspectCfg, "requiredClaimVal")
 				m.SetIntrospectPolicy(allowOthers, requiredScope, requiredClaim, requiredClaimVal)
 			}
+
+			// Configure custom endpoint path suffixes.
+			if endpointsCfg, ok := cfg["endpoints"].(map[string]any); ok {
+				m.SetEndpoints(module.M2MEndpointPaths{
+					Token:      stringFromMap(endpointsCfg, "token"),
+					Revoke:     stringFromMap(endpointsCfg, "revoke"),
+					Introspect: stringFromMap(endpointsCfg, "introspect"),
+					JWKS:       stringFromMap(endpointsCfg, "jwks"),
+				})
+			}
 			return m
 		},
 	}
@@ -380,6 +390,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "issuer", Label: "Issuer", Type: schema.FieldTypeString, DefaultValue: "workflow", Description: "Token issuer (iss) claim", Placeholder: "workflow"},
 				{Key: "clients", Label: "Registered Clients", Type: schema.FieldTypeJSON, Description: "List of OAuth2 clients: [{clientId, clientSecret, scopes, description, claims}]"},
 				{Key: "introspect", Label: "Introspection Policy", Type: schema.FieldTypeJSON, Description: "Access-control policy for POST /oauth/introspect: {allowOthers: bool, requiredScope: string, requiredClaim: string, requiredClaimVal: string}. Default: self-only (allowOthers: false)."},
+				{Key: "endpoints", Label: "Endpoint Paths", Type: schema.FieldTypeJSON, Description: "Custom OAuth2 endpoint path suffixes: {token, revoke, introspect, jwks}. Defaults: /oauth/token, /oauth/revoke, /oauth/introspect, /oauth/jwks."},
 			},
 			DefaultConfig: map[string]any{"algorithm": "ES256", "tokenExpiry": "1h", "issuer": "workflow", "clients": []any{}},
 		},

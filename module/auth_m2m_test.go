@@ -2130,3 +2130,157 @@ func TestM2M_Revoke_DBStore_MultipleTokens(t *testing.T) {
 		t.Errorf("expected %d DB rows, got %d", numTokens, len(storedJTIs))
 	}
 }
+
+// --- Custom endpoint path configuration ---
+
+func TestM2M_DefaultEndpointPaths(t *testing.T) {
+	defaults := DefaultM2MEndpointPaths()
+	if defaults.Token != "/oauth/token" {
+		t.Errorf("expected Token=/oauth/token, got %q", defaults.Token)
+	}
+	if defaults.Revoke != "/oauth/revoke" {
+		t.Errorf("expected Revoke=/oauth/revoke, got %q", defaults.Revoke)
+	}
+	if defaults.Introspect != "/oauth/introspect" {
+		t.Errorf("expected Introspect=/oauth/introspect, got %q", defaults.Introspect)
+	}
+	if defaults.JWKS != "/oauth/jwks" {
+		t.Errorf("expected JWKS=/oauth/jwks, got %q", defaults.JWKS)
+	}
+}
+
+func TestM2M_SetEndpoints_CustomPaths(t *testing.T) {
+	m := newM2MHS256(t)
+	m.SetEndpoints(M2MEndpointPaths{
+		Token:      "/v2/oauth/token",
+		Revoke:     "/oauth/token/revoke",
+		Introspect: "/oauth/token/introspect",
+		JWKS:       "/v2/oauth/jwks",
+	})
+
+	if m.endpointPaths.Token != "/v2/oauth/token" {
+		t.Errorf("expected /v2/oauth/token, got %q", m.endpointPaths.Token)
+	}
+	if m.endpointPaths.Revoke != "/oauth/token/revoke" {
+		t.Errorf("expected /oauth/token/revoke, got %q", m.endpointPaths.Revoke)
+	}
+	if m.endpointPaths.Introspect != "/oauth/token/introspect" {
+		t.Errorf("expected /oauth/token/introspect, got %q", m.endpointPaths.Introspect)
+	}
+	if m.endpointPaths.JWKS != "/v2/oauth/jwks" {
+		t.Errorf("expected /v2/oauth/jwks, got %q", m.endpointPaths.JWKS)
+	}
+}
+
+func TestM2M_SetEndpoints_EmptyFieldsPreserveDefaults(t *testing.T) {
+	m := newM2MHS256(t)
+	// Only override Revoke; other paths should remain at defaults.
+	m.SetEndpoints(M2MEndpointPaths{
+		Revoke: "/oauth/token/revoke",
+	})
+
+	if m.endpointPaths.Token != "/oauth/token" {
+		t.Errorf("Token should remain default, got %q", m.endpointPaths.Token)
+	}
+	if m.endpointPaths.Revoke != "/oauth/token/revoke" {
+		t.Errorf("expected /oauth/token/revoke, got %q", m.endpointPaths.Revoke)
+	}
+	if m.endpointPaths.Introspect != "/oauth/introspect" {
+		t.Errorf("Introspect should remain default, got %q", m.endpointPaths.Introspect)
+	}
+}
+
+func TestM2M_CustomTokenPath_Issues_Token(t *testing.T) {
+	m := newM2MHS256(t)
+	m.SetEndpoints(M2MEndpointPaths{Token: "/v2/oauth/token"})
+
+	req := httptest.NewRequest(http.MethodPost, "/v2/oauth/token",
+		strings.NewReader(url.Values{
+			"grant_type":    {"client_credentials"},
+			"client_id":     {"test-client"},
+			"client_secret": {"test-secret"},
+		}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	m.Handle(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestM2M_OldTokenPath_Returns404_WhenOverridden(t *testing.T) {
+	m := newM2MHS256(t)
+	m.SetEndpoints(M2MEndpointPaths{Token: "/v2/oauth/token"})
+
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token",
+		strings.NewReader(url.Values{
+			"grant_type":    {"client_credentials"},
+			"client_id":     {"test-client"},
+			"client_secret": {"test-secret"},
+		}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	m.Handle(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404 on old path after override, got %d", w.Code)
+	}
+}
+
+func TestM2M_CustomRevokePath_Fosite_Style(t *testing.T) {
+	m := newM2MHS256(t)
+	m.SetEndpoints(M2MEndpointPaths{
+		Revoke:     "/oauth/token/revoke",
+		Introspect: "/oauth/token/introspect",
+	})
+
+	tok := issueTestToken(t, m, "test-client", "test-secret")
+
+	// Revoke via Fosite-style path.
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token/revoke",
+		strings.NewReader(url.Values{"token": {tok}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth("test-client", "test-secret")
+	w := httptest.NewRecorder()
+	m.Handle(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on revoke, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	// Old /oauth/revoke should now return 404.
+	req2 := httptest.NewRequest(http.MethodPost, "/oauth/revoke",
+		strings.NewReader(url.Values{"token": {tok}}.Encode()))
+	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req2.SetBasicAuth("test-client", "test-secret")
+	w2 := httptest.NewRecorder()
+	m.Handle(w2, req2)
+	if w2.Code != http.StatusNotFound {
+		t.Errorf("expected 404 on old /oauth/revoke, got %d", w2.Code)
+	}
+}
+
+func TestM2M_CustomIntrospectPath_Fosite_Style(t *testing.T) {
+	m := newM2MHS256(t)
+	m.SetEndpoints(M2MEndpointPaths{
+		Introspect: "/oauth/token/introspect",
+	})
+	m.SetIntrospectPolicy(true, "", "", "")
+
+	tok := issueTestToken(t, m, "test-client", "test-secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token/introspect",
+		strings.NewReader(url.Values{"token": {tok}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth("test-client", "test-secret")
+	w := httptest.NewRecorder()
+	m.Handle(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	_ = json.NewDecoder(w.Body).Decode(&resp)
+	if active, _ := resp["active"].(bool); !active {
+		t.Errorf("expected active=true, got %v", resp)
+	}
+}

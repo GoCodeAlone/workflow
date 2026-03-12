@@ -63,6 +63,32 @@ type M2MClient struct {
 	Claims       map[string]any `json:"claims,omitempty"`
 }
 
+// M2MEndpointPaths configures the URL path suffixes for the OAuth2 endpoints
+// exposed by the M2M auth module. Each field is matched using strings.HasSuffix
+// against the incoming request path, so a prefix such as /api/v1 is allowed.
+//
+// The zero value is not useful; use DefaultM2MEndpointPaths() to obtain defaults.
+type M2MEndpointPaths struct {
+	// Token is the path suffix for the token endpoint (default: /oauth/token).
+	Token string
+	// Revoke is the path suffix for the revocation endpoint (default: /oauth/revoke).
+	Revoke string
+	// Introspect is the path suffix for the introspection endpoint (default: /oauth/introspect).
+	Introspect string
+	// JWKS is the path suffix for the JWKS endpoint (default: /oauth/jwks).
+	JWKS string
+}
+
+// DefaultM2MEndpointPaths returns the default OAuth2 endpoint path suffixes.
+func DefaultM2MEndpointPaths() M2MEndpointPaths {
+	return M2MEndpointPaths{ //nolint:gosec // G101: These are URL paths, not credentials.
+		Token:      "/oauth/token",
+		Revoke:     "/oauth/revoke",
+		Introspect: "/oauth/introspect",
+		JWKS:       "/oauth/jwks",
+	}
+}
+
 // M2MAuthModule provides machine-to-machine (server-to-server) OAuth2 authentication.
 // It supports the client_credentials grant and the JWT-bearer grant, and can issue
 // tokens signed with either HS256 (shared secret) or ES256 (ECDSA P-256).
@@ -94,6 +120,9 @@ type M2MAuthModule struct {
 	// Optional pluggable persistence for token revocations.
 	revocationStore TokenRevocationStore
 
+	// Configurable OAuth2 endpoint path suffixes.
+	endpointPaths M2MEndpointPaths
+
 	// Introspection access-control policy (see SetIntrospectPolicy).
 	introspectAllowOthers      bool   // if true, authenticated callers may inspect any token
 	introspectRequiredScope    string // scope required in caller's token to inspect others
@@ -111,14 +140,15 @@ func NewM2MAuthModule(name string, hmacSecret string, tokenExpiry time.Duration,
 		issuer = "workflow"
 	}
 	m := &M2MAuthModule{
-		name:         name,
-		algorithm:    SigningAlgHS256,
-		issuer:       issuer,
-		tokenExpiry:  tokenExpiry,
-		hmacSecret:   []byte(hmacSecret),
-		trustedKeys:  make(map[string]*ecdsa.PublicKey),
-		clients:      make(map[string]*M2MClient),
-		jtiBlacklist: make(map[string]time.Time),
+		name:          name,
+		algorithm:     SigningAlgHS256,
+		issuer:        issuer,
+		tokenExpiry:   tokenExpiry,
+		hmacSecret:    []byte(hmacSecret),
+		trustedKeys:   make(map[string]*ecdsa.PublicKey),
+		clients:       make(map[string]*M2MClient),
+		jtiBlacklist:  make(map[string]time.Time),
+		endpointPaths: DefaultM2MEndpointPaths(),
 	}
 	return m
 }
@@ -209,6 +239,32 @@ func (m *M2MAuthModule) SetRevocationStore(store TokenRevocationStore) {
 	m.revocationStore = store
 }
 
+// SetEndpoints overrides the URL path suffixes used by Handle() to route incoming
+// requests to the token, revocation, introspection, and JWKS sub-handlers.
+// Any empty field in paths is left at its current value (defaulting to the standard
+// paths set by NewM2MAuthModule).
+//
+// Example – to match Fosite/Auth0-style paths:
+//
+//	m.SetEndpoints(M2MEndpointPaths{
+//	    Revoke:     "/oauth/token/revoke",
+//	    Introspect: "/oauth/token/introspect",
+//	})
+func (m *M2MAuthModule) SetEndpoints(paths M2MEndpointPaths) {
+	if paths.Token != "" {
+		m.endpointPaths.Token = paths.Token
+	}
+	if paths.Revoke != "" {
+		m.endpointPaths.Revoke = paths.Revoke
+	}
+	if paths.Introspect != "" {
+		m.endpointPaths.Introspect = paths.Introspect
+	}
+	if paths.JWKS != "" {
+		m.endpointPaths.JWKS = paths.JWKS
+	}
+}
+
 // Name returns the module name.
 func (m *M2MAuthModule) Name() string { return m.name }
 
@@ -243,24 +299,24 @@ func (m *M2MAuthModule) RequiresServices() []modular.ServiceDependency { return 
 
 // Handle routes M2M OAuth2 requests.
 //
-// Routes:
+// Routes (path suffixes are configurable via SetEndpoints):
 //
-//	POST /oauth/token     — token endpoint (client_credentials + jwt-bearer grants)
-//	POST /oauth/revoke    — token revocation (RFC 7009)
-//	POST /oauth/introspect — token introspection (RFC 7662)
-//	GET  /oauth/jwks      — JSON Web Key Set (ES256 public key)
+//	POST <endpoints.Token>      — token endpoint (client_credentials + jwt-bearer grants)
+//	POST <endpoints.Revoke>     — token revocation (RFC 7009)
+//	POST <endpoints.Introspect> — token introspection (RFC 7662)
+//	GET  <endpoints.JWKS>       — JSON Web Key Set (ES256 public key)
 func (m *M2MAuthModule) Handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	path := r.URL.Path
 	switch {
-	case r.Method == http.MethodPost && strings.HasSuffix(path, "/oauth/token"):
+	case r.Method == http.MethodPost && strings.HasSuffix(path, m.endpointPaths.Token):
 		m.handleToken(w, r)
-	case r.Method == http.MethodPost && strings.HasSuffix(path, "/oauth/revoke"):
+	case r.Method == http.MethodPost && strings.HasSuffix(path, m.endpointPaths.Revoke):
 		m.handleRevoke(w, r)
-	case r.Method == http.MethodPost && strings.HasSuffix(path, "/oauth/introspect"):
+	case r.Method == http.MethodPost && strings.HasSuffix(path, m.endpointPaths.Introspect):
 		m.handleIntrospect(w, r)
-	case r.Method == http.MethodGet && strings.HasSuffix(path, "/oauth/jwks"):
+	case r.Method == http.MethodGet && strings.HasSuffix(path, m.endpointPaths.JWKS):
 		m.handleJWKS(w, r)
 	default:
 		w.WriteHeader(http.StatusNotFound)

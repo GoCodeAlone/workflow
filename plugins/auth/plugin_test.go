@@ -168,3 +168,55 @@ func TestModuleFactoryM2MWithClaims(t *testing.T) {
 		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestModuleFactoryM2MWithCustomEndpoints(t *testing.T) {
+	p := New()
+	factories := p.ModuleFactories()
+
+	mod := factories["auth.m2m"]("m2m-ep-test", map[string]any{
+		"algorithm": "HS256",
+		"secret":    "this-is-a-valid-secret-32-bytes!",
+		"clients": []any{
+			map[string]any{
+				"clientId":     "ep-client",
+				"clientSecret": "ep-secret",
+			},
+		},
+		"endpoints": map[string]any{
+			"token":      "/v2/oauth/token",
+			"revoke":     "/oauth/token/revoke",
+			"introspect": "/oauth/token/introspect",
+			"jwks":       "/v2/oauth/jwks",
+		},
+	})
+	if mod == nil {
+		t.Fatal("auth.m2m factory returned nil")
+	}
+	m2mMod, ok := mod.(*module.M2MAuthModule)
+	if !ok {
+		t.Fatal("expected *module.M2MAuthModule")
+	}
+
+	// Custom token path should work.
+	params := url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {"ep-client"},
+		"client_secret": {"ep-secret"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v2/oauth/token", strings.NewReader(params.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	m2mMod.Handle(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on custom token path, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	// Default token path should return 404 when overridden.
+	req2 := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(params.Encode()))
+	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w2 := httptest.NewRecorder()
+	m2mMod.Handle(w2, req2)
+	if w2.Code != http.StatusNotFound {
+		t.Errorf("expected 404 on default path after override, got %d", w2.Code)
+	}
+}
