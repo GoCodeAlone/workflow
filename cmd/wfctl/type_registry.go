@@ -702,6 +702,78 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"failure_threshold", "reset_timeout", "step", "fallback"},
 		},
+		"step.json_parse": {
+			Type:       "step.json_parse",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"source", "target"},
+		},
+		"step.raw_response": {
+			Type:       "step.raw_response",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"content_type", "status", "headers", "body", "body_from"},
+		},
+		"step.auth_validate": {
+			Type:       "step.auth_validate",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"auth_module", "token_source", "subject_field"},
+		},
+		"step.authz_check": {
+			Type:       "step.authz_check",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"policy_engine", "subject_field", "input_from"},
+		},
+		"step.hash": {
+			Type:       "step.hash",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"algorithm", "input"},
+		},
+		"step.regex_match": {
+			Type:       "step.regex_match",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"pattern", "input"},
+		},
+		"step.parallel": {
+			Type:       "step.parallel",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"steps", "error_strategy"},
+		},
+		"step.field_reencrypt": {
+			Type:       "step.field_reencrypt",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"module", "tenant_id"},
+		},
+		"step.token_revoke": {
+			Type:       "step.token_revoke",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"blacklist_module", "token_source"},
+		},
+		"step.sandbox_exec": {
+			Type:       "step.sandbox_exec",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"image", "command", "security_profile", "memory_limit", "cpu_limit", "timeout", "network", "env", "mounts"},
+		},
+		"step.ui_scaffold": {
+			Type:       "step.ui_scaffold",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"title", "theme", "auth", "filename"},
+		},
+		"step.ui_scaffold_analyze": {
+			Type:       "step.ui_scaffold_analyze",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"title", "theme"},
+		},
+
+		// actors plugin steps
+		"step.actor_send": {
+			Type:       "step.actor_send",
+			Plugin:     "actors",
+			ConfigKeys: []string{"pool", "message", "identity"},
+		},
+		"step.actor_ask": {
+			Type:       "step.actor_ask",
+			Plugin:     "actors",
+			ConfigKeys: []string{"pool", "message", "timeout", "identity"},
+		},
 
 		// http plugin steps
 		"step.rate_limit": {
@@ -826,6 +898,31 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Type:       "step.build_from_config",
 			Plugin:     "cicd",
 			ConfigKeys: []string{"config", "output"},
+		},
+		"step.git_clone": {
+			Type:       "step.git_clone",
+			Plugin:     "cicd",
+			ConfigKeys: []string{"repository", "directory", "branch", "token", "ssh_key", "depth"},
+		},
+		"step.git_commit": {
+			Type:       "step.git_commit",
+			Plugin:     "cicd",
+			ConfigKeys: []string{"directory", "message", "author_name", "author_email", "add_all", "add_files"},
+		},
+		"step.git_push": {
+			Type:       "step.git_push",
+			Plugin:     "cicd",
+			ConfigKeys: []string{"directory", "remote", "branch", "force", "tags", "token"},
+		},
+		"step.git_tag": {
+			Type:       "step.git_tag",
+			Plugin:     "cicd",
+			ConfigKeys: []string{"directory", "tag", "message", "push", "token"},
+		},
+		"step.git_checkout": {
+			Type:       "step.git_checkout",
+			Plugin:     "cicd",
+			ConfigKeys: []string{"directory", "branch", "create"},
 		},
 
 		// auth-related steps (from pipelinesteps but auth-aware)
@@ -1140,6 +1237,164 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Type:       "step.do_destroy",
 			Plugin:     "platform",
 			ConfigKeys: []string{"app"},
+		},
+
+		// platform plugin steps (platform template)
+		"step.platform_template": {
+			Type:       "step.platform_template",
+			Plugin:     "platform",
+			ConfigKeys: []string{"template_name", "template_version", "parameters"},
+		},
+
+		// platform plugin steps (scaling)
+		"step.scaling_plan": {
+			Type:       "step.scaling_plan",
+			Plugin:     "platform",
+			ConfigKeys: []string{"scaling", "provider_service", "resources_from", "context_org", "context_env", "context_app", "tier", "dry_run"},
+		},
+		"step.scaling_apply": {
+			Type:       "step.scaling_apply",
+			Plugin:     "platform",
+			ConfigKeys: []string{"scaling", "provider_service", "plan_from"},
+		},
+		"step.scaling_status": {
+			Type:       "step.scaling_status",
+			Plugin:     "platform",
+			ConfigKeys: []string{"scaling"},
+		},
+		"step.scaling_destroy": {
+			Type:       "step.scaling_destroy",
+			Plugin:     "platform",
+			ConfigKeys: []string{"scaling"},
+		},
+
+		// platform plugin steps (iac)
+		"step.iac_plan": {
+			Type:       "step.iac_plan",
+			Plugin:     "platform",
+			ConfigKeys: []string{"platform", "resource_id", "state_store"},
+		},
+		"step.iac_apply": {
+			Type:       "step.iac_apply",
+			Plugin:     "platform",
+			ConfigKeys: []string{"platform", "resource_id", "state_store"},
+		},
+		"step.iac_status": {
+			Type:       "step.iac_status",
+			Plugin:     "platform",
+			ConfigKeys: []string{"platform", "resource_id", "state_store"},
+		},
+		"step.iac_destroy": {
+			Type:       "step.iac_destroy",
+			Plugin:     "platform",
+			ConfigKeys: []string{"platform", "resource_id", "state_store"},
+		},
+		"step.iac_drift_detect": {
+			Type:       "step.iac_drift_detect",
+			Plugin:     "platform",
+			ConfigKeys: []string{"platform", "resource_id", "state_store"},
+		},
+
+		// platform plugin steps (dns)
+		"step.dns_plan": {
+			Type:       "step.dns_plan",
+			Plugin:     "platform",
+			ConfigKeys: []string{"zone"},
+		},
+		"step.dns_apply": {
+			Type:       "step.dns_apply",
+			Plugin:     "platform",
+			ConfigKeys: []string{"zone"},
+		},
+		"step.dns_status": {
+			Type:       "step.dns_status",
+			Plugin:     "platform",
+			ConfigKeys: []string{"zone"},
+		},
+
+		// platform plugin steps (networking)
+		"step.network_plan": {
+			Type:       "step.network_plan",
+			Plugin:     "platform",
+			ConfigKeys: []string{"network"},
+		},
+		"step.network_apply": {
+			Type:       "step.network_apply",
+			Plugin:     "platform",
+			ConfigKeys: []string{"network"},
+		},
+		"step.network_status": {
+			Type:       "step.network_status",
+			Plugin:     "platform",
+			ConfigKeys: []string{"network"},
+		},
+
+		// platform plugin steps (api gateway)
+		"step.apigw_plan": {
+			Type:       "step.apigw_plan",
+			Plugin:     "platform",
+			ConfigKeys: []string{"gateway"},
+		},
+		"step.apigw_apply": {
+			Type:       "step.apigw_apply",
+			Plugin:     "platform",
+			ConfigKeys: []string{"gateway"},
+		},
+		"step.apigw_status": {
+			Type:       "step.apigw_status",
+			Plugin:     "platform",
+			ConfigKeys: []string{"gateway"},
+		},
+		"step.apigw_destroy": {
+			Type:       "step.apigw_destroy",
+			Plugin:     "platform",
+			ConfigKeys: []string{"gateway"},
+		},
+
+		// platform plugin steps (ecs)
+		"step.ecs_plan": {
+			Type:       "step.ecs_plan",
+			Plugin:     "platform",
+			ConfigKeys: []string{"service"},
+		},
+		"step.ecs_apply": {
+			Type:       "step.ecs_apply",
+			Plugin:     "platform",
+			ConfigKeys: []string{"service"},
+		},
+		"step.ecs_status": {
+			Type:       "step.ecs_status",
+			Plugin:     "platform",
+			ConfigKeys: []string{"service"},
+		},
+		"step.ecs_destroy": {
+			Type:       "step.ecs_destroy",
+			Plugin:     "platform",
+			ConfigKeys: []string{"service"},
+		},
+
+		// platform plugin steps (app container)
+		"step.app_deploy": {
+			Type:       "step.app_deploy",
+			Plugin:     "platform",
+			ConfigKeys: []string{"app"},
+		},
+		"step.app_status": {
+			Type:       "step.app_status",
+			Plugin:     "platform",
+			ConfigKeys: []string{"app"},
+		},
+		"step.app_rollback": {
+			Type:       "step.app_rollback",
+			Plugin:     "platform",
+			ConfigKeys: []string{"app"},
+		},
+
+		// secrets plugin steps
+		"step.secret_rotate": {
+			Type:       "step.secret_rotate",
+			Plugin:     "secrets",
+			ConfigKeys: []string{"provider", "key", "notify_module"},
 		},
 	}
 	// Include any step types registered dynamically (e.g. from external plugins).

@@ -77,14 +77,67 @@ func TestKnownStepTypesPopulated(t *testing.T) {
 		t.Fatal("expected known step types to be non-empty")
 	}
 	expected := []string{
+		// pipelinesteps plugin
 		"step.validate",
 		"step.transform",
 		"step.json_response",
+		"step.raw_response",
+		"step.json_parse",
 		"step.db_query",
 		"step.publish",
 		"step.http_call",
 		"step.cache_get",
+		"step.auth_validate",
+		"step.authz_check",
+		"step.hash",
+		"step.regex_match",
+		"step.parallel",
+		"step.field_reencrypt",
+		"step.token_revoke",
+		"step.sandbox_exec",
+		"step.ui_scaffold",
+		"step.ui_scaffold_analyze",
+		// http plugin
 		"step.rate_limit",
+		// actors plugin
+		"step.actor_send",
+		"step.actor_ask",
+		// secrets plugin
+		"step.secret_rotate",
+		// platform plugin
+		"step.platform_template",
+		"step.scaling_plan",
+		"step.scaling_apply",
+		"step.scaling_status",
+		"step.scaling_destroy",
+		"step.iac_plan",
+		"step.iac_apply",
+		"step.iac_status",
+		"step.iac_destroy",
+		"step.iac_drift_detect",
+		"step.dns_plan",
+		"step.dns_apply",
+		"step.dns_status",
+		"step.network_plan",
+		"step.network_apply",
+		"step.network_status",
+		"step.apigw_plan",
+		"step.apigw_apply",
+		"step.apigw_status",
+		"step.apigw_destroy",
+		"step.ecs_plan",
+		"step.ecs_apply",
+		"step.ecs_status",
+		"step.ecs_destroy",
+		"step.app_deploy",
+		"step.app_status",
+		"step.app_rollback",
+		// cicd plugin
+		"step.git_clone",
+		"step.git_commit",
+		"step.git_push",
+		"step.git_tag",
+		"step.git_checkout",
 	}
 	for _, e := range expected {
 		if _, ok := types[e]; !ok {
@@ -134,8 +187,9 @@ func TestModuleTypeCount(t *testing.T) {
 
 func TestStepTypeCount(t *testing.T) {
 	types := KnownStepTypes()
-	// We should have a substantial number of step types
-	if len(types) < 20 {
-		t.Errorf("expected at least 20 step types, got %d", len(types))
+	// We should have a substantial number of step types — all built-in plugin steps.
+	// This threshold guards against accidental removal; update it when new steps are added.
+	if len(types) < 120 {
+		t.Errorf("expected at least 120 step types, got %d — some step types may have been dropped", len(types))
 	}
 }
