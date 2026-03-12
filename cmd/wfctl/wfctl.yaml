@@ -55,6 +55,8 @@ workflows:
         description: "Detect and fix known YAML config anti-patterns (dry-run by default)"
       - name: infra
         description: "Manage infrastructure lifecycle (plan, apply, status, drift, destroy)"
+      - name: docs
+        description: "Generate documentation from workflow configs (generate: produce Markdown + Mermaid diagrams)"
 
 # Each command is expressed as a workflow pipeline triggered by the CLI.
 # The pipeline delegates to the registered Go implementation via step.cli_invoke,
@@ -347,4 +349,15 @@ pipelines:
         type: step.cli_invoke
         config:
           command: infra
+
+  cmd-docs:
+    trigger:
+      type: cli
+      config:
+        command: docs
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: docs
 

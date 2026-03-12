@@ -119,6 +119,7 @@ graph TD
 | **Validation & Inspection** | `validate`, `inspect`, `schema`, `compat check`, `template validate` |
 | **API & Contract** | `api extract`, `contract test`, `diff` |
 | **Deployment** | `deploy docker/kubernetes/helm/cloud`, `build-ui`, `generate github-actions` |
+| **Documentation** | `docs generate` |
 | **Plugin Management** | `plugin`, `registry`, `publish` |
 | **UI Generation** | `ui scaffold`, `build-ui` |
 | **Database Migrations** | `migrate status/diff/apply` |
@@ -815,6 +816,42 @@ wfctl infra apply --auto-approve infra.yaml
 wfctl infra status --config infra.yaml
 wfctl infra drift infra.yaml
 wfctl infra destroy --auto-approve infra.yaml
+```
+
+---
+
+### `docs generate`
+
+Generate Markdown documentation with Mermaid diagrams from a workflow configuration file. Produces a set of `.md` files describing modules, pipelines, workflows, external plugins, and system architecture.
+
+```
+wfctl docs generate [options] <config.yaml>
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-output` | `./docs/generated/` | Output directory for generated documentation |
+| `-plugin-dir` | _(none)_ | Directory containing external plugin manifests (`plugin.json`) |
+| `-title` | _(derived from config filename)_ | Application title used in the README |
+
+**Generated files:**
+
+| File | Description |
+|------|-------------|
+| `README.md` | Application overview with metrics, required plugins, and documentation index |
+| `modules.md` | Module inventory table, type breakdown, configuration details, and dependency graph (Mermaid) |
+| `pipelines.md` | Pipeline definitions with trigger info, step tables, workflow diagrams (Mermaid), and compensation steps |
+| `workflows.md` | HTTP routes with route diagrams (Mermaid), messaging subscriptions/producers, and state machine diagrams (Mermaid) |
+| `plugins.md` | External plugin details including version, capabilities, module/step types, and dependencies (only when `-plugin-dir` is provided) |
+| `architecture.md` | System architecture diagram with layered subgraphs and plugin architecture (Mermaid) |
+
+**Examples:**
+
+```bash
+wfctl docs generate workflow.yaml
+wfctl docs generate -output ./docs/ workflow.yaml
+wfctl docs generate -output ./docs/ -plugin-dir ./plugins/ workflow.yaml
+wfctl docs generate -output ./docs/ -title "Order Service" workflow.yaml
 ```
 
 ---
