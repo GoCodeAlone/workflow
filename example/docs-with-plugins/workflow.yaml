@@ -1,0 +1,279 @@
+# Secure Order Processing API
+#
+# An example application demonstrating documentation generation.
+# This config uses multiple module types, pipelines, messaging,
+# state machines, and references external plugins such as
+# GoCodeAlone/workflow-plugin-authz for authorization enforcement.
+#
+# Generate docs:
+#   wfctl docs generate -output ./docs/ -plugin-dir ./plugins/ workflow.yaml
+
+requires:
+  plugins:
+    - name: workflow-plugin-http
+    - name: workflow-plugin-authz
+      version: ">=1.0.0"
+  capabilities:
+    - authorization
+    - http-serving
+
+modules:
+  # --- HTTP layer ---
+  - name: api-server
+    type: http.server
+    config:
+      address: ":8080"
+
+  - name: api-router
+    type: http.router
+    dependsOn:
+      - api-server
+
+  # --- Auth / Authz ---
+  - name: auth-jwt
+    type: auth.jwt
+    dependsOn:
+      - api-router
+    config:
+      secret: "${JWT_SECRET}"
+      issuer: "https://auth.example.com"
+      audience: "order-api"
+
+  - name: authz-enforcer
+    type: authz.enforcer
+    dependsOn:
+      - auth-jwt
+    config:
+      policy: "rbac"
+      rules_path: "./policies/orders.csv"
+
+  # --- Handlers ---
+  - name: orders-handler
+    type: http.handler
+    dependsOn:
+      - api-router
+    config:
+      contentType: application/json
+
+  - name: health-handler
+    type: http.handler
+    config:
+      contentType: application/json
+
+  # --- Processing ---
+  - name: order-transformer
+    type: data.transformer
+    dependsOn:
+      - orders-handler
+    config:
+      description: "Validates and normalizes incoming order data"
+
+  # --- State machine ---
+  - name: order-state
+    type: statemachine.engine
+    dependsOn:
+      - order-transformer
+
+  # --- Messaging ---
+  - name: event-broker
+    type: messaging.broker
+
+  - name: notification-handler
+    type: messaging.handler
+    dependsOn:
+      - event-broker
+    config:
+      topic: "order.completed"
+
+  # --- Storage ---
+  - name: order-db
+    type: storage.sqlite
+    config:
+      path: data/orders.db
+
+  # --- Observability ---
+  - name: order-metrics
+    type: metrics.collector
+
+  - name: health-check
+    type: health.checker
+
+workflows:
+  http:
+    server: api-server
+    router: api-router
+    routes:
+      - method: GET
+        path: /api/orders
+        handler: orders-handler
+        middlewares:
+          - auth-jwt
+          - authz-enforcer
+      - method: POST
+        path: /api/orders
+        handler: orders-handler
+        middlewares:
+          - auth-jwt
+          - authz-enforcer
+      - method: GET
+        path: /api/orders/:id
+        handler: orders-handler
+        middlewares:
+          - auth-jwt
+      - method: GET
+        path: /health
+        handler: health-handler
+
+  messaging:
+    broker: event-broker
+    subscriptions:
+      - topic: order.created
+        handler: notification-handler
+      - topic: order.shipped
+        handler: notification-handler
+      - topic: order.completed
+        handler: notification-handler
+    producers:
+      - name: orders-handler
+        forwardTo:
+          - order.created
+          - order.updated
+
+  statemachine:
+    engine: order-state
+    definitions:
+      - name: order-lifecycle
+        description: "Manages the lifecycle of an order from creation to delivery"
+        initialState: pending
+        states:
+          pending:
+            description: "Order has been received and is awaiting confirmation"
+            isFinal: false
+            isError: false
+          confirmed:
+            description: "Order has been confirmed and payment verified"
+            isFinal: false
+            isError: false
+          processing:
+            description: "Order is being prepared for shipment"
+            isFinal: false
+            isError: false
+          shipped:
+            description: "Order has been shipped to the customer"
+            isFinal: false
+            isError: false
+          delivered:
+            description: "Order has been delivered successfully"
+            isFinal: true
+            isError: false
+          cancelled:
+            description: "Order has been cancelled"
+            isFinal: true
+            isError: true
+          refunded:
+            description: "Order has been refunded"
+            isFinal: true
+            isError: false
+        transitions:
+          confirm_order:
+            fromState: pending
+            toState: confirmed
+          start_processing:
+            fromState: confirmed
+            toState: processing
+          ship_order:
+            fromState: processing
+            toState: shipped
+          deliver_order:
+            fromState: shipped
+            toState: delivered
+          cancel_order:
+            fromState: pending
+            toState: cancelled
+          refund_order:
+            fromState: delivered
+            toState: refunded
+
+triggers:
+  http:
+    server: api-server
+
+pipelines:
+  validate-order:
+    trigger:
+      type: http
+      config:
+        path: /api/orders/validate
+        method: POST
+    steps:
+      - name: authenticate
+        type: step.authz_check
+        config:
+          permission: "orders:validate"
+      - name: validate-payload
+        type: step.validate
+        config:
+          strategy: required_fields
+          required_fields:
+            - customer_id
+            - items
+            - shipping_address
+      - name: check-inventory
+        type: step.http_call
+        config:
+          url: "http://inventory-service:8081/api/check"
+          method: POST
+      - name: respond
+        type: step.json_response
+        config:
+          status: 200
+    on_error: stop
+    timeout: 30s
+
+  process-payment:
+    trigger:
+      type: http
+      config:
+        path: /api/payments
+        method: POST
+    steps:
+      - name: authorize
+        type: step.authz_check
+        config:
+          permission: "payments:process"
+      - name: validate
+        type: step.validate
+        config:
+          strategy: json_schema
+      - name: charge-card
+        type: step.http_call
+        config:
+          url: "http://payment-gateway:8082/charge"
+          method: POST
+      - name: log-payment
+        type: step.log
+        config:
+          level: info
+          message: "Payment processed for order {{ .order_id }}"
+      - name: publish-event
+        type: step.publish
+        config:
+          topic: payment.completed
+    compensation:
+      - name: refund-charge
+        type: step.http_call
+        config:
+          url: "http://payment-gateway:8082/refund"
+          method: POST
+    timeout: 60s
+
+sidecars:
+  - name: redis-cache
+    type: redis
+    config:
+      port: 6379
+  - name: jaeger-agent
+    type: jaeger
+    config:
+      port: 6831
+      endpoint: "http://jaeger-collector:14268"

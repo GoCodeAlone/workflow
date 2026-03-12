@@ -1,0 +1,63 @@
+{
+  "name": "workflow-plugin-authz",
+  "version": "1.2.0",
+  "author": "GoCodeAlone",
+  "description": "Authorization plugin for workflow engine providing RBAC, ABAC, and policy-based access control for HTTP endpoints and pipeline steps.",
+  "license": "MIT",
+  "repository": "https://github.com/GoCodeAlone/workflow-plugin-authz",
+  "tier": "community",
+  "tags": ["authorization", "rbac", "abac", "security", "access-control"],
+  "moduleTypes": ["authz.enforcer", "authz.policy"],
+  "stepTypes": ["step.authz_check", "step.authz_grant"],
+  "triggerTypes": [],
+  "workflowTypes": [],
+  "wiringHooks": ["authz-middleware-injection"],
+  "capabilities": [
+    {
+      "name": "authorization",
+      "role": "provider",
+      "priority": 10
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "workflow-plugin-http",
+      "constraint": ">=1.0.0"
+    }
+  ],
+  "stepSchemas": [
+    {
+      "type": "step.authz_check",
+      "description": "Check if the current request is authorized for a given permission",
+      "configFields": [
+        {
+          "key": "permission",
+          "label": "Permission",
+          "type": "string",
+          "description": "The permission string to check (e.g. 'orders:read')",
+          "required": true
+        }
+      ]
+    },
+    {
+      "type": "step.authz_grant",
+      "description": "Grant a permission to a role or user",
+      "configFields": [
+        {
+          "key": "role",
+          "label": "Role",
+          "type": "string",
+          "description": "Target role to grant permission to",
+          "required": true
+        },
+        {
+          "key": "permission",
+          "label": "Permission",
+          "type": "string",
+          "description": "Permission to grant",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

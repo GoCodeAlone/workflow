@@ -125,6 +125,8 @@ func TestExampleConfigsValidate(t *testing.T) {
 				schema.WithExtraWorkflowTypes("actors"),
 				// Actor module types registered by the actors plugin
 				schema.WithExtraModuleTypes("actor.system", "actor.pool"),
+				// Module types from the workflow-plugin-authz external plugin (docs-with-plugins example)
+				schema.WithExtraModuleTypes("authz.enforcer", "authz.policy"),
 				// Pipeline trigger types
 				schema.WithExtraTriggerTypes("mock"),
 				// Many configs are sub-workflows or modular-style configs without explicit entry points
@@ -169,6 +171,8 @@ func TestExampleConfigsBuildFromConfig(t *testing.T) {
 		"feature-flag-workflow.yaml": "step.feature_flag requires featureflag.service module loaded before pipeline configuration",
 		// actor-system config uses inline pipeline routes that require actor workflow handler wiring
 		"actor-system-config.yaml": "actor workflow handler wires routes via plugin hooks, not traditional handler registration",
+		// docs-with-plugins example references authz.enforcer from an external plugin not available in test engine
+		"docs-with-plugins/workflow.yaml": "authz.enforcer module type requires GoCodeAlone/workflow-plugin-authz external plugin",
 	}
 
 	for _, cfgPath := range configs {
