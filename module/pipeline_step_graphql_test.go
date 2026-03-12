@@ -380,6 +380,55 @@ func TestGraphQLStep_OffsetPagination(t *testing.T) {
 	}
 }
 
+func TestGraphQLStep_BatchQueries(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqs []map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&reqs); err != nil {
+			t.Fatal(err)
+		}
+		if len(reqs) != 2 {
+			t.Fatalf("expected 2 batch queries, got %d", len(reqs))
+		}
+
+		results := make([]map[string]any, len(reqs))
+		for i := range reqs {
+			results[i] = map[string]any{
+				"data": map[string]any{"index": i},
+			}
+		}
+		json.NewEncoder(w).Encode(results)
+	}))
+	defer server.Close()
+
+	factory := NewGraphQLStepFactory()
+	step, err := factory("batch_test", map[string]any{
+		"url": server.URL,
+		"batch": map[string]any{
+			"queries": []any{
+				map[string]any{"query": "{ users { name } }"},
+				map[string]any{"query": "{ posts { title } }"},
+			},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pc := &PipelineContext{Current: map[string]any{}, StepOutputs: map[string]map[string]any{}}
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results, ok := result.Output["results"].([]any)
+	if !ok {
+		t.Fatalf("expected results array, got %T", result.Output["results"])
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 results, got %d", len(results))
+	}
+}
+
 func TestGraphQLStep_DataPathExtraction(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{

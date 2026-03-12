@@ -14,6 +14,12 @@ import (
 	"github.com/GoCodeAlone/modular"
 )
 
+// batchQuery holds a single query in a batch request.
+type batchQuery struct {
+	query     string
+	variables map[string]any
+}
+
 // paginationConfig holds cursor or offset pagination settings.
 type paginationConfig struct {
 	strategy       string // "cursor" or "offset"
@@ -41,6 +47,7 @@ type GraphQLStep struct {
 	tmpl                *TemplateEngine
 	httpClient          *http.Client
 	pagination          *paginationConfig
+	batch               []batchQuery
 
 	// OAuth2 (reuses globalOAuthCache from pipeline_step_http_call.go)
 	auth       *oauthConfig
@@ -94,6 +101,23 @@ func NewGraphQLStepFactory() StepFactory {
 			for _, f := range frags {
 				if s, ok := f.(string); ok {
 					step.fragments = append(step.fragments, s)
+				}
+			}
+		}
+
+		if batchCfgParsed, ok := config["batch"].(map[string]any); ok {
+			if queries, ok := batchCfgParsed["queries"].([]any); ok {
+				for _, q := range queries {
+					qMap, ok := q.(map[string]any)
+					if !ok {
+						continue
+					}
+					bq := batchQuery{}
+					bq.query, _ = qMap["query"].(string)
+					if vars, ok := qMap["variables"].(map[string]any); ok {
+						bq.variables = vars
+					}
+					step.batch = append(step.batch, bq)
 				}
 			}
 		}
@@ -208,6 +232,10 @@ func (s *GraphQLStep) Name() string { return s.name }
 
 // Execute runs the GraphQL query/mutation and returns the result.
 func (s *GraphQLStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+	if len(s.batch) > 0 {
+		return s.executeBatch(ctx, pc)
+	}
+
 	if s.pagination != nil {
 		return s.executePaginated(ctx, pc)
 	}
@@ -418,6 +446,84 @@ done:
 	}
 
 	return &StepResult{Output: result}, nil
+}
+
+// executeBatch sends all batch queries in a single HTTP request.
+func (s *GraphQLStep) executeBatch(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+	if s.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.timeout)
+		defer cancel()
+	}
+
+	resolvedURL, err := s.tmpl.Resolve(s.url, pc)
+	if err != nil {
+		return nil, fmt.Errorf("graphql step %q: failed to resolve url: %w", s.name, err)
+	}
+
+	bearerToken, err := s.getBearerToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	batchBody := make([]map[string]any, len(s.batch))
+	for i, bq := range s.batch {
+		query := bq.query
+		if len(s.fragments) > 0 {
+			query = strings.Join(s.fragments, "\n") + "\n" + query
+		}
+		entry := map[string]any{"query": query}
+		if bq.variables != nil {
+			resolved, resolveErr := s.tmpl.ResolveMap(bq.variables, pc)
+			if resolveErr != nil {
+				return nil, fmt.Errorf("graphql step %q: batch query %d: failed to resolve variables: %w", s.name, i, resolveErr)
+			}
+			entry["variables"] = resolved
+		}
+		batchBody[i] = entry
+	}
+
+	bodyBytes, err := json.Marshal(batchBody)
+	if err != nil {
+		return nil, fmt.Errorf("graphql step %q: failed to marshal batch request: %w", s.name, err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, resolvedURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("graphql step %q: failed to create batch request: %w", s.name, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	for k, v := range s.headers {
+		req.Header.Set(k, v)
+	}
+	if bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("graphql step %q: batch request failed: %w", s.name, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+	if err != nil {
+		return nil, fmt.Errorf("graphql step %q: failed to read batch response: %w", s.name, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("graphql step %q: batch HTTP %d: %s", s.name, resp.StatusCode, string(respBody))
+	}
+
+	var batchResp []any
+	if err := json.Unmarshal(respBody, &batchResp); err != nil {
+		return nil, fmt.Errorf("graphql step %q: failed to parse batch response: %w", s.name, err)
+	}
+
+	return &StepResult{Output: map[string]any{
+		"results":     batchResp,
+		"status_code": resp.StatusCode,
+	}}, nil
 }
 
 // getBearerToken returns the OAuth2 bearer token if auth is configured.
