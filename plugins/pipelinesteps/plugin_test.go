@@ -49,6 +49,7 @@ func TestStepFactories(t *testing.T) {
 		"step.db_sync_partitions",
 		"step.json_response",
 		"step.raw_response",
+		"step.json_parse",
 		"step.static_file",
 		"step.validate_path_param",
 		"step.validate_pagination",
