@@ -114,12 +114,18 @@ func runPluginInstall(args []string) error {
 	}
 	fmt.Fprintf(os.Stderr, "Found in registry %q.\n", sourceName)
 
+	return installPluginFromManifest(*dataDir, pluginName, manifest)
+}
+
+// installPluginFromManifest downloads, extracts, and installs a plugin using the
+// provided registry manifest. It is shared by runPluginInstall and runPluginUpdate.
+func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryManifest) error {
 	dl, err := manifest.FindDownload(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return err
 	}
 
-	destDir := filepath.Join(*dataDir, pluginName)
+	destDir := filepath.Join(dataDir, pluginName)
 	if err := os.MkdirAll(destDir, 0750); err != nil {
 		return fmt.Errorf("create plugin dir %s: %w", destDir, err)
 	}
@@ -221,6 +227,7 @@ func runPluginList(args []string) error {
 func runPluginUpdate(args []string) error {
 	fs := flag.NewFlagSet("plugin update", flag.ContinueOnError)
 	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	cfgPath := fs.String("config", "", "Registry config file path")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin update [options] <name>\n\nUpdate an installed plugin to its latest version.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -239,8 +246,42 @@ func runPluginUpdate(args []string) error {
 		return fmt.Errorf("plugin %q is not installed", pluginName)
 	}
 
-	// Re-run install which will overwrite the existing installation.
-	return runPluginInstall(append([]string{"--data-dir", *dataDir}, pluginName))
+	// Read the local plugin.json for fallback: if the central registry doesn't
+	// list this plugin, we can try fetching the manifest directly from the
+	// plugin's own repository (the "repository" field in plugin.json).
+	var localRepoURL string
+	if data, err := os.ReadFile(filepath.Join(pluginDir, "plugin.json")); err == nil {
+		var pj installedPluginJSON
+		if json.Unmarshal(data, &pj) == nil {
+			localRepoURL = pj.Repository
+		}
+	}
+
+	cfg, err := LoadRegistryConfig(*cfgPath)
+	if err != nil {
+		return fmt.Errorf("load registry config: %w", err)
+	}
+	mr := NewMultiRegistry(cfg)
+
+	fmt.Fprintf(os.Stderr, "Fetching manifest for %q...\n", pluginName)
+	manifest, sourceName, registryErr := mr.FetchManifest(pluginName)
+	if registryErr == nil {
+		fmt.Fprintf(os.Stderr, "Found in registry %q.\n", sourceName)
+		return installPluginFromManifest(*dataDir, pluginName, manifest)
+	}
+
+	// Registry lookup failed. If the plugin's manifest declares a repository
+	// URL, try fetching the manifest directly from there as a fallback.
+	if localRepoURL != "" {
+		fmt.Fprintf(os.Stderr, "Not found in registry. Trying repository URL %q...\n", localRepoURL)
+		manifest, err = fetchManifestFromRepoURL(localRepoURL)
+		if err != nil {
+			return fmt.Errorf("registry lookup failed (%v); repository fallback also failed: %w", registryErr, err)
+		}
+		return installPluginFromManifest(*dataDir, pluginName, manifest)
+	}
+
+	return registryErr
 }
 
 func runPluginRemove(args []string) error {
@@ -366,6 +407,52 @@ func downloadURL(url string) ([]byte, error) {
 		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// fetchManifestFromRepoURL fetches a plugin's manifest.json directly from its
+// GitHub repository. It expects the repository URL in the form
+// https://github.com/{owner}/{repo} and looks for a manifest.json at the root
+// of the default branch.
+func fetchManifestFromRepoURL(repoURL string) (*RegistryManifest, error) {
+	owner, repo, err := parseGitHubRepoURL(repoURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse repository URL %q: %w", repoURL, err)
+	}
+	url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/main/manifest.json", owner, repo)
+	resp, err := http.Get(url) //nolint:gosec // G107: URL constructed from plugin's own repository field
+	if err != nil {
+		return nil, fmt.Errorf("fetch manifest from %q: %w", repoURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("no manifest.json found in repository %q (tried %s)", repoURL, url)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("repository %q returned HTTP %d", repoURL, resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read manifest from %q: %w", repoURL, err)
+	}
+	var m RegistryManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("parse manifest from %q: %w", repoURL, err)
+	}
+	return &m, nil
+}
+
+// parseGitHubRepoURL parses a GitHub repository URL and returns the owner and
+// repository name. It accepts URLs in the form https://github.com/{owner}/{repo}
+// (with or without trailing slashes or the https:// scheme).
+func parseGitHubRepoURL(repoURL string) (owner, repo string, err error) {
+	u := strings.TrimPrefix(repoURL, "https://")
+	u = strings.TrimPrefix(u, "http://")
+	u = strings.TrimSuffix(u, "/")
+	parts := strings.SplitN(u, "/", 3)
+	if len(parts) < 3 || parts[0] != "github.com" || parts[1] == "" || parts[2] == "" {
+		return "", "", fmt.Errorf("not a GitHub repository URL: %q (expected https://github.com/owner/repo)", repoURL)
+	}
+	return parts[1], parts[2], nil
 }
 
 // verifyChecksum checks that data matches the expected SHA256 hex string.
