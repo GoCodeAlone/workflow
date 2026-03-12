@@ -329,6 +329,56 @@ func TestPipeline_ConfigurePipelines_InlineEventTrigger(t *testing.T) {
 	}
 }
 
+func TestPipeline_ConfigurePipelines_InlineEventBusTrigger(t *testing.T) {
+	// Use a minimal engine without plugins to avoid trigger collisions.
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	engine.AddStepType("step.log", module.NewLogStepFactory())
+	pipelineHandler := handlers.NewPipelineWorkflowHandler()
+	engine.RegisterWorkflowHandler(pipelineHandler)
+
+	// Register a mock trigger that responds to "eventbus" type
+	mt := &mockTrigger{
+		name:       module.EventBusTriggerName,
+		configType: "eventbus",
+	}
+	engine.RegisterTrigger(mt)
+
+	pipelineCfg := map[string]any{
+		"process-follow-up-event": map[string]any{
+			"trigger": map[string]any{
+				"type": "eventbus",
+				"config": map[string]any{
+					"topic": "follow-up.created",
+				},
+			},
+			"steps": []any{
+				map[string]any{
+					"name": "log-event",
+					"type": "step.log",
+					"config": map[string]any{
+						"level":   "info",
+						"message": "EventBus event received",
+					},
+				},
+			},
+		},
+	}
+
+	err := engine.configurePipelines(pipelineCfg)
+	if err != nil {
+		t.Fatalf("configurePipelines failed: %v", err)
+	}
+
+	if !pipelineHandler.CanHandle("process-follow-up-event") {
+		t.Error("expected pipeline to be registered")
+	}
+
+	if !mt.configuredCalled {
+		t.Error("expected eventbus trigger to be configured")
+	}
+}
+
 func TestPipeline_ConfigurePipelines_RejectsUnknownStepType(t *testing.T) {
 	engine, _ := setupPipelineEngine(t)
 

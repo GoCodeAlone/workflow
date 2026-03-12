@@ -149,12 +149,31 @@ func (p *Plugin) PipelineTriggerConfigWrappers() map[string]plugin.TriggerConfig
 		"event": func(pipelineName string, cfg map[string]any) map[string]any {
 			sub := map[string]any{
 				"workflow": "pipeline:" + pipelineName,
+				"action":   "execute",
 			}
 			if t, ok := cfg["topic"]; ok {
 				sub["topic"] = t
 			}
 			if ev, ok := cfg["event"]; ok {
 				sub["event"] = ev
+			}
+			return map[string]any{
+				"subscriptions": []any{sub},
+			}
+		},
+		"eventbus": func(pipelineName string, cfg map[string]any) map[string]any {
+			sub := map[string]any{
+				"workflow": "pipeline:" + pipelineName,
+				"action":   "execute",
+			}
+			if t, ok := cfg["topic"]; ok {
+				sub["topic"] = t
+			}
+			if ev, ok := cfg["event"]; ok {
+				sub["event"] = ev
+			}
+			if async, ok := cfg["async"]; ok {
+				sub["async"] = async
 			}
 			return map[string]any{
 				"subscriptions": []any{sub},
