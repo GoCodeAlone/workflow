@@ -483,6 +483,52 @@ modules:
 	}
 }
 
+func TestCamelCaseConfigCheck_SchemaDefinedKeysNotFlagged(t *testing.T) {
+	// openapi module uses snake_case keys (spec_file, register_routes, swagger_ui,
+	// max_body_bytes) defined in its own schema — these must NOT be flagged.
+	input := `
+modules:
+  - name: api-docs
+    type: openapi
+    config:
+      spec_file: ./specs/api.yaml
+      register_routes: false
+      swagger_ui:
+        enabled: true
+        path: /docs
+      max_body_bytes: 1048576
+`
+	rule := findRule("camelcase-config")
+	if rule == nil {
+		t.Fatal("camelcase-config rule not found")
+	}
+	doc := parseTestYAML(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) != 0 {
+		t.Errorf("expected no findings for schema-defined snake_case keys, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestCamelCaseConfigCheck_UnknownModuleTypeStillFlagged(t *testing.T) {
+	// For a module type not in the schema registry, snake_case keys should still be flagged.
+	input := `
+modules:
+  - name: my-thing
+    type: custom.unknown
+    config:
+      snake_key: value
+`
+	rule := findRule("camelcase-config")
+	if rule == nil {
+		t.Fatal("camelcase-config rule not found")
+	}
+	doc := parseTestYAML(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) == 0 {
+		t.Fatal("expected findings for snake_case config keys on unknown module type")
+	}
+}
+
 func TestModernizeAllRulesRegistered(t *testing.T) {
 	rules := modernize.AllRules()
 	expectedIDs := []string{

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/GoCodeAlone/workflow/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -625,6 +626,11 @@ func requestParseConfigRule() Rule {
 var snakeCaseKeyRegex = regexp.MustCompile(`^[a-z]+(_[a-z0-9]+)+$`)
 
 func camelCaseConfigRule() Rule {
+	// Build a registry of schema-defined config key names per module type so
+	// that keys which are intentionally snake_case (e.g. openapi's spec_file,
+	// register_routes, swagger_ui) are never flagged as anti-patterns.
+	schemaRegistry := schema.NewModuleSchemaRegistry()
+
 	return Rule{
 		ID:          "camelcase-config",
 		Description: "Detect snake_case config field names (engine requires camelCase)",
@@ -641,9 +647,22 @@ func camelCaseConfigRule() Rule {
 				if nameNode != nil {
 					modName = nameNode.Value
 				}
+
+				// Build a set of officially defined config keys for this module type
+				// so that snake_case keys that come from the schema are not flagged.
+				schemaKeys := make(map[string]bool)
+				typeNode := findMapValue(mod, "type")
+				if typeNode != nil && typeNode.Value != "" {
+					if ms := schemaRegistry.Get(typeNode.Value); ms != nil {
+						for _, field := range ms.ConfigFields {
+							schemaKeys[field.Key] = true
+						}
+					}
+				}
+
 				for i := 0; i+1 < len(cfg.Content); i += 2 {
 					key := cfg.Content[i]
-					if key.Kind == yaml.ScalarNode && snakeCaseKeyRegex.MatchString(key.Value) {
+					if key.Kind == yaml.ScalarNode && snakeCaseKeyRegex.MatchString(key.Value) && !schemaKeys[key.Value] {
 						findings = append(findings, Finding{
 							RuleID:  "camelcase-config",
 							Line:    key.Line,
