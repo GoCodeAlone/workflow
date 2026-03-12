@@ -216,6 +216,17 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 				m.SetIntrospectPolicy(allowOthers, requiredScope, requiredClaim, requiredClaimVal)
 			}
 
+			// Configure custom endpoint path suffixes.
+			if endpointsCfg, ok := cfg["endpoints"].(map[string]any); ok {
+				if err := m.SetEndpoints(module.M2MEndpointPaths{
+					Token:      stringFromMap(endpointsCfg, "token"),
+					Revoke:     stringFromMap(endpointsCfg, "revoke"),
+					Introspect: stringFromMap(endpointsCfg, "introspect"),
+					JWKS:       stringFromMap(endpointsCfg, "jwks"),
+				}); err != nil {
+					m.SetInitErr(err)
+				}
+			}
 			// Register YAML-configured trusted keys for JWT-bearer grants.
 			if trustedKeys, ok := cfg["trustedKeys"].([]any); ok {
 				for i, tk := range trustedKeys {
@@ -423,6 +434,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "issuer", Label: "Issuer", Type: schema.FieldTypeString, DefaultValue: "workflow", Description: "Token issuer (iss) claim", Placeholder: "workflow"},
 				{Key: "clients", Label: "Registered Clients", Type: schema.FieldTypeJSON, Description: "List of OAuth2 clients: [{clientId, clientSecret, scopes, description, claims}]"},
 				{Key: "introspect", Label: "Introspection Policy", Type: schema.FieldTypeJSON, Description: "Access-control policy for POST /oauth/introspect: {allowOthers: bool, requiredScope: string, requiredClaim: string, requiredClaimVal: string}. Default: self-only (allowOthers: false)."},
+				{Key: "endpoints", Label: "Endpoint Paths", Type: schema.FieldTypeJSON, Description: "Custom OAuth2 endpoint path suffixes matched via strings.HasSuffix (so a router mount prefix is allowed). Keys: {token, revoke, introspect, jwks}. Each value must start with '/' and all four paths must be distinct. Defaults: /oauth/token, /oauth/revoke, /oauth/introspect, /oauth/jwks."},
 				{Key: "trustedKeys", Label: "Trusted External Issuers", Type: schema.FieldTypeJSON, Description: "List of trusted external JWT issuers for JWT-bearer grants: [{issuer, publicKeyPEM, audiences, claimMapping}]. Supports literal \\n in PEM values for Docker/Kubernetes env vars."},
 			},
 			DefaultConfig: map[string]any{"algorithm": "ES256", "tokenExpiry": "1h", "issuer": "workflow", "clients": []any{}},
