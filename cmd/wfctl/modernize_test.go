@@ -527,6 +527,16 @@ modules:
 	if len(findings) == 0 {
 		t.Fatal("expected findings for snake_case config keys on unknown module type")
 	}
+	found := false
+	for _, f := range findings {
+		if strings.Contains(f.Message, `"snake_key"`) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a finding mentioning key \"snake_key\", got: %v", findings)
+	}
 }
 
 func TestModernizeAllRulesRegistered(t *testing.T) {

@@ -631,6 +631,23 @@ func camelCaseConfigRule() Rule {
 	// register_routes, swagger_ui) are never flagged as anti-patterns.
 	schemaRegistry := schema.NewModuleSchemaRegistry()
 
+	// Cache the schema key sets by module type to avoid rebuilding them for
+	// every module instance encountered during a Check run.
+	schemaKeyCache := make(map[string]map[string]bool)
+	schemaKeysFor := func(moduleType string) map[string]bool {
+		if cached, ok := schemaKeyCache[moduleType]; ok {
+			return cached
+		}
+		keys := make(map[string]bool)
+		if ms := schemaRegistry.Get(moduleType); ms != nil {
+			for i := range ms.ConfigFields {
+				keys[ms.ConfigFields[i].Key] = true
+			}
+		}
+		schemaKeyCache[moduleType] = keys
+		return keys
+	}
+
 	return Rule{
 		ID:          "camelcase-config",
 		Description: "Detect snake_case config field names (engine requires camelCase)",
@@ -648,16 +665,12 @@ func camelCaseConfigRule() Rule {
 					modName = nameNode.Value
 				}
 
-				// Build a set of officially defined config keys for this module type
-				// so that snake_case keys that come from the schema are not flagged.
-				schemaKeys := make(map[string]bool)
+				// Resolve the set of officially defined config keys for this module
+				// type so that schema-declared snake_case keys are not flagged.
+				var schemaKeys map[string]bool
 				typeNode := findMapValue(mod, "type")
 				if typeNode != nil && typeNode.Value != "" {
-					if ms := schemaRegistry.Get(typeNode.Value); ms != nil {
-						for _, field := range ms.ConfigFields {
-							schemaKeys[field.Key] = true
-						}
-					}
+					schemaKeys = schemaKeysFor(typeNode.Value)
 				}
 
 				for i := 0; i+1 < len(cfg.Content); i += 2 {
