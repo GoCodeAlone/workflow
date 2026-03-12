@@ -221,6 +221,165 @@ func TestGraphQLStep_OAuth2ClientCredentials(t *testing.T) {
 	}
 }
 
+func TestGraphQLStep_CursorPagination(t *testing.T) {
+	page := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Variables map[string]any `json:"variables"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		page++
+		var resp map[string]any
+		switch page {
+		case 1:
+			if req.Variables["after"] != nil {
+				t.Error("first page should have no cursor")
+			}
+			resp = map[string]any{
+				"data": map[string]any{
+					"users": map[string]any{
+						"edges": []any{
+							map[string]any{"node": map[string]any{"name": "Alice"}},
+							map[string]any{"node": map[string]any{"name": "Bob"}},
+						},
+						"pageInfo": map[string]any{
+							"hasNextPage": true,
+							"endCursor":   "cursor-abc",
+						},
+					},
+				},
+			}
+		case 2:
+			if req.Variables["after"] != "cursor-abc" {
+				t.Errorf("expected cursor cursor-abc, got %v", req.Variables["after"])
+			}
+			resp = map[string]any{
+				"data": map[string]any{
+					"users": map[string]any{
+						"edges": []any{
+							map[string]any{"node": map[string]any{"name": "Charlie"}},
+						},
+						"pageInfo": map[string]any{
+							"hasNextPage": false,
+							"endCursor":   "cursor-def",
+						},
+					},
+				},
+			}
+		default:
+			t.Fatal("too many requests")
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	factory := NewGraphQLStepFactory()
+	step, err := factory("paginate_test", map[string]any{
+		"url":       server.URL,
+		"query":     `query Users($after: String) { users(first: 2, after: $after) { edges { node { name } } pageInfo { hasNextPage endCursor } } }`,
+		"data_path": "users.edges",
+		"pagination": map[string]any{
+			"strategy":        "cursor",
+			"page_info_path":  "users.pageInfo",
+			"cursor_variable": "after",
+			"has_next_field":  "hasNextPage",
+			"cursor_field":    "endCursor",
+			"max_pages":       10,
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pc := &PipelineContext{Current: map[string]any{}, StepOutputs: map[string]map[string]any{}}
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, ok := result.Output["data"].([]any)
+	if !ok {
+		t.Fatalf("expected merged array, got %T: %v", result.Output["data"], result.Output["data"])
+	}
+	if len(data) != 3 {
+		t.Errorf("expected 3 merged items, got %d", len(data))
+	}
+	if result.Output["page_count"] != 2 {
+		t.Errorf("expected page_count=2, got %v", result.Output["page_count"])
+	}
+}
+
+func TestGraphQLStep_OffsetPagination(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Variables map[string]any `json:"variables"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		offset := 0
+		if v, ok := req.Variables["offset"]; ok {
+			if f, ok := v.(float64); ok {
+				offset = int(f)
+			}
+		}
+
+		var items []any
+		switch offset {
+		case 0:
+			items = []any{
+				map[string]any{"name": "A"},
+				map[string]any{"name": "B"},
+			}
+		case 2:
+			items = []any{
+				map[string]any{"name": "C"},
+			}
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{"items": items},
+		})
+	}))
+	defer server.Close()
+
+	factory := NewGraphQLStepFactory()
+	step, err := factory("offset_test", map[string]any{
+		"url":       server.URL,
+		"query":     `query Items($offset: Int!, $limit: Int!) { items(offset: $offset, limit: $limit) { name } }`,
+		"data_path": "items",
+		"variables": map[string]any{
+			"limit": 2,
+		},
+		"pagination": map[string]any{
+			"strategy":        "offset",
+			"offset_variable": "offset",
+			"max_per_page":    2,
+			"max_pages":       10,
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pc := &PipelineContext{Current: map[string]any{}, StepOutputs: map[string]map[string]any{}}
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, ok := result.Output["data"].([]any)
+	if !ok {
+		t.Fatalf("expected merged array, got %T", result.Output["data"])
+	}
+	if len(data) != 3 {
+		t.Errorf("expected 3 items, got %d", len(data))
+	}
+	if result.Output["page_count"] != 2 {
+		t.Errorf("expected page_count=2, got %v", result.Output["page_count"])
+	}
+}
+
 func TestGraphQLStep_DataPathExtraction(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
