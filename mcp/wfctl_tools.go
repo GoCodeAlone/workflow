@@ -167,7 +167,9 @@ func (s *Server) registerWfctlTools() {
 			mcp.WithDescription("Detect and optionally fix known YAML config anti-patterns. "+
 				"Reports issues like hyphenated step names, template syntax in conditional fields, "+
 				"missing db_query mode, dot-access patterns, absolute dbPaths, empty routes, "+
-				"and snake_case config keys. Returns findings with line numbers and fix suggestions."),
+				"and snake_case config keys. When the server was started with a plugin directory, "+
+				"plugin-declared modernize rules are automatically included. "+
+				"Returns findings with line numbers and fix suggestions."),
 			mcp.WithString("yaml_content",
 				mcp.Required(),
 				mcp.Description("The YAML content of the workflow configuration to analyze"),
@@ -1701,6 +1703,24 @@ func (s *Server) handleModernize(_ context.Context, req mcp.CallToolRequest) (*m
 	}
 
 	rules := modernize.AllRules()
+
+	// Include modernize rules from installed external plugins when a plugin
+	// directory was configured at server startup.
+	if s.pluginDir != "" {
+		pluginRules, err := modernize.LoadRulesFromDir(s.pluginDir)
+		if err != nil {
+			// Surface the error as a warning in the result so clients can diagnose
+			// misconfigured plugin directories rather than silently missing rules.
+			result := map[string]any{
+				"findings":       []modernize.Finding{},
+				"count":          0,
+				"plugin_warning": fmt.Sprintf("failed to load plugin modernize rules from %q: %v", s.pluginDir, err),
+			}
+			return marshalToolResult(result)
+		}
+		rules = append(rules, pluginRules...)
+	}
+
 	rules = modernize.FilterRules(rules, rulesFilter, excludeFilter)
 
 	// Check phase

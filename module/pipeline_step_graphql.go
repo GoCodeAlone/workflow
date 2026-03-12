@@ -316,8 +316,9 @@ func (s *GraphQLStep) Execute(ctx context.Context, pc *PipelineContext) (*StepRe
 	// Execute request (with optional network error retry)
 	output, statusCode, err := s.doRequest(ctx, resolvedURL, reqBody, bearerToken)
 	if err != nil {
-		// 401 retry with token refresh
-		if statusCode == http.StatusUnauthorized && s.auth != nil {
+		switch {
+		case statusCode == http.StatusUnauthorized && s.auth != nil:
+			// 401 retry with token refresh
 			s.oauthEntry.invalidate()
 			bearerToken, err = s.fetchTokenDirect(ctx)
 			if err != nil {
@@ -327,13 +328,13 @@ func (s *GraphQLStep) Execute(ctx context.Context, pc *PipelineContext) (*StepRe
 			if err != nil {
 				return nil, err
 			}
-		} else if s.retryOnNetworkError && statusCode == 0 {
+		case s.retryOnNetworkError && statusCode == 0:
 			// Network-level error (no HTTP response) — retry once
 			output, statusCode, err = s.doRequest(ctx, resolvedURL, reqBody, bearerToken)
 			if err != nil {
 				return nil, err
 			}
-		} else {
+		default:
 			return nil, err
 		}
 	}
