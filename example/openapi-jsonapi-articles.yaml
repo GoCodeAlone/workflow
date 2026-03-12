@@ -1,0 +1,106 @@
+# OpenAPI Response Validation — JSON:API Example
+#
+# This configuration demonstrates how the workflow engine validates API
+# responses against an OpenAPI specification, including complex response
+# formats like JSON:API (https://jsonapi.org/).
+#
+# Key features:
+#   - Request validation:  incoming requests are checked against the spec
+#   - Response validation: outgoing responses are checked against the spec
+#   - response_action:     "warn" logs violations, "error" rejects them with 500
+#
+# The JSON:API spec (specs/jsonapi-articles.yaml) defines a complex nested
+# response envelope with required fields (data, type, id, attributes) that
+# the engine validates automatically.
+
+requires:
+  plugins:
+    - name: workflow-plugin-http
+    - name: workflow-plugin-openapi
+
+modules:
+  # HTTP server
+  - name: jsonapi-server
+    type: http.server
+    config:
+      address: ":8096"
+
+  # HTTP router
+  - name: jsonapi-router
+    type: http.router
+    dependsOn:
+      - jsonapi-server
+
+  # OpenAPI module with response validation enabled
+  - name: articles-api
+    type: openapi
+    dependsOn:
+      - jsonapi-router
+    config:
+      spec_file: specs/jsonapi-articles.yaml
+      base_path: /api/v1
+      router: jsonapi-router
+      validation:
+        request: true
+        response: true
+        response_action: warn    # "warn" = log and pass through; "error" = reject with 500
+      swagger_ui:
+        enabled: true
+        path: /docs
+
+# Pipelines that generate JSON:API compliant responses.
+# The OpenAPI response validation ensures these conform to the spec.
+pipelines:
+  list-articles:
+    steps:
+      - name: build-response
+        type: step.set
+        config:
+          values:
+            response_status: 200
+            response_headers:
+              Content-Type: "application/vnd.api+json"
+            response_body: |
+              {
+                "data": [
+                  {
+                    "type": "articles",
+                    "id": "1",
+                    "attributes": {
+                      "title": "Getting Started with Workflow Engine",
+                      "body": "This article explains how to use the workflow engine...",
+                      "created_at": "2024-01-15T10:30:00Z"
+                    },
+                    "relationships": {
+                      "author": {
+                        "data": {"type": "people", "id": "42"}
+                      }
+                    }
+                  }
+                ],
+                "meta": {"total": 1, "page": 1, "per_page": 10},
+                "links": {"self": "/api/v1/articles"}
+              }
+
+  get-article:
+    steps:
+      - name: build-response
+        type: step.set
+        config:
+          values:
+            response_status: 200
+            response_headers:
+              Content-Type: "application/vnd.api+json"
+            response_body: |
+              {
+                "data": {
+                  "type": "articles",
+                  "id": "1",
+                  "attributes": {
+                    "title": "Getting Started with Workflow Engine",
+                    "body": "This article explains how to use the workflow engine...",
+                    "created_at": "2024-01-15T10:30:00Z"
+                  }
+                },
+                "links": {"self": "/api/v1/articles/1"}
+              }

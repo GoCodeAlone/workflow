@@ -24,8 +24,9 @@ import (
 
 // OpenAPIValidationConfig controls which request/response parts are validated.
 type OpenAPIValidationConfig struct {
-	Request  bool `yaml:"request"  json:"request"`
-	Response bool `yaml:"response" json:"response"`
+	Request        bool   `yaml:"request"         json:"request"`
+	Response       bool   `yaml:"response"        json:"response"`
+	ResponseAction string `yaml:"response_action" json:"response_action"` // "warn" (default) or "error"
 }
 
 // OpenAPISwaggerUIConfig controls Swagger UI hosting.
@@ -97,21 +98,26 @@ type openAPIMediaType struct {
 
 // openAPIResponse describes a single response entry.
 type openAPIResponse struct {
-	Description string `yaml:"description" json:"description"`
+	Description string                      `yaml:"description" json:"description"`
+	Content     map[string]openAPIMediaType `yaml:"content"     json:"content"`
 }
 
 // openAPISchema is a minimal JSON Schema subset used for parameter/body validation.
 type openAPISchema struct {
-	Type       string                    `yaml:"type"       json:"type"`
-	Required   []string                  `yaml:"required"   json:"required"`
-	Properties map[string]*openAPISchema `yaml:"properties" json:"properties"`
-	Format     string                    `yaml:"format"     json:"format"`
-	Minimum    *float64                  `yaml:"minimum"    json:"minimum"`
-	Maximum    *float64                  `yaml:"maximum"    json:"maximum"`
-	MinLength  *int                      `yaml:"minLength"  json:"minLength"`
-	MaxLength  *int                      `yaml:"maxLength"  json:"maxLength"`
-	Pattern    string                    `yaml:"pattern"    json:"pattern"`
-	Enum       []any                     `yaml:"enum"       json:"enum"`
+	Type                 string                    `yaml:"type"                 json:"type"`
+	Required             []string                  `yaml:"required"             json:"required"`
+	Properties           map[string]*openAPISchema `yaml:"properties"           json:"properties"`
+	Format               string                    `yaml:"format"               json:"format"`
+	Minimum              *float64                  `yaml:"minimum"              json:"minimum"`
+	Maximum              *float64                  `yaml:"maximum"              json:"maximum"`
+	MinLength            *int                      `yaml:"minLength"            json:"minLength"`
+	MaxLength            *int                      `yaml:"maxLength"            json:"maxLength"`
+	Pattern              string                    `yaml:"pattern"              json:"pattern"`
+	Enum                 []any                     `yaml:"enum"                 json:"enum"`
+	Items                *openAPISchema            `yaml:"items"                json:"items"`
+	MinItems             *int                      `yaml:"minItems"             json:"minItems"`
+	MaxItems             *int                      `yaml:"maxItems"             json:"maxItems"`
+	AdditionalProperties *openAPISchema            `yaml:"additionalProperties" json:"additionalProperties"`
 }
 
 // ---- OpenAPIModule ----
@@ -289,15 +295,24 @@ func (m *OpenAPIModule) RegisterRoutes(router HTTPRouter) {
 
 // buildRouteHandler creates an HTTPHandler that validates the request (if enabled)
 // and either executes the linked pipeline (if x-pipeline is set) or returns a 501
-// Not Implemented stub response.
+// Not Implemented stub response. When response validation is enabled, the handler
+// checks the outgoing response body against the OpenAPI response schema and either
+// logs a warning or returns a 500 error depending on the response_action setting.
 func (m *OpenAPIModule) buildRouteHandler(specPath, method string, op *openAPIOperation) HTTPHandler {
 	validateReq := m.cfg.Validation.Request
+	validateResp := m.cfg.Validation.Response
+	responseAction := m.cfg.Validation.ResponseAction
+	if responseAction == "" {
+		responseAction = "warn"
+	}
 	h := &openAPIRouteHandler{
-		module:      m,
-		specPath:    specPath,
-		method:      method,
-		op:          op,
-		validateReq: validateReq,
+		module:         m,
+		specPath:       specPath,
+		method:         method,
+		op:             op,
+		validateReq:    validateReq,
+		validateResp:   validateResp,
+		responseAction: responseAction,
 	}
 	if op.XPipeline != "" {
 		h.pipelineName = op.XPipeline
@@ -321,6 +336,8 @@ type openAPIRouteHandler struct {
 	method         string
 	op             *openAPIOperation
 	validateReq    bool
+	validateResp   bool
+	responseAction string // "warn" or "error"
 	pipelineName   string
 	pipelineLookup PipelineLookupFn
 }
@@ -361,7 +378,16 @@ func (h *openAPIRouteHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 		data := openAPIExtractRequestData(r)
 
-		rw := &trackedResponseWriter{ResponseWriter: w}
+		// When response validation is enabled, wrap the writer with a capturing
+		// writer so we can inspect the response body/status before sending.
+		var cw *responseCapturingWriter
+		var rw *trackedResponseWriter
+		if h.validateResp {
+			cw = newResponseCapturingWriter(w)
+			rw = &trackedResponseWriter{ResponseWriter: cw}
+		} else {
+			rw = &trackedResponseWriter{ResponseWriter: w}
+		}
 		ctx := context.WithValue(r.Context(), HTTPResponseWriterContextKey, rw)
 		ctx = context.WithValue(ctx, HTTPRequestContextKey, r)
 
@@ -376,20 +402,72 @@ func (h *openAPIRouteHandler) Handle(w http.ResponseWriter, r *http.Request) {
 				_ = json.NewEncoder(w).Encode(map[string]string{
 					"error": fmt.Sprintf("pipeline execution failed: %v", err),
 				})
+			} else if cw != nil {
+				cw.flush()
 			}
 			return
 		}
 
 		if rw.written {
+			// Pipeline wrote directly to the response writer.
+			if cw != nil {
+				// Validate the captured response before flushing.
+				if respErrs := h.validateResponse(cw.statusCode, cw.Header(), cw.body.Bytes()); len(respErrs) > 0 {
+					if h.responseAction == "error" {
+						// Discard the buffered response and return a 500 with validation errors.
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusInternalServerError)
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"error":  "response validation failed",
+							"errors": respErrs,
+						})
+						return
+					}
+					h.module.logger.Warn("OpenAPI response validation failed",
+						"module", h.module.name,
+						"path", h.specPath,
+						"method", h.method,
+						"errors", respErrs,
+					)
+				}
+				cw.flush()
+			}
 			return
 		}
 
 		// If the pipeline set response_status in its output (without writing
 		// directly to the response writer), use those values to build the response.
-		if writePipelineContextResponse(w, result.Current) {
-			return
+		if h.validateResp {
+			if h.writeAndValidatePipelineResponse(w, result.Current) {
+				return
+			}
+		} else {
+			if writePipelineContextResponse(w, result.Current) {
+				return
+			}
 		}
 
+		// Default: 200 with JSON-encoded pipeline state.
+		respBody, _ := json.Marshal(result.Current)
+		if h.validateResp {
+			if respErrs := h.validateResponse(http.StatusOK, http.Header{"Content-Type": []string{"application/json"}}, respBody); len(respErrs) > 0 {
+				if h.responseAction == "error" {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusInternalServerError)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"error":  "response validation failed",
+						"errors": respErrs,
+					})
+					return
+				}
+				h.module.logger.Warn("OpenAPI response validation failed",
+					"module", h.module.name,
+					"path", h.specPath,
+					"method", h.method,
+					"errors", respErrs,
+				)
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(result.Current)
@@ -491,7 +569,7 @@ func (h *openAPIRouteHandler) validate(r *http.Request) []string {
 					var bodyData any
 					if jsonErr := json.Unmarshal(bodyBytes, &bodyData); jsonErr != nil {
 						errs = append(errs, fmt.Sprintf("request body contains invalid JSON: %v", jsonErr))
-					} else if bodyErrs := validateJSONValue(bodyData, "body", mediaType.Schema); len(bodyErrs) > 0 {
+					} else if bodyErrs := validateJSONValue(bodyData, "request body", mediaType.Schema); len(bodyErrs) > 0 {
 						errs = append(errs, bodyErrs...)
 					}
 				}
@@ -500,6 +578,200 @@ func (h *openAPIRouteHandler) validate(r *http.Request) []string {
 	}
 
 	return errs
+}
+
+// ---- Response validation ----
+
+// responseCapturingWriter buffers the response body, status code, and headers
+// so we can validate them against the OpenAPI spec before sending to the client.
+// It uses its own header map to prevent leaked headers reaching the client when
+// validation fails and a different (500) response needs to be sent.
+type responseCapturingWriter struct {
+	underlying http.ResponseWriter
+	headers    http.Header // own header map; copied to underlying only on flush
+	body       bytes.Buffer
+	statusCode int
+	headerSent bool
+}
+
+func newResponseCapturingWriter(w http.ResponseWriter) *responseCapturingWriter {
+	return &responseCapturingWriter{
+		underlying: w,
+		headers:    make(http.Header),
+		statusCode: http.StatusOK,
+	}
+}
+
+// Header returns this writer's own header map so that callers can set headers
+// which are only forwarded to the underlying writer when flush() is called.
+func (c *responseCapturingWriter) Header() http.Header {
+	return c.headers
+}
+
+// Write captures the response body into an internal buffer.
+func (c *responseCapturingWriter) Write(b []byte) (int, error) {
+	return c.body.Write(b)
+}
+
+// WriteHeader captures the status code without sending it yet.
+func (c *responseCapturingWriter) WriteHeader(code int) {
+	c.statusCode = code
+}
+
+// flush copies captured headers and sends the buffered status code and body to the underlying writer.
+func (c *responseCapturingWriter) flush() {
+	if c.headerSent {
+		return
+	}
+	c.headerSent = true
+	// Copy captured headers to the underlying writer before sending the status code.
+	for k, vals := range c.headers {
+		for _, v := range vals {
+			c.underlying.Header().Add(k, v)
+		}
+	}
+	c.underlying.WriteHeader(c.statusCode)
+	_, _ = c.underlying.Write(c.body.Bytes()) //nolint:gosec // G705: body is pipeline output, written back to same response
+}
+
+// validateResponse validates the response status code, content type, and body
+// against the OpenAPI spec for this operation. Returns a list of validation errors.
+func (h *openAPIRouteHandler) validateResponse(statusCode int, headers http.Header, body []byte) []string {
+	var errs []string
+
+	if h.op.Responses == nil {
+		return nil
+	}
+
+	// Look up the response spec by exact status code, then fall back to "default".
+	statusStr := strconv.Itoa(statusCode)
+	respSpec, ok := h.op.Responses[statusStr]
+	if !ok {
+		// Try wildcard status codes: 2XX, 3XX, etc.
+		wildcardStatus := string(statusStr[0]) + "XX"
+		respSpec, ok = h.op.Responses[wildcardStatus]
+	}
+	if !ok {
+		respSpec, ok = h.op.Responses["default"]
+	}
+	if !ok {
+		// No spec defined for this status code — nothing to validate.
+		return nil
+	}
+
+	// If no content is defined in the response spec, skip body validation.
+	if len(respSpec.Content) == 0 {
+		return nil
+	}
+
+	// Determine the response content type.
+	ct := headers.Get("Content-Type")
+	if idx := strings.Index(ct, ";"); idx >= 0 {
+		ct = strings.TrimSpace(ct[:idx])
+	}
+	if ct == "" {
+		ct = "application/json" // default assumption for JSON APIs
+	}
+
+	mediaType, ok := respSpec.Content[ct]
+	if !ok {
+		// Try wildcard content types (e.g., application/*)
+		for specCT, mt := range respSpec.Content {
+			if strings.HasSuffix(specCT, "/*") {
+				prefix := strings.TrimSuffix(specCT, "*")
+				if strings.HasPrefix(ct, prefix) {
+					mediaType = mt
+					ok = true
+					break
+				}
+			}
+		}
+	}
+	if !ok {
+		errs = append(errs, fmt.Sprintf("response Content-Type %q not defined in spec; spec defines: %s",
+			ct, supportedContentTypes(respSpec.Content)))
+		return errs
+	}
+
+	if mediaType.Schema == nil || len(body) == 0 {
+		return nil
+	}
+
+	// Parse and validate the response body against the schema.
+	var bodyData any
+	if jsonErr := json.Unmarshal(body, &bodyData); jsonErr != nil {
+		errs = append(errs, fmt.Sprintf("response body contains invalid JSON: %v", jsonErr))
+		return errs
+	}
+
+	if bodyErrs := validateJSONValue(bodyData, "response body", mediaType.Schema); len(bodyErrs) > 0 {
+		errs = append(errs, bodyErrs...)
+	}
+
+	return errs
+}
+
+// writeAndValidatePipelineResponse is like writePipelineContextResponse but also
+// validates the response against the OpenAPI spec when response validation is enabled.
+func (h *openAPIRouteHandler) writeAndValidatePipelineResponse(w http.ResponseWriter, result map[string]any) bool {
+	rawStatus, ok := result["response_status"]
+	if !ok {
+		return false
+	}
+	status, ok := coercePipelineStatus(rawStatus)
+	if !ok {
+		return false
+	}
+
+	hdrs := http.Header{}
+	if rawHeaders, ok := result["response_headers"]; ok {
+		// Build a temporary header map for validation
+		switch hv := rawHeaders.(type) {
+		case map[string]any:
+			for k, v := range hv {
+				hdrs.Set(k, fmt.Sprintf("%v", v))
+			}
+		case map[string]string:
+			for k, v := range hv {
+				hdrs.Set(k, v)
+			}
+		case http.Header:
+			hdrs = hv
+		}
+	}
+
+	var bodyBytes []byte
+	if body, ok := result["response_body"].(string); ok {
+		bodyBytes = []byte(body)
+	}
+
+	if respErrs := h.validateResponse(status, hdrs, bodyBytes); len(respErrs) > 0 {
+		if h.responseAction == "error" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error":  "response validation failed",
+				"errors": respErrs,
+			})
+			return true
+		}
+		h.module.logger.Warn("OpenAPI response validation failed",
+			"module", h.module.name,
+			"path", h.specPath,
+			"method", h.method,
+			"errors", respErrs,
+		)
+	}
+
+	// Write the actual response
+	if rawHeaders, ok := result["response_headers"]; ok {
+		applyPipelineHeaders(w, rawHeaders)
+	}
+	w.WriteHeader(status)
+	if body, ok := result["response_body"].(string); ok {
+		_, _ = w.Write([]byte(body))
+	}
+	return true
 }
 
 // ---- openAPISpecHandler ----
@@ -680,19 +952,21 @@ func validateScalarValue(val, name, kind string, schema *openAPISchema) []string
 }
 
 // validateJSONBody validates a decoded JSON body against an object schema.
-func validateJSONBody(body any, schema *openAPISchema) []string {
+// The bodyLabel parameter (e.g. "request body" or "response body") is used in
+// error messages to distinguish validation context.
+func validateJSONBody(body any, schema *openAPISchema, bodyLabel string) []string {
 	var errs []string
 	obj, ok := body.(map[string]any)
 	if !ok {
 		if schema.Type == "object" {
-			return []string{"request body must be a JSON object"}
+			return []string{bodyLabel + " must be a JSON object"}
 		}
 		return nil
 	}
 	// Check required fields
 	for _, req := range schema.Required {
 		if _, present := obj[req]; !present {
-			errs = append(errs, fmt.Sprintf("request body: required field %q is missing", req))
+			errs = append(errs, fmt.Sprintf("%s: required field %q is missing", bodyLabel, req))
 		}
 	}
 	// Validate individual properties
@@ -703,6 +977,18 @@ func validateJSONBody(body any, schema *openAPISchema) []string {
 		}
 		if fieldErrs := validateJSONValue(val, field, propSchema); len(fieldErrs) > 0 {
 			errs = append(errs, fieldErrs...)
+		}
+	}
+	// Validate additionalProperties: keys not declared in Properties are checked
+	// against the additionalProperties schema when it is specified.
+	if schema.AdditionalProperties != nil {
+		for key, val := range obj {
+			if _, defined := schema.Properties[key]; defined {
+				continue
+			}
+			if fieldErrs := validateJSONValue(val, key, schema.AdditionalProperties); len(fieldErrs) > 0 {
+				errs = append(errs, fieldErrs...)
+			}
 		}
 	}
 	return errs
@@ -776,8 +1062,27 @@ func validateJSONValue(val any, name string, schema *openAPISchema) []string {
 			errs = append(errs, fmt.Sprintf("field %q must be a boolean, got %T", name, val))
 		}
 	case "object":
-		if subErrs := validateJSONBody(val, schema); len(subErrs) > 0 {
+		if subErrs := validateJSONBody(val, schema, name); len(subErrs) > 0 {
 			errs = append(errs, subErrs...)
+		}
+	case "array":
+		arr, ok := val.([]any)
+		if !ok {
+			return []string{fmt.Sprintf("field %q must be an array, got %T", name, val)}
+		}
+		if schema.MinItems != nil && len(arr) < *schema.MinItems {
+			errs = append(errs, fmt.Sprintf("field %q must have at least %d items, got %d", name, *schema.MinItems, len(arr)))
+		}
+		if schema.MaxItems != nil && len(arr) > *schema.MaxItems {
+			errs = append(errs, fmt.Sprintf("field %q must have at most %d items, got %d", name, *schema.MaxItems, len(arr)))
+		}
+		if schema.Items != nil {
+			for i, item := range arr {
+				itemName := fmt.Sprintf("%s[%d]", name, i)
+				if itemErrs := validateJSONValue(item, itemName, schema.Items); len(itemErrs) > 0 {
+					errs = append(errs, itemErrs...)
+				}
+			}
 		}
 	}
 	// Enum validation: use type-aware comparison to prevent e.g. int 1 matching string "1".
