@@ -35,7 +35,7 @@ All modules are instantiated from YAML config via the plugin factory registry. O
 | `http.simple_proxy` | Simplified proxy configuration | http |
 | `reverseproxy` | Modular framework reverse proxy (v2) | http |
 | `static.fileserver` | Static file serving | http |
-| `openapi` | OpenAPI v3 spec-driven HTTP route generation with request/response validation and Swagger UI | openapi |
+| `openapi` | OpenAPI v3 spec-driven HTTP route generation with request validation and Swagger UI | openapi |
 
 > `httpserver.modular`, `httpclient.modular`, and `chimux.router` were removed in favor of `http.server`, `http.router`, and `reverseproxy`.
 
@@ -515,7 +515,7 @@ Detailed configuration reference for module types not covered in the main table 
 
 ### `openapi`
 
-Parses an OpenAPI v3 specification file and automatically generates HTTP routes, validates requests and responses against the spec, and optionally serves Swagger UI. Routes are mapped to named pipelines via the `x-pipeline` extension field in the spec.
+Parses an OpenAPI v3 specification file and automatically generates HTTP routes, validates incoming requests against the spec, and optionally serves Swagger UI. Routes are mapped to named pipelines via the `x-pipeline` extension field in the spec.
 
 **Configuration:**
 
@@ -526,9 +526,8 @@ Parses an OpenAPI v3 specification file and automatically generates HTTP routes,
 | `base_path` | string | `""` | URL path prefix to strip before matching spec paths. |
 | `max_body_bytes` | int | `1048576` | Maximum request body size (bytes). |
 | `validation.request` | bool | `true` | Validate incoming request bodies, query params, and headers against the spec. |
-| `validation.response` | bool | `false` | Validate outgoing response bodies against the spec. |
-| `validation.response_action` | string | `"warn"` | Action on response validation failure: `"warn"` (log only) or `"error"` (return 500). |
-| `swagger_ui` | bool | `false` | Serve Swagger UI at `/swagger/` (requires `spec_file`). |
+| `swagger_ui.enabled` | bool | `false` | Serve Swagger UI (requires `spec_file`). |
+| `swagger_ui.path` | string | `"/docs"` | URL path at which the Swagger UI is served. |
 
 **Route mapping via `x-pipeline`:**
 
@@ -551,9 +550,9 @@ modules:
       router: main-router
       validation:
         request: true
-        response: true
-        response_action: warn
-      swagger_ui: true
+      swagger_ui:
+        enabled: true
+        path: /docs
 ```
 
 ---
