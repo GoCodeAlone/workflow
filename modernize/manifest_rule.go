@@ -110,6 +110,12 @@ func (mr ManifestRule) Validate() error {
 	if kinds == 0 {
 		return fmt.Errorf("modernize rule %q: must specify at least one of: oldModuleType, oldStepType, or moduleType/stepType + oldKey", mr.ID)
 	}
+	if kinds > 1 {
+		return fmt.Errorf("modernize rule %q: exactly one rule kind must be configured; found %d kinds set", mr.ID, kinds)
+	}
+	if mr.Severity != "" && mr.Severity != "error" && mr.Severity != "warning" {
+		return fmt.Errorf("modernize rule %q: severity must be \"error\" or \"warning\", got %q", mr.ID, mr.Severity)
+	}
 	return nil
 }
 
@@ -250,6 +256,7 @@ func (mr ManifestRule) toModuleConfigKeyRenameRule(sev string) Rule {
 	if msg == "" {
 		msg = fmt.Sprintf("Config key %q is deprecated in %q modules; use %q instead", oldKey, moduleType, newKey)
 	}
+	msgCollision := fmt.Sprintf("Config key %q is deprecated in %q modules (cannot auto-rename: %q already exists)", oldKey, moduleType, newKey)
 	return Rule{
 		ID:          id,
 		Description: mr.Description,
@@ -267,11 +274,17 @@ func (mr ManifestRule) toModuleConfigKeyRenameRule(sev string) Rule {
 				}
 				keyNode := findMapKeyNode(cfg, oldKey)
 				if keyNode != nil {
+					// If newKey already exists this is still a finding but not auto-fixable.
+					fixable := findMapKeyNode(cfg, newKey) == nil
+					findingMsg := msg
+					if !fixable {
+						findingMsg = msgCollision
+					}
 					findings = append(findings, Finding{
 						RuleID:  id,
 						Line:    keyNode.Line,
-						Message: msg,
-						Fixable: true,
+						Message: findingMsg,
+						Fixable: fixable,
 					})
 				}
 			})
@@ -289,14 +302,19 @@ func (mr ManifestRule) toModuleConfigKeyRenameRule(sev string) Rule {
 					return
 				}
 				keyNode := findMapKeyNode(cfg, oldKey)
-				if keyNode != nil {
-					changes = append(changes, Change{
-						RuleID:      id,
-						Line:        keyNode.Line,
-						Description: fmt.Sprintf("Renamed config key %q -> %q in %q module", oldKey, newKey, moduleType),
-					})
-					keyNode.Value = newKey
+				if keyNode == nil {
+					return
 				}
+				// Skip rename if newKey already exists to avoid duplicate keys.
+				if findMapKeyNode(cfg, newKey) != nil {
+					return
+				}
+				changes = append(changes, Change{
+					RuleID:      id,
+					Line:        keyNode.Line,
+					Description: fmt.Sprintf("Renamed config key %q -> %q in %q module", oldKey, newKey, moduleType),
+				})
+				keyNode.Value = newKey
 			})
 			return changes
 		},
@@ -314,6 +332,7 @@ func (mr ManifestRule) toStepConfigKeyRenameRule(sev string) Rule {
 	if msg == "" {
 		msg = fmt.Sprintf("Config key %q is deprecated in %q steps; use %q instead", oldKey, stepType, newKey)
 	}
+	msgCollision := fmt.Sprintf("Config key %q is deprecated in %q steps (cannot auto-rename: %q already exists)", oldKey, stepType, newKey)
 	return Rule{
 		ID:          id,
 		Description: mr.Description,
@@ -327,11 +346,17 @@ func (mr ManifestRule) toStepConfigKeyRenameRule(sev string) Rule {
 				}
 				keyNode := findMapKeyNode(cfg, oldKey)
 				if keyNode != nil {
+					// If newKey already exists this is still a finding but not auto-fixable.
+					fixable := findMapKeyNode(cfg, newKey) == nil
+					findingMsg := msg
+					if !fixable {
+						findingMsg = msgCollision
+					}
 					findings = append(findings, Finding{
 						RuleID:  id,
 						Line:    keyNode.Line,
-						Message: msg,
-						Fixable: true,
+						Message: findingMsg,
+						Fixable: fixable,
 					})
 				}
 			})
@@ -345,14 +370,19 @@ func (mr ManifestRule) toStepConfigKeyRenameRule(sev string) Rule {
 					return
 				}
 				keyNode := findMapKeyNode(cfg, oldKey)
-				if keyNode != nil {
-					changes = append(changes, Change{
-						RuleID:      id,
-						Line:        keyNode.Line,
-						Description: fmt.Sprintf("Renamed config key %q -> %q in %q step", oldKey, newKey, stepType),
-					})
-					keyNode.Value = newKey
+				if keyNode == nil {
+					return
 				}
+				// Skip rename if newKey already exists to avoid duplicate keys.
+				if findMapKeyNode(cfg, newKey) != nil {
+					return
+				}
+				changes = append(changes, Change{
+					RuleID:      id,
+					Line:        keyNode.Line,
+					Description: fmt.Sprintf("Renamed config key %q -> %q in %q step", oldKey, newKey, stepType),
+				})
+				keyNode.Value = newKey
 			})
 			return changes
 		},

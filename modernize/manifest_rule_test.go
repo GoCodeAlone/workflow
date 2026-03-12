@@ -77,6 +77,52 @@ func TestManifestRule_Validate(t *testing.T) {
 			rule:    ManifestRule{ID: "x", Description: "d", StepType: "step.foo", OldKey: "old", NewKey: "new"},
 			wantErr: false,
 		},
+		{
+			name: "multiple rule kinds set (module type + module key rename)",
+			rule: ManifestRule{
+				ID:            "x",
+				Description:   "d",
+				OldModuleType: "a",
+				NewModuleType: "b",
+				ModuleType:    "a",
+				OldKey:        "old",
+				NewKey:        "new",
+			},
+			wantErr: true,
+		},
+		{
+			name: "multiple rule kinds set (step type + step key rename)",
+			rule: ManifestRule{
+				ID:          "x",
+				Description: "d",
+				OldStepType: "step.a",
+				NewStepType: "step.b",
+				StepType:    "step.a",
+				OldKey:      "old",
+				NewKey:      "new",
+			},
+			wantErr: true,
+		},
+		{
+			name:    "invalid severity value",
+			rule:    ManifestRule{ID: "x", Description: "d", Severity: "critical", OldModuleType: "a", NewModuleType: "b"},
+			wantErr: true,
+		},
+		{
+			name:    "valid severity error",
+			rule:    ManifestRule{ID: "x", Description: "d", Severity: "error", OldModuleType: "a", NewModuleType: "b"},
+			wantErr: false,
+		},
+		{
+			name:    "valid severity warning",
+			rule:    ManifestRule{ID: "x", Description: "d", Severity: "warning", OldModuleType: "a", NewModuleType: "b"},
+			wantErr: false,
+		},
+		{
+			name:    "empty severity (defaults to warning)",
+			rule:    ManifestRule{ID: "x", Description: "d", OldModuleType: "a", NewModuleType: "b"},
+			wantErr: false,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -399,6 +445,137 @@ modules:
 	changes := rule.Fix(doc)
 	if len(changes) != 0 {
 		t.Errorf("expected no changes, got %d", len(changes))
+	}
+}
+
+// TestManifestRule_ModuleConfigKeyRename_Collision verifies that when newKey
+// already exists in a module config, the finding is reported as not-fixable and
+// the Fix function does not create duplicate keys.
+func TestManifestRule_ModuleConfigKeyRename_Collision(t *testing.T) {
+	mr := ManifestRule{
+		ID:         "test-collision-mod",
+		Description: "Rename old_key to new_key in my.module",
+		ModuleType: "my.module",
+		OldKey:     "old_key",
+		NewKey:     "new_key",
+	}
+	rule, err := mr.ToRule()
+	if err != nil {
+		t.Fatalf("ToRule() error: %v", err)
+	}
+
+	// Config has both old_key and new_key — a collision scenario.
+	input := `
+modules:
+  - name: m1
+    type: my.module
+    config:
+      old_key: old_value
+      new_key: new_value
+`
+	doc := parseYAMLNode(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	// Finding should NOT be fixable when newKey already exists.
+	if findings[0].Fixable {
+		t.Error("finding should not be fixable when newKey already exists (collision)")
+	}
+	if !strings.Contains(findings[0].Message, "cannot auto-rename") {
+		t.Errorf("message should mention collision, got: %s", findings[0].Message)
+	}
+
+	// Fix should not modify anything.
+	changes := rule.Fix(doc)
+	if len(changes) != 0 {
+		t.Errorf("expected no changes when newKey already exists, got %d", len(changes))
+	}
+
+	// YAML should remain unchanged.
+	out, _ := yaml.Marshal(doc)
+	result := string(out)
+	if !strings.Contains(result, "old_key: old_value") {
+		t.Error("old_key should remain when newKey already exists")
+	}
+	if !strings.Contains(result, "new_key: new_value") {
+		t.Error("new_key should remain unchanged")
+	}
+}
+
+// TestManifestRule_StepConfigKeyRename_Collision verifies that when newKey
+// already exists in a step config, the finding is not-fixable and Fix is a no-op.
+func TestManifestRule_StepConfigKeyRename_Collision(t *testing.T) {
+	mr := ManifestRule{
+		ID:          "test-collision-step",
+		Description: "Rename timeout_ms to timeoutMs in step.my_step",
+		StepType:    "step.my_step",
+		OldKey:      "timeout_ms",
+		NewKey:      "timeoutMs",
+	}
+	rule, err := mr.ToRule()
+	if err != nil {
+		t.Fatalf("ToRule() error: %v", err)
+	}
+
+	// Both old and new keys are present — collision scenario.
+	input := `
+pipelines:
+  main:
+    steps:
+      - name: run
+        type: step.my_step
+        config:
+          timeout_ms: 1000
+          timeoutMs: 2000
+`
+	doc := parseYAMLNode(t, input)
+	findings := rule.Check(doc, []byte(input))
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].Fixable {
+		t.Error("finding should not be fixable when newKey already exists (collision)")
+	}
+	if !strings.Contains(findings[0].Message, "cannot auto-rename") {
+		t.Errorf("message should mention collision, got: %s", findings[0].Message)
+	}
+
+	changes := rule.Fix(doc)
+	if len(changes) != 0 {
+		t.Errorf("expected no changes when newKey already exists, got %d", len(changes))
+	}
+}
+
+// TestManifestRule_Validate_MultipleKinds verifies that Validate errors when
+// more than one rule kind is configured.
+func TestManifestRule_Validate_MultipleKinds(t *testing.T) {
+	mr := ManifestRule{
+		ID:            "multi-kind",
+		Description:   "Two rule kinds set",
+		OldModuleType: "a.old",
+		NewModuleType: "a.new",
+		ModuleType:    "a.old",
+		OldKey:        "foo",
+		NewKey:        "bar",
+	}
+	if err := mr.Validate(); err == nil {
+		t.Error("expected error when multiple rule kinds are configured")
+	}
+}
+
+// TestManifestRule_Validate_InvalidSeverity verifies that Validate rejects
+// unexpected severity values.
+func TestManifestRule_Validate_InvalidSeverity(t *testing.T) {
+	mr := ManifestRule{
+		ID:            "bad-sev",
+		Description:   "d",
+		Severity:      "critical",
+		OldModuleType: "a",
+		NewModuleType: "b",
+	}
+	if err := mr.Validate(); err == nil {
+		t.Error("expected error for invalid severity 'critical'")
 	}
 }
 

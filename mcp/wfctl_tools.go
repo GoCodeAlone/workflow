@@ -1708,9 +1708,17 @@ func (s *Server) handleModernize(_ context.Context, req mcp.CallToolRequest) (*m
 	// directory was configured at server startup.
 	if s.pluginDir != "" {
 		pluginRules, err := modernize.LoadRulesFromDir(s.pluginDir)
-		if err == nil {
-			rules = append(rules, pluginRules...)
+		if err != nil {
+			// Surface the error as a warning in the result so clients can diagnose
+			// misconfigured plugin directories rather than silently missing rules.
+			result := map[string]any{
+				"findings":       []modernize.Finding{},
+				"count":          0,
+				"plugin_warning": fmt.Sprintf("failed to load plugin modernize rules from %q: %v", s.pluginDir, err),
+			}
+			return marshalToolResult(result)
 		}
+		rules = append(rules, pluginRules...)
 	}
 
 	rules = modernize.FilterRules(rules, rulesFilter, excludeFilter)

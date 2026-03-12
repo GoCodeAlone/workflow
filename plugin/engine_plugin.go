@@ -109,14 +109,17 @@ type PipelineTriggerConfigProvider interface {
 }
 
 // ModernizeRulesProvider is optionally implemented by EnginePlugins that
-// supply custom modernize rules for the wfctl modernize command. Rules
-// returned here are merged with the core built-in rules and applied when
+// wish to supply custom modernize rules for the wfctl modernize command.
+// The rules returned by this interface are intended to be collected by the
+// engine or tooling and merged with the core built-in rules when
 // modernizing workflow configs that use this plugin's module/step types.
 //
 // External (process-isolated) plugins declare their rules in plugin.json
 // under the "modernizeRules" key and have them loaded automatically via
-// modernize.LoadRulesFromDir. In-process Go plugins implement this interface
-// to supply function-based rules that can perform arbitrary YAML transforms.
+// modernize.LoadRulesFromDir. In-process Go plugins can implement this
+// interface to expose function-based rules that perform arbitrary YAML
+// transforms. At present this interface serves as an API/extension point;
+// integrating it into a particular engine or CLI is up to that consumer.
 type ModernizeRulesProvider interface {
 	ModernizeRules() []modernize.Rule
 }

@@ -309,7 +309,7 @@ func (p *Plugin) ModernizeRules() []modernize.Rule {
 }
 ```
 
-The engine will call `ModernizeRules()` on plugins that implement `ModernizeRulesProvider`. You can also write arbitrary Check/Fix functions for complex migrations that go beyond type and key renaming.
+Support for consuming `ModernizeRules()` from in-process plugins is not yet wired into the engine; this interface is reserved for future use. You can still write arbitrary Check/Fix functions for complex migrations that go beyond type and key renaming in your rules.
 
 #### External plugins via `plugin.json`
 
