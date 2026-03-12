@@ -253,3 +253,104 @@ func TestManifestWorkflowTypes(t *testing.T) {
 		t.Errorf("expected workflow type 'messaging', got %q", m.WorkflowTypes[0])
 	}
 }
+
+func TestPipelineTriggerConfigWrappers(t *testing.T) {
+	p := New()
+	wrappers := p.PipelineTriggerConfigWrappers()
+
+	for _, triggerType := range []string{"event", "eventbus"} {
+		if _, ok := wrappers[triggerType]; !ok {
+			t.Errorf("missing pipeline trigger config wrapper: %s", triggerType)
+		}
+	}
+}
+
+func TestPipelineTriggerConfigWrapper_Event(t *testing.T) {
+	p := New()
+	wrappers := p.PipelineTriggerConfigWrappers()
+	wrapper, ok := wrappers["event"]
+	if !ok {
+		t.Fatal("missing pipeline trigger config wrapper: event")
+	}
+
+	cfg := map[string]any{
+		"topic": "orders.created",
+		"event": "order.placed",
+	}
+	result := wrapper("my-pipeline", cfg)
+
+	subs, ok := result["subscriptions"].([]any)
+	if !ok || len(subs) != 1 {
+		t.Fatalf("expected 1 subscription, got %v", result)
+	}
+	sub := subs[0].(map[string]any)
+	if sub["workflow"] != "pipeline:my-pipeline" {
+		t.Errorf("unexpected workflow: %v", sub["workflow"])
+	}
+	if sub["action"] != "execute" {
+		t.Errorf("expected action=execute, got %v", sub["action"])
+	}
+	if sub["topic"] != "orders.created" {
+		t.Errorf("unexpected topic: %v", sub["topic"])
+	}
+	if sub["event"] != "order.placed" {
+		t.Errorf("unexpected event: %v", sub["event"])
+	}
+}
+
+func TestPipelineTriggerConfigWrapper_EventBus(t *testing.T) {
+	p := New()
+	wrappers := p.PipelineTriggerConfigWrappers()
+	wrapper, ok := wrappers["eventbus"]
+	if !ok {
+		t.Fatal("missing pipeline trigger config wrapper: eventbus")
+	}
+
+	cfg := map[string]any{
+		"topic": "follow-up.created",
+		"async": true,
+	}
+	result := wrapper("process-follow-up", cfg)
+
+	subs, ok := result["subscriptions"].([]any)
+	if !ok || len(subs) != 1 {
+		t.Fatalf("expected 1 subscription, got %v", result)
+	}
+	sub := subs[0].(map[string]any)
+	if sub["workflow"] != "pipeline:process-follow-up" {
+		t.Errorf("unexpected workflow: %v", sub["workflow"])
+	}
+	if sub["action"] != "execute" {
+		t.Errorf("expected action=execute, got %v", sub["action"])
+	}
+	if sub["topic"] != "follow-up.created" {
+		t.Errorf("unexpected topic: %v", sub["topic"])
+	}
+	if sub["async"] != true {
+		t.Errorf("expected async=true, got %v", sub["async"])
+	}
+}
+
+func TestPipelineTriggerConfigWrapper_EventBus_WithEventFilter(t *testing.T) {
+	p := New()
+	wrappers := p.PipelineTriggerConfigWrappers()
+	wrapper, ok := wrappers["eventbus"]
+	if !ok {
+		t.Fatal("missing pipeline trigger config wrapper: eventbus")
+	}
+
+	cfg := map[string]any{
+		"topic": "user.events",
+		"event": "user.registered",
+	}
+	result := wrapper("onboard-pipeline", cfg)
+
+	subs, ok := result["subscriptions"].([]any)
+	if !ok || len(subs) != 1 {
+		t.Fatalf("expected 1 subscription, got %v", result)
+	}
+	sub := subs[0].(map[string]any)
+	if sub["event"] != "user.registered" {
+		t.Errorf("unexpected event filter: %v", sub["event"])
+	}
+}
