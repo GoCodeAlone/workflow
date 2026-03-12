@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -94,5 +95,105 @@ func TestGraphQLStep_FactoryValidation(t *testing.T) {
 	}, nil)
 	if err == nil {
 		t.Error("expected error for missing query")
+	}
+}
+
+func TestGraphQLStep_GraphQLErrors_FailByDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": nil,
+			"errors": []map[string]any{
+				{"message": "User not found", "locations": []map[string]any{{"line": 1, "column": 3}}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	factory := NewGraphQLStepFactory()
+	step, _ := factory("err_test", map[string]any{
+		"url":   server.URL,
+		"query": "{ user(id: \"bad\") { name } }",
+	}, nil)
+
+	pc := &PipelineContext{Current: map[string]any{}, StepOutputs: map[string]map[string]any{}}
+	_, err := step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error for GraphQL errors with fail_on_graphql_errors=true")
+	}
+	if !strings.Contains(err.Error(), "User not found") {
+		t.Errorf("expected error message to contain 'User not found', got: %s", err.Error())
+	}
+}
+
+func TestGraphQLStep_GraphQLErrors_PartialData(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{"user": map[string]any{"name": "Alice"}},
+			"errors": []map[string]any{
+				{"message": "email field requires elevated permissions"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	factory := NewGraphQLStepFactory()
+	step, _ := factory("partial_test", map[string]any{
+		"url":                    server.URL,
+		"query":                  "{ user(id: \"1\") { name email } }",
+		"data_path":              "user",
+		"fail_on_graphql_errors": false,
+	}, nil)
+
+	pc := &PipelineContext{Current: map[string]any{}, StepOutputs: map[string]map[string]any{}}
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error with fail_on_graphql_errors=false: %v", err)
+	}
+	if result.Output["has_errors"] != true {
+		t.Error("expected has_errors=true")
+	}
+	data := result.Output["data"].(map[string]any)
+	if data["name"] != "Alice" {
+		t.Errorf("expected partial data name=Alice, got %v", data["name"])
+	}
+	errors := result.Output["errors"].([]any)
+	if len(errors) != 1 {
+		t.Errorf("expected 1 error, got %d", len(errors))
+	}
+}
+
+func TestGraphQLStep_DataPathExtraction(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{
+				"organization": map[string]any{
+					"users": []any{
+						map[string]any{"name": "Alice"},
+						map[string]any{"name": "Bob"},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	factory := NewGraphQLStepFactory()
+	step, _ := factory("path_test", map[string]any{
+		"url":       server.URL,
+		"query":     "{ organization { users { name } } }",
+		"data_path": "organization.users",
+	}, nil)
+
+	pc := &PipelineContext{Current: map[string]any{}, StepOutputs: map[string]map[string]any{}}
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, ok := result.Output["data"].([]any)
+	if !ok {
+		t.Fatalf("expected data to be array, got %T", result.Output["data"])
+	}
+	if len(data) != 2 {
+		t.Errorf("expected 2 users, got %d", len(data))
 	}
 }
