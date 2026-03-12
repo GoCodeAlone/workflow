@@ -1400,3 +1400,997 @@ func TestOpenAPIModule_XPipeline_ResponseStatus_Float64(t *testing.T) {
 		t.Errorf("unexpected body: %q", w.Body.String())
 	}
 }
+
+// ---- Response validation spec fixtures ----
+
+const responseValidationYAML = `
+openapi: "3.0.0"
+info:
+  title: Response Validation API
+  version: "1.0.0"
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      summary: List all pets
+      x-pipeline: list-pets-pipeline
+      responses:
+        "200":
+          description: A list of pets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                    - id
+                    - name
+                  properties:
+                    id:
+                      type: integer
+                    name:
+                      type: string
+                      minLength: 1
+                    tag:
+                      type: string
+    post:
+      operationId: createPet
+      summary: Create a pet
+      x-pipeline: create-pet-pipeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+      responses:
+        "201":
+          description: Created pet
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - name
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      summary: Get a pet by ID
+      x-pipeline: get-pet-pipeline
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: A single pet
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - name
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  tag:
+                    type: string
+        "404":
+          description: Pet not found
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - error
+                properties:
+                  error:
+                    type: string
+  /no-response-schema:
+    get:
+      operationId: noSchema
+      summary: Endpoint with no response schema
+      x-pipeline: no-schema-pipeline
+      responses:
+        "200":
+          description: No content schema defined
+`
+
+// JSON:API style response spec for complex validation scenarios
+const jsonAPIResponseYAML = `
+openapi: "3.0.0"
+info:
+  title: JSON:API Response Validation
+  version: "1.0.0"
+paths:
+  /articles:
+    get:
+      operationId: listArticles
+      summary: List articles (JSON:API format)
+      x-pipeline: list-articles-pipeline
+      responses:
+        "200":
+          description: JSON:API compliant response
+          content:
+            application/vnd.api+json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - type
+                        - id
+                        - attributes
+                      properties:
+                        type:
+                          type: string
+                        id:
+                          type: string
+                        attributes:
+                          type: object
+                          required:
+                            - title
+                          properties:
+                            title:
+                              type: string
+                            body:
+                              type: string
+                        relationships:
+                          type: object
+                          properties:
+                            author:
+                              type: object
+                              properties:
+                                data:
+                                  type: object
+                                  required:
+                                    - type
+                                    - id
+                                  properties:
+                                    type:
+                                      type: string
+                                    id:
+                                      type: string
+                  meta:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                  links:
+                    type: object
+                    properties:
+                      self:
+                        type: string
+                      next:
+                        type: string
+`
+
+// ---- Response validation tests ----
+
+func TestOpenAPIModule_ResponseValidation_ValidResponse(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", responseValidationYAML)
+
+	mod := NewOpenAPIModule("resp-api", OpenAPIConfig{
+		SpecFile:   specPath,
+		BasePath:   "/api",
+		Validation: OpenAPIValidationConfig{Response: true, ResponseAction: "error"},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Pipeline returns a valid array of pets
+	step := &stubPipelineStep{
+		name: "list-pets",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{
+				Output: map[string]any{
+					"response_status": 200,
+					"response_body":   `[{"id":1,"name":"Fido","tag":"dog"},{"id":2,"name":"Whiskers"}]`,
+					"response_headers": map[string]any{
+						"Content-Type": "application/json",
+					},
+				},
+				Stop: true,
+			}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "list-pets-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "list-pets-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/pets")
+	if h == nil {
+		t.Fatal("GET /api/pets handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/pets", nil)
+	h.Handle(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestOpenAPIModule_ResponseValidation_InvalidResponse_ErrorAction(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", responseValidationYAML)
+
+	mod := NewOpenAPIModule("resp-api", OpenAPIConfig{
+		SpecFile:   specPath,
+		BasePath:   "/api",
+		Validation: OpenAPIValidationConfig{Response: true, ResponseAction: "error"},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Pipeline returns a pet missing the required "name" field
+	step := &stubPipelineStep{
+		name: "list-pets",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{
+				Output: map[string]any{
+					"response_status": 200,
+					"response_body":   `[{"id":1}]`,
+					"response_headers": map[string]any{
+						"Content-Type": "application/json",
+					},
+				},
+				Stop: true,
+			}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "list-pets-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "list-pets-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/pets")
+	if h == nil {
+		t.Fatal("GET /api/pets handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/pets", nil)
+	h.Handle(w, r)
+
+	// With action=error, we expect a 500 response with validation errors
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("expected JSON error body: %v", err)
+	}
+	if resp["error"] != "response validation failed" {
+		t.Errorf("expected 'response validation failed' error, got %v", resp["error"])
+	}
+	errs, ok := resp["errors"].([]any)
+	if !ok || len(errs) == 0 {
+		t.Errorf("expected validation errors, got %v", resp["errors"])
+	}
+}
+
+func TestOpenAPIModule_ResponseValidation_InvalidResponse_WarnAction(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", responseValidationYAML)
+
+	mod := NewOpenAPIModule("resp-api", OpenAPIConfig{
+		SpecFile:   specPath,
+		BasePath:   "/api",
+		Validation: OpenAPIValidationConfig{Response: true, ResponseAction: "warn"},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Pipeline returns a pet missing the required "name" field
+	step := &stubPipelineStep{
+		name: "list-pets",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{
+				Output: map[string]any{
+					"response_status": 200,
+					"response_body":   `[{"id":1}]`,
+					"response_headers": map[string]any{
+						"Content-Type": "application/json",
+					},
+				},
+				Stop: true,
+			}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "list-pets-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "list-pets-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/pets")
+	if h == nil {
+		t.Fatal("GET /api/pets handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/pets", nil)
+	h.Handle(w, r)
+
+	// With action=warn, the response should still be sent (200)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 (warning only), got %d: %s", w.Code, w.Body.String())
+	}
+	// Body should be the original pipeline body
+	if w.Body.String() != `[{"id":1}]` {
+		t.Errorf("expected original pipeline body, got %q", w.Body.String())
+	}
+}
+
+func TestOpenAPIModule_ResponseValidation_DefaultFallback_InvalidFallback(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", responseValidationYAML)
+
+	mod := NewOpenAPIModule("resp-api", OpenAPIConfig{
+		SpecFile:   specPath,
+		BasePath:   "/api",
+		Validation: OpenAPIValidationConfig{Response: true, ResponseAction: "error"},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Pipeline returns output without response_status — falls through to 200 default
+	step := &stubPipelineStep{
+		name: "list-pets",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{
+				Output: map[string]any{
+					"result": []any{
+						map[string]any{"id": float64(1), "name": "Fido"},
+					},
+				},
+			}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "list-pets-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "list-pets-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/pets")
+	if h == nil {
+		t.Fatal("GET /api/pets handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/pets", nil)
+	h.Handle(w, r)
+
+	// The spec expects an array at the top level, but we're sending an object
+	// (the full pipeline state). This should fail validation in error mode.
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 (response is object, spec expects array), got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestOpenAPIModule_ResponseValidation_NoSchema_Passes(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", responseValidationYAML)
+
+	mod := NewOpenAPIModule("resp-api", OpenAPIConfig{
+		SpecFile:   specPath,
+		BasePath:   "/api",
+		Validation: OpenAPIValidationConfig{Response: true, ResponseAction: "error"},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	step := &stubPipelineStep{
+		name: "no-schema",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{
+				Output: map[string]any{
+					"response_status": 200,
+					"response_body":   `{"anything":"goes"}`,
+					"response_headers": map[string]any{
+						"Content-Type": "application/json",
+					},
+				},
+				Stop: true,
+			}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "no-schema-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "no-schema-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/no-response-schema")
+	if h == nil {
+		t.Fatal("GET /api/no-response-schema handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/no-response-schema", nil)
+	h.Handle(w, r)
+
+	// No schema defined — response should pass through
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 (no schema to validate against), got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestOpenAPIModule_ResponseValidation_JSONAPI_ValidResponse(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", jsonAPIResponseYAML)
+
+	mod := NewOpenAPIModule("jsonapi", OpenAPIConfig{
+		SpecFile:   specPath,
+		BasePath:   "/api",
+		Validation: OpenAPIValidationConfig{Response: true, ResponseAction: "error"},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// A valid JSON:API response
+	validBody := `{
+		"data": [
+			{
+				"type": "articles",
+				"id": "1",
+				"attributes": {
+					"title": "Hello World",
+					"body": "This is my first article."
+				},
+				"relationships": {
+					"author": {
+						"data": {"type": "people", "id": "42"}
+					}
+				}
+			}
+		],
+		"meta": {"total": 1},
+		"links": {"self": "/articles"}
+	}`
+
+	step := &stubPipelineStep{
+		name: "list-articles",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{
+				Output: map[string]any{
+					"response_status": 200,
+					"response_body":   validBody,
+					"response_headers": map[string]any{
+						"Content-Type": "application/vnd.api+json",
+					},
+				},
+				Stop: true,
+			}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "list-articles-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "list-articles-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/articles")
+	if h == nil {
+		t.Fatal("GET /api/articles handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/articles", nil)
+	h.Handle(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for valid JSON:API response, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestOpenAPIModule_ResponseValidation_JSONAPI_InvalidResponse(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", jsonAPIResponseYAML)
+
+	mod := NewOpenAPIModule("jsonapi", OpenAPIConfig{
+		SpecFile:   specPath,
+		BasePath:   "/api",
+		Validation: OpenAPIValidationConfig{Response: true, ResponseAction: "error"},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Invalid JSON:API response — missing required "type" and "attributes" in data items
+	invalidBody := `{
+		"data": [
+			{
+				"id": "1"
+			}
+		]
+	}`
+
+	step := &stubPipelineStep{
+		name: "list-articles",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{
+				Output: map[string]any{
+					"response_status": 200,
+					"response_body":   invalidBody,
+					"response_headers": map[string]any{
+						"Content-Type": "application/vnd.api+json",
+					},
+				},
+				Stop: true,
+			}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "list-articles-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "list-articles-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/articles")
+	if h == nil {
+		t.Fatal("GET /api/articles handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/articles", nil)
+	h.Handle(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 for invalid JSON:API response, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("expected JSON error body: %v", err)
+	}
+	errs, ok := resp["errors"].([]any)
+	if !ok || len(errs) == 0 {
+		t.Fatalf("expected validation errors, got %v", resp["errors"])
+	}
+
+	// Check that it caught missing required fields
+	errStr := strings.Join(func() []string {
+		ss := make([]string, len(errs))
+		for i, e := range errs {
+			ss[i] = e.(string)
+		}
+		return ss
+	}(), " ")
+	if !strings.Contains(errStr, "type") {
+		t.Errorf("expected error about missing 'type' field, got: %s", errStr)
+	}
+	if !strings.Contains(errStr, "attributes") {
+		t.Errorf("expected error about missing 'attributes' field, got: %s", errStr)
+	}
+}
+
+func TestOpenAPIModule_ResponseValidation_JSONAPI_WrongContentType(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", jsonAPIResponseYAML)
+
+	mod := NewOpenAPIModule("jsonapi", OpenAPIConfig{
+		SpecFile:   specPath,
+		BasePath:   "/api",
+		Validation: OpenAPIValidationConfig{Response: true, ResponseAction: "error"},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Response with wrong content type (application/json instead of application/vnd.api+json)
+	step := &stubPipelineStep{
+		name: "list-articles",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{
+				Output: map[string]any{
+					"response_status": 200,
+					"response_body":   `{"data":[]}`,
+					"response_headers": map[string]any{
+						"Content-Type": "application/json",
+					},
+				},
+				Stop: true,
+			}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "list-articles-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "list-articles-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/articles")
+	if h == nil {
+		t.Fatal("GET /api/articles handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/articles", nil)
+	h.Handle(w, r)
+
+	// Should fail because the Content-Type doesn't match the spec
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 for wrong content type, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestOpenAPIModule_ResponseValidation_DirectWrite(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", responseValidationYAML)
+
+	mod := NewOpenAPIModule("resp-api", OpenAPIConfig{
+		SpecFile:   specPath,
+		BasePath:   "/api",
+		Validation: OpenAPIValidationConfig{Response: true, ResponseAction: "error"},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Pipeline step writes directly to the response writer with an invalid response
+	step := &stubPipelineStep{
+		name: "create-pet",
+		exec: func(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+			rw := ctx.Value(HTTPResponseWriterContextKey).(http.ResponseWriter)
+			rw.Header().Set("Content-Type", "application/json")
+			rw.WriteHeader(http.StatusCreated)
+			_, _ = rw.Write([]byte(`{"wrong":"fields"}`))
+			return &StepResult{Output: map[string]any{}}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "create-pet-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "create-pet-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("POST", "/api/pets")
+	if h == nil {
+		t.Fatal("POST /api/pets handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	body := strings.NewReader(`{"name":"Fido"}`)
+	r := httptest.NewRequest(http.MethodPost, "/api/pets", body)
+	r.Header.Set("Content-Type", "application/json")
+	h.Handle(w, r)
+
+	// With error action, the invalid response should be blocked
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 for invalid direct-write response, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestOpenAPIModule_ResponseValidation_DirectWrite_Valid(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", responseValidationYAML)
+
+	mod := NewOpenAPIModule("resp-api", OpenAPIConfig{
+		SpecFile:   specPath,
+		BasePath:   "/api",
+		Validation: OpenAPIValidationConfig{Response: true, ResponseAction: "error"},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Pipeline step writes a valid response directly
+	step := &stubPipelineStep{
+		name: "create-pet",
+		exec: func(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+			rw := ctx.Value(HTTPResponseWriterContextKey).(http.ResponseWriter)
+			rw.Header().Set("Content-Type", "application/json")
+			rw.WriteHeader(http.StatusCreated)
+			_, _ = rw.Write([]byte(`{"id":1,"name":"Fido"}`))
+			return &StepResult{Output: map[string]any{}}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "create-pet-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "create-pet-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("POST", "/api/pets")
+	if h == nil {
+		t.Fatal("POST /api/pets handler not found")
+	}
+
+	w := httptest.NewRecorder()
+	body := strings.NewReader(`{"name":"Fido"}`)
+	r := httptest.NewRequest(http.MethodPost, "/api/pets", body)
+	r.Header.Set("Content-Type", "application/json")
+	h.Handle(w, r)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected 201 for valid response, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestOpenAPIModule_ResponseValidation_ArrayConstraints(t *testing.T) {
+	const arrayConstraintYAML = `
+openapi: "3.0.0"
+info:
+  title: Array Constraint API
+  version: "1.0.0"
+paths:
+  /items:
+    get:
+      operationId: listItems
+      x-pipeline: list-items
+      responses:
+        "200":
+          description: Items list
+          content:
+            application/json:
+              schema:
+                type: array
+                minItems: 1
+                maxItems: 3
+                items:
+                  type: object
+                  required:
+                    - name
+                  properties:
+                    name:
+                      type: string
+`
+	specPath := writeTempSpec(t, ".yaml", arrayConstraintYAML)
+
+	t.Run("too_few_items", func(t *testing.T) {
+		mod := NewOpenAPIModule("arr-api", OpenAPIConfig{
+			SpecFile:   specPath,
+			BasePath:   "/api",
+			Validation: OpenAPIValidationConfig{Response: true, ResponseAction: "error"},
+		})
+		if err := mod.Init(nil); err != nil {
+			t.Fatalf("Init: %v", err)
+		}
+		step := &stubPipelineStep{
+			name: "list-items",
+			exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+				return &StepResult{
+					Output: map[string]any{
+						"response_status":  200,
+						"response_body":    `[]`,
+						"response_headers": map[string]any{"Content-Type": "application/json"},
+					},
+					Stop: true,
+				}, nil
+			},
+		}
+		pipe := &Pipeline{Name: "list-items", Steps: []PipelineStep{step}}
+		mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+			if name == "list-items" {
+				return pipe, true
+			}
+			return nil, false
+		})
+		router := &testRouter{}
+		mod.RegisterRoutes(router)
+		h := router.findHandler("GET", "/api/items")
+		if h == nil {
+			t.Fatal("route GET /api/items not registered")
+		}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/api/items", nil)
+		h.Handle(w, r)
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("expected 500 for too few items, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("too_many_items", func(t *testing.T) {
+		mod := NewOpenAPIModule("arr-api2", OpenAPIConfig{
+			SpecFile:   specPath,
+			BasePath:   "/api",
+			Validation: OpenAPIValidationConfig{Response: true, ResponseAction: "error"},
+		})
+		if err := mod.Init(nil); err != nil {
+			t.Fatalf("Init: %v", err)
+		}
+		step := &stubPipelineStep{
+			name: "list-items",
+			exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+				return &StepResult{
+					Output: map[string]any{
+						"response_status":  200,
+						"response_body":    `[{"name":"a"},{"name":"b"},{"name":"c"},{"name":"d"}]`,
+						"response_headers": map[string]any{"Content-Type": "application/json"},
+					},
+					Stop: true,
+				}, nil
+			},
+		}
+		pipe := &Pipeline{Name: "list-items", Steps: []PipelineStep{step}}
+		mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+			if name == "list-items" {
+				return pipe, true
+			}
+			return nil, false
+		})
+		router := &testRouter{}
+		mod.RegisterRoutes(router)
+		h := router.findHandler("GET", "/api/items")
+		if h == nil {
+			t.Fatal("route GET /api/items not registered")
+		}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/api/items", nil)
+		h.Handle(w, r)
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("expected 500 for too many items, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("valid_array", func(t *testing.T) {
+		mod := NewOpenAPIModule("arr-api3", OpenAPIConfig{
+			SpecFile:   specPath,
+			BasePath:   "/api",
+			Validation: OpenAPIValidationConfig{Response: true, ResponseAction: "error"},
+		})
+		if err := mod.Init(nil); err != nil {
+			t.Fatalf("Init: %v", err)
+		}
+		step := &stubPipelineStep{
+			name: "list-items",
+			exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+				return &StepResult{
+					Output: map[string]any{
+						"response_status":  200,
+						"response_body":    `[{"name":"a"},{"name":"b"}]`,
+						"response_headers": map[string]any{"Content-Type": "application/json"},
+					},
+					Stop: true,
+				}, nil
+			},
+		}
+		pipe := &Pipeline{Name: "list-items", Steps: []PipelineStep{step}}
+		mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+			if name == "list-items" {
+				return pipe, true
+			}
+			return nil, false
+		})
+		router := &testRouter{}
+		mod.RegisterRoutes(router)
+		h := router.findHandler("GET", "/api/items")
+		if h == nil {
+			t.Fatal("route GET /api/items not registered")
+		}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/api/items", nil)
+		h.Handle(w, r)
+		if w.Code != http.StatusOK {
+			t.Errorf("expected 200 for valid array, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+}
+
+func TestOpenAPIModule_ResponseValidation_DefaultAction_IsWarn(t *testing.T) {
+	specPath := writeTempSpec(t, ".yaml", responseValidationYAML)
+
+	// No ResponseAction specified — should default to "warn"
+	mod := NewOpenAPIModule("resp-api", OpenAPIConfig{
+		SpecFile:   specPath,
+		BasePath:   "/api",
+		Validation: OpenAPIValidationConfig{Response: true},
+	})
+	if err := mod.Init(nil); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	step := &stubPipelineStep{
+		name: "list-pets",
+		exec: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+			return &StepResult{
+				Output: map[string]any{
+					"response_status":  200,
+					"response_body":    `[{"id":1}]`, // missing required "name"
+					"response_headers": map[string]any{"Content-Type": "application/json"},
+				},
+				Stop: true,
+			}, nil
+		},
+	}
+	pipe := &Pipeline{Name: "list-pets-pipeline", Steps: []PipelineStep{step}}
+	mod.SetPipelineLookup(func(name string) (*Pipeline, bool) {
+		if name == "list-pets-pipeline" {
+			return pipe, true
+		}
+		return nil, false
+	})
+
+	router := &testRouter{}
+	mod.RegisterRoutes(router)
+
+	h := router.findHandler("GET", "/api/pets")
+	if h == nil {
+		t.Fatal("handler for GET /api/pets not found")
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/pets", nil)
+	h.Handle(w, r)
+
+	// Default action is warn, so response should pass through
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 with default warn action, got %d: %s", w.Code, w.Body.String())
+	}
+}

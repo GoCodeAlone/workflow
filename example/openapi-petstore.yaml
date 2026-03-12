@@ -29,7 +29,8 @@ modules:
       router: petstore-router
       validation:
         request: true
-        response: false
+        response: true
+        response_action: warn
       swagger_ui:
         enabled: true
         path: /docs

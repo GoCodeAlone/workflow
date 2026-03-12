@@ -5,7 +5,7 @@ go 1.26.0
 replace github.com/GoCodeAlone/workflow => ../
 
 require (
-	github.com/GoCodeAlone/modular v1.12.0
+	github.com/GoCodeAlone/modular v1.12.3
 	github.com/GoCodeAlone/workflow v0.0.0-00010101000000-000000000000
 )
 
@@ -20,12 +20,12 @@ require (
 	cloud.google.com/go/storage v1.60.0 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/DataDog/datadog-go/v5 v5.4.0 // indirect
-	github.com/GoCodeAlone/modular/modules/auth v1.12.0 // indirect
-	github.com/GoCodeAlone/modular/modules/cache v1.12.0 // indirect
-	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.5.0 // indirect
-	github.com/GoCodeAlone/modular/modules/jsonschema v1.12.0 // indirect
-	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.5.0 // indirect
-	github.com/GoCodeAlone/modular/modules/scheduler v1.12.0 // indirect
+	github.com/GoCodeAlone/modular/modules/auth v1.14.0 // indirect
+	github.com/GoCodeAlone/modular/modules/cache v1.14.0 // indirect
+	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.7.0 // indirect
+	github.com/GoCodeAlone/modular/modules/jsonschema v1.14.0 // indirect
+	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.7.0 // indirect
+	github.com/GoCodeAlone/modular/modules/scheduler v1.14.0 // indirect
 	github.com/GoCodeAlone/yaegi v0.17.1 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.30.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.55.0 // indirect
