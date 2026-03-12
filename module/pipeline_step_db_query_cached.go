@@ -249,7 +249,7 @@ func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext) (
 				}
 				val := values[i]
 				if b, ok := val.([]byte); ok {
-					row[col] = string(b)
+					row[col] = parseJSONBytesOrString(b)
 				} else {
 					row[col] = val
 				}
@@ -290,7 +290,7 @@ func (s *DBQueryCachedStep) runQuery(ctx context.Context, pc *PipelineContext) (
 			}
 			val := values[i]
 			if b, ok := val.([]byte); ok {
-				output[col] = string(b)
+				output[col] = parseJSONBytesOrString(b)
 			} else {
 				output[col] = val
 			}

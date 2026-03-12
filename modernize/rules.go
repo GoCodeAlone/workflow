@@ -201,39 +201,62 @@ func hyphenStepsRule() Rule {
 
 // hyphenStepsFixConfig updates step name references inside config mapping values.
 // It handles: template index expressions, conditional field dot-paths, route values,
-// and default values that are exact step name matches.
+// default values that are exact step name matches, and sequence elements (e.g., params arrays).
 func hyphenStepsFixConfig(cfg *yaml.Node, renames map[string]string, changes *[]Change) {
-	if cfg.Kind != yaml.MappingNode {
-		return
-	}
-	for i := 0; i+1 < len(cfg.Content); i += 2 {
-		key := cfg.Content[i]
-		val := cfg.Content[i+1]
+	switch cfg.Kind {
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(cfg.Content); i += 2 {
+			key := cfg.Content[i]
+			val := cfg.Content[i+1]
 
-		switch {
-		case val.Kind == yaml.MappingNode:
-			// Recurse into nested maps (e.g., routes map in step.conditional)
-			hyphenStepsFixConfig(val, renames, changes)
-		case val.Kind == yaml.ScalarNode:
-			for oldName, newName := range renames {
-				updated := hyphenStepsFixScalar(key.Value, val.Value, oldName, newName)
-				if updated != val.Value {
-					*changes = append(*changes, Change{
-						RuleID:      "hyphen-steps",
-						Line:        val.Line,
-						Description: fmt.Sprintf("Updated reference %q in config", oldName),
-					})
-					val.Value = updated
+			switch val.Kind {
+			case yaml.MappingNode:
+				hyphenStepsFixConfig(val, renames, changes)
+			case yaml.SequenceNode:
+				hyphenStepsFixConfig(val, renames, changes)
+			case yaml.ScalarNode:
+				for oldName, newName := range renames {
+					updated := hyphenStepsFixScalar(key.Value, val.Value, oldName, newName)
+					if updated != val.Value {
+						*changes = append(*changes, Change{
+							RuleID:      "hyphen-steps",
+							Line:        val.Line,
+							Description: fmt.Sprintf("Updated reference %q in config", oldName),
+						})
+						val.Value = updated
+					}
 				}
+			}
+		}
+	case yaml.SequenceNode:
+		for _, elem := range cfg.Content {
+			switch elem.Kind {
+			case yaml.ScalarNode:
+				for oldName, newName := range renames {
+					updated := hyphenStepsFixScalar("", elem.Value, oldName, newName)
+					if updated != elem.Value {
+						*changes = append(*changes, Change{
+							RuleID:      "hyphen-steps",
+							Line:        elem.Line,
+							Description: fmt.Sprintf("Updated reference %q in sequence", oldName),
+						})
+						elem.Value = updated
+					}
+				}
+			case yaml.MappingNode:
+				hyphenStepsFixConfig(elem, renames, changes)
+			case yaml.SequenceNode:
+				hyphenStepsFixConfig(elem, renames, changes)
 			}
 		}
 	}
 }
 
 // hyphenStepsFixScalar updates a single scalar value, only in safe contexts:
-// - "field" key: dot-path like steps.old-name.output
+// - "field"/"body_from" key: dot-path like steps.old-name.output
 // - "default" key or route values: exact step name match
 // - Template index expressions: index .steps "old-name" "field"
+// - Template step function: step "old-name" "field"
 // - Template dot-path expressions: .steps.old-name.field
 func hyphenStepsFixScalar(key, value, oldName, newName string) string {
 	// Exact match (e.g., default: old-name, or route value: old-name)
@@ -249,6 +272,12 @@ func hyphenStepsFixScalar(key, value, oldName, newName string) string {
 		updated = strings.ReplaceAll(updated, indexPattern, `index .steps "`+newName+`"`)
 	}
 
+	// Template step function: {{ step "old-name" "field" }}
+	stepFnPattern := `step "` + oldName + `"`
+	if strings.Contains(updated, stepFnPattern) {
+		updated = strings.ReplaceAll(updated, stepFnPattern, `step "`+newName+`"`)
+	}
+
 	// Template dot-path inside {{ }}: .steps.old-name.field
 	dotPattern := ".steps." + oldName + "."
 	if strings.Contains(updated, dotPattern) {
@@ -260,8 +289,8 @@ func hyphenStepsFixScalar(key, value, oldName, newName string) string {
 		updated = strings.ReplaceAll(updated, dotPatternEnd, ".steps."+newName+" ")
 	}
 
-	// Conditional field dot-path (no template braces): steps.old-name.output
-	if key == "field" {
+	// Dot-path references in field/body_from: steps.old-name.output
+	if key == "field" || key == "body_from" {
 		fieldPattern := "steps." + oldName + "."
 		if strings.Contains(updated, fieldPattern) {
 			updated = strings.ReplaceAll(updated, fieldPattern, "steps."+newName+".")

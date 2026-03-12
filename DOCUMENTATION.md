@@ -153,6 +153,7 @@ flowchart TD
 | `step.db_sync_partitions` | Ensures future partitions exist for a partitioned table | pipelinesteps |
 | `step.json_response` | Writes HTTP JSON response with custom status code and headers | pipelinesteps |
 | `step.raw_response` | Writes a raw HTTP response with arbitrary content type | pipelinesteps |
+| `step.json_parse` | Parses a JSON string (or `[]byte`) in the pipeline context into a structured object | pipelinesteps |
 | `step.static_file` | Serves a pre-loaded file from disk as an HTTP response | pipelinesteps |
 | `step.workflow_call` | Invokes another workflow pipeline by name | pipelinesteps |
 | `step.sub_workflow` | Executes a named sub-workflow inline and merges its output | ai |
@@ -526,6 +527,8 @@ Parses an OpenAPI v3 specification file and automatically generates HTTP routes,
 | `base_path` | string | `""` | URL path prefix to strip before matching spec paths. |
 | `max_body_bytes` | int | `1048576` | Maximum request body size (bytes). |
 | `validation.request` | bool | `true` | Validate incoming request bodies, query params, and headers against the spec. |
+| `validation.response` | bool | `false` | Validate pipeline response bodies against the spec's response schemas. |
+| `validation.response_action` | string | `"warn"` | Action when response validation fails: `"warn"` (log only) or `"error"` (return HTTP 500). |
 | `swagger_ui.enabled` | bool | `false` | Serve Swagger UI (requires `spec_file`). |
 | `swagger_ui.path` | string | `"/docs"` | URL path at which the Swagger UI is served. |
 
@@ -550,6 +553,8 @@ modules:
       router: main-router
       validation:
         request: true
+        response: true
+        response_action: warn
       swagger_ui:
         enabled: true
         path: /docs
@@ -572,6 +577,7 @@ Machine-to-machine (M2M) OAuth2 authentication module. Implements the `client_cr
 | `issuer` | string | `"workflow"` | Token `iss` claim. |
 | `clients` | array | `[]` | Registered OAuth2 clients: `[{clientId, clientSecret, scopes, description, claims}]`. |
 | `introspect` | object | — | Access-control policy for `POST /oauth/introspect`: `{allowOthers, requiredScope, requiredClaim, requiredClaimVal}`. Default: self-only. |
+| `trustedKeys` | array | `[]` | Trusted external JWT issuers for JWT-bearer assertion grants: `[{issuer, publicKeyPEM, algorithm, audiences, claimMapping}]`. Supports literal `\n` in PEM values. |
 
 **HTTP endpoints provided:**
 
@@ -666,6 +672,7 @@ PostgreSQL partitioned database module for multi-tenant data isolation. Manages 
 | `partitionNameFormat` | string | `"{table}_{tenant}"` | Template for partition table names. Supports `{table}` and `{tenant}` placeholders. |
 | `sourceTable` | string | — | Table containing all tenant IDs for auto-partition sync (e.g., `"tenants"`). |
 | `sourceColumn` | string | — | Column in source table to query for tenant values. Defaults to `partitionKey`. |
+| `autoSync` | bool | `true` | Automatically sync partitions from `sourceTable` on engine start. Defaults to `true` when `sourceTable` is set, `false` otherwise. |
 | `maxOpenConns` | int | `25` | Maximum open database connections. |
 | `maxIdleConns` | int | `5` | Maximum idle connections in the pool. |
 
