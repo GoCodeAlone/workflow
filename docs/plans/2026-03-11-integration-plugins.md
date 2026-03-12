@@ -656,6 +656,7 @@ func TestSendSMSStep_MissingClient(t *testing.T) {
 - Test param resolution from current vs config
 - Do NOT test actual API calls (those require live credentials)
 - Each product group file gets a corresponding `_test.go`
+- **Module lifecycle tests** (`internal/module_test.go`): Test that Init registers the client in the registry and Stop unregisters it. Verify GetClient returns non-nil after Init, nil after Stop.
 
 ### Step 7: Create plugin.json
 
@@ -1028,6 +1029,8 @@ func (s *createBoardStep) Execute(ctx context.Context, _ map[string]any, _ map[s
 
 Use `httptest.NewServer` to mock the monday.com GraphQL endpoint. Register the client with `WithBaseURL(server.URL)`. Test validation, GraphQL error handling, and successful responses.
 
+**Module lifecycle tests** (`internal/module_test.go`): Test that Init registers the client in the registry and Stop unregisters it. Verify GetClient returns non-nil after Init, nil after Stop.
+
 ### Step 7: Build, test, commit, push
 
 Same pattern as Twilio task.
@@ -1072,6 +1075,8 @@ import (
 const defaultTurnBaseURL = "https://whatsapp.turn.io"
 
 type TurnClient struct {
+	mu                 sync.Mutex
+	rateLimitRemaining int
 	baseURL    string
 	apiToken   string
 	httpClient *http.Client
@@ -1117,8 +1122,18 @@ func (c *TurnClient) Do(ctx context.Context, method, path string, body any) (jso
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
+	// Track rate limit budget from response headers
+	if remaining := resp.Header.Get("X-Ratelimit-Remaining"); remaining != "" {
+		if n, err := strconv.Atoi(remaining); err == nil {
+			c.mu.Lock()
+			c.rateLimitRemaining = n
+			c.mu.Unlock()
+		}
+	}
+
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return nil, fmt.Errorf("rate limited (HTTP 429)")
+		retryAfter := resp.Header.Get("Retry-After")
+		return nil, fmt.Errorf("rate limited (HTTP 429), retry after: %s", retryAfter)
 	}
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
@@ -1215,7 +1230,9 @@ func (s *sendTextStep) Execute(ctx context.Context, _ map[string]any, _ map[stri
 
 ### Step 5: Write tests, build, commit, push
 
-Same pattern as other plugins. Use `httptest.NewServer` to mock turn.io REST API.
+Same pattern as other plugins. Use `httptest.NewServer` to mock turn.io REST API. Include rate limit header tracking tests — verify `X-Ratelimit-Remaining` is parsed and stored.
+
+**Module lifecycle tests** (`internal/module_test.go`): Test that Init registers the client in the registry and Stop unregisters it. Verify GetClient returns non-nil after Init, nil after Stop.
 
 ---
 

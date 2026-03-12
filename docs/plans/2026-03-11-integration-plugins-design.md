@@ -68,7 +68,7 @@ modules:
 | TaskRouter | `create_workspace`, `create_task`, `create_worker`, `create_task_queue`, `create_tr_workflow`, `list_tasks`, `update_task` | 7 |
 | Phone Numbers | `search_available`, `buy_number`, `list_numbers`, `update_number`, `release_number` | 5 |
 | Studio | `trigger_flow`, `list_flows`, `fetch_execution` | 3 |
-| Serverless | `create_service`, `create_function`, `create_build`, `list_services` | 4 |
+| Serverless | `create_serverless_service`, `create_function`, `create_build`, `list_serverless_services` | 4 |
 | Intelligence | `create_transcript`, `fetch_transcript`, `list_transcripts` | 3 |
 | Flex | `create_flex_flow`, `create_web_channel`, `list_flex_flows` | 3 |
 | Proxy | `create_proxy_service`, `create_session`, `add_proxy_participant` | 3 |
