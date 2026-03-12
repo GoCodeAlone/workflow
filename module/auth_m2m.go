@@ -309,25 +309,68 @@ func (m *M2MAuthModule) SetRevocationStore(store TokenRevocationStore) {
 // Any empty field in paths is left at its current value (defaulting to the standard
 // paths set by NewM2MAuthModule).
 //
+// Each path must begin with '/' and all four resulting paths must be distinct to
+// prevent ambiguous suffix matching. An error is returned if validation fails; the
+// module's previous endpoint configuration is not modified.
+//
 // Example – to match Fosite/Auth0-style paths:
 //
-//	m.SetEndpoints(M2MEndpointPaths{
+//	if err := m.SetEndpoints(M2MEndpointPaths{
 //	    Revoke:     "/oauth/token/revoke",
 //	    Introspect: "/oauth/token/introspect",
-//	})
-func (m *M2MAuthModule) SetEndpoints(paths M2MEndpointPaths) {
+//	}); err != nil {
+//	    // handle error
+//	}
+func (m *M2MAuthModule) SetEndpoints(paths M2MEndpointPaths) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Build the candidate configuration by applying non-empty overrides.
+	candidate := m.endpointPaths
 	if paths.Token != "" {
-		m.endpointPaths.Token = paths.Token
+		candidate.Token = paths.Token
 	}
 	if paths.Revoke != "" {
-		m.endpointPaths.Revoke = paths.Revoke
+		candidate.Revoke = paths.Revoke
 	}
 	if paths.Introspect != "" {
-		m.endpointPaths.Introspect = paths.Introspect
+		candidate.Introspect = paths.Introspect
 	}
 	if paths.JWKS != "" {
-		m.endpointPaths.JWKS = paths.JWKS
+		candidate.JWKS = paths.JWKS
 	}
+
+	if err := validateEndpointPaths(candidate); err != nil {
+		return err
+	}
+
+	m.endpointPaths = candidate
+	return nil
+}
+
+// validateEndpointPaths checks that all four endpoint paths are non-empty, start
+// with '/', and are mutually distinct.
+func validateEndpointPaths(p M2MEndpointPaths) error {
+	entries := []struct{ name, value string }{
+		{"token", p.Token},
+		{"revoke", p.Revoke},
+		{"introspect", p.Introspect},
+		{"jwks", p.JWKS},
+	}
+	seen := make(map[string]string, len(entries))
+	for _, e := range entries {
+		if e.value == "" {
+			return fmt.Errorf("M2M auth: endpoint %q path must not be empty", e.name)
+		}
+		if !strings.HasPrefix(e.value, "/") {
+			return fmt.Errorf("M2M auth: endpoint %q path %q must start with '/'", e.name, e.value)
+		}
+		if prev, exists := seen[e.value]; exists {
+			return fmt.Errorf("M2M auth: endpoints %q and %q share the same path %q", prev, e.name, e.value)
+		}
+		seen[e.value] = e.name
+	}
+	return nil
 }
 
 // Name returns the module name.
@@ -337,13 +380,16 @@ func (m *M2MAuthModule) Name() string { return m.name }
 // that occurred in the factory (stored in initErr).
 func (m *M2MAuthModule) Init(_ modular.Application) error {
 	if m.initErr != nil {
-		return fmt.Errorf("M2M auth: key setup failed: %w", m.initErr)
+		return fmt.Errorf("M2M auth: %w", m.initErr)
 	}
 	if m.algorithm == SigningAlgHS256 && len(m.hmacSecret) < 32 {
 		return fmt.Errorf("M2M auth: HMAC secret must be at least 32 bytes for HS256")
 	}
 	if m.algorithm == SigningAlgES256 && m.privateKey == nil {
 		return fmt.Errorf("M2M auth: ECDSA private key required for ES256")
+	}
+	if err := validateEndpointPaths(m.endpointPaths); err != nil {
+		return err
 	}
 	return nil
 }
@@ -373,15 +419,19 @@ func (m *M2MAuthModule) RequiresServices() []modular.ServiceDependency { return 
 func (m *M2MAuthModule) Handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
+	m.mu.RLock()
+	ep := m.endpointPaths
+	m.mu.RUnlock()
+
 	path := r.URL.Path
 	switch {
-	case r.Method == http.MethodPost && strings.HasSuffix(path, m.endpointPaths.Token):
+	case r.Method == http.MethodPost && strings.HasSuffix(path, ep.Token):
 		m.handleToken(w, r)
-	case r.Method == http.MethodPost && strings.HasSuffix(path, m.endpointPaths.Revoke):
+	case r.Method == http.MethodPost && strings.HasSuffix(path, ep.Revoke):
 		m.handleRevoke(w, r)
-	case r.Method == http.MethodPost && strings.HasSuffix(path, m.endpointPaths.Introspect):
+	case r.Method == http.MethodPost && strings.HasSuffix(path, ep.Introspect):
 		m.handleIntrospect(w, r)
-	case r.Method == http.MethodGet && strings.HasSuffix(path, m.endpointPaths.JWKS):
+	case r.Method == http.MethodGet && strings.HasSuffix(path, ep.JWKS):
 		m.handleJWKS(w, r)
 	default:
 		w.WriteHeader(http.StatusNotFound)

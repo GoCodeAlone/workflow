@@ -205,7 +205,7 @@ func TestModuleFactoryM2MWithCustomEndpoints(t *testing.T) {
 		t.Fatal("expected *module.M2MAuthModule")
 	}
 
-  // Custom token path should work.
+	// Custom token path should work.
 	params := url.Values{
 		"grant_type":    {"client_credentials"},
 		"client_id":     {"ep-client"},
@@ -256,7 +256,7 @@ func TestModuleFactoryM2MWithTrustedKeys(t *testing.T) {
 				},
 			},
 		},
-  })
+	})
 	if mod == nil {
 		t.Fatal("auth.m2m factory returned nil")
 	}

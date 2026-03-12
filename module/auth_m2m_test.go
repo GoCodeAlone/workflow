@@ -2350,48 +2350,122 @@ func TestM2M_DefaultEndpointPaths(t *testing.T) {
 
 func TestM2M_SetEndpoints_CustomPaths(t *testing.T) {
 	m := newM2MHS256(t)
-	m.SetEndpoints(M2MEndpointPaths{
+	if err := m.SetEndpoints(M2MEndpointPaths{
 		Token:      "/v2/oauth/token",
 		Revoke:     "/oauth/token/revoke",
 		Introspect: "/oauth/token/introspect",
 		JWKS:       "/v2/oauth/jwks",
-	})
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-	if m.endpointPaths.Token != "/v2/oauth/token" {
-		t.Errorf("expected /v2/oauth/token, got %q", m.endpointPaths.Token)
+	m.mu.RLock()
+	ep := m.endpointPaths
+	m.mu.RUnlock()
+	if ep.Token != "/v2/oauth/token" {
+		t.Errorf("expected /v2/oauth/token, got %q", ep.Token)
 	}
-	if m.endpointPaths.Revoke != "/oauth/token/revoke" {
-		t.Errorf("expected /oauth/token/revoke, got %q", m.endpointPaths.Revoke)
+	if ep.Revoke != "/oauth/token/revoke" {
+		t.Errorf("expected /oauth/token/revoke, got %q", ep.Revoke)
 	}
-	if m.endpointPaths.Introspect != "/oauth/token/introspect" {
-		t.Errorf("expected /oauth/token/introspect, got %q", m.endpointPaths.Introspect)
+	if ep.Introspect != "/oauth/token/introspect" {
+		t.Errorf("expected /oauth/token/introspect, got %q", ep.Introspect)
 	}
-	if m.endpointPaths.JWKS != "/v2/oauth/jwks" {
-		t.Errorf("expected /v2/oauth/jwks, got %q", m.endpointPaths.JWKS)
+	if ep.JWKS != "/v2/oauth/jwks" {
+		t.Errorf("expected /v2/oauth/jwks, got %q", ep.JWKS)
 	}
 }
 
 func TestM2M_SetEndpoints_EmptyFieldsPreserveDefaults(t *testing.T) {
 	m := newM2MHS256(t)
 	// Only override Revoke; other paths should remain at defaults.
-	m.SetEndpoints(M2MEndpointPaths{
+	if err := m.SetEndpoints(M2MEndpointPaths{
 		Revoke: "/oauth/token/revoke",
-	})
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-	if m.endpointPaths.Token != "/oauth/token" {
-		t.Errorf("Token should remain default, got %q", m.endpointPaths.Token)
+	m.mu.RLock()
+	ep := m.endpointPaths
+	m.mu.RUnlock()
+	if ep.Token != "/oauth/token" {
+		t.Errorf("Token should remain default, got %q", ep.Token)
 	}
-	if m.endpointPaths.Revoke != "/oauth/token/revoke" {
-		t.Errorf("expected /oauth/token/revoke, got %q", m.endpointPaths.Revoke)
+	if ep.Revoke != "/oauth/token/revoke" {
+		t.Errorf("expected /oauth/token/revoke, got %q", ep.Revoke)
 	}
-	if m.endpointPaths.Introspect != "/oauth/introspect" {
-		t.Errorf("Introspect should remain default, got %q", m.endpointPaths.Introspect)
+	if ep.Introspect != "/oauth/introspect" {
+		t.Errorf("Introspect should remain default, got %q", ep.Introspect)
+	}
+}
+
+func TestM2M_SetEndpoints_ValidationErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		paths   M2MEndpointPaths
+		wantErr string
+	}{
+		{
+			name:    "missing leading slash",
+			paths:   M2MEndpointPaths{Token: "oauth/token"},
+			wantErr: "must start with '/'",
+		},
+		{
+			name: "duplicate paths",
+			paths: M2MEndpointPaths{
+				Token:      "/oauth/token",
+				Revoke:     "/oauth/token",
+				Introspect: "/oauth/introspect",
+				JWKS:       "/oauth/jwks",
+			},
+			wantErr: "share the same path",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newM2MHS256(t)
+			err := m.SetEndpoints(tc.paths)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("expected error containing %q, got %q", tc.wantErr, err.Error())
+			}
+		})
+	}
+}
+
+func TestM2M_SetEndpoints_InvalidPath_DoesNotMutateState(t *testing.T) {
+	m := newM2MHS256(t)
+	// Attempt an invalid override (no leading slash).
+	err := m.SetEndpoints(M2MEndpointPaths{Token: "bad-path"})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	// Existing defaults must be intact.
+	m.mu.RLock()
+	ep := m.endpointPaths
+	m.mu.RUnlock()
+	if ep.Token != "/oauth/token" {
+		t.Errorf("expected original default /oauth/token to be preserved, got %q", ep.Token)
+	}
+}
+
+func TestM2M_Init_ValidatesEndpointPaths(t *testing.T) {
+	// Directly corrupt endpointPaths to simulate a misconfiguration that
+	// bypassed SetEndpoints (e.g. zero-value struct).
+	m := newM2MHS256(t)
+	m.endpointPaths.Token = "no-leading-slash"
+	if err := m.Init(nil); err == nil {
+		t.Error("expected Init to reject invalid endpoint path")
 	}
 }
 
 func TestM2M_CustomTokenPath_Issues_Token(t *testing.T) {
 	m := newM2MHS256(t)
-	m.SetEndpoints(M2MEndpointPaths{Token: "/v2/oauth/token"})
+	if err := m.SetEndpoints(M2MEndpointPaths{Token: "/v2/oauth/token"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/v2/oauth/token",
 		strings.NewReader(url.Values{
@@ -2410,7 +2484,9 @@ func TestM2M_CustomTokenPath_Issues_Token(t *testing.T) {
 
 func TestM2M_OldTokenPath_Returns404_WhenOverridden(t *testing.T) {
 	m := newM2MHS256(t)
-	m.SetEndpoints(M2MEndpointPaths{Token: "/v2/oauth/token"})
+	if err := m.SetEndpoints(M2MEndpointPaths{Token: "/v2/oauth/token"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/oauth/token",
 		strings.NewReader(url.Values{
@@ -2429,10 +2505,12 @@ func TestM2M_OldTokenPath_Returns404_WhenOverridden(t *testing.T) {
 
 func TestM2M_CustomRevokePath_Fosite_Style(t *testing.T) {
 	m := newM2MHS256(t)
-	m.SetEndpoints(M2MEndpointPaths{
+	if err := m.SetEndpoints(M2MEndpointPaths{
 		Revoke:     "/oauth/token/revoke",
 		Introspect: "/oauth/token/introspect",
-	})
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	tok := issueTestToken(t, m, "test-client", "test-secret")
 
@@ -2461,9 +2539,11 @@ func TestM2M_CustomRevokePath_Fosite_Style(t *testing.T) {
 
 func TestM2M_CustomIntrospectPath_Fosite_Style(t *testing.T) {
 	m := newM2MHS256(t)
-	m.SetEndpoints(M2MEndpointPaths{
+	if err := m.SetEndpoints(M2MEndpointPaths{
 		Introspect: "/oauth/token/introspect",
-	})
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	m.SetIntrospectPolicy(true, "", "", "")
 
 	tok := issueTestToken(t, m, "test-client", "test-secret")
