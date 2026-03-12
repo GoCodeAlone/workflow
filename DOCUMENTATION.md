@@ -183,6 +183,7 @@ flowchart TD
 | `step.http_proxy` | Proxies an HTTP request to an upstream service | pipelinesteps |
 | `step.hash` | Computes a cryptographic hash (md5/sha256/sha512) of a template-resolved input | pipelinesteps |
 | `step.regex_match` | Matches a regular expression against a template-resolved input | pipelinesteps |
+| `step.secret_fetch` | Fetches one or more secrets from a secrets module (secrets.aws, secrets.vault) with dynamic tenant-aware secret ID resolution | pipelinesteps |
 | `step.jq` | Applies a JQ expression to pipeline data for complex transformations | pipelinesteps |
 | `step.ai_complete` | AI text completion using a configured provider | ai |
 | `step.ai_classify` | AI text classification into named categories | ai |
@@ -1099,6 +1100,79 @@ steps:
     config:
       input_from: "steps.fetch-users.users"
       expression: "[.[] | select(.active == true) | {id, email}]"
+```
+
+---
+
+### `step.secret_fetch`
+
+Fetches one or more secrets from a named secrets module (`secrets.aws`, `secrets.vault`, etc.) and exposes the resolved values as step outputs. Secret IDs / ARNs are Go template expressions evaluated against the live pipeline context, enabling **per-tenant dynamic secret resolution**.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `module` | string | yes | Service name of the secrets module (the `name` field in the module config). |
+| `secrets` | map[string]string | yes | Map of output key → secret ID/ARN. Values support Go template expressions for dynamic resolution. |
+
+**Output fields:** One field per key in `secrets`, each containing the resolved secret value. `fetched: true` when all secrets were successfully fetched.
+
+**Examples:**
+
+Static secret IDs:
+
+```yaml
+steps:
+  - name: fetch_creds
+    type: step.secret_fetch
+    config:
+      module: aws-secrets
+      secrets:
+        token_url: "arn:aws:secretsmanager:us-east-1:123:secret:token-url"
+        client_id: "arn:aws:secretsmanager:us-east-1:123:secret:client-id"
+        client_secret: "arn:aws:secretsmanager:us-east-1:123:secret:client-secret"
+```
+
+Tenant-aware dynamic resolution (ARNs from a previous step's output):
+
+```yaml
+steps:
+  - name: lookup_integration
+    type: step.db_query
+    config:
+      query: "SELECT * FROM integrations WHERE tenant_id = $1"
+      params: ["{{.tenant_id}}"]
+
+  - name: fetch_creds
+    type: step.secret_fetch
+    config:
+      module: aws-secrets
+      secrets:
+        token_url: "{{.steps.lookup_integration.row.token_url_secret_arn}}"
+        client_id: "{{.steps.lookup_integration.row.client_id_secret_arn}}"
+        client_secret: "{{.steps.lookup_integration.row.client_secret_secret_arn}}"
+
+  - name: call_api
+    type: step.http_call
+    config:
+      url: "https://login.example.com/services/oauth2/token"
+      method: POST
+      oauth2:
+        token_url: "{{.steps.fetch_creds.token_url}}"
+        client_id: "{{.steps.fetch_creds.client_id}}"
+        client_secret: "{{.steps.fetch_creds.client_secret}}"
+```
+
+Per-tenant ARN construction using trigger data:
+
+```yaml
+steps:
+  - name: fetch_tenant_secret
+    type: step.secret_fetch
+    config:
+      module: aws-secrets
+      secrets:
+        api_key: "arn:aws:secretsmanager:us-east-1:123:secret:{{.tenant_id}}-api-key"
 ```
 
 ---
