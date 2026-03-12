@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/GoCodeAlone/modular"
 )
@@ -46,9 +47,15 @@ func NewSecretFetchStepFactory() StepFactory {
 
 		secretMap := make(map[string]string, len(raw))
 		for k, v := range raw {
+			if k == "fetched" {
+				return nil, fmt.Errorf("secret_fetch step %q: secrets key %q is reserved for step output status", name, k)
+			}
 			idStr, ok := v.(string)
 			if !ok {
 				return nil, fmt.Errorf("secret_fetch step %q: secrets[%q] must be a string (secret ID or ARN)", name, k)
+			}
+			if strings.TrimSpace(idStr) == "" {
+				return nil, fmt.Errorf("secret_fetch step %q: secrets[%q] must not be empty", name, k)
 			}
 			secretMap[k] = idStr
 		}
@@ -88,6 +95,9 @@ func (s *SecretFetchStep) Execute(ctx context.Context, pc *PipelineContext) (*St
 		resolvedID, resolveErr := s.tmpl.Resolve(idTemplate, pc)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("secret_fetch step %q: failed to resolve secret ID for %q: %w", s.name, outputKey, resolveErr)
+		}
+		if strings.TrimSpace(resolvedID) == "" {
+			return nil, fmt.Errorf("secret_fetch step %q: resolved secret ID for %q is empty (check template expression %q)", s.name, outputKey, idTemplate)
 		}
 
 		value, fetchErr := provider.Get(ctx, resolvedID)

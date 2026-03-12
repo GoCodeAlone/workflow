@@ -80,6 +80,45 @@ func TestSecretFetchStep_NonStringSecretID(t *testing.T) {
 	}
 }
 
+func TestSecretFetchStep_ReservedFetchedKey(t *testing.T) {
+	factory := NewSecretFetchStepFactory()
+	_, err := factory("bad", map[string]any{
+		"module": "aws-secrets",
+		"secrets": map[string]any{
+			"fetched": "arn:secret:something", // reserved key
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error when secrets key 'fetched' is used (reserved for output status)")
+	}
+}
+
+func TestSecretFetchStep_EmptySecretID(t *testing.T) {
+	factory := NewSecretFetchStepFactory()
+	_, err := factory("bad", map[string]any{
+		"module": "aws-secrets",
+		"secrets": map[string]any{
+			"token": "", // empty string
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error when secret ID is an empty string")
+	}
+}
+
+func TestSecretFetchStep_WhitespaceOnlySecretID(t *testing.T) {
+	factory := NewSecretFetchStepFactory()
+	_, err := factory("bad", map[string]any{
+		"module": "aws-secrets",
+		"secrets": map[string]any{
+			"token": "   ", // whitespace only
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error when secret ID is whitespace-only")
+	}
+}
+
 // --- execute tests ---
 
 func TestSecretFetchStep_FetchSingle(t *testing.T) {
@@ -243,6 +282,33 @@ func TestSecretFetchStep_ProviderError(t *testing.T) {
 	_, err = step.Execute(context.Background(), pc)
 	if err == nil {
 		t.Fatal("expected error from provider.Get")
+	}
+}
+
+// TestSecretFetchStep_EmptyResolvedID verifies that a template that resolves to
+// an empty string at execute time causes a fast-fail error rather than calling
+// provider.Get with an empty key.
+func TestSecretFetchStep_EmptyResolvedID(t *testing.T) {
+	provider := newMockSecretProvider(map[string]string{})
+	app := mockAppWithSecrets("aws-secrets", provider)
+
+	factory := NewSecretFetchStepFactory()
+	step, err := factory("fetch-creds", map[string]any{
+		"module": "aws-secrets",
+		"secrets": map[string]any{
+			// Template resolves to empty when tenant_arn is absent from context.
+			"token": "{{.tenant_arn}}",
+		},
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	// Pipeline context missing the tenant_arn key → resolves to empty string.
+	pc := NewPipelineContext(nil, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error when resolved secret ID is empty")
 	}
 }
 
