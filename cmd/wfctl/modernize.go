@@ -17,6 +17,7 @@ func runModernize(args []string) error {
 	excludeFlag := fs.String("exclude-rules", "", "Comma-separated list of rule IDs to skip")
 	format := fs.String("format", "text", "Output format: text or json")
 	dir := fs.String("dir", "", "Scan all YAML files in a directory (recursive)")
+	pluginDir := fs.String("plugin-dir", "", "Directory of installed external plugins; their modernize rules are loaded")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl modernize [options] <config.yaml> [config2.yaml ...]
 
@@ -30,6 +31,7 @@ Examples:
   wfctl modernize --dir ./config/
   wfctl modernize --rules hyphen-steps,conditional-field config.yaml
   wfctl modernize --list-rules
+  wfctl modernize --plugin-dir data/plugins config.yaml
 
 Options:
 `)
@@ -41,6 +43,15 @@ Options:
 	}
 
 	rules := modernize.AllRules()
+
+	// Load additional modernize rules from installed external plugins.
+	if *pluginDir != "" {
+		pluginRules, err := modernize.LoadRulesFromDir(*pluginDir)
+		if err != nil {
+			return fmt.Errorf("failed to load plugin rules from %s: %w", *pluginDir, err)
+		}
+		rules = append(rules, pluginRules...)
+	}
 
 	if *listRules {
 		fmt.Println("Available modernize rules:")
