@@ -945,6 +945,95 @@ func TestLoadPluginTypesFromDir_MalformedManifest(t *testing.T) {
 	}
 }
 
+func TestLoadPluginTypesFromDir_CapabilitiesFormat(t *testing.T) {
+	// Tests the v0.3.0+ nested "capabilities" object format used by external plugins.
+	const customModuleType = "external.caps.module.testonly"
+	const customStepType = "step.caps_step_testonly"
+	const customTriggerType = "external.caps.trigger.testonly"
+
+	t.Cleanup(func() {
+		UnregisterModuleType(customModuleType)
+		UnregisterModuleType(customStepType)
+		UnregisterTriggerType(customTriggerType)
+	})
+
+	dir := t.TempDir()
+	pluginDir := dir + "/caps-plugin"
+	if err := makeDir(pluginDir); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"caps-plugin","version":"1.0.0","type":"external","capabilities":{"configProvider":false,"moduleTypes":["` + customModuleType + `"],"stepTypes":["` + customStepType + `"],"triggerTypes":["` + customTriggerType + `"]}}`
+	if err := writeFile(pluginDir+"/plugin.json", []byte(manifest)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LoadPluginTypesFromDir(dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// All types declared in capabilities should now be recognized
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{
+			{Name: "ext", Type: customModuleType},
+		},
+	}
+	if err := ValidateConfig(cfg, WithAllowNoEntryPoints()); err != nil {
+		t.Errorf("expected capabilities module type to be recognized, got: %v", err)
+	}
+
+	knownModules := KnownModuleTypes()
+	if !sliceContains(knownModules, customModuleType) {
+		t.Errorf("expected %q in KnownModuleTypes, got: %v", customModuleType, knownModules)
+	}
+	if !sliceContains(knownModules, customStepType) {
+		t.Errorf("expected %q in KnownModuleTypes (step), got: %v", customStepType, knownModules)
+	}
+	knownTriggers := KnownTriggerTypes()
+	if !sliceContains(knownTriggers, customTriggerType) {
+		t.Errorf("expected %q in KnownTriggerTypes, got: %v", customTriggerType, knownTriggers)
+	}
+}
+
+func sliceContains(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func TestLoadPluginTypesFromDir_CapabilitiesArrayFormat(t *testing.T) {
+	// Tests that a plugin.json using the engine-internal format (capabilities as a JSON
+	// array of CapabilityDecl objects) does not break loading of flat top-level types.
+	const customModuleType = "external.caps.array.module.testonly"
+
+	t.Cleanup(func() {
+		UnregisterModuleType(customModuleType)
+	})
+
+	dir := t.TempDir()
+	pluginDir := dir + "/array-caps-plugin"
+	if err := makeDir(pluginDir); err != nil {
+		t.Fatal(err)
+	}
+	// capabilities is a JSON array (engine-internal CapabilityDecl format)
+	manifest := `{"name":"array-caps-plugin","version":"1.0.0","moduleTypes":["` + customModuleType + `"],"capabilities":[{"name":"http-server","role":"provider"}]}`
+	if err := writeFile(pluginDir+"/plugin.json", []byte(manifest)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LoadPluginTypesFromDir(dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The flat top-level module type should still be registered despite the array-format capabilities
+	knownModules := KnownModuleTypes()
+	if !sliceContains(knownModules, customModuleType) {
+		t.Errorf("expected %q in KnownModuleTypes even with array capabilities, got: %v", customModuleType, knownModules)
+	}
+}
+
 func makeDir(path string) error {
 	return os.MkdirAll(path, 0755)
 }
