@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/GoCodeAlone/modular"
@@ -11,19 +12,32 @@ import (
 	"github.com/google/uuid"
 )
 
+// EventEncryptionConfig holds the field-level encryption configuration for event publishing.
+type EventEncryptionConfig struct {
+	// Provider is the encryption provider: "aes" or "envelope" (default: "aes").
+	Provider string
+	// KeyID is the encryption key identifier. Supports "${ENV_VAR}" env-var references.
+	KeyID string
+	// Fields lists the payload field names to encrypt.
+	Fields []string
+	// Algorithm is the encryption algorithm (currently only "AES-256-GCM" is supported).
+	Algorithm string
+}
+
 // EventPublishStep publishes events to a messaging broker, EventPublisher, or EventBus
 // from pipeline execution. It supports CloudEvents envelope format and multiple
 // provider backends including external plugins (e.g., Bento).
 type EventPublishStep struct {
-	name      string
-	topic     string
-	payload   map[string]any
-	headers   map[string]string
-	eventType string
-	source    string
-	broker    string // service name for a MessageBroker or EventPublisher
-	app       modular.Application
-	tmpl      *TemplateEngine
+	name       string
+	topic      string
+	payload    map[string]any
+	headers    map[string]string
+	eventType  string
+	source     string
+	broker     string // service name for a MessageBroker or EventPublisher
+	app        modular.Application
+	tmpl       *TemplateEngine
+	encryption *EventEncryptionConfig
 }
 
 // NewEventPublishStepFactory returns a StepFactory that creates EventPublishStep instances.
@@ -70,6 +84,47 @@ func NewEventPublishStepFactory() StepFactory {
 			step.broker, _ = config["provider"].(string)
 		}
 
+		// Parse optional encryption config block.
+		if encCfg, ok := config["encryption"].(map[string]any); ok {
+			enc := &EventEncryptionConfig{
+				Provider:  "aes",
+				Algorithm: "AES-256-GCM",
+			}
+			if p, ok := encCfg["provider"].(string); ok && p != "" {
+				if p != "aes" && p != "envelope" {
+					return nil, fmt.Errorf("event_publish step %q: unsupported encryption provider %q (supported: aes, envelope)", name, p)
+				}
+				enc.Provider = p
+			}
+			if k, ok := encCfg["key_id"].(string); ok {
+				enc.KeyID = k
+			}
+			if a, ok := encCfg["algorithm"].(string); ok && a != "" {
+				if a != "AES-256-GCM" {
+					return nil, fmt.Errorf("event_publish step %q: unsupported encryption algorithm %q (supported: AES-256-GCM)", name, a)
+				}
+				enc.Algorithm = a
+			}
+			if fields, ok := encCfg["fields"].([]any); ok {
+				for _, f := range fields {
+					if fs, ok := f.(string); ok && fs != "" {
+						enc.Fields = append(enc.Fields, fs)
+					}
+				}
+			} else if fields, ok := encCfg["fields"].([]string); ok {
+				enc.Fields = fields
+			}
+			if len(enc.Fields) > 0 && enc.KeyID != "" {
+				// Encryption requires a broker/provider so that the full envelope
+				// (including encryption metadata) is published. The EventBus path
+				// does not carry the envelope's extension attributes.
+				if step.broker == "" {
+					return nil, fmt.Errorf("event_publish step %q: 'broker' or 'provider' is required when encryption is configured", name)
+				}
+				step.encryption = enc
+			}
+		}
+
 		return step, nil
 	}
 }
@@ -113,8 +168,17 @@ func (s *EventPublishStep) Execute(ctx context.Context, pc *PipelineContext) (*S
 		}
 	}
 
+	// Apply field-level encryption if configured.
+	var encMeta *eventEncryptionMeta
+	if s.encryption != nil {
+		resolvedPayload, encMeta, err = applyEventFieldEncryption(resolvedPayload, s.encryption)
+		if err != nil {
+			return nil, fmt.Errorf("event_publish step %q: encryption failed: %w", s.name, err)
+		}
+	}
+
 	// Build event envelope for broker/EventPublisher paths
-	event := s.buildEventEnvelope(resolvedPayload, resolvedHeaders, resolvedSource)
+	event := s.buildEventEnvelope(resolvedPayload, resolvedHeaders, resolvedSource, encMeta)
 
 	if s.broker != "" {
 		// Try EventPublisher interface first (supports external plugins like Bento)
@@ -149,8 +213,9 @@ func (s *EventPublishStep) tryGetEventPublisher() (pub EventPublisher) {
 // envelope is emitted with specversion, type, source, id, time, and data fields.
 // When only headers are provided (without event_type/source), the payload is
 // wrapped as {data, headers} without adding CloudEvents-required attributes.
-func (s *EventPublishStep) buildEventEnvelope(payload map[string]any, headers map[string]string, resolvedSource string) map[string]any {
-	if s.eventType == "" && resolvedSource == "" && len(headers) == 0 {
+// Encryption metadata (if present) is added as CloudEvents extension attributes.
+func (s *EventPublishStep) buildEventEnvelope(payload map[string]any, headers map[string]string, resolvedSource string, encMeta *eventEncryptionMeta) map[string]any {
+	if s.eventType == "" && resolvedSource == "" && len(headers) == 0 && encMeta == nil {
 		return payload
 	}
 	envelope := map[string]any{
@@ -166,6 +231,13 @@ func (s *EventPublishStep) buildEventEnvelope(payload map[string]any, headers ma
 	}
 	if len(headers) > 0 {
 		envelope["headers"] = headers
+	}
+	// Embed encryption metadata as CloudEvents extension attributes.
+	if encMeta != nil {
+		envelope["encryption"] = encMeta.Algorithm
+		envelope["keyid"] = encMeta.KeyID
+		envelope["encrypteddek"] = encMeta.EncryptedDEK
+		envelope["encryptedfields"] = strings.Join(encMeta.EncryptedFields, ",")
 	}
 	return envelope
 }

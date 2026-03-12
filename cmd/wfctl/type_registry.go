@@ -582,6 +582,11 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"topic", "stream", "broker", "provider", "payload", "data", "headers", "event_type", "source"},
 		},
+		"step.event_decrypt": {
+			Type:       "step.event_decrypt",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"key_id"},
+		},
 		"step.http_call": {
 			Type:       "step.http_call",
 			Plugin:     "pipelinesteps",
