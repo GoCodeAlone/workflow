@@ -493,6 +493,7 @@ func TestModernizeAllRulesRegistered(t *testing.T) {
 		"absolute-dbpath",
 		"empty-routes",
 		"camelcase-config",
+		"request-parse-config",
 	}
 	if len(rules) != len(expectedIDs) {
 		t.Errorf("expected %d rules, got %d", len(expectedIDs), len(rules))

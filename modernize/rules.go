@@ -145,39 +145,159 @@ func hyphenStepsRule() Rule {
 
 			var changes []Change
 
-			// Walk all scalar nodes and replace references
-			walkNodes(root, func(n *yaml.Node) {
-				if n.Kind != yaml.ScalarNode {
-					return
-				}
-				for oldName, newName := range renames {
-					if n.Value == oldName {
-						n.Value = newName
-						changes = append(changes, Change{
-							RuleID:      "hyphen-steps",
-							Line:        n.Line,
-							Description: fmt.Sprintf("Renamed step %q -> %q", oldName, newName),
-						})
-						return
+			// 1. Rename step name fields themselves (exact match on name values)
+			docRoot := root
+			if docRoot.Kind == yaml.DocumentNode && len(docRoot.Content) > 0 {
+				docRoot = docRoot.Content[0]
+			}
+			pipelines := findMapValue(docRoot, "pipelines")
+			if pipelines != nil && pipelines.Kind == yaml.MappingNode {
+				for i := 1; i < len(pipelines.Content); i += 2 {
+					pipelineVal := pipelines.Content[i]
+					steps := findMapValue(pipelineVal, "steps")
+					if steps == nil || steps.Kind != yaml.SequenceNode {
+						continue
 					}
-					// Update references in field paths (steps.old-name.field)
-					if strings.Contains(n.Value, oldName) {
-						updated := strings.ReplaceAll(n.Value, oldName, newName)
-						if updated != n.Value {
-							n.Value = updated
+					for _, step := range steps.Content {
+						nameNode := findMapValue(step, "name")
+						if nameNode == nil || nameNode.Kind != yaml.ScalarNode {
+							continue
+						}
+						if newName, ok := renames[nameNode.Value]; ok {
 							changes = append(changes, Change{
 								RuleID:      "hyphen-steps",
-								Line:        n.Line,
-								Description: fmt.Sprintf("Updated reference %q in value", oldName),
+								Line:        nameNode.Line,
+								Description: fmt.Sprintf("Renamed step %q -> %q", nameNode.Value, newName),
 							})
+							nameNode.Value = newName
+						}
+
+						// 2. Rename "next" field references (exact match)
+						nextNode := findMapValue(step, "next")
+						if nextNode != nil && nextNode.Kind == yaml.ScalarNode {
+							if newName, ok := renames[nextNode.Value]; ok {
+								changes = append(changes, Change{
+									RuleID:      "hyphen-steps",
+									Line:        nextNode.Line,
+									Description: fmt.Sprintf("Updated next reference %q -> %q", nextNode.Value, newName),
+								})
+								nextNode.Value = newName
+							}
+						}
+
+						// 3. Update references inside config values
+						cfg := findMapValue(step, "config")
+						if cfg != nil && cfg.Kind == yaml.MappingNode {
+							hyphenStepsFixConfig(cfg, renames, &changes)
 						}
 					}
 				}
-			})
+			}
 
 			return changes
 		},
 	}
+}
+
+// hyphenStepsFixConfig updates step name references inside config mapping values.
+// It handles: template index expressions, conditional field dot-paths, route values,
+// default values that are exact step name matches, and sequence elements (e.g., params arrays).
+func hyphenStepsFixConfig(cfg *yaml.Node, renames map[string]string, changes *[]Change) {
+	switch cfg.Kind {
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(cfg.Content); i += 2 {
+			key := cfg.Content[i]
+			val := cfg.Content[i+1]
+
+			switch val.Kind {
+			case yaml.MappingNode:
+				hyphenStepsFixConfig(val, renames, changes)
+			case yaml.SequenceNode:
+				hyphenStepsFixConfig(val, renames, changes)
+			case yaml.ScalarNode:
+				for oldName, newName := range renames {
+					updated := hyphenStepsFixScalar(key.Value, val.Value, oldName, newName)
+					if updated != val.Value {
+						*changes = append(*changes, Change{
+							RuleID:      "hyphen-steps",
+							Line:        val.Line,
+							Description: fmt.Sprintf("Updated reference %q in config", oldName),
+						})
+						val.Value = updated
+					}
+				}
+			}
+		}
+	case yaml.SequenceNode:
+		for _, elem := range cfg.Content {
+			switch elem.Kind {
+			case yaml.ScalarNode:
+				for oldName, newName := range renames {
+					updated := hyphenStepsFixScalar("", elem.Value, oldName, newName)
+					if updated != elem.Value {
+						*changes = append(*changes, Change{
+							RuleID:      "hyphen-steps",
+							Line:        elem.Line,
+							Description: fmt.Sprintf("Updated reference %q in sequence", oldName),
+						})
+						elem.Value = updated
+					}
+				}
+			case yaml.MappingNode:
+				hyphenStepsFixConfig(elem, renames, changes)
+			case yaml.SequenceNode:
+				hyphenStepsFixConfig(elem, renames, changes)
+			}
+		}
+	}
+}
+
+// hyphenStepsFixScalar updates a single scalar value, only in safe contexts:
+// - "field"/"body_from" key: dot-path like steps.old-name.output
+// - "default" key or route values: exact step name match
+// - Template index expressions: index .steps "old-name" "field"
+// - Template step function: step "old-name" "field"
+// - Template dot-path expressions: .steps.old-name.field
+func hyphenStepsFixScalar(key, value, oldName, newName string) string {
+	// Exact match (e.g., default: old-name, or route value: old-name)
+	if value == oldName {
+		return newName
+	}
+
+	updated := value
+
+	// Template index expressions: {{ index .steps "old-name" "field" }}
+	indexPattern := `index .steps "` + oldName + `"`
+	if strings.Contains(updated, indexPattern) {
+		updated = strings.ReplaceAll(updated, indexPattern, `index .steps "`+newName+`"`)
+	}
+
+	// Template step function: {{ step "old-name" "field" }}
+	stepFnPattern := `step "` + oldName + `"`
+	if strings.Contains(updated, stepFnPattern) {
+		updated = strings.ReplaceAll(updated, stepFnPattern, `step "`+newName+`"`)
+	}
+
+	// Template dot-path inside {{ }}: .steps.old-name.field
+	dotPattern := ".steps." + oldName + "."
+	if strings.Contains(updated, dotPattern) {
+		updated = strings.ReplaceAll(updated, dotPattern, ".steps."+newName+".")
+	}
+	// Also handle end-of-expression: .steps.old-name }}
+	dotPatternEnd := ".steps." + oldName + " "
+	if strings.Contains(updated, dotPatternEnd) {
+		updated = strings.ReplaceAll(updated, dotPatternEnd, ".steps."+newName+" ")
+	}
+
+	// Dot-path references in field/body_from: steps.old-name.output
+	if key == "field" || key == "body_from" {
+		fieldPattern := "steps." + oldName + "."
+		if strings.Contains(updated, fieldPattern) {
+			updated = strings.ReplaceAll(updated, fieldPattern, "steps."+newName+".")
+		}
+	}
+
+	return updated
 }
 
 // conditionalFieldTemplateRegex matches {{ .some.path }} in a field value.
@@ -443,6 +563,57 @@ func emptyRoutesRule() Rule {
 						Message: fmt.Sprintf("step.conditional %q has empty routes (at least one route required)", name),
 						Fixable: false,
 					})
+				}
+			})
+			return findings
+		},
+	}
+}
+
+func requestParseConfigRule() Rule {
+	return Rule{
+		ID:          "request-parse-config",
+		Description: "Detect invalid step.request_parse config keys (parse_headers as bool, unnecessary parse_body)",
+		Severity:    "warning",
+		Check: func(root *yaml.Node, raw []byte) []Finding {
+			var findings []Finding
+			forEachStepOfType(root, "step.request_parse", func(step *yaml.Node) {
+				cfg := findMapValue(step, "config")
+				if cfg == nil || cfg.Kind != yaml.MappingNode {
+					return
+				}
+				nameNode := findMapValue(step, "name")
+				stepName := ""
+				if nameNode != nil {
+					stepName = nameNode.Value
+				}
+
+				// Check parse_headers: if it's a boolean (scalar "true"/"false"), warn
+				parseHeaders := findMapValue(cfg, "parse_headers")
+				if parseHeaders != nil && parseHeaders.Kind == yaml.ScalarNode {
+					v := strings.ToLower(parseHeaders.Value)
+					if v == "true" || v == "false" {
+						findings = append(findings, Finding{
+							RuleID:  "request-parse-config",
+							Line:    parseHeaders.Line,
+							Message: fmt.Sprintf("step.request_parse %q has parse_headers: %s (boolean); use an array of header names like [\"Authorization\"] or migrate to headers:", stepName, parseHeaders.Value),
+							Fixable: false,
+						})
+					}
+				}
+
+				// Check parse_body: true — unnecessary since body is auto-parsed
+				parseBody := findMapValue(cfg, "parse_body")
+				if parseBody != nil && parseBody.Kind == yaml.ScalarNode {
+					v := strings.ToLower(parseBody.Value)
+					if v == "true" {
+						findings = append(findings, Finding{
+							RuleID:  "request-parse-config",
+							Line:    parseBody.Line,
+							Message: fmt.Sprintf("step.request_parse %q has parse_body: true (unnecessary, body is auto-parsed)", stepName),
+							Fixable: false,
+						})
+					}
 				}
 			})
 			return findings

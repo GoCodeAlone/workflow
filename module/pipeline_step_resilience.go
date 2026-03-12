@@ -276,6 +276,13 @@ func buildSubStep(parentName, field string, cfg map[string]any, registryFn func(
 		stepName = fmt.Sprintf("%s-%s", parentName, field)
 	}
 
+	// If a nested "config" key exists (matching engine's pipeline step YAML format),
+	// unwrap it so the factory receives the inner config directly.
+	if innerCfg, ok := cfg["config"].(map[string]any); ok {
+		return registry.Create(stepType, stepName, innerCfg, app)
+	}
+
+	// Legacy/flat format: pass everything except type and name.
 	subCfg := make(map[string]any, len(cfg))
 	for k, v := range cfg {
 		if k != "type" && k != "name" {

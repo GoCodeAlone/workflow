@@ -58,7 +58,7 @@ func (a *scanMockApp) GetService(name string, target any) error {
 	return nil
 }
 
-func (a *scanMockApp) RegisterService(name string, svc any) error { a.services[name] = svc; return nil }
+func (a *scanMockApp) RegisterService(name string, svc any) error           { a.services[name] = svc; return nil }
 func (a *scanMockApp) RegisterConfigSection(string, modular.ConfigProvider) {}
 func (a *scanMockApp) GetConfigSection(string) (modular.ConfigProvider, error) {
 	return nil, nil
@@ -67,7 +67,7 @@ func (a *scanMockApp) ConfigSections() map[string]modular.ConfigProvider { retur
 func (a *scanMockApp) Logger() modular.Logger                            { return nil }
 func (a *scanMockApp) SetLogger(modular.Logger)                          {}
 func (a *scanMockApp) ConfigProvider() modular.ConfigProvider            { return nil }
-func (a *scanMockApp) SvcRegistry() modular.ServiceRegistry             { return a.services }
+func (a *scanMockApp) SvcRegistry() modular.ServiceRegistry              { return a.services }
 func (a *scanMockApp) RegisterModule(modular.Module)                     {}
 func (a *scanMockApp) Init() error                                       { return nil }
 func (a *scanMockApp) Start() error                                      { return nil }
@@ -83,9 +83,9 @@ func (a *scanMockApp) GetServiceEntry(string) (*modular.ServiceRegistryEntry, bo
 func (a *scanMockApp) GetServicesByInterface(_ reflect.Type) []*modular.ServiceRegistryEntry {
 	return nil
 }
-func (a *scanMockApp) GetModule(string) modular.Module           { return nil }
-func (a *scanMockApp) GetAllModules() map[string]modular.Module  { return nil }
-func (a *scanMockApp) StartTime() time.Time                      { return time.Time{} }
+func (a *scanMockApp) GetModule(string) modular.Module                { return nil }
+func (a *scanMockApp) GetAllModules() map[string]modular.Module       { return nil }
+func (a *scanMockApp) StartTime() time.Time                           { return time.Time{} }
 func (a *scanMockApp) OnConfigLoaded(func(modular.Application) error) {}
 
 func newScanApp(provider SecurityScannerProvider) *scanMockApp {

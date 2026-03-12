@@ -57,13 +57,25 @@ func WithRegistryDir(dir string) ServerOption {
 	}
 }
 
+// WithDocumentationFile sets an explicit path to DOCUMENTATION.md so that the
+// workflow://docs/full-reference MCP resource serves the actual repo documentation.
+// When not set the server attempts to locate the file automatically (see
+// handleDocsFullReference). If the file cannot be found the resource returns a
+// brief message directing users to the public documentation URL.
+func WithDocumentationFile(path string) ServerOption {
+	return func(s *Server) {
+		s.documentationFile = path
+	}
+}
+
 // Server wraps an MCP server instance and provides workflow-engine-specific
 // tools and resources.
 type Server struct {
-	mcpServer   *server.MCPServer
-	pluginDir   string
-	registryDir string
-	engine      EngineProvider // optional; enables execution tools when set
+	mcpServer         *server.MCPServer
+	pluginDir         string
+	registryDir       string
+	documentationFile string // optional explicit path to DOCUMENTATION.md
+	engine            EngineProvider // optional; enables execution tools when set
 }
 
 // NewServer creates a new MCP server with all workflow engine tools and
@@ -277,6 +289,16 @@ func (s *Server) registerResources() {
 			mcp.WithMIMEType("text/markdown"),
 		),
 		s.handleDocsModuleReference,
+	)
+
+	s.mcpServer.AddResource(
+		mcp.NewResource(
+			"workflow://docs/full-reference",
+			"Full Workflow Engine Documentation",
+			mcp.WithResourceDescription("Complete DOCUMENTATION.md from the GoCodeAlone/workflow repository: all module types, step types, pipeline steps, template functions, configuration format, workflow types, trigger types, CI/CD steps, platform steps, and detailed per-module reference."),
+			mcp.WithMIMEType("text/markdown"),
+		),
+		s.handleDocsFullReference,
 	)
 }
 
@@ -633,6 +655,67 @@ func (s *Server) handleDocsModuleReference(_ context.Context, _ mcp.ReadResource
 			Text:     doc,
 		},
 	}, nil
+}
+
+// handleDocsFullReference serves the complete DOCUMENTATION.md from the
+// GoCodeAlone/workflow repository. It resolves the file in this order:
+//  1. The explicit path set via WithDocumentationFile (if provided).
+//  2. A path derived from the plugin directory (same parent-of-data layout used
+//     by handleGetConfigExamples): <pluginDir>/../../DOCUMENTATION.md.
+//  3. DOCUMENTATION.md in the current working directory.
+//
+// If none of the candidates can be read, a fallback message with the public
+// documentation URL is returned so the resource is always usable.
+func (s *Server) handleDocsFullReference(_ context.Context, _ mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+	content := s.resolveDocumentationContent()
+	return []mcp.ResourceContents{
+		mcp.TextResourceContents{
+			URI:      "workflow://docs/full-reference",
+			MIMEType: "text/markdown",
+			Text:     content,
+		},
+	}, nil
+}
+
+// resolveDocumentationContent attempts to read DOCUMENTATION.md from several
+// well-known locations and returns its content, or a fallback string on failure.
+func (s *Server) resolveDocumentationContent() string {
+	candidates := s.documentationFileCandidates()
+	for _, p := range candidates {
+		if data, err := os.ReadFile(p); err == nil { //nolint:gosec // G304: path derived from trusted server config
+			return string(data)
+		}
+	}
+	return "# GoCodeAlone/workflow Documentation\n\n" +
+		"The full documentation (DOCUMENTATION.md) could not be found on the local filesystem.\n\n" +
+		"Please refer to the repository documentation at:\n" +
+		"https://github.com/GoCodeAlone/workflow/blob/main/DOCUMENTATION.md\n"
+}
+
+// documentationFileCandidates returns ordered candidate paths for DOCUMENTATION.md.
+func (s *Server) documentationFileCandidates() []string {
+	var candidates []string
+
+	// 1. Explicit override via WithDocumentationFile.
+	if s.documentationFile != "" {
+		candidates = append(candidates, s.documentationFile)
+	}
+
+	// 2. Derive from pluginDir: <pluginDir> = .../data/plugins → root = pluginDir/../..
+	if s.pluginDir != "" {
+		pluginBase := filepath.Base(s.pluginDir)
+		dataDir := filepath.Dir(s.pluginDir)
+		dataBase := filepath.Base(dataDir)
+		if pluginBase == "plugins" && dataBase == "data" {
+			root := filepath.Dir(dataDir)
+			candidates = append(candidates, filepath.Join(root, "DOCUMENTATION.md"))
+		}
+	}
+
+	// 3. Current working directory.
+	candidates = append(candidates, "DOCUMENTATION.md")
+
+	return candidates
 }
 
 // --- Helpers ---

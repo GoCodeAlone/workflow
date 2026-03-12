@@ -186,6 +186,12 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 			if sc, ok := cfg["sourceColumn"].(string); ok {
 				partCfg.SourceColumn = sc
 			}
+			if autoSync, ok := cfg["autoSync"].(bool); ok {
+				partCfg.AutoSync = &autoSync
+			}
+			if syncInterval, ok := cfg["syncInterval"].(string); ok {
+				partCfg.SyncInterval = syncInterval
+			}
 			if partitions, ok := cfg["partitions"].([]any); ok {
 				for _, item := range partitions {
 					pMap, ok := item.(map[string]any)
@@ -399,10 +405,12 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "partitionNameFormat", Label: "Partition Name Format", Type: schema.FieldTypeString, DefaultValue: "{table}_{tenant}", Description: "Template for partition table names. Supports {table} and {tenant} placeholders.", Placeholder: "{table}_{tenant}"},
 				{Key: "sourceTable", Label: "Source Table", Type: schema.FieldTypeString, Description: "Table containing all tenant IDs for auto-partition sync (e.g. tenants)", Placeholder: "tenants"},
 				{Key: "sourceColumn", Label: "Source Column", Type: schema.FieldTypeString, Description: "Column in source table to query for tenant values. Defaults to partitionKey.", Placeholder: "id"},
+				{Key: "autoSync", Label: "Auto Sync", Type: schema.FieldTypeBool, DefaultValue: true, Description: "Automatically sync partitions from sourceTable on startup. Defaults to true when sourceTable is set."},
+				{Key: "syncInterval", Label: "Sync Interval", Type: schema.FieldTypeDuration, Description: "Interval for periodic partition re-sync from sourceTable (e.g. 60s, 5m). Leave empty to disable.", Placeholder: "60s"},
 				{Key: "maxOpenConns", Label: "Max Open Connections", Type: schema.FieldTypeNumber, DefaultValue: 25, Description: "Maximum number of open database connections"},
 				{Key: "maxIdleConns", Label: "Max Idle Connections", Type: schema.FieldTypeNumber, DefaultValue: 5, Description: "Maximum number of idle connections in the pool"},
 			},
-			DefaultConfig: map[string]any{"maxOpenConns": 25, "maxIdleConns": 5, "partitionType": "list", "partitionNameFormat": "{table}_{tenant}"},
+			DefaultConfig: map[string]any{"maxOpenConns": 25, "maxIdleConns": 5, "partitionType": "list", "partitionNameFormat": "{table}_{tenant}", "autoSync": true},
 		},
 		{
 			Type:        "persistence.store",

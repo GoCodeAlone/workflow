@@ -1,9 +1,9 @@
 // Package pipelinesteps provides a plugin that registers generic pipeline step
 // types: validate, transform, conditional, set, log, delegate, jq, publish,
 // http_call, http_proxy, request_parse, db_query, db_exec, db_query_cached, json_response,
-// raw_response, static_file, validate_path_param, validate_pagination, validate_request_body,
-// foreach, webhook_verify, base64_decode, ui_scaffold, ui_scaffold_analyze,
-// dlq_send, dlq_replay, retry_with_backoff, circuit_breaker (wrapping),
+// raw_response, json_parse, static_file, validate_path_param, validate_pagination,
+// validate_request_body, foreach, webhook_verify, base64_decode, ui_scaffold,
+// ui_scaffold_analyze, dlq_send, dlq_replay, retry_with_backoff, circuit_breaker (wrapping),
 // s3_upload, auth_validate, authz_check, token_revoke, sandbox_exec.
 // It also provides the PipelineWorkflowHandler for composable pipelines.
 package pipelinesteps
@@ -70,6 +70,7 @@ func New() *Plugin {
 					"step.db_sync_partitions",
 					"step.json_response",
 					"step.raw_response",
+					"step.json_parse",
 					"step.static_file",
 					"step.workflow_call",
 					"step.validate_path_param",
@@ -141,6 +142,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.db_sync_partitions":    wrapStepFactory(module.NewDBSyncPartitionsStepFactory()),
 		"step.json_response":         wrapStepFactory(module.NewJSONResponseStepFactory()),
 		"step.raw_response":          wrapStepFactory(module.NewRawResponseStepFactory()),
+		"step.json_parse":            wrapStepFactory(module.NewJSONParseStepFactory()),
 		"step.static_file":           wrapStepFactory(module.NewStaticFileStepFactory()),
 		"step.validate_path_param":   wrapStepFactory(module.NewValidatePathParamStepFactory()),
 		"step.validate_pagination":   wrapStepFactory(module.NewValidatePaginationStepFactory()),

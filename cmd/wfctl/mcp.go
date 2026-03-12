@@ -13,6 +13,7 @@ func runMCP(args []string) error {
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	pluginDir := fs.String("plugin-dir", "data/plugins", "Plugin data directory")
 	registryDir := fs.String("registry-dir", "", "Path to cloned workflow-registry for plugin search")
+	documentationFile := fs.String("documentation-file", "", "Path to DOCUMENTATION.md (auto-detected when empty)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl mcp [options]
 
@@ -53,6 +54,9 @@ See docs/mcp.md for full setup instructions.
 	var opts []workflowmcp.ServerOption
 	if *registryDir != "" {
 		opts = append(opts, workflowmcp.WithRegistryDir(*registryDir))
+	}
+	if *documentationFile != "" {
+		opts = append(opts, workflowmcp.WithDocumentationFile(*documentationFile))
 	}
 
 	srv := workflowmcp.NewServer(*pluginDir, opts...)

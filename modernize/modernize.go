@@ -42,6 +42,7 @@ func AllRules() []Rule {
 		absoluteDbPathRule(),
 		emptyRoutesRule(),
 		camelCaseConfigRule(),
+		requestParseConfigRule(),
 	}
 }
 

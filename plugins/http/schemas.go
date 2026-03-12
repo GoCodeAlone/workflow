@@ -176,12 +176,18 @@ func corsMiddlewareSchema() *schema.ModuleSchema {
 		Inputs:      []schema.ServiceIODef{{Name: "request", Type: "http.Request", Description: "HTTP request needing CORS headers"}},
 		Outputs:     []schema.ServiceIODef{{Name: "cors", Type: "http.Request", Description: "HTTP request with CORS headers applied"}},
 		ConfigFields: []schema.ConfigFieldDef{
-			{Key: "allowedOrigins", Label: "Allowed Origins", Type: schema.FieldTypeArray, ArrayItemType: "string", DefaultValue: []string{"*"}, Description: "Allowed origins (e.g. https://example.com, http://localhost:3000)"},
+			{Key: "allowedOrigins", Label: "Allowed Origins", Type: schema.FieldTypeArray, ArrayItemType: "string", DefaultValue: []string{"*"}, Description: "Allowed origins (e.g. https://example.com, http://localhost:3000, *.example.com)"},
 			{Key: "allowedMethods", Label: "Allowed Methods", Type: schema.FieldTypeArray, ArrayItemType: "string", DefaultValue: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}, Description: "Allowed HTTP methods"},
+			{Key: "allowedHeaders", Label: "Allowed Headers", Type: schema.FieldTypeArray, ArrayItemType: "string", DefaultValue: []string{"Content-Type", "Authorization"}, Description: "Allowed request headers (e.g. Authorization, X-CSRF-Token, X-Request-Id)"},
+			{Key: "allowCredentials", Label: "Allow Credentials", Type: schema.FieldTypeBool, DefaultValue: false, Description: "Whether to allow requests with credentials (cookies, authorization headers). When true, the actual Origin is reflected instead of *"},
+			{Key: "maxAge", Label: "Max Age (sec)", Type: schema.FieldTypeNumber, DefaultValue: 0, Description: "How long (in seconds) the preflight response may be cached. 0 means no caching directive is sent"},
 		},
 		DefaultConfig: map[string]any{
-			"allowedOrigins": []string{"*"},
-			"allowedMethods": []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+			"allowedOrigins":   []string{"*"},
+			"allowedMethods":   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+			"allowedHeaders":   []string{"Content-Type", "Authorization"},
+			"allowCredentials": false,
+			"maxAge":           0,
 		},
 	}
 }

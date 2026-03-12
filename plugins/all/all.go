@@ -42,6 +42,7 @@ import (
 	pluginmessaging "github.com/GoCodeAlone/workflow/plugins/messaging"
 	pluginmodcompat "github.com/GoCodeAlone/workflow/plugins/modularcompat"
 	pluginobs "github.com/GoCodeAlone/workflow/plugins/observability"
+	pluginopenapi "github.com/GoCodeAlone/workflow/plugins/openapi"
 	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
 	pluginplatform "github.com/GoCodeAlone/workflow/plugins/platform"
 	pluginpolicy "github.com/GoCodeAlone/workflow/plugins/policy"
@@ -67,6 +68,7 @@ func DefaultPlugins() []plugin.EnginePlugin {
 		pluginlicense.New(),
 		pluginconfigprovider.New(),
 		pluginhttp.New(),
+		pluginopenapi.New(),
 		pluginobs.New(),
 		pluginmessaging.New(),
 		pluginsm.New(),
