@@ -383,18 +383,22 @@ func KnownWorkflowTypes() []string {
 
 // pluginManifestTypes holds the type declarations from a plugin.json manifest.
 // This is a minimal subset of the full plugin manifest to avoid import cycles.
-// It supports both the flat format (types at root level) and the v0.3.0+
+// It supports both the flat format (types at root level) and the registry-manifest
 // nested capabilities object format.
 type pluginManifestTypes struct {
-	ModuleTypes   []string                    `json:"moduleTypes"`
-	StepTypes     []string                    `json:"stepTypes"`
-	TriggerTypes  []string                    `json:"triggerTypes"`
-	WorkflowTypes []string                    `json:"workflowTypes"`
-	Capabilities  *pluginManifestCapabilities `json:"capabilities,omitempty"`
+	ModuleTypes   []string `json:"moduleTypes"`
+	StepTypes     []string `json:"stepTypes"`
+	TriggerTypes  []string `json:"triggerTypes"`
+	WorkflowTypes []string `json:"workflowTypes"`
+	// Capabilities is stored as raw JSON to safely handle both the registry-manifest
+	// format (object with moduleTypes/stepTypes/etc.) and the engine-internal format
+	// (array of CapabilityDecl). A non-object value is silently ignored.
+	Capabilities json.RawMessage `json:"capabilities,omitempty"`
 }
 
 // pluginManifestCapabilities holds the nested capabilities object used in the
-// v0.3.0+ external plugin.json format (e.g. from wfctl plugin install).
+// registry manifest plugin.json format (not the engine-internal format, which
+// uses a JSON array of CapabilityDecl instead).
 type pluginManifestCapabilities struct {
 	ModuleTypes      []string `json:"moduleTypes"`
 	StepTypes        []string `json:"stepTypes"`
@@ -438,19 +442,24 @@ func LoadPluginTypesFromDir(pluginDir string) error {
 		for _, t := range m.WorkflowTypes {
 			RegisterWorkflowType(t)
 		}
-		// Also handle the v0.3.0+ nested capabilities object format.
-		if cap := m.Capabilities; cap != nil {
-			for _, t := range cap.ModuleTypes {
-				RegisterModuleType(t)
-			}
-			for _, t := range cap.StepTypes {
-				RegisterModuleType(t)
-			}
-			for _, t := range cap.TriggerTypes {
-				RegisterTriggerType(t)
-			}
-			for _, t := range cap.WorkflowHandlers {
-				RegisterWorkflowType(t)
+		// Also handle the registry-manifest nested capabilities object format.
+		// The capabilities field may be a JSON array (engine-internal CapabilityDecl format)
+		// or a JSON object (registry manifest format). Only process it when it's an object.
+		if len(m.Capabilities) > 0 && m.Capabilities[0] == '{' {
+			var cap pluginManifestCapabilities
+			if err := json.Unmarshal(m.Capabilities, &cap); err == nil {
+				for _, t := range cap.ModuleTypes {
+					RegisterModuleType(t)
+				}
+				for _, t := range cap.StepTypes {
+					RegisterModuleType(t)
+				}
+				for _, t := range cap.TriggerTypes {
+					RegisterTriggerType(t)
+				}
+				for _, t := range cap.WorkflowHandlers {
+					RegisterWorkflowType(t)
+				}
 			}
 		}
 	}

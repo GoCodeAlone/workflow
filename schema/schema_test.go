@@ -1003,6 +1003,37 @@ func sliceContains(slice []string, s string) bool {
 	return false
 }
 
+func TestLoadPluginTypesFromDir_CapabilitiesArrayFormat(t *testing.T) {
+	// Tests that a plugin.json using the engine-internal format (capabilities as a JSON
+	// array of CapabilityDecl objects) does not break loading of flat top-level types.
+	const customModuleType = "external.caps.array.module.testonly"
+
+	t.Cleanup(func() {
+		UnregisterModuleType(customModuleType)
+	})
+
+	dir := t.TempDir()
+	pluginDir := dir + "/array-caps-plugin"
+	if err := makeDir(pluginDir); err != nil {
+		t.Fatal(err)
+	}
+	// capabilities is a JSON array (engine-internal CapabilityDecl format)
+	manifest := `{"name":"array-caps-plugin","version":"1.0.0","moduleTypes":["` + customModuleType + `"],"capabilities":[{"name":"http-server","role":"provider"}]}`
+	if err := writeFile(pluginDir+"/plugin.json", []byte(manifest)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LoadPluginTypesFromDir(dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The flat top-level module type should still be registered despite the array-format capabilities
+	knownModules := KnownModuleTypes()
+	if !sliceContains(knownModules, customModuleType) {
+		t.Errorf("expected %q in KnownModuleTypes even with array capabilities, got: %v", customModuleType, knownModules)
+	}
+}
+
 func makeDir(path string) error {
 	return os.MkdirAll(path, 0755)
 }

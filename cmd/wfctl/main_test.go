@@ -322,7 +322,7 @@ modules:
 
 func TestRunValidatePluginDirCapabilities(t *testing.T) {
 	// Create a fake external plugin directory with a plugin.json using the
-	// v0.3.0+ nested "capabilities" object format (as produced by wfctl plugin install).
+	// v0.3.0+ nested "capabilities" object format (as used by registry manifests and older installers).
 	pluginsDir := t.TempDir()
 	pluginSubdir := filepath.Join(pluginsDir, "my-ext-plugin-caps")
 	if err := os.MkdirAll(pluginSubdir, 0755); err != nil {
