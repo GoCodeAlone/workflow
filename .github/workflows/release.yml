@@ -273,7 +273,7 @@ jobs:
     if: ${{ !contains(inputs.tag_name || github.ref_name, '-') }}
     strategy:
       matrix:
-        repo: ['GoCodeAlone/workflow-vscode', 'GoCodeAlone/workflow-jetbrains']
+        repo: ['GoCodeAlone/workflow-vscode', 'GoCodeAlone/workflow-jetbrains', 'GoCodeAlone/workflow-editor']
     steps:
     - name: Trigger IDE update for ${{ matrix.repo }}
       uses: peter-evans/repository-dispatch@v4
