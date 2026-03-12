@@ -144,6 +144,7 @@ flowchart TD
 | `step.publish` | Publishes events to EventBus | pipelinesteps |
 | `step.event_publish` | Publishes events to EventBus with full envelope control | pipelinesteps |
 | `step.http_call` | Makes outbound HTTP requests | pipelinesteps |
+| `step.graphql` | Execute GraphQL queries/mutations with data extraction, pagination, batching, APQ | pipelinesteps |
 | `step.delegate` | Delegates to a named service | pipelinesteps |
 | `step.request_parse` | Extracts path params, query params, and request body from HTTP requests | pipelinesteps |
 | `step.db_query` | Executes parameterized SQL SELECT queries against a named database | pipelinesteps |
@@ -1020,6 +1021,55 @@ modules:
     config:
       endpoint: "otel-collector:4318"
       serviceName: "order-api"
+```
+
+---
+
+### `step.graphql`
+
+Executes GraphQL queries and mutations over HTTP POST. Supports OAuth2 authentication (reuses the same token cache as `step.http_call`), response data path extraction, cursor and offset pagination, batch queries, automatic persisted queries (APQ), introspection, and fragment prepending.
+
+**Configuration:**
+
+| Key | Type | Required | Default | Description |
+|-----|------|----------|---------|-------------|
+| `url` | string | yes | | GraphQL endpoint URL (template-resolved) |
+| `query` | string | yes* | | GraphQL query or mutation (* not required if `introspection` or `batch` is configured) |
+| `variables` | map | no | | Query variables (template-resolved values) |
+| `data_path` | string | no | | Dot-path to extract from response data (e.g., `"user.posts"`) |
+| `auth` | map | no | | Authentication config (`oauth2_client_credentials`, `bearer`, `api_key`, `basic`) |
+| `headers` | map | no | | Custom HTTP headers |
+| `fragments` | list | no | | GraphQL fragments prepended to query |
+| `pagination` | map | no | | Pagination config (`strategy`, `page_info_path`, `cursor_variable`, etc.) |
+| `batch` | map | no | | Batch query config (`queries` array) |
+| `persisted_query` | map | no | | APQ config (`enabled`, `sha256`) |
+| `introspection` | map | no | | Introspection config (`enabled`) |
+| `fail_on_graphql_errors` | bool | no | `true` | Whether to fail the step on GraphQL errors |
+| `timeout` | string | no | `"30s"` | Request timeout duration |
+| `retry_on_network_error` | bool | no | `false` | Retry once on network-level failure |
+
+**Output fields:** `data` (extracted via `data_path`), `errors` (array), `has_errors` (bool), `raw` (full response map), `status_code` (int), `extensions` (any). Paginated results also include `page_count` and `total_items`.
+
+**Example:**
+
+```yaml
+steps:
+  - name: fetch-user
+    type: step.graphql
+    config:
+      url: "https://api.example.com/graphql"
+      auth:
+        type: oauth2_client_credentials
+        token_url: "https://auth.example.com/token"
+        client_id: "{{ config \"client_id\" }}"
+        client_secret: "{{ config \"client_secret\" }}"
+      query: |
+        query GetUser($id: ID!) {
+          user(id: $id) { name email }
+        }
+      variables:
+        id: "{{ .user_id }}"
+      data_path: user
 ```
 
 ---
