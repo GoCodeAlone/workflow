@@ -1150,6 +1150,7 @@ wfctl modernize [options] <config.yaml|directory>
 | `--exclude-rules` | none | Comma-separated rule IDs to skip |
 | `--dir` | | Scan all YAML files recursively |
 | `--format` | `text` | Output format: text or json |
+| `--plugin-dir` | _(none)_ | Directory of installed external plugins; their modernize rules are loaded |
 
 **Rules:**
 
@@ -1163,6 +1164,22 @@ wfctl modernize [options] <config.yaml|directory>
 | `absolute-dbpath` | warning | no | Warn on absolute dbPath values |
 | `empty-routes` | error | no | Detect empty routes in step.conditional |
 | `camelcase-config` | warning | no | Detect snake_case config keys |
+
+**Plugin-provided rules** are loaded when `--plugin-dir` is specified. Each installed plugin can declare its own migration rules in its `plugin.json` manifest under the `modernizeRules` key. Rules from all plugins in the directory are merged with the built-in rules.
+
+```bash
+# Run built-in rules only
+wfctl modernize config.yaml
+
+# Include migration rules from installed plugins
+wfctl modernize --plugin-dir data/plugins config.yaml
+
+# Apply all fixes (built-in + plugin rules)
+wfctl modernize --apply --plugin-dir data/plugins config.yaml
+
+# List all available rules including those from plugins
+wfctl modernize --plugin-dir data/plugins --list-rules
+```
 
 ---
 

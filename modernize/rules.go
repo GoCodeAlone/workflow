@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/GoCodeAlone/workflow/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -625,6 +626,28 @@ func requestParseConfigRule() Rule {
 var snakeCaseKeyRegex = regexp.MustCompile(`^[a-z]+(_[a-z0-9]+)+$`)
 
 func camelCaseConfigRule() Rule {
+	// Build a registry of schema-defined config key names per module type so
+	// that keys which are intentionally snake_case (e.g. openapi's spec_file,
+	// register_routes, swagger_ui) are never flagged as anti-patterns.
+	schemaRegistry := schema.NewModuleSchemaRegistry()
+
+	// Cache the schema key sets by module type to avoid rebuilding them for
+	// every module instance encountered during a Check run.
+	schemaKeyCache := make(map[string]map[string]bool)
+	schemaKeysFor := func(moduleType string) map[string]bool {
+		if cached, ok := schemaKeyCache[moduleType]; ok {
+			return cached
+		}
+		keys := make(map[string]bool)
+		if ms := schemaRegistry.Get(moduleType); ms != nil {
+			for i := range ms.ConfigFields {
+				keys[ms.ConfigFields[i].Key] = true
+			}
+		}
+		schemaKeyCache[moduleType] = keys
+		return keys
+	}
+
 	return Rule{
 		ID:          "camelcase-config",
 		Description: "Detect snake_case config field names (engine requires camelCase)",
@@ -641,9 +664,18 @@ func camelCaseConfigRule() Rule {
 				if nameNode != nil {
 					modName = nameNode.Value
 				}
+
+				// Resolve the set of officially defined config keys for this module
+				// type so that schema-declared snake_case keys are not flagged.
+				var schemaKeys map[string]bool
+				typeNode := findMapValue(mod, "type")
+				if typeNode != nil && typeNode.Value != "" {
+					schemaKeys = schemaKeysFor(typeNode.Value)
+				}
+
 				for i := 0; i+1 < len(cfg.Content); i += 2 {
 					key := cfg.Content[i]
-					if key.Kind == yaml.ScalarNode && snakeCaseKeyRegex.MatchString(key.Value) {
+					if key.Kind == yaml.ScalarNode && snakeCaseKeyRegex.MatchString(key.Value) && !schemaKeys[key.Value] {
 						findings = append(findings, Finding{
 							RuleID:  "camelcase-config",
 							Line:    key.Line,
