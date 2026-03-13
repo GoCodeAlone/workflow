@@ -3,7 +3,6 @@ package plugin
 import (
 	"fmt"
 	"log/slog"
-	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -437,9 +436,10 @@ func checkEngineCompatibility(manifest *PluginManifest, engineVersion string) {
 		return // malformed engine version — skip silently
 	}
 	if engVer.Compare(minVer) < 0 {
-		fmt.Fprintf(os.Stderr, //nolint:gosec // G705
-			"WARNING: plugin %q requires engine >= v%s, running v%s — may cause runtime failures\n",
-			manifest.Name, manifest.MinEngineVersion, engineVersion)
+		slog.Warn("plugin requires newer engine",
+			"plugin", manifest.Name,
+			"minVersion", manifest.MinEngineVersion,
+			"engineVersion", engineVersion)
 	}
 }
 

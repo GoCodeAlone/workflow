@@ -68,13 +68,14 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 	}
 	var failed []string
 	for name, entry := range lf.Plugins {
-		nameArg := name + "@" + strings.TrimPrefix(entry.Version, "v")
 		fmt.Fprintf(os.Stderr, "Installing %s %s...\n", name, entry.Version)
 		installArgs := []string{"--plugin-dir", pluginDir}
 		if cfgPath != "" {
 			installArgs = append(installArgs, "--config", cfgPath)
 		}
-		installArgs = append(installArgs, nameArg)
+		// Pass just the name (no @version) so runPluginInstall does not
+		// call updateLockfile and inadvertently overwrite the pinned entry.
+		installArgs = append(installArgs, name)
 		if err := runPluginInstall(installArgs); err != nil {
 			fmt.Fprintf(os.Stderr, "error installing %s: %v\n", name, err)
 			failed = append(failed, name)
