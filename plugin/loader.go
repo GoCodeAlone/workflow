@@ -3,8 +3,10 @@ package plugin
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"reflect"
 	"sort"
+	"strings"
 
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/deploy"
@@ -36,6 +38,7 @@ type PluginLoader struct {
 	deployTargets        map[string]deploy.DeployTarget
 	sidecarProviders     map[string]deploy.SidecarProvider
 	overridableTypes     map[string]bool // types declared overridable by any loaded plugin
+	engineVersion        string          // running engine version for minEngineVersion checks
 }
 
 // NewPluginLoader creates a new PluginLoader backed by the given capability and schema registries.
@@ -68,6 +71,12 @@ func (l *PluginLoader) OverridableTypes() map[string]bool {
 		out[k] = v
 	}
 	return out
+}
+
+// SetEngineVersion sets the running engine version used for minEngineVersion
+// compatibility checks when loading plugins.
+func (l *PluginLoader) SetEngineVersion(v string) {
+	l.engineVersion = v
 }
 
 // SetLicenseValidator registers a license validator used for premium tier plugins.
@@ -159,6 +168,9 @@ func (l *PluginLoader) loadPlugin(p EnginePlugin, allowOverride bool) error {
 	if err := manifest.Validate(); err != nil {
 		return fmt.Errorf("plugin %q: %w", manifest.Name, err)
 	}
+
+	// Warn if the engine version is older than the plugin's minimum requirement.
+	checkEngineCompatibility(manifest, l.engineVersion)
 
 	// Validate plugin tier before proceeding.
 	if err := l.ValidateTier(manifest); err != nil {
@@ -406,6 +418,29 @@ func (l *PluginLoader) SidecarProviders() map[string]deploy.SidecarProvider {
 		out[k] = v
 	}
 	return out
+}
+
+// checkEngineCompatibility warns to stderr if the running engine version is
+// older than the plugin's declared minEngineVersion. This is a soft check only
+// (no hard failure) to allow testing newer plugins against older engines.
+// Skips the check when either version is empty or engineVersion is "dev".
+func checkEngineCompatibility(manifest *PluginManifest, engineVersion string) {
+	if manifest.MinEngineVersion == "" || engineVersion == "" || engineVersion == "dev" {
+		return
+	}
+	minVer, err := ParseSemver(strings.TrimPrefix(manifest.MinEngineVersion, "v"))
+	if err != nil {
+		return // malformed minEngineVersion — skip silently
+	}
+	engVer, err := ParseSemver(strings.TrimPrefix(engineVersion, "v"))
+	if err != nil {
+		return // malformed engine version — skip silently
+	}
+	if engVer.Compare(minVer) < 0 {
+		fmt.Fprintf(os.Stderr, //nolint:gosec // G705
+			"WARNING: plugin %q requires engine >= v%s, running v%s — may cause runtime failures\n",
+			manifest.Name, manifest.MinEngineVersion, engineVersion)
+	}
 }
 
 // topoSortPlugins performs a topological sort of plugins based on manifest dependencies.

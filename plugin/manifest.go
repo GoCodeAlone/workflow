@@ -65,6 +65,10 @@ type PluginManifest struct {
 	// Config mutability and sample plugin support
 	ConfigMutable  bool   `json:"configMutable,omitempty" yaml:"configMutable,omitempty"`
 	SampleCategory string `json:"sampleCategory,omitempty" yaml:"sampleCategory,omitempty"`
+
+	// MinEngineVersion declares the minimum engine version required to run this plugin.
+	// A semver string without the "v" prefix, e.g. "0.3.30".
+	MinEngineVersion string `json:"minEngineVersion,omitempty" yaml:"minEngineVersion,omitempty"`
 }
 
 // CapabilityDecl declares a capability relationship for a plugin in the manifest.
