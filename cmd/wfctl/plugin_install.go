@@ -198,12 +198,6 @@ func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryMan
 	}
 
 	fmt.Printf("Installed %s v%s to %s\n", manifest.Name, manifest.Version, destDir)
-
-	// Update .wfctl.yaml lockfile if name@version was provided.
-	if _, ver := parseNameVersion(nameArg); ver != "" {
-		updateLockfile(manifest.Name, manifest.Version, manifest.Repository)
-	}
-
 	return nil
 }
 
