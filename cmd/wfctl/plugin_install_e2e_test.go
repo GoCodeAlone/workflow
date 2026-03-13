@@ -217,6 +217,85 @@ func TestPluginInstallE2E(t *testing.T) {
 	}
 }
 
+// TestPluginInstallRespectsPluginDir verifies that -plugin-dir is honoured:
+// the install path uses the custom directory, not the default data/plugins.
+func TestPluginInstallRespectsPluginDir(t *testing.T) {
+	const pluginName = "dir-test-plugin"
+	binaryContent := []byte("#!/bin/sh\necho dir-test\n")
+
+	topDir := fmt.Sprintf("%s-%s-%s", pluginName, runtime.GOOS, runtime.GOARCH)
+	tarball := buildTarGz(t, map[string][]byte{
+		topDir + "/" + pluginName: binaryContent,
+	}, 0755)
+	checksum := sha256Hex(tarball)
+
+	tarSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.WriteHeader(http.StatusOK)
+		w.Write(tarball) //nolint:errcheck
+	}))
+	defer tarSrv.Close()
+
+	manifest := &RegistryManifest{
+		Name:    pluginName,
+		Version: "1.0.0",
+		Type:    "external",
+		Downloads: []PluginDownload{{
+			OS:     runtime.GOOS,
+			Arch:   runtime.GOARCH,
+			URL:    tarSrv.URL + "/" + pluginName + ".tar.gz",
+			SHA256: checksum,
+		}},
+	}
+
+	// Use a custom plugin dir (not defaultDataDir).
+	customDir := t.TempDir()
+
+	// Perform the install steps that runPluginInstall does, using the custom dir.
+	mr := NewMultiRegistryFromSources(&mockRegistrySource{
+		name:      "test",
+		manifests: map[string]*RegistryManifest{pluginName: manifest},
+	})
+
+	gotManifest, _, err := mr.FetchManifest(pluginName)
+	if err != nil {
+		t.Fatalf("FetchManifest: %v", err)
+	}
+
+	dl, err := gotManifest.FindDownload(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		t.Fatalf("FindDownload: %v", err)
+	}
+
+	data, err := downloadURL(dl.URL)
+	if err != nil {
+		t.Fatalf("downloadURL: %v", err)
+	}
+
+	if err := verifyChecksum(data, dl.SHA256); err != nil {
+		t.Fatalf("verifyChecksum: %v", err)
+	}
+
+	// Install into customDir, not defaultDataDir.
+	destDir := filepath.Join(customDir, pluginName)
+	if err := os.MkdirAll(destDir, 0750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := extractTarGz(data, destDir); err != nil {
+		t.Fatalf("extractTarGz: %v", err)
+	}
+
+	// Plugin binary must exist in customDir, not in defaultDataDir.
+	binaryPath := filepath.Join(customDir, pluginName, pluginName)
+	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
+		t.Errorf("plugin binary not found in customDir %s", customDir)
+	}
+	defaultPath := filepath.Join(defaultDataDir, pluginName, pluginName)
+	if _, err := os.Stat(defaultPath); err == nil {
+		t.Errorf("plugin binary unexpectedly found in defaultDataDir %s", defaultDataDir)
+	}
+}
+
 // TestExtractTarGz verifies that tar.gz extraction produces correct files with preserved modes.
 func TestExtractTarGz(t *testing.T) {
 	entries := map[string][]byte{

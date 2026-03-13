@@ -71,6 +71,30 @@ func (m *mockRegistrySource) SearchPlugins(query string) ([]PluginSearchResult, 
 }
 
 // ---------------------------------------------------------------------------
+// normalizePluginName tests
+// ---------------------------------------------------------------------------
+
+func TestNormalizePluginName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"authz", "authz"},
+		{"workflow-plugin-authz", "authz"},
+		{"workflow-plugin-payments", "payments"},
+		{"custom-plugin", "custom-plugin"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			got := normalizePluginName(tc.input)
+			if got != tc.want {
+				t.Errorf("normalizePluginName(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Registry config tests
 // ---------------------------------------------------------------------------
 

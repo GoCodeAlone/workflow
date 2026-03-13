@@ -52,11 +52,16 @@ Subcommands:
   remove   Uninstall a plugin
   validate Validate a plugin manifest from the registry or a local file
   info     Show details about an installed plugin
+
+Use -plugin-dir to specify a custom plugin directory (replaces deprecated -data-dir).
 `)
 	return fmt.Errorf("plugin subcommand is required")
 }
 
 func runPluginInit(args []string) error {
+	if err := checkTrailingFlags(args); err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("plugin init", flag.ExitOnError)
 	author := fs.String("author", "", "Plugin author (required)")
 	ver := fs.String("version", "0.1.0", "Plugin version")
