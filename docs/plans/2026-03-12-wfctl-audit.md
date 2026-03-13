@@ -798,14 +798,18 @@ In `plugins/ratchet/manifest.json`, add downloads entries:
 
 Check `plugins/authz/manifest.json` exists. Verify the `name` field is `"authz"` (not `"workflow-plugin-authz"`). If it doesn't exist, create it from the existing `plugin.json` in the authz repo.
 
-**Step 4: Run validation**
+**Step 4: Fix schema validation gap (B5)**
+
+Check `schema/registry-schema.json` — verify that the `type` enum includes `"builtin"` (not just `"external"` and `"internal"`). If the enum is missing `"builtin"`, add it. Then check CI (`.github/workflows/`) to confirm schema validation runs on PRs. If CI isn't validating manifests against the schema, add a step that runs `scripts/validate-manifests.sh`.
+
+**Step 5: Run validation**
 
 ```bash
 cd /Users/jon/workspace/workflow-registry
 ./scripts/validate-manifests.sh
 ```
 
-**Step 5: Commit and push**
+**Step 6: Commit and push**
 
 ```bash
 git add plugins/
