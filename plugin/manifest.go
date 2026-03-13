@@ -65,6 +65,10 @@ type PluginManifest struct {
 	// Config mutability and sample plugin support
 	ConfigMutable  bool   `json:"configMutable,omitempty" yaml:"configMutable,omitempty"`
 	SampleCategory string `json:"sampleCategory,omitempty" yaml:"sampleCategory,omitempty"`
+
+	// MinEngineVersion declares the minimum engine version required to run this plugin.
+	// A semver string without the "v" prefix, e.g. "0.3.30".
+	MinEngineVersion string `json:"minEngineVersion,omitempty" yaml:"minEngineVersion,omitempty"`
 }
 
 // CapabilityDecl declares a capability relationship for a plugin in the manifest.
@@ -74,70 +78,74 @@ type CapabilityDecl struct {
 	Priority int    `json:"priority,omitempty" yaml:"priority,omitempty"`
 }
 
-// legacyCapabilitiesObject represents the alternative object-style capabilities
-// field used by some external plugin manifests (e.g. workflow-plugin-authz) where
-// capabilities is a single JSON object instead of an array of CapabilityDecl.
-type legacyCapabilitiesObject struct {
-	ConfigProvider bool     `json:"configProvider"`
-	ModuleTypes    []string `json:"moduleTypes"`
-	StepTypes      []string `json:"stepTypes"`
-	TriggerTypes   []string `json:"triggerTypes"`
-	WorkflowTypes  []string `json:"workflowTypes"`
+// Dependency declares a versioned dependency on another plugin.
+type Dependency struct {
+	Name       string `json:"name" yaml:"name"`
+	Constraint string `json:"constraint" yaml:"constraint"` // semver constraint, e.g. ">=1.0.0", "^2.1"
 }
 
-// UnmarshalJSON implements custom JSON decoding for PluginManifest so that the
-// "capabilities" field can be either:
-//   - an array of CapabilityDecl objects (the canonical engine format), or
-//   - a plain JSON object with moduleTypes/stepTypes/triggerTypes keys
-//     (the legacy external-plugin format used by e.g. workflow-plugin-authz).
+// UnmarshalJSON implements custom JSON unmarshalling for PluginManifest that
+// handles both the canonical capabilities array format and the legacy object
+// format used by registry manifests and older plugin.json files.
 //
-// In the legacy-object case the type lists are merged into the manifest's
-// top-level ModuleTypes/StepTypes/TriggerTypes fields so the information is
-// not lost, and Capabilities is left nil.
+// Legacy format: "capabilities": {"configProvider": bool, "moduleTypes": [...], ...}
+// New format:    "capabilities": [{"name": "...", "role": "..."}]
+//
+// When the legacy object format is detected, its type lists are merged into the
+// top-level ModuleTypes, StepTypes, and TriggerTypes fields so callers always
+// find types in a consistent location. Any other JSON type (string, number,
+// bool) is rejected with a descriptive error.
 func (m *PluginManifest) UnmarshalJSON(data []byte) error {
-	// Use a type alias to avoid infinite recursion through UnmarshalJSON.
-	type Alias PluginManifest
-	type rawManifest struct {
-		Alias
+	// rawManifest breaks the recursion: it is the same layout as PluginManifest
+	// but without the custom UnmarshalJSON method.
+	type rawManifest PluginManifest
+	// withRawCaps shadows the Capabilities field so we can capture it as raw JSON
+	// and inspect whether it is an array or object before decoding.
+	type withRawCaps struct {
+		rawManifest
 		Capabilities json.RawMessage `json:"capabilities,omitempty"`
 	}
-
-	var raw rawManifest
+	var raw withRawCaps
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	*m = PluginManifest(raw.Alias)
+	*m = PluginManifest(raw.rawManifest)
+	m.Capabilities = nil // captured in raw.Capabilities; reset and repopulate below
 
 	if len(raw.Capabilities) == 0 {
 		return nil
 	}
 
 	// Peek at the first non-whitespace byte to decide which branch to take.
-	// This avoids silently ignoring genuinely invalid values.
-	firstByte := firstNonSpace(raw.Capabilities)
-
-	switch firstByte {
+	// This avoids silently ignoring genuinely invalid capability values.
+	switch firstNonSpace(raw.Capabilities) {
 	case 0, 'n':
 		// Empty or JSON null – treat as absent.
 
 	case '[':
-		// Canonical array-of-CapabilityDecl format.
+		// New format: array of CapabilityDecl.
 		var caps []CapabilityDecl
 		if err := json.Unmarshal(raw.Capabilities, &caps); err != nil {
-			return fmt.Errorf("capabilities: %w", err)
+			return fmt.Errorf("invalid capabilities array: %w", err)
 		}
 		m.Capabilities = caps
 
 	case '{':
-		// Legacy object format – extract type lists into top-level fields.
-		var legacy legacyCapabilitiesObject
-		if err := json.Unmarshal(raw.Capabilities, &legacy); err != nil {
-			return fmt.Errorf("capabilities: %w", err)
+		// Legacy format: object with configProvider, moduleTypes, stepTypes, triggerTypes.
+		// Merge type lists into the top-level fields so callers see them consistently.
+		var legacyCaps struct {
+			ModuleTypes   []string `json:"moduleTypes"`
+			StepTypes     []string `json:"stepTypes"`
+			TriggerTypes  []string `json:"triggerTypes"`
+			WorkflowTypes []string `json:"workflowTypes"`
 		}
-		m.ModuleTypes = appendUnique(m.ModuleTypes, legacy.ModuleTypes...)
-		m.StepTypes = appendUnique(m.StepTypes, legacy.StepTypes...)
-		m.TriggerTypes = appendUnique(m.TriggerTypes, legacy.TriggerTypes...)
-		m.WorkflowTypes = appendUnique(m.WorkflowTypes, legacy.WorkflowTypes...)
+		if err := json.Unmarshal(raw.Capabilities, &legacyCaps); err != nil {
+			return fmt.Errorf("invalid capabilities object: %w", err)
+		}
+		m.ModuleTypes = appendUnique(m.ModuleTypes, legacyCaps.ModuleTypes...)
+		m.StepTypes = appendUnique(m.StepTypes, legacyCaps.StepTypes...)
+		m.TriggerTypes = appendUnique(m.TriggerTypes, legacyCaps.TriggerTypes...)
+		m.WorkflowTypes = appendUnique(m.WorkflowTypes, legacyCaps.WorkflowTypes...)
 
 	default:
 		return fmt.Errorf("capabilities: unsupported JSON type (expected array or object, got %q)", string(raw.Capabilities))
@@ -169,12 +177,6 @@ func appendUnique(dst []string, values ...string) []string {
 		}
 	}
 	return dst
-}
-
-// Dependency declares a versioned dependency on another plugin.
-type Dependency struct {
-	Name       string `json:"name" yaml:"name"`
-	Constraint string `json:"constraint" yaml:"constraint"` // semver constraint, e.g. ">=1.0.0", "^2.1"
 }
 
 // Validate checks that a manifest has all required fields and valid semver.
