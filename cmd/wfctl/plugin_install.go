@@ -66,7 +66,9 @@ func runPluginSearch(args []string) error {
 
 func runPluginInstall(args []string) error {
 	fs := flag.NewFlagSet("plugin install", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	cfgPath := fs.String("config", "", "Registry config file path")
 	registryName := fs.String("registry", "", "Use a specific registry by name")
 	fs.Usage = func() {
@@ -76,9 +78,10 @@ func runPluginInstall(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+
+	// No args: install all plugins from .wfctl.yaml lockfile.
 	if fs.NArg() < 1 {
-		fs.Usage()
-		return fmt.Errorf("plugin name is required")
+		return installFromLockfile(pluginDirVal, *cfgPath)
 	}
 
 	nameArg := fs.Arg(0)
@@ -108,17 +111,43 @@ func runPluginInstall(args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Fetching manifest for %q...\n", pluginName)
-	manifest, sourceName, err := mr.FetchManifest(pluginName)
-	if err != nil {
-		return err
+	manifest, sourceName, registryErr := mr.FetchManifest(pluginName)
+
+	if registryErr != nil {
+		// Registry lookup failed. Try GitHub direct install if input looks like owner/repo[@version].
+		ghOwner, ghRepo, ghVersion, isGH := parseGitHubRef(nameArg)
+		if !isGH {
+			return registryErr
+		}
+		pluginName = normalizePluginName(ghRepo)
+		destDir := filepath.Join(pluginDirVal, pluginName)
+		if err := installFromGitHub(ghOwner, ghRepo, ghVersion, destDir); err != nil {
+			return fmt.Errorf("registry: %w; github: %w", registryErr, err)
+		}
+		if err := ensurePluginBinary(destDir, pluginName); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not normalize binary name: %v\n", err)
+		}
+		fmt.Printf("Installed %s to %s\n", nameArg, destDir)
+		return nil
 	}
+
 	fmt.Fprintf(os.Stderr, "Found in registry %q.\n", sourceName)
 
-	return installPluginFromManifest(*dataDir, pluginName, manifest)
+	if err := installPluginFromManifest(pluginDirVal, pluginName, manifest); err != nil {
+		return err
+	}
+
+	// Update .wfctl.yaml lockfile if name@version was provided.
+	if _, ver := parseNameVersion(nameArg); ver != "" {
+		updateLockfile(manifest.Name, manifest.Version, manifest.Repository)
+	}
+
+	return nil
 }
 
 // installPluginFromManifest downloads, extracts, and installs a plugin using the
 // provided registry manifest. It is shared by runPluginInstall and runPluginUpdate.
+// The plugin.json is always written/updated from the manifest to keep version tracking correct.
 func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryManifest) error {
 	dl, err := manifest.FindDownload(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
@@ -154,12 +183,12 @@ func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryMan
 		fmt.Fprintf(os.Stderr, "warning: could not normalize binary name: %v\n", err)
 	}
 
-	// Write a minimal plugin.json if not already present (records version).
+	// Write plugin.json from the registry manifest. This keeps the installed
+	// version metadata in sync with the manifest. If the tarball already
+	// extracted a plugin.json, this overwrites it with the registry version.
 	pluginJSONPath := filepath.Join(destDir, "plugin.json")
-	if _, err := os.Stat(pluginJSONPath); os.IsNotExist(err) {
-		if writeErr := writeInstalledManifest(pluginJSONPath, manifest); writeErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not write plugin.json: %v\n", writeErr)
-		}
+	if writeErr := writeInstalledManifest(pluginJSONPath, manifest); writeErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not write plugin.json: %v\n", writeErr)
 	}
 
 	// Verify the installed plugin.json is valid for ExternalPluginManager.
@@ -174,7 +203,9 @@ func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryMan
 
 func runPluginList(args []string) error {
 	fs := flag.NewFlagSet("plugin list", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin list [options]\n\nList installed plugins.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -183,13 +214,13 @@ func runPluginList(args []string) error {
 		return err
 	}
 
-	entries, err := os.ReadDir(*dataDir)
+	entries, err := os.ReadDir(pluginDirVal)
 	if os.IsNotExist(err) {
 		fmt.Println("No plugins installed.")
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("read data dir %s: %w", *dataDir, err)
+		return fmt.Errorf("read data dir %s: %w", pluginDirVal, err)
 	}
 
 	type installed struct {
@@ -203,7 +234,7 @@ func runPluginList(args []string) error {
 		if !e.IsDir() {
 			continue
 		}
-		ver, pType, desc := readInstalledInfo(filepath.Join(*dataDir, e.Name()))
+		ver, pType, desc := readInstalledInfo(filepath.Join(pluginDirVal, e.Name()))
 		plugins = append(plugins, installed{name: e.Name(), version: ver, pluginType: pType, description: desc})
 	}
 
@@ -226,7 +257,9 @@ func runPluginList(args []string) error {
 
 func runPluginUpdate(args []string) error {
 	fs := flag.NewFlagSet("plugin update", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	cfgPath := fs.String("config", "", "Registry config file path")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin update [options] <name>\n\nUpdate an installed plugin to its latest version.\n\nOptions:\n")
@@ -241,7 +274,7 @@ func runPluginUpdate(args []string) error {
 	}
 
 	pluginName := fs.Arg(0)
-	pluginDir := filepath.Join(*dataDir, pluginName)
+	pluginDir := filepath.Join(pluginDirVal, pluginName)
 	if _, err := os.Stat(pluginDir); os.IsNotExist(err) {
 		return fmt.Errorf("plugin %q is not installed", pluginName)
 	}
@@ -267,7 +300,13 @@ func runPluginUpdate(args []string) error {
 	manifest, sourceName, registryErr := mr.FetchManifest(pluginName)
 	if registryErr == nil {
 		fmt.Fprintf(os.Stderr, "Found in registry %q.\n", sourceName)
-		return installPluginFromManifest(*dataDir, pluginName, manifest)
+		installedVer := readInstalledVersion(pluginDir)
+		if installedVer == manifest.Version {
+			fmt.Printf("already at latest version (%s)\n", manifest.Version)
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
+		return installPluginFromManifest(pluginDirVal, pluginName, manifest)
 	}
 
 	// Registry lookup failed. If the plugin's manifest declares a repository
@@ -278,7 +317,17 @@ func runPluginUpdate(args []string) error {
 		if err != nil {
 			return fmt.Errorf("registry lookup failed (%v); repository fallback also failed: %w", registryErr, err)
 		}
-		return installPluginFromManifest(*dataDir, pluginName, manifest)
+		// Validate that the fetched manifest is for the plugin we're updating.
+		if manifest.Name != pluginName {
+			return fmt.Errorf("manifest name %q does not match plugin %q; refusing to update to prevent installing the wrong plugin", manifest.Name, pluginName)
+		}
+		installedVer := readInstalledVersion(pluginDir)
+		if installedVer == manifest.Version {
+			fmt.Printf("already at latest version (%s)\n", manifest.Version)
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
+		return installPluginFromManifest(pluginDirVal, pluginName, manifest)
 	}
 
 	return registryErr
@@ -286,7 +335,9 @@ func runPluginUpdate(args []string) error {
 
 func runPluginRemove(args []string) error {
 	fs := flag.NewFlagSet("plugin remove", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin remove [options] <name>\n\nUninstall a plugin.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -300,7 +351,7 @@ func runPluginRemove(args []string) error {
 	}
 
 	pluginName := fs.Arg(0)
-	pluginDir := filepath.Join(*dataDir, pluginName)
+	pluginDir := filepath.Join(pluginDirVal, pluginName)
 	if _, err := os.Stat(pluginDir); os.IsNotExist(err) {
 		return fmt.Errorf("plugin %q is not installed", pluginName)
 	}
@@ -313,7 +364,9 @@ func runPluginRemove(args []string) error {
 
 func runPluginInfo(args []string) error {
 	fs := flag.NewFlagSet("plugin info", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin info [options] <name>\n\nShow details about an installed plugin.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -327,8 +380,9 @@ func runPluginInfo(args []string) error {
 	}
 
 	pluginName := fs.Arg(0)
-	pluginDir := filepath.Join(*dataDir, pluginName)
-	manifestPath := filepath.Join(pluginDir, "plugin.json")
+	pluginDir := filepath.Join(pluginDirVal, pluginName)
+	absDir, _ := filepath.Abs(pluginDir)
+	manifestPath := filepath.Join(absDir, "plugin.json")
 
 	data, err := os.ReadFile(manifestPath)
 	if os.IsNotExist(err) {
@@ -373,7 +427,7 @@ func runPluginInfo(args []string) error {
 	}
 
 	// Check binary status.
-	binaryPath := filepath.Join(pluginDir, pluginName)
+	binaryPath := filepath.Join(absDir, pluginName)
 	if info, statErr := os.Stat(binaryPath); statErr == nil {
 		fmt.Printf("Binary:       %s (%d bytes)\n", binaryPath, info.Size())
 		if info.Mode()&0111 != 0 {
@@ -409,6 +463,10 @@ func downloadURL(url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+// rawGitHubContentBaseURL is the base URL for raw GitHub content. It is a
+// package-level variable so tests can override it to point at a local server.
+var rawGitHubContentBaseURL = "https://raw.githubusercontent.com"
+
 // fetchManifestFromRepoURL fetches a plugin's manifest.json directly from its
 // GitHub repository. It expects the repository URL in the form
 // https://github.com/{owner}/{repo} and looks for a manifest.json at the root
@@ -418,7 +476,7 @@ func fetchManifestFromRepoURL(repoURL string) (*RegistryManifest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse repository URL %q: %w", repoURL, err)
 	}
-	url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/main/manifest.json", owner, repo)
+	url := fmt.Sprintf("%s/%s/%s/main/manifest.json", rawGitHubContentBaseURL, owner, repo)
 	resp, err := http.Get(url) //nolint:gosec // G107: URL constructed from plugin's own repository field
 	if err != nil {
 		return nil, fmt.Errorf("fetch manifest from %q: %w", repoURL, err)
@@ -443,16 +501,26 @@ func fetchManifestFromRepoURL(repoURL string) (*RegistryManifest, error) {
 
 // parseGitHubRepoURL parses a GitHub repository URL and returns the owner and
 // repository name. It accepts URLs in the form https://github.com/{owner}/{repo}
-// (with or without trailing slashes or the https:// scheme).
+// (with or without trailing slash or .git suffix) and rejects URLs with extra
+// path segments (e.g. https://github.com/owner/repo/tree/main).
 func parseGitHubRepoURL(repoURL string) (owner, repo string, err error) {
 	u := strings.TrimPrefix(repoURL, "https://")
 	u = strings.TrimPrefix(u, "http://")
 	u = strings.TrimSuffix(u, "/")
-	parts := strings.SplitN(u, "/", 3)
+	// Split into at most 4 parts to detect extra path segments.
+	parts := strings.SplitN(u, "/", 4)
 	if len(parts) < 3 || parts[0] != "github.com" || parts[1] == "" || parts[2] == "" {
 		return "", "", fmt.Errorf("not a GitHub repository URL: %q (expected https://github.com/owner/repo)", repoURL)
 	}
-	return parts[1], parts[2], nil
+	if len(parts) == 4 {
+		// Extra path segments present (e.g. /tree/main, /blob/main/file.go).
+		return "", "", fmt.Errorf("not a GitHub repository URL: %q (unexpected extra path; expected https://github.com/owner/repo)", repoURL)
+	}
+	repoName := strings.TrimSuffix(parts[2], ".git")
+	if repoName == "" {
+		return "", "", fmt.Errorf("not a GitHub repository URL: %q (expected https://github.com/owner/repo)", repoURL)
+	}
+	return parts[1], repoName, nil
 }
 
 // verifyChecksum checks that data matches the expected SHA256 hex string.
