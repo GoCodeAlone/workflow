@@ -59,6 +59,9 @@ func runRegistryList(args []string) error {
 }
 
 func runRegistryAdd(args []string) error {
+	if err := checkTrailingFlags(args); err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("registry add", flag.ContinueOnError)
 	cfgPath := fs.String("config", "", "Registry config file path (default: ~/.config/wfctl/config.yaml)")
 	regType := fs.String("type", "github", "Registry type (github)")
@@ -121,6 +124,9 @@ func runRegistryAdd(args []string) error {
 }
 
 func runRegistryRemove(args []string) error {
+	if err := checkTrailingFlags(args); err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("registry remove", flag.ContinueOnError)
 	cfgPath := fs.String("config", "", "Registry config file path (default: ~/.config/wfctl/config.yaml)")
 	fs.Usage = func() {

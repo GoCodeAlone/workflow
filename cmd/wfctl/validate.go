@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/schema"
+	"gopkg.in/yaml.v3"
 )
 
 func runValidate(args []string) error {
@@ -60,7 +62,13 @@ Options:
 		if err != nil {
 			return fmt.Errorf("failed to scan directory %s: %w", *dir, err)
 		}
-		files = append(files, found...)
+		for _, f := range found {
+			if !isWorkflowYAML(f) {
+				fmt.Fprintf(os.Stderr, "  Skipping non-workflow file: %s\n", f)
+				continue
+			}
+			files = append(files, f)
+		}
 	}
 
 	files = append(files, fs.Args()...)
@@ -107,9 +115,16 @@ Options:
 }
 
 func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints bool) error {
+	// Read raw YAML to extract imports list for verbose feedback.
+	imports := extractImports(cfgPath)
+
 	cfg, err := config.LoadFromFile(cfgPath)
 	if err != nil {
 		return fmt.Errorf("failed to load: %w", err)
+	}
+
+	if len(imports) > 0 {
+		fmt.Fprintf(os.Stderr, "  Resolved %d import(s): %s\n", len(imports), strings.Join(imports, ", "))
 	}
 
 	var opts []schema.ValidationOption
@@ -156,6 +171,27 @@ var skipFiles = map[string]bool{
 	"dashboard.yaml":      true,
 }
 
+// isWorkflowYAML reports whether the YAML file at path looks like a workflow
+// config by checking the first 100 lines for top-level keys: modules:,
+// workflows:, or pipelines:.
+func isWorkflowYAML(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for i := 0; i < 100 && scanner.Scan(); i++ {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "modules:") ||
+			strings.HasPrefix(line, "workflows:") ||
+			strings.HasPrefix(line, "pipelines:") {
+			return true
+		}
+	}
+	return false
+}
+
 func findYAMLFiles(root string) ([]string, error) {
 	var files []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -179,6 +215,22 @@ func findYAMLFiles(root string) ([]string, error) {
 		return nil
 	})
 	return files, err
+}
+
+// extractImports reads the raw YAML at path and returns the top-level imports: list.
+// Returns nil if the file cannot be read or has no imports.
+func extractImports(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var raw struct {
+		Imports []string `yaml:"imports"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	return raw.Imports
 }
 
 func indentError(err error) string {

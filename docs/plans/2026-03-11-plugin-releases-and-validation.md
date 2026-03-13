@@ -187,7 +187,7 @@ After wave 2 plugins are built, create scenarios 54-59:
 | 54-okta-integration | okta | user CRUD, group membership, app assignment, MFA enrollment, auth server config |
 | 55-datadog-integration | datadog | metric submit/query, monitor CRUD, event creation, log search, SLO lifecycle |
 | 56-launchdarkly-integration | launchdarkly | flag CRUD, project/environment management, segment operations, context evaluation |
-| 57-permit-integration | permit | RBAC check, user/role CRUD, resource management, relationship tuples, condition sets |
+| 57-permit-integration | authz (permit provider) | RBAC check, user/role CRUD, resource management, relationship tuples, condition sets |
 | 58-salesforce-integration | salesforce | record CRUD, SOQL query, bulk operations, composite requests, approval process |
 | 59-openlms-integration | openlms | user/course CRUD, enrollment, grades, quiz lifecycle, assignment submission |
 

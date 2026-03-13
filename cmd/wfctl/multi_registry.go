@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 )
 
 // MultiRegistry aggregates multiple RegistrySource instances and resolves
@@ -41,16 +42,40 @@ func NewMultiRegistryFromSources(sources ...RegistrySource) *MultiRegistry {
 	return &MultiRegistry{sources: sources}
 }
 
+// normalizePluginName strips the "workflow-plugin-" prefix from a plugin name
+// so that users can refer to plugins by their short name (e.g. "authz") or
+// full name (e.g. "workflow-plugin-authz") interchangeably.
+func normalizePluginName(name string) string {
+	return strings.TrimPrefix(name, "workflow-plugin-")
+}
+
 // FetchManifest tries each source in priority order, returning the first successful result.
+// It first tries the normalized name (stripping "workflow-plugin-" prefix); if the
+// normalized name differs from the original, it also tries the original name as a fallback.
 func (m *MultiRegistry) FetchManifest(name string) (*RegistryManifest, string, error) {
+	normalized := normalizePluginName(name)
+
+	// Try normalized name first across all sources.
 	var lastErr error
 	for _, src := range m.sources {
-		manifest, err := src.FetchManifest(name)
+		manifest, err := src.FetchManifest(normalized)
 		if err == nil {
 			return manifest, src.Name(), nil
 		}
 		lastErr = err
 	}
+
+	// If normalized differs from original, try original name as fallback.
+	if normalized != name {
+		for _, src := range m.sources {
+			manifest, err := src.FetchManifest(name)
+			if err == nil {
+				return manifest, src.Name(), nil
+			}
+			lastErr = err
+		}
+	}
+
 	if lastErr != nil {
 		return nil, "", lastErr
 	}
@@ -59,12 +84,14 @@ func (m *MultiRegistry) FetchManifest(name string) (*RegistryManifest, string, e
 
 // SearchPlugins searches all sources and returns deduplicated results.
 // When the same plugin appears in multiple registries, the higher-priority source wins.
+// The query is normalized (stripping "workflow-plugin-" prefix) before searching.
 func (m *MultiRegistry) SearchPlugins(query string) ([]PluginSearchResult, error) {
 	seen := make(map[string]bool)
 	var results []PluginSearchResult
 
+	normalizedQuery := normalizePluginName(query)
 	for _, src := range m.sources {
-		srcResults, err := src.SearchPlugins(query)
+		srcResults, err := src.SearchPlugins(normalizedQuery)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: search failed for registry %q: %v\n", src.Name(), err)
 			continue

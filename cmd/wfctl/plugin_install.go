@@ -66,7 +66,9 @@ func runPluginSearch(args []string) error {
 
 func runPluginInstall(args []string) error {
 	fs := flag.NewFlagSet("plugin install", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	cfgPath := fs.String("config", "", "Registry config file path")
 	registryName := fs.String("registry", "", "Use a specific registry by name")
 	fs.Usage = func() {
@@ -76,9 +78,11 @@ func runPluginInstall(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	dataDir := &pluginDirVal
+
+	// No args: install all plugins from .wfctl.yaml lockfile.
 	if fs.NArg() < 1 {
-		fs.Usage()
-		return fmt.Errorf("plugin name is required")
+		return installFromLockfile(*dataDir, *cfgPath)
 	}
 
 	nameArg := fs.Arg(0)
@@ -108,10 +112,28 @@ func runPluginInstall(args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Fetching manifest for %q...\n", pluginName)
-	manifest, sourceName, err := mr.FetchManifest(pluginName)
-	if err != nil {
-		return err
+	manifest, sourceName, registryErr := mr.FetchManifest(pluginName)
+
+	if registryErr != nil {
+		// Registry lookup failed. Try GitHub direct install if input looks like owner/repo[@version].
+		ghOwner, ghRepo, ghVersion, isGH := parseGitHubRef(nameArg)
+		if !isGH {
+			return registryErr
+		}
+		pluginName = normalizePluginName(ghRepo)
+		destDir := filepath.Join(*dataDir, pluginName)
+		if err := installFromGitHub(ghOwner, ghRepo, ghVersion, destDir); err != nil {
+			return fmt.Errorf("registry: %w; github: %w", registryErr, err)
+		}
+		if err := ensurePluginBinary(destDir, pluginName); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not normalize binary name: %v\n", err)
+		}
+		fmt.Printf("Installed %s to %s\n", nameArg, destDir)
+		return nil
 	}
+
+	destDir := filepath.Join(*dataDir, pluginName)
+
 	fmt.Fprintf(os.Stderr, "Found in registry %q.\n", sourceName)
 
 	dl, err := manifest.FindDownload(runtime.GOOS, runtime.GOARCH)
@@ -119,7 +141,6 @@ func runPluginInstall(args []string) error {
 		return err
 	}
 
-	destDir := filepath.Join(*dataDir, pluginName)
 	if err := os.MkdirAll(destDir, 0750); err != nil {
 		return fmt.Errorf("create plugin dir %s: %w", destDir, err)
 	}
@@ -163,12 +184,20 @@ func runPluginInstall(args []string) error {
 	}
 
 	fmt.Printf("Installed %s v%s to %s\n", manifest.Name, manifest.Version, destDir)
+
+	// Update .wfctl.yaml lockfile if name@version was provided.
+	if _, ver := parseNameVersion(nameArg); ver != "" {
+		updateLockfile(manifest.Name, manifest.Version, manifest.Repository)
+	}
+
 	return nil
 }
 
 func runPluginList(args []string) error {
 	fs := flag.NewFlagSet("plugin list", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin list [options]\n\nList installed plugins.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -177,13 +206,13 @@ func runPluginList(args []string) error {
 		return err
 	}
 
-	entries, err := os.ReadDir(*dataDir)
+	entries, err := os.ReadDir(pluginDirVal)
 	if os.IsNotExist(err) {
 		fmt.Println("No plugins installed.")
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("read data dir %s: %w", *dataDir, err)
+		return fmt.Errorf("read data dir %s: %w", pluginDirVal, err)
 	}
 
 	type installed struct {
@@ -197,7 +226,7 @@ func runPluginList(args []string) error {
 		if !e.IsDir() {
 			continue
 		}
-		ver, pType, desc := readInstalledInfo(filepath.Join(*dataDir, e.Name()))
+		ver, pType, desc := readInstalledInfo(filepath.Join(pluginDirVal, e.Name()))
 		plugins = append(plugins, installed{name: e.Name(), version: ver, pluginType: pType, description: desc})
 	}
 
@@ -220,7 +249,10 @@ func runPluginList(args []string) error {
 
 func runPluginUpdate(args []string) error {
 	fs := flag.NewFlagSet("plugin update", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
+	cfgPath := fs.String("config", "", "Registry config file path")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin update [options] <name>\n\nUpdate an installed plugin to its latest version.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -234,18 +266,38 @@ func runPluginUpdate(args []string) error {
 	}
 
 	pluginName := fs.Arg(0)
-	pluginDir := filepath.Join(*dataDir, pluginName)
+	pluginDir := filepath.Join(pluginDirVal, pluginName)
 	if _, err := os.Stat(pluginDir); os.IsNotExist(err) {
 		return fmt.Errorf("plugin %q is not installed", pluginName)
 	}
 
+	// Check the registry for the latest version before downloading.
+	cfg, err := LoadRegistryConfig(*cfgPath)
+	if err != nil {
+		return fmt.Errorf("load registry config: %w", err)
+	}
+	mr := NewMultiRegistry(cfg)
+	manifest, _, err := mr.FetchManifest(pluginName)
+	if err != nil {
+		return fmt.Errorf("fetch manifest: %w", err)
+	}
+
+	installedVer := readInstalledVersion(pluginDir)
+	if installedVer == manifest.Version {
+		fmt.Printf("already at latest version (%s)\n", manifest.Version)
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
+
 	// Re-run install which will overwrite the existing installation.
-	return runPluginInstall(append([]string{"--data-dir", *dataDir}, pluginName))
+	return runPluginInstall(append([]string{"--plugin-dir", pluginDirVal, "--config", *cfgPath}, pluginName))
 }
 
 func runPluginRemove(args []string) error {
 	fs := flag.NewFlagSet("plugin remove", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin remove [options] <name>\n\nUninstall a plugin.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -259,7 +311,7 @@ func runPluginRemove(args []string) error {
 	}
 
 	pluginName := fs.Arg(0)
-	pluginDir := filepath.Join(*dataDir, pluginName)
+	pluginDir := filepath.Join(pluginDirVal, pluginName)
 	if _, err := os.Stat(pluginDir); os.IsNotExist(err) {
 		return fmt.Errorf("plugin %q is not installed", pluginName)
 	}
@@ -272,7 +324,9 @@ func runPluginRemove(args []string) error {
 
 func runPluginInfo(args []string) error {
 	fs := flag.NewFlagSet("plugin info", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin info [options] <name>\n\nShow details about an installed plugin.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -286,8 +340,9 @@ func runPluginInfo(args []string) error {
 	}
 
 	pluginName := fs.Arg(0)
-	pluginDir := filepath.Join(*dataDir, pluginName)
-	manifestPath := filepath.Join(pluginDir, "plugin.json")
+	pluginDir := filepath.Join(pluginDirVal, pluginName)
+	absDir, _ := filepath.Abs(pluginDir)
+	manifestPath := filepath.Join(absDir, "plugin.json")
 
 	data, err := os.ReadFile(manifestPath)
 	if os.IsNotExist(err) {
@@ -332,7 +387,7 @@ func runPluginInfo(args []string) error {
 	}
 
 	// Check binary status.
-	binaryPath := filepath.Join(pluginDir, pluginName)
+	binaryPath := filepath.Join(absDir, pluginName)
 	if info, statErr := os.Stat(binaryPath); statErr == nil {
 		fmt.Printf("Binary:       %s (%d bytes)\n", binaryPath, info.Size())
 		if info.Mode()&0111 != 0 {
