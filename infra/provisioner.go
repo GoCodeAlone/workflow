@@ -291,21 +291,42 @@ func (p *Provisioner) provisionResource(ctx context.Context, rc ResourceConfig) 
 	return nil
 }
 
-// destroyResource removes a resource from the internal store.
+// destroyResource delegates to the matching provider then removes from internal store.
 func (p *Provisioner) destroyResource(ctx context.Context, name string) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled before destroy %q: %w", name, err)
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	res, exists := p.resources[name]
 	if !exists {
+		p.mu.Unlock()
 		return fmt.Errorf("resource %q not found", name)
 	}
 
 	res.Status = "destroying"
+	rc := res.Config
+	p.mu.Unlock()
+
+	// Delegate to the matching provider (mirror of provisionResource).
+	for _, prov := range p.providers {
+		if prov.Supports(rc.Type, rc.Provider) {
+			if err := prov.Destroy(ctx, name); err != nil {
+				p.mu.Lock()
+				if r, ok := p.resources[name]; ok {
+					r.Status = "failed"
+					r.Error = err.Error()
+				}
+				p.mu.Unlock()
+				return err
+			}
+			break
+		}
+	}
+
+	p.mu.Lock()
 	delete(p.resources, name)
+	p.mu.Unlock()
 
 	p.logger.Info("resource destroyed", "name", name)
 	return nil
