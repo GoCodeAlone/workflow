@@ -79,9 +79,10 @@ func runPluginInstall(args []string) error {
 		return err
 	}
 	dataDir := &pluginDirVal
+
+	// No args: install all plugins from .wfctl.yaml lockfile.
 	if fs.NArg() < 1 {
-		fs.Usage()
-		return fmt.Errorf("plugin name is required")
+		return installFromLockfile(*dataDir, *cfgPath)
 	}
 
 	nameArg := fs.Arg(0)
@@ -182,6 +183,12 @@ func runPluginInstall(args []string) error {
 	}
 
 	fmt.Printf("Installed %s v%s to %s\n", manifest.Name, manifest.Version, destDir)
+
+	// Update .wfctl.yaml lockfile if name@version was provided.
+	if _, ver := parseNameVersion(nameArg); ver != "" {
+		updateLockfile(manifest.Name, manifest.Version, manifest.Repository)
+	}
+
 	return nil
 }
 
