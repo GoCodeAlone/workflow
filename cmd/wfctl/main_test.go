@@ -2,6 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +12,23 @@ import (
 
 	"github.com/GoCodeAlone/workflow/schema"
 )
+
+func TestHelpFlagDoesNotLeakEngineError(t *testing.T) {
+	if !isHelpRequested(flag.ErrHelp) {
+		t.Error("isHelpRequested should return true for flag.ErrHelp")
+	}
+	if isHelpRequested(nil) {
+		t.Error("isHelpRequested should return false for nil")
+	}
+	if isHelpRequested(errors.New("some other error")) {
+		t.Error("isHelpRequested should return false for unrelated errors")
+	}
+	// Wrapped error should also be detected
+	wrapped := fmt.Errorf("pipeline failed: %w", flag.ErrHelp)
+	if !isHelpRequested(wrapped) {
+		t.Error("isHelpRequested should return true for wrapped flag.ErrHelp")
+	}
+}
 
 func writeTestConfig(t *testing.T, dir, name, content string) string {
 	t.Helper()

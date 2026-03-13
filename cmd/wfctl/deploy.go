@@ -132,6 +132,9 @@ Options:
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if *config == "" && fs.NArg() > 0 {
+		*config = fs.Arg(0)
+	}
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -417,6 +420,9 @@ func runK8sGenerate(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if f.configFile == "" && fs.NArg() > 0 {
+		f.configFile = fs.Arg(0)
+	}
 	if f.image == "" {
 		return fmt.Errorf("-image is required")
 	}
@@ -469,6 +475,9 @@ func runK8sApply(args []string) error {
 	registry := fs.String("registry", "", "Registry for remote clusters (e.g. ghcr.io/org)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if f.configFile == "" && fs.NArg() > 0 {
+		f.configFile = fs.Arg(0)
 	}
 
 	// Load .wfctl.yaml defaults for build settings
@@ -778,6 +787,9 @@ Options:
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *configFile == "" && fs.NArg() > 0 {
+		*configFile = fs.Arg(0)
 	}
 
 	if *target != "" && *target != "staging" && *target != "production" {

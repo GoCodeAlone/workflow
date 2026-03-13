@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +27,17 @@ import (
 var wfctlConfigBytes []byte
 
 var version = "dev"
+
+// isHelpRequested reports whether the error originated from the user
+// requesting help (--help / -h). flag.ErrHelp propagates through the
+// pipeline engine as a step failure; catching it here lets us exit 0
+// instead of printing a confusing "error: flag: help requested" message.
+func isHelpRequested(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "flag: help requested")
+}
 
 // commands maps each CLI command name to its Go implementation. The command
 // metadata (name, description) is declared in wfctl.yaml; this map provides
@@ -131,9 +143,9 @@ func main() {
 	cliHandler.SetOutput(os.Stderr)
 
 	if len(os.Args) < 2 {
-		// No subcommand — print usage and exit non-zero.
+		// No subcommand — print usage and exit 0 (help is not an error).
 		_ = cliHandler.Dispatch([]string{"-h"})
-		os.Exit(1)
+		os.Exit(0)
 	}
 
 	cmd := os.Args[1]
@@ -155,6 +167,10 @@ func main() {
 	stop()
 
 	if dispatchErr != nil {
+		// If the user requested help, exit cleanly without printing the engine error.
+		if isHelpRequested(dispatchErr) {
+			os.Exit(0)
+		}
 		// The handler already printed routing errors (unknown/missing command).
 		// Only emit the "error:" prefix for actual command execution failures.
 		if _, isKnown := commands[cmd]; isKnown {

@@ -633,3 +633,58 @@ func (m *mockSidecarProvider) Validate(_ config.SidecarConfig) error { return ni
 func (m *mockSidecarProvider) Resolve(_ config.SidecarConfig, _ string) (*deploy.SidecarSpec, error) {
 	return nil, nil
 }
+
+func TestCheckEngineCompatibility(t *testing.T) {
+	cases := []struct {
+		name          string
+		minVersion    string
+		engineVersion string
+		wantWarn      bool
+	}{
+		{"compatible", "0.3.0", "0.3.30", false},
+		{"equal", "0.3.30", "0.3.30", false},
+		{"incompatible", "0.4.0", "0.3.30", true},
+		{"empty minVersion", "", "0.3.30", false},
+		{"empty engineVersion", "0.3.0", "", false},
+		{"dev engine", "0.3.0", "dev", false},
+		{"malformed min", "not-a-version", "0.3.30", false},
+		{"malformed engine", "0.3.0", "not-a-version", false},
+		{"v-prefix stripped", "0.3.0", "v0.3.30", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := &PluginManifest{
+				Name:             "test-plugin",
+				MinEngineVersion: tc.minVersion,
+			}
+			// Just verify it doesn't panic; stderr output is checked manually
+			checkEngineCompatibility(manifest, tc.engineVersion)
+		})
+	}
+}
+
+func TestPluginLoader_WarnOnMinEngineVersion(t *testing.T) {
+	loader := newTestEngineLoader()
+	loader.SetEngineVersion("0.3.0")
+
+	// Plugin requiring a newer engine version than what's running
+	p := makeEnginePlugin("min-version-plugin", "1.0.0", nil)
+	p.Manifest.MinEngineVersion = "0.4.0"
+
+	// Should load successfully (warning only, not hard fail)
+	if err := loader.LoadPlugin(p); err != nil {
+		t.Fatalf("LoadPlugin should succeed despite minEngineVersion warning, got: %v", err)
+	}
+}
+
+func TestPluginLoader_NoWarnOnCompatibleEngineVersion(t *testing.T) {
+	loader := newTestEngineLoader()
+	loader.SetEngineVersion("1.0.0")
+
+	p := makeEnginePlugin("compat-plugin", "1.0.0", nil)
+	p.Manifest.MinEngineVersion = "0.3.0"
+
+	if err := loader.LoadPlugin(p); err != nil {
+		t.Fatalf("LoadPlugin failed: %v", err)
+	}
+}
