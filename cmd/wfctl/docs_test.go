@@ -954,13 +954,19 @@ func writeTempWorkflowFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
-// TestDocsApplicationConfig verifies that docs can be generated from an
-// ApplicationConfig that embeds multiple workflow YAML files, and that all
-// content from those files appears in the generated documentation.
-func TestDocsApplicationConfig(t *testing.T) {
+// appConfigFixture holds paths set up by buildAppConfigFixture.
+type appConfigFixture struct {
+	appCfgPath string
+	outDir     string
+}
+
+// buildAppConfigFixture creates a temp directory tree with the chimera-platform
+// ApplicationConfig fixture (api + jobs workflow files) and returns the paths
+// needed by individual test cases.
+func buildAppConfigFixture(t *testing.T) appConfigFixture {
+	t.Helper()
 	dir := t.TempDir()
 
-	// Write sub-workflow files
 	apiDir := filepath.Join(dir, "api")
 	jobsDir := filepath.Join(dir, "jobs")
 	if err := os.MkdirAll(apiDir, 0750); err != nil {
@@ -972,8 +978,7 @@ func TestDocsApplicationConfig(t *testing.T) {
 	writeTempWorkflowFile(t, apiDir, "api.yaml", docsAPIWorkflowConfig)
 	writeTempWorkflowFile(t, jobsDir, "application.yaml", docsJobsWorkflowConfig)
 
-	// Write the ApplicationConfig that references both workflow files
-	appConfig := `
+	const appConfig = `
 application:
   name: chimera-platform
   workflows:
@@ -987,16 +992,27 @@ application:
 		t.Fatal(err)
 	}
 
-	outDir := filepath.Join(dir, "docs")
-	if err := runDocsGenerate([]string{"-output", outDir, appCfgPath}); err != nil {
+	return appConfigFixture{
+		appCfgPath: appCfgPath,
+		outDir:     filepath.Join(dir, "docs"),
+	}
+}
+
+// TestDocsApplicationConfig verifies that docs can be generated from an
+// ApplicationConfig that embeds multiple workflow YAML files, and that all
+// content from those files appears in the generated documentation.
+func TestDocsApplicationConfig(t *testing.T) {
+	f := buildAppConfigFixture(t)
+
+	if err := runDocsGenerate([]string{"-output", f.outDir, f.appCfgPath}); err != nil {
 		t.Fatalf("docs generate failed for ApplicationConfig: %v", err)
 	}
 
 	// All main doc files should be created
-	for _, f := range []string{"README.md", "modules.md", "pipelines.md", "workflows.md", "architecture.md"} {
-		path := filepath.Join(outDir, f)
+	for _, name := range []string{"README.md", "modules.md", "pipelines.md", "workflows.md", "architecture.md"} {
+		path := filepath.Join(f.outDir, name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			t.Errorf("expected %s to be created for ApplicationConfig", f)
+			t.Errorf("expected %s to be created for ApplicationConfig", name)
 		}
 	}
 }
@@ -1004,39 +1020,13 @@ application:
 // TestDocsApplicationConfigReadme checks that the README lists the application
 // name and the embedded workflow files.
 func TestDocsApplicationConfigReadme(t *testing.T) {
-	dir := t.TempDir()
+	f := buildAppConfigFixture(t)
 
-	apiDir := filepath.Join(dir, "api")
-	jobsDir := filepath.Join(dir, "jobs")
-	if err := os.MkdirAll(apiDir, 0750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(jobsDir, 0750); err != nil {
-		t.Fatal(err)
-	}
-	writeTempWorkflowFile(t, apiDir, "api.yaml", docsAPIWorkflowConfig)
-	writeTempWorkflowFile(t, jobsDir, "application.yaml", docsJobsWorkflowConfig)
-
-	appConfig := `
-application:
-  name: chimera-platform
-  workflows:
-    - file: ./api/api.yaml
-      name: api
-    - file: ./jobs/application.yaml
-      name: jobs
-`
-	appCfgPath := filepath.Join(dir, "app.yaml")
-	if err := os.WriteFile(appCfgPath, []byte(appConfig), 0640); err != nil {
-		t.Fatal(err)
-	}
-
-	outDir := filepath.Join(dir, "docs")
-	if err := runDocsGenerate([]string{"-output", outDir, appCfgPath}); err != nil {
+	if err := runDocsGenerate([]string{"-output", f.outDir, f.appCfgPath}); err != nil {
 		t.Fatalf("docs generate failed: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(outDir, "README.md"))
+	data, err := os.ReadFile(filepath.Join(f.outDir, "README.md"))
 	if err != nil {
 		t.Fatalf("failed to read README.md: %v", err)
 	}
@@ -1067,39 +1057,13 @@ application:
 // TestDocsApplicationConfigModules checks that modules from all embedded
 // workflow files appear in modules.md.
 func TestDocsApplicationConfigModules(t *testing.T) {
-	dir := t.TempDir()
+	f := buildAppConfigFixture(t)
 
-	apiDir := filepath.Join(dir, "api")
-	jobsDir := filepath.Join(dir, "jobs")
-	if err := os.MkdirAll(apiDir, 0750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(jobsDir, 0750); err != nil {
-		t.Fatal(err)
-	}
-	writeTempWorkflowFile(t, apiDir, "api.yaml", docsAPIWorkflowConfig)
-	writeTempWorkflowFile(t, jobsDir, "application.yaml", docsJobsWorkflowConfig)
-
-	appConfig := `
-application:
-  name: chimera-platform
-  workflows:
-    - file: ./api/api.yaml
-      name: api
-    - file: ./jobs/application.yaml
-      name: jobs
-`
-	appCfgPath := filepath.Join(dir, "app.yaml")
-	if err := os.WriteFile(appCfgPath, []byte(appConfig), 0640); err != nil {
-		t.Fatal(err)
-	}
-
-	outDir := filepath.Join(dir, "docs")
-	if err := runDocsGenerate([]string{"-output", outDir, appCfgPath}); err != nil {
+	if err := runDocsGenerate([]string{"-output", f.outDir, f.appCfgPath}); err != nil {
 		t.Fatalf("docs generate failed: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(outDir, "modules.md"))
+	data, err := os.ReadFile(filepath.Join(f.outDir, "modules.md"))
 	if err != nil {
 		t.Fatalf("failed to read modules.md: %v", err)
 	}
@@ -1122,39 +1086,13 @@ application:
 // TestDocsApplicationConfigWorkflows checks that workflows from all embedded
 // files appear in workflows.md.
 func TestDocsApplicationConfigWorkflows(t *testing.T) {
-	dir := t.TempDir()
+	f := buildAppConfigFixture(t)
 
-	apiDir := filepath.Join(dir, "api")
-	jobsDir := filepath.Join(dir, "jobs")
-	if err := os.MkdirAll(apiDir, 0750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(jobsDir, 0750); err != nil {
-		t.Fatal(err)
-	}
-	writeTempWorkflowFile(t, apiDir, "api.yaml", docsAPIWorkflowConfig)
-	writeTempWorkflowFile(t, jobsDir, "application.yaml", docsJobsWorkflowConfig)
-
-	appConfig := `
-application:
-  name: chimera-platform
-  workflows:
-    - file: ./api/api.yaml
-      name: api
-    - file: ./jobs/application.yaml
-      name: jobs
-`
-	appCfgPath := filepath.Join(dir, "app.yaml")
-	if err := os.WriteFile(appCfgPath, []byte(appConfig), 0640); err != nil {
-		t.Fatal(err)
-	}
-
-	outDir := filepath.Join(dir, "docs")
-	if err := runDocsGenerate([]string{"-output", outDir, appCfgPath}); err != nil {
+	if err := runDocsGenerate([]string{"-output", f.outDir, f.appCfgPath}); err != nil {
 		t.Fatalf("docs generate failed: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(outDir, "workflows.md"))
+	data, err := os.ReadFile(filepath.Join(f.outDir, "workflows.md"))
 	if err != nil {
 		t.Fatalf("failed to read workflows.md: %v", err)
 	}
@@ -1185,39 +1123,13 @@ application:
 // TestDocsApplicationConfigPipelines checks that pipelines from all embedded
 // files appear in pipelines.md.
 func TestDocsApplicationConfigPipelines(t *testing.T) {
-	dir := t.TempDir()
+	f := buildAppConfigFixture(t)
 
-	apiDir := filepath.Join(dir, "api")
-	jobsDir := filepath.Join(dir, "jobs")
-	if err := os.MkdirAll(apiDir, 0750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(jobsDir, 0750); err != nil {
-		t.Fatal(err)
-	}
-	writeTempWorkflowFile(t, apiDir, "api.yaml", docsAPIWorkflowConfig)
-	writeTempWorkflowFile(t, jobsDir, "application.yaml", docsJobsWorkflowConfig)
-
-	appConfig := `
-application:
-  name: chimera-platform
-  workflows:
-    - file: ./api/api.yaml
-      name: api
-    - file: ./jobs/application.yaml
-      name: jobs
-`
-	appCfgPath := filepath.Join(dir, "app.yaml")
-	if err := os.WriteFile(appCfgPath, []byte(appConfig), 0640); err != nil {
-		t.Fatal(err)
-	}
-
-	outDir := filepath.Join(dir, "docs")
-	if err := runDocsGenerate([]string{"-output", outDir, appCfgPath}); err != nil {
+	if err := runDocsGenerate([]string{"-output", f.outDir, f.appCfgPath}); err != nil {
 		t.Fatalf("docs generate failed: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(outDir, "pipelines.md"))
+	data, err := os.ReadFile(filepath.Join(f.outDir, "pipelines.md"))
 	if err != nil {
 		t.Fatalf("failed to read pipelines.md: %v", err)
 	}
@@ -1251,7 +1163,7 @@ func TestDocsApplicationConfigTitleOverride(t *testing.T) {
 	}
 	writeTempWorkflowFile(t, apiDir, "api.yaml", docsAPIWorkflowConfig)
 
-	appConfig := `
+	const appConfig = `
 application:
   name: chimera-platform
   workflows:
@@ -1277,5 +1189,96 @@ application:
 	}
 	if strings.Contains(string(data), "# chimera-platform") {
 		t.Error("README.md should NOT use the application name when -title is specified")
+	}
+}
+
+// TestDocsApplicationConfigDuplicateWorkflowKey verifies that when two embedded
+// workflow files both define the same workflow key (e.g. both have workflows.http),
+// their list-bearing fields (routes, subscriptions, producers, definitions) are
+// merged/appended rather than the second file silently overwriting the first.
+func TestDocsApplicationConfigDuplicateWorkflowKey(t *testing.T) {
+	dir := t.TempDir()
+
+	// Two workflow files that both contribute http routes
+	const apiV1Config = `
+modules:
+  - name: api-server
+    type: http.server
+    config:
+      address: ":8080"
+  - name: api-router
+    type: http.router
+    dependsOn: [api-server]
+  - name: v1-handler
+    type: http.handler
+    dependsOn: [api-router]
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /v1/resource
+        handler: v1-handler
+
+triggers:
+  http:
+    server: api-server
+`
+
+	const apiV2Config = `
+modules:
+  - name: v2-handler
+    type: http.handler
+
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /v2/resource
+        handler: v2-handler
+`
+
+	v1Dir := filepath.Join(dir, "v1")
+	v2Dir := filepath.Join(dir, "v2")
+	if err := os.MkdirAll(v1Dir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(v2Dir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	writeTempWorkflowFile(t, v1Dir, "v1.yaml", apiV1Config)
+	writeTempWorkflowFile(t, v2Dir, "v2.yaml", apiV2Config)
+
+	const appConfig = `
+application:
+  name: multi-version-api
+  workflows:
+    - file: ./v1/v1.yaml
+      name: v1
+    - file: ./v2/v2.yaml
+      name: v2
+`
+	appCfgPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(appCfgPath, []byte(appConfig), 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := filepath.Join(dir, "docs")
+	if err := runDocsGenerate([]string{"-output", outDir, appCfgPath}); err != nil {
+		t.Fatalf("docs generate failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outDir, "workflows.md"))
+	if err != nil {
+		t.Fatalf("failed to read workflows.md: %v", err)
+	}
+	content := string(data)
+
+	// Routes from BOTH workflow files must be present
+	if !strings.Contains(content, "/v1/resource") {
+		t.Error("workflows.md should contain /v1/resource route from v1 workflow file")
+	}
+	if !strings.Contains(content, "/v2/resource") {
+		t.Error("workflows.md should contain /v2/resource route from v2 workflow file (deep merge)")
 	}
 }

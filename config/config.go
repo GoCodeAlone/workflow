@@ -379,6 +379,16 @@ func MergeApplicationConfig(appCfg *ApplicationConfig) (*WorkflowConfig, error) 
 
 		combined.Modules = append(combined.Modules, wfCfg.Modules...)
 		for k, v := range wfCfg.Workflows {
+			if existing, exists := combined.Workflows[k]; exists {
+				dstMap, dstOk := existing.(map[string]any)
+				srcMap, srcOk := v.(map[string]any)
+				if dstOk && srcOk {
+					mergeWorkflowSection(dstMap, srcMap)
+					continue
+				}
+				// Cannot deep-merge (not both maps) — first definition wins.
+				continue
+			}
 			combined.Workflows[k] = v
 		}
 		for k, v := range wfCfg.Triggers {
@@ -395,6 +405,35 @@ func MergeApplicationConfig(appCfg *ApplicationConfig) (*WorkflowConfig, error) 
 	}
 
 	return combined, nil
+}
+
+// mergeWorkflowSection merges src workflow section fields into dst in-place.
+// For known list-bearing keys (routes, subscriptions, producers, definitions),
+// the source list is appended to the destination list so that routes/topics from
+// multiple workflow files are all preserved. For all other keys, the first
+// definition wins (dst is left unchanged).
+func mergeWorkflowSection(dst, src map[string]any) {
+	listKeys := map[string]bool{
+		"routes":        true,
+		"subscriptions": true,
+		"producers":     true,
+		"definitions":   true,
+	}
+	for k, srcVal := range src {
+		if listKeys[k] {
+			srcList, ok := srcVal.([]any)
+			if !ok {
+				continue
+			}
+			if existing, ok := dst[k].([]any); ok {
+				dst[k] = append(existing, srcList...)
+			} else if _, exists := dst[k]; !exists {
+				dst[k] = srcVal
+			}
+		} else if _, exists := dst[k]; !exists {
+			dst[k] = srcVal
+		}
+	}
 }
 
 // NewEmptyWorkflowConfig creates a new empty workflow configuration
