@@ -112,23 +112,48 @@ func (m *PluginManifest) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	// Try the canonical array-of-CapabilityDecl format first.
-	var caps []CapabilityDecl
-	if err := json.Unmarshal(raw.Capabilities, &caps); err == nil {
-		m.Capabilities = caps
-		return nil
-	}
+	// Peek at the first non-whitespace byte to decide which branch to take.
+	// This avoids silently ignoring genuinely invalid values.
+	firstByte := firstNonSpace(raw.Capabilities)
 
-	// Fall back to legacy object format – extract type lists into top-level fields.
-	var legacy legacyCapabilitiesObject
-	if err := json.Unmarshal(raw.Capabilities, &legacy); err == nil {
+	switch firstByte {
+	case 0, 'n':
+		// Empty or JSON null – treat as absent.
+
+	case '[':
+		// Canonical array-of-CapabilityDecl format.
+		var caps []CapabilityDecl
+		if err := json.Unmarshal(raw.Capabilities, &caps); err != nil {
+			return fmt.Errorf("capabilities: %w", err)
+		}
+		m.Capabilities = caps
+
+	case '{':
+		// Legacy object format – extract type lists into top-level fields.
+		var legacy legacyCapabilitiesObject
+		if err := json.Unmarshal(raw.Capabilities, &legacy); err != nil {
+			return fmt.Errorf("capabilities: %w", err)
+		}
 		m.ModuleTypes = appendUnique(m.ModuleTypes, legacy.ModuleTypes...)
 		m.StepTypes = appendUnique(m.StepTypes, legacy.StepTypes...)
 		m.TriggerTypes = appendUnique(m.TriggerTypes, legacy.TriggerTypes...)
 		m.WorkflowTypes = appendUnique(m.WorkflowTypes, legacy.WorkflowTypes...)
+
+	default:
+		return fmt.Errorf("capabilities: unsupported JSON type (expected array or object, got %q)", string(raw.Capabilities))
 	}
-	// Unknown capability format is silently ignored – capabilities is left nil.
+
 	return nil
+}
+
+// firstNonSpace returns the first non-whitespace byte in b, or 0 if b is empty/all-whitespace.
+func firstNonSpace(b []byte) byte {
+	for _, c := range b {
+		if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
+			return c
+		}
+	}
+	return 0
 }
 
 // appendUnique appends values to dst, skipping any that are already present.

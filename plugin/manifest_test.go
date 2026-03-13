@@ -527,3 +527,35 @@ func TestManifestLegacyCapabilitiesObjectFile(t *testing.T) {
 		t.Errorf("StepTypes = %v, want [step.authz_check]", m.StepTypes)
 	}
 }
+
+// TestManifestCapabilitiesInvalidFormat verifies that a plugin.json whose
+// "capabilities" field is neither an array nor an object (e.g. a bare string)
+// is rejected with a descriptive error.
+func TestManifestCapabilitiesInvalidFormat(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+	}{
+		{
+			name: "string value",
+			json: `{"name":"p","version":"1.0.0","author":"A","description":"D","capabilities":"oops"}`,
+		},
+		{
+			name: "numeric value",
+			json: `{"name":"p","version":"1.0.0","author":"A","description":"D","capabilities":42}`,
+		},
+		{
+			name: "boolean value",
+			json: `{"name":"p","version":"1.0.0","author":"A","description":"D","capabilities":true}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var m PluginManifest
+			err := json.Unmarshal([]byte(tc.json), &m)
+			if err == nil {
+				t.Errorf("expected error for capabilities %s, got nil", tc.name)
+			}
+		})
+	}
+}
