@@ -426,86 +426,136 @@ func TestManifestEngineFieldsLoadFromFile(t *testing.T) {
 	}
 }
 
-func TestPluginManifest_LegacyCapabilities(t *testing.T) {
-	// Legacy format: capabilities is a JSON object with configProvider, moduleTypes, etc.
-	legacyJSON := `{
-		"name": "legacy-plugin",
+// TestManifestLegacyCapabilitiesObject verifies that a plugin.json whose
+// "capabilities" field is a plain JSON object (the format used by external
+// plugins such as workflow-plugin-authz) is parsed without error and that the
+// type lists nested inside the object are promoted to the manifest's top-level
+// ModuleTypes/StepTypes/TriggerTypes fields.
+func TestManifestLegacyCapabilitiesObject(t *testing.T) {
+	const legacyJSON = `{
+		"name": "workflow-plugin-authz",
 		"version": "1.0.0",
-		"author": "Test",
-		"description": "Legacy capabilities test",
+		"description": "RBAC authorization plugin using Casbin",
+		"author": "GoCodeAlone",
+		"license": "MIT",
+		"type": "external",
+		"tier": "core",
+		"minEngineVersion": "0.3.11",
+		"keywords": ["authz", "rbac", "casbin", "authorization", "policy"],
+		"homepage": "https://github.com/GoCodeAlone/workflow-plugin-authz",
+		"repository": "https://github.com/GoCodeAlone/workflow-plugin-authz",
 		"capabilities": {
-			"configProvider": true,
-			"moduleTypes": ["test.module"],
-			"stepTypes": ["step.test"],
-			"triggerTypes": ["trigger.test"]
+			"configProvider": false,
+			"moduleTypes": ["authz.casbin"],
+			"stepTypes": [
+				"step.authz_check_casbin",
+				"step.authz_add_policy",
+				"step.authz_remove_policy",
+				"step.authz_role_assign"
+			],
+			"triggerTypes": []
 		}
 	}`
 
 	var m PluginManifest
 	if err := json.Unmarshal([]byte(legacyJSON), &m); err != nil {
-		t.Fatalf("Unmarshal legacy capabilities: %v", err)
+		t.Fatalf("unexpected unmarshal error for legacy capabilities object: %v", err)
 	}
-	if len(m.ModuleTypes) != 1 || m.ModuleTypes[0] != "test.module" {
-		t.Errorf("ModuleTypes = %v, want [test.module]", m.ModuleTypes)
-	}
-	if len(m.StepTypes) != 1 || m.StepTypes[0] != "step.test" {
-		t.Errorf("StepTypes = %v, want [step.test]", m.StepTypes)
-	}
-	if len(m.TriggerTypes) != 1 || m.TriggerTypes[0] != "trigger.test" {
-		t.Errorf("TriggerTypes = %v, want [trigger.test]", m.TriggerTypes)
-	}
-	// Legacy object format should not populate Capabilities slice
+
+	// Capabilities array should be nil / empty – the object format has no CapabilityDecl items.
 	if len(m.Capabilities) != 0 {
-		t.Errorf("Capabilities = %v, want empty for legacy object format", m.Capabilities)
+		t.Errorf("Capabilities = %v, want empty", m.Capabilities)
+	}
+
+	// moduleTypes from the nested object should be promoted to the top level.
+	if len(m.ModuleTypes) != 1 || m.ModuleTypes[0] != "authz.casbin" {
+		t.Errorf("ModuleTypes = %v, want [authz.casbin]", m.ModuleTypes)
+	}
+
+	// stepTypes should be promoted.
+	wantSteps := []string{
+		"step.authz_check_casbin",
+		"step.authz_add_policy",
+		"step.authz_remove_policy",
+		"step.authz_role_assign",
+	}
+	if len(m.StepTypes) != len(wantSteps) {
+		t.Errorf("StepTypes len = %d, want %d; got %v", len(m.StepTypes), len(wantSteps), m.StepTypes)
+	} else {
+		for i, want := range wantSteps {
+			if m.StepTypes[i] != want {
+				t.Errorf("StepTypes[%d] = %q, want %q", i, m.StepTypes[i], want)
+			}
+		}
+	}
+
+	// triggerTypes is an empty array – TriggerTypes should remain nil/empty.
+	if len(m.TriggerTypes) != 0 {
+		t.Errorf("TriggerTypes = %v, want empty", m.TriggerTypes)
 	}
 }
 
-func TestPluginManifest_NewCapabilitiesArrayFormat(t *testing.T) {
-	// New format: capabilities is a JSON array of CapabilityDecl
-	newJSON := `{
-		"name": "new-plugin",
+// TestManifestLegacyCapabilitiesObjectFile verifies that LoadManifest succeeds
+// for a plugin.json that uses the legacy object-style capabilities field.
+func TestManifestLegacyCapabilitiesObjectFile(t *testing.T) {
+	const legacyJSON = `{
+		"name": "workflow-plugin-authz",
 		"version": "1.0.0",
-		"author": "Test",
-		"description": "New capabilities test",
-		"moduleTypes": ["test.module"],
-		"stepTypes": ["step.test"],
-		"capabilities": [{"name": "step.test", "role": "provider"}]
-	}`
-
-	var m PluginManifest
-	if err := json.Unmarshal([]byte(newJSON), &m); err != nil {
-		t.Fatalf("Unmarshal new capabilities: %v", err)
-	}
-	if len(m.Capabilities) != 1 || m.Capabilities[0].Name != "step.test" {
-		t.Errorf("Capabilities = %v, want [{step.test provider 0}]", m.Capabilities)
-	}
-	if len(m.ModuleTypes) != 1 || m.ModuleTypes[0] != "test.module" {
-		t.Errorf("ModuleTypes = %v, want [test.module]", m.ModuleTypes)
-	}
-}
-
-func TestPluginManifest_LegacyCapabilitiesMergesWithTopLevel(t *testing.T) {
-	// Top-level fields should be merged with types from legacy capabilities object
-	legacyJSON := `{
-		"name": "merged-plugin",
-		"version": "1.0.0",
-		"author": "Test",
-		"description": "Merge test",
-		"moduleTypes": ["existing.module"],
+		"description": "RBAC authorization plugin",
+		"author": "GoCodeAlone",
 		"capabilities": {
-			"moduleTypes": ["caps.module"],
-			"stepTypes": ["step.caps"]
+			"moduleTypes": ["authz.casbin"],
+			"stepTypes": ["step.authz_check"],
+			"triggerTypes": []
 		}
 	}`
 
-	var m PluginManifest
-	if err := json.Unmarshal([]byte(legacyJSON), &m); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plugin.json")
+	if err := os.WriteFile(path, []byte(legacyJSON), 0644); err != nil {
+		t.Fatal(err)
 	}
-	if len(m.ModuleTypes) != 2 {
-		t.Errorf("ModuleTypes = %v, want [existing.module caps.module]", m.ModuleTypes)
+
+	m, err := LoadManifest(path)
+	if err != nil {
+		t.Fatalf("LoadManifest error: %v", err)
 	}
-	if len(m.StepTypes) != 1 || m.StepTypes[0] != "step.caps" {
-		t.Errorf("StepTypes = %v, want [step.caps]", m.StepTypes)
+	if len(m.ModuleTypes) != 1 || m.ModuleTypes[0] != "authz.casbin" {
+		t.Errorf("ModuleTypes = %v, want [authz.casbin]", m.ModuleTypes)
+	}
+	if len(m.StepTypes) != 1 || m.StepTypes[0] != "step.authz_check" {
+		t.Errorf("StepTypes = %v, want [step.authz_check]", m.StepTypes)
+	}
+}
+
+// TestManifestCapabilitiesInvalidFormat verifies that a plugin.json whose
+// "capabilities" field is neither an array nor an object (e.g. a bare string)
+// is rejected with a descriptive error.
+func TestManifestCapabilitiesInvalidFormat(t *testing.T) {
+	cases := []struct {
+		name string
+		json string
+	}{
+		{
+			name: "string value",
+			json: `{"name":"p","version":"1.0.0","author":"A","description":"D","capabilities":"oops"}`,
+		},
+		{
+			name: "numeric value",
+			json: `{"name":"p","version":"1.0.0","author":"A","description":"D","capabilities":42}`,
+		},
+		{
+			name: "boolean value",
+			json: `{"name":"p","version":"1.0.0","author":"A","description":"D","capabilities":true}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var m PluginManifest
+			err := json.Unmarshal([]byte(tc.json), &m)
+			if err == nil {
+				t.Errorf("expected error for capabilities %s, got nil", tc.name)
+			}
+		})
 	}
 }
