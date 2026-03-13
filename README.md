@@ -95,7 +95,7 @@ Hybrid AI integration with two providers:
 
 ### Visual Workflow Builder (ReactFlow UI)
 
-- Drag-and-drop node palette with all 48+ module types across categorized sections
+- Drag-and-drop node palette with all 90+ module types across categorized sections
 - Property panel for node configuration with type-specific fields
 - YAML import/export with round-trip fidelity
 - Undo/redo, validation (local + server), Zustand state management
