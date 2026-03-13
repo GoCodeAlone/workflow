@@ -10,6 +10,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/schema"
+	"gopkg.in/yaml.v3"
 )
 
 func runValidate(args []string) error {
@@ -114,9 +115,16 @@ Options:
 }
 
 func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints bool) error {
+	// Read raw YAML to extract imports list for verbose feedback.
+	imports := extractImports(cfgPath)
+
 	cfg, err := config.LoadFromFile(cfgPath)
 	if err != nil {
 		return fmt.Errorf("failed to load: %w", err)
+	}
+
+	if len(imports) > 0 {
+		fmt.Fprintf(os.Stderr, "  Resolved %d import(s): %s\n", len(imports), strings.Join(imports, ", "))
 	}
 
 	var opts []schema.ValidationOption
@@ -207,6 +215,22 @@ func findYAMLFiles(root string) ([]string, error) {
 		return nil
 	})
 	return files, err
+}
+
+// extractImports reads the raw YAML at path and returns the top-level imports: list.
+// Returns nil if the file cannot be read or has no imports.
+func extractImports(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var raw struct {
+		Imports []string `yaml:"imports"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	return raw.Imports
 }
 
 func indentError(err error) string {
