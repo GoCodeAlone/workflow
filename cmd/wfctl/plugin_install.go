@@ -78,11 +78,10 @@ func runPluginInstall(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	dataDir := &pluginDirVal
 
 	// No args: install all plugins from .wfctl.yaml lockfile.
 	if fs.NArg() < 1 {
-		return installFromLockfile(*dataDir, *cfgPath)
+		return installFromLockfile(pluginDirVal, *cfgPath)
 	}
 
 	nameArg := fs.Arg(0)
@@ -121,7 +120,7 @@ func runPluginInstall(args []string) error {
 			return registryErr
 		}
 		pluginName = normalizePluginName(ghRepo)
-		destDir := filepath.Join(*dataDir, pluginName)
+		destDir := filepath.Join(pluginDirVal, pluginName)
 		if err := installFromGitHub(ghOwner, ghRepo, ghVersion, destDir); err != nil {
 			return fmt.Errorf("registry: %w; github: %w", registryErr, err)
 		}
@@ -132,15 +131,30 @@ func runPluginInstall(args []string) error {
 		return nil
 	}
 
-	destDir := filepath.Join(*dataDir, pluginName)
-
 	fmt.Fprintf(os.Stderr, "Found in registry %q.\n", sourceName)
 
+	if err := installPluginFromManifest(pluginDirVal, pluginName, manifest); err != nil {
+		return err
+	}
+
+	// Update .wfctl.yaml lockfile if name@version was provided.
+	if _, ver := parseNameVersion(nameArg); ver != "" {
+		updateLockfile(manifest.Name, manifest.Version, manifest.Repository)
+	}
+
+	return nil
+}
+
+// installPluginFromManifest downloads, extracts, and installs a plugin using the
+// provided registry manifest. It is shared by runPluginInstall and runPluginUpdate.
+// The plugin.json is always written/updated from the manifest to keep version tracking correct.
+func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryManifest) error {
 	dl, err := manifest.FindDownload(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return err
 	}
 
+	destDir := filepath.Join(dataDir, pluginName)
 	if err := os.MkdirAll(destDir, 0750); err != nil {
 		return fmt.Errorf("create plugin dir %s: %w", destDir, err)
 	}
@@ -169,12 +183,12 @@ func runPluginInstall(args []string) error {
 		fmt.Fprintf(os.Stderr, "warning: could not normalize binary name: %v\n", err)
 	}
 
-	// Write a minimal plugin.json if not already present (records version).
+	// Write plugin.json from the registry manifest. This keeps the installed
+	// version metadata in sync with the manifest. If the tarball already
+	// extracted a plugin.json, this overwrites it with the registry version.
 	pluginJSONPath := filepath.Join(destDir, "plugin.json")
-	if _, err := os.Stat(pluginJSONPath); os.IsNotExist(err) {
-		if writeErr := writeInstalledManifest(pluginJSONPath, manifest); writeErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not write plugin.json: %v\n", writeErr)
-		}
+	if writeErr := writeInstalledManifest(pluginJSONPath, manifest); writeErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not write plugin.json: %v\n", writeErr)
 	}
 
 	// Verify the installed plugin.json is valid for ExternalPluginManager.
@@ -184,12 +198,6 @@ func runPluginInstall(args []string) error {
 	}
 
 	fmt.Printf("Installed %s v%s to %s\n", manifest.Name, manifest.Version, destDir)
-
-	// Update .wfctl.yaml lockfile if name@version was provided.
-	if _, ver := parseNameVersion(nameArg); ver != "" {
-		updateLockfile(manifest.Name, manifest.Version, manifest.Repository)
-	}
-
 	return nil
 }
 
@@ -271,26 +279,59 @@ func runPluginUpdate(args []string) error {
 		return fmt.Errorf("plugin %q is not installed", pluginName)
 	}
 
+	// Read the local plugin.json for fallback: if the central registry doesn't
+	// list this plugin, we can try fetching the manifest directly from the
+	// plugin's own repository (the "repository" field in plugin.json).
+	var localRepoURL string
+	if data, err := os.ReadFile(filepath.Join(pluginDir, "plugin.json")); err == nil {
+		var pj installedPluginJSON
+		if json.Unmarshal(data, &pj) == nil {
+			localRepoURL = pj.Repository
+		}
+	}
+
 	// Check the registry for the latest version before downloading.
 	cfg, err := LoadRegistryConfig(*cfgPath)
 	if err != nil {
 		return fmt.Errorf("load registry config: %w", err)
 	}
 	mr := NewMultiRegistry(cfg)
-	manifest, _, err := mr.FetchManifest(pluginName)
-	if err != nil {
-		return fmt.Errorf("fetch manifest: %w", err)
+
+	fmt.Fprintf(os.Stderr, "Fetching manifest for %q...\n", pluginName)
+	manifest, sourceName, registryErr := mr.FetchManifest(pluginName)
+	if registryErr == nil {
+		fmt.Fprintf(os.Stderr, "Found in registry %q.\n", sourceName)
+		installedVer := readInstalledVersion(pluginDir)
+		if installedVer == manifest.Version {
+			fmt.Printf("already at latest version (%s)\n", manifest.Version)
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
+		return installPluginFromManifest(pluginDirVal, pluginName, manifest)
 	}
 
-	installedVer := readInstalledVersion(pluginDir)
-	if installedVer == manifest.Version {
-		fmt.Printf("already at latest version (%s)\n", manifest.Version)
-		return nil
+	// Registry lookup failed. If the plugin's manifest declares a repository
+	// URL, try fetching the manifest directly from there as a fallback.
+	if localRepoURL != "" {
+		fmt.Fprintf(os.Stderr, "Not found in registry. Trying repository URL %q...\n", localRepoURL)
+		manifest, err = fetchManifestFromRepoURL(localRepoURL)
+		if err != nil {
+			return fmt.Errorf("registry lookup failed (%v); repository fallback also failed: %w", registryErr, err)
+		}
+		// Validate that the fetched manifest is for the plugin we're updating.
+		if manifest.Name != pluginName {
+			return fmt.Errorf("manifest name %q does not match plugin %q; refusing to update to prevent installing the wrong plugin", manifest.Name, pluginName)
+		}
+		installedVer := readInstalledVersion(pluginDir)
+		if installedVer == manifest.Version {
+			fmt.Printf("already at latest version (%s)\n", manifest.Version)
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
+		return installPluginFromManifest(pluginDirVal, pluginName, manifest)
 	}
-	fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
 
-	// Re-run install which will overwrite the existing installation.
-	return runPluginInstall(append([]string{"--plugin-dir", pluginDirVal, "--config", *cfgPath}, pluginName))
+	return registryErr
 }
 
 func runPluginRemove(args []string) error {
@@ -431,6 +472,66 @@ func verifyChecksum(data []byte, expected string) error {
 		return fmt.Errorf("checksum mismatch: got %s, want %s", got, expected)
 	}
 	return nil
+}
+
+// rawGitHubContentBaseURL is the base URL for raw GitHub content. It is a
+// package-level variable so tests can override it to point at a local server.
+var rawGitHubContentBaseURL = "https://raw.githubusercontent.com"
+
+// fetchManifestFromRepoURL fetches a plugin's manifest.json directly from its
+// GitHub repository. It expects the repository URL in the form
+// https://github.com/{owner}/{repo} and looks for a manifest.json at the root
+// of the default branch.
+func fetchManifestFromRepoURL(repoURL string) (*RegistryManifest, error) {
+	owner, repo, err := parseGitHubRepoURL(repoURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse repository URL %q: %w", repoURL, err)
+	}
+	url := fmt.Sprintf("%s/%s/%s/main/manifest.json", rawGitHubContentBaseURL, owner, repo)
+	resp, err := http.Get(url) //nolint:gosec // G107: URL constructed from plugin's own repository field
+	if err != nil {
+		return nil, fmt.Errorf("fetch manifest from %q: %w", repoURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("no manifest.json found in repository %q (tried %s)", repoURL, url)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("repository %q returned HTTP %d", repoURL, resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read manifest from %q: %w", repoURL, err)
+	}
+	var m RegistryManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("parse manifest from %q: %w", repoURL, err)
+	}
+	return &m, nil
+}
+
+// parseGitHubRepoURL parses a GitHub repository URL and returns the owner and
+// repository name. It accepts URLs in the form https://github.com/{owner}/{repo}
+// (with or without trailing slash or .git suffix) and rejects URLs with extra
+// path segments (e.g. https://github.com/owner/repo/tree/main).
+func parseGitHubRepoURL(repoURL string) (owner, repo string, err error) {
+	u := strings.TrimPrefix(repoURL, "https://")
+	u = strings.TrimPrefix(u, "http://")
+	u = strings.TrimSuffix(u, "/")
+	// Split into at most 4 parts to detect extra path segments.
+	parts := strings.SplitN(u, "/", 4)
+	if len(parts) < 3 || parts[0] != "github.com" || parts[1] == "" || parts[2] == "" {
+		return "", "", fmt.Errorf("not a GitHub repository URL: %q (expected https://github.com/owner/repo)", repoURL)
+	}
+	if len(parts) == 4 {
+		// Extra path segments present (e.g. /tree/main, /blob/main/file.go).
+		return "", "", fmt.Errorf("not a GitHub repository URL: %q (unexpected extra path; expected https://github.com/owner/repo)", repoURL)
+	}
+	repoName := strings.TrimSuffix(parts[2], ".git")
+	if repoName == "" {
+		return "", "", fmt.Errorf("not a GitHub repository URL: %q (expected https://github.com/owner/repo)", repoURL)
+	}
+	return parts[1], repoName, nil
 }
 
 // extractTarGz decompresses and extracts a .tar.gz archive into destDir.

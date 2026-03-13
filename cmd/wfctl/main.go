@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -174,7 +175,13 @@ func main() {
 		// The handler already printed routing errors (unknown/missing command).
 		// Only emit the "error:" prefix for actual command execution failures.
 		if _, isKnown := commands[cmd]; isKnown {
-			fmt.Fprintf(os.Stderr, "error: %v\n", dispatchErr) //nolint:gosec // G705
+			// Unwrap to the root cause so users see a concise, actionable message
+			// rather than the full pipeline execution chain.
+			rootErr := dispatchErr
+			for errors.Unwrap(rootErr) != nil {
+				rootErr = errors.Unwrap(rootErr)
+			}
+			fmt.Fprintf(os.Stderr, "error: %v\n", rootErr) //nolint:gosec // G705
 		}
 		os.Exit(1)
 	}

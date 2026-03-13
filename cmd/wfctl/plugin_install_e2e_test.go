@@ -574,3 +574,285 @@ func TestDownloadURL(t *testing.T) {
 		}
 	})
 }
+
+// TestParseGitHubRepoURL tests the parseGitHubRepoURL helper.
+func TestParseGitHubRepoURL(t *testing.T) {
+	tests := []struct {
+		input     string
+		wantOwner string
+		wantRepo  string
+		wantErr   bool
+	}{
+		{
+			input:     "https://github.com/GoCodeAlone/workflow-plugin-authz",
+			wantOwner: "GoCodeAlone",
+			wantRepo:  "workflow-plugin-authz",
+		},
+		{
+			input:     "https://github.com/GoCodeAlone/workflow-plugin-authz/",
+			wantOwner: "GoCodeAlone",
+			wantRepo:  "workflow-plugin-authz",
+		},
+		{
+			input:     "https://github.com/GoCodeAlone/workflow-plugin-authz.git",
+			wantOwner: "GoCodeAlone",
+			wantRepo:  "workflow-plugin-authz",
+		},
+		{
+			input:     "http://github.com/owner/repo",
+			wantOwner: "owner",
+			wantRepo:  "repo",
+		},
+		{
+			input:   "https://gitlab.com/owner/repo",
+			wantErr: true,
+		},
+		{
+			input:   "https://github.com/owner",
+			wantErr: true,
+		},
+		{
+			input:   "not-a-url",
+			wantErr: true,
+		},
+		{
+			input:   "https://github.com//repo",
+			wantErr: true,
+		},
+		{
+			// Extra path segments must be rejected.
+			input:   "https://github.com/owner/repo/tree/main",
+			wantErr: true,
+		},
+		{
+			// Extra path segments must be rejected.
+			input:   "https://github.com/owner/repo/blob/main/README.md",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			owner, repo, err := parseGitHubRepoURL(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error for %q, got owner=%q repo=%q", tt.input, owner, repo)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if owner != tt.wantOwner {
+				t.Errorf("owner: got %q, want %q", owner, tt.wantOwner)
+			}
+			if repo != tt.wantRepo {
+				t.Errorf("repo: got %q, want %q", repo, tt.wantRepo)
+			}
+		})
+	}
+}
+
+// TestFetchManifestFromRepoURL tests the fetchManifestFromRepoURL helper using
+// an httptest server that serves a manifest.json. It overrides rawGitHubContentBaseURL
+// to point at the test server so no real network calls are made.
+func TestFetchManifestFromRepoURL(t *testing.T) {
+	const owner = "GoCodeAlone"
+	const repo = "workflow-plugin-authz"
+
+	wantManifest := &RegistryManifest{
+		Name:        "workflow-plugin-authz",
+		Version:     "1.2.0",
+		Author:      "GoCodeAlone",
+		Description: "RBAC authorization plugin",
+		Type:        "external",
+		Tier:        "core",
+		License:     "MIT",
+	}
+	manifestJSON, _ := json.Marshal(wantManifest)
+
+	t.Run("success", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			wantPath := fmt.Sprintf("/%s/%s/main/manifest.json", owner, repo)
+			if r.URL.Path == wantPath {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write(manifestJSON) //nolint:errcheck
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer srv.Close()
+
+		orig := rawGitHubContentBaseURL
+		rawGitHubContentBaseURL = srv.URL
+		defer func() { rawGitHubContentBaseURL = orig }()
+
+		got, err := fetchManifestFromRepoURL(fmt.Sprintf("https://github.com/%s/%s", owner, repo))
+		if err != nil {
+			t.Fatalf("fetchManifestFromRepoURL: %v", err)
+		}
+		if got.Name != wantManifest.Name {
+			t.Errorf("name: got %q, want %q", got.Name, wantManifest.Name)
+		}
+		if got.Version != wantManifest.Version {
+			t.Errorf("version: got %q, want %q", got.Version, wantManifest.Version)
+		}
+	})
+
+	t.Run("404 returns error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.NotFound(w, r)
+		}))
+		defer srv.Close()
+
+		orig := rawGitHubContentBaseURL
+		rawGitHubContentBaseURL = srv.URL
+		defer func() { rawGitHubContentBaseURL = orig }()
+
+		_, err := fetchManifestFromRepoURL(fmt.Sprintf("https://github.com/%s/%s", owner, repo))
+		if err == nil {
+			t.Fatal("expected error for 404 manifest, got nil")
+		}
+	})
+
+	t.Run("invalid repo URL returns error", func(t *testing.T) {
+		_, err := fetchManifestFromRepoURL("not-a-github-url")
+		if err == nil {
+			t.Fatal("expected error for invalid repo URL")
+		}
+	})
+
+	t.Run("extra path segments rejected", func(t *testing.T) {
+		_, err := fetchManifestFromRepoURL(fmt.Sprintf("https://github.com/%s/%s/tree/main", owner, repo))
+		if err == nil {
+			t.Fatal("expected error for URL with extra path segments")
+		}
+	})
+}
+
+// TestPluginUpdateFallbackToRepo tests that runPluginUpdate falls back to the
+// repository URL in plugin.json when the registry does not have the plugin.
+// It uses an empty registry config (so all lookups fail) and overrides
+// rawGitHubContentBaseURL to serve the manifest from a local httptest server.
+func TestPluginUpdateFallbackToRepo(t *testing.T) {
+	const pluginName = "workflow-plugin-authz"
+	const owner = "GoCodeAlone"
+	binaryContent := []byte("#!/bin/sh\necho authz\n")
+
+	// Build tarball for the "updated" plugin.
+	topDir := fmt.Sprintf("%s-%s-%s", pluginName, runtime.GOOS, runtime.GOARCH)
+	tarEntries := map[string][]byte{
+		topDir + "/" + pluginName: binaryContent,
+	}
+	tarball := buildTarGz(t, tarEntries, 0755)
+	checksum := sha256Hex(tarball)
+
+	// manifest served by the plugin's repo when registry lookup fails.
+	updatedManifest := &RegistryManifest{
+		Name:        pluginName,
+		Version:     "2.0.0",
+		Author:      "GoCodeAlone",
+		Description: "RBAC authorization plugin using Casbin",
+		Type:        "external",
+		Tier:        "core",
+		License:     "MIT",
+		Capabilities: &RegistryCapabilities{
+			ModuleTypes: []string{"authz.casbin"},
+			StepTypes:   []string{"step.authz_check_casbin"},
+		},
+	}
+
+	// Single test server that:
+	//  - /{owner}/{repo}/main/manifest.json → 200 with updatedManifest (simulates raw.githubusercontent.com)
+	//  - /tarball → 200 with the plugin tarball (referenced in the manifest's downloads)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case fmt.Sprintf("/%s/%s/main/manifest.json", owner, pluginName):
+			// Fill in the tarball URL dynamically (srv.URL is known here).
+			m := *updatedManifest
+			m.Downloads = []PluginDownload{{
+				OS:     runtime.GOOS,
+				Arch:   runtime.GOARCH,
+				URL:    "/tarball", // relative, will be prefixed by srv.URL in the handler
+				SHA256: checksum,
+			}}
+			// Use absolute URL for the tarball.
+			m.Downloads[0].URL = "http://" + r.Host + "/tarball"
+			manifestJSON, _ := json.Marshal(&m)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(manifestJSON) //nolint:errcheck
+		case "/tarball":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Write(tarball) //nolint:errcheck
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	// Write an empty registry config file so the registry lookup always fails.
+	cfgDir := t.TempDir()
+	cfgFile := filepath.Join(cfgDir, "config.yaml")
+	if err := os.WriteFile(cfgFile, []byte("registries: []\n"), 0640); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	// Set up a plugins directory with a pre-installed plugin.json that has a
+	// repository field pointing to the real GitHub URL. rawGitHubContentBaseURL
+	// is overridden so fetchManifestFromRepoURL uses the test server instead.
+	pluginsDir := t.TempDir()
+	pluginDir := filepath.Join(pluginsDir, pluginName)
+	if err := os.MkdirAll(pluginDir, 0750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	installedJSON := installedPluginJSON{
+		Name:        pluginName,
+		Version:     "1.0.0",
+		Author:      "GoCodeAlone",
+		Description: "RBAC authorization plugin using Casbin",
+		Type:        "external",
+		Tier:        "core",
+		License:     "MIT",
+		Repository:  fmt.Sprintf("https://github.com/%s/%s", owner, pluginName),
+		ModuleTypes: []string{"authz.casbin"},
+	}
+	installedJSONBytes, _ := json.Marshal(installedJSON)
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), installedJSONBytes, 0640); err != nil {
+		t.Fatalf("write plugin.json: %v", err)
+	}
+
+	// Override rawGitHubContentBaseURL to route manifest fetches to the test server.
+	orig := rawGitHubContentBaseURL
+	rawGitHubContentBaseURL = srv.URL
+	defer func() { rawGitHubContentBaseURL = orig }()
+
+	// Run the update command. It should fail the registry lookup (empty registry)
+	// and fall back to fetching the manifest from the repository URL.
+	err := runPluginUpdate([]string{
+		"-plugin-dir", pluginsDir,
+		"-config", cfgFile,
+		pluginName,
+	})
+	if err != nil {
+		t.Fatalf("runPluginUpdate: %v", err)
+	}
+
+	// Verify the binary was installed.
+	binaryPath := filepath.Join(pluginDir, pluginName)
+	if _, statErr := os.Stat(binaryPath); statErr != nil {
+		t.Fatalf("expected binary at %s: %v", binaryPath, statErr)
+	}
+
+	// Verify the plugin.json was updated to the new version.
+	data, err := os.ReadFile(filepath.Join(pluginDir, "plugin.json"))
+	if err != nil {
+		t.Fatalf("read updated plugin.json: %v", err)
+	}
+	var pj installedPluginJSON
+	if err := json.Unmarshal(data, &pj); err != nil {
+		t.Fatalf("unmarshal plugin.json: %v", err)
+	}
+	if pj.Version != "2.0.0" {
+		t.Errorf("plugin.json version: got %q, want %q", pj.Version, "2.0.0")
+	}
+}
