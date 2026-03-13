@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/schema"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -772,7 +773,7 @@ func TestStepSchemaRegistry_Coverage(t *testing.T) {
 }
 
 func TestTemplateFunctionDescriptions_AllHaveExamples(t *testing.T) {
-	funcs := templateFunctionDescriptions()
+	funcs := module.TemplateFuncDescriptions()
 	for _, f := range funcs {
 		if f.Name == "" {
 			t.Error("function has empty name")

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/schema"
 	"github.com/mark3labs/mcp-go/mcp"
 	"gopkg.in/yaml.v3"
@@ -219,7 +220,7 @@ func (s *Server) handleGetStepSchema(_ context.Context, req mcp.CallToolRequest)
 }
 
 func (s *Server) handleGetTemplateFunctions(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	funcs := templateFunctionDescriptions()
+	funcs := module.TemplateFuncDescriptions()
 	return marshalToolResult(map[string]any{
 		"functions": funcs,
 		"count":     len(funcs),
@@ -407,195 +408,6 @@ func (s *Server) handleGetConfigExamples(_ context.Context, req mcp.CallToolRequ
 		"count":    len(examples),
 	}
 	return marshalToolResult(result)
-}
-
-
-// TemplateFunctionDef describes a template function available in pipeline templates.
-type TemplateFunctionDef struct {
-	Name        string `json:"name"`
-	Signature   string `json:"signature"`
-	Description string `json:"description"`
-	Example     string `json:"example"`
-}
-
-// templateFunctionDescriptions returns descriptions for all built-in template functions.
-func templateFunctionDescriptions() []TemplateFunctionDef {
-	return []TemplateFunctionDef{
-		{
-			Name:        "uuid",
-			Signature:   "uuid() string",
-			Description: "Generates a new random UUID v4 string.",
-			Example:     `{{ uuid }}`,
-		},
-		{
-			Name:        "uuidv4",
-			Signature:   "uuidv4() string",
-			Description: "Generates a new random UUID v4 string. Alias for uuid.",
-			Example:     `{{ uuidv4 }}`,
-		},
-		{
-			Name:        "now",
-			Signature:   "now(layout ...string) string",
-			Description: "Returns the current UTC time formatted with the given Go time layout or named constant (e.g. RFC3339, DateOnly). Defaults to RFC3339 when called with no arguments.",
-			Example:     `{{ now "RFC3339" }} or {{ now "2006-01-02" }}`,
-		},
-		{
-			Name:        "lower",
-			Signature:   "lower(s string) string",
-			Description: "Converts a string to lowercase.",
-			Example:     `{{ lower .name }}`,
-		},
-		{
-			Name:        "default",
-			Signature:   "default(fallback any, val any) any",
-			Description: "Returns fallback when val is nil or an empty string, otherwise returns val.",
-			Example:     `{{ default "anonymous" .username }}`,
-		},
-		{
-			Name:        "trimPrefix",
-			Signature:   "trimPrefix(prefix string, s string) string",
-			Description: "Removes the given prefix from s if present.",
-			Example:     `{{ trimPrefix "/api" .path }}`,
-		},
-		{
-			Name:        "trimSuffix",
-			Signature:   "trimSuffix(suffix string, s string) string",
-			Description: "Removes the given suffix from s if present.",
-			Example:     `{{ trimSuffix "/" .path }}`,
-		},
-		{
-			Name:        "json",
-			Signature:   "json(v any) string",
-			Description: "Marshals a value to a JSON string. Returns '{}' on marshal error.",
-			Example:     `{{ json .data }}`,
-		},
-		{
-			Name:        "step",
-			Signature:   "step(name string, keys ...string) any",
-			Description: "Accesses step outputs by step name and optional nested keys. Returns nil if the step does not exist or a key is missing.",
-			Example:     `{{ step "parse-request" "body" "id" }}`,
-		},
-		{
-			Name:        "trigger",
-			Signature:   "trigger(keys ...string) any",
-			Description: "Accesses trigger data by nested keys. Returns nil if keys do not exist.",
-			Example:     `{{ trigger "path_params" "id" }}`,
-		},
-		{
-			Name:        "upper",
-			Signature:   "upper(s string) string",
-			Description: "Converts a string to uppercase.",
-			Example:     `{{ .name | upper }}`,
-		},
-		{
-			Name:        "title",
-			Signature:   "title(s string) string",
-			Description: "Converts a string to title case (first letter of each word capitalized).",
-			Example:     `{{ "hello world" | title }}`,
-		},
-		{
-			Name:        "replace",
-			Signature:   "replace(old string, new string, s string) string",
-			Description: "Replaces all occurrences of old with new in s.",
-			Example:     `{{ replace "-" "_" .slug }}`,
-		},
-		{
-			Name:        "contains",
-			Signature:   "contains(substr string, s string) bool",
-			Description: "Reports whether substr is within s.",
-			Example:     `{{ contains "admin" .role }}`,
-		},
-		{
-			Name:        "hasPrefix",
-			Signature:   "hasPrefix(prefix string, s string) bool",
-			Description: "Tests whether s begins with prefix.",
-			Example:     `{{ hasPrefix "/api" .path }}`,
-		},
-		{
-			Name:        "hasSuffix",
-			Signature:   "hasSuffix(suffix string, s string) bool",
-			Description: "Tests whether s ends with suffix.",
-			Example:     `{{ hasSuffix ".json" .filename }}`,
-		},
-		{
-			Name:        "split",
-			Signature:   "split(sep string, s string) []string",
-			Description: "Splits s by sep and returns a string slice.",
-			Example:     `{{ $parts := split "," .tags }}{{ index $parts 0 }}`,
-		},
-		{
-			Name:        "join",
-			Signature:   "join(sep string, v any) string",
-			Description: "Concatenates elements of a slice with sep. Works with []string and []any.",
-			Example:     `{{ join ", " .items }}`,
-		},
-		{
-			Name:        "trimSpace",
-			Signature:   "trimSpace(s string) string",
-			Description: "Removes leading and trailing whitespace from a string.",
-			Example:     `{{ .input | trimSpace }}`,
-		},
-		{
-			Name:        "urlEncode",
-			Signature:   "urlEncode(s string) string",
-			Description: "Percent-encodes a string for safe use in URL query parameters.",
-			Example:     `{{ .query | urlEncode }}`,
-		},
-		{
-			Name:        "add",
-			Signature:   "add(a any, b any) any",
-			Description: "Returns a + b. Returns int64 if both are integer types, float64 otherwise.",
-			Example:     `{{ add .offset .limit }}`,
-		},
-		{
-			Name:        "sub",
-			Signature:   "sub(a any, b any) any",
-			Description: "Returns a - b. Returns int64 if both are integer types, float64 otherwise.",
-			Example:     `{{ sub .total .discount }}`,
-		},
-		{
-			Name:        "mul",
-			Signature:   "mul(a any, b any) any",
-			Description: "Returns a * b. Returns int64 if both are integer types, float64 otherwise.",
-			Example:     `{{ mul .quantity .price }}`,
-		},
-		{
-			Name:        "div",
-			Signature:   "div(a any, b any) any",
-			Description: "Returns a / b as float64. Returns 0 on divide-by-zero.",
-			Example:     `{{ div .total .count }}`,
-		},
-		{
-			Name:        "toInt",
-			Signature:   "toInt(v any) int64",
-			Description: "Converts a value (number or string) to int64.",
-			Example:     `{{ toInt .page_size }}`,
-		},
-		{
-			Name:        "toFloat",
-			Signature:   "toFloat(v any) float64",
-			Description: "Converts a value (number or string) to float64.",
-			Example:     `{{ toFloat .price }}`,
-		},
-		{
-			Name:        "toString",
-			Signature:   "toString(v any) string",
-			Description: "Converts any value to its string representation.",
-			Example:     `{{ toString .count }}`,
-		},
-		{
-			Name:        "length",
-			Signature:   "length(v any) int",
-			Description: "Returns the length of a string, slice, array, or map. Returns 0 for other types.",
-			Example:     `{{ length .items }}`,
-		},
-		{
-			Name:        "coalesce",
-			Signature:   "coalesce(vals ...any) any",
-			Description: "Returns the first non-nil, non-empty-string value from the arguments.",
-			Example:     `{{ coalesce .preferred_name .display_name .username }}`,
-		},
-	}
 }
 
 // exampleInfo describes an available config example.
