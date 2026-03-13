@@ -93,7 +93,8 @@ type Dependency struct {
 //
 // When the legacy object format is detected, its type lists are merged into the
 // top-level ModuleTypes, StepTypes, and TriggerTypes fields so callers always
-// find types in a consistent location.
+// find types in a consistent location. Any other JSON type (string, number,
+// bool) is rejected with a descriptive error.
 func (m *PluginManifest) UnmarshalJSON(data []byte) error {
 	// rawManifest breaks the recursion: it is the same layout as PluginManifest
 	// but without the custom UnmarshalJSON method.
@@ -114,30 +115,68 @@ func (m *PluginManifest) UnmarshalJSON(data []byte) error {
 	if len(raw.Capabilities) == 0 {
 		return nil
 	}
-	switch raw.Capabilities[0] {
+
+	// Peek at the first non-whitespace byte to decide which branch to take.
+	// This avoids silently ignoring genuinely invalid capability values.
+	switch firstNonSpace(raw.Capabilities) {
+	case 0, 'n':
+		// Empty or JSON null – treat as absent.
+
 	case '[':
-		// New format: array of CapabilityDecl
+		// New format: array of CapabilityDecl.
 		var caps []CapabilityDecl
 		if err := json.Unmarshal(raw.Capabilities, &caps); err != nil {
 			return fmt.Errorf("invalid capabilities array: %w", err)
 		}
 		m.Capabilities = caps
+
 	case '{':
 		// Legacy format: object with configProvider, moduleTypes, stepTypes, triggerTypes.
 		// Merge type lists into the top-level fields so callers see them consistently.
 		var legacyCaps struct {
-			ModuleTypes  []string `json:"moduleTypes"`
-			StepTypes    []string `json:"stepTypes"`
-			TriggerTypes []string `json:"triggerTypes"`
+			ModuleTypes   []string `json:"moduleTypes"`
+			StepTypes     []string `json:"stepTypes"`
+			TriggerTypes  []string `json:"triggerTypes"`
+			WorkflowTypes []string `json:"workflowTypes"`
 		}
 		if err := json.Unmarshal(raw.Capabilities, &legacyCaps); err != nil {
 			return fmt.Errorf("invalid capabilities object: %w", err)
 		}
-		m.ModuleTypes = append(m.ModuleTypes, legacyCaps.ModuleTypes...)
-		m.StepTypes = append(m.StepTypes, legacyCaps.StepTypes...)
-		m.TriggerTypes = append(m.TriggerTypes, legacyCaps.TriggerTypes...)
+		m.ModuleTypes = appendUnique(m.ModuleTypes, legacyCaps.ModuleTypes...)
+		m.StepTypes = appendUnique(m.StepTypes, legacyCaps.StepTypes...)
+		m.TriggerTypes = appendUnique(m.TriggerTypes, legacyCaps.TriggerTypes...)
+		m.WorkflowTypes = appendUnique(m.WorkflowTypes, legacyCaps.WorkflowTypes...)
+
+	default:
+		return fmt.Errorf("capabilities: unsupported JSON type (expected array or object, got %q)", string(raw.Capabilities))
 	}
+
 	return nil
+}
+
+// firstNonSpace returns the first non-whitespace byte in b, or 0 if b is empty/all-whitespace.
+func firstNonSpace(b []byte) byte {
+	for _, c := range b {
+		if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
+			return c
+		}
+	}
+	return 0
+}
+
+// appendUnique appends values to dst, skipping any that are already present.
+func appendUnique(dst []string, values ...string) []string {
+	existing := make(map[string]struct{}, len(dst))
+	for _, v := range dst {
+		existing[v] = struct{}{}
+	}
+	for _, v := range values {
+		if _, ok := existing[v]; !ok {
+			dst = append(dst, v)
+			existing[v] = struct{}{}
+		}
+	}
+	return dst
 }
 
 // Validate checks that a manifest has all required fields and valid semver.
