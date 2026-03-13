@@ -290,6 +290,7 @@ func runPluginUpdate(args []string) error {
 		}
 	}
 
+	// Check the registry for the latest version before downloading.
 	cfg, err := LoadRegistryConfig(*cfgPath)
 	if err != nil {
 		return fmt.Errorf("load registry config: %w", err)
@@ -463,6 +464,16 @@ func downloadURL(url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+// verifyChecksum checks that data matches the expected SHA256 hex string.
+func verifyChecksum(data []byte, expected string) error {
+	h := sha256.Sum256(data)
+	got := hex.EncodeToString(h[:])
+	if !strings.EqualFold(got, expected) {
+		return fmt.Errorf("checksum mismatch: got %s, want %s", got, expected)
+	}
+	return nil
+}
+
 // rawGitHubContentBaseURL is the base URL for raw GitHub content. It is a
 // package-level variable so tests can override it to point at a local server.
 var rawGitHubContentBaseURL = "https://raw.githubusercontent.com"
@@ -521,16 +532,6 @@ func parseGitHubRepoURL(repoURL string) (owner, repo string, err error) {
 		return "", "", fmt.Errorf("not a GitHub repository URL: %q (expected https://github.com/owner/repo)", repoURL)
 	}
 	return parts[1], repoName, nil
-}
-
-// verifyChecksum checks that data matches the expected SHA256 hex string.
-func verifyChecksum(data []byte, expected string) error {
-	h := sha256.Sum256(data)
-	got := hex.EncodeToString(h[:])
-	if !strings.EqualFold(got, expected) {
-		return fmt.Errorf("checksum mismatch: got %s, want %s", got, expected)
-	}
-	return nil
 }
 
 // extractTarGz decompresses and extracts a .tar.gz archive into destDir.
