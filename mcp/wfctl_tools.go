@@ -1318,9 +1318,9 @@ func mcpCheckCompatibility(cfg *config.WorkflowConfig) *mcpCompatResult {
 		knownModules[t] = true
 	}
 
-	// Also check step types from the knownStepTypeDescriptions registry
+	// Check step types from the schema registry
 	knownSteps := make(map[string]bool)
-	for t := range knownStepTypeDescriptions() {
+	for _, t := range schema.GetStepSchemaRegistry().Types() {
 		knownSteps[t] = true
 	}
 	// Merge with schema-registered step types
@@ -1400,9 +1400,8 @@ func mcpValidateWorkflowConfig(cfg *config.WorkflowConfig) mcpValidationResult {
 		knownModuleSet[t] = true
 	}
 
-	knownSteps := knownStepTypeDescriptions()
 	knownStepSet := make(map[string]bool)
-	for t := range knownSteps {
+	for _, t := range schema.GetStepSchemaRegistry().Types() {
 		knownStepSet[t] = true
 	}
 	for _, t := range schema.KnownModuleTypes() {
@@ -1494,12 +1493,12 @@ func mcpValidateWorkflowConfig(cfg *config.WorkflowConfig) mcpValidationResult {
 				result.Errors = append(result.Errors, fmt.Sprintf("pipeline %q step uses unknown type %q", pipelineName, stepType))
 			} else {
 				result.StepValid++
-				// Config key warnings from step descriptions
-				if stepInfo, ok := knownSteps[stepType]; ok {
-					if stepCfg, ok := stepMap["config"].(map[string]any); ok && len(stepInfo.ConfigKeys) > 0 {
+				// Config key warnings from step schema registry
+				if stepSchema := schema.GetStepSchemaRegistry().Get(stepType); stepSchema != nil {
+					if stepCfg, ok := stepMap["config"].(map[string]any); ok && len(stepSchema.ConfigFields) > 0 {
 						knownKeys := make(map[string]bool)
-						for _, k := range stepInfo.ConfigKeys {
-							knownKeys[k] = true
+						for _, f := range stepSchema.ConfigFields {
+							knownKeys[f.Key] = true
 						}
 						for key := range stepCfg {
 							if !knownKeys[key] {

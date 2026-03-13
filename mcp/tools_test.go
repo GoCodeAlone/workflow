@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/schema"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -745,26 +746,27 @@ func TestGenerateStepExample(t *testing.T) {
 	}
 }
 
-func TestKnownStepTypeDescriptions_Coverage(t *testing.T) {
-	descs := knownStepTypeDescriptions()
-	if len(descs) == 0 {
-		t.Fatal("expected non-empty step type descriptions")
+func TestStepSchemaRegistry_Coverage(t *testing.T) {
+	reg := schema.GetStepSchemaRegistry()
+	types := reg.Types()
+	if len(types) == 0 {
+		t.Fatal("expected non-empty step schema registry")
 	}
 
 	// Spot-check some important types.
 	for _, must := range []string{"step.set", "step.http_call", "step.foreach", "step.retry_with_backoff"} {
-		if _, ok := descs[must]; !ok {
-			t.Errorf("expected step type %q in descriptions", must)
+		if s := reg.Get(must); s == nil {
+			t.Errorf("expected step type %q in schema registry", must)
 		}
 	}
 
 	// All entries must have a non-empty description.
-	for typ, info := range descs {
-		if info.Description == "" {
-			t.Errorf("step type %q has empty description", typ)
+	for _, s := range reg.All() {
+		if s.Description == "" {
+			t.Errorf("step type %q has empty description", s.Type)
 		}
-		if info.Type != typ {
-			t.Errorf("step type key %q doesn't match info.Type %q", typ, info.Type)
+		if s.Type == "" {
+			t.Error("step schema has empty type")
 		}
 	}
 }
