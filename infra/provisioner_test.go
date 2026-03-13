@@ -518,3 +518,29 @@ func TestResourceDiffers(t *testing.T) {
 		t.Error("expected different configs to differ")
 	}
 }
+
+func TestProvisionerWithProvider(t *testing.T) {
+	p := NewProvisioner(nil)
+	p.AddProvider(&MemoryProvider{})
+	plan := &ProvisionPlan{
+		Create: []ResourceConfig{{Name: "test-db", Type: "database", Provider: "memory"}},
+	}
+	if err := p.Apply(context.Background(), plan); err != nil {
+		t.Fatalf("Apply failed: %v", err)
+	}
+	status := p.Status()
+	if _, ok := status["test-db"]; !ok {
+		t.Error("expected test-db in status")
+	}
+}
+
+func TestProvisionerNoProvider(t *testing.T) {
+	p := NewProvisioner(nil)
+	// No providers added — should still work (legacy fallback)
+	plan := &ProvisionPlan{
+		Create: []ResourceConfig{{Name: "test-cache", Type: "cache", Provider: "memory"}},
+	}
+	if err := p.Apply(context.Background(), plan); err != nil {
+		t.Fatalf("Apply failed: %v", err)
+	}
+}

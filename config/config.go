@@ -100,15 +100,29 @@ type SidecarConfig struct {
 
 // WorkflowConfig represents the overall configuration for the workflow engine
 type WorkflowConfig struct {
-	Imports   []string        `json:"imports,omitempty" yaml:"imports,omitempty"`
-	Modules   []ModuleConfig  `json:"modules" yaml:"modules"`
-	Workflows map[string]any  `json:"workflows" yaml:"workflows"`
-	Triggers  map[string]any  `json:"triggers" yaml:"triggers"`
-	Pipelines map[string]any  `json:"pipelines,omitempty" yaml:"pipelines,omitempty"`
-	Platform  map[string]any  `json:"platform,omitempty" yaml:"platform,omitempty"`
-	Requires  *RequiresConfig `json:"requires,omitempty" yaml:"requires,omitempty"`
-	Sidecars  []SidecarConfig `json:"sidecars,omitempty" yaml:"sidecars,omitempty"`
-	ConfigDir string          `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
+	Imports        []string              `json:"imports,omitempty" yaml:"imports,omitempty"`
+	Modules        []ModuleConfig        `json:"modules" yaml:"modules"`
+	Workflows      map[string]any        `json:"workflows" yaml:"workflows"`
+	Triggers       map[string]any        `json:"triggers" yaml:"triggers"`
+	Pipelines      map[string]any        `json:"pipelines,omitempty" yaml:"pipelines,omitempty"`
+	Platform       map[string]any        `json:"platform,omitempty" yaml:"platform,omitempty"`
+	Requires       *RequiresConfig       `json:"requires,omitempty" yaml:"requires,omitempty"`
+	Sidecars       []SidecarConfig       `json:"sidecars,omitempty" yaml:"sidecars,omitempty"`
+	Infrastructure *InfrastructureConfig `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
+	ConfigDir      string                `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
+}
+
+// InfrastructureConfig holds infrastructure resource declarations.
+type InfrastructureConfig struct {
+	Resources []InfraResourceConfig `json:"resources" yaml:"resources"`
+}
+
+// InfraResourceConfig describes a single infrastructure resource to provision.
+type InfraResourceConfig struct {
+	Name     string         `json:"name" yaml:"name"`
+	Type     string         `json:"type" yaml:"type"`
+	Provider string         `json:"provider" yaml:"provider"`
+	Config   map[string]any `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
 // ResolveRelativePath resolves a path relative to the config file's directory.

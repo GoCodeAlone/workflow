@@ -13,6 +13,7 @@ import (
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/dynamic"
+	"github.com/GoCodeAlone/workflow/infra"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
@@ -84,6 +85,10 @@ type StdEngine struct {
 	// pipelineRegistry holds all registered pipelines by name, enabling
 	// step.workflow_call to look up sibling pipelines at execution time.
 	pipelineRegistry map[string]*module.Pipeline
+
+	// provisioner holds the infrastructure provisioner when an infrastructure
+	// block is declared in the config. Nil when no infrastructure is declared.
+	provisioner *infra.Provisioner
 
 	// configHash is the SHA-256 hash of the last config built via BuildFromConfig.
 	// Format: "sha256:<hex>". Empty until BuildFromConfig is called.
@@ -389,6 +394,30 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		if err := e.validateRequirements(cfg.Requires); err != nil {
 			return fmt.Errorf("requirements check failed: %w", err)
 		}
+	}
+
+	// Provision infrastructure resources declared in the config.
+	if cfg.Infrastructure != nil && len(cfg.Infrastructure.Resources) > 0 {
+		var infraLogger *slog.Logger
+		if sl, ok := e.logger.(*slog.Logger); ok {
+			infraLogger = sl
+		}
+		p := infra.NewProvisioner(infraLogger)
+		p.AddProvider(&infra.MemoryProvider{})
+		resources := make([]infra.ResourceConfig, len(cfg.Infrastructure.Resources))
+		for i, r := range cfg.Infrastructure.Resources {
+			resources[i] = infra.ResourceConfig{
+				Name: r.Name, Type: r.Type, Provider: r.Provider, Config: r.Config,
+			}
+		}
+		plan, err := p.Plan(infra.InfraConfig{Resources: resources})
+		if err != nil {
+			return fmt.Errorf("infrastructure plan failed: %w", err)
+		}
+		if err := p.Apply(context.TODO(), plan); err != nil {
+			return fmt.Errorf("infrastructure provisioning failed: %w", err)
+		}
+		e.provisioner = p
 	}
 
 	// Store config directory for consistent path resolution in pipeline steps

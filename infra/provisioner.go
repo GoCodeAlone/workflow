@@ -58,6 +58,7 @@ var validProviders = map[string]map[string]bool{
 type Provisioner struct {
 	mu        sync.RWMutex
 	resources map[string]*ProvisionedResource
+	providers []ResourceProvider
 	logger    *slog.Logger
 }
 
@@ -70,6 +71,12 @@ func NewProvisioner(logger *slog.Logger) *Provisioner {
 		resources: make(map[string]*ProvisionedResource),
 		logger:    logger,
 	}
+}
+
+// AddProvider registers a ResourceProvider with the provisioner.
+// Providers are tried in order; the first one that returns Supports==true is used.
+func (p *Provisioner) AddProvider(rp ResourceProvider) {
+	p.providers = append(p.providers, rp)
 }
 
 // Plan computes the diff between the current state and the desired InfraConfig.
@@ -252,21 +259,43 @@ func ParseConfig(raw map[string]any) (*InfraConfig, error) {
 	return cfg, nil
 }
 
-// provisionResource creates a resource in the internal store.
+// provisionResource creates a resource via registered providers or the legacy fallback.
 func (p *Provisioner) provisionResource(rc ResourceConfig) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	if _, exists := p.resources[rc.Name]; exists {
+		p.mu.Unlock()
 		return fmt.Errorf("resource %q already exists", rc.Name)
 	}
-
+	// Reserve slot with pending status before calling provider (avoids holding lock during I/O).
 	p.resources[rc.Name] = &ProvisionedResource{
 		Config:    rc,
-		Status:    "provisioned",
+		Status:    "pending",
 		CreatedAt: time.Now(),
 	}
+	p.mu.Unlock()
 
+	// Try each registered provider.
+	for _, prov := range p.providers {
+		if prov.Supports(rc.Type, rc.Provider) {
+			if err := prov.Provision(context.Background(), rc); err != nil {
+				p.mu.Lock()
+				p.resources[rc.Name].Status = "failed"
+				p.resources[rc.Name].Error = err.Error()
+				p.mu.Unlock()
+				return err
+			}
+			p.mu.Lock()
+			p.resources[rc.Name].Status = "provisioned"
+			p.mu.Unlock()
+			p.logger.Info("resource provisioned", "name", rc.Name, "type", rc.Type, "provider", rc.Provider)
+			return nil
+		}
+	}
+
+	// Fallback: mark as provisioned (legacy behaviour — no real provider needed).
+	p.mu.Lock()
+	p.resources[rc.Name].Status = "provisioned"
+	p.mu.Unlock()
 	p.logger.Info("resource provisioned", "name", rc.Name, "type", rc.Type, "provider", rc.Provider)
 	return nil
 }
