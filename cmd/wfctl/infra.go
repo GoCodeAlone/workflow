@@ -65,7 +65,7 @@ func resolveInfraConfig(fs *flag.FlagSet) (string, error) {
 			return arg, nil
 		}
 	}
-	return "", fmt.Errorf("no config file found (tried infra.yaml, config/infra.yaml)")
+	return "", fmt.Errorf("no infrastructure config found (tried infra.yaml, config/infra.yaml).\nCreate an infra config with cloud.account and platform.* modules.\nRun 'wfctl init --template full-stack' for a starter config with infrastructure.")
 }
 
 // infraModuleEntry is a minimal struct for parsing modules from YAML.
