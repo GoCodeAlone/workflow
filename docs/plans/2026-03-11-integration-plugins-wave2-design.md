@@ -5,11 +5,11 @@
 
 ## Overview
 
-Six new external gRPC plugins for the workflow engine, continuing the integration plugin pattern established in wave 1 (Twilio, monday.com, turn.io). All are MIT-licensed, open-source, community-tier plugins following the `workflow-plugin-*` pattern.
+Five new external gRPC plugins for the workflow engine, plus Permit.io integrated as a new provider in the existing `workflow-plugin-authz`. Continues the integration plugin pattern from wave 1 (Twilio, monday.com, turn.io). All new repos are MIT-licensed, open-source, community-tier.
 
 ## Common Architecture
 
-Identical to wave 1 — see `2026-03-11-integration-plugins-design.md`. Each plugin:
+Identical to wave 1 — see `2026-03-11-integration-plugins-design.md`. Each **new** plugin:
 - Standalone Go repo: `GoCodeAlone/workflow-plugin-<name>`
 - `sdk.Serve(provider)` entry point
 - PluginProvider + ModuleProvider + StepProvider interfaces
@@ -17,6 +17,8 @@ Identical to wave 1 — see `2026-03-11-integration-plugins-design.md`. Each plu
 - Package-level provider registry with `sync.RWMutex`
 - GoReleaser v2, `CGO_ENABLED=0`, linux/darwin x amd64/arm64
 - MIT license, community tier, minEngineVersion `0.3.30`
+
+**Exception — Permit.io**: Added as a provider to the existing `workflow-plugin-authz` (alongside Casbin), following the multi-provider pattern used in `workflow-plugin-payments` (Stripe + PayPal). New module type: `permit.provider`. New step types prefixed `step.permit_`.
 
 ---
 
@@ -127,13 +129,15 @@ Identical to wave 1 — see `2026-03-11-integration-plugins-design.md`. Each plu
 
 ---
 
-## Plugin 4: workflow-plugin-permit
+## Plugin 4: Permit.io provider in workflow-plugin-authz
 
-**Dependency**: `github.com/permitio/permit-golang` v1.2.8 (official Go SDK)
+**Repo**: `GoCodeAlone/workflow-plugin-authz` (existing — add Permit.io as a new provider alongside Casbin)
+**New Dependency**: `github.com/permitio/permit-golang` v1.2.8 (official Go SDK)
 
-**Module**: `permit.provider`
+**Module**: `permit.provider` (new module type in the authz plugin)
 - Config: `apiKey` (required), optional `pdpUrl` (default `https://cloudpdp.api.permit.io`), optional `apiUrl` (default `https://api.permit.io`), optional `project`, `environment`
 - Initializes Permit SDK client
+- Coexists with the existing `authz.provider` (Casbin) — both can be configured simultaneously
 
 ### Step Types (~80 steps, all prefixed `step.permit_`)
 
@@ -255,4 +259,5 @@ All six plugins built in parallel using agent teams. Each plugin is independent.
 - **Salesforce**: ~75 steps, community SDK + direct REST
 - **OpenLMS**: ~120 steps, direct REST client (Moodle Web Services)
 
-**Repos**: `GoCodeAlone/workflow-plugin-okta`, `GoCodeAlone/workflow-plugin-datadog`, `GoCodeAlone/workflow-plugin-launchdarkly`, `GoCodeAlone/workflow-plugin-permit`, `GoCodeAlone/workflow-plugin-salesforce`, `GoCodeAlone/workflow-plugin-openlms`
+**New Repos**: `GoCodeAlone/workflow-plugin-okta`, `GoCodeAlone/workflow-plugin-datadog`, `GoCodeAlone/workflow-plugin-launchdarkly`, `GoCodeAlone/workflow-plugin-salesforce`, `GoCodeAlone/workflow-plugin-openlms`
+**Existing Repo (extended)**: `GoCodeAlone/workflow-plugin-authz` (Permit.io provider added)
