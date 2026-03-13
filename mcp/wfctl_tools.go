@@ -1497,8 +1497,8 @@ func mcpValidateWorkflowConfig(cfg *config.WorkflowConfig) mcpValidationResult {
 				if stepSchema := schema.GetStepSchemaRegistry().Get(stepType); stepSchema != nil {
 					if stepCfg, ok := stepMap["config"].(map[string]any); ok && len(stepSchema.ConfigFields) > 0 {
 						knownKeys := make(map[string]bool)
-						for _, f := range stepSchema.ConfigFields {
-							knownKeys[f.Key] = true
+						for i := range stepSchema.ConfigFields {
+							knownKeys[stepSchema.ConfigFields[i].Key] = true
 						}
 						for key := range stepCfg {
 							if !knownKeys[key] {
