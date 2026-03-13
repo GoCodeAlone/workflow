@@ -57,9 +57,26 @@ jobs:
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
 
+    - name: Checkout workflow-editor
+      if: matrix.language == 'go'
+      uses: actions/checkout@v4
+      with:
+        repository: GoCodeAlone/workflow-editor
+        path: ../workflow-editor
+
+    - name: Build workflow-editor package
+      if: matrix.language == 'go'
+      working-directory: ../workflow-editor
+      run: npm ci && npm run build && npm pack
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Build UI assets
       if: matrix.language == 'go'
-      run: cd ui && npm ci && npm run build
+      run: |
+        cd ui
+        node ../.github/scripts/update-workflow-editor-hash.js
+        npm ci && npm run build
       env:
         NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

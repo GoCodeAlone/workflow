@@ -43,9 +43,23 @@ jobs:
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
 
+    - name: Checkout workflow-editor
+      uses: actions/checkout@v4
+      with:
+        repository: GoCodeAlone/workflow-editor
+        path: ../workflow-editor
+
+    - name: Build workflow-editor package
+      working-directory: ../workflow-editor
+      run: npm ci && npm run build && npm pack
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Build UI assets
       run: |
-        cd ui && npm ci && npm run build
+        cd ui
+        node ../.github/scripts/update-workflow-editor-hash.js
+        npm ci && npm run build
       env:
         NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -90,9 +104,23 @@ jobs:
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
 
+    - name: Checkout workflow-editor
+      uses: actions/checkout@v4
+      with:
+        repository: GoCodeAlone/workflow-editor
+        path: ../workflow-editor
+
+    - name: Build workflow-editor package
+      working-directory: ../workflow-editor
+      run: npm ci && npm run build && npm pack
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Build UI assets
       run: |
-        cd ui && npm ci && npm run build
+        cd ui
+        node ../.github/scripts/update-workflow-editor-hash.js
+        npm ci && npm run build
       env:
         NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -127,9 +155,23 @@ jobs:
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
 
+    - name: Checkout workflow-editor
+      uses: actions/checkout@v4
+      with:
+        repository: GoCodeAlone/workflow-editor
+        path: ../workflow-editor
+
+    - name: Build workflow-editor package
+      working-directory: ../workflow-editor
+      run: npm ci && npm run build && npm pack
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Build UI assets
       run: |
-        cd ui && npm ci && npm run build
+        cd ui
+        node ../.github/scripts/update-workflow-editor-hash.js
+        npm ci && npm run build
       env:
         NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -173,8 +215,22 @@ jobs:
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
 
+    - name: Checkout workflow-editor
+      uses: actions/checkout@v4
+      with:
+        repository: GoCodeAlone/workflow-editor
+        path: ../workflow-editor
+
+    - name: Build workflow-editor package
+      working-directory: ../workflow-editor
+      run: npm ci && npm run build && npm pack
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Install dependencies
-      run: npm ci
+      run: |
+        node ../.github/scripts/update-workflow-editor-hash.js
+        npm ci
       env:
         NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -213,9 +269,23 @@ jobs:
         cache: 'npm'
         cache-dependency-path: ui/package-lock.json
 
+    - name: Checkout workflow-editor
+      uses: actions/checkout@v4
+      with:
+        repository: GoCodeAlone/workflow-editor
+        path: ../workflow-editor
+
+    - name: Build workflow-editor package
+      working-directory: ../workflow-editor
+      run: npm ci && npm run build && npm pack
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Build UI assets
       run: |
-        cd ui && npm ci && npm run build
+        cd ui
+        node ../.github/scripts/update-workflow-editor-hash.js
+        npm ci && npm run build
       env:
         NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
