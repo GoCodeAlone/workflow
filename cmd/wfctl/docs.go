@@ -69,9 +69,32 @@ Options:
 	}
 
 	configFile := fs.Arg(0)
-	cfg, err := config.LoadFromFile(configFile)
+
+	// Read the raw bytes first so we can detect whether this is an
+	// ApplicationConfig (application.workflows[]) or a plain WorkflowConfig.
+	rawData, err := os.ReadFile(configFile)
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var cfg *config.WorkflowConfig
+	var appInfo *config.ApplicationInfo
+	if config.IsApplicationConfig(rawData) {
+		appCfg, appErr := config.LoadApplicationConfig(configFile)
+		if appErr != nil {
+			return fmt.Errorf("failed to load application config: %w", appErr)
+		}
+		merged, mergeErr := config.MergeApplicationConfig(appCfg)
+		if mergeErr != nil {
+			return fmt.Errorf("failed to merge application config: %w", mergeErr)
+		}
+		cfg = merged
+		appInfo = &appCfg.Application
+	} else {
+		cfg, err = config.LoadFromFile(configFile)
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
 	}
 
 	// Load external plugin manifests if a plugin directory is specified.
@@ -85,7 +108,11 @@ Options:
 
 	appTitle := *title
 	if appTitle == "" {
-		appTitle = deriveTitle(configFile)
+		if appInfo != nil && appInfo.Name != "" {
+			appTitle = appInfo.Name
+		} else {
+			appTitle = deriveTitle(configFile)
+		}
 	}
 
 	if err := os.MkdirAll(*output, 0750); err != nil {
@@ -94,6 +121,7 @@ Options:
 
 	gen := &docsGenerator{
 		cfg:       cfg,
+		appInfo:   appInfo,
 		plugins:   plugins,
 		title:     appTitle,
 		outputDir: *output,
@@ -186,6 +214,7 @@ func mermaidID(s string) string {
 // docsGenerator holds state for a single documentation generation run.
 type docsGenerator struct {
 	cfg       *config.WorkflowConfig
+	appInfo   *config.ApplicationInfo // non-nil when loaded from an ApplicationConfig
 	plugins   []*plugin.PluginManifest
 	title     string
 	outputDir string
@@ -254,6 +283,22 @@ func (g *docsGenerator) writeOverview(path string) error {
 
 	fmt.Fprintf(&b, "# %s\n\n", g.title)
 	b.WriteString("> Auto-generated documentation from workflow configuration.\n\n")
+
+	// When loaded from an ApplicationConfig, show the workflow sources.
+	if g.appInfo != nil && len(g.appInfo.Workflows) > 0 {
+		b.WriteString("## Application Workflows\n\n")
+		b.WriteString("This application is composed of the following workflow files:\n\n")
+		b.WriteString("| Name | File |\n")
+		b.WriteString("|------|------|\n")
+		for _, ref := range g.appInfo.Workflows {
+			name := ref.Name
+			if name == "" {
+				name = ref.File
+			}
+			fmt.Fprintf(&b, "| `%s` | `%s` |\n", name, ref.File)
+		}
+		b.WriteString("\n")
+	}
 
 	// Quick stats
 	b.WriteString("## Overview\n\n")
