@@ -228,6 +228,7 @@ func runPluginUpdate(args []string) error {
 	var pluginDirVal string
 	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
 	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
+	cfgPath := fs.String("config", "", "Registry config file path")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin update [options] <name>\n\nUpdate an installed plugin to its latest version.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -246,8 +247,26 @@ func runPluginUpdate(args []string) error {
 		return fmt.Errorf("plugin %q is not installed", pluginName)
 	}
 
+	// Check the registry for the latest version before downloading.
+	cfg, err := LoadRegistryConfig(*cfgPath)
+	if err != nil {
+		return fmt.Errorf("load registry config: %w", err)
+	}
+	mr := NewMultiRegistry(cfg)
+	manifest, _, err := mr.FetchManifest(pluginName)
+	if err != nil {
+		return fmt.Errorf("fetch manifest: %w", err)
+	}
+
+	installedVer := readInstalledVersion(pluginDir)
+	if installedVer == manifest.Version {
+		fmt.Printf("already at latest version (%s)\n", manifest.Version)
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
+
 	// Re-run install which will overwrite the existing installation.
-	return runPluginInstall(append([]string{"--plugin-dir", pluginDirVal}, pluginName))
+	return runPluginInstall(append([]string{"--plugin-dir", pluginDirVal, "--config", *cfgPath}, pluginName))
 }
 
 func runPluginRemove(args []string) error {

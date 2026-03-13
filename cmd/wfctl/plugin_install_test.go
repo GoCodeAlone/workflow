@@ -37,3 +37,4 @@ func TestPluginListAcceptsLegacyDataDirFlag(t *testing.T) {
 		t.Errorf("-data-dir: runPluginList returned unexpected error: %v", err)
 	}
 }
+
