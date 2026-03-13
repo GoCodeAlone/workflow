@@ -425,9 +425,16 @@ func mergeWorkflowSection(dst, src map[string]any) {
 			if !ok {
 				continue
 			}
-			if existing, ok := dst[k].([]any); ok {
+			switch existing := dst[k].(type) {
+			case []any:
+				// Append src items to the existing list.
 				dst[k] = append(existing, srcList...)
-			} else if _, exists := dst[k]; !exists {
+			case nil:
+				// Key absent or explicitly null — use the src list.
+				dst[k] = srcVal
+			default:
+				// Key exists with a non-list value (unexpected YAML shape).
+				// Treat it as empty and replace so src items are not lost.
 				dst[k] = srcVal
 			}
 		} else if _, exists := dst[k]; !exists {

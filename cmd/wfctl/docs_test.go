@@ -1040,17 +1040,18 @@ func TestDocsApplicationConfigReadme(t *testing.T) {
 	if !strings.Contains(content, "Application Workflows") {
 		t.Error("README.md should have Application Workflows section")
 	}
-	if !strings.Contains(content, "api") {
-		t.Error("README.md should list the 'api' workflow")
+	// Check for specific table rows matching the markdown format: | `name` | `file` |
+	if !strings.Contains(content, "| `api` |") {
+		t.Error("README.md should have a table row with name 'api'")
 	}
-	if !strings.Contains(content, "jobs") {
-		t.Error("README.md should list the 'jobs' workflow")
+	if !strings.Contains(content, "| `jobs` |") {
+		t.Error("README.md should have a table row with name 'jobs'")
 	}
-	if !strings.Contains(content, "./api/api.yaml") {
-		t.Error("README.md should list the api workflow file path")
+	if !strings.Contains(content, "| `./api/api.yaml` |") {
+		t.Error("README.md should list the api workflow file path in the table")
 	}
-	if !strings.Contains(content, "./jobs/application.yaml") {
-		t.Error("README.md should list the jobs workflow file path")
+	if !strings.Contains(content, "| `./jobs/application.yaml` |") {
+		t.Error("README.md should list the jobs workflow file path in the table")
 	}
 }
 

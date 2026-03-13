@@ -268,6 +268,76 @@ func TestDeepMergeConfigs_RequiresOverride(t *testing.T) {
 	}
 }
 
+func TestMergeWorkflowSection_NilDestinationList(t *testing.T) {
+	// When dst[k] is nil (e.g. `routes:` with no value in YAML), the src list
+	// should be used rather than being silently dropped.
+	dst := map[string]any{
+		"routes": nil,
+	}
+	src := map[string]any{
+		"routes": []any{
+			map[string]any{"method": "GET", "path": "/v2/resource"},
+		},
+	}
+	mergeWorkflowSection(dst, src)
+
+	routes, ok := dst["routes"].([]any)
+	if !ok {
+		t.Fatal("expected dst[routes] to be []any after merge")
+	}
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(routes))
+	}
+	route, _ := routes[0].(map[string]any)
+	if route["path"] != "/v2/resource" {
+		t.Errorf("expected path=/v2/resource, got %v", route["path"])
+	}
+}
+
+func TestMergeWorkflowSection_NonSliceDestinationReplaced(t *testing.T) {
+	// When dst[k] exists but holds a non-slice value (unexpected YAML shape),
+	// the src list should replace it so items are not lost.
+	dst := map[string]any{
+		"routes": "not-a-list",
+	}
+	src := map[string]any{
+		"routes": []any{
+			map[string]any{"method": "POST", "path": "/v2/submit"},
+		},
+	}
+	mergeWorkflowSection(dst, src)
+
+	routes, ok := dst["routes"].([]any)
+	if !ok {
+		t.Fatal("expected dst[routes] to be []any after merge")
+	}
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(routes))
+	}
+}
+
+func TestMergeWorkflowSection_AppendsToExistingList(t *testing.T) {
+	dst := map[string]any{
+		"routes": []any{
+			map[string]any{"method": "GET", "path": "/v1/resource"},
+		},
+	}
+	src := map[string]any{
+		"routes": []any{
+			map[string]any{"method": "GET", "path": "/v2/resource"},
+		},
+	}
+	mergeWorkflowSection(dst, src)
+
+	routes, ok := dst["routes"].([]any)
+	if !ok {
+		t.Fatal("expected dst[routes] to be []any after merge")
+	}
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 routes, got %d", len(routes))
+	}
+}
+
 func TestDeepMergeConfigs_ModuleTypeOverride(t *testing.T) {
 	base := &WorkflowConfig{
 		Modules: []ModuleConfig{{Name: "svc", Type: "old-type"}},
