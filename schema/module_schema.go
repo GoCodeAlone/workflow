@@ -2018,4 +2018,295 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "cache_control", Label: "Cache-Control", Type: FieldTypeString, Description: "Optional Cache-Control header value (e.g. public, max-age=3600)"},
 		},
 	})
+
+	// ---- Auth Required ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.auth_required",
+		Label:       "Auth Required",
+		Category:    "pipeline",
+		Description: "Validates JWT or API key authentication; returns 401 if not authenticated",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "roles", Label: "Required Roles", Type: FieldTypeArray, Description: "Required roles (any match grants access)"},
+			{Key: "scopes", Label: "Required Scopes", Type: FieldTypeArray, Description: "Required OAuth2 scopes"},
+		},
+	})
+
+	// ---- Auth Validate ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.auth_validate",
+		Label:       "Auth Validate",
+		Category:    "pipeline",
+		Description: "Validates a Bearer token against a registered AuthProvider module and outputs claims",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "auth_module", Label: "Auth Module", Type: FieldTypeString, Required: true, Description: "Service name of AuthProvider module"},
+			{Key: "token_source", Label: "Token Source", Type: FieldTypeString, Required: true, Description: "Dot-path to Bearer token in pipeline context"},
+			{Key: "subject_field", Label: "Subject Field", Type: FieldTypeString, Description: "Output field name for 'sub' claim"},
+		},
+	})
+
+	// ---- Authz Check ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.authz_check",
+		Label:       "Authz Check",
+		Category:    "pipeline",
+		Description: "Checks authorization using the configured authz module; returns 403 if denied",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Label: "Module", Type: FieldTypeString, Required: true, Description: "Authorization module name"},
+			{Key: "subject", Label: "Subject", Type: FieldTypeString, Required: true, Description: "Subject (template expression)"},
+			{Key: "object", Label: "Object", Type: FieldTypeString, Required: true, Description: "Object (template expression)"},
+			{Key: "action", Label: "Action", Type: FieldTypeString, Required: true, Description: "Action (template expression)"},
+		},
+	})
+
+	// ---- CLI Invoke ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.cli_invoke",
+		Label:       "CLI Invoke",
+		Category:    "pipeline",
+		Description: "Calls a registered Go CLI command function from the CLICommandRegistry",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "command", Label: "Command", Type: FieldTypeString, Required: true, Description: "Registered command name"},
+		},
+	})
+
+	// ---- CLI Print ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.cli_print",
+		Label:       "CLI Print",
+		Category:    "pipeline",
+		Description: "Writes a template-resolved message to stdout or stderr",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "message", Label: "Message", Type: FieldTypeString, Required: true, Description: "Message template"},
+			{Key: "newline", Label: "Newline", Type: FieldTypeBool, Description: "Append trailing newline"},
+			{Key: "target", Label: "Target", Type: FieldTypeSelect, Options: []string{"stdout", "stderr"}, Description: "Output destination"},
+		},
+	})
+
+	// ---- Event Decrypt ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.event_decrypt",
+		Label:       "Event Decrypt",
+		Category:    "pipeline",
+		Description: "Decrypts field-level encryption applied by step.event_publish using CloudEvents extension attributes",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "key_id", Label: "Key ID", Type: FieldTypeString, Description: "Key ID override"},
+		},
+	})
+
+	// ---- Field Re-encrypt ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.field_reencrypt",
+		Label:       "Field Re-encrypt",
+		Category:    "pipeline",
+		Description: "Re-encrypts pipeline context data with the latest key version using a ProtectedFieldManager",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Label: "Module", Type: FieldTypeString, Required: true, Description: "Service name of ProtectedFieldManager"},
+			{Key: "tenant_id", Label: "Tenant ID", Type: FieldTypeString, Description: "Template expression for tenant ID"},
+		},
+	})
+
+	// ---- GraphQL ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.graphql",
+		Label:       "GraphQL",
+		Category:    "pipeline",
+		Description: "Executes GraphQL queries or mutations with support for pagination, batch requests, and OAuth2 authentication",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "url", Label: "URL", Type: FieldTypeString, Required: true, Description: "GraphQL endpoint URL"},
+			{Key: "query", Label: "Query", Type: FieldTypeString, Description: "GraphQL query or mutation"},
+			{Key: "variables", Label: "Variables", Type: FieldTypeMap, Description: "Query variables"},
+			{Key: "data_path", Label: "Data Path", Type: FieldTypeString, Description: "Dot-path to extract nested data"},
+			{Key: "headers", Label: "Headers", Type: FieldTypeMap, Description: "Custom HTTP headers"},
+			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, Description: "Request timeout"},
+			{Key: "auth", Label: "Auth", Type: FieldTypeMap, Description: "Authentication config"},
+		},
+	})
+
+	// ---- JSON Parse ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.json_parse",
+		Label:       "JSON Parse",
+		Category:    "pipeline",
+		Description: "Parses a JSON string from pipeline context into a structured value",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "source", Label: "Source", Type: FieldTypeString, Required: true, Description: "Dot-path to JSON string value"},
+			{Key: "target", Label: "Target", Type: FieldTypeString, Description: "Output key name for parsed result"},
+		},
+	})
+
+	// ---- M2M Token ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.m2m_token",
+		Label:       "M2M Token",
+		Category:    "pipeline",
+		Description: "Generates or validates a machine-to-machine (M2M) token with custom claims",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "action", Label: "Action", Type: FieldTypeSelect, Options: []string{"generate", "validate", "revoke", "introspect"}, Required: true},
+			{Key: "claims", Label: "Claims", Type: FieldTypeMap, Description: "Custom claims"},
+			{Key: "ttl", Label: "TTL", Type: FieldTypeDuration, Description: "Token time-to-live"},
+		},
+	})
+
+	// ---- NoSQL Get ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.nosql_get",
+		Label:       "NoSQL Get",
+		Category:    "pipeline",
+		Description: "Retrieves a document from a NoSQL store by key",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "store", Label: "Store", Type: FieldTypeString, Required: true, Description: "NoSQL store module name"},
+			{Key: "key", Label: "Key", Type: FieldTypeString, Required: true, Description: "Document key"},
+		},
+	})
+
+	// ---- NoSQL Put ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.nosql_put",
+		Label:       "NoSQL Put",
+		Category:    "pipeline",
+		Description: "Stores a document in a NoSQL store by key",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "store", Label: "Store", Type: FieldTypeString, Required: true, Description: "NoSQL store module name"},
+			{Key: "key", Label: "Key", Type: FieldTypeString, Required: true, Description: "Document key"},
+			{Key: "item", Label: "Item", Type: FieldTypeJSON, Description: "Document to store"},
+		},
+	})
+
+	// ---- NoSQL Query ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.nosql_query",
+		Label:       "NoSQL Query",
+		Category:    "pipeline",
+		Description: "Queries documents from a NoSQL store by key prefix",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "store", Label: "Store", Type: FieldTypeString, Required: true, Description: "NoSQL store module name"},
+			{Key: "prefix", Label: "Prefix", Type: FieldTypeString, Description: "Key prefix to filter documents"},
+		},
+	})
+
+	// ---- OIDC Auth URL ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.oidc_auth_url",
+		Label:       "OIDC Auth URL",
+		Category:    "pipeline",
+		Description: "Generates an OIDC/OAuth2 authorization URL and redirects the user",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Required: true, Description: "OIDC provider name"},
+			{Key: "redirect_uri", Label: "Redirect URI", Type: FieldTypeString, Required: true, Description: "Redirect URI after authentication"},
+			{Key: "scopes", Label: "Scopes", Type: FieldTypeArray, Description: "OAuth2 scopes to request"},
+		},
+	})
+
+	// ---- OIDC Callback ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.oidc_callback",
+		Label:       "OIDC Callback",
+		Category:    "pipeline",
+		Description: "Handles the OIDC/OAuth2 callback, exchanges the code for tokens, and extracts user info",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Required: true, Description: "OIDC provider name"},
+			{Key: "redirect_uri", Label: "Redirect URI", Type: FieldTypeString, Required: true, Description: "Redirect URI (must match auth URL)"},
+		},
+	})
+
+	// ---- Raw Response ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.raw_response",
+		Label:       "Raw Response",
+		Category:    "pipeline",
+		Description: "Writes a non-JSON HTTP response with custom content type and stops pipeline execution",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "content_type", Label: "Content-Type", Type: FieldTypeString, Required: true, Description: "Content-Type header"},
+			{Key: "status", Label: "Status", Type: FieldTypeNumber, Description: "HTTP status code"},
+			{Key: "headers", Label: "Headers", Type: FieldTypeMap, Description: "Custom response headers"},
+			{Key: "body", Label: "Body", Type: FieldTypeString, Description: "Response body"},
+			{Key: "body_from", Label: "Body From", Type: FieldTypeString, Description: "Dot-path to body value"},
+		},
+	})
+
+	// ---- Sandbox Exec ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.sandbox_exec",
+		Label:       "Sandbox Exec",
+		Category:    "pipeline",
+		Description: "Runs a command in a hardened Docker sandbox container with resource limits",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "image", Label: "Image", Type: FieldTypeString, Description: "Container image URI"},
+			{Key: "command", Label: "Command", Type: FieldTypeArray, Description: "Command to execute"},
+			{Key: "security_profile", Label: "Security Profile", Type: FieldTypeSelect, Options: []string{"strict", "standard", "permissive"}, Description: "Security profile"},
+			{Key: "memory_limit", Label: "Memory Limit", Type: FieldTypeString, Description: "Memory limit (e.g. 128m)"},
+			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, Description: "Execution timeout"},
+			{Key: "env", Label: "Environment", Type: FieldTypeMap, Description: "Environment variables"},
+		},
+	})
+
+	// ---- Secret Fetch ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.secret_fetch",
+		Label:       "Secret Fetch",
+		Category:    "pipeline",
+		Description: "Fetches one or more secrets from a named secrets module",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Label: "Module", Type: FieldTypeString, Required: true, Description: "Secrets module name"},
+			{Key: "secrets", Label: "Secrets", Type: FieldTypeMap, Required: true, Description: "Map of output key to secret ID/ARN"},
+		},
+	})
+
+	// ---- State Machine Get ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.statemachine_get",
+		Label:       "State Machine Get",
+		Category:    "pipeline",
+		Description: "Retrieves the current state of a state machine instance",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "engine", Label: "Engine", Type: FieldTypeString, Required: true, Description: "State machine engine module name"},
+			{Key: "instanceId", Label: "Instance ID", Type: FieldTypeString, Required: true, Description: "State machine instance ID"},
+		},
+	})
+
+	// ---- State Machine Transition ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.statemachine_transition",
+		Label:       "State Machine Transition",
+		Category:    "pipeline",
+		Description: "Triggers a state machine transition for a given instance",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "engine", Label: "Engine", Type: FieldTypeString, Required: true, Description: "State machine engine module name"},
+			{Key: "instanceId", Label: "Instance ID", Type: FieldTypeString, Required: true, Description: "State machine instance ID"},
+			{Key: "transition", Label: "Transition", Type: FieldTypeString, Required: true, Description: "Transition name to trigger"},
+		},
+	})
+
+	// ---- Token Revoke ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.token_revoke",
+		Label:       "Token Revoke",
+		Category:    "pipeline",
+		Description: "Revokes a JWT by extracting its JTI claim and adding it to a token blacklist",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "blacklist_module", Label: "Blacklist Module", Type: FieldTypeString, Required: true, Description: "TokenBlacklist module name"},
+			{Key: "token_source", Label: "Token Source", Type: FieldTypeString, Required: true, Description: "Dot-path to Bearer token"},
+		},
+	})
 }

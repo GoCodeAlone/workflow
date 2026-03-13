@@ -59,7 +59,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Description: "Branches pipeline execution based on a field value. Uses 'field' with 'routes' map and 'default'.",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "field", Type: FieldTypeString, Description: "Template expression to evaluate for routing", Required: true},
-			{Key: "routes", Type: FieldTypeMap, Description: "Map of field values to step names for branching"},
+			{Key: "routes", Type: FieldTypeMap, Description: "Map of field values to step names for branching", Required: true},
 			{Key: "default", Type: FieldTypeString, Description: "Default step name when no route matches", Required: true},
 		},
 		Outputs: []StepOutputDef{
@@ -128,7 +128,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "database", Type: FieldTypeString, Description: "Database module name", Required: true},
 			{Key: "query", Type: FieldTypeSQL, Description: "SQL query (template expressions supported)", Required: true},
 			{Key: "params", Type: FieldTypeArray, Description: "Query parameters (positional $1, $2...)"},
-			{Key: "mode", Type: FieldTypeSelect, Description: "Result mode", Options: []string{"single", "list"}, DefaultValue: "single"},
+			{Key: "mode", Type: FieldTypeSelect, Description: "Result mode", Options: []string{"single", "list"}, DefaultValue: "list"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "row", Type: "map", Description: "First result row as key-value map (single mode)"},
@@ -693,6 +693,650 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "token", Type: "string", Description: "Generated or validated token"},
 			{Key: "claims", Type: "map", Description: "Token claims"},
 			{Key: "valid", Type: "boolean", Description: "Whether the token is valid (validate action)"},
+		},
+	})
+
+	// --- AI plugin steps ---
+
+	r.Register(&StepSchema{
+		Type:        "step.ai_complete",
+		Plugin:      "ai",
+		Description: "Invokes an AI provider for text completion.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Type: FieldTypeString, Description: "AI provider module name"},
+			{Key: "model", Type: FieldTypeString, Description: "Model name to use"},
+			{Key: "system_prompt", Type: FieldTypeString, Description: "System prompt (template expressions supported)"},
+			{Key: "input_from", Type: FieldTypeString, Description: "Dot-path to resolve input text"},
+			{Key: "max_tokens", Type: FieldTypeNumber, Description: "Token limit", DefaultValue: 1024},
+			{Key: "temperature", Type: FieldTypeNumber, Description: "Temperature parameter"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "content", Type: "string", Description: "Generated text"},
+			{Key: "model", Type: "string", Description: "Model used"},
+			{Key: "finish_reason", Type: "string", Description: "Completion finish reason"},
+			{Key: "usage", Type: "map", Description: "Token usage (input_tokens, output_tokens)"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.ai_classify",
+		Plugin:      "ai",
+		Description: "Classifies text input into predefined categories using an AI provider.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Type: FieldTypeString, Description: "AI provider module name"},
+			{Key: "model", Type: FieldTypeString, Description: "Model name to use"},
+			{Key: "categories", Type: FieldTypeArray, Description: "Valid classification categories", Required: true},
+			{Key: "input_from", Type: FieldTypeString, Description: "Dot-path to resolve input text"},
+			{Key: "max_tokens", Type: FieldTypeNumber, Description: "Token limit", DefaultValue: 256},
+			{Key: "temperature", Type: FieldTypeNumber, Description: "Temperature parameter"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "category", Type: "string", Description: "Predicted category"},
+			{Key: "confidence", Type: "number", Description: "Confidence score (0-1)"},
+			{Key: "reasoning", Type: "string", Description: "Explanation of classification"},
+			{Key: "usage", Type: "map", Description: "Token usage stats"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.ai_extract",
+		Plugin:      "ai",
+		Description: "Extracts structured data from text using AI provider with optional tool use.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Type: FieldTypeString, Description: "AI provider module name"},
+			{Key: "model", Type: FieldTypeString, Description: "Model name to use"},
+			{Key: "schema", Type: FieldTypeJSON, Description: "JSON Schema for extraction structure", Required: true},
+			{Key: "input_from", Type: FieldTypeString, Description: "Dot-path to input text"},
+			{Key: "max_tokens", Type: FieldTypeNumber, Description: "Token limit", DefaultValue: 1024},
+			{Key: "temperature", Type: FieldTypeNumber, Description: "Temperature parameter"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "extracted", Type: "map", Description: "Extracted structured data"},
+			{Key: "method", Type: "string", Description: "Extraction method used"},
+			{Key: "usage", Type: "map", Description: "Token usage"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.sub_workflow",
+		Plugin:      "ai",
+		Description: "Invokes a registered plugin workflow as a sub-workflow.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "workflow", Type: FieldTypeString, Description: "Qualified workflow name", Required: true},
+			{Key: "input_mapping", Type: FieldTypeMap, Description: "Template expressions mapping parent to child inputs"},
+			{Key: "output_mapping", Type: FieldTypeMap, Description: "Dot-paths mapping child outputs to parent keys"},
+			{Key: "timeout", Type: FieldTypeDuration, Description: "Execution timeout", DefaultValue: "30s"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "result", Type: "map", Description: "Child pipeline outputs"},
+		},
+	})
+
+	// --- CI/CD plugin steps ---
+
+	r.Register(&StepSchema{
+		Type:        "step.artifact_pull",
+		Plugin:      "cicd",
+		Description: "Retrieves an artifact from a configured source (previous execution, URL, or S3).",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "source", Type: FieldTypeSelect, Description: "Artifact source type", Options: []string{"previous_execution", "url", "s3"}, Required: true},
+			{Key: "dest", Type: FieldTypeString, Description: "Destination file path", Required: true},
+			{Key: "key", Type: FieldTypeString, Description: "Artifact key (for previous_execution or s3 source)"},
+			{Key: "url", Type: FieldTypeString, Description: "Download URL (for url source)"},
+			{Key: "execution_id", Type: FieldTypeString, Description: "Execution ID (uses metadata if not set)"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "source", Type: "string", Description: "Source type used"},
+			{Key: "key", Type: "string", Description: "Artifact key"},
+			{Key: "dest", Type: "string", Description: "Destination path"},
+			{Key: "size", Type: "number", Description: "File size in bytes"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.artifact_push",
+		Plugin:      "cicd",
+		Description: "Reads a file and stores it as an artifact with SHA256 checksum.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "source_path", Type: FieldTypeString, Description: "Path to file to push", Required: true},
+			{Key: "key", Type: FieldTypeString, Description: "Storage key", Required: true},
+			{Key: "dest", Type: FieldTypeString, Description: "Destination type (default: artifact_store)"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "key", Type: "string", Description: "Storage key"},
+			{Key: "size", Type: "number", Description: "File size in bytes"},
+			{Key: "checksum", Type: "string", Description: "SHA256 hex digest"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.build_ui",
+		Plugin:      "cicd",
+		Description: "Builds a UI project (npm install + npm run build) and copies output to target directory.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "source_dir", Type: FieldTypeString, Description: "UI source directory (containing package.json)", Required: true},
+			{Key: "output_dir", Type: FieldTypeString, Description: "Target directory for built assets", Required: true},
+			{Key: "install_cmd", Type: FieldTypeString, Description: "npm install command", DefaultValue: "npm install --silent"},
+			{Key: "build_cmd", Type: FieldTypeString, Description: "Build command", DefaultValue: "npm run build"},
+			{Key: "env", Type: FieldTypeMap, Description: "Environment variables"},
+			{Key: "timeout", Type: FieldTypeDuration, Description: "Build timeout", DefaultValue: "5m"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "status", Type: "string", Description: "Build status"},
+			{Key: "file_count", Type: "number", Description: "Number of files in output"},
+			{Key: "output_dir", Type: "string", Description: "Resolved output path"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.docker_build",
+		Plugin:      "cicd",
+		Description: "Builds a Docker image from a context directory.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "context", Type: FieldTypeString, Description: "Build context directory", Required: true},
+			{Key: "dockerfile", Type: FieldTypeString, Description: "Dockerfile path", DefaultValue: "Dockerfile"},
+			{Key: "tags", Type: FieldTypeArray, Description: "Image tags"},
+			{Key: "build_args", Type: FieldTypeMap, Description: "Build arguments"},
+			{Key: "cache_from", Type: FieldTypeArray, Description: "Cache images"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "images_built", Type: "[]string", Description: "Built image tags"},
+			{Key: "digest", Type: "string", Description: "Image digest"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.docker_push",
+		Plugin:      "cicd",
+		Description: "Pushes a Docker image to a remote registry.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "image", Type: FieldTypeString, Description: "Image name/tag to push", Required: true},
+			{Key: "registry", Type: FieldTypeString, Description: "Registry prefix"},
+			{Key: "auth_provider", Type: FieldTypeString, Description: "Auth provider name"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "image", Type: "string", Description: "Image name"},
+			{Key: "digest", Type: "string", Description: "Image digest"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.docker_run",
+		Plugin:      "cicd",
+		Description: "Runs a command inside a Docker container.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "image", Type: FieldTypeString, Description: "Container image", Required: true},
+			{Key: "command", Type: FieldTypeArray, Description: "Command to run"},
+			{Key: "env", Type: FieldTypeMap, Description: "Environment variables"},
+			{Key: "timeout", Type: FieldTypeDuration, Description: "Execution timeout"},
+			{Key: "wait_for_exit", Type: FieldTypeBool, Description: "Wait for container to exit", DefaultValue: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "exit_code", Type: "number", Description: "Container exit code"},
+			{Key: "stdout", Type: "string", Description: "Standard output"},
+			{Key: "stderr", Type: "string", Description: "Standard error"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.deploy",
+		Plugin:      "cicd",
+		Description: "Executes deployment with strategy support (rolling, blue_green, canary).",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "environment", Type: FieldTypeString, Description: "Target environment", Required: true},
+			{Key: "strategy", Type: FieldTypeSelect, Description: "Deployment strategy", Options: []string{"rolling", "blue_green", "canary"}, Required: true},
+			{Key: "image", Type: FieldTypeString, Description: "Container image to deploy", Required: true},
+			{Key: "provider", Type: FieldTypeString, Description: "Deployment provider name"},
+			{Key: "rollback_on_failure", Type: FieldTypeBool, Description: "Auto-rollback on deployment error"},
+			{Key: "health_check", Type: FieldTypeMap, Description: "Health check configuration (path, interval, timeout)"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "status", Type: "string", Description: "Deployment status"},
+			{Key: "image", Type: "string", Description: "Deployed image"},
+			{Key: "environment", Type: "string", Description: "Target environment"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.gate",
+		Plugin:      "cicd",
+		Description: "Approval gate supporting manual, automated, and scheduled approval types.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "type", Type: FieldTypeSelect, Description: "Gate type", Options: []string{"manual", "automated", "scheduled"}, Required: true},
+			{Key: "timeout", Type: FieldTypeDuration, Description: "Approval timeout", DefaultValue: "24h"},
+			{Key: "approvers", Type: FieldTypeArray, Description: "Required approver names"},
+			{Key: "auto_approve_conditions", Type: FieldTypeArray, Description: "Conditions for automated approval"},
+			{Key: "schedule", Type: FieldTypeMap, Description: "Scheduled window config (weekdays, start_hour, end_hour)"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "gate_result", Type: "map", Description: "Gate result: {passed, type, reason, approval_required}"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.scan_sast",
+		Plugin:      "cicd",
+		Description: "Performs static application security testing (SAST).",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "scanner", Type: FieldTypeString, Description: "Scanner name (e.g., semgrep)", Required: true},
+			{Key: "target", Type: FieldTypeString, Description: "Scan target path"},
+			{Key: "rules", Type: FieldTypeArray, Description: "Scanner rule sets"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "findings", Type: "[]any", Description: "Security findings"},
+			{Key: "passed", Type: "boolean", Description: "Whether the scan passed"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.scan_container",
+		Plugin:      "cicd",
+		Description: "Scans a container image for vulnerabilities.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "target_image", Type: FieldTypeString, Description: "Image to scan", Required: true},
+			{Key: "fail_on_severity", Type: FieldTypeSelect, Description: "Minimum severity to fail", Options: []string{"critical", "high", "medium", "low"}},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "vulnerabilities", Type: "[]any", Description: "Found vulnerabilities"},
+			{Key: "severity_counts", Type: "map", Description: "Vulnerability counts by severity"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.scan_deps",
+		Plugin:      "cicd",
+		Description: "Scans project dependencies for known vulnerabilities.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "manifest_path", Type: FieldTypeString, Description: "Package manifest file path"},
+			{Key: "fail_on_severity", Type: FieldTypeSelect, Description: "Minimum severity to fail", Options: []string{"critical", "high", "medium", "low"}},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "vulnerabilities", Type: "[]any", Description: "Vulnerable dependencies found"},
+			{Key: "passed", Type: "boolean", Description: "Whether the scan passed"},
+		},
+	})
+
+	// --- Platform plugin steps ---
+
+	r.Register(&StepSchema{
+		Type:        "step.platform_template",
+		Plugin:      "platform",
+		Description: "Resolves a platform resource template with parameters, producing capability declarations.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "template_name", Type: FieldTypeString, Description: "Template name to resolve", Required: true},
+			{Key: "template_version", Type: FieldTypeString, Description: "Template version"},
+			{Key: "parameters", Type: FieldTypeMap, Description: "Template parameters"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "resolved_resources", Type: "[]any", Description: "Resolved capability declarations"},
+			{Key: "template_name", Type: "string", Description: "Resolved template name"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.platform_plan",
+		Plugin:      "platform",
+		Description: "Plans infrastructure changes for a named platform resource module.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Platform resource module name", Required: true},
+			{Key: "resources_from", Type: FieldTypeString, Description: "Context key containing resources to plan"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "plan", Type: "map", Description: "Infrastructure plan"},
+			{Key: "actions", Type: "[]any", Description: "Planned actions"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.platform_apply",
+		Plugin:      "platform",
+		Description: "Applies infrastructure changes for a named platform resource module.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Platform resource module name", Required: true},
+			{Key: "resources_from", Type: FieldTypeString, Description: "Context key containing resources to apply"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "result", Type: "map", Description: "Apply result"},
+			{Key: "success", Type: "boolean", Description: "Whether the apply succeeded"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.platform_destroy",
+		Plugin:      "platform",
+		Description: "Destroys infrastructure resources managed by a named platform resource module.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Platform resource module name", Required: true},
+			{Key: "resources_from", Type: FieldTypeString, Description: "Context key containing resources to destroy"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "success", Type: "boolean", Description: "Whether the destroy succeeded"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.drift_check",
+		Plugin:      "platform",
+		Description: "Checks resources for configuration drift by comparing current vs desired state.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider_service", Type: FieldTypeString, Description: "Provider service name", Required: true},
+			{Key: "resources_from", Type: FieldTypeString, Description: "Context key for applied resources", DefaultValue: "applied_resources"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "reports", Type: "[]any", Description: "Drift report per resource"},
+			{Key: "drift_detected", Type: "boolean", Description: "Whether any drift was detected"},
+		},
+	})
+
+	// --- Pipeline steps plugin (additional) ---
+
+	r.Register(&StepSchema{
+		Type:        "step.circuit_breaker",
+		Plugin:      "pipelinesteps",
+		Description: "Tracks service failures and opens the circuit when a threshold is exceeded to prevent cascading failures.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "failure_threshold", Type: FieldTypeNumber, Description: "Failures before opening the circuit", DefaultValue: 5},
+			{Key: "success_threshold", Type: FieldTypeNumber, Description: "Successes to close circuit in half-open state", DefaultValue: 3},
+			{Key: "timeout", Type: FieldTypeDuration, Description: "Duration before transitioning to half-open", DefaultValue: "30s"},
+			{Key: "service_name", Type: FieldTypeString, Description: "Service identifier for the circuit"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "circuit_breaker", Type: "map", Description: "Status: {state, service, allowed, transitioned}"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.rate_limit",
+		Plugin:      "pipelinesteps",
+		Description: "Enforces rate limiting using the token bucket algorithm.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "requests_per_minute", Type: FieldTypeNumber, Description: "Rate limit in requests per minute", DefaultValue: 60},
+			{Key: "burst_size", Type: FieldTypeNumber, Description: "Burst capacity", DefaultValue: 10},
+			{Key: "key_from", Type: FieldTypeString, Description: "Template for per-client key (default: global)"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "rate_limit", Type: "map", Description: "Rate limit result: {allowed, key}"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.constraint_check",
+		Plugin:      "pipelinesteps",
+		Description: "Validates capability declarations against defined constraints.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "resources_from", Type: FieldTypeString, Description: "Context key containing resources to validate", DefaultValue: "resources"},
+			{Key: "constraints", Type: FieldTypeArray, Description: "Constraint definitions [{field, operator, value, source}]"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "constraint_violations", Type: "[]any", Description: "List of constraint violations"},
+			{Key: "constraint_summary", Type: "map", Description: "Summary: {passed, total_checked, violation_count}"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.db_create_partition",
+		Plugin:      "pipelinesteps",
+		Description: "Creates a PostgreSQL LIST partition for a tenant value.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "database", Type: FieldTypeString, Description: "Database module name", Required: true},
+			{Key: "tenantKey", Type: FieldTypeString, Description: "Dot-path to tenant value", Required: true},
+			{Key: "partitionKey", Type: FieldTypeString, Description: "Target partition config key"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "synced", Type: "boolean", Description: "Whether the partition was created"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.db_sync_partitions",
+		Plugin:      "pipelinesteps",
+		Description: "Synchronizes partitions from source table for all managed tables.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "database", Type: FieldTypeString, Description: "Database module name", Required: true},
+			{Key: "partitionKey", Type: FieldTypeString, Description: "Target partition key"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "synced", Type: "boolean", Description: "Whether synchronization completed"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.s3_upload",
+		Plugin:      "pipelinesteps",
+		Description: "Uploads base64-encoded binary data to an S3 bucket.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "bucket", Type: FieldTypeString, Description: "S3 bucket name", Required: true},
+			{Key: "region", Type: FieldTypeString, Description: "AWS region", Required: true},
+			{Key: "key", Type: FieldTypeString, Description: "S3 key (template expressions supported)", Required: true},
+			{Key: "body_from", Type: FieldTypeString, Description: "Dot-path to base64-encoded body", Required: true},
+			{Key: "content_type", Type: FieldTypeString, Description: "Static MIME type"},
+			{Key: "content_type_from", Type: FieldTypeString, Description: "Dot-path to MIME type"},
+			{Key: "endpoint", Type: FieldTypeString, Description: "Custom S3 endpoint (for MinIO or LocalStack)"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "url", Type: "string", Description: "Public URL of the uploaded object"},
+			{Key: "key", Type: "string", Description: "Resolved S3 key"},
+			{Key: "bucket", Type: "string", Description: "Bucket name"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.ui_scaffold",
+		Plugin:      "pipelinesteps",
+		Description: "Generates a Vite+React+TypeScript UI scaffold from an OpenAPI spec and returns a ZIP file.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "title", Type: FieldTypeString, Description: "UI title"},
+			{Key: "theme", Type: FieldTypeString, Description: "Theme name"},
+			{Key: "auth", Type: FieldTypeBool, Description: "Include authentication module"},
+			{Key: "filename", Type: FieldTypeString, Description: "ZIP filename", DefaultValue: "scaffold.zip"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "status", Type: "number", Description: "HTTP response status (200 on success)"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.ui_scaffold_analyze",
+		Plugin:      "pipelinesteps",
+		Description: "Analyzes an OpenAPI spec and returns parsed resource/operation structure as JSON.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "title", Type: FieldTypeString, Description: "UI title for scaffold analysis"},
+			{Key: "theme", Type: FieldTypeString, Description: "Theme for analysis"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "resources", Type: "[]any", Description: "Parsed API resources"},
+			{Key: "operations", Type: "[]any", Description: "Parsed operations"},
+		},
+	})
+
+	// --- Feature flags plugin steps ---
+
+	r.Register(&StepSchema{
+		Type:        "step.ff_gate",
+		Plugin:      "featureflags",
+		Description: "Evaluates a feature flag and routes pipeline execution based on the result.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "flag", Type: FieldTypeString, Description: "Feature flag name", Required: true},
+			{Key: "on_enabled", Type: FieldTypeString, Description: "Next step name when flag is enabled", Required: true},
+			{Key: "on_disabled", Type: FieldTypeString, Description: "Next step name when flag is disabled", Required: true},
+			{Key: "user_from", Type: FieldTypeString, Description: "Template expression to resolve user key"},
+			{Key: "group_from", Type: FieldTypeString, Description: "Template expression to resolve group"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "flag_value", Type: "any", Description: "Evaluated flag value"},
+			{Key: "enabled", Type: "boolean", Description: "Whether the flag is enabled"},
+		},
+	})
+
+	// --- New pipeline steps (pipelinesteps plugin) ---
+
+	r.Register(&StepSchema{
+		Type:        "step.raw_response",
+		Plugin:      "pipelinesteps",
+		Description: "Writes a non-JSON HTTP response (XML, HTML, plain text) with custom status code, content type, and optional headers. Stops pipeline execution.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "content_type", Type: FieldTypeString, Description: "Content-Type header (e.g. text/xml)", Required: true},
+			{Key: "status", Type: FieldTypeNumber, Description: "HTTP status code", DefaultValue: 200},
+			{Key: "headers", Type: FieldTypeMap, Description: "Custom response headers"},
+			{Key: "body", Type: FieldTypeString, Description: "Response body (template expressions supported)"},
+			{Key: "body_from", Type: FieldTypeString, Description: "Dot-path to body value in pipeline context"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "status", Type: "number", Description: "HTTP status code sent"},
+			{Key: "content_type", Type: "string", Description: "Content type used"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.json_parse",
+		Plugin:      "pipelinesteps",
+		Description: "Parses a JSON string from pipeline context into a structured value.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "source", Type: FieldTypeString, Description: "Dot-path to JSON string value", Required: true},
+			{Key: "target", Type: FieldTypeString, Description: "Output key name for parsed result", DefaultValue: "value"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "(target)", Type: "any", Description: "Parsed JSON value stored under the configured target key"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.auth_validate",
+		Plugin:      "pipelinesteps",
+		Description: "Validates a Bearer token against a registered AuthProvider module and outputs claims.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "auth_module", Type: FieldTypeString, Description: "Service name of AuthProvider module", Required: true},
+			{Key: "token_source", Type: FieldTypeString, Description: "Dot-path to Bearer token in pipeline context", Required: true},
+			{Key: "subject_field", Type: FieldTypeString, Description: "Output field name for 'sub' claim", DefaultValue: "auth_user_id"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "(claims)", Type: "any", Description: "All claims from AuthProvider as flat keys"},
+			{Key: "(subject_field)", Type: "string", Description: "Value of 'sub' claim mapped to configured subject_field"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.token_revoke",
+		Plugin:      "pipelinesteps",
+		Description: "Revokes a JWT by extracting its JTI claim and adding it to a token blacklist.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "blacklist_module", Type: FieldTypeString, Description: "Service name of TokenBlacklist module", Required: true},
+			{Key: "token_source", Type: FieldTypeString, Description: "Dot-path to Bearer token", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "revoked", Type: "boolean", Description: "Whether the JTI was added to the blacklist"},
+			{Key: "jti", Type: "string", Description: "The JTI claim value (present if revoked=true)"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.field_reencrypt",
+		Plugin:      "pipelinesteps",
+		Description: "Re-encrypts pipeline context data with the latest key version using a ProtectedFieldManager.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Service name of ProtectedFieldManager", Required: true},
+			{Key: "tenant_id", Type: FieldTypeString, Description: "Template expression for tenant ID"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "reencrypted", Type: "boolean", Description: "Whether re-encryption was performed"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.sandbox_exec",
+		Plugin:      "pipelinesteps",
+		Description: "Runs a command in a hardened Docker sandbox container with resource limits.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "image", Type: FieldTypeString, Description: "Container image URI", DefaultValue: "cgr.dev/chainguard/wolfi-base:latest"},
+			{Key: "command", Type: FieldTypeArray, Description: "Command to execute in sandbox"},
+			{Key: "security_profile", Type: FieldTypeSelect, Description: "Security profile", Options: []string{"strict", "standard", "permissive"}, DefaultValue: "strict"},
+			{Key: "memory_limit", Type: FieldTypeString, Description: "Memory limit (e.g. 128m, 1g)"},
+			{Key: "cpu_limit", Type: FieldTypeNumber, Description: "CPU limit (e.g. 0.5)"},
+			{Key: "timeout", Type: FieldTypeDuration, Description: "Execution timeout"},
+			{Key: "env", Type: FieldTypeMap, Description: "Environment variables"},
+			{Key: "fail_on_error", Type: FieldTypeBool, Description: "Stop pipeline if exit_code != 0", DefaultValue: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "exit_code", Type: "number", Description: "Container exit code"},
+			{Key: "stdout", Type: "string", Description: "Standard output"},
+			{Key: "stderr", Type: "string", Description: "Standard error"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.cli_print",
+		Plugin:      "pipelinesteps",
+		Description: "Writes a template-resolved message to stdout or stderr.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "message", Type: FieldTypeString, Description: "Message template (resolved against pipeline context)", Required: true},
+			{Key: "newline", Type: FieldTypeBool, Description: "Append trailing newline", DefaultValue: true},
+			{Key: "target", Type: FieldTypeSelect, Description: "Output destination", Options: []string{"stdout", "stderr"}, DefaultValue: "stdout"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "printed", Type: "string", Description: "The resolved message that was written"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.cli_invoke",
+		Plugin:      "pipelinesteps",
+		Description: "Calls a registered Go CLI command function from the CLICommandRegistry.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "command", Type: FieldTypeString, Description: "Registered command name in CLICommandRegistry", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "command", Type: "string", Description: "Name of the executed command"},
+			{Key: "success", Type: "boolean", Description: "Whether the command succeeded"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.graphql",
+		Plugin:      "pipelinesteps",
+		Description: "Executes GraphQL queries or mutations with support for pagination, batch requests, and OAuth2 authentication.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "url", Type: FieldTypeString, Description: "GraphQL endpoint URL (template expressions supported)", Required: true},
+			{Key: "query", Type: FieldTypeString, Description: "GraphQL query or mutation"},
+			{Key: "variables", Type: FieldTypeMap, Description: "Query variables (template expressions supported)"},
+			{Key: "data_path", Type: FieldTypeString, Description: "Dot-separated path to extract nested data (e.g. user.profile)"},
+			{Key: "headers", Type: FieldTypeMap, Description: "Custom HTTP headers"},
+			{Key: "timeout", Type: FieldTypeDuration, Description: "Request timeout", DefaultValue: "30s"},
+			{Key: "fail_on_graphql_errors", Type: FieldTypeBool, Description: "Fail if response contains errors", DefaultValue: true},
+			{Key: "auth", Type: FieldTypeMap, Description: "Authentication config (type, token, client_id, client_secret)"},
+			{Key: "pagination", Type: FieldTypeMap, Description: "Pagination config (strategy, page_info_path, cursor_variable, max_pages)"},
+			{Key: "batch", Type: FieldTypeMap, Description: "Batch query config (queries array)"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "data", Type: "any", Description: "Extracted data (after data_path applied)"},
+			{Key: "errors", Type: "[]any", Description: "GraphQL errors"},
+			{Key: "has_errors", Type: "boolean", Description: "Whether errors are present"},
+			{Key: "status_code", Type: "number", Description: "HTTP status code"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.event_decrypt",
+		Plugin:      "pipelinesteps",
+		Description: "Decrypts field-level encryption applied by step.event_publish, reading CloudEvents extension attributes.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "key_id", Type: FieldTypeString, Description: "Key ID override (supports ${ENV_VAR} expressions)"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "decrypted", Type: "boolean", Description: "Whether decryption was performed"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.secret_fetch",
+		Plugin:      "pipelinesteps",
+		Description: "Fetches one or more secrets from a named secrets module (AWS/Vault).",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Service name of secrets module", Required: true},
+			{Key: "secrets", Type: FieldTypeMap, Description: "Map of output key to secret ID/ARN (supports template expressions)", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "(key)", Type: "string", Description: "For each key in secrets map, the resolved secret value"},
+			{Key: "fetched", Type: "boolean", Description: "Whether all secrets were fetched"},
 		},
 	})
 
