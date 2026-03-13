@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -60,7 +61,13 @@ Options:
 		if err != nil {
 			return fmt.Errorf("failed to scan directory %s: %w", *dir, err)
 		}
-		files = append(files, found...)
+		for _, f := range found {
+			if !isWorkflowYAML(f) {
+				fmt.Fprintf(os.Stderr, "  Skipping non-workflow file: %s\n", f)
+				continue
+			}
+			files = append(files, f)
+		}
 	}
 
 	files = append(files, fs.Args()...)
@@ -154,6 +161,27 @@ var skipFiles = map[string]bool{
 	"datasource.yaml":     true,
 	"dashboard.yml":       true,
 	"dashboard.yaml":      true,
+}
+
+// isWorkflowYAML reports whether the YAML file at path looks like a workflow
+// config by checking the first 100 lines for top-level keys: modules:,
+// workflows:, or pipelines:.
+func isWorkflowYAML(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for i := 0; i < 100 && scanner.Scan(); i++ {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "modules:") ||
+			strings.HasPrefix(line, "workflows:") ||
+			strings.HasPrefix(line, "pipelines:") {
+			return true
+		}
+	}
+	return false
 }
 
 func findYAMLFiles(root string) ([]string, error) {
