@@ -414,7 +414,7 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		if err != nil {
 			return fmt.Errorf("infrastructure plan failed: %w", err)
 		}
-		if err := p.Apply(context.TODO(), plan); err != nil {
+		if err := p.Apply(context.Background(), plan); err != nil {
 			return fmt.Errorf("infrastructure provisioning failed: %w", err)
 		}
 		e.provisioner = p
