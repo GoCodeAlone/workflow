@@ -425,3 +425,87 @@ func TestManifestEngineFieldsLoadFromFile(t *testing.T) {
 		t.Errorf("Capabilities = %v, want [{storage provider 5}]", loaded.Capabilities)
 	}
 }
+
+func TestPluginManifest_LegacyCapabilities(t *testing.T) {
+	// Legacy format: capabilities is a JSON object with configProvider, moduleTypes, etc.
+	legacyJSON := `{
+		"name": "legacy-plugin",
+		"version": "1.0.0",
+		"author": "Test",
+		"description": "Legacy capabilities test",
+		"capabilities": {
+			"configProvider": true,
+			"moduleTypes": ["test.module"],
+			"stepTypes": ["step.test"],
+			"triggerTypes": ["trigger.test"]
+		}
+	}`
+
+	var m PluginManifest
+	if err := json.Unmarshal([]byte(legacyJSON), &m); err != nil {
+		t.Fatalf("Unmarshal legacy capabilities: %v", err)
+	}
+	if len(m.ModuleTypes) != 1 || m.ModuleTypes[0] != "test.module" {
+		t.Errorf("ModuleTypes = %v, want [test.module]", m.ModuleTypes)
+	}
+	if len(m.StepTypes) != 1 || m.StepTypes[0] != "step.test" {
+		t.Errorf("StepTypes = %v, want [step.test]", m.StepTypes)
+	}
+	if len(m.TriggerTypes) != 1 || m.TriggerTypes[0] != "trigger.test" {
+		t.Errorf("TriggerTypes = %v, want [trigger.test]", m.TriggerTypes)
+	}
+	// Legacy object format should not populate Capabilities slice
+	if len(m.Capabilities) != 0 {
+		t.Errorf("Capabilities = %v, want empty for legacy object format", m.Capabilities)
+	}
+}
+
+func TestPluginManifest_NewCapabilitiesArrayFormat(t *testing.T) {
+	// New format: capabilities is a JSON array of CapabilityDecl
+	newJSON := `{
+		"name": "new-plugin",
+		"version": "1.0.0",
+		"author": "Test",
+		"description": "New capabilities test",
+		"moduleTypes": ["test.module"],
+		"stepTypes": ["step.test"],
+		"capabilities": [{"name": "step.test", "role": "provider"}]
+	}`
+
+	var m PluginManifest
+	if err := json.Unmarshal([]byte(newJSON), &m); err != nil {
+		t.Fatalf("Unmarshal new capabilities: %v", err)
+	}
+	if len(m.Capabilities) != 1 || m.Capabilities[0].Name != "step.test" {
+		t.Errorf("Capabilities = %v, want [{step.test provider 0}]", m.Capabilities)
+	}
+	if len(m.ModuleTypes) != 1 || m.ModuleTypes[0] != "test.module" {
+		t.Errorf("ModuleTypes = %v, want [test.module]", m.ModuleTypes)
+	}
+}
+
+func TestPluginManifest_LegacyCapabilitiesMergesWithTopLevel(t *testing.T) {
+	// Top-level fields should be merged with types from legacy capabilities object
+	legacyJSON := `{
+		"name": "merged-plugin",
+		"version": "1.0.0",
+		"author": "Test",
+		"description": "Merge test",
+		"moduleTypes": ["existing.module"],
+		"capabilities": {
+			"moduleTypes": ["caps.module"],
+			"stepTypes": ["step.caps"]
+		}
+	}`
+
+	var m PluginManifest
+	if err := json.Unmarshal([]byte(legacyJSON), &m); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if len(m.ModuleTypes) != 2 {
+		t.Errorf("ModuleTypes = %v, want [existing.module caps.module]", m.ModuleTypes)
+	}
+	if len(m.StepTypes) != 1 || m.StepTypes[0] != "step.caps" {
+		t.Errorf("StepTypes = %v, want [step.caps]", m.StepTypes)
+	}
+}
