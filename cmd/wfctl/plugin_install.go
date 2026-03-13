@@ -111,10 +111,27 @@ func runPluginInstall(args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Fetching manifest for %q...\n", pluginName)
-	manifest, sourceName, err := mr.FetchManifest(pluginName)
-	if err != nil {
-		return err
+	manifest, sourceName, registryErr := mr.FetchManifest(nameArg)
+
+	destDir := filepath.Join(*dataDir, pluginName)
+
+	if registryErr != nil {
+		// Registry lookup failed. Try GitHub direct install if input looks like owner/repo[@version].
+		ghOwner, ghRepo, ghVersion, isGH := parseGitHubRef(nameArg)
+		if !isGH {
+			return registryErr
+		}
+		if err := installFromGitHub(ghOwner, ghRepo, ghVersion, destDir); err != nil {
+			return fmt.Errorf("registry: %w; github: %w", registryErr, err)
+		}
+		pluginName = normalizePluginName(ghRepo)
+		if err := ensurePluginBinary(destDir, pluginName); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not normalize binary name: %v\n", err)
+		}
+		fmt.Printf("Installed %s to %s\n", nameArg, destDir)
+		return nil
 	}
+
 	fmt.Fprintf(os.Stderr, "Found in registry %q.\n", sourceName)
 
 	dl, err := manifest.FindDownload(runtime.GOOS, runtime.GOARCH)
@@ -122,7 +139,6 @@ func runPluginInstall(args []string) error {
 		return err
 	}
 
-	destDir := filepath.Join(*dataDir, pluginName)
 	if err := os.MkdirAll(destDir, 0750); err != nil {
 		return fmt.Errorf("create plugin dir %s: %w", destDir, err)
 	}
