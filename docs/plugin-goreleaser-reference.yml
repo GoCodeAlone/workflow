@@ -1,0 +1,44 @@
+version: 2
+
+# Reference .goreleaser.yml for GoCodeAlone workflow plugin repositories.
+# Copy this to your plugin repo as .goreleaser.yml and adjust as needed.
+#
+# Key requirements:
+#   1. binary uses {{ .ProjectName }} so no hardcoded names
+#   2. archives always include plugin.json
+#   3. before/after hooks template plugin.json version from the release tag
+
+before:
+  hooks:
+    - "cp plugin.json plugin.json.orig"
+    - "sed -i.bak 's/\"version\": \".*\"/\"version\": \"{{ .Version }}\"/' plugin.json && rm -f plugin.json.bak"
+
+after:
+  hooks:
+    - "mv plugin.json.orig plugin.json"
+
+builds:
+  - main: ./cmd/{{ .ProjectName }}
+    binary: "{{ .ProjectName }}"
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+    files:
+      - plugin.json
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
