@@ -66,7 +66,9 @@ func runPluginSearch(args []string) error {
 
 func runPluginInstall(args []string) error {
 	fs := flag.NewFlagSet("plugin install", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	cfgPath := fs.String("config", "", "Registry config file path")
 	registryName := fs.String("registry", "", "Use a specific registry by name")
 	fs.Usage = func() {
@@ -76,6 +78,7 @@ func runPluginInstall(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	dataDir := &pluginDirVal
 	if fs.NArg() < 1 {
 		fs.Usage()
 		return fmt.Errorf("plugin name is required")
@@ -168,7 +171,9 @@ func runPluginInstall(args []string) error {
 
 func runPluginList(args []string) error {
 	fs := flag.NewFlagSet("plugin list", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin list [options]\n\nList installed plugins.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -177,13 +182,13 @@ func runPluginList(args []string) error {
 		return err
 	}
 
-	entries, err := os.ReadDir(*dataDir)
+	entries, err := os.ReadDir(pluginDirVal)
 	if os.IsNotExist(err) {
 		fmt.Println("No plugins installed.")
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("read data dir %s: %w", *dataDir, err)
+		return fmt.Errorf("read data dir %s: %w", pluginDirVal, err)
 	}
 
 	type installed struct {
@@ -197,7 +202,7 @@ func runPluginList(args []string) error {
 		if !e.IsDir() {
 			continue
 		}
-		ver, pType, desc := readInstalledInfo(filepath.Join(*dataDir, e.Name()))
+		ver, pType, desc := readInstalledInfo(filepath.Join(pluginDirVal, e.Name()))
 		plugins = append(plugins, installed{name: e.Name(), version: ver, pluginType: pType, description: desc})
 	}
 
@@ -220,7 +225,9 @@ func runPluginList(args []string) error {
 
 func runPluginUpdate(args []string) error {
 	fs := flag.NewFlagSet("plugin update", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin update [options] <name>\n\nUpdate an installed plugin to its latest version.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -234,18 +241,20 @@ func runPluginUpdate(args []string) error {
 	}
 
 	pluginName := fs.Arg(0)
-	pluginDir := filepath.Join(*dataDir, pluginName)
+	pluginDir := filepath.Join(pluginDirVal, pluginName)
 	if _, err := os.Stat(pluginDir); os.IsNotExist(err) {
 		return fmt.Errorf("plugin %q is not installed", pluginName)
 	}
 
 	// Re-run install which will overwrite the existing installation.
-	return runPluginInstall(append([]string{"--data-dir", *dataDir}, pluginName))
+	return runPluginInstall(append([]string{"--plugin-dir", pluginDirVal}, pluginName))
 }
 
 func runPluginRemove(args []string) error {
 	fs := flag.NewFlagSet("plugin remove", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin remove [options] <name>\n\nUninstall a plugin.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -259,7 +268,7 @@ func runPluginRemove(args []string) error {
 	}
 
 	pluginName := fs.Arg(0)
-	pluginDir := filepath.Join(*dataDir, pluginName)
+	pluginDir := filepath.Join(pluginDirVal, pluginName)
 	if _, err := os.Stat(pluginDir); os.IsNotExist(err) {
 		return fmt.Errorf("plugin %q is not installed", pluginName)
 	}
@@ -272,7 +281,9 @@ func runPluginRemove(args []string) error {
 
 func runPluginInfo(args []string) error {
 	fs := flag.NewFlagSet("plugin info", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", defaultDataDir, "Plugin data directory")
+	var pluginDirVal string
+	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
+	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin info [options] <name>\n\nShow details about an installed plugin.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -286,7 +297,7 @@ func runPluginInfo(args []string) error {
 	}
 
 	pluginName := fs.Arg(0)
-	pluginDir := filepath.Join(*dataDir, pluginName)
+	pluginDir := filepath.Join(pluginDirVal, pluginName)
 	manifestPath := filepath.Join(pluginDir, "plugin.json")
 
 	data, err := os.ReadFile(manifestPath)
