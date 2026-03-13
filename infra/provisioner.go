@@ -141,33 +141,24 @@ func (p *Provisioner) Apply(ctx context.Context, plan *ProvisionPlan) error {
 
 	// Process deletes first.
 	for _, rc := range plan.Delete {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("context cancelled during delete: %w", err)
-		}
-		if err := p.destroyResource(rc.Name); err != nil {
+		if err := p.destroyResource(ctx, rc.Name); err != nil {
 			return fmt.Errorf("failed to delete resource %q: %w", rc.Name, err)
 		}
 	}
 
 	// Process creates.
 	for _, rc := range plan.Create {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("context cancelled during create: %w", err)
-		}
-		if err := p.provisionResource(rc); err != nil {
+		if err := p.provisionResource(ctx, rc); err != nil {
 			return fmt.Errorf("failed to create resource %q: %w", rc.Name, err)
 		}
 	}
 
 	// Process updates (destroy then re-provision).
 	for _, rc := range plan.Update {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("context cancelled during update: %w", err)
-		}
-		if err := p.destroyResource(rc.Name); err != nil {
+		if err := p.destroyResource(ctx, rc.Name); err != nil {
 			return fmt.Errorf("failed to destroy resource %q for update: %w", rc.Name, err)
 		}
-		if err := p.provisionResource(rc); err != nil {
+		if err := p.provisionResource(ctx, rc); err != nil {
 			return fmt.Errorf("failed to re-create resource %q for update: %w", rc.Name, err)
 		}
 	}
@@ -182,10 +173,7 @@ func (p *Provisioner) Apply(ctx context.Context, plan *ProvisionPlan) error {
 
 // Destroy tears down a single named resource.
 func (p *Provisioner) Destroy(ctx context.Context, name string) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("context cancelled: %w", err)
-	}
-	return p.destroyResource(name)
+	return p.destroyResource(ctx, name)
 }
 
 // Status returns the current state of all provisioned resources.
@@ -260,7 +248,10 @@ func ParseConfig(raw map[string]any) (*InfraConfig, error) {
 }
 
 // provisionResource creates a resource via registered providers or the legacy fallback.
-func (p *Provisioner) provisionResource(rc ResourceConfig) error {
+func (p *Provisioner) provisionResource(ctx context.Context, rc ResourceConfig) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled before provision %q: %w", rc.Name, err)
+	}
 	p.mu.Lock()
 	if _, exists := p.resources[rc.Name]; exists {
 		p.mu.Unlock()
@@ -277,7 +268,7 @@ func (p *Provisioner) provisionResource(rc ResourceConfig) error {
 	// Try each registered provider.
 	for _, prov := range p.providers {
 		if prov.Supports(rc.Type, rc.Provider) {
-			if err := prov.Provision(context.Background(), rc); err != nil {
+			if err := prov.Provision(ctx, rc); err != nil {
 				p.mu.Lock()
 				p.resources[rc.Name].Status = "failed"
 				p.resources[rc.Name].Error = err.Error()
@@ -300,18 +291,42 @@ func (p *Provisioner) provisionResource(rc ResourceConfig) error {
 	return nil
 }
 
-// destroyResource removes a resource from the internal store.
-func (p *Provisioner) destroyResource(name string) error {
+// destroyResource delegates to the matching provider then removes from internal store.
+func (p *Provisioner) destroyResource(ctx context.Context, name string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled before destroy %q: %w", name, err)
+	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	res, exists := p.resources[name]
 	if !exists {
+		p.mu.Unlock()
 		return fmt.Errorf("resource %q not found", name)
 	}
 
 	res.Status = "destroying"
+	rc := res.Config
+	p.mu.Unlock()
+
+	// Delegate to the matching provider (mirror of provisionResource).
+	for _, prov := range p.providers {
+		if prov.Supports(rc.Type, rc.Provider) {
+			if err := prov.Destroy(ctx, name); err != nil {
+				p.mu.Lock()
+				if r, ok := p.resources[name]; ok {
+					r.Status = "failed"
+					r.Error = err.Error()
+				}
+				p.mu.Unlock()
+				return err
+			}
+			break
+		}
+	}
+
+	p.mu.Lock()
 	delete(p.resources, name)
+	p.mu.Unlock()
 
 	p.logger.Info("resource destroyed", "name", name)
 	return nil
