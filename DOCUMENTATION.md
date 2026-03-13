@@ -6,7 +6,7 @@ The Workflow Engine is a configuration-driven orchestration platform built in Go
 
 ## Core Engine
 
-The engine is built on the [CrisisTextLine/modular](https://github.com/CrisisTextLine/modular) framework for module lifecycle, dependency injection, and service registry management.
+The engine is built on the [GoCodeAlone/modular](https://github.com/GoCodeAlone/modular) framework for module lifecycle, dependency injection, and service registry management.
 
 **Key capabilities:**
 - YAML-driven configuration with environment variable expansion (`${JWT_SECRET}`)

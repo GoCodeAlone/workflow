@@ -2,10 +2,10 @@
 
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Built on Modular](https://img.shields.io/badge/Built%20on-CrisisTextLine%2Fmodular-green)](https://github.com/CrisisTextLine/modular)
+[![Built on Modular](https://img.shields.io/badge/Built%20on-GoCodeAlone%2Fmodular-green)](https://github.com/GoCodeAlone/modular)
 [![Go Reference](https://pkg.go.dev/badge/github.com/GoCodeAlone/workflow.svg)](https://pkg.go.dev/github.com/GoCodeAlone/workflow)
 
-A production-grade, configuration-driven workflow orchestration engine built on [CrisisTextLine/modular](https://github.com/CrisisTextLine/modular) v1.11.11. Define entire applications in YAML -- from API servers to multi-service chat platforms -- with 48+ module types, dynamic hot-reload, AI-powered generation, and a visual builder UI.
+A production-grade, configuration-driven workflow orchestration engine built on [GoCodeAlone/modular](https://github.com/GoCodeAlone/modular) v1.12.3. Define entire applications in YAML -- from API servers to multi-service chat platforms -- with 90+ module types, dynamic hot-reload, AI-powered generation, and a visual builder UI.
 
 ## What It Does
 
@@ -179,7 +179,7 @@ go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
 **Commands:**
 - `wfctl inspect <config.yaml>` — summarize modules, workflows, triggers, and dependencies
 - `wfctl validate <config.yaml>` — deep validation against known module/step types
-- `wfctl api-extract <config.yaml>` — generate OpenAPI 3.0 spec from HTTP workflows
+- `wfctl api extract <config.yaml>` — generate OpenAPI 3.0 spec from HTTP workflows
 - `wfctl diff <old.yaml> <new.yaml>` — compare configs and detect breaking changes
 - `wfctl manifest <config.yaml>` — produce infrastructure requirements manifest
 - `wfctl scaffold --modules <types>` — generate a skeleton config for given module types
@@ -327,7 +327,7 @@ cd ui && npm run lint
 | Component | Technology |
 |-----------|-----------|
 | Language | Go 1.26 |
-| Framework | [CrisisTextLine/modular](https://github.com/CrisisTextLine/modular) v1.11.11 |
+| Framework | [GoCodeAlone/modular](https://github.com/GoCodeAlone/modular) v1.12.3 |
 | UI | React, ReactFlow, Zustand, Vite, TypeScript |
 | Hot-Reload | [Yaegi](https://github.com/traefik/yaegi) Go interpreter |
 | Messaging | Apache Kafka ([Sarama](https://github.com/IBM/sarama)), NATS, EventBus |
