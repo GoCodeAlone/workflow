@@ -175,8 +175,7 @@ jobs:
           - name: lsp-server
             cmd: ./cmd/workflow-lsp-server
             prefix: workflow-lsp-server
-            # Windows LSP build skipped: tliron/kutil v0.3.11 has a termenv API mismatch on Windows.
-            platforms: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+            platforms: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
     steps:
     - name: Check out code
