@@ -27,12 +27,15 @@ func (r *StepRegistry) Register(stepType string, factory StepFactory) {
 }
 
 // Create instantiates a PipelineStep of the given type.
-func (r *StepRegistry) Create(stepType, name string, config map[string]any, app modular.Application) (PipelineStep, error) {
+// app must be a modular.Application; it is typed as any to satisfy
+// the interfaces.StepRegistrar interface without an import cycle.
+func (r *StepRegistry) Create(stepType, name string, config map[string]any, app any) (PipelineStep, error) {
 	factory, ok := r.factories[stepType]
 	if !ok {
 		return nil, fmt.Errorf("unknown step type: %s", stepType)
 	}
-	return factory(name, config, app)
+	a, _ := app.(modular.Application)
+	return factory(name, config, a)
 }
 
 // Types returns all registered step type names.

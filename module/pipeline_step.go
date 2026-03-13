@@ -1,14 +1,7 @@
 package module
 
-import "context"
+import "github.com/GoCodeAlone/workflow/interfaces"
 
 // PipelineStep is a single composable unit of work in a pipeline.
-type PipelineStep interface {
-	// Name returns the step's unique name within the pipeline.
-	Name() string
-
-	// Execute runs the step with the pipeline context.
-	// It receives accumulated data from previous steps and returns
-	// its own output to be merged into the context.
-	Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error)
-}
+// Aliased from interfaces.PipelineStep for backwards compatibility.
+type PipelineStep = interfaces.PipelineStep

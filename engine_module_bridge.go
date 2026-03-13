@@ -68,16 +68,18 @@ func (e *StdEngine) recordWorkflowMetrics(workflowType, action, status string, d
 // type-asserts the factory result to module.PipelineStep.
 func (e *StdEngine) registerPluginSteps(typeName string, stepFactory func(name string, cfg map[string]any, app modular.Application) (any, error)) {
 	capturedType := typeName
-	e.stepRegistry.Register(typeName, func(name string, cfg map[string]any, app modular.Application) (module.PipelineStep, error) {
-		result, err := stepFactory(name, cfg, app)
-		if err != nil {
-			return nil, err
-		}
-		if step, ok := result.(module.PipelineStep); ok {
-			return step, nil
-		}
-		return nil, fmt.Errorf("step factory for %q returned non-PipelineStep type", capturedType)
-	})
+	if r, ok := e.stepRegistry.(*module.StepRegistry); ok {
+		r.Register(typeName, func(name string, cfg map[string]any, app modular.Application) (module.PipelineStep, error) {
+			result, err := stepFactory(name, cfg, app)
+			if err != nil {
+				return nil, err
+			}
+			if step, ok := result.(module.PipelineStep); ok {
+				return step, nil
+			}
+			return nil, fmt.Errorf("step factory for %q returned non-PipelineStep type", capturedType)
+		})
+	}
 }
 
 // registerPluginTrigger wires a trigger from a plugin into the engine.

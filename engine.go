@@ -64,11 +64,11 @@ type StdEngine struct {
 	dynamicLoader    *dynamic.Loader
 	eventEmitter     interfaces.EventEmitter
 	secretsResolver  *secrets.MultiResolver
-	// stepRegistry is a concrete *module.StepRegistry because StepFactory and
-	// PipelineStep are module-level types not yet abstracted in interfaces.
-	// TODO(phase5): move StepFactory/PipelineStep to interfaces and change this
-	// field to interfaces.StepRegistrar.
-	stepRegistry    *module.StepRegistry
+	// stepRegistry holds the pipeline step registry. The field is typed as
+	// interfaces.StepRegistrar so the engine depends on the abstraction rather
+	// than the concrete *module.StepRegistry. Registration (AddStepType and
+	// registerPluginSteps) still calls the concrete type via type assertion.
+	stepRegistry    interfaces.StepRegistrar
 	pluginInstaller *plugin.PluginInstaller
 	configDir       string // directory of the config file, for resolving relative paths
 
@@ -154,12 +154,14 @@ func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
 	}
 	// Register the step.workflow_call factory with a closure that looks up
 	// pipelines from this engine's registry at execution time.
-	e.stepRegistry.Register("step.workflow_call", module.NewWorkflowCallStepFactory(
-		func(name string) (*module.Pipeline, bool) {
-			p, ok := e.pipelineRegistry[name]
-			return p, ok
-		},
-	))
+	if r, ok := e.stepRegistry.(*module.StepRegistry); ok {
+		r.Register("step.workflow_call", module.NewWorkflowCallStepFactory(
+			func(name string) (*module.Pipeline, bool) {
+				p, ok := e.pipelineRegistry[name]
+				return p, ok
+			},
+		))
+	}
 	return e
 }
 
@@ -200,11 +202,13 @@ func (e *StdEngine) AddModuleType(moduleType string, factory ModuleFactory) {
 
 // AddStepType registers a pipeline step factory for the given step type.
 func (e *StdEngine) AddStepType(stepType string, factory module.StepFactory) {
-	e.stepRegistry.Register(stepType, factory)
+	if r, ok := e.stepRegistry.(*module.StepRegistry); ok {
+		r.Register(stepType, factory)
+	}
 }
 
 // GetStepRegistry returns the engine's pipeline step registry.
-func (e *StdEngine) GetStepRegistry() *module.StepRegistry {
+func (e *StdEngine) GetStepRegistry() interfaces.StepRegistrar {
 	return e.stepRegistry
 }
 
