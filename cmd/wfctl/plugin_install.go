@@ -317,7 +317,8 @@ func runPluginInfo(args []string) error {
 
 	pluginName := fs.Arg(0)
 	pluginDir := filepath.Join(pluginDirVal, pluginName)
-	manifestPath := filepath.Join(pluginDir, "plugin.json")
+	absDir, _ := filepath.Abs(pluginDir)
+	manifestPath := filepath.Join(absDir, "plugin.json")
 
 	data, err := os.ReadFile(manifestPath)
 	if os.IsNotExist(err) {
@@ -362,7 +363,7 @@ func runPluginInfo(args []string) error {
 	}
 
 	// Check binary status.
-	binaryPath := filepath.Join(pluginDir, pluginName)
+	binaryPath := filepath.Join(absDir, pluginName)
 	if info, statErr := os.Stat(binaryPath); statErr == nil {
 		fmt.Printf("Binary:       %s (%d bytes)\n", binaryPath, info.Size())
 		if info.Mode()&0111 != 0 {
