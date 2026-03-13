@@ -21,29 +21,21 @@ jobs:
         fi
         echo "REPO_DISPATCH_TOKEN is set"
 
-    - name: Dispatch to workflow-vscode
+    - name: Dispatch to workflow-editor
       uses: peter-evans/repository-dispatch@v4
       with:
         token: ${{ secrets.REPO_DISPATCH_TOKEN }}
-        repository: GoCodeAlone/workflow-vscode
+        repository: GoCodeAlone/workflow-editor
         event-type: workflow-release
         client-payload: '{"version": "${{ inputs.version }}"}'
 
-    - name: Dispatch to workflow-jetbrains
-      uses: peter-evans/repository-dispatch@v4
-      with:
-        token: ${{ secrets.REPO_DISPATCH_TOKEN }}
-        repository: GoCodeAlone/workflow-jetbrains
-        event-type: workflow-release
-        client-payload: '{"version": "${{ inputs.version }}"}'
-
-    - name: Verify dispatches triggered
+    - name: Verify dispatch triggered
       env:
         GH_TOKEN: ${{ secrets.REPO_DISPATCH_TOKEN }}
       run: |
         sleep 5
-        echo "=== workflow-vscode recent runs ==="
-        gh run list --repo GoCodeAlone/workflow-vscode --limit 3 --json status,displayTitle,event --jq '.[] | "\(.event) \(.status) \(.displayTitle)"'
+        echo "=== workflow-editor recent runs ==="
+        gh run list --repo GoCodeAlone/workflow-editor --limit 3 --json status,displayTitle,event --jq '.[] | "\(.event) \(.status) \(.displayTitle)"'
         echo ""
-        echo "=== workflow-jetbrains recent runs ==="
-        gh run list --repo GoCodeAlone/workflow-jetbrains --limit 3 --json status,displayTitle,event --jq '.[] | "\(.event) \(.status) \(.displayTitle)"'
+        echo "Chain: workflow → editor → (vscode, jetbrains, admin)"
+        echo "Editor's publish.yml dispatches editor-release to IDE plugins after npm publish."
