@@ -148,6 +148,10 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	}
 	engine.SetPluginInstaller(installer)
 
+	// Register the external plugin directory so BuildFromConfig can auto-fetch
+	// plugins declared with autoFetch: true in the config's plugins.external section.
+	engine.SetExternalPluginDir(extPluginDir)
+
 	// Build engine from config
 	if err := engine.BuildFromConfig(cfg); err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to build workflow: %w", err)
