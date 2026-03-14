@@ -103,27 +103,42 @@ func TestDefaultRegistryConfig(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("expected non-nil config")
 	}
-	if len(cfg.Registries) != 1 {
-		t.Fatalf("expected 1 registry, got %d", len(cfg.Registries))
+	if len(cfg.Registries) != 2 {
+		t.Fatalf("expected 2 registries, got %d", len(cfg.Registries))
 	}
+	// Primary: static registry
 	r := cfg.Registries[0]
 	if r.Name != "default" {
 		t.Errorf("name: got %q, want %q", r.Name, "default")
 	}
-	if r.Type != "github" {
-		t.Errorf("type: got %q, want %q", r.Type, "github")
+	if r.Type != "static" {
+		t.Errorf("type: got %q, want %q", r.Type, "static")
 	}
-	if r.Owner != registryOwner {
-		t.Errorf("owner: got %q, want %q", r.Owner, registryOwner)
-	}
-	if r.Repo != registryRepo {
-		t.Errorf("repo: got %q, want %q", r.Repo, registryRepo)
-	}
-	if r.Branch != registryBranch {
-		t.Errorf("branch: got %q, want %q", r.Branch, registryBranch)
+	if r.URL == "" {
+		t.Error("expected non-empty URL for static registry")
 	}
 	if r.Priority != 0 {
 		t.Errorf("priority: got %d, want 0", r.Priority)
+	}
+	// Fallback: github registry
+	fb := cfg.Registries[1]
+	if fb.Name != "github-fallback" {
+		t.Errorf("fallback name: got %q, want %q", fb.Name, "github-fallback")
+	}
+	if fb.Type != "github" {
+		t.Errorf("fallback type: got %q, want %q", fb.Type, "github")
+	}
+	if fb.Owner != registryOwner {
+		t.Errorf("fallback owner: got %q, want %q", fb.Owner, registryOwner)
+	}
+	if fb.Repo != registryRepo {
+		t.Errorf("fallback repo: got %q, want %q", fb.Repo, registryRepo)
+	}
+	if fb.Branch != registryBranch {
+		t.Errorf("fallback branch: got %q, want %q", fb.Branch, registryBranch)
+	}
+	if fb.Priority != 100 {
+		t.Errorf("fallback priority: got %d, want 100", fb.Priority)
 	}
 }
 
