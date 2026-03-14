@@ -138,6 +138,117 @@ func (g *GitHubRegistrySource) SearchPlugins(query string) ([]PluginSearchResult
 	return results, nil
 }
 
+// StaticRegistrySource implements RegistrySource backed by a static HTTP base URL (e.g. GitHub Pages).
+// It expects:
+//   - {baseURL}/plugins/{name}/manifest.json  for individual plugin manifests
+//   - {baseURL}/index.json                    for the plugin listing/search index
+type StaticRegistrySource struct {
+	name    string
+	baseURL string
+	token   string
+}
+
+// NewStaticRegistrySource creates a new static-URL-backed registry source.
+func NewStaticRegistrySource(cfg RegistrySourceConfig) *StaticRegistrySource {
+	return &StaticRegistrySource{name: cfg.Name, baseURL: strings.TrimSuffix(cfg.URL, "/"), token: cfg.Token}
+}
+
+func (s *StaticRegistrySource) Name() string { return s.name }
+
+func (s *StaticRegistrySource) FetchManifest(name string) (*RegistryManifest, error) {
+	url := fmt.Sprintf("%s/plugins/%s/manifest.json", s.baseURL, name)
+	data, err := s.fetch(url)
+	if err != nil {
+		return nil, fmt.Errorf("fetch manifest for %q from %s: %w", name, s.name, err)
+	}
+	var m RegistryManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("parse manifest for %q from %s: %w", name, s.name, err)
+	}
+	return &m, nil
+}
+
+// staticIndexEntry is a single entry in the registry index.json file.
+type staticIndexEntry struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+	Tier        string `json:"tier"`
+}
+
+func (s *StaticRegistrySource) fetchIndex() ([]staticIndexEntry, error) {
+	url := fmt.Sprintf("%s/index.json", s.baseURL)
+	data, err := s.fetch(url)
+	if err != nil {
+		return nil, fmt.Errorf("fetch index from %s: %w", s.name, err)
+	}
+	var entries []staticIndexEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("parse index from %s: %w", s.name, err)
+	}
+	return entries, nil
+}
+
+func (s *StaticRegistrySource) SearchPlugins(query string) ([]PluginSearchResult, error) {
+	entries, err := s.fetchIndex()
+	if err != nil {
+		return nil, err
+	}
+	q := strings.ToLower(query)
+	var results []PluginSearchResult
+	for _, e := range entries {
+		if q == "" ||
+			strings.Contains(strings.ToLower(e.Name), q) ||
+			strings.Contains(strings.ToLower(e.Description), q) {
+			results = append(results, PluginSearchResult{
+				PluginSummary: PluginSummary{
+					Name:        e.Name,
+					Version:     e.Version,
+					Description: e.Description,
+					Tier:        e.Tier,
+				},
+				Source: s.name,
+			})
+		}
+	}
+	return results, nil
+}
+
+func (s *StaticRegistrySource) ListPlugins() ([]string, error) {
+	entries, err := s.fetchIndex()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name)
+	}
+	return names, nil
+}
+
+// fetch performs an HTTP GET with optional auth token.
+func (s *StaticRegistrySource) fetch(url string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil) //nolint:gosec // G107: URL from user config
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	if s.token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("not found (HTTP 404) at %s", url)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+	}
+	return io.ReadAll(resp.Body)
+}
+
 // matchesRegistryQuery checks if a manifest matches a search query.
 func matchesRegistryQuery(m *RegistryManifest, q string) bool {
 	if q == "" {

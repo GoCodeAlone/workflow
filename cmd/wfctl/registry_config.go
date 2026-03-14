@@ -17,24 +17,33 @@ type RegistryConfig struct {
 // RegistrySourceConfig defines a single registry source.
 type RegistrySourceConfig struct {
 	Name     string `yaml:"name" json:"name"`         // e.g. "default", "my-org"
-	Type     string `yaml:"type" json:"type"`         // "github" (only type for now)
-	Owner    string `yaml:"owner" json:"owner"`       // GitHub owner/org
-	Repo     string `yaml:"repo" json:"repo"`         // GitHub repo name
-	Branch   string `yaml:"branch" json:"branch"`     // Git branch, default "main"
+	Type     string `yaml:"type" json:"type"`         // "github" or "static"
+	Owner    string `yaml:"owner" json:"owner"`       // GitHub owner/org (type: github)
+	Repo     string `yaml:"repo" json:"repo"`         // GitHub repo name (type: github)
+	Branch   string `yaml:"branch" json:"branch"`     // Git branch, default "main" (type: github)
 	Priority int    `yaml:"priority" json:"priority"` // Lower = higher priority
+	URL      string `yaml:"url" json:"url"`           // Base URL (type: static)
+	Token    string `yaml:"token" json:"token"`       // Auth token (optional)
 }
 
-// DefaultRegistryConfig returns the built-in config with GoCodeAlone/workflow-registry.
+// DefaultRegistryConfig returns the built-in config with a static GitHub Pages
+// primary registry and a GitHub API fallback.
 func DefaultRegistryConfig() *RegistryConfig {
 	return &RegistryConfig{
 		Registries: []RegistrySourceConfig{
 			{
 				Name:     "default",
+				Type:     "static",
+				URL:      "https://gocodealone.github.io/workflow-registry/v1",
+				Priority: 0,
+			},
+			{
+				Name:     "github-fallback",
 				Type:     "github",
 				Owner:    registryOwner,
 				Repo:     registryRepo,
 				Branch:   registryBranch,
-				Priority: 0,
+				Priority: 100,
 			},
 		},
 	}

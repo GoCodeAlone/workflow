@@ -28,6 +28,8 @@ func NewMultiRegistry(cfg *RegistryConfig) *MultiRegistry {
 		switch sc.Type {
 		case "github":
 			sources = append(sources, NewGitHubRegistrySource(sc))
+		case "static":
+			sources = append(sources, NewStaticRegistrySource(sc))
 		default:
 			// Skip unknown types
 			fmt.Fprintf(os.Stderr, "warning: unknown registry type %q for %q, skipping\n", sc.Type, sc.Name)
