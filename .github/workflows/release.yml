@@ -265,6 +265,20 @@ jobs:
         prerelease: ${{ contains(env.TAG_NAME, '-') }}
         generate_release_notes: true
 
+  update-homebrew:
+    name: Update Homebrew Tap
+    runs-on: ubuntu-latest
+    needs: release
+    if: ${{ !contains(inputs.tag_name || github.ref_name, '-') }}
+    steps:
+    - name: Update wfctl formula in homebrew-tap
+      uses: peter-evans/repository-dispatch@v4
+      with:
+        token: ${{ secrets.repo_dispatch_token }}
+        repository: GoCodeAlone/homebrew-tap
+        event-type: update-wfctl
+        client-payload: '{"version": "${{ env.TAG_NAME }}"}'
+
   notify-ide-plugins:
     name: Notify IDE Plugins
     runs-on: ubuntu-latest
