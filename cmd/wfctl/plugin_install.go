@@ -74,7 +74,7 @@ func runPluginInstall(args []string) error {
 	directURL := fs.String("url", "", "Install from a direct download URL (tar.gz archive)")
 	localPath := fs.String("local", "", "Install from a local plugin directory")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] <name>[@<version>]\n\nDownload and install a plugin from the registry.\n\nOptions:\n")
+		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] [<name>[@<version>]]\n\nInstall a plugin from the registry, a URL, a local directory, or from the lockfile.\n\n  wfctl plugin install <name>         Install latest from registry\n  wfctl plugin install <name>@v1.0.0  Install specific version\n  wfctl plugin install --url <url>     Install from a direct download URL\n  wfctl plugin install --local <dir>   Install from a local build directory\n  wfctl plugin install                 Install all plugins from .wfctl.yaml\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -110,7 +110,8 @@ func runPluginInstall(args []string) error {
 	}
 
 	nameArg := fs.Arg(0)
-	pluginName, _ := parseNameVersion(nameArg)
+	rawName, _ := parseNameVersion(nameArg)
+	pluginName := normalizePluginName(rawName)
 
 	cfg, err := LoadRegistryConfig(*cfgPath)
 	if err != nil {
@@ -515,14 +516,14 @@ func installFromURL(url, pluginDir string) error {
 	}
 
 	if err := ensurePluginBinary(destDir, pluginName); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not normalize binary name: %v\n", err)
+		return fmt.Errorf("normalize binary name: %w", err)
 	}
 
 	// Hash the installed binary (not the archive) so that verifyInstalledChecksum matches.
 	binaryPath := filepath.Join(destDir, pluginName)
 	checksum, hashErr := hashFileSHA256(binaryPath)
 	if hashErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not hash installed binary: %v\n", hashErr)
+		return fmt.Errorf("hash installed binary for lockfile: %w", hashErr)
 	}
 	updateLockfileWithChecksum(pluginName, pj.Version, pj.Repository, "", checksum)
 
@@ -590,7 +591,7 @@ func installFromLocal(srcDir, pluginDir string) error {
 	if hashErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not hash installed binary: %v\n", hashErr)
 	}
-	updateLockfileWithChecksum(pluginName, pj.Version, "", "local", sha)
+	updateLockfileWithChecksum(pluginName, pj.Version, "", "", sha)
 
 	fmt.Printf("Installed %s v%s from %s to %s\n", pluginName, pj.Version, srcDir, destDir)
 	return nil

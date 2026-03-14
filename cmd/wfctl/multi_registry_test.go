@@ -184,7 +184,7 @@ func TestLoadRegistryConfigFromFile(t *testing.T) {
 }
 
 func TestLoadRegistryConfigDefault(t *testing.T) {
-	// Test DefaultRegistryConfig directly to avoid picking up user config files.
+	// Test DefaultRegistryConfig directly.
 	cfg := DefaultRegistryConfig()
 	if len(cfg.Registries) != 2 {
 		t.Fatalf("expected 2 registries (static + github fallback), got %d", len(cfg.Registries))
@@ -194,6 +194,25 @@ func TestLoadRegistryConfigDefault(t *testing.T) {
 	}
 	if cfg.Registries[1].Owner != registryOwner {
 		t.Errorf("fallback owner: got %q, want %q", cfg.Registries[1].Owner, registryOwner)
+	}
+}
+
+func TestLoadRegistryConfigFallback(t *testing.T) {
+	// LoadRegistryConfig with no valid config files should fall back to
+	// DefaultRegistryConfig. Isolate from real config by changing both
+	// CWD and HOME to a temp dir.
+	origDir, _ := os.Getwd()
+	tmpDir := t.TempDir()
+	_ = os.Chdir(tmpDir)
+	t.Setenv("HOME", tmpDir)
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	cfg, err := LoadRegistryConfig(filepath.Join(tmpDir, "nonexistent.yaml"))
+	if err != nil {
+		t.Fatalf("LoadRegistryConfig: %v", err)
+	}
+	if len(cfg.Registries) != 2 {
+		t.Fatalf("expected 2 registries (default fallback), got %d", len(cfg.Registries))
 	}
 }
 

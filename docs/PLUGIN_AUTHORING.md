@@ -23,7 +23,7 @@ make install-local
 `wfctl plugin init` generates a complete project:
 
 ```
-workflow-plugin-my-plugin/
+my-plugin/
 ├── cmd/workflow-plugin-my-plugin/main.go   # gRPC entrypoint
 ├── internal/
 │   ├── provider.go                         # Plugin provider (registers steps/modules)
@@ -79,7 +79,7 @@ func (p *Provider) CreateStep(typeName, name string, config map[string]any) (sdk
     case "step.my_action":
         return &MyStep{config: config}, nil
     }
-    return nil, nil
+    return nil, fmt.Errorf("unknown step type: %s", typeName)
 }
 ```
 

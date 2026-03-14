@@ -124,10 +124,10 @@ func generateProjectStructure(opts GenerateOptions) error {
 	if err := os.MkdirAll(internalDir, 0750); err != nil {
 		return fmt.Errorf("create internal dir: %w", err)
 	}
-	if err := writeFile(filepath.Join(internalDir, "provider.go"), generateProviderGo(goModule, opts, shortName), 0600); err != nil {
+	if err := writeFile(filepath.Join(internalDir, "provider.go"), generateProviderGo(opts, shortName), 0600); err != nil {
 		return err
 	}
-	if err := writeFile(filepath.Join(internalDir, "steps.go"), generateStepsGo(goModule, shortName), 0600); err != nil {
+	if err := writeFile(filepath.Join(internalDir, "steps.go"), generateStepsGo(shortName), 0600); err != nil {
 		return err
 	}
 
@@ -192,7 +192,7 @@ func generateMainGo(goModule, shortName string) string {
 	return b.String()
 }
 
-func generateProviderGo(goModule string, opts GenerateOptions, shortName string) string {
+func generateProviderGo(opts GenerateOptions, shortName string) string {
 	typeName := toCamelCase(shortName) + "Provider"
 	license := opts.License
 	if license == "" {
@@ -231,12 +231,10 @@ func generateProviderGo(goModule string, opts GenerateOptions, shortName string)
 	b.WriteString("\t}\n")
 	b.WriteString("\treturn nil, fmt.Errorf(\"unknown step type: %s\", typeName)\n")
 	b.WriteString("}\n")
-	_ = goModule
-	_ = license
 	return b.String()
 }
 
-func generateStepsGo(goModule, shortName string) string {
+func generateStepsGo(shortName string) string {
 	stepType := "step." + shortName + "_example"
 	funcName := toCamelCase(shortName) + "ExampleStep"
 	var b strings.Builder
@@ -264,7 +262,6 @@ func generateStepsGo(goModule, shortName string) string {
 	b.WriteString("\t\t},\n")
 	b.WriteString("\t}, nil\n")
 	b.WriteString("}\n")
-	_ = goModule
 	return b.String()
 }
 
