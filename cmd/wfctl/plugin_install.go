@@ -96,6 +96,7 @@ func runPluginInstall(args []string) error {
 		return fmt.Errorf("--url, --local, and <name> are mutually exclusive; specify only one")
 	}
 
+
 	if *directURL != "" {
 		return installFromURL(*directURL, pluginDirVal)
 	}
@@ -516,7 +517,7 @@ func installFromURL(url, pluginDir string) error {
 	}
 
 	if err := ensurePluginBinary(destDir, pluginName); err != nil {
-		return fmt.Errorf("normalize binary name: %w", err)
+		fmt.Fprintf(os.Stderr, "warning: could not normalize binary name: %v\n", err)
 	}
 
 	// Validate the installed plugin (same checks as registry installs).
@@ -597,6 +598,7 @@ func installFromLocal(srcDir, pluginDir string) error {
 		fmt.Fprintf(os.Stderr, "warning: could not hash installed binary: %v\n", hashErr)
 	}
 	updateLockfileWithChecksum(pluginName, pj.Version, "", "", sha)
+
 
 	fmt.Printf("Installed %s v%s from %s to %s\n", pluginName, pj.Version, srcDir, destDir)
 	return nil
