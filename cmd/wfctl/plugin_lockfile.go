@@ -99,8 +99,9 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 }
 
 // updateLockfileWithChecksum adds or updates a plugin entry in .wfctl.yaml with SHA-256 checksum.
+// The sha256Hash must be the hash of the installed binary, not the download archive.
 // Silently no-ops if the lockfile cannot be read or written (install still succeeds).
-func updateLockfileWithChecksum(pluginName, version, repository, sha256Hash string) {
+func updateLockfileWithChecksum(pluginName, version, repository, registry, sha256Hash string) {
 	lf, err := loadPluginLockfile(wfctlYAMLPath)
 	if err != nil {
 		return
@@ -111,6 +112,7 @@ func updateLockfileWithChecksum(pluginName, version, repository, sha256Hash stri
 	lf.Plugins[pluginName] = PluginLockEntry{
 		Version:    version,
 		Repository: repository,
+		Registry:   registry,
 		SHA256:     sha256Hash,
 	}
 	_ = lf.Save(wfctlYAMLPath)

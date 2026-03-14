@@ -149,8 +149,12 @@ type StaticRegistrySource struct {
 }
 
 // NewStaticRegistrySource creates a new static-URL-backed registry source.
-func NewStaticRegistrySource(cfg RegistrySourceConfig) *StaticRegistrySource {
-	return &StaticRegistrySource{name: cfg.Name, baseURL: strings.TrimSuffix(cfg.URL, "/"), token: cfg.Token}
+// Returns an error if the URL is empty.
+func NewStaticRegistrySource(cfg RegistrySourceConfig) (*StaticRegistrySource, error) {
+	if cfg.URL == "" {
+		return nil, fmt.Errorf("registry %q: url is required for type=static", cfg.Name)
+	}
+	return &StaticRegistrySource{name: cfg.Name, baseURL: strings.TrimSuffix(cfg.URL, "/"), token: cfg.Token}, nil
 }
 
 func (s *StaticRegistrySource) Name() string { return s.name }
@@ -201,8 +205,13 @@ func (s *StaticRegistrySource) SearchPlugins(query string) ([]PluginSearchResult
 			strings.Contains(strings.ToLower(e.Name), q) ||
 			strings.Contains(strings.ToLower(e.Description), q) {
 			results = append(results, PluginSearchResult{
-				PluginSummary: PluginSummary(e),
-				Source:        s.name,
+				PluginSummary: PluginSummary{
+					Name:        e.Name,
+					Version:     e.Version,
+					Description: e.Description,
+					Tier:        e.Tier,
+				},
+				Source: s.name,
 			})
 		}
 	}

@@ -81,6 +81,21 @@ func runPluginInstall(args []string) error {
 		return err
 	}
 
+	// Enforce mutual exclusivity: at most one of --url, --local, or positional args.
+	exclusiveCount := 0
+	if *directURL != "" {
+		exclusiveCount++
+	}
+	if *localPath != "" {
+		exclusiveCount++
+	}
+	if fs.NArg() > 0 {
+		exclusiveCount++
+	}
+	if exclusiveCount > 1 {
+		return fmt.Errorf("--url, --local, and <name> are mutually exclusive; specify only one")
+	}
+
 	if *directURL != "" {
 		return installFromURL(*directURL, pluginDirVal)
 	}
@@ -149,11 +164,10 @@ func runPluginInstall(args []string) error {
 
 	// Update .wfctl.yaml lockfile if name@version was provided.
 	if _, ver := parseNameVersion(nameArg); ver != "" {
-		sha := ""
-		if dl, dlErr := manifest.FindDownload(runtime.GOOS, runtime.GOARCH); dlErr == nil {
-			sha = dl.SHA256
-		}
-		updateLockfileWithChecksum(manifest.Name, manifest.Version, manifest.Repository, sha)
+		// Hash the installed binary (not the archive) so verifyInstalledChecksum matches.
+		binaryPath := filepath.Join(pluginDirVal, pluginName, pluginName)
+		sha := hashFileSHA256(binaryPath)
+		updateLockfileWithChecksum(manifest.Name, manifest.Version, manifest.Repository, sourceName, sha)
 	}
 
 	return nil
@@ -501,9 +515,10 @@ func installFromURL(url, pluginDir string) error {
 		fmt.Fprintf(os.Stderr, "warning: could not normalize binary name: %v\n", err)
 	}
 
-	h := sha256.Sum256(data)
-	checksum := hex.EncodeToString(h[:])
-	updateLockfileWithChecksum(pluginName, pj.Version, pj.Repository, checksum)
+	// Hash the installed binary (not the archive) so that verifyInstalledChecksum matches.
+	binaryPath := filepath.Join(destDir, pluginName)
+	checksum := hashFileSHA256(binaryPath)
+	updateLockfileWithChecksum(pluginName, pj.Version, pj.Repository, "", checksum)
 
 	fmt.Printf("Installed %s v%s to %s\n", pluginName, pj.Version, destDir)
 	return nil
@@ -656,6 +671,17 @@ func parseGitHubRepoURL(repoURL string) (owner, repo string, err error) {
 		return "", "", fmt.Errorf("not a GitHub repository URL: %q (expected https://github.com/owner/repo)", repoURL)
 	}
 	return parts[1], repoName, nil
+}
+
+// hashFileSHA256 returns the hex-encoded SHA-256 hash of the file at path.
+// Returns an empty string if the file cannot be read.
+func hashFileSHA256(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
 }
 
 // extractTarGz decompresses and extracts a .tar.gz archive into destDir.
