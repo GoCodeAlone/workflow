@@ -31,7 +31,7 @@ func AutoFetchPlugin(pluginName, version, pluginDir string) error {
 	}
 
 	args := []string{"plugin", "install", "--plugin-dir", pluginDir, installArg}
-	cmd := exec.Command("wfctl", args...)
+	cmd := exec.Command("wfctl", args...) //nolint:gosec // G204: args are constructed from config, not user input
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

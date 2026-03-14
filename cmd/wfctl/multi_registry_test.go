@@ -184,16 +184,16 @@ func TestLoadRegistryConfigFromFile(t *testing.T) {
 }
 
 func TestLoadRegistryConfigDefault(t *testing.T) {
-	// Provide a path that does not exist — should fall back to default.
-	cfg, err := LoadRegistryConfig("/nonexistent/path/config.yaml")
-	if err != nil {
-		t.Fatalf("LoadRegistryConfig: %v", err)
+	// Test DefaultRegistryConfig directly to avoid picking up user config files.
+	cfg := DefaultRegistryConfig()
+	if len(cfg.Registries) != 2 {
+		t.Fatalf("expected 2 registries (static + github fallback), got %d", len(cfg.Registries))
 	}
-	if len(cfg.Registries) != 1 {
-		t.Fatalf("expected 1 registry (default), got %d", len(cfg.Registries))
+	if cfg.Registries[0].Type != "static" {
+		t.Errorf("first registry type: got %q, want %q", cfg.Registries[0].Type, "static")
 	}
-	if cfg.Registries[0].Owner != registryOwner {
-		t.Errorf("owner: got %q, want %q", cfg.Registries[0].Owner, registryOwner)
+	if cfg.Registries[1].Owner != registryOwner {
+		t.Errorf("fallback owner: got %q, want %q", cfg.Registries[1].Owner, registryOwner)
 	}
 }
 

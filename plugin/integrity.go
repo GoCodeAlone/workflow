@@ -32,12 +32,12 @@ func VerifyPluginIntegrity(pluginDir, pluginName string) error {
 
 	data, err := os.ReadFile(lockfilePath)
 	if err != nil {
-		return nil // can't read, skip verification
+		return nil //nolint:nilerr // intentional: skip verification when lockfile unreadable
 	}
 
 	var lf lockfileData
 	if err := yaml.Unmarshal(data, &lf); err != nil {
-		return nil // unparseable, skip
+		return nil //nolint:nilerr // intentional: skip verification when lockfile unparseable
 	}
 
 	entry, ok := lf.Plugins[pluginName]
