@@ -329,8 +329,15 @@ func TestCheckForUpdateNotice_OlderReleaseSuppressed(t *testing.T) {
 
 	// Capture stderr to ensure no update notice is printed.
 	origStderr := os.Stderr
-	r, w, _ := os.Pipe()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
 	os.Stderr = w
+	t.Cleanup(func() {
+		os.Stderr = origStderr
+		r.Close()
+	})
 
 	done := checkForUpdateNotice()
 	<-done
@@ -338,7 +345,6 @@ func TestCheckForUpdateNotice_OlderReleaseSuppressed(t *testing.T) {
 	w.Close()
 	var buf [512]byte
 	n, _ := r.Read(buf[:])
-	os.Stderr = origStderr
 
 	output := string(buf[:n])
 	if output != "" {
