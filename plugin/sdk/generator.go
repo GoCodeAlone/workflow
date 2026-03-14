@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -177,6 +178,42 @@ func writeFile(path, content string, mode os.FileMode) error {
 // normalizeSDKPluginName strips the "workflow-plugin-" prefix if present.
 func normalizeSDKPluginName(name string) string {
 	return strings.TrimPrefix(name, "workflow-plugin-")
+}
+
+// writePluginJSON writes a plugin.json with the nested capabilities format.
+func writePluginJSON(path string, opts GenerateOptions) error {
+	shortName := normalizeSDKPluginName(opts.Name)
+	license := opts.License
+	if license == "" {
+		license = "Apache-2.0"
+	}
+	type capabilities struct {
+		ModuleTypes  []string `json:"moduleTypes"`
+		StepTypes    []string `json:"stepTypes"`
+		TriggerTypes []string `json:"triggerTypes"`
+	}
+	pj := map[string]interface{}{
+		"name":             "workflow-plugin-" + shortName,
+		"version":          opts.Version,
+		"description":      opts.Description,
+		"author":           opts.Author,
+		"license":          license,
+		"type":             "external",
+		"tier":             "community",
+		"private":          false,
+		"minEngineVersion": "0.3.30",
+		"keywords":         []string{},
+		"capabilities": capabilities{
+			ModuleTypes:  []string{},
+			StepTypes:    []string{"step." + shortName + "_example"},
+			TriggerTypes: []string{},
+		},
+	}
+	data, err := json.MarshalIndent(pj, "", "    ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0640) //nolint:gosec // G306: plugin.json is user-owned output
 }
 
 func generateMainGo(goModule, shortName string) string {
