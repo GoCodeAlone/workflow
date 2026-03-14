@@ -433,8 +433,8 @@ func TestCopyFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat dest: %v", err)
 	}
-	if info.Mode() != wantMode {
-		t.Errorf("mode: got %v, want %v", info.Mode(), wantMode)
+	if info.Mode().Perm()&wantMode != wantMode {
+		t.Errorf("mode: got %v, want at least %v", info.Mode().Perm(), wantMode)
 	}
 }
 

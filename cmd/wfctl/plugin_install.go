@@ -166,8 +166,11 @@ func runPluginInstall(args []string) error {
 	if _, ver := parseNameVersion(nameArg); ver != "" {
 		// Hash the installed binary (not the archive) so verifyInstalledChecksum matches.
 		binaryPath := filepath.Join(pluginDirVal, pluginName, pluginName)
-		sha := hashFileSHA256(binaryPath)
-		updateLockfileWithChecksum(manifest.Name, manifest.Version, manifest.Repository, sourceName, sha)
+		sha, hashErr := hashFileSHA256(binaryPath)
+		if hashErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not hash installed binary: %v\n", hashErr)
+		}
+		updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, sourceName, sha)
 	}
 
 	return nil
@@ -517,7 +520,10 @@ func installFromURL(url, pluginDir string) error {
 
 	// Hash the installed binary (not the archive) so that verifyInstalledChecksum matches.
 	binaryPath := filepath.Join(destDir, pluginName)
-	checksum := hashFileSHA256(binaryPath)
+	checksum, hashErr := hashFileSHA256(binaryPath)
+	if hashErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not hash installed binary: %v\n", hashErr)
+	}
 	updateLockfileWithChecksum(pluginName, pj.Version, pj.Repository, "", checksum)
 
 	fmt.Printf("Installed %s v%s to %s\n", pluginName, pj.Version, destDir)
@@ -577,6 +583,14 @@ func installFromLocal(srcDir, pluginDir string) error {
 	if err := copyFile(srcBinary, filepath.Join(destDir, pluginName), 0750); err != nil {
 		return err
 	}
+
+	// Update lockfile with binary checksum for consistency with other install paths.
+	installedBinary := filepath.Join(destDir, pluginName)
+	sha, hashErr := hashFileSHA256(installedBinary)
+	if hashErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not hash installed binary: %v\n", hashErr)
+	}
+	updateLockfileWithChecksum(pluginName, pj.Version, "", "local", sha)
 
 	fmt.Printf("Installed %s v%s from %s to %s\n", pluginName, pj.Version, srcDir, destDir)
 	return nil
@@ -674,14 +688,13 @@ func parseGitHubRepoURL(repoURL string) (owner, repo string, err error) {
 }
 
 // hashFileSHA256 returns the hex-encoded SHA-256 hash of the file at path.
-// Returns an empty string if the file cannot be read.
-func hashFileSHA256(path string) string {
+func hashFileSHA256(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("hash file %s: %w", path, err)
 	}
 	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:])
+	return hex.EncodeToString(h[:]), nil
 }
 
 // extractTarGz decompresses and extracts a .tar.gz archive into destDir.

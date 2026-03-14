@@ -201,6 +201,7 @@ func generateProviderGo(goModule string, opts GenerateOptions, shortName string)
 	var b strings.Builder
 	fmt.Fprintf(&b, "package internal\n\n")
 	b.WriteString("import (\n")
+	b.WriteString("\t\"fmt\"\n\n")
 	b.WriteString("\t\"github.com/GoCodeAlone/workflow/plugin/external/sdk\"\n")
 	b.WriteString(")\n\n")
 	fmt.Fprintf(&b, "// %s implements sdk.PluginProvider and sdk.StepProvider.\n", typeName)
@@ -228,7 +229,7 @@ func generateProviderGo(goModule string, opts GenerateOptions, shortName string)
 	fmt.Fprintf(&b, "\tcase %q:\n", "step."+shortName+"_example")
 	fmt.Fprintf(&b, "\t\treturn &%sExampleStep{config: config}, nil\n", toCamelCase(shortName))
 	b.WriteString("\t}\n")
-	b.WriteString("\treturn nil, nil\n")
+	b.WriteString("\treturn nil, fmt.Errorf(\"unknown step type: %s\", typeName)\n")
 	b.WriteString("}\n")
 	_ = goModule
 	_ = license
@@ -384,13 +385,11 @@ test:
 	go test ./...
 
 install-local: build
-	mkdir -p $(HOME)/.local/share/workflow/plugins/%s
-	cp %s $(HOME)/.local/share/workflow/plugins/%s/
-	cp plugin.json $(HOME)/.local/share/workflow/plugins/%s/
+	wfctl plugin install --local .
 
 clean:
 	rm -f %s
-`, binaryName, binaryName, binaryName, binaryName, binaryName, binaryName, binaryName)
+`, binaryName, binaryName, binaryName)
 }
 
 func generateREADME(opts GenerateOptions, binaryName, goModule string) string {
