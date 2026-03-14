@@ -194,10 +194,6 @@ func generateMainGo(goModule, shortName string) string {
 
 func generateProviderGo(opts GenerateOptions, shortName string) string {
 	typeName := toCamelCase(shortName) + "Provider"
-	license := opts.License
-	if license == "" {
-		license = "Apache-2.0"
-	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "package internal\n\n")
 	b.WriteString("import (\n")
