@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 const (
@@ -67,7 +69,7 @@ Options:
 	current := strings.TrimPrefix(version, "v")
 
 	if *checkOnly {
-		if current == "dev" || latest == current {
+		if current == "dev" || !isNewerVersion(latest, current) {
 			fmt.Printf("wfctl is up to date (version %s)\n", version)
 		} else {
 			fmt.Printf("Update available: %s → %s\n", version, rel.TagName)
@@ -77,7 +79,7 @@ Options:
 		return nil
 	}
 
-	if latest == current && current != "dev" {
+	if current != "dev" && !isNewerVersion(latest, current) {
 		fmt.Printf("wfctl %s is already the latest version.\n", version)
 		return nil
 	}
@@ -151,11 +153,30 @@ func checkForUpdateNotice() <-chan struct{} {
 		}
 		latest := strings.TrimPrefix(rel.TagName, "v")
 		current := strings.TrimPrefix(version, "v")
-		if latest != "" && latest != current {
+		if isNewerVersion(latest, current) {
 			fmt.Fprintf(os.Stderr, "\n⚡ wfctl %s is available (you have %s). Run 'wfctl update' to upgrade.\n\n", rel.TagName, version)
 		}
 	}()
 	return done
+}
+
+// isNewerVersion reports whether latestVer is strictly greater than currentVer
+// using semantic versioning. Both arguments may optionally include a "v" prefix.
+// Returns false if either version string is not valid semver.
+func isNewerVersion(latestVer, currentVer string) bool {
+	// golang.org/x/mod/semver requires the "v" prefix.
+	lv := latestVer
+	if !strings.HasPrefix(lv, "v") {
+		lv = "v" + lv
+	}
+	cv := currentVer
+	if !strings.HasPrefix(cv, "v") {
+		cv = "v" + cv
+	}
+	if !semver.IsValid(lv) || !semver.IsValid(cv) {
+		return false
+	}
+	return semver.Compare(lv, cv) > 0
 }
 
 // fetchLatestRelease queries the GitHub releases API for the latest release.

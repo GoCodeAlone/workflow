@@ -276,6 +276,133 @@ func TestDownloadWithTimeout_Success(t *testing.T) {
 	}
 }
 
+func TestIsNewerVersion(t *testing.T) {
+	tests := []struct {
+		latest  string
+		current string
+		want    bool
+	}{
+		// Newer available
+		{"v0.3.43", "v0.3.42", true},
+		{"0.3.43", "0.3.42", true},
+		{"v1.0.0", "v0.9.9", true},
+		// Same version
+		{"v0.3.42", "v0.3.42", false},
+		// Older version reported as "latest" (the bug scenario)
+		{"v0.3.41", "v0.3.42", false},
+		{"v0.2.0", "v1.0.0", false},
+		// Invalid semver
+		{"not-a-version", "v1.0.0", false},
+		{"v1.0.0", "not-a-version", false},
+		{"", "v1.0.0", false},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("latest=%s current=%s", tt.latest, tt.current), func(t *testing.T) {
+			got := isNewerVersion(tt.latest, tt.current)
+			if got != tt.want {
+				t.Errorf("isNewerVersion(%q, %q) = %v, want %v", tt.latest, tt.current, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckForUpdateNotice_OlderReleaseSuppressed(t *testing.T) {
+	// Regression test: when running a newer version than the latest GitHub release,
+	// no update notice should be printed.
+	origVersion := version
+	version = "v0.3.42"
+	defer func() { version = origVersion }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		rel := githubRelease{
+			TagName: "v0.3.41", // older than current
+			HTMLURL: "https://github.com/GoCodeAlone/workflow/releases/tag/v0.3.41",
+			Assets:  []githubAsset{},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(rel)
+	}))
+	defer srv.Close()
+
+	githubReleasesURLOverride = srv.URL
+	defer func() { githubReleasesURLOverride = "" }()
+
+	// Capture stderr to ensure no update notice is printed.
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	t.Cleanup(func() {
+		os.Stderr = origStderr
+		r.Close()
+	})
+
+	done := checkForUpdateNotice()
+	<-done
+
+	w.Close()
+	var buf [512]byte
+	n, _ := r.Read(buf[:])
+
+	output := string(buf[:n])
+	if output != "" {
+		t.Errorf("expected no update notice for older release, got: %q", output)
+	}
+}
+
+func TestRunUpdate_CheckOnly_OlderRelease(t *testing.T) {
+	// When current version is newer than the GitHub release, --check should
+	// report "up to date" rather than showing a spurious update notice.
+	origVersion := version
+	version = "v0.3.42"
+	defer func() { version = origVersion }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		rel := githubRelease{
+			TagName: "v0.3.41",
+			HTMLURL: "https://example.com",
+			Assets:  []githubAsset{},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(rel)
+	}))
+	defer srv.Close()
+
+	githubReleasesURLOverride = srv.URL
+	defer func() { githubReleasesURLOverride = "" }()
+
+	if err := runUpdate([]string{"--check"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunUpdate_OlderRelease_NoDownload(t *testing.T) {
+	// When the current version is newer, runUpdate should not attempt to download.
+	origVersion := version
+	version = "v0.3.42"
+	defer func() { version = origVersion }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		rel := githubRelease{
+			TagName: "v0.3.41",
+			HTMLURL: "https://example.com",
+			Assets:  []githubAsset{},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(rel)
+	}))
+	defer srv.Close()
+
+	githubReleasesURLOverride = srv.URL
+	defer func() { githubReleasesURLOverride = "" }()
+
+	if err := runUpdate([]string{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestDownloadWithTimeout_HTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "gone", http.StatusGone)
