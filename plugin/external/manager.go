@@ -94,6 +94,14 @@ func (m *ExternalPluginManager) LoadPlugin(name string) (*ExternalPluginAdapter,
 		return nil, fmt.Errorf("validate manifest for plugin %q: %w", name, err)
 	}
 
+	// Verify binary integrity against the lockfile checksum before loading.
+	// A mismatch is logged as a warning and the plugin is skipped, rather than
+	// crashing the engine so other plugins can still be loaded.
+	if err := pluginpkg.VerifyPluginIntegrity(m.pluginsDir, name); err != nil {
+		m.logger.Printf("WARNING: skipping plugin %q — integrity check failed: %v", name, err)
+		return nil, fmt.Errorf("integrity check failed for plugin %q: %w", name, err)
+	}
+
 	// Verify binary is executable
 	info, err := os.Stat(binaryPath) //nolint:gosec // G703: plugin binary path from trusted data/plugins directory
 	if err != nil {
