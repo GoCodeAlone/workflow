@@ -98,23 +98,6 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 	return nil
 }
 
-// updateLockfile adds or updates a plugin entry in .wfctl.yaml.
-// Silently no-ops if the lockfile cannot be read or written (install still succeeds).
-func updateLockfile(pluginName, version, repository string) {
-	lf, err := loadPluginLockfile(wfctlYAMLPath)
-	if err != nil {
-		return
-	}
-	if lf.Plugins == nil {
-		lf.Plugins = make(map[string]PluginLockEntry)
-	}
-	lf.Plugins[pluginName] = PluginLockEntry{
-		Version:    version,
-		Repository: repository,
-	}
-	_ = lf.Save(wfctlYAMLPath)
-}
-
 // updateLockfileWithChecksum adds or updates a plugin entry in .wfctl.yaml with SHA-256 checksum.
 // Silently no-ops if the lockfile cannot be read or written (install still succeeds).
 func updateLockfileWithChecksum(pluginName, version, repository, sha256Hash string) {
