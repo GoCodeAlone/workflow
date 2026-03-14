@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -15,6 +16,7 @@ type PluginLockEntry struct {
 	Version    string `yaml:"version"`
 	Repository string `yaml:"repository,omitempty"`
 	SHA256     string `yaml:"sha256,omitempty"`
+	Registry   string `yaml:"registry,omitempty"`
 }
 
 // PluginLockfile represents the plugins section of .wfctl.yaml.
@@ -79,6 +81,15 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 		if err := runPluginInstall(installArgs); err != nil {
 			fmt.Fprintf(os.Stderr, "error installing %s: %v\n", name, err)
 			failed = append(failed, name)
+			continue
+		}
+		if entry.SHA256 != "" {
+			pluginInstallDir := filepath.Join(pluginDir, name)
+			if verifyErr := verifyInstalledChecksum(pluginInstallDir, name, entry.SHA256); verifyErr != nil {
+				fmt.Fprintf(os.Stderr, "CHECKSUM MISMATCH for %s: %v\n", name, verifyErr)
+				failed = append(failed, name)
+				continue
+			}
 		}
 	}
 	if len(failed) > 0 {
@@ -100,6 +111,24 @@ func updateLockfile(pluginName, version, repository string) {
 	lf.Plugins[pluginName] = PluginLockEntry{
 		Version:    version,
 		Repository: repository,
+	}
+	_ = lf.Save(wfctlYAMLPath)
+}
+
+// updateLockfileWithChecksum adds or updates a plugin entry in .wfctl.yaml with SHA-256 checksum.
+// Silently no-ops if the lockfile cannot be read or written (install still succeeds).
+func updateLockfileWithChecksum(pluginName, version, repository, sha256Hash string) {
+	lf, err := loadPluginLockfile(wfctlYAMLPath)
+	if err != nil {
+		return
+	}
+	if lf.Plugins == nil {
+		lf.Plugins = make(map[string]PluginLockEntry)
+	}
+	lf.Plugins[pluginName] = PluginLockEntry{
+		Version:    version,
+		Repository: repository,
+		SHA256:     sha256Hash,
 	}
 	_ = lf.Save(wfctlYAMLPath)
 }
