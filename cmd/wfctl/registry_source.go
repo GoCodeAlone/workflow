@@ -149,8 +149,11 @@ type StaticRegistrySource struct {
 }
 
 // NewStaticRegistrySource creates a new static-URL-backed registry source.
-func NewStaticRegistrySource(cfg RegistrySourceConfig) *StaticRegistrySource {
-	return &StaticRegistrySource{name: cfg.Name, baseURL: strings.TrimSuffix(cfg.URL, "/"), token: cfg.Token}
+func NewStaticRegistrySource(cfg RegistrySourceConfig) (*StaticRegistrySource, error) {
+	if cfg.URL == "" {
+		return nil, fmt.Errorf("static registry %q requires a URL", cfg.Name)
+	}
+	return &StaticRegistrySource{name: cfg.Name, baseURL: strings.TrimSuffix(cfg.URL, "/"), token: cfg.Token}, nil
 }
 
 func (s *StaticRegistrySource) Name() string { return s.name }

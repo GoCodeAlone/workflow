@@ -75,9 +75,14 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 		if cfgPath != "" {
 			installArgs = append(installArgs, "--config", cfgPath)
 		}
-		// Pass just the name (no @version) so runPluginInstall does not
-		// call updateLockfile and inadvertently overwrite the pinned entry.
-		installArgs = append(installArgs, name)
+		if entry.Registry != "" {
+			installArgs = append(installArgs, "--registry", entry.Registry)
+		}
+		installArg := name
+		if entry.Version != "" {
+			installArg = name + "@" + entry.Version
+		}
+		installArgs = append(installArgs, installArg)
 		if err := runPluginInstall(installArgs); err != nil {
 			fmt.Fprintf(os.Stderr, "error installing %s: %v\n", name, err)
 			failed = append(failed, name)
@@ -87,6 +92,9 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 			pluginInstallDir := filepath.Join(pluginDir, name)
 			if verifyErr := verifyInstalledChecksum(pluginInstallDir, name, entry.SHA256); verifyErr != nil {
 				fmt.Fprintf(os.Stderr, "CHECKSUM MISMATCH for %s: %v\n", name, verifyErr)
+				if removeErr := os.RemoveAll(pluginInstallDir); removeErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not remove plugin dir: %v\n", removeErr)
+				}
 				failed = append(failed, name)
 				continue
 			}
@@ -100,7 +108,7 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 
 // updateLockfileWithChecksum adds or updates a plugin entry in .wfctl.yaml with SHA-256 checksum.
 // Silently no-ops if the lockfile cannot be read or written (install still succeeds).
-func updateLockfileWithChecksum(pluginName, version, repository, sha256Hash string) {
+func updateLockfileWithChecksum(pluginName, version, repository, registry, sha256Hash string) {
 	lf, err := loadPluginLockfile(wfctlYAMLPath)
 	if err != nil {
 		return
@@ -112,6 +120,7 @@ func updateLockfileWithChecksum(pluginName, version, repository, sha256Hash stri
 		Version:    version,
 		Repository: repository,
 		SHA256:     sha256Hash,
+		Registry:   registry,
 	}
 	_ = lf.Save(wfctlYAMLPath)
 }

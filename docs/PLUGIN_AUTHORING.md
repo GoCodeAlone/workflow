@@ -9,7 +9,7 @@ This guide covers creating, testing, publishing, and registering workflow plugin
 wfctl plugin init my-plugin -author MyOrg -description "My custom plugin"
 
 # Build and test
-cd workflow-plugin-my-plugin
+cd my-plugin
 go mod tidy
 make build
 make test
@@ -23,7 +23,7 @@ make install-local
 `wfctl plugin init` generates a complete project:
 
 ```
-workflow-plugin-my-plugin/
+my-plugin/
 ├── cmd/workflow-plugin-my-plugin/main.go   # gRPC entrypoint
 ├── internal/
 │   ├── provider.go                         # Plugin provider (registers steps/modules)
@@ -40,47 +40,34 @@ workflow-plugin-my-plugin/
 
 ## Implementing Steps
 
-Step types are the primary extension point. Each step implements the SDK Step interface:
+Step types are the primary extension point. Each step implements the external SDK `StepInstance` interface:
 
 ```go
 type MyStep struct {
     config map[string]any
 }
 
-type MyStepFactory struct{}
-
-func NewMyStepFactory() *MyStepFactory { return &MyStepFactory{} }
-
-func (f *MyStepFactory) Create(config map[string]any) (sdk.Step, error) {
-    return &MyStep{config: config}, nil
-}
-
-func (s *MyStep) Execute(ctx context.Context, params sdk.StepParams) (map[string]any, error) {
-    // Access step config: s.config["key"]
-    // Access pipeline context: params.Current["key"]
-    // Access previous step output: params.Steps["step-name"]["key"]
-    return map[string]any{"result": "value"}, nil
+func (s *MyStep) Execute(ctx context.Context, triggerData map[string]any, stepOutputs map[string]map[string]any, current map[string]any, metadata map[string]any, config map[string]any) (*sdk.StepResult, error) {
+    // Access step config: config["key"]
+    // Access pipeline context: current["key"]
+    // Access previous step output: stepOutputs["step-name"]["key"]
+    return &sdk.StepResult{Output: map[string]any{"result": "value"}}, nil
 }
 ```
 
 Register in `internal/provider.go`:
 
 ```go
-func (p *Provider) StepFactories() map[string]sdk.StepFactory {
-    return map[string]sdk.StepFactory{
-        "step.my_action": NewMyStepFactory(),
-    }
+func (p *Provider) StepTypes() []string {
+    return []string{"step.my_action"}
 }
-```
 
-## Implementing Modules
-
-Modules provide runtime services (database connections, API clients, etc.):
-
-```go
-func (p *Provider) ModuleFactories() map[string]sdk.ModuleFactory {
-    return map[string]sdk.ModuleFactory{
-        "my.provider": NewMyModuleFactory(),
+func (p *Provider) CreateStep(typeName, name string, config map[string]any) (sdk.StepInstance, error) {
+    switch typeName {
+    case "step.my_action":
+        return &MyStep{config: config}, nil
+    default:
+        return nil, fmt.Errorf("unknown step type: %s", typeName)
     }
 }
 ```

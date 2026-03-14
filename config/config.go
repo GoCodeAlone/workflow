@@ -104,7 +104,9 @@ type SidecarConfig struct {
 type ExternalPluginDecl struct {
 	// Name is the plugin name as registered in the plugin registry.
 	Name string `json:"name" yaml:"name"`
-	// Version is an optional semver constraint (e.g., ">=0.1.0", "0.2.0").
+	// Version is an optional version specifier forwarded to wfctl plugin install
+	// as name@version. Simple constraints (>=, ^, ~) are stripped to extract the
+	// version; compound constraints fall back to installing the latest.
 	// Used only when AutoFetch is true.
 	Version string `json:"version,omitempty" yaml:"version,omitempty"`
 	// AutoFetch controls whether the engine should download the plugin

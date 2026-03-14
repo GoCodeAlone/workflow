@@ -74,11 +74,26 @@ func runPluginInstall(args []string) error {
 	directURL := fs.String("url", "", "Install from a direct download URL (tar.gz archive)")
 	localPath := fs.String("local", "", "Install from a local plugin directory")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] <name>[@<version>]\n\nDownload and install a plugin from the registry.\n\nOptions:\n")
+		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] [<name>[@<version>]]\n\nInstall a plugin from the registry, a URL, a local directory, or from the lockfile.\n\n  wfctl plugin install <name>         Install latest from registry\n  wfctl plugin install <name>@<ver>   Install specific version\n  wfctl plugin install --url <url>    Install from direct URL\n  wfctl plugin install --local <dir>  Install from local directory\n  wfctl plugin install                Install all from .wfctl.yaml\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	// Validate mutual exclusivity of install modes.
+	modes := 0
+	if *directURL != "" {
+		modes++
+	}
+	if *localPath != "" {
+		modes++
+	}
+	if fs.NArg() > 0 {
+		modes++
+	}
+	if modes > 1 {
+		return fmt.Errorf("specify only one of: <name>, --url, or --local")
 	}
 
 	if *directURL != "" {
@@ -149,11 +164,13 @@ func runPluginInstall(args []string) error {
 
 	// Update .wfctl.yaml lockfile if name@version was provided.
 	if _, ver := parseNameVersion(nameArg); ver != "" {
-		sha := ""
-		if dl, dlErr := manifest.FindDownload(runtime.GOOS, runtime.GOARCH); dlErr == nil {
-			sha = dl.SHA256
+		pluginName = normalizePluginName(pluginName)
+		binaryChecksum := ""
+		binaryPath := filepath.Join(pluginDirVal, pluginName, pluginName)
+		if cs, hashErr := hashFileSHA256(binaryPath); hashErr == nil {
+			binaryChecksum = cs
 		}
-		updateLockfileWithChecksum(manifest.Name, manifest.Version, manifest.Repository, sha)
+		updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, sourceName, binaryChecksum)
 	}
 
 	return nil
@@ -498,15 +515,27 @@ func installFromURL(url, pluginDir string) error {
 	}
 
 	if err := ensurePluginBinary(destDir, pluginName); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not normalize binary name: %v\n", err)
+		return fmt.Errorf("could not normalize binary name: %w", err)
 	}
 
-	h := sha256.Sum256(data)
-	checksum := hex.EncodeToString(h[:])
-	updateLockfileWithChecksum(pluginName, pj.Version, pj.Repository, checksum)
+	binaryChecksum, hashErr := hashFileSHA256(filepath.Join(destDir, pluginName))
+	if hashErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not compute binary checksum: %v\n", hashErr)
+	}
+	updateLockfileWithChecksum(pluginName, pj.Version, pj.Repository, "", binaryChecksum)
 
 	fmt.Printf("Installed %s v%s to %s\n", pluginName, pj.Version, destDir)
 	return nil
+}
+
+// hashFileSHA256 computes the SHA-256 hex digest of the file at path.
+func hashFileSHA256(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("hash file %s: %w", path, err)
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:]), nil
 }
 
 // verifyInstalledChecksum reads the plugin binary and verifies its SHA-256 checksum.
@@ -562,6 +591,12 @@ func installFromLocal(srcDir, pluginDir string) error {
 	if err := copyFile(srcBinary, filepath.Join(destDir, pluginName), 0750); err != nil {
 		return err
 	}
+
+	binaryChecksum, hashErr := hashFileSHA256(filepath.Join(destDir, pluginName))
+	if hashErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not compute binary checksum: %v\n", hashErr)
+	}
+	updateLockfileWithChecksum(pluginName, pj.Version, "", "", binaryChecksum)
 
 	fmt.Printf("Installed %s v%s from %s to %s\n", pluginName, pj.Version, srcDir, destDir)
 	return nil

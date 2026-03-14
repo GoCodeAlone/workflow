@@ -60,7 +60,7 @@ func TestInstallFromURL(t *testing.T) {
 	pjContent := minimalPluginJSON(pluginName, "1.2.3")
 
 	tarball := buildPluginTarGz(t, pluginName, binaryContent, pjContent)
-	tarChecksum := sha256Hex(tarball)
+	binaryChecksum := sha256Hex(binaryContent)
 
 	// Serve tarball from a local httptest server.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -114,8 +114,8 @@ func TestInstallFromURL(t *testing.T) {
 	if !ok {
 		t.Fatalf("lockfile missing entry for %q; entries: %v", pluginName, lf.Plugins)
 	}
-	if entry.SHA256 != tarChecksum {
-		t.Errorf("lockfile checksum: got %q, want %q", entry.SHA256, tarChecksum)
+	if entry.SHA256 != binaryChecksum {
+		t.Errorf("lockfile checksum: got %q, want %q", entry.SHA256, binaryChecksum)
 	}
 	if entry.Version != "1.2.3" {
 		t.Errorf("lockfile version: got %q, want %q", entry.Version, "1.2.3")

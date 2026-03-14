@@ -93,7 +93,7 @@ func TestStaticRegistrySource_FetchManifest(t *testing.T) {
 	srv := buildStaticRegistryServer(t, nil, manifests)
 	defer srv.Close()
 
-	src := NewStaticRegistrySource(RegistrySourceConfig{
+	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
 		Name: "test-static",
 		URL:  srv.URL,
 	})
@@ -116,7 +116,7 @@ func TestStaticRegistrySource_FetchManifest_NotFound(t *testing.T) {
 	srv := buildStaticRegistryServer(t, nil, map[string]*RegistryManifest{})
 	defer srv.Close()
 
-	src := NewStaticRegistrySource(RegistrySourceConfig{
+	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
 		Name: "test-static",
 		URL:  srv.URL,
 	})
@@ -139,7 +139,7 @@ func TestStaticRegistrySource_ListPlugins(t *testing.T) {
 	srv := buildStaticRegistryServer(t, index, nil)
 	defer srv.Close()
 
-	src := NewStaticRegistrySource(RegistrySourceConfig{
+	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
 		Name: "test-static",
 		URL:  srv.URL,
 	})
@@ -174,7 +174,7 @@ func TestStaticRegistrySource_SearchPlugins_AllWithEmptyQuery(t *testing.T) {
 	srv := buildStaticRegistryServer(t, index, nil)
 	defer srv.Close()
 
-	src := NewStaticRegistrySource(RegistrySourceConfig{
+	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
 		Name: "test-static",
 		URL:  srv.URL,
 	})
@@ -200,7 +200,7 @@ func TestStaticRegistrySource_SearchPlugins_Filtering(t *testing.T) {
 	srv := buildStaticRegistryServer(t, index, nil)
 	defer srv.Close()
 
-	src := NewStaticRegistrySource(RegistrySourceConfig{
+	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
 		Name: "test-static",
 		URL:  srv.URL,
 	})
@@ -256,7 +256,7 @@ func TestStaticRegistrySource_SearchPlugins_SourceName(t *testing.T) {
 	defer srv.Close()
 
 	const registryName = "my-static-registry"
-	src := NewStaticRegistrySource(RegistrySourceConfig{
+	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
 		Name: registryName,
 		URL:  srv.URL,
 	})
@@ -284,7 +284,7 @@ func TestStaticRegistrySource_TrailingSlashStripped(t *testing.T) {
 	defer srv.Close()
 
 	// Pass URL with trailing slash.
-	src := NewStaticRegistrySource(RegistrySourceConfig{
+	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
 		Name: "test",
 		URL:  srv.URL + "/",
 	})
@@ -300,7 +300,7 @@ func TestStaticRegistrySource_TrailingSlashStripped(t *testing.T) {
 
 // TestStaticRegistrySource_Name verifies that the registry name is returned correctly.
 func TestStaticRegistrySource_Name(t *testing.T) {
-	src := NewStaticRegistrySource(RegistrySourceConfig{
+	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
 		Name: "my-registry",
 		URL:  "https://example.com",
 	})

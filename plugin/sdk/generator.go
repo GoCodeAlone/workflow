@@ -124,10 +124,10 @@ func generateProjectStructure(opts GenerateOptions) error {
 	if err := os.MkdirAll(internalDir, 0750); err != nil {
 		return fmt.Errorf("create internal dir: %w", err)
 	}
-	if err := writeFile(filepath.Join(internalDir, "provider.go"), generateProviderGo(goModule, opts, shortName), 0600); err != nil {
+	if err := writeFile(filepath.Join(internalDir, "provider.go"), generateProviderGo(opts, shortName), 0600); err != nil {
 		return err
 	}
-	if err := writeFile(filepath.Join(internalDir, "steps.go"), generateStepsGo(goModule, shortName), 0600); err != nil {
+	if err := writeFile(filepath.Join(internalDir, "steps.go"), generateStepsGo(shortName), 0600); err != nil {
 		return err
 	}
 
@@ -184,7 +184,7 @@ func generateMainGo(goModule, shortName string) string {
 	b.WriteString("package main\n\n")
 	b.WriteString("import (\n")
 	fmt.Fprintf(&b, "\t%q\n", goModule+"/internal")
-	b.WriteString("\t\"github.com/GoCodeAlone/workflow/plugin/sdk\"\n")
+	b.WriteString("\t\"github.com/GoCodeAlone/workflow/plugin/external/sdk\"\n")
 	b.WriteString(")\n\n")
 	b.WriteString("func main() {\n")
 	fmt.Fprintf(&b, "\tsdk.Serve(internal.New%sProvider())\n", toCamelCase(shortName))
@@ -192,65 +192,56 @@ func generateMainGo(goModule, shortName string) string {
 	return b.String()
 }
 
-func generateProviderGo(goModule string, opts GenerateOptions, shortName string) string {
+func generateProviderGo(opts GenerateOptions, shortName string) string {
 	typeName := toCamelCase(shortName) + "Provider"
 	var b strings.Builder
 	fmt.Fprintf(&b, "package internal\n\n")
 	b.WriteString("import (\n")
-	b.WriteString("\t\"github.com/GoCodeAlone/workflow/plugin\"\n")
+	b.WriteString("\t\"fmt\"\n\n")
+	b.WriteString("\t\"github.com/GoCodeAlone/workflow/plugin/external/sdk\"\n")
 	b.WriteString(")\n\n")
-	fmt.Fprintf(&b, "// %s implements plugin.PluginProvider.\n", typeName)
+	fmt.Fprintf(&b, "// %s implements sdk.PluginProvider.\n", typeName)
 	fmt.Fprintf(&b, "type %s struct{}\n\n", typeName)
 	fmt.Fprintf(&b, "// New%s creates a new %s.\n", typeName, typeName)
 	fmt.Fprintf(&b, "func New%s() *%s {\n", typeName, typeName)
 	fmt.Fprintf(&b, "\treturn &%s{}\n", typeName)
 	b.WriteString("}\n\n")
-	fmt.Fprintf(&b, "func (p *%s) PluginInfo() *plugin.PluginManifest {\n", typeName)
-	b.WriteString("\treturn &plugin.PluginManifest{\n")
+	fmt.Fprintf(&b, "func (p *%s) Manifest() sdk.PluginManifest {\n", typeName)
+	b.WriteString("\treturn sdk.PluginManifest{\n")
 	fmt.Fprintf(&b, "\t\tName:        %q,\n", "workflow-plugin-"+shortName)
 	fmt.Fprintf(&b, "\t\tVersion:     %q,\n", opts.Version)
 	fmt.Fprintf(&b, "\t\tAuthor:      %q,\n", opts.Author)
 	fmt.Fprintf(&b, "\t\tDescription: %q,\n", opts.Description)
-	fmt.Fprintf(&b, "\t\tLicense:     %q,\n", func() string {
-		if opts.License != "" {
-			return opts.License
-		}
-		return "Apache-2.0"
-	}())
 	b.WriteString("\t}\n")
 	b.WriteString("}\n\n")
-	fmt.Fprintf(&b, "func (p *%s) StepFactories() []plugin.StepFactory {\n", typeName)
-	b.WriteString("\treturn []plugin.StepFactory{\n")
-	fmt.Fprintf(&b, "\t\tNew%sExampleStep,\n", toCamelCase(shortName))
+	fmt.Fprintf(&b, "func (p *%s) StepTypes() []string {\n", typeName)
+	fmt.Fprintf(&b, "\treturn []string{\"step.%s_example\"}\n", shortName)
+	b.WriteString("}\n\n")
+	fmt.Fprintf(&b, "func (p *%s) CreateStep(typeName, name string, config map[string]any) (sdk.StepInstance, error) {\n", typeName)
+	b.WriteString("\tswitch typeName {\n")
+	fmt.Fprintf(&b, "\tcase \"step.%s_example\":\n", shortName)
+	fmt.Fprintf(&b, "\t\treturn &%sExampleStep{}, nil\n", toCamelCase(shortName))
+	b.WriteString("\tdefault:\n")
+	b.WriteString("\t\treturn nil, fmt.Errorf(\"unknown step type: %s\", typeName)\n")
 	b.WriteString("\t}\n")
 	b.WriteString("}\n")
-	// Suppress unused import warning if goModule doesn't get used in this file
-	_ = goModule
 	return b.String()
 }
 
-func generateStepsGo(goModule, shortName string) string {
+func generateStepsGo(shortName string) string {
 	stepType := "step." + shortName + "_example"
 	funcName := toCamelCase(shortName) + "ExampleStep"
 	var b strings.Builder
 	b.WriteString("package internal\n\n")
 	b.WriteString("import (\n")
 	b.WriteString("\t\"context\"\n\n")
-	b.WriteString("\t\"github.com/GoCodeAlone/workflow/plugin\"\n")
+	b.WriteString("\t\"github.com/GoCodeAlone/workflow/plugin/external/sdk\"\n")
 	b.WriteString(")\n\n")
 	fmt.Fprintf(&b, "// %s implements the %s step.\n", funcName, stepType)
 	fmt.Fprintf(&b, "type %s struct{}\n\n", funcName)
-	fmt.Fprintf(&b, "// New%s creates the factory function for %s.\n", funcName, stepType)
-	fmt.Fprintf(&b, "func New%s(cfg map[string]interface{}) (plugin.Step, error) {\n", funcName)
-	fmt.Fprintf(&b, "\treturn &%s{}, nil\n", funcName)
-	b.WriteString("}\n\n")
-	fmt.Fprintf(&b, "func (s *%s) Type() string { return %q }\n\n", funcName, stepType)
-	fmt.Fprintf(&b, "func (s *%s) Execute(ctx context.Context, params plugin.StepParams) (map[string]interface{}, error) {\n", funcName)
-	b.WriteString("\treturn map[string]interface{}{\n")
-	b.WriteString("\t\t\"status\": \"ok\",\n")
-	b.WriteString("\t}, nil\n")
+	fmt.Fprintf(&b, "func (s *%s) Execute(ctx context.Context, triggerData map[string]any, stepOutputs map[string]map[string]any, current map[string]any, metadata map[string]any, config map[string]any) (*sdk.StepResult, error) {\n", funcName)
+	b.WriteString("\treturn &sdk.StepResult{Output: map[string]any{\"status\": \"ok\"}}, nil\n")
 	b.WriteString("}\n")
-	_ = goModule
 	return b.String()
 }
 
@@ -371,13 +362,11 @@ test:
 	go test ./...
 
 install-local: build
-	mkdir -p $(HOME)/.local/share/workflow/plugins/%s
-	cp %s $(HOME)/.local/share/workflow/plugins/%s/
-	cp plugin.json $(HOME)/.local/share/workflow/plugins/%s/
+	wfctl plugin install --local .
 
 clean:
 	rm -f %s
-`, binaryName, binaryName, binaryName, binaryName, binaryName, binaryName, binaryName)
+`, binaryName, binaryName, binaryName)
 }
 
 func generateREADME(opts GenerateOptions, binaryName, goModule string) string {
