@@ -402,8 +402,10 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	}
 
 	// Auto-fetch declared external plugins before validating requirements.
-	// This ensures plugins declared with autoFetch: true are present locally
-	// before any requirement checks or module loading begins.
+	// Note: auto-fetch runs after external plugins have already been discovered
+	// and loaded for this process. Any plugins downloaded here will only be
+	// available after the server restarts — AutoFetchDeclaredPlugins logs a
+	// warning when this occurs.
 	if cfg.Plugins != nil && len(cfg.Plugins.External) > 0 && e.externalPluginDir != "" {
 		var sl *slog.Logger
 		if l, ok := e.logger.(*slog.Logger); ok {

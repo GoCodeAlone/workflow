@@ -52,48 +52,32 @@ func TestAutoFetchPlugin_WfctlNotFound(t *testing.T) {
 	}
 }
 
-// TestAutoFetchPlugin_VersionConstraintStripping verifies that constraint prefixes
-// are stripped when constructing the install argument.
-func TestAutoFetchPlugin_VersionConstraintStripping(t *testing.T) {
-	// We test the stripping logic indirectly by verifying the args constructed
-	// by AutoFetchPlugin would use the stripped version. Since we can't call
-	// wfctl in tests, we rely on the already-installed short-circuit and only
-	// exercise the stripping via AutoFetchDeclaredPlugins with AutoFetch=false.
-	//
-	// The version stripping is unit-tested here by replicating the logic and
-	// confirming outputs for each prefix variant.
+// TestStripVersionConstraint verifies that constraint prefixes are stripped and
+// compound constraints are detected as invalid.
+func TestStripVersionConstraint(t *testing.T) {
 	cases := []struct {
-		input string
-		want  string
+		input   string
+		want    string
+		wantOK  bool
 	}{
-		{">=0.1.0", "0.1.0"},
-		{"^0.2.0", "0.2.0"},
-		{"~1.0.0", "1.0.0"},
-		{"0.3.0", "0.3.0"},
-		{"", ""},
+		{">=0.1.0", "0.1.0", true},
+		{"<=0.1.0", "0.1.0", true},
+		{"^0.2.0", "0.2.0", true},
+		{"~1.0.0", "1.0.0", true},
+		{"0.3.0", "0.3.0", true},
+		{"", "", true},
+		{">=0.1.0,<0.2.0", "", false},  // compound — not supported
+		{">=0.1.0 <0.2.0", "", false},  // compound with space
 	}
 	for _, tc := range cases {
-		got := stripVersionConstraint(tc.input)
-		if got != tc.want {
+		got, ok := stripVersionConstraint(tc.input)
+		if ok != tc.wantOK {
+			t.Errorf("stripVersionConstraint(%q) ok=%v, want ok=%v", tc.input, ok, tc.wantOK)
+		}
+		if ok && got != tc.want {
 			t.Errorf("stripVersionConstraint(%q) = %q, want %q", tc.input, got, tc.want)
 		}
 	}
-}
-
-// stripVersionConstraint mirrors the stripping logic in AutoFetchPlugin so we can
-// test it in isolation. It must stay in sync with autofetch.go.
-func stripVersionConstraint(version string) string {
-	if version == "" {
-		return ""
-	}
-	v := version
-	for _, prefix := range []string{">=", "^", "~"} {
-		if len(v) > len(prefix) && v[:len(prefix)] == prefix {
-			v = v[len(prefix):]
-			break
-		}
-	}
-	return v
 }
 
 // TestAutoFetchPlugin_CorrectArgs verifies that AutoFetchPlugin constructs the
