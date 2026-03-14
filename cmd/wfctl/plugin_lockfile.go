@@ -78,10 +78,11 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 		if entry.Registry != "" {
 			installArgs = append(installArgs, "--registry", entry.Registry)
 		}
-		// Pass just the name (no @version) so runPluginInstall does not
-		// trigger lockfile updates that would overwrite the pinned entry
-		// before we verify the checksum.
-		installArgs = append(installArgs, name)
+		installArg := name
+		if entry.Version != "" {
+			installArg = name + "@" + entry.Version
+		}
+		installArgs = append(installArgs, installArg)
 		if err := runPluginInstall(installArgs); err != nil {
 			fmt.Fprintf(os.Stderr, "error installing %s: %v\n", name, err)
 			failed = append(failed, name)
@@ -90,8 +91,10 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 		if entry.SHA256 != "" {
 			pluginInstallDir := filepath.Join(pluginDir, name)
 			if verifyErr := verifyInstalledChecksum(pluginInstallDir, name, entry.SHA256); verifyErr != nil {
-				fmt.Fprintf(os.Stderr, "CHECKSUM MISMATCH for %s: %v — removing plugin\n", name, verifyErr)
-				_ = os.RemoveAll(pluginInstallDir)
+				fmt.Fprintf(os.Stderr, "CHECKSUM MISMATCH for %s: %v\n", name, verifyErr)
+				if removeErr := os.RemoveAll(pluginInstallDir); removeErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not remove plugin dir: %v\n", removeErr)
+				}
 				failed = append(failed, name)
 				continue
 			}
