@@ -6,11 +6,19 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"github.com/GoCodeAlone/workflow/lsp"
 )
 
-var version = "dev"
+var version = buildVersion()
+
+func buildVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
+}
 
 func main() {
 	showVersion := flag.Bool("version", false, "Print version and exit")

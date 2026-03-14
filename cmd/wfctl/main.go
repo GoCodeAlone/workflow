@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -27,7 +28,14 @@ import (
 //go:embed wfctl.yaml
 var wfctlConfigBytes []byte
 
-var version = "dev"
+var version = buildVersion()
+
+func buildVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
+}
 
 // isHelpRequested reports whether the error originated from the user
 // requesting help (--help / -h). flag.ErrHelp propagates through the
