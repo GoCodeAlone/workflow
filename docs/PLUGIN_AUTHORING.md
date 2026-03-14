@@ -116,8 +116,11 @@ make test
 # Install to local engine
 make install-local
 
-# Validate manifest format
-wfctl plugin validate -plugin-dir data/plugins my-plugin
+# Validate manifest format (from registry by name)
+wfctl plugin validate my-plugin
+
+# Validate a local manifest file
+wfctl plugin validate --file plugin.json
 
 # Full lifecycle test (start/stop/execute)
 wfctl plugin test .
