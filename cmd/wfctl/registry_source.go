@@ -205,13 +205,8 @@ func (s *StaticRegistrySource) SearchPlugins(query string) ([]PluginSearchResult
 			strings.Contains(strings.ToLower(e.Name), q) ||
 			strings.Contains(strings.ToLower(e.Description), q) {
 			results = append(results, PluginSearchResult{
-				PluginSummary: PluginSummary{
-					Name:        e.Name,
-					Version:     e.Version,
-					Description: e.Description,
-					Tier:        e.Tier,
-				},
-				Source: s.name,
+				PluginSummary: PluginSummary(e),
+				Source:        s.name,
 			})
 		}
 	}
