@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/plugin"
+	"github.com/GoCodeAlone/workflow/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -69,9 +71,46 @@ Options:
 	}
 
 	configFile := fs.Arg(0)
-	cfg, err := config.LoadFromFile(configFile)
+
+	// Read the raw bytes first so we can detect whether this is an
+	// ApplicationConfig (application.workflows[]) or a plain WorkflowConfig.
+	rawData, err := os.ReadFile(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	// Use the same code path as the core engine (config.FileSource) to load
+	// and merge the configuration. This guarantees docs reflect exactly what
+	// the engine would see, including ApplicationConfig multi-file merging and
+	// its conflict detection (duplicate module/pipeline/trigger names).
+	cfg, err := config.NewFileSource(configFile).Load(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// For ApplicationConfig inputs, also capture the application metadata
+	// (name, embedded workflow list) used for the README title and table.
+	var appInfo *config.ApplicationInfo
+	if config.IsApplicationConfig(rawData) {
+		appCfg, appErr := config.LoadApplicationConfig(configFile)
+		if appErr != nil {
+			return fmt.Errorf("failed to load application config metadata: %w", appErr)
+		}
+		appInfo = &appCfg.Application
+	}
+
+	// Validate the merged config before generating docs so structural problems
+	// (missing names/types, etc.) are surfaced early. Type checks are skipped
+	// because the docs tool does not require all module/workflow/trigger types
+	// to be registered.
+	if err := schema.ValidateConfig(cfg,
+		schema.WithAllowEmptyModules(),
+		schema.WithAllowNoEntryPoints(),
+		schema.WithSkipModuleTypeCheck(),
+		schema.WithSkipWorkflowTypeCheck(),
+		schema.WithSkipTriggerTypeCheck(),
+	); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
 	}
 
 	// Load external plugin manifests if a plugin directory is specified.
@@ -85,7 +124,11 @@ Options:
 
 	appTitle := *title
 	if appTitle == "" {
-		appTitle = deriveTitle(configFile)
+		if appInfo != nil && appInfo.Name != "" {
+			appTitle = appInfo.Name
+		} else {
+			appTitle = deriveTitle(configFile)
+		}
 	}
 
 	if err := os.MkdirAll(*output, 0750); err != nil {
@@ -94,6 +137,7 @@ Options:
 
 	gen := &docsGenerator{
 		cfg:       cfg,
+		appInfo:   appInfo,
 		plugins:   plugins,
 		title:     appTitle,
 		outputDir: *output,
@@ -186,6 +230,7 @@ func mermaidID(s string) string {
 // docsGenerator holds state for a single documentation generation run.
 type docsGenerator struct {
 	cfg       *config.WorkflowConfig
+	appInfo   *config.ApplicationInfo // non-nil when loaded from an ApplicationConfig
 	plugins   []*plugin.PluginManifest
 	title     string
 	outputDir string
@@ -254,6 +299,22 @@ func (g *docsGenerator) writeOverview(path string) error {
 
 	fmt.Fprintf(&b, "# %s\n\n", g.title)
 	b.WriteString("> Auto-generated documentation from workflow configuration.\n\n")
+
+	// When loaded from an ApplicationConfig, show the workflow sources.
+	if g.appInfo != nil && len(g.appInfo.Workflows) > 0 {
+		b.WriteString("## Application Workflows\n\n")
+		b.WriteString("This application is composed of the following workflow files:\n\n")
+		b.WriteString("| Name | File |\n")
+		b.WriteString("|------|------|\n")
+		for _, ref := range g.appInfo.Workflows {
+			name := ref.Name
+			if name == "" {
+				name = ref.File
+			}
+			fmt.Fprintf(&b, "| `%s` | `%s` |\n", name, ref.File)
+		}
+		b.WriteString("\n")
+	}
 
 	// Quick stats
 	b.WriteString("## Overview\n\n")

@@ -379,6 +379,22 @@ func MergeApplicationConfig(appCfg *ApplicationConfig) (*WorkflowConfig, error) 
 
 		combined.Modules = append(combined.Modules, wfCfg.Modules...)
 		for k, v := range wfCfg.Workflows {
+			if existing, exists := combined.Workflows[k]; exists {
+				// If the existing value is nil (e.g. `http:` with no body in YAML),
+				// treat it as absent and use the incoming value so data is not lost.
+				if existing == nil {
+					combined.Workflows[k] = v
+					continue
+				}
+				dstMap, dstOk := existing.(map[string]any)
+				srcMap, srcOk := v.(map[string]any)
+				if dstOk && srcOk {
+					mergeWorkflowSection(dstMap, srcMap)
+					continue
+				}
+				// Cannot deep-merge (not both maps) — first definition wins.
+				continue
+			}
 			combined.Workflows[k] = v
 		}
 		for k, v := range wfCfg.Triggers {
@@ -395,6 +411,42 @@ func MergeApplicationConfig(appCfg *ApplicationConfig) (*WorkflowConfig, error) 
 	}
 
 	return combined, nil
+}
+
+// mergeWorkflowSection merges src workflow section fields into dst in-place.
+// For known list-bearing keys (routes, subscriptions, producers, definitions),
+// the source list is appended to the destination list so that routes/topics from
+// multiple workflow files are all preserved. For all other keys, the first
+// definition wins (dst is left unchanged).
+func mergeWorkflowSection(dst, src map[string]any) {
+	listKeys := map[string]bool{
+		"routes":        true,
+		"subscriptions": true,
+		"producers":     true,
+		"definitions":   true,
+	}
+	for k, srcVal := range src {
+		if listKeys[k] {
+			srcList, ok := srcVal.([]any)
+			if !ok {
+				continue
+			}
+			switch existing := dst[k].(type) {
+			case []any:
+				// Append src items to the existing list.
+				dst[k] = append(existing, srcList...)
+			case nil:
+				// Key absent or explicitly null — use the src list.
+				dst[k] = srcVal
+			default:
+				// Key exists with a non-list value (unexpected YAML shape).
+				// Treat it as empty and replace so src items are not lost.
+				dst[k] = srcVal
+			}
+		} else if _, exists := dst[k]; !exists {
+			dst[k] = srcVal
+		}
+	}
 }
 
 // NewEmptyWorkflowConfig creates a new empty workflow configuration
