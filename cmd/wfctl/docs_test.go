@@ -69,6 +69,7 @@ modules:
     type: auth.jwt
     dependsOn: [api-router]
     config:
+      secret: "$JWT_SECRET"
       issuer: "https://auth.example.com"
   - name: order-handler
     type: http.handler
@@ -805,6 +806,7 @@ modules:
     type: auth.jwt
     dependsOn: [api-router]
     config:
+      secret: "$JWT_SECRET"
       issuer: "https://auth.example.com"
   - name: user-handler
     type: http.handler
@@ -1281,5 +1283,363 @@ application:
 	}
 	if !strings.Contains(content, "/v2/resource") {
 		t.Error("workflows.md should contain /v2/resource route from v2 workflow file (deep merge)")
+	}
+}
+
+// TestDocsApplicationConfigDuplicateModuleName verifies that when two embedded
+// workflow files define a module with the same name, docs generation fails with
+// a clear error (matching engine behaviour: module name conflicts are fatal).
+func TestDocsApplicationConfigDuplicateModuleName(t *testing.T) {
+	dir := t.TempDir()
+
+	const file1 = `
+modules:
+  - name: shared-server
+    type: http.server
+    config:
+      address: ":8080"
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /v1/ping
+        handler: shared-server
+`
+	const file2 = `
+modules:
+  - name: shared-server
+    type: http.server
+    config:
+      address: ":9090"
+`
+	d1 := filepath.Join(dir, "svc1")
+	d2 := filepath.Join(dir, "svc2")
+	if err := os.MkdirAll(d1, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(d2, 0750); err != nil {
+		t.Fatal(err)
+	}
+	writeTempWorkflowFile(t, d1, "svc1.yaml", file1)
+	writeTempWorkflowFile(t, d2, "svc2.yaml", file2)
+
+	const appCfg = `
+application:
+  name: conflict-test
+  workflows:
+    - file: ./svc1/svc1.yaml
+      name: svc1
+    - file: ./svc2/svc2.yaml
+      name: svc2
+`
+	appCfgPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(appCfgPath, []byte(appCfg), 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := filepath.Join(dir, "docs")
+	err := runDocsGenerate([]string{"-output", outDir, appCfgPath})
+	if err == nil {
+		t.Fatal("expected error for duplicate module name, got nil")
+	}
+	if !strings.Contains(err.Error(), "shared-server") {
+		t.Errorf("error should mention conflicting module name, got: %v", err)
+	}
+}
+
+// TestDocsApplicationConfigDuplicatePipelineName verifies that when two embedded
+// workflow files define a pipeline with the same name, docs generation fails
+// (matching engine behaviour: pipeline name conflicts are fatal).
+func TestDocsApplicationConfigDuplicatePipelineName(t *testing.T) {
+	dir := t.TempDir()
+
+	const file1 = `
+modules:
+  - name: handler-a
+    type: http.handler
+pipelines:
+  process-request:
+    steps:
+      - name: step1
+        type: step.log
+        config:
+          message: "from svc-a"
+`
+	const file2 = `
+modules:
+  - name: handler-b
+    type: http.handler
+pipelines:
+  process-request:
+    steps:
+      - name: step1
+        type: step.log
+        config:
+          message: "from svc-b"
+`
+	d1 := filepath.Join(dir, "svc1")
+	d2 := filepath.Join(dir, "svc2")
+	if err := os.MkdirAll(d1, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(d2, 0750); err != nil {
+		t.Fatal(err)
+	}
+	writeTempWorkflowFile(t, d1, "svc1.yaml", file1)
+	writeTempWorkflowFile(t, d2, "svc2.yaml", file2)
+
+	const appCfg = `
+application:
+  name: pipeline-conflict-test
+  workflows:
+    - file: ./svc1/svc1.yaml
+      name: svc1
+    - file: ./svc2/svc2.yaml
+      name: svc2
+`
+	appCfgPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(appCfgPath, []byte(appCfg), 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := filepath.Join(dir, "docs")
+	err := runDocsGenerate([]string{"-output", outDir, appCfgPath})
+	if err == nil {
+		t.Fatal("expected error for duplicate pipeline name, got nil")
+	}
+	if !strings.Contains(err.Error(), "process-request") {
+		t.Errorf("error should mention conflicting pipeline name, got: %v", err)
+	}
+}
+
+// TestDocsApplicationConfigNullWorkflowSection verifies that when the first
+// embedded workflow file defines a workflow key with a null value (e.g.
+// `http:` with no body), the second file's non-null value is used rather than
+// being silently dropped.
+func TestDocsApplicationConfigNullWorkflowSection(t *testing.T) {
+	dir := t.TempDir()
+
+	// First file: declares the http workflow key with no body (null)
+	const file1 = `
+modules:
+  - name: api-server
+    type: http.server
+    config:
+      address: ":8080"
+  - name: api-router
+    type: http.router
+    dependsOn: [api-server]
+workflows:
+  http:
+triggers:
+  http:
+    server: api-server
+`
+	// Second file: adds concrete routes under the same http key
+	const file2 = `
+modules:
+  - name: ping-handler
+    type: http.handler
+    dependsOn: [api-router]
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /ping
+        handler: ping-handler
+`
+	d1 := filepath.Join(dir, "base")
+	d2 := filepath.Join(dir, "routes")
+	if err := os.MkdirAll(d1, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(d2, 0750); err != nil {
+		t.Fatal(err)
+	}
+	writeTempWorkflowFile(t, d1, "base.yaml", file1)
+	writeTempWorkflowFile(t, d2, "routes.yaml", file2)
+
+	const appCfg = `
+application:
+  name: null-section-test
+  workflows:
+    - file: ./base/base.yaml
+      name: base
+    - file: ./routes/routes.yaml
+      name: routes
+`
+	appCfgPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(appCfgPath, []byte(appCfg), 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := filepath.Join(dir, "docs")
+	if err := runDocsGenerate([]string{"-output", outDir, appCfgPath}); err != nil {
+		t.Fatalf("docs generate failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outDir, "workflows.md"))
+	if err != nil {
+		t.Fatalf("failed to read workflows.md: %v", err)
+	}
+	content := string(data)
+
+	// Routes from the second file must be present even though first file
+	// had a null http workflow section
+	if !strings.Contains(content, "/ping") {
+		t.Error("workflows.md should contain /ping route from second workflow file (null section override)")
+	}
+}
+
+// TestDocsApplicationConfigThreeFiles verifies that a more complex application
+// with three embedded workflow files is fully merged and documented correctly.
+func TestDocsApplicationConfigThreeFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	const apiConfig = `
+modules:
+  - name: api-server
+    type: http.server
+    config:
+      address: ":8080"
+  - name: api-router
+    type: http.router
+    dependsOn: [api-server]
+  - name: users-handler
+    type: http.handler
+    dependsOn: [api-router]
+  - name: orders-handler
+    type: http.handler
+    dependsOn: [api-router]
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /users
+        handler: users-handler
+      - method: GET
+        path: /orders
+        handler: orders-handler
+triggers:
+  http:
+    server: api-server
+`
+	const eventsConfig = `
+modules:
+  - name: event-broker
+    type: messaging.broker
+  - name: order-event-handler
+    type: messaging.handler
+    dependsOn: [event-broker]
+workflows:
+  messaging:
+    subscriptions:
+      - topic: order.created
+        handler: order-event-handler
+`
+	const jobsConfig = `
+modules:
+  - name: scheduler
+    type: scheduler
+pipelines:
+  daily-report:
+    steps:
+      - name: generate-report
+        type: step.log
+        config:
+          message: "generating daily report"
+workflows:
+  scheduler:
+    jobs:
+      - name: daily-report-job
+        schedule: "0 8 * * *"
+        pipeline: daily-report
+`
+	d1 := filepath.Join(dir, "api")
+	d2 := filepath.Join(dir, "events")
+	d3 := filepath.Join(dir, "jobs")
+	for _, d := range []string{d1, d2, d3} {
+		if err := os.MkdirAll(d, 0750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeTempWorkflowFile(t, d1, "api.yaml", apiConfig)
+	writeTempWorkflowFile(t, d2, "events.yaml", eventsConfig)
+	writeTempWorkflowFile(t, d3, "jobs.yaml", jobsConfig)
+
+	const appCfg = `
+application:
+  name: three-file-platform
+  workflows:
+    - file: ./api/api.yaml
+      name: api
+    - file: ./events/events.yaml
+      name: events
+    - file: ./jobs/jobs.yaml
+      name: jobs
+`
+	appCfgPath := filepath.Join(dir, "app.yaml")
+	if err := os.WriteFile(appCfgPath, []byte(appCfg), 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := filepath.Join(dir, "docs")
+	if err := runDocsGenerate([]string{"-output", outDir, appCfgPath}); err != nil {
+		t.Fatalf("docs generate failed: %v", err)
+	}
+
+	// All doc files should exist
+	for _, name := range []string{"README.md", "modules.md", "workflows.md", "pipelines.md", "architecture.md"} {
+		if _, statErr := os.Stat(filepath.Join(outDir, name)); os.IsNotExist(statErr) {
+			t.Errorf("expected %s to be generated for 3-file ApplicationConfig", name)
+		}
+	}
+
+	// README should list all three workflow files
+	readmeData, err := os.ReadFile(filepath.Join(outDir, "README.md"))
+	if err != nil {
+		t.Fatalf("failed to read README.md: %v", err)
+	}
+	readme := string(readmeData)
+	for _, row := range []string{"| `api` |", "| `events` |", "| `jobs` |"} {
+		if !strings.Contains(readme, row) {
+			t.Errorf("README.md missing table row %q", row)
+		}
+	}
+	if !strings.Contains(readme, "# three-file-platform") {
+		t.Error("README.md should use application name as title")
+	}
+
+	// modules.md should cover modules from all three files
+	modulesData, err := os.ReadFile(filepath.Join(outDir, "modules.md"))
+	if err != nil {
+		t.Fatalf("failed to read modules.md: %v", err)
+	}
+	modules := string(modulesData)
+	for _, mod := range []string{"api-server", "api-router", "event-broker", "scheduler"} {
+		if !strings.Contains(modules, mod) {
+			t.Errorf("modules.md should contain %q", mod)
+		}
+	}
+
+	// workflows.md should contain routes, subscriptions, and scheduler section
+	wfData, err := os.ReadFile(filepath.Join(outDir, "workflows.md"))
+	if err != nil {
+		t.Fatalf("failed to read workflows.md: %v", err)
+	}
+	wf := string(wfData)
+	for _, expect := range []string{"/users", "/orders", "order.created"} {
+		if !strings.Contains(wf, expect) {
+			t.Errorf("workflows.md should contain %q", expect)
+		}
+	}
+
+	// pipelines.md should include the daily-report pipeline
+	pipData, err := os.ReadFile(filepath.Join(outDir, "pipelines.md"))
+	if err != nil {
+		t.Fatalf("failed to read pipelines.md: %v", err)
+	}
+	if !strings.Contains(string(pipData), "daily-report") {
+		t.Error("pipelines.md should contain the daily-report pipeline from the jobs file")
 	}
 }

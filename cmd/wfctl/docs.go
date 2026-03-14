@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/plugin"
+	"github.com/GoCodeAlone/workflow/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -77,24 +79,38 @@ Options:
 		return fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	var cfg *config.WorkflowConfig
+	// Use the same code path as the core engine (config.FileSource) to load
+	// and merge the configuration. This guarantees docs reflect exactly what
+	// the engine would see, including ApplicationConfig multi-file merging and
+	// its conflict detection (duplicate module/pipeline/trigger names).
+	cfg, err := config.NewFileSource(configFile).Load(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// For ApplicationConfig inputs, also capture the application metadata
+	// (name, embedded workflow list) used for the README title and table.
 	var appInfo *config.ApplicationInfo
 	if config.IsApplicationConfig(rawData) {
 		appCfg, appErr := config.LoadApplicationConfig(configFile)
 		if appErr != nil {
-			return fmt.Errorf("failed to load application config: %w", appErr)
+			return fmt.Errorf("failed to load application config metadata: %w", appErr)
 		}
-		merged, mergeErr := config.MergeApplicationConfig(appCfg)
-		if mergeErr != nil {
-			return fmt.Errorf("failed to merge application config: %w", mergeErr)
-		}
-		cfg = merged
 		appInfo = &appCfg.Application
-	} else {
-		cfg, err = config.LoadFromFile(configFile)
-		if err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
+	}
+
+	// Validate the merged config before generating docs so structural problems
+	// (missing names/types, etc.) are surfaced early. Type checks are skipped
+	// because the docs tool does not require all module/workflow/trigger types
+	// to be registered.
+	if err := schema.ValidateConfig(cfg,
+		schema.WithAllowEmptyModules(),
+		schema.WithAllowNoEntryPoints(),
+		schema.WithSkipModuleTypeCheck(),
+		schema.WithSkipWorkflowTypeCheck(),
+		schema.WithSkipTriggerTypeCheck(),
+	); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
 	}
 
 	// Load external plugin manifests if a plugin directory is specified.

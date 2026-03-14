@@ -380,6 +380,12 @@ func MergeApplicationConfig(appCfg *ApplicationConfig) (*WorkflowConfig, error) 
 		combined.Modules = append(combined.Modules, wfCfg.Modules...)
 		for k, v := range wfCfg.Workflows {
 			if existing, exists := combined.Workflows[k]; exists {
+				// If the existing value is nil (e.g. `http:` with no body in YAML),
+				// treat it as absent and use the incoming value so data is not lost.
+				if existing == nil {
+					combined.Workflows[k] = v
+					continue
+				}
 				dstMap, dstOk := existing.(map[string]any)
 				srcMap, srcOk := v.(map[string]any)
 				if dstOk && srcOk {

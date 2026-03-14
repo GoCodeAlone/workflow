@@ -1,7 +1,9 @@
 package config
 
 import (
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -350,4 +352,184 @@ func TestDeepMergeConfigs_ModuleTypeOverride(t *testing.T) {
 	if result.Modules[0].Type != "new-type" {
 		t.Errorf("expected type=new-type from override, got %q", result.Modules[0].Type)
 	}
+}
+
+func TestMergeApplicationConfig_NilWorkflowKeyReplacedByLaterFile(t *testing.T) {
+	// If the first workflow file defines a workflow key with a null body (e.g.
+	// `http:` with no content), the second file's non-null value should be used
+	// rather than being silently dropped by the "first-definition-wins" logic.
+	dir := t.TempDir()
+
+	const file1 = `
+modules:
+  - name: server
+    type: http.server
+    config:
+      address: ":8080"
+workflows:
+  http:
+triggers:
+  http:
+    server: server
+`
+	const file2 = `
+modules:
+  - name: ping-handler
+    type: http.handler
+workflows:
+  http:
+    routes:
+      - method: GET
+        path: /ping
+        handler: ping-handler
+`
+	writeFile := func(name, content string) string {
+		path := dir + "/" + name
+		if err := writeFileContent(path, content); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		return path
+	}
+	file1Path := writeFile("base.yaml", file1)
+	file2Path := writeFile("routes.yaml", file2)
+	_ = file1Path
+
+	appCfg := &ApplicationConfig{
+		ConfigDir: dir,
+		Application: ApplicationInfo{
+			Name: "null-key-test",
+			Workflows: []WorkflowRef{
+				{File: "base.yaml", Name: "base"},
+				{File: "routes.yaml", Name: "routes"},
+			},
+		},
+	}
+	_ = file2Path
+
+	combined, err := MergeApplicationConfig(appCfg)
+	if err != nil {
+		t.Fatalf("MergeApplicationConfig failed: %v", err)
+	}
+
+	httpSection, ok := combined.Workflows["http"]
+	if !ok {
+		t.Fatal("expected 'http' key in merged Workflows")
+	}
+	if httpSection == nil {
+		t.Fatal("expected 'http' to be non-nil after merge with null first file")
+	}
+	httpMap, ok := httpSection.(map[string]any)
+	if !ok {
+		t.Fatalf("expected 'http' to be map[string]any, got %T", httpSection)
+	}
+	routes, ok := httpMap["routes"].([]any)
+	if !ok || len(routes) == 0 {
+		t.Error("expected routes from second file to be present after null-key merge")
+	}
+}
+
+func TestMergeApplicationConfig_DuplicateModuleNameReturnsError(t *testing.T) {
+	dir := t.TempDir()
+
+	const file1 = `
+modules:
+  - name: shared-module
+    type: http.server
+`
+	const file2 = `
+modules:
+  - name: shared-module
+    type: http.handler
+`
+	if err := writeFileContent(dir+"/svc1.yaml", file1); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileContent(dir+"/svc2.yaml", file2); err != nil {
+		t.Fatal(err)
+	}
+
+	appCfg := &ApplicationConfig{
+		ConfigDir: dir,
+		Application: ApplicationInfo{
+			Name: "conflict-test",
+			Workflows: []WorkflowRef{
+				{File: "svc1.yaml", Name: "svc1"},
+				{File: "svc2.yaml", Name: "svc2"},
+			},
+		},
+	}
+
+	_, err := MergeApplicationConfig(appCfg)
+	if err == nil {
+		t.Fatal("expected error for duplicate module name, got nil")
+	}
+	if !contains(err.Error(), "shared-module") {
+		t.Errorf("error should mention conflicting module name, got: %v", err)
+	}
+}
+
+func TestMergeApplicationConfig_DuplicatePipelineNameReturnsError(t *testing.T) {
+	dir := t.TempDir()
+
+	const file1 = `
+modules:
+  - name: handler-a
+    type: http.handler
+pipelines:
+  my-pipeline:
+    steps:
+      - name: step1
+        type: step.log
+`
+	const file2 = `
+modules:
+  - name: handler-b
+    type: http.handler
+pipelines:
+  my-pipeline:
+    steps:
+      - name: step1
+        type: step.log
+`
+	if err := writeFileContent(dir+"/svc1.yaml", file1); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileContent(dir+"/svc2.yaml", file2); err != nil {
+		t.Fatal(err)
+	}
+
+	appCfg := &ApplicationConfig{
+		ConfigDir: dir,
+		Application: ApplicationInfo{
+			Name: "pipeline-conflict",
+			Workflows: []WorkflowRef{
+				{File: "svc1.yaml", Name: "svc1"},
+				{File: "svc2.yaml", Name: "svc2"},
+			},
+		},
+	}
+
+	_, err := MergeApplicationConfig(appCfg)
+	if err == nil {
+		t.Fatal("expected error for duplicate pipeline name, got nil")
+	}
+	if !contains(err.Error(), "my-pipeline") {
+		t.Errorf("error should mention conflicting pipeline name, got: %v", err)
+	}
+}
+
+// writeFileContent writes content to path (helper for MergeApplicationConfig tests).
+func writeFileContent(path, content string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(content)
+	return err
+}
+
+// contains is a helper wrapping strings.Contains for use in this test file.
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }
