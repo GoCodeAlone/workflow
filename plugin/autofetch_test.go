@@ -81,11 +81,9 @@ func TestStripVersionConstraint(t *testing.T) {
 	}
 }
 
-// TestAutoFetchPlugin_CorrectArgs verifies that AutoFetchPlugin constructs the
-// expected wfctl arguments. We do this by ensuring the function short-circuits
-// when the plugin is already installed (not executing wfctl), which confirms
-// the plugin.json check is evaluated before any exec.Command call.
-func TestAutoFetchPlugin_CorrectArgs(t *testing.T) {
+// TestAutoFetchPlugin_SkipsWhenExists verifies that AutoFetchPlugin returns nil
+// immediately when the plugin is already installed, without invoking wfctl.
+func TestAutoFetchPlugin_SkipsWhenExists(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "plugins")
 	pluginName := "test-plugin"

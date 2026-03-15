@@ -419,6 +419,25 @@ func MergeApplicationConfig(appCfg *ApplicationConfig) (*WorkflowConfig, error) 
 		}
 
 		combined.Modules = append(combined.Modules, wfCfg.Modules...)
+
+		// Merge external plugin declarations — deduplicate by name (first definition wins).
+		if wfCfg.Plugins != nil && len(wfCfg.Plugins.External) > 0 {
+			if combined.Plugins == nil {
+				combined.Plugins = &PluginsConfig{}
+			}
+			existingPlugins := make(map[string]struct{}, len(combined.Plugins.External))
+			for _, ep := range combined.Plugins.External {
+				existingPlugins[ep.Name] = struct{}{}
+			}
+			for _, ep := range wfCfg.Plugins.External {
+				if _, exists := existingPlugins[ep.Name]; exists {
+					continue
+				}
+				combined.Plugins.External = append(combined.Plugins.External, ep)
+				existingPlugins[ep.Name] = struct{}{}
+			}
+		}
+
 		for k, v := range wfCfg.Workflows {
 			if existing, exists := combined.Workflows[k]; exists {
 				// If the existing value is nil (e.g. `http:` with no body in YAML),

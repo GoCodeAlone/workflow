@@ -64,7 +64,7 @@ func (g *GitHubRegistrySource) ListPlugins() ([]string, error) {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := registryHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("list registry plugins from %s: %w", g.name, err)
 	}
@@ -90,7 +90,11 @@ func (g *GitHubRegistrySource) FetchManifest(name string) (*RegistryManifest, er
 		"https://raw.githubusercontent.com/%s/%s/%s/plugins/%s/manifest.json",
 		g.owner, g.repo, g.branch, name,
 	)
-	resp, err := http.Get(url) //nolint:gosec // URL constructed from configured registry
+	req, err := http.NewRequest(http.MethodGet, url, nil) //nolint:gosec // URL constructed from configured registry
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	resp, err := registryHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch manifest for %q from %s: %w", name, g.name, err)
 	}
@@ -231,7 +235,8 @@ func (s *StaticRegistrySource) ListPlugins() ([]string, error) {
 	return names, nil
 }
 
-// registryHTTPClient is used for all registry HTTP requests with a reasonable timeout.
+// registryHTTPClient is used for all registry HTTP requests (both GitHub and static
+// sources) with a reasonable timeout to avoid hangs on network issues.
 var registryHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 // fetch performs an HTTP GET with optional auth token.

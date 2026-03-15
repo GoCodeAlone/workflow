@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,13 +50,17 @@ func VerifyPluginIntegrity(pluginDir, pluginName string) error {
 	}
 
 	binaryPath := filepath.Join(pluginDir, pluginName, pluginName)
-	binaryData, err := os.ReadFile(binaryPath)
+	f, err := os.Open(binaryPath)
 	if err != nil {
 		return fmt.Errorf("read plugin binary %s: %w", binaryPath, err)
 	}
+	defer f.Close()
 
-	h := sha256.Sum256(binaryData)
-	got := hex.EncodeToString(h[:])
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("hash plugin binary %s: %w", binaryPath, err)
+	}
+	got := hex.EncodeToString(h.Sum(nil))
 	if !strings.EqualFold(got, entry.SHA256) {
 		return fmt.Errorf("plugin %q integrity check failed: binary checksum %s does not match lockfile %s", pluginName, got, entry.SHA256)
 	}

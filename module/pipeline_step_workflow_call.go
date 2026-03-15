@@ -139,7 +139,7 @@ func (s *WorkflowCallStep) Execute(ctx context.Context, pc *PipelineContext) (*S
 			defer cancel()
 			_, _ = target.Execute(asyncCtx, data) //nolint:errcheck
 		}(ctx, triggerData)
-		return &StepResult{Output: map[string]any{"workflow": s.workflow, "mode": "async", "dispatched": true}}, nil
+		return &StepResult{Output: map[string]any{"workflow": workflowName, "mode": "async", "dispatched": true}}, nil
 	}
 
 	// Sync mode: apply timeout and wait for result
@@ -148,7 +148,7 @@ func (s *WorkflowCallStep) Execute(ctx context.Context, pc *PipelineContext) (*S
 
 	childCtx, err := target.Execute(syncCtx, triggerData)
 	if err != nil {
-		return nil, fmt.Errorf("workflow_call step %q: workflow %q failed: %w", s.name, s.workflow, err)
+		return nil, fmt.Errorf("workflow_call step %q: workflow %q failed: %w", s.name, workflowName, err)
 	}
 
 	// Map outputs back to parent context

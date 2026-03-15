@@ -100,7 +100,17 @@ func (p *Provider) CreateModule(typeName, name string, config map[string]any) (s
 
 ## Plugin Manifest
 
-The `plugin.json` declares what your plugin provides. The name should match what you passed to `wfctl plugin init`:
+The `plugin.json` at the project root declares what your plugin provides. The `name`
+field **must match the short name** you passed to `wfctl plugin init` (e.g. `my-plugin`).
+This is the name used by the engine for plugin discovery, the `requires.plugins` dependency
+check, and `wfctl plugin install`.
+
+> **Note:** The scaffolded `internal/provider.go` returns a manifest with the name prefixed
+> as `workflow-plugin-<short-name>` (e.g. `workflow-plugin-my-plugin`). That longer form is
+> the canonical name used in the **public registry** (`workflow-registry`) and in release
+> artifact URLs. When referencing your plugin in a workflow config's `requires.plugins` or
+> `plugins.external`, use the same short name you put in `plugin.json` — the engine resolves
+> both forms automatically.
 
 ```json
 {
