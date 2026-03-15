@@ -402,10 +402,11 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	}
 
 	// Auto-fetch declared external plugins before validating requirements.
-	// Note: auto-fetch runs after external plugins have already been discovered
-	// and loaded for this process. Any plugins downloaded here will only be
-	// available after the server restarts — AutoFetchDeclaredPlugins logs a
-	// warning when this occurs.
+	// TODO: Move auto-fetch before external plugin discovery/loading so newly
+	// fetched plugins are available in the current process. Currently auto-fetch
+	// runs after DiscoverPlugins/LoadPlugin in the server startup sequence, so
+	// plugins downloaded here require a server restart to take effect.
+	// AutoFetchDeclaredPlugins logs a warning when this occurs.
 	if cfg.Plugins != nil && len(cfg.Plugins.External) > 0 && e.externalPluginDir != "" {
 		var sl *slog.Logger
 		if l, ok := e.logger.(*slog.Logger); ok {
