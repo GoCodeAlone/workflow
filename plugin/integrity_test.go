@@ -40,6 +40,48 @@ func writeBinary(t *testing.T, pluginDir, pluginName string, data []byte) string
 	return hex.EncodeToString(h[:])
 }
 
+// TestVerifyPluginIntegrity_UnreadableLockfile verifies that the function fails
+// closed when the lockfile exists but cannot be read.
+func TestVerifyPluginIntegrity_UnreadableLockfile(t *testing.T) {
+	dir := t.TempDir()
+
+	orig, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(orig) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// Create a lockfile with no read permission.
+	p := filepath.Join(dir, ".wfctl.yaml")
+	if err := os.WriteFile(p, []byte("plugins:\n  my-plugin:\n    sha256: abc\n"), 0000); err != nil {
+		t.Fatalf("write lockfile: %v", err)
+	}
+
+	err := VerifyPluginIntegrity(filepath.Join(dir, "plugins"), "my-plugin")
+	if err == nil {
+		t.Error("expected error when lockfile is unreadable, got nil (fail-open)")
+	}
+}
+
+// TestVerifyPluginIntegrity_MalformedLockfile verifies that the function fails
+// closed when the lockfile exists but contains invalid YAML.
+func TestVerifyPluginIntegrity_MalformedLockfile(t *testing.T) {
+	dir := t.TempDir()
+
+	orig, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(orig) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	writeLockfile(t, dir, "{{{{not valid yaml")
+
+	err := VerifyPluginIntegrity(filepath.Join(dir, "plugins"), "my-plugin")
+	if err == nil {
+		t.Error("expected error when lockfile contains invalid YAML, got nil (fail-open)")
+	}
+}
+
 // TestVerifyPluginIntegrity_NoLockfile verifies that the function returns nil
 // when no lockfile can be found in the directory hierarchy.
 func TestVerifyPluginIntegrity_NoLockfile(t *testing.T) {

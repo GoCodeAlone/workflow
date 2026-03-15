@@ -518,6 +518,11 @@ func installFromURL(url, pluginDir string) error {
 		return fmt.Errorf("could not normalize binary name: %w", err)
 	}
 
+	// Validate the installed plugin (same checks as registry installs).
+	if verifyErr := verifyInstalledPlugin(destDir, pluginName); verifyErr != nil {
+		return fmt.Errorf("post-install verification failed: %w", verifyErr)
+	}
+
 	binaryChecksum, hashErr := hashFileSHA256(filepath.Join(destDir, pluginName))
 	if hashErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not compute binary checksum: %v\n", hashErr)
