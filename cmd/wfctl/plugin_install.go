@@ -170,6 +170,8 @@ func runPluginInstall(args []string) error {
 		binaryPath := filepath.Join(pluginDirVal, pluginName, pluginName)
 		if cs, hashErr := hashFileSHA256(binaryPath); hashErr == nil {
 			binaryChecksum = cs
+		} else {
+			fmt.Fprintf(os.Stderr, "Warning: could not hash binary %s: %v (lockfile will have no checksum)\n", binaryPath, hashErr)
 		}
 		updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, sourceName, binaryChecksum)
 	}
@@ -536,14 +538,18 @@ func installFromURL(url, pluginDir string) error {
 	return nil
 }
 
-// hashFileSHA256 computes the SHA-256 hex digest of the file at path.
+// hashFileSHA256 computes the SHA-256 hex digest of the file at path using streaming I/O.
 func hashFileSHA256(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("hash file %s: %w", path, err)
 	}
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:]), nil
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("hash file %s: %w", path, err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // verifyInstalledChecksum reads the plugin binary and verifies its SHA-256 checksum.

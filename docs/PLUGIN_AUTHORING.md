@@ -81,6 +81,7 @@ func (p *Provider) CreateStep(typeName, name string, config map[string]any) (sdk
     }
     return nil, fmt.Errorf("unknown step type: %s", typeName)
 }
+```
 
 ## Implementing Modules
 
