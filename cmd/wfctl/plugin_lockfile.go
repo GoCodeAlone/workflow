@@ -78,12 +78,10 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 		if entry.Registry != "" {
 			installArgs = append(installArgs, "--registry", entry.Registry)
 		}
-		// Pass name@version to install the pinned version from the lockfile.
-		installArg := name
-		if entry.Version != "" {
-			installArg = name + "@" + entry.Version
-		}
-		installArgs = append(installArgs, installArg)
+		// Pass just the name (no @version) so runPluginInstall does not
+		// trigger lockfile updates that would overwrite the pinned entry
+		// before we verify the checksum.
+		installArgs = append(installArgs, name)
 		if err := runPluginInstall(installArgs); err != nil {
 			fmt.Fprintf(os.Stderr, "error installing %s: %v\n", name, err)
 			failed = append(failed, name)

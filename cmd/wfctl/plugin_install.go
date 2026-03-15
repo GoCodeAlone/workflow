@@ -519,6 +519,11 @@ func installFromURL(url, pluginDir string) error {
 		return fmt.Errorf("normalize binary name: %w", err)
 	}
 
+	// Validate the installed plugin (same checks as registry installs).
+	if verifyErr := verifyInstalledPlugin(destDir, pluginName); verifyErr != nil {
+		return fmt.Errorf("post-install verification failed: %w", verifyErr)
+	}
+
 	// Hash the installed binary (not the archive) so that verifyInstalledChecksum matches.
 	binaryPath := filepath.Join(destDir, pluginName)
 	checksum, hashErr := hashFileSHA256(binaryPath)
