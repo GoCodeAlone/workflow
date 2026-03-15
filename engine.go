@@ -966,10 +966,14 @@ func parseRoutePipelineSteps(stepsRaw []any) []config.PipelineStepConfig {
 		if name == "" || stepType == "" {
 			continue
 		}
+		skipIf, _ := stepMap["skip_if"].(string)
+		ifExpr, _ := stepMap["if"].(string)
 		cfgs = append(cfgs, config.PipelineStepConfig{
 			Name:   name,
 			Type:   stepType,
 			Config: stepConfig,
+			SkipIf: skipIf,
+			If:     ifExpr,
 		})
 	}
 	return cfgs
@@ -1006,6 +1010,12 @@ func (e *StdEngine) buildPipelineSteps(pipelineName string, stepCfgs []config.Pi
 		if err != nil {
 			return nil, fmt.Errorf("step %q (type %s): %w", sc.Name, sc.Type, err)
 		}
+
+		// Wrap the step with skip_if / if guard when either field is set.
+		if sc.SkipIf != "" || sc.If != "" {
+			step = module.NewSkippableStep(step, sc.SkipIf, sc.If)
+		}
+
 		steps = append(steps, step)
 	}
 
