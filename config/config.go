@@ -98,6 +98,28 @@ type SidecarConfig struct {
 	DependsOn []string       `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
 }
 
+// ExternalPluginDecl declares an external plugin that the engine should load.
+// When AutoFetch is true and the plugin is not found locally, the engine will
+// call wfctl to download it from the registry before loading.
+type ExternalPluginDecl struct {
+	// Name is the plugin name as registered in the plugin registry.
+	Name string `json:"name" yaml:"name"`
+	// Version is an optional version specifier forwarded to wfctl plugin install
+	// as name@version. Simple constraints (>=, ^, ~) are stripped to extract the
+	// version; compound constraints fall back to installing the latest.
+	// Used only when AutoFetch is true.
+	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+	// AutoFetch controls whether the engine should download the plugin
+	// automatically if it is not found in the local plugin directory.
+	AutoFetch bool `json:"autoFetch,omitempty" yaml:"autoFetch,omitempty"`
+}
+
+// PluginsConfig holds the top-level plugins configuration section.
+type PluginsConfig struct {
+	// External lists external plugins that the engine should discover and load.
+	External []ExternalPluginDecl `json:"external,omitempty" yaml:"external,omitempty"`
+}
+
 // WorkflowConfig represents the overall configuration for the workflow engine
 type WorkflowConfig struct {
 	Imports        []string              `json:"imports,omitempty" yaml:"imports,omitempty"`
@@ -107,6 +129,7 @@ type WorkflowConfig struct {
 	Pipelines      map[string]any        `json:"pipelines,omitempty" yaml:"pipelines,omitempty"`
 	Platform       map[string]any        `json:"platform,omitempty" yaml:"platform,omitempty"`
 	Requires       *RequiresConfig       `json:"requires,omitempty" yaml:"requires,omitempty"`
+	Plugins        *PluginsConfig        `json:"plugins,omitempty" yaml:"plugins,omitempty"`
 	Sidecars       []SidecarConfig       `json:"sidecars,omitempty" yaml:"sidecars,omitempty"`
 	Infrastructure *InfrastructureConfig `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
 	ConfigDir      string                `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
@@ -255,6 +278,24 @@ func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
 				if _, exists := cfg.Platform[k]; !exists {
 					cfg.Platform[k] = v
 				}
+			}
+		}
+
+		// Merge external plugin declarations — deduplicate by name (first definition wins)
+		if impCfg.Plugins != nil && len(impCfg.Plugins.External) > 0 {
+			if cfg.Plugins == nil {
+				cfg.Plugins = &PluginsConfig{}
+			}
+			existingPlugins := make(map[string]struct{}, len(cfg.Plugins.External))
+			for _, ep := range cfg.Plugins.External {
+				existingPlugins[ep.Name] = struct{}{}
+			}
+			for _, ep := range impCfg.Plugins.External {
+				if _, exists := existingPlugins[ep.Name]; exists {
+					continue
+				}
+				cfg.Plugins.External = append(cfg.Plugins.External, ep)
+				existingPlugins[ep.Name] = struct{}{}
 			}
 		}
 

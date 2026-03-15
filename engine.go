@@ -93,6 +93,7 @@ type StdEngine struct {
 	// configHash is the SHA-256 hash of the last config built via BuildFromConfig.
 	// Format: "sha256:<hex>". Empty until BuildFromConfig is called.
 	configHash string
+
 }
 
 // App returns the underlying modular.Application.
@@ -140,6 +141,7 @@ func (e *StdEngine) SetDynamicLoader(loader *dynamic.Loader) {
 func (e *StdEngine) SetPluginInstaller(installer *plugin.PluginInstaller) {
 	e.pluginInstaller = installer
 }
+
 
 // NewStdEngine creates a new workflow engine
 func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {

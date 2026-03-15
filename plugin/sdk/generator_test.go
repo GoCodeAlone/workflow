@@ -145,6 +145,96 @@ func TestTemplateGeneratorInvalidName(t *testing.T) {
 	}
 }
 
+func TestGenerateProjectStructure(t *testing.T) {
+	dir := t.TempDir()
+	outputDir := filepath.Join(dir, "my-plugin")
+
+	gen := NewTemplateGenerator()
+	err := gen.Generate(GenerateOptions{
+		Name:        "my-plugin",
+		Version:     "0.2.0",
+		Author:      "TestOrg",
+		Description: "Project structure test",
+		OutputDir:   outputDir,
+	})
+	if err != nil {
+		t.Fatalf("Generate error: %v", err)
+	}
+
+	// Verify all expected project files exist.
+	expectedFiles := []string{
+		"cmd/workflow-plugin-my-plugin/main.go",
+		"internal/provider.go",
+		"internal/steps.go",
+		"go.mod",
+		".goreleaser.yml",
+		".github/workflows/ci.yml",
+		".github/workflows/release.yml",
+		"Makefile",
+		"README.md",
+	}
+	for _, f := range expectedFiles {
+		p := filepath.Join(outputDir, f)
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("expected file %s to exist: %v", f, err)
+		}
+	}
+
+	// Verify main.go uses the external SDK import.
+	mainData, err := os.ReadFile(filepath.Join(outputDir, "cmd/workflow-plugin-my-plugin/main.go"))
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	mainSrc := string(mainData)
+	if !strings.Contains(mainSrc, `"github.com/GoCodeAlone/workflow/plugin/external/sdk"`) {
+		t.Error("main.go should import plugin/external/sdk")
+	}
+	if !strings.Contains(mainSrc, "sdk.Serve(") {
+		t.Error("main.go should call sdk.Serve()")
+	}
+
+	// Verify provider.go uses external SDK types.
+	provData, err := os.ReadFile(filepath.Join(outputDir, "internal/provider.go"))
+	if err != nil {
+		t.Fatalf("read provider.go: %v", err)
+	}
+	provSrc := string(provData)
+	if !strings.Contains(provSrc, `"github.com/GoCodeAlone/workflow/plugin/external/sdk"`) {
+		t.Error("provider.go should import plugin/external/sdk")
+	}
+	if !strings.Contains(provSrc, "sdk.PluginManifest") {
+		t.Error("provider.go should use sdk.PluginManifest")
+	}
+	if !strings.Contains(provSrc, "sdk.StepInstance") {
+		t.Error("provider.go should return sdk.StepInstance")
+	}
+	if !strings.Contains(provSrc, `return nil, fmt.Errorf("unknown step type:`) {
+		t.Error("provider.go should return error for unknown step types")
+	}
+
+	// Verify steps.go uses external SDK types.
+	stepsData, err := os.ReadFile(filepath.Join(outputDir, "internal/steps.go"))
+	if err != nil {
+		t.Fatalf("read steps.go: %v", err)
+	}
+	stepsSrc := string(stepsData)
+	if !strings.Contains(stepsSrc, `"github.com/GoCodeAlone/workflow/plugin/external/sdk"`) {
+		t.Error("steps.go should import plugin/external/sdk")
+	}
+	if !strings.Contains(stepsSrc, "*sdk.StepResult") {
+		t.Error("steps.go should return *sdk.StepResult")
+	}
+
+	// Verify go.mod has correct module path.
+	modData, err := os.ReadFile(filepath.Join(outputDir, "go.mod"))
+	if err != nil {
+		t.Fatalf("read go.mod: %v", err)
+	}
+	if !strings.Contains(string(modData), "module github.com/TestOrg/workflow-plugin-my-plugin") {
+		t.Errorf("go.mod module path unexpected: %s", string(modData))
+	}
+}
+
 func TestToCamelCase(t *testing.T) {
 	tests := []struct {
 		input string

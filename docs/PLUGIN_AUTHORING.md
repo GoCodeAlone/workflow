@@ -101,11 +101,11 @@ func (p *Provider) CreateModule(typeName, name string, config map[string]any) (s
 
 ## Plugin Manifest
 
-The `plugin.json` declares what your plugin provides:
+The `plugin.json` declares what your plugin provides. The name should match what you passed to `wfctl plugin init`:
 
 ```json
 {
-    "name": "workflow-plugin-my-plugin",
+    "name": "my-plugin",
     "version": "0.1.0",
     "description": "My custom plugin",
     "author": "MyOrg",

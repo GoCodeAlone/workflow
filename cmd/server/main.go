@@ -104,10 +104,24 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 		}
 	}
 
+	// Auto-fetch declared external plugins before discovery so newly
+	// downloaded plugins are available in the current startup.
+	extPluginDir := filepath.Join(*dataDir, "plugins")
+	if cfg.Plugins != nil && len(cfg.Plugins.External) > 0 {
+		decls := make([]plugin.AutoFetchDecl, len(cfg.Plugins.External))
+		for i, ep := range cfg.Plugins.External {
+			decls[i] = plugin.AutoFetchDecl{
+				Name:      ep.Name,
+				Version:   ep.Version,
+				AutoFetch: ep.AutoFetch,
+			}
+		}
+		plugin.AutoFetchDeclaredPlugins(decls, extPluginDir, logger)
+	}
+
 	// Discover and load external plugins from data/plugins/ directory.
 	// External plugins run as separate processes communicating over gRPC.
 	// Failures are non-fatal — the engine works fine with only builtin plugins.
-	extPluginDir := filepath.Join(*dataDir, "plugins")
 	extMgr := pluginexternal.NewExternalPluginManager(extPluginDir, log.Default())
 	discovered, discoverErr := extMgr.DiscoverPlugins()
 	if discoverErr != nil {
