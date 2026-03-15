@@ -90,10 +90,8 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 		if entry.SHA256 != "" {
 			pluginInstallDir := filepath.Join(pluginDir, name)
 			if verifyErr := verifyInstalledChecksum(pluginInstallDir, name, entry.SHA256); verifyErr != nil {
-				fmt.Fprintf(os.Stderr, "CHECKSUM MISMATCH for %s: %v\n", name, verifyErr)
-				if removeErr := os.RemoveAll(pluginInstallDir); removeErr != nil {
-					fmt.Fprintf(os.Stderr, "warning: could not remove plugin dir: %v\n", removeErr)
-				}
+				fmt.Fprintf(os.Stderr, "CHECKSUM MISMATCH for %s: %v — removing plugin\n", name, verifyErr)
+				_ = os.RemoveAll(pluginInstallDir)
 				failed = append(failed, name)
 				continue
 			}
@@ -106,6 +104,7 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 }
 
 // updateLockfileWithChecksum adds or updates a plugin entry in .wfctl.yaml with SHA-256 checksum.
+// The sha256Hash must be the hash of the installed binary, not the download archive.
 // Silently no-ops if the lockfile cannot be read or written (install still succeeds).
 func updateLockfileWithChecksum(pluginName, version, repository, registry, sha256Hash string) {
 	lf, err := loadPluginLockfile(wfctlYAMLPath)
@@ -118,8 +117,8 @@ func updateLockfileWithChecksum(pluginName, version, repository, registry, sha25
 	lf.Plugins[pluginName] = PluginLockEntry{
 		Version:    version,
 		Repository: repository,
-		SHA256:     sha256Hash,
 		Registry:   registry,
+		SHA256:     sha256Hash,
 	}
 	_ = lf.Save(wfctlYAMLPath)
 }

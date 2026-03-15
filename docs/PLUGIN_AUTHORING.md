@@ -40,35 +40,62 @@ my-plugin/
 
 ## Implementing Steps
 
-Step types are the primary extension point. Each step implements the external SDK `StepInstance` interface:
+Step types are the primary extension point. Each step implements the `sdk.StepInstance` interface from `github.com/GoCodeAlone/workflow/plugin/external/sdk`:
 
 ```go
+// MyStep implements sdk.StepInstance.
 type MyStep struct {
     config map[string]any
 }
 
-func (s *MyStep) Execute(ctx context.Context, triggerData map[string]any, stepOutputs map[string]map[string]any, current map[string]any, metadata map[string]any, config map[string]any) (*sdk.StepResult, error) {
-    // Access step config: config["key"]
+func (s *MyStep) Execute(
+    ctx context.Context,
+    triggerData map[string]any,
+    stepOutputs map[string]map[string]any,
+    current map[string]any,
+    metadata map[string]any,
+    config map[string]any,
+) (*sdk.StepResult, error) {
+    // Access step config: config["key"] or s.config["key"]
     // Access pipeline context: current["key"]
     // Access previous step output: stepOutputs["step-name"]["key"]
-    return &sdk.StepResult{Output: map[string]any{"result": "value"}}, nil
+    return &sdk.StepResult{
+        Output: map[string]any{"result": "value"},
+    }, nil
 }
 ```
 
-Register in `internal/provider.go`:
+Register in `internal/provider.go` by implementing `sdk.StepProvider`:
 
 ```go
+// StepTypes implements sdk.StepProvider.
 func (p *Provider) StepTypes() []string {
     return []string{"step.my_action"}
 }
 
+// CreateStep implements sdk.StepProvider.
 func (p *Provider) CreateStep(typeName, name string, config map[string]any) (sdk.StepInstance, error) {
     switch typeName {
     case "step.my_action":
         return &MyStep{config: config}, nil
-    default:
-        return nil, fmt.Errorf("unknown step type: %s", typeName)
     }
+    return nil, fmt.Errorf("unknown step type: %s", typeName)
+}
+```
+
+## Implementing Modules
+
+Modules provide runtime services (database connections, API clients, etc.) by implementing `sdk.ModuleProvider`:
+
+```go
+// ModuleTypes implements sdk.ModuleProvider.
+func (p *Provider) ModuleTypes() []string {
+    return []string{"my.provider"}
+}
+
+// CreateModule implements sdk.ModuleProvider.
+func (p *Provider) CreateModule(typeName, name string, config map[string]any) (sdk.ModuleInstance, error) {
+    return &MyModule{config: config}, nil
 }
 ```
 

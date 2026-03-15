@@ -73,6 +73,17 @@ type errSentinel string
 
 func (e errSentinel) Error() string { return string(e) }
 
+// mustNewStaticRegistrySource is a test helper that calls NewStaticRegistrySource
+// and fails the test if an error is returned.
+func mustNewStaticRegistrySource(t *testing.T, cfg RegistrySourceConfig) *StaticRegistrySource {
+	t.Helper()
+	src, err := NewStaticRegistrySource(cfg)
+	if err != nil {
+		t.Fatalf("NewStaticRegistrySource: %v", err)
+	}
+	return src
+}
+
 // ---------------------------------------------------------------------------
 
 // TestStaticRegistrySource_FetchManifest verifies that FetchManifest fetches
@@ -93,7 +104,7 @@ func TestStaticRegistrySource_FetchManifest(t *testing.T) {
 	srv := buildStaticRegistryServer(t, nil, manifests)
 	defer srv.Close()
 
-	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
+	src := mustNewStaticRegistrySource(t, RegistrySourceConfig{
 		Name: "test-static",
 		URL:  srv.URL,
 	})
@@ -116,7 +127,7 @@ func TestStaticRegistrySource_FetchManifest_NotFound(t *testing.T) {
 	srv := buildStaticRegistryServer(t, nil, map[string]*RegistryManifest{})
 	defer srv.Close()
 
-	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
+	src := mustNewStaticRegistrySource(t, RegistrySourceConfig{
 		Name: "test-static",
 		URL:  srv.URL,
 	})
@@ -139,7 +150,7 @@ func TestStaticRegistrySource_ListPlugins(t *testing.T) {
 	srv := buildStaticRegistryServer(t, index, nil)
 	defer srv.Close()
 
-	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
+	src := mustNewStaticRegistrySource(t, RegistrySourceConfig{
 		Name: "test-static",
 		URL:  srv.URL,
 	})
@@ -174,7 +185,7 @@ func TestStaticRegistrySource_SearchPlugins_AllWithEmptyQuery(t *testing.T) {
 	srv := buildStaticRegistryServer(t, index, nil)
 	defer srv.Close()
 
-	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
+	src := mustNewStaticRegistrySource(t, RegistrySourceConfig{
 		Name: "test-static",
 		URL:  srv.URL,
 	})
@@ -200,7 +211,7 @@ func TestStaticRegistrySource_SearchPlugins_Filtering(t *testing.T) {
 	srv := buildStaticRegistryServer(t, index, nil)
 	defer srv.Close()
 
-	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
+	src := mustNewStaticRegistrySource(t, RegistrySourceConfig{
 		Name: "test-static",
 		URL:  srv.URL,
 	})
@@ -256,7 +267,7 @@ func TestStaticRegistrySource_SearchPlugins_SourceName(t *testing.T) {
 	defer srv.Close()
 
 	const registryName = "my-static-registry"
-	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
+	src := mustNewStaticRegistrySource(t, RegistrySourceConfig{
 		Name: registryName,
 		URL:  srv.URL,
 	})
@@ -284,7 +295,7 @@ func TestStaticRegistrySource_TrailingSlashStripped(t *testing.T) {
 	defer srv.Close()
 
 	// Pass URL with trailing slash.
-	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
+	src := mustNewStaticRegistrySource(t, RegistrySourceConfig{
 		Name: "test",
 		URL:  srv.URL + "/",
 	})
@@ -300,11 +311,23 @@ func TestStaticRegistrySource_TrailingSlashStripped(t *testing.T) {
 
 // TestStaticRegistrySource_Name verifies that the registry name is returned correctly.
 func TestStaticRegistrySource_Name(t *testing.T) {
-	src, _ := NewStaticRegistrySource(RegistrySourceConfig{
+	src := mustNewStaticRegistrySource(t, RegistrySourceConfig{
 		Name: "my-registry",
 		URL:  "https://example.com",
 	})
 	if src.Name() != "my-registry" {
 		t.Errorf("Name: got %q, want %q", src.Name(), "my-registry")
+	}
+}
+
+// TestStaticRegistrySource_EmptyURL verifies that NewStaticRegistrySource returns
+// an error when the URL is empty.
+func TestStaticRegistrySource_EmptyURL(t *testing.T) {
+	_, err := NewStaticRegistrySource(RegistrySourceConfig{
+		Name: "no-url-registry",
+		URL:  "",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty URL, got nil")
 	}
 }

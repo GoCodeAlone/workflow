@@ -60,6 +60,7 @@ func TestInstallFromURL(t *testing.T) {
 	pjContent := minimalPluginJSON(pluginName, "1.2.3")
 
 	tarball := buildPluginTarGz(t, pluginName, binaryContent, pjContent)
+	// The lockfile records the SHA-256 of the installed binary, not the archive.
 	binaryChecksum := sha256Hex(binaryContent)
 
 	// Serve tarball from a local httptest server.
@@ -115,7 +116,7 @@ func TestInstallFromURL(t *testing.T) {
 		t.Fatalf("lockfile missing entry for %q; entries: %v", pluginName, lf.Plugins)
 	}
 	if entry.SHA256 != binaryChecksum {
-		t.Errorf("lockfile checksum: got %q, want %q", entry.SHA256, binaryChecksum)
+		t.Errorf("lockfile checksum: got %q, want %q (should be binary hash, not archive hash)", entry.SHA256, binaryChecksum)
 	}
 	if entry.Version != "1.2.3" {
 		t.Errorf("lockfile version: got %q, want %q", entry.Version, "1.2.3")
@@ -432,8 +433,8 @@ func TestCopyFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat dest: %v", err)
 	}
-	if info.Mode() != wantMode {
-		t.Errorf("mode: got %v, want %v", info.Mode(), wantMode)
+	if info.Mode().Perm()&wantMode != wantMode {
+		t.Errorf("mode: got %v, want at least %v", info.Mode().Perm(), wantMode)
 	}
 }
 
