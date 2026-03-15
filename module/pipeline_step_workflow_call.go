@@ -31,6 +31,7 @@ type WorkflowCallStep struct {
 	name          string
 	workflow      string           // target pipeline name
 	mode          WorkflowCallMode // "sync" (default) or "async"
+	stopPipeline  bool             // if true, stop parent pipeline after this step completes
 	inputMapping  map[string]string
 	outputMapping map[string]string
 	timeout       time.Duration
@@ -86,6 +87,10 @@ func NewWorkflowCallStepFactory(lookup PipelineLookupFn) StepFactory {
 			}
 		}
 
+		if v, ok := cfg["stop_pipeline"].(bool); ok {
+			step.stopPipeline = v
+		}
+
 		return step, nil
 	}
 }
@@ -101,9 +106,13 @@ func (s *WorkflowCallStep) Execute(ctx context.Context, pc *PipelineContext) (*S
 	if s.lookup == nil {
 		return nil, fmt.Errorf("workflow_call step %q: no pipeline lookup function configured", s.name)
 	}
-	target, ok := s.lookup(s.workflow)
+	workflowName, resolveErr := s.tmpl.Resolve(s.workflow, pc)
+	if resolveErr != nil {
+		return nil, fmt.Errorf("workflow_call step %q: failed to resolve workflow name %q: %w", s.name, s.workflow, resolveErr)
+	}
+	target, ok := s.lookup(workflowName)
 	if !ok {
-		return nil, fmt.Errorf("workflow_call step %q: pipeline %q not found — ensure it is defined in the application config", s.name, s.workflow)
+		return nil, fmt.Errorf("workflow_call step %q: pipeline %q not found — ensure it is defined in the application config", s.name, workflowName)
 	}
 
 	// Build trigger data from input mapping or fall back to passing all current data
@@ -153,7 +162,7 @@ func (s *WorkflowCallStep) Execute(ctx context.Context, pc *PipelineContext) (*S
 		output["result"] = childCtx.Current
 	}
 
-	return &StepResult{Output: output}, nil
+	return &StepResult{Output: output, Stop: s.stopPipeline}, nil
 }
 
 // Ensure interface satisfaction at compile time.
