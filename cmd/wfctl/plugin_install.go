@@ -701,16 +701,6 @@ func parseGitHubRepoURL(repoURL string) (owner, repo string, err error) {
 	return parts[1], repoName, nil
 }
 
-// hashFileSHA256 returns the hex-encoded SHA-256 hash of the file at path.
-func hashFileSHA256(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("hash file %s: %w", path, err)
-	}
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:]), nil
-}
-
 // extractTarGz decompresses and extracts a .tar.gz archive into destDir.
 // It guards against path traversal (zip-slip) attacks.
 func extractTarGz(data []byte, destDir string) error {
