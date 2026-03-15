@@ -52,7 +52,7 @@ func VerifyPluginIntegrity(pluginDir, pluginName string) error {
 	binaryPath := filepath.Join(pluginDir, pluginName, pluginName)
 	f, err := os.Open(binaryPath)
 	if err != nil {
-		return fmt.Errorf("read plugin binary %s: %w", binaryPath, err)
+		return fmt.Errorf("open plugin binary %s: %w", binaryPath, err)
 	}
 	defer f.Close()
 

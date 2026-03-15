@@ -171,7 +171,7 @@ func runPluginInstall(args []string) error {
 		if cs, hashErr := hashFileSHA256(binaryPath); hashErr == nil {
 			binaryChecksum = cs
 		} else {
-			fmt.Fprintf(os.Stderr, "Warning: could not hash binary %s: %v (lockfile will have no checksum)\n", binaryPath, hashErr)
+			fmt.Fprintf(os.Stderr, "warning: could not hash binary %s: %v (lockfile will have no checksum)\n", binaryPath, hashErr)
 		}
 		updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, sourceName, binaryChecksum)
 	}

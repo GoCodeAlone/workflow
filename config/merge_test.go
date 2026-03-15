@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -538,19 +539,21 @@ func TestMergeApplicationConfig_PluginDedup(t *testing.T) {
 	dir := t.TempDir()
 
 	// Workflow A declares plugin "foo"
-	wfA := dir + "/a.yaml"
-	writeFileContent(wfA, `
+	wfA := filepath.Join(dir, "a.yaml")
+	if err := writeFileContent(wfA, `
 plugins:
   external:
     - name: foo
       version: "1.0"
       repository: "https://example.com/foo"
 modules: []
-`)
+`); err != nil {
+		t.Fatalf("write a.yaml: %v", err)
+	}
 
 	// Workflow B declares plugin "foo" (duplicate) and "bar"
-	wfB := dir + "/b.yaml"
-	writeFileContent(wfB, `
+	wfB := filepath.Join(dir, "b.yaml")
+	if err := writeFileContent(wfB, `
 plugins:
   external:
     - name: foo
@@ -560,7 +563,9 @@ plugins:
       version: "1.0"
       repository: "https://example.com/bar"
 modules: []
-`)
+`); err != nil {
+		t.Fatalf("write b.yaml: %v", err)
+	}
 
 	appCfg := &ApplicationConfig{
 		Application: ApplicationInfo{
