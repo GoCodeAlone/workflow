@@ -204,7 +204,7 @@ func (s *StaticRegistrySource) SearchPlugins(query string) ([]PluginSearchResult
 			strings.Contains(strings.ToLower(e.Name), q) ||
 			strings.Contains(strings.ToLower(e.Description), q) {
 			results = append(results, PluginSearchResult{
-				PluginSummary: PluginSummary{
+				PluginSummary: PluginSummary{ //nolint:staticcheck // S1016: explicit fields for clarity across struct tag boundaries
 					Name:        e.Name,
 					Version:     e.Version,
 					Description: e.Description,
