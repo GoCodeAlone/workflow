@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -532,4 +533,69 @@ func writeFileContent(path, content string) error {
 // contains is a helper wrapping strings.Contains for use in this test file.
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
+}
+
+func TestMergeApplicationConfig_PluginDedup(t *testing.T) {
+	dir := t.TempDir()
+
+	// Workflow A declares plugin "foo"
+	wfA := filepath.Join(dir, "a.yaml")
+	if err := writeFileContent(wfA, `
+plugins:
+  external:
+    - name: foo
+      version: "1.0"
+      repository: "https://example.com/foo"
+modules: []
+`); err != nil {
+		t.Fatalf("write a.yaml: %v", err)
+	}
+
+	// Workflow B declares plugin "foo" (duplicate) and "bar"
+	wfB := filepath.Join(dir, "b.yaml")
+	if err := writeFileContent(wfB, `
+plugins:
+  external:
+    - name: foo
+      version: "2.0"
+      repository: "https://example.com/foo-v2"
+    - name: bar
+      version: "1.0"
+      repository: "https://example.com/bar"
+modules: []
+`); err != nil {
+		t.Fatalf("write b.yaml: %v", err)
+	}
+
+	appCfg := &ApplicationConfig{
+		Application: ApplicationInfo{
+			Workflows: []WorkflowRef{
+				{File: wfA},
+				{File: wfB},
+			},
+		},
+	}
+
+	cfg, err := MergeApplicationConfig(appCfg)
+	if err != nil {
+		t.Fatalf("MergeApplicationConfig: %v", err)
+	}
+
+	if cfg.Plugins == nil {
+		t.Fatal("expected Plugins to be non-nil after merge")
+	}
+	if len(cfg.Plugins.External) != 2 {
+		t.Fatalf("expected 2 plugins (foo + bar), got %d", len(cfg.Plugins.External))
+	}
+
+	// First definition wins — foo should have version "1.0" from workflow A
+	var fooVer string
+	for _, p := range cfg.Plugins.External {
+		if p.Name == "foo" {
+			fooVer = p.Version
+		}
+	}
+	if fooVer != "1.0" {
+		t.Errorf("expected foo version 1.0 (first definition wins), got %s", fooVer)
+	}
 }

@@ -13,13 +13,24 @@ import (
 // It shells out to wfctl for the actual download/install logic.
 // version is an optional semver constraint (e.g., ">=0.1.0" or "0.2.0").
 func AutoFetchPlugin(pluginName, version, pluginDir string) error {
+	return autoFetchPlugin(pluginName, version, pluginDir, nil)
+}
+
+// autoFetchPlugin is the internal implementation that accepts an optional structured
+// logger. When logger is non-nil, status messages are emitted via slog instead of
+// writing directly to stderr.
+func autoFetchPlugin(pluginName, version, pluginDir string, logger *slog.Logger) error {
 	// Check both pluginName and workflow-plugin-<pluginName> (or the short form
 	// if pluginName already has the "workflow-plugin-" prefix).
 	if isPluginInstalled(pluginName, pluginDir) {
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "[auto-fetch] Plugin %q not found locally, fetching from registry...\n", pluginName)
+	if logger != nil {
+		logger.Info("plugin not found locally, fetching from registry", "plugin", pluginName)
+	} else {
+		fmt.Fprintf(os.Stderr, "[auto-fetch] Plugin %q not found locally, fetching from registry...\n", pluginName)
+	}
 
 	// Build install argument with version if specified.
 	installArg := pluginName
@@ -27,7 +38,12 @@ func AutoFetchPlugin(pluginName, version, pluginDir string) error {
 		stripped, ok := stripVersionConstraint(version)
 		if !ok {
 			// Complex constraint (e.g. ">=0.1.0,<0.2.0") — install latest instead.
-			fmt.Fprintf(os.Stderr, "[auto-fetch] Version constraint %q is complex; installing latest version of %q\n", version, pluginName)
+			if logger != nil {
+				logger.Warn("version constraint is complex; installing latest version",
+					"plugin", pluginName, "constraint", version)
+			} else {
+				fmt.Fprintf(os.Stderr, "[auto-fetch] Version constraint %q is complex; installing latest version of %q\n", version, pluginName)
+			}
 			stripped = ""
 		}
 		if stripped != "" {
@@ -118,7 +134,20 @@ func AutoFetchDeclaredPlugins(decls []AutoFetchDecl, pluginDir string, logger *s
 		return
 	}
 
-	// Check wfctl availability once.
+	// Scan for at least one AutoFetch=true entry before checking wfctl availability.
+	// This avoids a misleading warning on startup when no plugins require auto-fetch.
+	hasAutoFetch := false
+	for _, d := range decls {
+		if d.AutoFetch {
+			hasAutoFetch = true
+			break
+		}
+	}
+	if !hasAutoFetch {
+		return
+	}
+
+	// Check wfctl availability once — only needed when auto-fetch is actually requested.
 	if _, err := exec.LookPath("wfctl"); err != nil {
 		if logger != nil {
 			logger.Warn("wfctl not found on PATH; skipping auto-fetch for declared plugins",
@@ -134,7 +163,7 @@ func AutoFetchDeclaredPlugins(decls []AutoFetchDecl, pluginDir string, logger *s
 		}
 		// Record whether the plugin was already present before fetching.
 		alreadyPresent := isPluginInstalled(d.Name, pluginDir)
-		if err := AutoFetchPlugin(d.Name, d.Version, pluginDir); err != nil {
+		if err := autoFetchPlugin(d.Name, d.Version, pluginDir, logger); err != nil {
 			if logger != nil {
 				logger.Warn("auto-fetch failed for plugin", "plugin", d.Name, "error", err)
 			}

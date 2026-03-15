@@ -81,19 +81,19 @@ func runPluginInstall(args []string) error {
 		return err
 	}
 
-	// Enforce mutual exclusivity: at most one of --url, --local, or positional args.
-	exclusiveCount := 0
+	// Validate mutual exclusivity of install modes.
+	modes := 0
 	if *directURL != "" {
-		exclusiveCount++
+		modes++
 	}
 	if *localPath != "" {
-		exclusiveCount++
+		modes++
 	}
 	if fs.NArg() > 0 {
-		exclusiveCount++
+		modes++
 	}
-	if exclusiveCount > 1 {
-		return fmt.Errorf("--url, --local, and <name> are mutually exclusive; specify only one")
+	if modes > 1 {
+		return fmt.Errorf("specify only one of: <name>, --url, or --local")
 	}
 
 	if *directURL != "" {
@@ -165,13 +165,15 @@ func runPluginInstall(args []string) error {
 
 	// Update .wfctl.yaml lockfile if name@version was provided.
 	if _, ver := parseNameVersion(nameArg); ver != "" {
-		// Hash the installed binary (not the archive) so verifyInstalledChecksum matches.
+		pluginName = normalizePluginName(pluginName)
+		binaryChecksum := ""
 		binaryPath := filepath.Join(pluginDirVal, pluginName, pluginName)
-		sha, hashErr := hashFileSHA256(binaryPath)
-		if hashErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not hash installed binary: %v\n", hashErr)
+		if cs, hashErr := hashFileSHA256(binaryPath); hashErr == nil {
+			binaryChecksum = cs
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: could not hash binary %s: %v (lockfile will have no checksum)\n", binaryPath, hashErr)
 		}
-		updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, sourceName, sha)
+		updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, sourceName, binaryChecksum)
 	}
 
 	return nil
@@ -516,7 +518,7 @@ func installFromURL(url, pluginDir string) error {
 	}
 
 	if err := ensurePluginBinary(destDir, pluginName); err != nil {
-		return fmt.Errorf("normalize binary name: %w", err)
+		return fmt.Errorf("could not normalize binary name: %w", err)
 	}
 
 	// Validate the installed plugin (same checks as registry installs).
@@ -534,6 +536,20 @@ func installFromURL(url, pluginDir string) error {
 
 	fmt.Printf("Installed %s v%s to %s\n", pluginName, pj.Version, destDir)
 	return nil
+}
+
+// hashFileSHA256 computes the SHA-256 hex digest of the file at path using streaming I/O.
+func hashFileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("hash file %s: %w", path, err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("hash file %s: %w", path, err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // verifyInstalledChecksum reads the plugin binary and verifies its SHA-256 checksum.
@@ -590,13 +606,11 @@ func installFromLocal(srcDir, pluginDir string) error {
 		return err
 	}
 
-	// Update lockfile with binary checksum for consistency with other install paths.
-	installedBinary := filepath.Join(destDir, pluginName)
-	sha, hashErr := hashFileSHA256(installedBinary)
+	binaryChecksum, hashErr := hashFileSHA256(filepath.Join(destDir, pluginName))
 	if hashErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not hash installed binary: %v\n", hashErr)
+		fmt.Fprintf(os.Stderr, "warning: could not compute binary checksum: %v\n", hashErr)
 	}
-	updateLockfileWithChecksum(pluginName, pj.Version, "", "", sha)
+	updateLockfileWithChecksum(pluginName, pj.Version, "", "", binaryChecksum)
 
 	fmt.Printf("Installed %s v%s from %s to %s\n", pluginName, pj.Version, srcDir, destDir)
 	return nil
@@ -691,16 +705,6 @@ func parseGitHubRepoURL(repoURL string) (owner, repo string, err error) {
 		return "", "", fmt.Errorf("not a GitHub repository URL: %q (expected https://github.com/owner/repo)", repoURL)
 	}
 	return parts[1], repoName, nil
-}
-
-// hashFileSHA256 returns the hex-encoded SHA-256 hash of the file at path.
-func hashFileSHA256(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("hash file %s: %w", path, err)
-	}
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:]), nil
 }
 
 // extractTarGz decompresses and extracts a .tar.gz archive into destDir.

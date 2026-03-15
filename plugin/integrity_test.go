@@ -57,6 +57,13 @@ func TestVerifyPluginIntegrity_UnreadableLockfile(t *testing.T) {
 		t.Fatalf("write lockfile: %v", err)
 	}
 
+	// POSIX permission bits are not enforced on all platforms (e.g. Windows, or
+	// when running as root). Verify the file is actually unreadable before
+	// asserting fail-closed behaviour.
+	if _, err := os.ReadFile(p); err == nil {
+		t.Skip("lockfile is readable despite 0000 permissions (platform or root); skipping test")
+	}
+
 	err := VerifyPluginIntegrity(filepath.Join(dir, "plugins"), "my-plugin")
 	if err == nil {
 		t.Error("expected error when lockfile is unreadable, got nil (fail-open)")
