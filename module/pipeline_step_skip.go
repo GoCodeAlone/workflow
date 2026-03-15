@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -41,14 +42,13 @@ func (s *SkippableStep) Name() string {
 }
 
 // Execute evaluates skip_if / if guards and either skips or delegates to the
-// wrapped step.
+// wrapped step. Template resolution errors are returned as errors (fail closed).
 func (s *SkippableStep) Execute(ctx context.Context, pc *PipelineContext) (*interfaces.StepResult, error) {
 	// Evaluate skip_if (takes precedence when both are set)
 	if s.skipIf != "" {
 		val, err := s.tmpl.Resolve(s.skipIf, pc)
 		if err != nil {
-			// Template resolution errors are non-fatal: treat as falsy (execute).
-			val = ""
+			return nil, fmt.Errorf("skip_if template error in step %q: %w", s.inner.Name(), err)
 		}
 		if isTruthy(val) {
 			return skippedResult("skip_if evaluated to true"), nil
@@ -59,8 +59,7 @@ func (s *SkippableStep) Execute(ctx context.Context, pc *PipelineContext) (*inte
 	if s.ifExpr != "" {
 		val, err := s.tmpl.Resolve(s.ifExpr, pc)
 		if err != nil {
-			// Template resolution errors are non-fatal: treat as falsy (skip).
-			val = ""
+			return nil, fmt.Errorf("if template error in step %q: %w", s.inner.Name(), err)
 		}
 		if !isTruthy(val) {
 			return skippedResult("if evaluated to false"), nil
@@ -85,11 +84,13 @@ func isTruthy(val string) bool {
 }
 
 // skippedResult builds the standard output for a step that was skipped by a guard.
+// Uses the same reserved underscore-prefixed metadata keys as ErrorStrategySkip
+// (_skipped / _error) to avoid collisions with business fields.
 func skippedResult(reason string) *interfaces.StepResult {
 	return &interfaces.StepResult{
 		Output: map[string]any{
-			"skipped": true,
-			"reason":  reason,
+			"_skipped": true,
+			"_error":   reason,
 		},
 	}
 }

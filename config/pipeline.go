@@ -27,7 +27,8 @@ type PipelineStepConfig struct {
 	// the pipeline continues with the next step. Falsy or absent → execute.
 	SkipIf string `json:"skip_if,omitempty" yaml:"skip_if,omitempty"`
 	// If is the logical inverse of SkipIf: the step executes only when the
-	// template evaluates to truthy. Falsy or absent with no SkipIf → execute.
+	// template evaluates to truthy. A present `if` that resolves to a falsy
+	// value (empty, "false", or "0") skips the step.
 	// When both SkipIf and If are set, SkipIf takes precedence.
 	If string `json:"if,omitempty" yaml:"if,omitempty"`
 }
