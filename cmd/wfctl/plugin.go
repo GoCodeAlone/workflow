@@ -69,6 +69,7 @@ func runPluginInit(args []string) error {
 	license := fs.String("license", "", "Plugin license")
 	output := fs.String("output", "", "Output directory (defaults to plugin name)")
 	withContract := fs.Bool("contract", false, "Include a contract skeleton")
+	module := fs.String("module", "", "Go module path (default: github.com/<author>/workflow-plugin-<name>)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin init [options] <name>\n\nScaffold a new plugin project.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -94,6 +95,7 @@ func runPluginInit(args []string) error {
 		License:      *license,
 		OutputDir:    *output,
 		WithContract: *withContract,
+		GoModule:     *module,
 	}
 	if err := gen.Generate(opts); err != nil {
 		return err

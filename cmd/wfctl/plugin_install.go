@@ -71,12 +71,37 @@ func runPluginInstall(args []string) error {
 	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	cfgPath := fs.String("config", "", "Registry config file path")
 	registryName := fs.String("registry", "", "Use a specific registry by name")
+	directURL := fs.String("url", "", "Install from a direct download URL (tar.gz archive)")
+	localPath := fs.String("local", "", "Install from a local plugin directory")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] <name>[@<version>]\n\nDownload and install a plugin from the registry.\n\nOptions:\n")
+		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] [<name>[@<version>]]\n\nInstall a plugin from the registry, a URL, a local directory, or from the lockfile.\n\n  wfctl plugin install <name>         Install latest from registry\n  wfctl plugin install <name>@v1.0.0  Install specific version\n  wfctl plugin install --url <url>     Install from a direct download URL\n  wfctl plugin install --local <dir>   Install from a local build directory\n  wfctl plugin install                 Install all plugins from .wfctl.yaml\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	// Enforce mutual exclusivity: at most one of --url, --local, or positional args.
+	exclusiveCount := 0
+	if *directURL != "" {
+		exclusiveCount++
+	}
+	if *localPath != "" {
+		exclusiveCount++
+	}
+	if fs.NArg() > 0 {
+		exclusiveCount++
+	}
+	if exclusiveCount > 1 {
+		return fmt.Errorf("--url, --local, and <name> are mutually exclusive; specify only one")
+	}
+
+	if *directURL != "" {
+		return installFromURL(*directURL, pluginDirVal)
+	}
+
+	if *localPath != "" {
+		return installFromLocal(*localPath, pluginDirVal)
 	}
 
 	// No args: install all plugins from .wfctl.yaml lockfile.
@@ -85,7 +110,8 @@ func runPluginInstall(args []string) error {
 	}
 
 	nameArg := fs.Arg(0)
-	pluginName, _ := parseNameVersion(nameArg)
+	rawName, _ := parseNameVersion(nameArg)
+	pluginName := normalizePluginName(rawName)
 
 	cfg, err := LoadRegistryConfig(*cfgPath)
 	if err != nil {
@@ -139,7 +165,13 @@ func runPluginInstall(args []string) error {
 
 	// Update .wfctl.yaml lockfile if name@version was provided.
 	if _, ver := parseNameVersion(nameArg); ver != "" {
-		updateLockfile(manifest.Name, manifest.Version, manifest.Repository)
+		// Hash the installed binary (not the archive) so verifyInstalledChecksum matches.
+		binaryPath := filepath.Join(pluginDirVal, pluginName, pluginName)
+		sha, hashErr := hashFileSHA256(binaryPath)
+		if hashErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not hash installed binary: %v\n", hashErr)
+		}
+		updateLockfileWithChecksum(pluginName, manifest.Version, manifest.Repository, sourceName, sha)
 	}
 
 	return nil
@@ -443,6 +475,133 @@ func runPluginInfo(args []string) error {
 	return nil
 }
 
+// installFromURL downloads a plugin tarball from a direct URL and installs it.
+func installFromURL(url, pluginDir string) error {
+	fmt.Fprintf(os.Stderr, "Downloading %s...\n", url)
+	data, err := downloadURL(url)
+	if err != nil {
+		return fmt.Errorf("download: %w", err)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "wfctl-plugin-*")
+	if err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := extractTarGz(data, tmpDir); err != nil {
+		return fmt.Errorf("extract: %w", err)
+	}
+
+	pjData, err := os.ReadFile(filepath.Join(tmpDir, "plugin.json"))
+	if err != nil {
+		return fmt.Errorf("no plugin.json found in archive: %w", err)
+	}
+	var pj installedPluginJSON
+	if err := json.Unmarshal(pjData, &pj); err != nil {
+		return fmt.Errorf("parse plugin.json: %w", err)
+	}
+	if pj.Name == "" {
+		return fmt.Errorf("plugin.json missing name field")
+	}
+
+	pluginName := normalizePluginName(pj.Name)
+	destDir := filepath.Join(pluginDir, pluginName)
+	if err := os.MkdirAll(destDir, 0750); err != nil {
+		return fmt.Errorf("create plugin dir: %w", err)
+	}
+
+	if err := extractTarGz(data, destDir); err != nil {
+		return fmt.Errorf("extract to dest: %w", err)
+	}
+
+	if err := ensurePluginBinary(destDir, pluginName); err != nil {
+		return fmt.Errorf("normalize binary name: %w", err)
+	}
+
+	// Validate the installed plugin (same checks as registry installs).
+	if verifyErr := verifyInstalledPlugin(destDir, pluginName); verifyErr != nil {
+		return fmt.Errorf("post-install verification failed: %w", verifyErr)
+	}
+
+	// Hash the installed binary (not the archive) so that verifyInstalledChecksum matches.
+	binaryPath := filepath.Join(destDir, pluginName)
+	checksum, hashErr := hashFileSHA256(binaryPath)
+	if hashErr != nil {
+		return fmt.Errorf("hash installed binary for lockfile: %w", hashErr)
+	}
+	updateLockfileWithChecksum(pluginName, pj.Version, pj.Repository, "", checksum)
+
+	fmt.Printf("Installed %s v%s to %s\n", pluginName, pj.Version, destDir)
+	return nil
+}
+
+// verifyInstalledChecksum reads the plugin binary and verifies its SHA-256 checksum.
+func verifyInstalledChecksum(pluginDir, pluginName, expectedSHA256 string) error {
+	binaryPath := filepath.Join(pluginDir, pluginName)
+	data, err := os.ReadFile(binaryPath)
+	if err != nil {
+		return fmt.Errorf("read binary %s: %w", binaryPath, err)
+	}
+	h := sha256.Sum256(data)
+	got := hex.EncodeToString(h[:])
+	if !strings.EqualFold(got, expectedSHA256) {
+		return fmt.Errorf("binary checksum mismatch: got %s, want %s", got, expectedSHA256)
+	}
+	return nil
+}
+
+// installFromLocal installs a plugin from a local directory.
+func installFromLocal(srcDir, pluginDir string) error {
+	pjPath := filepath.Join(srcDir, "plugin.json")
+	pjData, err := os.ReadFile(pjPath)
+	if err != nil {
+		return fmt.Errorf("read plugin.json in %s: %w", srcDir, err)
+	}
+	var pj installedPluginJSON
+	if err := json.Unmarshal(pjData, &pj); err != nil {
+		return fmt.Errorf("parse plugin.json: %w", err)
+	}
+	if pj.Name == "" {
+		return fmt.Errorf("plugin.json missing name field")
+	}
+
+	pluginName := normalizePluginName(pj.Name)
+	destDir := filepath.Join(pluginDir, pluginName)
+	if err := os.MkdirAll(destDir, 0750); err != nil {
+		return fmt.Errorf("create plugin dir: %w", err)
+	}
+
+	// Copy plugin.json
+	if err := copyFile(pjPath, filepath.Join(destDir, "plugin.json"), 0640); err != nil {
+		return err
+	}
+
+	// Find and copy the binary
+	srcBinary := filepath.Join(srcDir, pluginName)
+	if _, err := os.Stat(srcBinary); os.IsNotExist(err) {
+		fullName := "workflow-plugin-" + pluginName
+		srcBinary = filepath.Join(srcDir, fullName)
+		if _, err := os.Stat(srcBinary); os.IsNotExist(err) {
+			return fmt.Errorf("no plugin binary found in %s (tried %s and %s)", srcDir, pluginName, fullName)
+		}
+	}
+	if err := copyFile(srcBinary, filepath.Join(destDir, pluginName), 0750); err != nil {
+		return err
+	}
+
+	// Update lockfile with binary checksum for consistency with other install paths.
+	installedBinary := filepath.Join(destDir, pluginName)
+	sha, hashErr := hashFileSHA256(installedBinary)
+	if hashErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not hash installed binary: %v\n", hashErr)
+	}
+	updateLockfileWithChecksum(pluginName, pj.Version, "", "", sha)
+
+	fmt.Printf("Installed %s v%s from %s to %s\n", pluginName, pj.Version, srcDir, destDir)
+	return nil
+}
+
 // parseNameVersion splits "name@version" into (name, version). Version is empty if absent.
 func parseNameVersion(arg string) (name, ver string) {
 	if idx := strings.Index(arg, "@"); idx >= 0 {
@@ -532,6 +691,16 @@ func parseGitHubRepoURL(repoURL string) (owner, repo string, err error) {
 		return "", "", fmt.Errorf("not a GitHub repository URL: %q (expected https://github.com/owner/repo)", repoURL)
 	}
 	return parts[1], repoName, nil
+}
+
+// hashFileSHA256 returns the hex-encoded SHA-256 hash of the file at path.
+func hashFileSHA256(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("hash file %s: %w", path, err)
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:]), nil
 }
 
 // extractTarGz decompresses and extracts a .tar.gz archive into destDir.
