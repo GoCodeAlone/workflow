@@ -78,8 +78,8 @@ func stripVersionConstraint(version string) (string, bool) {
 		return "", true
 	}
 
-	// Detect compound constraints such as ">=0.1.0,<0.2.0" or ">=0.1.0 <0.2.0".
-	if strings.Contains(version, ",") || strings.Count(version, " ") > 1 {
+	// Detect compound constraints such as ">=0.1.0,<0.2.0" or ">=0.1.0 <0.2.0" or "0.1.0 0.2.0".
+	if strings.Contains(version, ",") || strings.ContainsRune(version, ' ') {
 		return "", false
 	}
 

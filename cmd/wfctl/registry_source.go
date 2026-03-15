@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 // RegistrySource is the interface for a plugin registry backend.
@@ -225,6 +226,9 @@ func (s *StaticRegistrySource) ListPlugins() ([]string, error) {
 	return names, nil
 }
 
+// registryHTTPClient is used for all registry HTTP requests with a reasonable timeout.
+var registryHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 // fetch performs an HTTP GET with optional auth token.
 func (s *StaticRegistrySource) fetch(url string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil) //nolint:gosec // G107: URL from user config
@@ -234,7 +238,7 @@ func (s *StaticRegistrySource) fetch(url string) ([]byte, error) {
 	if s.token != "" {
 		req.Header.Set("Authorization", "Bearer "+s.token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := registryHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

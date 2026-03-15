@@ -68,6 +68,7 @@ func TestStripVersionConstraint(t *testing.T) {
 		{"", "", true},
 		{">=0.1.0,<0.2.0", "", false},  // compound — not supported
 		{">=0.1.0 <0.2.0", "", false},  // compound with space
+		{"0.1.0 0.2.0", "", false},     // two bare versions separated by space
 	}
 	for _, tc := range cases {
 		got, ok := stripVersionConstraint(tc.input)

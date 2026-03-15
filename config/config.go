@@ -281,6 +281,24 @@ func (cfg *WorkflowConfig) processImports(seen map[string]bool) error {
 			}
 		}
 
+		// Merge external plugin declarations — deduplicate by name (first definition wins)
+		if impCfg.Plugins != nil && len(impCfg.Plugins.External) > 0 {
+			if cfg.Plugins == nil {
+				cfg.Plugins = &PluginsConfig{}
+			}
+			existingPlugins := make(map[string]struct{}, len(cfg.Plugins.External))
+			for _, ep := range cfg.Plugins.External {
+				existingPlugins[ep.Name] = struct{}{}
+			}
+			for _, ep := range impCfg.Plugins.External {
+				if _, exists := existingPlugins[ep.Name]; exists {
+					continue
+				}
+				cfg.Plugins.External = append(cfg.Plugins.External, ep)
+				existingPlugins[ep.Name] = struct{}{}
+			}
+		}
+
 		// Merge sidecars — deduplicate by name (first definition wins)
 		existingSidecars := make(map[string]struct{}, len(cfg.Sidecars))
 		for _, sc := range cfg.Sidecars {
