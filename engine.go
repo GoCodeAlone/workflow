@@ -94,10 +94,6 @@ type StdEngine struct {
 	// Format: "sha256:<hex>". Empty until BuildFromConfig is called.
 	configHash string
 
-	// externalPluginDir is the directory where external plugins are installed.
-	// When set, auto-fetch is triggered for any plugins declared with autoFetch: true
-	// in the config's plugins.external section during BuildFromConfig.
-	externalPluginDir string
 }
 
 // App returns the underlying modular.Application.
@@ -146,12 +142,6 @@ func (e *StdEngine) SetPluginInstaller(installer *plugin.PluginInstaller) {
 	e.pluginInstaller = installer
 }
 
-// SetExternalPluginDir sets the directory where external plugins are installed.
-// When set, auto-fetch is triggered for plugins declared with autoFetch: true in
-// the config's plugins.external section during BuildFromConfig.
-func (e *StdEngine) SetExternalPluginDir(dir string) {
-	e.externalPluginDir = dir
-}
 
 // NewStdEngine creates a new workflow engine
 func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
@@ -399,28 +389,6 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	}
 	if err := schema.ValidateConfig(cfg, valOpts...); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
-	}
-
-	// Auto-fetch declared external plugins before validating requirements.
-	// TODO: Move auto-fetch before external plugin discovery/loading so newly
-	// fetched plugins are available in the current process. Currently auto-fetch
-	// runs after DiscoverPlugins/LoadPlugin in the server startup sequence, so
-	// plugins downloaded here require a server restart to take effect.
-	// AutoFetchDeclaredPlugins logs a warning when this occurs.
-	if cfg.Plugins != nil && len(cfg.Plugins.External) > 0 && e.externalPluginDir != "" {
-		var sl *slog.Logger
-		if l, ok := e.logger.(*slog.Logger); ok {
-			sl = l
-		}
-		decls := make([]plugin.AutoFetchDecl, len(cfg.Plugins.External))
-		for i, ep := range cfg.Plugins.External {
-			decls[i] = plugin.AutoFetchDecl{
-				Name:      ep.Name,
-				Version:   ep.Version,
-				AutoFetch: ep.AutoFetch,
-			}
-		}
-		plugin.AutoFetchDeclaredPlugins(decls, e.externalPluginDir, sl)
 	}
 
 	// Validate plugin requirements if declared

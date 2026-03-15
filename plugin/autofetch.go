@@ -111,9 +111,8 @@ type AutoFetchDecl struct {
 // is logged and the plugin is skipped rather than failing startup. Other errors are
 // logged as warnings but do not abort the remaining plugins.
 //
-// Note: plugins fetched here will not be loaded in the current server process.
-// The server must be restarted (or re-discover plugins) for newly fetched plugins
-// to take effect.
+// Callers should invoke this before plugin discovery/loading so that newly
+// fetched plugins are available in the current startup.
 func AutoFetchDeclaredPlugins(decls []AutoFetchDecl, pluginDir string, logger *slog.Logger) {
 	if pluginDir == "" || len(decls) == 0 {
 		return
@@ -147,7 +146,7 @@ func AutoFetchDeclaredPlugins(decls []AutoFetchDecl, pluginDir string, logger *s
 	}
 
 	if anyFetched && logger != nil {
-		logger.Warn("auto-fetch downloaded new plugins; restart the server for them to load",
+		logger.Info("auto-fetch downloaded new plugins; they will be discovered during startup",
 			"plugin_dir", pluginDir)
 	}
 }
