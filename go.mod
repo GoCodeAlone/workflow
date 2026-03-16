@@ -18,7 +18,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.41.4
 	github.com/aws/aws-sdk-go-v2/config v1.32.12
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.12
-	github.com/aws/aws-sdk-go-v2/service/apigatewayv2 v1.33.6
+	github.com/aws/aws-sdk-go-v2/service/apigatewayv2 v1.33.8
 	github.com/aws/aws-sdk-go-v2/service/applicationautoscaling v1.41.11
 	github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.55.2
 	github.com/aws/aws-sdk-go-v2/service/codebuild v1.68.10
