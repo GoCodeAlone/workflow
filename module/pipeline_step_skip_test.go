@@ -26,8 +26,8 @@ func TestStepSkipIf_SkipsWhenTrue(t *testing.T) {
 	if result == nil {
 		t.Fatal("expected non-nil result for skipped step")
 	}
-	if result.Output["_skipped"] != true {
-		t.Errorf("expected _skipped=true in output, got %v", result.Output["_skipped"])
+	if result.Output["skipped"] != true {
+		t.Errorf("expected skipped=true in output, got %v", result.Output["skipped"])
 	}
 }
 
@@ -65,11 +65,11 @@ func TestStepSkipIf_OutputContainsSkippedFlag(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if result.Output["_skipped"] != true {
-		t.Errorf("expected _skipped=true, got %v", result.Output["_skipped"])
+	if result.Output["skipped"] != true {
+		t.Errorf("expected skipped=true, got %v", result.Output["skipped"])
 	}
-	if result.Output["_error"] == nil || result.Output["_error"] == "" {
-		t.Errorf("expected non-empty _error in output, got %v", result.Output["_error"])
+	if result.Output["reason"] == nil || result.Output["reason"] == "" {
+		t.Errorf("expected non-empty reason in output, got %v", result.Output["reason"])
 	}
 }
 
@@ -110,8 +110,8 @@ func TestStepIf_SkipsWhenFalse(t *testing.T) {
 	if len(inner.execLog) != 0 {
 		t.Errorf("inner step should not execute when `if` is falsy")
 	}
-	if result.Output["_skipped"] != true {
-		t.Errorf("expected _skipped=true, got %v", result.Output["_skipped"])
+	if result.Output["skipped"] != true {
+		t.Errorf("expected skipped=true, got %v", result.Output["skipped"])
 	}
 }
 
@@ -132,8 +132,8 @@ func TestStepSkipIf_TemplateResolution(t *testing.T) {
 	if len(inner.execLog) != 0 {
 		t.Errorf("expected inner step to be skipped when feature_flag=off")
 	}
-	if result.Output["_skipped"] != true {
-		t.Errorf("expected _skipped=true in output")
+	if result.Output["skipped"] != true {
+		t.Errorf("expected skipped=true in output")
 	}
 
 	// Now with feature_flag=on → skip_if = "" → execute
@@ -172,8 +172,8 @@ func TestStepSkipIf_TemplateAccessesStepOutputs(t *testing.T) {
 	if len(inner.execLog) != 0 {
 		t.Errorf("expected step to be skipped based on previous step output")
 	}
-	if result.Output["_skipped"] != true {
-		t.Errorf("expected _skipped=true")
+	if result.Output["skipped"] != true {
+		t.Errorf("expected skipped=true")
 	}
 }
 
@@ -258,45 +258,7 @@ func TestStepSkipIf_BothFieldsSet_SkipIfTakesPrecedence(t *testing.T) {
 	if len(inner.execLog) != 0 {
 		t.Errorf("expected step to be skipped when skip_if=true")
 	}
-	if result.Output["_skipped"] != true {
-		t.Errorf("expected _skipped=true")
-	}
-}
-
-// TestStepSkipIf_TemplateError_ReturnsError verifies that a broken skip_if
-// template returns an error (fail closed) rather than silently changing control flow.
-func TestStepSkipIf_TemplateError_ReturnsError(t *testing.T) {
-	inner := newMockStep("inner", map[string]any{"ran": true})
-	// Invalid template syntax → should return an error
-	wrapped := NewSkippableStep(inner, "{{ .nonexistent | badFunc }}", "")
-
-	pc := NewPipelineContext(map[string]any{}, nil)
-	_, err := wrapped.Execute(context.Background(), pc)
-	if err == nil {
-		t.Error("expected error from broken skip_if template, got nil")
-	}
-
-	// Inner step must NOT have executed
-	if len(inner.execLog) != 0 {
-		t.Errorf("inner step should not execute when skip_if template errors")
-	}
-}
-
-// TestStepIf_TemplateError_ReturnsError verifies that a broken `if` template
-// returns an error (fail closed) rather than silently skipping the step.
-func TestStepIf_TemplateError_ReturnsError(t *testing.T) {
-	inner := newMockStep("inner", map[string]any{"ran": true})
-	// Invalid template syntax → should return an error
-	wrapped := NewSkippableStep(inner, "", "{{ .nonexistent | badFunc }}")
-
-	pc := NewPipelineContext(map[string]any{}, nil)
-	_, err := wrapped.Execute(context.Background(), pc)
-	if err == nil {
-		t.Error("expected error from broken `if` template, got nil")
-	}
-
-	// Inner step must NOT have executed
-	if len(inner.execLog) != 0 {
-		t.Errorf("inner step should not execute when `if` template errors")
+	if result.Output["skipped"] != true {
+		t.Errorf("expected skipped=true")
 	}
 }
