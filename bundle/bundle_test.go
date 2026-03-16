@@ -180,6 +180,92 @@ func TestImportPathTraversal(t *testing.T) {
 	}
 }
 
+func TestImportDotDirectoryEntry(t *testing.T) {
+	// Tarballs created with "tar -czf bundle.tar.gz ." include a top-level "."
+	// directory entry. Import should skip it gracefully instead of failing.
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	// Write a "." directory entry (as created by tar when archiving a directory itself)
+	_ = tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeDir,
+		Name:     ".",
+		Mode:     0755,
+	})
+
+	manifestData, _ := json.Marshal(Manifest{
+		Version: "1.0",
+		Name:    "dot-test",
+		Files:   []string{"workflow.yaml"},
+	})
+	_ = writeToTar(tw, "manifest.json", manifestData)
+	_ = writeToTar(tw, "workflow.yaml", []byte("modules: []\nworkflows: {}\ntriggers: {}"))
+
+	tw.Close()
+	gw.Close()
+
+	destDir := t.TempDir()
+	manifest, workflowPath, err := Import(&buf, destDir)
+	if err != nil {
+		t.Fatalf("Import failed on tarball with dot entry: %v", err)
+	}
+	if manifest.Name != "dot-test" {
+		t.Errorf("manifest name = %q, want %q", manifest.Name, "dot-test")
+	}
+	if workflowPath == "" {
+		t.Error("workflowPath is empty")
+	}
+}
+
+func TestImportRelativeDestDir(t *testing.T) {
+	// Import must work correctly even when destDir is a relative path.
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	manifestData, _ := json.Marshal(Manifest{
+		Version: "1.0",
+		Name:    "rel-test",
+		Files:   []string{"workflow.yaml"},
+	})
+	_ = writeToTar(tw, "manifest.json", manifestData)
+	_ = writeToTar(tw, "workflow.yaml", []byte("modules: []\nworkflows: {}\ntriggers: {}"))
+
+	tw.Close()
+	gw.Close()
+
+	// Use a temp dir but pass it as a relative path from its parent.
+	abs := t.TempDir()
+	parent := filepath.Dir(abs)
+	rel := filepath.Join(filepath.Base(parent), filepath.Base(abs))
+
+	// Change working directory temporarily to the grandparent so rel is valid.
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Dir(parent)); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(orig) }()
+
+	manifest, workflowPath, err := Import(&buf, rel)
+	if err != nil {
+		t.Fatalf("Import failed with relative destDir: %v", err)
+	}
+	if manifest.Name != "rel-test" {
+		t.Errorf("manifest name = %q, want %q", manifest.Name, "rel-test")
+	}
+	if workflowPath == "" {
+		t.Error("workflowPath is empty")
+	}
+	// workflowPath must be absolute
+	if !filepath.IsAbs(workflowPath) {
+		t.Errorf("workflowPath is not absolute: %s", workflowPath)
+	}
+}
+
 func TestImportFileSizeLimit(t *testing.T) {
 	// Build a tar.gz with a file exceeding MaxFileSize
 	var buf bytes.Buffer

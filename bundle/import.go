@@ -24,8 +24,11 @@ func Import(r io.Reader, destDir string) (*Manifest, string, error) {
 	if err := os.MkdirAll(destDir, 0750); err != nil {
 		return nil, "", fmt.Errorf("create dest dir: %w", err)
 	}
-	// Normalise the destination directory once for safe prefix checks.
-	absDestDir := filepath.Clean(destDir)
+	// Resolve the destination directory to an absolute path once for safe prefix checks.
+	absDestDir, err := filepath.Abs(destDir)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve dest dir: %w", err)
+	}
 
 	gr, err := gzip.NewReader(r)
 	if err != nil {
@@ -50,7 +53,8 @@ func Import(r io.Reader, destDir string) (*Manifest, string, error) {
 		// Path traversal protection
 		clean := filepath.Clean(hdr.Name)
 		if clean == "." {
-			return nil, "", fmt.Errorf("invalid path in bundle: %s", hdr.Name)
+			// Top-level "." entries are harmless (common in tarballs created with "tar -czf . ..."); skip them.
+			continue
 		}
 		if strings.HasPrefix(clean, "/") || strings.HasPrefix(clean, `\`) {
 			return nil, "", fmt.Errorf("invalid absolute path in bundle: %s", hdr.Name)
