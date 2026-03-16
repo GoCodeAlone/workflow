@@ -24,6 +24,11 @@ func Import(r io.Reader, destDir string) (*Manifest, string, error) {
 	if err := os.MkdirAll(destDir, 0750); err != nil {
 		return nil, "", fmt.Errorf("create dest dir: %w", err)
 	}
+	// Resolve the destination directory to an absolute path once for safe prefix checks.
+	absDestDir, err := filepath.Abs(destDir)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve dest dir: %w", err)
+	}
 
 	gr, err := gzip.NewReader(r)
 	if err != nil {
@@ -47,8 +52,16 @@ func Import(r io.Reader, destDir string) (*Manifest, string, error) {
 
 		// Path traversal protection
 		clean := filepath.Clean(hdr.Name)
-		if strings.HasPrefix(clean, "..") || strings.HasPrefix(clean, "/") {
-			return nil, "", fmt.Errorf("invalid path in bundle: %s", hdr.Name)
+		if clean == "." {
+			// Top-level "." entries are harmless (common in tarballs created with "tar -czf . ..."); skip them.
+			continue
+		}
+		if strings.HasPrefix(clean, "/") || strings.HasPrefix(clean, `\`) {
+			return nil, "", fmt.Errorf("invalid absolute path in bundle: %s", hdr.Name)
+		}
+		// Reject any parent directory components after cleaning.
+		if strings.Contains(clean, ".."+string(os.PathSeparator)) || clean == ".." {
+			return nil, "", fmt.Errorf("invalid path in bundle (parent directory reference): %s", hdr.Name)
 		}
 
 		// Size checks
@@ -60,16 +73,21 @@ func Import(r io.Reader, destDir string) (*Manifest, string, error) {
 			return nil, "", fmt.Errorf("bundle exceeds max total size (%d)", MaxBundleSize)
 		}
 
-		destPath := filepath.Join(destDir, clean)
+		destPath := filepath.Join(absDestDir, clean)
+		absDestPath := filepath.Clean(destPath)
+		// Ensure the final destination path is still within the destination directory.
+		if absDestPath != absDestDir && !strings.HasPrefix(absDestPath, absDestDir+string(os.PathSeparator)) {
+			return nil, "", fmt.Errorf("invalid path in bundle (outside destination): %s", hdr.Name)
+		}
 
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(destPath, 0750); err != nil {
+			if err := os.MkdirAll(absDestPath, 0750); err != nil {
 				return nil, "", fmt.Errorf("create dir %s: %w", clean, err)
 			}
 		case tar.TypeReg:
 			// Ensure parent directory exists
-			if err := os.MkdirAll(filepath.Dir(destPath), 0750); err != nil {
+			if err := os.MkdirAll(filepath.Dir(absDestPath), 0750); err != nil {
 				return nil, "", fmt.Errorf("create parent dir for %s: %w", clean, err)
 			}
 
@@ -81,7 +99,7 @@ func Import(r io.Reader, destDir string) (*Manifest, string, error) {
 				return nil, "", fmt.Errorf("file %s exceeds max size", clean)
 			}
 
-			if err := os.WriteFile(destPath, data, 0600); err != nil {
+			if err := os.WriteFile(absDestPath, data, 0600); err != nil {
 				return nil, "", fmt.Errorf("write %s: %w", clean, err)
 			}
 
@@ -95,7 +113,7 @@ func Import(r io.Reader, destDir string) (*Manifest, string, error) {
 			}
 
 			if clean == "workflow.yaml" {
-				workflowPath = destPath
+				workflowPath = absDestPath
 			}
 		}
 	}
