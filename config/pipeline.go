@@ -22,4 +22,12 @@ type PipelineStepConfig struct {
 	Config  map[string]any `json:"config,omitempty" yaml:"config,omitempty"`
 	OnError string         `json:"on_error,omitempty" yaml:"on_error,omitempty"`
 	Timeout string         `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	// SkipIf is an optional Go template expression. When it evaluates to a
+	// truthy value (non-empty, not "false", not "0"), the step is skipped and
+	// the pipeline continues with the next step. Falsy or absent → execute.
+	SkipIf string `json:"skip_if,omitempty" yaml:"skip_if,omitempty"`
+	// If is the logical inverse of SkipIf: the step executes only when the
+	// template evaluates to truthy. Falsy or absent with no SkipIf → execute.
+	// When both SkipIf and If are set, SkipIf takes precedence.
+	If string `json:"if,omitempty" yaml:"if,omitempty"`
 }
