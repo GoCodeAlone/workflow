@@ -129,6 +129,14 @@ func (s *JSONResponseStep) resolveResponseBody(pc *PipelineContext) any {
 		return result
 	}
 	if s.bodyRaw != nil {
+		// Resolve template expressions in raw string bodies.
+		if str, ok := s.bodyRaw.(string); ok {
+			resolved, err := s.tmpl.Resolve(str, pc)
+			if err != nil {
+				return s.bodyRaw
+			}
+			return resolved
+		}
 		return s.bodyRaw
 	}
 	return nil
