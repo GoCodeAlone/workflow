@@ -194,6 +194,22 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 	})
 
 	r.Register(&StepSchema{
+		Type:        "step.branch",
+		Plugin:      "pipelinesteps",
+		Description: "Switch/case routing: evaluates a field, executes only the matched branch's sub-steps inline, then jumps to merge_step. Unlike step.conditional, skipped branches never execute.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "field", Type: FieldTypeString, Description: "Dot-path field to evaluate for branch selection", Required: true},
+			{Key: "branches", Type: FieldTypeMap, Description: "Map of field values to lists of inline step configs", Required: true},
+			{Key: "default", Type: FieldTypeArray, Description: "Sub-steps to run when no branch matches", Required: false},
+			{Key: "merge_step", Type: FieldTypeString, Description: "Step name to jump to after the branch completes (empty = continue sequentially)", Required: false},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "matched_value", Type: "string", Description: "The field value that was matched"},
+			{Key: "branch", Type: "string", Description: "Name of the branch that was executed"},
+		},
+	})
+
+	r.Register(&StepSchema{
 		Type:        "step.parallel",
 		Plugin:      "pipelinesteps",
 		Description: "Execute multiple named sub-steps concurrently and collect results. Time: O(max(branch)). Space: O(branches × context_size).",

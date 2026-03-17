@@ -100,6 +100,7 @@ func New() *Plugin {
 					"step.cli_print",
 					"step.cli_invoke",
 					"step.parallel",
+					"step.branch",
 					"step.graphql",
 					"step.event_decrypt",
 					"step.secret_fetch",
@@ -185,6 +186,10 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.cli_invoke": wrapStepFactory(module.NewCLIInvokeStepFactory()),
 		// step.parallel uses a lazy registry getter so sub-steps can reference any registered type.
 		"step.parallel": wrapStepFactory(module.NewParallelStepFactory(func() *module.StepRegistry {
+			return p.concreteStepRegistry
+		})),
+		// step.branch uses a lazy registry getter so branch sub-steps can reference any registered type.
+		"step.branch": wrapStepFactory(module.NewBranchStepFactory(func() *module.StepRegistry {
 			return p.concreteStepRegistry
 		})),
 		"step.graphql":       wrapStepFactory(module.NewGraphQLStepFactory()),
