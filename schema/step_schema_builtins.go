@@ -1398,7 +1398,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Applies (provisions or updates) an API gateway configuration.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
+			{Key: "gateway", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "id", Type: "string", Description: "API gateway ID"},
@@ -1413,7 +1413,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Destroys a provisioned API gateway.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
+			{Key: "gateway", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "destroyed", Type: "boolean", Description: "Whether the gateway was destroyed"},
@@ -1427,7 +1427,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Plans API gateway changes without applying them.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
+			{Key: "gateway", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
@@ -1442,7 +1442,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Gets the current status of an API gateway.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
+			{Key: "gateway", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "status", Type: "string", Description: "Current gateway status"},
@@ -1457,7 +1457,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Deploys an application container to the target platform.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the app.container module", Required: true},
+			{Key: "app", Type: FieldTypeString, Description: "Name of the app.container module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "deployed", Type: "boolean", Description: "Whether deployment succeeded"},
@@ -1472,7 +1472,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Rolls back an application container to a previous version.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the app.container module", Required: true},
+			{Key: "app", Type: FieldTypeString, Description: "Name of the app.container module", Required: true},
 			{Key: "revision", Type: FieldTypeString, Description: "Target revision to roll back to (empty = previous)"},
 		},
 		Outputs: []StepOutputDef{
@@ -1487,7 +1487,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Gets the current deployment status of an application container.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the app.container module", Required: true},
+			{Key: "app", Type: FieldTypeString, Description: "Name of the app.container module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "status", Type: "string", Description: "Deployment status"},
@@ -1502,9 +1502,8 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Deletes an Argo Workflow.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
-			{Key: "name", Type: FieldTypeString, Description: "Workflow name to delete", Required: true},
-			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
+			{Key: "service", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
+			{Key: "workflow_run", Type: FieldTypeString, Description: "Workflow run name to delete"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "deleted", Type: "boolean", Description: "Whether the workflow was deleted"},
@@ -1518,8 +1517,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Lists Argo Workflows in a namespace.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
-			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
+			{Key: "service", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
 			{Key: "label_selector", Type: FieldTypeString, Description: "Label selector filter"},
 		},
 		Outputs: []StepOutputDef{
@@ -1535,9 +1533,8 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Retrieves logs from an Argo Workflow.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
-			{Key: "name", Type: FieldTypeString, Description: "Workflow name", Required: true},
-			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
+			{Key: "service", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
+			{Key: "workflow_run", Type: FieldTypeString, Description: "Workflow run name to get logs for"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "logs", Type: "string", Description: "Workflow logs"},
@@ -1551,9 +1548,8 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Gets the status of an Argo Workflow.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
-			{Key: "name", Type: FieldTypeString, Description: "Workflow name", Required: true},
-			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
+			{Key: "service", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
+			{Key: "workflow_run", Type: FieldTypeString, Description: "Workflow run name to check status"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "phase", Type: "string", Description: "Workflow phase (Pending, Running, Succeeded, Failed)"},
@@ -1568,10 +1564,9 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Submits an Argo Workflow from a template or manifest.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
-			{Key: "template", Type: FieldTypeString, Description: "Workflow template name or YAML manifest"},
-			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
-			{Key: "parameters", Type: FieldTypeMap, Description: "Workflow parameters"},
+			{Key: "service", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
+			{Key: "workflow_name", Type: FieldTypeString, Description: "Workflow template name (defaults to step name)"},
+			{Key: "steps", Type: FieldTypeArray, Description: "Workflow step definitions"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "name", Type: "string", Description: "Created workflow name"},
@@ -1586,8 +1581,8 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "storage",
 		Description: "Deletes an artifact from the artifact store.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the storage.artifact module", Required: true},
-			{Key: "id", Type: FieldTypeString, Description: "Artifact ID to delete", Required: true},
+			{Key: "store", Type: FieldTypeString, Description: "Name of the storage.artifact module", Required: true},
+			{Key: "key", Type: FieldTypeString, Description: "Artifact key to delete", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "deleted", Type: "boolean", Description: "Whether the artifact was deleted"},
@@ -1601,9 +1596,9 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "storage",
 		Description: "Downloads an artifact from the artifact store.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the storage.artifact module", Required: true},
-			{Key: "id", Type: FieldTypeString, Description: "Artifact ID to download", Required: true},
-			{Key: "destination", Type: FieldTypeString, Description: "Local path to write the artifact"},
+			{Key: "store", Type: FieldTypeString, Description: "Name of the storage.artifact module", Required: true},
+			{Key: "key", Type: FieldTypeString, Description: "Artifact key to download", Required: true},
+			{Key: "dest", Type: FieldTypeString, Description: "Local path to write the artifact"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "path", Type: "string", Description: "Local path where artifact was written"},
@@ -1618,7 +1613,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "storage",
 		Description: "Lists artifacts in the artifact store.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the storage.artifact module", Required: true},
+			{Key: "store", Type: FieldTypeString, Description: "Name of the storage.artifact module", Required: true},
 			{Key: "prefix", Type: FieldTypeString, Description: "Optional prefix filter"},
 		},
 		Outputs: []StepOutputDef{
@@ -1634,14 +1629,14 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "storage",
 		Description: "Uploads a file as an artifact to the artifact store.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the storage.artifact module", Required: true},
-			{Key: "path", Type: FieldTypeString, Description: "Local file path to upload", Required: true},
-			{Key: "name", Type: FieldTypeString, Description: "Artifact name (defaults to filename)"},
+			{Key: "store", Type: FieldTypeString, Description: "Name of the storage.artifact module", Required: true},
+			{Key: "key", Type: FieldTypeString, Description: "Artifact key (storage path)", Required: true},
+			{Key: "source", Type: FieldTypeString, Description: "Local file path to upload", Required: true},
 			{Key: "metadata", Type: FieldTypeMap, Description: "Additional metadata to attach"},
 		},
 		Outputs: []StepOutputDef{
-			{Key: "id", Type: "string", Description: "Artifact ID"},
-			{Key: "url", Type: "string", Description: "Artifact download URL"},
+			{Key: "key", Type: "string", Description: "Stored artifact key"},
+			{Key: "store", Type: "string", Description: "Name of the store used"},
 		},
 	})
 
@@ -1702,7 +1697,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "cicd",
 		Description: "Creates an AWS CodeBuild project.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
+			{Key: "project", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
 			{Key: "project_name", Type: FieldTypeString, Description: "CodeBuild project name", Required: true},
 			{Key: "source", Type: FieldTypeMap, Description: "Source configuration (type, location)"},
 			{Key: "environment", Type: FieldTypeMap, Description: "Build environment configuration"},
@@ -1720,7 +1715,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "cicd",
 		Description: "Deletes an AWS CodeBuild project.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
+			{Key: "project", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
 			{Key: "project_name", Type: FieldTypeString, Description: "CodeBuild project name to delete", Required: true},
 		},
 		Outputs: []StepOutputDef{
@@ -1735,7 +1730,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "cicd",
 		Description: "Lists builds for an AWS CodeBuild project.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
+			{Key: "project", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
 			{Key: "project_name", Type: FieldTypeString, Description: "CodeBuild project name", Required: true},
 		},
 		Outputs: []StepOutputDef{
@@ -1751,7 +1746,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "cicd",
 		Description: "Retrieves logs for an AWS CodeBuild build.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
+			{Key: "project", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
 			{Key: "build_id", Type: FieldTypeString, Description: "CodeBuild build ID", Required: true},
 		},
 		Outputs: []StepOutputDef{
@@ -1766,7 +1761,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "cicd",
 		Description: "Starts an AWS CodeBuild build.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
+			{Key: "project", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
 			{Key: "project_name", Type: FieldTypeString, Description: "CodeBuild project name", Required: true},
 			{Key: "env_override", Type: FieldTypeMap, Description: "Environment variable overrides"},
 		},
@@ -1783,7 +1778,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "cicd",
 		Description: "Gets the status of an AWS CodeBuild build.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
+			{Key: "project", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
 			{Key: "build_id", Type: FieldTypeString, Description: "CodeBuild build ID", Required: true},
 		},
 		Outputs: []StepOutputDef{
@@ -1799,7 +1794,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Applies DNS zone and record changes.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.dns module", Required: true},
+			{Key: "zone", Type: FieldTypeString, Description: "Name of the platform.dns module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "zone_id", Type: "string", Description: "DNS zone ID"},
@@ -1814,7 +1809,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Plans DNS changes without applying them.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.dns module", Required: true},
+			{Key: "zone", Type: FieldTypeString, Description: "Name of the platform.dns module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
@@ -1829,7 +1824,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Gets the current status of a DNS zone.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.dns module", Required: true},
+			{Key: "zone", Type: FieldTypeString, Description: "Name of the platform.dns module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "status", Type: "string", Description: "Zone status"},
@@ -1844,7 +1839,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Deploys an application to DigitalOcean App Platform.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
+			{Key: "app", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "app_id", Type: "string", Description: "DigitalOcean app ID"},
@@ -1859,7 +1854,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Destroys a DigitalOcean App Platform application.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
+			{Key: "app", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "destroyed", Type: "boolean", Description: "Whether the app was destroyed"},
@@ -1873,7 +1868,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Retrieves logs from a DigitalOcean App Platform application.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
+			{Key: "app", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
 			{Key: "component", Type: FieldTypeString, Description: "App component name"},
 		},
 		Outputs: []StepOutputDef{
@@ -1888,7 +1883,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Scales a DigitalOcean App Platform application.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
+			{Key: "app", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
 			{Key: "instances", Type: FieldTypeNumber, Description: "Desired instance count", Required: true},
 		},
 		Outputs: []StepOutputDef{
@@ -1903,7 +1898,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Gets the status of a DigitalOcean App Platform application.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
+			{Key: "app", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "phase", Type: "string", Description: "App deployment phase"},
@@ -1918,7 +1913,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Applies (deploys) an ECS Fargate service.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
+			{Key: "service", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
 			{Key: "image", Type: FieldTypeString, Description: "Container image to deploy"},
 		},
 		Outputs: []StepOutputDef{
@@ -1934,7 +1929,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Destroys an ECS Fargate service.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
+			{Key: "service", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "destroyed", Type: "boolean", Description: "Whether the service was destroyed"},
@@ -1948,7 +1943,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Plans ECS service deployment changes without applying them.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
+			{Key: "service", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
 			{Key: "image", Type: FieldTypeString, Description: "Container image to plan for"},
 		},
 		Outputs: []StepOutputDef{
@@ -1964,7 +1959,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Gets the status of an ECS Fargate service.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
+			{Key: "service", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "status", Type: "string", Description: "Service status"},
@@ -2157,7 +2152,9 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Applies infrastructure changes from an IaC plan.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the IaC module to apply", Required: true},
+			{Key: "platform", Type: FieldTypeString, Description: "Name of the platform module", Required: true},
+			{Key: "resource_id", Type: FieldTypeString, Description: "Resource ID to manage"},
+			{Key: "state_store", Type: FieldTypeString, Description: "Name of the iac.state module for state backend"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "applied", Type: "boolean", Description: "Whether changes were applied"},
@@ -2172,7 +2169,9 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Destroys infrastructure managed by an IaC module.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the IaC module to destroy", Required: true},
+			{Key: "platform", Type: FieldTypeString, Description: "Name of the platform module", Required: true},
+			{Key: "resource_id", Type: FieldTypeString, Description: "Resource ID to destroy"},
+			{Key: "state_store", Type: FieldTypeString, Description: "Name of the iac.state module for state backend"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "destroyed", Type: "boolean", Description: "Whether resources were destroyed"},
@@ -2186,7 +2185,10 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Detects configuration drift between IaC state and actual infrastructure.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the IaC module to check", Required: true},
+			{Key: "platform", Type: FieldTypeString, Description: "Name of the platform module", Required: true},
+			{Key: "resource_id", Type: FieldTypeString, Description: "Resource ID to check"},
+			{Key: "state_store", Type: FieldTypeString, Description: "Name of the iac.state module for state backend"},
+			{Key: "config", Type: FieldTypeMap, Description: "Current config to compare against state"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "has_drift", Type: "boolean", Description: "Whether drift was detected"},
@@ -2201,7 +2203,9 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Plans infrastructure changes without applying them.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the IaC module to plan", Required: true},
+			{Key: "platform", Type: FieldTypeString, Description: "Name of the platform module", Required: true},
+			{Key: "resource_id", Type: FieldTypeString, Description: "Resource ID to plan"},
+			{Key: "state_store", Type: FieldTypeString, Description: "Name of the iac.state module for state backend"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
@@ -2216,7 +2220,9 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Gets the current provisioning status of IaC-managed infrastructure.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the IaC module to query", Required: true},
+			{Key: "platform", Type: FieldTypeString, Description: "Name of the platform module", Required: true},
+			{Key: "resource_id", Type: FieldTypeString, Description: "Resource ID to query"},
+			{Key: "state_store", Type: FieldTypeString, Description: "Name of the iac.state module for state backend"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "status", Type: "string", Description: "Provisioning status"},
@@ -2231,7 +2237,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Applies Kubernetes manifests to a cluster.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.kubernetes module", Required: true},
+			{Key: "cluster", Type: FieldTypeString, Description: "Name of the platform.kubernetes module", Required: true},
 			{Key: "manifest", Type: FieldTypeString, Description: "YAML manifest or path to manifest file"},
 			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
 		},
@@ -2248,7 +2254,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Deletes Kubernetes resources.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.kubernetes module", Required: true},
+			{Key: "cluster", Type: FieldTypeString, Description: "Name of the platform.kubernetes module", Required: true},
 			{Key: "manifest", Type: FieldTypeString, Description: "YAML manifest or path to manifest file"},
 			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
 		},
@@ -2264,7 +2270,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Diffs Kubernetes manifests against the current cluster state.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.kubernetes module", Required: true},
+			{Key: "cluster", Type: FieldTypeString, Description: "Name of the platform.kubernetes module", Required: true},
 			{Key: "manifest", Type: FieldTypeString, Description: "YAML manifest or path to manifest file"},
 			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
 		},
@@ -2281,7 +2287,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Gets the status of Kubernetes resources.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.kubernetes module", Required: true},
+			{Key: "cluster", Type: FieldTypeString, Description: "Name of the platform.kubernetes module", Required: true},
 			{Key: "kind", Type: FieldTypeString, Description: "Resource kind (Deployment, Service, etc.)"},
 			{Key: "name", Type: FieldTypeString, Description: "Resource name"},
 			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
@@ -2388,7 +2394,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Applies VPC networking changes.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.networking module", Required: true},
+			{Key: "network", Type: FieldTypeString, Description: "Name of the platform.networking module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "vpc_id", Type: "string", Description: "VPC ID"},
@@ -2403,7 +2409,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Plans VPC networking changes without applying them.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.networking module", Required: true},
+			{Key: "network", Type: FieldTypeString, Description: "Name of the platform.networking module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
@@ -2418,7 +2424,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Gets the status of VPC networking resources.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.networking module", Required: true},
+			{Key: "network", Type: FieldTypeString, Description: "Name of the platform.networking module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "status", Type: "string", Description: "Network status"},
@@ -2433,7 +2439,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "datastores",
 		Description: "Deletes an item from a NoSQL store by key.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the nosql.* module", Required: true},
+			{Key: "store", Type: FieldTypeString, Description: "Name of the nosql.* module", Required: true},
 			{Key: "key", Type: FieldTypeString, Description: "Item key to delete", Required: true},
 		},
 		Outputs: []StepOutputDef{
@@ -2606,7 +2612,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Applies autoscaling policy changes.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
+			{Key: "scaling", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "applied", Type: "boolean", Description: "Whether scaling policies were applied"},
@@ -2620,7 +2626,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Removes autoscaling policies.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
+			{Key: "scaling", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "destroyed", Type: "boolean", Description: "Whether policies were removed"},
@@ -2634,7 +2640,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Plans autoscaling policy changes without applying them.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
+			{Key: "scaling", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
@@ -2649,7 +2655,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "platform",
 		Description: "Gets the status of autoscaling policies.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
+			{Key: "scaling", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "status", Type: "string", Description: "Scaling status"},
@@ -2664,7 +2670,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "secrets",
 		Description: "Rotates a secret by generating a new value and updating the secrets backend.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "module", Type: FieldTypeString, Description: "Name of the secrets module", Required: true},
+			{Key: "provider", Type: FieldTypeString, Description: "Name of the secrets module", Required: true},
 			{Key: "secret_id", Type: FieldTypeString, Description: "Secret ID or ARN to rotate", Required: true},
 		},
 		Outputs: []StepOutputDef{
