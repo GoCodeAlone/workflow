@@ -1357,4 +1357,1394 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "headers", Type: "map", Description: "Backend response headers (when no HTTP writer)"},
 		},
 	})
+
+	// ---- Actor Send ----
+
+	r.Register(&StepSchema{
+		Type:        "step.actor_send",
+		Plugin:      "actors",
+		Description: "Send a message to an actor without waiting for a response (fire-and-forget).",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "pool", Type: FieldTypeString, Description: "Name of the actor.pool module to send to", Required: true},
+			{Key: "identity", Type: FieldTypeString, Description: "Unique key for auto-managed actors"},
+			{Key: "message", Type: FieldTypeJSON, Description: "Message to send (must include 'type' field)", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "delivered", Type: "boolean", Description: "Whether the message was delivered"},
+		},
+	})
+
+	// ---- Actor Ask ----
+
+	r.Register(&StepSchema{
+		Type:        "step.actor_ask",
+		Plugin:      "actors",
+		Description: "Send a message to an actor and wait for a response.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "pool", Type: FieldTypeString, Description: "Name of the actor.pool module to send to", Required: true},
+			{Key: "identity", Type: FieldTypeString, Description: "Unique key for auto-managed actors"},
+			{Key: "timeout", Type: FieldTypeDuration, Description: "How long to wait for the actor's reply before failing", DefaultValue: "10s"},
+			{Key: "message", Type: FieldTypeJSON, Description: "Message to send (must include 'type' field)", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "*", Type: "any", Description: "The actor's reply — varies by message handler"},
+		},
+	})
+
+	// ---- API Gateway Apply ----
+
+	r.Register(&StepSchema{
+		Type:        "step.apigw_apply",
+		Plugin:      "platform",
+		Description: "Applies (provisions or updates) an API gateway configuration.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "id", Type: "string", Description: "API gateway ID"},
+			{Key: "endpoint", Type: "string", Description: "Gateway endpoint URL"},
+		},
+	})
+
+	// ---- API Gateway Destroy ----
+
+	r.Register(&StepSchema{
+		Type:        "step.apigw_destroy",
+		Plugin:      "platform",
+		Description: "Destroys a provisioned API gateway.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "destroyed", Type: "boolean", Description: "Whether the gateway was destroyed"},
+		},
+	})
+
+	// ---- API Gateway Plan ----
+
+	r.Register(&StepSchema{
+		Type:        "step.apigw_plan",
+		Plugin:      "platform",
+		Description: "Plans API gateway changes without applying them.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
+			{Key: "changes", Type: "number", Description: "Number of changes planned"},
+		},
+	})
+
+	// ---- API Gateway Status ----
+
+	r.Register(&StepSchema{
+		Type:        "step.apigw_status",
+		Plugin:      "platform",
+		Description: "Gets the current status of an API gateway.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.apigateway module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "status", Type: "string", Description: "Current gateway status"},
+			{Key: "endpoint", Type: "string", Description: "Gateway endpoint URL"},
+		},
+	})
+
+	// ---- App Deploy ----
+
+	r.Register(&StepSchema{
+		Type:        "step.app_deploy",
+		Plugin:      "platform",
+		Description: "Deploys an application container to the target platform.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the app.container module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "deployed", Type: "boolean", Description: "Whether deployment succeeded"},
+			{Key: "endpoint", Type: "string", Description: "Service endpoint after deployment"},
+		},
+	})
+
+	// ---- App Rollback ----
+
+	r.Register(&StepSchema{
+		Type:        "step.app_rollback",
+		Plugin:      "platform",
+		Description: "Rolls back an application container to a previous version.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the app.container module", Required: true},
+			{Key: "revision", Type: FieldTypeString, Description: "Target revision to roll back to (empty = previous)"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "rolled_back", Type: "boolean", Description: "Whether rollback succeeded"},
+		},
+	})
+
+	// ---- App Status ----
+
+	r.Register(&StepSchema{
+		Type:        "step.app_status",
+		Plugin:      "platform",
+		Description: "Gets the current deployment status of an application container.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the app.container module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "status", Type: "string", Description: "Deployment status"},
+			{Key: "replicas", Type: "number", Description: "Current replica count"},
+		},
+	})
+
+	// ---- Argo Delete ----
+
+	r.Register(&StepSchema{
+		Type:        "step.argo_delete",
+		Plugin:      "platform",
+		Description: "Deletes an Argo Workflow.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
+			{Key: "name", Type: FieldTypeString, Description: "Workflow name to delete", Required: true},
+			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "deleted", Type: "boolean", Description: "Whether the workflow was deleted"},
+		},
+	})
+
+	// ---- Argo List ----
+
+	r.Register(&StepSchema{
+		Type:        "step.argo_list",
+		Plugin:      "platform",
+		Description: "Lists Argo Workflows in a namespace.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
+			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
+			{Key: "label_selector", Type: FieldTypeString, Description: "Label selector filter"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "workflows", Type: "[]any", Description: "List of workflows"},
+			{Key: "count", Type: "number", Description: "Number of workflows"},
+		},
+	})
+
+	// ---- Argo Logs ----
+
+	r.Register(&StepSchema{
+		Type:        "step.argo_logs",
+		Plugin:      "platform",
+		Description: "Retrieves logs from an Argo Workflow.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
+			{Key: "name", Type: FieldTypeString, Description: "Workflow name", Required: true},
+			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "logs", Type: "string", Description: "Workflow logs"},
+		},
+	})
+
+	// ---- Argo Status ----
+
+	r.Register(&StepSchema{
+		Type:        "step.argo_status",
+		Plugin:      "platform",
+		Description: "Gets the status of an Argo Workflow.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
+			{Key: "name", Type: FieldTypeString, Description: "Workflow name", Required: true},
+			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "phase", Type: "string", Description: "Workflow phase (Pending, Running, Succeeded, Failed)"},
+			{Key: "message", Type: "string", Description: "Status message"},
+		},
+	})
+
+	// ---- Argo Submit ----
+
+	r.Register(&StepSchema{
+		Type:        "step.argo_submit",
+		Plugin:      "platform",
+		Description: "Submits an Argo Workflow from a template or manifest.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the argo.workflows module", Required: true},
+			{Key: "template", Type: FieldTypeString, Description: "Workflow template name or YAML manifest"},
+			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
+			{Key: "parameters", Type: FieldTypeMap, Description: "Workflow parameters"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "name", Type: "string", Description: "Created workflow name"},
+			{Key: "namespace", Type: "string", Description: "Workflow namespace"},
+		},
+	})
+
+	// ---- Artifact Delete ----
+
+	r.Register(&StepSchema{
+		Type:        "step.artifact_delete",
+		Plugin:      "storage",
+		Description: "Deletes an artifact from the artifact store.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the storage.artifact module", Required: true},
+			{Key: "id", Type: FieldTypeString, Description: "Artifact ID to delete", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "deleted", Type: "boolean", Description: "Whether the artifact was deleted"},
+		},
+	})
+
+	// ---- Artifact Download ----
+
+	r.Register(&StepSchema{
+		Type:        "step.artifact_download",
+		Plugin:      "storage",
+		Description: "Downloads an artifact from the artifact store.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the storage.artifact module", Required: true},
+			{Key: "id", Type: FieldTypeString, Description: "Artifact ID to download", Required: true},
+			{Key: "destination", Type: FieldTypeString, Description: "Local path to write the artifact"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "path", Type: "string", Description: "Local path where artifact was written"},
+			{Key: "size", Type: "number", Description: "Artifact size in bytes"},
+		},
+	})
+
+	// ---- Artifact List ----
+
+	r.Register(&StepSchema{
+		Type:        "step.artifact_list",
+		Plugin:      "storage",
+		Description: "Lists artifacts in the artifact store.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the storage.artifact module", Required: true},
+			{Key: "prefix", Type: FieldTypeString, Description: "Optional prefix filter"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "artifacts", Type: "[]any", Description: "List of artifact metadata"},
+			{Key: "count", Type: "number", Description: "Number of artifacts"},
+		},
+	})
+
+	// ---- Artifact Upload ----
+
+	r.Register(&StepSchema{
+		Type:        "step.artifact_upload",
+		Plugin:      "storage",
+		Description: "Uploads a file as an artifact to the artifact store.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the storage.artifact module", Required: true},
+			{Key: "path", Type: FieldTypeString, Description: "Local file path to upload", Required: true},
+			{Key: "name", Type: FieldTypeString, Description: "Artifact name (defaults to filename)"},
+			{Key: "metadata", Type: FieldTypeMap, Description: "Additional metadata to attach"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "id", Type: "string", Description: "Artifact ID"},
+			{Key: "url", Type: "string", Description: "Artifact download URL"},
+		},
+	})
+
+	// ---- Build Binary ----
+
+	r.Register(&StepSchema{
+		Type:        "step.build_binary",
+		Plugin:      "cicd",
+		Description: "Builds a Go binary from source.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "source", Type: FieldTypeString, Description: "Source directory or package path", Required: true},
+			{Key: "output", Type: FieldTypeString, Description: "Output binary path"},
+			{Key: "os", Type: FieldTypeString, Description: "Target OS (GOOS)"},
+			{Key: "arch", Type: FieldTypeString, Description: "Target architecture (GOARCH)"},
+			{Key: "ldflags", Type: FieldTypeString, Description: "Linker flags"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "binary_path", Type: "string", Description: "Path to the built binary"},
+		},
+	})
+
+	// ---- Build From Config ----
+
+	r.Register(&StepSchema{
+		Type:        "step.build_from_config",
+		Plugin:      "cicd",
+		Description: "Builds an application using the workflow engine config as build specification.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "config", Type: FieldTypeString, Description: "Path to build config file", Required: true},
+			{Key: "target", Type: FieldTypeString, Description: "Build target name"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "artifact", Type: "string", Description: "Path to the built artifact"},
+			{Key: "success", Type: "boolean", Description: "Whether the build succeeded"},
+		},
+	})
+
+	// ---- Cloud Validate ----
+
+	r.Register(&StepSchema{
+		Type:        "step.cloud_validate",
+		Plugin:      "cloud",
+		Description: "Validates cloud provider credentials and connectivity.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "account", Type: FieldTypeString, Description: "Name of the cloud.account module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "valid", Type: "boolean", Description: "Whether credentials are valid"},
+			{Key: "provider", Type: "string", Description: "Cloud provider name"},
+			{Key: "region", Type: "string", Description: "Configured region"},
+		},
+	})
+
+	// ---- CodeBuild Create Project ----
+
+	r.Register(&StepSchema{
+		Type:        "step.codebuild_create_project",
+		Plugin:      "cicd",
+		Description: "Creates an AWS CodeBuild project.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
+			{Key: "project_name", Type: FieldTypeString, Description: "CodeBuild project name", Required: true},
+			{Key: "source", Type: FieldTypeMap, Description: "Source configuration (type, location)"},
+			{Key: "environment", Type: FieldTypeMap, Description: "Build environment configuration"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "project_name", Type: "string", Description: "Created project name"},
+			{Key: "arn", Type: "string", Description: "Project ARN"},
+		},
+	})
+
+	// ---- CodeBuild Delete Project ----
+
+	r.Register(&StepSchema{
+		Type:        "step.codebuild_delete_project",
+		Plugin:      "cicd",
+		Description: "Deletes an AWS CodeBuild project.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
+			{Key: "project_name", Type: FieldTypeString, Description: "CodeBuild project name to delete", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "deleted", Type: "boolean", Description: "Whether the project was deleted"},
+		},
+	})
+
+	// ---- CodeBuild List Builds ----
+
+	r.Register(&StepSchema{
+		Type:        "step.codebuild_list_builds",
+		Plugin:      "cicd",
+		Description: "Lists builds for an AWS CodeBuild project.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
+			{Key: "project_name", Type: FieldTypeString, Description: "CodeBuild project name", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "builds", Type: "[]any", Description: "List of build IDs"},
+			{Key: "count", Type: "number", Description: "Number of builds"},
+		},
+	})
+
+	// ---- CodeBuild Logs ----
+
+	r.Register(&StepSchema{
+		Type:        "step.codebuild_logs",
+		Plugin:      "cicd",
+		Description: "Retrieves logs for an AWS CodeBuild build.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
+			{Key: "build_id", Type: FieldTypeString, Description: "CodeBuild build ID", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "logs", Type: "string", Description: "Build log output"},
+		},
+	})
+
+	// ---- CodeBuild Start ----
+
+	r.Register(&StepSchema{
+		Type:        "step.codebuild_start",
+		Plugin:      "cicd",
+		Description: "Starts an AWS CodeBuild build.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
+			{Key: "project_name", Type: FieldTypeString, Description: "CodeBuild project name", Required: true},
+			{Key: "env_override", Type: FieldTypeMap, Description: "Environment variable overrides"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "build_id", Type: "string", Description: "Started build ID"},
+			{Key: "status", Type: "string", Description: "Initial build status"},
+		},
+	})
+
+	// ---- CodeBuild Status ----
+
+	r.Register(&StepSchema{
+		Type:        "step.codebuild_status",
+		Plugin:      "cicd",
+		Description: "Gets the status of an AWS CodeBuild build.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the aws.codebuild module", Required: true},
+			{Key: "build_id", Type: FieldTypeString, Description: "CodeBuild build ID", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "status", Type: "string", Description: "Build status (IN_PROGRESS, SUCCEEDED, FAILED, etc.)"},
+			{Key: "phase", Type: "string", Description: "Current build phase"},
+		},
+	})
+
+	// ---- DNS Apply ----
+
+	r.Register(&StepSchema{
+		Type:        "step.dns_apply",
+		Plugin:      "platform",
+		Description: "Applies DNS zone and record changes.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.dns module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "zone_id", Type: "string", Description: "DNS zone ID"},
+			{Key: "nameservers", Type: "[]string", Description: "Zone nameservers"},
+		},
+	})
+
+	// ---- DNS Plan ----
+
+	r.Register(&StepSchema{
+		Type:        "step.dns_plan",
+		Plugin:      "platform",
+		Description: "Plans DNS changes without applying them.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.dns module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
+			{Key: "changes", Type: "number", Description: "Number of changes planned"},
+		},
+	})
+
+	// ---- DNS Status ----
+
+	r.Register(&StepSchema{
+		Type:        "step.dns_status",
+		Plugin:      "platform",
+		Description: "Gets the current status of a DNS zone.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.dns module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "status", Type: "string", Description: "Zone status"},
+			{Key: "zone_id", Type: "string", Description: "DNS zone ID"},
+		},
+	})
+
+	// ---- DigitalOcean Deploy ----
+
+	r.Register(&StepSchema{
+		Type:        "step.do_deploy",
+		Plugin:      "platform",
+		Description: "Deploys an application to DigitalOcean App Platform.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "app_id", Type: "string", Description: "DigitalOcean app ID"},
+			{Key: "live_url", Type: "string", Description: "App live URL"},
+		},
+	})
+
+	// ---- DigitalOcean Destroy ----
+
+	r.Register(&StepSchema{
+		Type:        "step.do_destroy",
+		Plugin:      "platform",
+		Description: "Destroys a DigitalOcean App Platform application.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "destroyed", Type: "boolean", Description: "Whether the app was destroyed"},
+		},
+	})
+
+	// ---- DigitalOcean Logs ----
+
+	r.Register(&StepSchema{
+		Type:        "step.do_logs",
+		Plugin:      "platform",
+		Description: "Retrieves logs from a DigitalOcean App Platform application.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
+			{Key: "component", Type: FieldTypeString, Description: "App component name"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "logs", Type: "string", Description: "Application log output"},
+		},
+	})
+
+	// ---- DigitalOcean Scale ----
+
+	r.Register(&StepSchema{
+		Type:        "step.do_scale",
+		Plugin:      "platform",
+		Description: "Scales a DigitalOcean App Platform application.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
+			{Key: "instances", Type: FieldTypeNumber, Description: "Desired instance count", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "instances", Type: "number", Description: "New instance count"},
+		},
+	})
+
+	// ---- DigitalOcean Status ----
+
+	r.Register(&StepSchema{
+		Type:        "step.do_status",
+		Plugin:      "platform",
+		Description: "Gets the status of a DigitalOcean App Platform application.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.do_app module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "phase", Type: "string", Description: "App deployment phase"},
+			{Key: "live_url", Type: "string", Description: "App live URL"},
+		},
+	})
+
+	// ---- ECS Apply ----
+
+	r.Register(&StepSchema{
+		Type:        "step.ecs_apply",
+		Plugin:      "platform",
+		Description: "Applies (deploys) an ECS Fargate service.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
+			{Key: "image", Type: FieldTypeString, Description: "Container image to deploy"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "service_arn", Type: "string", Description: "ECS service ARN"},
+			{Key: "status", Type: "string", Description: "Service status"},
+		},
+	})
+
+	// ---- ECS Destroy ----
+
+	r.Register(&StepSchema{
+		Type:        "step.ecs_destroy",
+		Plugin:      "platform",
+		Description: "Destroys an ECS Fargate service.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "destroyed", Type: "boolean", Description: "Whether the service was destroyed"},
+		},
+	})
+
+	// ---- ECS Plan ----
+
+	r.Register(&StepSchema{
+		Type:        "step.ecs_plan",
+		Plugin:      "platform",
+		Description: "Plans ECS service deployment changes without applying them.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
+			{Key: "image", Type: FieldTypeString, Description: "Container image to plan for"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
+			{Key: "changes", Type: "number", Description: "Number of changes planned"},
+		},
+	})
+
+	// ---- ECS Status ----
+
+	r.Register(&StepSchema{
+		Type:        "step.ecs_status",
+		Plugin:      "platform",
+		Description: "Gets the status of an ECS Fargate service.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.ecs module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "status", Type: "string", Description: "Service status"},
+			{Key: "running_count", Type: "number", Description: "Number of running tasks"},
+		},
+	})
+
+	// ---- Git Checkout ----
+
+	r.Register(&StepSchema{
+		Type:        "step.git_checkout",
+		Plugin:      "cicd",
+		Description: "Checks out a Git branch, tag, or commit.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "path", Type: FieldTypeString, Description: "Local repository path", Required: true},
+			{Key: "ref", Type: FieldTypeString, Description: "Branch, tag, or commit SHA to checkout", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "commit", Type: "string", Description: "HEAD commit SHA after checkout"},
+			{Key: "branch", Type: "string", Description: "Current branch name"},
+		},
+	})
+
+	// ---- Git Clone ----
+
+	r.Register(&StepSchema{
+		Type:        "step.git_clone",
+		Plugin:      "cicd",
+		Description: "Clones a Git repository to a local path.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "url", Type: FieldTypeString, Description: "Repository URL to clone", Required: true},
+			{Key: "path", Type: FieldTypeString, Description: "Local path to clone into", Required: true},
+			{Key: "branch", Type: FieldTypeString, Description: "Branch to clone (default: main)"},
+			{Key: "depth", Type: FieldTypeNumber, Description: "Clone depth (0 = full history)"},
+			{Key: "token", Type: FieldTypeString, Description: "Auth token for private repos", Sensitive: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "commit", Type: "string", Description: "HEAD commit SHA"},
+			{Key: "path", Type: "string", Description: "Local path where repo was cloned"},
+		},
+	})
+
+	// ---- Git Commit ----
+
+	r.Register(&StepSchema{
+		Type:        "step.git_commit",
+		Plugin:      "cicd",
+		Description: "Creates a Git commit with staged changes.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "path", Type: FieldTypeString, Description: "Local repository path", Required: true},
+			{Key: "message", Type: FieldTypeString, Description: "Commit message", Required: true},
+			{Key: "author_name", Type: FieldTypeString, Description: "Commit author name"},
+			{Key: "author_email", Type: FieldTypeString, Description: "Commit author email"},
+			{Key: "add_all", Type: FieldTypeBool, Description: "Stage all changes before committing"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "sha", Type: "string", Description: "New commit SHA"},
+		},
+	})
+
+	// ---- Git Push ----
+
+	r.Register(&StepSchema{
+		Type:        "step.git_push",
+		Plugin:      "cicd",
+		Description: "Pushes local commits to a remote Git repository.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "path", Type: FieldTypeString, Description: "Local repository path", Required: true},
+			{Key: "remote", Type: FieldTypeString, Description: "Remote name (default: origin)", DefaultValue: "origin"},
+			{Key: "branch", Type: FieldTypeString, Description: "Branch to push"},
+			{Key: "token", Type: FieldTypeString, Description: "Auth token for private repos", Sensitive: true},
+			{Key: "force", Type: FieldTypeBool, Description: "Force push"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "pushed", Type: "boolean", Description: "Whether push succeeded"},
+		},
+	})
+
+	// ---- Git Tag ----
+
+	r.Register(&StepSchema{
+		Type:        "step.git_tag",
+		Plugin:      "cicd",
+		Description: "Creates a Git tag on the current commit.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "path", Type: FieldTypeString, Description: "Local repository path", Required: true},
+			{Key: "tag", Type: FieldTypeString, Description: "Tag name to create", Required: true},
+			{Key: "message", Type: FieldTypeString, Description: "Annotated tag message (empty = lightweight tag)"},
+			{Key: "push", Type: FieldTypeBool, Description: "Push tag to remote after creating"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "tag", Type: "string", Description: "Created tag name"},
+			{Key: "sha", Type: "string", Description: "Tagged commit SHA"},
+		},
+	})
+
+	// ---- GitLab Create MR ----
+
+	r.Register(&StepSchema{
+		Type:        "step.gitlab_create_mr",
+		Plugin:      "gitlab",
+		Description: "Creates a GitLab merge request.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "client", Type: FieldTypeString, Description: "Name of the gitlab.client module", Required: true},
+			{Key: "project_id", Type: FieldTypeString, Description: "GitLab project ID or path", Required: true},
+			{Key: "source_branch", Type: FieldTypeString, Description: "Source branch for the MR", Required: true},
+			{Key: "target_branch", Type: FieldTypeString, Description: "Target branch for the MR", Required: true},
+			{Key: "title", Type: FieldTypeString, Description: "MR title", Required: true},
+			{Key: "description", Type: FieldTypeString, Description: "MR description"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "iid", Type: "number", Description: "Merge request internal ID"},
+			{Key: "url", Type: "string", Description: "Merge request URL"},
+		},
+	})
+
+	// ---- GitLab MR Comment ----
+
+	r.Register(&StepSchema{
+		Type:        "step.gitlab_mr_comment",
+		Plugin:      "gitlab",
+		Description: "Adds a comment to a GitLab merge request.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "client", Type: FieldTypeString, Description: "Name of the gitlab.client module", Required: true},
+			{Key: "project_id", Type: FieldTypeString, Description: "GitLab project ID or path", Required: true},
+			{Key: "mr_iid", Type: FieldTypeNumber, Description: "Merge request internal ID", Required: true},
+			{Key: "body", Type: FieldTypeString, Description: "Comment body text", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "note_id", Type: "number", Description: "Created note ID"},
+		},
+	})
+
+	// ---- GitLab Parse Webhook ----
+
+	r.Register(&StepSchema{
+		Type:        "step.gitlab_parse_webhook",
+		Plugin:      "gitlab",
+		Description: "Parses and validates a GitLab webhook payload.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "webhook", Type: FieldTypeString, Description: "Name of the gitlab.webhook module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "event_type", Type: "string", Description: "GitLab event type (push, tag, merge_request, etc.)"},
+			{Key: "project_id", Type: "number", Description: "GitLab project ID"},
+			{Key: "payload", Type: "any", Description: "Parsed webhook payload"},
+		},
+	})
+
+	// ---- GitLab Pipeline Status ----
+
+	r.Register(&StepSchema{
+		Type:        "step.gitlab_pipeline_status",
+		Plugin:      "gitlab",
+		Description: "Gets the status of a GitLab pipeline.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "client", Type: FieldTypeString, Description: "Name of the gitlab.client module", Required: true},
+			{Key: "project_id", Type: FieldTypeString, Description: "GitLab project ID or path", Required: true},
+			{Key: "pipeline_id", Type: FieldTypeNumber, Description: "Pipeline ID", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "status", Type: "string", Description: "Pipeline status (running, success, failed, etc.)"},
+			{Key: "url", Type: "string", Description: "Pipeline web URL"},
+		},
+	})
+
+	// ---- GitLab Trigger Pipeline ----
+
+	r.Register(&StepSchema{
+		Type:        "step.gitlab_trigger_pipeline",
+		Plugin:      "gitlab",
+		Description: "Triggers a GitLab CI/CD pipeline.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "client", Type: FieldTypeString, Description: "Name of the gitlab.client module", Required: true},
+			{Key: "project_id", Type: FieldTypeString, Description: "GitLab project ID or path", Required: true},
+			{Key: "ref", Type: FieldTypeString, Description: "Branch or tag to run pipeline on", Required: true},
+			{Key: "variables", Type: FieldTypeMap, Description: "Pipeline variables to pass"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "pipeline_id", Type: "number", Description: "Triggered pipeline ID"},
+			{Key: "status", Type: "string", Description: "Initial pipeline status"},
+			{Key: "url", Type: "string", Description: "Pipeline web URL"},
+		},
+	})
+
+	// ---- IaC Apply ----
+
+	r.Register(&StepSchema{
+		Type:        "step.iac_apply",
+		Plugin:      "platform",
+		Description: "Applies infrastructure changes from an IaC plan.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the IaC module to apply", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "applied", Type: "boolean", Description: "Whether changes were applied"},
+			{Key: "resources", Type: "[]any", Description: "Applied resource details"},
+		},
+	})
+
+	// ---- IaC Destroy ----
+
+	r.Register(&StepSchema{
+		Type:        "step.iac_destroy",
+		Plugin:      "platform",
+		Description: "Destroys infrastructure managed by an IaC module.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the IaC module to destroy", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "destroyed", Type: "boolean", Description: "Whether resources were destroyed"},
+		},
+	})
+
+	// ---- IaC Drift Detect ----
+
+	r.Register(&StepSchema{
+		Type:        "step.iac_drift_detect",
+		Plugin:      "platform",
+		Description: "Detects configuration drift between IaC state and actual infrastructure.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the IaC module to check", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "has_drift", Type: "boolean", Description: "Whether drift was detected"},
+			{Key: "drifted_resources", Type: "[]any", Description: "List of drifted resources"},
+		},
+	})
+
+	// ---- IaC Plan ----
+
+	r.Register(&StepSchema{
+		Type:        "step.iac_plan",
+		Plugin:      "platform",
+		Description: "Plans infrastructure changes without applying them.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the IaC module to plan", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
+			{Key: "changes", Type: "number", Description: "Number of changes planned"},
+		},
+	})
+
+	// ---- IaC Status ----
+
+	r.Register(&StepSchema{
+		Type:        "step.iac_status",
+		Plugin:      "platform",
+		Description: "Gets the current provisioning status of IaC-managed infrastructure.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the IaC module to query", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "status", Type: "string", Description: "Provisioning status"},
+			{Key: "resources", Type: "[]any", Description: "Managed resource states"},
+		},
+	})
+
+	// ---- Kubernetes Apply ----
+
+	r.Register(&StepSchema{
+		Type:        "step.k8s_apply",
+		Plugin:      "platform",
+		Description: "Applies Kubernetes manifests to a cluster.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.kubernetes module", Required: true},
+			{Key: "manifest", Type: FieldTypeString, Description: "YAML manifest or path to manifest file"},
+			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "applied", Type: "boolean", Description: "Whether manifests were applied"},
+			{Key: "resources", Type: "[]any", Description: "Applied resource summaries"},
+		},
+	})
+
+	// ---- Kubernetes Destroy ----
+
+	r.Register(&StepSchema{
+		Type:        "step.k8s_destroy",
+		Plugin:      "platform",
+		Description: "Deletes Kubernetes resources.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.kubernetes module", Required: true},
+			{Key: "manifest", Type: FieldTypeString, Description: "YAML manifest or path to manifest file"},
+			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "destroyed", Type: "boolean", Description: "Whether resources were deleted"},
+		},
+	})
+
+	// ---- Kubernetes Plan ----
+
+	r.Register(&StepSchema{
+		Type:        "step.k8s_plan",
+		Plugin:      "platform",
+		Description: "Diffs Kubernetes manifests against the current cluster state.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.kubernetes module", Required: true},
+			{Key: "manifest", Type: FieldTypeString, Description: "YAML manifest or path to manifest file"},
+			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "diff", Type: "string", Description: "Diff output"},
+			{Key: "changes", Type: "number", Description: "Number of changes detected"},
+		},
+	})
+
+	// ---- Kubernetes Status ----
+
+	r.Register(&StepSchema{
+		Type:        "step.k8s_status",
+		Plugin:      "platform",
+		Description: "Gets the status of Kubernetes resources.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.kubernetes module", Required: true},
+			{Key: "kind", Type: FieldTypeString, Description: "Resource kind (Deployment, Service, etc.)"},
+			{Key: "name", Type: FieldTypeString, Description: "Resource name"},
+			{Key: "namespace", Type: FieldTypeString, Description: "Kubernetes namespace"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "status", Type: "string", Description: "Resource status"},
+			{Key: "ready", Type: "boolean", Description: "Whether resource is ready"},
+		},
+	})
+
+	// ---- Marketplace Detail ----
+
+	r.Register(&StepSchema{
+		Type:        "step.marketplace_detail",
+		Plugin:      "marketplace",
+		Description: "Gets detailed information about a marketplace plugin.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "plugin", Type: FieldTypeString, Description: "Plugin name to get details for", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "plugin", Type: "any", Description: "Plugin metadata and details"},
+		},
+	})
+
+	// ---- Marketplace Install ----
+
+	r.Register(&StepSchema{
+		Type:        "step.marketplace_install",
+		Plugin:      "marketplace",
+		Description: "Installs a plugin from the marketplace.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "plugin", Type: FieldTypeString, Description: "Plugin name to install", Required: true},
+			{Key: "version", Type: FieldTypeString, Description: "Plugin version (default: latest)"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "installed", Type: "boolean", Description: "Whether installation succeeded"},
+			{Key: "version", Type: "string", Description: "Installed plugin version"},
+		},
+	})
+
+	// ---- Marketplace Installed ----
+
+	r.Register(&StepSchema{
+		Type:        "step.marketplace_installed",
+		Plugin:      "marketplace",
+		Description: "Lists installed marketplace plugins.",
+		ConfigFields: []ConfigFieldDef{},
+		Outputs: []StepOutputDef{
+			{Key: "plugins", Type: "[]any", Description: "List of installed plugin metadata"},
+			{Key: "count", Type: "number", Description: "Number of installed plugins"},
+		},
+	})
+
+	// ---- Marketplace Search ----
+
+	r.Register(&StepSchema{
+		Type:        "step.marketplace_search",
+		Plugin:      "marketplace",
+		Description: "Searches the plugin marketplace.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "query", Type: FieldTypeString, Description: "Search query string"},
+			{Key: "category", Type: FieldTypeString, Description: "Filter by category"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "results", Type: "[]any", Description: "Search result plugins"},
+			{Key: "count", Type: "number", Description: "Number of results"},
+		},
+	})
+
+	// ---- Marketplace Uninstall ----
+
+	r.Register(&StepSchema{
+		Type:        "step.marketplace_uninstall",
+		Plugin:      "marketplace",
+		Description: "Uninstalls a marketplace plugin.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "plugin", Type: FieldTypeString, Description: "Plugin name to uninstall", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "uninstalled", Type: "boolean", Description: "Whether uninstall succeeded"},
+		},
+	})
+
+	// ---- Marketplace Update ----
+
+	r.Register(&StepSchema{
+		Type:        "step.marketplace_update",
+		Plugin:      "marketplace",
+		Description: "Updates an installed marketplace plugin to a newer version.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "plugin", Type: FieldTypeString, Description: "Plugin name to update", Required: true},
+			{Key: "version", Type: FieldTypeString, Description: "Target version (default: latest)"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "updated", Type: "boolean", Description: "Whether update succeeded"},
+			{Key: "version", Type: "string", Description: "Updated plugin version"},
+		},
+	})
+
+	// ---- Network Apply ----
+
+	r.Register(&StepSchema{
+		Type:        "step.network_apply",
+		Plugin:      "platform",
+		Description: "Applies VPC networking changes.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.networking module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "vpc_id", Type: "string", Description: "VPC ID"},
+			{Key: "subnet_ids", Type: "[]string", Description: "Created subnet IDs"},
+		},
+	})
+
+	// ---- Network Plan ----
+
+	r.Register(&StepSchema{
+		Type:        "step.network_plan",
+		Plugin:      "platform",
+		Description: "Plans VPC networking changes without applying them.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.networking module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
+			{Key: "changes", Type: "number", Description: "Number of changes planned"},
+		},
+	})
+
+	// ---- Network Status ----
+
+	r.Register(&StepSchema{
+		Type:        "step.network_status",
+		Plugin:      "platform",
+		Description: "Gets the status of VPC networking resources.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.networking module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "status", Type: "string", Description: "Network status"},
+			{Key: "vpc_id", Type: "string", Description: "VPC ID"},
+		},
+	})
+
+	// ---- NoSQL Delete ----
+
+	r.Register(&StepSchema{
+		Type:        "step.nosql_delete",
+		Plugin:      "datastores",
+		Description: "Deletes an item from a NoSQL store by key.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the nosql.* module", Required: true},
+			{Key: "key", Type: FieldTypeString, Description: "Item key to delete", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "deleted", Type: "boolean", Description: "Whether the item was deleted"},
+		},
+	})
+
+	// ---- Policy Evaluate ----
+
+	r.Register(&StepSchema{
+		Type:        "step.policy_evaluate",
+		Plugin:      "policy",
+		Description: "Evaluates input data against a loaded policy and returns an allow/deny decision.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "engine", Type: FieldTypeString, Description: "Name of the policy.* module", Required: true},
+			{Key: "policy", Type: FieldTypeString, Description: "Policy name to evaluate", Required: true},
+			{Key: "input", Type: FieldTypeJSON, Description: "Input data for policy evaluation"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "allowed", Type: "boolean", Description: "Whether the policy allows the action"},
+			{Key: "reason", Type: "string", Description: "Decision reason or denial message"},
+		},
+	})
+
+	// ---- Policy List ----
+
+	r.Register(&StepSchema{
+		Type:        "step.policy_list",
+		Plugin:      "policy",
+		Description: "Lists all loaded policies in a policy engine.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "engine", Type: FieldTypeString, Description: "Name of the policy.* module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "policies", Type: "[]string", Description: "List of loaded policy names"},
+			{Key: "count", Type: "number", Description: "Number of loaded policies"},
+		},
+	})
+
+	// ---- Policy Load ----
+
+	r.Register(&StepSchema{
+		Type:        "step.policy_load",
+		Plugin:      "policy",
+		Description: "Loads a policy into the policy engine at runtime.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "engine", Type: FieldTypeString, Description: "Name of the policy.* module", Required: true},
+			{Key: "name", Type: FieldTypeString, Description: "Policy name", Required: true},
+			{Key: "content", Type: FieldTypeString, Description: "Policy content (Rego, CEL, etc.)", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "loaded", Type: "boolean", Description: "Whether the policy was loaded successfully"},
+		},
+	})
+
+	// ---- Policy Test ----
+
+	r.Register(&StepSchema{
+		Type:        "step.policy_test",
+		Plugin:      "policy",
+		Description: "Runs tests against a policy to verify its behavior.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "engine", Type: FieldTypeString, Description: "Name of the policy.* module", Required: true},
+			{Key: "policy", Type: FieldTypeString, Description: "Policy name to test", Required: true},
+			{Key: "cases", Type: FieldTypeJSON, Description: "Test cases (array of {input, expected_allow})"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "passed", Type: "boolean", Description: "Whether all test cases passed"},
+			{Key: "results", Type: "[]any", Description: "Per-case test results"},
+		},
+	})
+
+	// ---- Region Deploy ----
+
+	r.Register(&StepSchema{
+		Type:        "step.region_deploy",
+		Plugin:      "platform",
+		Description: "Deploys to a specific region in a multi-region configuration.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.region module", Required: true},
+			{Key: "region", Type: FieldTypeString, Description: "Region name to deploy to"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "deployed", Type: "boolean", Description: "Whether deployment succeeded"},
+			{Key: "endpoint", Type: "string", Description: "Region endpoint after deployment"},
+		},
+	})
+
+	// ---- Region Failover ----
+
+	r.Register(&StepSchema{
+		Type:        "step.region_failover",
+		Plugin:      "platform",
+		Description: "Triggers a failover to a secondary region.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.region module", Required: true},
+			{Key: "from_region", Type: FieldTypeString, Description: "Region to fail over from"},
+			{Key: "to_region", Type: FieldTypeString, Description: "Region to fail over to"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "active_region", Type: "string", Description: "Active region after failover"},
+		},
+	})
+
+	// ---- Region Promote ----
+
+	r.Register(&StepSchema{
+		Type:        "step.region_promote",
+		Plugin:      "platform",
+		Description: "Promotes a region to primary (increases traffic weight or priority).",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.region module", Required: true},
+			{Key: "region", Type: FieldTypeString, Description: "Region to promote", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "promoted", Type: "boolean", Description: "Whether promotion succeeded"},
+		},
+	})
+
+	// ---- Region Status ----
+
+	r.Register(&StepSchema{
+		Type:        "step.region_status",
+		Plugin:      "platform",
+		Description: "Gets the health and status of all regions.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.region module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "regions", Type: "[]any", Description: "Region status objects"},
+			{Key: "active_count", Type: "number", Description: "Number of healthy regions"},
+		},
+	})
+
+	// ---- Region Sync ----
+
+	r.Register(&StepSchema{
+		Type:        "step.region_sync",
+		Plugin:      "platform",
+		Description: "Syncs state or configuration across all regions.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.region module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "synced", Type: "boolean", Description: "Whether sync succeeded"},
+			{Key: "regions_synced", Type: "number", Description: "Number of regions synced"},
+		},
+	})
+
+	// ---- Region Weight ----
+
+	r.Register(&StepSchema{
+		Type:        "step.region_weight",
+		Plugin:      "platform",
+		Description: "Sets the traffic weight for a region.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.region module", Required: true},
+			{Key: "region", Type: FieldTypeString, Description: "Region name", Required: true},
+			{Key: "weight", Type: FieldTypeNumber, Description: "Traffic weight (0-100)", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "weight", Type: "number", Description: "Applied weight"},
+		},
+	})
+
+	// ---- Scaling Apply ----
+
+	r.Register(&StepSchema{
+		Type:        "step.scaling_apply",
+		Plugin:      "platform",
+		Description: "Applies autoscaling policy changes.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "applied", Type: "boolean", Description: "Whether scaling policies were applied"},
+		},
+	})
+
+	// ---- Scaling Destroy ----
+
+	r.Register(&StepSchema{
+		Type:        "step.scaling_destroy",
+		Plugin:      "platform",
+		Description: "Removes autoscaling policies.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "destroyed", Type: "boolean", Description: "Whether policies were removed"},
+		},
+	})
+
+	// ---- Scaling Plan ----
+
+	r.Register(&StepSchema{
+		Type:        "step.scaling_plan",
+		Plugin:      "platform",
+		Description: "Plans autoscaling policy changes without applying them.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "plan", Type: "string", Description: "Human-readable plan output"},
+			{Key: "changes", Type: "number", Description: "Number of changes planned"},
+		},
+	})
+
+	// ---- Scaling Status ----
+
+	r.Register(&StepSchema{
+		Type:        "step.scaling_status",
+		Plugin:      "platform",
+		Description: "Gets the status of autoscaling policies.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the platform.autoscaling module", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "status", Type: "string", Description: "Scaling status"},
+			{Key: "policies", Type: "[]any", Description: "Active scaling policy details"},
+		},
+	})
+
+	// ---- Secret Rotate ----
+
+	r.Register(&StepSchema{
+		Type:        "step.secret_rotate",
+		Plugin:      "secrets",
+		Description: "Rotates a secret by generating a new value and updating the secrets backend.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Name of the secrets module", Required: true},
+			{Key: "secret_id", Type: FieldTypeString, Description: "Secret ID or ARN to rotate", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "rotated", Type: "boolean", Description: "Whether the secret was rotated"},
+			{Key: "version_id", Type: "string", Description: "New secret version ID"},
+		},
+	})
+
+	// ---- Trace Annotate ----
+
+	r.Register(&StepSchema{
+		Type:        "step.trace_annotate",
+		Plugin:      "observability",
+		Description: "Adds attributes or events to the current trace span.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "attributes", Type: FieldTypeMap, Description: "Key/value attributes to add to the span"},
+			{Key: "event", Type: FieldTypeString, Description: "Event name to record on the span"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "annotated", Type: "boolean", Description: "Whether annotation was applied"},
+		},
+	})
+
+	// ---- Trace Extract ----
+
+	r.Register(&StepSchema{
+		Type:        "step.trace_extract",
+		Plugin:      "observability",
+		Description: "Extracts trace context from incoming request headers or message attributes.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "source", Type: FieldTypeString, Description: "Source to extract from: headers, message, context", DefaultValue: "headers"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "trace_id", Type: "string", Description: "Extracted trace ID"},
+			{Key: "span_id", Type: "string", Description: "Extracted span ID"},
+		},
+	})
+
+	// ---- Trace Inject ----
+
+	r.Register(&StepSchema{
+		Type:        "step.trace_inject",
+		Plugin:      "observability",
+		Description: "Injects trace context into outgoing request headers or message attributes.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "target", Type: FieldTypeString, Description: "Target to inject into: headers, message", DefaultValue: "headers"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "injected", Type: "boolean", Description: "Whether context was injected"},
+		},
+	})
+
+	// ---- Trace Link ----
+
+	r.Register(&StepSchema{
+		Type:        "step.trace_link",
+		Plugin:      "observability",
+		Description: "Creates a causal link between the current span and another span.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "trace_id", Type: FieldTypeString, Description: "Trace ID to link to", Required: true},
+			{Key: "span_id", Type: FieldTypeString, Description: "Span ID to link to"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "linked", Type: "boolean", Description: "Whether the link was created"},
+		},
+	})
+
+	// ---- Trace Start ----
+
+	r.Register(&StepSchema{
+		Type:        "step.trace_start",
+		Plugin:      "observability",
+		Description: "Starts a new trace span for the current pipeline step or operation.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "name", Type: FieldTypeString, Description: "Span name", Required: true},
+			{Key: "attributes", Type: FieldTypeMap, Description: "Initial span attributes"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "trace_id", Type: "string", Description: "New trace ID"},
+			{Key: "span_id", Type: "string", Description: "New span ID"},
+		},
+	})
 }

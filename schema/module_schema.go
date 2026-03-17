@@ -2309,4 +2309,639 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "token_source", Label: "Token Source", Type: FieldTypeString, Required: true, Description: "Dot-path to Bearer token"},
 		},
 	})
+
+	// ---- Actor System ----
+
+	r.Register(&ModuleSchema{
+		Type:     "actor.system",
+		Label:    "Actor System",
+		Category: "infrastructure",
+		Description: "Actor runtime for stateful, message-driven services. " +
+			"Actors are lightweight, isolated units of computation that communicate through messages.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "shutdownTimeout", Label: "Shutdown Timeout", Type: FieldTypeDuration, Description: "How long to wait for in-flight messages to drain before forcing shutdown", DefaultValue: "30s"},
+			{Key: "defaultRecovery", Label: "Default Recovery Policy", Type: FieldTypeJSON, Description: "What happens when any actor in this system crashes"},
+		},
+	})
+
+	// ---- Actor Pool ----
+
+	r.Register(&ModuleSchema{
+		Type:        "actor.pool",
+		Label:       "Actor Pool",
+		Category:    "infrastructure",
+		Description: "Defines a group of actors that handle the same type of work with configurable lifecycle and routing.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "system", Label: "Actor Cluster", Type: FieldTypeString, Required: true, Description: "Name of the actor.system module this pool belongs to"},
+			{Key: "mode", Label: "Lifecycle Mode", Type: FieldTypeSelect, Options: []string{"auto-managed", "permanent"}, DefaultValue: "auto-managed", Description: "'auto-managed': actors activate on first message; 'permanent': fixed pool"},
+			{Key: "idleTimeout", Label: "Idle Timeout", Type: FieldTypeDuration, DefaultValue: "10m", Description: "How long an auto-managed actor stays idle before deactivating"},
+			{Key: "poolSize", Label: "Pool Size", Type: FieldTypeNumber, DefaultValue: 10, Description: "Number of actors in a permanent pool"},
+			{Key: "routing", Label: "Load Balancing", Type: FieldTypeSelect, Options: []string{"round-robin", "random", "broadcast", "sticky"}, DefaultValue: "round-robin", Description: "How messages are distributed among actors"},
+			{Key: "routingKey", Label: "Sticky Routing Key", Type: FieldTypeString, Description: "Message field used for sticky routing"},
+			{Key: "recovery", Label: "Recovery Policy", Type: FieldTypeJSON, Description: "What happens when an actor crashes"},
+		},
+	})
+
+	// ---- App Container ----
+
+	r.Register(&ModuleSchema{
+		Type:        "app.container",
+		Label:       "App Container",
+		Category:    "infrastructure",
+		Description: "Application deployment abstraction that translates high-level config into platform-specific resources (Kubernetes Deployment+Service or ECS task definition)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "environment", Label: "Environment", Type: FieldTypeString, Required: true, Description: "Name of the platform.kubernetes or platform.ecs module to deploy to"},
+			{Key: "image", Label: "Container Image", Type: FieldTypeString, Required: true, Description: "Container image reference (e.g. registry.example.com/my-api:v1.0.0)"},
+			{Key: "replicas", Label: "Replicas", Type: FieldTypeNumber, Description: "Desired replica count"},
+			{Key: "ports", Label: "Ports", Type: FieldTypeArray, Description: "List of container port numbers"},
+			{Key: "cpu", Label: "CPU", Type: FieldTypeString, Description: "CPU request/limit (e.g. 500m)"},
+			{Key: "memory", Label: "Memory", Type: FieldTypeString, Description: "Memory request/limit (e.g. 512Mi)"},
+			{Key: "env", Label: "Environment Variables", Type: FieldTypeMap, Description: "Environment variables injected into the container"},
+			{Key: "health_path", Label: "Health Path", Type: FieldTypeString, Description: "HTTP health check path"},
+			{Key: "health_port", Label: "Health Port", Type: FieldTypeNumber, Description: "HTTP health check port"},
+		},
+	})
+
+	// ---- Argo Workflows ----
+
+	r.Register(&ModuleSchema{
+		Type:        "argo.workflows",
+		Label:       "Argo Workflows",
+		Category:    "cicd",
+		Description: "Manages Argo Workflows submissions and status on a Kubernetes cluster",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "namespace", Label: "Namespace", Type: FieldTypeString, Description: "Kubernetes namespace for Argo Workflows"},
+			{Key: "server", Label: "Argo Server", Type: FieldTypeString, Description: "Argo Workflows server URL"},
+			{Key: "token", Label: "Auth Token", Type: FieldTypeString, Description: "Bearer token for Argo server authentication", Sensitive: true},
+		},
+	})
+
+	// ---- Auth Token Blacklist ----
+
+	r.Register(&ModuleSchema{
+		Type:        "auth.token-blacklist",
+		Label:       "Token Blacklist",
+		Category:    "security",
+		Description: "JWT token blacklist for revocation support (memory or Redis backend)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "backend", Label: "Backend", Type: FieldTypeSelect, Options: []string{"memory", "redis"}, DefaultValue: "memory", Description: "Storage backend for the blacklist"},
+			{Key: "redis_url", Label: "Redis URL", Type: FieldTypeString, Description: "Redis connection URL (redis backend only)", Placeholder: "redis://localhost:6379"},
+			{Key: "cleanup_interval", Label: "Cleanup Interval", Type: FieldTypeDuration, DefaultValue: "5m", Description: "How often to purge expired tokens"},
+		},
+	})
+
+	// ---- AWS CodeBuild ----
+
+	r.Register(&ModuleSchema{
+		Type:        "aws.codebuild",
+		Label:       "AWS CodeBuild",
+		Category:    "cicd",
+		Description: "AWS CodeBuild integration for running build projects in the cloud",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "region", Label: "AWS Region", Type: FieldTypeString, Description: "AWS region (e.g. us-east-1)"},
+			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
+			{Key: "role_arn", Label: "IAM Role ARN", Type: FieldTypeString, Description: "IAM role ARN for CodeBuild service role"},
+		},
+	})
+
+	// ---- Cache Redis ----
+
+	r.Register(&ModuleSchema{
+		Type:        "cache.redis",
+		Label:       "Redis Cache",
+		Category:    "infrastructure",
+		Description: "Redis-backed key/value cache for pipeline step data",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "address", Label: "Address", Type: FieldTypeString, DefaultValue: "localhost:6379", Description: "Redis server address (host:port)"},
+			{Key: "password", Label: "Password", Type: FieldTypeString, Description: "Redis password (optional)", Sensitive: true},
+			{Key: "db", Label: "Database", Type: FieldTypeNumber, DefaultValue: 0, Description: "Redis database number"},
+			{Key: "prefix", Label: "Key Prefix", Type: FieldTypeString, DefaultValue: "wf:", Description: "Prefix applied to all cache keys"},
+			{Key: "defaultTTL", Label: "Default TTL", Type: FieldTypeString, DefaultValue: "1h", Description: "Default time-to-live for cached values"},
+		},
+	})
+
+	// ---- Cloud Account ----
+
+	r.Register(&ModuleSchema{
+		Type:        "cloud.account",
+		Label:       "Cloud Account",
+		Category:    "infrastructure",
+		Description: "Cloud provider credentials (AWS, GCP, Azure, DigitalOcean, Kubernetes, or mock)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Required: true, Description: "Cloud provider: aws, gcp, azure, digitalocean, kubernetes, mock"},
+			{Key: "region", Label: "Region", Type: FieldTypeString, Description: "Primary region (e.g. us-east-1, us-central1, eastus, nyc3)"},
+			{Key: "credentials", Label: "Credentials", Type: FieldTypeJSON, Description: "Credential configuration (type, keys, paths)"},
+			{Key: "project_id", Label: "GCP Project ID", Type: FieldTypeString, Description: "GCP project ID"},
+			{Key: "subscription_id", Label: "Azure Subscription ID", Type: FieldTypeString, Description: "Azure subscription ID"},
+		},
+	})
+
+	// ---- GitLab Client ----
+
+	r.Register(&ModuleSchema{
+		Type:        "gitlab.client",
+		Label:       "GitLab Client",
+		Category:    "integration",
+		Description: "GitLab API client for triggering pipelines, managing MRs, and querying pipeline status",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "url", Label: "GitLab URL", Type: FieldTypeString, DefaultValue: "https://gitlab.com", Description: "GitLab instance URL"},
+			{Key: "token", Label: "Access Token", Type: FieldTypeString, Required: true, Description: "GitLab personal or project access token", Sensitive: true},
+		},
+	})
+
+	// ---- GitLab Webhook ----
+
+	r.Register(&ModuleSchema{
+		Type:        "gitlab.webhook",
+		Label:       "GitLab Webhook",
+		Category:    "integration",
+		Description: "GitLab webhook receiver that parses and validates incoming GitLab events",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "secret", Label: "Webhook Secret", Type: FieldTypeString, Description: "GitLab webhook secret token for request validation", Sensitive: true},
+		},
+	})
+
+	// ---- HTTP Middleware OTEL ----
+
+	r.Register(&ModuleSchema{
+		Type:        "http.middleware.otel",
+		Label:       "OTEL HTTP Middleware",
+		Category:    "observability",
+		Description: "Instruments HTTP requests with OpenTelemetry tracing spans",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "serverName", Label: "Server Name", Type: FieldTypeString, DefaultValue: "workflow-http", Description: "Server name used as the span operation name"},
+		},
+	})
+
+	// ---- IaC State ----
+
+	r.Register(&ModuleSchema{
+		Type:        "iac.state",
+		Label:       "IaC State Store",
+		Category:    "infrastructure",
+		Description: "Tracks infrastructure provisioning state (memory or filesystem backend)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "backend", Label: "Backend", Type: FieldTypeString, Description: "memory or filesystem"},
+			{Key: "directory", Label: "Directory", Type: FieldTypeString, Description: "State directory (filesystem backend only)"},
+		},
+	})
+
+	// ---- NoSQL DynamoDB ----
+
+	r.Register(&ModuleSchema{
+		Type:        "nosql.dynamodb",
+		Label:       "DynamoDB",
+		Category:    "database",
+		Description: "AWS DynamoDB NoSQL store",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "region", Label: "Region", Type: FieldTypeString, Description: "AWS region"},
+			{Key: "table", Label: "Table", Type: FieldTypeString, Required: true, Description: "DynamoDB table name"},
+			{Key: "endpoint", Label: "Endpoint", Type: FieldTypeString, Description: "Custom endpoint (for local DynamoDB)"},
+		},
+	})
+
+	// ---- NoSQL Memory ----
+
+	r.Register(&ModuleSchema{
+		Type:        "nosql.memory",
+		Label:       "In-Memory NoSQL",
+		Category:    "database",
+		Description: "In-memory NoSQL store for testing and development",
+		ConfigFields: []ConfigFieldDef{},
+	})
+
+	// ---- NoSQL MongoDB ----
+
+	r.Register(&ModuleSchema{
+		Type:        "nosql.mongodb",
+		Label:       "MongoDB",
+		Category:    "database",
+		Description: "MongoDB NoSQL document store",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "uri", Label: "Connection URI", Type: FieldTypeString, Required: true, Description: "MongoDB connection URI", Placeholder: "mongodb://localhost:27017"},
+			{Key: "database", Label: "Database", Type: FieldTypeString, Required: true, Description: "MongoDB database name"},
+			{Key: "collection", Label: "Collection", Type: FieldTypeString, Description: "Default collection name"},
+		},
+	})
+
+	// ---- NoSQL Redis ----
+
+	r.Register(&ModuleSchema{
+		Type:        "nosql.redis",
+		Label:       "Redis NoSQL",
+		Category:    "database",
+		Description: "Redis as a NoSQL key/value store",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "address", Label: "Address", Type: FieldTypeString, DefaultValue: "localhost:6379", Description: "Redis server address"},
+			{Key: "password", Label: "Password", Type: FieldTypeString, Description: "Redis password", Sensitive: true},
+			{Key: "db", Label: "Database", Type: FieldTypeNumber, DefaultValue: 0, Description: "Redis database number"},
+		},
+	})
+
+	// ---- Platform API Gateway ----
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.apigateway",
+		Label:       "API Gateway",
+		Category:    "infrastructure",
+		Description: "Manages API gateway provisioning with routes, stages, and rate limiting (mock or AWS API Gateway v2)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | aws"},
+			{Key: "name", Label: "Gateway Name", Type: FieldTypeString, Required: true, Description: "API gateway name"},
+			{Key: "stage", Label: "Stage", Type: FieldTypeString, Description: "Deployment stage (dev, staging, prod)"},
+			{Key: "cors", Label: "CORS Config", Type: FieldTypeJSON, Description: "CORS configuration"},
+			{Key: "routes", Label: "Routes", Type: FieldTypeJSON, Description: "Route definitions"},
+		},
+	})
+
+	// ---- Platform Autoscaling ----
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.autoscaling",
+		Label:       "Autoscaling Policies",
+		Category:    "infrastructure",
+		Description: "Manages autoscaling policies (target tracking, step, scheduled) for AWS or mock resources",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | aws"},
+			{Key: "policies", Label: "Policies", Type: FieldTypeJSON, Required: true, Description: "Scaling policy definitions"},
+		},
+	})
+
+	// ---- Platform DNS ----
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.dns",
+		Label:       "DNS Zone Manager",
+		Category:    "infrastructure",
+		Description: "Manages DNS zones and records (mock or Route53/aws backend)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | aws"},
+			{Key: "zone", Label: "Zone Config", Type: FieldTypeJSON, Required: true, Description: "Zone configuration (name, comment, private, vpcId)"},
+			{Key: "records", Label: "DNS Records", Type: FieldTypeJSON, Description: "List of DNS record definitions"},
+		},
+	})
+
+	// ---- Platform DigitalOcean App ----
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.do_app",
+		Label:       "DigitalOcean App Platform",
+		Category:    "infrastructure",
+		Description: "Deploys containerized apps to DigitalOcean App Platform (mock or real DO backend)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
+			{Key: "name", Label: "App Name", Type: FieldTypeString, Description: "App Platform application name"},
+			{Key: "region", Label: "Region", Type: FieldTypeString, Description: "DO region slug (e.g. nyc)"},
+			{Key: "image", Label: "Container Image", Type: FieldTypeString, Description: "Container image reference"},
+			{Key: "instances", Label: "Instances", Type: FieldTypeNumber, Description: "Number of instances"},
+			{Key: "http_port", Label: "HTTP Port", Type: FieldTypeNumber, Description: "Container HTTP port"},
+			{Key: "envs", Label: "Environment Variables", Type: FieldTypeMap, Description: "Environment variables for the app"},
+		},
+	})
+
+	// ---- Platform DigitalOcean Database ----
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.do_database",
+		Label:       "DigitalOcean Managed Database",
+		Category:    "infrastructure",
+		Description: "Manages DigitalOcean Managed Databases (PostgreSQL, MySQL, Redis, MongoDB, Kafka)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
+			{Key: "engine", Label: "Engine", Type: FieldTypeString, Description: "Database engine: pg | mysql | redis | mongodb | kafka"},
+			{Key: "version", Label: "Version", Type: FieldTypeString, Description: "Engine version"},
+			{Key: "size", Label: "Size", Type: FieldTypeString, Description: "Droplet size slug"},
+			{Key: "region", Label: "Region", Type: FieldTypeString, Description: "DO region slug"},
+			{Key: "num_nodes", Label: "Node Count", Type: FieldTypeNumber, Description: "Number of nodes"},
+			{Key: "name", Label: "Cluster Name", Type: FieldTypeString, Description: "Database cluster name"},
+		},
+	})
+
+	// ---- Platform DigitalOcean DNS ----
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.do_dns",
+		Label:       "DigitalOcean DNS",
+		Category:    "infrastructure",
+		Description: "Manages DigitalOcean domains and DNS records (mock or real DO backend)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
+			{Key: "domain", Label: "Domain", Type: FieldTypeString, Required: true, Description: "Domain name (e.g. example.com)"},
+			{Key: "records", Label: "Records", Type: FieldTypeJSON, Description: "List of DNS record definitions"},
+		},
+	})
+
+	// ---- Platform DigitalOcean Networking ----
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.do_networking",
+		Label:       "DigitalOcean VPC & Firewalls",
+		Category:    "infrastructure",
+		Description: "Manages DigitalOcean VPCs, firewalls, and load balancers (mock or real DO backend)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
+			{Key: "vpc", Label: "VPC Config", Type: FieldTypeJSON, Required: true, Description: "VPC configuration (name, region, ip_range)"},
+			{Key: "firewalls", Label: "Firewalls", Type: FieldTypeJSON, Description: "List of firewall definitions"},
+		},
+	})
+
+	// ---- Platform DOKS ----
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.doks",
+		Label:       "DigitalOcean Kubernetes (DOKS)",
+		Category:    "infrastructure",
+		Description: "Manages DigitalOcean Kubernetes Service clusters (mock or real DO backend)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
+			{Key: "cluster_name", Label: "Cluster Name", Type: FieldTypeString, Description: "DOKS cluster name"},
+			{Key: "region", Label: "Region", Type: FieldTypeString, Description: "DO region slug (e.g. nyc3)"},
+			{Key: "version", Label: "Kubernetes Version", Type: FieldTypeString, Description: "Kubernetes version slug"},
+			{Key: "node_pool", Label: "Node Pool", Type: FieldTypeJSON, Description: "Node pool config"},
+		},
+	})
+
+	// ---- Platform ECS ----
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.ecs",
+		Label:       "ECS Fargate Service",
+		Category:    "infrastructure",
+		Description: "AWS ECS/Fargate service with task definitions and ALB target group config",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
+			{Key: "cluster", Label: "ECS Cluster", Type: FieldTypeString, Required: true, Description: "ECS cluster name"},
+			{Key: "region", Label: "AWS Region", Type: FieldTypeString, Description: "AWS region (e.g. us-east-1)"},
+			{Key: "launch_type", Label: "Launch Type", Type: FieldTypeString, Description: "FARGATE or EC2"},
+			{Key: "desired_count", Label: "Desired Count", Type: FieldTypeString, Description: "Number of tasks to run"},
+			{Key: "vpc_subnets", Label: "VPC Subnets", Type: FieldTypeJSON, Description: "List of subnet IDs"},
+			{Key: "security_groups", Label: "Security Groups", Type: FieldTypeJSON, Description: "List of security group IDs"},
+		},
+	})
+
+	// ---- Platform Kubernetes ----
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.kubernetes",
+		Label:       "Kubernetes Cluster",
+		Category:    "infrastructure",
+		Description: "Managed Kubernetes cluster (kind/k3s for local, EKS/GKE/AKS stubs for cloud)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
+			{Key: "type", Label: "Cluster Type", Type: FieldTypeString, Required: true, Description: "eks | gke | aks | kind | k3s"},
+			{Key: "version", Label: "Kubernetes Version", Type: FieldTypeString, Description: "e.g. 1.29"},
+			{Key: "nodeGroups", Label: "Node Groups", Type: FieldTypeJSON, Description: "Node group definitions"},
+		},
+	})
+
+	// ---- Platform Networking ----
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.networking",
+		Label:       "VPC Networking",
+		Category:    "infrastructure",
+		Description: "Manages VPC, subnets, NAT gateway, and security groups (mock or AWS backend)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | aws"},
+			{Key: "vpc", Label: "VPC Config", Type: FieldTypeJSON, Required: true, Description: "VPC configuration (cidr, name)"},
+			{Key: "subnets", Label: "Subnets", Type: FieldTypeJSON, Description: "List of subnet definitions"},
+			{Key: "nat_gateway", Label: "NAT Gateway", Type: FieldTypeBool, Description: "Provision a NAT gateway"},
+			{Key: "security_groups", Label: "Security Groups", Type: FieldTypeJSON, Description: "List of security group definitions"},
+		},
+	})
+
+	// ---- Platform Region ----
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.region",
+		Label:       "Multi-Region Deployment",
+		Category:    "infrastructure",
+		Description: "Manages multi-region tenant deployments with failover, health checking, and traffic weight routing",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock (default)"},
+			{Key: "regions", Label: "Regions", Type: FieldTypeJSON, Required: true, Description: "List of region definitions (name, provider, endpoint, priority, health_check)"},
+		},
+	})
+
+	// ---- Platform Region Router ----
+
+	r.Register(&ModuleSchema{
+		Type:        "platform.region_router",
+		Label:       "Region Router",
+		Category:    "infrastructure",
+		Description: "Routes traffic between regions based on weights, health, and failover policies",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "region", Label: "Region Module", Type: FieldTypeString, Required: true, Description: "Name of the platform.region module to route"},
+			{Key: "strategy", Label: "Routing Strategy", Type: FieldTypeSelect, Options: []string{"weighted", "failover", "active-active"}, DefaultValue: "weighted", Description: "Traffic routing strategy"},
+		},
+	})
+
+	// ---- Policy Mock ----
+
+	r.Register(&ModuleSchema{
+		Type:        "policy.mock",
+		Label:       "Mock Policy Engine",
+		Category:    "security",
+		Description: "In-memory mock policy engine for testing. Denies if any loaded policy contains the word 'deny'.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "policies", Label: "Pre-loaded Policies", Type: FieldTypeJSON, Description: "List of policies to load at startup"},
+		},
+	})
+
+	// ---- Security Field Protection ----
+
+	r.Register(&ModuleSchema{
+		Type:        "security.field-protection",
+		Label:       "Field Protection",
+		Category:    "security",
+		Description: "Field-level encryption/masking for sensitive data in pipeline responses",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "fields", Label: "Protected Fields", Type: FieldTypeJSON, Description: "List of field protection rules (path, action: mask|encrypt|redact)"},
+			{Key: "key", Label: "Encryption Key", Type: FieldTypeString, Description: "Key used for field encryption", Sensitive: true},
+		},
+	})
+
+	// ---- Security Scanner ----
+
+	r.Register(&ModuleSchema{
+		Type:        "security.scanner",
+		Label:       "Security Scanner",
+		Category:    "security",
+		Description: "Security scanner provider supporting mock, semgrep, trivy, and grype backends",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "mode", Label: "Mode", Type: FieldTypeSelect, Options: []string{"mock", "cli"}, DefaultValue: "mock", Description: "Scanner mode: 'mock' for testing or 'cli' for real tools"},
+			{Key: "semgrepBinary", Label: "Semgrep Binary", Type: FieldTypeString, DefaultValue: "semgrep", Description: "Path to semgrep binary"},
+			{Key: "trivyBinary", Label: "Trivy Binary", Type: FieldTypeString, DefaultValue: "trivy", Description: "Path to trivy binary"},
+			{Key: "grypeBinary", Label: "Grype Binary", Type: FieldTypeString, DefaultValue: "grype", Description: "Path to grype binary"},
+			{Key: "mockFindings", Label: "Mock Findings", Type: FieldTypeJSON, Description: "Mock findings to return (keyed by scan type: sast, container, deps)"},
+		},
+	})
+
+	// ---- Storage Artifact ----
+
+	r.Register(&ModuleSchema{
+		Type:        "storage.artifact",
+		Label:       "Artifact Store",
+		Category:    "infrastructure",
+		Description: "Named artifact storage with metadata support (filesystem or S3)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "backend", Label: "Backend", Type: FieldTypeSelect, Options: []string{"filesystem", "s3"}, DefaultValue: "filesystem", Description: "Storage backend to use"},
+			{Key: "basePath", Label: "Base Path", Type: FieldTypeString, DefaultValue: "./data/artifacts", Description: "Root directory for filesystem backend"},
+			{Key: "maxSize", Label: "Max Size (bytes)", Type: FieldTypeNumber, Description: "Maximum artifact size in bytes (0 = unlimited)"},
+			{Key: "bucket", Label: "S3 Bucket", Type: FieldTypeString, Description: "S3 bucket name (s3 backend only)"},
+			{Key: "region", Label: "S3 Region", Type: FieldTypeString, Description: "AWS region (s3 backend only)"},
+			{Key: "endpoint", Label: "S3 Endpoint", Type: FieldTypeString, Description: "Custom S3 endpoint"},
+		},
+	})
+
+	// ---- Tracing Propagation ----
+
+	r.Register(&ModuleSchema{
+		Type:        "tracing.propagation",
+		Label:       "Trace Propagation",
+		Category:    "observability",
+		Description: "Propagates trace context across async boundaries (Kafka, EventBridge, webhooks, HTTP)",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "format", Label: "Propagation Format", Type: FieldTypeSelect, Options: []string{"w3c", "b3", "composite"}, DefaultValue: "w3c", Description: "Trace context propagation format"},
+		},
+	})
+
+	// ---- Auth M2M ----
+
+	r.Register(&ModuleSchema{
+		Type:        "auth.m2m",
+		Label:       "M2M Auth",
+		Category:    "security",
+		Description: "Machine-to-machine OAuth2 auth: client_credentials grant, JWT-bearer assertion, ES256/HS256 token issuance, and JWKS endpoint",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "secret", Label: "HMAC Secret", Type: FieldTypeString, Description: "Secret for HS256 token signing", Sensitive: true},
+			{Key: "algorithm", Label: "Signing Algorithm", Type: FieldTypeSelect, Options: []string{"HS256", "ES256"}, DefaultValue: "ES256", Description: "JWT signing algorithm"},
+			{Key: "tokenExpiry", Label: "Token Expiry", Type: FieldTypeDuration, DefaultValue: "1h", Description: "Access token expiration duration"},
+			{Key: "issuer", Label: "Issuer", Type: FieldTypeString, DefaultValue: "workflow", Description: "Token issuer claim"},
+			{Key: "clients", Label: "Registered Clients", Type: FieldTypeJSON, Description: "List of OAuth2 clients"},
+		},
+	})
+
+	// ---- Auth OAuth2 ----
+
+	r.Register(&ModuleSchema{
+		Type:        "auth.oauth2",
+		Label:       "OAuth2",
+		Category:    "security",
+		Description: "OAuth2 authorization code flow supporting Google, GitHub, and generic OIDC providers",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "providers", Label: "Providers", Type: FieldTypeJSON, Required: true, Description: "List of OAuth2 provider configurations"},
+		},
+	})
+
+	// ---- Step types (pipeline steps registered as module types) ----
+
+	for _, stepType := range []struct {
+		t, label, desc string
+	}{
+		{"step.actor_send", "Actor Send", "Send a message to an actor without waiting for a response"},
+		{"step.actor_ask", "Actor Ask", "Send a message to an actor and wait for a response"},
+		{"step.apigw_apply", "API Gateway Apply", "Applies API gateway configuration"},
+		{"step.apigw_destroy", "API Gateway Destroy", "Destroys a provisioned API gateway"},
+		{"step.apigw_plan", "API Gateway Plan", "Plans API gateway changes without applying them"},
+		{"step.apigw_status", "API Gateway Status", "Gets the current status of an API gateway"},
+		{"step.app_deploy", "App Deploy", "Deploys an application container"},
+		{"step.app_rollback", "App Rollback", "Rolls back an application to a previous version"},
+		{"step.app_status", "App Status", "Gets the deployment status of an application"},
+		{"step.argo_delete", "Argo Delete", "Deletes an Argo Workflow"},
+		{"step.argo_list", "Argo List", "Lists Argo Workflows"},
+		{"step.argo_logs", "Argo Logs", "Retrieves logs from an Argo Workflow"},
+		{"step.argo_status", "Argo Status", "Gets the status of an Argo Workflow"},
+		{"step.argo_submit", "Argo Submit", "Submits an Argo Workflow"},
+		{"step.artifact_delete", "Artifact Delete", "Deletes an artifact from the artifact store"},
+		{"step.artifact_download", "Artifact Download", "Downloads an artifact from the artifact store"},
+		{"step.artifact_list", "Artifact List", "Lists artifacts in the artifact store"},
+		{"step.artifact_upload", "Artifact Upload", "Uploads a file as an artifact"},
+		{"step.build_binary", "Build Binary", "Builds a Go binary from source"},
+		{"step.build_from_config", "Build From Config", "Builds using workflow engine config as build spec"},
+		{"step.cloud_validate", "Cloud Validate", "Validates cloud provider credentials"},
+		{"step.codebuild_create_project", "CodeBuild Create Project", "Creates an AWS CodeBuild project"},
+		{"step.codebuild_delete_project", "CodeBuild Delete Project", "Deletes an AWS CodeBuild project"},
+		{"step.codebuild_list_builds", "CodeBuild List Builds", "Lists builds for a CodeBuild project"},
+		{"step.codebuild_logs", "CodeBuild Logs", "Retrieves logs for a CodeBuild build"},
+		{"step.codebuild_start", "CodeBuild Start", "Starts an AWS CodeBuild build"},
+		{"step.codebuild_status", "CodeBuild Status", "Gets the status of a CodeBuild build"},
+		{"step.dns_apply", "DNS Apply", "Applies DNS zone and record changes"},
+		{"step.dns_plan", "DNS Plan", "Plans DNS changes without applying them"},
+		{"step.dns_status", "DNS Status", "Gets the current status of a DNS zone"},
+		{"step.do_deploy", "DO Deploy", "Deploys to DigitalOcean App Platform"},
+		{"step.do_destroy", "DO Destroy", "Destroys a DigitalOcean App Platform application"},
+		{"step.do_logs", "DO Logs", "Retrieves logs from DigitalOcean App Platform"},
+		{"step.do_scale", "DO Scale", "Scales a DigitalOcean App Platform application"},
+		{"step.do_status", "DO Status", "Gets the status of a DigitalOcean App Platform application"},
+		{"step.ecs_apply", "ECS Apply", "Applies ECS Fargate service deployment"},
+		{"step.ecs_destroy", "ECS Destroy", "Destroys an ECS Fargate service"},
+		{"step.ecs_plan", "ECS Plan", "Plans ECS service deployment changes"},
+		{"step.ecs_status", "ECS Status", "Gets the status of an ECS Fargate service"},
+		{"step.git_checkout", "Git Checkout", "Checks out a Git branch, tag, or commit"},
+		{"step.git_clone", "Git Clone", "Clones a Git repository"},
+		{"step.git_commit", "Git Commit", "Creates a Git commit"},
+		{"step.git_push", "Git Push", "Pushes commits to a remote repository"},
+		{"step.git_tag", "Git Tag", "Creates a Git tag"},
+		{"step.gitlab_create_mr", "GitLab Create MR", "Creates a GitLab merge request"},
+		{"step.gitlab_mr_comment", "GitLab MR Comment", "Adds a comment to a GitLab merge request"},
+		{"step.gitlab_parse_webhook", "GitLab Parse Webhook", "Parses and validates a GitLab webhook"},
+		{"step.gitlab_pipeline_status", "GitLab Pipeline Status", "Gets the status of a GitLab pipeline"},
+		{"step.gitlab_trigger_pipeline", "GitLab Trigger Pipeline", "Triggers a GitLab CI/CD pipeline"},
+		{"step.iac_apply", "IaC Apply", "Applies infrastructure changes"},
+		{"step.iac_destroy", "IaC Destroy", "Destroys IaC-managed infrastructure"},
+		{"step.iac_drift_detect", "IaC Drift Detect", "Detects IaC configuration drift"},
+		{"step.iac_plan", "IaC Plan", "Plans infrastructure changes without applying"},
+		{"step.iac_status", "IaC Status", "Gets IaC provisioning status"},
+		{"step.k8s_apply", "K8s Apply", "Applies Kubernetes manifests"},
+		{"step.k8s_destroy", "K8s Destroy", "Deletes Kubernetes resources"},
+		{"step.k8s_plan", "K8s Plan", "Diffs Kubernetes manifests against cluster state"},
+		{"step.k8s_status", "K8s Status", "Gets the status of Kubernetes resources"},
+		{"step.marketplace_detail", "Marketplace Detail", "Gets details about a marketplace plugin"},
+		{"step.marketplace_install", "Marketplace Install", "Installs a marketplace plugin"},
+		{"step.marketplace_installed", "Marketplace Installed", "Lists installed marketplace plugins"},
+		{"step.marketplace_search", "Marketplace Search", "Searches the plugin marketplace"},
+		{"step.marketplace_uninstall", "Marketplace Uninstall", "Uninstalls a marketplace plugin"},
+		{"step.marketplace_update", "Marketplace Update", "Updates an installed marketplace plugin"},
+		{"step.network_apply", "Network Apply", "Applies VPC networking changes"},
+		{"step.network_plan", "Network Plan", "Plans VPC networking changes"},
+		{"step.network_status", "Network Status", "Gets VPC networking status"},
+		{"step.nosql_delete", "NoSQL Delete", "Deletes an item from a NoSQL store"},
+		{"step.policy_evaluate", "Policy Evaluate", "Evaluates input against a policy"},
+		{"step.policy_list", "Policy List", "Lists loaded policies"},
+		{"step.policy_load", "Policy Load", "Loads a policy at runtime"},
+		{"step.policy_test", "Policy Test", "Tests a policy against cases"},
+		{"step.region_deploy", "Region Deploy", "Deploys to a specific region"},
+		{"step.region_failover", "Region Failover", "Triggers regional failover"},
+		{"step.region_promote", "Region Promote", "Promotes a region to primary"},
+		{"step.region_status", "Region Status", "Gets multi-region health status"},
+		{"step.region_sync", "Region Sync", "Syncs state across regions"},
+		{"step.region_weight", "Region Weight", "Sets traffic weight for a region"},
+		{"step.scaling_apply", "Scaling Apply", "Applies autoscaling policies"},
+		{"step.scaling_destroy", "Scaling Destroy", "Removes autoscaling policies"},
+		{"step.scaling_plan", "Scaling Plan", "Plans autoscaling changes"},
+		{"step.scaling_status", "Scaling Status", "Gets autoscaling status"},
+		{"step.secret_rotate", "Secret Rotate", "Rotates a secret"},
+		{"step.trace_annotate", "Trace Annotate", "Adds attributes to the current trace span"},
+		{"step.trace_extract", "Trace Extract", "Extracts trace context from incoming headers"},
+		{"step.trace_inject", "Trace Inject", "Injects trace context into outgoing headers"},
+		{"step.trace_link", "Trace Link", "Links the current span to another span"},
+		{"step.trace_start", "Trace Start", "Starts a new trace span"},
+	} {
+		r.Register(&ModuleSchema{
+			Type:         stepType.t,
+			Label:        stepType.label,
+			Category:     "pipeline",
+			Description:  stepType.desc,
+			ConfigFields: []ConfigFieldDef{},
+		})
+	}
 }

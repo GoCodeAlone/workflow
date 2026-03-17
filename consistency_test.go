@@ -3,7 +3,9 @@ package workflow
 import (
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/plugins/all"
 	"github.com/GoCodeAlone/workflow/schema"
 )
@@ -57,6 +59,36 @@ func TestRegistryConsistency(t *testing.T) {
 		// Engine should have a reasonable number of step types.
 		if len(engineTypes) < 40 {
 			t.Errorf("expected at least 40 engine step types, got %d", len(engineTypes))
+		}
+	})
+
+	t.Run("schema KnownModuleTypes covers all built-in plugin module types", func(t *testing.T) {
+		// This is the contract test: every module type registered by a DefaultPlugin
+		// must appear in schema.KnownModuleTypes() so that wfctl validate does not
+		// report false "unknown module type" errors.
+		capReg := capability.NewRegistry()
+		schemaReg := schema.NewModuleSchemaRegistry()
+		loader := plugin.NewPluginLoader(capReg, schemaReg)
+		for _, p := range all.DefaultPlugins() {
+			if err := loader.LoadPlugin(p); err != nil {
+				t.Fatalf("LoadPlugin(%q) error: %v", p.Name(), err)
+			}
+		}
+
+		known := make(map[string]bool)
+		for _, mt := range schema.KnownModuleTypes() {
+			known[mt] = true
+		}
+
+		for modType := range loader.ModuleFactories() {
+			if !known[modType] {
+				t.Errorf("module type %q is registered by a built-in plugin but missing from schema.KnownModuleTypes() — add it to coreModuleTypes in schema/schema.go", modType)
+			}
+		}
+		for stepType := range loader.StepFactories() {
+			if !known[stepType] {
+				t.Errorf("step type %q is registered by a built-in plugin but missing from schema.KnownModuleTypes() — add it to coreModuleTypes in schema/schema.go", stepType)
+			}
 		}
 	})
 }
