@@ -223,3 +223,28 @@ func TestKnownStepTypesCoverAllPlugins(t *testing.T) {
 		}
 	}
 }
+
+// TestKnownModuleTypesCoverAllPlugins ensures KnownModuleTypes() is in sync with all module
+// types registered by the built-in plugins. Any module type registered by a DefaultPlugin
+// that is not listed in KnownModuleTypes() will cause this test to fail, preventing silent
+// omissions from being introduced in the future (e.g. the auth.m2m missing-type regression).
+func TestKnownModuleTypesCoverAllPlugins(t *testing.T) {
+	// Collect all module types registered by DefaultPlugins via the PluginLoader.
+	capReg := capability.NewRegistry()
+	schemaReg := schema.NewModuleSchemaRegistry()
+	loader := plugin.NewPluginLoader(capReg, schemaReg)
+	for _, p := range all.DefaultPlugins() {
+		if err := loader.LoadPlugin(p); err != nil {
+			t.Fatalf("LoadPlugin(%q) error: %v", p.Name(), err)
+		}
+	}
+
+	pluginModules := loader.ModuleFactories()
+	known := KnownModuleTypes()
+
+	for modType := range pluginModules {
+		if _, ok := known[modType]; !ok {
+			t.Errorf("module type %q is registered by a built-in plugin but missing from KnownModuleTypes()", modType)
+		}
+	}
+}

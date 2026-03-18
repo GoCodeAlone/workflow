@@ -187,6 +187,18 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Stateful:   false,
 			ConfigKeys: []string{"secret", "algorithm", "privateKey", "tokenExpiry", "issuer", "clients"},
 		},
+		"auth.token-blacklist": {
+			Type:       "auth.token-blacklist",
+			Plugin:     "auth",
+			Stateful:   false,
+			ConfigKeys: []string{"ttl"},
+		},
+		"security.field-protection": {
+			Type:       "security.field-protection",
+			Plugin:     "auth",
+			Stateful:   false,
+			ConfigKeys: []string{"fields", "algorithm", "keyRef"},
+		},
 
 		// messaging plugin
 		"messaging.broker": {
@@ -512,6 +524,94 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Plugin:     "platform",
 			Stateful:   false,
 			ConfigKeys: []string{"account", "provider", "name", "region", "image", "instances", "http_port", "envs"},
+		},
+		"platform.do_database": {
+			Type:       "platform.do_database",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"account", "provider", "engine", "size", "region", "nodes"},
+		},
+		"platform.kubernetes": {
+			Type:       "platform.kubernetes",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"account", "cluster", "namespace", "kubeconfig"},
+		},
+		"platform.ecs": {
+			Type:       "platform.ecs",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"account", "cluster", "region"},
+		},
+		"platform.dns": {
+			Type:       "platform.dns",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"account", "provider", "domain"},
+		},
+		"platform.networking": {
+			Type:       "platform.networking",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"account", "provider", "vpc"},
+		},
+		"platform.apigateway": {
+			Type:       "platform.apigateway",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"account", "provider", "name", "region"},
+		},
+		"platform.autoscaling": {
+			Type:       "platform.autoscaling",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"account", "provider", "resource"},
+		},
+		"platform.region": {
+			Type:       "platform.region",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "region", "primary"},
+		},
+		"iac.state": {
+			Type:       "iac.state",
+			Plugin:     "platform",
+			Stateful:   true,
+			ConfigKeys: []string{"backend", "path"},
+		},
+		"app.container": {
+			Type:       "app.container",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"image", "registry", "port", "envs"},
+		},
+		"argo.workflows": {
+			Type:       "argo.workflows",
+			Plugin:     "platform",
+			Stateful:   false,
+			ConfigKeys: []string{"namespace", "kubeconfig", "server_addr"},
+		},
+
+		// actors plugin
+		"actor.system": {
+			Type:       "actor.system",
+			Plugin:     "actors",
+			Stateful:   false,
+			ConfigKeys: []string{"maxWorkers", "mailboxSize"},
+		},
+		"actor.pool": {
+			Type:       "actor.pool",
+			Plugin:     "actors",
+			Stateful:   false,
+			ConfigKeys: []string{"system", "workers", "handler"},
+		},
+
+		// scanner plugin
+		"security.scanner": {
+			Type:       "security.scanner",
+			Plugin:     "scanner",
+			Stateful:   false,
+			ConfigKeys: []string{"trivy", "semgrep", "snyk"},
 		},
 	}
 	// Include any types registered dynamically (e.g. from external plugins loaded via LoadPluginTypesFromDir).

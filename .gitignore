@@ -57,3 +57,4 @@ current-bench.txt
 benchmark-results.txt
 benchstat-output.txt
 .worktrees
+cmd/wfctl/.wfctl.yaml
