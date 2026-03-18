@@ -1140,6 +1140,21 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	})
 
 	r.Register(&ModuleSchema{
+		Type:        "step.branch",
+		Label:       "Branch",
+		Category:    "pipeline",
+		Description: "Switch/case routing: evaluates a field, executes only the matched branch's sub-steps inline, then jumps to merge_step. Unlike step.conditional, skipped branches never execute.",
+		Inputs:      []ServiceIODef{{Name: "context", Type: "PipelineContext", Description: "Pipeline context containing the field to evaluate"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Branch result with matched_value and branch name"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "field", Label: "Field", Type: FieldTypeString, Required: true, Description: "Dot-path field to evaluate for branch selection"},
+			{Key: "branches", Label: "Branches", Type: FieldTypeMap, Required: true, Description: "Map of field values to lists of inline step configs"},
+			{Key: "default", Label: "Default", Type: FieldTypeArray, Description: "Sub-steps to run when no branch matches"},
+			{Key: "merge_step", Label: "Merge Step", Type: FieldTypeString, Description: "Step name to jump to after the branch completes (empty = continue sequentially)"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
 		Type:        "step.s3_upload",
 		Label:       "S3 Upload",
 		Category:    "pipeline",

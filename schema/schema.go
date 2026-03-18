@@ -258,6 +258,7 @@ var coreModuleTypes = []string{
 	"step.auth_validate",
 	"step.authz_check",
 	"step.base64_decode",
+	"step.branch",
 	"step.build_binary",
 	"step.build_from_config",
 	"step.build_ui",

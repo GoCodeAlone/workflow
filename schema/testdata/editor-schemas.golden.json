@@ -1,5 +1,91 @@
 {
   "moduleSchemas": {
+    "actor.pool": {
+      "type": "actor.pool",
+      "label": "Actor Pool",
+      "category": "infrastructure",
+      "description": "Defines a group of actors that handle the same type of work with configurable lifecycle and routing.",
+      "configFields": [
+        {
+          "key": "system",
+          "label": "Actor Cluster",
+          "type": "string",
+          "description": "Name of the actor.system module this pool belongs to",
+          "required": true
+        },
+        {
+          "key": "mode",
+          "label": "Lifecycle Mode",
+          "type": "select",
+          "description": "'auto-managed': actors activate on first message; 'permanent': fixed pool",
+          "defaultValue": "auto-managed",
+          "options": [
+            "auto-managed",
+            "permanent"
+          ]
+        },
+        {
+          "key": "idleTimeout",
+          "label": "Idle Timeout",
+          "type": "duration",
+          "description": "How long an auto-managed actor stays idle before deactivating",
+          "defaultValue": "10m"
+        },
+        {
+          "key": "poolSize",
+          "label": "Pool Size",
+          "type": "number",
+          "description": "Number of actors in a permanent pool",
+          "defaultValue": 10
+        },
+        {
+          "key": "routing",
+          "label": "Load Balancing",
+          "type": "select",
+          "description": "How messages are distributed among actors",
+          "defaultValue": "round-robin",
+          "options": [
+            "round-robin",
+            "random",
+            "broadcast",
+            "sticky"
+          ]
+        },
+        {
+          "key": "routingKey",
+          "label": "Sticky Routing Key",
+          "type": "string",
+          "description": "Message field used for sticky routing"
+        },
+        {
+          "key": "recovery",
+          "label": "Recovery Policy",
+          "type": "json",
+          "description": "What happens when an actor crashes"
+        }
+      ]
+    },
+    "actor.system": {
+      "type": "actor.system",
+      "label": "Actor System",
+      "category": "infrastructure",
+      "description": "Actor runtime for stateful, message-driven services. Actors are lightweight, isolated units of computation that communicate through messages.",
+      "configFields": [
+        {
+          "key": "shutdownTimeout",
+          "label": "Shutdown Timeout",
+          "type": "duration",
+          "description": "How long to wait for in-flight messages to drain before forcing shutdown",
+          "defaultValue": "30s"
+        },
+        {
+          "key": "defaultRecovery",
+          "label": "Default Recovery Policy",
+          "type": "json",
+          "description": "What happens when any actor in this system crashes"
+        }
+      ]
+    },
     "api.command": {
       "type": "api.command",
       "label": "Command Handler",
@@ -220,6 +306,97 @@
         }
       ]
     },
+    "app.container": {
+      "type": "app.container",
+      "label": "App Container",
+      "category": "infrastructure",
+      "description": "Application deployment abstraction that translates high-level config into platform-specific resources (Kubernetes Deployment+Service or ECS task definition)",
+      "configFields": [
+        {
+          "key": "environment",
+          "label": "Environment",
+          "type": "string",
+          "description": "Name of the platform.kubernetes or platform.ecs module to deploy to",
+          "required": true
+        },
+        {
+          "key": "image",
+          "label": "Container Image",
+          "type": "string",
+          "description": "Container image reference (e.g. registry.example.com/my-api:v1.0.0)",
+          "required": true
+        },
+        {
+          "key": "replicas",
+          "label": "Replicas",
+          "type": "number",
+          "description": "Desired replica count"
+        },
+        {
+          "key": "ports",
+          "label": "Ports",
+          "type": "array",
+          "description": "List of container port numbers"
+        },
+        {
+          "key": "cpu",
+          "label": "CPU",
+          "type": "string",
+          "description": "CPU request/limit (e.g. 500m)"
+        },
+        {
+          "key": "memory",
+          "label": "Memory",
+          "type": "string",
+          "description": "Memory request/limit (e.g. 512Mi)"
+        },
+        {
+          "key": "env",
+          "label": "Environment Variables",
+          "type": "map",
+          "description": "Environment variables injected into the container"
+        },
+        {
+          "key": "health_path",
+          "label": "Health Path",
+          "type": "string",
+          "description": "HTTP health check path"
+        },
+        {
+          "key": "health_port",
+          "label": "Health Port",
+          "type": "number",
+          "description": "HTTP health check port"
+        }
+      ]
+    },
+    "argo.workflows": {
+      "type": "argo.workflows",
+      "label": "Argo Workflows",
+      "category": "cicd",
+      "description": "Manages Argo Workflows submissions and status on a Kubernetes cluster",
+      "configFields": [
+        {
+          "key": "namespace",
+          "label": "Namespace",
+          "type": "string",
+          "description": "Kubernetes namespace for Argo Workflows"
+        },
+        {
+          "key": "server",
+          "label": "Argo Server",
+          "type": "string",
+          "description": "Argo Workflows server URL"
+        },
+        {
+          "key": "token",
+          "label": "Auth Token",
+          "type": "string",
+          "description": "Bearer token for Argo server authentication",
+          "sensitive": true
+        }
+      ]
+    },
     "auth.jwt": {
       "type": "auth.jwt",
       "label": "JWT Auth",
@@ -295,6 +472,100 @@
         "tokenExpiry": "24h"
       }
     },
+    "auth.m2m": {
+      "type": "auth.m2m",
+      "label": "M2M Auth",
+      "category": "security",
+      "description": "Machine-to-machine OAuth2 auth: client_credentials grant, JWT-bearer assertion, ES256/HS256 token issuance, and JWKS endpoint",
+      "configFields": [
+        {
+          "key": "secret",
+          "label": "HMAC Secret",
+          "type": "string",
+          "description": "Secret for HS256 token signing",
+          "sensitive": true
+        },
+        {
+          "key": "algorithm",
+          "label": "Signing Algorithm",
+          "type": "select",
+          "description": "JWT signing algorithm",
+          "defaultValue": "ES256",
+          "options": [
+            "HS256",
+            "ES256"
+          ]
+        },
+        {
+          "key": "tokenExpiry",
+          "label": "Token Expiry",
+          "type": "duration",
+          "description": "Access token expiration duration",
+          "defaultValue": "1h"
+        },
+        {
+          "key": "issuer",
+          "label": "Issuer",
+          "type": "string",
+          "description": "Token issuer claim",
+          "defaultValue": "workflow"
+        },
+        {
+          "key": "clients",
+          "label": "Registered Clients",
+          "type": "json",
+          "description": "List of OAuth2 clients"
+        }
+      ]
+    },
+    "auth.oauth2": {
+      "type": "auth.oauth2",
+      "label": "OAuth2",
+      "category": "security",
+      "description": "OAuth2 authorization code flow supporting Google, GitHub, and generic OIDC providers",
+      "configFields": [
+        {
+          "key": "providers",
+          "label": "Providers",
+          "type": "json",
+          "description": "List of OAuth2 provider configurations",
+          "required": true
+        }
+      ]
+    },
+    "auth.token-blacklist": {
+      "type": "auth.token-blacklist",
+      "label": "Token Blacklist",
+      "category": "security",
+      "description": "JWT token blacklist for revocation support (memory or Redis backend)",
+      "configFields": [
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "select",
+          "description": "Storage backend for the blacklist",
+          "defaultValue": "memory",
+          "options": [
+            "memory",
+            "redis"
+          ]
+        },
+        {
+          "key": "redis_url",
+          "label": "Redis URL",
+          "type": "string",
+          "description": "Redis connection URL (redis backend only)",
+          "placeholder": "redis://localhost:6379"
+        },
+        {
+          "key": "cleanup_interval",
+          "label": "Cleanup Interval",
+          "type": "duration",
+          "description": "How often to purge expired tokens",
+          "defaultValue": "5m"
+        }
+      ]
+    },
     "auth.user-store": {
       "type": "auth.user-store",
       "label": "User Store",
@@ -316,6 +587,32 @@
       ],
       "configFields": []
     },
+    "aws.codebuild": {
+      "type": "aws.codebuild",
+      "label": "AWS CodeBuild",
+      "category": "cicd",
+      "description": "AWS CodeBuild integration for running build projects in the cloud",
+      "configFields": [
+        {
+          "key": "region",
+          "label": "AWS Region",
+          "type": "string",
+          "description": "AWS region (e.g. us-east-1)"
+        },
+        {
+          "key": "account",
+          "label": "Cloud Account",
+          "type": "string",
+          "description": "Name of the cloud.account module"
+        },
+        {
+          "key": "role_arn",
+          "label": "IAM Role ARN",
+          "type": "string",
+          "description": "IAM role ARN for CodeBuild service role"
+        }
+      ]
+    },
     "cache.modular": {
       "type": "cache.modular",
       "label": "Cache",
@@ -336,6 +633,88 @@
         }
       ],
       "configFields": []
+    },
+    "cache.redis": {
+      "type": "cache.redis",
+      "label": "Redis Cache",
+      "category": "infrastructure",
+      "description": "Redis-backed key/value cache for pipeline step data",
+      "configFields": [
+        {
+          "key": "address",
+          "label": "Address",
+          "type": "string",
+          "description": "Redis server address (host:port)",
+          "defaultValue": "localhost:6379"
+        },
+        {
+          "key": "password",
+          "label": "Password",
+          "type": "string",
+          "description": "Redis password (optional)",
+          "sensitive": true
+        },
+        {
+          "key": "db",
+          "label": "Database",
+          "type": "number",
+          "description": "Redis database number",
+          "defaultValue": 0
+        },
+        {
+          "key": "prefix",
+          "label": "Key Prefix",
+          "type": "string",
+          "description": "Prefix applied to all cache keys",
+          "defaultValue": "wf:"
+        },
+        {
+          "key": "defaultTTL",
+          "label": "Default TTL",
+          "type": "string",
+          "description": "Default time-to-live for cached values",
+          "defaultValue": "1h"
+        }
+      ]
+    },
+    "cloud.account": {
+      "type": "cloud.account",
+      "label": "Cloud Account",
+      "category": "infrastructure",
+      "description": "Cloud provider credentials (AWS, GCP, Azure, DigitalOcean, Kubernetes, or mock)",
+      "configFields": [
+        {
+          "key": "provider",
+          "label": "Provider",
+          "type": "string",
+          "description": "Cloud provider: aws, gcp, azure, digitalocean, kubernetes, mock",
+          "required": true
+        },
+        {
+          "key": "region",
+          "label": "Region",
+          "type": "string",
+          "description": "Primary region (e.g. us-east-1, us-central1, eastus, nyc3)"
+        },
+        {
+          "key": "credentials",
+          "label": "Credentials",
+          "type": "json",
+          "description": "Credential configuration (type, keys, paths)"
+        },
+        {
+          "key": "project_id",
+          "label": "GCP Project ID",
+          "type": "string",
+          "description": "GCP project ID"
+        },
+        {
+          "key": "subscription_id",
+          "label": "Azure Subscription ID",
+          "type": "string",
+          "description": "Azure subscription ID"
+        }
+      ]
     },
     "config.provider": {
       "type": "config.provider",
@@ -742,6 +1121,44 @@
       },
       "maxIncoming": 0
     },
+    "gitlab.client": {
+      "type": "gitlab.client",
+      "label": "GitLab Client",
+      "category": "integration",
+      "description": "GitLab API client for triggering pipelines, managing MRs, and querying pipeline status",
+      "configFields": [
+        {
+          "key": "url",
+          "label": "GitLab URL",
+          "type": "string",
+          "description": "GitLab instance URL",
+          "defaultValue": "https://gitlab.com"
+        },
+        {
+          "key": "token",
+          "label": "Access Token",
+          "type": "string",
+          "description": "GitLab personal or project access token",
+          "required": true,
+          "sensitive": true
+        }
+      ]
+    },
+    "gitlab.webhook": {
+      "type": "gitlab.webhook",
+      "label": "GitLab Webhook",
+      "category": "integration",
+      "description": "GitLab webhook receiver that parses and validates incoming GitLab events",
+      "configFields": [
+        {
+          "key": "secret",
+          "label": "Webhook Secret",
+          "type": "string",
+          "description": "GitLab webhook secret token for request validation",
+          "sensitive": true
+        }
+      ]
+    },
     "health.checker": {
       "type": "health.checker",
       "label": "Health Checker",
@@ -968,6 +1385,21 @@
       "defaultConfig": {
         "logLevel": "info"
       }
+    },
+    "http.middleware.otel": {
+      "type": "http.middleware.otel",
+      "label": "OTEL HTTP Middleware",
+      "category": "observability",
+      "description": "Instruments HTTP requests with OpenTelemetry tracing spans",
+      "configFields": [
+        {
+          "key": "serverName",
+          "label": "Server Name",
+          "type": "string",
+          "description": "Server name used as the span operation name",
+          "defaultValue": "workflow-http"
+        }
+      ]
     },
     "http.middleware.ratelimit": {
       "type": "http.middleware.ratelimit",
@@ -1218,6 +1650,26 @@
           "description": "Map of URL prefix to backend URL (e.g. /api -\u003e http://localhost:3000)",
           "placeholder": "/api=http://backend:8080",
           "mapValueType": "string"
+        }
+      ]
+    },
+    "iac.state": {
+      "type": "iac.state",
+      "label": "IaC State Store",
+      "category": "infrastructure",
+      "description": "Tracks infrastructure provisioning state (memory or filesystem backend)",
+      "configFields": [
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "string",
+          "description": "memory or filesystem"
+        },
+        {
+          "key": "directory",
+          "label": "Directory",
+          "type": "string",
+          "description": "State directory (filesystem backend only)"
         }
       ]
     },
@@ -1574,6 +2026,98 @@
         "namespace": "workflow"
       }
     },
+    "nosql.dynamodb": {
+      "type": "nosql.dynamodb",
+      "label": "DynamoDB",
+      "category": "database",
+      "description": "AWS DynamoDB NoSQL store",
+      "configFields": [
+        {
+          "key": "region",
+          "label": "Region",
+          "type": "string",
+          "description": "AWS region"
+        },
+        {
+          "key": "table",
+          "label": "Table",
+          "type": "string",
+          "description": "DynamoDB table name",
+          "required": true
+        },
+        {
+          "key": "endpoint",
+          "label": "Endpoint",
+          "type": "string",
+          "description": "Custom endpoint (for local DynamoDB)"
+        }
+      ]
+    },
+    "nosql.memory": {
+      "type": "nosql.memory",
+      "label": "In-Memory NoSQL",
+      "category": "database",
+      "description": "In-memory NoSQL store for testing and development",
+      "configFields": []
+    },
+    "nosql.mongodb": {
+      "type": "nosql.mongodb",
+      "label": "MongoDB",
+      "category": "database",
+      "description": "MongoDB NoSQL document store",
+      "configFields": [
+        {
+          "key": "uri",
+          "label": "Connection URI",
+          "type": "string",
+          "description": "MongoDB connection URI",
+          "required": true,
+          "placeholder": "mongodb://localhost:27017"
+        },
+        {
+          "key": "database",
+          "label": "Database",
+          "type": "string",
+          "description": "MongoDB database name",
+          "required": true
+        },
+        {
+          "key": "collection",
+          "label": "Collection",
+          "type": "string",
+          "description": "Default collection name"
+        }
+      ]
+    },
+    "nosql.redis": {
+      "type": "nosql.redis",
+      "label": "Redis NoSQL",
+      "category": "database",
+      "description": "Redis as a NoSQL key/value store",
+      "configFields": [
+        {
+          "key": "address",
+          "label": "Address",
+          "type": "string",
+          "description": "Redis server address",
+          "defaultValue": "localhost:6379"
+        },
+        {
+          "key": "password",
+          "label": "Password",
+          "type": "string",
+          "description": "Redis password",
+          "sensitive": true
+        },
+        {
+          "key": "db",
+          "label": "Database",
+          "type": "number",
+          "description": "Redis database number",
+          "defaultValue": 0
+        }
+      ]
+    },
     "notification.slack": {
       "type": "notification.slack",
       "label": "Slack Notification",
@@ -1888,6 +2432,78 @@
         "database": "database"
       }
     },
+    "platform.apigateway": {
+      "type": "platform.apigateway",
+      "label": "API Gateway",
+      "category": "infrastructure",
+      "description": "Manages API gateway provisioning with routes, stages, and rate limiting (mock or AWS API Gateway v2)",
+      "configFields": [
+        {
+          "key": "account",
+          "label": "Cloud Account",
+          "type": "string",
+          "description": "Name of the cloud.account module"
+        },
+        {
+          "key": "provider",
+          "label": "Provider",
+          "type": "string",
+          "description": "mock | aws"
+        },
+        {
+          "key": "name",
+          "label": "Gateway Name",
+          "type": "string",
+          "description": "API gateway name",
+          "required": true
+        },
+        {
+          "key": "stage",
+          "label": "Stage",
+          "type": "string",
+          "description": "Deployment stage (dev, staging, prod)"
+        },
+        {
+          "key": "cors",
+          "label": "CORS Config",
+          "type": "json",
+          "description": "CORS configuration"
+        },
+        {
+          "key": "routes",
+          "label": "Routes",
+          "type": "json",
+          "description": "Route definitions"
+        }
+      ]
+    },
+    "platform.autoscaling": {
+      "type": "platform.autoscaling",
+      "label": "Autoscaling Policies",
+      "category": "infrastructure",
+      "description": "Manages autoscaling policies (target tracking, step, scheduled) for AWS or mock resources",
+      "configFields": [
+        {
+          "key": "account",
+          "label": "Cloud Account",
+          "type": "string",
+          "description": "Name of the cloud.account module"
+        },
+        {
+          "key": "provider",
+          "label": "Provider",
+          "type": "string",
+          "description": "mock | aws"
+        },
+        {
+          "key": "policies",
+          "label": "Policies",
+          "type": "json",
+          "description": "Scaling policy definitions",
+          "required": true
+        }
+      ]
+    },
     "platform.context": {
       "type": "platform.context",
       "label": "Platform Context",
@@ -1935,6 +2551,384 @@
       },
       "maxIncoming": 0
     },
+    "platform.dns": {
+      "type": "platform.dns",
+      "label": "DNS Zone Manager",
+      "category": "infrastructure",
+      "description": "Manages DNS zones and records (mock or Route53/aws backend)",
+      "configFields": [
+        {
+          "key": "account",
+          "label": "Cloud Account",
+          "type": "string",
+          "description": "Name of the cloud.account module"
+        },
+        {
+          "key": "provider",
+          "label": "Provider",
+          "type": "string",
+          "description": "mock | aws"
+        },
+        {
+          "key": "zone",
+          "label": "Zone Config",
+          "type": "json",
+          "description": "Zone configuration (name, comment, private, vpcId)",
+          "required": true
+        },
+        {
+          "key": "records",
+          "label": "DNS Records",
+          "type": "json",
+          "description": "List of DNS record definitions"
+        }
+      ]
+    },
+    "platform.do_app": {
+      "type": "platform.do_app",
+      "label": "DigitalOcean App Platform",
+      "category": "infrastructure",
+      "description": "Deploys containerized apps to DigitalOcean App Platform (mock or real DO backend)",
+      "configFields": [
+        {
+          "key": "account",
+          "label": "Cloud Account",
+          "type": "string",
+          "description": "Name of the cloud.account module"
+        },
+        {
+          "key": "provider",
+          "label": "Provider",
+          "type": "string",
+          "description": "mock | digitalocean"
+        },
+        {
+          "key": "name",
+          "label": "App Name",
+          "type": "string",
+          "description": "App Platform application name"
+        },
+        {
+          "key": "region",
+          "label": "Region",
+          "type": "string",
+          "description": "DO region slug (e.g. nyc)"
+        },
+        {
+          "key": "image",
+          "label": "Container Image",
+          "type": "string",
+          "description": "Container image reference"
+        },
+        {
+          "key": "instances",
+          "label": "Instances",
+          "type": "number",
+          "description": "Number of instances"
+        },
+        {
+          "key": "http_port",
+          "label": "HTTP Port",
+          "type": "number",
+          "description": "Container HTTP port"
+        },
+        {
+          "key": "envs",
+          "label": "Environment Variables",
+          "type": "map",
+          "description": "Environment variables for the app"
+        }
+      ]
+    },
+    "platform.do_database": {
+      "type": "platform.do_database",
+      "label": "DigitalOcean Managed Database",
+      "category": "infrastructure",
+      "description": "Manages DigitalOcean Managed Databases (PostgreSQL, MySQL, Redis, MongoDB, Kafka)",
+      "configFields": [
+        {
+          "key": "account",
+          "label": "Cloud Account",
+          "type": "string",
+          "description": "Name of the cloud.account module"
+        },
+        {
+          "key": "provider",
+          "label": "Provider",
+          "type": "string",
+          "description": "mock | digitalocean"
+        },
+        {
+          "key": "engine",
+          "label": "Engine",
+          "type": "string",
+          "description": "Database engine: pg | mysql | redis | mongodb | kafka"
+        },
+        {
+          "key": "version",
+          "label": "Version",
+          "type": "string",
+          "description": "Engine version"
+        },
+        {
+          "key": "size",
+          "label": "Size",
+          "type": "string",
+          "description": "Droplet size slug"
+        },
+        {
+          "key": "region",
+          "label": "Region",
+          "type": "string",
+          "description": "DO region slug"
+        },
+        {
+          "key": "num_nodes",
+          "label": "Node Count",
+          "type": "number",
+          "description": "Number of nodes"
+        },
+        {
+          "key": "name",
+          "label": "Cluster Name",
+          "type": "string",
+          "description": "Database cluster name"
+        }
+      ]
+    },
+    "platform.do_dns": {
+      "type": "platform.do_dns",
+      "label": "DigitalOcean DNS",
+      "category": "infrastructure",
+      "description": "Manages DigitalOcean domains and DNS records (mock or real DO backend)",
+      "configFields": [
+        {
+          "key": "account",
+          "label": "Cloud Account",
+          "type": "string",
+          "description": "Name of the cloud.account module"
+        },
+        {
+          "key": "provider",
+          "label": "Provider",
+          "type": "string",
+          "description": "mock | digitalocean"
+        },
+        {
+          "key": "domain",
+          "label": "Domain",
+          "type": "string",
+          "description": "Domain name (e.g. example.com)",
+          "required": true
+        },
+        {
+          "key": "records",
+          "label": "Records",
+          "type": "json",
+          "description": "List of DNS record definitions"
+        }
+      ]
+    },
+    "platform.do_networking": {
+      "type": "platform.do_networking",
+      "label": "DigitalOcean VPC \u0026 Firewalls",
+      "category": "infrastructure",
+      "description": "Manages DigitalOcean VPCs, firewalls, and load balancers (mock or real DO backend)",
+      "configFields": [
+        {
+          "key": "account",
+          "label": "Cloud Account",
+          "type": "string",
+          "description": "Name of the cloud.account module"
+        },
+        {
+          "key": "provider",
+          "label": "Provider",
+          "type": "string",
+          "description": "mock | digitalocean"
+        },
+        {
+          "key": "vpc",
+          "label": "VPC Config",
+          "type": "json",
+          "description": "VPC configuration (name, region, ip_range)",
+          "required": true
+        },
+        {
+          "key": "firewalls",
+          "label": "Firewalls",
+          "type": "json",
+          "description": "List of firewall definitions"
+        }
+      ]
+    },
+    "platform.doks": {
+      "type": "platform.doks",
+      "label": "DigitalOcean Kubernetes (DOKS)",
+      "category": "infrastructure",
+      "description": "Manages DigitalOcean Kubernetes Service clusters (mock or real DO backend)",
+      "configFields": [
+        {
+          "key": "account",
+          "label": "Cloud Account",
+          "type": "string",
+          "description": "Name of the cloud.account module"
+        },
+        {
+          "key": "cluster_name",
+          "label": "Cluster Name",
+          "type": "string",
+          "description": "DOKS cluster name"
+        },
+        {
+          "key": "region",
+          "label": "Region",
+          "type": "string",
+          "description": "DO region slug (e.g. nyc3)"
+        },
+        {
+          "key": "version",
+          "label": "Kubernetes Version",
+          "type": "string",
+          "description": "Kubernetes version slug"
+        },
+        {
+          "key": "node_pool",
+          "label": "Node Pool",
+          "type": "json",
+          "description": "Node pool config"
+        }
+      ]
+    },
+    "platform.ecs": {
+      "type": "platform.ecs",
+      "label": "ECS Fargate Service",
+      "category": "infrastructure",
+      "description": "AWS ECS/Fargate service with task definitions and ALB target group config",
+      "configFields": [
+        {
+          "key": "account",
+          "label": "Cloud Account",
+          "type": "string",
+          "description": "Name of the cloud.account module"
+        },
+        {
+          "key": "cluster",
+          "label": "ECS Cluster",
+          "type": "string",
+          "description": "ECS cluster name",
+          "required": true
+        },
+        {
+          "key": "region",
+          "label": "AWS Region",
+          "type": "string",
+          "description": "AWS region (e.g. us-east-1)"
+        },
+        {
+          "key": "launch_type",
+          "label": "Launch Type",
+          "type": "string",
+          "description": "FARGATE or EC2"
+        },
+        {
+          "key": "desired_count",
+          "label": "Desired Count",
+          "type": "string",
+          "description": "Number of tasks to run"
+        },
+        {
+          "key": "vpc_subnets",
+          "label": "VPC Subnets",
+          "type": "json",
+          "description": "List of subnet IDs"
+        },
+        {
+          "key": "security_groups",
+          "label": "Security Groups",
+          "type": "json",
+          "description": "List of security group IDs"
+        }
+      ]
+    },
+    "platform.kubernetes": {
+      "type": "platform.kubernetes",
+      "label": "Kubernetes Cluster",
+      "category": "infrastructure",
+      "description": "Managed Kubernetes cluster (kind/k3s for local, EKS/GKE/AKS stubs for cloud)",
+      "configFields": [
+        {
+          "key": "account",
+          "label": "Cloud Account",
+          "type": "string",
+          "description": "Name of the cloud.account module"
+        },
+        {
+          "key": "type",
+          "label": "Cluster Type",
+          "type": "string",
+          "description": "eks | gke | aks | kind | k3s",
+          "required": true
+        },
+        {
+          "key": "version",
+          "label": "Kubernetes Version",
+          "type": "string",
+          "description": "e.g. 1.29"
+        },
+        {
+          "key": "nodeGroups",
+          "label": "Node Groups",
+          "type": "json",
+          "description": "Node group definitions"
+        }
+      ]
+    },
+    "platform.networking": {
+      "type": "platform.networking",
+      "label": "VPC Networking",
+      "category": "infrastructure",
+      "description": "Manages VPC, subnets, NAT gateway, and security groups (mock or AWS backend)",
+      "configFields": [
+        {
+          "key": "account",
+          "label": "Cloud Account",
+          "type": "string",
+          "description": "Name of the cloud.account module"
+        },
+        {
+          "key": "provider",
+          "label": "Provider",
+          "type": "string",
+          "description": "mock | aws"
+        },
+        {
+          "key": "vpc",
+          "label": "VPC Config",
+          "type": "json",
+          "description": "VPC configuration (cidr, name)",
+          "required": true
+        },
+        {
+          "key": "subnets",
+          "label": "Subnets",
+          "type": "json",
+          "description": "List of subnet definitions"
+        },
+        {
+          "key": "nat_gateway",
+          "label": "NAT Gateway",
+          "type": "boolean",
+          "description": "Provision a NAT gateway"
+        },
+        {
+          "key": "security_groups",
+          "label": "Security Groups",
+          "type": "json",
+          "description": "List of security group definitions"
+        }
+      ]
+    },
     "platform.provider": {
       "type": "platform.provider",
       "label": "Platform Provider",
@@ -1971,6 +2965,54 @@
         }
       ],
       "maxIncoming": 0
+    },
+    "platform.region": {
+      "type": "platform.region",
+      "label": "Multi-Region Deployment",
+      "category": "infrastructure",
+      "description": "Manages multi-region tenant deployments with failover, health checking, and traffic weight routing",
+      "configFields": [
+        {
+          "key": "provider",
+          "label": "Provider",
+          "type": "string",
+          "description": "mock (default)"
+        },
+        {
+          "key": "regions",
+          "label": "Regions",
+          "type": "json",
+          "description": "List of region definitions (name, provider, endpoint, priority, health_check)",
+          "required": true
+        }
+      ]
+    },
+    "platform.region_router": {
+      "type": "platform.region_router",
+      "label": "Region Router",
+      "category": "infrastructure",
+      "description": "Routes traffic between regions based on weights, health, and failover policies",
+      "configFields": [
+        {
+          "key": "region",
+          "label": "Region Module",
+          "type": "string",
+          "description": "Name of the platform.region module to route",
+          "required": true
+        },
+        {
+          "key": "strategy",
+          "label": "Routing Strategy",
+          "type": "select",
+          "description": "Traffic routing strategy",
+          "defaultValue": "weighted",
+          "options": [
+            "weighted",
+            "failover",
+            "active-active"
+          ]
+        }
+      ]
     },
     "platform.resource": {
       "type": "platform.resource",
@@ -2036,6 +3078,20 @@
       "defaultConfig": {
         "tier": "application"
       }
+    },
+    "policy.mock": {
+      "type": "policy.mock",
+      "label": "Mock Policy Engine",
+      "category": "security",
+      "description": "In-memory mock policy engine for testing. Denies if any loaded policy contains the word 'deny'.",
+      "configFields": [
+        {
+          "key": "policies",
+          "label": "Pre-loaded Policies",
+          "type": "json",
+          "description": "List of policies to load at startup"
+        }
+      ]
     },
     "processing.step": {
       "type": "processing.step",
@@ -2247,6 +3303,73 @@
         "mountPath": "secret"
       }
     },
+    "security.field-protection": {
+      "type": "security.field-protection",
+      "label": "Field Protection",
+      "category": "security",
+      "description": "Field-level encryption/masking for sensitive data in pipeline responses",
+      "configFields": [
+        {
+          "key": "fields",
+          "label": "Protected Fields",
+          "type": "json",
+          "description": "List of field protection rules (path, action: mask|encrypt|redact)"
+        },
+        {
+          "key": "key",
+          "label": "Encryption Key",
+          "type": "string",
+          "description": "Key used for field encryption",
+          "sensitive": true
+        }
+      ]
+    },
+    "security.scanner": {
+      "type": "security.scanner",
+      "label": "Security Scanner",
+      "category": "security",
+      "description": "Security scanner provider supporting mock, semgrep, trivy, and grype backends",
+      "configFields": [
+        {
+          "key": "mode",
+          "label": "Mode",
+          "type": "select",
+          "description": "Scanner mode: 'mock' for testing or 'cli' for real tools",
+          "defaultValue": "mock",
+          "options": [
+            "mock",
+            "cli"
+          ]
+        },
+        {
+          "key": "semgrepBinary",
+          "label": "Semgrep Binary",
+          "type": "string",
+          "description": "Path to semgrep binary",
+          "defaultValue": "semgrep"
+        },
+        {
+          "key": "trivyBinary",
+          "label": "Trivy Binary",
+          "type": "string",
+          "description": "Path to trivy binary",
+          "defaultValue": "trivy"
+        },
+        {
+          "key": "grypeBinary",
+          "label": "Grype Binary",
+          "type": "string",
+          "description": "Path to grype binary",
+          "defaultValue": "grype"
+        },
+        {
+          "key": "mockFindings",
+          "label": "Mock Findings",
+          "type": "json",
+          "description": "Mock findings to return (keyed by scan type: sast, container, deps)"
+        }
+      ]
+    },
     "state.connector": {
       "type": "state.connector",
       "label": "State Connector",
@@ -2405,6 +3528,20 @@
         "prefix": "/",
         "spaFallback": true
       }
+    },
+    "step.actor_ask": {
+      "type": "step.actor_ask",
+      "label": "Actor Ask",
+      "category": "pipeline",
+      "description": "Send a message to an actor and wait for a response",
+      "configFields": []
+    },
+    "step.actor_send": {
+      "type": "step.actor_send",
+      "label": "Actor Send",
+      "category": "pipeline",
+      "description": "Send a message to an actor without waiting for a response",
+      "configFields": []
     },
     "step.ai_classify": {
       "type": "step.ai_classify",
@@ -2600,6 +3737,111 @@
         "temperature": 0.3
       }
     },
+    "step.apigw_apply": {
+      "type": "step.apigw_apply",
+      "label": "API Gateway Apply",
+      "category": "pipeline",
+      "description": "Applies API gateway configuration",
+      "configFields": []
+    },
+    "step.apigw_destroy": {
+      "type": "step.apigw_destroy",
+      "label": "API Gateway Destroy",
+      "category": "pipeline",
+      "description": "Destroys a provisioned API gateway",
+      "configFields": []
+    },
+    "step.apigw_plan": {
+      "type": "step.apigw_plan",
+      "label": "API Gateway Plan",
+      "category": "pipeline",
+      "description": "Plans API gateway changes without applying them",
+      "configFields": []
+    },
+    "step.apigw_status": {
+      "type": "step.apigw_status",
+      "label": "API Gateway Status",
+      "category": "pipeline",
+      "description": "Gets the current status of an API gateway",
+      "configFields": []
+    },
+    "step.app_deploy": {
+      "type": "step.app_deploy",
+      "label": "App Deploy",
+      "category": "pipeline",
+      "description": "Deploys an application container",
+      "configFields": []
+    },
+    "step.app_rollback": {
+      "type": "step.app_rollback",
+      "label": "App Rollback",
+      "category": "pipeline",
+      "description": "Rolls back an application to a previous version",
+      "configFields": []
+    },
+    "step.app_status": {
+      "type": "step.app_status",
+      "label": "App Status",
+      "category": "pipeline",
+      "description": "Gets the deployment status of an application",
+      "configFields": []
+    },
+    "step.argo_delete": {
+      "type": "step.argo_delete",
+      "label": "Argo Delete",
+      "category": "pipeline",
+      "description": "Deletes an Argo Workflow",
+      "configFields": []
+    },
+    "step.argo_list": {
+      "type": "step.argo_list",
+      "label": "Argo List",
+      "category": "pipeline",
+      "description": "Lists Argo Workflows",
+      "configFields": []
+    },
+    "step.argo_logs": {
+      "type": "step.argo_logs",
+      "label": "Argo Logs",
+      "category": "pipeline",
+      "description": "Retrieves logs from an Argo Workflow",
+      "configFields": []
+    },
+    "step.argo_status": {
+      "type": "step.argo_status",
+      "label": "Argo Status",
+      "category": "pipeline",
+      "description": "Gets the status of an Argo Workflow",
+      "configFields": []
+    },
+    "step.argo_submit": {
+      "type": "step.argo_submit",
+      "label": "Argo Submit",
+      "category": "pipeline",
+      "description": "Submits an Argo Workflow",
+      "configFields": []
+    },
+    "step.artifact_delete": {
+      "type": "step.artifact_delete",
+      "label": "Artifact Delete",
+      "category": "pipeline",
+      "description": "Deletes an artifact from the artifact store",
+      "configFields": []
+    },
+    "step.artifact_download": {
+      "type": "step.artifact_download",
+      "label": "Artifact Download",
+      "category": "pipeline",
+      "description": "Downloads an artifact from the artifact store",
+      "configFields": []
+    },
+    "step.artifact_list": {
+      "type": "step.artifact_list",
+      "label": "Artifact List",
+      "category": "pipeline",
+      "description": "Lists artifacts in the artifact store",
+      "configFields": []
+    },
     "step.artifact_pull": {
       "type": "step.artifact_pull",
       "label": "Artifact Pull",
@@ -2705,6 +3947,13 @@
           "defaultValue": "artifact_store"
         }
       ]
+    },
+    "step.artifact_upload": {
+      "type": "step.artifact_upload",
+      "label": "Artifact Upload",
+      "category": "pipeline",
+      "description": "Uploads a file as an artifact",
+      "configFields": []
     },
     "step.auth_required": {
       "type": "step.auth_required",
@@ -2850,6 +4099,68 @@
           "defaultValue": "false"
         }
       ]
+    },
+    "step.branch": {
+      "type": "step.branch",
+      "label": "Branch",
+      "category": "pipeline",
+      "description": "Switch/case routing: evaluates a field, executes only the matched branch's sub-steps inline, then jumps to merge_step. Unlike step.conditional, skipped branches never execute.",
+      "inputs": [
+        {
+          "name": "context",
+          "type": "PipelineContext",
+          "description": "Pipeline context containing the field to evaluate"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "StepResult",
+          "description": "Branch result with matched_value and branch name"
+        }
+      ],
+      "configFields": [
+        {
+          "key": "field",
+          "label": "Field",
+          "type": "string",
+          "description": "Dot-path field to evaluate for branch selection",
+          "required": true
+        },
+        {
+          "key": "branches",
+          "label": "Branches",
+          "type": "map",
+          "description": "Map of field values to lists of inline step configs",
+          "required": true
+        },
+        {
+          "key": "default",
+          "label": "Default",
+          "type": "array",
+          "description": "Sub-steps to run when no branch matches"
+        },
+        {
+          "key": "merge_step",
+          "label": "Merge Step",
+          "type": "string",
+          "description": "Step name to jump to after the branch completes (empty = continue sequentially)"
+        }
+      ]
+    },
+    "step.build_binary": {
+      "type": "step.build_binary",
+      "label": "Build Binary",
+      "category": "pipeline",
+      "description": "Builds a Go binary from source",
+      "configFields": []
+    },
+    "step.build_from_config": {
+      "type": "step.build_from_config",
+      "label": "Build From Config",
+      "category": "pipeline",
+      "description": "Builds using workflow engine config as build spec",
+      "configFields": []
     },
     "step.build_ui": {
       "type": "step.build_ui",
@@ -3118,6 +4429,55 @@
           ]
         }
       ]
+    },
+    "step.cloud_validate": {
+      "type": "step.cloud_validate",
+      "label": "Cloud Validate",
+      "category": "pipeline",
+      "description": "Validates cloud provider credentials",
+      "configFields": []
+    },
+    "step.codebuild_create_project": {
+      "type": "step.codebuild_create_project",
+      "label": "CodeBuild Create Project",
+      "category": "pipeline",
+      "description": "Creates an AWS CodeBuild project",
+      "configFields": []
+    },
+    "step.codebuild_delete_project": {
+      "type": "step.codebuild_delete_project",
+      "label": "CodeBuild Delete Project",
+      "category": "pipeline",
+      "description": "Deletes an AWS CodeBuild project",
+      "configFields": []
+    },
+    "step.codebuild_list_builds": {
+      "type": "step.codebuild_list_builds",
+      "label": "CodeBuild List Builds",
+      "category": "pipeline",
+      "description": "Lists builds for a CodeBuild project",
+      "configFields": []
+    },
+    "step.codebuild_logs": {
+      "type": "step.codebuild_logs",
+      "label": "CodeBuild Logs",
+      "category": "pipeline",
+      "description": "Retrieves logs for a CodeBuild build",
+      "configFields": []
+    },
+    "step.codebuild_start": {
+      "type": "step.codebuild_start",
+      "label": "CodeBuild Start",
+      "category": "pipeline",
+      "description": "Starts an AWS CodeBuild build",
+      "configFields": []
+    },
+    "step.codebuild_status": {
+      "type": "step.codebuild_status",
+      "label": "CodeBuild Status",
+      "category": "pipeline",
+      "description": "Gets the status of a CodeBuild build",
+      "configFields": []
     },
     "step.conditional": {
       "type": "step.conditional",
@@ -3665,6 +5025,62 @@
         }
       ]
     },
+    "step.dns_apply": {
+      "type": "step.dns_apply",
+      "label": "DNS Apply",
+      "category": "pipeline",
+      "description": "Applies DNS zone and record changes",
+      "configFields": []
+    },
+    "step.dns_plan": {
+      "type": "step.dns_plan",
+      "label": "DNS Plan",
+      "category": "pipeline",
+      "description": "Plans DNS changes without applying them",
+      "configFields": []
+    },
+    "step.dns_status": {
+      "type": "step.dns_status",
+      "label": "DNS Status",
+      "category": "pipeline",
+      "description": "Gets the current status of a DNS zone",
+      "configFields": []
+    },
+    "step.do_deploy": {
+      "type": "step.do_deploy",
+      "label": "DO Deploy",
+      "category": "pipeline",
+      "description": "Deploys to DigitalOcean App Platform",
+      "configFields": []
+    },
+    "step.do_destroy": {
+      "type": "step.do_destroy",
+      "label": "DO Destroy",
+      "category": "pipeline",
+      "description": "Destroys a DigitalOcean App Platform application",
+      "configFields": []
+    },
+    "step.do_logs": {
+      "type": "step.do_logs",
+      "label": "DO Logs",
+      "category": "pipeline",
+      "description": "Retrieves logs from DigitalOcean App Platform",
+      "configFields": []
+    },
+    "step.do_scale": {
+      "type": "step.do_scale",
+      "label": "DO Scale",
+      "category": "pipeline",
+      "description": "Scales a DigitalOcean App Platform application",
+      "configFields": []
+    },
+    "step.do_status": {
+      "type": "step.do_status",
+      "label": "DO Status",
+      "category": "pipeline",
+      "description": "Gets the status of a DigitalOcean App Platform application",
+      "configFields": []
+    },
     "step.docker_build": {
       "type": "step.docker_build",
       "label": "Docker Build",
@@ -3851,6 +5267,34 @@
           "defaultValue": "applied_resources"
         }
       ]
+    },
+    "step.ecs_apply": {
+      "type": "step.ecs_apply",
+      "label": "ECS Apply",
+      "category": "pipeline",
+      "description": "Applies ECS Fargate service deployment",
+      "configFields": []
+    },
+    "step.ecs_destroy": {
+      "type": "step.ecs_destroy",
+      "label": "ECS Destroy",
+      "category": "pipeline",
+      "description": "Destroys an ECS Fargate service",
+      "configFields": []
+    },
+    "step.ecs_plan": {
+      "type": "step.ecs_plan",
+      "label": "ECS Plan",
+      "category": "pipeline",
+      "description": "Plans ECS service deployment changes",
+      "configFields": []
+    },
+    "step.ecs_status": {
+      "type": "step.ecs_status",
+      "label": "ECS Status",
+      "category": "pipeline",
+      "description": "Gets the status of an ECS Fargate service",
+      "configFields": []
     },
     "step.event_decrypt": {
       "type": "step.event_decrypt",
@@ -4182,6 +5626,76 @@
         "timeout": "24h"
       }
     },
+    "step.git_checkout": {
+      "type": "step.git_checkout",
+      "label": "Git Checkout",
+      "category": "pipeline",
+      "description": "Checks out a Git branch, tag, or commit",
+      "configFields": []
+    },
+    "step.git_clone": {
+      "type": "step.git_clone",
+      "label": "Git Clone",
+      "category": "pipeline",
+      "description": "Clones a Git repository",
+      "configFields": []
+    },
+    "step.git_commit": {
+      "type": "step.git_commit",
+      "label": "Git Commit",
+      "category": "pipeline",
+      "description": "Creates a Git commit",
+      "configFields": []
+    },
+    "step.git_push": {
+      "type": "step.git_push",
+      "label": "Git Push",
+      "category": "pipeline",
+      "description": "Pushes commits to a remote repository",
+      "configFields": []
+    },
+    "step.git_tag": {
+      "type": "step.git_tag",
+      "label": "Git Tag",
+      "category": "pipeline",
+      "description": "Creates a Git tag",
+      "configFields": []
+    },
+    "step.gitlab_create_mr": {
+      "type": "step.gitlab_create_mr",
+      "label": "GitLab Create MR",
+      "category": "pipeline",
+      "description": "Creates a GitLab merge request",
+      "configFields": []
+    },
+    "step.gitlab_mr_comment": {
+      "type": "step.gitlab_mr_comment",
+      "label": "GitLab MR Comment",
+      "category": "pipeline",
+      "description": "Adds a comment to a GitLab merge request",
+      "configFields": []
+    },
+    "step.gitlab_parse_webhook": {
+      "type": "step.gitlab_parse_webhook",
+      "label": "GitLab Parse Webhook",
+      "category": "pipeline",
+      "description": "Parses and validates a GitLab webhook",
+      "configFields": []
+    },
+    "step.gitlab_pipeline_status": {
+      "type": "step.gitlab_pipeline_status",
+      "label": "GitLab Pipeline Status",
+      "category": "pipeline",
+      "description": "Gets the status of a GitLab pipeline",
+      "configFields": []
+    },
+    "step.gitlab_trigger_pipeline": {
+      "type": "step.gitlab_trigger_pipeline",
+      "label": "GitLab Trigger Pipeline",
+      "category": "pipeline",
+      "description": "Triggers a GitLab CI/CD pipeline",
+      "configFields": []
+    },
     "step.graphql": {
       "type": "step.graphql",
       "label": "GraphQL",
@@ -4394,6 +5908,41 @@
         }
       ]
     },
+    "step.iac_apply": {
+      "type": "step.iac_apply",
+      "label": "IaC Apply",
+      "category": "pipeline",
+      "description": "Applies infrastructure changes",
+      "configFields": []
+    },
+    "step.iac_destroy": {
+      "type": "step.iac_destroy",
+      "label": "IaC Destroy",
+      "category": "pipeline",
+      "description": "Destroys IaC-managed infrastructure",
+      "configFields": []
+    },
+    "step.iac_drift_detect": {
+      "type": "step.iac_drift_detect",
+      "label": "IaC Drift Detect",
+      "category": "pipeline",
+      "description": "Detects IaC configuration drift",
+      "configFields": []
+    },
+    "step.iac_plan": {
+      "type": "step.iac_plan",
+      "label": "IaC Plan",
+      "category": "pipeline",
+      "description": "Plans infrastructure changes without applying",
+      "configFields": []
+    },
+    "step.iac_status": {
+      "type": "step.iac_status",
+      "label": "IaC Status",
+      "category": "pipeline",
+      "description": "Gets IaC provisioning status",
+      "configFields": []
+    },
     "step.jq": {
       "type": "step.jq",
       "label": "JQ Transform",
@@ -4501,6 +6050,34 @@
         }
       ]
     },
+    "step.k8s_apply": {
+      "type": "step.k8s_apply",
+      "label": "K8s Apply",
+      "category": "pipeline",
+      "description": "Applies Kubernetes manifests",
+      "configFields": []
+    },
+    "step.k8s_destroy": {
+      "type": "step.k8s_destroy",
+      "label": "K8s Destroy",
+      "category": "pipeline",
+      "description": "Deletes Kubernetes resources",
+      "configFields": []
+    },
+    "step.k8s_plan": {
+      "type": "step.k8s_plan",
+      "label": "K8s Plan",
+      "category": "pipeline",
+      "description": "Diffs Kubernetes manifests against cluster state",
+      "configFields": []
+    },
+    "step.k8s_status": {
+      "type": "step.k8s_status",
+      "label": "K8s Status",
+      "category": "pipeline",
+      "description": "Gets the status of Kubernetes resources",
+      "configFields": []
+    },
     "step.log": {
       "type": "step.log",
       "label": "Log",
@@ -4575,6 +6152,76 @@
           "description": "Token time-to-live"
         }
       ]
+    },
+    "step.marketplace_detail": {
+      "type": "step.marketplace_detail",
+      "label": "Marketplace Detail",
+      "category": "pipeline",
+      "description": "Gets details about a marketplace plugin",
+      "configFields": []
+    },
+    "step.marketplace_install": {
+      "type": "step.marketplace_install",
+      "label": "Marketplace Install",
+      "category": "pipeline",
+      "description": "Installs a marketplace plugin",
+      "configFields": []
+    },
+    "step.marketplace_installed": {
+      "type": "step.marketplace_installed",
+      "label": "Marketplace Installed",
+      "category": "pipeline",
+      "description": "Lists installed marketplace plugins",
+      "configFields": []
+    },
+    "step.marketplace_search": {
+      "type": "step.marketplace_search",
+      "label": "Marketplace Search",
+      "category": "pipeline",
+      "description": "Searches the plugin marketplace",
+      "configFields": []
+    },
+    "step.marketplace_uninstall": {
+      "type": "step.marketplace_uninstall",
+      "label": "Marketplace Uninstall",
+      "category": "pipeline",
+      "description": "Uninstalls a marketplace plugin",
+      "configFields": []
+    },
+    "step.marketplace_update": {
+      "type": "step.marketplace_update",
+      "label": "Marketplace Update",
+      "category": "pipeline",
+      "description": "Updates an installed marketplace plugin",
+      "configFields": []
+    },
+    "step.network_apply": {
+      "type": "step.network_apply",
+      "label": "Network Apply",
+      "category": "pipeline",
+      "description": "Applies VPC networking changes",
+      "configFields": []
+    },
+    "step.network_plan": {
+      "type": "step.network_plan",
+      "label": "Network Plan",
+      "category": "pipeline",
+      "description": "Plans VPC networking changes",
+      "configFields": []
+    },
+    "step.network_status": {
+      "type": "step.network_status",
+      "label": "Network Status",
+      "category": "pipeline",
+      "description": "Gets VPC networking status",
+      "configFields": []
+    },
+    "step.nosql_delete": {
+      "type": "step.nosql_delete",
+      "label": "NoSQL Delete",
+      "category": "pipeline",
+      "description": "Deletes an item from a NoSQL store",
+      "configFields": []
     },
     "step.nosql_get": {
       "type": "step.nosql_get",
@@ -4833,6 +6480,34 @@
         }
       ]
     },
+    "step.policy_evaluate": {
+      "type": "step.policy_evaluate",
+      "label": "Policy Evaluate",
+      "category": "pipeline",
+      "description": "Evaluates input against a policy",
+      "configFields": []
+    },
+    "step.policy_list": {
+      "type": "step.policy_list",
+      "label": "Policy List",
+      "category": "pipeline",
+      "description": "Lists loaded policies",
+      "configFields": []
+    },
+    "step.policy_load": {
+      "type": "step.policy_load",
+      "label": "Policy Load",
+      "category": "pipeline",
+      "description": "Loads a policy at runtime",
+      "configFields": []
+    },
+    "step.policy_test": {
+      "type": "step.policy_test",
+      "label": "Policy Test",
+      "category": "pipeline",
+      "description": "Tests a policy against cases",
+      "configFields": []
+    },
     "step.publish": {
       "type": "step.publish",
       "label": "Publish Event",
@@ -4995,6 +6670,48 @@
           "required": true
         }
       ]
+    },
+    "step.region_deploy": {
+      "type": "step.region_deploy",
+      "label": "Region Deploy",
+      "category": "pipeline",
+      "description": "Deploys to a specific region",
+      "configFields": []
+    },
+    "step.region_failover": {
+      "type": "step.region_failover",
+      "label": "Region Failover",
+      "category": "pipeline",
+      "description": "Triggers regional failover",
+      "configFields": []
+    },
+    "step.region_promote": {
+      "type": "step.region_promote",
+      "label": "Region Promote",
+      "category": "pipeline",
+      "description": "Promotes a region to primary",
+      "configFields": []
+    },
+    "step.region_status": {
+      "type": "step.region_status",
+      "label": "Region Status",
+      "category": "pipeline",
+      "description": "Gets multi-region health status",
+      "configFields": []
+    },
+    "step.region_sync": {
+      "type": "step.region_sync",
+      "label": "Region Sync",
+      "category": "pipeline",
+      "description": "Syncs state across regions",
+      "configFields": []
+    },
+    "step.region_weight": {
+      "type": "step.region_weight",
+      "label": "Region Weight",
+      "category": "pipeline",
+      "description": "Sets traffic weight for a region",
+      "configFields": []
     },
     "step.request_parse": {
       "type": "step.request_parse",
@@ -5239,6 +6956,34 @@
           "description": "Environment variables"
         }
       ]
+    },
+    "step.scaling_apply": {
+      "type": "step.scaling_apply",
+      "label": "Scaling Apply",
+      "category": "pipeline",
+      "description": "Applies autoscaling policies",
+      "configFields": []
+    },
+    "step.scaling_destroy": {
+      "type": "step.scaling_destroy",
+      "label": "Scaling Destroy",
+      "category": "pipeline",
+      "description": "Removes autoscaling policies",
+      "configFields": []
+    },
+    "step.scaling_plan": {
+      "type": "step.scaling_plan",
+      "label": "Scaling Plan",
+      "category": "pipeline",
+      "description": "Plans autoscaling changes",
+      "configFields": []
+    },
+    "step.scaling_status": {
+      "type": "step.scaling_status",
+      "label": "Scaling Status",
+      "category": "pipeline",
+      "description": "Gets autoscaling status",
+      "configFields": []
     },
     "step.scan_container": {
       "type": "step.scan_container",
@@ -5498,6 +7243,13 @@
           "required": true
         }
       ]
+    },
+    "step.secret_rotate": {
+      "type": "step.secret_rotate",
+      "label": "Secret Rotate",
+      "category": "pipeline",
+      "description": "Rotates a secret",
+      "configFields": []
     },
     "step.set": {
       "type": "step.set",
@@ -5760,6 +7512,41 @@
           "required": true
         }
       ]
+    },
+    "step.trace_annotate": {
+      "type": "step.trace_annotate",
+      "label": "Trace Annotate",
+      "category": "pipeline",
+      "description": "Adds attributes to the current trace span",
+      "configFields": []
+    },
+    "step.trace_extract": {
+      "type": "step.trace_extract",
+      "label": "Trace Extract",
+      "category": "pipeline",
+      "description": "Extracts trace context from incoming headers",
+      "configFields": []
+    },
+    "step.trace_inject": {
+      "type": "step.trace_inject",
+      "label": "Trace Inject",
+      "category": "pipeline",
+      "description": "Injects trace context into outgoing headers",
+      "configFields": []
+    },
+    "step.trace_link": {
+      "type": "step.trace_link",
+      "label": "Trace Link",
+      "category": "pipeline",
+      "description": "Links the current span to another span",
+      "configFields": []
+    },
+    "step.trace_start": {
+      "type": "step.trace_start",
+      "label": "Trace Start",
+      "category": "pipeline",
+      "description": "Starts a new trace span",
+      "configFields": []
     },
     "step.transform": {
       "type": "step.transform",
@@ -6097,6 +7884,56 @@
         "timeout": "30s"
       }
     },
+    "storage.artifact": {
+      "type": "storage.artifact",
+      "label": "Artifact Store",
+      "category": "infrastructure",
+      "description": "Named artifact storage with metadata support (filesystem or S3)",
+      "configFields": [
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "select",
+          "description": "Storage backend to use",
+          "defaultValue": "filesystem",
+          "options": [
+            "filesystem",
+            "s3"
+          ]
+        },
+        {
+          "key": "basePath",
+          "label": "Base Path",
+          "type": "string",
+          "description": "Root directory for filesystem backend",
+          "defaultValue": "./data/artifacts"
+        },
+        {
+          "key": "maxSize",
+          "label": "Max Size (bytes)",
+          "type": "number",
+          "description": "Maximum artifact size in bytes (0 = unlimited)"
+        },
+        {
+          "key": "bucket",
+          "label": "S3 Bucket",
+          "type": "string",
+          "description": "S3 bucket name (s3 backend only)"
+        },
+        {
+          "key": "region",
+          "label": "S3 Region",
+          "type": "string",
+          "description": "AWS region (s3 backend only)"
+        },
+        {
+          "key": "endpoint",
+          "label": "S3 Endpoint",
+          "type": "string",
+          "description": "Custom S3 endpoint"
+        }
+      ]
+    },
     "storage.gcs": {
       "type": "storage.gcs",
       "label": "GCS Storage",
@@ -6308,6 +8145,26 @@
         "event_store": "admin-event-store"
       },
       "maxIncoming": 1
+    },
+    "tracing.propagation": {
+      "type": "tracing.propagation",
+      "label": "Trace Propagation",
+      "category": "observability",
+      "description": "Propagates trace context across async boundaries (Kafka, EventBridge, webhooks, HTTP)",
+      "configFields": [
+        {
+          "key": "format",
+          "label": "Propagation Format",
+          "type": "select",
+          "description": "Trace context propagation format",
+          "defaultValue": "w3c",
+          "options": [
+            "w3c",
+            "b3",
+            "composite"
+          ]
+        }
+      ]
     },
     "webhook.sender": {
       "type": "webhook.sender",
