@@ -57,6 +57,8 @@ workflows:
         description: "Manage infrastructure lifecycle (plan, apply, status, drift, destroy)"
       - name: docs
         description: "Generate documentation from workflow configs (generate: produce Markdown + Mermaid diagrams)"
+      - name: editor-schemas
+        description: "Export module schemas and type coercion rules for the visual editor"
 
 # Each command is expressed as a workflow pipeline triggered by the CLI.
 # The pipeline delegates to the registered Go implementation via step.cli_invoke,
@@ -360,4 +362,15 @@ pipelines:
         type: step.cli_invoke
         config:
           command: docs
+
+  cmd-editor-schemas:
+    trigger:
+      type: cli
+      config:
+        command: editor-schemas
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: editor-schemas
 
