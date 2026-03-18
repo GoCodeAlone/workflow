@@ -139,6 +139,7 @@ flowchart TD
 | `step.validate` | Validates pipeline data against required fields or JSON schema | pipelinesteps |
 | `step.transform` | Transforms data shape and field mapping | pipelinesteps |
 | `step.conditional` | Conditional branching based on field values | pipelinesteps |
+| `step.branch` | Switch/case routing with inline sub-pipeline execution | pipelinesteps |
 | `step.set` | Sets values in pipeline context with template support | pipelinesteps |
 | `step.log` | Logs pipeline data for debugging | pipelinesteps |
 | `step.publish` | Publishes events to EventBus | pipelinesteps |
