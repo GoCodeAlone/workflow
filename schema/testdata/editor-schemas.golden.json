@@ -5,6 +5,20 @@
       "label": "Actor Pool",
       "category": "infrastructure",
       "description": "Defines a group of actors that handle the same type of work with configurable lifecycle and routing.",
+      "inputs": [
+        {
+          "name": "message",
+          "type": "JSON",
+          "description": "Message to dispatch to an actor in the pool"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "JSON",
+          "description": "Actor response message"
+        }
+      ],
       "configFields": [
         {
           "key": "system",
@@ -70,6 +84,13 @@
       "label": "Actor System",
       "category": "infrastructure",
       "description": "Actor runtime for stateful, message-driven services. Actors are lightweight, isolated units of computation that communicate through messages.",
+      "outputs": [
+        {
+          "name": "system",
+          "type": "any",
+          "description": "Actor runtime system for message-driven actor pools"
+        }
+      ],
       "configFields": [
         {
           "key": "shutdownTimeout",
@@ -311,6 +332,13 @@
       "label": "App Container",
       "category": "infrastructure",
       "description": "Application deployment abstraction that translates high-level config into platform-specific resources (Kubernetes Deployment+Service or ECS task definition)",
+      "outputs": [
+        {
+          "name": "container",
+          "type": "JSON",
+          "description": "Deployment output with service endpoint and status"
+        }
+      ],
       "configFields": [
         {
           "key": "environment",
@@ -375,6 +403,13 @@
       "label": "Argo Workflows",
       "category": "cicd",
       "description": "Manages Argo Workflows submissions and status on a Kubernetes cluster",
+      "outputs": [
+        {
+          "name": "workflow",
+          "type": "JSON",
+          "description": "Argo Workflows service for workflow submission and status"
+        }
+      ],
       "configFields": [
         {
           "key": "namespace",
@@ -477,6 +512,20 @@
       "label": "M2M Auth",
       "category": "security",
       "description": "Machine-to-machine OAuth2 auth: client_credentials grant, JWT-bearer assertion, ES256/HS256 token issuance, and JWKS endpoint",
+      "inputs": [
+        {
+          "name": "credentials",
+          "type": "Credentials",
+          "description": "Client credentials for M2M OAuth2 token request"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "auth",
+          "type": "AuthService",
+          "description": "M2M authentication service for token issuance and validation"
+        }
+      ],
       "configFields": [
         {
           "key": "secret",
@@ -523,6 +572,20 @@
       "label": "OAuth2",
       "category": "security",
       "description": "OAuth2 authorization code flow supporting Google, GitHub, and generic OIDC providers",
+      "inputs": [
+        {
+          "name": "credentials",
+          "type": "Credentials",
+          "description": "OAuth2 credentials (client ID/secret or authorization code)"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "auth",
+          "type": "AuthService",
+          "description": "OAuth2 authentication service for authorization code flow"
+        }
+      ],
       "configFields": [
         {
           "key": "providers",
@@ -538,6 +601,20 @@
       "label": "Token Blacklist",
       "category": "security",
       "description": "JWT token blacklist for revocation support (memory or Redis backend)",
+      "inputs": [
+        {
+          "name": "token",
+          "type": "Token",
+          "description": "JWT token to check or add to the blacklist"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "blacklist",
+          "type": "PersistenceStore",
+          "description": "Token blacklist service for revocation checks"
+        }
+      ],
       "configFields": [
         {
           "key": "backend",
@@ -592,6 +669,13 @@
       "label": "AWS CodeBuild",
       "category": "cicd",
       "description": "AWS CodeBuild integration for running build projects in the cloud",
+      "outputs": [
+        {
+          "name": "build",
+          "type": "JSON",
+          "description": "AWS CodeBuild service for running and monitoring build projects"
+        }
+      ],
       "configFields": [
         {
           "key": "region",
@@ -639,6 +723,20 @@
       "label": "Redis Cache",
       "category": "infrastructure",
       "description": "Redis-backed key/value cache for pipeline step data",
+      "inputs": [
+        {
+          "name": "key",
+          "type": "string",
+          "description": "Cache key for get/set operations"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "cache",
+          "type": "Cache",
+          "description": "Redis cache service"
+        }
+      ],
       "configFields": [
         {
           "key": "address",
@@ -682,6 +780,13 @@
       "label": "Cloud Account",
       "category": "infrastructure",
       "description": "Cloud provider credentials (AWS, GCP, Azure, DigitalOcean, Kubernetes, or mock)",
+      "outputs": [
+        {
+          "name": "credentials",
+          "type": "Credentials",
+          "description": "Cloud provider credentials for downstream infrastructure modules"
+        }
+      ],
       "configFields": [
         {
           "key": "provider",
@@ -721,6 +826,13 @@
       "label": "Config Provider",
       "category": "infrastructure",
       "description": "Application configuration registry with schema validation, defaults, and source layering. Provides {{config \"key\"}} template references.",
+      "outputs": [
+        {
+          "name": "config",
+          "type": "JSON",
+          "description": "Configuration values accessible via {{config \"key\"}} templates"
+        }
+      ],
       "configFields": [
         {
           "key": "sources",
@@ -1126,6 +1238,13 @@
       "label": "GitLab Client",
       "category": "integration",
       "description": "GitLab API client for triggering pipelines, managing MRs, and querying pipeline status",
+      "outputs": [
+        {
+          "name": "client",
+          "type": "ExternalAPIClient",
+          "description": "GitLab API client for pipeline and MR operations"
+        }
+      ],
       "configFields": [
         {
           "key": "url",
@@ -1149,6 +1268,20 @@
       "label": "GitLab Webhook",
       "category": "integration",
       "description": "GitLab webhook receiver that parses and validates incoming GitLab events",
+      "inputs": [
+        {
+          "name": "event",
+          "type": "http.Request",
+          "description": "Incoming GitLab webhook HTTP request"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "event",
+          "type": "Event",
+          "description": "Parsed and validated GitLab event"
+        }
+      ],
       "configFields": [
         {
           "key": "secret",
@@ -1391,6 +1524,20 @@
       "label": "OTEL HTTP Middleware",
       "category": "observability",
       "description": "Instruments HTTP requests with OpenTelemetry tracing spans",
+      "inputs": [
+        {
+          "name": "request",
+          "type": "http.Request",
+          "description": "HTTP request to instrument with tracing"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "request",
+          "type": "http.Request",
+          "description": "HTTP request with OpenTelemetry span attached"
+        }
+      ],
       "configFields": [
         {
           "key": "serverName",
@@ -1658,6 +1805,20 @@
       "label": "IaC State Store",
       "category": "infrastructure",
       "description": "Tracks infrastructure provisioning state (memory or filesystem backend)",
+      "inputs": [
+        {
+          "name": "state",
+          "type": "JSON",
+          "description": "Infrastructure state snapshot to store or update"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "state",
+          "type": "PersistenceStore",
+          "description": "IaC state persistence service"
+        }
+      ],
       "configFields": [
         {
           "key": "backend",
@@ -2031,6 +2192,20 @@
       "label": "DynamoDB",
       "category": "database",
       "description": "AWS DynamoDB NoSQL store",
+      "inputs": [
+        {
+          "name": "key",
+          "type": "string",
+          "description": "Document key for get/put operations"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "store",
+          "type": "PersistenceStore",
+          "description": "DynamoDB NoSQL persistence store"
+        }
+      ],
       "configFields": [
         {
           "key": "region",
@@ -2058,6 +2233,20 @@
       "label": "In-Memory NoSQL",
       "category": "database",
       "description": "In-memory NoSQL store for testing and development",
+      "inputs": [
+        {
+          "name": "key",
+          "type": "string",
+          "description": "Document key for get/put operations"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "store",
+          "type": "PersistenceStore",
+          "description": "In-memory NoSQL persistence store"
+        }
+      ],
       "configFields": []
     },
     "nosql.mongodb": {
@@ -2065,6 +2254,20 @@
       "label": "MongoDB",
       "category": "database",
       "description": "MongoDB NoSQL document store",
+      "inputs": [
+        {
+          "name": "key",
+          "type": "string",
+          "description": "Document key for get/put operations"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "store",
+          "type": "PersistenceStore",
+          "description": "MongoDB NoSQL persistence store"
+        }
+      ],
       "configFields": [
         {
           "key": "uri",
@@ -2094,6 +2297,20 @@
       "label": "Redis NoSQL",
       "category": "database",
       "description": "Redis as a NoSQL key/value store",
+      "inputs": [
+        {
+          "name": "key",
+          "type": "string",
+          "description": "Document key for get/put operations"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "store",
+          "type": "PersistenceStore",
+          "description": "Redis NoSQL persistence store"
+        }
+      ],
       "configFields": [
         {
           "key": "address",
@@ -2437,6 +2654,13 @@
       "label": "API Gateway",
       "category": "infrastructure",
       "description": "Manages API gateway provisioning with routes, stages, and rate limiting (mock or AWS API Gateway v2)",
+      "outputs": [
+        {
+          "name": "gateway",
+          "type": "JSON",
+          "description": "Provisioned API gateway endpoint and configuration"
+        }
+      ],
       "configFields": [
         {
           "key": "account",
@@ -2482,6 +2706,13 @@
       "label": "Autoscaling Policies",
       "category": "infrastructure",
       "description": "Manages autoscaling policies (target tracking, step, scheduled) for AWS or mock resources",
+      "outputs": [
+        {
+          "name": "policies",
+          "type": "JSON",
+          "description": "Configured autoscaling policies"
+        }
+      ],
       "configFields": [
         {
           "key": "account",
@@ -2556,6 +2787,13 @@
       "label": "DNS Zone Manager",
       "category": "infrastructure",
       "description": "Manages DNS zones and records (mock or Route53/aws backend)",
+      "outputs": [
+        {
+          "name": "zone",
+          "type": "JSON",
+          "description": "Provisioned DNS zone and record set"
+        }
+      ],
       "configFields": [
         {
           "key": "account",
@@ -2589,6 +2827,13 @@
       "label": "DigitalOcean App Platform",
       "category": "infrastructure",
       "description": "Deploys containerized apps to DigitalOcean App Platform (mock or real DO backend)",
+      "outputs": [
+        {
+          "name": "app",
+          "type": "JSON",
+          "description": "Deployed app endpoint and status on DigitalOcean App Platform"
+        }
+      ],
       "configFields": [
         {
           "key": "account",
@@ -2645,6 +2890,13 @@
       "label": "DigitalOcean Managed Database",
       "category": "infrastructure",
       "description": "Manages DigitalOcean Managed Databases (PostgreSQL, MySQL, Redis, MongoDB, Kafka)",
+      "outputs": [
+        {
+          "name": "database",
+          "type": "sql.DB",
+          "description": "Managed database connection for DigitalOcean database cluster"
+        }
+      ],
       "configFields": [
         {
           "key": "account",
@@ -2701,6 +2953,13 @@
       "label": "DigitalOcean DNS",
       "category": "infrastructure",
       "description": "Manages DigitalOcean domains and DNS records (mock or real DO backend)",
+      "outputs": [
+        {
+          "name": "zone",
+          "type": "JSON",
+          "description": "Provisioned DigitalOcean DNS zone and records"
+        }
+      ],
       "configFields": [
         {
           "key": "account",
@@ -2734,6 +2993,13 @@
       "label": "DigitalOcean VPC \u0026 Firewalls",
       "category": "infrastructure",
       "description": "Manages DigitalOcean VPCs, firewalls, and load balancers (mock or real DO backend)",
+      "outputs": [
+        {
+          "name": "vpc",
+          "type": "JSON",
+          "description": "Provisioned DigitalOcean VPC and firewall configuration"
+        }
+      ],
       "configFields": [
         {
           "key": "account",
@@ -2767,6 +3033,13 @@
       "label": "DigitalOcean Kubernetes (DOKS)",
       "category": "infrastructure",
       "description": "Manages DigitalOcean Kubernetes Service clusters (mock or real DO backend)",
+      "outputs": [
+        {
+          "name": "cluster",
+          "type": "JSON",
+          "description": "Provisioned DOKS cluster endpoint and kubeconfig"
+        }
+      ],
       "configFields": [
         {
           "key": "account",
@@ -2805,6 +3078,13 @@
       "label": "ECS Fargate Service",
       "category": "infrastructure",
       "description": "AWS ECS/Fargate service with task definitions and ALB target group config",
+      "outputs": [
+        {
+          "name": "service",
+          "type": "JSON",
+          "description": "Provisioned ECS Fargate service ARN and endpoint"
+        }
+      ],
       "configFields": [
         {
           "key": "account",
@@ -2856,6 +3136,13 @@
       "label": "Kubernetes Cluster",
       "category": "infrastructure",
       "description": "Managed Kubernetes cluster (kind/k3s for local, EKS/GKE/AKS stubs for cloud)",
+      "outputs": [
+        {
+          "name": "cluster",
+          "type": "JSON",
+          "description": "Kubernetes cluster endpoint and kubeconfig"
+        }
+      ],
       "configFields": [
         {
           "key": "account",
@@ -2889,6 +3176,13 @@
       "label": "VPC Networking",
       "category": "infrastructure",
       "description": "Manages VPC, subnets, NAT gateway, and security groups (mock or AWS backend)",
+      "outputs": [
+        {
+          "name": "vpc",
+          "type": "JSON",
+          "description": "Provisioned VPC with subnets and security groups"
+        }
+      ],
       "configFields": [
         {
           "key": "account",
@@ -2971,6 +3265,13 @@
       "label": "Multi-Region Deployment",
       "category": "infrastructure",
       "description": "Manages multi-region tenant deployments with failover, health checking, and traffic weight routing",
+      "outputs": [
+        {
+          "name": "regions",
+          "type": "JSON",
+          "description": "Multi-region deployment status and endpoint map"
+        }
+      ],
       "configFields": [
         {
           "key": "provider",
@@ -2992,6 +3293,20 @@
       "label": "Region Router",
       "category": "infrastructure",
       "description": "Routes traffic between regions based on weights, health, and failover policies",
+      "inputs": [
+        {
+          "name": "request",
+          "type": "http.Request",
+          "description": "Incoming HTTP request to route to a region"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "routed",
+          "type": "http.Request",
+          "description": "Request routed to the selected region's endpoint"
+        }
+      ],
       "configFields": [
         {
           "key": "region",
@@ -3084,6 +3399,20 @@
       "label": "Mock Policy Engine",
       "category": "security",
       "description": "In-memory mock policy engine for testing. Denies if any loaded policy contains the word 'deny'.",
+      "inputs": [
+        {
+          "name": "request",
+          "type": "JSON",
+          "description": "Authorization request to evaluate against policies"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "decision",
+          "type": "JSON",
+          "description": "Policy decision (allow/deny) with reason"
+        }
+      ],
       "configFields": [
         {
           "key": "policies",
@@ -3308,6 +3637,20 @@
       "label": "Field Protection",
       "category": "security",
       "description": "Field-level encryption/masking for sensitive data in pipeline responses",
+      "inputs": [
+        {
+          "name": "data",
+          "type": "JSON",
+          "description": "JSON data with fields to protect via encryption or masking"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "protected",
+          "type": "JSON",
+          "description": "JSON data with sensitive fields encrypted or masked"
+        }
+      ],
       "configFields": [
         {
           "key": "fields",
@@ -3329,6 +3672,13 @@
       "label": "Security Scanner",
       "category": "security",
       "description": "Security scanner provider supporting mock, semgrep, trivy, and grype backends",
+      "outputs": [
+        {
+          "name": "scanner",
+          "type": "JSON",
+          "description": "Security scanner service for SAST, container, and dependency scans"
+        }
+      ],
       "configFields": [
         {
           "key": "mode",
@@ -7889,6 +8239,20 @@
       "label": "Artifact Store",
       "category": "infrastructure",
       "description": "Named artifact storage with metadata support (filesystem or S3)",
+      "inputs": [
+        {
+          "name": "artifact",
+          "type": "[]byte",
+          "description": "Binary artifact data to store or retrieve"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "storage",
+          "type": "FileStore",
+          "description": "Artifact file storage service with metadata support"
+        }
+      ],
       "configFields": [
         {
           "key": "backend",
@@ -8151,6 +8515,20 @@
       "label": "Trace Propagation",
       "category": "observability",
       "description": "Propagates trace context across async boundaries (Kafka, EventBridge, webhooks, HTTP)",
+      "inputs": [
+        {
+          "name": "span",
+          "type": "trace.Span",
+          "description": "Trace span to propagate across async boundaries"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "propagation",
+          "type": "trace.Span",
+          "description": "Trace span with propagation context injected or extracted"
+        }
+      ],
       "configFields": [
         {
           "key": "format",

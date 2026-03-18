@@ -477,6 +477,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Config Provider",
 		Category:    "infrastructure",
 		Description: "Application configuration registry with schema validation, defaults, and source layering. Provides {{config \"key\"}} template references.",
+		Outputs:     []ServiceIODef{{Name: "config", Type: "JSON", Description: "Configuration values accessible via {{config \"key\"}} templates"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "sources", Label: "Sources", Type: FieldTypeArray, Required: true, Description: "Ordered list of config sources (later overrides earlier). Supported types: defaults, env"},
 			{Key: "schema", Label: "Schema", Type: FieldTypeMap, Required: true, Description: "Map of config key definitions with env, required, default, sensitive, desc fields"},
@@ -2333,6 +2334,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Category: "infrastructure",
 		Description: "Actor runtime for stateful, message-driven services. " +
 			"Actors are lightweight, isolated units of computation that communicate through messages.",
+		Outputs: []ServiceIODef{{Name: "system", Type: "any", Description: "Actor runtime system for message-driven actor pools"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "shutdownTimeout", Label: "Shutdown Timeout", Type: FieldTypeDuration, Description: "How long to wait for in-flight messages to drain before forcing shutdown", DefaultValue: "30s"},
 			{Key: "defaultRecovery", Label: "Default Recovery Policy", Type: FieldTypeJSON, Description: "What happens when any actor in this system crashes"},
@@ -2346,6 +2348,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Actor Pool",
 		Category:    "infrastructure",
 		Description: "Defines a group of actors that handle the same type of work with configurable lifecycle and routing.",
+		Inputs:      []ServiceIODef{{Name: "message", Type: "JSON", Description: "Message to dispatch to an actor in the pool"}},
+		Outputs:     []ServiceIODef{{Name: "result", Type: "JSON", Description: "Actor response message"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "system", Label: "Actor Cluster", Type: FieldTypeString, Required: true, Description: "Name of the actor.system module this pool belongs to"},
 			{Key: "mode", Label: "Lifecycle Mode", Type: FieldTypeSelect, Options: []string{"auto-managed", "permanent"}, DefaultValue: "auto-managed", Description: "'auto-managed': actors activate on first message; 'permanent': fixed pool"},
@@ -2364,6 +2368,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "App Container",
 		Category:    "infrastructure",
 		Description: "Application deployment abstraction that translates high-level config into platform-specific resources (Kubernetes Deployment+Service or ECS task definition)",
+		Outputs:     []ServiceIODef{{Name: "container", Type: "JSON", Description: "Deployment output with service endpoint and status"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "environment", Label: "Environment", Type: FieldTypeString, Required: true, Description: "Name of the platform.kubernetes or platform.ecs module to deploy to"},
 			{Key: "image", Label: "Container Image", Type: FieldTypeString, Required: true, Description: "Container image reference (e.g. registry.example.com/my-api:v1.0.0)"},
@@ -2384,6 +2389,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Argo Workflows",
 		Category:    "cicd",
 		Description: "Manages Argo Workflows submissions and status on a Kubernetes cluster",
+		Outputs:     []ServiceIODef{{Name: "workflow", Type: "JSON", Description: "Argo Workflows service for workflow submission and status"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "namespace", Label: "Namespace", Type: FieldTypeString, Description: "Kubernetes namespace for Argo Workflows"},
 			{Key: "server", Label: "Argo Server", Type: FieldTypeString, Description: "Argo Workflows server URL"},
@@ -2398,6 +2404,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Token Blacklist",
 		Category:    "security",
 		Description: "JWT token blacklist for revocation support (memory or Redis backend)",
+		Inputs:      []ServiceIODef{{Name: "token", Type: "Token", Description: "JWT token to check or add to the blacklist"}},
+		Outputs:     []ServiceIODef{{Name: "blacklist", Type: "PersistenceStore", Description: "Token blacklist service for revocation checks"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "backend", Label: "Backend", Type: FieldTypeSelect, Options: []string{"memory", "redis"}, DefaultValue: "memory", Description: "Storage backend for the blacklist"},
 			{Key: "redis_url", Label: "Redis URL", Type: FieldTypeString, Description: "Redis connection URL (redis backend only)", Placeholder: "redis://localhost:6379"},
@@ -2412,6 +2420,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "AWS CodeBuild",
 		Category:    "cicd",
 		Description: "AWS CodeBuild integration for running build projects in the cloud",
+		Outputs:     []ServiceIODef{{Name: "build", Type: "JSON", Description: "AWS CodeBuild service for running and monitoring build projects"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "region", Label: "AWS Region", Type: FieldTypeString, Description: "AWS region (e.g. us-east-1)"},
 			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
@@ -2426,6 +2435,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Redis Cache",
 		Category:    "infrastructure",
 		Description: "Redis-backed key/value cache for pipeline step data",
+		Inputs:      []ServiceIODef{{Name: "key", Type: "string", Description: "Cache key for get/set operations"}},
+		Outputs:     []ServiceIODef{{Name: "cache", Type: "Cache", Description: "Redis cache service"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "address", Label: "Address", Type: FieldTypeString, DefaultValue: "localhost:6379", Description: "Redis server address (host:port)"},
 			{Key: "password", Label: "Password", Type: FieldTypeString, Description: "Redis password (optional)", Sensitive: true},
@@ -2442,6 +2453,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Cloud Account",
 		Category:    "infrastructure",
 		Description: "Cloud provider credentials (AWS, GCP, Azure, DigitalOcean, Kubernetes, or mock)",
+		Outputs:     []ServiceIODef{{Name: "credentials", Type: "Credentials", Description: "Cloud provider credentials for downstream infrastructure modules"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "provider", Label: "Provider", Type: FieldTypeString, Required: true, Description: "Cloud provider: aws, gcp, azure, digitalocean, kubernetes, mock"},
 			{Key: "region", Label: "Region", Type: FieldTypeString, Description: "Primary region (e.g. us-east-1, us-central1, eastus, nyc3)"},
@@ -2458,6 +2470,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "GitLab Client",
 		Category:    "integration",
 		Description: "GitLab API client for triggering pipelines, managing MRs, and querying pipeline status",
+		Outputs:     []ServiceIODef{{Name: "client", Type: "ExternalAPIClient", Description: "GitLab API client for pipeline and MR operations"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "url", Label: "GitLab URL", Type: FieldTypeString, DefaultValue: "https://gitlab.com", Description: "GitLab instance URL"},
 			{Key: "token", Label: "Access Token", Type: FieldTypeString, Required: true, Description: "GitLab personal or project access token", Sensitive: true},
@@ -2471,6 +2484,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "GitLab Webhook",
 		Category:    "integration",
 		Description: "GitLab webhook receiver that parses and validates incoming GitLab events",
+		Inputs:      []ServiceIODef{{Name: "event", Type: "http.Request", Description: "Incoming GitLab webhook HTTP request"}},
+		Outputs:     []ServiceIODef{{Name: "event", Type: "Event", Description: "Parsed and validated GitLab event"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "secret", Label: "Webhook Secret", Type: FieldTypeString, Description: "GitLab webhook secret token for request validation", Sensitive: true},
 		},
@@ -2483,6 +2498,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "OTEL HTTP Middleware",
 		Category:    "observability",
 		Description: "Instruments HTTP requests with OpenTelemetry tracing spans",
+		Inputs:      []ServiceIODef{{Name: "request", Type: "http.Request", Description: "HTTP request to instrument with tracing"}},
+		Outputs:     []ServiceIODef{{Name: "request", Type: "http.Request", Description: "HTTP request with OpenTelemetry span attached"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "serverName", Label: "Server Name", Type: FieldTypeString, DefaultValue: "workflow-http", Description: "Server name used as the span operation name"},
 		},
@@ -2495,6 +2512,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "IaC State Store",
 		Category:    "infrastructure",
 		Description: "Tracks infrastructure provisioning state (memory or filesystem backend)",
+		Inputs:      []ServiceIODef{{Name: "state", Type: "JSON", Description: "Infrastructure state snapshot to store or update"}},
+		Outputs:     []ServiceIODef{{Name: "state", Type: "PersistenceStore", Description: "IaC state persistence service"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "backend", Label: "Backend", Type: FieldTypeString, Description: "memory or filesystem"},
 			{Key: "directory", Label: "Directory", Type: FieldTypeString, Description: "State directory (filesystem backend only)"},
@@ -2508,6 +2527,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "DynamoDB",
 		Category:    "database",
 		Description: "AWS DynamoDB NoSQL store",
+		Inputs:      []ServiceIODef{{Name: "key", Type: "string", Description: "Document key for get/put operations"}},
+		Outputs:     []ServiceIODef{{Name: "store", Type: "PersistenceStore", Description: "DynamoDB NoSQL persistence store"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "region", Label: "Region", Type: FieldTypeString, Description: "AWS region"},
 			{Key: "table", Label: "Table", Type: FieldTypeString, Required: true, Description: "DynamoDB table name"},
@@ -2518,10 +2539,12 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	// ---- NoSQL Memory ----
 
 	r.Register(&ModuleSchema{
-		Type:        "nosql.memory",
-		Label:       "In-Memory NoSQL",
-		Category:    "database",
-		Description: "In-memory NoSQL store for testing and development",
+		Type:         "nosql.memory",
+		Label:        "In-Memory NoSQL",
+		Category:     "database",
+		Description:  "In-memory NoSQL store for testing and development",
+		Inputs:       []ServiceIODef{{Name: "key", Type: "string", Description: "Document key for get/put operations"}},
+		Outputs:      []ServiceIODef{{Name: "store", Type: "PersistenceStore", Description: "In-memory NoSQL persistence store"}},
 		ConfigFields: []ConfigFieldDef{},
 	})
 
@@ -2532,6 +2555,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "MongoDB",
 		Category:    "database",
 		Description: "MongoDB NoSQL document store",
+		Inputs:      []ServiceIODef{{Name: "key", Type: "string", Description: "Document key for get/put operations"}},
+		Outputs:     []ServiceIODef{{Name: "store", Type: "PersistenceStore", Description: "MongoDB NoSQL persistence store"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "uri", Label: "Connection URI", Type: FieldTypeString, Required: true, Description: "MongoDB connection URI", Placeholder: "mongodb://localhost:27017"},
 			{Key: "database", Label: "Database", Type: FieldTypeString, Required: true, Description: "MongoDB database name"},
@@ -2546,6 +2571,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Redis NoSQL",
 		Category:    "database",
 		Description: "Redis as a NoSQL key/value store",
+		Inputs:      []ServiceIODef{{Name: "key", Type: "string", Description: "Document key for get/put operations"}},
+		Outputs:     []ServiceIODef{{Name: "store", Type: "PersistenceStore", Description: "Redis NoSQL persistence store"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "address", Label: "Address", Type: FieldTypeString, DefaultValue: "localhost:6379", Description: "Redis server address"},
 			{Key: "password", Label: "Password", Type: FieldTypeString, Description: "Redis password", Sensitive: true},
@@ -2560,6 +2587,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "API Gateway",
 		Category:    "infrastructure",
 		Description: "Manages API gateway provisioning with routes, stages, and rate limiting (mock or AWS API Gateway v2)",
+		Outputs:     []ServiceIODef{{Name: "gateway", Type: "JSON", Description: "Provisioned API gateway endpoint and configuration"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
 			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | aws"},
@@ -2577,6 +2605,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Autoscaling Policies",
 		Category:    "infrastructure",
 		Description: "Manages autoscaling policies (target tracking, step, scheduled) for AWS or mock resources",
+		Outputs:     []ServiceIODef{{Name: "policies", Type: "JSON", Description: "Configured autoscaling policies"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
 			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | aws"},
@@ -2591,6 +2620,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "DNS Zone Manager",
 		Category:    "infrastructure",
 		Description: "Manages DNS zones and records (mock or Route53/aws backend)",
+		Outputs:     []ServiceIODef{{Name: "zone", Type: "JSON", Description: "Provisioned DNS zone and record set"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
 			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | aws"},
@@ -2606,6 +2636,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "DigitalOcean App Platform",
 		Category:    "infrastructure",
 		Description: "Deploys containerized apps to DigitalOcean App Platform (mock or real DO backend)",
+		Outputs:     []ServiceIODef{{Name: "app", Type: "JSON", Description: "Deployed app endpoint and status on DigitalOcean App Platform"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
 			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
@@ -2625,6 +2656,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "DigitalOcean Managed Database",
 		Category:    "infrastructure",
 		Description: "Manages DigitalOcean Managed Databases (PostgreSQL, MySQL, Redis, MongoDB, Kafka)",
+		Outputs:     []ServiceIODef{{Name: "database", Type: "sql.DB", Description: "Managed database connection for DigitalOcean database cluster"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
 			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
@@ -2644,6 +2676,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "DigitalOcean DNS",
 		Category:    "infrastructure",
 		Description: "Manages DigitalOcean domains and DNS records (mock or real DO backend)",
+		Outputs:     []ServiceIODef{{Name: "zone", Type: "JSON", Description: "Provisioned DigitalOcean DNS zone and records"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
 			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
@@ -2659,6 +2692,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "DigitalOcean VPC & Firewalls",
 		Category:    "infrastructure",
 		Description: "Manages DigitalOcean VPCs, firewalls, and load balancers (mock or real DO backend)",
+		Outputs:     []ServiceIODef{{Name: "vpc", Type: "JSON", Description: "Provisioned DigitalOcean VPC and firewall configuration"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
 			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | digitalocean"},
@@ -2674,6 +2708,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "DigitalOcean Kubernetes (DOKS)",
 		Category:    "infrastructure",
 		Description: "Manages DigitalOcean Kubernetes Service clusters (mock or real DO backend)",
+		Outputs:     []ServiceIODef{{Name: "cluster", Type: "JSON", Description: "Provisioned DOKS cluster endpoint and kubeconfig"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
 			{Key: "cluster_name", Label: "Cluster Name", Type: FieldTypeString, Description: "DOKS cluster name"},
@@ -2690,6 +2725,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "ECS Fargate Service",
 		Category:    "infrastructure",
 		Description: "AWS ECS/Fargate service with task definitions and ALB target group config",
+		Outputs:     []ServiceIODef{{Name: "service", Type: "JSON", Description: "Provisioned ECS Fargate service ARN and endpoint"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
 			{Key: "cluster", Label: "ECS Cluster", Type: FieldTypeString, Required: true, Description: "ECS cluster name"},
@@ -2708,6 +2744,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Kubernetes Cluster",
 		Category:    "infrastructure",
 		Description: "Managed Kubernetes cluster (kind/k3s for local, EKS/GKE/AKS stubs for cloud)",
+		Outputs:     []ServiceIODef{{Name: "cluster", Type: "JSON", Description: "Kubernetes cluster endpoint and kubeconfig"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
 			{Key: "type", Label: "Cluster Type", Type: FieldTypeString, Required: true, Description: "eks | gke | aks | kind | k3s"},
@@ -2723,6 +2760,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "VPC Networking",
 		Category:    "infrastructure",
 		Description: "Manages VPC, subnets, NAT gateway, and security groups (mock or AWS backend)",
+		Outputs:     []ServiceIODef{{Name: "vpc", Type: "JSON", Description: "Provisioned VPC with subnets and security groups"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
 			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock | aws"},
@@ -2740,6 +2778,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Multi-Region Deployment",
 		Category:    "infrastructure",
 		Description: "Manages multi-region tenant deployments with failover, health checking, and traffic weight routing",
+		Outputs:     []ServiceIODef{{Name: "regions", Type: "JSON", Description: "Multi-region deployment status and endpoint map"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "mock (default)"},
 			{Key: "regions", Label: "Regions", Type: FieldTypeJSON, Required: true, Description: "List of region definitions (name, provider, endpoint, priority, health_check)"},
@@ -2753,6 +2792,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Region Router",
 		Category:    "infrastructure",
 		Description: "Routes traffic between regions based on weights, health, and failover policies",
+		Inputs:      []ServiceIODef{{Name: "request", Type: "http.Request", Description: "Incoming HTTP request to route to a region"}},
+		Outputs:     []ServiceIODef{{Name: "routed", Type: "http.Request", Description: "Request routed to the selected region's endpoint"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "region", Label: "Region Module", Type: FieldTypeString, Required: true, Description: "Name of the platform.region module to route"},
 			{Key: "strategy", Label: "Routing Strategy", Type: FieldTypeSelect, Options: []string{"weighted", "failover", "active-active"}, DefaultValue: "weighted", Description: "Traffic routing strategy"},
@@ -2766,6 +2807,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Mock Policy Engine",
 		Category:    "security",
 		Description: "In-memory mock policy engine for testing. Denies if any loaded policy contains the word 'deny'.",
+		Inputs:      []ServiceIODef{{Name: "request", Type: "JSON", Description: "Authorization request to evaluate against policies"}},
+		Outputs:     []ServiceIODef{{Name: "decision", Type: "JSON", Description: "Policy decision (allow/deny) with reason"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "policies", Label: "Pre-loaded Policies", Type: FieldTypeJSON, Description: "List of policies to load at startup"},
 		},
@@ -2778,6 +2821,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Field Protection",
 		Category:    "security",
 		Description: "Field-level encryption/masking for sensitive data in pipeline responses",
+		Inputs:      []ServiceIODef{{Name: "data", Type: "JSON", Description: "JSON data with fields to protect via encryption or masking"}},
+		Outputs:     []ServiceIODef{{Name: "protected", Type: "JSON", Description: "JSON data with sensitive fields encrypted or masked"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "fields", Label: "Protected Fields", Type: FieldTypeJSON, Description: "List of field protection rules (path, action: mask|encrypt|redact)"},
 			{Key: "key", Label: "Encryption Key", Type: FieldTypeString, Description: "Key used for field encryption", Sensitive: true},
@@ -2791,6 +2836,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Security Scanner",
 		Category:    "security",
 		Description: "Security scanner provider supporting mock, semgrep, trivy, and grype backends",
+		Outputs:     []ServiceIODef{{Name: "scanner", Type: "JSON", Description: "Security scanner service for SAST, container, and dependency scans"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "mode", Label: "Mode", Type: FieldTypeSelect, Options: []string{"mock", "cli"}, DefaultValue: "mock", Description: "Scanner mode: 'mock' for testing or 'cli' for real tools"},
 			{Key: "semgrepBinary", Label: "Semgrep Binary", Type: FieldTypeString, DefaultValue: "semgrep", Description: "Path to semgrep binary"},
@@ -2807,6 +2853,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Artifact Store",
 		Category:    "infrastructure",
 		Description: "Named artifact storage with metadata support (filesystem or S3)",
+		Inputs:      []ServiceIODef{{Name: "artifact", Type: "[]byte", Description: "Binary artifact data to store or retrieve"}},
+		Outputs:     []ServiceIODef{{Name: "storage", Type: "FileStore", Description: "Artifact file storage service with metadata support"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "backend", Label: "Backend", Type: FieldTypeSelect, Options: []string{"filesystem", "s3"}, DefaultValue: "filesystem", Description: "Storage backend to use"},
 			{Key: "basePath", Label: "Base Path", Type: FieldTypeString, DefaultValue: "./data/artifacts", Description: "Root directory for filesystem backend"},
@@ -2824,6 +2872,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "Trace Propagation",
 		Category:    "observability",
 		Description: "Propagates trace context across async boundaries (Kafka, EventBridge, webhooks, HTTP)",
+		Inputs:      []ServiceIODef{{Name: "span", Type: "trace.Span", Description: "Trace span to propagate across async boundaries"}},
+		Outputs:     []ServiceIODef{{Name: "propagation", Type: "trace.Span", Description: "Trace span with propagation context injected or extracted"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "format", Label: "Propagation Format", Type: FieldTypeSelect, Options: []string{"w3c", "b3", "composite"}, DefaultValue: "w3c", Description: "Trace context propagation format"},
 		},
@@ -2836,6 +2886,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "M2M Auth",
 		Category:    "security",
 		Description: "Machine-to-machine OAuth2 auth: client_credentials grant, JWT-bearer assertion, ES256/HS256 token issuance, and JWKS endpoint",
+		Inputs:      []ServiceIODef{{Name: "credentials", Type: "Credentials", Description: "Client credentials for M2M OAuth2 token request"}},
+		Outputs:     []ServiceIODef{{Name: "auth", Type: "AuthService", Description: "M2M authentication service for token issuance and validation"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "secret", Label: "HMAC Secret", Type: FieldTypeString, Description: "Secret for HS256 token signing", Sensitive: true},
 			{Key: "algorithm", Label: "Signing Algorithm", Type: FieldTypeSelect, Options: []string{"HS256", "ES256"}, DefaultValue: "ES256", Description: "JWT signing algorithm"},
@@ -2852,6 +2904,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Label:       "OAuth2",
 		Category:    "security",
 		Description: "OAuth2 authorization code flow supporting Google, GitHub, and generic OIDC providers",
+		Inputs:      []ServiceIODef{{Name: "credentials", Type: "Credentials", Description: "OAuth2 credentials (client ID/secret or authorization code)"}},
+		Outputs:     []ServiceIODef{{Name: "auth", Type: "AuthService", Description: "OAuth2 authentication service for authorization code flow"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "providers", Label: "Providers", Type: FieldTypeJSON, Required: true, Description: "List of OAuth2 provider configurations"},
 		},
