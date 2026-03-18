@@ -118,3 +118,30 @@ func TestModuleSchemaRegistry_CustomRegister(t *testing.T) {
 		t.Errorf("configFields = %d, want 1", len(s.ConfigFields))
 	}
 }
+
+// TestNonStepModulesHaveIO verifies that every non-step module type has at least
+// one Input or Output defined. Step types (step.*) communicate via PipelineContext
+// and don't need module-level IO, but infrastructure, database, middleware, etc.
+// must declare their service ports so the visual editor can validate connections.
+func TestNonStepModulesHaveIO(t *testing.T) {
+	r := NewModuleSchemaRegistry()
+	for _, mt := range KnownModuleTypes() {
+		// Step types don't need module-level IO
+		if len(mt) > 5 && mt[:5] == "step." {
+			continue
+		}
+		// Conditional types are UI-only constructs in the editor
+		if len(mt) > 12 && mt[:12] == "conditional." {
+			continue
+		}
+		s := r.Get(mt)
+		if s == nil {
+			continue
+		}
+		hasInputs := len(s.Inputs) > 0
+		hasOutputs := len(s.Outputs) > 0
+		if !hasInputs && !hasOutputs {
+			t.Errorf("module type %q (%s) has no Inputs and no Outputs — add IO definitions to registerBuiltins() so the visual editor can validate connections", mt, s.Category)
+		}
+	}
+}
