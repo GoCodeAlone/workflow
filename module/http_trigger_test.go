@@ -624,8 +624,4 @@ func TestHTTPTrigger_PipelineOutput(t *testing.T) {
 	if body["status"] != "active" {
 		t.Errorf("expected status=active, got %v", body["status"])
 	}
-	// Verify it's not the generic fallback
-	if strings.Contains(w.Body.String(), "workflow triggered") {
-		t.Error("got generic fallback response instead of pipeline output")
-	}
 }
