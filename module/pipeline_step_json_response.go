@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -84,6 +85,11 @@ func (s *JSONResponseStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 
 	// Determine response body
 	responseBody := s.resolveResponseBody(pc)
+
+	// Detect Go raw map/slice strings in response values — these indicate
+	// a template resolved to a Go fmt.Sprint representation instead of JSON.
+	// This is always a bug (e.g. {{ .steps.X.row }} instead of body_from).
+	warnRawGoValues(s.name, responseBody)
 
 	// Set headers
 	w.Header().Set("Content-Type", "application/json")
@@ -240,4 +246,47 @@ func resolveNestedPath(data map[string]any, path string) any {
 		}
 	}
 	return current
+}
+
+// warnRawGoValues recursively inspects a response body for string values that
+// look like Go's default fmt.Sprint representation of maps or slices
+// (e.g. "map[key:value ...]" or "[map[...] map[...]]"). These indicate a
+// template expression resolved to a raw Go value instead of proper JSON.
+// This is always a configuration error — the pipeline should use body_from
+// or index into specific fields instead.
+func warnRawGoValues(stepName string, body any) {
+	switch v := body.(type) {
+	case map[string]any:
+		for k, val := range v {
+			if s, ok := val.(string); ok && isGoRawValue(s) {
+				slog.Warn("json_response: field contains Go raw map/slice string instead of JSON — use body_from or index into specific fields",
+					"step", stepName, "field", k, "value_prefix", truncate(s, 80))
+			}
+			warnRawGoValues(stepName, val)
+		}
+	case []any:
+		for _, item := range v {
+			warnRawGoValues(stepName, item)
+		}
+	case string:
+		if isGoRawValue(v) {
+			slog.Warn("json_response: response body contains Go raw map/slice string instead of JSON — use body_from or index into specific fields",
+				"step", stepName, "value_prefix", truncate(v, 80))
+		}
+	}
+}
+
+// isGoRawValue detects strings that look like Go's fmt.Sprint output for maps
+// or slices: "map[...]" or "[map[...]]".
+func isGoRawValue(s string) bool {
+	s = strings.TrimSpace(s)
+	return strings.HasPrefix(s, "map[") || strings.HasPrefix(s, "[map[")
+}
+
+// truncate returns the first n characters of a string.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
