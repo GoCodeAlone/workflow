@@ -128,6 +128,35 @@ func TestPipelineOutputStep_RequiresSourceOrValues(t *testing.T) {
 	}
 }
 
+func TestPipelineOutputStep_SourceAndValuesMutuallyExclusive(t *testing.T) {
+	factory := NewPipelineOutputStepFactory()
+	_, err := factory("result", map[string]any{
+		"source": "steps.fetch",
+		"values": map[string]any{"key": "val"},
+	}, nil)
+	if err == nil {
+		t.Error("expected error when both source and values are provided")
+	}
+}
+
+func TestPipelineOutputStep_ValuesTemplateError(t *testing.T) {
+	factory := NewPipelineOutputStepFactory()
+	step, err := factory("result", map[string]any{
+		"values": map[string]any{
+			"bad": "{{ .nonexistent.deep.path }}",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Error("expected error on template resolution failure")
+	}
+}
+
 func TestPipelineOutputStep_SourceNotFound(t *testing.T) {
 	factory := NewPipelineOutputStepFactory()
 	step, err := factory("result", map[string]any{

@@ -260,7 +260,7 @@ func warnRawGoValues(stepName string, body any) {
 		for k, val := range v {
 			if s, ok := val.(string); ok && isGoRawValue(s) {
 				slog.Warn("json_response: field contains Go raw map/slice string instead of JSON — use body_from or index into specific fields",
-					"step", stepName, "field", k, "value_prefix", truncate(s, 80))
+					"step", stepName, "field", k, "value_prefix", truncateForLog(s, 80))
 			}
 			warnRawGoValues(stepName, val)
 		}
@@ -271,7 +271,7 @@ func warnRawGoValues(stepName string, body any) {
 	case string:
 		if isGoRawValue(v) {
 			slog.Warn("json_response: response body contains Go raw map/slice string instead of JSON — use body_from or index into specific fields",
-				"step", stepName, "value_prefix", truncate(v, 80))
+				"step", stepName, "value_prefix", truncateForLog(v, 80))
 		}
 	}
 }
@@ -284,7 +284,7 @@ func isGoRawValue(s string) bool {
 }
 
 // truncate returns the first n characters of a string.
-func truncate(s string, n int) string {
+func truncateForLog(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}

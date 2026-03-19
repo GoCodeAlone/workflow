@@ -694,11 +694,15 @@ func (e *StdEngine) ExecutePipeline(ctx context.Context, name string, data map[s
 		return nil, fmt.Errorf("pipeline %q: %w", name, err)
 	}
 
-	// Prefer explicit pipeline output if step.pipeline_output was used
+	// Prefer explicit pipeline output if step.pipeline_output was used.
 	if pipeOut, ok := pc.Metadata["_pipeline_output"].(map[string]any); ok {
 		return pipeOut, nil
 	}
 
+	// Fallback: return the full merged pipeline state. Note that Current
+	// contains all step outputs merged flat, including internal markers like
+	// _response_handled. Pipelines intended for Go callers should use
+	// step.pipeline_output to define an explicit return contract.
 	return pc.Current, nil
 }
 

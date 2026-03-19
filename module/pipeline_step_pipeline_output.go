@@ -35,6 +35,9 @@ func NewPipelineOutputStepFactory() StepFactory {
 		if source == "" && len(values) == 0 {
 			return nil, fmt.Errorf("pipeline_output step %q: 'source' or 'values' is required", name)
 		}
+		if source != "" && len(values) > 0 {
+			return nil, fmt.Errorf("pipeline_output step %q: 'source' and 'values' are mutually exclusive", name)
+		}
 
 		return &PipelineOutputStep{
 			name:   name,
@@ -65,10 +68,9 @@ func (s *PipelineOutputStep) Execute(_ context.Context, pc *PipelineContext) (*S
 		for k, tmplExpr := range s.values {
 			resolved, err := s.tmpl.Resolve(tmplExpr, pc)
 			if err != nil {
-				output[k] = tmplExpr // fallback to unresolved
-			} else {
-				output[k] = resolved
+				return nil, fmt.Errorf("pipeline_output step %q: failed to resolve value %q: %w", s.name, k, err)
 			}
+			output[k] = resolved
 		}
 	}
 
