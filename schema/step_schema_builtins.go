@@ -1204,6 +1204,19 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 	})
 
 	r.Register(&StepSchema{
+		Type:        "step.pipeline_output",
+		Plugin:      "pipelinesteps",
+		Description: "Marks structured data as the pipeline's return value for extraction by engine.ExecutePipeline() or the HTTP trigger fallback.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "source", Type: FieldTypeString, Description: "Dot-path to step output (e.g. steps.fetch or steps.fetch.row)"},
+			{Key: "values", Type: FieldTypeMap, Description: "Template map of key-value pairs to include in output"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "_pipeline_output", Type: "map", Description: "The structured output stored in pipeline metadata"},
+		},
+	})
+
+	r.Register(&StepSchema{
 		Type:        "step.json_parse",
 		Plugin:      "pipelinesteps",
 		Description: "Parses a JSON string from pipeline context into a structured value.",

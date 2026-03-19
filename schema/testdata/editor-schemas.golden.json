@@ -6720,6 +6720,26 @@
         }
       ]
     },
+    "step.pipeline_output": {
+      "type": "step.pipeline_output",
+      "label": "Pipeline Output",
+      "category": "pipeline",
+      "description": "Marks structured data as the pipeline's return value for extraction by engine.ExecutePipeline() or the HTTP trigger fallback",
+      "configFields": [
+        {
+          "key": "source",
+          "label": "Source",
+          "type": "string",
+          "description": "Dot-path to step output (e.g. steps.fetch or steps.fetch.row)"
+        },
+        {
+          "key": "values",
+          "label": "Values",
+          "type": "map",
+          "description": "Template map of key-value pairs to include in output"
+        }
+      ]
+    },
     "step.platform_apply": {
       "type": "step.platform_apply",
       "label": "Platform Apply",

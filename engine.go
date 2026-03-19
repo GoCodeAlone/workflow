@@ -677,6 +677,35 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 	return fmt.Errorf("no handler found for workflow type: %s", workflowType)
 }
 
+// ExecutePipeline runs a named pipeline synchronously and returns its
+// structured output. For use by Go callers (gRPC servers, tests) that
+// don't need HTTP request/response threading.
+//
+// If the pipeline uses step.pipeline_output, the explicitly marked output
+// is returned. Otherwise, the pipeline's merged Current state is returned.
+func (e *StdEngine) ExecutePipeline(ctx context.Context, name string, data map[string]any) (map[string]any, error) {
+	pipeline, ok := e.pipelineRegistry[name]
+	if !ok {
+		return nil, fmt.Errorf("pipeline %q not found", name)
+	}
+
+	pc, err := pipeline.Execute(ctx, data)
+	if err != nil {
+		return nil, fmt.Errorf("pipeline %q: %w", name, err)
+	}
+
+	// Prefer explicit pipeline output if step.pipeline_output was used.
+	if pipeOut, ok := pc.Metadata["_pipeline_output"].(map[string]any); ok {
+		return pipeOut, nil
+	}
+
+	// Fallback: return the full merged pipeline state. Note that Current
+	// contains all step outputs merged flat, including internal markers like
+	// _response_handled. Pipelines intended for Go callers should use
+	// step.pipeline_output to define an explicit return contract.
+	return pc.Current, nil
+}
+
 // recordWorkflowMetrics is defined in engine_module_bridge.go.
 // It records execution metrics via interfaces.MetricsRecorder so that engine.go
 // need not reference the concrete *module.MetricsCollector type.
@@ -1073,6 +1102,9 @@ func (e *StdEngine) LoadedPlugins() []plugin.EnginePlugin {
 	copy(out, e.enginePlugins)
 	return out
 }
+
+// Compile-time interface check: StdEngine must satisfy PipelineExecutor.
+var _ interfaces.PipelineExecutor = (*StdEngine)(nil)
 
 type Engine interface {
 	RegisterWorkflowHandler(handler WorkflowHandler)

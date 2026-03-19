@@ -353,6 +353,7 @@ var coreModuleTypes = []string{
 	"step.oidc_auth_url",
 	"step.oidc_callback",
 	"step.parallel",
+	"step.pipeline_output",
 	"step.platform_apply",
 	"step.platform_destroy",
 	"step.platform_plan",

@@ -452,6 +452,16 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 			if writePipelineContextResponse(w, result) {
 				return
 			}
+
+			// If a step.pipeline_output set _pipeline_output, write it as JSON.
+			if pipeOut, ok := result["_pipeline_output"]; ok && pipeOut != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				if err := json.NewEncoder(w).Encode(pipeOut); err != nil {
+					log.Printf("http trigger: failed to write pipeline output: %v", err)
+				}
+				return
+			}
 		}
 
 		// Fallback: return a generic accepted response when the pipeline doesn't

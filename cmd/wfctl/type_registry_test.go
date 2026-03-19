@@ -87,6 +87,7 @@ func TestKnownStepTypesPopulated(t *testing.T) {
 		"step.transform",
 		"step.json_response",
 		"step.raw_response",
+		"step.pipeline_output",
 		"step.json_parse",
 		"step.db_query",
 		"step.publish",

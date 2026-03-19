@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 
 	"sort"
 	"strings"
@@ -331,6 +332,10 @@ func applyPipelineSchemas(gen *module.OpenAPIGenerator, ep *pipelineEndpoint) {
 				} else if sc, ok := stepCfg["status"]; ok {
 					statusCode = fmt.Sprintf("%v", sc)
 				}
+				// Infer response schema from body_from by tracing to source step's SQL columns
+				if bodyFrom, ok := stepCfg["body_from"].(string); ok && respSchema == nil {
+					respSchema = inferBodyFromSchema(bodyFrom, ep.steps)
+				}
 				// Infer response schema from body if present
 				if body, ok := stepCfg["body"]; ok {
 					if respSchema == nil {
@@ -406,6 +411,7 @@ func inferValidateSchema(schema *module.OpenAPISchema, stepCfg map[string]any) {
 }
 
 // inferBodySchema creates a schema from a body config value.
+// It detects Go raw map template patterns and warns about them.
 func inferBodySchema(body any) *module.OpenAPISchema {
 	bodyMap, ok := body.(map[string]any)
 	if !ok {
@@ -417,16 +423,185 @@ func inferBodySchema(body any) *module.OpenAPISchema {
 		Properties: make(map[string]*module.OpenAPISchema),
 	}
 	for k, v := range bodyMap {
-		switch v.(type) {
+		switch val := v.(type) {
 		case int, int64, float64:
 			schema.Properties[k] = &module.OpenAPISchema{Type: "integer"}
 		case bool:
 			schema.Properties[k] = &module.OpenAPISchema{Type: "boolean"}
+		case string:
+			// Detect templates that would render Go raw maps/slices
+			// e.g. {{ index .steps "X" "row" }} or {{ .steps.X.rows }}
+			// These produce "map[key:value ...]" strings instead of JSON
+			if isRawMapTemplate(val) {
+				fmt.Fprintf(os.Stderr, "WARNING: body field %q uses template %q which may produce a Go raw map string instead of JSON. Use body_from or index into specific fields.\n", k, val)
+				schema.Properties[k] = &module.OpenAPISchema{Type: "object", Description: "WARNING: may produce Go raw map string"}
+			} else {
+				schema.Properties[k] = &module.OpenAPISchema{Type: "string"}
+			}
 		default:
 			schema.Properties[k] = &module.OpenAPISchema{Type: "string"}
 		}
 	}
 	return schema
+}
+
+// isRawMapTemplate detects template expressions that would produce Go raw map
+// strings when rendered. These patterns reference a step's "row" or "rows"
+// output without indexing into a specific field.
+func isRawMapTemplate(tmpl string) bool {
+	// Match patterns like:
+	//   {{ index .steps "X" "row" }}
+	//   {{ index .steps "X" "rows" }}
+	//   {{ .steps.X.row }}
+	//   {{ .steps.X.rows }}
+	// But NOT:
+	//   {{ index .steps "X" "row" "field" }}  (has field access)
+	//   {{ .steps.X.row.field }}              (has field access)
+	patterns := []string{
+		`\{\{.*index\s+\.steps\s+"[^"]+"\s+"rows?"\s*\}\}`,
+		`\{\{.*\.steps\.[^.]+\.rows?\s*\}\}`,
+		`\{\{.*index\s+\.steps\s+"[^"]+"\s+"rows?"\s*\|`,
+	}
+	for _, p := range patterns {
+		if matched, _ := regexp.MatchString(p, tmpl); matched {
+			return true
+		}
+	}
+	return false
+}
+
+// inferBodyFromSchema traces a body_from path (e.g. "steps.fetch.rows" or
+// "steps.fetch.row") back to the source step and attempts to extract column
+// names from the SQL query to build a response schema.
+func inferBodyFromSchema(bodyFrom string, steps []map[string]any) *module.OpenAPISchema {
+	parts := strings.Split(bodyFrom, ".")
+	if len(parts) < 2 || parts[0] != "steps" {
+		return nil
+	}
+	stepName := parts[1]
+	outputKey := ""
+	if len(parts) >= 3 {
+		outputKey = parts[2] // "rows", "row", or a specific field
+	}
+
+	// Find the source step
+	for _, step := range steps {
+		name, _ := step["name"].(string)
+		if name != stepName {
+			continue
+		}
+		stepType, _ := step["type"].(string)
+		cfg, _ := step["config"].(map[string]any)
+		if cfg == nil {
+			break
+		}
+
+		// For db_query steps, extract column names from the SQL SELECT
+		if stepType == "step.db_query" || stepType == "step.db_query_cached" {
+			query, _ := cfg["query"].(string)
+			if query == "" {
+				break
+			}
+			columns := extractSQLColumns(query)
+			if len(columns) == 0 {
+				break
+			}
+
+			itemSchema := &module.OpenAPISchema{
+				Type:       "object",
+				Properties: make(map[string]*module.OpenAPISchema),
+			}
+			for _, col := range columns {
+				itemSchema.Properties[col] = &module.OpenAPISchema{Type: "string"}
+			}
+
+			// Determine if it's a list or single row response
+			mode, _ := cfg["mode"].(string)
+			if mode == "list" || outputKey == "rows" {
+				return &module.OpenAPISchema{
+					Type:  "array",
+					Items: itemSchema,
+				}
+			}
+			return itemSchema
+		}
+		break
+	}
+	return nil
+}
+
+// extractSQLColumns parses a SQL SELECT statement and returns the column names
+// (or aliases) from the SELECT clause.
+func extractSQLColumns(query string) []string {
+	// Normalize whitespace
+	query = strings.Join(strings.Fields(query), " ")
+
+	// Find SELECT ... FROM
+	upper := strings.ToUpper(query)
+	selectIdx := strings.Index(upper, "SELECT ")
+	fromIdx := strings.Index(upper, " FROM ")
+	if selectIdx < 0 || fromIdx < 0 || fromIdx <= selectIdx {
+		return nil
+	}
+
+	selectClause := query[selectIdx+7 : fromIdx]
+
+	// Handle DISTINCT
+	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(selectClause)), "DISTINCT ") {
+		selectClause = strings.TrimSpace(selectClause)[9:]
+	}
+
+	// Split by comma, handling parenthesized subexpressions
+	var columns []string
+	depth := 0
+	current := ""
+	for _, ch := range selectClause {
+		switch ch {
+		case '(':
+			depth++
+			current += string(ch)
+		case ')':
+			depth--
+			current += string(ch)
+		case ',':
+			if depth == 0 {
+				if col := extractColumnName(strings.TrimSpace(current)); col != "" {
+					columns = append(columns, col)
+				}
+				current = ""
+			} else {
+				current += string(ch)
+			}
+		default:
+			current += string(ch)
+		}
+	}
+	if col := extractColumnName(strings.TrimSpace(current)); col != "" {
+		columns = append(columns, col)
+	}
+	return columns
+}
+
+// extractColumnName extracts the effective column name from a SELECT expression.
+// Handles: "col", "table.col", "expr AS alias", "COALESCE(...) AS alias".
+func extractColumnName(expr string) string {
+	if expr == "" || expr == "*" {
+		return ""
+	}
+	// Check for AS alias (case-insensitive)
+	upper := strings.ToUpper(expr)
+	if asIdx := strings.LastIndex(upper, " AS "); asIdx >= 0 {
+		alias := strings.TrimSpace(expr[asIdx+4:])
+		// Remove quotes if present
+		alias = strings.Trim(alias, "\"'`")
+		return alias
+	}
+	// Check for table.column
+	if dotIdx := strings.LastIndex(expr, "."); dotIdx >= 0 {
+		return strings.TrimSpace(expr[dotIdx+1:])
+	}
+	// Simple column name
+	return strings.TrimSpace(expr)
 }
 
 // userCredentialsSchema returns a schema for email+password request bodies.
