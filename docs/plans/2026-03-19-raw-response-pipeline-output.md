@@ -399,6 +399,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/GoCodeAlone/modular"
 )
@@ -467,10 +468,17 @@ func (s *PipelineOutputStep) Execute(_ context.Context, pc *PipelineContext) (*S
 		}
 	}
 
-	// Store in metadata for extraction by ExecutePipeline() / HTTP trigger fallback
+	// Store in metadata for extraction by ExecutePipeline()
 	pc.Metadata["_pipeline_output"] = output
 
-	return &StepResult{Output: output, Stop: true}, nil
+	// Also include _pipeline_output in Output so it propagates into Current
+	// via MergeStepOutput. This makes it visible to the HTTP trigger's
+	// resultHolder (which reads from Pipeline.Run() → pc.Current).
+	stepOutput := make(map[string]any, len(output)+1)
+	maps.Copy(stepOutput, output)
+	stepOutput["_pipeline_output"] = output
+
+	return &StepResult{Output: stepOutput, Stop: true}, nil
 }
 
 var _ PipelineStep = (*PipelineOutputStep)(nil)
@@ -683,11 +691,7 @@ func (e *StdEngine) ExecutePipeline(ctx context.Context, name string, data map[s
 }
 ```
 
-Also add `ExecutePipeline` to the `Engine` interface at line 1084:
-
-```go
-	ExecutePipeline(ctx context.Context, name string, data map[string]any) (map[string]any, error)
-```
+Do NOT add `ExecutePipeline` to the existing `Engine` interface — that would break all existing mock implementations. The separate `PipelineExecutor` interface (Task 7) is the consumer contract. Callers that need this API assert on `PipelineExecutor`, not `Engine`.
 
 **Step 4: Run test to verify it passes**
 
