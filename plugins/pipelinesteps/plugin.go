@@ -146,6 +146,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.db_sync_partitions":    wrapStepFactory(module.NewDBSyncPartitionsStepFactory()),
 		"step.json_response":         wrapStepFactory(module.NewJSONResponseStepFactory()),
 		"step.raw_response":          wrapStepFactory(module.NewRawResponseStepFactory()),
+		"step.pipeline_output":       wrapStepFactory(module.NewPipelineOutputStepFactory()),
 		"step.json_parse":            wrapStepFactory(module.NewJSONParseStepFactory()),
 		"step.static_file":           wrapStepFactory(module.NewStaticFileStepFactory()),
 		"step.validate_path_param":   wrapStepFactory(module.NewValidatePathParamStepFactory()),
