@@ -561,3 +561,71 @@ func TestHTTPTrigger_PipelineContextResponse_MapStringStringHeaders(t *testing.T
 		t.Errorf("expected X-Custom header, got %q", w.Header().Get("X-Custom"))
 	}
 }
+
+// TestHTTPTrigger_PipelineOutput verifies that when a pipeline sets _pipeline_output
+// in the result holder, the HTTP trigger writes it as JSON with status 200 instead
+// of falling back to the generic 202 accepted response.
+func TestHTTPTrigger_PipelineOutput(t *testing.T) {
+	app := NewMockApplication()
+	router := NewMockHTTPRouter("test-router")
+	_ = app.RegisterService("httpRouter", router)
+
+	engine := &pipelineContextResultEngine{result: map[string]any{
+		"_pipeline_output": map[string]any{
+			"gameId": "test-123",
+			"status": "active",
+		},
+	}}
+	_ = app.RegisterService("workflowEngine", engine)
+
+	trigger := NewHTTPTrigger()
+	app.RegisterModule(trigger)
+
+	cfg := map[string]any{
+		"routes": []any{
+			map[string]any{
+				"path":     "/api/game",
+				"method":   "GET",
+				"workflow": "game-workflow",
+				"action":   "execute",
+			},
+		},
+	}
+	if err := trigger.Configure(app, cfg); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := trigger.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	handler := router.routes["GET /api/game"]
+	if handler == nil {
+		t.Fatal("handler not registered")
+	}
+
+	req := httptest.NewRequest("GET", "/api/game", nil)
+	w := httptest.NewRecorder()
+	handler.Handle(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected Content-Type=application/json, got %q", ct)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if body["gameId"] != "test-123" {
+		t.Errorf("expected gameId=test-123, got %v", body["gameId"])
+	}
+	if body["status"] != "active" {
+		t.Errorf("expected status=active, got %v", body["status"])
+	}
+	// Verify it's not the generic fallback
+	if strings.Contains(w.Body.String(), "workflow triggered") {
+		t.Error("got generic fallback response instead of pipeline output")
+	}
+}
