@@ -817,6 +817,11 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"content_type", "status", "headers", "body", "body_from"},
 		},
+		"step.pipeline_output": {
+			Type:       "step.pipeline_output",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"source", "values"},
+		},
 		"step.auth_validate": {
 			Type:       "step.auth_validate",
 			Plugin:     "pipelinesteps",

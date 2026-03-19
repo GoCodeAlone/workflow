@@ -2256,6 +2256,19 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		},
 	})
 
+	// ---- Pipeline Output ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.pipeline_output",
+		Label:       "Pipeline Output",
+		Category:    "pipeline",
+		Description: "Marks structured data as the pipeline's return value for extraction by engine.ExecutePipeline() or the HTTP trigger fallback",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "source", Label: "Source", Type: FieldTypeString, Description: "Dot-path to step output (e.g. steps.fetch or steps.fetch.row)"},
+			{Key: "values", Label: "Values", Type: FieldTypeMap, Description: "Template map of key-value pairs to include in output"},
+		},
+	})
+
 	// ---- Sandbox Exec ----
 
 	r.Register(&ModuleSchema{

@@ -156,6 +156,7 @@ flowchart TD
 | `step.db_sync_partitions` | Ensures future partitions exist for a partitioned table | pipelinesteps |
 | `step.json_response` | Writes HTTP JSON response with custom status code and headers | pipelinesteps |
 | `step.raw_response` | Writes a raw HTTP response with arbitrary content type | pipelinesteps |
+| `step.pipeline_output` | Marks structured data as the pipeline's return value for extraction by `engine.ExecutePipeline()` | pipelinesteps |
 | `step.json_parse` | Parses a JSON string (or `[]byte`) in the pipeline context into a structured object | pipelinesteps |
 | `step.static_file` | Serves a pre-loaded file from disk as an HTTP response | pipelinesteps |
 | `step.workflow_call` | Invokes another workflow pipeline by name | pipelinesteps |

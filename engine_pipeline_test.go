@@ -639,3 +639,59 @@ func (t *configCapturingTrigger) Configure(app modular.Application, triggerConfi
 	}
 	return nil
 }
+
+func TestExecutePipeline_WithPipelineOutput(t *testing.T) {
+	engine, _ := setupPipelineEngine(t)
+
+	pipelineCfg := map[string]any{
+		"test_pipeline": map[string]any{
+			"steps": []any{
+				map[string]any{
+					"name": "fetch",
+					"type": "step.set",
+					"config": map[string]any{
+						"values": map[string]any{
+							"gameId": "test-42",
+							"status": "active",
+						},
+					},
+				},
+				map[string]any{
+					"name": "output",
+					"type": "step.pipeline_output",
+					"config": map[string]any{
+						"source": "steps.fetch",
+					},
+				},
+			},
+		},
+	}
+
+	if err := engine.configurePipelines(pipelineCfg); err != nil {
+		t.Fatalf("configurePipelines failed: %v", err)
+	}
+
+	ctx := context.Background()
+	result, err := engine.ExecutePipeline(ctx, "test_pipeline", map[string]any{})
+	if err != nil {
+		t.Fatalf("ExecutePipeline failed: %v", err)
+	}
+	if result["gameId"] != "test-42" {
+		t.Errorf("expected gameId=test-42, got %v", result["gameId"])
+	}
+	if result["status"] != "active" {
+		t.Errorf("expected status=active, got %v", result["status"])
+	}
+}
+
+func TestExecutePipeline_UnknownPipeline(t *testing.T) {
+	engine, _ := setupPipelineEngine(t)
+
+	_, err := engine.ExecutePipeline(context.Background(), "nonexistent", nil)
+	if err == nil {
+		t.Error("expected error for unknown pipeline")
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Errorf("expected error to mention pipeline name, got: %v", err)
+	}
+}
