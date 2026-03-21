@@ -4,7 +4,43 @@
 // capability-based abstractions that are provider-agnostic.
 package platform
 
-import "time"
+import (
+	"time"
+
+	"github.com/GoCodeAlone/workflow/interfaces"
+)
+
+// IaC type aliases — re-export from interfaces/ for backward compatibility.
+// Code that previously imported platform for these types can continue to do so.
+type (
+	IaCProvider    = interfaces.IaCProvider
+	IaCStateStore  = interfaces.IaCStateStore
+	Size           = interfaces.Size
+	ResourceHints  = interfaces.ResourceHints
+	ProviderSizing = interfaces.ProviderSizing
+	ResourceSpec   = interfaces.ResourceSpec
+	ResourceRef   = interfaces.ResourceRef
+	ResourceState = interfaces.ResourceState
+	ActionError    = interfaces.ActionError
+	ApplyResult    = interfaces.ApplyResult
+	DestroyResult  = interfaces.DestroyResult
+	FieldChange    = interfaces.FieldChange
+	HealthResult   = interfaces.HealthResult
+	DiffResult     = interfaces.DiffResult
+	SizingDefaults = interfaces.SizingDefaults
+)
+
+// Size tier constants re-exported from interfaces.
+const (
+	SizeXS = interfaces.SizeXS
+	SizeS  = interfaces.SizeS
+	SizeM  = interfaces.SizeM
+	SizeL  = interfaces.SizeL
+	SizeXL = interfaces.SizeXL
+)
+
+// SizingMap re-exported from interfaces.
+var SizingMap = interfaces.SizingMap
 
 // Tier represents the infrastructure tier a resource belongs to.
 // The three tiers form a hierarchy where each tier's outputs constrain
