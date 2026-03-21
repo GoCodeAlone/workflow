@@ -11,12 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// PGRow abstracts a single-row query result, allowing mock injection in tests.
-type PGRow interface {
-	Scan(dest ...any) error
-	IsNoRows() bool
-}
-
 // PostgresConn abstracts the database operations used by PostgresIaCStateStore.
 type PostgresConn interface {
 	UpsertState(ctx context.Context, state *IaCState) error
@@ -222,6 +216,8 @@ func (c *pgxRealConn) GetState(ctx context.Context, name string) (*IaCState, err
 		}
 		return nil, err
 	}
+	// Unmarshal errors are intentionally discarded: corrupt JSONB is treated
+	// as an empty map so the caller still receives the record's other fields.
 	_ = json.Unmarshal([]byte(cfgJSON), &st.Config)
 	_ = json.Unmarshal([]byte(outJSON), &st.Outputs)
 	return &st, nil
@@ -243,6 +239,7 @@ func (c *pgxRealConn) ListRows(ctx context.Context) ([]*IaCState, error) {
 		if err := rows.Scan(&st.ResourceID, &st.ResourceType, &st.Provider, &st.Status, &cfgJSON, &outJSON); err != nil {
 			continue
 		}
+		// Unmarshal errors discarded: corrupt JSONB yields empty map, row still included.
 		_ = json.Unmarshal([]byte(cfgJSON), &st.Config)
 		_ = json.Unmarshal([]byte(outJSON), &st.Outputs)
 		results = append(results, &st)

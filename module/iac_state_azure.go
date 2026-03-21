@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/lease"
@@ -258,7 +259,7 @@ func (c *azureRealClient) AcquireLease(ctx context.Context, name string, duratio
 
 func (c *azureRealClient) ReleaseLease(ctx context.Context, name, leaseID string) error {
 	blobClient := c.client.ServiceClient().NewContainerClient(c.container).NewBlobClient(name)
-	leaseClient, err := lease.NewBlobClient(blobClient, nil)
+	leaseClient, err := lease.NewBlobClient(blobClient, &lease.BlobClientOptions{LeaseID: &leaseID})
 	if err != nil {
 		return err
 	}
@@ -267,9 +268,6 @@ func (c *azureRealClient) ReleaseLease(ctx context.Context, name, leaseID string
 }
 
 func isAzureNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "BlobNotFound") || strings.Contains(msg, "404")
+	var respErr *azcore.ResponseError
+	return errors.As(err, &respErr) && respErr.StatusCode == 404
 }

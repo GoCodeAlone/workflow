@@ -243,6 +243,26 @@ func TestAzureBlobIaCStateStore_Unlock_NotLocked(t *testing.T) {
 	}
 }
 
+// TestAzureBlobIaCStateStore_Unlock_PassesLeaseID verifies that Unlock passes the
+// correct leaseID to ReleaseLease. The mock enforces leaseID matching, so this
+// test will fail if ReleaseLease ignores the leaseID parameter.
+func TestAzureBlobIaCStateStore_Unlock_PassesLeaseID(t *testing.T) {
+	client := newMockAzureClient()
+	store := newTestAzureStore(client)
+
+	if err := store.Lock("res-lease"); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+	// Unlock must pass the correct leaseID — mock rejects wrong/empty leaseIDs.
+	if err := store.Unlock("res-lease"); err != nil {
+		t.Fatalf("Unlock with leaseID: %v", err)
+	}
+	// After unlock, should be able to re-lock.
+	if err := store.Lock("res-lease"); err != nil {
+		t.Fatalf("Lock after Unlock: %v", err)
+	}
+}
+
 func TestAzureBlobIaCStateStore_JSONRoundTrip(t *testing.T) {
 	store := newTestAzureStore(newMockAzureClient())
 
