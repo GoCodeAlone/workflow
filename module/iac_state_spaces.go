@@ -251,33 +251,27 @@ func (s *SpacesIaCStateStore) DeleteState(resourceID string) error {
 	return nil
 }
 
-// Lock creates a lock object for resourceID. Fails if the lock already exists.
+// Lock creates a lock object for resourceID using S3 conditional writes (If-None-Match: *)
+// for atomic, race-free lock acquisition. Fails if the lock already exists.
 func (s *SpacesIaCStateStore) Lock(resourceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	key := s.lockKey(resourceID)
-
-	// Check if lock exists.
-	_, err := s.client.HeadObject(context.Background(), &s3.HeadObjectInput{
-		Bucket: &s.bucket,
-		Key:    &key,
-	})
-	if err == nil {
-		return fmt.Errorf("iac spaces state: Lock %q: resource is already locked", resourceID)
-	}
-	if !isNotFoundErr(err) {
-		return fmt.Errorf("iac spaces state: Lock %q: head: %w", resourceID, err)
-	}
-
-	// Create lock object with a timestamp.
 	body := []byte(time.Now().UTC().Format(time.RFC3339))
-	_, err = s.client.PutObject(context.Background(), &s3.PutObjectInput{
-		Bucket: &s.bucket,
-		Key:    &key,
-		Body:   bytes.NewReader(body),
+	ifNoneMatch := "*"
+
+	_, err := s.client.PutObject(context.Background(), &s3.PutObjectInput{
+		Bucket:      &s.bucket,
+		Key:         &key,
+		Body:        bytes.NewReader(body),
+		IfNoneMatch: &ifNoneMatch,
 	})
 	if err != nil {
+		// S3 returns 412 Precondition Failed when the object already exists.
+		if isPreconditionFailedErr(err) {
+			return fmt.Errorf("iac spaces state: Lock %q: resource is already locked", resourceID)
+		}
 		return fmt.Errorf("iac spaces state: Lock %q: put: %w", resourceID, err)
 	}
 	return nil
@@ -310,6 +304,16 @@ func (s *SpacesIaCStateStore) Unlock(resourceID string) error {
 		return fmt.Errorf("iac spaces state: Unlock %q: %w", resourceID, err)
 	}
 	return nil
+}
+
+// isPreconditionFailedErr returns true for HTTP 412 Precondition Failed responses,
+// which S3 returns when a conditional write fails (e.g. If-None-Match: * on an existing object).
+func isPreconditionFailedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "PreconditionFailed") || strings.Contains(msg, "412")
 }
 
 // isNotFoundErr checks whether an S3 error indicates the key was not found.
