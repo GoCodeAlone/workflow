@@ -43,6 +43,12 @@ func (m *mockS3Client) PutObject(_ context.Context, input *s3.PutObjectInput, _ 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := aws.ToString(input.Key)
+	// Honour If-None-Match: * — fail if the object already exists (atomic lock semantics).
+	if aws.ToString(input.IfNoneMatch) == "*" {
+		if _, exists := m.objects[key]; exists {
+			return nil, fmt.Errorf("PreconditionFailed: object %q already exists", key)
+		}
+	}
 	data, err := io.ReadAll(input.Body)
 	if err != nil {
 		return nil, err
