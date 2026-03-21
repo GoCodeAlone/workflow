@@ -75,7 +75,7 @@ func TestSizing_UnknownSize(t *testing.T) {
 	}
 }
 
-func TestSizing_EmptyHints(t *testing.T) {
+func TestSizing_NilHints(t *testing.T) {
 	result, err := platform.ResolveSizing("infra.container_service", interfaces.SizeS, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -85,6 +85,20 @@ func TestSizing_EmptyHints(t *testing.T) {
 	}
 	if result.Memory != "2Gi" {
 		t.Errorf("expected memory=2Gi, got %q", result.Memory)
+	}
+}
+
+func TestSizing_EmptyHints(t *testing.T) {
+	// Empty-but-non-nil hints should not override any defaults.
+	result, err := platform.ResolveSizing("infra.container_service", interfaces.SizeS, &interfaces.ResourceHints{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.CPU != "1" {
+		t.Errorf("expected cpu=1 (no override), got %q", result.CPU)
+	}
+	if result.Memory != "2Gi" {
+		t.Errorf("expected memory=2Gi (no override), got %q", result.Memory)
 	}
 }
 
