@@ -162,7 +162,11 @@ func (m *RateLimitMiddleware) Process(next http.Handler) http.Handler {
 			elapsed := time.Since(c.lastTimestamp).Minutes()
 			tokensToAdd := elapsed * m.ratePerMinute
 			if tokensToAdd > 0 {
-				c.tokens = min(c.tokens+tokensToAdd, float64(m.burstSize))
+				if newTokens := c.tokens + tokensToAdd; newTokens < float64(m.burstSize) {
+					c.tokens = newTokens
+				} else {
+					c.tokens = float64(m.burstSize)
+				}
 				c.lastTimestamp = time.Now()
 			}
 		}
