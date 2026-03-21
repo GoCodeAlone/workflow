@@ -432,13 +432,22 @@ Use `interfaces.SizingMap` as defaults. Merge with ResourceHints (hints override
 - Print plan as table (default) or `--format markdown` for PR comments
 - `--output plan.json` to save plan for later apply
 
-**Step 3: Implement state subcommands**
+**Step 3: Implement apply/destroy/status/drift subcommands**
+
+- `wfctl infra apply` — load plan (from file or compute), confirm (unless `--auto-approve`), call provider.Apply(), update state store
+- `wfctl infra destroy` — confirm (unless `--auto-approve`), call provider.Destroy() in reverse dependency order, remove from state
+- `wfctl infra status` — load state, call provider.Status() for each resource, print table
+- `wfctl infra drift` — load state, call provider.DetectDrift(), print drift report
+- `wfctl infra import` — call provider.Import() with cloud ID + type, save to state
+
+**Step 4: Implement state subcommands**
 
 - `wfctl infra state list` — table of tracked resources
 - `wfctl infra state export --format tfstate` — write to .tfstate
 - `wfctl infra state import --from tfstate <file>` — read from .tfstate
+- `wfctl infra state import --from pulumi <file>` — read Pulumi checkpoint JSON
 
-**Step 4: Run tests, commit**
+**Step 5: Run tests, commit**
 
 ---
 
@@ -523,12 +532,17 @@ var doSizing = map[string]map[interfaces.Size]string{
 
 **Step 2: Port existing `platform/providers/aws/` drivers (already behind build tag on main)**
 
-The engine already has EKS, VPC, RDS, SQS, IAM, ALB drivers in `platform/providers/aws/`. Extract and adapt to the plugin SDK interface.
+The engine already has these drivers in `platform/providers/aws/`. Extract and adapt to the plugin SDK interface:
+- **EKS**: `service/eks` — clusters, node groups, add-ons, OIDC providers
+- **VPC**: `service/ec2` — VPCs, subnets, route tables, internet gateways, NAT gateways
+- **RDS**: `service/rds` — instances, Aurora clusters, parameter groups, subnet groups
+- **IAM**: `service/iam` — roles, policies, instance profiles
+- **ALB/NLB**: `service/elasticloadbalancingv2` — load balancers, target groups, listeners
 
 **Step 3: Add missing drivers**
 
 - **ECS Fargate**: `service/ecs` — task definitions, services, clusters
-- **ElastiCache**: `service/elasticache` — Redis/Memcached clusters
+- **ElastiCache**: `service/elasticache` — Redis/Memcached/Valkey clusters
 - **ECR**: `service/ecr` — repositories, lifecycle policies
 - **Route 53**: `service/route53` — hosted zones, record sets, health checks
 - **API Gateway v2**: `service/apigatewayv2` — HTTP APIs, routes, integrations
@@ -705,9 +719,13 @@ Generate `.gitlab-ci.yml` using GitLab CI v17+ syntax: `rules:` (not `only:`), `
 
 Generate declarative `Jenkinsfile`: `pipeline { agent { } stages { } }` syntax.
 
-**Step 5: Add `wfctl ci generate` command to engine**
+**Step 5: Implement CircleCI generator**
 
-**Step 6: Tests, GoReleaser, CI, tag v0.1.0**
+Generate `.circleci/config.yml` using v2.1 syntax: orbs, executors, workflows with approval jobs.
+
+**Step 6: Add `wfctl ci generate` command to engine**
+
+**Step 7: Tests, GoReleaser, CI, tag v0.1.0**
 
 ---
 
