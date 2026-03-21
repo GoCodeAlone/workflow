@@ -3,13 +3,14 @@ module github.com/your-org/test-event-processor
 go 1.26
 
 require (
-	github.com/CrisisTextLine/modular v1.11.11
+	github.com/GoCodeAlone/modular v1.12.3
 	github.com/GoCodeAlone/workflow v0.1.0
 )
 
 require (
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
+	github.com/CrisisTextLine/modular v1.11.11 // indirect
 	github.com/CrisisTextLine/modular/modules/auth v0.4.0 // indirect
 	github.com/CrisisTextLine/modular/modules/eventbus v1.6.0 // indirect
 	github.com/DataDog/datadog-go/v5 v5.4.0 // indirect
@@ -131,7 +132,7 @@ require (
 	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260128011058-8636f8732409 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260217215200-42d3e9bedb6d // indirect
-	google.golang.org/grpc v1.79.1 // indirect
+	google.golang.org/grpc v1.79.3 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.67.6 // indirect
