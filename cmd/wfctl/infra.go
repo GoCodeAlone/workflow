@@ -136,7 +136,10 @@ func runInfraPlan(args []string) error {
 
 	current := loadCurrentState(cfgFile)
 
-	plan := platform.ComputePlan(desired, current)
+	plan, err := platform.ComputePlan(desired, current)
+	if err != nil {
+		return fmt.Errorf("compute plan: %w", err)
+	}
 
 	switch *format {
 	case "markdown":
@@ -280,8 +283,8 @@ func configHashMap(config map[string]any) string {
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
-// formatPlanTable renders an interfaces.Plan as a human-readable table.
-func formatPlanTable(plan interfaces.Plan) string {
+// formatPlanTable renders an interfaces.IaCPlan as a human-readable table.
+func formatPlanTable(plan interfaces.IaCPlan) string {
 	if len(plan.Actions) == 0 {
 		return "No changes. Infrastructure is up-to-date.\n"
 	}
@@ -302,9 +305,9 @@ func formatPlanTable(plan interfaces.Plan) string {
 	return sb.String()
 }
 
-// formatPlanMarkdown renders an interfaces.Plan as a GitHub-flavored markdown
+// formatPlanMarkdown renders an interfaces.IaCPlan as a GitHub-flavored markdown
 // table suitable for PR comments.
-func formatPlanMarkdown(plan interfaces.Plan) string {
+func formatPlanMarkdown(plan interfaces.IaCPlan) string {
 	if len(plan.Actions) == 0 {
 		return "## Infrastructure Plan\n\nNo changes. Infrastructure is up-to-date.\n"
 	}
@@ -338,7 +341,7 @@ func actionSymbol(action string) string {
 	}
 }
 
-func countActions(plan interfaces.Plan) (creates, updates, deletes int) {
+func countActions(plan interfaces.IaCPlan) (creates, updates, deletes int) {
 	for _, a := range plan.Actions {
 		switch a.Action {
 		case "create":
@@ -353,7 +356,7 @@ func countActions(plan interfaces.Plan) (creates, updates, deletes int) {
 }
 
 // writePlanJSON serialises the plan to a JSON file for later apply.
-func writePlanJSON(plan interfaces.Plan, path string) error {
+func writePlanJSON(plan interfaces.IaCPlan, path string) error {
 	data, err := json.MarshalIndent(plan, "", "  ")
 	if err != nil {
 		return err

@@ -13,7 +13,9 @@ import (
 // and returns a Plan with the minimal set of ordered actions needed to
 // reconcile them. Creates and updates are ordered by DependsOn (dependencies
 // first); deletes are ordered in reverse dependency order.
-func ComputePlan(desired []interfaces.ResourceSpec, current []interfaces.ResourceState) interfaces.Plan {
+//
+// Returns an error if the DependsOn graph contains a cycle.
+func ComputePlan(desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (interfaces.IaCPlan, error) {
 	// Index current state by resource name.
 	currentMap := make(map[string]interfaces.ResourceState, len(current))
 	for _, rs := range current {
@@ -28,7 +30,7 @@ func ComputePlan(desired []interfaces.ResourceSpec, current []interfaces.Resourc
 
 	var creates, updates, deletes []interfaces.PlanAction
 
-	// Creates and updates: iterate desired.
+	// Creates and updates: iterate desired in stable order.
 	for _, spec := range desired {
 		hash := configHash(spec.Config)
 		if rs, exists := currentMap[spec.Name]; !exists {
@@ -37,11 +39,11 @@ func ComputePlan(desired []interfaces.ResourceSpec, current []interfaces.Resourc
 				Resource: spec,
 			})
 		} else if rs.ConfigHash != hash {
-			current := rs
+			rsCopy := rs
 			updates = append(updates, interfaces.PlanAction{
 				Action:   "update",
 				Resource: spec,
-				Current:  &current,
+				Current:  &rsCopy,
 			})
 		}
 		// No change: skip.
@@ -50,7 +52,7 @@ func ComputePlan(desired []interfaces.ResourceSpec, current []interfaces.Resourc
 	// Deletes: resources in current that are not in desired.
 	for _, rs := range current {
 		if _, exists := desiredMap[rs.Name]; !exists {
-			// Convert ResourceState to a minimal ResourceSpec for the action.
+			rsCopy := rs
 			spec := interfaces.ResourceSpec{
 				Name:      rs.Name,
 				Type:      rs.Type,
@@ -59,32 +61,39 @@ func ComputePlan(desired []interfaces.ResourceSpec, current []interfaces.Resourc
 			deletes = append(deletes, interfaces.PlanAction{
 				Action:   "delete",
 				Resource: spec,
-				Current:  func() *interfaces.ResourceState { c := rs; return &c }(),
+				Current:  &rsCopy,
 			})
 		}
 	}
 
 	// Topological sort: creates and updates in dependency order (deps first).
-	sorted := topoSort(creates, updates, desired)
+	sorted, err := topoSort(creates, updates, desired)
+	if err != nil {
+		return interfaces.IaCPlan{}, err
+	}
 
 	// Deletes in reverse dependency order (dependents deleted before deps).
-	sortedDeletes := reverseTopoSort(deletes)
+	sortedDeletes, err := reverseTopoSort(deletes)
+	if err != nil {
+		return interfaces.IaCPlan{}, err
+	}
 
 	actions := append(sorted, sortedDeletes...)
 
-	return interfaces.Plan{
+	return interfaces.IaCPlan{
 		ID:        planID(),
 		Actions:   actions,
 		CreatedAt: time.Now().UTC(),
-	}
+	}, nil
 }
 
 // configHash returns a deterministic SHA-256 hex hash of a config map.
+// json.Marshal error is intentionally ignored: map[string]any always marshals.
 func configHash(config map[string]any) string {
 	if len(config) == 0 {
 		return ""
 	}
-	data, _ := json.Marshal(config)
+	data, _ := json.Marshal(config) // map[string]any is always marshalable
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
@@ -94,9 +103,10 @@ func planID() string {
 }
 
 // topoSort returns creates and updates ordered so that a resource's
-// dependencies appear before itself. Resources with no DependsOn come first.
-// The desiredSpecs slice is used to build the full dependency graph.
-func topoSort(creates, updates []interfaces.PlanAction, desiredSpecs []interfaces.ResourceSpec) []interfaces.PlanAction {
+// dependencies appear before itself. Iteration order is seeded from
+// desiredSpecs to ensure deterministic output for independent resources.
+// Returns an error if a dependency cycle is detected.
+func topoSort(creates, updates []interfaces.PlanAction, desiredSpecs []interfaces.ResourceSpec) ([]interfaces.PlanAction, error) {
 	// Build a map of name → DependsOn from desired specs.
 	deps := make(map[string][]string, len(desiredSpecs))
 	for _, s := range desiredSpecs {
@@ -113,34 +123,49 @@ func topoSort(creates, updates []interfaces.PlanAction, desiredSpecs []interface
 	}
 
 	visited := make(map[string]bool)
+	inStack := make(map[string]bool) // cycle detection
 	var result []interfaces.PlanAction
 
-	var visit func(name string)
-	visit = func(name string) {
+	var visit func(name string) error
+	visit = func(name string) error {
+		if inStack[name] {
+			return fmt.Errorf("dependency cycle detected involving resource %q", name)
+		}
 		if visited[name] {
-			return
+			return nil
 		}
-		visited[name] = true
+		inStack[name] = true
 		for _, dep := range deps[name] {
-			visit(dep)
+			if err := visit(dep); err != nil {
+				return err
+			}
 		}
+		inStack[name] = false
+		visited[name] = true
 		if action, ok := actionMap[name]; ok {
 			result = append(result, action)
 		}
+		return nil
 	}
 
-	for name := range actionMap {
-		visit(name)
+	// Seed DFS from desiredSpecs to guarantee deterministic ordering.
+	for _, s := range desiredSpecs {
+		if _, ok := actionMap[s.Name]; ok {
+			if err := visit(s.Name); err != nil {
+				return nil, err
+			}
+		}
 	}
 
-	return result
+	return result, nil
 }
 
 // reverseTopoSort returns deletes in reverse dependency order so that
 // dependent resources are deleted before the resources they depend on.
-func reverseTopoSort(deletes []interfaces.PlanAction) []interfaces.PlanAction {
+// Returns an error if a dependency cycle is detected.
+func reverseTopoSort(deletes []interfaces.PlanAction) ([]interfaces.PlanAction, error) {
 	if len(deletes) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Build deps map from DependsOn on the resource spec.
@@ -151,26 +176,37 @@ func reverseTopoSort(deletes []interfaces.PlanAction) []interfaces.PlanAction {
 		actionMap[a.Resource.Name] = a
 	}
 
-	// Forward topo sort (same as creates).
 	visited := make(map[string]bool)
+	inStack := make(map[string]bool) // cycle detection
 	var forward []interfaces.PlanAction
 
-	var visit func(name string)
-	visit = func(name string) {
+	var visit func(name string) error
+	visit = func(name string) error {
+		if inStack[name] {
+			return fmt.Errorf("dependency cycle detected involving resource %q", name)
+		}
 		if visited[name] {
-			return
+			return nil
 		}
-		visited[name] = true
+		inStack[name] = true
 		for _, dep := range deps[name] {
-			visit(dep)
+			if err := visit(dep); err != nil {
+				return err
+			}
 		}
+		inStack[name] = false
+		visited[name] = true
 		if action, ok := actionMap[name]; ok {
 			forward = append(forward, action)
 		}
+		return nil
 	}
 
-	for name := range actionMap {
-		visit(name)
+	// Seed DFS from the stable delete-action order.
+	for _, a := range deletes {
+		if err := visit(a.Resource.Name); err != nil {
+			return nil, err
+		}
 	}
 
 	// Reverse the order: deps-first → dependents-first for deletion.
@@ -178,5 +214,5 @@ func reverseTopoSort(deletes []interfaces.PlanAction) []interfaces.PlanAction {
 	for i, a := range forward {
 		result[len(forward)-1-i] = a
 	}
-	return result
+	return result, nil
 }

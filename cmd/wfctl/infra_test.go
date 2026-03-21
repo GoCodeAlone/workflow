@@ -133,7 +133,7 @@ func TestFormatPlanTable_ShowsAllActions(t *testing.T) {
 }
 
 func TestFormatPlanTable_EmptyPlanMessage(t *testing.T) {
-	plan := interfaces.Plan{Actions: nil}
+	plan := interfaces.IaCPlan{Actions: nil}
 	out := formatPlanTable(plan)
 	if !strings.Contains(out, "No changes") {
 		t.Errorf("expected 'No changes' for empty plan, got: %q", out)
@@ -155,7 +155,7 @@ func TestFormatPlanMarkdown_ContainsTable(t *testing.T) {
 }
 
 func TestFormatPlanMarkdown_EmptyPlanMessage(t *testing.T) {
-	plan := interfaces.Plan{Actions: nil}
+	plan := interfaces.IaCPlan{Actions: nil}
 	out := formatPlanMarkdown(plan)
 	if !strings.Contains(out, "No changes") {
 		t.Errorf("expected 'No changes' for empty plan, got: %q", out)
@@ -182,7 +182,7 @@ func TestWritePlanJSON_RoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var restored interfaces.Plan
+	var restored interfaces.IaCPlan
 	if err := json.Unmarshal(data, &restored); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -217,7 +217,10 @@ modules:
 		t.Fatal(err)
 	}
 
-	plan := platform.ComputePlan(specs, nil)
+	plan, err := platform.ComputePlan(specs, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(plan.Actions) != 2 {
 		t.Fatalf("expected 2 create actions, got %d", len(plan.Actions))
 	}
@@ -243,8 +246,8 @@ func writeTempYAML(t *testing.T, content string) (string, error) {
 	return f.Name(), f.Close()
 }
 
-func makeMixedPlan() interfaces.Plan {
-	return interfaces.Plan{
+func makeMixedPlan() interfaces.IaCPlan {
+	return interfaces.IaCPlan{
 		ID:        "plan-test",
 		CreatedAt: time.Now(),
 		Actions: []interfaces.PlanAction{

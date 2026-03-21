@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -22,7 +23,10 @@ func TestDiffer_NewResource(t *testing.T) {
 	}
 	current := []interfaces.ResourceState{}
 
-	plan := platform.ComputePlan(desired, current)
+	plan, err := platform.ComputePlan(desired, current)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(plan.Actions) != 1 {
 		t.Fatalf("expected 1 action, got %d", len(plan.Actions))
@@ -41,7 +45,10 @@ func TestDiffer_DeletedResource(t *testing.T) {
 		{Name: "old-db", Type: "infra.database", ConfigHash: "abc123"},
 	}
 
-	plan := platform.ComputePlan(desired, current)
+	plan, err := platform.ComputePlan(desired, current)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(plan.Actions) != 1 {
 		t.Fatalf("expected 1 action, got %d", len(plan.Actions))
@@ -65,7 +72,10 @@ func TestDiffer_UpdatedResource(t *testing.T) {
 		{Name: "db", Type: "infra.database", ConfigHash: hashConfig(config)},
 	}
 
-	plan := platform.ComputePlan(desired, current)
+	plan, err := platform.ComputePlan(desired, current)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(plan.Actions) != 1 {
 		t.Fatalf("expected 1 action, got %d", len(plan.Actions))
@@ -85,7 +95,10 @@ func TestDiffer_NoChanges(t *testing.T) {
 		{Name: "db", Type: "infra.database", ConfigHash: hashConfig(config)},
 	}
 
-	plan := platform.ComputePlan(desired, current)
+	plan, err := platform.ComputePlan(desired, current)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(plan.Actions) != 0 {
 		t.Fatalf("expected 0 actions, got %d: %+v", len(plan.Actions), plan.Actions)
@@ -102,7 +115,10 @@ func TestDiffer_DependencyOrdering(t *testing.T) {
 	}
 	current := []interfaces.ResourceState{}
 
-	plan := platform.ComputePlan(desired, current)
+	plan, err := platform.ComputePlan(desired, current)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(plan.Actions) != 3 {
 		t.Fatalf("expected 3 actions, got %d", len(plan.Actions))
@@ -135,7 +151,10 @@ func TestDiffer_MixedActions(t *testing.T) {
 		{Name: "old-cache", Type: "infra.cache"},
 	}
 
-	plan := platform.ComputePlan(desired, current)
+	plan, err := platform.ComputePlan(desired, current)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	actions := make(map[string]string) // name → action
 	for _, a := range plan.Actions {
@@ -150,5 +169,22 @@ func TestDiffer_MixedActions(t *testing.T) {
 	}
 	if actions["old-cache"] != "delete" {
 		t.Errorf("old-cache action = %q, want %q", actions["old-cache"], "delete")
+	}
+}
+
+func TestDiffer_CycleDetection(t *testing.T) {
+	// A depends on B, B depends on A — cycle
+	desired := []interfaces.ResourceSpec{
+		{Name: "a", Type: "infra.vpc", DependsOn: []string{"b"}},
+		{Name: "b", Type: "infra.database", DependsOn: []string{"a"}},
+	}
+	current := []interfaces.ResourceState{}
+
+	_, err := platform.ComputePlan(desired, current)
+	if err == nil {
+		t.Fatal("expected error for cyclic dependency, got nil")
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("error = %q, expected 'cycle' in message", err.Error())
 	}
 }
