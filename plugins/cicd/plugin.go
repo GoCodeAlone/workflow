@@ -3,7 +3,9 @@
 // docker_run, scan_sast, scan_container, scan_deps, deploy, gate, build_ui,
 // build_from_config, build_binary, git_clone, git_commit, git_push, git_tag, git_checkout,
 // codebuild_create_project, codebuild_start, codebuild_status, codebuild_logs,
-// codebuild_delete_project, codebuild_list_builds.
+// codebuild_delete_project, codebuild_list_builds,
+// deploy_rolling, deploy_blue_green, deploy_canary, deploy_verify, deploy_rollback,
+// container_build.
 // It also registers the aws.codebuild module type.
 package cicd
 
@@ -61,6 +63,12 @@ func New() *Plugin {
 					"step.codebuild_logs",
 					"step.codebuild_delete_project",
 					"step.codebuild_list_builds",
+					"step.deploy_rolling",
+					"step.deploy_blue_green",
+					"step.deploy_canary",
+					"step.deploy_verify",
+					"step.deploy_rollback",
+					"step.container_build",
 				},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "cicd-pipeline", Role: "provider", Priority: 50},
@@ -117,6 +125,12 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.codebuild_logs":           wrapStepFactory(module.NewCodeBuildLogsStepFactory()),
 		"step.codebuild_delete_project": wrapStepFactory(module.NewCodeBuildDeleteProjectStepFactory()),
 		"step.codebuild_list_builds":    wrapStepFactory(module.NewCodeBuildListBuildsStepFactory()),
+		"step.deploy_rolling":           wrapStepFactory(module.NewDeployRollingStepFactory()),
+		"step.deploy_blue_green":        wrapStepFactory(module.NewDeployBlueGreenStepFactory()),
+		"step.deploy_canary":            wrapStepFactory(module.NewDeployCanaryStepFactory()),
+		"step.deploy_verify":            wrapStepFactory(module.NewDeployVerifyStepFactory()),
+		"step.deploy_rollback":          wrapStepFactory(module.NewDeployRollbackStepFactory()),
+		"step.container_build":          wrapStepFactory(module.NewContainerBuildStepFactory()),
 	}
 }
 
