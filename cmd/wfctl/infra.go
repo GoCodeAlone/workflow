@@ -1,11 +1,16 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
+	"text/tabwriter"
 
+	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/platform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,6 +29,10 @@ func runInfra(args []string) error {
 		return runInfraDrift(args[1:])
 	case "destroy":
 		return runInfraDestroy(args[1:])
+	case "import":
+		return runInfraImport(args[1:])
+	case "state":
+		return runInfraState(args[1:])
 	default:
 		return infraUsage()
 	}
@@ -40,10 +49,14 @@ Actions:
   status    Show current infrastructure status
   drift     Detect configuration drift
   destroy   Tear down infrastructure
+  import    Import an existing cloud resource into state
+  state     Manage IaC state (list, export, import)
 
 Options:
   --config <file>    Config file (default: infra.yaml or config/infra.yaml)
   --auto-approve     Skip confirmation prompt (apply/destroy only)
+  --format <fmt>     Output format: table (default) or markdown (plan only)
+  --output <file>    Write plan to JSON file (plan only)
 `)
 	return fmt.Errorf("missing or unknown action")
 }
@@ -105,6 +118,8 @@ func discoverInfraModules(cfgFile string) (iacState []infraModuleEntry, platform
 func runInfraPlan(args []string) error {
 	fs := flag.NewFlagSet("infra plan", flag.ContinueOnError)
 	_ = fs.String("config", "", "Config file")
+	format := fs.String("format", "table", "Output format: table or markdown")
+	output := fs.String("output", "", "Write plan to JSON file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -114,55 +129,255 @@ func runInfraPlan(args []string) error {
 		return err
 	}
 
-	iacStates, platforms, cloudAccounts, err := discoverInfraModules(cfgFile)
+	desired, err := parseInfraResourceSpecs(cfgFile)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Infrastructure Plan\n")
-	fmt.Printf("===================\n")
-	fmt.Printf("Config:  %s\n\n", cfgFile)
+	current := loadCurrentState(cfgFile)
 
-	if len(cloudAccounts) == 0 {
-		fmt.Printf("WARNING: No cloud.account modules found.\n\n")
-	} else {
-		for _, ca := range cloudAccounts {
-			provider, _ := ca.Config["provider"].(string)
-			fmt.Printf("Cloud Account: %s (provider: %s)\n", ca.Name, provider)
+	plan := platform.ComputePlan(desired, current)
+
+	switch *format {
+	case "markdown":
+		fmt.Print(formatPlanMarkdown(plan))
+	default:
+		fmt.Printf("Infrastructure Plan — %s\n\n", cfgFile)
+		fmt.Print(formatPlanTable(plan))
+	}
+
+	if *output != "" {
+		if err := writePlanJSON(plan, *output); err != nil {
+			return fmt.Errorf("write plan: %w", err)
 		}
-		fmt.Println()
+		fmt.Printf("\nPlan saved to %s\n", *output)
 	}
 
-	if len(iacStates) == 0 {
-		fmt.Printf("WARNING: No iac.state modules found — state will not be persisted.\n\n")
-	} else {
-		for _, is := range iacStates {
-			backend, _ := is.Config["backend"].(string)
-			dir, _ := is.Config["directory"].(string)
-			fmt.Printf("State Backend: %s (backend: %s, dir: %s)\n", is.Name, backend, dir)
+	return nil
+}
+
+// parseInfraResourceSpecs reads an infra YAML file and returns the list of
+// infra.* modules as ResourceSpecs for plan computation.
+func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) {
+	data, err := os.ReadFile(cfgFile)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", cfgFile, err)
+	}
+
+	var parsed struct {
+		Modules []struct {
+			Name   string         `yaml:"name"`
+			Type   string         `yaml:"type"`
+			Config map[string]any `yaml:"config"`
+		} `yaml:"modules"`
+	}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", cfgFile, err)
+	}
+
+	var specs []interfaces.ResourceSpec
+	for _, m := range parsed.Modules {
+		if !strings.HasPrefix(m.Type, "infra.") {
+			continue
 		}
-		fmt.Println()
-	}
-
-	if len(platforms) == 0 {
-		return fmt.Errorf("no platform.* modules found in %s", cfgFile)
-	}
-
-	fmt.Printf("Resources to manage (%d):\n", len(platforms))
-	for _, p := range platforms {
-		fmt.Printf("  + %s (%s)\n", p.Name, p.Type)
-		for k, v := range p.Config {
-			if k == "account" || k == "provider" {
-				continue
+		spec := interfaces.ResourceSpec{
+			Name:   m.Name,
+			Type:   m.Type,
+			Config: m.Config,
+		}
+		// Extract size from config if present.
+		if size, ok := m.Config["size"].(string); ok {
+			spec.Size = interfaces.Size(size)
+		}
+		// Extract depends_on from config if present.
+		if raw, ok := m.Config["depends_on"]; ok {
+			switch v := raw.(type) {
+			case []any:
+				for _, d := range v {
+					if s, ok := d.(string); ok {
+						spec.DependsOn = append(spec.DependsOn, s)
+					}
+				}
+			case []string:
+				spec.DependsOn = v
 			}
-			fmt.Printf("      %s: %v\n", k, v)
+		}
+		specs = append(specs, spec)
+	}
+	return specs, nil
+}
+
+// loadCurrentState attempts to load ResourceStates from the iac.state backend
+// configured in cfgFile. Returns an empty slice on any error (first run).
+func loadCurrentState(cfgFile string) []interfaces.ResourceState {
+	iacStates, _, _, err := discoverInfraModules(cfgFile)
+	if err != nil || len(iacStates) == 0 {
+		return nil
+	}
+	m := iacStates[0]
+	backend, _ := m.Config["backend"].(string)
+	dir, _ := m.Config["directory"].(string)
+
+	switch backend {
+	case "filesystem":
+		if dir == "" {
+			dir = "/var/lib/workflow/iac-state"
+		}
+		return loadFSState(dir)
+	default:
+		// memory, spaces, gcs, azure, postgres — not accessible without credentials
+		return nil
+	}
+}
+
+// loadFSState reads IaC state records from a filesystem directory and converts
+// them to interfaces.ResourceState values for use with the differ.
+func loadFSState(dir string) []interfaces.ResourceState {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	var states []interfaces.ResourceState
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".lock.json") {
+			continue
+		}
+		data, err := os.ReadFile(dir + "/" + e.Name())
+		if err != nil {
+			continue
+		}
+		var s struct {
+			ResourceID   string         `json:"resource_id"`
+			ResourceType string         `json:"resource_type"`
+			Provider     string         `json:"provider"`
+			Config       map[string]any `json:"config"`
+			Outputs      map[string]any `json:"outputs"`
+		}
+		if err := json.Unmarshal(data, &s); err != nil {
+			continue
+		}
+		states = append(states, interfaces.ResourceState{
+			ID:            s.ResourceID,
+			Name:          s.ResourceID,
+			Type:          s.ResourceType,
+			Provider:      s.Provider,
+			ProviderID:    s.ResourceID,
+			ConfigHash:    configHashMap(s.Config),
+			AppliedConfig: s.Config,
+			Outputs:       s.Outputs,
+		})
+	}
+	return states
+}
+
+// configHashMap computes a deterministic SHA-256 hex hash of a config map.
+func configHashMap(config map[string]any) string {
+	if len(config) == 0 {
+		return ""
+	}
+	data, _ := json.Marshal(config)
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
+
+// formatPlanTable renders an interfaces.Plan as a human-readable table.
+func formatPlanTable(plan interfaces.Plan) string {
+	if len(plan.Actions) == 0 {
+		return "No changes. Infrastructure is up-to-date.\n"
+	}
+
+	var sb strings.Builder
+	tw := tabwriter.NewWriter(&sb, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "Action\tResource\tType")
+	fmt.Fprintln(tw, "------\t--------\t----")
+	for _, a := range plan.Actions {
+		symbol := actionSymbol(a.Action)
+		fmt.Fprintf(tw, "%s %s\t%s\t%s\n", symbol, a.Action, a.Resource.Name, a.Resource.Type)
+	}
+	tw.Flush()
+
+	creates, updates, deletes := countActions(plan)
+	fmt.Fprintf(&sb, "\nPlan: %d to create, %d to update, %d to destroy.\n",
+		creates, updates, deletes)
+	return sb.String()
+}
+
+// formatPlanMarkdown renders an interfaces.Plan as a GitHub-flavored markdown
+// table suitable for PR comments.
+func formatPlanMarkdown(plan interfaces.Plan) string {
+	if len(plan.Actions) == 0 {
+		return "## Infrastructure Plan\n\nNo changes. Infrastructure is up-to-date.\n"
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Infrastructure Plan\n\n")
+	sb.WriteString("| Action | Resource | Type |\n")
+	sb.WriteString("|--------|----------|------|\n")
+	for _, a := range plan.Actions {
+		symbol := actionSymbol(a.Action)
+		fmt.Fprintf(&sb, "| %s %s | `%s` | `%s` |\n",
+			symbol, a.Action, a.Resource.Name, a.Resource.Type)
+	}
+
+	creates, updates, deletes := countActions(plan)
+	fmt.Fprintf(&sb, "\n**Plan: %d to create, %d to update, %d to destroy.**\n",
+		creates, updates, deletes)
+	return sb.String()
+}
+
+func actionSymbol(action string) string {
+	switch action {
+	case "create":
+		return "+"
+	case "update":
+		return "~"
+	case "delete":
+		return "-"
+	default:
+		return " "
+	}
+}
+
+func countActions(plan interfaces.Plan) (creates, updates, deletes int) {
+	for _, a := range plan.Actions {
+		switch a.Action {
+		case "create":
+			creates++
+		case "update":
+			updates++
+		case "delete":
+			deletes++
 		}
 	}
-	fmt.Println()
+	return
+}
 
-	// Execute plan via wfctl pipeline run
-	fmt.Printf("Running plan pipeline...\n")
-	return runPipelineRun([]string{"-c", cfgFile, "-p", "plan"})
+// writePlanJSON serialises the plan to a JSON file for later apply.
+func writePlanJSON(plan interfaces.Plan, path string) error {
+	data, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+// runInfraImport imports an existing cloud resource into the IaC state.
+func runInfraImport(args []string) error {
+	fs := flag.NewFlagSet("infra import", flag.ContinueOnError)
+	provider := fs.String("provider", "", "Provider name (aws, gcp, azure, digitalocean)")
+	resType := fs.String("type", "", "Abstract resource type (e.g. infra.database)")
+	cloudID := fs.String("id", "", "Cloud-provider resource ID")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *provider == "" || *resType == "" || *cloudID == "" {
+		return fmt.Errorf("import requires --provider, --type, and --id\n\nExample:\n  wfctl infra import --provider aws --type infra.database --id db-abc123")
+	}
+	fmt.Printf("Import: provider=%s type=%s id=%s\n\n", *provider, *resType, *cloudID)
+	fmt.Println("NOTE: Provider plugins (Phase 2) are required to call provider.Import().")
+	fmt.Println("Once a provider plugin is installed, this command will query the cloud API")
+	fmt.Println("and record the resource in the IaC state store.")
+	return nil
 }
 
 func runInfraApply(args []string) error {
