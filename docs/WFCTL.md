@@ -53,16 +53,32 @@ graph TD
     wfctl --> ui
     wfctl --> publish
     wfctl --> deploy
+    wfctl --> infra
     wfctl --> api
     wfctl --> diff
     wfctl --> template
     wfctl --> contract
     wfctl --> compat
     wfctl --> generate
+    wfctl --> ci
     wfctl --> git
     wfctl --> registry
     wfctl --> update
     wfctl --> mcp
+
+    infra --> infra-plan["plan"]
+    infra --> infra-apply["apply"]
+    infra --> infra-destroy["destroy"]
+    infra --> infra-status["status"]
+    infra --> infra-drift["drift"]
+    infra --> infra-import["import"]
+    infra --> infra-state["state"]
+
+    infra-state --> infra-state-list["list"]
+    infra-state --> infra-state-export["export"]
+    infra-state --> infra-state-import["import"]
+
+    ci --> ci-generate["generate"]
 
     plugin --> plugin-init["init"]
     plugin --> plugin-docs["docs"]
@@ -119,6 +135,8 @@ graph TD
 | **Validation & Inspection** | `validate`, `inspect`, `schema`, `compat check`, `template validate` |
 | **API & Contract** | `api extract`, `contract test`, `diff` |
 | **Deployment** | `deploy docker/kubernetes/helm/cloud`, `build-ui`, `generate github-actions` |
+| **Infrastructure** | `infra plan/apply/destroy/status/drift/import`, `infra state list/export/import` |
+| **CI/CD** | `ci generate`, `generate github-actions` |
 | **Documentation** | `docs generate` |
 | **Plugin Management** | `plugin`, `registry`, `publish` |
 | **UI Generation** | `ui scaffold`, `build-ui` |
@@ -791,7 +809,7 @@ wfctl deploy cloud --target production --yes
 
 ### `infra`
 
-Manage infrastructure lifecycle defined in a workflow config. Discovers `cloud.account`, `iac.state`, and `platform.*` modules, then executes the corresponding IaC pipeline.
+Manage infrastructure lifecycle defined in a workflow config. Discovers `cloud.account`, `iac.state`, `iac.provider`, and `platform.*` modules, then executes the corresponding IaC pipeline.
 
 ```
 wfctl infra <action> [options] [config.yaml]
@@ -802,13 +820,31 @@ wfctl infra <action> [options] [config.yaml]
 | `plan` | Show planned infrastructure changes |
 | `apply` | Apply infrastructure changes |
 | `status` | Show current infrastructure status |
-| `drift` | Detect configuration drift |
+| `drift` | Detect configuration drift between desired and actual state |
 | `destroy` | Tear down all managed infrastructure |
+| `import` | Import existing resources into IaC state |
+| `state` | Manage state storage (list/export/import) |
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--config` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
 | `--auto-approve` | `false` | Skip confirmation prompt (apply/destroy only) |
+| `--parallelism` | `10` | Number of parallel operations |
+| `--lock-timeout` | `0s` | Timeout for state lock acquisition |
+
+**State Subcommands:**
+
+```
+wfctl infra state <subaction> [options]
+```
+
+| Subaction | Description |
+|-----------|-------------|
+| `list` | List all state snapshots and their metadata |
+| `export` | Export current state to file or external system |
+| `import` | Import state from file or external system |
+
+**Examples:**
 
 ```bash
 wfctl infra plan infra.yaml
@@ -816,6 +852,10 @@ wfctl infra apply --auto-approve infra.yaml
 wfctl infra status --config infra.yaml
 wfctl infra drift infra.yaml
 wfctl infra destroy --auto-approve infra.yaml
+wfctl infra import --config infra.yaml
+wfctl infra state list
+wfctl infra state export --output state.json
+wfctl infra state import --source state.json
 ```
 
 ---
@@ -1012,6 +1052,40 @@ Generated files:
 - `ci.yml` — validates config, runs tests, optionally builds UI
 - `cd.yml` — builds multi-platform Docker image and pushes on tag push
 - `release.yml` — _(if plugin detected)_ builds and releases plugin binaries
+
+---
+
+### `ci generate`
+
+Generate CI/CD pipeline configuration from a workflow definition. Detects infrastructure modules, deployment steps, and state management to produce environment-specific CI configurations.
+
+```
+wfctl ci generate [options] <config.yaml>
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output` | `./ci/generated/` | Output directory for generated CI configurations |
+| `--format` | `yaml` | Output format: `yaml` or `json` |
+| `--environments` | `dev,staging,prod` | Comma-separated environments to generate configs for |
+| `--include-infra` | `true` | Include infrastructure provisioning steps |
+| `--include-tests` | `true` | Include automated test execution steps |
+| `--parallelism` | `4` | Maximum concurrent deployment steps |
+
+**Examples:**
+
+```bash
+wfctl ci generate workflow.yaml
+wfctl ci generate -output ./ci/ -environments dev,staging,prod workflow.yaml
+wfctl ci generate -format json -include-infra=true workflow.yaml
+```
+
+Generated configuration includes:
+- Environment-specific provisioning pipelines (dev/staging/prod)
+- Infrastructure validation and drift detection
+- Deployment strategy configuration (rolling, blue-green, canary)
+- Rollback procedures and health checks
+- State management and backup/restore operations
 
 ---
 

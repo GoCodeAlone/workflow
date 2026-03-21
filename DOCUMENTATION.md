@@ -278,6 +278,19 @@ flowchart TD
 | `step.iac_status` | Retrieves the current state of an IaC stack | platform |
 | `step.iac_destroy` | Destroys all resources in an IaC stack | platform |
 | `step.iac_drift_detect` | Detects configuration drift between desired and actual state | platform |
+| `step.iac_generate_hcl` | Generates Terraform HCL from infrastructure definitions | platform |
+| `step.tofu_init` | Initializes an OpenTofu working directory | platform |
+| `step.tofu_plan` | Creates an OpenTofu execution plan | platform |
+| `step.tofu_apply` | Applies OpenTofu changes to infrastructure | platform |
+| `step.tofu_state_import` | Imports existing resources into OpenTofu state | platform |
+| `step.tofu_state_export` | Exports OpenTofu state to a file or external system | platform |
+| `step.deploy_rolling` | Performs a rolling deployment with configurable batch size and health checks | platform |
+| `step.deploy_blue_green` | Executes a blue-green deployment with traffic cutover | platform |
+| `step.deploy_canary` | Deploys changes to a small percentage of traffic first, then gradually ramps up | platform |
+| `step.deploy_verify` | Verifies deployment health, readiness, and status | platform |
+| `step.deploy_rollback` | Rolls back a deployment to a previous known-good version | platform |
+| `step.container_build` | Builds a container image without pushing (stores in artifact) | platform |
+| `step.ci_generate` | Generates CI/CD configuration from workflow definition | platform |
 | `step.dns_plan` | Plans DNS record changes | platform |
 | `step.dns_apply` | Applies DNS record changes | platform |
 | `step.dns_status` | Retrieves the current DNS records for a domain | platform |
@@ -438,7 +451,21 @@ value: '{{ index .steps "parse-request" "path_params" "id" }}'
 | `platform.do_networking` | DigitalOcean VPC and firewall management | platform |
 | `platform.do_dns` | DigitalOcean domain and DNS record management | platform |
 | `platform.do_database` | DigitalOcean Managed Database (PostgreSQL, MySQL, Redis) | platform |
-| `iac.state` | IaC state persistence (memory, filesystem, or spaces/S3-compatible backends) | platform |
+| `iac.provider` | Cloud provider configuration (aws, gcp, azure, digitalocean) for IaC operations | platform |
+| `iac.state` | IaC state persistence (memory, filesystem, spaces, gcs, azure_blob, postgres) | platform |
+| `infra.vpc` | Virtual Private Cloud and subnet management | platform |
+| `infra.database` | Managed database instance provisioning and configuration | platform |
+| `infra.cache` | In-memory cache cluster provisioning (Redis, Memcached) | platform |
+| `infra.container_service` | Container orchestration service provisioning (ECS, GKE, AKS) | platform |
+| `infra.k8s_cluster` | Kubernetes cluster creation and lifecycle management | platform |
+| `infra.load_balancer` | Load balancer configuration and health check management | platform |
+| `infra.dns` | DNS zone and record management across providers | platform |
+| `infra.registry` | Container image registry configuration (ECR, GCR, ACR) | platform |
+| `infra.api_gateway` | API gateway configuration for request routing and throttling | platform |
+| `infra.firewall` | Network firewall and security group configuration | platform |
+| `infra.iam_role` | IAM role and policy creation and management | platform |
+| `infra.storage` | Object storage provisioning and access configuration | platform |
+| `infra.certificate` | SSL/TLS certificate provisioning and renewal | platform |
 | `app.container` | Containerised application deployment descriptor | platform |
 | `argo.workflows` | Argo Workflows integration for Kubernetes-native workflow orchestration | platform |
 | `aws.codebuild` | AWS CodeBuild project and build management | cicd |
