@@ -3,6 +3,7 @@ package interfaces_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
@@ -20,11 +21,11 @@ func (m *mockProvider) Version() string { return "0.0.1" }
 func (m *mockProvider) Initialize(_ context.Context, _ map[string]any) error {
 	return nil
 }
-func (m *mockProvider) Capabilities() []interfaces.CapabilityDeclaration { return nil }
-func (m *mockProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.Plan, error) {
+func (m *mockProvider) Capabilities() []interfaces.IaCCapabilityDeclaration { return nil }
+func (m *mockProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
 	return nil, nil
 }
-func (m *mockProvider) Apply(_ context.Context, _ *interfaces.Plan) (*interfaces.ApplyResult, error) {
+func (m *mockProvider) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
 	return nil, nil
 }
 func (m *mockProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
@@ -68,30 +69,50 @@ func (d *mockDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ int) (
 	return nil, nil
 }
 
+// noopLockHandle is a no-op IaCLockHandle for tests.
+type noopLockHandle struct{}
+
+func (h *noopLockHandle) Unlock(_ context.Context) error { return nil }
+
 // mockState implements IaCStateStore
 type mockState struct{}
 
-func (s *mockState) SaveResource(_ interfaces.ResourceState) error   { return nil }
-func (s *mockState) GetResource(_ string) (*interfaces.ResourceState, error) { return nil, nil }
-func (s *mockState) ListResources() ([]interfaces.ResourceState, error)      { return nil, nil }
-func (s *mockState) DeleteResource(_ string) error                           { return nil }
-func (s *mockState) SavePlan(_ interfaces.Plan) error                        { return nil }
-func (s *mockState) GetPlan(_ string) (*interfaces.Plan, error)              { return nil, nil }
-func (s *mockState) Lock(_ string) error                                     { return nil }
-func (s *mockState) Unlock(_ string) error                                   { return nil }
-func (s *mockState) Close() error                                            { return nil }
+func (s *mockState) SaveResource(_ context.Context, _ interfaces.ResourceState) error { return nil }
+func (s *mockState) GetResource(_ context.Context, _ string) (*interfaces.ResourceState, error) {
+	return nil, nil
+}
+func (s *mockState) ListResources(_ context.Context) ([]interfaces.ResourceState, error) {
+	return nil, nil
+}
+func (s *mockState) DeleteResource(_ context.Context, _ string) error { return nil }
+func (s *mockState) SavePlan(_ context.Context, _ interfaces.IaCPlan) error { return nil }
+func (s *mockState) GetPlan(_ context.Context, _ string) (*interfaces.IaCPlan, error) {
+	return nil, nil
+}
+func (s *mockState) Lock(_ context.Context, _ string, _ time.Duration) (interfaces.IaCLockHandle, error) {
+	return &noopLockHandle{}, nil
+}
+func (s *mockState) Close() error { return nil }
 
-func TestSizeConstants(t *testing.T) {
-	sizes := []interfaces.Size{
-		interfaces.SizeXS, interfaces.SizeS, interfaces.SizeM,
-		interfaces.SizeL, interfaces.SizeXL,
+func TestSize_Constants_Values(t *testing.T) {
+	cases := []struct {
+		constant interfaces.Size
+		want     interfaces.Size
+	}{
+		{interfaces.SizeXS, "xs"},
+		{interfaces.SizeS, "s"},
+		{interfaces.SizeM, "m"},
+		{interfaces.SizeL, "l"},
+		{interfaces.SizeXL, "xl"},
 	}
-	if len(sizes) != 5 {
-		t.Fatal("expected 5 size tiers")
+	for _, tc := range cases {
+		if tc.constant != tc.want {
+			t.Errorf("constant = %q, want %q", tc.constant, tc.want)
+		}
 	}
 }
 
-func TestResourceSpecDependsOn(t *testing.T) {
+func TestResourceSpec_DependsOn_Populated(t *testing.T) {
 	spec := interfaces.ResourceSpec{
 		Name:      "db",
 		Type:      "infra.database",
@@ -102,7 +123,7 @@ func TestResourceSpecDependsOn(t *testing.T) {
 	}
 }
 
-func TestSizingMapCoversAllSizes(t *testing.T) {
+func TestSizingMap_CoversAllSizes(t *testing.T) {
 	sizes := []interfaces.Size{
 		interfaces.SizeXS, interfaces.SizeS, interfaces.SizeM,
 		interfaces.SizeL, interfaces.SizeXL,

@@ -19,8 +19,8 @@ type (
 	ResourceHints  = interfaces.ResourceHints
 	ProviderSizing = interfaces.ProviderSizing
 	ResourceSpec   = interfaces.ResourceSpec
-	ResourceRef   = interfaces.ResourceRef
-	ResourceState = interfaces.ResourceState
+	ResourceRef    = interfaces.ResourceRef
+	ResourceState  = interfaces.ResourceState
 	ActionError    = interfaces.ActionError
 	ApplyResult    = interfaces.ApplyResult
 	DestroyResult  = interfaces.DestroyResult

@@ -1,19 +1,26 @@
 package interfaces
 
-import "time"
+import (
+	"context"
+	"time"
+)
+
+// IaCLockHandle is returned by IaCStateStore.Lock and is used to release the lock.
+type IaCLockHandle interface {
+	Unlock(ctx context.Context) error
+}
 
 // IaCStateStore provides persistent state tracking for managed resources.
 type IaCStateStore interface {
-	SaveResource(state ResourceState) error
-	GetResource(name string) (*ResourceState, error)
-	ListResources() ([]ResourceState, error)
-	DeleteResource(name string) error
+	SaveResource(ctx context.Context, state ResourceState) error
+	GetResource(ctx context.Context, name string) (*ResourceState, error)
+	ListResources(ctx context.Context) ([]ResourceState, error)
+	DeleteResource(ctx context.Context, name string) error
 
-	SavePlan(plan Plan) error
-	GetPlan(id string) (*Plan, error)
+	SavePlan(ctx context.Context, plan IaCPlan) error
+	GetPlan(ctx context.Context, id string) (*IaCPlan, error)
 
-	Lock(resource string) error
-	Unlock(resource string) error
+	Lock(ctx context.Context, resource string, ttl time.Duration) (IaCLockHandle, error)
 
 	Close() error
 }
@@ -34,14 +41,14 @@ type ResourceState struct {
 	LastDriftCheck time.Time      `json:"last_drift_check,omitempty"`
 }
 
-// Plan is the complete execution plan for a set of infrastructure changes.
-type Plan struct {
+// IaCPlan is the complete execution plan for a set of infrastructure changes.
+type IaCPlan struct {
 	ID        string       `json:"id"`
 	Actions   []PlanAction `json:"actions"`
 	CreatedAt time.Time    `json:"created_at"`
 }
 
-// PlanAction is a single planned change within a Plan.
+// PlanAction is a single planned change within an IaCPlan.
 type PlanAction struct {
 	Action   string         `json:"action"` // create, update, replace, delete
 	Resource ResourceSpec   `json:"resource"`

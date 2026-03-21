@@ -10,11 +10,11 @@ type IaCProvider interface {
 	Initialize(ctx context.Context, config map[string]any) error
 
 	// Capabilities returns what resource types this provider supports.
-	Capabilities() []CapabilityDeclaration
+	Capabilities() []IaCCapabilityDeclaration
 
 	// Lifecycle
-	Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*Plan, error)
-	Apply(ctx context.Context, plan *Plan) (*ApplyResult, error)
+	Plan(ctx context.Context, desired []ResourceSpec, current []ResourceState) (*IaCPlan, error)
+	Apply(ctx context.Context, plan *IaCPlan) (*ApplyResult, error)
 	Destroy(ctx context.Context, resources []ResourceRef) (*DestroyResult, error)
 
 	// Observability
@@ -57,8 +57,8 @@ type ProviderSizing struct {
 	Specs        map[string]any `json:"specs"`
 }
 
-// CapabilityDeclaration describes a resource type supported by a provider.
-type CapabilityDeclaration struct {
+// IaCCapabilityDeclaration describes a resource type supported by a provider.
+type IaCCapabilityDeclaration struct {
 	ResourceType string   `json:"resource_type"` // infra.database, infra.vpc, etc.
 	Tier         int      `json:"tier"`          // 1=infra, 2=shared, 3=app
 	Operations   []string `json:"operations"`    // create, read, update, delete, scale
