@@ -204,21 +204,6 @@ type tfStateInstance struct {
 
 // exportAsTFState converts workflow ResourceStates to Terraform state JSON format.
 func exportAsTFState(states []interfaces.ResourceState) ([]byte, error) {
-	loaded := make([]loadedState, 0, len(states))
-	for _, s := range states {
-		loaded = append(loaded, loadedState{
-			Name:         s.Name,
-			Type:         s.Type,
-			Provider:     s.Provider,
-			ProviderID:   s.ProviderID,
-			Outputs:      s.Outputs,
-			Dependencies: s.Dependencies,
-		})
-	}
-	return exportAsTFStateImpl(loaded)
-}
-
-func exportAsTFStateImpl(states []loadedState) ([]byte, error) {
 	tf := tfState{
 		Version:          4,
 		TerraformVersion: "1.0.0 (workflow-wfctl)",
@@ -366,16 +351,6 @@ func importFromPulumi(srcFile, stateDir string) error {
 	}
 	fmt.Printf("Imported %d resource(s) from Pulumi checkpoint %s into %s\n", imported, srcFile, stateDir)
 	return nil
-}
-
-// loadedState is a simple struct for state records loaded from disk.
-type loadedState struct {
-	Name         string
-	Type         string
-	Provider     string
-	ProviderID   string
-	Outputs      map[string]any
-	Dependencies []string
 }
 
 func sanitizeStateID(id string) string {
