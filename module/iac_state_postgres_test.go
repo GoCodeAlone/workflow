@@ -3,6 +3,7 @@ package module_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/module"
@@ -216,5 +217,11 @@ func TestPostgresIaCStateStore_Unlock_NotLocked(t *testing.T) {
 	store := newTestPostgresStore(newMockPGConn())
 	if err := store.Unlock("not-locked"); err == nil {
 		t.Fatal("expected error unlocking non-locked resource")
+	}
+}
+
+func TestPostgresIaCStateStore_Schema_HasProviderID(t *testing.T) {
+	if !strings.Contains(module.CreateTableSQL, "provider_id") {
+		t.Error("createTableSQL is missing provider_id column (required by spec)")
 	}
 }

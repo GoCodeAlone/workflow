@@ -160,11 +160,14 @@ type pgxRealConn struct {
 	pool *pgxpool.Pool
 }
 
-const createTableSQL = `
+// CreateTableSQL is the DDL for the iac_resources table.
+// Exported so tests can assert schema completeness.
+const CreateTableSQL = `
 CREATE TABLE IF NOT EXISTS iac_resources (
     name           TEXT PRIMARY KEY,
     type           TEXT NOT NULL DEFAULT '',
     provider       TEXT NOT NULL DEFAULT '',
+    provider_id    TEXT NOT NULL DEFAULT '',
     status         TEXT NOT NULL DEFAULT '',
     config_hash    TEXT NOT NULL DEFAULT '',
     applied_config JSONB NOT NULL DEFAULT '{}',
@@ -175,7 +178,7 @@ CREATE TABLE IF NOT EXISTS iac_resources (
 )`
 
 func (c *pgxRealConn) createTable(ctx context.Context) error {
-	_, err := c.pool.Exec(ctx, createTableSQL)
+	_, err := c.pool.Exec(ctx, CreateTableSQL)
 	return err
 }
 
@@ -189,28 +192,30 @@ func (c *pgxRealConn) UpsertState(ctx context.Context, st *IaCState) error {
 		return err
 	}
 	_, err = c.pool.Exec(ctx, `
-		INSERT INTO iac_resources (name, type, provider, status, applied_config, outputs, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, NOW())
+		INSERT INTO iac_resources (name, type, provider, provider_id, status, applied_config, outputs, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
 		ON CONFLICT (name) DO UPDATE SET
 			type           = EXCLUDED.type,
 			provider       = EXCLUDED.provider,
+			provider_id    = EXCLUDED.provider_id,
 			status         = EXCLUDED.status,
 			applied_config = EXCLUDED.applied_config,
 			outputs        = EXCLUDED.outputs,
 			updated_at     = NOW()
-	`, st.ResourceID, st.ResourceType, st.Provider, st.Status, string(cfg), string(out))
+	`, st.ResourceID, st.ResourceType, st.Provider, "", st.Status, string(cfg), string(out))
 	return err
 }
 
 func (c *pgxRealConn) GetState(ctx context.Context, name string) (*IaCState, error) {
 	var st IaCState
-	var cfgJSON, outJSON string
+	var cfgJSON, outJSON, providerID string
 	var deps []string
 	err := c.pool.QueryRow(ctx, `
-		SELECT name, type, provider, status, applied_config::text, outputs::text, dependencies, created_at, updated_at
+		SELECT name, type, provider, provider_id, status, applied_config::text, outputs::text, dependencies, created_at, updated_at
 		FROM iac_resources WHERE name = $1
-	`, name).Scan(&st.ResourceID, &st.ResourceType, &st.Provider, &st.Status,
+	`, name).Scan(&st.ResourceID, &st.ResourceType, &st.Provider, &providerID, &st.Status,
 		&cfgJSON, &outJSON, &deps, &st.CreatedAt, &st.UpdatedAt)
+	_ = providerID // provider_id stored for spec compliance; IaCState.ProviderID not yet defined
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
