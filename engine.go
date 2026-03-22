@@ -249,6 +249,7 @@ func (e *StdEngine) LoadPluginWithOverride(p plugin.EnginePlugin) error {
 }
 
 func (e *StdEngine) loadPluginInternal(p plugin.EnginePlugin, allowOverride bool) error {
+	transportSnapshot := module.SnapshotDefaultTransport()
 	loader := e.PluginLoader()
 	var err error
 	if allowOverride {
@@ -258,6 +259,11 @@ func (e *StdEngine) loadPluginInternal(p plugin.EnginePlugin, allowOverride bool
 	}
 	if err != nil {
 		return fmt.Errorf("load plugin: %w", err)
+	}
+	if module.DetectTransportMutation(transportSnapshot) {
+		pluginName := p.EngineManifest().Name
+		e.logger.Warn(fmt.Sprintf("plugin %q mutated http.DefaultTransport; restoring original to prevent cross-plugin interference", pluginName))
+		module.RestoreDefaultTransport(transportSnapshot)
 	}
 	for typeName, factory := range p.ModuleFactories() {
 		pluginFactory := factory

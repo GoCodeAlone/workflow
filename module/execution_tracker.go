@@ -291,6 +291,9 @@ func (t *ExecutionTracker) handleStepOutputRecorded(state *executionState, data 
 	}
 	outputJSON := "{}"
 	if output, ok := data["output"]; ok {
+		if outputMap, ok := output.(map[string]any); ok {
+			output = RedactStepOutput(outputMap)
+		}
 		if b, err := json.Marshal(output); err == nil {
 			outputJSON = string(truncateIO(b))
 		}
