@@ -391,11 +391,18 @@ func TestInfraModule_RequiresServices_EmptyProvider(t *testing.T) {
 func TestInfraModule_ProvidesServices(t *testing.T) {
 	m := NewInfraModule("db", "infra.database", map[string]any{"provider": "aws"})
 	svcs := m.ProvidesServices()
-	if len(svcs) != 1 {
-		t.Fatalf("ProvidesServices() returned %d services, want 1", len(svcs))
+	if len(svcs) != 2 {
+		t.Fatalf("ProvidesServices() returned %d services, want 2", len(svcs))
 	}
-	if svcs[0].Name != "db.driver" {
-		t.Errorf("service Name = %q, want %q", svcs[0].Name, "db.driver")
+	names := map[string]bool{}
+	for _, s := range svcs {
+		names[s.Name] = true
+	}
+	if !names["db.driver"] {
+		t.Error("expected 'db.driver' in ProvidesServices")
+	}
+	if !names["db"] {
+		t.Error("expected 'db' (deploy driver) in ProvidesServices")
 	}
 }
 

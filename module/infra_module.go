@@ -93,16 +93,68 @@ func (m *InfraModule) Init(app modular.Application) error {
 	}
 	m.driver = driver
 
-	// Register as "<name>.driver" so pipeline steps can look it up
-	return app.RegisterService(m.name+".driver", m)
+	// Register as "<name>.driver" so IaC pipeline steps can look it up.
+	if err := app.RegisterService(m.name+".driver", m); err != nil {
+		return fmt.Errorf("infra module %q: register driver service: %w", m.name, err)
+	}
+
+	// Bridge to deployment steps: register a DeployDriver at "<name>" so that
+	// step.deploy_rolling (and friends) can resolve this module by its plain name.
+	//
+	// Priority (highest first):
+	//   1. Provider implements BlueGreenDriverProvider → also exposes BlueGreenDriver.
+	//   2. Provider implements CanaryDriverProvider    → also exposes CanaryDriver.
+	//   3. Provider implements DeployDriverProvider    → uses a provider-supplied driver.
+	//   4. Fallback: wrap the ResourceDriver in an infraDeployAdapter.
+	//
+	// Registrations are best-effort; if a service already exists at "<name>" we
+	// skip silently rather than fail the whole module.
+	m.registerDeployDrivers(app)
+	return nil
 }
 
-// ProvidesServices declares the driver service registration.
+// registerDeployDrivers registers deploy-capable drivers at "<name>" (and
+// "<name>.bluegreen" / "<name>.canary" if available).
+func (m *InfraModule) registerDeployDrivers(app modular.Application) {
+	// BlueGreenDriverProvider → register at "<name>" as BlueGreenDriver.
+	if bgp, ok := m.provider.(BlueGreenDriverProvider); ok {
+		if bgd := bgp.ProvideBlueGreenDriver(m.name); bgd != nil {
+			_ = app.RegisterService(m.name, bgd)
+			return
+		}
+	}
+
+	// CanaryDriverProvider → register at "<name>" as CanaryDriver.
+	if cp, ok := m.provider.(CanaryDriverProvider); ok {
+		if cd := cp.ProvideCanaryDriver(m.name); cd != nil {
+			_ = app.RegisterService(m.name, cd)
+			return
+		}
+	}
+
+	// DeployDriverProvider → register a provider-supplied DeployDriver.
+	if dp, ok := m.provider.(DeployDriverProvider); ok {
+		if dd := dp.ProvideDeployDriver(m.name); dd != nil {
+			_ = app.RegisterService(m.name, dd)
+			return
+		}
+	}
+
+	// Fallback: wrap the ResourceDriver in a generic adapter.
+	_ = app.RegisterService(m.name, &infraDeployAdapter{im: m})
+}
+
+// ProvidesServices declares the driver service registrations.
 func (m *InfraModule) ProvidesServices() []modular.ServiceProvider {
 	return []modular.ServiceProvider{
 		{
 			Name:        m.name + ".driver",
 			Description: "InfraModule driver: " + m.infraType + " (" + m.name + ")",
+			Instance:    m,
+		},
+		{
+			Name:        m.name,
+			Description: "InfraModule deploy driver: " + m.infraType + " (" + m.name + ")",
 			Instance:    m,
 		},
 	}
