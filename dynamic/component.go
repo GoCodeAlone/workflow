@@ -83,7 +83,10 @@ func (dc *DynamicComponent) Init(services map[string]any) error {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 	if dc.initFunc != nil {
-		if err := dc.safeCallInit(services); err != nil {
+		transportSnapshot := snapshotDefaultTransport()
+		err := dc.safeCallInit(services)
+		guardTransport(transportSnapshot, dc.id)
+		if err != nil {
 			dc.info.Status = StatusError
 			dc.info.Error = err.Error()
 			return err
@@ -137,7 +140,10 @@ func (dc *DynamicComponent) Execute(ctx context.Context, params map[string]any) 
 		}
 		params = ApplyDefaults(dc.Contract, params)
 	}
-	return dc.safeCallExecute(ctx, params)
+	transportSnapshot := snapshotDefaultTransport()
+	result, err := dc.safeCallExecute(ctx, params)
+	guardTransport(transportSnapshot, dc.id)
+	return result, err
 }
 
 // LoadFromSource compiles and loads Go source code into the component.
@@ -150,11 +156,15 @@ func (dc *DynamicComponent) LoadFromSource(source string) error {
 		return fmt.Errorf("failed to create interpreter: %w", err)
 	}
 
-	// Evaluate the source
-	if _, err := i.Eval(source); err != nil {
+	// Evaluate the source — guard http.DefaultTransport before and after because
+	// top-level init code in dynamic source can import "net/http" and mutate it.
+	transportSnapshot := snapshotDefaultTransport()
+	_, evalErr := i.Eval(source)
+	guardTransport(transportSnapshot, dc.id)
+	if evalErr != nil {
 		dc.info.Status = StatusError
-		dc.info.Error = err.Error()
-		return fmt.Errorf("failed to evaluate source: %w", err)
+		dc.info.Error = evalErr.Error()
+		return fmt.Errorf("failed to evaluate source: %w", evalErr)
 	}
 
 	dc.interpreter = i

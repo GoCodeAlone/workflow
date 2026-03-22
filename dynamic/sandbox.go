@@ -1,5 +1,31 @@
 package dynamic
 
+import (
+	"log/slog"
+	"net/http"
+)
+
+// snapshotDefaultTransport captures the current http.DefaultTransport value.
+func snapshotDefaultTransport() http.RoundTripper {
+	return http.DefaultTransport
+}
+
+// restoreDefaultTransport resets http.DefaultTransport to the snapshot.
+func restoreDefaultTransport(snapshot http.RoundTripper) {
+	http.DefaultTransport = snapshot
+}
+
+// guardTransport checks whether http.DefaultTransport was mutated relative to
+// the snapshot and, if so, logs a warning and restores the original to prevent
+// dynamic components from affecting the rest of the process's HTTP behavior.
+func guardTransport(snapshot http.RoundTripper, componentID string) {
+	if http.DefaultTransport != snapshot {
+		slog.Warn("dynamic component mutated http.DefaultTransport; restoring original",
+			"component", componentID)
+		restoreDefaultTransport(snapshot)
+	}
+}
+
 // AllowedPackages defines the standard library packages that dynamically loaded
 // components are permitted to import. Packages not in this list will be rejected
 // during source validation.
