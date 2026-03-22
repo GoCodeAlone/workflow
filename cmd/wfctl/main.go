@@ -81,6 +81,7 @@ var commands = map[string]func([]string) error{
 	"infra":          runInfra,
 	"docs":           runDocs,
 	"editor-schemas": runEditorSchemas,
+	"ci":             runCI,
 }
 
 func main() {
