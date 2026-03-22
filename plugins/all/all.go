@@ -35,6 +35,7 @@ import (
 	pluginff "github.com/GoCodeAlone/workflow/plugins/featureflags"
 	plugingitlab "github.com/GoCodeAlone/workflow/plugins/gitlab"
 	pluginhttp "github.com/GoCodeAlone/workflow/plugins/http"
+	plugininfra "github.com/GoCodeAlone/workflow/plugins/infra"
 	pluginintegration "github.com/GoCodeAlone/workflow/plugins/integration"
 	plugink8s "github.com/GoCodeAlone/workflow/plugins/k8s"
 	pluginlicense "github.com/GoCodeAlone/workflow/plugins/license"
@@ -86,6 +87,7 @@ func DefaultPlugins() []plugin.EnginePlugin {
 		pluginscheduler.New(),
 		pluginintegration.New(),
 		pluginai.New(),
+		plugininfra.New(),
 		pluginplatform.New(),
 		plugincloud.New(),
 		plugingitlab.New(),
