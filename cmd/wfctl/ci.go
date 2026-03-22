@@ -214,7 +214,7 @@ permissions:
 jobs:
   plan:
     if: github.event_name == 'pull_request'
-    runs-on: {{.Runner}}
+    runs-on: '{{.Runner}}'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -224,7 +224,7 @@ jobs:
       - name: Install wfctl
         run: go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
       - name: Plan infrastructure
-        run: wfctl infra plan --config {{.InfraConfig}} --format markdown > plan.md
+        run: wfctl infra plan --config '{{.InfraConfig}}' --format markdown > plan.md
       - name: Post plan comment
         uses: actions/github-script@v7
         with:
@@ -239,7 +239,7 @@ jobs:
             });
   apply:
     if: github.event_name == 'push' && github.ref == 'refs/heads/{{.Branch}}'
-    runs-on: {{.Runner}}
+    runs-on: '{{.Runner}}'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -249,7 +249,7 @@ jobs:
       - name: Install wfctl
         run: go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
       - name: Apply infrastructure
-        run: wfctl infra apply --config {{.InfraConfig}} --auto-approve
+        run: wfctl infra apply --config '{{.InfraConfig}}' --auto-approve
 `
 
 const ghaBuildTemplate = `name: Build
@@ -265,7 +265,7 @@ permissions:
   packages: write
 jobs:
   build:
-    runs-on: {{.Runner}}
+    runs-on: '{{.Runner}}'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
