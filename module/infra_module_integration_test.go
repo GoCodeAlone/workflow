@@ -98,6 +98,50 @@ func (d *recordingDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ i
 	return nil, nil
 }
 
+// ─── planningProvider: mock that implements Plan() with provider-specific types ──
+
+// planningProvider wraps recordingProvider and adds a realistic Plan()
+// implementation that maps abstract infra.* types to provider-specific
+// instance types. It records all ResourceSpecs it receives from Plan() calls.
+type planningProvider struct {
+	recordingProvider
+	// instanceTypes maps "infra.<type>" → provider-specific instance type string
+	// used to populate FieldChange entries in the returned plan.
+	instanceTypes map[string]string
+	planSpecs     []interfaces.ResourceSpec
+}
+
+func newPlanningProvider(name string, instanceTypes map[string]string) *planningProvider {
+	return &planningProvider{
+		recordingProvider: recordingProvider{
+			providerName: name,
+			driver:       &recordingDriver{},
+		},
+		instanceTypes: instanceTypes,
+	}
+}
+
+// Plan records the received specs and returns a plan whose actions each include
+// a FieldChange showing the provider-specific instance type for that resource.
+func (p *planningProvider) Plan(_ context.Context, desired []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	p.planSpecs = append(p.planSpecs, desired...)
+	actions := make([]interfaces.PlanAction, len(desired))
+	for i, spec := range desired {
+		instanceType, ok := p.instanceTypes[spec.Type]
+		if !ok {
+			instanceType = p.providerName + "-default"
+		}
+		actions[i] = interfaces.PlanAction{
+			Action:   "create",
+			Resource: spec,
+			Changes: []interfaces.FieldChange{
+				{Path: "instance_type", New: instanceType},
+			},
+		}
+	}
+	return &interfaces.IaCPlan{ID: p.providerName + "-plan", Actions: actions}, nil
+}
+
 // configHashIntegration replicates platform.configHash for test assertions.
 func configHashIntegration(config map[string]any) string {
 	if len(config) == 0 {
@@ -398,5 +442,160 @@ func TestInfraModule_SizingPassthrough(t *testing.T) {
 	}
 	if call.Hints == nil || call.Hints.Memory != "32Gi" {
 		t.Errorf("ResolveSizing hints = %+v, want Memory=32Gi", call.Hints)
+	}
+}
+
+// ─── Test 6: MultiProviderScenario ────────────────────────────────────────────
+
+// TestInfraModule_MultiProviderScenario verifies the abstraction layer
+// end-to-end: the same infra config (vpc + database + container_service) can be
+// swapped between an AWS provider and a DigitalOcean provider. The ResourceSpecs
+// flowing into each provider must be identical; only the provider-specific plan
+// output (concrete instance types) should differ.
+func TestInfraModule_MultiProviderScenario(t *testing.T) {
+	// AWS maps abstract infra types to EC2/RDS/ECS instance families.
+	awsProvider := newPlanningProvider("aws", map[string]string{
+		"infra.vpc":               "aws-vpc",
+		"infra.database":          "db.t3.medium",
+		"infra.container_service": "t3.small",
+	})
+	// DigitalOcean maps the same types to Droplet/Managed-DB slugs.
+	doProvider := newPlanningProvider("do", map[string]string{
+		"infra.vpc":               "do-vpc",
+		"infra.database":          "db-s-2vcpu-4gb",
+		"infra.container_service": "basic-s-1vcpu-1gb",
+	})
+
+	// ── Step 1: build desired ResourceSpecs from InfraModules ──────────────
+	// The modules represent what would be declared in infra.yaml. We init them
+	// twice — once per provider — and verify both sets of specs are identical.
+
+	buildSpecs := func(t *testing.T, providerName string, providerSvc interfaces.IaCProvider) []interfaces.ResourceSpec {
+		t.Helper()
+		app := module.NewMockApplication()
+		if err := app.RegisterService(providerName, providerSvc); err != nil {
+			t.Fatalf("RegisterService %s: %v", providerName, err)
+		}
+
+		cfgs := []struct {
+			name      string
+			infraType string
+			extra     map[string]any
+		}{
+			{"vpc", "infra.vpc", map[string]any{"cidr": "10.0.0.0/16"}},
+			{"database", "infra.database", map[string]any{"engine": "postgres"}},
+			{"container-service", "infra.container_service", map[string]any{"image": "nginx", "replicas": 2}},
+		}
+
+		specs := make([]interfaces.ResourceSpec, 0, len(cfgs))
+		for _, c := range cfgs {
+			cfg := map[string]any{"provider": providerName, "size": "m"}
+			for k, v := range c.extra {
+				cfg[k] = v
+			}
+			m := module.NewInfraModule(c.name, c.infraType, cfg)
+			if err := m.Init(app); err != nil {
+				t.Fatalf("Init %s/%s: %v", providerName, c.name, err)
+			}
+			specs = append(specs, interfaces.ResourceSpec{
+				Name:   m.Name(),
+				Type:   m.InfraType(),
+				Size:   m.Size(),
+				Config: m.ResourceConfig(),
+			})
+		}
+		return specs
+	}
+
+	ctx := context.Background()
+	awsSpecs := buildSpecs(t, "aws", awsProvider)
+	doSpecs := buildSpecs(t, "do", doProvider)
+
+	// ── Step 2: ResourceSpecs must be identical across providers ───────────
+	if len(awsSpecs) != len(doSpecs) {
+		t.Fatalf("spec count mismatch: aws=%d do=%d", len(awsSpecs), len(doSpecs))
+	}
+	for i := range awsSpecs {
+		a, d := awsSpecs[i], doSpecs[i]
+		if a.Name != d.Name {
+			t.Errorf("spec[%d]: Name aws=%q do=%q", i, a.Name, d.Name)
+		}
+		if a.Type != d.Type {
+			t.Errorf("spec[%d]: Type aws=%q do=%q", i, a.Type, d.Type)
+		}
+		if a.Size != d.Size {
+			t.Errorf("spec[%d]: Size aws=%q do=%q", i, a.Size, d.Size)
+		}
+		// Config maps must contain the same resource-specific keys/values.
+		for k, v := range a.Config {
+			if d.Config[k] != v {
+				t.Errorf("spec[%d] Config[%q]: aws=%v do=%v", i, k, v, d.Config[k])
+			}
+		}
+	}
+
+	// ── Step 3: Run Plan() on each provider with the same desired specs ────
+	awsPlan, err := awsProvider.Plan(ctx, awsSpecs, nil)
+	if err != nil {
+		t.Fatalf("awsProvider.Plan: %v", err)
+	}
+	doPlan, err := doProvider.Plan(ctx, doSpecs, nil)
+	if err != nil {
+		t.Fatalf("doProvider.Plan: %v", err)
+	}
+
+	// Both plans must have one action per resource.
+	if len(awsPlan.Actions) != 3 {
+		t.Fatalf("aws plan: expected 3 actions, got %d", len(awsPlan.Actions))
+	}
+	if len(doPlan.Actions) != 3 {
+		t.Fatalf("do plan: expected 3 actions, got %d", len(doPlan.Actions))
+	}
+
+	// ── Step 4: Verify provider-specific instance types differ ────────────
+	awsInstanceTypes := map[string]string{}
+	for _, a := range awsPlan.Actions {
+		for _, ch := range a.Changes {
+			if ch.Path == "instance_type" {
+				awsInstanceTypes[a.Resource.Name] = ch.New.(string)
+			}
+		}
+	}
+	doInstanceTypes := map[string]string{}
+	for _, a := range doPlan.Actions {
+		for _, ch := range a.Changes {
+			if ch.Path == "instance_type" {
+				doInstanceTypes[a.Resource.Name] = ch.New.(string)
+			}
+		}
+	}
+
+	wantAWS := map[string]string{
+		"vpc":               "aws-vpc",
+		"database":          "db.t3.medium",
+		"container-service": "t3.small",
+	}
+	wantDO := map[string]string{
+		"vpc":               "do-vpc",
+		"database":          "db-s-2vcpu-4gb",
+		"container-service": "basic-s-1vcpu-1gb",
+	}
+	for name, want := range wantAWS {
+		if awsInstanceTypes[name] != want {
+			t.Errorf("aws plan[%s] instance_type = %q, want %q", name, awsInstanceTypes[name], want)
+		}
+	}
+	for name, want := range wantDO {
+		if doInstanceTypes[name] != want {
+			t.Errorf("do plan[%s] instance_type = %q, want %q", name, doInstanceTypes[name], want)
+		}
+	}
+
+	// ── Step 5: Plans must differ from each other (provider mapping differs) ─
+	for name := range wantAWS {
+		if awsInstanceTypes[name] == doInstanceTypes[name] {
+			t.Errorf("resource %q: aws and do instance types are identical (%q) — provider mapping not applied",
+				name, awsInstanceTypes[name])
+		}
 	}
 }
