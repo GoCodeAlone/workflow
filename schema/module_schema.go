@@ -3026,4 +3026,87 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			ConfigFields: []ConfigFieldDef{},
 		})
 	}
+
+	// ---- Deployment steps (cicd plugin) ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.container_build",
+		Label:       "Container Build",
+		Category:    "deployment",
+		Description: "Builds a container image using docker/podman and pushes it to a registry",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "context", Label: "Build Context", Type: FieldTypeFilePath, Required: true, Description: "Build context path"},
+			{Key: "tag", Label: "Image Tag", Type: FieldTypeString, Required: true, Description: "Image tag (template expressions supported)"},
+			{Key: "registry", Label: "Registry", Type: FieldTypeString, Required: true, Description: "ContainerRegistry service name"},
+			{Key: "dockerfile", Label: "Dockerfile", Type: FieldTypeString, Description: "Dockerfile path relative to context", DefaultValue: "Dockerfile"},
+			{Key: "build_args", Label: "Build Args", Type: FieldTypeMap, Description: "Build-time variables"},
+			{Key: "builder", Label: "Builder", Type: FieldTypeSelect, Options: []string{"docker", "podman"}, Description: "Container builder binary", DefaultValue: "docker"},
+			{Key: "dry_run", Label: "Dry Run", Type: FieldTypeBool, Description: "Print build command without executing"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.deploy_blue_green",
+		Label:       "Deploy Blue/Green",
+		Category:    "deployment",
+		Description: "Deploys using blue/green strategy: creates green environment, verifies it, switches traffic, destroys blue",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "service", Label: "Service", Type: FieldTypeString, Required: true, Description: "BlueGreenDriver service name"},
+			{Key: "image", Label: "Image", Type: FieldTypeString, Required: true, Description: "Docker image to deploy"},
+			{Key: "health_check", Label: "Health Check", Type: FieldTypeJSON, Description: "Health check config: {path, timeout}"},
+			{Key: "traffic_switch", Label: "Traffic Switch", Type: FieldTypeSelect, Options: []string{"dns", "lb"}, Description: "Traffic switch mechanism", DefaultValue: "lb"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.deploy_canary",
+		Label:       "Deploy Canary",
+		Category:    "deployment",
+		Description: "Gradually shifts traffic to a new image via configurable stages with optional metric gates",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "service", Label: "Service", Type: FieldTypeString, Required: true, Description: "CanaryDriver service name"},
+			{Key: "image", Label: "Image", Type: FieldTypeString, Required: true, Description: "Docker image to deploy"},
+			{Key: "stages", Label: "Stages", Type: FieldTypeArray, Description: "Canary stages: [{percent, duration, metric_gate}]"},
+			{Key: "rollback_on_failure", Label: "Rollback on Failure", Type: FieldTypeBool, Description: "Automatically rollback if a stage fails"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.deploy_rollback",
+		Label:       "Deploy Rollback",
+		Category:    "deployment",
+		Description: "Rolls back a service to a previous image version using deployment history",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "service", Label: "Service", Type: FieldTypeString, Required: true, Description: "DeployDriver service name"},
+			{Key: "history_store", Label: "History Store", Type: FieldTypeString, Required: true, Description: "DeployHistoryStore service name"},
+			{Key: "target_version", Label: "Target Version", Type: FieldTypeString, Description: "Version to roll back to", DefaultValue: "previous"},
+			{Key: "health_check", Label: "Health Check", Type: FieldTypeJSON, Description: "Health check config: {path, timeout}"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.deploy_rolling",
+		Label:       "Deploy Rolling",
+		Category:    "deployment",
+		Description: "Deploys an image using rolling update strategy, replacing instances one-by-one with health checks",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "service", Label: "Service", Type: FieldTypeString, Required: true, Description: "DeployDriver service name"},
+			{Key: "image", Label: "Image", Type: FieldTypeString, Required: true, Description: "Docker image to deploy"},
+			{Key: "max_surge", Label: "Max Surge", Type: FieldTypeNumber, Description: "Maximum instances above desired count", DefaultValue: 1},
+			{Key: "max_unavailable", Label: "Max Unavailable", Type: FieldTypeNumber, Description: "Maximum unavailable instances during update", DefaultValue: 1},
+			{Key: "health_check", Label: "Health Check", Type: FieldTypeJSON, Description: "Health check config: {path, interval, timeout}"},
+			{Key: "rollback_on_failure", Label: "Rollback on Failure", Type: FieldTypeBool, Description: "Automatically rollback if health checks fail"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.deploy_verify",
+		Label:       "Deploy Verify",
+		Category:    "deployment",
+		Description: "Runs HTTP and/or metrics checks against a service to confirm it is healthy after a deployment",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "service", Label: "Service", Type: FieldTypeString, Required: true, Description: "DeployDriver service name"},
+			{Key: "checks", Label: "Checks", Type: FieldTypeArray, Required: true, Description: "Verification checks: [{type, path, expected_status, threshold, window}]"},
+		},
+	})
 }

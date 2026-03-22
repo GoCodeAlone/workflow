@@ -2782,4 +2782,106 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "span_id", Type: "string", Description: "New span ID"},
 		},
 	})
+
+	// ---- Deployment steps (cicd plugin) ----
+
+	r.Register(&StepSchema{
+		Type:        "step.container_build",
+		Plugin:      "cicd",
+		Description: "Builds a container image using docker/podman and pushes it to a registry.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "context", Type: FieldTypeFilePath, Description: "Build context path", Required: true},
+			{Key: "tag", Type: FieldTypeString, Description: "Image tag (template expressions supported)", Required: true},
+			{Key: "registry", Type: FieldTypeString, Description: "ContainerRegistry service name", Required: true},
+			{Key: "dockerfile", Type: FieldTypeString, Description: "Dockerfile path relative to context", DefaultValue: "Dockerfile"},
+			{Key: "build_args", Type: FieldTypeMap, Description: "Build-time variables passed as --build-arg flags"},
+			{Key: "builder", Type: FieldTypeSelect, Description: "Container builder binary", Options: []string{"docker", "podman"}, DefaultValue: "docker"},
+			{Key: "dry_run", Type: FieldTypeBool, Description: "Print build command without executing"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "image", Type: "string", Description: "Full image reference (registry/tag)"},
+			{Key: "digest", Type: "string", Description: "Image digest returned by the registry"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.deploy_blue_green",
+		Plugin:      "cicd",
+		Description: "Deploys an image using blue/green strategy: creates a green environment, verifies it, switches traffic, and destroys the old blue environment.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "service", Type: FieldTypeString, Description: "BlueGreenDriver service name", Required: true},
+			{Key: "image", Type: FieldTypeString, Description: "Docker image to deploy (template expressions supported)", Required: true},
+			{Key: "health_check", Type: FieldTypeJSON, Description: "Health check config: {path, timeout}"},
+			{Key: "traffic_switch", Type: FieldTypeSelect, Description: "Traffic switch mechanism", Options: []string{"dns", "lb"}, DefaultValue: "lb"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "deploy_id", Type: "string", Description: "Deployment identifier"},
+			{Key: "status", Type: "string", Description: "Deployment status (success/failed)"},
+			{Key: "green_endpoint", Type: "string", Description: "Endpoint of the promoted green environment"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.deploy_canary",
+		Plugin:      "cicd",
+		Description: "Gradually shifts traffic to a new image via configurable stages with optional metric gates.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "service", Type: FieldTypeString, Description: "CanaryDriver service name", Required: true},
+			{Key: "image", Type: FieldTypeString, Description: "Docker image to deploy (template expressions supported)", Required: true},
+			{Key: "stages", Type: FieldTypeArray, Description: "Canary stages: [{percent, duration, metric_gate}]"},
+			{Key: "rollback_on_failure", Type: FieldTypeBool, Description: "Automatically rollback if a stage fails"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "deploy_id", Type: "string", Description: "Deployment identifier"},
+			{Key: "status", Type: "string", Description: "Deployment status (success/failed/rolled_back)"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.deploy_rollback",
+		Plugin:      "cicd",
+		Description: "Rolls back a service to a previous image version using deployment history.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "service", Type: FieldTypeString, Description: "DeployDriver service name", Required: true},
+			{Key: "history_store", Type: FieldTypeString, Description: "DeployHistoryStore service name", Required: true},
+			{Key: "target_version", Type: FieldTypeString, Description: "Version to roll back to (default: previous)", DefaultValue: "previous"},
+			{Key: "health_check", Type: FieldTypeJSON, Description: "Health check config: {path, timeout}"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "rolled_back_to", Type: "string", Description: "Image that was rolled back to"},
+			{Key: "status", Type: "string", Description: "Rollback status (success/failed)"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.deploy_rolling",
+		Plugin:      "cicd",
+		Description: "Deploys an image using a rolling update strategy, replacing instances one-by-one with health checks between batches.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "service", Type: FieldTypeString, Description: "DeployDriver service name", Required: true},
+			{Key: "image", Type: FieldTypeString, Description: "Docker image to deploy (template expressions supported)", Required: true},
+			{Key: "max_surge", Type: FieldTypeNumber, Description: "Maximum instances to add above desired count", DefaultValue: 1},
+			{Key: "max_unavailable", Type: FieldTypeNumber, Description: "Maximum instances that can be unavailable during update", DefaultValue: 1},
+			{Key: "health_check", Type: FieldTypeJSON, Description: "Health check config: {path, interval, timeout}"},
+			{Key: "rollback_on_failure", Type: FieldTypeBool, Description: "Automatically rollback if health checks fail"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "deploy_id", Type: "string", Description: "Deployment identifier"},
+			{Key: "status", Type: "string", Description: "Deployment status (success/failed/rolled_back)"},
+		},
+	})
+
+	r.Register(&StepSchema{
+		Type:        "step.deploy_verify",
+		Plugin:      "cicd",
+		Description: "Runs HTTP and/or metrics checks against a service to confirm it is healthy after a deployment.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "service", Type: FieldTypeString, Description: "DeployDriver service name", Required: true},
+			{Key: "checks", Type: FieldTypeArray, Description: "Verification checks: [{type, path, expected_status, threshold, window}]", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "results", Type: "[]any", Description: "Check results: [{type, path, passed, message}]"},
+			{Key: "passed", Type: "boolean", Description: "Whether all checks passed"},
+		},
+	})
 }
