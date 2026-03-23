@@ -97,6 +97,26 @@ pipelines:
 	}
 }
 
+func TestFireSchedule_CapturesStepResults(t *testing.T) {
+	h := wftest.New(t, wftest.WithYAML(`
+pipelines:
+  my-job:
+    steps:
+      - name: do_work
+        type: step.set
+        config:
+          values:
+            done: true
+`))
+	result := h.FireSchedule("my-job", nil)
+	if result.Error != nil {
+		t.Fatal(result.Error)
+	}
+	if !result.StepExecuted("do_work") {
+		t.Error("expected do_work to be tracked as executed")
+	}
+}
+
 func TestHarness_InjectTrigger_CustomAdapter(t *testing.T) {
 	const adapterName = "test-custom-trigger"
 

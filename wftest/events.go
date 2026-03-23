@@ -46,26 +46,33 @@ func (h *Harness) FireEvent(topic string, data map[string]any) *Result {
 }
 
 // FireSchedule simulates a schedule trigger firing for the named pipeline.
-// It calls TriggerWorkflow directly (bypassing cron timing) and returns the
-// pipeline result. params is merged into the trigger data; pass nil for none.
+// It calls ExecutePipelineContext directly (bypassing cron timing) so that
+// step execution results are captured in the returned Result, exactly as they
+// are for ExecutePipeline. params is merged into the trigger data; pass nil
+// for none.
 func (h *Harness) FireSchedule(pipelineName string, params map[string]any) *Result {
 	h.t.Helper()
 	h.ensureStarted()
-
-	holder := &module.PipelineResultHolder{}
-	ctx := context.WithValue(h.t.Context(), module.PipelineResultContextKey, holder)
 
 	if params == nil {
 		params = map[string]any{}
 	}
 
 	start := time.Now()
-	if err := h.engine.TriggerWorkflow(ctx, "pipeline:"+pipelineName, "execute", params); err != nil {
+	pc, err := h.engine.ExecutePipelineContext(h.t.Context(), pipelineName, params)
+	if err != nil {
 		return &Result{Error: err, Duration: time.Since(start)}
 	}
 
+	// Prefer explicit pipeline output if step.pipeline_output was used.
+	output := pc.Current
+	if pipeOut, ok := pc.Metadata["_pipeline_output"].(map[string]any); ok {
+		output = pipeOut
+	}
+
 	return &Result{
-		Output:   holder.Get(),
-		Duration: time.Since(start),
+		Output:      output,
+		StepResults: pc.StepOutputs,
+		Duration:    time.Since(start),
 	}
 }
