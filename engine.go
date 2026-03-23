@@ -188,6 +188,11 @@ func (e *StdEngine) RegisterTrigger(trigger interfaces.Trigger) {
 	e.triggerRegistry.RegisterTrigger(trigger)
 }
 
+// Triggers returns the engine's registered triggers.
+func (e *StdEngine) Triggers() []interfaces.Trigger {
+	return e.triggers
+}
+
 // RegisterTriggerType registers a mapping from a trigger config type key
 // (e.g., "reconciliation") to a trigger Name() (e.g., "trigger.reconciliation").
 // This is used for triggers registered directly via RegisterTrigger() rather

@@ -180,6 +180,35 @@ func (t *EventBusTrigger) SetEventBusAndEngine(eb *eventbus.EventBusModule, engi
 	t.engine = engine
 }
 
+// InvokeForTopic synchronously invokes all subscriptions matching topic with
+// the supplied context and data. It mirrors what createHandler does but skips
+// the async eventbus channel, making it safe for in-process test injection.
+// Subscriptions with a non-empty Event filter are still respected.
+func (t *EventBusTrigger) InvokeForTopic(ctx context.Context, topic string, data map[string]any) error {
+	for _, sub := range t.subscriptions {
+		if sub.Topic != topic {
+			continue
+		}
+		// Apply event-type filter if one is configured.
+		if sub.Event != "" {
+			eventType, _ := data["type"].(string)
+			if eventType == "" {
+				eventType, _ = data["eventType"].(string)
+			}
+			if eventType != sub.Event {
+				continue
+			}
+		}
+		payload := make(map[string]any, len(data)+len(sub.Params))
+		maps.Copy(payload, data)
+		maps.Copy(payload, sub.Params)
+		if err := t.engine.TriggerWorkflow(ctx, sub.Workflow, sub.Action, payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // createHandler returns an EventHandler for the given subscription.
 func (t *EventBusTrigger) createHandler(sub EventBusTriggerSubscription) eventbus.EventHandler {
 	return func(ctx context.Context, ev eventbus.Event) error {

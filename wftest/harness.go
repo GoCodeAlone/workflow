@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/modular/modules/eventbus/v2"
 	"github.com/GoCodeAlone/workflow"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/plugin"
@@ -54,7 +55,8 @@ type Harness struct {
 	// httpHandler is the HTTP router used for in-process request injection.
 	// Set by startServer() (WithServer mode) or lazily by getHTTPHandler().
 	httpHandler http.Handler
-	startOnce   sync.Once
+	engineOnce  sync.Once // guards engine.Start (triggers + subscriptions)
+	httpOnce    sync.Once // guards HTTP handler discovery
 	mockSteps   map[string]StepHandler
 	mockModules []*MockModule
 }
@@ -102,6 +104,11 @@ func (h *Harness) init() {
 		h.engine.App().RegisterModule(mod)
 	}
 
+	// Auto-register an in-memory EventBus so eventbus triggers work without
+	// explicit YAML configuration. The module registers itself as the
+	// "eventbus.provider" service during Init.
+	h.engine.App().RegisterModule(eventbus.NewModule())
+
 	var cfg *config.WorkflowConfig
 	var err error
 	if h.yamlConfig != "" {
@@ -123,14 +130,13 @@ func (h *Harness) init() {
 	}
 }
 
-// getHTTPHandler returns the engine's HTTP router as an http.Handler for
-// in-process request injection. The engine is started (once) on the first call;
-// if WithServer() already started it, the cached handler is returned directly.
-func (h *Harness) getHTTPHandler() http.Handler {
+// ensureStarted starts the engine once. It is a no-op if the engine was
+// already started by startServer() (WithServer mode sets h.httpHandler).
+func (h *Harness) ensureStarted() {
 	h.t.Helper()
-	h.startOnce.Do(func() {
+	h.engineOnce.Do(func() {
 		if h.httpHandler != nil {
-			// Already set by startServer() — WithServer mode.
+			// WithServer mode already started the engine.
 			return
 		}
 		ctx := h.t.Context()
@@ -140,6 +146,20 @@ func (h *Harness) getHTTPHandler() http.Handler {
 		h.t.Cleanup(func() {
 			_ = h.engine.Stop(context.Background())
 		})
+	})
+}
+
+// getHTTPHandler returns the engine's HTTP router as an http.Handler for
+// in-process request injection. The engine is started (once) on the first call;
+// if WithServer() already started it, the cached handler is returned directly.
+func (h *Harness) getHTTPHandler() http.Handler {
+	h.t.Helper()
+	h.httpOnce.Do(func() {
+		if h.httpHandler != nil {
+			// Already set by startServer() — WithServer mode.
+			return
+		}
+		h.ensureStarted()
 		for _, svc := range h.engine.App().SvcRegistry() {
 			if handler, ok := svc.(http.Handler); ok {
 				h.httpHandler = handler

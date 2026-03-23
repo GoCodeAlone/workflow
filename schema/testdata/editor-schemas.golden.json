@@ -4894,6 +4894,65 @@
         }
       ]
     },
+    "step.container_build": {
+      "type": "step.container_build",
+      "label": "Container Build",
+      "category": "deployment",
+      "description": "Builds a container image using docker/podman and pushes it to a registry",
+      "configFields": [
+        {
+          "key": "context",
+          "label": "Build Context",
+          "type": "filepath",
+          "description": "Build context path",
+          "required": true
+        },
+        {
+          "key": "tag",
+          "label": "Image Tag",
+          "type": "string",
+          "description": "Image tag (template expressions supported)",
+          "required": true
+        },
+        {
+          "key": "registry",
+          "label": "Registry",
+          "type": "string",
+          "description": "ContainerRegistry service name",
+          "required": true
+        },
+        {
+          "key": "dockerfile",
+          "label": "Dockerfile",
+          "type": "string",
+          "description": "Dockerfile path relative to context",
+          "defaultValue": "Dockerfile"
+        },
+        {
+          "key": "build_args",
+          "label": "Build Args",
+          "type": "map",
+          "description": "Build-time variables"
+        },
+        {
+          "key": "builder",
+          "label": "Builder",
+          "type": "select",
+          "description": "Container builder binary",
+          "defaultValue": "docker",
+          "options": [
+            "docker",
+            "podman"
+          ]
+        },
+        {
+          "key": "dry_run",
+          "label": "Dry Run",
+          "type": "boolean",
+          "description": "Print build command without executing"
+        }
+      ]
+    },
     "step.db_create_partition": {
       "type": "step.db_create_partition",
       "label": "Create Database Partition",
@@ -5298,6 +5357,184 @@
           "label": "Health Check",
           "type": "json",
           "description": "Health check configuration (path, interval, timeout, thresholds)"
+        }
+      ]
+    },
+    "step.deploy_blue_green": {
+      "type": "step.deploy_blue_green",
+      "label": "Deploy Blue/Green",
+      "category": "deployment",
+      "description": "Deploys using blue/green strategy: creates green environment, verifies it, switches traffic, destroys blue",
+      "configFields": [
+        {
+          "key": "service",
+          "label": "Service",
+          "type": "string",
+          "description": "BlueGreenDriver service name",
+          "required": true
+        },
+        {
+          "key": "image",
+          "label": "Image",
+          "type": "string",
+          "description": "Docker image to deploy",
+          "required": true
+        },
+        {
+          "key": "health_check",
+          "label": "Health Check",
+          "type": "json",
+          "description": "Health check config: {path, timeout}"
+        },
+        {
+          "key": "traffic_switch",
+          "label": "Traffic Switch",
+          "type": "select",
+          "description": "Traffic switch mechanism",
+          "defaultValue": "lb",
+          "options": [
+            "dns",
+            "lb"
+          ]
+        }
+      ]
+    },
+    "step.deploy_canary": {
+      "type": "step.deploy_canary",
+      "label": "Deploy Canary",
+      "category": "deployment",
+      "description": "Gradually shifts traffic to a new image via configurable stages with optional metric gates",
+      "configFields": [
+        {
+          "key": "service",
+          "label": "Service",
+          "type": "string",
+          "description": "CanaryDriver service name",
+          "required": true
+        },
+        {
+          "key": "image",
+          "label": "Image",
+          "type": "string",
+          "description": "Docker image to deploy",
+          "required": true
+        },
+        {
+          "key": "stages",
+          "label": "Stages",
+          "type": "array",
+          "description": "Canary stages: [{percent, duration, metric_gate}]"
+        },
+        {
+          "key": "rollback_on_failure",
+          "label": "Rollback on Failure",
+          "type": "boolean",
+          "description": "Automatically rollback if a stage fails"
+        }
+      ]
+    },
+    "step.deploy_rollback": {
+      "type": "step.deploy_rollback",
+      "label": "Deploy Rollback",
+      "category": "deployment",
+      "description": "Rolls back a service to a previous image version using deployment history",
+      "configFields": [
+        {
+          "key": "service",
+          "label": "Service",
+          "type": "string",
+          "description": "DeployDriver service name",
+          "required": true
+        },
+        {
+          "key": "history_store",
+          "label": "History Store",
+          "type": "string",
+          "description": "DeployHistoryStore service name",
+          "required": true
+        },
+        {
+          "key": "target_version",
+          "label": "Target Version",
+          "type": "string",
+          "description": "Version to roll back to",
+          "defaultValue": "previous"
+        },
+        {
+          "key": "health_check",
+          "label": "Health Check",
+          "type": "json",
+          "description": "Health check config: {path, timeout}"
+        }
+      ]
+    },
+    "step.deploy_rolling": {
+      "type": "step.deploy_rolling",
+      "label": "Deploy Rolling",
+      "category": "deployment",
+      "description": "Deploys an image using rolling update strategy, replacing instances one-by-one with health checks",
+      "configFields": [
+        {
+          "key": "service",
+          "label": "Service",
+          "type": "string",
+          "description": "DeployDriver service name",
+          "required": true
+        },
+        {
+          "key": "image",
+          "label": "Image",
+          "type": "string",
+          "description": "Docker image to deploy",
+          "required": true
+        },
+        {
+          "key": "max_surge",
+          "label": "Max Surge",
+          "type": "number",
+          "description": "Maximum instances above desired count",
+          "defaultValue": 1
+        },
+        {
+          "key": "max_unavailable",
+          "label": "Max Unavailable",
+          "type": "number",
+          "description": "Maximum unavailable instances during update",
+          "defaultValue": 1
+        },
+        {
+          "key": "health_check",
+          "label": "Health Check",
+          "type": "json",
+          "description": "Health check config: {path, interval, timeout}"
+        },
+        {
+          "key": "rollback_on_failure",
+          "label": "Rollback on Failure",
+          "type": "boolean",
+          "description": "Automatically rollback if health checks fail"
+        }
+      ]
+    },
+    "step.deploy_verify": {
+      "type": "step.deploy_verify",
+      "label": "Deploy Verify",
+      "category": "deployment",
+      "description": "Runs HTTP and/or metrics checks against a service to confirm it is healthy after a deployment",
+      "configFields": [
+        {
+          "key": "service",
+          "label": "Service",
+          "type": "string",
+          "description": "DeployDriver service name",
+          "required": true
+        },
+        {
+          "key": "checks",
+          "label": "Checks",
+          "type": "array",
+          "description": "Verification checks: [{type, path, expected_status, threshold, window}]",
+          "required": true
         }
       ]
     },
