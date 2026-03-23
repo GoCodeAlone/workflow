@@ -41,4 +41,5 @@ func registerSteps(ctx *godog.ScenarioContext, sc *ScenarioContext) {
 	registerTriggerSteps(ctx, sc)
 	registerAssertSteps(ctx, sc)
 	registerStateSteps(ctx, sc)
+	registerStrictHooks(ctx, sc)
 }

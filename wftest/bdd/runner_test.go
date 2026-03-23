@@ -29,3 +29,9 @@ func TestRunFeatures_Assertions(t *testing.T) {
 func TestRunFeatures_State(t *testing.T) {
 	bdd.RunFeatures(t, "testdata/state.feature")
 }
+
+// TestRunFeatures_UndefinedLenient verifies that undefined steps do NOT fail the
+// suite in the default (lenient) mode — they are warned via t.Log and skipped.
+func TestRunFeatures_UndefinedLenient(t *testing.T) {
+	bdd.RunFeatures(t, "testdata/undefined.feature")
+}
