@@ -1,0 +1,93 @@
+yaml: |
+  pipelines:
+    greet:
+      steps:
+        - name: set_msg
+          type: step.set
+          config:
+            values:
+              message: "hello {{ .name }}"
+        - name: set_upper
+          type: step.set
+          config:
+            values:
+              upper: "DONE"
+    fetch-users:
+      steps:
+        - name: query
+          type: step.db_query
+          config:
+            database: db
+            query: "SELECT * FROM users"
+            mode: list
+        - name: count
+          type: step.set
+          config:
+            values:
+              total: "{{ index .steps \"query\" \"count\" }}"
+
+mocks:
+  steps:
+    step.db_query:
+      rows: []
+      count: 0
+
+tests:
+  greet-alice:
+    description: "greet pipeline sets message correctly"
+    trigger:
+      type: pipeline
+      name: greet
+      data:
+        name: alice
+    assertions:
+      - output:
+          message: "hello alice"
+
+  greet-bob:
+    description: "greet with a different name"
+    trigger:
+      type: pipeline
+      name: greet
+      data:
+        name: bob
+    assertions:
+      - output:
+          message: "hello bob"
+
+  greet-step-output:
+    description: "individual step output is captured"
+    trigger:
+      type: pipeline
+      name: greet
+      data:
+        name: charlie
+    assertions:
+      - step: set_msg
+        output:
+          message: "hello charlie"
+
+  fetch-users-mocked:
+    description: "db_query step is mocked at file level"
+    trigger:
+      type: pipeline
+      name: fetch-users
+    assertions:
+      - output:
+          total: "0"
+
+  fetch-users-per-test-mock:
+    description: "per-test mock overrides file-level mock"
+    trigger:
+      type: pipeline
+      name: fetch-users
+    mocks:
+      steps:
+        step.db_query:
+          rows:
+            - id: 42
+              email: user@example.com
+          count: 1
+    assertions:
+      - output:
+          total: "1"
