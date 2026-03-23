@@ -512,7 +512,11 @@ type Assertion struct {
 
 Parses the YAML file, creates a harness per test case (with merged mocks), fires the trigger, then checks assertions. Each test case becomes a `t.Run` subtest.
 
-**Step 3: Write test with an actual *_test.yaml fixture**
+**Step 3: Implement RunAllYAMLTests(t, dir)**
+
+Auto-discovers all `*_test.yaml` files in a directory, calls `RunYAMLTests` for each.
+
+**Step 4: Write test with an actual *_test.yaml fixture**
 
 Create `wftest/testdata/simple_test.yaml` with 3-4 test cases and verify they run.
 
@@ -582,6 +586,7 @@ When enabled:
 - Start real HTTP listener on a free port
 - Expose `h.BaseURL()` for real HTTP clients
 - Expose `h.WSDialer(path)` for real WS connections (if WS plugin loaded)
+- Expose `h.GRPCConn()` returning a `*grpc.ClientConn` via bufconn (if gRPC plugin loaded)
 - Start engine via `engine.Start(ctx)` instead of just `BuildFromConfig`
 - Cleanup on `t.Cleanup`
 
@@ -663,4 +668,54 @@ Write the testing guide covering:
 **Commit:**
 ```bash
 git commit -m "docs: add comprehensive workflow testing guide"
+```
+
+---
+
+### Task 12: Update WS + gRPC Plugins with TriggerAdapter
+
+**Files:**
+- Modify: `workflow-plugin-websocket` — add `testing/adapter.go` implementing `wftest.TriggerAdapter`
+- Modify: Any gRPC trigger plugin — add `testing/adapter.go` implementing `wftest.TriggerAdapter`
+
+**Step 1: Implement WebSocket TriggerAdapter**
+
+The adapter's `Inject` method should:
+- Find the WebSocket trigger registered in the engine
+- Call a `HandleTestEvent(event, data)` method on it (add this to the trigger if needed)
+- Return the pipeline execution result
+
+**Step 2: Implement gRPC TriggerAdapter (if applicable)**
+
+Same pattern — inject a method call into the gRPC service handler.
+
+**Step 3: Export adapters for test consumers**
+
+```go
+// In workflow-plugin-websocket/testing package
+func NewWSTestAdapter() wftest.TriggerAdapter { ... }
+```
+
+**Step 4: Commit each plugin separately**
+
+---
+
+### Task 13: Example Tests in workflow-scenarios Using wftest
+
+**Files:**
+- Add Go test files to select existing scenarios that demonstrate `wftest` usage
+- Create `wftest/testdata/` with reusable fixture patterns
+
+**Step 1: Add a Go-based wftest example to a simple scenario (e.g., scenario 01 or 09)**
+
+Show the pattern: load scenario config, mock DB steps, execute pipeline, assert response.
+
+**Step 2: Add a YAML test file example to a scenario (e.g., scenario 64-iac-do-basic)**
+
+Show the `*_test.yaml` pattern alongside an existing config.
+
+**Step 3: Commit**
+
+```bash
+git commit -m "test: add wftest example tests to workflow-scenarios"
 ```
