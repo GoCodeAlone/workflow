@@ -20,6 +20,25 @@ func WithPlugin(p plugin.EnginePlugin) Option {
 	return func(h *Harness) { h.extraPlugins = append(h.extraPlugins, p) }
 }
 
+// MockStep registers a mock factory for stepType that calls handler on every
+// execution. The mock is installed after built-in plugins load, so it
+// overrides real implementations. Use Returns for fixed output or NewRecorder
+// to capture calls.
+func MockStep(stepType string, handler StepHandler) Option {
+	return func(h *Harness) {
+		if h.mockSteps == nil {
+			h.mockSteps = make(map[string]StepHandler)
+		}
+		h.mockSteps[stepType] = handler
+	}
+}
+
+// WithMockModule registers a fake module in the service registry so steps that
+// look up a named dependency find this mock instead of a real module.
+func WithMockModule(mod *MockModule) Option {
+	return func(h *Harness) { h.mockModules = append(h.mockModules, mod) }
+}
+
 // WithServer starts a real HTTP listener backed by the engine's HTTP router.
 // After harness creation, use h.BaseURL() to get the server URL.
 // The server is stopped automatically via t.Cleanup.
