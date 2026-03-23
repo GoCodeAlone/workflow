@@ -66,7 +66,7 @@ func New(t *testing.T, opts ...Option) *Harness {
 	t.Helper()
 	h := &Harness{t: t}
 	for _, opt := range opts {
-		opt(h)
+		opt.applyTo(h)
 	}
 	h.init()
 	t.Cleanup(func() {

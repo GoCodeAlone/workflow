@@ -47,15 +47,37 @@ type Call struct {
 
 // Recorder is a StepHandler that records every call made to a mock step.
 // Use NewRecorder to create one, then pass it to MockStep.
-// Recorder also implements StepHandler so it can return fixed output.
+// Recorder also implements StepHandler and Option so a Recorder returned by
+// RecordStep can be passed directly to New without a separate MockStep call.
 type Recorder struct {
-	mu     sync.Mutex
-	calls  []Call
-	output map[string]any
+	mu       sync.Mutex
+	stepType string // set by RecordStep; enables Recorder to implement Option
+	calls    []Call
+	output   map[string]any
 }
 
 // NewRecorder creates a Recorder that returns an empty output map by default.
 func NewRecorder() *Recorder { return &Recorder{} }
+
+// RecordStep creates a Recorder bound to stepType and returns it. The returned
+// *Recorder implements Option, so it can be passed directly to New:
+//
+//	rec := wftest.RecordStep("step.db_query")
+//	h   := wftest.New(t, wftest.WithYAML(`...`), rec)
+//	h.ExecutePipeline("fetch", nil)
+//	t.Logf("called %d times", rec.CallCount())
+func RecordStep(stepType string) *Recorder {
+	return &Recorder{stepType: stepType}
+}
+
+// applyTo implements Option. It registers the Recorder as a mock for its
+// bound step type so *Recorder returned by RecordStep can be passed to New.
+func (r *Recorder) applyTo(h *Harness) {
+	if h.mockSteps == nil {
+		h.mockSteps = make(map[string]StepHandler)
+	}
+	h.mockSteps[r.stepType] = r
+}
 
 // WithOutput sets fixed output that the recorder returns on every call.
 func (r *Recorder) WithOutput(output map[string]any) *Recorder {

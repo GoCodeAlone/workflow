@@ -155,6 +155,62 @@ pipelines:
 	}
 }
 
+func TestRecordStep_AsOption(t *testing.T) {
+	// RecordStep returns a *Recorder that also implements Option — pass it
+	// directly to New without a separate MockStep call.
+	rec := wftest.RecordStep("step.db_exec")
+	h := wftest.New(t,
+		wftest.WithYAML(`
+pipelines:
+  insert:
+    steps:
+      - name: write
+        type: step.db_exec
+        config:
+          database: db
+          query: "INSERT INTO users (email) VALUES (?)"
+          mode: exec
+`),
+		rec,
+	)
+
+	h.ExecutePipeline("insert", map[string]any{"email": "test@example.com"})
+	if rec.CallCount() != 1 {
+		t.Errorf("expected 1 call, got %d", rec.CallCount())
+	}
+}
+
+func TestRecordStep_CapturesStepContext(t *testing.T) {
+	rec := wftest.RecordStep("step.db_exec")
+	h := wftest.New(t,
+		wftest.WithYAML(`
+pipelines:
+  run:
+    steps:
+      - name: s
+        type: step.db_exec
+        config:
+          database: db
+          query: "SELECT 1"
+          mode: exec
+`),
+		rec,
+	)
+
+	h.ExecutePipeline("run", map[string]any{"user": "alice"})
+
+	calls := rec.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if calls[0].Ctx == nil {
+		t.Error("expected Ctx to be captured in StepContext")
+	}
+	if calls[0].Input["user"] != "alice" {
+		t.Errorf("expected input user='alice', got %v", calls[0].Input["user"])
+	}
+}
+
 func TestHarness_MockStep_MultipleTypes(t *testing.T) {
 	queryRec := wftest.NewRecorder().WithOutput(map[string]any{"rows": []any{}, "count": 0})
 	execRec := wftest.NewRecorder()

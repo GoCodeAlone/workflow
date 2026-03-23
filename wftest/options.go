@@ -2,22 +2,32 @@ package wftest
 
 import "github.com/GoCodeAlone/workflow/plugin"
 
-// Option configures a Harness.
-type Option func(*Harness)
+// Option configures a Harness when passed to New.
+// All built-in option constructors (WithYAML, MockStep, etc.) implement this
+// interface. *Recorder also implements Option so RecordStep can be passed
+// directly to New without a separate MockStep call.
+type Option interface {
+	applyTo(*Harness)
+}
+
+// optionFunc is a function that implements Option.
+type optionFunc func(*Harness)
+
+func (f optionFunc) applyTo(h *Harness) { f(h) }
 
 // WithYAML configures the harness with inline YAML config.
 func WithYAML(yaml string) Option {
-	return func(h *Harness) { h.yamlConfig = yaml }
+	return optionFunc(func(h *Harness) { h.yamlConfig = yaml })
 }
 
 // WithConfig loads config from a YAML file path.
 func WithConfig(path string) Option {
-	return func(h *Harness) { h.configPath = path }
+	return optionFunc(func(h *Harness) { h.configPath = path })
 }
 
 // WithPlugin loads an additional engine plugin into the harness before BuildFromConfig.
 func WithPlugin(p plugin.EnginePlugin) Option {
-	return func(h *Harness) { h.extraPlugins = append(h.extraPlugins, p) }
+	return optionFunc(func(h *Harness) { h.extraPlugins = append(h.extraPlugins, p) })
 }
 
 // MockStep registers a mock factory for stepType that calls handler on every
@@ -25,23 +35,23 @@ func WithPlugin(p plugin.EnginePlugin) Option {
 // overrides real implementations. Use Returns for fixed output or NewRecorder
 // to capture calls.
 func MockStep(stepType string, handler StepHandler) Option {
-	return func(h *Harness) {
+	return optionFunc(func(h *Harness) {
 		if h.mockSteps == nil {
 			h.mockSteps = make(map[string]StepHandler)
 		}
 		h.mockSteps[stepType] = handler
-	}
+	})
 }
 
 // WithMockModule registers a fake module in the service registry so steps that
 // look up a named dependency find this mock instead of a real module.
 func WithMockModule(mod *MockModule) Option {
-	return func(h *Harness) { h.mockModules = append(h.mockModules, mod) }
+	return optionFunc(func(h *Harness) { h.mockModules = append(h.mockModules, mod) })
 }
 
 // WithServer starts a real HTTP listener backed by the engine's HTTP router.
 // After harness creation, use h.BaseURL() to get the server URL.
 // The server is stopped automatically via t.Cleanup.
 func WithServer() Option {
-	return func(h *Harness) { h.serverMode = true }
+	return optionFunc(func(h *Harness) { h.serverMode = true })
 }
