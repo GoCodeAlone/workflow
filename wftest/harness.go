@@ -59,6 +59,7 @@ type Harness struct {
 	httpOnce    sync.Once // guards HTTP handler discovery
 	mockSteps   map[string]StepHandler
 	mockModules []*MockModule
+	state       *StateStore
 }
 
 // New creates a test harness with the given options.
@@ -102,6 +103,11 @@ func (h *Harness) init() {
 	// Register mock modules so their services are in the service registry.
 	for _, mod := range h.mockModules {
 		h.engine.App().RegisterModule(mod)
+	}
+
+	// Register StateStore as a service if WithState() was used.
+	if h.state != nil {
+		h.engine.App().RegisterModule(&stateStoreModule{store: h.state})
 	}
 
 	// Auto-register an in-memory EventBus so eventbus triggers work without
@@ -171,6 +177,12 @@ func (h *Harness) getHTTPHandler() http.Handler {
 		}
 	})
 	return h.httpHandler
+}
+
+// State returns the in-memory StateStore (only non-nil when WithState() was used).
+// Use it to seed and assert state around pipeline executions.
+func (h *Harness) State() *StateStore {
+	return h.state
 }
 
 // RecordStep registers a new Recorder for the given step type and returns it.

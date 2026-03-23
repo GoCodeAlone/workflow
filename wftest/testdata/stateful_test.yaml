@@ -1,0 +1,49 @@
+yaml: |
+  pipelines:
+    init-game:
+      steps:
+        - name: setup
+          type: step.set
+          config:
+            values:
+              status: initialized
+    take-turn:
+      steps:
+        - name: process
+          type: step.set
+          config:
+            values:
+              last_action: draw
+
+tests:
+  card-game-sequence:
+    description: "multi-step game session with seeded state"
+    state:
+      seed:
+        sessions:
+          game-1:
+            turn: p1
+    sequence:
+      - name: init
+        trigger:
+          type: pipeline
+          name: init-game
+        assertions:
+          - step: setup
+            executed: true
+          - state:
+              sessions:
+                game-1:
+                  turn: p1
+
+      - name: first-turn
+        trigger:
+          type: pipeline
+          name: take-turn
+        assertions:
+          - step: process
+            executed: true
+          - state:
+              sessions:
+                game-1:
+                  turn: p1

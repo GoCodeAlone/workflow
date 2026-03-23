@@ -1,0 +1,4 @@
+{
+  "player1": {"hp": 100, "level": 5},
+  "player2": {"hp": 80, "level": 3}
+}

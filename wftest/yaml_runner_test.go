@@ -165,6 +165,62 @@ tests:
 	wftest.RunYAMLTests(t, tmpDir+"/stop_test.yaml")
 }
 
+func TestYAMLRunner_SequenceWithState(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFile(t, tmpDir+"/seq_test.yaml", `
+yaml: |
+  pipelines:
+    setup-game:
+      steps:
+        - name: init
+          type: step.set
+          config:
+            values:
+              status: ready
+    take-turn:
+      steps:
+        - name: move
+          type: step.set
+          config:
+            values:
+              action: draw
+tests:
+  multi-step-game:
+    description: "sequence test with seeded state preserved across steps"
+    state:
+      seed:
+        sessions:
+          game-1:
+            turn: p1
+    sequence:
+      - name: setup
+        trigger:
+          type: pipeline
+          name: setup-game
+        assertions:
+          - step: init
+            executed: true
+          - state:
+              sessions:
+                game-1:
+                  turn: p1
+      - name: turn
+        pipeline: take-turn
+        assertions:
+          - step: move
+            executed: true
+          - state:
+              sessions:
+                game-1:
+                  turn: p1
+`)
+	wftest.RunYAMLTests(t, tmpDir+"/seq_test.yaml")
+}
+
+func TestYAMLRunner_StatefulTestData(t *testing.T) {
+	wftest.RunYAMLTests(t, "testdata/stateful_test.yaml")
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

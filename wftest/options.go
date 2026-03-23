@@ -55,3 +55,10 @@ func WithMockModule(mod *MockModule) Option {
 func WithServer() Option {
 	return optionFunc(func(h *Harness) { h.serverMode = true })
 }
+
+// WithState initializes an in-memory StateStore for the harness.
+// The store is accessible via h.State() and is also registered as the
+// "wftest.state_store" service so pipeline steps can look it up.
+func WithState() Option {
+	return optionFunc(func(h *Harness) { h.state = NewStateStore() })
+}

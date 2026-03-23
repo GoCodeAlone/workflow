@@ -26,12 +26,48 @@ type TestCase struct {
 	// Description is an optional human-readable label shown in test output.
 	Description string `yaml:"description"`
 	// Trigger describes how to invoke the pipeline or HTTP endpoint.
+	// Mutually exclusive with Sequence.
 	Trigger TriggerDef `yaml:"trigger"`
 	// StopAfter halts pipeline execution after the named step completes.
 	StopAfter string `yaml:"stop_after"`
 	// Mocks overrides the file-level Mocks for this test case only.
 	Mocks *MockConfig `yaml:"mocks"`
 	// Assertions is an ordered list of checks applied to the result.
+	// Used with Trigger; ignored when Sequence is set.
+	Assertions []Assertion `yaml:"assertions"`
+	// State configures initial state to seed before the test runs.
+	State *StateConfig `yaml:"state"`
+	// Sequence replaces the single Trigger for multi-step stateful tests.
+	// Each step fires a trigger and may assert pipeline output and state.
+	Sequence []SequenceStep `yaml:"sequence"`
+}
+
+// StateConfig describes state to set up before a test case runs.
+type StateConfig struct {
+	// Fixtures are files to load into named stores.
+	Fixtures []FixtureDef `yaml:"fixtures"`
+	// Seed maps store_name → key → value for inline initial state.
+	Seed map[string]map[string]any `yaml:"seed"`
+}
+
+// FixtureDef loads a JSON or YAML file into a named state store.
+type FixtureDef struct {
+	// File is the path to the fixture file (JSON or YAML).
+	File string `yaml:"file"`
+	// Target is the store name to seed.
+	Target string `yaml:"target"`
+}
+
+// SequenceStep is one step in a multi-step stateful test.
+type SequenceStep struct {
+	// Name is a label shown in test output.
+	Name string `yaml:"name"`
+	// Pipeline is a shorthand for a pipeline trigger name.
+	// If Trigger.Name is empty, Pipeline is used.
+	Pipeline string `yaml:"pipeline"`
+	// Trigger describes how to invoke this step.
+	Trigger TriggerDef `yaml:"trigger"`
+	// Assertions are checked after this step executes.
 	Assertions []Assertion `yaml:"assertions"`
 }
 
@@ -62,6 +98,10 @@ type Assertion struct {
 	Executed *bool `yaml:"executed"`
 	// Response checks HTTP response fields (status, body).
 	Response *ResponseAssert `yaml:"response"`
+	// State checks per-store key/value pairs in the StateStore.
+	// Maps store_name → key → expected_value.
+	// Requires WithState() (or state config in YAML).
+	State map[string]map[string]any `yaml:"state"`
 }
 
 // ResponseAssert checks HTTP response fields.

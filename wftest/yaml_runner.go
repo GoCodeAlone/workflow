@@ -79,14 +79,43 @@ func runYAMLTestCase(t *testing.T, tf *TestFile, tc *TestCase) {
 	// Build harness options.
 	opts := buildHarnessOptions(t, tf, merged)
 
+	// Enable state store if the test uses state or sequence.
+	if tc.State != nil || len(tc.Sequence) > 0 {
+		opts = append(opts, WithState())
+	}
+
 	h := New(t, opts...)
 
-	// Fire the trigger and collect result.
-	result := fireTrigger(t, h, tc)
+	// Seed state before execution.
+	if tc.State != nil {
+		for store, data := range tc.State.Seed {
+			h.State().Seed(store, data)
+		}
+		for _, fix := range tc.State.Fixtures {
+			if err := h.State().LoadFixture(fix.File, fix.Target); err != nil {
+				t.Fatalf("state fixture %s: %v", fix.File, err)
+			}
+		}
+	}
 
-	// Apply assertions.
+	if len(tc.Sequence) > 0 {
+		// Multi-step sequence: each step fires its own trigger, then checks assertions.
+		// State persists across all steps (same harness).
+		for i, step := range tc.Sequence {
+			step := step // capture
+			label := fmt.Sprintf("sequence[%d](%s)", i, step.Name)
+			result := fireSequenceStep(t, h, &step)
+			for j, a := range step.Assertions {
+				applyAssertion(t, fmt.Sprintf("%s.assertion[%d]", label, j), result, &a, h)
+			}
+		}
+		return
+	}
+
+	// Legacy single-trigger path.
+	result := fireTrigger(t, h, tc)
 	for i, a := range tc.Assertions {
-		applyAssertion(t, fmt.Sprintf("[%d]", i), result, &a)
+		applyAssertion(t, fmt.Sprintf("[%d]", i), result, &a, h)
 	}
 }
 
@@ -176,8 +205,24 @@ func fireTrigger(t *testing.T, h *Harness, tc *TestCase) *Result {
 	}
 }
 
+// fireSequenceStep fires the trigger for one SequenceStep.
+// If Trigger.Name is empty, Pipeline is used as the pipeline name.
+func fireSequenceStep(t *testing.T, h *Harness, step *SequenceStep) *Result {
+	t.Helper()
+	td := step.Trigger
+	if td.Name == "" && step.Pipeline != "" {
+		td.Name = step.Pipeline
+		if td.Type == "" {
+			td.Type = "pipeline"
+		}
+	}
+	tc := &TestCase{Trigger: td}
+	return fireTrigger(t, h, tc)
+}
+
 // applyAssertion checks one assertion against the result.
-func applyAssertion(t *testing.T, label string, result *Result, a *Assertion) {
+// h is optional (may be nil); it is only needed for state assertions.
+func applyAssertion(t *testing.T, label string, result *Result, a *Assertion, h *Harness) {
 	t.Helper()
 
 	// Check HTTP response assertions.
@@ -201,33 +246,44 @@ func applyAssertion(t *testing.T, label string, result *Result, a *Assertion) {
 	}
 
 	// Check output assertions.
-	if len(a.Output) == 0 {
-		return
+	if len(a.Output) > 0 {
+		// Select target output map.
+		var actual map[string]any
+		if a.Step != "" {
+			actual = result.StepOutput(a.Step)
+			if actual == nil {
+				t.Errorf("assertion %s: step %q has no output (did it execute?)", label, a.Step)
+				return
+			}
+		} else {
+			if result.Error != nil {
+				t.Errorf("assertion %s: pipeline returned error: %v", label, result.Error)
+				return
+			}
+			actual = result.Output
+		}
+
+		for key, want := range a.Output {
+			got := actual[key]
+			// Compare via JSON to handle numeric type differences.
+			wantJSON, _ := json.Marshal(want)
+			gotJSON, _ := json.Marshal(got)
+			if string(wantJSON) != string(gotJSON) {
+				t.Errorf("assertion %s: output[%q]: want %v, got %v", label, key, want, got)
+			}
+		}
 	}
 
-	// Select target output map.
-	var actual map[string]any
-	if a.Step != "" {
-		actual = result.StepOutput(a.Step)
-		if actual == nil {
-			t.Errorf("assertion %s: step %q has no output (did it execute?)", label, a.Step)
+	// Check state assertions.
+	if len(a.State) > 0 {
+		if h == nil || h.state == nil {
+			t.Errorf("assertion %s: state assertions require WithState()", label)
 			return
 		}
-	} else {
-		if result.Error != nil {
-			t.Errorf("assertion %s: pipeline returned error: %v", label, result.Error)
-			return
-		}
-		actual = result.Output
-	}
-
-	for key, want := range a.Output {
-		got := actual[key]
-		// Compare via JSON to handle numeric type differences.
-		wantJSON, _ := json.Marshal(want)
-		gotJSON, _ := json.Marshal(got)
-		if string(wantJSON) != string(gotJSON) {
-			t.Errorf("assertion %s: output[%q]: want %v, got %v", label, key, want, got)
+		for store, expected := range a.State {
+			if err := h.state.Assert(store, expected); err != nil {
+				t.Errorf("assertion %s: %v", label, err)
+			}
 		}
 	}
 }
