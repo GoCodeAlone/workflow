@@ -1,7 +1,10 @@
 package wftest
 
 import (
+	"context"
+	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,6 +51,12 @@ type Harness struct {
 	serverMode   bool
 	httpServer   *httptest.Server
 	baseURL      string
+	// httpHandler is the HTTP router used for in-process request injection.
+	// Set by startServer() (WithServer mode) or lazily by getHTTPHandler().
+	httpHandler http.Handler
+	startOnce   sync.Once
+	mockSteps   map[string]StepHandler
+	mockModules []*MockModule
 }
 
 // New creates a test harness with the given options.
@@ -83,6 +92,16 @@ func (h *Harness) init() {
 		}
 	}
 
+	// Register mock step factories (override real implementations).
+	for stepType, handler := range h.mockSteps {
+		h.engine.AddStepType(stepType, newMockStepFactory(handler))
+	}
+
+	// Register mock modules so their services are in the service registry.
+	for _, mod := range h.mockModules {
+		h.engine.App().RegisterModule(mod)
+	}
+
 	var cfg *config.WorkflowConfig
 	var err error
 	if h.yamlConfig != "" {
@@ -102,6 +121,36 @@ func (h *Harness) init() {
 	if h.serverMode {
 		h.startServer()
 	}
+}
+
+// getHTTPHandler returns the engine's HTTP router as an http.Handler for
+// in-process request injection. The engine is started (once) on the first call;
+// if WithServer() already started it, the cached handler is returned directly.
+func (h *Harness) getHTTPHandler() http.Handler {
+	h.t.Helper()
+	h.startOnce.Do(func() {
+		if h.httpHandler != nil {
+			// Already set by startServer() — WithServer mode.
+			return
+		}
+		ctx := h.t.Context()
+		if err := h.engine.Start(ctx); err != nil {
+			h.t.Fatalf("wftest: engine.Start failed: %v", err)
+		}
+		h.t.Cleanup(func() {
+			_ = h.engine.Stop(context.Background())
+		})
+		for _, svc := range h.engine.App().SvcRegistry() {
+			if handler, ok := svc.(http.Handler); ok {
+				h.httpHandler = handler
+				break
+			}
+		}
+		if h.httpHandler == nil {
+			h.t.Fatalf("wftest: no http.Handler found in service registry; ensure an http.router module is configured")
+		}
+	})
+	return h.httpHandler
 }
 
 // ExecutePipeline runs a named pipeline with the given trigger data.

@@ -37,6 +37,7 @@ func (h *Harness) startServer() {
 		h.t.Fatalf("wftest: WithServer requires an http.router module in the config")
 	}
 
+	h.httpHandler = router
 	h.httpServer = httptest.NewServer(router)
 	h.baseURL = h.httpServer.URL
 
