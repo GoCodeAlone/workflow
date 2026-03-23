@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -59,6 +60,37 @@ func (h *PipelineResultHolder) Set(result map[string]any) {
 // Get returns the stored pipeline result, or nil if not set.
 func (h *PipelineResultHolder) Get() map[string]any {
 	return h.result
+}
+
+// pipelineContextKey is the unexported type for the PipelineContextHolder context key.
+type pipelineContextKey struct{}
+
+// PipelineContextKey is the context key used to capture the full PipelineContext
+// (including StepOutputs) from TriggerWorkflow. Callers that need per-step output
+// visibility inject a *PipelineContextHolder into the context before calling
+// TriggerWorkflow; the pipeline handler populates it after execution.
+var PipelineContextKey = pipelineContextKey{}
+
+// PipelineContextHolder is a thread-safe container used to pass the full
+// PipelineContext (including StepOutputs) back through the context from the
+// pipeline handler to any caller of TriggerWorkflow that needs per-step visibility.
+type PipelineContextHolder struct {
+	mu  sync.Mutex
+	ctx *PipelineContext
+}
+
+// Set stores the PipelineContext in the holder.
+func (h *PipelineContextHolder) Set(pc *PipelineContext) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.ctx = pc
+}
+
+// Get returns the stored PipelineContext, or nil if not set.
+func (h *PipelineContextHolder) Get() *PipelineContext {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.ctx
 }
 
 // coercePipelineStatus coerces common numeric/string types into an HTTP status

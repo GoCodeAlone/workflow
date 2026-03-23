@@ -736,3 +736,156 @@ func TestExecutePipeline_UnknownPipeline(t *testing.T) {
 		t.Errorf("expected error to mention pipeline name, got: %v", err)
 	}
 }
+
+// TestTriggerWorkflow_PreservesStepOutputs verifies that injecting a
+// PipelineContextHolder into the context before calling TriggerWorkflow causes
+// StepOutputs to be populated after the pipeline runs.
+func TestTriggerWorkflow_PreservesStepOutputs(t *testing.T) {
+	engine, _ := setupPipelineEngine(t)
+
+	pipelineCfg := map[string]any{
+		"step_output_pipeline": map[string]any{
+			"steps": []any{
+				map[string]any{
+					"name": "set_value",
+					"type": "step.set",
+					"config": map[string]any{
+						"values": map[string]any{
+							"color": "blue",
+						},
+					},
+				},
+			},
+		},
+	}
+	if err := engine.configurePipelines(pipelineCfg); err != nil {
+		t.Fatalf("configurePipelines failed: %v", err)
+	}
+
+	holder := &module.PipelineContextHolder{}
+	ctx := context.WithValue(context.Background(), module.PipelineContextKey, holder)
+
+	if err := engine.TriggerWorkflow(ctx, "pipeline:step_output_pipeline", "", map[string]any{}); err != nil {
+		t.Fatalf("TriggerWorkflow failed: %v", err)
+	}
+
+	pc := holder.Get()
+	if pc == nil {
+		t.Fatal("expected PipelineContextHolder to be populated after TriggerWorkflow")
+	}
+	if pc.StepOutputs == nil {
+		t.Fatal("expected StepOutputs to be non-nil")
+	}
+	stepOut, ok := pc.StepOutputs["set_value"]
+	if !ok {
+		t.Fatalf("expected StepOutputs to contain 'set_value', got keys: %v", stepKeys(pc.StepOutputs))
+	}
+	if stepOut["color"] != "blue" {
+		t.Errorf("expected step output color=blue, got %v", stepOut["color"])
+	}
+}
+
+// TestExecutePipeline_UsesUnifiedPath verifies that ExecutePipeline and
+// TriggerWorkflow with a PipelineContextHolder produce identical results.
+func TestExecutePipeline_UsesUnifiedPath(t *testing.T) {
+	engine, _ := setupPipelineEngine(t)
+
+	pipelineCfg := map[string]any{
+		"unified_path_pipeline": map[string]any{
+			"steps": []any{
+				map[string]any{
+					"name": "set_msg",
+					"type": "step.set",
+					"config": map[string]any{
+						"values": map[string]any{
+							"msg": "hello",
+						},
+					},
+				},
+			},
+		},
+	}
+	if err := engine.configurePipelines(pipelineCfg); err != nil {
+		t.Fatalf("configurePipelines failed: %v", err)
+	}
+
+	// Path 1: ExecutePipeline
+	result1, err := engine.ExecutePipeline(context.Background(), "unified_path_pipeline", map[string]any{})
+	if err != nil {
+		t.Fatalf("ExecutePipeline failed: %v", err)
+	}
+
+	// Path 2: TriggerWorkflow with PipelineContextHolder
+	holder := &module.PipelineContextHolder{}
+	ctx := context.WithValue(context.Background(), module.PipelineContextKey, holder)
+	if err := engine.TriggerWorkflow(ctx, "pipeline:unified_path_pipeline", "", map[string]any{}); err != nil {
+		t.Fatalf("TriggerWorkflow failed: %v", err)
+	}
+	pc := holder.Get()
+	if pc == nil {
+		t.Fatal("holder should be populated")
+	}
+
+	if result1["msg"] != pc.Current["msg"] {
+		t.Errorf("ExecutePipeline and TriggerWorkflow produced different results: %v vs %v", result1["msg"], pc.Current["msg"])
+	}
+	if pc.StepOutputs["set_msg"]["msg"] != "hello" {
+		t.Errorf("expected StepOutputs[set_msg][msg]=hello, got %v", pc.StepOutputs["set_msg"]["msg"])
+	}
+}
+
+// TestExecutePipelineContext_PreservesStepOutputs verifies that ExecutePipelineContext
+// returns a PipelineContext with StepOutputs populated for all executed steps.
+func TestExecutePipelineContext_PreservesStepOutputs(t *testing.T) {
+	engine, _ := setupPipelineEngine(t)
+
+	pipelineCfg := map[string]any{
+		"ctx_step_output_pipeline": map[string]any{
+			"steps": []any{
+				map[string]any{
+					"name": "step_a",
+					"type": "step.set",
+					"config": map[string]any{
+						"values": map[string]any{"a": "1"},
+					},
+				},
+				map[string]any{
+					"name": "step_b",
+					"type": "step.set",
+					"config": map[string]any{
+						"values": map[string]any{"b": "2"},
+					},
+				},
+			},
+		},
+	}
+	if err := engine.configurePipelines(pipelineCfg); err != nil {
+		t.Fatalf("configurePipelines failed: %v", err)
+	}
+
+	pc, err := engine.ExecutePipelineContext(context.Background(), "ctx_step_output_pipeline", map[string]any{})
+	if err != nil {
+		t.Fatalf("ExecutePipelineContext failed: %v", err)
+	}
+	if pc == nil {
+		t.Fatal("expected non-nil PipelineContext")
+	}
+	if len(pc.StepOutputs) != 2 {
+		t.Errorf("expected 2 step outputs, got %d: %v", len(pc.StepOutputs), stepKeys(pc.StepOutputs))
+	}
+	if pc.StepOutputs["step_a"]["a"] != "1" {
+		t.Errorf("expected step_a output a=1, got %v", pc.StepOutputs["step_a"]["a"])
+	}
+	if pc.StepOutputs["step_b"]["b"] != "2" {
+		t.Errorf("expected step_b output b=2, got %v", pc.StepOutputs["step_b"]["b"])
+	}
+}
+
+// stepKeys returns the keys of a step output map for test failure messages.
+func stepKeys(m map[string]map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}

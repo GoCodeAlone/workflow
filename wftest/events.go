@@ -25,8 +25,10 @@ func (h *Harness) FireEvent(topic string, data map[string]any) *Result {
 		data = map[string]any{}
 	}
 
-	holder := &module.PipelineResultHolder{}
-	ctx := context.WithValue(h.t.Context(), module.PipelineResultContextKey, holder)
+	resultHolder := &module.PipelineResultHolder{}
+	ctxHolder := &module.PipelineContextHolder{}
+	ctx := context.WithValue(h.t.Context(), module.PipelineResultContextKey, resultHolder)
+	ctx = context.WithValue(ctx, module.PipelineContextKey, ctxHolder)
 
 	start := time.Now()
 	for _, trigger := range h.engine.Triggers() {
@@ -39,8 +41,21 @@ func (h *Harness) FireEvent(topic string, data map[string]any) *Result {
 		}
 	}
 
+	// Prefer the full PipelineContext (with StepOutputs) when available.
+	if pc := ctxHolder.Get(); pc != nil {
+		output := pc.Current
+		if pipeOut, ok := pc.Metadata["_pipeline_output"].(map[string]any); ok {
+			output = pipeOut
+		}
+		return &Result{
+			Output:      output,
+			StepResults: pc.StepOutputs,
+			Duration:    time.Since(start),
+		}
+	}
+
 	return &Result{
-		Output:   holder.Get(),
+		Output:   resultHolder.Get(),
 		Duration: time.Since(start),
 	}
 }

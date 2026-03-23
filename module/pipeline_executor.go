@@ -359,10 +359,18 @@ func (p *Pipeline) SetEventRecorder(recorder interfaces.EventRecorder) {
 // Run executes the pipeline and returns the merged result data map.
 // It implements interfaces.PipelineRunner by wrapping Execute and
 // returning PipelineContext.Current so callers need not import PipelineContext.
+// If a PipelineContextHolder is stored in ctx under PipelineContextKey, it is
+// populated with the full PipelineContext (including StepOutputs) so that callers
+// can inspect per-step results without a separate code path.
 func (p *Pipeline) Run(ctx context.Context, data map[string]any) (map[string]any, error) {
 	pc, err := p.Execute(ctx, data)
 	if err != nil {
 		return nil, err
+	}
+	// Populate the PipelineContextHolder if present in context, so all callers
+	// of TriggerWorkflow can receive full step output visibility.
+	if holder, ok := ctx.Value(PipelineContextKey).(*PipelineContextHolder); ok && holder != nil {
+		holder.Set(pc)
 	}
 	return pc.Current, nil
 }

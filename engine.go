@@ -694,15 +694,20 @@ func (e *StdEngine) TriggerWorkflow(ctx context.Context, workflowType string, ac
 //
 // If the pipeline uses step.pipeline_output, the explicitly marked output
 // is returned. Otherwise, the pipeline's merged Current state is returned.
+//
+// This goes through TriggerWorkflow so all trigger paths share the same
+// execution code, including StepOutputs preservation via PipelineContextHolder.
 func (e *StdEngine) ExecutePipeline(ctx context.Context, name string, data map[string]any) (map[string]any, error) {
-	pipeline, ok := e.pipelineRegistry[name]
-	if !ok {
-		return nil, fmt.Errorf("pipeline %q not found", name)
+	holder := &module.PipelineContextHolder{}
+	ctx = context.WithValue(ctx, module.PipelineContextKey, holder)
+
+	if err := e.TriggerWorkflow(ctx, "pipeline:"+name, "", data); err != nil {
+		return nil, err
 	}
 
-	pc, err := pipeline.Execute(ctx, data)
-	if err != nil {
-		return nil, fmt.Errorf("pipeline %q: %w", name, err)
+	pc := holder.Get()
+	if pc == nil {
+		return nil, fmt.Errorf("pipeline %q: no context returned", name)
 	}
 
 	// Prefer explicit pipeline output if step.pipeline_output was used.
@@ -720,15 +725,20 @@ func (e *StdEngine) ExecutePipeline(ctx context.Context, name string, data map[s
 // ExecutePipelineContext runs a named pipeline and returns the full PipelineContext,
 // including StepOutputs for each step. This is intended for test harnesses that need
 // per-step output inspection. For production callers, use ExecutePipeline instead.
+//
+// This goes through TriggerWorkflow so all trigger paths share the same
+// execution code. The PipelineContextHolder captures the full context.
 func (e *StdEngine) ExecutePipelineContext(ctx context.Context, name string, data map[string]any) (*interfaces.PipelineContext, error) {
-	pipeline, ok := e.pipelineRegistry[name]
-	if !ok {
-		return nil, fmt.Errorf("pipeline %q not found", name)
+	holder := &module.PipelineContextHolder{}
+	ctx = context.WithValue(ctx, module.PipelineContextKey, holder)
+
+	if err := e.TriggerWorkflow(ctx, "pipeline:"+name, "", data); err != nil {
+		return nil, err
 	}
 
-	pc, err := pipeline.Execute(ctx, data)
-	if err != nil {
-		return nil, fmt.Errorf("pipeline %q: %w", name, err)
+	pc := holder.Get()
+	if pc == nil {
+		return nil, fmt.Errorf("pipeline %q: no context returned", name)
 	}
 
 	return pc, nil
