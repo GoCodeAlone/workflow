@@ -30,4 +30,9 @@ type PipelineStepConfig struct {
 	// template evaluates to truthy. Falsy or absent with no SkipIf → execute.
 	// When both SkipIf and If are set, SkipIf takes precedence.
 	If string `json:"if,omitempty" yaml:"if,omitempty"`
+	// ErrorStatus overrides the HTTP response status code when this step fails.
+	// Use 400 for bad requests, 422 for unprocessable entity, etc.
+	// When set, the step error is wrapped in a ValidationError so the HTTP
+	// handler returns the specified status code instead of 500.
+	ErrorStatus int `json:"error_status,omitempty" yaml:"error_status,omitempty"`
 }

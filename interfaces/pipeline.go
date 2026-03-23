@@ -6,6 +6,7 @@ package interfaces
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"maps"
 )
@@ -116,6 +117,42 @@ type PipelineStep interface {
 
 	// Execute runs the step with the pipeline context.
 	Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error)
+}
+
+// ValidationError indicates a step failed due to invalid user input, not an
+// infrastructure error. HTTP handlers map this to a 4xx status code instead
+// of the default 500 Internal Server Error.
+type ValidationError struct {
+	Message string
+	Status  int    // HTTP status code to use (e.g., 400, 422)
+	Field   string // optional: which field was invalid
+	Code    string // optional: machine-readable error code for clients
+}
+
+func (e *ValidationError) Error() string { return e.Message }
+
+// NewValidationError creates a ValidationError with the given message and HTTP
+// status code. Use status 400 for bad input, 422 for unprocessable entity, etc.
+func NewValidationError(msg string, status int) *ValidationError {
+	return &ValidationError{Message: msg, Status: status}
+}
+
+// IsValidationError reports whether err (or any error in its chain) is a
+// *ValidationError.
+func IsValidationError(err error) bool {
+	var ve *ValidationError
+	return errors.As(err, &ve)
+}
+
+// ValidationErrorStatus returns the HTTP status code from a ValidationError in
+// the error chain. Returns 400 if the error has no status or is not a
+// ValidationError.
+func ValidationErrorStatus(err error) int {
+	var ve *ValidationError
+	if errors.As(err, &ve) && ve.Status != 0 {
+		return ve.Status
+	}
+	return 400
 }
 
 // StepRegistrar manages step type registration and creation.

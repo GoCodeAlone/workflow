@@ -3,12 +3,14 @@ package module
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
 // TestHTTPTrigger tests the HTTP trigger functionality
@@ -623,5 +625,107 @@ func TestHTTPTrigger_PipelineOutput(t *testing.T) {
 	}
 	if body["status"] != "active" {
 		t.Errorf("expected status=active, got %v", body["status"])
+	}
+}
+
+// errorEngine is a test engine that always returns a configured error.
+type errorEngine struct {
+	err error
+}
+
+func (e *errorEngine) TriggerWorkflow(_ context.Context, _, _ string, _ map[string]any) error {
+	return e.err
+}
+
+// setupErrorEngineRoute is a helper that registers an errorEngine with the
+// HTTP trigger and returns the handler for the registered route.
+func setupErrorEngineRoute(t *testing.T, eng WorkflowEngine) HTTPHandler {
+	t.Helper()
+	app := NewMockApplication()
+	router := NewMockHTTPRouter("test-router")
+	_ = app.RegisterService("httpRouter", router)
+	_ = app.RegisterService("workflowEngine", eng)
+
+	trigger := NewHTTPTrigger()
+	app.RegisterModule(trigger)
+	cfg := map[string]any{
+		"routes": []any{
+			map[string]any{
+				"path":     "/api/validate",
+				"method":   "POST",
+				"workflow": "test-wf",
+				"action":   "execute",
+			},
+		},
+	}
+	if err := trigger.Configure(app, cfg); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := trigger.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	h, ok := router.routes["POST /api/validate"]
+	if !ok {
+		t.Fatal("handler not registered")
+	}
+	return h
+}
+
+// TestHTTPHandler_ValidationError_Returns400 verifies that when a workflow step
+// returns a ValidationError with status 400, the HTTP trigger responds with 400
+// and a JSON body containing the error message, not 500.
+func TestHTTPHandler_ValidationError_Returns400(t *testing.T) {
+	valErr := interfaces.NewValidationError("invalid move: card doesn't match", 400)
+	eng := &errorEngine{err: valErr}
+	handler := setupErrorEngineRoute(t, eng)
+
+	req := httptest.NewRequest("POST", "/api/validate", nil)
+	w := httptest.NewRecorder()
+	handler.Handle(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != 400 {
+		t.Errorf("expected 400, got %d", resp.StatusCode)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if body["error"] != "invalid move: card doesn't match" {
+		t.Errorf("unexpected error message: %v", body["error"])
+	}
+}
+
+// TestHTTPHandler_ValidationError_Returns422 verifies that a ValidationError
+// with status 422 causes the HTTP trigger to respond with 422.
+func TestHTTPHandler_ValidationError_Returns422(t *testing.T) {
+	valErr := interfaces.NewValidationError("unprocessable input", 422)
+	eng := &errorEngine{err: valErr}
+	handler := setupErrorEngineRoute(t, eng)
+
+	req := httptest.NewRequest("POST", "/api/validate", nil)
+	w := httptest.NewRecorder()
+	handler.Handle(w, req)
+
+	if w.Result().StatusCode != 422 {
+		t.Errorf("expected 422, got %d", w.Result().StatusCode)
+	}
+}
+
+// TestHTTPHandler_InfraError_Returns500 verifies that a non-ValidationError
+// still results in a 500 Internal Server Error response.
+func TestHTTPHandler_InfraError_Returns500(t *testing.T) {
+	eng := &errorEngine{err: fmt.Errorf("database connection failed")}
+	handler := setupErrorEngineRoute(t, eng)
+
+	req := httptest.NewRequest("POST", "/api/validate", nil)
+	w := httptest.NewRecorder()
+	handler.Handle(w, req)
+
+	if w.Result().StatusCode != 500 {
+		t.Errorf("expected 500, got %d", w.Result().StatusCode)
 	}
 }

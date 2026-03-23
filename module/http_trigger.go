@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
 // httpRWContextKey is the unexported type for the HTTP response writer context key.
@@ -436,6 +437,15 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 		// Call the workflow engine to trigger the workflow
 		err := t.engine.TriggerWorkflow(ctx, route.Workflow, route.Action, data)
 		if err != nil {
+			if interfaces.IsValidationError(err) {
+				status := interfaces.ValidationErrorStatus(err)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				if encErr := json.NewEncoder(w).Encode(map[string]any{"error": err.Error()}); encErr != nil {
+					log.Printf("http trigger: failed to write validation error response: %v", encErr)
+				}
+				return
+			}
 			http.Error(w, fmt.Sprintf("Error triggering workflow: %v", err), http.StatusInternalServerError)
 			return
 		}

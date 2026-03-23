@@ -1073,6 +1073,13 @@ func (e *StdEngine) buildPipelineSteps(pipelineName string, stepCfgs []config.Pi
 			step = module.NewSkippableStep(step, sc.SkipIf, sc.If)
 		}
 
+		// Wrap the step with an error_status mapper when set so that step
+		// failures are surfaced as ValidationErrors and the HTTP handler
+		// returns the configured 4xx status instead of 500.
+		if sc.ErrorStatus != 0 {
+			step = module.NewErrorStatusStep(step, sc.ErrorStatus)
+		}
+
 		steps = append(steps, step)
 	}
 
