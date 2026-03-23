@@ -366,3 +366,199 @@ if rec.Calls()[0].Input["user_id"] != "42" {
     t.Errorf("wrong user_id in email step input")
 }
 ```
+
+---
+
+## Stateful Testing
+
+For workflows that manage state across multiple pipeline calls (games, sessions,
+multi-step transactions), `wftest` provides a `StateStore` and sequence execution.
+
+### Go API
+
+```go
+func TestGameTurnSequence(t *testing.T) {
+    h := wftest.New(t,
+        wftest.WithConfig("config.yaml"),
+        wftest.WithState(),  // enables StateStore
+        wftest.MockStep("step.db_query", wftest.Returns(map[string]any{"rows": []any{}})),
+    )
+
+    // Seed initial state
+    h.State().Seed("sessions", map[string]any{
+        "game-1": map[string]any{
+            "players": []string{"alice", "bob"},
+            "turn":    "alice",
+            "hp":      map[string]any{"alice": 30, "bob": 25},
+        },
+    })
+
+    // Turn 1: alice attacks
+    result := h.ExecutePipeline("attack", map[string]any{
+        "game_id":  "game-1",
+        "attacker": "alice",
+        "target":   "bob",
+    })
+    if result.Error != nil {
+        t.Fatal(result.Error)
+    }
+
+    // Assert state changed
+    if err := h.State().Assert("sessions", map[string]any{
+        "game-1": map[string]any{"turn": "bob"},
+    }); err != nil {
+        t.Errorf("state mismatch after turn 1: %v", err)
+    }
+
+    // Turn 2: bob attacks
+    result = h.ExecutePipeline("attack", map[string]any{
+        "game_id":  "game-1",
+        "attacker": "bob",
+        "target":   "alice",
+    })
+
+    // Assert turn rotated back
+    if err := h.State().Assert("sessions", map[string]any{
+        "game-1": map[string]any{"turn": "alice"},
+    }); err != nil {
+        t.Errorf("state mismatch after turn 2: %v", err)
+    }
+}
+```
+
+### Loading State from Fixture Files
+
+```go
+// Load complex initial state from a JSON or YAML file
+h.State().LoadFixture("testdata/combat_setup.json", "sessions")
+h.State().LoadFixture("testdata/inventory.yaml", "cache")
+```
+
+### StateStore Methods
+
+| Method | Description |
+|--------|-------------|
+| `Seed(store, data)` | Load initial state from a map |
+| `LoadFixture(path, store)` | Load state from a JSON/YAML file |
+| `Get(store, key)` | Retrieve a single value |
+| `Set(store, key, value)` | Write a value |
+| `GetAll(store)` | Get all entries in a store |
+| `Assert(store, expected)` | Check state matches expected (returns error on mismatch) |
+
+### YAML Stateful Tests
+
+Use `state:` for initial data and `sequence:` for multi-step execution with
+intermediate state assertions.
+
+```yaml
+# game_test.yaml
+config: config/app.yaml
+
+tests:
+  test_combat_round:
+    state:
+      fixtures:
+        - file: testdata/combat_setup.json
+          target: sessions
+      seed:
+        cache:
+          game-1:deck: [card1, card2, card3]
+
+    sequence:
+      - name: warrior_attacks
+        pipeline: attack
+        trigger:
+          body:
+            game_id: game-1
+            attacker: warrior
+            target: goblin
+        assertions:
+          - step: calculate_damage
+            output:
+              damage: 8
+          - state:
+              sessions:
+                game-1:
+                  goblin_hp: 12
+
+      - name: goblin_counterattacks
+        pipeline: attack
+        trigger:
+          body:
+            game_id: game-1
+            attacker: goblin
+            target: warrior
+        assertions:
+          - step: calculate_damage
+            output:
+              damage: 3
+          - state:
+              sessions:
+                game-1:
+                  warrior_hp: 27
+
+      - name: warrior_draws_card
+        pipeline: draw-card
+        trigger:
+          body:
+            game_id: game-1
+            player: warrior
+        assertions:
+          - step: draw
+            output:
+              card: card1
+          - state:
+              cache:
+                game-1:deck: [card2, card3]
+```
+
+### State Block Reference
+
+```yaml
+state:
+  # Load from files (JSON or YAML)
+  fixtures:
+    - file: testdata/setup.json    # path relative to test file
+      target: sessions             # store name
+
+  # Inline seed data
+  seed:
+    store_name:
+      key1: value1
+      key2:
+        nested: data
+```
+
+### Sequence Steps
+
+When `sequence:` is present (instead of `trigger:`), the harness executes each
+step in order. State persists across all steps — the same harness instance is
+reused throughout the sequence.
+
+```yaml
+sequence:
+  - name: step_display_name       # for test output
+    pipeline: pipeline-name        # which pipeline to execute
+    trigger:                       # trigger data for this step
+      type: http                   # or: pipeline, eventbus, scheduler
+      method: POST
+      path: /api/action
+      body: { key: value }
+    assertions:
+      - step: step_name            # assert step output
+        output: { field: value }
+      - state:                     # assert state store contents
+          store_name:
+            key: expected_value
+```
+
+### Tips for Stateful Tests
+
+- **Seed only what matters** — don't replicate your entire database schema; seed
+  the specific keys your pipeline reads/writes.
+- **Assert incrementally** — check state after each sequence step, not just at
+  the end. This pinpoints exactly which step broke the state.
+- **Use fixtures for complex state** — if your initial state is more than ~10
+  lines, put it in a JSON file and use `fixtures:`.
+- **State stores are isolated per test** — each `t.Run` subtest gets its own
+  StateStore, so tests don't interfere with each other.
