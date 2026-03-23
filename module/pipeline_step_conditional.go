@@ -57,11 +57,15 @@ func (s *ConditionalStep) Name() string { return s.name }
 
 // Execute resolves the field value and determines the next step.
 func (s *ConditionalStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
-	// Build a template expression from the field path. If any segment
-	// contains a hyphen (e.g., "steps.get-company.found"), use the
-	// index function so Go's template parser doesn't treat '-' as
-	// subtraction.
-	tmplExpr := buildFieldTemplate(s.field)
+	// Resolve the field value. If the field already contains template
+	// delimiters ({{ }}), use it as-is. Otherwise, build a template
+	// expression from the dot-separated field path.
+	var tmplExpr string
+	if strings.Contains(s.field, "{{") {
+		tmplExpr = s.field
+	} else {
+		tmplExpr = buildFieldTemplate(s.field)
+	}
 	resolved, err := s.tmpl.Resolve(tmplExpr, pc)
 	if err != nil {
 		return nil, fmt.Errorf("conditional step %q: failed to resolve field %q: %w", s.name, s.field, err)

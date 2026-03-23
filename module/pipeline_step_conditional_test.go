@@ -193,3 +193,62 @@ func TestConditionalStep_DoesNotStop(t *testing.T) {
 		t.Error("conditional step should not set Stop")
 	}
 }
+
+func TestConditionalStep_FieldWithTemplateDelimiters(t *testing.T) {
+	factory := NewConditionalStepFactory()
+	step, err := factory("route-event", map[string]any{
+		"field": `{{ index .steps "verify" "event_type" }}`,
+		"routes": map[string]any{
+			"invoice.paid":           "handle_payment",
+			"charge.dispute.created": "handle_dispute",
+		},
+		"default": "ack",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := &PipelineContext{
+		Current: map[string]any{},
+		StepOutputs: map[string]map[string]any{
+			"verify": {"event_type": "invoice.paid"},
+		},
+	}
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if result.NextStep != "handle_payment" {
+		t.Errorf("expected next step 'handle_payment', got %q", result.NextStep)
+	}
+}
+
+func TestConditionalStep_FieldWithTemplateDelimiters_Default(t *testing.T) {
+	factory := NewConditionalStepFactory()
+	step, err := factory("route-event", map[string]any{
+		"field": `{{ index .steps "verify" "event_type" }}`,
+		"routes": map[string]any{
+			"invoice.paid": "handle_payment",
+		},
+		"default": "ack",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := &PipelineContext{
+		Current: map[string]any{},
+		StepOutputs: map[string]map[string]any{
+			"verify": {"event_type": "unknown.event"},
+		},
+	}
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if result.NextStep != "ack" {
+		t.Errorf("expected default route 'ack', got %q", result.NextStep)
+	}
+}
