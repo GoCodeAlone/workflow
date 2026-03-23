@@ -37,24 +37,32 @@ import (
 	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
 	pluginsm "github.com/GoCodeAlone/workflow/plugins/statemachine"
 	pluginstorage "github.com/GoCodeAlone/workflow/plugins/storage"
+	"github.com/GoCodeAlone/workflow/wftest/bdd"
 	"gopkg.in/yaml.v3"
 )
 
 func runTest(args []string) error {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	verbose := fs.Bool("v", false, "Verbose output (print each assertion)")
+	coverage := fs.Bool("coverage", false, "Print pipeline + scenario coverage report (requires <config> <features-dir>)")
+	strict := fs.Bool("strict", false, "Fail if any pipelines are uncovered (with --coverage)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl test [options] <file_or_dir> [file_or_dir ...]
 
-Run YAML-based workflow integration tests.
+Run YAML-based workflow integration tests or report BDD coverage.
 
 Each *_test.yaml file defines a workflow config and a set of named test cases.
 Results are printed as PASS/FAIL with timing. Exit code is non-zero on failure.
+
+BDD .feature files are detected automatically. They must be run via go test
+using the wftest/bdd package (see: wfctl test --help-bdd for details).
 
 Examples:
   wfctl test tests/
   wfctl test tests/pipeline_test.yaml
   wfctl test -v tests/
+  wfctl test --coverage config.yaml features/
+  wfctl test --coverage --strict config.yaml features/
 
 Options:
 `)
@@ -70,36 +78,58 @@ Options:
 		return fmt.Errorf("at least one file or directory is required")
 	}
 
-	// Collect all *_test.yaml files from the given targets.
-	var files []string
+	// Coverage mode: static pipeline + scenario coverage analysis.
+	if *coverage {
+		return runBDDCoverage(targets, *strict)
+	}
+
+	// Separate YAML test files from .feature files.
+	var yamlFiles []string
+	var featureFiles []string
 	for _, target := range targets {
 		info, err := os.Stat(target)
 		if err != nil {
 			return fmt.Errorf("cannot access %s: %w", target, err)
 		}
 		if info.IsDir() {
-			matches, err := filepath.Glob(filepath.Join(target, "*_test.yaml"))
+			yMatches, err := filepath.Glob(filepath.Join(target, "*_test.yaml"))
 			if err != nil {
 				return fmt.Errorf("glob %s: %w", target, err)
 			}
-			files = append(files, matches...)
+			yamlFiles = append(yamlFiles, yMatches...)
+
+			fMatches, err := filepath.Glob(filepath.Join(target, "*.feature"))
+			if err != nil {
+				return fmt.Errorf("glob %s: %w", target, err)
+			}
+			featureFiles = append(featureFiles, fMatches...)
+		} else if strings.HasSuffix(target, ".feature") {
+			featureFiles = append(featureFiles, target)
 		} else {
-			files = append(files, target)
+			yamlFiles = append(yamlFiles, target)
 		}
 	}
 
-	if len(files) == 0 {
-		fmt.Println("No *_test.yaml files found.")
+	// Feature files require go test — print guidance.
+	if len(featureFiles) > 0 {
+		printBDDGuidance(featureFiles)
+	}
+
+	if len(yamlFiles) == 0 && len(featureFiles) == 0 {
+		fmt.Println("No *_test.yaml or *.feature files found.")
+		return nil
+	}
+	if len(yamlFiles) == 0 {
 		return nil
 	}
 
-	// Run all files and collect results.
+	// Run all YAML test files and collect results.
 	var (
 		totalPass int
 		totalFail int
 	)
 
-	for _, f := range files {
+	for _, f := range yamlFiles {
 		pass, fail, err := runTestFile(f, *verbose)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s: %v\n", f, err)
@@ -111,7 +141,7 @@ Options:
 	}
 
 	// Print summary when more than one file was processed.
-	if len(files) > 1 {
+	if len(yamlFiles) > 1 {
 		fmt.Printf("\n--- Summary ---\n")
 		fmt.Printf("  %d passed, %d failed\n", totalPass, totalFail)
 	}
@@ -120,6 +150,84 @@ Options:
 		return fmt.Errorf("%d test(s) failed", totalFail)
 	}
 	return nil
+}
+
+// runBDDCoverage performs static pipeline + scenario coverage analysis.
+// Expects exactly 2 positional args: <config-file> <features-dir>.
+func runBDDCoverage(args []string, strict bool) error {
+	if len(args) != 2 {
+		return fmt.Errorf("--coverage requires exactly 2 arguments: <config-file> <features-dir>\n  example: wfctl test --coverage config.yaml features/")
+	}
+	configPath := args[0]
+	featureDir := args[1]
+
+	report, err := bdd.CalculateCoverage(configPath, featureDir)
+	if err != nil {
+		return fmt.Errorf("coverage: %w", err)
+	}
+
+	covered := len(report.CoveredPipelines)
+	total := report.TotalPipelines
+	pct := 0.0
+	if total > 0 {
+		pct = float64(covered) / float64(total) * 100
+	}
+	fmt.Printf("\nPipeline Coverage: %d/%d (%.1f%%)\n", covered, total, pct)
+
+	if covered > 0 {
+		fmt.Println("\nCOVERED:")
+		for _, e := range report.CoveredPipelines {
+			tag := fmt.Sprintf("(%s)", e.Via)
+			fmt.Printf("  %-36s %s:%d %s\n", e.Pipeline, filepath.Base(e.FeatureFile), e.Line, tag)
+		}
+	}
+	if len(report.UncoveredPipelines) > 0 {
+		fmt.Println("\nUNCOVERED:")
+		for _, name := range report.UncoveredPipelines {
+			fmt.Printf("  %s\n", name)
+		}
+	}
+
+	fmt.Printf("\nScenario Coverage:\n")
+	fmt.Printf("  Total:     %d\n", report.TotalScenarios)
+	if report.TotalScenarios > 0 {
+		fmt.Printf("  With pipeline: %d (%.1f%%)\n",
+			report.ImplementedScenarios,
+			float64(report.ImplementedScenarios)/float64(report.TotalScenarios)*100)
+		fmt.Printf("  Without:       %d\n", report.UndefinedScenarios)
+	}
+
+	if strict && len(report.UncoveredPipelines) > 0 {
+		return fmt.Errorf("strict: %d pipeline(s) have no feature coverage: %s",
+			len(report.UncoveredPipelines), strings.Join(report.UncoveredPipelines, ", "))
+	}
+	return nil
+}
+
+// printBDDGuidance prints instructions for running .feature files via go test.
+func printBDDGuidance(featureFiles []string) {
+	fmt.Printf("Found %d .feature file(s) — BDD tests must be run via go test.\n", len(featureFiles))
+	fmt.Println()
+	fmt.Println("To run BDD feature tests, create a Go test file in your package:")
+	fmt.Println()
+	fmt.Println(`  // features_test.go`)
+	fmt.Println(`  package myapp_test`)
+	fmt.Println()
+	fmt.Println(`  import (`)
+	fmt.Println(`      "testing"`)
+	fmt.Println(`      "github.com/GoCodeAlone/workflow/wftest/bdd"`)
+	fmt.Println(`  )`)
+	fmt.Println()
+	fmt.Println(`  func TestFeatures(t *testing.T) {`)
+	fmt.Println(`      bdd.RunFeatures(t, "features/",`)
+	fmt.Println(`          bdd.WithConfig("config.yaml"),`)
+	fmt.Println(`      )`)
+	fmt.Println(`  }`)
+	fmt.Println()
+	fmt.Println("Then run:  go test ./... -run TestFeatures")
+	fmt.Println()
+	fmt.Println("For coverage analysis:  wfctl test --coverage config.yaml features/")
+	fmt.Println()
 }
 
 // testFile mirrors wftest.TestFile without the testing.T dependency.

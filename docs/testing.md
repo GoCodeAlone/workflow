@@ -562,3 +562,204 @@ sequence:
   lines, put it in a JSON file and use `fixtures:`.
 - **State stores are isolated per test** — each `t.Run` subtest gets its own
   StateStore, so tests don't interfere with each other.
+
+---
+
+## BDD / Gherkin Tests
+
+The `wftest/bdd` package provides pre-built [Gherkin](https://cucumber.io/docs/gherkin/)
+step definitions backed by the `wftest.Harness`. Each scenario creates a fresh
+harness so scenarios are fully isolated.
+
+### Quick Start
+
+Create a Go test file that calls `bdd.RunFeatures`:
+
+```go
+// features_test.go
+package myapp_test
+
+import (
+    "testing"
+    "github.com/GoCodeAlone/workflow/wftest/bdd"
+)
+
+func TestFeatures(t *testing.T) {
+    bdd.RunFeatures(t, "features/",
+        bdd.WithConfig("config.yaml"),
+    )
+}
+```
+
+Write feature files in `features/`:
+
+```gherkin
+# features/greet.feature
+Feature: Greeting pipeline
+
+  @pipeline:greet
+  Scenario: Greet a user
+    Given the workflow engine is loaded with "config.yaml"
+    When I execute pipeline "greet" with:
+      | name | alice |
+    Then the pipeline should succeed
+    And the pipeline output "message" should be "hello alice"
+```
+
+Run with: `go test ./... -run TestFeatures`
+
+### Pre-Built Step Definitions
+
+#### Engine Setup (`Given`)
+
+| Step | Description |
+|------|-------------|
+| `the workflow engine is loaded with "path"` | Load config from a YAML file |
+| `the workflow engine is loaded with config:` | Load inline YAML docstring |
+
+#### Mocking (`Given`)
+
+| Step | Description |
+|------|-------------|
+| `step "type" is mocked to return:` | Mock a step type with a key/value table |
+| `step "type" returns JSON:` | Mock a step type with a JSON docstring |
+| `module "name" "type" is mocked` | Mock a module in the service registry |
+
+```gherkin
+Given step "step.db_query" is mocked to return:
+  | user_id | 42    |
+  | name    | alice |
+
+Given step "step.ai_call" returns JSON:
+  """json
+  {"summary": "looks good", "score": 0.95}
+  """
+```
+
+#### HTTP Triggers (`When`)
+
+| Step | Description |
+|------|-------------|
+| `I GET "path"` | GET request |
+| `I GET "path" with header "name" = "value"` | GET with custom header |
+| `I POST "path" with JSON:` | POST with JSON body (docstring) |
+| `I POST "path" with:` | POST with table body |
+| `I PUT "path" with JSON:` | PUT with JSON body (docstring) |
+| `I DELETE "path"` | DELETE request |
+
+HTTP steps require an `http.router` module in the config:
+
+```gherkin
+Given the workflow engine is loaded with config:
+  """yaml
+  modules:
+    - name: router
+      type: http.router
+  pipelines:
+    users-list:
+      trigger:
+        type: http
+        config:
+          method: GET
+          path: /api/users
+      steps: [...]
+  """
+When I GET "/api/users"
+Then the response status should be 200
+```
+
+#### Pipeline / Event Triggers (`When`)
+
+| Step | Description |
+|------|-------------|
+| `I execute pipeline "name"` | Execute a pipeline with no input |
+| `I execute pipeline "name" with:` | Execute with key/value table as input |
+| `I fire event "topic" with:` | Fire an eventbus event |
+| `I fire schedule "name"` | Fire a named scheduler trigger |
+
+#### State Setup (`Given`)
+
+| Step | Description |
+|------|-------------|
+| `state "store" is seeded from "path"` | Load fixture JSON file into a state store |
+| `state "store" has key "key" with:` | Inline seed a state store key with a table |
+
+#### Assertions (`Then`)
+
+| Step | Description |
+|------|-------------|
+| `the pipeline should succeed` | Assert no pipeline error |
+| `the pipeline should fail` | Assert a pipeline error occurred |
+| `the pipeline output "key" should be "value"` | Assert a pipeline output field |
+| `step "name" should have been executed` | Assert step ran |
+| `step "name" should not have been executed` | Assert step did not run |
+| `step "name" output "key" should be "value"` | Assert step output string |
+| `step "name" output "key" should be 42` | Assert step output integer |
+| `the response status should be 200` | Assert HTTP status code |
+| `the response body should contain "text"` | Assert HTTP body substring |
+| `the response JSON "path" should be "value"` | Assert JSON body dot-path value |
+| `the response JSON "path" should not be empty` | Assert JSON body dot-path non-empty |
+| `the response header "name" should be "value"` | Assert HTTP response header |
+| `state "store" key "k" field "f" should be "value"` | Assert state store field (string) |
+| `state "store" key "k" field "f" should be 42` | Assert state store field (integer) |
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `bdd.WithConfig(path)` | Default config file applied to every scenario |
+| `bdd.WithYAML(yaml)` | Default inline YAML applied to every scenario |
+| `bdd.WithMockStep(name, handler)` | Default mock step applied to every scenario |
+| `bdd.Strict()` | Fail on undefined or pending steps |
+
+### Strict Mode
+
+In strict mode, undefined or pending steps cause the suite to fail. In the
+default (lenient) mode, they are logged as warnings and the scenario is skipped.
+
+```go
+func TestFeatures(t *testing.T) {
+    bdd.RunFeatures(t, "features/",
+        bdd.WithConfig("config.yaml"),
+        bdd.Strict(), // fail on undefined/pending steps
+    )
+}
+```
+
+### Pipeline Coverage
+
+`wfctl test --coverage` performs static analysis of your app config and feature
+directory to report which pipelines have BDD test coverage.
+
+```
+$ wfctl test --coverage config.yaml features/
+
+Pipeline Coverage: 3/5 (60.0%)
+
+COVERED:
+  greet                                greet.feature:8 (tag)
+  users-list                           api.feature:12 (route)
+  users-create                         api.feature:24 (route)
+
+UNCOVERED:
+  payment-refund
+  admin-report
+
+Scenario Coverage:
+  Total:     12
+  With pipeline: 10 (83.3%)
+  Without:       2
+```
+
+Pipelines are linked to features in two ways:
+
+- **Explicit tag**: `@pipeline:name` on a scenario
+- **Implicit route match**: `When I POST "/api/path"` steps matched against
+  pipeline HTTP trigger configs in the config file
+
+Use `--strict` with `--coverage` to fail if any pipelines are uncovered:
+
+```
+$ wfctl test --coverage --strict config.yaml features/
+Error: strict: 2 pipeline(s) have no feature coverage: payment-refund, admin-report
+```
