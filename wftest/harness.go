@@ -173,6 +173,21 @@ func (h *Harness) getHTTPHandler() http.Handler {
 	return h.httpHandler
 }
 
+// RecordStep registers a new Recorder for the given step type and returns it.
+// It overrides any previously registered factory for stepType, including real
+// implementations loaded by plugins. Unlike MockStep (used at construction via
+// New), RecordStep can be called after the harness is created:
+//
+//	h := wftest.New(t, wftest.WithYAML(`...`))
+//	rec := h.RecordStep("step.db_query")
+//	h.ExecutePipeline("fetch", nil)
+//	t.Logf("called %d times", rec.CallCount())
+func (h *Harness) RecordStep(stepType string) *Recorder {
+	rec := NewRecorder()
+	h.engine.AddStepType(stepType, newMockStepFactory(rec))
+	return rec
+}
+
 // ExecutePipeline runs a named pipeline with the given trigger data.
 // StepResults in the returned Result is populated with per-step outputs.
 func (h *Harness) ExecutePipeline(name string, data map[string]any) *Result {

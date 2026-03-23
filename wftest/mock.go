@@ -30,12 +30,19 @@ func Returns(output map[string]any) StepHandler {
 	})
 }
 
-// Call records one invocation of a mock step.
-type Call struct {
+// StepContext holds the full execution context passed to a mock step handler.
+type StepContext struct {
+	// Ctx is the context from the pipeline execution.
+	Ctx context.Context
 	// Config is the step's YAML config from BuildFromConfig.
 	Config map[string]any
 	// Input is the merged pipeline state (pc.Current) at execution time.
 	Input map[string]any
+}
+
+// Call records one invocation of a mock step.
+type Call struct {
+	StepContext
 }
 
 // Recorder is a StepHandler that records every call made to a mock step.
@@ -59,10 +66,10 @@ func (r *Recorder) WithOutput(output map[string]any) *Recorder {
 }
 
 // Handle records the call and returns configured output (or empty map).
-func (r *Recorder) Handle(_ context.Context, config, input map[string]any) (map[string]any, error) {
+func (r *Recorder) Handle(ctx context.Context, config, input map[string]any) (map[string]any, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.calls = append(r.calls, Call{Config: config, Input: input})
+	r.calls = append(r.calls, Call{StepContext: StepContext{Ctx: ctx, Config: config, Input: input}})
 	if r.output != nil {
 		return r.output, nil
 	}

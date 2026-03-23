@@ -59,6 +59,8 @@ workflows:
         description: "Generate documentation from workflow configs (generate: produce Markdown + Mermaid diagrams)"
       - name: editor-schemas
         description: "Export module schemas and type coercion rules for the visual editor"
+      - name: test
+        description: "Run *_test.yaml integration tests against workflow configs"
 
 # Each command is expressed as a workflow pipeline triggered by the CLI.
 # The pipeline delegates to the registered Go implementation via step.cli_invoke,
@@ -374,3 +376,14 @@ pipelines:
         config:
           command: editor-schemas
 
+
+  cmd-test:
+    trigger:
+      type: cli
+      config:
+        command: test
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: test
