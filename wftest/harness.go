@@ -1,6 +1,7 @@
 package wftest
 
 import (
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -39,10 +40,14 @@ func (d *discardLogger) Debug(msg string, args ...any) {}
 
 // Harness is an in-process workflow engine for integration testing.
 type Harness struct {
-	t          *testing.T
-	yamlConfig string
-	configPath string
-	engine     *workflow.StdEngine
+	t            *testing.T
+	yamlConfig   string
+	configPath   string
+	engine       *workflow.StdEngine
+	extraPlugins []plugin.EnginePlugin
+	serverMode   bool
+	httpServer   *httptest.Server
+	baseURL      string
 }
 
 // New creates a test harness with the given options.
@@ -53,6 +58,11 @@ func New(t *testing.T, opts ...Option) *Harness {
 		opt(h)
 	}
 	h.init()
+	t.Cleanup(func() {
+		if h.httpServer != nil {
+			h.httpServer.Close()
+		}
+	})
 	return h
 }
 
@@ -64,6 +74,11 @@ func (h *Harness) init() {
 
 	for _, p := range allBuiltinPlugins() {
 		if err := h.engine.LoadPlugin(p); err != nil {
+			h.t.Fatalf("wftest: LoadPlugin(%s) failed: %v", p.Name(), err)
+		}
+	}
+	for _, p := range h.extraPlugins {
+		if err := h.engine.LoadPluginWithOverride(p); err != nil {
 			h.t.Fatalf("wftest: LoadPlugin(%s) failed: %v", p.Name(), err)
 		}
 	}
@@ -83,18 +98,33 @@ func (h *Harness) init() {
 			h.t.Fatalf("wftest: BuildFromConfig failed: %v", err)
 		}
 	}
+
+	if h.serverMode {
+		h.startServer()
+	}
 }
 
 // ExecutePipeline runs a named pipeline with the given trigger data.
+// StepResults in the returned Result is populated with per-step outputs.
 func (h *Harness) ExecutePipeline(name string, data map[string]any) *Result {
 	h.t.Helper()
 	ctx := h.t.Context()
 	start := time.Now()
-	output, err := h.engine.ExecutePipeline(ctx, name, data)
+	pc, err := h.engine.ExecutePipelineContext(ctx, name, data)
+	if err != nil {
+		return &Result{Error: err, Duration: time.Since(start)}
+	}
+
+	// Prefer explicit pipeline output if step.pipeline_output was used.
+	output := pc.Current
+	if pipeOut, ok := pc.Metadata["_pipeline_output"].(map[string]any); ok {
+		output = pipeOut
+	}
+
 	return &Result{
-		Output:   output,
-		Error:    err,
-		Duration: time.Since(start),
+		Output:      output,
+		StepResults: pc.StepOutputs,
+		Duration:    time.Since(start),
 	}
 }
 

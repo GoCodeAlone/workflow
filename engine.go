@@ -712,6 +712,23 @@ func (e *StdEngine) ExecutePipeline(ctx context.Context, name string, data map[s
 	return pc.Current, nil
 }
 
+// ExecutePipelineContext runs a named pipeline and returns the full PipelineContext,
+// including StepOutputs for each step. This is intended for test harnesses that need
+// per-step output inspection. For production callers, use ExecutePipeline instead.
+func (e *StdEngine) ExecutePipelineContext(ctx context.Context, name string, data map[string]any) (*interfaces.PipelineContext, error) {
+	pipeline, ok := e.pipelineRegistry[name]
+	if !ok {
+		return nil, fmt.Errorf("pipeline %q not found", name)
+	}
+
+	pc, err := pipeline.Execute(ctx, data)
+	if err != nil {
+		return nil, fmt.Errorf("pipeline %q: %w", name, err)
+	}
+
+	return pc, nil
+}
+
 // recordWorkflowMetrics is defined in engine_module_bridge.go.
 // It records execution metrics via interfaces.MetricsRecorder so that engine.go
 // need not reference the concrete *module.MetricsCollector type.

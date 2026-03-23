@@ -37,6 +37,16 @@ func (r *Result) StepCount() int {
 	return len(r.StepResults)
 }
 
+// StepOutputs returns all per-step output maps keyed by step name.
+func (r *Result) StepOutputs() map[string]map[string]any {
+	return r.StepResults
+}
+
+// Header returns the value of the named HTTP response header.
+func (r *Result) Header(key string) string {
+	return r.Headers[key]
+}
+
 // JSON parses the HTTP response body as JSON.
 func (r *Result) JSON() map[string]any {
 	if r.RawBody == nil {
