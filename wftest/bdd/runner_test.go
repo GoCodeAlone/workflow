@@ -13,3 +13,15 @@ func TestRunFeatures_Minimal(t *testing.T) {
 func TestRunFeatures_Mock(t *testing.T) {
 	bdd.RunFeatures(t, "testdata/mock.feature")
 }
+
+func TestRunFeatures_HTTP(t *testing.T) {
+	bdd.RunFeatures(t, "testdata/http.feature")
+}
+
+func TestRunFeatures_Triggers(t *testing.T) {
+	bdd.RunFeatures(t, "testdata/triggers.feature")
+}
+
+func TestRunFeatures_Assertions(t *testing.T) {
+	bdd.RunFeatures(t, "testdata/assertions.feature")
+}
