@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/GoCodeAlone/modular"
 )
@@ -75,7 +76,12 @@ func (s *BranchStep) Name() string { return s.name }
 // sub-steps sequentially on the shared PipelineContext, and returns
 // NextStep=merge_step so the parent executor jumps to the merge point.
 func (s *BranchStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
-	tmplExpr := buildFieldTemplate(s.field)
+	var tmplExpr string
+	if strings.Contains(s.field, "{{") {
+		tmplExpr = s.field
+	} else {
+		tmplExpr = buildFieldTemplate(s.field)
+	}
 	resolved, err := s.tmpl.Resolve(tmplExpr, pc)
 	if err != nil {
 		return nil, fmt.Errorf("branch step %q: failed to resolve field %q: %w", s.name, s.field, err)
