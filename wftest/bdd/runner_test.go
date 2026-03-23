@@ -25,3 +25,7 @@ func TestRunFeatures_Triggers(t *testing.T) {
 func TestRunFeatures_Assertions(t *testing.T) {
 	bdd.RunFeatures(t, "testdata/assertions.feature")
 }
+
+func TestRunFeatures_State(t *testing.T) {
+	bdd.RunFeatures(t, "testdata/state.feature")
+}
