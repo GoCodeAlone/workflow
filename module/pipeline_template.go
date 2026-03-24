@@ -306,39 +306,69 @@ func (te *TemplateEngine) funcMapWithContext(pc *PipelineContext) template.FuncM
 
 	// step accesses step outputs by name and optional nested keys.
 	// Usage: {{ step "parse-request" "path_params" "id" }}
-	// Returns nil if the step doesn't exist, a key is missing, or an
-	// intermediate value is not a map (consistent with missingkey=zero).
-	fm["step"] = func(name string, keys ...string) any {
+	// In strict mode (pc.StrictTemplates true), returns an error when the step
+	// doesn't exist or a key is missing. In default mode, returns nil (consistent
+	// with missingkey=zero behaviour) and a WARN is emitted by Resolve via the
+	// missingkey=error detection pass.
+	fm["step"] = func(name string, keys ...string) (any, error) {
 		stepMap, ok := pc.StepOutputs[name]
 		if !ok || stepMap == nil {
-			return nil
+			if pc.StrictTemplates {
+				return nil, fmt.Errorf("step %q not found in pipeline context", name)
+			}
+			return nil, nil //nolint:nilnil
 		}
 		var val any = stepMap
 		for _, key := range keys {
 			m, ok := val.(map[string]any)
 			if !ok {
-				return nil
+				if pc.StrictTemplates {
+					return nil, fmt.Errorf("step %q: value at key path is not a map (cannot access key %q)", name, key)
+				}
+				return nil, nil //nolint:nilnil
 			}
-			val = m[key]
+			v, exists := m[key]
+			if !exists {
+				if pc.StrictTemplates {
+					return nil, fmt.Errorf("step %q: key %q not found", name, key)
+				}
+				return nil, nil //nolint:nilnil
+			}
+			val = v
 		}
-		return val
+		return val, nil
 	}
 
 	// trigger accesses trigger data by nested keys.
 	// Usage: {{ trigger "path_params" "id" }}
-	fm["trigger"] = func(keys ...string) any {
+	// In strict mode (pc.StrictTemplates true), returns an error when a key is
+	// missing. In default mode, returns nil (consistent with missingkey=zero).
+	fm["trigger"] = func(keys ...string) (any, error) {
 		if pc.TriggerData == nil {
-			return nil
+			if pc.StrictTemplates && len(keys) > 0 {
+				return nil, fmt.Errorf("trigger data is nil; cannot access key %q", keys[0])
+			}
+			return nil, nil //nolint:nilnil
 		}
 		var val any = map[string]any(pc.TriggerData)
 		for _, key := range keys {
 			m, ok := val.(map[string]any)
 			if !ok {
-				return nil
+				if pc.StrictTemplates {
+					return nil, fmt.Errorf("trigger: value at key path is not a map (cannot access key %q)", key)
+				}
+				return nil, nil //nolint:nilnil
 			}
-			val = m[key]
+			v, exists := m[key]
+			if !exists {
+				if pc.StrictTemplates {
+					return nil, fmt.Errorf("trigger: key %q not found", key)
+				}
+				return nil, nil //nolint:nilnil
+			}
+			val = v
 		}
-		return val
+		return val, nil
 	}
 
 	return fm
@@ -355,13 +385,19 @@ func isMissingKeyError(err error) bool {
 // Resolve evaluates a template string against a PipelineContext.
 // If the string does not contain {{ }}, it is returned as-is.
 //
-// Missing key behaviour:
+// Missing key behaviour (direct map access via {{ .steps.foo.bar }}):
 //   - When pc.StrictTemplates is true (Option A), any reference to a missing
-//     map key causes an immediate error, surfacing typos as failures.
+//     map key causes an immediate error via missingkey=error, surfacing typos
+//     as failures.
 //   - When pc.StrictTemplates is false (the default, Option C), a missing key
 //     resolves to the zero value AND a WARN log is emitted via pc.Logger (or
 //     slog.Default() when no logger is set) so that the silent failure is
 //     visible without breaking existing pipelines.
+//
+// NOTE: Strict template mode applies to both direct map key resolution
+// (missingkey=error) and the step/trigger helper functions. Missing keys
+// accessed via {{ step "name" "field" }} or {{ trigger "key" }} also return
+// an error in strict mode.
 func (te *TemplateEngine) Resolve(tmplStr string, pc *PipelineContext) (string, error) {
 	if !strings.Contains(tmplStr, "{{") {
 		return tmplStr, nil
@@ -387,7 +423,8 @@ func (te *TemplateEngine) Resolve(tmplStr string, pc *PipelineContext) (string, 
 	}
 
 	// Default mode (Option C): try with missingkey=error to detect missing
-	// keys, log a warning, then fall back to missingkey=zero so the pipeline
+	// keys, log a warning (without template contents to avoid leaking
+	// secrets/PII), then fall back to missingkey=zero so the pipeline
 	// continues with the zero value (preserving backward compatibility).
 	var buf bytes.Buffer
 	if execErr := t.Option("missingkey=error").Execute(&buf, data); execErr != nil {
@@ -395,13 +432,20 @@ func (te *TemplateEngine) Resolve(tmplStr string, pc *PipelineContext) (string, 
 			return "", fmt.Errorf("template exec error: %w", execErr)
 		}
 
-		// Log a warning about the missing key so developers can spot typos.
+		// Log a warning about the missing key so developers can spot typos,
+		// without including the full template text (which may contain secrets).
 		logger := slog.Default()
 		if pc != nil && pc.Logger != nil {
 			logger = pc.Logger
 		}
+		pipelineName := "<unknown>"
+		if pc != nil && pc.Metadata != nil {
+			if v, ok := pc.Metadata["pipeline"]; ok {
+				pipelineName = fmt.Sprint(v)
+			}
+		}
 		logger.Warn("template resolved missing key to zero value",
-			"template", tmplStr,
+			"pipeline", pipelineName,
 			"error", execErr,
 		)
 

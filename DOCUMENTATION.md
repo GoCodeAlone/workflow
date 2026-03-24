@@ -434,7 +434,7 @@ value: '{{ index .steps "parse-request" "path_params" "id" }}'
 By default, template expressions that reference a missing map key (e.g. a typo in a step field name) resolve to the zero value silently — but the engine now logs a **WARN** message to make the problem visible:
 
 ```
-WARN template resolved missing key to zero value template="{{ .steps.auth.affilate_id }}" error="map has no entry for key \"affilate_id\""
+WARN template resolved missing key to zero value pipeline=my-pipeline error="..."
 ```
 
 To turn the warning into a hard error, set `strict_templates: true` on the pipeline:
@@ -455,6 +455,8 @@ pipelines:
 |------|-------------------|--------------------|
 | Default | `false` | Zero value (`<no value>`) + WARN log |
 | Strict | `true` | Step returns an error |
+
+Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) and the `step`/`trigger` helper functions (`{{ step "auth" "field" }}`). A missing key via either syntax will fail the step when `strict_templates: true` is set.
 
 `wfctl template validate --config workflow.yaml` lints template expressions and warns on undefined step references and forward references. Use `strict_templates: true` in the pipeline config to catch field-level typos at runtime.
 ### Infrastructure
