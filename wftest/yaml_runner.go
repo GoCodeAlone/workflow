@@ -200,6 +200,20 @@ func fireTrigger(t *testing.T, h *Harness, tc *TestCase) *Result {
 		}
 		return h.POST(tc.Trigger.Path, body, reqOpts...)
 
+	case "schedule":
+		name := tc.Trigger.Name
+		if name == "" {
+			t.Fatal("RunYAMLTests: trigger.name is required for schedule triggers")
+		}
+		return h.FireSchedule(name, tc.Trigger.Data)
+
+	case "event", "eventbus":
+		topic := tc.Trigger.Name
+		if topic == "" {
+			t.Fatal("RunYAMLTests: trigger.name (topic) is required for event triggers")
+		}
+		return h.FireEvent(topic, tc.Trigger.Data)
+
 	default:
 		t.Fatalf("RunYAMLTests: unsupported trigger type %q", tc.Trigger.Type)
 		return nil
