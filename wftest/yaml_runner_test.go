@@ -224,12 +224,23 @@ func TestYAMLRunner_StatefulTestData(t *testing.T) {
 func TestYAMLRunner_HTTPPutTrigger(t *testing.T) {
 	tmpDir := t.TempDir()
 	writeFile(t, tmpDir+"/put_test.yaml", `
+yaml: |
+  modules:
+    - name: router
+      type: http.router
+  pipelines:
     update-resource:
       trigger:
         type: http
         config:
           path: /v1/resource/{id}
           method: PUT
+      steps:
+        - name: respond
+          type: step.json_response
+          config:
+            status: 200
+            body:
               updated: true
 tests:
   update-resource:
