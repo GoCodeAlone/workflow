@@ -146,7 +146,7 @@ func (s *PostgresIaCStateStore) Unlock(resourceID string) error {
 func advisoryKey(resourceID string) int64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(resourceID))
-	return int64(h.Sum64())
+	return int64(h.Sum64() & 0x7FFFFFFFFFFFFFFF)
 }
 
 // pgxRealConn wraps the real pgxpool.Pool to satisfy PostgresConn.
