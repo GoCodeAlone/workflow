@@ -190,16 +190,83 @@ func fireTrigger(t *testing.T, h *Harness, tc *TestCase) *Result {
 		return h.GET(path, reqOpts...)
 
 	case "http.post", "post":
+		path := tc.Trigger.Path
+		if path == "" {
+			t.Fatal("RunYAMLTests: trigger.path is required for http triggers")
+		}
 		body := ""
 		if tc.Trigger.Data != nil {
-			b, _ := json.Marshal(tc.Trigger.Data)
+			b, err := json.Marshal(tc.Trigger.Data)
+			if err != nil {
+				t.Fatalf("RunYAMLTests: failed to marshal trigger.data: %v", err)
+			}
 			body = string(b)
 		}
 		var reqOpts []RequestOption
 		for k, v := range tc.Trigger.Headers {
 			reqOpts = append(reqOpts, Header(k, v))
 		}
-		return h.POST(tc.Trigger.Path, body, reqOpts...)
+		return h.POST(path, body, reqOpts...)
+
+	case "http.put", "put":
+		path := tc.Trigger.Path
+		if path == "" {
+			t.Fatal("RunYAMLTests: trigger.path is required for http triggers")
+		}
+		body := ""
+		if tc.Trigger.Data != nil {
+			b, err := json.Marshal(tc.Trigger.Data)
+			if err != nil {
+				t.Fatalf("RunYAMLTests: failed to marshal trigger.data: %v", err)
+			}
+			body = string(b)
+		}
+		var reqOpts []RequestOption
+		for k, v := range tc.Trigger.Headers {
+			reqOpts = append(reqOpts, Header(k, v))
+		}
+		return h.PUT(path, body, reqOpts...)
+
+	case "http.patch", "patch":
+		path := tc.Trigger.Path
+		if path == "" {
+			t.Fatal("RunYAMLTests: trigger.path is required for http triggers")
+		}
+		body := ""
+		if tc.Trigger.Data != nil {
+			b, err := json.Marshal(tc.Trigger.Data)
+			if err != nil {
+				t.Fatalf("RunYAMLTests: failed to marshal trigger.data: %v", err)
+			}
+			body = string(b)
+		}
+		var reqOpts []RequestOption
+		for k, v := range tc.Trigger.Headers {
+			reqOpts = append(reqOpts, Header(k, v))
+		}
+		return h.PATCH(path, body, reqOpts...)
+
+	case "http.delete", "delete":
+		path := tc.Trigger.Path
+		if path == "" {
+			t.Fatal("RunYAMLTests: trigger.path is required for http triggers")
+		}
+		var reqOpts []RequestOption
+		for k, v := range tc.Trigger.Headers {
+			reqOpts = append(reqOpts, Header(k, v))
+		}
+		return h.DELETE(path, reqOpts...)
+
+	case "http.head", "head":
+		path := tc.Trigger.Path
+		if path == "" {
+			t.Fatal("RunYAMLTests: trigger.path is required for http triggers")
+		}
+		var reqOpts []RequestOption
+		for k, v := range tc.Trigger.Headers {
+			reqOpts = append(reqOpts, Header(k, v))
+		}
+		return h.HEAD(path, reqOpts...)
 
 	case "schedule":
 		name := tc.Trigger.Name

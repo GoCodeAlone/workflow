@@ -221,6 +221,170 @@ func TestYAMLRunner_StatefulTestData(t *testing.T) {
 	wftest.RunYAMLTests(t, "testdata/stateful_test.yaml")
 }
 
+func TestYAMLRunner_HTTPPutTrigger(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFile(t, tmpDir+"/put_test.yaml", `
+yaml: |
+  modules:
+    - name: router
+      type: http.router
+  pipelines:
+    update-resource:
+      trigger:
+        type: http
+        config:
+          path: /v1/resource/{id}
+          method: PUT
+      steps:
+        - name: respond
+          type: step.json_response
+          config:
+            status: 200
+            body:
+              updated: true
+tests:
+  update-resource:
+    trigger:
+      type: http.put
+      path: /v1/resource/123
+      data:
+        name: updated
+    assertions:
+      - response:
+          status: 200
+          body: '"updated":true'
+  update-resource-short:
+    trigger:
+      type: put
+      path: /v1/resource/123
+    assertions:
+      - response:
+          status: 200
+`)
+	wftest.RunYAMLTests(t, tmpDir+"/put_test.yaml")
+}
+
+func TestYAMLRunner_HTTPPatchTrigger(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFile(t, tmpDir+"/patch_test.yaml", `
+yaml: |
+  modules:
+    - name: router
+      type: http.router
+  pipelines:
+    patch-resource:
+      trigger:
+        type: http
+        config:
+          path: /v1/resource/{id}
+          method: PATCH
+      steps:
+        - name: respond
+          type: step.json_response
+          config:
+            status: 200
+            body:
+              patched: true
+tests:
+  patch-resource:
+    trigger:
+      type: http.patch
+      path: /v1/resource/123
+      data:
+        field: value
+    assertions:
+      - response:
+          status: 200
+          body: '"patched":true'
+  patch-resource-short:
+    trigger:
+      type: patch
+      path: /v1/resource/123
+    assertions:
+      - response:
+          status: 200
+`)
+	wftest.RunYAMLTests(t, tmpDir+"/patch_test.yaml")
+}
+
+func TestYAMLRunner_HTTPDeleteTrigger(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFile(t, tmpDir+"/delete_test.yaml", `
+yaml: |
+  modules:
+    - name: router
+      type: http.router
+  pipelines:
+    delete-resource:
+      trigger:
+        type: http
+        config:
+          path: /v1/resource/{id}
+          method: DELETE
+      steps:
+        - name: respond
+          type: step.json_response
+          config:
+            status: 204
+tests:
+  delete-resource:
+    trigger:
+      type: http.delete
+      path: /v1/resource/123
+    assertions:
+      - response:
+          status: 204
+  delete-resource-short:
+    trigger:
+      type: delete
+      path: /v1/resource/123
+    assertions:
+      - response:
+          status: 204
+`)
+	wftest.RunYAMLTests(t, tmpDir+"/delete_test.yaml")
+}
+
+func TestYAMLRunner_HTTPHeadTrigger(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFile(t, tmpDir+"/head_test.yaml", `
+yaml: |
+  modules:
+    - name: router
+      type: http.router
+  pipelines:
+    head-resource:
+      trigger:
+        type: http
+        config:
+          path: /v1/resource/{id}
+          method: HEAD
+      steps:
+        - name: respond
+          type: step.json_response
+          config:
+            status: 200
+            body:
+              exists: true
+tests:
+  head-resource:
+    trigger:
+      type: http.head
+      path: /v1/resource/123
+    assertions:
+      - response:
+          status: 200
+  head-resource-short:
+    trigger:
+      type: head
+      path: /v1/resource/123
+    assertions:
+      - response:
+          status: 200
+`)
+	wftest.RunYAMLTests(t, tmpDir+"/head_test.yaml")
+}
+
 func TestYAMLRunner_ResponseJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 	writeFile(t, tmpDir+"/json_test.yaml", `
