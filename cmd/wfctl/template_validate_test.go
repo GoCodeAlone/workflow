@@ -880,7 +880,6 @@ func TestValidateStepOutputFieldRegistry(t *testing.T) {
 	}
 }
 
-
 // --- Output field name validation tests ---
 
 // TestValidateStepOutputField_KnownField checks that a reference to a known output

@@ -242,4 +242,3 @@ func (s *DeployRollingStep) Execute(ctx context.Context, _ *PipelineContext) (*S
 		"batches":          totalBatches,
 	}}, nil
 }
-

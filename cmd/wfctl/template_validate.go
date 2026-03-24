@@ -653,8 +653,8 @@ func hasDynamicOutputs(outputs []schema.InferredOutput) bool {
 func validatePipelineTemplates(pipelineName string, stepsRaw []any, result *templateValidationResult) {
 	// Build ordered step name list and step metadata for schema validation.
 	stepNames := make(map[string]int)             // step name -> index in pipeline
-	stepMeta := make(map[string]pipelineStepMeta) // step name -> type+config
-	stepInfos := make(map[string]stepBuildInfo) // step name -> type and config
+	stepMeta := make(map[string]pipelineStepMeta) // step name -> type+config (used by validateStepOutputField)
+	stepInfos := make(map[string]stepBuildInfo)   // step name -> type and config (used by validateStepRef)
 
 	reg := schema.NewStepSchemaRegistry()
 
@@ -666,21 +666,18 @@ func validatePipelineTemplates(pipelineName string, stepsRaw []any, result *temp
 		name, _ := stepMap["name"].(string)
 		if name == "" {
 			continue
-    }
-    
+		}
+
 		stepNames[name] = i
 		typ, _ := stepMap["type"].(string)
 		cfg, _ := stepMap["config"].(map[string]any)
+		if cfg == nil {
+			cfg = map[string]any{}
+		}
 
-    if cfg == nil {
-      cfg = map[string]any{}
-    }
-
-    stepInfos[name] = stepBuildInfo{stepType: typ, stepConfig: cfg}
+		stepInfos[name] = stepBuildInfo{stepType: typ, stepConfig: cfg}
 		stepMeta[name] = pipelineStepMeta{typ: typ, config: cfg}
 	}
-
-	reg := schema.NewStepSchemaRegistry()
 
 	// Check each step's config for template expressions
 	for i, stepRaw := range stepsRaw {
