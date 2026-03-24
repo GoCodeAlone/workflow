@@ -221,6 +221,164 @@ func TestYAMLRunner_StatefulTestData(t *testing.T) {
 	wftest.RunYAMLTests(t, "testdata/stateful_test.yaml")
 }
 
+func TestYAMLRunner_ResponseJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFile(t, tmpDir+"/json_test.yaml", `
+yaml: |
+  modules:
+    - name: router
+      type: http.router
+  pipelines:
+    hello:
+      trigger:
+        type: http
+        config:
+          path: /hello
+          method: GET
+      steps:
+        - name: respond
+          type: step.json_response
+          config:
+            status: 200
+            body:
+              message: "hello"
+              data:
+                id: "abc123"
+tests:
+  json-path-check:
+    trigger:
+      type: http
+      path: /hello
+    assertions:
+      - response:
+          status: 200
+          json:
+            message: "hello"
+            data.id: "abc123"
+          json_not_empty:
+            - message
+            - data
+          headers:
+            Content-Type: "application/json"
+`)
+	wftest.RunYAMLTests(t, tmpDir+"/json_test.yaml")
+}
+
+func TestRunYAMLTests_ScheduleTrigger(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFile(t, tmpDir+"/schedule_test.yaml", `
+yaml: |
+  pipelines:
+    cleanup-sessions:
+      steps:
+        - name: run
+          type: step.set
+          config:
+            values:
+              status: completed
+tests:
+  cleanup-job:
+    trigger:
+      type: schedule
+      name: cleanup-sessions
+    assertions:
+      - output:
+          status: completed
+`)
+	wftest.RunYAMLTests(t, tmpDir+"/schedule_test.yaml")
+}
+
+func TestRunYAMLTests_ScheduleTriggerWithData(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFile(t, tmpDir+"/schedule_data_test.yaml", `
+yaml: |
+  pipelines:
+    parameterized-job:
+      steps:
+        - name: echo
+          type: step.set
+          config:
+            values:
+              got: "{{ .param1 }}"
+tests:
+  job-with-params:
+    trigger:
+      type: schedule
+      name: parameterized-job
+      data:
+        param1: value1
+    assertions:
+      - output:
+          got: value1
+`)
+	wftest.RunYAMLTests(t, tmpDir+"/schedule_data_test.yaml")
+}
+
+func TestRunYAMLTests_EventTrigger(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFile(t, tmpDir+"/event_test.yaml", `
+yaml: |
+  pipelines:
+    on-submission:
+      trigger:
+        type: eventbus
+        config:
+          topic: forms.submission.created
+      steps:
+        - name: process
+          type: step.set
+          config:
+            values:
+              handled: true
+              form_id: "{{ .form_id }}"
+tests:
+  submission-event:
+    trigger:
+      type: event
+      name: forms.submission.created
+      data:
+        affiliate_id: sampleaff1
+        form_id: form-uuid-1
+    assertions:
+      - output:
+          handled: true
+          form_id: form-uuid-1
+`)
+	wftest.RunYAMLTests(t, tmpDir+"/event_test.yaml")
+}
+
+func TestRunYAMLTests_EventbusTriggerAlias(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFile(t, tmpDir+"/eventbus_test.yaml", `
+yaml: |
+  pipelines:
+    on-user-created:
+      trigger:
+        type: eventbus
+        config:
+          topic: user.created
+      steps:
+        - name: log_event
+          type: step.set
+          config:
+            values:
+              handled: true
+              user_id: "{{ .user_id }}"
+tests:
+  user-created:
+    trigger:
+      type: eventbus
+      name: user.created
+      data:
+        user_id: "123"
+    assertions:
+      - output:
+          handled: true
+          user_id: "123"
+`)
+	wftest.RunYAMLTests(t, tmpDir+"/eventbus_test.yaml")
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
