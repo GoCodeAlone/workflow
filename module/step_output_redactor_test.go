@@ -6,7 +6,7 @@ import (
 
 func TestRedactStepOutput_SensitiveFields(t *testing.T) {
 	cases := []struct {
-		key      string
+		key          string
 		wantRedacted bool
 	}{
 		{"password", true},

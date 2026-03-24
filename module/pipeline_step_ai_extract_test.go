@@ -43,10 +43,10 @@ func TestAIExtractStep_WithAllOptions(t *testing.T) {
 		"schema": map[string]any{
 			"type": "object",
 		},
-		"provider":   "anthropic",
-		"model":      "claude-3-haiku",
-		"input_from": ".body.text",
-		"max_tokens": 256,
+		"provider":    "anthropic",
+		"model":       "claude-3-haiku",
+		"input_from":  ".body.text",
+		"max_tokens":  256,
 		"temperature": 0.0,
 	}, nil)
 	if err != nil {

@@ -41,12 +41,12 @@ func resolveDeployDriver(app modular.Application, serviceName, stepName string) 
 // HTTPDeployDriver is a simple DeployDriver backed by a mock or HTTP-reachable service.
 // It is provided for testing and simple HTTP-based deployments.
 type HTTPDeployDriver struct {
-	BaseURL      string
-	CurrentImg   string
-	ReplicaCnt   int
-	UpdateFn     func(ctx context.Context, image string) error
-	HealthFn     func(ctx context.Context, path string) error
-	httpClient   *http.Client
+	BaseURL    string
+	CurrentImg string
+	ReplicaCnt int
+	UpdateFn   func(ctx context.Context, image string) error
+	HealthFn   func(ctx context.Context, path string) error
+	httpClient *http.Client
 }
 
 // Update calls the user-provided UpdateFn or sets CurrentImg directly.

@@ -93,7 +93,6 @@ type StdEngine struct {
 	// configHash is the SHA-256 hash of the last config built via BuildFromConfig.
 	// Format: "sha256:<hex>". Empty until BuildFromConfig is called.
 	configHash string
-
 }
 
 // App returns the underlying modular.Application.
@@ -141,7 +140,6 @@ func (e *StdEngine) SetDynamicLoader(loader *dynamic.Loader) {
 func (e *StdEngine) SetPluginInstaller(installer *plugin.PluginInstaller) {
 	e.pluginInstaller = installer
 }
-
 
 // NewStdEngine creates a new workflow engine
 func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
@@ -854,11 +852,12 @@ func (e *StdEngine) configurePipelines(pipelineCfg map[string]any) error {
 		}
 
 		pipeline := &module.Pipeline{
-			Name:         pipelineName,
-			Steps:        steps,
-			OnError:      onError,
-			Timeout:      timeout,
-			Compensation: compSteps,
+			Name:            pipelineName,
+			Steps:           steps,
+			OnError:         onError,
+			Timeout:         timeout,
+			Compensation:    compSteps,
+			StrictTemplates: pipeCfg.StrictTemplates,
 		}
 
 		// Propagate the engine's logger to the pipeline so that execution logs

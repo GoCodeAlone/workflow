@@ -879,3 +879,394 @@ func TestValidateStepOutputFieldRegistry(t *testing.T) {
 		})
 	}
 }
+
+
+// --- Output field name validation tests ---
+
+// TestValidateStepOutputField_KnownField checks that a reference to a known output
+// field does NOT produce a warning.
+func TestValidateStepOutputField_KnownField(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name":   "query",
+						"type":   "step.db_query",
+						"config": map[string]any{"database": "db", "query": "SELECT id FROM users", "mode": "single"},
+					},
+					map[string]any{
+						"name": "respond",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								// "found" is a known output of step.db_query single mode
+								"ok": "{{ .steps.query.found }}",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "found") && strings.Contains(w, "not a known output") {
+			t.Errorf("unexpected warning about known output field 'found': %s", w)
+		}
+	}
+}
+
+// TestValidateStepOutputField_UnknownField checks that a reference to an unknown
+// output field produces a warning.
+func TestValidateStepOutputField_UnknownField(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name":   "query",
+						"type":   "step.db_query",
+						"config": map[string]any{"database": "db", "query": "SELECT id FROM users", "mode": "single"},
+					},
+					map[string]any{
+						"name": "respond",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								// "nonexistent_column" is NOT an output of step.db_query
+								"x": "{{ .steps.query.nonexistent_column }}",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "nonexistent_column") && strings.Contains(w, "not a known output") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected warning about unknown output field 'nonexistent_column', got warnings: %v", result.Warnings)
+	}
+}
+
+// TestValidateStepOutputField_SQLAlias_Valid checks that a reference to a SQL column
+// alias that IS present in the query does NOT produce a warning.
+func TestValidateStepOutputField_SQLAlias_Valid(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "load",
+						"type": "step.db_query",
+						"config": map[string]any{
+							"database": "db",
+							"query":    "SELECT auth_token, affiliate_id FROM integrations WHERE id = $1",
+							"mode":     "single",
+						},
+					},
+					map[string]any{
+						"name": "verify",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								// auth_token IS selected by the SQL query
+								"tok": "{{ .steps.load.row.auth_token }}",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "auth_token") && strings.Contains(w, "does not select") {
+			t.Errorf("unexpected SQL alias warning for known alias 'auth_token': %s", w)
+		}
+	}
+}
+
+// TestValidateStepOutputField_SQLAlias_Invalid checks that a reference to a SQL
+// column alias that is NOT present in the query produces a warning.
+func TestValidateStepOutputField_SQLAlias_Invalid(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "load",
+						"type": "step.db_query",
+						"config": map[string]any{
+							"database": "db",
+							// Query selects "auth_token" but not "token"
+							"query": "SELECT auth_token FROM integrations WHERE id = $1",
+							"mode":  "single",
+						},
+					},
+					map[string]any{
+						"name": "verify",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								// "token" is NOT a column in the query
+								"tok": "{{ .steps.load.row.token }}",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "token") && strings.Contains(w, "does not select") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected SQL alias warning for missing column 'token', got warnings: %v", result.Warnings)
+	}
+}
+
+// TestValidatePlainStepRef_SecretFrom checks that a secret_from value referencing
+// a nonexistent step produces a warning.
+func TestValidatePlainStepRef_SecretFrom(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "verify",
+						"type": "step.webhook_verify",
+						"config": map[string]any{
+							// references a step "load" that does not exist in this pipeline
+							"secret_from": "steps.load.row.auth_token",
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "load") && strings.Contains(w, "does not exist") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected warning about nonexistent step in secret_from, got warnings: %v", result.Warnings)
+	}
+}
+
+// TestValidatePlainStepRef_SecretFrom_Valid checks that a valid secret_from reference
+// pointing to a known step output does NOT produce a warning.
+func TestValidatePlainStepRef_SecretFrom_Valid(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "load",
+						"type": "step.db_query",
+						"config": map[string]any{
+							"database": "db",
+							"query":    "SELECT auth_token FROM integrations WHERE id = $1",
+							"mode":     "single",
+						},
+					},
+					map[string]any{
+						"name": "verify",
+						"type": "step.webhook_verify",
+						"config": map[string]any{
+							// references load.row — "row" is a known output of step.db_query single mode
+							"secret_from": "steps.load.row.auth_token",
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "load") && strings.Contains(w, "does not exist") {
+			t.Errorf("unexpected warning about existing step 'load': %s", w)
+		}
+		if strings.Contains(w, "row") && strings.Contains(w, "not a known output") {
+			t.Errorf("unexpected warning about known output field 'row': %s", w)
+		}
+	}
+}
+
+// TestValidatePlainStepRef_ConditionalField checks that a conditional step's
+// "field" config value pointing to a nonexistent step output is warned about.
+func TestValidatePlainStepRef_ConditionalField(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name":   "query",
+						"type":   "step.db_query",
+						"config": map[string]any{"database": "db", "query": "SELECT id FROM t", "mode": "single"},
+					},
+					map[string]any{
+						"name": "route",
+						"type": "step.conditional",
+						"config": map[string]any{
+							// "found" is a known output of step.db_query single mode
+							"field":   "steps.query.found",
+							"routes":  map[string]any{"true": "a"},
+							"default": "b",
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "found") && strings.Contains(w, "not a known output") {
+			t.Errorf("unexpected warning about known output field 'found' in conditional field: %s", w)
+		}
+		if strings.Contains(w, "query") && strings.Contains(w, "does not exist") {
+			t.Errorf("unexpected 'does not exist' warning for existing step 'query': %s", w)
+		}
+	}
+}
+
+// TestValidatePlainStepRef_ConditionalField_Unknown verifies that a conditional
+// step's "field" referencing a step output that doesn't exist emits a warning.
+func TestValidatePlainStepRef_ConditionalField_Unknown(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name":   "query",
+						"type":   "step.db_query",
+						"config": map[string]any{"database": "db", "query": "SELECT id FROM t", "mode": "single"},
+					},
+					map[string]any{
+						"name": "route",
+						"type": "step.conditional",
+						"config": map[string]any{
+							// "nonexistent_output" is NOT an output of step.db_query
+							"field":   "steps.query.nonexistent_output",
+							"routes":  map[string]any{"true": "a"},
+							"default": "b",
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "nonexistent_output") && strings.Contains(w, "not a known output") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected warning about unknown output field in conditional field, got warnings: %v", result.Warnings)
+	}
+}
+
+// TestValidateStepOutputField_DynamicOutputSkipped verifies that steps with
+// dynamic/wildcard placeholder outputs (e.g. "(key)" from step.secret_fetch,
+// "(dynamic)" from step.set) do NOT generate false-positive warnings when
+// arbitrary field names are accessed.
+func TestValidateStepOutputField_DynamicOutputSkipped(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "fetch",
+						"type": "step.secret_fetch",
+						"config": map[string]any{
+							"secrets": map[string]any{
+								"api_key": "env://API_KEY",
+							},
+						},
+					},
+					map[string]any{
+						"name": "call",
+						"type": "step.http_call",
+						"config": map[string]any{
+							// "api_key" is a dynamic output of step.secret_fetch (not statically declared)
+							"url": "https://api.example.com",
+							"headers": map[string]any{
+								"Authorization": "Bearer {{ .steps.fetch.api_key }}",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "api_key") && strings.Contains(w, "not a known output") {
+			t.Errorf("unexpected false-positive warning about dynamic output field 'api_key': %s", w)
+		}
+	}
+}

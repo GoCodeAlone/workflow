@@ -57,6 +57,17 @@ type PipelineContext struct {
 
 	// Metadata holds execution metadata (pipeline name, trace ID, etc.)
 	Metadata map[string]any
+
+	// StrictTemplates causes template execution to return an error instead of
+	// the zero value when a template expression references a missing map key.
+	// When false (the default), missing keys resolve to the zero value with a
+	// warning logged via Logger. Enable via pipeline config: strict_templates: true.
+	StrictTemplates bool
+
+	// Logger is used to emit warnings when a template expression resolves a
+	// missing key to the zero value (non-strict mode). When nil, slog.Default()
+	// is used.
+	Logger *slog.Logger
 }
 
 // NewPipelineContext creates a PipelineContext initialized with trigger data.

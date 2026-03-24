@@ -60,9 +60,9 @@ func TestAIClassifyStep_NonStringCategoryIgnored(t *testing.T) {
 func TestAIClassifyStep_WithValidStringCategories(t *testing.T) {
 	registry := ai.NewAIModelRegistry()
 	step, err := NewAIClassifyStepFactory(registry)("classify", map[string]any{
-		"categories": []any{"spam", "not_spam"},
-		"provider":   "anthropic",
-		"input_from": ".body.text",
+		"categories":  []any{"spam", "not_spam"},
+		"provider":    "anthropic",
+		"input_from":  ".body.text",
 		"temperature": 0.2,
 	}, nil)
 	if err != nil {

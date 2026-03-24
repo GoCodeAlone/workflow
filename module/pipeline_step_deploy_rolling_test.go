@@ -55,9 +55,9 @@ func setupRollingApp(t *testing.T) (*module.MockApplication, *mockDeployDriver) 
 
 func baseRollingCfg() map[string]any {
 	return map[string]any{
-		"service":    "my-svc",
-		"image":      "myapp:v2",
-		"max_surge":  1,
+		"service":         "my-svc",
+		"image":           "myapp:v2",
+		"max_surge":       1,
 		"max_unavailable": 1,
 		"health_check": map[string]any{
 			"path":    "/health",

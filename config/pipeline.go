@@ -24,6 +24,11 @@ type PipelineConfig struct {
 	//   - tools that understand pipeline outputs (for example, step.workflow_call)
 	//     to validate or document output_mapping and other response shapes
 	Outputs map[string]PipelineOutputDef `json:"outputs,omitempty" yaml:"outputs,omitempty"`
+	// StrictTemplates causes the pipeline to return an error when any template
+	// expression references a missing map key, instead of silently using the zero
+	// value. Useful for catching typos in step field references at runtime.
+	// Default is false (missing keys produce a warning log and resolve to zero).
+	StrictTemplates bool `json:"strict_templates,omitempty" yaml:"strict_templates,omitempty"`
 }
 
 // PipelineTriggerConfig defines what starts a pipeline.
