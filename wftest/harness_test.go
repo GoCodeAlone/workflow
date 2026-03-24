@@ -278,3 +278,63 @@ pipelines:
 		t.Error("final should have been executed")
 	}
 }
+
+func TestSkipIf_StepTrackedWhenConditionFalse(t *testing.T) {
+	h := wftest.New(t, wftest.WithYAML(`
+pipelines:
+  test:
+    steps:
+      - name: set_flag
+        type: step.set
+        config:
+          values:
+            flag: "false"
+      - name: guarded_step
+        type: step.set
+        skip_if: '{{ eq .flag "true" }}'
+        config:
+          values:
+            ran: "yes"
+`))
+	result := h.ExecutePipeline("test", nil)
+	if result.Error != nil {
+		t.Fatal(result.Error)
+	}
+	if !result.StepExecuted("guarded_step") {
+		t.Error("guarded_step should have been executed (skip_if was false)")
+	}
+	out := result.StepOutput("guarded_step")
+	if out["ran"] != "yes" {
+		t.Errorf("expected guarded_step output ran=yes, got %v", out["ran"])
+	}
+}
+
+func TestIf_StepTrackedWhenConditionTrue(t *testing.T) {
+	h := wftest.New(t, wftest.WithYAML(`
+pipelines:
+  test:
+    steps:
+      - name: set_flag
+        type: step.set
+        config:
+          values:
+            flag: "true"
+      - name: guarded_step
+        type: step.set
+        if: '{{ eq .flag "true" }}'
+        config:
+          values:
+            ran: "yes"
+`))
+	result := h.ExecutePipeline("test", nil)
+	if result.Error != nil {
+		t.Fatal(result.Error)
+	}
+	if !result.StepExecuted("guarded_step") {
+		t.Error("guarded_step should have been executed (if condition was true)")
+	}
+	out := result.StepOutput("guarded_step")
+	if out["ran"] != "yes" {
+		t.Errorf("expected guarded_step output ran=yes, got %v", out["ran"])
+	}
+}
