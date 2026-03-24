@@ -46,7 +46,7 @@ func (d *deployCapableDriver) Update(_ context.Context, image string) error {
 	d.updateCalled = true
 	return nil
 }
-func (d *deployCapableDriver) HealthCheck(_ context.Context, _ string) error { return d.healthErr }
+func (d *deployCapableDriver) HealthCheck(_ context.Context, _ string) error  { return d.healthErr }
 func (d *deployCapableDriver) CurrentImage(_ context.Context) (string, error) { return d.image, nil }
 func (d *deployCapableDriver) ReplicaCount(_ context.Context) (int, error)    { return d.replicas, nil }
 
@@ -93,9 +93,9 @@ func (d *deployCapableDriver) DestroyCanary(_ context.Context) error {
 
 type deployProviderMock struct {
 	*infraMockProvider
-	deployDriver    *deployCapableDriver
-	bgDriver        *deployCapableDriver
-	canaryDriver    *deployCapableDriver
+	deployDriver *deployCapableDriver
+	bgDriver     *deployCapableDriver
+	canaryDriver *deployCapableDriver
 }
 
 func (p *deployProviderMock) ProvideDeployDriver(_ string) DeployDriver {

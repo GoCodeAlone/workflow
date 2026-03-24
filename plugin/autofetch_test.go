@@ -56,9 +56,9 @@ func TestAutoFetchPlugin_WfctlNotFound(t *testing.T) {
 // compound constraints are detected as invalid.
 func TestStripVersionConstraint(t *testing.T) {
 	cases := []struct {
-		input   string
-		want    string
-		wantOK  bool
+		input  string
+		want   string
+		wantOK bool
 	}{
 		{">=0.1.0", "0.1.0", true},
 		{"<=0.1.0", "0.1.0", true},
@@ -66,9 +66,9 @@ func TestStripVersionConstraint(t *testing.T) {
 		{"~1.0.0", "1.0.0", true},
 		{"0.3.0", "0.3.0", true},
 		{"", "", true},
-		{">=0.1.0,<0.2.0", "", false},  // compound — not supported
-		{">=0.1.0 <0.2.0", "", false},  // compound with space
-		{"0.1.0 0.2.0", "", false},     // two bare versions separated by space
+		{">=0.1.0,<0.2.0", "", false}, // compound — not supported
+		{">=0.1.0 <0.2.0", "", false}, // compound with space
+		{"0.1.0 0.2.0", "", false},    // two bare versions separated by space
 	}
 	for _, tc := range cases {
 		got, ok := stripVersionConstraint(tc.input)

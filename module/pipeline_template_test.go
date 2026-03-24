@@ -2,6 +2,7 @@ package module
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -86,18 +87,159 @@ func TestTemplateEngine_EmptyStringPassthrough(t *testing.T) {
 	}
 }
 
-func TestTemplateEngine_MissingKeyReturnsZeroValue(t *testing.T) {
+func TestTemplateEngine_MissingKeyLogsWarning(t *testing.T) {
 	te := NewTemplateEngine()
-	pc := NewPipelineContext(nil, nil)
+	pc := NewPipelineContext(nil, map[string]any{"pipeline": "test-pipeline"})
 
-	// missingkey=zero means missing keys produce zero values, not errors
+	// Capture log output to verify the warning is emitted.
+	var logBuf strings.Builder
+	handler := slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})
+	pc.Logger = slog.New(handler)
+
+	// Non-strict mode: missing key resolves to zero value but logs a warning.
 	result, err := te.Resolve("{{ .nonexistent }}", pc)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected error in non-strict mode: %v", err)
 	}
-	// The zero value for a missing key in a map renders as "<no value>" or empty
-	// With missingkey=zero it should render as the zero value string representation
-	_ = result // Just verify no error
+	// The zero value for a missing key in a map renders as "<no value>".
+	_ = result
+
+	// A warning should have been logged with the pipeline name, not the full template.
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "template resolved missing key to zero value") {
+		t.Errorf("expected missing-key warning in log, got: %q", logOutput)
+	}
+	if !strings.Contains(logOutput, "test-pipeline") {
+		t.Errorf("expected pipeline name in log, got: %q", logOutput)
+	}
+	// The raw template attribute must NOT appear in logs (security: may contain secrets/PII).
+	// The key name may appear in the error message from text/template, which is acceptable.
+	if strings.Contains(logOutput, "template={{ .nonexistent }}") {
+		t.Errorf("log should not contain raw template= attribute (security), got: %q", logOutput)
+	}
+}
+
+func TestTemplateEngine_StrictModeReturnsError(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+	pc.StrictTemplates = true
+
+	_, err := te.Resolve("{{ .nonexistent }}", pc)
+	if err == nil {
+		t.Fatal("expected error in strict mode for missing key")
+	}
+	if !strings.Contains(err.Error(), "template exec error") {
+		t.Errorf("expected 'template exec error' in message, got: %v", err)
+	}
+}
+
+func TestTemplateEngine_StrictModePassesForPresentKey(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"name": "Alice"}, nil)
+	pc.StrictTemplates = true
+
+	result, err := te.Resolve("{{ .name }}", pc)
+	if err != nil {
+		t.Fatalf("unexpected error in strict mode for present key: %v", err)
+	}
+	if result != "Alice" {
+		t.Errorf("expected 'Alice', got %q", result)
+	}
+}
+
+func TestTemplateEngine_StrictModeStepFieldTypoReturnsError(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("auth", map[string]any{"affiliate_id": "tenant123"})
+	pc.StrictTemplates = true
+
+	// Correct access should succeed.
+	result, err := te.Resolve("{{ .steps.auth.affiliate_id }}", pc)
+	if err != nil {
+		t.Fatalf("unexpected error for correct field in strict mode: %v", err)
+	}
+	if result != "tenant123" {
+		t.Errorf("expected 'tenant123', got %q", result)
+	}
+
+	// Typo in field name should fail in strict mode.
+	_, err = te.Resolve("{{ .steps.auth.affilate_id }}", pc)
+	if err == nil {
+		t.Fatal("expected error for typo in field name in strict mode")
+	}
+}
+
+func TestTemplateEngine_NonStrictModeStepFieldTypoLogsWarning(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("auth", map[string]any{"affiliate_id": "tenant123"})
+
+	var logBuf strings.Builder
+	handler := slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn})
+	pc.Logger = slog.New(handler)
+
+	// Typo in field name: should resolve to zero value with a warning.
+	result, err := te.Resolve("{{ .steps.auth.affilate_id }}", pc)
+	if err != nil {
+		t.Fatalf("unexpected error in non-strict mode for field typo: %v", err)
+	}
+	_ = result // zero/empty value
+
+	if !strings.Contains(logBuf.String(), "template resolved missing key to zero value") {
+		t.Errorf("expected missing-key warning in log, got: %q", logBuf.String())
+	}
+}
+
+func TestTemplateEngine_StrictModeStepHelperMissingStepReturnsError(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+	pc.StrictTemplates = true
+
+	// step helper for nonexistent step should fail in strict mode.
+	_, err := te.Resolve(`{{ step "nonexistent" "field" }}`, pc)
+	if err == nil {
+		t.Fatal("expected error for missing step in strict mode via step helper")
+	}
+}
+
+func TestTemplateEngine_StrictModeStepHelperMissingFieldReturnsError(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("auth", map[string]any{"affiliate_id": "tenant123"})
+	pc.StrictTemplates = true
+
+	// step helper for existing step but missing field should fail in strict mode.
+	_, err := te.Resolve(`{{ step "auth" "affilate_id" }}`, pc)
+	if err == nil {
+		t.Fatal("expected error for missing field in strict mode via step helper")
+	}
+}
+
+func TestTemplateEngine_StrictModeStepHelperSucceeds(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("auth", map[string]any{"affiliate_id": "tenant123"})
+	pc.StrictTemplates = true
+
+	result, err := te.Resolve(`{{ step "auth" "affiliate_id" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error in strict mode for correct step helper access: %v", err)
+	}
+	if result != "tenant123" {
+		t.Errorf("expected 'tenant123', got %q", result)
+	}
+}
+
+func TestTemplateEngine_StrictModeTriggerHelperMissingKeyReturnsError(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"source": "webhook"}, nil)
+	pc.StrictTemplates = true
+
+	// trigger helper for missing key should fail in strict mode.
+	_, err := te.Resolve(`{{ trigger "nonexistent_key" }}`, pc)
+	if err == nil {
+		t.Fatal("expected error for missing trigger key in strict mode via trigger helper")
+	}
 }
 
 func TestTemplateEngine_InvalidTemplateReturnsError(t *testing.T) {

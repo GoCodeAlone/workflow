@@ -13,9 +13,9 @@ import (
 
 // mockAzureClient is an in-memory implementation of AzureBlobClient for testing.
 type mockAzureClient struct {
-	mu      sync.Mutex
-	blobs   map[string][]byte  // name -> body
-	leases  map[string]string  // name -> leaseID (empty = not leased)
+	mu     sync.Mutex
+	blobs  map[string][]byte // name -> body
+	leases map[string]string // name -> leaseID (empty = not leased)
 }
 
 func newMockAzureClient() *mockAzureClient {

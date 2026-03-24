@@ -20,16 +20,16 @@ func newInfraMockApp() *infraMockApp {
 	return &infraMockApp{services: make(map[string]any)}
 }
 
-func (a *infraMockApp) RegisterConfigSection(string, modular.ConfigProvider)  {}
+func (a *infraMockApp) RegisterConfigSection(string, modular.ConfigProvider)    {}
 func (a *infraMockApp) GetConfigSection(string) (modular.ConfigProvider, error) { return nil, nil }
 func (a *infraMockApp) ConfigSections() map[string]modular.ConfigProvider {
 	return nil
 }
-func (a *infraMockApp) Logger() modular.Logger                    { return &noopLogger{} }
-func (a *infraMockApp) SetLogger(modular.Logger)                  {}
-func (a *infraMockApp) ConfigProvider() modular.ConfigProvider    { return nil }
-func (a *infraMockApp) SvcRegistry() modular.ServiceRegistry      { return a.services }
-func (a *infraMockApp) RegisterModule(modular.Module)             {}
+func (a *infraMockApp) Logger() modular.Logger                 { return &noopLogger{} }
+func (a *infraMockApp) SetLogger(modular.Logger)               {}
+func (a *infraMockApp) ConfigProvider() modular.ConfigProvider { return nil }
+func (a *infraMockApp) SvcRegistry() modular.ServiceRegistry   { return a.services }
+func (a *infraMockApp) RegisterModule(modular.Module)          {}
 func (a *infraMockApp) RegisterService(name string, svc any) error {
 	a.services[name] = svc
 	return nil
@@ -46,23 +46,23 @@ func (a *infraMockApp) GetService(name string, target any) error {
 	}
 	return nil
 }
-func (a *infraMockApp) Init() error                                            { return nil }
-func (a *infraMockApp) Start() error                                           { return nil }
-func (a *infraMockApp) Stop() error                                            { return nil }
-func (a *infraMockApp) Run() error                                             { return nil }
-func (a *infraMockApp) IsVerboseConfig() bool                                  { return false }
-func (a *infraMockApp) SetVerboseConfig(bool)                                  {}
-func (a *infraMockApp) Context() context.Context                               { return context.Background() }
-func (a *infraMockApp) GetServicesByModule(string) []string                    { return nil }
+func (a *infraMockApp) Init() error                         { return nil }
+func (a *infraMockApp) Start() error                        { return nil }
+func (a *infraMockApp) Stop() error                         { return nil }
+func (a *infraMockApp) Run() error                          { return nil }
+func (a *infraMockApp) IsVerboseConfig() bool               { return false }
+func (a *infraMockApp) SetVerboseConfig(bool)               {}
+func (a *infraMockApp) Context() context.Context            { return context.Background() }
+func (a *infraMockApp) GetServicesByModule(string) []string { return nil }
 func (a *infraMockApp) GetServiceEntry(string) (*modular.ServiceRegistryEntry, bool) {
 	return nil, false
 }
 func (a *infraMockApp) GetServicesByInterface(reflect.Type) []*modular.ServiceRegistryEntry {
 	return nil
 }
-func (a *infraMockApp) GetModule(string) modular.Module              { return nil }
-func (a *infraMockApp) GetAllModules() map[string]modular.Module     { return nil }
-func (a *infraMockApp) StartTime() time.Time                         { return time.Time{} }
+func (a *infraMockApp) GetModule(string) modular.Module                { return nil }
+func (a *infraMockApp) GetAllModules() map[string]modular.Module       { return nil }
+func (a *infraMockApp) StartTime() time.Time                           { return time.Time{} }
 func (a *infraMockApp) OnConfigLoaded(func(modular.Application) error) {}
 
 // infraMockProvider implements interfaces.IaCProvider for tests.
@@ -408,11 +408,11 @@ func TestInfraModule_ProvidesServices(t *testing.T) {
 
 func TestInfraModule_ResourceConfig_StripsStandardKeys(t *testing.T) {
 	m := NewInfraModule("db", "infra.database", map[string]any{
-		"provider": "aws",
-		"size":     "m",
+		"provider":  "aws",
+		"size":      "m",
 		"resources": map[string]any{"cpu": "2"},
-		"engine":   "postgres",
-		"version":  "16",
+		"engine":    "postgres",
+		"version":   "16",
 	})
 	cfg := m.ResourceConfig()
 	if _, ok := cfg["provider"]; ok {

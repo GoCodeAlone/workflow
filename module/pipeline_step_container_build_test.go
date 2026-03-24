@@ -12,9 +12,9 @@ import (
 // ─── Mock ContainerRegistry ───────────────────────────────────────────────────
 
 type mockContainerRegistry struct {
-	registryURL string
+	registryURL  string
 	pushedImages []string
-	pushErr     error
+	pushErr      error
 }
 
 func (m *mockContainerRegistry) PushImage(_ context.Context, imageRef string) (string, error) {
