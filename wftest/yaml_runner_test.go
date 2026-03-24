@@ -248,7 +248,6 @@ tests:
   json-path-check:
     trigger:
       type: http
-      method: GET
       path: /hello
     assertions:
       - response:

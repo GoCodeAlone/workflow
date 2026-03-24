@@ -2,11 +2,10 @@ package bdd
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 
+	"github.com/GoCodeAlone/workflow/wftest"
 	"github.com/cucumber/godog"
 )
 
@@ -162,7 +161,7 @@ func (sc *ScenarioContext) theResponseJSONShouldBe(path, expected string) error 
 	if err := sc.ensureResult(); err != nil {
 		return err
 	}
-	val, err := jsonPath(sc.result.RawBody, path)
+	val, err := wftest.JSONPath(sc.result.RawBody, path)
 	if err != nil {
 		return err
 	}
@@ -178,11 +177,11 @@ func (sc *ScenarioContext) theResponseJSONShouldNotBeEmpty(path string) error {
 	if err := sc.ensureResult(); err != nil {
 		return err
 	}
-	val, err := jsonPath(sc.result.RawBody, path)
+	val, err := wftest.JSONPath(sc.result.RawBody, path)
 	if err != nil {
 		return err
 	}
-	if val == nil || fmt.Sprintf("%v", val) == "" {
+	if wftest.IsJSONEmpty(val) {
 		return fmt.Errorf("response JSON %q: expected non-empty, got %v", path, val)
 	}
 	return nil
@@ -198,25 +197,4 @@ func (sc *ScenarioContext) theResponseHeaderShouldBe(header, expected string) er
 		return fmt.Errorf("response header %q: want %q, got %q", header, expected, actual)
 	}
 	return nil
-}
-
-// jsonPath traverses a JSON body using a dot-separated path (e.g., "user.name").
-func jsonPath(body []byte, path string) (any, error) {
-	var root any
-	if err := json.Unmarshal(body, &root); err != nil {
-		return nil, fmt.Errorf("JSON path %q: invalid JSON body: %w", path, err)
-	}
-	parts := strings.Split(path, ".")
-	current := root
-	for _, part := range parts {
-		m, ok := current.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("JSON path %q: cannot traverse into non-object at %q", path, part)
-		}
-		current, ok = m[part]
-		if !ok {
-			return nil, fmt.Errorf("JSON path %q: key %q not found", path, part)
-		}
-	}
-	return current, nil
 }

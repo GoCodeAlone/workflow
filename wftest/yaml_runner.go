@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,27 +236,37 @@ func applyAssertion(t *testing.T, label string, result *Result, a *Assertion, h 
 			t.Errorf("assertion %s: body %q not found in %q", label, a.Response.Body, string(result.RawBody))
 		}
 		for path, expected := range a.Response.JSON {
-			val, err := jsonPath(result.RawBody, path)
+			val, err := JSONPath(result.RawBody, path)
 			if err != nil {
 				t.Errorf("assertion %s: %v", label, err)
 				continue
 			}
-			if fmt.Sprintf("%v", val) != fmt.Sprintf("%v", expected) {
-				t.Errorf("assertion %s: JSON %q: want %v, got %v", label, path, expected, val)
+			wantJSON, err := json.Marshal(expected)
+			if err != nil {
+				t.Errorf("assertion %s: JSON %q: cannot marshal expected value: %v", label, path, err)
+				continue
+			}
+			gotJSON, err := json.Marshal(val)
+			if err != nil {
+				t.Errorf("assertion %s: JSON %q: cannot marshal actual value: %v", label, path, err)
+				continue
+			}
+			if !bytes.Equal(wantJSON, gotJSON) {
+				t.Errorf("assertion %s: JSON %q: want %s, got %s", label, path, string(wantJSON), string(gotJSON))
 			}
 		}
 		for _, path := range a.Response.JSONNotEmpty {
-			val, err := jsonPath(result.RawBody, path)
+			val, err := JSONPath(result.RawBody, path)
 			if err != nil {
 				t.Errorf("assertion %s: %v", label, err)
 				continue
 			}
-			if val == nil || fmt.Sprintf("%v", val) == "" {
+			if IsJSONEmpty(val) {
 				t.Errorf("assertion %s: JSON %q: expected non-empty, got %v", label, path, val)
 			}
 		}
 		for header, expected := range a.Response.Headers {
-			actual := result.Header(header)
+			actual := result.Header(http.CanonicalHeaderKey(header))
 			if actual != expected {
 				t.Errorf("assertion %s: header %q: want %q, got %q", label, header, expected, actual)
 			}
@@ -313,26 +324,4 @@ func applyAssertion(t *testing.T, label string, result *Result, a *Assertion, h 
 			}
 		}
 	}
-}
-
-// jsonPath traverses a JSON body using a dot-separated path (e.g., "user.name").
-// Returns the value at the path, or an error if the path cannot be traversed.
-func jsonPath(body []byte, path string) (any, error) {
-	var root any
-	if err := json.Unmarshal(body, &root); err != nil {
-		return nil, fmt.Errorf("JSON path %q: invalid JSON body: %w", path, err)
-	}
-	parts := strings.Split(path, ".")
-	current := root
-	for _, part := range parts {
-		m, ok := current.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("JSON path %q: cannot traverse into non-object at %q", path, part)
-		}
-		current, ok = m[part]
-		if !ok {
-			return nil, fmt.Errorf("JSON path %q: key %q not found", path, part)
-		}
-	}
-	return current, nil
 }
