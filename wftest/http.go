@@ -47,6 +47,21 @@ func (h *Harness) DELETE(path string, opts ...RequestOption) *Result {
 	return h.doHTTP(http.MethodDelete, path, "", opts)
 }
 
+// PATCH sends a PATCH request with a body to the harness HTTP handler.
+// Content-Type is set to application/json unless overridden via Header().
+// Requires an http.router module in the config.
+func (h *Harness) PATCH(path, body string, opts ...RequestOption) *Result {
+	h.t.Helper()
+	return h.doHTTP(http.MethodPatch, path, body, opts)
+}
+
+// HEAD sends a HEAD request to the harness HTTP handler and returns the result.
+// Requires an http.router module in the config.
+func (h *Harness) HEAD(path string, opts ...RequestOption) *Result {
+	h.t.Helper()
+	return h.doHTTP(http.MethodHead, path, "", opts)
+}
+
 func (h *Harness) doHTTP(method, path, body string, opts []RequestOption) *Result {
 	h.t.Helper()
 	handler := h.getHTTPHandler()
