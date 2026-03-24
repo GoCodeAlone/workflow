@@ -199,6 +199,44 @@ func fireTrigger(t *testing.T, h *Harness, tc *TestCase) *Result {
 		}
 		return h.POST(tc.Trigger.Path, body, reqOpts...)
 
+	case "http.put", "put":
+		body := ""
+		if tc.Trigger.Data != nil {
+			b, _ := json.Marshal(tc.Trigger.Data)
+			body = string(b)
+		}
+		var reqOpts []RequestOption
+		for k, v := range tc.Trigger.Headers {
+			reqOpts = append(reqOpts, Header(k, v))
+		}
+		return h.PUT(tc.Trigger.Path, body, reqOpts...)
+
+	case "http.patch", "patch":
+		body := ""
+		if tc.Trigger.Data != nil {
+			b, _ := json.Marshal(tc.Trigger.Data)
+			body = string(b)
+		}
+		var reqOpts []RequestOption
+		for k, v := range tc.Trigger.Headers {
+			reqOpts = append(reqOpts, Header(k, v))
+		}
+		return h.PATCH(tc.Trigger.Path, body, reqOpts...)
+
+	case "http.delete", "delete":
+		var reqOpts []RequestOption
+		for k, v := range tc.Trigger.Headers {
+			reqOpts = append(reqOpts, Header(k, v))
+		}
+		return h.DELETE(tc.Trigger.Path, reqOpts...)
+
+	case "http.head", "head":
+		var reqOpts []RequestOption
+		for k, v := range tc.Trigger.Headers {
+			reqOpts = append(reqOpts, Header(k, v))
+		}
+		return h.HEAD(tc.Trigger.Path, reqOpts...)
+
 	default:
 		t.Fatalf("RunYAMLTests: unsupported trigger type %q", tc.Trigger.Type)
 		return nil
