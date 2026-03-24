@@ -23,7 +23,7 @@ func (m *mockSession) SendAndWait(ctx context.Context, opts copilot.MessageOptio
 	return m.sendAndWaitFn(ctx, opts)
 }
 
-func (m *mockSession) Destroy() error {
+func (m *mockSession) Disconnect() error {
 	m.destroyed = true
 	return nil
 }

@@ -18,8 +18,8 @@ import (
 func ComputePlan(desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (interfaces.IaCPlan, error) {
 	// Index current state by resource name.
 	currentMap := make(map[string]interfaces.ResourceState, len(current))
-	for _, rs := range current {
-		currentMap[rs.Name] = rs
+	for i := range current {
+		currentMap[current[i].Name] = current[i]
 	}
 
 	// Index desired specs by name for delete detection.
@@ -50,9 +50,10 @@ func ComputePlan(desired []interfaces.ResourceSpec, current []interfaces.Resourc
 	}
 
 	// Deletes: resources in current that are not in desired.
-	for _, rs := range current {
+	for i := range current {
+		rs := &current[i]
 		if _, exists := desiredMap[rs.Name]; !exists {
-			rsCopy := rs
+			rsCopy := *rs
 			spec := interfaces.ResourceSpec{
 				Name:      rs.Name,
 				Type:      rs.Type,
@@ -78,11 +79,11 @@ func ComputePlan(desired []interfaces.ResourceSpec, current []interfaces.Resourc
 		return interfaces.IaCPlan{}, err
 	}
 
-	actions := append(sorted, sortedDeletes...)
+	sorted = append(sorted, sortedDeletes...)
 
 	return interfaces.IaCPlan{
 		ID:        planID(),
-		Actions:   actions,
+		Actions:   sorted,
 		CreatedAt: time.Now().UTC(),
 	}, nil
 }
@@ -115,11 +116,11 @@ func topoSort(creates, updates []interfaces.PlanAction, desiredSpecs []interface
 
 	// Collect all actions into a map by resource name.
 	actionMap := make(map[string]interfaces.PlanAction)
-	for _, a := range creates {
-		actionMap[a.Resource.Name] = a
+	for i := range creates {
+		actionMap[creates[i].Resource.Name] = creates[i]
 	}
-	for _, a := range updates {
-		actionMap[a.Resource.Name] = a
+	for i := range updates {
+		actionMap[updates[i].Resource.Name] = updates[i]
 	}
 
 	visited := make(map[string]bool)
@@ -171,9 +172,10 @@ func reverseTopoSort(deletes []interfaces.PlanAction) ([]interfaces.PlanAction, 
 	// Build deps map from DependsOn on the resource spec.
 	deps := make(map[string][]string, len(deletes))
 	actionMap := make(map[string]interfaces.PlanAction, len(deletes))
-	for _, a := range deletes {
+	for i := range deletes {
+		a := &deletes[i]
 		deps[a.Resource.Name] = a.Resource.DependsOn
-		actionMap[a.Resource.Name] = a
+		actionMap[a.Resource.Name] = *a
 	}
 
 	visited := make(map[string]bool)
@@ -203,16 +205,16 @@ func reverseTopoSort(deletes []interfaces.PlanAction) ([]interfaces.PlanAction, 
 	}
 
 	// Seed DFS from the stable delete-action order.
-	for _, a := range deletes {
-		if err := visit(a.Resource.Name); err != nil {
+	for i := range deletes {
+		if err := visit(deletes[i].Resource.Name); err != nil {
 			return nil, err
 		}
 	}
 
 	// Reverse the order: deps-first → dependents-first for deletion.
 	result := make([]interfaces.PlanAction, len(forward))
-	for i, a := range forward {
-		result[len(forward)-1-i] = a
+	for i := range forward {
+		result[len(forward)-1-i] = forward[i]
 	}
 	return result, nil
 }

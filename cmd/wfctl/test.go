@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -91,7 +92,8 @@ Options:
 		if err != nil {
 			return fmt.Errorf("cannot access %s: %w", target, err)
 		}
-		if info.IsDir() {
+		switch {
+		case info.IsDir():
 			yMatches, err := filepath.Glob(filepath.Join(target, "*_test.yaml"))
 			if err != nil {
 				return fmt.Errorf("glob %s: %w", target, err)
@@ -103,9 +105,9 @@ Options:
 				return fmt.Errorf("glob %s: %w", target, err)
 			}
 			featureFiles = append(featureFiles, fMatches...)
-		} else if strings.HasSuffix(target, ".feature") {
+		case strings.HasSuffix(target, ".feature"):
 			featureFiles = append(featureFiles, target)
-		} else {
+		default:
 			yamlFiles = append(yamlFiles, target)
 		}
 	}
@@ -306,7 +308,8 @@ func runTestFile(path string, verbose bool) (pass, fail int, err error) {
 
 	fmt.Printf("%s\n", filepath.Base(path))
 
-	for name, tc := range tf.Tests {
+	for name := range tf.Tests {
+		tc := tf.Tests[name]
 		r := runTestCase(name, &tf, &tc)
 		if r.pass {
 			pass++
@@ -380,11 +383,12 @@ func buildTestEngine(tf *testFile, mocks *testMockConfig) (*workflow.StdEngine, 
 	// Load config.
 	var cfg *config.WorkflowConfig
 	var err error
-	if tf.YAML != "" {
+	switch {
+	case tf.YAML != "":
 		cfg, err = config.LoadFromString(tf.YAML)
-	} else if tf.Config != "" {
+	case tf.Config != "":
 		cfg, err = config.LoadFromFile(tf.Config)
-	} else {
+	default:
 		return nil, fmt.Errorf("test file must set 'yaml' or 'config'")
 	}
 	if err != nil {
@@ -520,7 +524,7 @@ func checkTestAssertion(label string, a testAssertion, output map[string]any, st
 		got := actual[key]
 		wantJSON, _ := json.Marshal(want)
 		gotJSON, _ := json.Marshal(got)
-		if string(wantJSON) != string(gotJSON) {
+		if !bytes.Equal(wantJSON, gotJSON) {
 			*failures = append(*failures, fmt.Sprintf("%s: output[%q]: want %v, got %v", label, key, want, got))
 		}
 	}

@@ -153,7 +153,7 @@ func (c *Client) GenerateWorkflow(ctx context.Context, req ai.GenerateRequest) (
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = session.Destroy() }()
+	defer func() { _ = session.Disconnect() }()
 
 	prompt := ai.GeneratePrompt(req)
 
@@ -185,7 +185,7 @@ func (c *Client) GenerateComponent(ctx context.Context, spec ai.ComponentSpec) (
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = session.Destroy() }()
+	defer func() { _ = session.Disconnect() }()
 
 	prompt := ai.ComponentPrompt(spec)
 
@@ -207,7 +207,7 @@ func (c *Client) SuggestWorkflow(ctx context.Context, useCase string) ([]ai.Work
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = session.Destroy() }()
+	defer func() { _ = session.Disconnect() }()
 
 	prompt := ai.SuggestPrompt(useCase)
 
@@ -244,7 +244,7 @@ func (c *Client) IdentifyMissingComponents(ctx context.Context, cfg *config.Work
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = session.Destroy() }()
+	defer func() { _ = session.Disconnect() }()
 
 	prompt := ai.MissingComponentsPrompt(types)
 

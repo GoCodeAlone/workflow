@@ -48,6 +48,11 @@ linters:
           - errcheck
           - gosec
           - gocritic
+      # SA5011: staticcheck doesn't recognize t.Fatal as terminating; false positive in tests
+      - path: _test\.go
+        linters:
+          - staticcheck
+        text: "SA5011"
     presets:
       - std-error-handling
 
