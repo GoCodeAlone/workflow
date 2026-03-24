@@ -58,9 +58,9 @@ func runInfraStateList(args []string) error {
 		var err error
 		cfgFile, err = resolveInfraConfig(fs)
 		if err != nil {
-			// No config found — list is empty.
+			// No config found — list is empty, not an error.
 			fmt.Println("No infrastructure config found. No state to list.")
-			return nil
+			return nil //nolint:nilerr // intentionally swallowing error - no config means nothing to list
 		}
 	}
 
@@ -73,7 +73,8 @@ func runInfraStateList(args []string) error {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "Name\tType\tProvider\tProviderID")
 	fmt.Fprintln(tw, "----\t----\t--------\t----------")
-	for _, s := range states {
+	for i := range states {
+		s := &states[i]
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.Name, s.Type, s.Provider, s.ProviderID)
 	}
 	tw.Flush()
@@ -117,7 +118,7 @@ func runInfraStateExport(args []string) error {
 		fmt.Println(string(data))
 		return nil
 	}
-	if err := os.WriteFile(*outputFlag, data, 0o644); err != nil {
+	if err := os.WriteFile(*outputFlag, data, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", *outputFlag, err)
 	}
 	fmt.Printf("State exported to %s (%s format)\n", *outputFlag, *format)
@@ -212,7 +213,8 @@ func exportAsTFState(states []interfaces.ResourceState) ([]byte, error) {
 		Outputs:          map[string]any{},
 	}
 
-	for _, s := range states {
+	for i := range states {
+		s := &states[i]
 		attrs := map[string]any{
 			"id":       s.ProviderID,
 			"name":     s.Name,
@@ -252,7 +254,7 @@ func importFromTFState(srcFile, stateDir string) error {
 		return fmt.Errorf("parse tfstate: %w", err)
 	}
 
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o750); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
 	}
 
@@ -281,7 +283,7 @@ func importFromTFState(srcFile, stateDir string) error {
 			continue
 		}
 		fname := stateDir + "/" + sanitizeStateID(id) + ".json"
-		if err := os.WriteFile(fname, out, 0o644); err != nil {
+		if err := os.WriteFile(fname, out, 0o600); err != nil {
 			return fmt.Errorf("write state record: %w", err)
 		}
 		imported++
@@ -314,7 +316,7 @@ func importFromPulumi(srcFile, stateDir string) error {
 		return fmt.Errorf("parse pulumi checkpoint: %w", err)
 	}
 
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o750); err != nil {
 		return fmt.Errorf("create state dir: %w", err)
 	}
 
@@ -344,7 +346,7 @@ func importFromPulumi(srcFile, stateDir string) error {
 			continue
 		}
 		fname := stateDir + "/" + sanitizeStateID(res.ID) + ".json"
-		if err := os.WriteFile(fname, out, 0o644); err != nil {
+		if err := os.WriteFile(fname, out, 0o600); err != nil {
 			return fmt.Errorf("write state record: %w", err)
 		}
 		imported++

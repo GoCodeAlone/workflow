@@ -64,10 +64,10 @@ func main() {
 
 	// Create context that can be canceled on signal
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	// Start the engine
 	if err := engine.Start(ctx); err != nil {
+		cancel()
 		log.Fatalf("Failed to start workflow: %v", err)
 	}
 
@@ -80,6 +80,7 @@ func main() {
 	<-sigCh
 
 	fmt.Println("Shutting down...")
+	cancel()
 	if err := engine.Stop(ctx); err != nil {
 		log.Fatalf("Error during shutdown: %v", err)
 	}
