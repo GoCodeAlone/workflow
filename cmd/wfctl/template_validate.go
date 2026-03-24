@@ -578,8 +578,10 @@ var stepRefIndexRe = regexp.MustCompile(`index\s+\.steps\s+"([^"]+)"`)
 // action, after a pipe, or after an opening parenthesis.
 var stepRefFuncRe = regexp.MustCompile(`(?:^|\||\()\s*step\s+"([^"]+)"`)
 
-// stepFuncFieldRe matches step "STEP_NAME" "FIELD_NAME" capturing both arguments.
-var stepFuncFieldRe = regexp.MustCompile(`step\s+"([^"]+)"\s+"([^"]+)"`)
+// stepFuncFieldRe matches step "STEP_NAME" "FIELD_NAME" capturing both arguments,
+// when used as a function call at the start of an action, after a pipe, or after
+// an opening parenthesis.
+var stepFuncFieldRe = regexp.MustCompile(`(?:^|\||\()\s*step\s+"([^"]+)"\s+"([^"]+)"`)
 
 // hyphenDotRe matches dot-access chains with hyphens (e.g., .steps.my-step.field),
 // including continuation segments after the hyphenated part.
@@ -654,10 +656,14 @@ func validatePipelineTemplates(pipelineName string, stepsRaw []any, result *temp
 				}
 
 				// Check for step output field references via dot-access (.steps.NAME.FIELD)
-				fieldDotMatches := stepFieldDotRe.FindAllStringSubmatch(actionContent, -1)
-				for _, m := range fieldDotMatches {
-					refStepName, refField := m[1], m[2]
-					validateStepOutputField(pipelineName, stepName, refStepName, refField, stepMeta, reg, result)
+				// Skip when the action contains hyphenated dot-access, which is not valid
+				// Go-template syntax and is already flagged separately by hyphenDotRe.
+				if !hyphenDotRe.MatchString(actionContent) {
+					fieldDotMatches := stepFieldDotRe.FindAllStringSubmatch(actionContent, -1)
+					for _, m := range fieldDotMatches {
+						refStepName, refField := m[1], m[2]
+						validateStepOutputField(pipelineName, stepName, refStepName, refField, stepMeta, reg, result)
+					}
 				}
 
 				// Check for step name references via index

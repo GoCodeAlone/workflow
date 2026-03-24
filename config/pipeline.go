@@ -21,7 +21,8 @@ type PipelineConfig struct {
 	// existing pipelines without an Outputs block continue to work unchanged.
 	// When present, it enables:
 	//   - wfctl contract test to include response schemas in endpoint contracts
-	//   - wfctl template validate to validate output_mapping in step.workflow_call
+	//   - tools that understand pipeline outputs (for example, step.workflow_call)
+	//     to validate or document output_mapping and other response shapes
 	Outputs map[string]PipelineOutputDef `json:"outputs,omitempty" yaml:"outputs,omitempty"`
 }
 

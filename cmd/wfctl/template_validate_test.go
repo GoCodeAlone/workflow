@@ -532,6 +532,51 @@ func TestValidateConfigWithSelfReference(t *testing.T) {
 	}
 }
 
+func TestValidateConfigWithHyphenDotAccess(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "my-step",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								"x": "hello",
+							},
+						},
+					},
+					map[string]any{
+						"name": "consumer",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								"y": "{{ .steps.my-step.field }}",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "hyphenated dot-access") && strings.Contains(w, "prefer") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected informational warning about hyphenated dot-access, got warnings: %v", result.Warnings)
+	}
+}
+
 // TestValidateStepOutputField_UndeclaredField_Warning checks that the validator
 // warns when a template references a field that is not in the step type's
 // declared output schema (Phase 1 static analysis).
