@@ -110,4 +110,13 @@ type ResponseAssert struct {
 	Status int `yaml:"status"`
 	// Body is a substring expected in the response body.
 	Body string `yaml:"body"`
+	// JSON maps dot-path keys to expected values for exact JSON path equality checks.
+	// Example: {"message": "ok", "data.id": "abc123"}
+	JSON map[string]any `yaml:"json"`
+	// JSONNotEmpty lists dot-paths that must be present and non-empty in the JSON body.
+	// Example: ["data", "meta"]
+	JSONNotEmpty []string `yaml:"json_not_empty"`
+	// Headers maps response header names to expected values.
+	// Example: {"Content-Type": "application/json"}
+	Headers map[string]string `yaml:"headers"`
 }
