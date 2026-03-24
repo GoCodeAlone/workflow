@@ -592,6 +592,86 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			ConfigKeys: []string{"namespace", "kubeconfig", "server_addr"},
 		},
 
+		// infra plugin (abstract IaC resource types)
+		"infra.container_service": {
+			Type:       "infra.container_service",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+		"infra.k8s_cluster": {
+			Type:       "infra.k8s_cluster",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+		"infra.database": {
+			Type:       "infra.database",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+		"infra.cache": {
+			Type:       "infra.cache",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+		"infra.vpc": {
+			Type:       "infra.vpc",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+		"infra.load_balancer": {
+			Type:       "infra.load_balancer",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+		"infra.dns": {
+			Type:       "infra.dns",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+		"infra.registry": {
+			Type:       "infra.registry",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+		"infra.api_gateway": {
+			Type:       "infra.api_gateway",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+		"infra.firewall": {
+			Type:       "infra.firewall",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+		"infra.iam_role": {
+			Type:       "infra.iam_role",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+		"infra.storage": {
+			Type:       "infra.storage",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+		"infra.certificate": {
+			Type:       "infra.certificate",
+			Plugin:     "infra",
+			Stateful:   false,
+			ConfigKeys: []string{"provider", "size", "resources"},
+		},
+
 		// actors plugin
 		"actor.system": {
 			Type:       "actor.system",
