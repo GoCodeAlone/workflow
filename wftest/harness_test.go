@@ -204,3 +204,77 @@ pipelines:
 		t.Error("expected error for missing pipeline")
 	}
 }
+
+func TestSkipIf_StepNotTrackedAsExecuted(t *testing.T) {
+	h := wftest.New(t, wftest.WithYAML(`
+pipelines:
+  test:
+    steps:
+      - name: always_runs
+        type: step.set
+        config:
+          values:
+            flag: "true"
+      - name: skipped_step
+        type: step.set
+        skip_if: '{{ eq .flag "true" }}'
+        config:
+          values:
+            should_not_run: true
+      - name: final
+        type: step.set
+        config:
+          values:
+            done: true
+`))
+	result := h.ExecutePipeline("test", nil)
+	if result.Error != nil {
+		t.Fatal(result.Error)
+	}
+	if !result.StepExecuted("always_runs") {
+		t.Error("always_runs should have been executed")
+	}
+	if result.StepExecuted("skipped_step") {
+		t.Error("skipped_step should NOT have been executed (skip_if was true)")
+	}
+	if !result.StepExecuted("final") {
+		t.Error("final should have been executed")
+	}
+}
+
+func TestIf_StepNotTrackedWhenConditionFalse(t *testing.T) {
+	h := wftest.New(t, wftest.WithYAML(`
+pipelines:
+  test:
+    steps:
+      - name: set_flag
+        type: step.set
+        config:
+          values:
+            flag: "true"
+      - name: conditional_step
+        type: step.set
+        if: '{{ eq .flag "false" }}'
+        config:
+          values:
+            should_not_run: true
+      - name: final
+        type: step.set
+        config:
+          values:
+            done: true
+`))
+	result := h.ExecutePipeline("test", nil)
+	if result.Error != nil {
+		t.Fatal(result.Error)
+	}
+	if !result.StepExecuted("set_flag") {
+		t.Error("set_flag should have been executed")
+	}
+	if result.StepExecuted("conditional_step") {
+		t.Error("conditional_step should NOT have been executed (if condition was false)")
+	}
+	if !result.StepExecuted("final") {
+		t.Error("final should have been executed")
+	}
+}

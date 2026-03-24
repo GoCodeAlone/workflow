@@ -224,6 +224,18 @@ func (p *Pipeline) Execute(ctx context.Context, triggerData map[string]any) (*Pi
 			}
 		}
 
+		// Guard-skipped steps are not recorded in StepOutputs.
+		if result != nil && result.Skipped {
+			logger.Info("Step skipped by guard", "pipeline", p.Name, "step", step.Name(), "elapsed", elapsed)
+			p.recordEvent(ctx, "step.skipped", map[string]any{
+				"step_name": step.Name(),
+				"reason":    result.Output["reason"],
+				"elapsed":   elapsed.String(),
+			})
+			i++
+			continue
+		}
+
 		logger.Info("Step completed", "pipeline", p.Name, "step", step.Name(), "elapsed", elapsed)
 
 		// Record step.completed

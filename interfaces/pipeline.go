@@ -108,6 +108,10 @@ type StepResult struct {
 
 	// Stop indicates the pipeline should stop after this step (success).
 	Stop bool
+
+	// Skipped indicates the step was bypassed by a guard (skip_if or if).
+	// When true, the pipeline executor will not record this step in StepOutputs.
+	Skipped bool
 }
 
 // PipelineStep is a single composable unit of work in a pipeline.

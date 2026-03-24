@@ -87,6 +87,7 @@ func isTruthy(val string) bool {
 // skippedResult builds the standard output for a step that was skipped by a guard.
 func skippedResult(reason string) *interfaces.StepResult {
 	return &interfaces.StepResult{
+		Skipped: true,
 		Output: map[string]any{
 			"skipped": true,
 			"reason":  reason,
