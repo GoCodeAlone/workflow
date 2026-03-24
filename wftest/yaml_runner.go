@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -247,6 +248,42 @@ func applyAssertion(t *testing.T, label string, result *Result, a *Assertion, h 
 		}
 		if a.Response.Body != "" && !strings.Contains(string(result.RawBody), a.Response.Body) {
 			t.Errorf("assertion %s: body %q not found in %q", label, a.Response.Body, string(result.RawBody))
+		}
+		for path, expected := range a.Response.JSON {
+			val, err := JSONPath(result.RawBody, path)
+			if err != nil {
+				t.Errorf("assertion %s: %v", label, err)
+				continue
+			}
+			wantJSON, err := json.Marshal(expected)
+			if err != nil {
+				t.Errorf("assertion %s: JSON %q: cannot marshal expected value: %v", label, path, err)
+				continue
+			}
+			gotJSON, err := json.Marshal(val)
+			if err != nil {
+				t.Errorf("assertion %s: JSON %q: cannot marshal actual value: %v", label, path, err)
+				continue
+			}
+			if !bytes.Equal(wantJSON, gotJSON) {
+				t.Errorf("assertion %s: JSON %q: want %s, got %s", label, path, string(wantJSON), string(gotJSON))
+			}
+		}
+		for _, path := range a.Response.JSONNotEmpty {
+			val, err := JSONPath(result.RawBody, path)
+			if err != nil {
+				t.Errorf("assertion %s: %v", label, err)
+				continue
+			}
+			if IsJSONEmpty(val) {
+				t.Errorf("assertion %s: JSON %q: expected non-empty, got %v", label, path, val)
+			}
+		}
+		for header, expected := range a.Response.Headers {
+			actual := result.Header(http.CanonicalHeaderKey(header))
+			if actual != expected {
+				t.Errorf("assertion %s: header %q: want %q, got %q", label, header, expected, actual)
+			}
 		}
 		return
 	}

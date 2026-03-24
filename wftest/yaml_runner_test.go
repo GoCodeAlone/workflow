@@ -221,6 +221,49 @@ func TestYAMLRunner_StatefulTestData(t *testing.T) {
 	wftest.RunYAMLTests(t, "testdata/stateful_test.yaml")
 }
 
+func TestYAMLRunner_ResponseJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFile(t, tmpDir+"/json_test.yaml", `
+yaml: |
+  modules:
+    - name: router
+      type: http.router
+  pipelines:
+    hello:
+      trigger:
+        type: http
+        config:
+          path: /hello
+          method: GET
+      steps:
+        - name: respond
+          type: step.json_response
+          config:
+            status: 200
+            body:
+              message: "hello"
+              data:
+                id: "abc123"
+tests:
+  json-path-check:
+    trigger:
+      type: http
+      path: /hello
+    assertions:
+      - response:
+          status: 200
+          json:
+            message: "hello"
+            data.id: "abc123"
+          json_not_empty:
+            - message
+            - data
+          headers:
+            Content-Type: "application/json"
+`)
+	wftest.RunYAMLTests(t, tmpDir+"/json_test.yaml")
+}
+
 func TestRunYAMLTests_ScheduleTrigger(t *testing.T) {
 	tmpDir := t.TempDir()
 	writeFile(t, tmpDir+"/schedule_test.yaml", `
