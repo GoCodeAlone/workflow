@@ -12,11 +12,11 @@ import (
 
 type mockBlueGreenDriver struct {
 	mockDeployDriver
-	createGreenErr   error
-	switchTrafficErr error
-	destroyBlueErr   error
-	greenEndpoint    string
-	greenEndpointErr error
+	createGreenErr      error
+	switchTrafficErr    error
+	destroyBlueErr      error
+	greenEndpoint       string
+	greenEndpointErr    error
 	createGreenCalled   bool
 	switchTrafficCalled bool
 	destroyBlueCalled   bool

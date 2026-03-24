@@ -429,8 +429,36 @@ value: '{{ step "parse-request" "path_params" "id" }}'
 value: '{{ index .steps "parse-request" "path_params" "id" }}'
 ```
 
-`wfctl template validate --config workflow.yaml` lints template expressions and warns on undefined step references, forward references, and suggests the `step` function for hyphenated names.
+#### Missing Key Behaviour
 
+By default, template expressions that reference a missing map key (e.g. a typo in a step field name) resolve to the zero value silently — but the engine now logs a **WARN** message to make the problem visible:
+
+```
+WARN template resolved missing key to zero value pipeline=my-pipeline error="..."
+```
+
+To turn the warning into a hard error, set `strict_templates: true` on the pipeline:
+
+```yaml
+pipelines:
+  my-pipeline:
+    strict_templates: true   # any missing key access fails the pipeline step
+    steps:
+      - name: process
+        type: step.set
+        config:
+          values:
+            tenant: "{{ .steps.auth.affilate_id }}"   # typo: affilate_id instead of affiliate_id → step fails immediately
+```
+
+| Mode | `strict_templates` | Missing key result |
+|------|-------------------|--------------------|
+| Default | `false` | Zero value (`<no value>`) + WARN log |
+| Strict | `true` | Step returns an error |
+
+Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) and the `step`/`trigger` helper functions (`{{ step "auth" "field" }}`). A missing key via either syntax will fail the step when `strict_templates: true` is set.
+
+`wfctl template validate --config workflow.yaml` lints template expressions and warns on undefined step references and forward references. Use `strict_templates: true` in the pipeline config to catch field-level typos at runtime.
 ### Infrastructure
 | Type | Description | Plugin |
 |------|-------------|--------|

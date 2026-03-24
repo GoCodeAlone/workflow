@@ -22,9 +22,9 @@ type DeployHistoryStore interface {
 
 // DeployHistoryEntry describes a single deployment event.
 type DeployHistoryEntry struct {
-	Service   string    `json:"service"`
-	Image     string    `json:"image"`
-	Version   string    `json:"version"`
+	Service    string    `json:"service"`
+	Image      string    `json:"image"`
+	Version    string    `json:"version"`
 	DeployedAt time.Time `json:"deployed_at"`
 }
 
@@ -181,10 +181,10 @@ func (s *DeployRollbackStep) Execute(ctx context.Context, _ *PipelineContext) (*
 	}
 
 	return &StepResult{Output: map[string]any{
-		"success":           true,
-		"service":           s.service,
-		"rolled_back_to":    entry.Version,
-		"image":             entry.Image,
+		"success":                true,
+		"service":                s.service,
+		"rolled_back_to":         entry.Version,
+		"image":                  entry.Image,
 		"originally_deployed_at": entry.DeployedAt.Format(time.RFC3339),
 	}}, nil
 }

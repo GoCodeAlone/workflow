@@ -14,9 +14,9 @@ import (
 // mockGCSClient is an in-memory implementation of GCSObjectClient for testing.
 type mockGCSClient struct {
 	mu         sync.Mutex
-	objects    map[string][]byte       // key -> body
-	generation map[string]int64        // key -> current generation
-	errOnPut   map[string]error        // key -> error to return on conditional Put
+	objects    map[string][]byte // key -> body
+	generation map[string]int64  // key -> current generation
+	errOnPut   map[string]error  // key -> error to return on conditional Put
 }
 
 func newMockGCSClient() *mockGCSClient {
