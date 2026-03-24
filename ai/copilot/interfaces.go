@@ -9,7 +9,7 @@ import (
 // SessionWrapper wraps the methods we use from copilot.Session so they can be mocked.
 type SessionWrapper interface {
 	SendAndWait(ctx context.Context, opts copilot.MessageOptions) (*copilot.SessionEvent, error)
-	Destroy() error
+	Disconnect() error
 }
 
 // ClientWrapper wraps the methods we use from copilot.Client so they can be mocked.
@@ -39,6 +39,6 @@ func (w *realSessionWrapper) SendAndWait(ctx context.Context, opts copilot.Messa
 	return w.sess.SendAndWait(ctx, opts)
 }
 
-func (w *realSessionWrapper) Destroy() error {
-	return w.sess.Destroy()
+func (w *realSessionWrapper) Disconnect() error {
+	return w.sess.Disconnect()
 }

@@ -1,6 +1,7 @@
 package wftest
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -36,8 +37,8 @@ func RunYAMLTests(t *testing.T, testFilePath string) {
 		tf.Config = filepath.Join(filepath.Dir(testFilePath), tf.Config)
 	}
 
-	for name, tc := range tf.Tests {
-		name, tc := name, tc // capture loop vars
+	for name := range tf.Tests {
+		tc := tf.Tests[name]
 		t.Run(name, func(t *testing.T) {
 			t.Helper()
 			if tc.Description != "" {
@@ -101,12 +102,12 @@ func runYAMLTestCase(t *testing.T, tf *TestFile, tc *TestCase) {
 	if len(tc.Sequence) > 0 {
 		// Multi-step sequence: each step fires its own trigger, then checks assertions.
 		// State persists across all steps (same harness).
-		for i, step := range tc.Sequence {
-			step := step // capture
+		for i := range tc.Sequence {
+			step := &tc.Sequence[i]
 			label := fmt.Sprintf("sequence[%d](%s)", i, step.Name)
-			result := fireSequenceStep(t, h, &step)
-			for j, a := range step.Assertions {
-				applyAssertion(t, fmt.Sprintf("%s.assertion[%d]", label, j), result, &a, h)
+			result := fireSequenceStep(t, h, step)
+			for j := range step.Assertions {
+				applyAssertion(t, fmt.Sprintf("%s.assertion[%d]", label, j), result, &step.Assertions[j], h)
 			}
 		}
 		return
@@ -268,7 +269,7 @@ func applyAssertion(t *testing.T, label string, result *Result, a *Assertion, h 
 			// Compare via JSON to handle numeric type differences.
 			wantJSON, _ := json.Marshal(want)
 			gotJSON, _ := json.Marshal(got)
-			if string(wantJSON) != string(gotJSON) {
+			if !bytes.Equal(wantJSON, gotJSON) {
 				t.Errorf("assertion %s: output[%q]: want %v, got %v", label, key, want, got)
 			}
 		}
