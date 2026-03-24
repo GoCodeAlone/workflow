@@ -80,7 +80,7 @@ func runCIGenerate(args []string) error {
 		return err
 	}
 
-	if err := os.MkdirAll(*outputDir, 0o755); err != nil {
+	if err := os.MkdirAll(*outputDir, 0o750); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 
@@ -91,11 +91,11 @@ func runCIGenerate(args []string) error {
 			// relPath is already a full relative path like .github/workflows/infra.yml
 			// Write relative to cwd, not outputDir
 			dest = relPath
-			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 				return fmt.Errorf("create dir for %s: %w", dest, err)
 			}
 		}
-		if err := os.WriteFile(dest, []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(dest, []byte(content), 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", dest, err)
 		}
 		fmt.Printf("wrote %s\n", dest)

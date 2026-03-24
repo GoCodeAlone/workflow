@@ -1,6 +1,7 @@
 package wftest
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -109,7 +110,7 @@ func (s *StateStore) Assert(store string, expected map[string]any) error {
 		}
 		wantJSON, _ := json.Marshal(want)
 		gotJSON, _ := json.Marshal(got)
-		if string(wantJSON) != string(gotJSON) {
+		if !bytes.Equal(wantJSON, gotJSON) {
 			return fmt.Errorf("state[%s][%s]: want %s, got %s", store, key, wantJSON, gotJSON)
 		}
 	}

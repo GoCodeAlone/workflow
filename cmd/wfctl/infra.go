@@ -294,7 +294,8 @@ func formatPlanTable(plan interfaces.IaCPlan) string {
 	tw := tabwriter.NewWriter(&sb, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "Action\tResource\tType")
 	fmt.Fprintln(tw, "------\t--------\t----")
-	for _, a := range plan.Actions {
+	for i := range plan.Actions {
+		a := &plan.Actions[i]
 		symbol := actionSymbol(a.Action)
 		fmt.Fprintf(tw, "%s %s\t%s\t%s\n", symbol, a.Action, a.Resource.Name, a.Resource.Type)
 	}
@@ -317,7 +318,8 @@ func formatPlanMarkdown(plan interfaces.IaCPlan) string {
 	sb.WriteString("## Infrastructure Plan\n\n")
 	sb.WriteString("| Action | Resource | Type |\n")
 	sb.WriteString("|--------|----------|------|\n")
-	for _, a := range plan.Actions {
+	for i := range plan.Actions {
+		a := &plan.Actions[i]
 		symbol := actionSymbol(a.Action)
 		fmt.Fprintf(&sb, "| %s %s | `%s` | `%s` |\n",
 			symbol, a.Action, a.Resource.Name, a.Resource.Type)
@@ -343,8 +345,8 @@ func actionSymbol(action string) string {
 }
 
 func countActions(plan interfaces.IaCPlan) (creates, updates, deletes int) {
-	for _, a := range plan.Actions {
-		switch a.Action {
+	for i := range plan.Actions {
+		switch plan.Actions[i].Action {
 		case "create":
 			creates++
 		case "update":
@@ -362,7 +364,7 @@ func writePlanJSON(plan interfaces.IaCPlan, path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 // runInfraImport imports an existing cloud resource into the IaC state.
