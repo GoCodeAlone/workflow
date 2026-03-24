@@ -12,11 +12,11 @@ import (
 
 type mockCanaryDriver struct {
 	mockDeployDriver
-	createCanaryErr   error
-	routePercentErr   error
-	metricGateErr     error
-	promoteCanaryErr  error
-	destroyCanaryErr  error
+	createCanaryErr  error
+	routePercentErr  error
+	metricGateErr    error
+	promoteCanaryErr error
+	destroyCanaryErr error
 
 	createCanaryCalled  bool
 	promoteCanaryCalled bool

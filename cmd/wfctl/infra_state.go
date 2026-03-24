@@ -180,11 +180,11 @@ func runInfraStateImport(args []string) error {
 // --- tfstate export ---
 
 type tfState struct {
-	Version          int              `json:"version"`
-	TerraformVersion string           `json:"terraform_version"`
-	Serial           int              `json:"serial"`
-	Lineage          string           `json:"lineage"`
-	Outputs          map[string]any   `json:"outputs"`
+	Version          int               `json:"version"`
+	TerraformVersion string            `json:"terraform_version"`
+	Serial           int               `json:"serial"`
+	Lineage          string            `json:"lineage"`
+	Outputs          map[string]any    `json:"outputs"`
 	Resources        []tfStateResource `json:"resources"`
 }
 
@@ -302,11 +302,11 @@ func importFromPulumi(srcFile, stateDir string) error {
 	var checkpoint struct {
 		Latest struct {
 			Resources []struct {
-				URN      string         `json:"urn"`
-				Type     string         `json:"type"`
-				ID       string         `json:"id"`
-				Inputs   map[string]any `json:"inputs"`
-				Outputs  map[string]any `json:"outputs"`
+				URN     string         `json:"urn"`
+				Type    string         `json:"type"`
+				ID      string         `json:"id"`
+				Inputs  map[string]any `json:"inputs"`
+				Outputs map[string]any `json:"outputs"`
 			} `json:"resources"`
 		} `json:"latest"`
 	}

@@ -7,6 +7,11 @@ type PipelineConfig struct {
 	OnError      string                `json:"on_error,omitempty" yaml:"on_error,omitempty"`
 	Timeout      string                `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Compensation []PipelineStepConfig  `json:"compensation,omitempty" yaml:"compensation,omitempty"`
+	// StrictTemplates causes the pipeline to return an error when any template
+	// expression references a missing map key, instead of silently using the zero
+	// value. Useful for catching typos in step field references at runtime.
+	// Default is false (missing keys produce a warning log and resolve to zero).
+	StrictTemplates bool `json:"strict_templates,omitempty" yaml:"strict_templates,omitempty"`
 }
 
 // PipelineTriggerConfig defines what starts a pipeline.

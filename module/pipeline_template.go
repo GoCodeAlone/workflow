@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"reflect"
 	"regexp"
@@ -343,8 +344,24 @@ func (te *TemplateEngine) funcMapWithContext(pc *PipelineContext) template.FuncM
 	return fm
 }
 
+// isMissingKeyError reports whether err is a text/template "map has no entry
+// for key" error produced when missingkey=error is set. Checking the error
+// message string is the standard approach because text/template does not
+// export a typed sentinel for this condition.
+func isMissingKeyError(err error) bool {
+	return strings.Contains(err.Error(), "map has no entry for key")
+}
+
 // Resolve evaluates a template string against a PipelineContext.
 // If the string does not contain {{ }}, it is returned as-is.
+//
+// Missing key behaviour:
+//   - When pc.StrictTemplates is true (Option A), any reference to a missing
+//     map key causes an immediate error, surfacing typos as failures.
+//   - When pc.StrictTemplates is false (the default, Option C), a missing key
+//     resolves to the zero value AND a WARN log is emitted via pc.Logger (or
+//     slog.Default() when no logger is set) so that the silent failure is
+//     visible without breaking existing pipelines.
 func (te *TemplateEngine) Resolve(tmplStr string, pc *PipelineContext) (string, error) {
 	if !strings.Contains(tmplStr, "{{") {
 		return tmplStr, nil
@@ -352,14 +369,47 @@ func (te *TemplateEngine) Resolve(tmplStr string, pc *PipelineContext) (string, 
 
 	tmplStr = preprocessTemplate(tmplStr)
 
-	t, err := template.New("").Funcs(te.funcMapWithContext(pc)).Option("missingkey=zero").Parse(tmplStr)
+	// Parse once; we may execute with different missingkey options below.
+	t, err := template.New("").Funcs(te.funcMapWithContext(pc)).Parse(tmplStr)
 	if err != nil {
 		return "", fmt.Errorf("template parse error: %w", err)
 	}
 
+	data := te.templateData(pc)
+
+	// Strict mode (Option A): error immediately on missing keys.
+	if pc != nil && pc.StrictTemplates {
+		var buf bytes.Buffer
+		if err := t.Option("missingkey=error").Execute(&buf, data); err != nil {
+			return "", fmt.Errorf("template exec error: %w", err)
+		}
+		return buf.String(), nil
+	}
+
+	// Default mode (Option C): try with missingkey=error to detect missing
+	// keys, log a warning, then fall back to missingkey=zero so the pipeline
+	// continues with the zero value (preserving backward compatibility).
 	var buf bytes.Buffer
-	if err := t.Execute(&buf, te.templateData(pc)); err != nil {
-		return "", fmt.Errorf("template exec error: %w", err)
+	if execErr := t.Option("missingkey=error").Execute(&buf, data); execErr != nil {
+		if !isMissingKeyError(execErr) {
+			return "", fmt.Errorf("template exec error: %w", execErr)
+		}
+
+		// Log a warning about the missing key so developers can spot typos.
+		logger := slog.Default()
+		if pc != nil && pc.Logger != nil {
+			logger = pc.Logger
+		}
+		logger.Warn("template resolved missing key to zero value",
+			"template", tmplStr,
+			"error", execErr,
+		)
+
+		// Re-execute with zero mode to preserve backward-compatible output.
+		buf.Reset()
+		if err := t.Option("missingkey=zero").Execute(&buf, data); err != nil {
+			return "", fmt.Errorf("template exec error: %w", err)
+		}
 	}
 	return buf.String(), nil
 }

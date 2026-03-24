@@ -35,8 +35,8 @@ func setupRollbackApp(t *testing.T) (*module.MockApplication, *mockDeployDriver,
 
 func baseRollbackCfg() map[string]any {
 	return map[string]any{
-		"service":       "rb-svc",
-		"history_store": "deploy-history",
+		"service":        "rb-svc",
+		"history_store":  "deploy-history",
 		"target_version": "previous",
 		"health_check": map[string]any{
 			"path":    "/health",

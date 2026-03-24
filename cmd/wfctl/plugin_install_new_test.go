@@ -24,8 +24,8 @@ func buildPluginTarGz(t *testing.T, pluginName string, binaryContent []byte, pjC
 	t.Helper()
 	topDir := pluginName + "-" + runtime.GOOS + "-" + runtime.GOARCH
 	entries := map[string][]byte{
-		topDir + "/" + pluginName:    binaryContent,
-		topDir + "/plugin.json":      pjContent,
+		topDir + "/" + pluginName: binaryContent,
+		topDir + "/plugin.json":   pjContent,
 	}
 	return buildTarGz(t, entries, 0755)
 }
@@ -166,8 +166,8 @@ func TestInstallFromURL_NameNormalization(t *testing.T) {
 
 	pjContent := minimalPluginJSON(fullName, "0.1.0")
 	entries := map[string][]byte{
-		"top/" + fullName:    []byte("#!/bin/sh\n"),
-		"top/plugin.json":    pjContent,
+		"top/" + fullName: []byte("#!/bin/sh\n"),
+		"top/plugin.json": pjContent,
 	}
 	tarball := buildTarGz(t, entries, 0755)
 

@@ -44,7 +44,7 @@ func (m *mockProvider) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.
 	return nil, nil
 }
 func (m *mockProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) { return nil, nil }
-func (m *mockProvider) Close() error                                                { return nil }
+func (m *mockProvider) Close() error                                               { return nil }
 
 // mockDriver implements ResourceDriver
 type mockDriver struct{}
@@ -84,7 +84,7 @@ func (s *mockState) GetResource(_ context.Context, _ string) (*interfaces.Resour
 func (s *mockState) ListResources(_ context.Context) ([]interfaces.ResourceState, error) {
 	return nil, nil
 }
-func (s *mockState) DeleteResource(_ context.Context, _ string) error { return nil }
+func (s *mockState) DeleteResource(_ context.Context, _ string) error       { return nil }
 func (s *mockState) SavePlan(_ context.Context, _ interfaces.IaCPlan) error { return nil }
 func (s *mockState) GetPlan(_ context.Context, _ string) (*interfaces.IaCPlan, error) {
 	return nil, nil

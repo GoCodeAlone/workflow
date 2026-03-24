@@ -40,6 +40,12 @@ type Pipeline struct {
 	// used by step.request_parse for path parameter extraction.
 	RoutePattern string
 
+	// StrictTemplates enables strict template key resolution: when true, any
+	// template expression that references a missing map key returns an error
+	// instead of silently resolving to the zero value. Corresponds to the
+	// pipeline config field strict_templates.
+	StrictTemplates bool
+
 	// EventRecorder is an optional recorder for execution events.
 	// When nil (the default), no events are recorded. Events are best-effort:
 	// recording failures are logged but never fail the pipeline.
@@ -121,11 +127,13 @@ func (p *Pipeline) Execute(ctx context.Context, triggerData map[string]any) (*Pi
 		}
 	}
 	pc := NewPipelineContext(triggerData, md)
+	pc.StrictTemplates = p.StrictTemplates
 
 	logger := p.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
+	pc.Logger = logger
 
 	logger.Info("Pipeline started", "pipeline", p.Name, "steps", len(p.Steps))
 

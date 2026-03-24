@@ -2360,9 +2360,9 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 	// ---- Marketplace Installed ----
 
 	r.Register(&StepSchema{
-		Type:        "step.marketplace_installed",
-		Plugin:      "marketplace",
-		Description: "Lists installed marketplace plugins.",
+		Type:         "step.marketplace_installed",
+		Plugin:       "marketplace",
+		Description:  "Lists installed marketplace plugins.",
 		ConfigFields: []ConfigFieldDef{},
 		Outputs: []StepOutputDef{
 			{Key: "plugins", Type: "[]any", Description: "List of installed plugin metadata"},
