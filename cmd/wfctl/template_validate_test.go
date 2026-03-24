@@ -920,3 +920,49 @@ func TestValidatePlainStepRef_ConditionalField_Unknown(t *testing.T) {
 		t.Errorf("expected warning about unknown output field in conditional field, got warnings: %v", result.Warnings)
 	}
 }
+
+// TestValidateStepOutputField_DynamicOutputSkipped verifies that steps with
+// dynamic/wildcard placeholder outputs (e.g. "(key)" from step.secret_fetch,
+// "(dynamic)" from step.set) do NOT generate false-positive warnings when
+// arbitrary field names are accessed.
+func TestValidateStepOutputField_DynamicOutputSkipped(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "fetch",
+						"type": "step.secret_fetch",
+						"config": map[string]any{
+							"secrets": map[string]any{
+								"api_key": "env://API_KEY",
+							},
+						},
+					},
+					map[string]any{
+						"name": "call",
+						"type": "step.http_call",
+						"config": map[string]any{
+							// "api_key" is a dynamic output of step.secret_fetch (not statically declared)
+							"url": "https://api.example.com",
+							"headers": map[string]any{
+								"Authorization": "Bearer {{ .steps.fetch.api_key }}",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "api_key") && strings.Contains(w, "not a known output") {
+			t.Errorf("unexpected false-positive warning about dynamic output field 'api_key': %s", w)
+		}
+	}
+}

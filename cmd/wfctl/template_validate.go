@@ -601,13 +601,35 @@ var dbQueryStepTypes = map[string]bool{
 // isDBQueryStep reports whether a step type is a DB query step.
 func isDBQueryStep(t string) bool { return dbQueryStepTypes[t] }
 
-// joinOutputKeys returns a comma-joined list of output key names for error messages.
+// joinOutputKeys returns a comma-joined list of output key names for error messages,
+// omitting placeholder/wildcard entries like "(key)", "(dynamic)", "(nested)".
 func joinOutputKeys(outputs []schema.InferredOutput) string {
-	keys := make([]string, len(outputs))
-	for i, o := range outputs {
-		keys[i] = o.Key
+	keys := make([]string, 0, len(outputs))
+	for _, o := range outputs {
+		if !isPlaceholderOutputKey(o.Key) {
+			keys = append(keys, o.Key)
+		}
 	}
 	return strings.Join(keys, ", ")
+}
+
+// isPlaceholderOutputKey reports whether an output key is a dynamic/wildcard
+// placeholder (e.g. "(key)", "(dynamic)", "(nested)").  Steps that expose
+// such placeholders produce outputs whose field names cannot be statically
+// determined, so field-path validation should be skipped for them.
+func isPlaceholderOutputKey(key string) bool {
+	return len(key) >= 2 && key[0] == '(' && key[len(key)-1] == ')'
+}
+
+// hasDynamicOutputs reports whether any output in the list is a wildcard
+// placeholder, meaning the step emits fields that are not statically known.
+func hasDynamicOutputs(outputs []schema.InferredOutput) bool {
+	for _, o := range outputs {
+		if isPlaceholderOutputKey(o.Key) {
+			return true
+		}
+	}
+	return false
 }
 
 // validatePipelineTemplates checks template expressions in pipeline step configs for
@@ -740,6 +762,13 @@ func validateStepRef(pipelineName, currentStep, refName, fieldPath string, curre
 	outputs := reg.InferStepOutputs(info.stepType, info.stepConfig)
 	if len(outputs) == 0 {
 		return // no schema information available; skip
+	}
+
+	// If any output key is a placeholder (e.g. "(key)", "(dynamic)", "(nested)"),
+	// the step emits dynamic fields whose names cannot be statically determined.
+	// Skip field-path validation for such steps to avoid false positives.
+	if hasDynamicOutputs(outputs) {
+		return
 	}
 
 	// Split ".row.auth_token" → ["row", "auth_token"]
