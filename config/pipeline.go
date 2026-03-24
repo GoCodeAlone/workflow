@@ -1,5 +1,14 @@
 package config
 
+// PipelineOutputDef describes a single declared output field of a pipeline.
+// When a pipeline declares its outputs, callers (HTTP triggers,
+// step.workflow_call, wfctl contract test) can validate or document the
+// expected response shape.
+type PipelineOutputDef struct {
+	Type        string `json:"type" yaml:"type"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
 // PipelineConfig represents a single composable pipeline definition.
 type PipelineConfig struct {
 	Trigger      PipelineTriggerConfig `json:"trigger" yaml:"trigger"`
@@ -7,6 +16,13 @@ type PipelineConfig struct {
 	OnError      string                `json:"on_error,omitempty" yaml:"on_error,omitempty"`
 	Timeout      string                `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Compensation []PipelineStepConfig  `json:"compensation,omitempty" yaml:"compensation,omitempty"`
+	// Outputs declares the named output fields that this pipeline is expected
+	// to produce. This is an optional, backwards-compatible declaration —
+	// existing pipelines without an Outputs block continue to work unchanged.
+	// When present, it enables:
+	//   - wfctl contract test to include response schemas in endpoint contracts
+	//   - wfctl template validate to validate output_mapping in step.workflow_call
+	Outputs map[string]PipelineOutputDef `json:"outputs,omitempty" yaml:"outputs,omitempty"`
 }
 
 // PipelineTriggerConfig defines what starts a pipeline.
