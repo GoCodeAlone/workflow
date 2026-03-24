@@ -245,9 +245,9 @@ type testMockConfig struct {
 }
 
 type testCase struct {
-	Description string         `yaml:"description"`
-	Trigger     testTriggerDef `yaml:"trigger"`
-	StopAfter   string         `yaml:"stop_after"`
+	Description string          `yaml:"description"`
+	Trigger     testTriggerDef  `yaml:"trigger"`
+	StopAfter   string          `yaml:"stop_after"`
 	Mocks       *testMockConfig `yaml:"mocks"`
 	Assertions  []testAssertion `yaml:"assertions"`
 }
@@ -262,9 +262,9 @@ type testTriggerDef struct {
 }
 
 type testAssertion struct {
-	Step     string         `yaml:"step"`
-	Output   map[string]any `yaml:"output"`
-	Executed *bool          `yaml:"executed"`
+	Step     string              `yaml:"step"`
+	Output   map[string]any      `yaml:"output"`
+	Executed *bool               `yaml:"executed"`
 	Response *testResponseAssert `yaml:"response"`
 }
 
