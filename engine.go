@@ -19,6 +19,7 @@ import (
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/schema"
 	"github.com/GoCodeAlone/workflow/secrets"
+	"github.com/GoCodeAlone/workflow/validation"
 	"gopkg.in/yaml.v3"
 )
 
@@ -398,6 +399,32 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	}
 	if err := schema.ValidateConfig(cfg, valOpts...); err != nil {
 		return fmt.Errorf("config validation failed: %w", err)
+	}
+
+	// Run pipeline template cross-reference validation.
+	// Mode is controlled by engine.validation.templateRefs in the config:
+	//   "off"   — skip entirely (preserves previous behaviour)
+	//   "warn"  — log warnings for suspicious references (default)
+	//   "error" — return an error when validation finds problems
+	if len(cfg.Pipelines) > 0 {
+		mode := "warn" // default
+		if cfg.Engine != nil && cfg.Engine.Validation != nil && cfg.Engine.Validation.TemplateRefs != "" {
+			mode = cfg.Engine.Validation.TemplateRefs
+		}
+		if mode != "off" {
+			vr := validation.ValidatePipelineTemplateRefs(cfg.Pipelines)
+			if vr.HasIssues() {
+				allMessages := make([]string, 0, len(vr.Warnings)+len(vr.Errors))
+				allMessages = append(allMessages, vr.Warnings...)
+				allMessages = append(allMessages, vr.Errors...)
+				if mode == "error" {
+					return fmt.Errorf("pipeline template validation failed: %s", strings.Join(allMessages, "; "))
+				}
+				for _, msg := range allMessages {
+					e.logger.Warn(msg)
+				}
+			}
+		}
 	}
 
 	// Validate plugin requirements if declared

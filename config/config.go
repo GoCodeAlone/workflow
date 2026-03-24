@@ -132,7 +132,20 @@ type WorkflowConfig struct {
 	Plugins        *PluginsConfig        `json:"plugins,omitempty" yaml:"plugins,omitempty"`
 	Sidecars       []SidecarConfig       `json:"sidecars,omitempty" yaml:"sidecars,omitempty"`
 	Infrastructure *InfrastructureConfig `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
+	Engine         *EngineConfig         `json:"engine,omitempty" yaml:"engine,omitempty"`
 	ConfigDir      string                `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
+}
+
+// EngineConfig holds engine-level runtime settings.
+type EngineConfig struct {
+	Validation *EngineValidationConfig `json:"validation,omitempty" yaml:"validation,omitempty"`
+}
+
+// EngineValidationConfig controls startup and execution-time validation behaviour.
+type EngineValidationConfig struct {
+	// TemplateRefs controls template cross-reference validation at startup.
+	// Allowed values: "off" (skip), "warn" (log warnings, default), "error" (fail on errors).
+	TemplateRefs string `json:"templateRefs,omitempty" yaml:"templateRefs,omitempty"`
 }
 
 // InfrastructureConfig holds infrastructure resource declarations.
