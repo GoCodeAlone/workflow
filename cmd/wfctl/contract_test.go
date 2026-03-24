@@ -560,3 +560,235 @@ pipelines:
 		t.Errorf("expected 'breaking' in error message, got: %v", err)
 	}
 }
+
+// TestGenerateContractResponseSchema checks that the response schema is extracted
+// from the pipeline's optional outputs declaration.
+func TestGenerateContractResponseSchema(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"get-item": map[string]any{
+				"trigger": map[string]any{
+					"type": "http",
+					"config": map[string]any{
+						"path":   "/api/items/:id",
+						"method": "GET",
+					},
+				},
+				"outputs": map[string]any{
+					"id":    map[string]any{"type": "string"},
+					"name":  map[string]any{"type": "string"},
+					"found": map[string]any{"type": "boolean"},
+				},
+				"steps": []any{},
+			},
+		},
+	}
+
+	contract := generateContract(cfg)
+
+	if len(contract.Endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(contract.Endpoints))
+	}
+	ep := contract.Endpoints[0]
+	if len(ep.ResponseSchema) != 3 {
+		t.Fatalf("expected 3 response schema fields, got %d: %v", len(ep.ResponseSchema), ep.ResponseSchema)
+	}
+	if ep.ResponseSchema["id"] != "string" {
+		t.Errorf("expected id=string, got %q", ep.ResponseSchema["id"])
+	}
+	if ep.ResponseSchema["found"] != "boolean" {
+		t.Errorf("expected found=boolean, got %q", ep.ResponseSchema["found"])
+	}
+}
+
+// TestGenerateContractNoResponseSchema checks that endpoints without an outputs
+// block have a nil ResponseSchema (backwards-compatible).
+func TestGenerateContractNoResponseSchema(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"get-item": map[string]any{
+				"trigger": map[string]any{
+					"type": "http",
+					"config": map[string]any{
+						"path":   "/api/items",
+						"method": "GET",
+					},
+				},
+				"steps": []any{},
+			},
+		},
+	}
+
+	contract := generateContract(cfg)
+	if len(contract.Endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(contract.Endpoints))
+	}
+	if contract.Endpoints[0].ResponseSchema != nil {
+		t.Errorf("expected nil ResponseSchema for pipeline without outputs, got %v", contract.Endpoints[0].ResponseSchema)
+	}
+}
+
+// TestCompareContracts_ResponseSchemaFieldRemoved checks that removing a
+// declared response schema field is detected as a breaking change.
+func TestCompareContracts_ResponseSchemaFieldRemoved(t *testing.T) {
+	base := &Contract{
+		Version: "1.0",
+		Endpoints: []EndpointContract{
+			{
+				Method:   "GET",
+				Path:     "/api/items",
+				Pipeline: "get-items",
+				ResponseSchema: map[string]string{
+					"id":    "string",
+					"name":  "string",
+					"found": "boolean",
+				},
+			},
+		},
+	}
+	current := &Contract{
+		Version: "1.0",
+		Endpoints: []EndpointContract{
+			{
+				Method:   "GET",
+				Path:     "/api/items",
+				Pipeline: "get-items",
+				ResponseSchema: map[string]string{
+					"id":   "string",
+					"name": "string",
+					// "found" has been removed
+				},
+			},
+		},
+	}
+
+	comp := compareContracts(base, current)
+
+	if comp.BreakingCount == 0 {
+		t.Error("expected breaking change when response field is removed")
+	}
+	found := false
+	for _, ec := range comp.Endpoints {
+		if ec.IsBreaking && strings.Contains(ec.Detail, "found") && strings.Contains(ec.Detail, "removed") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected breaking change about removed field 'found', got: %v", comp.Endpoints)
+	}
+}
+
+// TestCompareContracts_ResponseSchemaTypeChanged checks that changing a
+// declared response schema field type is detected as a breaking change.
+func TestCompareContracts_ResponseSchemaTypeChanged(t *testing.T) {
+	base := &Contract{
+		Version: "1.0",
+		Endpoints: []EndpointContract{
+			{
+				Method:   "GET",
+				Path:     "/api/items",
+				Pipeline: "get-items",
+				ResponseSchema: map[string]string{
+					"count": "integer",
+				},
+			},
+		},
+	}
+	current := &Contract{
+		Version: "1.0",
+		Endpoints: []EndpointContract{
+			{
+				Method:   "GET",
+				Path:     "/api/items",
+				Pipeline: "get-items",
+				ResponseSchema: map[string]string{
+					"count": "string", // changed from integer to string
+				},
+			},
+		},
+	}
+
+	comp := compareContracts(base, current)
+
+	if comp.BreakingCount == 0 {
+		t.Error("expected breaking change when response field type changes")
+	}
+	found := false
+	for _, ec := range comp.Endpoints {
+		if ec.IsBreaking && strings.Contains(ec.Detail, "count") && strings.Contains(ec.Detail, "changed type") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected breaking change about type change for 'count', got: %v", comp.Endpoints)
+	}
+}
+
+// TestCompareContracts_ResponseSchemaFieldAdded checks that adding a new
+// response schema field is not a breaking change.
+func TestCompareContracts_ResponseSchemaFieldAdded(t *testing.T) {
+	base := &Contract{
+		Version: "1.0",
+		Endpoints: []EndpointContract{
+			{
+				Method:         "GET",
+				Path:           "/api/items",
+				Pipeline:       "get-items",
+				ResponseSchema: map[string]string{"id": "string"},
+			},
+		},
+	}
+	current := &Contract{
+		Version: "1.0",
+		Endpoints: []EndpointContract{
+			{
+				Method:         "GET",
+				Path:           "/api/items",
+				Pipeline:       "get-items",
+				ResponseSchema: map[string]string{"id": "string", "name": "string"},
+			},
+		},
+	}
+
+	comp := compareContracts(base, current)
+
+	if comp.BreakingCount != 0 {
+		t.Errorf("expected no breaking changes when a new field is added, got %d: %v", comp.BreakingCount, comp.Endpoints)
+	}
+}
+
+// TestExtractPipelineOutputSchema tests the helper that reads the outputs block.
+func TestExtractPipelineOutputSchema(t *testing.T) {
+	t.Run("with outputs", func(t *testing.T) {
+		pipelineMap := map[string]any{
+			"outputs": map[string]any{
+				"id":    map[string]any{"type": "string", "description": "Item ID"},
+				"found": map[string]any{"type": "boolean"},
+				"score": map[string]any{}, // missing type → defaults to "any"
+			},
+		}
+		got := extractPipelineOutputSchema(pipelineMap)
+		if got == nil {
+			t.Fatal("expected non-nil schema")
+		}
+		if got["id"] != "string" {
+			t.Errorf("id: want string, got %q", got["id"])
+		}
+		if got["found"] != "boolean" {
+			t.Errorf("found: want boolean, got %q", got["found"])
+		}
+		if got["score"] != "any" {
+			t.Errorf("score: want any, got %q", got["score"])
+		}
+	})
+
+	t.Run("without outputs", func(t *testing.T) {
+		pipelineMap := map[string]any{"steps": []any{}}
+		got := extractPipelineOutputSchema(pipelineMap)
+		if got != nil {
+			t.Errorf("expected nil for pipeline without outputs, got %v", got)
+		}
+	})
+}

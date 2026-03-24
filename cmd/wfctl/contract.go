@@ -26,10 +26,11 @@ type Contract struct {
 
 // EndpointContract describes an HTTP endpoint in the contract.
 type EndpointContract struct {
-	Method       string `json:"method"`
-	Path         string `json:"path"`
-	AuthRequired bool   `json:"authRequired"`
-	Pipeline     string `json:"pipeline"`
+	Method         string            `json:"method"`
+	Path           string            `json:"path"`
+	AuthRequired   bool              `json:"authRequired"`
+	Pipeline       string            `json:"pipeline"`
+	ResponseSchema map[string]string `json:"responseSchema,omitempty"` // field name → type
 }
 
 // ModuleContract describes a module in the contract.
@@ -268,6 +269,8 @@ func generateContract(cfg *config.WorkflowConfig) *Contract {
 									}
 								}
 							}
+							// Populate response schema from pipeline outputs declaration
+							ep.ResponseSchema = extractPipelineOutputSchema(pipelineMap)
 							contract.Endpoints = append(contract.Endpoints, ep)
 						}
 					}
@@ -343,6 +346,31 @@ func generateContract(cfg *config.WorkflowConfig) *Contract {
 	return contract
 }
 
+// extractPipelineOutputSchema reads the optional "outputs" block from a raw
+// pipeline map and returns a field→type map for use in EndpointContract.
+// Returns nil when the pipeline has no outputs declaration.
+func extractPipelineOutputSchema(pipelineMap map[string]any) map[string]string {
+	outputsRaw, ok := pipelineMap["outputs"]
+	if !ok || outputsRaw == nil {
+		return nil
+	}
+	outputsMap, ok := outputsRaw.(map[string]any)
+	if !ok || len(outputsMap) == 0 {
+		return nil
+	}
+	schema := make(map[string]string, len(outputsMap))
+	for field, defRaw := range outputsMap {
+		fieldType := "any"
+		if defMap, ok := defRaw.(map[string]any); ok {
+			if t, ok := defMap["type"].(string); ok && t != "" {
+				fieldType = t
+			}
+		}
+		schema[field] = fieldType
+	}
+	return schema
+}
+
 // compareContracts compares a baseline contract to the current one.
 func compareContracts(base, current *Contract) *contractComparison {
 	comp := &contractComparison{
@@ -365,18 +393,37 @@ func compareContracts(base, current *Contract) *contractComparison {
 	// Check base endpoints
 	for key, baseEP := range baseEPs {
 		if currentEP, exists := currentEPs[key]; exists {
-			// Check for breaking changes
+			// Collect all breaking changes for this endpoint
+			var breakingDetails []string
+
+			// Auth was added to a public endpoint
 			if baseEP.AuthRequired != currentEP.AuthRequired && !baseEP.AuthRequired {
-				// Auth was added to a public endpoint
-				comp.Endpoints = append(comp.Endpoints, endpointChange{
-					Method:     baseEP.Method,
-					Path:       baseEP.Path,
-					Pipeline:   currentEP.Pipeline,
-					Change:     changeChanged,
-					Detail:     "auth requirement added (clients without tokens will get 401)",
-					IsBreaking: true,
-				})
-				comp.BreakingCount++
+				breakingDetails = append(breakingDetails, "auth requirement added (clients without tokens will get 401)")
+			}
+
+			// Response schema fields were removed or changed type
+			for field, baseType := range baseEP.ResponseSchema {
+				if currentType, exists := currentEP.ResponseSchema[field]; !exists {
+					breakingDetails = append(breakingDetails,
+						fmt.Sprintf("response field %q removed (was %s)", field, baseType))
+				} else if baseType != currentType && baseType != "any" && currentType != "any" {
+					breakingDetails = append(breakingDetails,
+						fmt.Sprintf("response field %q changed type from %s to %s", field, baseType, currentType))
+				}
+			}
+
+			if len(breakingDetails) > 0 {
+				for _, detail := range breakingDetails {
+					comp.Endpoints = append(comp.Endpoints, endpointChange{
+						Method:     baseEP.Method,
+						Path:       baseEP.Path,
+						Pipeline:   currentEP.Pipeline,
+						Change:     changeChanged,
+						Detail:     detail,
+						IsBreaking: true,
+					})
+					comp.BreakingCount++
+				}
 			} else {
 				comp.Endpoints = append(comp.Endpoints, endpointChange{
 					Method:   baseEP.Method,
@@ -511,6 +558,17 @@ func printContract(c *Contract) {
 			auth = " [auth]"
 		}
 		fmt.Printf("  %-7s %s%s  (pipeline: %s)\n", ep.Method, ep.Path, auth, ep.Pipeline)
+		if len(ep.ResponseSchema) > 0 {
+			// Print response schema fields sorted for stable output
+			fields := make([]string, 0, len(ep.ResponseSchema))
+			for f := range ep.ResponseSchema {
+				fields = append(fields, f)
+			}
+			sort.Strings(fields)
+			for _, f := range fields {
+				fmt.Printf("    response.%s: %s\n", f, ep.ResponseSchema[f])
+			}
+		}
 	}
 
 	fmt.Printf("\nModules (%d):\n", len(c.Modules))

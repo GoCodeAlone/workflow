@@ -570,6 +570,9 @@ var templateExprRe = regexp.MustCompile(`\{\{(.*?)\}\}`)
 // Group 2: remaining dot-path (e.g. ".row.auth_token"), field names without hyphens.
 var stepRefDotRe = regexp.MustCompile(`\.steps\.([a-zA-Z_][a-zA-Z0-9_-]*)((?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)`)
 
+// stepFieldDotRe matches .steps.STEP_NAME.FIELD_NAME (captures step and first field).
+var stepFieldDotRe = regexp.MustCompile(`\.steps\.([a-zA-Z_][a-zA-Z0-9_-]*)\.([a-zA-Z_][a-zA-Z0-9_-]*)`)
+
 // stepRefIndexRe matches index .steps "STEP_NAME" patterns.
 var stepRefIndexRe = regexp.MustCompile(`index\s+\.steps\s+"([^"]+)"`)
 
@@ -577,9 +580,20 @@ var stepRefIndexRe = regexp.MustCompile(`index\s+\.steps\s+"([^"]+)"`)
 // action, after a pipe, or after an opening parenthesis.
 var stepRefFuncRe = regexp.MustCompile(`(?:^|\||\()\s*step\s+"([^"]+)"`)
 
+// stepFuncFieldRe matches step "STEP_NAME" "FIELD_NAME" capturing both arguments,
+// when used as a function call at the start of an action, after a pipe, or after
+// an opening parenthesis.
+var stepFuncFieldRe = regexp.MustCompile(`(?:^|\||\()\s*step\s+"([^"]+)"\s+"([^"]+)"`)
+
 // hyphenDotRe matches dot-access chains with hyphens (e.g., .steps.my-step.field),
 // including continuation segments after the hyphenated part.
 var hyphenDotRe = regexp.MustCompile(`\.[a-zA-Z_][a-zA-Z0-9_]*-[a-zA-Z0-9_-]*(?:\.[a-zA-Z_][a-zA-Z0-9_-]*)*`)
+
+// pipelineStepMeta holds the type and config of a pipeline step for static analysis.
+type pipelineStepMeta struct {
+	typ    string
+	config map[string]any
+}
 
 // plainStepPathRe matches bare step context-key references such as
 // "steps.STEP_NAME.field.subfield" used in plain-string config values (no {{ }}).
@@ -634,10 +648,13 @@ func hasDynamicOutputs(outputs []schema.InferredOutput) bool {
 
 // validatePipelineTemplates checks template expressions in pipeline step configs for
 // references to nonexistent or forward-declared steps and common template pitfalls.
+// It also warns when a template references a field that is not in the step type's
+// declared output schema (Phase 1 static analysis).
 func validatePipelineTemplates(pipelineName string, stepsRaw []any, result *templateValidationResult) {
-	// Build ordered step name list and per-step type/config info.
-	stepNames := make(map[string]int)           // step name -> index in pipeline
-	stepInfos := make(map[string]stepBuildInfo) // step name -> type and config
+	// Build ordered step name list and step metadata for schema validation.
+	stepNames := make(map[string]int)             // step name -> index in pipeline
+	stepMeta := make(map[string]pipelineStepMeta) // step name -> type+config (used by validateStepOutputField)
+	stepInfos := make(map[string]stepBuildInfo)   // step name -> type and config (used by validateStepRef)
 
 	reg := schema.NewStepSchemaRegistry()
 
@@ -647,15 +664,19 @@ func validatePipelineTemplates(pipelineName string, stepsRaw []any, result *temp
 			continue
 		}
 		name, _ := stepMap["name"].(string)
-		if name != "" {
-			stepNames[name] = i
-			sType, _ := stepMap["type"].(string)
-			sCfg, _ := stepMap["config"].(map[string]any)
-			if sCfg == nil {
-				sCfg = map[string]any{}
-			}
-			stepInfos[name] = stepBuildInfo{stepType: sType, stepConfig: sCfg}
+		if name == "" {
+			continue
 		}
+
+		stepNames[name] = i
+		typ, _ := stepMap["type"].(string)
+		cfg, _ := stepMap["config"].(map[string]any)
+		if cfg == nil {
+			cfg = map[string]any{}
+		}
+
+		stepInfos[name] = stepBuildInfo{stepType: typ, stepConfig: cfg}
+		stepMeta[name] = pipelineStepMeta{typ: typ, config: cfg}
 	}
 
 	// Check each step's config for template expressions
@@ -698,6 +719,17 @@ func validatePipelineTemplates(pipelineName string, stepsRaw []any, result *temp
 					validateStepRef(pipelineName, stepName, refName, fieldPath, i, stepNames, stepInfos, reg, result)
 				}
 
+				// Check for step output field references via dot-access (.steps.NAME.FIELD)
+				// Skip when the action contains hyphenated dot-access, which is not valid
+				// Go-template syntax and is already flagged separately by hyphenDotRe.
+				if !hyphenDotRe.MatchString(actionContent) {
+					fieldDotMatches := stepFieldDotRe.FindAllStringSubmatch(actionContent, -1)
+					for _, m := range fieldDotMatches {
+						refStepName, refField := m[1], m[2]
+						validateStepOutputField(pipelineName, stepName, refStepName, refField, stepMeta, reg, result)
+					}
+				}
+
 				// Check for step name references via index (no field path resolvable)
 				indexMatches := stepRefIndexRe.FindAllStringSubmatch(actionContent, -1)
 				for _, m := range indexMatches {
@@ -710,6 +742,13 @@ func validatePipelineTemplates(pipelineName string, stepsRaw []any, result *temp
 				for _, m := range funcMatches {
 					refName := m[1]
 					validateStepRef(pipelineName, stepName, refName, "", i, stepNames, stepInfos, reg, result)
+				}
+
+				// Check for step output field references via step function (step "NAME" "FIELD")
+				funcFieldMatches := stepFuncFieldRe.FindAllStringSubmatch(actionContent, -1)
+				for _, m := range funcFieldMatches {
+					refStepName, refField := m[1], m[2]
+					validateStepOutputField(pipelineName, stepName, refStepName, refField, stepMeta, reg, result)
 				}
 
 				// Warn on hyphenated dot-access (auto-fixed but suggest preferred syntax)
@@ -726,6 +765,44 @@ func validatePipelineTemplates(pipelineName string, stepsRaw []any, result *temp
 			validatePlainStepRefs(pipelineName, stepName, i, stepCfg, stepNames, stepInfos, reg, result)
 		}
 	}
+}
+
+// validateStepOutputField checks that a referenced output field exists in the
+// step type's declared output schema. It emits a warning when the step type is
+// known, has declared outputs, and none of them match the referenced field.
+func validateStepOutputField(pipelineName, currentStep, refStepName, refField string, stepMeta map[string]pipelineStepMeta, reg *schema.StepSchemaRegistry, result *templateValidationResult) {
+	meta, ok := stepMeta[refStepName]
+	if !ok || meta.typ == "" {
+		return // step name unknown or no type — already caught by validateStepRef
+	}
+
+	outputs := reg.InferStepOutputs(meta.typ, meta.config)
+	if len(outputs) == 0 {
+		return // no declared outputs for this step type — nothing to check
+	}
+
+	// If any output key is a placeholder (wrapped in parentheses), the step
+	// has dynamic/config-dependent outputs and we cannot validate statically.
+	for _, o := range outputs {
+		if len(o.Key) > 1 && o.Key[0] == '(' && o.Key[len(o.Key)-1] == ')' {
+			return
+		}
+	}
+
+	for _, o := range outputs {
+		if o.Key == refField {
+			return // field found — all good
+		}
+	}
+
+	// Build a suggestion list from declared outputs
+	keys := make([]string, 0, len(outputs))
+	for _, o := range outputs {
+		keys = append(keys, o.Key)
+	}
+	result.Warnings = append(result.Warnings,
+		fmt.Sprintf("pipeline %q step %q: references %s.%s but step %q (%s) declares outputs: %s",
+			pipelineName, currentStep, refStepName, refField, refStepName, meta.typ, strings.Join(keys, ", ")))
 }
 
 // validateStepRef checks that a referenced step name exists and appears before the

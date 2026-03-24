@@ -577,6 +577,309 @@ func TestValidateConfigWithHyphenDotAccess(t *testing.T) {
 	}
 }
 
+// TestValidateStepOutputField_UndeclaredField_Warning checks that the validator
+// warns when a template references a field that is not in the step type's
+// declared output schema (Phase 1 static analysis).
+func TestValidateStepOutputField_UndeclaredField_Warning(t *testing.T) {
+	// step.db_query with mode:single declares outputs: row, found
+	// Referencing .steps.query.rows (plural) should warn
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "query",
+						"type": "step.db_query",
+						"config": map[string]any{
+							"db":    "mydb",
+							"query": "SELECT * FROM items WHERE id = 1",
+							"mode":  "single",
+						},
+					},
+					map[string]any{
+						"name": "respond",
+						"type": "step.json_response",
+						"config": map[string]any{
+							"status": 200,
+							// "rows" is the list-mode output; single-mode declares "row"
+							"body": `{{ json .steps.query.rows }}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "rows") && strings.Contains(w, "query") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected warning for undeclared field 'rows' on step.db_query (single mode), got warnings: %v", result.Warnings)
+	}
+}
+
+// TestValidateStepOutputField_DeclaredField_NoWarning checks that referencing a
+// declared output field does not produce a warning.
+func TestValidateStepOutputField_DeclaredField_NoWarning(t *testing.T) {
+	// step.db_query with mode:single declares outputs: row, found
+	// Referencing .steps.query.row should NOT warn
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "query",
+						"type": "step.db_query",
+						"config": map[string]any{
+							"db":    "mydb",
+							"query": "SELECT * FROM items WHERE id = 1",
+							"mode":  "single",
+						},
+					},
+					map[string]any{
+						"name": "respond",
+						"type": "step.json_response",
+						"config": map[string]any{
+							"status": 200,
+							"body":   `{{ json .steps.query.row }}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "query.row") && strings.Contains(w, "declares outputs") {
+			t.Errorf("unexpected warning for declared field 'row': %s", w)
+		}
+	}
+}
+
+// TestValidateStepOutputField_StepFuncSyntax_Warning verifies that the validator
+// also checks field names in the step "NAME" "FIELD" function call syntax.
+func TestValidateStepOutputField_StepFuncSyntax_Warning(t *testing.T) {
+	// step.db_query with mode:list declares outputs: rows, count
+	// Using step "query" "row" (singular) should warn
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "query",
+						"type": "step.db_query",
+						"config": map[string]any{
+							"mode": "list",
+						},
+					},
+					map[string]any{
+						"name": "respond",
+						"type": "step.json_response",
+						"config": map[string]any{
+							"status": 200,
+							// list mode declares "rows"/"count", not "row"
+							"body": `{{ step "query" "row" }}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "row") && strings.Contains(w, "query") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected warning for undeclared field 'row' on step.db_query (list mode) via step func, got warnings: %v", result.Warnings)
+	}
+}
+
+// TestValidateStepOutputField_SetStep_NoWarning checks that step.set outputs
+// inferred from config are validated correctly (declared key should not warn).
+func TestValidateStepOutputField_SetStep_NoWarning(t *testing.T) {
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "setter",
+						"type": "step.set",
+						"config": map[string]any{
+							"values": map[string]any{
+								"user_id": "123",
+							},
+						},
+					},
+					map[string]any{
+						"name": "respond",
+						"type": "step.json_response",
+						"config": map[string]any{
+							"status": 200,
+							"body":   `{{ .steps.setter.user_id }}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "declares outputs") && strings.Contains(w, "setter") {
+			t.Errorf("unexpected step output warning for step.set with declared key: %s", w)
+		}
+	}
+}
+
+// TestValidateStepOutputField_NoOutputSchema_NoWarning checks that steps with
+// no declared outputs do not produce false-positive field warnings.
+func TestValidateStepOutputField_NoOutputSchema_NoWarning(t *testing.T) {
+	// An unknown/external step type has no schema — any field reference should be silently ignored
+	cfg := &config.WorkflowConfig{
+		Pipelines: map[string]any{
+			"api": map[string]any{
+				"steps": []any{
+					map[string]any{
+						"name": "external",
+						"type": "step.external_custom_step", // not in registry
+					},
+					map[string]any{
+						"name": "respond",
+						"type": "step.json_response",
+						"config": map[string]any{
+							"status": 200,
+							"body":   `{{ .steps.external.anything }}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	knownModules := KnownModuleTypes()
+	knownSteps := KnownStepTypes()
+	knownTriggers := KnownTriggerTypes()
+
+	result := validateWorkflowConfig("test", cfg, knownModules, knownSteps, knownTriggers)
+
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "declares outputs") && strings.Contains(w, "external") {
+			t.Errorf("unexpected output field warning for step with no declared outputs: %s", w)
+		}
+	}
+}
+
+// TestValidateStepOutputFieldRegistry tests validateStepOutputField directly.
+func TestValidateStepOutputFieldRegistry(t *testing.T) {
+	reg := schema.NewStepSchemaRegistry()
+
+	tests := []struct {
+		name       string
+		stepName   string
+		stepType   string
+		stepConfig map[string]any
+		refField   string
+		expectWarn bool
+	}{
+		{
+			name:       "db_query single mode: valid field row",
+			stepName:   "q",
+			stepType:   "step.db_query",
+			stepConfig: map[string]any{"mode": "single"},
+			refField:   "row",
+			expectWarn: false,
+		},
+		{
+			name:       "db_query single mode: invalid field rows",
+			stepName:   "q",
+			stepType:   "step.db_query",
+			stepConfig: map[string]any{"mode": "single"},
+			refField:   "rows",
+			expectWarn: true,
+		},
+		{
+			name:       "db_query list mode: valid field rows",
+			stepName:   "q",
+			stepType:   "step.db_query",
+			stepConfig: map[string]any{"mode": "list"},
+			refField:   "rows",
+			expectWarn: false,
+		},
+		{
+			name:       "db_query list mode: invalid field row",
+			stepName:   "q",
+			stepType:   "step.db_query",
+			stepConfig: map[string]any{"mode": "list"},
+			refField:   "row",
+			expectWarn: true,
+		},
+		{
+			name:       "step.set: declared key is valid",
+			stepName:   "s",
+			stepType:   "step.set",
+			stepConfig: map[string]any{"values": map[string]any{"my_field": "v"}},
+			refField:   "my_field",
+			expectWarn: false,
+		},
+		{
+			name:       "step.set: undeclared key warns",
+			stepName:   "s",
+			stepType:   "step.set",
+			stepConfig: map[string]any{"values": map[string]any{"my_field": "v"}},
+			refField:   "other_field",
+			expectWarn: true,
+		},
+		{
+			name:       "unknown step type: no warning",
+			stepName:   "s",
+			stepType:   "step.nonexistent",
+			stepConfig: nil,
+			refField:   "anything",
+			expectWarn: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := &templateValidationResult{}
+			stepMeta := map[string]pipelineStepMeta{
+				tc.stepName: {typ: tc.stepType, config: tc.stepConfig},
+			}
+			validateStepOutputField("pipeline", "current-step", tc.stepName, tc.refField, stepMeta, reg, result)
+			hasWarn := len(result.Warnings) > 0
+			if hasWarn != tc.expectWarn {
+				t.Errorf("expectWarn=%v but warnings=%v", tc.expectWarn, result.Warnings)
+			}
+		})
+	}
+}
+
 // --- Output field name validation tests ---
 
 // TestValidateStepOutputField_KnownField checks that a reference to a known output
