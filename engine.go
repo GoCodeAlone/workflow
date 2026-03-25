@@ -411,8 +411,14 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		if cfg.Engine != nil && cfg.Engine.Validation != nil && cfg.Engine.Validation.TemplateRefs != "" {
 			mode = cfg.Engine.Validation.TemplateRefs
 		}
+		switch mode {
+		case "off", "warn", "error":
+			// valid
+		default:
+			return fmt.Errorf("invalid engine.validation.templateRefs value %q, must be one of: off, warn, error", mode)
+		}
 		if mode != "off" {
-			vr := validation.ValidatePipelineTemplateRefs(cfg.Pipelines)
+			vr := validation.ValidatePipelineTemplateRefs(cfg.Pipelines, e.PluginLoader().StepSchemaRegistry())
 			if vr.HasIssues() {
 				allMessages := make([]string, 0, len(vr.Warnings)+len(vr.Errors))
 				allMessages = append(allMessages, vr.Warnings...)

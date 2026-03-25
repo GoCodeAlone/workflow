@@ -193,7 +193,8 @@ func TestValidatePipelineTemplateRefs_SelfReference(t *testing.T) {
 }
 
 // TestValidatePipelineTemplateRefs_HyphenatedStep ensures that a step with a
-// hyphenated name correctly generates a warning when referenced via dot-access.
+// hyphenated name correctly generates a warning when referenced via dot-access,
+// and does NOT produce spurious output-field or unknown-step warnings alongside it.
 func TestValidatePipelineTemplateRefs_HyphenatedStep(t *testing.T) {
 	pipelines := map[string]any{
 		"api": map[string]any{
@@ -224,6 +225,13 @@ func TestValidatePipelineTemplateRefs_HyphenatedStep(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected hyphenated dot-access warning, got: %v", result.Warnings)
+	}
+	// Should NOT produce spurious "does not exist" or output-field warnings —
+	// the single hyphen warning is sufficient guidance for the user.
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "does not exist") || strings.Contains(w, "declares outputs") {
+			t.Errorf("unexpected spurious warning alongside hyphen warning: %s", w)
+		}
 	}
 }
 

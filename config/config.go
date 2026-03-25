@@ -144,7 +144,7 @@ type EngineConfig struct {
 // EngineValidationConfig controls startup and execution-time validation behaviour.
 type EngineValidationConfig struct {
 	// TemplateRefs controls template cross-reference validation at startup.
-	// Allowed values: "off" (skip), "warn" (log warnings, default), "error" (fail on errors).
+	// Allowed values: "off" (skip), "warn" (log warnings, default), "error" (fail on any validation issues).
 	TemplateRefs string `json:"templateRefs,omitempty" yaml:"templateRefs,omitempty"`
 }
 

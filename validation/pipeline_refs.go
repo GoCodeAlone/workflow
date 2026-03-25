@@ -82,7 +82,17 @@ func isDBQueryStep(t string) bool { return dbQueryStepTypes[t] }
 //
 // The pipelines parameter is expected to be a map[string]any where each value is a
 // pipeline config map containing a "steps" field (as parsed from YAML).
-func ValidatePipelineTemplateRefs(pipelines map[string]any) *RefValidationResult {
+//
+// An optional *schema.StepSchemaRegistry may be provided to supply plugin-registered
+// step schemas. When absent, a default built-in registry is created once and reused
+// across all pipelines.
+func ValidatePipelineTemplateRefs(pipelines map[string]any, reg ...*schema.StepSchemaRegistry) *RefValidationResult {
+	var r *schema.StepSchemaRegistry
+	if len(reg) > 0 && reg[0] != nil {
+		r = reg[0]
+	} else {
+		r = schema.NewStepSchemaRegistry()
+	}
 	result := &RefValidationResult{}
 	for pipelineName, pipelineRaw := range pipelines {
 		pipelineMap, ok := pipelineRaw.(map[string]any)
@@ -93,7 +103,7 @@ func ValidatePipelineTemplateRefs(pipelines map[string]any) *RefValidationResult
 		if len(stepsRaw) == 0 {
 			continue
 		}
-		validatePipelineTemplateRefs(pipelineName, stepsRaw, result)
+		validatePipelineTemplateRefs(pipelineName, stepsRaw, r, result)
 	}
 	return result
 }
@@ -102,13 +112,11 @@ func ValidatePipelineTemplateRefs(pipelines map[string]any) *RefValidationResult
 // references to nonexistent or forward-declared steps and common template pitfalls.
 // It also warns when a template references a field that is not in the step type's
 // declared output schema (Phase 1 static analysis).
-func validatePipelineTemplateRefs(pipelineName string, stepsRaw []any, result *RefValidationResult) {
+func validatePipelineTemplateRefs(pipelineName string, stepsRaw []any, reg *schema.StepSchemaRegistry, result *RefValidationResult) {
 	// Build ordered step name list and step metadata for schema validation.
 	stepNames := make(map[string]int)             // step name -> index in pipeline
 	stepMeta := make(map[string]pipelineStepMeta) // step name -> type+config (used by validateStepOutputField)
 	stepInfos := make(map[string]stepBuildInfo)   // step name -> type and config (used by validateStepRef)
-
-	reg := schema.NewStepSchemaRegistry()
 
 	for i, stepRaw := range stepsRaw {
 		stepMap, ok := stepRaw.(map[string]any)
@@ -162,10 +170,14 @@ func validatePipelineTemplateRefs(pipelineName string, stepsRaw []any, result *R
 
 				// Check for step name references via dot-access (captures optional field path)
 				dotMatches := stepRefDotRe.FindAllStringSubmatch(actionContent, -1)
+				hasHyphen := hyphenDotRe.MatchString(actionContent)
 				for _, m := range dotMatches {
 					refName := m[1]
 					fieldPath := ""
-					if len(m) > 2 {
+					// When the action contains a hyphenated dot-access, skip field-path
+					// validation to avoid spurious output-field or SQL-column warnings
+					// (a dedicated hyphen warning is emitted separately below).
+					if !hasHyphen && len(m) > 2 {
 						fieldPath = m[2]
 					}
 					validateStepRef(pipelineName, stepName, refName, fieldPath, i, stepNames, stepInfos, reg, result)

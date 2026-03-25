@@ -1709,3 +1709,33 @@ func TestStdEngine_ConfigHash_Deterministic(t *testing.T) {
 		t.Errorf("different configs produced the same hash: %q", hashA1)
 	}
 }
+
+func TestEngine_BuildFromConfig_InvalidTemplateRefsMode(t *testing.T) {
+	app := newMockApplication()
+	engine := NewStdEngine(app, app.Logger())
+	loadAllPlugins(t, engine)
+
+	cfg := &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{},
+		Pipelines: map[string]any{
+			"test": map[string]any{
+				"steps": []any{
+					map[string]any{"name": "a", "type": "step.set"},
+				},
+			},
+		},
+		Engine: &config.EngineConfig{
+			Validation: &config.EngineValidationConfig{
+				TemplateRefs: "typo",
+			},
+		},
+	}
+
+	err := engine.BuildFromConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid templateRefs value")
+	}
+	if !strings.Contains(err.Error(), "invalid engine.validation.templateRefs") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}

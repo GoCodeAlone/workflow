@@ -1760,7 +1760,7 @@ triggers:
 
 Both approaches work with `wfctl template validate --config` for validation.
 
-### Engine Validation Config
+## Engine Validation Config
 
 Control the engine's startup validation behaviour via the `engine.validation` block:
 
@@ -1782,9 +1782,7 @@ The validation checks performed at startup match those run by `wfctl template va
 - Output field validation against each step type's declared output schema
 - SQL column validation for `step.db_query` steps with a static `query`
 
-
-
-A React-based visual editor for composing workflow configurations (`ui/` directory).
+## Visual Workflow Builder (UI)
 
 **Technology stack:** React, ReactFlow, Zustand, TypeScript, Vite
 
