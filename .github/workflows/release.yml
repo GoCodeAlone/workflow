@@ -168,6 +168,7 @@ jobs:
             cmd: ./cmd/server
             prefix: workflow
             platforms: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
+            build_ui: true
           - name: wfctl
             cmd: ./cmd/wfctl
             prefix: wfctl
@@ -188,6 +189,7 @@ jobs:
         cache: true
 
     - name: Set up Node.js
+      if: matrix.build_ui
       uses: actions/setup-node@v4
       with:
         node-version: '20'
@@ -196,6 +198,7 @@ jobs:
         cache-dependency-path: ui/package-lock.json
 
     - name: Build UI assets (required for Go embed)
+      if: matrix.build_ui
       run: |
         cd ui && npm ci && npm run build
         cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
