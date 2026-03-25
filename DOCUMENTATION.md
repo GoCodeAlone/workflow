@@ -1760,9 +1760,29 @@ triggers:
 
 Both approaches work with `wfctl template validate --config` for validation.
 
-## Visual Workflow Builder (UI)
+## Engine Validation Config
 
-A React-based visual editor for composing workflow configurations (`ui/` directory).
+Control the engine's startup validation behaviour via the `engine.validation` block:
+
+```yaml
+engine:
+  validation:
+    templateRefs: warn   # "off" | "warn" | "error" (default: "warn")
+```
+
+| Value | Behaviour |
+|-------|-----------|
+| `warn` | (default) Log warnings for suspicious pipeline template references at startup. Engine starts normally. |
+| `error` | Refuse to start if any pipeline template reference issues are detected (e.g. dangling step refs, unknown output fields). |
+| `off` | Skip template reference validation entirely. Preserves the previous engine behavior. |
+
+The validation checks performed at startup match those run by `wfctl template validate`, including:
+- Step name references (`{{ .steps.NAME.field }}`) against declared steps in the same pipeline
+- Forward references (referencing a step that appears later in the pipeline)
+- Output field validation against each step type's declared output schema
+- SQL column validation for `step.db_query` steps with a static `query`
+
+## Visual Workflow Builder (UI)
 
 **Technology stack:** React, ReactFlow, Zustand, TypeScript, Vite
 

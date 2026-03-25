@@ -12,6 +12,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/validation"
 	"gopkg.in/yaml.v3"
 )
 
@@ -502,7 +503,7 @@ func inferBodyFromSchema(bodyFrom string, steps []map[string]any) *module.OpenAP
 			if query == "" {
 				break
 			}
-			columns := extractSQLColumns(query)
+			columns := validation.ExtractSQLColumns(query)
 			if len(columns) == 0 {
 				break
 			}
@@ -528,80 +529,6 @@ func inferBodyFromSchema(bodyFrom string, steps []map[string]any) *module.OpenAP
 		break
 	}
 	return nil
-}
-
-// extractSQLColumns parses a SQL SELECT statement and returns the column names
-// (or aliases) from the SELECT clause.
-func extractSQLColumns(query string) []string {
-	// Normalize whitespace
-	query = strings.Join(strings.Fields(query), " ")
-
-	// Find SELECT ... FROM
-	upper := strings.ToUpper(query)
-	selectIdx := strings.Index(upper, "SELECT ")
-	fromIdx := strings.Index(upper, " FROM ")
-	if selectIdx < 0 || fromIdx < 0 || fromIdx <= selectIdx {
-		return nil
-	}
-
-	selectClause := query[selectIdx+7 : fromIdx]
-
-	// Handle DISTINCT
-	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(selectClause)), "DISTINCT ") {
-		selectClause = strings.TrimSpace(selectClause)[9:]
-	}
-
-	// Split by comma, handling parenthesized subexpressions
-	var columns []string
-	depth := 0
-	current := ""
-	for _, ch := range selectClause {
-		switch ch {
-		case '(':
-			depth++
-			current += string(ch)
-		case ')':
-			depth--
-			current += string(ch)
-		case ',':
-			if depth == 0 {
-				if col := extractColumnName(strings.TrimSpace(current)); col != "" {
-					columns = append(columns, col)
-				}
-				current = ""
-			} else {
-				current += string(ch)
-			}
-		default:
-			current += string(ch)
-		}
-	}
-	if col := extractColumnName(strings.TrimSpace(current)); col != "" {
-		columns = append(columns, col)
-	}
-	return columns
-}
-
-// extractColumnName extracts the effective column name from a SELECT expression.
-// Handles: "col", "table.col", "expr AS alias", "COALESCE(...) AS alias".
-func extractColumnName(expr string) string {
-	if expr == "" || expr == "*" {
-		return ""
-	}
-	// Check for AS alias (case-insensitive)
-	upper := strings.ToUpper(expr)
-	if asIdx := strings.LastIndex(upper, " AS "); asIdx >= 0 {
-		alias := strings.TrimSpace(expr[asIdx+4:])
-		// Remove quotes if present
-		alias = strings.Trim(alias, "\"'`")
-		return alias
-	}
-	// Check for table.column
-	if dotIdx := strings.LastIndex(expr, "."); dotIdx >= 0 {
-		return strings.TrimSpace(expr[dotIdx+1:])
-	}
-	// Simple column name
-	return strings.TrimSpace(expr)
 }
 
 // userCredentialsSchema returns a schema for email+password request bodies.

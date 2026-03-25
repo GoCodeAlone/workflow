@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/schema"
+	"github.com/GoCodeAlone/workflow/validation"
 )
 
 func TestRunTemplateValidateAllTemplates(t *testing.T) {
@@ -795,10 +797,9 @@ func TestValidateStepOutputField_NoOutputSchema_NoWarning(t *testing.T) {
 	}
 }
 
-// TestValidateStepOutputFieldRegistry tests validateStepOutputField directly.
+// TestValidateStepOutputFieldRegistry tests output field validation through
+// ValidatePipelineTemplateRefs for known and unknown output fields.
 func TestValidateStepOutputFieldRegistry(t *testing.T) {
-	reg := schema.NewStepSchemaRegistry()
-
 	tests := []struct {
 		name       string
 		stepName   string
@@ -867,14 +868,28 @@ func TestValidateStepOutputFieldRegistry(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := &templateValidationResult{}
-			stepMeta := map[string]pipelineStepMeta{
-				tc.stepName: {typ: tc.stepType, config: tc.stepConfig},
+			// Test through ValidatePipelineTemplateRefs: build a pipeline where step B
+			// references step A's output field, and check for warnings.
+			pipelines := map[string]any{
+				"test-pipeline": map[string]any{
+					"steps": []any{
+						map[string]any{"name": tc.stepName, "type": tc.stepType, "config": tc.stepConfig},
+						map[string]any{
+							"name": "next-step",
+							"type": "step.set",
+							"config": map[string]any{
+								"values": map[string]any{
+									"x": fmt.Sprintf("{{ .steps.%s.%s }}", tc.stepName, tc.refField),
+								},
+							},
+						},
+					},
+				},
 			}
-			validateStepOutputField("pipeline", "current-step", tc.stepName, tc.refField, stepMeta, reg, result)
-			hasWarn := len(result.Warnings) > 0
+			vr := validation.ValidatePipelineTemplateRefs(pipelines)
+			hasWarn := len(vr.Warnings) > 0
 			if hasWarn != tc.expectWarn {
-				t.Errorf("expectWarn=%v but warnings=%v", tc.expectWarn, result.Warnings)
+				t.Errorf("expectWarn=%v but warnings=%v", tc.expectWarn, vr.Warnings)
 			}
 		})
 	}
