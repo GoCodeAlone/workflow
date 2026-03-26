@@ -1076,3 +1076,35 @@ func TestHTTPCallStep_BodyFrom_NilValue(t *testing.T) {
 		t.Errorf("expected empty body for nil body_from, got %q", string(gotBody))
 	}
 }
+
+func TestHTTPCallStep_ElapsedMS(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("elapsed-test", map[string]any{
+		"url":    srv.URL,
+		"method": "GET",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	step.(*HTTPCallStep).httpClient = srv.Client()
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	elapsedMS, ok := result.Output["elapsed_ms"].(int64)
+	if !ok {
+		t.Fatalf("expected elapsed_ms to be int64, got %T (%v)", result.Output["elapsed_ms"], result.Output["elapsed_ms"])
+	}
+	if elapsedMS < 0 {
+		t.Errorf("expected elapsed_ms >= 0, got %d", elapsedMS)
+	}
+}

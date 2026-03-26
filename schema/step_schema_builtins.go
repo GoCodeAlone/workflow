@@ -85,6 +85,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "status", Type: "number", Description: "HTTP response status code"},
 			{Key: "body", Type: "any", Description: "Response body (parsed as JSON if Content-Type is application/json)"},
 			{Key: "headers", Type: "map", Description: "Response headers"},
+			{Key: "elapsed_ms", Type: "number", Description: "Request duration in milliseconds (wall-clock time from send to response fully read)"},
 		},
 	})
 
