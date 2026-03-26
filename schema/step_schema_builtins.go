@@ -82,7 +82,8 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "auth", Type: FieldTypeMap, Description: "Authentication config (type, token, client_id, client_secret, token_url for OAuth2)"},
 		},
 		Outputs: []StepOutputDef{
-			{Key: "status", Type: "number", Description: "HTTP response status code"},
+			{Key: "status_code", Type: "number", Description: "HTTP response status code (e.g. 200)"},
+			{Key: "status", Type: "string", Description: "HTTP response status text (e.g. \"200 OK\")"},
 			{Key: "body", Type: "any", Description: "Response body (parsed as JSON if Content-Type is application/json)"},
 			{Key: "headers", Type: "map", Description: "Response headers"},
 			{Key: "elapsed_ms", Type: "number", Description: "Request duration in milliseconds (wall-clock time from send to response fully read)"},

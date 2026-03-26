@@ -272,6 +272,13 @@ func TestHTTPCallStep_OAuth2_Retry401(t *testing.T) {
 	if result.Output["status_code"] != http.StatusOK {
 		t.Errorf("expected 200 after retry, got %v", result.Output["status_code"])
 	}
+	retryElapsedMS, ok := result.Output["elapsed_ms"].(int64)
+	if !ok {
+		t.Fatalf("expected elapsed_ms to be int64 on retry path, got %T (%v)", result.Output["elapsed_ms"], result.Output["elapsed_ms"])
+	}
+	if retryElapsedMS < 0 {
+		t.Errorf("expected elapsed_ms >= 0 on retry path, got %d", retryElapsedMS)
+	}
 	if atomic.LoadInt32(&tokenRequests) != 2 {
 		t.Errorf("expected 2 token requests, got %d", atomic.LoadInt32(&tokenRequests))
 	}
