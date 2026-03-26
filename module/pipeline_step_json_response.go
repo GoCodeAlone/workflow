@@ -74,18 +74,30 @@ func (s *JSONResponseStep) Name() string { return s.name }
 
 // resolveStatus returns the effective HTTP status code for the response.
 // If status_from is set, it resolves the value from the pipeline context and
-// converts it to an integer. If the resolved value is not a valid integer,
-// it falls back to the static status (or 200 by default).
+// converts it to an integer. The resolved value must be a whole number within
+// the valid HTTP status code range (100–599); otherwise it falls back to the
+// static status (or 200 by default).
 func (s *JSONResponseStep) resolveStatus(pc *PipelineContext) int {
 	if s.statusFrom != "" {
 		if val := resolveBodyFrom(s.statusFrom, pc); val != nil {
+			var code int
+			valid := false
 			switch v := val.(type) {
 			case int:
-				return v
+				code = v
+				valid = true
 			case float64:
-				return int(v)
+				// Only accept whole numbers — reject 404.9, etc.
+				if v == float64(int(v)) {
+					code = int(v)
+					valid = true
+				}
 			case int64:
-				return int(v)
+				code = int(v)
+				valid = true
+			}
+			if valid && code >= 100 && code <= 599 {
+				return code
 			}
 		}
 	}

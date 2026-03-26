@@ -637,3 +637,131 @@ func TestJSONResponseStep_StatusFromNoWriter(t *testing.T) {
 		t.Errorf("expected status=503, got %v", result.Output["status"])
 	}
 }
+
+func TestJSONResponseStep_StatusFromFractionalFloat(t *testing.T) {
+	// A fractional float (e.g. 404.9) is not a valid HTTP status code; fall back.
+	factory := NewJSONResponseStepFactory()
+	step, err := factory("fractional-status", map[string]any{
+		"status":      201,
+		"status_from": "steps.upstream.status_code",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_response_writer": recorder,
+	})
+	pc.MergeStepOutput("upstream", map[string]any{
+		"status_code": float64(404.9),
+	})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	resp := recorder.Result()
+	if resp.StatusCode != 201 {
+		t.Errorf("expected fallback to static status 201 for fractional float, got %d", resp.StatusCode)
+	}
+	if result.Output["status"] != 201 {
+		t.Errorf("expected output status=201, got %v", result.Output["status"])
+	}
+}
+
+func TestJSONResponseStep_StatusFromOutOfRange(t *testing.T) {
+	// Out-of-range status codes (< 100 or > 599) must fall back to static status.
+	tests := []struct {
+		name   string
+		code   int
+		static int
+	}{
+		{"zero", 0, 200},
+		{"negative", -1, 200},
+		{"too-large", 9999, 404},
+		{"boundary-low", 99, 200},
+		{"boundary-high", 600, 200},
+	}
+
+	factory := NewJSONResponseStepFactory()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			step, err := factory("out-of-range-status", map[string]any{
+				"status":      tc.static,
+				"status_from": "steps.upstream.code",
+			}, nil)
+			if err != nil {
+				t.Fatalf("factory error: %v", err)
+			}
+
+			recorder := httptest.NewRecorder()
+			pc := NewPipelineContext(nil, map[string]any{
+				"_http_response_writer": recorder,
+			})
+			pc.MergeStepOutput("upstream", map[string]any{
+				"code": tc.code,
+			})
+
+			result, err := step.Execute(context.Background(), pc)
+			if err != nil {
+				t.Fatalf("execute error: %v", err)
+			}
+
+			resp := recorder.Result()
+			if resp.StatusCode != tc.static {
+				t.Errorf("code %d: expected fallback to %d, got %d", tc.code, tc.static, resp.StatusCode)
+			}
+			if result.Output["status"] != tc.static {
+				t.Errorf("code %d: expected output status=%d, got %v", tc.code, tc.static, result.Output["status"])
+			}
+		})
+	}
+}
+
+func TestJSONResponseStep_StatusFromBoundaryValid(t *testing.T) {
+	// Boundary values within valid HTTP range (100–599) should be accepted.
+	tests := []struct {
+		name string
+		code int
+	}{
+		{"min", 100},
+		{"max", 599},
+		{"common", 200},
+	}
+
+	factory := NewJSONResponseStepFactory()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			step, err := factory("boundary-valid", map[string]any{
+				"status":      200,
+				"status_from": "steps.upstream.code",
+			}, nil)
+			if err != nil {
+				t.Fatalf("factory error: %v", err)
+			}
+
+			recorder := httptest.NewRecorder()
+			pc := NewPipelineContext(nil, map[string]any{
+				"_http_response_writer": recorder,
+			})
+			pc.MergeStepOutput("upstream", map[string]any{
+				"code": tc.code,
+			})
+
+			result, err := step.Execute(context.Background(), pc)
+			if err != nil {
+				t.Fatalf("execute error: %v", err)
+			}
+
+			resp := recorder.Result()
+			if resp.StatusCode != tc.code {
+				t.Errorf("code %d: expected status %d, got %d", tc.code, tc.code, resp.StatusCode)
+			}
+			if result.Output["status"] != tc.code {
+				t.Errorf("code %d: expected output status=%d, got %v", tc.code, tc.code, result.Output["status"])
+			}
+		})
+	}
+}
