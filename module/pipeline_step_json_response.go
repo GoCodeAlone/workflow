@@ -13,13 +13,14 @@ import (
 
 // JSONResponseStep writes an HTTP JSON response with a custom status code and stops the pipeline.
 type JSONResponseStep struct {
-	name     string
-	status   int
-	headers  map[string]string
-	body     map[string]any
-	bodyRaw  any // for non-map bodies (arrays, literals)
-	bodyFrom string
-	tmpl     *TemplateEngine
+	name       string
+	status     int
+	statusFrom string
+	headers    map[string]string
+	body       map[string]any
+	bodyRaw    any // for non-map bodies (arrays, literals)
+	bodyFrom   string
+	tmpl       *TemplateEngine
 }
 
 // NewJSONResponseStepFactory returns a StepFactory that creates JSONResponseStep instances.
@@ -54,28 +55,52 @@ func NewJSONResponseStepFactory() StepFactory {
 			bodyRaw = config["body"]
 		}
 		bodyFrom, _ := config["body_from"].(string)
+		statusFrom, _ := config["status_from"].(string)
 
 		return &JSONResponseStep{
-			name:     name,
-			status:   status,
-			headers:  headers,
-			body:     body,
-			bodyRaw:  bodyRaw,
-			bodyFrom: bodyFrom,
-			tmpl:     NewTemplateEngine(),
+			name:       name,
+			status:     status,
+			statusFrom: statusFrom,
+			headers:    headers,
+			body:       body,
+			bodyRaw:    bodyRaw,
+			bodyFrom:   bodyFrom,
+			tmpl:       NewTemplateEngine(),
 		}, nil
 	}
 }
 
 func (s *JSONResponseStep) Name() string { return s.name }
 
+// resolveStatus returns the effective HTTP status code for the response.
+// If status_from is set, it resolves the value from the pipeline context and
+// converts it to an integer. If the resolved value is not a valid integer,
+// it falls back to the static status (or 200 by default).
+func (s *JSONResponseStep) resolveStatus(pc *PipelineContext) int {
+	if s.statusFrom != "" {
+		if val := resolveBodyFrom(s.statusFrom, pc); val != nil {
+			switch v := val.(type) {
+			case int:
+				return v
+			case float64:
+				return int(v)
+			case int64:
+				return int(v)
+			}
+		}
+	}
+	return s.status
+}
+
 func (s *JSONResponseStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+	status := s.resolveStatus(pc)
+
 	w, ok := pc.Metadata["_http_response_writer"].(http.ResponseWriter)
 	if !ok {
 		// No response writer — return the body as output without writing HTTP
 		responseBody := s.resolveResponseBody(pc)
 		output := map[string]any{
-			"status": s.status,
+			"status": status,
 		}
 		if responseBody != nil {
 			output["body"] = responseBody
@@ -98,7 +123,7 @@ func (s *JSONResponseStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 	}
 
 	// Write status code
-	w.WriteHeader(s.status)
+	w.WriteHeader(status)
 
 	// Write body
 	if responseBody != nil {
@@ -112,7 +137,7 @@ func (s *JSONResponseStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 
 	return &StepResult{
 		Output: map[string]any{
-			"status": s.status,
+			"status": status,
 		},
 		Stop: true,
 	}, nil

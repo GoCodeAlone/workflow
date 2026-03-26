@@ -476,3 +476,164 @@ func TestJSONResponseStep_DefaultStatus(t *testing.T) {
 		t.Errorf("expected default status 200, got %d", resp.StatusCode)
 	}
 }
+
+func TestJSONResponseStep_StatusFrom(t *testing.T) {
+	factory := NewJSONResponseStepFactory()
+	step, err := factory("proxy-respond", map[string]any{
+		"status_from": "steps.call_upstream.status_code",
+		"body_from":   "steps.call_upstream.body",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_response_writer": recorder,
+	})
+	pc.MergeStepOutput("call_upstream", map[string]any{
+		"status_code": 404,
+		"body":        map[string]any{"error": "not found"},
+	})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	if !result.Stop {
+		t.Error("expected Stop=true")
+	}
+
+	resp := recorder.Result()
+	if resp.StatusCode != 404 {
+		t.Errorf("expected status 404 from status_from, got %d", resp.StatusCode)
+	}
+
+	if result.Output["status"] != 404 {
+		t.Errorf("expected output status=404, got %v", result.Output["status"])
+	}
+}
+
+func TestJSONResponseStep_StatusFromFloat64(t *testing.T) {
+	// JSON numbers are often decoded as float64; ensure conversion works.
+	factory := NewJSONResponseStepFactory()
+	step, err := factory("proxy-respond", map[string]any{
+		"status_from": "steps.upstream.status_code",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_response_writer": recorder,
+	})
+	pc.MergeStepOutput("upstream", map[string]any{
+		"status_code": float64(503),
+	})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	resp := recorder.Result()
+	if resp.StatusCode != 503 {
+		t.Errorf("expected status 503 from float64 status_from, got %d", resp.StatusCode)
+	}
+	if result.Output["status"] != 503 {
+		t.Errorf("expected output status=503, got %v", result.Output["status"])
+	}
+}
+
+func TestJSONResponseStep_StatusFromFallback(t *testing.T) {
+	// When status_from cannot be resolved, fall back to static status.
+	factory := NewJSONResponseStepFactory()
+	step, err := factory("fallback-respond", map[string]any{
+		"status":      201,
+		"status_from": "steps.nonexistent.status_code",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_response_writer": recorder,
+	})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	resp := recorder.Result()
+	if resp.StatusCode != 201 {
+		t.Errorf("expected fallback status 201, got %d", resp.StatusCode)
+	}
+	if result.Output["status"] != 201 {
+		t.Errorf("expected output status=201, got %v", result.Output["status"])
+	}
+}
+
+func TestJSONResponseStep_StatusFromPrecedence(t *testing.T) {
+	// status_from takes precedence over static status when resolved.
+	factory := NewJSONResponseStepFactory()
+	step, err := factory("precedence-respond", map[string]any{
+		"status":      200,
+		"status_from": "steps.upstream.status_code",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_response_writer": recorder,
+	})
+	pc.MergeStepOutput("upstream", map[string]any{
+		"status_code": 422,
+	})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	resp := recorder.Result()
+	if resp.StatusCode != 422 {
+		t.Errorf("expected status_from 422 to take precedence, got %d", resp.StatusCode)
+	}
+	if result.Output["status"] != 422 {
+		t.Errorf("expected output status=422, got %v", result.Output["status"])
+	}
+}
+
+func TestJSONResponseStep_StatusFromNoWriter(t *testing.T) {
+	// Verify status_from is reflected in output even without an HTTP writer.
+	factory := NewJSONResponseStepFactory()
+	step, err := factory("no-writer-status-from", map[string]any{
+		"status_from": "steps.upstream.status_code",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, map[string]any{})
+	pc.MergeStepOutput("upstream", map[string]any{
+		"status_code": 503,
+	})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	if !result.Stop {
+		t.Error("expected Stop=true even without writer")
+	}
+	if result.Output["status"] != 503 {
+		t.Errorf("expected status=503, got %v", result.Output["status"])
+	}
+}
