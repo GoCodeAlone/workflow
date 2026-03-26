@@ -255,7 +255,7 @@ func TestInferStepOutputs_Fallback(t *testing.T) {
 	for _, o := range outputs {
 		keys[o.Key] = true
 	}
-	if !keys["status"] || !keys["body"] || !keys["headers"] {
+	if !keys["status_code"] || !keys["body"] || !keys["headers"] || !keys["elapsed_ms"] {
 		t.Errorf("expected static outputs for step.http_call, got %v", outputs)
 	}
 }
