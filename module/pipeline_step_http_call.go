@@ -470,6 +470,7 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		return nil, err
 	}
 
+	start := time.Now()
 	resp, err := s.httpClient.Do(req) //nolint:gosec // G107: URL is user-configured
 	if err != nil {
 		return nil, fmt.Errorf("http_call step %q: request failed: %w", s.name, err)
@@ -477,6 +478,7 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
+	elapsedMS := time.Since(start).Milliseconds()
 	if err != nil {
 		return nil, fmt.Errorf("http_call step %q: failed to read response: %w", s.name, err)
 	}
@@ -511,6 +513,7 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 			return nil, buildErr
 		}
 
+		retryStart := time.Now()
 		retryResp, doErr := s.httpClient.Do(retryReq) //nolint:gosec // G107: URL is user-configured
 		if doErr != nil {
 			return nil, fmt.Errorf("http_call step %q: retry request failed: %w", s.name, doErr)
@@ -518,11 +521,13 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		defer retryResp.Body.Close()
 
 		respBody, err = io.ReadAll(retryResp.Body)
+		retryElapsedMS := time.Since(retryStart).Milliseconds()
 		if err != nil {
 			return nil, fmt.Errorf("http_call step %q: failed to read retry response: %w", s.name, err)
 		}
 
 		output := parseHTTPResponse(retryResp, respBody)
+		output["elapsed_ms"] = retryElapsedMS
 		if instanceURL := s.oauthEntry.getInstanceURL(); instanceURL != "" {
 			output["instance_url"] = instanceURL
 		}
@@ -533,6 +538,7 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 	}
 
 	output := parseHTTPResponse(resp, respBody)
+	output["elapsed_ms"] = elapsedMS
 	if s.auth != nil {
 		if instanceURL := s.oauthEntry.getInstanceURL(); instanceURL != "" {
 			output["instance_url"] = instanceURL
