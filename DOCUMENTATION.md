@@ -154,7 +154,7 @@ flowchart TD
 | `step.db_query_cached` | Executes a cached SQL SELECT query | pipelinesteps |
 | `step.db_create_partition` | Creates a time-based table partition | pipelinesteps |
 | `step.db_sync_partitions` | Ensures future partitions exist for a partitioned table | pipelinesteps |
-| `step.json_response` | Writes HTTP JSON response with custom status code and headers | pipelinesteps |
+| `step.json_response` | Writes HTTP JSON response with custom status code and headers. Supports `status_from` to dynamically resolve the HTTP status code from the pipeline context at runtime | pipelinesteps |
 | `step.raw_response` | Writes a raw HTTP response with arbitrary content type | pipelinesteps |
 | `step.pipeline_output` | Marks structured data as the pipeline's return value for extraction by `engine.ExecutePipeline()` | pipelinesteps |
 | `step.json_parse` | Parses a JSON string (or `[]byte`) in the pipeline context into a structured object | pipelinesteps |

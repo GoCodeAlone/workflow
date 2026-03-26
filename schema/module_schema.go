@@ -1105,6 +1105,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Response status (always sets Stop: true)"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "status", Label: "Status Code", Type: FieldTypeNumber, DefaultValue: "200", Description: "HTTP status code for the response"},
+			{Key: "status_from", Label: "Status From", Type: FieldTypeString, Description: "Dotted path to resolve HTTP status code dynamically (e.g., steps.call_upstream.status_code). Takes precedence over 'status' when resolved to a valid HTTP status code (100-599).", Placeholder: "steps.call_upstream.status_code"},
 			{Key: "headers", Label: "Headers", Type: FieldTypeMap, MapValueType: "string", Description: "Additional response headers"},
 			{Key: "body", Label: "Body", Type: FieldTypeJSON, Description: "Response body as JSON (supports template expressions)"},
 			{Key: "body_from", Label: "Body From", Type: FieldTypeString, Description: "Dotted path to resolve body from step outputs (e.g., steps.get-company.row)", Placeholder: "steps.get-company.row"},

@@ -95,7 +95,8 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "pipelinesteps",
 		Description: "Sends a JSON HTTP response and terminates pipeline execution.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "status", Type: FieldTypeNumber, Description: "HTTP status code", Required: true},
+			{Key: "status", Type: FieldTypeNumber, Description: "HTTP status code (default 200)", DefaultValue: "200"},
+			{Key: "status_from", Type: FieldTypeString, Description: "Dotted path to resolve HTTP status code dynamically (e.g. 'steps.call_upstream.status_code'). Takes precedence over 'status' when resolved to a valid HTTP status code (100-599)."},
 			{Key: "body", Type: FieldTypeJSON, Description: "Response body (static JSON object or template expression)"},
 			{Key: "body_from", Type: FieldTypeString, Description: "Template expression to build body from step outputs (e.g. 'steps.query.rows')"},
 			{Key: "headers", Type: FieldTypeMap, Description: "Additional response headers"},
