@@ -65,6 +65,8 @@ graph TD
     wfctl --> registry
     wfctl --> update
     wfctl --> mcp
+    wfctl --> editor-schemas["editor-schemas"]
+    wfctl --> dsl-reference["dsl-reference"]
 
     infra --> infra-plan["plan"]
     infra --> infra-apply["apply"]
@@ -132,7 +134,7 @@ graph TD
 | Category | Commands |
 |----------|----------|
 | **Project Setup** | `init`, `run` |
-| **Validation & Inspection** | `validate`, `inspect`, `schema`, `compat check`, `template validate` |
+| **Validation & Inspection** | `validate`, `inspect`, `schema`, `compat check`, `template validate`, `editor-schemas`, `dsl-reference` |
 | **API & Contract** | `api extract`, `contract test`, `diff` |
 | **Deployment** | `deploy docker/kubernetes/helm/cloud`, `build-ui`, `generate github-actions` |
 | **Infrastructure** | `infra plan/apply/destroy/status/drift/import`, `infra state list/export/import` |
@@ -473,6 +475,92 @@ wfctl schema [options]
 ```bash
 wfctl schema
 wfctl schema --output workflow-schema.json
+```
+
+---
+
+### `editor-schemas`
+
+Export module and step type schemas for the visual editor. Outputs JSON with `moduleSchemas`, `stepSchemas`, and `coercionRules`. This is the source of truth consumed by `@gocodealone/workflow-editor` and IDE plugins.
+
+```
+wfctl editor-schemas
+```
+
+**Output format:**
+
+```json
+{
+  "moduleSchemas": {
+    "http.server": {
+      "type": "http.server",
+      "label": "HTTP Server",
+      "category": "http",
+      "configFields": [
+        {"key": "address", "type": "string", "label": "Listen Address", "required": true, "defaultValue": ":8080"}
+      ],
+      "inputs": [...],
+      "outputs": [...]
+    }
+  },
+  "stepSchemas": {
+    "step.db_query": {
+      "type": "step.db_query",
+      "configFields": [...],
+      "outputs": [...]
+    }
+  },
+  "coercionRules": {
+    "http.Request": ["any", "PipelineContext"]
+  }
+}
+```
+
+**Example:**
+
+```bash
+wfctl editor-schemas > engine-schemas.json
+wfctl editor-schemas | jq '.moduleSchemas | keys | length'  # 279 types
+wfctl editor-schemas | jq '.stepSchemas | keys | length'    # 182 types
+```
+
+---
+
+### `dsl-reference`
+
+Export the workflow YAML DSL reference as structured JSON. Parses `docs/dsl-reference.md` (embedded in the binary) into sections with field documentation, examples, and relationship descriptions. Consumed by the visual editor's DSL Reference pane and IDE plugins for hover/completion.
+
+```
+wfctl dsl-reference
+```
+
+**Output format:**
+
+```json
+{
+  "sections": [
+    {
+      "id": "modules",
+      "title": "Modules",
+      "description": "Modules are the building blocks...",
+      "requiredFields": [
+        {"name": "name", "type": "string", "description": "unique identifier"}
+      ],
+      "optionalFields": [...],
+      "example": "modules:\n  - name: db\n    type: database.workflow\n    ...",
+      "relationships": ["Referenced by workflows.http.routes[].handler"],
+      "parent": ""
+    }
+  ]
+}
+```
+
+**Example:**
+
+```bash
+wfctl dsl-reference > dsl-reference.json
+wfctl dsl-reference | jq '.sections | length'              # 12 sections
+wfctl dsl-reference | jq '.sections[].id'                  # list section IDs
 ```
 
 ---

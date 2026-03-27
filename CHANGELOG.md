@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.4.1] - 2026-03-27
+
+### Fixed
+- Editor schemas golden file updated to reflect v0.4.0 schema changes (release CI fix)
+
+## [0.4.0] - 2026-03-27
+
+This release eliminates all `type: "json"` schema fields, replacing them with proper typed fields (`map`, `array`, or individual sub-fields). This improves the visual editor experience — config fields that previously rendered as raw JSON textareas now render as structured form widgets. See the [migration guide](docs/migrations/v0.4.0-schema-types.md) for details.
+
+### Breaking Changes (Editor Schema)
+- **88 config fields changed from `type: "json"` to typed schemas.** If your tooling parses `wfctl editor-schemas` output and relies on specific field types, those fields are now `map`, `array`, or individual typed fields instead of `json`. The engine runtime behavior is unchanged — this only affects editor/UI consumers.
+- **`wfctl editor-schemas` now includes `stepSchemas`** alongside `moduleSchemas` and `coercionRules`. Consumers parsing this JSON output will see a new top-level key.
+- **workflow-editor npm package:** The static `MODULE_TYPES` array has been removed. `MODULE_TYPE_MAP` is still exported but now sourced from `engine-schemas.json` instead of a hand-maintained array. If you imported `MODULE_TYPES` directly, switch to `MODULE_TYPE_MAP` or `getEngineModuleTypes()`.
+
+### Added
+- **DSL Reference** (`docs/dsl-reference.md`): Canonical specification for the workflow YAML DSL covering all 12 top-level sections (application, modules, workflows, pipelines, triggers, imports, config providers, platform/infrastructure/sidecars)
+- **`wfctl dsl-reference` command**: Extracts the DSL reference as structured JSON for consumption by editors and IDE plugins
+- **Step schemas in `wfctl editor-schemas`**: 182 step type schemas now exported alongside 279 module type schemas
+- **Struct-tag reflection generator** (`pkg/schema/reflect.go`): `GenerateConfigFields()` produces `[]ConfigFieldDef` from Go struct `editor:"..."` tags, enabling config structs to be the source of truth for editor schemas
+- **Editor struct tags** on 5 key config structs (`DatabaseConfig`, `HTTPServer`, `RedisNoSQLConfig`, `HealthCheckerConfig`, `MetricsCollectorConfig`) as the initial adoption of the reflection-based schema pattern
+- **LSP hover documentation**: `textDocument/hover` returns DSL reference descriptions and schema details for YAML keys, module types, and step types — surfaces in both VS Code and JetBrains
+- **LSP completion with DSL descriptions**: `textDocument/completion` suggests top-level keys, module types, step types, and config keys with descriptions from the DSL reference and schema registry
+- **CI contract test** (`schema/schema_contract_test.go`): Zero-tolerance enforcement for `type: "json"` fields in both built-in registries and plugin schemas — any new json-typed field fails CI
+
+### Changed
+- 88 `FieldTypeJSON` config fields converted to proper typed schemas across built-in modules (39), built-in steps (12), and plugins (37)
+- Schema contract test ratcheted from `maxAllowed: 51` → unconditional zero tolerance
+
 ### Changed
 - Switch yaegi dependency from `github.com/traefik/yaegi` v0.16.1 to `github.com/GoCodeAlone/yaegi` v0.17.0 (our maintained fork)
   - Eval/EvalPath now recover from panics instead of crashing the host process
