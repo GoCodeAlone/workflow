@@ -17,6 +17,8 @@ func Hover(reg *Registry, doc *Document, ctx PositionContext) *protocol.Hover {
 	}
 
 	switch ctx.Section {
+	case SectionTopLevel:
+		return hoverTopLevelKey(reg, doc, ctx)
 	case SectionModules:
 		if ctx.FieldName == "type" && ctx.ModuleType != "" {
 			return hoverModuleType(reg, ctx.ModuleType)
@@ -27,10 +29,14 @@ func Hover(reg *Registry, doc *Document, ctx PositionContext) *protocol.Hover {
 		if ctx.ModuleType != "" {
 			return hoverModuleType(reg, ctx.ModuleType)
 		}
+		return hoverDSLSection(reg, "modules")
+	case SectionWorkflow:
+		return hoverDSLSection(reg, "workflows")
 	case SectionTriggers:
 		if ctx.FieldName != "" {
 			return hoverTriggerType(reg, ctx.FieldName)
 		}
+		return hoverDSLSection(reg, "triggers")
 	case SectionPipeline:
 		if ctx.FieldName == "type" && ctx.StepType != "" {
 			return hoverStepType(reg, ctx.StepType)
@@ -41,8 +47,62 @@ func Hover(reg *Registry, doc *Document, ctx PositionContext) *protocol.Hover {
 		if ctx.StepType != "" {
 			return hoverStepType(reg, ctx.StepType)
 		}
+		return hoverDSLSection(reg, "pipelines")
+	case SectionImports:
+		return hoverDSLSection(reg, "imports")
+	case SectionRequires:
+		return hoverDSLSection(reg, "application")
 	}
 	return nil
+}
+
+// hoverTopLevelKey returns hover docs for a top-level YAML key (indent 0).
+func hoverTopLevelKey(reg *Registry, doc *Document, ctx PositionContext) *protocol.Hover {
+	if doc == nil {
+		return nil
+	}
+	lines := strings.Split(doc.Content, "\n")
+	if ctx.Line >= len(lines) {
+		return nil
+	}
+	line := lines[ctx.Line]
+	key := ""
+	if colonIdx := strings.Index(line, ":"); colonIdx >= 0 {
+		key = strings.TrimSpace(line[:colonIdx])
+		// Strip leading list marker if present
+		key = strings.TrimPrefix(key, "- ")
+	}
+	if key == "" {
+		return nil
+	}
+	sectionID, ok := topLevelKeyToSectionID[key]
+	if !ok {
+		return nil
+	}
+	return hoverDSLSection(reg, sectionID)
+}
+
+// hoverDSLSection returns a hover for the named DSL section from the registry.
+func hoverDSLSection(reg *Registry, sectionID string) *protocol.Hover {
+	if reg.DSLSections == nil {
+		return nil
+	}
+	sec, ok := reg.DSLSections[sectionID]
+	if !ok {
+		return nil
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "**%s**\n\n", sec.Title)
+	if sec.Description != "" {
+		sb.WriteString(sec.Description)
+		sb.WriteString("\n")
+	}
+	if sec.Example != "" {
+		sb.WriteString("\n**Example:**\n```yaml\n")
+		sb.WriteString(sec.Example)
+		sb.WriteString("\n```\n")
+	}
+	return markdownHover(sb.String())
 }
 
 // hoverModuleType generates hover markdown for a module type.

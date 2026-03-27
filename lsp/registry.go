@@ -36,6 +36,7 @@ type Registry struct {
 	StepTypes     map[string]StepTypeInfo
 	TriggerTypes  map[string]TriggerTypeInfo
 	WorkflowTypes []string
+	DSLSections   map[string]*DSLSectionDoc // section ID → parsed doc from dsl-reference.md
 }
 
 // NewRegistry builds a Registry from the schema package's known types and registry.
@@ -45,6 +46,7 @@ func NewRegistry() *Registry {
 		StepTypes:     make(map[string]StepTypeInfo),
 		TriggerTypes:  make(map[string]TriggerTypeInfo),
 		WorkflowTypes: schema.KnownWorkflowTypes(),
+		DSLSections:   loadDSLSections(),
 	}
 
 	// Build module type info from ModuleSchemaRegistry.

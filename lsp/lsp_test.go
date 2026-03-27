@@ -913,6 +913,130 @@ func TestCompletions_TemplateStepNamePrefixFilter(t *testing.T) {
 	}
 }
 
+// TestHover_TopLevelKey checks hover for top-level YAML keys using DSL reference.
+func TestHover_TopLevelKey(t *testing.T) {
+	reg := NewRegistry()
+	// If DSL sections loaded (repo root accessible), verify content; otherwise skip.
+	if reg.DSLSections == nil {
+		t.Skip("dsl-reference.md not found — skipping DSL hover test")
+	}
+
+	yaml := `modules:
+  - name: server
+    type: http.server
+workflows:
+  http:
+    server: server
+pipelines:
+  my-pipeline:
+    steps: []
+`
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", yaml)
+
+	tests := []struct {
+		name    string
+		line    int
+		wantKey string
+	}{
+		{"modules key", 0, "Modules"},
+		{"workflows key", 3, "Workflows"},
+		{"pipelines key", 6, "Pipelines"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := ContextAt(yaml, tc.line, 0)
+			if ctx.Section != SectionTopLevel {
+				t.Fatalf("expected SectionTopLevel, got %q", ctx.Section)
+			}
+			hover := Hover(reg, doc, ctx)
+			if hover == nil {
+				t.Fatalf("expected hover for %q (line %d)", tc.wantKey, tc.line)
+			}
+			content := hover.Contents.(protocol.MarkupContent).Value
+			if !containsStr(content, tc.wantKey) {
+				t.Errorf("hover should mention %q, got: %s", tc.wantKey, content)
+			}
+		})
+	}
+}
+
+// TestHover_SectionFallback checks that section-level hover returns DSL docs.
+func TestHover_SectionFallback(t *testing.T) {
+	reg := NewRegistry()
+	if reg.DSLSections == nil {
+		t.Skip("dsl-reference.md not found — skipping DSL hover test")
+	}
+
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", testYAML)
+
+	cases := []struct {
+		section SectionKind
+		want    string
+	}{
+		{SectionModules, "Modules"},
+		{SectionWorkflow, "Workflows"},
+		{SectionPipeline, "Pipelines"},
+		{SectionImports, "Imports"},
+	}
+
+	for _, tc := range cases {
+		t.Run(string(tc.section), func(t *testing.T) {
+			ctx := PositionContext{Section: tc.section}
+			hover := Hover(reg, doc, ctx)
+			if hover == nil {
+				t.Fatalf("expected DSL hover for section %q", tc.section)
+			}
+			content := hover.Contents.(protocol.MarkupContent).Value
+			if !containsStr(content, tc.want) {
+				t.Errorf("hover for %q should mention %q, got: %s", tc.section, tc.want, content)
+			}
+		})
+	}
+}
+
+// TestParseDSLSections checks the DSL reference parser with minimal input.
+func TestParseDSLSections(t *testing.T) {
+	md := `
+<!-- section: modules -->
+## Modules
+
+Modules are the building blocks of a workflow application.
+
+### Required Fields
+- ` + "`name`" + ` (string) — unique identifier
+
+### Example
+` + "```yaml" + `
+modules:
+  - name: api
+    type: http.server
+` + "```" + `
+
+### Relationship to Other Sections
+- Referenced by workflows
+`
+	result := parseDSLSections(md)
+	if result == nil {
+		t.Fatal("parseDSLSections returned nil")
+	}
+	sec, ok := result["modules"]
+	if !ok {
+		t.Fatal("modules section not parsed")
+	}
+	if sec.Title != "Modules" {
+		t.Errorf("expected title 'Modules', got %q", sec.Title)
+	}
+	if !containsStr(sec.Description, "building blocks") {
+		t.Errorf("unexpected description: %q", sec.Description)
+	}
+	if !containsStr(sec.Example, "http.server") {
+		t.Errorf("example should contain 'http.server', got: %q", sec.Example)
+	}
+}
+
 // helpers
 
 func containsStr(s, sub string) bool {
