@@ -1,20 +1,16 @@
 package schema_test
 
 import (
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
-// TestNoNewJSONFields is a ratchet test that prevents the number of json-typed
-// schema fields from growing. The maxAllowed constant should only decrease over
-// time as fields are converted to proper typed schemas (Task 5 and successors).
-//
-// To run with strict mode (requires zero json fields):
-//
-//	STRICT_SCHEMA=true go test ./schema/ -run TestNoNewJSONFields -v
+// TestNoNewJSONFields enforces zero tolerance for json-typed schema fields.
+// All module and step config fields must use a typed schema (string, number,
+// boolean, select, array, map, duration, filepath, sql). Any new json field
+// will cause this test to fail.
 func TestNoNewJSONFields(t *testing.T) {
 	moduleRegistry := schema.NewModuleSchemaRegistry()
 	stepRegistry := schema.NewStepSchemaRegistry()
@@ -36,23 +32,8 @@ func TestNoNewJSONFields(t *testing.T) {
 		}
 	}
 
-	if os.Getenv("STRICT_SCHEMA") == "true" {
-		if len(jsonFields) > 0 {
-			t.Errorf("STRICT_SCHEMA: %d json fields remain (must be 0):\n%s",
-				len(jsonFields), strings.Join(jsonFields, "\n"))
-		}
-		return
+	if len(jsonFields) > 0 {
+		t.Errorf("%d json-typed fields remain (must be 0):\n%s",
+			len(jsonFields), strings.Join(jsonFields, "\n"))
 	}
-
-	// Ratchet: count should only decrease over time.
-	// Update this number downward as fields are converted to typed schemas.
-	// Was 73 before Task 5; reduced to 51 after Task 5; now 0 — all json fields converted.
-	const maxAllowed = 0
-
-	if len(jsonFields) > maxAllowed {
-		t.Errorf("JSON field count increased to %d (max allowed: %d). New json fields:\n%s",
-			len(jsonFields), maxAllowed, strings.Join(jsonFields, "\n"))
-	}
-
-	t.Logf("Current JSON field count: %d / %d allowed", len(jsonFields), maxAllowed)
 }
