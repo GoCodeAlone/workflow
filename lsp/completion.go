@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"sort"
+	"strings"
 
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
@@ -201,10 +202,10 @@ func getTemplateFunctionCompletions() []protocol.CompletionItem {
 func getModuleNamesFromContent(content string) []protocol.CompletionItem {
 	kind := protocol.CompletionItemKindValue
 	items := []protocol.CompletionItem{}
-	for _, line := range splitLines(content) {
-		trimmed := trimSpace(line)
-		if hasPrefix(trimmed, "name:") {
-			val := trimSpace(trimPrefix(trimmed, "name:"))
+	for _, line := range strings.Split(strings.TrimRight(content, "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "name:") {
+			val := strings.TrimSpace(strings.TrimPrefix(trimmed, "name:"))
 			if val != "" {
 				name := val
 				items = append(items, protocol.CompletionItem{
@@ -540,48 +541,3 @@ func metaFieldCompletions() []protocol.CompletionItem {
 	return items
 }
 
-func splitLines(s string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
-		}
-	}
-	lines = append(lines, s[start:])
-	return lines
-}
-
-func trimSpace(s string) string {
-	return trimLeft(trimRight(s))
-}
-
-func trimLeft(s string) string {
-	for i, c := range s {
-		if c != ' ' && c != '\t' {
-			return s[i:]
-		}
-	}
-	return ""
-}
-
-func trimRight(s string) string {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] != ' ' && s[i] != '\t' && s[i] != '\r' && s[i] != '\n' {
-			return s[:i+1]
-		}
-	}
-	return ""
-}
-
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
-}
-
-func trimPrefix(s, prefix string) string {
-	if hasPrefix(s, prefix) {
-		return s[len(prefix):]
-	}
-	return s
-}
