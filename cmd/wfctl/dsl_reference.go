@@ -123,12 +123,6 @@ func parseDSLReference(md string) (*DSLReferenceOutput, error) {
 	lines := strings.Split(md, "\n")
 	var sections []DSLSection
 
-	type pending struct {
-		id    string
-		start int
-	}
-	var cur *pending
-
 	// Map of section comment ID → index in sections slice (for setting parent)
 	idToIdx := map[string]int{}
 
@@ -141,7 +135,6 @@ func parseDSLReference(md string) (*DSLReferenceOutput, error) {
 
 	for i, line := range lines {
 		if m := reSectionComment.FindStringSubmatch(line); m != nil {
-			_ = cur
 			boundaries = append(boundaries, boundary{id: m[1], start: i})
 		}
 	}
