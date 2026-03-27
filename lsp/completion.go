@@ -7,27 +7,40 @@ import (
 )
 
 type topLevelKeyEntry struct {
-	key  string
-	doc  string
-	kind protocol.CompletionItemKind
+	key       string
+	doc       string
+	sectionID string // DSL reference section ID for enriched documentation
+	kind      protocol.CompletionItemKind
 }
 
 // getTopLevelKeys returns completion items for top-level YAML keys.
-func getTopLevelKeys() []protocol.CompletionItem {
+// When a registry is provided, descriptions are enriched from the DSL reference.
+func getTopLevelKeys(reg *Registry) []protocol.CompletionItem {
 	entries := []topLevelKeyEntry{
-		{"modules", "List of module definitions to instantiate", protocol.CompletionItemKindKeyword},
-		{"workflows", "Workflow handler configurations", protocol.CompletionItemKindKeyword},
-		{"triggers", "Trigger configurations", protocol.CompletionItemKindKeyword},
-		{"pipelines", "Named pipeline definitions", protocol.CompletionItemKindKeyword},
-		{"imports", "List of external config files to import", protocol.CompletionItemKindKeyword},
-		{"requires", "Plugin and version dependency declarations", protocol.CompletionItemKindKeyword},
-		{"platform", "Platform-level configuration", protocol.CompletionItemKindKeyword},
+		{"modules", "List of module definitions to instantiate", "modules", protocol.CompletionItemKindKeyword},
+		{"workflows", "Workflow handler configurations (http, messaging, statemachine, events)", "workflows", protocol.CompletionItemKindKeyword},
+		{"triggers", "Trigger configurations (http, cron, event)", "triggers", protocol.CompletionItemKindKeyword},
+		{"pipelines", "Named pipeline definitions with ordered steps", "pipelines", protocol.CompletionItemKindKeyword},
+		{"imports", "List of external config files to import", "imports", protocol.CompletionItemKindKeyword},
+		{"requires", "Plugin and version dependency declarations", "application", protocol.CompletionItemKindKeyword},
+		{"platform", "Platform-level IaC configuration", "platform", protocol.CompletionItemKindKeyword},
+		{"infrastructure", "Cloud resource provisioning declarations", "platform", protocol.CompletionItemKindKeyword},
+		{"sidecars", "Auxiliary containers to run alongside the application", "platform", protocol.CompletionItemKindKeyword},
+		{"name", "Application name", "application", protocol.CompletionItemKindKeyword},
+		{"version", "Application version (semver recommended)", "application", protocol.CompletionItemKindKeyword},
+		{"configProviders", "Configuration value providers (env, file, defaults)", "config-providers", protocol.CompletionItemKindKeyword},
 	}
 
 	items := make([]protocol.CompletionItem, 0, len(entries))
 	for _, e := range entries {
 		kind := e.kind
 		doc := e.doc
+		// Enrich with DSL reference description if available.
+		if reg != nil && reg.DSLSections != nil {
+			if sec, ok := reg.DSLSections[e.sectionID]; ok && sec.Description != "" {
+				doc = sec.Description
+			}
+		}
 		label := e.key
 		items = append(items, protocol.CompletionItem{
 			Label:         label,
@@ -212,7 +225,7 @@ func Completions(reg *Registry, doc *Document, ctx PositionContext) []protocol.C
 
 	switch ctx.Section {
 	case SectionTopLevel:
-		return getTopLevelKeys()
+		return getTopLevelKeys(reg)
 	case SectionModules:
 		if ctx.DependsOn {
 			return getModuleNamesFromContent(doc.Content)

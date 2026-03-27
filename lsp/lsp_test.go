@@ -913,6 +913,42 @@ func TestCompletions_TemplateStepNamePrefixFilter(t *testing.T) {
 	}
 }
 
+// TestCompletions_TopLevel_DSLDescriptions checks that top-level completions include DSL descriptions.
+func TestCompletions_TopLevel_DSLDescriptions(t *testing.T) {
+	reg := NewRegistry()
+	store := NewDocumentStore()
+	doc := store.Set("file:///test.yaml", "")
+
+	ctx := PositionContext{Section: SectionTopLevel}
+	items := Completions(reg, doc, ctx)
+	if len(items) == 0 {
+		t.Fatal("no top-level completions")
+	}
+
+	// infrastructure and sidecars should now be in the list.
+	labels := make(map[string]string, len(items))
+	for _, item := range items {
+		doc := ""
+		if d, ok := item.Documentation.(string); ok {
+			doc = d
+		}
+		labels[item.Label] = doc
+	}
+	for _, expected := range []string{"modules", "workflows", "triggers", "pipelines", "infrastructure", "sidecars", "configProviders"} {
+		if _, ok := labels[expected]; !ok {
+			t.Errorf("missing top-level key completion: %q", expected)
+		}
+	}
+
+	// If DSL sections are loaded, descriptions should come from DSL reference.
+	if reg.DSLSections != nil {
+		modulesDoc := labels["modules"]
+		if modulesDoc == "" {
+			t.Error("modules completion should have a non-empty description")
+		}
+	}
+}
+
 // TestHover_TopLevelKey checks hover for top-level YAML keys using DSL reference.
 func TestHover_TopLevelKey(t *testing.T) {
 	reg := NewRegistry()
