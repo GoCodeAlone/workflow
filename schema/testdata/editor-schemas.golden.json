@@ -74,7 +74,7 @@
         {
           "key": "recovery",
           "label": "Recovery Policy",
-          "type": "json",
+          "type": "map",
           "description": "What happens when an actor crashes"
         }
       ]
@@ -102,7 +102,7 @@
         {
           "key": "defaultRecovery",
           "label": "Default Recovery Policy",
-          "type": "json",
+          "type": "map",
           "description": "What happens when any actor in this system crashes"
         }
       ]
@@ -138,7 +138,7 @@
         {
           "key": "routes",
           "label": "Route Pipelines",
-          "type": "json",
+          "type": "array",
           "description": "Per-route processing pipelines with composable steps (validate, transform, http_call, etc.)",
           "group": "routes"
         }
@@ -321,7 +321,7 @@
         {
           "key": "routes",
           "label": "Route Pipelines",
-          "type": "json",
+          "type": "array",
           "description": "Per-route processing pipelines with composable steps (validate, transform, http_call, etc.)",
           "group": "routes"
         }
@@ -562,7 +562,7 @@
         {
           "key": "clients",
           "label": "Registered Clients",
-          "type": "json",
+          "type": "array",
           "description": "List of OAuth2 clients"
         }
       ]
@@ -590,7 +590,7 @@
         {
           "key": "providers",
           "label": "Providers",
-          "type": "json",
+          "type": "array",
           "description": "List of OAuth2 provider configurations",
           "required": true
         }
@@ -804,7 +804,7 @@
         {
           "key": "credentials",
           "label": "Credentials",
-          "type": "json",
+          "type": "map",
           "description": "Credential configuration (type, keys, paths)"
         },
         {
@@ -2477,22 +2477,14 @@
         {
           "key": "validation",
           "label": "Validation",
-          "type": "json",
-          "description": "Request/response validation settings, e.g. {\"request\": true, \"response\": false}",
-          "defaultValue": {
-            "request": true,
-            "response": false
-          }
+          "type": "map",
+          "description": "Request/response validation settings (request, response booleans)"
         },
         {
           "key": "swagger_ui",
           "label": "Swagger UI",
-          "type": "json",
-          "description": "Swagger UI settings, e.g. {\"enabled\": false, \"path\": \"/docs\"}",
-          "defaultValue": {
-            "enabled": false,
-            "path": "/docs"
-          }
+          "type": "map",
+          "description": "Swagger UI settings (enabled bool, path string)"
         },
         {
           "key": "max_body_bytes",
@@ -2690,13 +2682,13 @@
         {
           "key": "cors",
           "label": "CORS Config",
-          "type": "json",
-          "description": "CORS configuration"
+          "type": "map",
+          "description": "CORS configuration (allowedOrigins, allowedMethods, allowedHeaders)"
         },
         {
           "key": "routes",
           "label": "Routes",
-          "type": "json",
+          "type": "array",
           "description": "Route definitions"
         }
       ]
@@ -2729,7 +2721,7 @@
         {
           "key": "policies",
           "label": "Policies",
-          "type": "json",
+          "type": "array",
           "description": "Scaling policy definitions",
           "required": true
         }
@@ -2810,14 +2802,14 @@
         {
           "key": "zone",
           "label": "Zone Config",
-          "type": "json",
+          "type": "map",
           "description": "Zone configuration (name, comment, private, vpcId)",
           "required": true
         },
         {
           "key": "records",
           "label": "DNS Records",
-          "type": "json",
+          "type": "array",
           "description": "List of DNS record definitions"
         }
       ]
@@ -2983,7 +2975,7 @@
         {
           "key": "records",
           "label": "Records",
-          "type": "json",
+          "type": "array",
           "description": "List of DNS record definitions"
         }
       ]
@@ -3016,14 +3008,14 @@
         {
           "key": "vpc",
           "label": "VPC Config",
-          "type": "json",
+          "type": "map",
           "description": "VPC configuration (name, region, ip_range)",
           "required": true
         },
         {
           "key": "firewalls",
           "label": "Firewalls",
-          "type": "json",
+          "type": "array",
           "description": "List of firewall definitions"
         }
       ]
@@ -3068,7 +3060,7 @@
         {
           "key": "node_pool",
           "label": "Node Pool",
-          "type": "json",
+          "type": "map",
           "description": "Node pool config"
         }
       ]
@@ -3120,14 +3112,16 @@
         {
           "key": "vpc_subnets",
           "label": "VPC Subnets",
-          "type": "json",
-          "description": "List of subnet IDs"
+          "type": "array",
+          "description": "List of subnet IDs",
+          "arrayItemType": "string"
         },
         {
           "key": "security_groups",
           "label": "Security Groups",
-          "type": "json",
-          "description": "List of security group IDs"
+          "type": "array",
+          "description": "List of security group IDs",
+          "arrayItemType": "string"
         }
       ]
     },
@@ -3166,7 +3160,7 @@
         {
           "key": "nodeGroups",
           "label": "Node Groups",
-          "type": "json",
+          "type": "array",
           "description": "Node group definitions"
         }
       ]
@@ -3199,14 +3193,14 @@
         {
           "key": "vpc",
           "label": "VPC Config",
-          "type": "json",
+          "type": "map",
           "description": "VPC configuration (cidr, name)",
           "required": true
         },
         {
           "key": "subnets",
           "label": "Subnets",
-          "type": "json",
+          "type": "array",
           "description": "List of subnet definitions"
         },
         {
@@ -3218,7 +3212,7 @@
         {
           "key": "security_groups",
           "label": "Security Groups",
-          "type": "json",
+          "type": "array",
           "description": "List of security group definitions"
         }
       ]
@@ -3254,7 +3248,7 @@
         {
           "key": "tiers",
           "label": "Tier Configuration",
-          "type": "json",
+          "type": "map",
           "description": "Three-tier infrastructure layout (infrastructure, shared_primitives, application)"
         }
       ],
@@ -3282,7 +3276,7 @@
         {
           "key": "regions",
           "label": "Regions",
-          "type": "json",
+          "type": "array",
           "description": "List of region definitions (name, provider, endpoint, priority, health_check)",
           "required": true
         }
@@ -3380,13 +3374,13 @@
         {
           "key": "capabilities",
           "label": "Capabilities",
-          "type": "json",
+          "type": "map",
           "description": "Provider-agnostic capability properties (replicas, memory, ports, etc.)"
         },
         {
           "key": "constraints",
           "label": "Constraints",
-          "type": "json",
+          "type": "map",
           "description": "Hard limits imposed by parent tiers"
         }
       ],
@@ -3417,7 +3411,7 @@
         {
           "key": "policies",
           "label": "Pre-loaded Policies",
-          "type": "json",
+          "type": "array",
           "description": "List of policies to load at startup"
         }
       ]
@@ -3655,7 +3649,7 @@
         {
           "key": "fields",
           "label": "Protected Fields",
-          "type": "json",
+          "type": "array",
           "description": "List of field protection rules (path, action: mask|encrypt|redact)"
         },
         {
@@ -3715,7 +3709,7 @@
         {
           "key": "mockFindings",
           "label": "Mock Findings",
-          "type": "json",
+          "type": "map",
           "description": "Mock findings to return (keyed by scan type: sast, container, deps)"
         }
       ]
@@ -4058,7 +4052,7 @@
         {
           "key": "schema",
           "label": "Extraction Schema",
-          "type": "json",
+          "type": "map",
           "description": "JSON schema defining the fields to extract",
           "required": true
         },
@@ -4882,7 +4876,7 @@
         {
           "key": "constraints",
           "label": "Constraints",
-          "type": "json",
+          "type": "array",
           "description": "List of constraint definitions (field, operator, value)"
         },
         {
@@ -6425,7 +6419,7 @@
         {
           "key": "body",
           "label": "Body",
-          "type": "json",
+          "type": "map",
           "description": "Request body (supports templates). For POST/PUT without body, sends pipeline context."
         },
         {
@@ -6439,8 +6433,8 @@
         {
           "key": "oauth2",
           "label": "OAuth2",
-          "type": "json",
-          "description": "OAuth2 client_credentials configuration. Tokens are cached and refreshed automatically. Fields: grant_type (default: client_credentials), token_url, client_id, client_secret, scopes. When the token endpoint returns instance_url (Salesforce pattern), it is injected as {{ .instance_url }} for URL templates and included in the step output. If both the legacy auth block and oauth2 are configured, auth takes precedence and oauth2 is ignored."
+          "type": "map",
+          "description": "OAuth2 client_credentials configuration (grant_type, token_url, client_id, client_secret, scopes). Tokens are cached and refreshed automatically."
         }
       ]
     },
@@ -6632,7 +6626,7 @@
         {
           "key": "body",
           "label": "Body",
-          "type": "json",
+          "type": "map",
           "description": "Response body as JSON (supports template expressions)"
         },
         {
@@ -6862,7 +6856,7 @@
         {
           "key": "item",
           "label": "Item",
-          "type": "json",
+          "type": "map",
           "description": "Document to store"
         }
       ]
@@ -7955,7 +7949,7 @@
         {
           "key": "artifacts_out",
           "label": "Output Artifacts",
-          "type": "json",
+          "type": "array",
           "description": "Artifacts to collect after execution (array of {key, path})"
         }
       ]
@@ -8292,7 +8286,7 @@
         {
           "key": "schema",
           "label": "JSON Schema",
-          "type": "json",
+          "type": "map",
           "description": "JSON Schema definition for validation (when strategy is json_schema)"
         },
         {
