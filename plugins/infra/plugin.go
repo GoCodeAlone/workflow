@@ -72,7 +72,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 	commonFields := []schema.ConfigFieldDef{
 		{Key: "provider", Label: "Provider Module", Type: schema.FieldTypeString, Required: true, Description: "Name of the iac.provider module to delegate to"},
 		{Key: "size", Label: "Size Tier", Type: schema.FieldTypeString, Description: "Sizing tier: xs/s/m/l/xl (default: s)"},
-		{Key: "resources", Label: "Resource Hints", Type: schema.FieldTypeJSON, Description: "Optional cpu/memory/storage overrides"},
+		{Key: "resources", Label: "Resource Hints", Type: schema.FieldTypeMap, Description: "Optional cpu/memory/storage overrides"},
 	}
 
 	schemas := make([]*schema.ModuleSchema, 0, len(infraTypes))

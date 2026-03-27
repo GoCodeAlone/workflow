@@ -302,7 +302,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (optional for kind)"},
 				{Key: "type", Label: "Cluster Type", Type: schema.FieldTypeString, Required: true, Description: "eks | gke | aks | kind | k3s"},
 				{Key: "version", Label: "Kubernetes Version", Type: schema.FieldTypeString, Description: "e.g. 1.29"},
-				{Key: "nodeGroups", Label: "Node Groups", Type: schema.FieldTypeJSON, Description: "Node group definitions"},
+				{Key: "nodeGroups", Label: "Node Groups", Type: schema.FieldTypeArray, Description: "Node group definitions"},
 			},
 		},
 		{
@@ -316,8 +316,8 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "region", Label: "AWS Region", Type: schema.FieldTypeString, Description: "AWS region (e.g. us-east-1)"},
 				{Key: "launch_type", Label: "Launch Type", Type: schema.FieldTypeString, Description: "FARGATE or EC2 (default: FARGATE)"},
 				{Key: "desired_count", Label: "Desired Count", Type: schema.FieldTypeString, Description: "Number of tasks to run (default: 1)"},
-				{Key: "vpc_subnets", Label: "VPC Subnets", Type: schema.FieldTypeJSON, Description: "List of subnet IDs"},
-				{Key: "security_groups", Label: "Security Groups", Type: schema.FieldTypeJSON, Description: "List of security group IDs"},
+				{Key: "vpc_subnets", Label: "VPC Subnets", Type: schema.FieldTypeArray, ArrayItemType: "string", Description: "List of subnet IDs"},
+				{Key: "security_groups", Label: "Security Groups", Type: schema.FieldTypeArray, ArrayItemType: "string", Description: "List of security group IDs"},
 			},
 		},
 		{
@@ -328,8 +328,8 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			ConfigFields: []schema.ConfigFieldDef{
 				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (optional for mock)"},
 				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock | aws (Route53)"},
-				{Key: "zone", Label: "Zone Config", Type: schema.FieldTypeJSON, Required: true, Description: "Zone configuration (name, comment, private, vpcId)"},
-				{Key: "records", Label: "DNS Records", Type: schema.FieldTypeJSON, Description: "List of DNS record definitions"},
+				{Key: "zone", Label: "Zone Config", Type: schema.FieldTypeMap, Required: true, Description: "Zone configuration (name, comment, private, vpcId)"},
+				{Key: "records", Label: "DNS Records", Type: schema.FieldTypeArray, Description: "List of DNS record definitions"},
 			},
 		},
 		{
@@ -340,10 +340,10 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			ConfigFields: []schema.ConfigFieldDef{
 				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (optional for mock)"},
 				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock | aws"},
-				{Key: "vpc", Label: "VPC Config", Type: schema.FieldTypeJSON, Required: true, Description: "VPC configuration (cidr, name)"},
-				{Key: "subnets", Label: "Subnets", Type: schema.FieldTypeJSON, Description: "List of subnet definitions"},
+				{Key: "vpc", Label: "VPC Config", Type: schema.FieldTypeMap, Required: true, Description: "VPC configuration (cidr, name)"},
+				{Key: "subnets", Label: "Subnets", Type: schema.FieldTypeArray, Description: "List of subnet definitions"},
 				{Key: "nat_gateway", Label: "NAT Gateway", Type: schema.FieldTypeBool, Description: "Provision a NAT gateway"},
-				{Key: "security_groups", Label: "Security Groups", Type: schema.FieldTypeJSON, Description: "List of security group definitions"},
+				{Key: "security_groups", Label: "Security Groups", Type: schema.FieldTypeArray, Description: "List of security group definitions"},
 			},
 		},
 		{
@@ -356,8 +356,8 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock | aws"},
 				{Key: "name", Label: "Gateway Name", Type: schema.FieldTypeString, Required: true, Description: "API gateway name"},
 				{Key: "stage", Label: "Stage", Type: schema.FieldTypeString, Description: "Deployment stage (dev, staging, prod)"},
-				{Key: "cors", Label: "CORS Config", Type: schema.FieldTypeJSON, Description: "CORS configuration (allow_origins, allow_methods, allow_headers)"},
-				{Key: "routes", Label: "Routes", Type: schema.FieldTypeJSON, Description: "Route definitions (path, method, target, rate_limit, auth_type)"},
+				{Key: "cors", Label: "CORS Config", Type: schema.FieldTypeMap, Description: "CORS configuration (allow_origins, allow_methods, allow_headers)"},
+				{Key: "routes", Label: "Routes", Type: schema.FieldTypeArray, Description: "Route definitions (path, method, target, rate_limit, auth_type)"},
 			},
 		},
 		{
@@ -368,7 +368,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			ConfigFields: []schema.ConfigFieldDef{
 				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (optional for mock)"},
 				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock | aws"},
-				{Key: "policies", Label: "Policies", Type: schema.FieldTypeJSON, Required: true, Description: "Scaling policy definitions (name, type, target_resource, min_capacity, max_capacity, ...)"},
+				{Key: "policies", Label: "Policies", Type: schema.FieldTypeArray, Required: true, Description: "Scaling policy definitions (name, type, target_resource, min_capacity, max_capacity, ...)"},
 			},
 		},
 		{
@@ -422,7 +422,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			Description: "Manages multi-region tenant deployments with failover, health checking, and traffic weight routing (mock or cloud provider backend)",
 			ConfigFields: []schema.ConfigFieldDef{
 				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock (default)"},
-				{Key: "regions", Label: "Regions", Type: schema.FieldTypeJSON, Required: true, Description: "List of region definitions (name, provider, endpoint, priority, health_check)"},
+				{Key: "regions", Label: "Regions", Type: schema.FieldTypeArray, Required: true, Description: "List of region definitions (name, provider, endpoint, priority, health_check)"},
 			},
 		},
 		{
@@ -435,7 +435,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "cluster_name", Label: "Cluster Name", Type: schema.FieldTypeString, Description: "DOKS cluster name"},
 				{Key: "region", Label: "Region", Type: schema.FieldTypeString, Description: "DO region slug (e.g. nyc3)"},
 				{Key: "version", Label: "Kubernetes Version", Type: schema.FieldTypeString, Description: "Kubernetes version slug (e.g. 1.29.1-do.0)"},
-				{Key: "node_pool", Label: "Node Pool", Type: schema.FieldTypeJSON, Description: "Node pool config (size, count, auto_scale, min_nodes, max_nodes)"},
+				{Key: "node_pool", Label: "Node Pool", Type: schema.FieldTypeMap, Description: "Node pool config (size, count, auto_scale, min_nodes, max_nodes)"},
 			},
 		},
 		{
@@ -446,8 +446,8 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			ConfigFields: []schema.ConfigFieldDef{
 				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (provider=digitalocean)"},
 				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock | digitalocean"},
-				{Key: "vpc", Label: "VPC Config", Type: schema.FieldTypeJSON, Required: true, Description: "VPC configuration (name, region, ip_range)"},
-				{Key: "firewalls", Label: "Firewalls", Type: schema.FieldTypeJSON, Description: "List of firewall definitions"},
+				{Key: "vpc", Label: "VPC Config", Type: schema.FieldTypeMap, Required: true, Description: "VPC configuration (name, region, ip_range)"},
+				{Key: "firewalls", Label: "Firewalls", Type: schema.FieldTypeArray, Description: "List of firewall definitions"},
 			},
 		},
 		{
@@ -459,7 +459,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (provider=digitalocean)"},
 				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Description: "mock | digitalocean"},
 				{Key: "domain", Label: "Domain", Type: schema.FieldTypeString, Required: true, Description: "Domain name (e.g. example.com)"},
-				{Key: "records", Label: "Records", Type: schema.FieldTypeJSON, Description: "List of DNS record definitions (name, type, data, ttl)"},
+				{Key: "records", Label: "Records", Type: schema.FieldTypeArray, Description: "List of DNS record definitions (name, type, data, ttl)"},
 			},
 		},
 		{

@@ -68,7 +68,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			ConfigFields: []schema.ConfigFieldDef{
 				{Key: "provider", Label: "Provider", Type: schema.FieldTypeString, Required: true, Description: "Cloud provider: aws, gcp, azure, digitalocean, kubernetes, mock"},
 				{Key: "region", Label: "Region", Type: schema.FieldTypeString, Description: "Primary region (e.g. us-east-1, us-central1, eastus, nyc3)"},
-				{Key: "credentials", Label: "Credentials", Type: schema.FieldTypeJSON, Description: "Credential configuration (type, keys, paths). GCP types: service_account_json, service_account_key, workload_identity, application_default. Azure types: client_credentials, managed_identity, cli, env. DigitalOcean types: api_token, env."},
+				{Key: "credentials", Label: "Credentials", Type: schema.FieldTypeMap, Description: "Credential configuration (type, keys, paths). GCP types: service_account_json, service_account_key, workload_identity, application_default. Azure types: client_credentials, managed_identity, cli, env. DigitalOcean types: api_token, env."},
 				{Key: "project_id", Label: "GCP Project ID", Type: schema.FieldTypeString, Description: "GCP project ID (google cloud project)"},
 				{Key: "subscription_id", Label: "Azure Subscription ID", Type: schema.FieldTypeString, Description: "Azure subscription ID"},
 			},

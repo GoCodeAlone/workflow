@@ -424,7 +424,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			Outputs:     []schema.ServiceIODef{{Name: "response", Type: "JSON", Description: "JSON query result"}},
 			ConfigFields: []schema.ConfigFieldDef{
 				{Key: "delegate", Label: "Delegate Service", Type: schema.FieldTypeString, Description: "Name of a service (implementing http.Handler) to delegate unmatched requests to", Placeholder: "my-service-name", InheritFrom: "dependency.name"},
-				{Key: "routes", Label: "Route Pipelines", Type: schema.FieldTypeJSON, Description: "Per-route processing pipelines with composable steps (validate, transform, http_call, etc.)", Group: "routes"},
+				{Key: "routes", Label: "Route Pipelines", Type: schema.FieldTypeArray, Description: "Per-route processing pipelines with composable steps (validate, transform, http_call, etc.)", Group: "routes"},
 			},
 		},
 		{
@@ -436,7 +436,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			Outputs:     []schema.ServiceIODef{{Name: "response", Type: "JSON", Description: "JSON command result"}},
 			ConfigFields: []schema.ConfigFieldDef{
 				{Key: "delegate", Label: "Delegate Service", Type: schema.FieldTypeString, Description: "Name of a service (implementing http.Handler) to delegate unmatched requests to", Placeholder: "my-service-name", InheritFrom: "dependency.name"},
-				{Key: "routes", Label: "Route Pipelines", Type: schema.FieldTypeJSON, Description: "Per-route processing pipelines with composable steps (validate, transform, http_call, etc.)", Group: "routes"},
+				{Key: "routes", Label: "Route Pipelines", Type: schema.FieldTypeArray, Description: "Per-route processing pipelines with composable steps (validate, transform, http_call, etc.)", Group: "routes"},
 			},
 		},
 		{
@@ -468,10 +468,10 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			Inputs:      []schema.ServiceIODef{{Name: "http_request", Type: "http.Request", Description: "Incoming HTTP request"}},
 			Outputs:     []schema.ServiceIODef{{Name: "http_response", Type: "http.Response", Description: "Proxied response from backend"}},
 			ConfigFields: []schema.ConfigFieldDef{
-				{Key: "routes", Label: "Routes", Type: schema.FieldTypeJSON, Required: true, Description: "Array of route definitions with pathPrefix, backend, methods, rateLimit, auth, timeout"},
-				{Key: "globalRateLimit", Label: "Global Rate Limit", Type: schema.FieldTypeJSON, Description: "Global rate limit applied to all routes (requestsPerMinute, burstSize)"},
-				{Key: "cors", Label: "CORS Config", Type: schema.FieldTypeJSON, Description: "CORS settings (allowOrigins, allowMethods, allowHeaders, maxAge)"},
-				{Key: "auth", Label: "Auth Config", Type: schema.FieldTypeJSON, Description: "Authentication settings (type: bearer/api_key/basic, header)"},
+				{Key: "routes", Label: "Routes", Type: schema.FieldTypeArray, Required: true, Description: "Array of route definitions with pathPrefix, backend, methods, rateLimit, auth, timeout"},
+				{Key: "globalRateLimit", Label: "Global Rate Limit", Type: schema.FieldTypeMap, Description: "Global rate limit applied to all routes (requestsPerMinute, burstSize)"},
+				{Key: "cors", Label: "CORS Config", Type: schema.FieldTypeMap, Description: "CORS settings (allowOrigins, allowMethods, allowHeaders, maxAge)"},
+				{Key: "auth", Label: "Auth Config", Type: schema.FieldTypeMap, Description: "Authentication settings (type: bearer/api_key/basic, header)"},
 			},
 		},
 		{

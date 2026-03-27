@@ -82,7 +82,7 @@ func scannerModuleSchema() *schema.ModuleSchema {
 			{Key: "semgrepBinary", Type: schema.FieldTypeString, Description: "Path to semgrep binary", DefaultValue: "semgrep"},
 			{Key: "trivyBinary", Type: schema.FieldTypeString, Description: "Path to trivy binary", DefaultValue: "trivy"},
 			{Key: "grypeBinary", Type: schema.FieldTypeString, Description: "Path to grype binary", DefaultValue: "grype"},
-			{Key: "mockFindings", Type: schema.FieldTypeJSON, Description: "Mock findings to return (keyed by scan type: sast, container, deps)"},
+			{Key: "mockFindings", Type: schema.FieldTypeMap, Description: "Mock findings to return (keyed by scan type: sast, container, deps)"},
 		},
 	}
 }

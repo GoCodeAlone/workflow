@@ -95,7 +95,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 // ModuleSchemas returns UI schema definitions for policy module types.
 func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 	sharedPolicyFields := []schema.ConfigFieldDef{
-		{Key: "policies", Label: "Pre-loaded Policies", Type: schema.FieldTypeJSON, Description: "List of policies to load at startup: [{\"name\": \"authz\", \"content\": \"...\"}]"},
+		{Key: "policies", Label: "Pre-loaded Policies", Type: schema.FieldTypeArray, Description: "List of policies to load at startup: [{\"name\": \"authz\", \"content\": \"...\"}]"},
 	}
 
 	return []*schema.ModuleSchema{

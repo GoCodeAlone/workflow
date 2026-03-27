@@ -22,7 +22,7 @@ func actorSystemSchema() *schema.ModuleSchema {
 			{
 				Key:         "defaultRecovery",
 				Label:       "Default Recovery Policy",
-				Type:        schema.FieldTypeJSON,
+				Type:        schema.FieldTypeMap,
 				Description: "What happens when any actor in this system crashes. Applied to pools that don't set their own recovery policy.",
 				Group:       "Fault Tolerance",
 			},
@@ -91,7 +91,7 @@ func actorPoolSchema() *schema.ModuleSchema {
 			{
 				Key:         "recovery",
 				Label:       "Recovery Policy",
-				Type:        schema.FieldTypeJSON,
+				Type:        schema.FieldTypeMap,
 				Description: "What happens when an actor crashes. Overrides the system default.",
 				Group:       "Fault Tolerance",
 			},
@@ -129,7 +129,7 @@ func actorSendStepSchema() *schema.StepSchema {
 			{
 				Key:         "message",
 				Label:       "Message",
-				Type:        schema.FieldTypeJSON,
+				Type:        schema.FieldTypeMap,
 				Description: "Message to send. Must include 'type' (matched against receive handlers) and optional 'payload' map.",
 				Required:    true,
 			},
@@ -173,7 +173,7 @@ func actorAskStepSchema() *schema.StepSchema {
 			{
 				Key:         "message",
 				Label:       "Message",
-				Type:        schema.FieldTypeJSON,
+				Type:        schema.FieldTypeMap,
 				Description: "Message to send. Must include 'type' and optional 'payload' map.",
 				Required:    true,
 			},
