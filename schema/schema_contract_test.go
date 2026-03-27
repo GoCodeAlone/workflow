@@ -46,8 +46,8 @@ func TestNoNewJSONFields(t *testing.T) {
 
 	// Ratchet: count should only decrease over time.
 	// Update this number downward as fields are converted to typed schemas.
-	// Was 73 before Task 5; reduced to 51 after Task 5.
-	const maxAllowed = 51
+	// Was 73 before Task 5; reduced to 51 after Task 5; now 0 — all json fields converted.
+	const maxAllowed = 0
 
 	if len(jsonFields) > maxAllowed {
 		t.Errorf("JSON field count increased to %d (max allowed: %d). New json fields:\n%s",

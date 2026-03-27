@@ -97,7 +97,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "status", Type: FieldTypeNumber, Description: "HTTP status code (default 200)", DefaultValue: "200"},
 			{Key: "status_from", Type: FieldTypeString, Description: "Dotted path to resolve HTTP status code dynamically (e.g. 'steps.call_upstream.status_code'). Takes precedence over 'status' when resolved to a valid HTTP status code (100-599)."},
-			{Key: "body", Type: FieldTypeJSON, Description: "Response body (static JSON object or template expression)"},
+			{Key: "body", Type: FieldTypeMap, Description: "Response body (static JSON object or template expression)"},
 			{Key: "body_from", Type: FieldTypeString, Description: "Template expression to build body from step outputs (e.g. 'steps.query.rows')"},
 			{Key: "headers", Type: FieldTypeMap, Description: "Additional response headers"},
 		},
@@ -330,7 +330,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "initial_delay", Type: FieldTypeDuration, Description: "Initial delay before first retry", DefaultValue: "100ms"},
 			{Key: "max_delay", Type: FieldTypeDuration, Description: "Maximum delay between retries", DefaultValue: "30s"},
 			{Key: "multiplier", Type: FieldTypeNumber, Description: "Backoff multiplier", DefaultValue: 2.0},
-			{Key: "step", Type: FieldTypeJSON, Description: "The step definition to retry", Required: true},
+			{Key: "step", Type: FieldTypeMap, Description: "The step definition to retry", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "attempts", Type: "number", Description: "Number of attempts made"},
@@ -461,7 +461,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "pipelinesteps",
 		Description: "Validates the request body against a JSON Schema.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "schema", Type: FieldTypeJSON, Description: "JSON Schema to validate against", Required: true},
+			{Key: "schema", Type: FieldTypeMap, Description: "JSON Schema to validate against", Required: true},
 			{Key: "required", Type: FieldTypeArray, Description: "List of required body fields"},
 		},
 		Outputs: []StepOutputDef{
@@ -523,7 +523,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "store", Type: FieldTypeString, Description: "NoSQL store module name", Required: true},
 			{Key: "key", Type: FieldTypeString, Description: "Document key (template expressions supported)", Required: true},
-			{Key: "item", Type: FieldTypeJSON, Description: "Document to store"},
+			{Key: "item", Type: FieldTypeMap, Description: "Document to store"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "stored", Type: "boolean", Description: "Whether the document was stored successfully"},
@@ -764,7 +764,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "provider", Type: FieldTypeString, Description: "AI provider module name"},
 			{Key: "model", Type: FieldTypeString, Description: "Model name to use"},
-			{Key: "schema", Type: FieldTypeJSON, Description: "JSON Schema for extraction structure", Required: true},
+			{Key: "schema", Type: FieldTypeMap, Description: "JSON Schema for extraction structure", Required: true},
 			{Key: "input_from", Type: FieldTypeString, Description: "Dot-path to input text"},
 			{Key: "max_tokens", Type: FieldTypeNumber, Description: "Token limit", DefaultValue: 1024},
 			{Key: "temperature", Type: FieldTypeNumber, Description: "Temperature parameter"},
@@ -1399,7 +1399,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "pool", Type: FieldTypeString, Description: "Name of the actor.pool module to send to", Required: true},
 			{Key: "identity", Type: FieldTypeString, Description: "Unique key for auto-managed actors"},
-			{Key: "message", Type: FieldTypeJSON, Description: "Message to send (must include 'type' field)", Required: true},
+			{Key: "message", Type: FieldTypeMap, Description: "Message to send (must include 'type' field)", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "delivered", Type: "boolean", Description: "Whether the message was delivered"},
@@ -1416,7 +1416,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "pool", Type: FieldTypeString, Description: "Name of the actor.pool module to send to", Required: true},
 			{Key: "identity", Type: FieldTypeString, Description: "Unique key for auto-managed actors"},
 			{Key: "timeout", Type: FieldTypeDuration, Description: "How long to wait for the actor's reply before failing", DefaultValue: "10s"},
-			{Key: "message", Type: FieldTypeJSON, Description: "Message to send (must include 'type' field)", Required: true},
+			{Key: "message", Type: FieldTypeMap, Description: "Message to send (must include 'type' field)", Required: true},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "*", Type: "any", Description: "The actor's reply — varies by message handler"},
@@ -2488,7 +2488,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "engine", Type: FieldTypeString, Description: "Name of the policy.* module", Required: true},
 			{Key: "policy", Type: FieldTypeString, Description: "Policy name to evaluate", Required: true},
-			{Key: "input", Type: FieldTypeJSON, Description: "Input data for policy evaluation"},
+			{Key: "input", Type: FieldTypeMap, Description: "Input data for policy evaluation"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "allowed", Type: "boolean", Description: "Whether the policy allows the action"},
@@ -2536,7 +2536,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "engine", Type: FieldTypeString, Description: "Name of the policy.* module", Required: true},
 			{Key: "policy", Type: FieldTypeString, Description: "Policy name to test", Required: true},
-			{Key: "cases", Type: FieldTypeJSON, Description: "Test cases (array of {input, expected_allow})"},
+			{Key: "cases", Type: FieldTypeArray, Description: "Test cases (array of {input, expected_allow})"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "passed", Type: "boolean", Description: "Whether all test cases passed"},
@@ -2814,7 +2814,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "service", Type: FieldTypeString, Description: "BlueGreenDriver service name", Required: true},
 			{Key: "image", Type: FieldTypeString, Description: "Docker image to deploy (template expressions supported)", Required: true},
-			{Key: "health_check", Type: FieldTypeJSON, Description: "Health check config: {path, timeout}"},
+			{Key: "health_check", Type: FieldTypeMap, Description: "Health check config (path string, timeout duration)"},
 			{Key: "traffic_switch", Type: FieldTypeSelect, Description: "Traffic switch mechanism", Options: []string{"dns", "lb"}, DefaultValue: "lb"},
 		},
 		Outputs: []StepOutputDef{
@@ -2848,7 +2848,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "service", Type: FieldTypeString, Description: "DeployDriver service name", Required: true},
 			{Key: "history_store", Type: FieldTypeString, Description: "DeployHistoryStore service name", Required: true},
 			{Key: "target_version", Type: FieldTypeString, Description: "Version to roll back to (default: previous)", DefaultValue: "previous"},
-			{Key: "health_check", Type: FieldTypeJSON, Description: "Health check config: {path, timeout}"},
+			{Key: "health_check", Type: FieldTypeMap, Description: "Health check config (path string, timeout duration)"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "rolled_back_to", Type: "string", Description: "Image that was rolled back to"},
@@ -2865,7 +2865,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "image", Type: FieldTypeString, Description: "Docker image to deploy (template expressions supported)", Required: true},
 			{Key: "max_surge", Type: FieldTypeNumber, Description: "Maximum instances to add above desired count", DefaultValue: 1},
 			{Key: "max_unavailable", Type: FieldTypeNumber, Description: "Maximum instances that can be unavailable during update", DefaultValue: 1},
-			{Key: "health_check", Type: FieldTypeJSON, Description: "Health check config: {path, interval, timeout}"},
+			{Key: "health_check", Type: FieldTypeMap, Description: "Health check config (path string, interval duration, timeout duration)"},
 			{Key: "rollback_on_failure", Type: FieldTypeBool, Description: "Automatically rollback if health checks fail"},
 		},
 		Outputs: []StepOutputDef{
