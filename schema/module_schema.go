@@ -902,7 +902,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "transformer", Label: "Transformer Service", Type: FieldTypeString, Description: "Name of a DataTransformer service to use", Placeholder: "my-transformer", InheritFrom: "dependency.name"},
 			{Key: "pipeline", Label: "Pipeline Name", Type: FieldTypeString, Description: "Named pipeline within the transformer", Placeholder: "normalize"},
-			{Key: "operations", Label: "Operations", Type: FieldTypeJSON, Description: "Inline transformation operations (alternative to transformer+pipeline)"},
+			{Key: "operations", Label: "Operations", Type: FieldTypeArray, Description: "Inline transformation operations (alternative to transformer+pipeline)"},
 		},
 	})
 
@@ -929,7 +929,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Publish confirmation with topic and message ID"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "topic", Label: "Topic", Type: FieldTypeString, Required: true, Description: "Topic name to publish to", Placeholder: "order.created"},
-			{Key: "payload", Label: "Payload", Type: FieldTypeJSON, Description: "Custom payload template (uses {{ .field }} expressions). Defaults to pipeline context."},
+			{Key: "payload", Label: "Payload", Type: FieldTypeMap, Description: "Custom payload template (uses {{ .field }} expressions). Defaults to pipeline context."},
 			{Key: "broker", Label: "Broker Service", Type: FieldTypeString, Description: "Message broker service name (optional, defaults to EventBus)", InheritFrom: "dependency.name"},
 		},
 	})
@@ -1341,7 +1341,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "image", Label: "Image", Type: FieldTypeString, Required: true, Description: "Docker image to deploy", Placeholder: "myapp:v1.2.3"},
 			{Key: "provider", Label: "Provider", Type: FieldTypeSelect, Options: []string{"aws", "gcp", "azure", "digitalocean"}, Description: "Cloud provider to deploy to"},
 			{Key: "rollback_on_failure", Label: "Rollback on Failure", Type: FieldTypeBool, Description: "Automatically rollback if deployment fails"},
-			{Key: "health_check", Label: "Health Check", Type: FieldTypeJSON, Description: "Health check configuration (path, interval, timeout, thresholds)"},
+			{Key: "health_check", Label: "Health Check", Type: FieldTypeMap, Description: "Health check configuration (path, interval, timeout, thresholds)"},
 		},
 	})
 
@@ -1357,7 +1357,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "approvers", Label: "Approvers", Type: FieldTypeArray, ArrayItemType: "string", Description: "List of approver identifiers (for manual gates)"},
 			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, DefaultValue: "24h", Description: "Maximum time to wait for approval", Placeholder: "24h"},
 			{Key: "auto_approve_conditions", Label: "Auto-Approve Conditions", Type: FieldTypeArray, ArrayItemType: "string", Description: "Conditions for automated approval (key.path == value format)"},
-			{Key: "schedule", Label: "Schedule Window", Type: FieldTypeJSON, Description: "Time window for scheduled gates (weekdays, start_hour, end_hour)"},
+			{Key: "schedule", Label: "Schedule Window", Type: FieldTypeMap, Description: "Time window for scheduled gates (weekdays, start_hour, end_hour)"},
 		},
 		DefaultConfig: map[string]any{"timeout": "24h"},
 	})
@@ -1374,7 +1374,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "output_dir", Label: "Output Directory", Type: FieldTypeString, Required: true, Description: "Where to place built assets (for static.fileserver root)", Placeholder: "ui_dist"},
 			{Key: "install_cmd", Label: "Install Command", Type: FieldTypeString, DefaultValue: "npm install --silent", Description: "Dependency install command"},
 			{Key: "build_cmd", Label: "Build Command", Type: FieldTypeString, DefaultValue: "npm run build", Description: "Build command to generate static assets"},
-			{Key: "env", Label: "Environment Variables", Type: FieldTypeJSON, Description: "Extra environment variables for the build process"},
+			{Key: "env", Label: "Environment Variables", Type: FieldTypeMap, Description: "Extra environment variables for the build process"},
 			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, DefaultValue: "5m", Description: "Maximum time for the build", Placeholder: "5m"},
 		},
 		DefaultConfig: map[string]any{"install_cmd": "npm install --silent", "build_cmd": "npm run build", "timeout": "5m"},
@@ -1392,10 +1392,10 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Inputs:      []ServiceIODef{{Name: "http_request", Type: "http.Request", Description: "Incoming HTTP request"}},
 		Outputs:     []ServiceIODef{{Name: "http_response", Type: "http.Response", Description: "Proxied response from backend"}},
 		ConfigFields: []ConfigFieldDef{
-			{Key: "routes", Label: "Routes", Type: FieldTypeJSON, Required: true, Description: "Array of route definitions with pathPrefix, backend, methods, rateLimit, auth, timeout"},
-			{Key: "globalRateLimit", Label: "Global Rate Limit", Type: FieldTypeJSON, Description: "Global rate limit applied to all routes (requestsPerMinute, burstSize)"},
-			{Key: "cors", Label: "CORS Config", Type: FieldTypeJSON, Description: "CORS settings (allowOrigins, allowMethods, allowHeaders, maxAge)"},
-			{Key: "auth", Label: "Auth Config", Type: FieldTypeJSON, Description: "Authentication settings (type: bearer/api_key/basic, header)"},
+			{Key: "routes", Label: "Routes", Type: FieldTypeArray, Required: true, Description: "Array of route definitions with pathPrefix, backend, methods, rateLimit, auth, timeout"},
+			{Key: "globalRateLimit", Label: "Global Rate Limit", Type: FieldTypeMap, Description: "Global rate limit applied to all routes (requestsPerMinute, burstSize)"},
+			{Key: "cors", Label: "CORS Config", Type: FieldTypeMap, Description: "CORS settings (allowOrigins, allowMethods, allowHeaders, maxAge)"},
+			{Key: "auth", Label: "Auth Config", Type: FieldTypeMap, Description: "Authentication settings (type: bearer/api_key/basic, header)"},
 		},
 	})
 
@@ -1447,8 +1447,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Outputs:     []ServiceIODef{{Name: "result", Type: "StepResult", Description: "Sub-workflow execution result with mapped outputs"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "workflow", Label: "Workflow", Type: FieldTypeString, Required: true, Description: "Qualified workflow name (plugin:workflow-name)", Placeholder: "my-plugin:payment-flow"},
-			{Key: "input_mapping", Label: "Input Mapping", Type: FieldTypeJSON, Description: "Map of sub-workflow input keys to template expressions"},
-			{Key: "output_mapping", Label: "Output Mapping", Type: FieldTypeJSON, Description: "Map of parent context keys to sub-workflow output paths"},
+			{Key: "input_mapping", Label: "Input Mapping", Type: FieldTypeMap, Description: "Map of sub-workflow input keys to template expressions"},
+			{Key: "output_mapping", Label: "Output Mapping", Type: FieldTypeMap, Description: "Map of parent context keys to sub-workflow output paths"},
 			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, DefaultValue: "30s", Description: "Maximum execution time for the sub-workflow"},
 		},
 		DefaultConfig: map[string]any{"timeout": "30s"},
@@ -1468,8 +1468,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "workflow", Label: "Workflow", Type: FieldTypeString, Required: true, Description: "Name of the target pipeline to call (must be registered in the same engine)", Placeholder: "queue-assignment"},
 			{Key: "mode", Label: "Mode", Type: FieldTypeSelect, Options: []string{"sync", "async"}, DefaultValue: "sync", Description: "Execution mode: 'sync' waits for result, 'async' fires and returns immediately"},
-			{Key: "input", Label: "Input Mapping", Type: FieldTypeJSON, Description: "Map of target pipeline input keys to template expressions from the current context (e.g. {\"conversation_id\": \"{{ .conversation_id }}\"}). If omitted, all current context data is passed through."},
-			{Key: "output_mapping", Label: "Output Mapping", Type: FieldTypeJSON, Description: "Map of parent context keys to target pipeline output paths (e.g. {\"assigned_responder\": \"responder_id\"}). If omitted, all outputs are returned under 'result'."},
+			{Key: "input", Label: "Input Mapping", Type: FieldTypeMap, Description: "Map of target pipeline input keys to template expressions from the current context. If omitted, all current context data is passed through."},
+			{Key: "output_mapping", Label: "Output Mapping", Type: FieldTypeMap, Description: "Map of parent context keys to target pipeline output paths. If omitted, all outputs are returned under 'result'."},
 			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, DefaultValue: "30s", Description: "Maximum execution time for the called workflow (applies to both sync and async modes)"},
 		},
 		DefaultConfig: map[string]any{"mode": "sync", "timeout": "30s"},
@@ -1771,7 +1771,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "item_key", Label: "Item Key (legacy)", Type: FieldTypeString, Description: "Legacy alias for item_var"},
 			{Key: "index_key", Label: "Index Key", Type: FieldTypeString, Description: "Context variable name for the current index (defaults to 'index')", DefaultValue: "index"},
 			{Key: "step", Label: "Step", Type: FieldTypeMap, Description: "Single step map to execute for each item (mutually exclusive with steps); must include 'type' key"},
-			{Key: "steps", Label: "Steps", Type: FieldTypeJSON, Description: "Array of step maps to execute for each item (mutually exclusive with step)"},
+			{Key: "steps", Label: "Steps", Type: FieldTypeArray, Description: "Array of step maps to execute for each item (mutually exclusive with step)"},
 		},
 	})
 
@@ -1781,7 +1781,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Category:    "pipeline_steps",
 		Description: "Execute multiple named sub-steps concurrently and collect results",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "steps", Label: "Steps", Type: FieldTypeJSON, Required: true, Description: "List of sub-steps to run concurrently. Each must have a unique 'name'."},
+			{Key: "steps", Label: "Steps", Type: FieldTypeArray, Required: true, Description: "List of sub-steps to run concurrently. Each must have a unique 'name'."},
 			{Key: "error_strategy", Label: "Error Strategy", Type: FieldTypeSelect, Description: "fail_fast: cancel on first error. collect_errors: run all, collect partial results.", Options: []string{"fail_fast", "collect_errors"}, DefaultValue: "fail_fast"},
 		},
 	})
@@ -1846,9 +1846,9 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "topic", Label: "Topic", Type: FieldTypeString, Description: "Topic or channel to publish the event to (also accepts 'stream' alias)", Placeholder: "user-events"},
 			{Key: "stream", Label: "Stream", Type: FieldTypeString, Description: "Alias for 'topic' — name of the stream to publish to (e.g., Kinesis stream name)", Placeholder: "messaging.texter-messages"},
-			{Key: "payload", Label: "Payload", Type: FieldTypeJSON, Description: "Event payload as a JSON object (supports template expressions); defaults to current pipeline context"},
-			{Key: "data", Label: "Data", Type: FieldTypeJSON, Description: "Alias for 'payload' — event data fields (supports template expressions)"},
-			{Key: "headers", Label: "Headers", Type: FieldTypeJSON, Description: "Additional headers/metadata to include with the event as a JSON object"},
+			{Key: "payload", Label: "Payload", Type: FieldTypeMap, Description: "Event payload (supports template expressions); defaults to current pipeline context"},
+			{Key: "data", Label: "Data", Type: FieldTypeMap, Description: "Alias for 'payload' — event data fields (supports template expressions)"},
+			{Key: "headers", Label: "Headers", Type: FieldTypeMap, Description: "Additional headers/metadata to include with the event"},
 			{Key: "event_type", Label: "Event Type", Type: FieldTypeString, Description: "CloudEvents type identifier (e.g., messaging.texter-message.received)", Placeholder: "user.created"},
 			{Key: "source", Label: "Source", Type: FieldTypeString, Description: "CloudEvents source URI identifying the event producer (supports template expressions)", Placeholder: "/chimera/messaging"},
 			{Key: "broker", Label: "Broker", Type: FieldTypeString, Description: "Name of the messaging broker module to use (falls back to eventbus if not set)"},
@@ -3054,7 +3054,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		ConfigFields: []ConfigFieldDef{
 			{Key: "service", Label: "Service", Type: FieldTypeString, Required: true, Description: "BlueGreenDriver service name"},
 			{Key: "image", Label: "Image", Type: FieldTypeString, Required: true, Description: "Docker image to deploy"},
-			{Key: "health_check", Label: "Health Check", Type: FieldTypeJSON, Description: "Health check config: {path, timeout}"},
+			{Key: "health_check", Label: "Health Check", Type: FieldTypeMap, Description: "Health check config: {path, timeout}"},
 			{Key: "traffic_switch", Label: "Traffic Switch", Type: FieldTypeSelect, Options: []string{"dns", "lb"}, Description: "Traffic switch mechanism", DefaultValue: "lb"},
 		},
 	})
@@ -3081,7 +3081,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "service", Label: "Service", Type: FieldTypeString, Required: true, Description: "DeployDriver service name"},
 			{Key: "history_store", Label: "History Store", Type: FieldTypeString, Required: true, Description: "DeployHistoryStore service name"},
 			{Key: "target_version", Label: "Target Version", Type: FieldTypeString, Description: "Version to roll back to", DefaultValue: "previous"},
-			{Key: "health_check", Label: "Health Check", Type: FieldTypeJSON, Description: "Health check config: {path, timeout}"},
+			{Key: "health_check", Label: "Health Check", Type: FieldTypeMap, Description: "Health check config: {path, timeout}"},
 		},
 	})
 
@@ -3095,7 +3095,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "image", Label: "Image", Type: FieldTypeString, Required: true, Description: "Docker image to deploy"},
 			{Key: "max_surge", Label: "Max Surge", Type: FieldTypeNumber, Description: "Maximum instances above desired count", DefaultValue: 1},
 			{Key: "max_unavailable", Label: "Max Unavailable", Type: FieldTypeNumber, Description: "Maximum unavailable instances during update", DefaultValue: 1},
-			{Key: "health_check", Label: "Health Check", Type: FieldTypeJSON, Description: "Health check config: {path, interval, timeout}"},
+			{Key: "health_check", Label: "Health Check", Type: FieldTypeMap, Description: "Health check config: {path, interval, timeout}"},
 			{Key: "rollback_on_failure", Label: "Rollback on Failure", Type: FieldTypeBool, Description: "Automatically rollback if health checks fail"},
 		},
 	})

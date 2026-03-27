@@ -167,26 +167,26 @@
         {
           "key": "routes",
           "label": "Routes",
-          "type": "json",
+          "type": "array",
           "description": "Array of route definitions with pathPrefix, backend, methods, rateLimit, auth, timeout",
           "required": true
         },
         {
           "key": "globalRateLimit",
           "label": "Global Rate Limit",
-          "type": "json",
+          "type": "map",
           "description": "Global rate limit applied to all routes (requestsPerMinute, burstSize)"
         },
         {
           "key": "cors",
           "label": "CORS Config",
-          "type": "json",
+          "type": "map",
           "description": "CORS settings (allowOrigins, allowMethods, allowHeaders, maxAge)"
         },
         {
           "key": "auth",
           "label": "Auth Config",
-          "type": "json",
+          "type": "map",
           "description": "Authentication settings (type: bearer/api_key/basic, header)"
         }
       ]
@@ -4565,7 +4565,7 @@
         {
           "key": "env",
           "label": "Environment Variables",
-          "type": "json",
+          "type": "map",
           "description": "Extra environment variables for the build process"
         },
         {
@@ -5355,7 +5355,7 @@
         {
           "key": "health_check",
           "label": "Health Check",
-          "type": "json",
+          "type": "map",
           "description": "Health check configuration (path, interval, timeout, thresholds)"
         }
       ]
@@ -5383,7 +5383,7 @@
         {
           "key": "health_check",
           "label": "Health Check",
-          "type": "json",
+          "type": "map",
           "description": "Health check config: {path, timeout}"
         },
         {
@@ -5463,7 +5463,7 @@
         {
           "key": "health_check",
           "label": "Health Check",
-          "type": "json",
+          "type": "map",
           "description": "Health check config: {path, timeout}"
         }
       ]
@@ -5505,7 +5505,7 @@
         {
           "key": "health_check",
           "label": "Health Check",
-          "type": "json",
+          "type": "map",
           "description": "Health check config: {path, interval, timeout}"
         },
         {
@@ -5920,20 +5920,20 @@
         {
           "key": "payload",
           "label": "Payload",
-          "type": "json",
-          "description": "Event payload as a JSON object (supports template expressions); defaults to current pipeline context"
+          "type": "map",
+          "description": "Event payload (supports template expressions); defaults to current pipeline context"
         },
         {
           "key": "data",
           "label": "Data",
-          "type": "json",
+          "type": "map",
           "description": "Alias for 'payload' — event data fields (supports template expressions)"
         },
         {
           "key": "headers",
           "label": "Headers",
-          "type": "json",
-          "description": "Additional headers/metadata to include with the event as a JSON object"
+          "type": "map",
+          "description": "Additional headers/metadata to include with the event"
         },
         {
           "key": "event_type",
@@ -6143,7 +6143,7 @@
         {
           "key": "steps",
           "label": "Steps",
-          "type": "json",
+          "type": "array",
           "description": "Array of step maps to execute for each item (mutually exclusive with step)"
         }
       ]
@@ -6205,7 +6205,7 @@
         {
           "key": "schedule",
           "label": "Schedule Window",
-          "type": "json",
+          "type": "map",
           "description": "Time window for scheduled gates (weekdays, start_hour, end_hour)"
         }
       ],
@@ -6947,7 +6947,7 @@
         {
           "key": "steps",
           "label": "Steps",
-          "type": "json",
+          "type": "array",
           "description": "List of sub-steps to run concurrently. Each must have a unique 'name'.",
           "required": true
         },
@@ -7153,7 +7153,7 @@
         {
           "key": "payload",
           "label": "Payload",
-          "type": "json",
+          "type": "map",
           "description": "Custom payload template (uses {{ .field }} expressions). Defaults to pipeline context."
         },
         {
@@ -8084,13 +8084,13 @@
         {
           "key": "input_mapping",
           "label": "Input Mapping",
-          "type": "json",
+          "type": "map",
           "description": "Map of sub-workflow input keys to template expressions"
         },
         {
           "key": "output_mapping",
           "label": "Output Mapping",
-          "type": "json",
+          "type": "map",
           "description": "Map of parent context keys to sub-workflow output paths"
         },
         {
@@ -8200,7 +8200,7 @@
         {
           "key": "operations",
           "label": "Operations",
-          "type": "json",
+          "type": "array",
           "description": "Inline transformation operations (alternative to transformer+pipeline)"
         }
       ]
@@ -8476,14 +8476,14 @@
         {
           "key": "input",
           "label": "Input Mapping",
-          "type": "json",
-          "description": "Map of target pipeline input keys to template expressions from the current context (e.g. {\"conversation_id\": \"{{ .conversation_id }}\"}). If omitted, all current context data is passed through."
+          "type": "map",
+          "description": "Map of target pipeline input keys to template expressions from the current context. If omitted, all current context data is passed through."
         },
         {
           "key": "output_mapping",
           "label": "Output Mapping",
-          "type": "json",
-          "description": "Map of parent context keys to target pipeline output paths (e.g. {\"assigned_responder\": \"responder_id\"}). If omitted, all outputs are returned under 'result'."
+          "type": "map",
+          "description": "Map of parent context keys to target pipeline output paths. If omitted, all outputs are returned under 'result'."
         },
         {
           "key": "timeout",
