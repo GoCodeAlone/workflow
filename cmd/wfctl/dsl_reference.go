@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,6 +10,9 @@ import (
 	"regexp"
 	"strings"
 )
+
+//go:embed dsl-reference-embedded.md
+var embeddedDSLReference string
 
 // DSLReferenceOutput is the top-level JSON output of the dsl-reference command.
 type DSLReferenceOutput struct {
@@ -61,6 +65,12 @@ func findDSLReferenceMarkdown() ([]byte, error) {
 			return data, nil
 		}
 	}
+
+	// Fall back to the embedded copy compiled into the binary
+	if embeddedDSLReference != "" {
+		return []byte(embeddedDSLReference), nil
+	}
+
 	return nil, fmt.Errorf("docs/dsl-reference.md not found; run from within the workflow repository or set cwd to the repo root")
 }
 
