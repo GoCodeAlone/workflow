@@ -11,6 +11,7 @@ import (
 
 type editorSchemasOutput struct {
 	ModuleSchemas map[string]*schema.ModuleSchema `json:"moduleSchemas"`
+	StepSchemas   map[string]*schema.StepSchema   `json:"stepSchemas"`
 	CoercionRules map[string][]string             `json:"coercionRules"`
 }
 
@@ -26,10 +27,12 @@ func runEditorSchemas(args []string) error {
 	}
 
 	moduleReg := schema.NewModuleSchemaRegistry()
+	stepReg := schema.NewStepSchemaRegistry()
 	coercionReg := schema.NewTypeCoercionRegistry()
 
 	data := editorSchemasOutput{
 		ModuleSchemas: moduleReg.AllMap(),
+		StepSchemas:   stepReg.AllMap(),
 		CoercionRules: coercionReg.Rules(),
 	}
 
