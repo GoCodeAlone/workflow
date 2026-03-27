@@ -59,6 +59,8 @@ workflows:
         description: "Generate documentation from workflow configs (generate: produce Markdown + Mermaid diagrams)"
       - name: editor-schemas
         description: "Export module schemas and type coercion rules for the visual editor"
+      - name: dsl-reference
+        description: "Parse docs/dsl-reference.md and output structured JSON for IDE tooling"
       - name: test
         description: "Run *_test.yaml integration tests against workflow configs"
 
@@ -376,6 +378,16 @@ pipelines:
         config:
           command: editor-schemas
 
+  cmd-dsl-reference:
+    trigger:
+      type: cli
+      config:
+        command: dsl-reference
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: dsl-reference
 
   cmd-test:
     trigger:
