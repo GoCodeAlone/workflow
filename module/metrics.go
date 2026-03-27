@@ -12,10 +12,10 @@ import (
 
 // MetricsCollectorConfig holds configuration for the MetricsCollector module.
 type MetricsCollectorConfig struct {
-	Namespace      string   `yaml:"namespace" json:"namespace"`
-	Subsystem      string   `yaml:"subsystem" json:"subsystem"`
-	MetricsPath    string   `yaml:"metricsPath" json:"metricsPath"`
-	EnabledMetrics []string `yaml:"enabledMetrics" json:"enabledMetrics"`
+	Namespace      string   `yaml:"namespace" json:"namespace" editor:"type=string,description=Prometheus metric namespace prefix,default=workflow,placeholder=workflow"`
+	Subsystem      string   `yaml:"subsystem" json:"subsystem" editor:"type=string,description=Prometheus metric subsystem,placeholder=api"`
+	MetricsPath    string   `yaml:"metricsPath" json:"metricsPath" editor:"type=string,description=Endpoint path for Prometheus scraping,default=/metrics,placeholder=/metrics"`
+	EnabledMetrics []string `yaml:"enabledMetrics" json:"enabledMetrics" editor:"type=array,arrayItemType=string,description=Which metric groups to register (workflow http module active_workflows)"`
 }
 
 // DefaultMetricsCollectorConfig returns the default configuration.

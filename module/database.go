@@ -34,10 +34,10 @@ type DatabaseTLSConfig struct {
 
 // DatabaseConfig holds configuration for the workflow database module
 type DatabaseConfig struct {
-	Driver          string            `json:"driver" yaml:"driver"`
-	DSN             string            `json:"dsn" yaml:"dsn"`
-	MaxOpenConns    int               `json:"maxOpenConns" yaml:"maxOpenConns"`
-	MaxIdleConns    int               `json:"maxIdleConns" yaml:"maxIdleConns"`
+	Driver          string            `json:"driver" yaml:"driver" editor:"type=select,options=postgres|mysql|sqlite3,required,description=Database driver to use,label=Driver"`
+	DSN             string            `json:"dsn" yaml:"dsn" editor:"type=string,required,sensitive,description=Data source name / connection string,placeholder=postgres://user:pass@localhost/db?sslmode=disable,label=DSN"` //nolint:gosec // G117: placeholder DSN example in struct tag, not a hardcoded secret
+	MaxOpenConns    int               `json:"maxOpenConns" yaml:"maxOpenConns" editor:"type=number,description=Maximum number of open database connections,default=25,label=Max Open Connections"`
+	MaxIdleConns    int               `json:"maxIdleConns" yaml:"maxIdleConns" editor:"type=number,description=Maximum number of idle connections in the pool,default=5,label=Max Idle Connections"`
 	ConnMaxLifetime time.Duration     `json:"connMaxLifetime" yaml:"connMaxLifetime"`
 	MigrationsDir   string            `json:"migrationsDir" yaml:"migrationsDir"`
 	TLS             DatabaseTLSConfig `json:"tls" yaml:"tls"`

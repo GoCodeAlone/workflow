@@ -13,6 +13,13 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
+// HTTPServerConfig holds configuration for the standard HTTP server module.
+type HTTPServerConfig struct {
+	Address      string `json:"address" yaml:"address" editor:"type=string,required,description=Host:port to listen on (e.g. :8080 or 0.0.0.0:80),default=:8080,placeholder=:8080"`
+	ReadTimeout  string `json:"readTimeout" yaml:"readTimeout" editor:"type=duration,description=Maximum duration for reading the full request,default=30s,placeholder=30s"`
+	WriteTimeout string `json:"writeTimeout" yaml:"writeTimeout" editor:"type=duration,description=Maximum duration before timing out writes of the response,default=30s,placeholder=30s"`
+}
+
 // HTTPServerTLSConfig holds TLS configuration for the HTTP server.
 type HTTPServerTLSConfig struct {
 	Mode         string                 `yaml:"mode" json:"mode"` // manual | autocert | disabled

@@ -13,11 +13,11 @@ import (
 
 // HealthCheckerConfig holds configuration for the HealthChecker module.
 type HealthCheckerConfig struct {
-	HealthPath   string        `yaml:"healthPath" json:"healthPath"`
-	ReadyPath    string        `yaml:"readyPath" json:"readyPath"`
-	LivePath     string        `yaml:"livePath" json:"livePath"`
-	CheckTimeout time.Duration `yaml:"checkTimeout" json:"checkTimeout"`
-	AutoDiscover bool          `yaml:"autoDiscover" json:"autoDiscover"`
+	HealthPath   string        `yaml:"healthPath" json:"healthPath" editor:"type=string,description=Health check endpoint path,default=/healthz,placeholder=/healthz"`
+	ReadyPath    string        `yaml:"readyPath" json:"readyPath" editor:"type=string,description=Readiness probe endpoint path,default=/readyz,placeholder=/readyz"`
+	LivePath     string        `yaml:"livePath" json:"livePath" editor:"type=string,description=Liveness probe endpoint path,default=/livez,placeholder=/livez"`
+	CheckTimeout time.Duration `yaml:"checkTimeout" json:"checkTimeout" editor:"type=duration,description=Per-check timeout duration,default=5s,placeholder=5s"`
+	AutoDiscover bool          `yaml:"autoDiscover" json:"autoDiscover" editor:"type=boolean,description=Automatically discover HealthCheckable services,default=true,label=Auto-Discover"`
 }
 
 // DefaultHealthCheckerConfig returns the default configuration.
