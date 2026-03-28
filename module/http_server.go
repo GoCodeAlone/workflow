@@ -39,8 +39,9 @@ type StandardHTTPServer struct {
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 	idleTimeout  time.Duration
-	tlsCfg       HTTPServerTLSConfig
-	listenErr    chan error
+	tlsCfg          HTTPServerTLSConfig
+	listenErr        chan error
+	acmeChallengeErr chan error
 }
 
 // ListenError returns a channel that receives the first fatal error from
@@ -50,6 +51,14 @@ type StandardHTTPServer struct {
 // failures and restart or surface the error.
 func (s *StandardHTTPServer) ListenError() <-chan error {
 	return s.listenErr
+}
+
+// ACMEChallengeListenError returns a channel that receives the first fatal
+// error from the auxiliary ACME HTTP-01 challenge listener (port 80). This
+// goroutine is separate from the main TLS listener and owns its own channel.
+// The channel is nil unless autocert mode is active.
+func (s *StandardHTTPServer) ACMEChallengeListenError() <-chan error {
+	return s.acmeChallengeErr
 }
 
 // NewStandardHTTPServer creates a new HTTP server with the given name and address
@@ -194,15 +203,18 @@ func (s *StandardHTTPServer) startAutocert(ctx context.Context) error {
 		MinVersion:     tls.VersionTLS12,
 	}
 
-	// ACME HTTP-01 challenge listener on :80
+	// ACME HTTP-01 challenge listener on :80 — auxiliary, owns its own error channel.
+	s.acmeChallengeErr = make(chan error, 1)
 	go func() {
+		defer close(s.acmeChallengeErr)
 		httpSrv := &http.Server{
 			Addr:              ":80",
 			Handler:           m.HTTPHandler(nil),
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.logger.Error("autocert HTTP-01 listener error", "error", err)
+			s.logger.Error("autocert HTTP-01 listener died", "error", err)
+			s.acmeChallengeErr <- err
 		}
 	}()
 
