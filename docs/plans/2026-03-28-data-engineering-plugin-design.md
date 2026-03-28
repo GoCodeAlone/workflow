@@ -64,11 +64,19 @@ workflow-plugin-data-engineering/
 
 ```go
 type CDCProvider interface {
-    Start(ctx context.Context, config CDCSourceConfig) error
-    Stop(ctx context.Context, sourceID string) error
+    // Connect establishes a connection and starts the CDC stream.
+    Connect(ctx context.Context, config SourceConfig) error
+    // Disconnect stops the CDC stream and releases resources.
+    Disconnect(ctx context.Context, sourceID string) error
+    // Status returns the current status of a CDC stream.
     Status(ctx context.Context, sourceID string) (*CDCStatus, error)
+    // Snapshot triggers a full table snapshot for the given tables.
     Snapshot(ctx context.Context, sourceID string, tables []string) error
+    // SchemaHistory returns the schema change history for a table.
     SchemaHistory(ctx context.Context, sourceID string, table string) ([]SchemaVersion, error)
+    // RegisterEventHandler registers a callback for CDC events.
+    // The trigger uses this to wire workflow callbacks to the stream.
+    RegisterEventHandler(sourceID string, h EventHandler) error
 }
 ```
 
