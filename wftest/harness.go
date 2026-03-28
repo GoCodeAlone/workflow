@@ -74,6 +74,7 @@ func New(t *testing.T, opts ...Option) *Harness {
 		if h.httpServer != nil {
 			h.httpServer.Close()
 		}
+		_ = h.engine.Stop(context.Background())
 	})
 	return h
 }
