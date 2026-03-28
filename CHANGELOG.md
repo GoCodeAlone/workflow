@@ -57,58 +57,48 @@ This release eliminates all `type: "json"` schema fields, replacing them with pr
 
 ---
 
-## [0.5.0] - 2026-02-12
+## [0.5.3] - 2026-03-28
+
+### Changed
+- Bump modular to v1.13.0 (consolidated sub-modules)
+
+---
+
+## [0.5.2] - 2026-03-28
+
+### Changed
+- Extract `TemplateEngine` to `pipeline/` package; decouple plugins from `module` package (SDK boundary)
+
+---
+
+## [0.5.1] - 2026-03-28
+
+### Fixed
+- Implement `http.Hijacker` and `http.Flusher` interfaces on `trackedResponseWriter`
+- Bump modular dependencies to v1.12.5 / v1.15.0 / v2.8.0
+
+---
+
+## [0.5.0] - 2026-03-28
 
 ### Added
-- **Module Expansion (48 Total Module Types)**
-  - HTTP modules (10): http.server, http.router, http.handler, http.middleware.{auth,cors,logging,ratelimit,requestid}, http.proxy, http.simple_proxy
-  - Messaging modules (6): messaging.broker, messaging.broker.eventbus, messaging.handler, messaging.nats, messaging.kafka, notification.slack
-  - State machine modules (4): statemachine.engine, state.tracker, state.connector, processing.step
-  - Modular framework modules (10): httpserver, httpclient, chimux, scheduler, auth, eventbus, cache, database, eventlogger, jsonschema
-  - Storage/persistence modules (4): database.workflow, persistence.store, storage.s3, static.fileserver
-  - Observability modules (3): metrics.collector, health.checker, observability.otel
-  - Data/integration modules (4): data.transformer, api.handler, webhook.sender, dynamic.component
-  - Auth modules (2): auth.jwt, auth.modular
-  - Reverse proxy modules (2): reverseproxy, http.proxy
-  - 5 trigger types: http, schedule, event, eventbus, mock
-- **Order Processing Pipeline Example**
-  - 10+ module YAML config with HTTP servers, routers, handlers, data transformers, state machines, brokers, and observability
-  - End-to-end pipeline demonstrating module composition across 5 categories
-- **Chat Platform Example (73 files)**
-  - Multi-service Docker Compose architecture (gateway, API, conversation, Kafka, Prometheus, Grafana)
-  - 18 dynamic components: ai_summarizer, pii_encryptor, survey_engine, risk_tagger, conversation_router, message_processor, keyword_matcher, escalation_handler, followup_scheduler, data_retention, notification_sender, webchat_handler, twilio_provider, aws_provider, partner_provider, and more
-  - Full SPA with role-based views: admin, responder, and supervisor dashboards
-  - Queue health monitoring with per-program metrics
-  - Conversation state machine (queued -> assigned -> active -> wrap_up -> closed)
-  - Real-time risk assessment with keyword pattern matching (5 categories)
-  - PII masking in UI (phone numbers, identifiers)
-  - Webchat widget for web-based texters
-  - Seed data system (users, affiliates, programs, keywords, surveys)
-  - Architecture docs, user guide, and screenshots
-- **JWT Authentication**
-  - JWTAuthModule with user registration, login, token generation/validation
-  - Seed file loading with bcrypt password hashing
-  - Role-based metadata in JWT claims and login response
-  - Auth middleware integration for endpoint protection
-- **PII Encryption at Rest**
-  - AES-256-GCM FieldEncryptor with SHA-256 key derivation
-  - Configurable field-level encryption (encrypt specific fields, leave others plaintext)
-  - Integration with PersistenceStore (encrypt on save, decrypt on load)
-  - Integration with KafkaBroker (encrypt/decrypt Kafka message payloads)
-  - 15 sub-tests covering encrypt/decrypt, round-trip, key rotation, edge cases
-- **REST API Handler Enhancements**
-  - View handler pattern: sourceResourceName + stateFilter for cross-resource views
-  - Queue health endpoint with per-program aggregation
-  - Sub-action support for nested resources (e.g., /conversations/{id}/messages)
-  - Inline risk assessment on message append and conversation creation
-- **Docker Multi-Stage Builds**
-  - Dockerfile for chat-platform (builder/runtime stages, Alpine Linux, CGO_ENABLED=0)
-  - Dockerfile for ecommerce-app
-  - Docker Compose with health checks, volume mounts, and service dependencies
-- **Observability Stack**
-  - Prometheus metrics collection with custom dashboard
-  - Grafana dashboards for chat platform monitoring
-  - Health check endpoints integrated with Docker orchestration
+- **Expr template engine** — `${ }` syntax for pipeline step `config` values alongside the existing `{{ }}` Go template syntax; both may be mixed in the same string
+  - Bracket notation for hyphenated step names: `${ steps["step-name"]["key"] }`
+  - Boolean/comparison guards: `${ status == "active" && count > 0 }`
+  - String concatenation: `${ "Hello " + body["name"] }`
+  - Template functions in expr context: `${ upper(name) }`
+- **`skip_if` expr support** — pipeline steps accept `skip_if: ${ expr }` for inline conditional skipping
+- **`wfctl expr-migrate` command** — auto-converts Go template (`{{ }}`) expressions to expr syntax (`${ }`) with `--dry-run`, `--output`, and `--inplace` modes; complex patterns receive `# TODO: migrate` comments
+- **LSP hover/completion for `${ }`** — IDE plugins surface available namespaces and function signatures inside expr expressions
+- **docs/dsl-reference.md expr syntax section** — documents all expr namespaces, operators, and migration path
+- **docs/migrations/v0.5.0-expr-templates.md** — step-by-step migration guide for upgrading configs from Go templates to expr syntax
+
+### Fixed
+- Eviction added to unbounded rate-limit, cache, and lock maps (memory leak)
+- Panic recovery added to 9 goroutine sites
+- EventProcessor goroutine leak and CronScheduler data race
+- HTTP stability: ListenError channel, trackedResponseWriter race, SSE lock contention
+- Release RLock before handler dispatch; panic recovery in handler goroutines
 
 ---
 

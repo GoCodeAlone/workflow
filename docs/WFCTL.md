@@ -565,6 +565,45 @@ wfctl dsl-reference | jq '.sections[].id'                  # list section IDs
 
 ---
 
+### `expr-migrate`
+
+Auto-convert Go template expressions (`{{ }}`) to expr syntax (`${ }`) in a workflow config file. Simple patterns are converted automatically; complex templates that cannot be safely rewritten receive a `# TODO: migrate` comment.
+
+```
+wfctl expr-migrate [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | _(required)_ | Path to workflow YAML config file |
+| `--output` | _(stdout)_ | Write converted output to this file |
+| `--inplace` | `false` | Rewrite the input file in-place (overrides `--output`) |
+| `--dry-run` | `false` | Print conversion stats and preview without writing |
+
+**Conversions applied:**
+
+| Input (Go template) | Output (expr) |
+|---------------------|---------------|
+| `{{ .field }}` | `${ field }` |
+| `{{ .body.name }}` | `${ body.name }` |
+| `{{ .steps.name.field }}` | `${ steps["name"]["field"] }` |
+| `{{ eq .status "active" }}` | `${ status == "active" }` |
+| `{{ ne .x "val" }}` | `${ x != "val" }` |
+| `{{ gt .x 5 }}` | `${ x > 5 }` |
+| `{{ index .steps "n" "k" }}` | `${ steps["n"]["k"] }` |
+| `{{ upper .name }}` | `${ upper(name) }` |
+| `{{ and (eq .x "a") ... }}` | `${ x == "a" && ... }` |
+
+**Examples:**
+
+```bash
+wfctl expr-migrate --config app.yaml --dry-run
+wfctl expr-migrate --config app.yaml --output app-new.yaml
+wfctl expr-migrate --config app.yaml --inplace
+```
+
+---
+
 ### `snippets`
 
 Export workflow configuration snippets for IDE support.
