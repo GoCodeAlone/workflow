@@ -383,7 +383,15 @@ func isMissingKeyError(err error) bool {
 }
 
 // Resolve evaluates a template string against a PipelineContext.
-// If the string does not contain {{ }}, it is returned as-is.
+// Supports two syntaxes that may be mixed in a single string:
+//
+//   - Go templates: {{ .field }}, {{ upper .name }}, etc.
+//   - Expr expressions: ${ body.name }, ${ upper(name) }, etc.
+//
+// ${ } blocks are evaluated first; the resulting string is then passed through
+// the Go template engine if any {{ }} blocks remain.
+//
+// If the string contains neither {{ }} nor ${ }, it is returned as-is.
 //
 // Missing key behaviour (direct map access via {{ .steps.foo.bar }}):
 //   - When pc.StrictTemplates is true (Option A), any reference to a missing
@@ -399,6 +407,26 @@ func isMissingKeyError(err error) bool {
 // accessed via {{ step "name" "field" }} or {{ trigger "key" }} also return
 // an error in strict mode.
 func (te *TemplateEngine) Resolve(tmplStr string, pc *PipelineContext) (string, error) {
+	hasGoTmpl := strings.Contains(tmplStr, "{{")
+	hasExpr := containsExpr(tmplStr)
+
+	if !hasGoTmpl && !hasExpr {
+		return tmplStr, nil
+	}
+
+	// Process ${ } blocks first so their output can flow into Go template blocks.
+	if hasExpr {
+		var err error
+		tmplStr, err = resolveExprBlocks(tmplStr, pc, NewExprEngine())
+		if err != nil {
+			return "", err
+		}
+		// Re-check after substitution; expr results may have consumed all content.
+		if !strings.Contains(tmplStr, "{{") {
+			return tmplStr, nil
+		}
+	}
+
 	if !strings.Contains(tmplStr, "{{") {
 		return tmplStr, nil
 	}
