@@ -116,6 +116,18 @@ func (s *ParallelStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		childPC := buildParallelChildContext(pc)
 		go func() {
 			defer wg.Done()
+			defer func() {
+				if rec := recover(); rec != nil {
+					panicErr := fmt.Errorf("panic in parallel branch %q: %v", step.Name(), rec)
+					results[i] = branchResult{name: step.Name(), err: panicErr}
+					if s.errorStrategy == "fail_fast" {
+						errOnce.Do(func() {
+							firstErr = fmt.Errorf("parallel step %q: branch %q panicked: %v", s.name, step.Name(), rec)
+							cancel()
+						})
+					}
+				}
+			}()
 			result, err := step.Execute(branchCtx, childPC)
 			if err != nil {
 				results[i] = branchResult{name: step.Name(), err: err}

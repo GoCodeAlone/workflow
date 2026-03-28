@@ -352,3 +352,76 @@ func TestBuildParallelChildContext_DeepCopy(t *testing.T) {
 		t.Fatal("deep copy failed: mutation of child Current slice affected parent")
 	}
 }
+
+// parallelPanicStep is a PipelineStep that panics on Execute.
+type parallelPanicStep struct{ name string }
+
+func (s *parallelPanicStep) Name() string { return s.name }
+func (s *parallelPanicStep) Execute(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+	panic("intentional test panic in parallel branch")
+}
+
+// TestPanicRecoveryParallelStep verifies that a panicking branch is caught,
+// reported as an error, and does not crash the process or hang the WaitGroup.
+func TestPanicRecoveryParallelStep(t *testing.T) {
+	steps := []PipelineStep{
+		&parallelSuccessStep{name: "ok", output: map[string]any{"v": 1}},
+		&parallelPanicStep{name: "boom"},
+	}
+
+	// collect_errors: both results collected even when one panics.
+	ps, err := buildParallelStepDirect("test-parallel", steps, "collect_errors")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pc := &PipelineContext{
+		TriggerData: map[string]any{},
+		StepOutputs: map[string]map[string]any{},
+		Current:     map[string]any{},
+		Metadata:    map[string]any{},
+	}
+
+	result, err := ps.Execute(t.Context(), pc)
+	if err != nil {
+		t.Fatalf("collect_errors mode: unexpected top-level error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("nil result")
+	}
+
+	errMap, _ := result.Output["errors"].(map[string]any)
+	if errMap["boom"] == nil {
+		t.Error("expected panic branch to appear in errors map")
+	}
+	successMap, _ := result.Output["results"].(map[string]any)
+	if successMap["ok"] == nil {
+		t.Error("expected ok branch to appear in results map")
+	}
+}
+
+// TestPanicRecoveryParallelStepFailFast verifies that a panicking branch
+// triggers fail_fast cancellation and returns an error.
+func TestPanicRecoveryParallelStepFailFast(t *testing.T) {
+	steps := []PipelineStep{
+		&parallelPanicStep{name: "boom"},
+		&parallelSuccessStep{name: "ok", output: map[string]any{"v": 1}},
+	}
+
+	ps, err := buildParallelStepDirect("test-parallel-ff", steps, "fail_fast")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pc := &PipelineContext{
+		TriggerData: map[string]any{},
+		StepOutputs: map[string]map[string]any{},
+		Current:     map[string]any{},
+		Metadata:    map[string]any{},
+	}
+
+	_, err = ps.Execute(t.Context(), pc)
+	if err == nil {
+		t.Fatal("fail_fast mode: expected error from panicking branch, got nil")
+	}
+}

@@ -3,9 +3,11 @@ package module
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"reflect"
 	"regexp"
+	"runtime/debug"
 	"sync"
 
 	"github.com/GoCodeAlone/modular"
@@ -53,6 +55,7 @@ type StandardHTTPRouter struct {
 	mu                sync.RWMutex
 	serverDeps        []string // Names of HTTP server modules this router depends on
 	serveMux          *http.ServeMux
+	wrappedMux        http.Handler // pre-built: serveMux wrapped with globalMiddlewares
 	globalMiddlewares []HTTPMiddleware
 }
 
@@ -148,6 +151,11 @@ func (r *StandardHTTPRouter) AddGlobalMiddleware(mw HTTPMiddleware) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.globalMiddlewares = append(r.globalMiddlewares, mw)
+	// Rebuild wrappedMux if the mux is already live so the new middleware
+	// takes effect immediately without requiring a restart.
+	if r.serveMux != nil {
+		r.rebuildMuxLocked()
+	}
 }
 
 // HasRoute checks if a route with the given method and path already exists
@@ -166,25 +174,29 @@ func (r *StandardHTTPRouter) HasRoute(method, path string) bool {
 // Global middlewares (e.g. OTEL tracing) are applied around the entire mux so
 // every request — including health-checks and pipeline-triggered routes — is
 // instrumented, regardless of how the route was registered.
+//
+// The lock is held only long enough to copy the pre-built handler pointer;
+// it is released before the request is dispatched to prevent lock contention
+// during long-running requests (pipeline execution, SSE streaming, etc.).
 func (r *StandardHTTPRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
+	handler := r.wrappedMux
+	r.mu.RUnlock()
 
-	var base http.Handler
-	if r.serveMux != nil {
-		base = r.serveMux
-	} else {
-		base = http.NotFoundHandler()
+	if handler == nil {
+		handler = http.NotFoundHandler()
 	}
 
-	// Wrap with global middlewares in reverse registration order so that the
-	// first-added middleware is outermost (executes first).
-	handler := base
-	for i := len(r.globalMiddlewares) - 1; i >= 0; i-- {
-		handler = r.globalMiddlewares[i].Process(handler)
-	}
-
-	handler.ServeHTTP(w, req)
+	rw := &trackedResponseWriter{ResponseWriter: w}
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.Error("panic in HTTP handler", "panic", rec, "stack", string(debug.Stack()))
+			if !rw.written.Load() {
+				http.Error(rw, "Internal Server Error", http.StatusInternalServerError)
+			}
+		}
+	}()
+	handler.ServeHTTP(rw, req)
 }
 
 // Start compiles all registered routes into the internal ServeMux.
@@ -225,6 +237,13 @@ func (r *StandardHTTPRouter) rebuildMuxLocked() {
 	}
 
 	r.serveMux = mux
+
+	// Pre-wrap with global middlewares so ServeHTTP only needs to read one pointer.
+	var h http.Handler = mux
+	for i := len(r.globalMiddlewares) - 1; i >= 0; i-- {
+		h = r.globalMiddlewares[i].Process(h)
+	}
+	r.wrappedMux = h
 }
 
 // Stop is a no-op for router (implements Stoppable interface)
