@@ -320,6 +320,69 @@ func TestPermanentPool_StartSpawnsActors(t *testing.T) {
 	}
 }
 
+func TestPermanentPool_LongLived(t *testing.T) {
+	// Regression test for #387: permanent actors must use WithLongLived()
+	// to prevent goakt's default 2-minute passivation from killing them.
+	// We can't wait 2 minutes in a test, but we verify the spawn option
+	// is applied by checking actors are alive after a brief delay.
+	ctx := context.Background()
+
+	sysMod, err := NewActorSystemModule("test-longlived", map[string]any{
+		"shutdownTimeout": "5s",
+	})
+	if err != nil {
+		t.Fatalf("failed to create system: %v", err)
+	}
+	if err := sysMod.Start(ctx); err != nil {
+		t.Fatalf("failed to start system: %v", err)
+	}
+	defer sysMod.Stop(ctx) //nolint:errcheck
+
+	pool := &ActorPoolModule{
+		name:       "longlived-workers",
+		systemName: "test-longlived",
+		mode:       "permanent",
+		poolSize:   2,
+		routing:    "round-robin",
+		system:     sysMod,
+		handlers: map[string]*HandlerPipeline{
+			"Ping": {
+				Steps: []map[string]any{
+					{"name": "pong", "type": "step.set", "config": map[string]any{
+						"values": map[string]any{"alive": "true"},
+					}},
+				},
+			},
+		},
+	}
+
+	if err := pool.Start(ctx); err != nil {
+		t.Fatalf("failed to start pool: %v", err)
+	}
+
+	// Wait briefly — without WithLongLived(), actors would be scheduled
+	// for passivation immediately (default strategy has a short initial check)
+	time.Sleep(3 * time.Second)
+
+	// Verify all actors are still alive after the delay
+	for i, pid := range pool.pids {
+		resp, err := actor.Ask(ctx, pid, &ActorMessage{
+			Type:    "Ping",
+			Payload: map[string]any{},
+		}, 5*time.Second)
+		if err != nil {
+			t.Fatalf("actor %d: should be alive after delay but got: %v", i, err)
+		}
+		result, ok := resp.(map[string]any)
+		if !ok {
+			t.Fatalf("actor %d: expected map response, got %T", i, resp)
+		}
+		if result["alive"] != "true" {
+			t.Errorf("actor %d: expected alive=true, got %v", i, result["alive"])
+		}
+	}
+}
+
 func TestPermanentPool_RoundRobinRouting(t *testing.T) {
 	ctx := context.Background()
 

@@ -161,8 +161,10 @@ func (m *ActorPoolModule) Start(ctx context.Context) error {
 		sys := m.system.ActorSystem()
 		m.pids = make([]*actor.PID, 0, m.poolSize)
 
-		// Build spawn options: apply per-pool recovery supervisor if configured
+		// Build spawn options: permanent actors must be long-lived to prevent
+		// goakt's default 2-minute passivation from shutting them down.
 		var spawnOpts []actor.SpawnOption
+		spawnOpts = append(spawnOpts, actor.WithLongLived())
 		if m.recovery != nil {
 			spawnOpts = append(spawnOpts, actor.WithSupervisor(m.recovery))
 		}
