@@ -7,13 +7,12 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.4
 	github.com/GoCodeAlone/go-plugin v1.7.0
-	github.com/GoCodeAlone/modular v1.12.5
+	github.com/GoCodeAlone/modular v1.13.0
 	github.com/GoCodeAlone/modular/modules/auth v1.15.0
 	github.com/GoCodeAlone/modular/modules/cache v1.15.0
 	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.8.0
 	github.com/GoCodeAlone/modular/modules/jsonschema v1.15.0
 	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.8.0
-	github.com/GoCodeAlone/modular/modules/scheduler v1.15.0
 	github.com/GoCodeAlone/yaegi v0.17.2
 	github.com/IBM/sarama v1.47.0
 	github.com/alicebob/miniredis/v2 v2.36.1

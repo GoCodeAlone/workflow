@@ -6,7 +6,7 @@ import (
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/modular/modules/cache"
 	"github.com/GoCodeAlone/modular/modules/jsonschema"
-	"github.com/GoCodeAlone/modular/modules/scheduler"
+	"github.com/GoCodeAlone/modular/scheduler"
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/plugin"
 )

@@ -44,8 +44,8 @@ github.com/DataDog/datadog-go/v5 v5.8.3 h1:s58CUJ9s8lezjhTNJO/SxkPBv2qZjS3ktpRSq
 github.com/DataDog/datadog-go/v5 v5.8.3/go.mod h1:K9kcYBlxkcPP8tvvjZZKs/m1edNAUFzBbdpTUKfCsuw=
 github.com/GoCodeAlone/go-plugin v1.7.0 h1:EwnhqPlXiNmp85S+MXnKKvm3YlfA6O4NzBb4+GSlEVY=
 github.com/GoCodeAlone/go-plugin v1.7.0/go.mod h1:HbGQRZUIa+jbDfjsaZIMJYvrz+LnxL0mJpggfynSTMk=
-github.com/GoCodeAlone/modular v1.12.5 h1:vDI7r8Rxpk31iUjGsG1vBnKmRWqG3G1C0lJ2oCvlLYU=
-github.com/GoCodeAlone/modular v1.12.5/go.mod h1:nDdyW/eJu4gDFNueb6vWwLvti3bPHSZJHkWGiwEmi2I=
+github.com/GoCodeAlone/modular v1.13.0 h1:UfsegfAmPWcPYQOqYZFsw/LNySBmMDcthiOQe5bscqE=
+github.com/GoCodeAlone/modular v1.13.0/go.mod h1:b06Pvgcc8HsGxvl30iO39zGH2jIWz467QEj2+OQL2Do=
 github.com/GoCodeAlone/modular/modules/auth v1.15.0 h1:pBSkPSf4k4GLSbUQFLuPa+nFbfoJXGzSz9q89VoapZk=
 github.com/GoCodeAlone/modular/modules/auth v1.15.0/go.mod h1:vmIm/LQrcURS2p02YwaELb+CZoHPtT0XB0v1i+sj9i4=
 github.com/GoCodeAlone/modular/modules/cache v1.15.0 h1:6Y2EJ5S7mb/TjyG/uN6dto5VUYJNDFYULUamRsqAKvo=
@@ -56,8 +56,6 @@ github.com/GoCodeAlone/modular/modules/jsonschema v1.15.0 h1:xb1mI4NZkzvNKQ2F6nk
 github.com/GoCodeAlone/modular/modules/jsonschema v1.15.0/go.mod h1:hhGouwAVsonmJ4Lain4jINZ9nZCoc9l9eF3BHbmR8eE=
 github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.8.0 h1:cvdLHbM/vzvygQTcAWSJsy+dAPzzwWyjzKMmTBFcFIo=
 github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.8.0/go.mod h1:/9ipMG4qM2CHQ14BfXKdVlYRJelef6M8MFI5TbZv67M=
-github.com/GoCodeAlone/modular/modules/scheduler v1.15.0 h1:fMx2doYJUoL3DS2DrWrv+bAzvnQf1mavRx99Yh95820=
-github.com/GoCodeAlone/modular/modules/scheduler v1.15.0/go.mod h1:85pxWAMP/ZhgdJ8Q7nkIyK0FL70TvuGSDB0pjvLLphc=
 github.com/GoCodeAlone/yaegi v0.17.2 h1:WK6Y6e0t1a6U7r+S2dN3CGWW1PizYD3zO0zneToZPxM=
 github.com/GoCodeAlone/yaegi v0.17.2/go.mod h1:z5Pr6Wse6QJcQvpgxTxzMAevFarH0N37TG88Y9dprx0=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.31.0 h1:DHa2U07rk8syqvCge0QIGMCE1WxGj9njT44GH7zNJLQ=
