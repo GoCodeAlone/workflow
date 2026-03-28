@@ -3,6 +3,8 @@ package module
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/GoCodeAlone/modular"
@@ -26,8 +28,10 @@ type CronScheduler struct {
 	name           string
 	cronExpression string
 	jobs           []Job
-	running        bool
+	jobsMu         sync.Mutex
+	running        atomic.Bool
 	stopCh         chan struct{}
+	stopMu         sync.Mutex // protects stopCh lifecycle
 }
 
 // NewCronScheduler creates a new cron scheduler
@@ -38,6 +42,11 @@ func NewCronScheduler(name string, cronExpression string) *CronScheduler {
 		jobs:           make([]Job, 0),
 		stopCh:         make(chan struct{}),
 	}
+}
+
+// newStopCh reinitializes stopCh for reuse after Stop; must be called with stopMu held.
+func (s *CronScheduler) resetStopCh() {
+	s.stopCh = make(chan struct{})
 }
 
 // Name returns the module name
@@ -53,7 +62,7 @@ func (s *CronScheduler) Init(app modular.Application) error {
 
 // Start starts the scheduler
 func (s *CronScheduler) Start(ctx context.Context) error {
-	if s.running {
+	if s.running.Load() {
 		return nil
 	}
 
@@ -61,31 +70,45 @@ func (s *CronScheduler) Start(ctx context.Context) error {
 		return fmt.Errorf("invalid cron expression %q: %w", s.cronExpression, err)
 	}
 
-	s.running = true
+	s.stopMu.Lock()
+	s.resetStopCh()
+	stopCh := s.stopCh
+	s.stopMu.Unlock()
+
+	s.running.Store(true)
 
 	go func() {
 		for {
 			next, err := scheduler.NextRun(s.cronExpression, time.Now())
 			if err != nil {
-				s.running = false
+				s.running.Store(false)
 				return
 			}
 			timer := time.NewTimer(time.Until(next))
 			select {
 			case <-timer.C:
-				for _, job := range s.jobs {
+				s.jobsMu.Lock()
+				jobs := make([]Job, len(s.jobs))
+				copy(jobs, s.jobs)
+				s.jobsMu.Unlock()
+				for _, job := range jobs {
 					go func(j Job) {
+						defer func() {
+							if rec := recover(); rec != nil {
+								fmt.Printf("panic in cron job execution: %v\n", rec)
+							}
+						}()
 						if err := j.Execute(ctx); err != nil {
 							fmt.Printf("Job execution failed: %v\n", err)
 						}
 					}(job)
 				}
-			case <-s.stopCh:
+			case <-stopCh:
 				timer.Stop()
 				return
 			case <-ctx.Done():
 				timer.Stop()
-				s.running = false
+				s.running.Store(false)
 				return
 			}
 		}
@@ -96,18 +119,23 @@ func (s *CronScheduler) Start(ctx context.Context) error {
 
 // Stop stops the scheduler
 func (s *CronScheduler) Stop(ctx context.Context) error {
-	if !s.running {
+	if !s.running.Load() {
 		return nil
 	}
 
-	s.stopCh <- struct{}{}
-	s.running = false
+	s.stopMu.Lock()
+	close(s.stopCh)
+	s.stopMu.Unlock()
+
+	s.running.Store(false)
 	return nil
 }
 
 // Schedule adds a job to the scheduler
 func (s *CronScheduler) Schedule(job Job) error {
+	s.jobsMu.Lock()
 	s.jobs = append(s.jobs, job)
+	s.jobsMu.Unlock()
 	return nil
 }
 

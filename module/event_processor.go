@@ -54,6 +54,7 @@ type EventProcessor struct {
 	processingLock sync.Mutex
 	err            error               // Add an error field to support the error interface
 	appContext     modular.Application // Store application context for service access
+	stopCh         chan struct{}
 }
 
 // NewEventProcessor creates a new complex event processor
@@ -64,6 +65,7 @@ func NewEventProcessor(name string) *EventProcessor {
 		eventBuffer: make(map[string][]EventData),
 		handlers:    make(map[string]EventHandler),
 		bufferLock:  sync.RWMutex{},
+		stopCh:      make(chan struct{}),
 	}
 }
 
@@ -89,7 +91,7 @@ func (p *EventProcessor) Start(ctx context.Context) error {
 
 // Stop stops the event processor
 func (p *EventProcessor) Stop(ctx context.Context) error {
-	// Nothing to do for now
+	close(p.stopCh)
 	return nil
 }
 
@@ -216,11 +218,17 @@ func (p *EventProcessor) eventMatchesType(event EventData, types []string) bool 
 	return slices.Contains(types, event.EventType)
 }
 
-// periodicCleanup removes old events from the buffer
+// periodicCleanup removes old events from the buffer until stopped.
 func (p *EventProcessor) periodicCleanup() {
 	ticker := time.NewTicker(5 * time.Minute)
-	for range ticker.C {
-		p.cleanupOldEvents()
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			p.cleanupOldEvents()
+		case <-p.stopCh:
+			return
+		}
 	}
 }
 

@@ -18,7 +18,7 @@ func TestNewCronScheduler(t *testing.T) {
 	if s.cronExpression != "* * * * *" {
 		t.Errorf("expected cron '* * * * *', got '%s'", s.cronExpression)
 	}
-	if s.running {
+	if s.running.Load() {
 		t.Error("expected running=false initially")
 	}
 }
@@ -64,7 +64,7 @@ func TestCronScheduler_StartStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	if !s.running {
+	if !s.running.Load() {
 		t.Error("expected running=true after Start")
 	}
 
@@ -78,7 +78,7 @@ func TestCronScheduler_StartStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stop failed: %v", err)
 	}
-	if s.running {
+	if s.running.Load() {
 		t.Error("expected running=false after Stop")
 	}
 }
@@ -112,7 +112,7 @@ func TestCronScheduler_CronExpressions(t *testing.T) {
 			if err != nil {
 				t.Errorf("Start failed for %q: %v", tc.cron, err)
 			}
-			if !s.running {
+			if !s.running.Load() {
 				t.Error("expected running=true after Start")
 			}
 			cancel()
@@ -128,7 +128,7 @@ func TestCronScheduler_InvalidExpression(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for invalid cron expression")
 	}
-	if s.running {
+	if s.running.Load() {
 		t.Error("expected running=false for invalid expression")
 	}
 }
