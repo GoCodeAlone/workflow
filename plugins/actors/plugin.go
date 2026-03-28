@@ -11,7 +11,7 @@ import (
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
-	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/pipeline"
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/schema"
 )
@@ -19,10 +19,9 @@ import (
 // Plugin provides actor model support for the workflow engine.
 type Plugin struct {
 	plugin.BaseEnginePlugin
-	stepRegistry         interfaces.StepRegistryProvider
-	concreteStepRegistry *module.StepRegistry
-	logger               *slog.Logger
-	actorHandler         *ActorWorkflowHandler
+	stepRegistry interfaces.StepRegistrar
+	logger       *slog.Logger
+	actorHandler *ActorWorkflowHandler
 }
 
 // New creates a new actors plugin.
@@ -59,9 +58,8 @@ func New() *Plugin {
 
 // SetStepRegistry is called by the engine to inject the step registry.
 func (p *Plugin) SetStepRegistry(registry interfaces.StepRegistryProvider) {
-	p.stepRegistry = registry
-	if concrete, ok := registry.(*module.StepRegistry); ok {
-		p.concreteStepRegistry = concrete
+	if r, ok := registry.(interfaces.StepRegistrar); ok {
+		p.stepRegistry = r
 	}
 }
 
@@ -122,8 +120,8 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 	}
 }
 
-// wrapStepFactory converts a module.StepFactory to a plugin.StepFactory.
-func wrapStepFactory(f module.StepFactory) plugin.StepFactory {
+// wrapStepFactory converts a pipeline.StepFactory to a plugin.StepFactory.
+func wrapStepFactory(f pipeline.StepFactory) plugin.StepFactory {
 	return func(name string, cfg map[string]any, app modular.Application) (any, error) {
 		return f(name, cfg, app)
 	}
@@ -161,8 +159,8 @@ func (p *Plugin) WiringHooks() []plugin.WiringHook {
 						continue
 					}
 					pool.SetHandlers(handlers)
-					if p.concreteStepRegistry != nil {
-						pool.SetStepRegistry(p.concreteStepRegistry, app)
+					if p.stepRegistry != nil {
+						pool.SetStepRegistry(p.stepRegistry, app)
 					}
 				}
 				return nil

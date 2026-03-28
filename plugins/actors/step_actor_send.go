@@ -5,7 +5,8 @@ import (
 	"fmt"
 
 	"github.com/GoCodeAlone/modular"
-	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/pipeline"
 	"github.com/tochemey/goakt/v4/actor"
 )
 
@@ -15,13 +16,13 @@ type ActorSendStep struct {
 	pool     string
 	identity string // template expression
 	message  map[string]any
-	tmpl     *module.TemplateEngine
+	tmpl     *pipeline.TemplateEngine
 	app      modular.Application
 }
 
 // NewActorSendStepFactory returns a factory for step.actor_send.
-func NewActorSendStepFactory() module.StepFactory {
-	return func(name string, config map[string]any, app modular.Application) (module.PipelineStep, error) {
+func NewActorSendStepFactory() pipeline.StepFactory {
+	return func(name string, config map[string]any, app modular.Application) (interfaces.PipelineStep, error) {
 		pool, _ := config["pool"].(string)
 		if pool == "" {
 			return nil, fmt.Errorf("step.actor_send %q: 'pool' is required", name)
@@ -44,7 +45,7 @@ func NewActorSendStepFactory() module.StepFactory {
 			pool:     pool,
 			identity: identity,
 			message:  message,
-			tmpl:     module.NewTemplateEngine(),
+			tmpl:     pipeline.NewTemplateEngine(),
 			app:      app,
 		}, nil
 	}
@@ -54,7 +55,7 @@ func NewActorSendStepFactory() module.StepFactory {
 func (s *ActorSendStep) Name() string { return s.name }
 
 // Execute sends a fire-and-forget message to an actor pool.
-func (s *ActorSendStep) Execute(ctx context.Context, pc *module.PipelineContext) (*module.StepResult, error) {
+func (s *ActorSendStep) Execute(ctx context.Context, pc *interfaces.PipelineContext) (*interfaces.StepResult, error) {
 	// Resolve template expressions in message
 	resolved, err := s.tmpl.ResolveMap(s.message, pc)
 	if err != nil {
@@ -121,7 +122,7 @@ func (s *ActorSendStep) Execute(ctx context.Context, pc *module.PipelineContext)
 		}
 	}
 
-	return &module.StepResult{
+	return &interfaces.StepResult{
 		Output: map[string]any{"delivered": true},
 	}, nil
 }

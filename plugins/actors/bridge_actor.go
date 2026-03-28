@@ -6,12 +6,13 @@ import (
 	"log/slog"
 
 	"github.com/GoCodeAlone/modular"
-	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/pipeline"
 	goaktactor "github.com/tochemey/goakt/v4/actor"
 )
 
 // NewBridgeActor creates a BridgeActor ready to be spawned into a permanent pool.
-func NewBridgeActor(poolName, identity string, handlers map[string]*HandlerPipeline, registry *module.StepRegistry, app modular.Application, logger *slog.Logger) *BridgeActor {
+func NewBridgeActor(poolName, identity string, handlers map[string]*HandlerPipeline, registry interfaces.StepRegistrar, app modular.Application, logger *slog.Logger) *BridgeActor {
 	return &BridgeActor{
 		poolName: poolName,
 		identity: identity,
@@ -34,7 +35,7 @@ type BridgeActor struct {
 	handlers map[string]*HandlerPipeline
 
 	// Injected dependencies (set before spawning)
-	registry *module.StepRegistry
+	registry interfaces.StepRegistrar
 	app      modular.Application
 	logger   *slog.Logger
 }
@@ -75,7 +76,7 @@ type BridgeGrain struct {
 	state    map[string]any
 	handlers map[string]*HandlerPipeline
 
-	registry *module.StepRegistry
+	registry interfaces.StepRegistrar
 	app      modular.Application
 	logger   *slog.Logger
 }
@@ -110,14 +111,14 @@ func (g *BridgeGrain) OnDeactivate(_ context.Context, _ *goaktactor.GrainProps) 
 }
 
 // buildStep creates a step instance from a step config map.
-func buildStep(stepType, stepName string, stepCfg map[string]any, registry *module.StepRegistry, app modular.Application) (module.PipelineStep, error) {
+func buildStep(stepType, stepName string, stepCfg map[string]any, registry interfaces.StepRegistrar, app modular.Application) (interfaces.PipelineStep, error) {
 	config, _ := stepCfg["config"].(map[string]any)
 	switch {
 	case registry != nil:
 		return registry.Create(stepType, stepName, config, app)
 	case stepType == "step.set":
-		factory := module.NewSetStepFactory()
-		return factory(stepName, config, nil)
+		factory := pipeline.NewSetStepFactory()
+		return factory(stepName, config, app)
 	default:
 		return nil, fmt.Errorf("no step registry available for type %q", stepType)
 	}
@@ -125,7 +126,7 @@ func buildStep(stepType, stepName string, stepCfg map[string]any, registry *modu
 
 // executePipeline finds the handler for msg.Type, runs the step pipeline, updates state,
 // and returns the accumulated output. Shared by BridgeActor and BridgeGrain.
-func executePipeline(ctx context.Context, msg *ActorMessage, poolName, identity string, state map[string]any, handlers map[string]*HandlerPipeline, registry *module.StepRegistry, app modular.Application) (map[string]any, error) {
+func executePipeline(ctx context.Context, msg *ActorMessage, poolName, identity string, state map[string]any, handlers map[string]*HandlerPipeline, registry interfaces.StepRegistrar, app modular.Application) (map[string]any, error) {
 	handler, ok := handlers[msg.Type]
 	if !ok {
 		return nil, fmt.Errorf("no handler for message type %q", msg.Type)
@@ -143,7 +144,7 @@ func executePipeline(ctx context.Context, msg *ActorMessage, poolName, identity 
 		},
 	}
 
-	pc := module.NewPipelineContext(triggerData, map[string]any{
+	pc := interfaces.NewPipelineContext(triggerData, map[string]any{
 		"actor_pool":     poolName,
 		"actor_identity": identity,
 		"message_type":   msg.Type,

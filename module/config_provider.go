@@ -10,7 +10,16 @@ import (
 	"sync"
 
 	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/workflow/pipeline"
 )
+
+func init() {
+	// Wire the global config registry into the pipeline package so that the
+	// "config" template function works without importing module/ from pipeline/.
+	pipeline.ConfigLookup = func(key string) (string, bool) {
+		return globalConfigRegistry.Get(key)
+	}
+}
 
 // configKeyRegexp matches {{config "key"}}, {{ config "key" }}, {{config 'key'}},
 // or {{ config 'key' }} patterns. It handles single or double quotes and optional whitespace.

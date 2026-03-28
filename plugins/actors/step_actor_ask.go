@@ -6,7 +6,8 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/modular"
-	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/pipeline"
 	"github.com/tochemey/goakt/v4/actor"
 )
 
@@ -17,13 +18,13 @@ type ActorAskStep struct {
 	identity string
 	timeout  time.Duration
 	message  map[string]any
-	tmpl     *module.TemplateEngine
+	tmpl     *pipeline.TemplateEngine
 	app      modular.Application
 }
 
 // NewActorAskStepFactory returns a factory for step.actor_ask.
-func NewActorAskStepFactory() module.StepFactory {
-	return func(name string, config map[string]any, app modular.Application) (module.PipelineStep, error) {
+func NewActorAskStepFactory() pipeline.StepFactory {
+	return func(name string, config map[string]any, app modular.Application) (interfaces.PipelineStep, error) {
 		pool, _ := config["pool"].(string)
 		if pool == "" {
 			return nil, fmt.Errorf("step.actor_ask %q: 'pool' is required", name)
@@ -56,7 +57,7 @@ func NewActorAskStepFactory() module.StepFactory {
 			identity: identity,
 			timeout:  timeout,
 			message:  message,
-			tmpl:     module.NewTemplateEngine(),
+			tmpl:     pipeline.NewTemplateEngine(),
 			app:      app,
 		}, nil
 	}
@@ -66,7 +67,7 @@ func NewActorAskStepFactory() module.StepFactory {
 func (s *ActorAskStep) Name() string { return s.name }
 
 // Execute sends a request-response message to an actor and returns the response.
-func (s *ActorAskStep) Execute(ctx context.Context, pc *module.PipelineContext) (*module.StepResult, error) {
+func (s *ActorAskStep) Execute(ctx context.Context, pc *interfaces.PipelineContext) (*interfaces.StepResult, error) {
 	// Resolve template expressions in message
 	resolved, err := s.tmpl.ResolveMap(s.message, pc)
 	if err != nil {
@@ -145,5 +146,5 @@ func (s *ActorAskStep) Execute(ctx context.Context, pc *module.PipelineContext) 
 		output = map[string]any{"response": resp}
 	}
 
-	return &module.StepResult{Output: output}, nil
+	return &interfaces.StepResult{Output: output}, nil
 }

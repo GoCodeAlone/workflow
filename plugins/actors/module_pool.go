@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/modular"
-	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
@@ -45,7 +45,7 @@ type ActorPoolModule struct {
 	handlers map[string]*HandlerPipeline
 
 	// Step registry for building pipeline steps inside actors
-	stepRegistry *module.StepRegistry
+	stepRegistry interfaces.StepRegistrar
 	app          modular.Application
 }
 
@@ -229,7 +229,7 @@ func (m *ActorPoolModule) SetHandlers(handlers map[string]*HandlerPipeline) {
 }
 
 // SetStepRegistry injects the step registry and app for actor spawn-time pipeline building.
-func (m *ActorPoolModule) SetStepRegistry(registry *module.StepRegistry, app modular.Application) {
+func (m *ActorPoolModule) SetStepRegistry(registry interfaces.StepRegistrar, app modular.Application) {
 	m.stepRegistry = registry
 	m.app = app
 }
