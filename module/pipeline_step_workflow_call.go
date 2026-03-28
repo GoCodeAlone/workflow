@@ -135,6 +135,11 @@ func (s *WorkflowCallStep) Execute(ctx context.Context, pc *PipelineContext) (*S
 		// Fire-and-forget: run in background goroutine derived from parent context
 		// so cancellation signals propagate, bounded by the configured timeout.
 		go func(parentCtx context.Context, data map[string]any) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					fmt.Printf("panic in async workflow_call %q: %v\n", workflowName, rec)
+				}
+			}()
 			asyncCtx, cancel := context.WithTimeout(parentCtx, s.timeout)
 			defer cancel()
 			_, _ = target.Execute(asyncCtx, data) //nolint:errcheck

@@ -192,6 +192,11 @@ func (rm *RuntimeManager) loadWorkflow(ctx context.Context, configPath, workDir 
 
 	// Watch for context cancellation to clean up
 	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				rm.logger.Error("panic in runtime watcher goroutine", "id", id, "panic", rec)
+			}
+		}()
 		<-engineCtx.Done()
 		rm.mu.Lock()
 		if inst, ok := rm.instances[id]; ok {
@@ -332,6 +337,11 @@ func (rm *RuntimeManager) LaunchFromWorkspace(ctx context.Context, id, name, yam
 	rm.AnnounceServices(instance)
 
 	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				rm.logger.Error("panic in runtime watcher goroutine", "id", id, "panic", rec)
+			}
+		}()
 		<-engineCtx.Done()
 		rm.mu.Lock()
 		if inst, ok := rm.instances[id]; ok && inst.Status == "running" {

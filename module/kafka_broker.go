@@ -244,6 +244,12 @@ func (b *KafkaBroker) Start(ctx context.Context) error {
 		}
 
 		go func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					b.logger.Error("panic in Kafka consumer goroutine", "panic", rec)
+					b.setUnhealthy(fmt.Sprintf("consumer panic: %v", rec))
+				}
+			}()
 			for {
 				if consumeErr := group.Consume(consumerCtx, topics, handler); consumeErr != nil {
 					b.logger.Error("Kafka consumer group error", "error", consumeErr)

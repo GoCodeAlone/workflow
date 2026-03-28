@@ -219,6 +219,18 @@ outer:
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }() // release slot
+			defer func() {
+				if rec := recover(); rec != nil {
+					panicErr := fmt.Errorf("panic in foreach iteration %d: %v", i, rec)
+					errs[i] = panicErr
+					if s.errorStrategy == "fail_fast" {
+						errOnce.Do(func() {
+							firstErr = fmt.Errorf("foreach step %q: %w", s.name, panicErr)
+							cancel()
+						})
+					}
+				}
+			}()
 
 			childPC := s.buildChildContext(pc, item, i)
 			iterResult := make(map[string]any)

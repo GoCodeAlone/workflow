@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -197,6 +198,11 @@ func (lc *LogCollector) LogHandler() http.HandlerFunc {
 func (lc *LogCollector) StartCollectionLoop(ctx context.Context, interval time.Duration) context.CancelFunc {
 	ctx, cancel := context.WithCancel(ctx)
 	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				fmt.Printf("panic in log collection goroutine: %v\n", rec)
+			}
+		}()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {

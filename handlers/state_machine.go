@@ -399,6 +399,11 @@ func (h *StateMachineWorkflowHandler) ConfigureWorkflow(app modular.Application,
 			processingStates := h.extractProcessingStates(hooksConfig, definitions)
 			if len(processingStates) > 0 {
 				go func() {
+					defer func() {
+						if rec := recover(); rec != nil {
+							fmt.Printf("panic in state machine recovery goroutine: %v\n", rec)
+						}
+					}()
 					// Small startup delay to let all modules finish initializing
 					time.Sleep(2 * time.Second)
 					recovered := smEngine.RecoverProcessingInstances(context.Background(), processingStates)

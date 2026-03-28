@@ -45,6 +45,11 @@ func (h *RESTAPIHandler) startWorkflowForResource(_ context.Context, resourceId 
 	// Use context.Background() since the HTTP request context is cancelled when the
 	// handler returns, which would abort the processing pipeline.
 	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				h.logger.Warn(fmt.Sprintf("panic in transition goroutine for '%s': %v", instanceId, rec))
+			}
+		}()
 		bgCtx := context.Background()
 		transitionName := h.InitialTransition
 		if transitionName == "" {

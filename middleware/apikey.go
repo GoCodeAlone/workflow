@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/GoCodeAlone/workflow/store"
@@ -73,6 +74,11 @@ func APIKeyAuth(apiKeyStore store.APIKeyStore, next http.Handler) http.Handler {
 
 		// Update last used time asynchronously (best effort).
 		go func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					log.Printf("panic in UpdateLastUsed goroutine: %v", rec)
+				}
+			}()
 			_ = apiKeyStore.UpdateLastUsed(context.Background(), apiKey.ID)
 		}()
 
