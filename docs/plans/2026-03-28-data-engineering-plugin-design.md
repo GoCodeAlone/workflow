@@ -412,4 +412,6 @@ capabilities:
     - timeseries.clickhouse
     - timeseries.questdb
     - timeseries.druid
+  triggers:
+    - trigger.cdc
 ```

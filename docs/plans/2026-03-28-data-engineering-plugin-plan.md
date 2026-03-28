@@ -2234,48 +2234,106 @@ git push origin main --tags
 
 ---
 
+### Task 10: Workflow Scenarios (Phase 1 validation)
+
+**Files:**
+- Create: `workflow-scenarios/69-data-cdc-basic/config/app.yaml`
+- Create: `workflow-scenarios/69-data-cdc-basic/tests/cdc_test.go`
+- Create: `workflow-scenarios/70-data-tenancy/config/app.yaml`
+- Create: `workflow-scenarios/70-data-tenancy/tests/tenancy_test.go`
+
+**Step 1: Create scenario 69 — CDC basic**
+
+A minimal config using the data-engineering plugin with `cdc.source` (memory provider) and CDC step types. Tests verify:
+- Module initializes and starts
+- `step.cdc_status` returns running state
+- `step.cdc_snapshot` triggers and records schema history
+- `step.cdc_stop` gracefully stops
+
+**Step 2: Create scenario 70 — Multi-tenancy**
+
+Config using `data.tenancy` module with schema_per_tenant strategy. Tests verify:
+- `step.tenant_provision` creates tenant namespace
+- Tenant table resolution applies correct schema prefix
+- `step.tenant_deprovision` archives tenant
+
+**Step 3: Run scenarios**
+
+```bash
+cd workflow-scenarios/69-data-cdc-basic && go test ./tests/ -v
+cd workflow-scenarios/70-data-tenancy && go test ./tests/ -v
+```
+
+Expected: all tests PASS.
+
+**Step 4: Commit**
+
+```bash
+git add workflow-scenarios/69-data-cdc-basic/ workflow-scenarios/70-data-tenancy/
+git commit -m "feat: add data engineering scenarios 69-70 (CDC + tenancy)"
+```
+
+---
+
 ## Phase 2: Lakehouse + Time-Series (outline)
 
 > Detailed TDD tasks to be written when Phase 1 is complete.
+> **Note:** Phase 2 also includes full implementations of the Bento, Debezium, and DMS CDC providers (stubbed in Phase 1). These require real infrastructure (Kafka, AWS) for integration testing.
 
-### Task 10: Iceberg REST Catalog Client
+### Task 11: Bento CDC Provider (full implementation)
+- `internal/cdc/bento_provider.go` — Generate Bento YAML configs for Postgres/MySQL/DynamoDB CDC
+- Reuse existing `bento.stream` module pattern or import `warpstreamlabs/bento` directly
+- Tests against Bento test server
+
+### Task 12: Debezium CDC Provider (full implementation)
+- `internal/cdc/debezium_provider.go` — HTTP client to Kafka Connect REST API
+- Connector CRUD, status monitoring, schema history via Kafka topics
+- Tests against mock Kafka Connect server
+
+### Task 13: DMS CDC Provider (full implementation)
+- `internal/cdc/dms_provider.go` — AWS SDK calls for DMS replication tasks
+- Create/start/stop/describe tasks, Kinesis stream targets
+- Tests against mock AWS endpoints
+
+### Task 14: Iceberg REST Catalog Client
 - `internal/lakehouse/iceberg_client.go` — HTTP client for Iceberg REST Catalog spec
 - `internal/lakehouse/iceberg_client_test.go` — tests against mock HTTP server
 - Endpoints: list namespaces, create/load/drop table, update schema, list snapshots
 
-### Task 11: Lakehouse Module + Steps
+### Task 15: Lakehouse Module + Steps
 - `internal/lakehouse/module.go` — `catalog.iceberg` and `lakehouse.table` modules
 - `internal/lakehouse/steps.go` — all `step.lakehouse_*` steps
 - Tests for create_table, evolve_schema, write, compact, snapshot, query, expire_snapshots
 
-### Task 12: InfluxDB Module + Steps
+### Task 16: InfluxDB Module + Steps
 - `internal/timeseries/influxdb.go` — module using `influxdata/influxdb-client-go/v2`
 - `internal/timeseries/influxdb_test.go` — tests against mock write/query APIs
 - Steps: ts_write, ts_write_batch, ts_query, ts_downsample, ts_retention
 
-### Task 13: TimescaleDB Module + Steps
+### Task 17: TimescaleDB Module + Steps
 - `internal/timeseries/timescaledb.go` — module using pgx (Postgres extension)
 - Continuous aggregation via `CREATE MATERIALIZED VIEW ... WITH (timescaledb.continuous)`
 - Reuses database.workflow driver pattern
+- **Owns `step.ts_continuous_query`** — TimescaleDB continuous aggregates are the primary use case
 
-### Task 14: ClickHouse Module + Steps
+### Task 18: ClickHouse Module + Steps
 - `internal/timeseries/clickhouse.go` — module using `ClickHouse/clickhouse-go/v2`
 - Native protocol for batch writes, SQL for queries
 
-### Task 15: QuestDB Module + Steps
+### Task 19: QuestDB Module + Steps
 - `internal/timeseries/questdb.go` — module using `questdb/go-questdb-client/v3`
 - ILP protocol for writes, REST API for queries
 
-### Task 16: Druid Module + Steps
+### Task 20: Druid Module + Steps
 - `internal/timeseries/druid.go` — HTTP client to Druid Router API
 - Steps: ts_druid_ingest (Kafka supervisor spec), ts_druid_query (SQL + native), ts_druid_datasource, ts_druid_compact
 
-### Task 17: Schema Registry Module
+### Task 21: Schema Registry Module
 - `internal/catalog/schema_registry.go` — HTTP client to Confluent Schema Registry
 - Steps: schema_register, schema_validate
 - Compatibility modes: BACKWARD, FORWARD, FULL
 
-### Task 18: Wire Phase 2 + Update plugin.json
+### Task 22: Wire Phase 2 + Update plugin.json
 - Add all new module/step types to plugin.go dispatch
 - Update plugin.json capabilities
 - Integration tests across all Phase 2 modules
@@ -2284,32 +2342,32 @@ git push origin main --tags
 
 ## Phase 3: Migrations + Data Quality (outline)
 
-### Task 19: Declarative Schema Differ
+### Task 23: Declarative Schema Differ
 - `internal/migrate/declarative.go` — YAML schema definition parser + SQL diff generator
 - Support: add column, add table, add index, widen varchar, add constraint
 - Detect breaking changes: drop column, narrow type, remove constraint
 
-### Task 20: Scripted Migration Runner
+### Task 24: Scripted Migration Runner
 - `internal/migrate/scripted.go` — numbered migration execution with state tracking
 - Lock table, version tracking, rollback support
 
-### Task 21: Migration Module + Steps
+### Task 25: Migration Module + Steps
 - `internal/migrate/module.go` — `migrate.schema` module
 - Steps: migrate_plan, migrate_apply, migrate_run, migrate_rollback, migrate_status
 
-### Task 22: Go-Native Data Quality Checks
+### Task 26: Go-Native Data Quality Checks
 - `internal/quality/builtin.go` — not_null, unique, freshness, row_count, referential, anomaly
 - SQL-based checks executed against any DBProvider
 - `gonum` for statistical profiling and anomaly detection (Z-score, IQR)
 
-### Task 23: Data Contract Validator
+### Task 27: Data Contract Validator
 - `internal/quality/contract.go` — YAML contract parser + validation engine
 - Schema validation, quality assertion execution, reporting
 
-### Task 24: Quality Module + Steps
+### Task 28: Quality Module + Steps
 - Steps: quality_check, quality_schema_validate, quality_profile, quality_compare, quality_anomaly
 
-### Task 25: Python Tool Providers (opt-in)
+### Task 29: Python Tool Providers (opt-in)
 - `internal/quality/dbt_provider.go` — shell wrapper for dbt test
 - `internal/quality/soda_provider.go` — shell wrapper for soda check
 - `internal/quality/ge_provider.go` — shell wrapper for great_expectations
@@ -2318,29 +2376,29 @@ git push origin main --tags
 
 ## Phase 4: Graph + Knowledge Graphs + Catalog (outline)
 
-### Task 26: Neo4j Module
+### Task 30: Neo4j Module
 - `internal/graph/neo4j.go` — module using `neo4j/neo4j-go-driver/v5`
 - Connection management, auth, database selection
 
-### Task 27: Graph Steps
+### Task 31: Graph Steps
 - Steps: graph_query (Cypher), graph_write (nodes + relationships), graph_import (bulk from relational)
 
-### Task 28: Knowledge Graph Steps
+### Task 32: Knowledge Graph Steps
 - Steps: graph_extract_entities (entity extraction), graph_link (relationship creation)
 - Pattern-based entity extraction from text (regex + configurable rules)
 
-### Task 29: DataHub Client + Steps
+### Task 33: DataHub Client + Steps
 - `internal/catalog/datahub.go` — HTTP client to DataHub GMS API
 - Steps: catalog_register, catalog_search
 
-### Task 30: OpenMetadata Client + Steps
+### Task 34: OpenMetadata Client + Steps
 - `internal/catalog/openmetadata.go` — HTTP client to OpenMetadata API
 - Steps: catalog_register, catalog_search (provider pattern, same steps as DataHub)
 
-### Task 31: Data Contract Steps
+### Task 35: Data Contract Steps
 - Steps: contract_validate — validate data against YAML contracts registered in catalog
 
-### Task 32: Final Integration + Release
+### Task 36: Final Integration + Release
 - Wire all Phase 4 modules/steps into plugin.go
 - Full plugin integration tests
 - Update plugin.json with all capabilities
