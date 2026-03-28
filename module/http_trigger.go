@@ -1,6 +1,7 @@
 package module
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"log"
 	"maps"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -209,6 +211,24 @@ func (t *trackedResponseWriter) WriteHeader(code int) {
 		t.written.Store(true)
 		t.ResponseWriter.WriteHeader(code)
 	})
+}
+
+// Hijack implements http.Hijacker by delegating to the underlying ResponseWriter.
+// This is required for WebSocket upgrades (gorilla/websocket) which need to take
+// over the raw TCP connection.
+func (t *trackedResponseWriter) Hijack() (c net.Conn, brw *bufio.ReadWriter, err error) {
+	if hj, ok := t.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
+}
+
+// Flush implements http.Flusher by delegating to the underlying ResponseWriter.
+// This is needed for streaming responses (SSE, chunked transfer).
+func (t *trackedResponseWriter) Flush() {
+	if fl, ok := t.ResponseWriter.(http.Flusher); ok {
+		fl.Flush()
+	}
 }
 
 const (
