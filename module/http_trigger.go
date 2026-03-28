@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -194,17 +195,20 @@ func writePipelineContextResponse(w http.ResponseWriter, result map[string]any) 
 // "workflow triggered" response only when the pipeline didn't write one.
 type trackedResponseWriter struct {
 	http.ResponseWriter
-	written bool
+	written    atomic.Bool
+	headerOnce sync.Once
 }
 
 func (t *trackedResponseWriter) Write(b []byte) (int, error) {
-	t.written = true
+	t.written.Store(true)
 	return t.ResponseWriter.Write(b)
 }
 
 func (t *trackedResponseWriter) WriteHeader(code int) {
-	t.written = true
-	t.ResponseWriter.WriteHeader(code)
+	t.headerOnce.Do(func() {
+		t.written.Store(true)
+		t.ResponseWriter.WriteHeader(code)
+	})
 }
 
 const (
@@ -484,7 +488,7 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 
 		// If a pipeline step (e.g. step.json_response) already wrote the response,
 		// don't overwrite it with the generic fallback.
-		if rw.written {
+		if rw.written.Load() {
 			return
 		}
 

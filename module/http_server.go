@@ -40,6 +40,16 @@ type StandardHTTPServer struct {
 	writeTimeout time.Duration
 	idleTimeout  time.Duration
 	tlsCfg       HTTPServerTLSConfig
+	listenErr    chan error
+}
+
+// ListenError returns a channel that receives the first fatal error from
+// ListenAndServe (or its TLS variants). The channel is closed when the
+// goroutine exits cleanly (e.g. after Shutdown). Callers can select on
+// this channel alongside their own context to detect unexpected listener
+// failures and restart or surface the error.
+func (s *StandardHTTPServer) ListenError() <-chan error {
+	return s.listenErr
 }
 
 // NewStandardHTTPServer creates a new HTTP server with the given name and address
@@ -112,6 +122,8 @@ func (s *StandardHTTPServer) Start(ctx context.Context) error {
 		IdleTimeout:       timeoutOrDefault(s.idleTimeout, 120*time.Second),
 	}
 
+	s.listenErr = make(chan error, 1)
+
 	switch s.tlsCfg.Mode {
 	case "autocert":
 		return s.startAutocert(ctx)
@@ -120,8 +132,10 @@ func (s *StandardHTTPServer) Start(ctx context.Context) error {
 	default:
 		// Plain HTTP
 		go func() {
+			defer close(s.listenErr)
 			if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				s.logger.Error("HTTP server error", "error", err)
+				s.logger.Error("HTTP server listener died", "error", err)
+				s.listenErr <- err
 			}
 		}()
 		s.logger.Info("HTTP server started", "address", s.address)
@@ -149,8 +163,10 @@ func (s *StandardHTTPServer) startManualTLS(ctx context.Context) error {
 	s.server.TLSConfig = tlsConfig
 
 	go func() {
+		defer close(s.listenErr)
 		if err := s.server.ListenAndServeTLS(manualCfg.CertFile, manualCfg.KeyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.logger.Error("HTTPS server error", "error", err)
+			s.logger.Error("HTTPS server listener died", "error", err)
+			s.listenErr <- err
 		}
 	}()
 	s.logger.Info("HTTPS server started (manual TLS)", "address", s.address)
@@ -191,8 +207,10 @@ func (s *StandardHTTPServer) startAutocert(ctx context.Context) error {
 	}()
 
 	go func() {
+		defer close(s.listenErr)
 		if err := s.server.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.logger.Error("HTTPS server error (autocert)", "error", err)
+			s.logger.Error("HTTPS server listener died (autocert)", "error", err)
+			s.listenErr <- err
 		}
 	}()
 	s.logger.Info("HTTPS server started (autocert)", "address", s.address, "domains", ac.Domains)

@@ -450,7 +450,7 @@ func (c *WebhookIntegrationConnector) Connect(ctx context.Context) error {
 	// Start server in a goroutine
 	go func() {
 		if err := c.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Printf("Webhook server error: %v\n", err)
+			log.Printf("webhook server error: %v", err)
 		}
 	}()
 

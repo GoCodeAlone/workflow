@@ -455,7 +455,7 @@ func (h *openAPIRouteHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		pipelineCopy := *pipeline
 		result, err := pipelineCopy.Execute(ctx, data)
 		if err != nil {
-			if !rw.written {
+			if !rw.written.Load() {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
 				_ = json.NewEncoder(w).Encode(map[string]string{
@@ -467,7 +467,7 @@ func (h *openAPIRouteHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if rw.written {
+		if rw.written.Load() {
 			// Pipeline wrote directly to the response writer.
 			if cw != nil {
 				// Validate the captured response before flushing.

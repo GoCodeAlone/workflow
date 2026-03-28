@@ -85,11 +85,19 @@ func (t *SSETracer) Subscribe(executionID string) (<-chan SSEEvent, func()) {
 // If a subscriber's channel is full, the event is dropped for that subscriber
 // (non-blocking send to prevent slow consumers from stalling the publisher).
 func (t *SSETracer) Publish(executionID string, event SSEEvent) {
+	// Copy channels under the read lock so Subscribe/Unsubscribe are not
+	// blocked during the (potentially slow) channel send loop below.
 	t.mu.RLock()
-	defer t.mu.RUnlock()
+	specific := t.subscribers[executionID]
+	wildcard := t.subscribers["*"]
+	channels := make([]chan SSEEvent, 0, len(specific)+len(wildcard))
+	channels = append(channels, specific...)
+	if executionID != "*" {
+		channels = append(channels, wildcard...)
+	}
+	t.mu.RUnlock()
 
-	// Send to specific execution subscribers
-	for _, ch := range t.subscribers[executionID] {
+	for _, ch := range channels {
 		select {
 		case ch <- event:
 		default:
@@ -97,20 +105,6 @@ func (t *SSETracer) Publish(executionID string, event SSEEvent) {
 				"execution_id", executionID,
 				"event", event.Event,
 			)
-		}
-	}
-
-	// Send to wildcard subscribers (if executionID is not already "*")
-	if executionID != "*" {
-		for _, ch := range t.subscribers["*"] {
-			select {
-			case ch <- event:
-			default:
-				t.logger.Warn("SSE event dropped for slow wildcard subscriber",
-					"execution_id", executionID,
-					"event", event.Event,
-				)
-			}
 		}
 	}
 }
