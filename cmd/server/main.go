@@ -1671,8 +1671,10 @@ func runMultiWorkflow(logger *slog.Logger) error {
 	}
 	cancel()
 
-	// Graceful shutdown
-	shutdownCtx := context.Background()
+	// Graceful shutdown with a 30-second timeout to avoid blocking forever
+	// if in-flight requests or engine modules hang.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
 	if err := mgr.StopAll(shutdownCtx); err != nil {
 		logger.Error("Engine manager shutdown error", "error", err)
 	}

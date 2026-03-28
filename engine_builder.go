@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/config"
@@ -266,7 +267,9 @@ func (b *EngineBuilder) RunUntilSignal(cfg *config.WorkflowConfig) error {
 	<-sigCh
 
 	cancel()
-	if err := engine.Stop(context.Background()); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+	if err := engine.Stop(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown error: %w", err)
 	}
 	return nil

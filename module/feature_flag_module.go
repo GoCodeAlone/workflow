@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -124,6 +125,14 @@ func (m *FeatureFlagModule) Service() *featureflag.Service {
 // Store returns the underlying generic store, or nil if using a non-generic provider.
 func (m *FeatureFlagModule) Store() *generic.Store {
 	return m.store
+}
+
+// Stop closes the underlying store's database connection during shutdown.
+func (m *FeatureFlagModule) Stop(_ context.Context) error {
+	if m.store != nil {
+		return m.store.Close()
+	}
+	return nil
 }
 
 // SSEEnabled returns whether SSE streaming is enabled for this module.
