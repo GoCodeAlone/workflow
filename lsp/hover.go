@@ -15,6 +15,9 @@ func Hover(reg *Registry, doc *Document, ctx PositionContext) *protocol.Hover {
 	if ctx.InTemplate {
 		return hoverTemplateExpr(reg, doc, ctx)
 	}
+	if ctx.InExpr {
+		return hoverExprExpr(reg, doc, ctx)
+	}
 
 	switch ctx.Section {
 	case SectionTopLevel:
@@ -451,6 +454,54 @@ func hoverTemplateFunction(name string) *protocol.Hover {
 		return nil
 	}
 	return markdownHover(fmt.Sprintf("**%s** — %s", name, doc))
+}
+
+// hoverExprExpr provides hover documentation for ${ } expr expressions.
+// It reuses the same namespace and function documentation as the Go template
+// hover, but describes expr syntax (bracket notation, no leading dot).
+func hoverExprExpr(reg *Registry, doc *Document, ctx PositionContext) *protocol.Hover {
+	tp := ctx.TemplatePath
+	if tp == nil {
+		return hoverExprFunction(ctx.FieldName)
+	}
+
+	// If there is a raw expression with no namespace, check function docs.
+	if tp.Namespace == "" && tp.Raw != "" {
+		return hoverExprFunction(tp.Raw)
+	}
+
+	switch tp.Namespace {
+	case "steps":
+		return hoverTemplateStepOutput(reg, doc, ctx, tp)
+	case "trigger":
+		return hoverTemplateTrigger(ctx, tp)
+	case "body":
+		return hoverTemplateBody(tp)
+	case "meta":
+		return hoverTemplateMeta(tp)
+	case "":
+		return hoverExprNamespaces()
+	}
+	return nil
+}
+
+// hoverExprFunction generates hover docs for an expr function name.
+func hoverExprFunction(name string) *protocol.Hover {
+	// Reuse template function docs — same functions are available in expr.
+	return hoverTemplateFunction(name)
+}
+
+// hoverExprNamespaces shows the top-level expr namespaces.
+func hoverExprNamespaces() *protocol.Hover {
+	md := "**Expr context namespaces**\n\n" +
+		"- `steps[\"name\"][\"field\"]` — Output fields from a completed pipeline step\n" +
+		"- `trigger[\"path_params\"][\"id\"]` — URL path parameters\n" +
+		"- `trigger[\"query\"][\"page\"]` — Query string parameters\n" +
+		"- `trigger[\"headers\"][\"Authorization\"]` — HTTP headers\n" +
+		"- `body[\"field\"]` — Request body shorthand\n" +
+		"- `meta[\"pipeline\"]` — Pipeline metadata\n" +
+		"\nAll template functions are available: `upper(name)`, `lower(name)`, `json(value)`, etc.\n"
+	return markdownHover(md)
 }
 
 // markdownHover wraps a markdown string in a Hover response.

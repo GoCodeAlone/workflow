@@ -79,10 +79,11 @@ type PositionContext struct {
 	StepType        string            // if inside a pipeline step config, the step type value
 	FieldName       string            // the field name at the cursor
 	InTemplate      bool              // cursor is inside {{ }}
+	InExpr          bool              // cursor is inside ${ }
 	DependsOn       bool              // cursor is in a dependsOn array value
 	PipelineName    string            // name of the pipeline containing the cursor (if any)
 	CurrentStepName string            // name of the step containing the cursor (if any)
-	TemplatePath    *TemplateExprPath // parsed template expression at cursor, if InTemplate
+	TemplatePath    *TemplateExprPath // parsed template expression at cursor, if InTemplate or InExpr
 	Line            int
 	Character       int
 }
@@ -107,6 +108,9 @@ func ContextAt(content string, line, char int) PositionContext {
 	if isInTemplate(lines, line, char) {
 		ctx.InTemplate = true
 		ctx.TemplatePath = ParseTemplateExprAt(currentLine, char)
+	} else if isInExpr(lines, line, char) {
+		ctx.InExpr = true
+		ctx.TemplatePath = ParseExprAt(currentLine, char)
 	}
 
 	// Determine indentation level and section.
@@ -236,6 +240,25 @@ func isInTemplate(lines []string, line, char int) bool {
 	openIdx := strings.LastIndex(prefix, "{{")
 	closeIdx := strings.LastIndex(prefix, "}}")
 	return openIdx >= 0 && openIdx > closeIdx
+}
+
+// isInExpr returns true if position (line, char) is inside a ${ } expression.
+func isInExpr(lines []string, line, char int) bool {
+	if line >= len(lines) {
+		return false
+	}
+	l := lines[line]
+	if char > len(l) {
+		char = len(l)
+	}
+	prefix := l[:char]
+	openIdx := strings.LastIndex(prefix, "${")
+	closeIdx := strings.LastIndex(prefix, "}")
+	// closeIdx must come after openIdx+1 (the { of ${) to count as closing.
+	if openIdx < 0 {
+		return false
+	}
+	return closeIdx < openIdx+1
 }
 
 // leadingSpaces returns the number of leading spaces in a string.

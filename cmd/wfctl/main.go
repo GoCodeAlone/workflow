@@ -78,6 +78,7 @@ var commands = map[string]func([]string) error{
 	"update":         runUpdate,
 	"mcp":            runMCP,
 	"modernize":      runModernize,
+	"expr-migrate":   runExprMigrate,
 	"infra":          runInfra,
 	"docs":           runDocs,
 	"editor-schemas": runEditorSchemas,

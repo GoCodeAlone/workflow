@@ -53,6 +53,8 @@ workflows:
         description: Start the MCP server over stdio for AI assistant integration
       - name: modernize
         description: "Detect and fix known YAML config anti-patterns (dry-run by default)"
+      - name: expr-migrate
+        description: "Convert Go template {{ }} expressions to expr ${ } syntax in a config file"
       - name: infra
         description: "Manage infrastructure lifecycle (plan, apply, status, drift, destroy)"
       - name: docs
@@ -344,6 +346,17 @@ pipelines:
         type: step.cli_invoke
         config:
           command: modernize
+
+  cmd-expr-migrate:
+    trigger:
+      type: cli
+      config:
+        command: expr-migrate
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: expr-migrate
 
   cmd-infra:
     trigger:

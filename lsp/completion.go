@@ -223,6 +223,9 @@ func Completions(reg *Registry, doc *Document, ctx PositionContext) []protocol.C
 	if ctx.InTemplate {
 		return getTemplateCompletions(reg, doc, ctx)
 	}
+	if ctx.InExpr {
+		return getExprCompletions(reg, doc, ctx)
+	}
 
 	switch ctx.Section {
 	case SectionTopLevel:
@@ -515,6 +518,76 @@ func triggerSubFieldCompletions(pipCtx *PipelineDataContext, subField string) []
 			Kind:          &kind,
 			Detail:        &detail,
 			Documentation: fs.Description,
+		})
+	}
+	return items
+}
+
+// getExprCompletions returns context-aware completions for ${ } expr expressions.
+// It reuses the same pipeline data context as Go template completions but uses
+// expr-style suggestions (bracket notation, function call syntax).
+func getExprCompletions(reg *Registry, doc *Document, ctx PositionContext) []protocol.CompletionItem {
+	tp := ctx.TemplatePath
+	if tp == nil {
+		// No parsed path: suggest namespaces and functions.
+		items := exprNamespaceCompletions()
+		items = append(items, getTemplateFunctionCompletions()...)
+		return items
+	}
+
+	switch tp.Namespace {
+	case "":
+		items := exprNamespaceCompletions()
+		items = append(items, getTemplateFunctionCompletions()...)
+		if tp.FieldPrefix != "" {
+			return filterCompletions(items, tp.FieldPrefix)
+		}
+		return items
+
+	case "steps":
+		pipCtx := BuildPipelineContext(reg, doc, ctx.Line)
+		if tp.StepName == "" {
+			return filterCompletions(stepNameCompletions(pipCtx), tp.FieldPrefix)
+		}
+		return filterCompletions(stepOutputKeyCompletions(pipCtx, tp.StepName), tp.FieldPrefix)
+
+	case "trigger":
+		pipCtx := BuildPipelineContext(reg, doc, ctx.Line)
+		if tp.SubField != "" {
+			return filterCompletions(triggerSubFieldCompletions(pipCtx, tp.SubField), tp.FieldPrefix)
+		}
+		return filterCompletions(triggerFieldCompletions(pipCtx), tp.FieldPrefix)
+
+	case "body":
+		pipCtx := BuildPipelineContext(reg, doc, ctx.Line)
+		return filterCompletions(bodyFieldCompletions(pipCtx), tp.FieldPrefix)
+
+	case "meta":
+		return filterCompletions(metaFieldCompletions(), tp.FieldPrefix)
+
+	default:
+		return getTemplateFunctionCompletions()
+	}
+}
+
+// exprNamespaceCompletions returns top-level namespace completions for expr syntax.
+func exprNamespaceCompletions() []protocol.CompletionItem {
+	kind := protocol.CompletionItemKindKeyword
+	entries := []struct{ label, doc string }{
+		{"steps", `Step outputs: steps["step-name"]["field"]`},
+		{"trigger", `Trigger data: trigger["path_params"]["id"]`},
+		{"body", `Request body shorthand: body["field"]`},
+		{"meta", `Pipeline metadata: meta["pipeline"]`},
+		{"current", "Merged pipeline context at current step"},
+	}
+	items := make([]protocol.CompletionItem, 0, len(entries))
+	for _, e := range entries {
+		label := e.label
+		doc := e.doc
+		items = append(items, protocol.CompletionItem{
+			Label:         label,
+			Kind:          &kind,
+			Documentation: doc,
 		})
 	}
 	return items

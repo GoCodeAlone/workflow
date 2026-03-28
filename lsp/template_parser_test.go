@@ -1,6 +1,8 @@
 package lsp
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestParseTemplateExprAt(t *testing.T) {
 	tests := []struct {
@@ -138,6 +140,124 @@ func TestParseTemplateExprAt(t *testing.T) {
 			}
 			if result.FieldPrefix != tt.prefix {
 				t.Errorf("FieldPrefix: got %q, want %q", result.FieldPrefix, tt.prefix)
+			}
+		})
+	}
+}
+
+func TestParseExprAt(t *testing.T) {
+	tests := []struct {
+		name      string
+		line      string
+		char      int
+		wantNil   bool
+		namespace string
+		stepName  string
+		prefix    string
+	}{
+		{
+			name:      "empty expr",
+			line:      `        value: "${ `,
+			char:      20,
+			namespace: "",
+		},
+		{
+			name:      "steps namespace bracket",
+			line:      `        value: "${ steps["`,
+			char:      26,
+			namespace: "steps",
+			stepName:  "",
+		},
+		{
+			name:      "steps with step name",
+			line:      `        value: "${ steps["parse"]`,
+			char:      33,
+			namespace: "steps",
+			stepName:  "parse",
+		},
+		{
+			name:      "trigger namespace",
+			line:      `        value: "${ trigger["`,
+			char:      28,
+			namespace: "trigger",
+		},
+		{
+			name:      "body namespace",
+			line:      `        value: "${ body["`,
+			char:      25,
+			namespace: "body",
+		},
+		{
+			name:      "meta namespace",
+			line:      `        value: "${ meta["`,
+			char:      25,
+			namespace: "meta",
+		},
+		{
+			name:    "not in expr - after close brace",
+			line:    `        value: "${ name } rest`,
+			char:    28,
+			wantNil: true,
+		},
+		{
+			name:    "not in expr - no open",
+			line:    `        value: "hello"`,
+			char:    20,
+			wantNil: true,
+		},
+		{
+			name:      "function call prefix",
+			line:      `        value: "${ uppe`,
+			char:      23,
+			namespace: "",
+			prefix:    "uppe",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseExprAt(tt.line, tt.char)
+			if tt.wantNil {
+				if result != nil {
+					t.Errorf("expected nil, got %+v", result)
+				}
+				return
+			}
+			if result == nil {
+				t.Fatal("expected non-nil result")
+			}
+			if result.Namespace != tt.namespace {
+				t.Errorf("Namespace: got %q, want %q", result.Namespace, tt.namespace)
+			}
+			if result.StepName != tt.stepName {
+				t.Errorf("StepName: got %q, want %q", result.StepName, tt.stepName)
+			}
+			if result.FieldPrefix != tt.prefix {
+				t.Errorf("FieldPrefix: got %q, want %q", result.FieldPrefix, tt.prefix)
+			}
+		})
+	}
+}
+
+func TestIsInExpr(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		char int
+		want bool
+	}{
+		{"in expr", `value: "${ name `, 16, true},
+		{"after close", `value: "${ name }"`, 18, false},
+		{"no open", `value: "hello"`, 10, false},
+		{"at open", `value: "${`, 10, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := []string{tt.line}
+			got := isInExpr(lines, 0, tt.char)
+			if got != tt.want {
+				t.Errorf("isInExpr(%q, 0, %d) = %v, want %v", tt.line, tt.char, got, tt.want)
 			}
 		})
 	}

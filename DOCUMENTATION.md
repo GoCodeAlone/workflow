@@ -325,9 +325,42 @@ flowchart TD
 | `step.do_scale` | Scales a DigitalOcean App Platform component | platform |
 | `step.do_destroy` | Destroys a DigitalOcean App Platform deployment | platform |
 
+### Expression Syntax
+
+Pipeline steps support two expression syntaxes in `config` values. They may be mixed in the same string.
+
+#### Expr syntax (recommended) — `${ }`
+
+```yaml
+# Field access
+value: "${ body.name }"
+# Step output (bracket notation supports hyphenated step names)
+user_id: "${ steps[\"parse-request\"][\"user_id\"] }"
+# Function call
+tag: "${ upper(env) }"
+# Boolean — used in skip_if / if guards
+skip_if: "${ status == \"inactive\" && count > 0 }"
+# String concat
+greeting: "${ \"Hello \" + name }"
+```
+
+**Namespaces:** `steps["name"]["field"]`, `trigger["key"]`, `body["key"]`, `meta["key"]`, `current`
+
+**Migrate from Go templates:** `wfctl expr-migrate --config app.yaml --dry-run`
+
+#### Go template syntax (legacy) — `{{ }}`
+
+```yaml
+value: "{{ .field }}"
+step_out: "{{ .steps.lookup.result }}"
+func_result: "{{ upper .name }}"
+```
+
+See [Template Data Context](#template-data-context) for the full namespace reference.
+
 ### Template Functions
 
-Pipeline steps support Go template syntax with these built-in functions:
+Pipeline steps support Go template syntax (`{{ }}`) and expr syntax (`${ }`) with these built-in functions. All functions are available in both syntaxes.
 
 #### Core
 

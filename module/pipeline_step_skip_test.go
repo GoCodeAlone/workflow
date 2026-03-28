@@ -262,3 +262,157 @@ func TestStepSkipIf_BothFieldsSet_SkipIfTakesPrecedence(t *testing.T) {
 		t.Errorf("expected skipped=true")
 	}
 }
+
+// --- Expr (${...}) tests ---
+
+// TestStepSkipIf_ExprBooleanTrue verifies that skip_if with ${ true } skips the step.
+func TestStepSkipIf_ExprBooleanTrue(t *testing.T) {
+	inner := newMockStep("inner", map[string]any{"ran": true})
+	wrapped := NewSkippableStep(inner, `${ true }`, "")
+
+	pc := NewPipelineContext(map[string]any{}, nil)
+	result, err := wrapped.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(inner.execLog) != 0 {
+		t.Errorf("expected step to be skipped with skip_if='${ true }', got %d executions", len(inner.execLog))
+	}
+	if result.Output["skipped"] != true {
+		t.Errorf("expected skipped=true in output, got %v", result.Output["skipped"])
+	}
+}
+
+// TestStepSkipIf_ExprBooleanFalse verifies that skip_if with ${ false } executes the step.
+func TestStepSkipIf_ExprBooleanFalse(t *testing.T) {
+	inner := newMockStep("inner", map[string]any{"ran": true})
+	wrapped := NewSkippableStep(inner, `${ false }`, "")
+
+	pc := NewPipelineContext(map[string]any{}, nil)
+	result, err := wrapped.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(inner.execLog) != 1 {
+		t.Errorf("expected inner step to execute when skip_if='${ false }', got %d executions", len(inner.execLog))
+	}
+	if result.Output["ran"] != true {
+		t.Errorf("expected inner step output, got %v", result)
+	}
+}
+
+// TestStepSkipIf_ExprComparisonCondition verifies skip_if using a comparison expr.
+func TestStepSkipIf_ExprComparisonCondition(t *testing.T) {
+	inner := newMockStep("inner", map[string]any{"ran": true})
+	wrapped := NewSkippableStep(inner, `${ status == "inactive" }`, "")
+
+	// status=inactive → skip
+	pc := NewPipelineContext(map[string]any{"status": "inactive"}, nil)
+	result, err := wrapped.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(inner.execLog) != 0 {
+		t.Errorf("expected step to be skipped when status==inactive")
+	}
+	if result.Output["skipped"] != true {
+		t.Errorf("expected skipped=true")
+	}
+
+	// status=active → execute
+	inner2 := newMockStep("inner2", map[string]any{"ran": true})
+	wrapped2 := NewSkippableStep(inner2, `${ status == "inactive" }`, "")
+	pc2 := NewPipelineContext(map[string]any{"status": "active"}, nil)
+	result2, err := wrapped2.Execute(context.Background(), pc2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(inner2.execLog) != 1 {
+		t.Errorf("expected inner2 to execute when status==active")
+	}
+	if result2.Output["ran"] != true {
+		t.Errorf("expected inner step output when not skipped")
+	}
+}
+
+// TestStepSkipIf_ExprCompoundCondition verifies skip_if with && compound expressions.
+func TestStepSkipIf_ExprCompoundCondition(t *testing.T) {
+	inner := newMockStep("inner", map[string]any{"ran": true})
+	wrapped := NewSkippableStep(inner, `${ env == "prod" && debug == "false" }`, "")
+
+	pc := NewPipelineContext(map[string]any{"env": "prod", "debug": "false"}, nil)
+	result, err := wrapped.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(inner.execLog) != 0 {
+		t.Errorf("expected step to be skipped with compound expr")
+	}
+	if result.Output["skipped"] != true {
+		t.Errorf("expected skipped=true")
+	}
+}
+
+// TestStepIf_ExprTrueExecutes verifies if with a truthy expr expression executes.
+func TestStepIf_ExprTrueExecutes(t *testing.T) {
+	inner := newMockStep("inner", map[string]any{"ran": true})
+	wrapped := NewSkippableStep(inner, "", `${ enabled == "true" }`)
+
+	pc := NewPipelineContext(map[string]any{"enabled": "true"}, nil)
+	result, err := wrapped.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(inner.execLog) != 1 {
+		t.Errorf("expected inner step to execute when if='${ enabled==\"true\" }'")
+	}
+	if result.Output["ran"] != true {
+		t.Errorf("expected inner step output")
+	}
+}
+
+// TestStepIf_ExprFalseSkips verifies if with a falsy expr expression skips.
+func TestStepIf_ExprFalseSkips(t *testing.T) {
+	inner := newMockStep("inner", map[string]any{"ran": true})
+	wrapped := NewSkippableStep(inner, "", `${ enabled == "true" }`)
+
+	pc := NewPipelineContext(map[string]any{"enabled": "false"}, nil)
+	result, err := wrapped.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(inner.execLog) != 0 {
+		t.Errorf("expected step to be skipped when enabled!=true")
+	}
+	if result.Output["skipped"] != true {
+		t.Errorf("expected skipped=true")
+	}
+}
+
+// TestStepSkipIf_ExprFalsyValues verifies that "false" and "0" produced by expr are falsy.
+func TestStepSkipIf_ExprFalsyValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		skipExpr string
+	}{
+		{"false_literal", `${ false }`},
+		{"zero_comparison", `${ count == 99 }`}, // produces false when count=0
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			inner := newMockStep("inner", map[string]any{"ran": true})
+			wrapped := NewSkippableStep(inner, tc.skipExpr, "")
+			pc := NewPipelineContext(map[string]any{"count": 0}, nil)
+			_, err := wrapped.Execute(context.Background(), pc)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(inner.execLog) != 1 {
+				t.Errorf("expected inner to execute for expr=%q (falsy), got %d executions", tc.skipExpr, len(inner.execLog))
+			}
+		})
+	}
+}

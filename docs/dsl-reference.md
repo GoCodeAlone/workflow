@@ -376,7 +376,24 @@ Pipelines are composable step sequences that execute in response to a trigger. E
 - `config` (map) — step type-specific configuration
 
 ### Template Expressions
-Step `config` values support Go template expressions accessing the pipeline context:
+Step `config` values support two expression syntaxes that may be mixed in the same string.
+
+#### Expr syntax (recommended)
+A simpler, more readable syntax using `${ }`:
+- `${ field_name }` — top-level context field (e.g., request body fields)
+- `${ steps["step-name"]["output_key"] }` — output from a named step (bracket notation supports hyphenated names)
+- `${ trigger["headers"]["X-Request-Id"] }` — request headers
+- `${ trigger["query"]["param"] }` — URL query parameters
+- `${ upper(name) }` — call any template function
+- `${ status == "active" && count > 0 }` — boolean/comparison expressions for skip_if/if guards
+- `${ "Hello " + body["name"] }` — string concatenation
+
+**Available namespaces:** `steps`, `trigger`, `body` (alias for trigger), `meta`, `current`
+
+**Migrate existing templates:** `wfctl expr-migrate --config app.yaml --dry-run`
+
+#### Go template syntax (legacy)
+The original `{{ }}` syntax is still fully supported:
 - `{{ .field_name }}` — top-level context field (e.g., request body fields)
 - `{{ .steps.step_name.output_key }}` — output from a named step
 - `{{ .headers.X-Request-Id }}` — request headers

@@ -186,6 +186,77 @@ func parseDotPath(path string) *TemplateExprPath {
 	return result
 }
 
+// ParseExprAt parses the expr expression from a line up to the cursor position.
+// Returns nil if the cursor is not inside a ${ } block.
+// The returned TemplateExprPath uses the same fields as ParseTemplateExprAt
+// but interprets expr syntax: `steps["name"]["field"]`, `body.field`, etc.
+func ParseExprAt(line string, char int) *TemplateExprPath {
+	if char > len(line) {
+		char = len(line)
+	}
+	truncated := line[:char]
+
+	// Find the last ${ in the truncated string.
+	openIdx := strings.LastIndex(truncated, "${")
+	if openIdx == -1 {
+		return nil
+	}
+
+	// Check there's no } after the last ${ (that would mean the block is closed).
+	afterOpen := truncated[openIdx+1:] // skip the $ char
+	if idx := strings.Index(afterOpen, "}"); idx >= 0 {
+		return nil
+	}
+
+	// Extract text between ${ and cursor.
+	exprText := strings.TrimSpace(truncated[openIdx+2:])
+	raw := exprText
+
+	result := &TemplateExprPath{Raw: raw}
+	if exprText == "" {
+		return result
+	}
+
+	// Pattern: steps["name"]["field"] or steps["name"]
+	if strings.HasPrefix(exprText, "steps") {
+		result.Namespace = "steps"
+		rest := exprText[len("steps"):]
+		// Extract quoted names from bracket notation.
+		quoted := extractQuotedStrings(rest)
+		if len(quoted) > 0 {
+			result.StepName = quoted[0]
+		}
+		if len(quoted) > 1 {
+			result.FieldPrefix = quoted[1]
+		}
+		return result
+	}
+
+	// Pattern: trigger["key"] or trigger.key
+	for _, ns := range []string{"trigger", "body", "meta", "current"} {
+		if strings.HasPrefix(exprText, ns) {
+			result.Namespace = ns
+			rest := exprText[len(ns):]
+			// bracket notation: ["key"]
+			if strings.HasPrefix(rest, "[") {
+				quoted := extractQuotedStrings(rest)
+				if len(quoted) > 0 {
+					result.FieldPrefix = quoted[0]
+				}
+			} else if strings.HasPrefix(rest, ".") {
+				// dot notation: .key
+				parts := strings.Split(rest[1:], ".")
+				result.FieldPrefix = parts[len(parts)-1]
+			}
+			return result
+		}
+	}
+
+	// Pattern: plain identifier (function name or top-level variable).
+	result.FieldPrefix = exprText
+	return result
+}
+
 // extractQuotedStrings extracts all double-quoted strings from s.
 func extractQuotedStrings(s string) []string {
 	var results []string
