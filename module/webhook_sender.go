@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -35,14 +36,19 @@ type WebhookDelivery struct {
 	DeliveredAt *time.Time        `json:"deliveredAt,omitempty"`
 }
 
+// maxDefaultDeadLetters is the default cap for the dead letter queue.
+const maxDefaultDeadLetters = 10000
+
 // WebhookSender sends webhooks with retry logic
 type WebhookSender struct {
-	name       string
-	config     WebhookConfig
-	client     *http.Client
-	deadLetter map[string]*WebhookDelivery
-	mu         sync.RWMutex
-	idCounter  int
+	name           string
+	config         WebhookConfig
+	client         *http.Client
+	deadLetter     map[string]*WebhookDelivery
+	maxDeadLetters int
+	mu             sync.RWMutex
+	idCounter      int
+	stopCh         chan struct{}
 }
 
 // NewWebhookSender creates a new WebhookSender with sensible defaults
@@ -69,7 +75,72 @@ func NewWebhookSender(name string, config WebhookConfig) *WebhookSender {
 		client: &http.Client{
 			Timeout: config.Timeout,
 		},
-		deadLetter: make(map[string]*WebhookDelivery),
+		deadLetter:     make(map[string]*WebhookDelivery),
+		maxDeadLetters: maxDefaultDeadLetters,
+		stopCh:         make(chan struct{}),
+	}
+}
+
+// Start launches the background dead letter cleanup goroutine.
+func (ws *WebhookSender) Start(_ context.Context) error {
+	go ws.cleanupLoop()
+	return nil
+}
+
+// Stop shuts down the background cleanup goroutine.
+func (ws *WebhookSender) Stop(_ context.Context) error {
+	select {
+	case <-ws.stopCh:
+	default:
+		close(ws.stopCh)
+	}
+	return nil
+}
+
+// cleanupLoop periodically purges dead letter entries older than 24 hours.
+func (ws *WebhookSender) cleanupLoop() {
+	defer func() { recover() }() //nolint:errcheck
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			ws.purgeOldDeadLetters(24 * time.Hour)
+		case <-ws.stopCh:
+			return
+		}
+	}
+}
+
+// purgeOldDeadLetters removes dead letter entries older than ttl.
+func (ws *WebhookSender) purgeOldDeadLetters(ttl time.Duration) {
+	cutoff := time.Now().Add(-ttl)
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	for id, d := range ws.deadLetter {
+		if d.CreatedAt.Before(cutoff) {
+			delete(ws.deadLetter, id)
+		}
+	}
+}
+
+// trimDeadLetters drops the oldest entries until the queue is at or below maxDeadLetters.
+// Must be called with ws.mu held for writing.
+func (ws *WebhookSender) trimDeadLetters() {
+	type entry struct {
+		id        string
+		createdAt time.Time
+	}
+	entries := make([]entry, 0, len(ws.deadLetter))
+	for id, d := range ws.deadLetter {
+		entries = append(entries, entry{id, d.CreatedAt})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].createdAt.Before(entries[j].createdAt)
+	})
+	excess := len(ws.deadLetter) - ws.maxDeadLetters
+	for i := 0; i < excess; i++ {
+		delete(ws.deadLetter, entries[i].id)
 	}
 }
 
@@ -112,6 +183,9 @@ func (ws *WebhookSender) Send(ctx context.Context, url string, payload []byte, h
 		delivery.LastError = err.Error()
 		ws.mu.Lock()
 		ws.deadLetter[delivery.ID] = delivery
+		if len(ws.deadLetter) > ws.maxDeadLetters {
+			ws.trimDeadLetters()
+		}
 		ws.mu.Unlock()
 		return delivery, err
 	}

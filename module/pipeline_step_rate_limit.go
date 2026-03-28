@@ -19,8 +19,10 @@ type RateLimitStep struct {
 	keyFrom           string // template for per-client key
 	tmpl              *TemplateEngine
 
-	mu      sync.Mutex
-	buckets map[string]*tokenBucket
+	mu        sync.Mutex
+	buckets   map[string]*tokenBucket
+	stopCh    chan struct{}
+	startOnce sync.Once
 }
 
 // tokenBucket implements a simple token bucket rate limiter.
@@ -97,6 +99,7 @@ func NewRateLimitStepFactory() StepFactory {
 			keyFrom:           keyFrom,
 			tmpl:              NewTemplateEngine(),
 			buckets:           make(map[string]*tokenBucket),
+			stopCh:            make(chan struct{}),
 		}, nil
 	}
 }
@@ -104,9 +107,49 @@ func NewRateLimitStepFactory() StepFactory {
 // Name returns the step name.
 func (s *RateLimitStep) Name() string { return s.name }
 
+// Stop shuts down the background cleanup goroutine. Safe to call multiple times
+// only if the goroutine was started (i.e., Execute was called at least once).
+func (s *RateLimitStep) Stop() {
+	s.startOnce.Do(func() {}) // mark once as done so cleanup won't start if Stop races Execute
+	select {
+	case <-s.stopCh:
+	default:
+		close(s.stopCh)
+	}
+}
+
+// cleanupLoop removes stale token buckets every 5 minutes.
+func (s *RateLimitStep) cleanupLoop() {
+	defer func() { recover() }() //nolint:errcheck
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.evictStaleBuckets(10 * time.Minute)
+		case <-s.stopCh:
+			return
+		}
+	}
+}
+
+// evictStaleBuckets removes buckets that have not been accessed within ttl.
+func (s *RateLimitStep) evictStaleBuckets(ttl time.Duration) {
+	cutoff := time.Now().Add(-ttl)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, b := range s.buckets {
+		if b.lastRefill.Before(cutoff) {
+			delete(s.buckets, k)
+		}
+	}
+}
+
 // Execute checks rate limiting for the resolved key and either allows or
 // rejects the request.
 func (s *RateLimitStep) Execute(_ context.Context, pc *PipelineContext) (*StepResult, error) {
+	s.startOnce.Do(func() { go s.cleanupLoop() })
+
 	// Resolve the rate limit key from template
 	key := s.keyFrom
 	if s.tmpl != nil && key != "global" {

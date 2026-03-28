@@ -2,7 +2,9 @@ package module
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 )
 
 func TestRateLimitStepFactory_Defaults(t *testing.T) {
@@ -171,5 +173,92 @@ func TestTokenBucket_AllowAndRefill(t *testing.T) {
 	}
 	if bucket.allow() {
 		t.Fatal("third request should be rejected (bucket empty)")
+	}
+}
+
+func TestRateLimitStep_BucketEviction(t *testing.T) {
+	factory := NewRateLimitStepFactory()
+	step, err := factory("rl-evict", map[string]any{
+		"requests_per_minute": 60,
+		"burst_size":          5,
+		"key_from":            "{{ .client }}",
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rls := step.(*RateLimitStep)
+	defer rls.Stop()
+
+	ctx := context.Background()
+
+	// Fill buckets with 100 unique keys
+	for i := range 100 {
+		pc := NewPipelineContext(map[string]any{"client": fmt.Sprintf("c%d", i)}, nil)
+		_, _ = rls.Execute(ctx, pc)
+	}
+
+	rls.mu.Lock()
+	count := len(rls.buckets)
+	rls.mu.Unlock()
+	if count != 100 {
+		t.Fatalf("expected 100 buckets, got %d", count)
+	}
+
+	// Backdate all buckets so they appear stale
+	rls.mu.Lock()
+	for _, b := range rls.buckets {
+		b.lastRefill = time.Now().Add(-20 * time.Minute)
+	}
+	rls.mu.Unlock()
+
+	// Run eviction directly (bypasses ticker for deterministic test)
+	rls.evictStaleBuckets(10 * time.Minute)
+
+	rls.mu.Lock()
+	count = len(rls.buckets)
+	rls.mu.Unlock()
+	if count != 0 {
+		t.Fatalf("expected 0 buckets after eviction, got %d", count)
+	}
+}
+
+func TestRateLimitStep_ActiveBucketsNotEvicted(t *testing.T) {
+	factory := NewRateLimitStepFactory()
+	step, err := factory("rl-evict2", map[string]any{
+		"requests_per_minute": 60,
+		"burst_size":          5,
+		"key_from":            "{{ .client }}",
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rls := step.(*RateLimitStep)
+	defer rls.Stop()
+
+	ctx := context.Background()
+
+	for i := range 10 {
+		pc := NewPipelineContext(map[string]any{"client": fmt.Sprintf("active%d", i)}, nil)
+		_, _ = rls.Execute(ctx, pc)
+	}
+
+	// Backdate half the buckets
+	i := 0
+	rls.mu.Lock()
+	for _, b := range rls.buckets {
+		if i < 5 {
+			b.lastRefill = time.Now().Add(-20 * time.Minute)
+		}
+		i++
+	}
+	rls.mu.Unlock()
+
+	rls.evictStaleBuckets(10 * time.Minute)
+
+	rls.mu.Lock()
+	count := len(rls.buckets)
+	rls.mu.Unlock()
+	if count != 5 {
+		t.Fatalf("expected 5 remaining buckets, got %d", count)
 	}
 }

@@ -369,3 +369,82 @@ func TestWebhookSender_DeliveryHasUniqueIDs(t *testing.T) {
 		t.Errorf("expected unique IDs, both got %q", d1.ID)
 	}
 }
+
+func TestWebhookSender_DeadLetterEviction(t *testing.T) {
+	// Server always fails so deliveries go to dead letter queue
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	ws := NewWebhookSender("evict-sender", WebhookConfig{
+		MaxRetries:     0,
+		InitialBackoff: time.Millisecond,
+		Timeout:        time.Second,
+	})
+
+	// Add 5 dead letter entries via failed sends
+	for range 5 {
+		_, _ = ws.Send(context.Background(), server.URL, []byte(`{}`), nil)
+	}
+
+	ws.mu.RLock()
+	count := len(ws.deadLetter)
+	ws.mu.RUnlock()
+	if count != 5 {
+		t.Fatalf("expected 5 dead letter entries, got %d", count)
+	}
+
+	// Backdate entries to simulate age
+	ws.mu.Lock()
+	for _, d := range ws.deadLetter {
+		d.CreatedAt = time.Now().Add(-25 * time.Hour)
+	}
+	ws.mu.Unlock()
+
+	ws.purgeOldDeadLetters(24 * time.Hour)
+
+	ws.mu.RLock()
+	count = len(ws.deadLetter)
+	ws.mu.RUnlock()
+	if count != 0 {
+		t.Fatalf("expected 0 dead letter entries after purge, got %d", count)
+	}
+}
+
+func TestWebhookSender_DeadLetterCap(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	ws := NewWebhookSender("cap-sender", WebhookConfig{
+		MaxRetries:     0,
+		InitialBackoff: time.Millisecond,
+		Timeout:        time.Second,
+	})
+	ws.maxDeadLetters = 3 // low cap for testing
+
+	// Send 5 requests — all fail and go to dead letter queue
+	for range 5 {
+		_, _ = ws.Send(context.Background(), server.URL, []byte(`{}`), nil)
+	}
+
+	ws.mu.RLock()
+	count := len(ws.deadLetter)
+	ws.mu.RUnlock()
+	if count > ws.maxDeadLetters {
+		t.Fatalf("dead letter queue exceeded cap: got %d, want <= %d", count, ws.maxDeadLetters)
+	}
+}
+
+func TestWebhookSender_StartStop(t *testing.T) {
+	ws := NewWebhookSender("lifecycle-sender", WebhookConfig{})
+	ctx := context.Background()
+	if err := ws.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	if err := ws.Stop(ctx); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+}

@@ -71,6 +71,7 @@ type gatewayRateLimiter struct {
 	buckets map[string]*tokenBucket
 	rpm     int
 	burst   int
+	stopCh  chan struct{}
 }
 
 func newGatewayRateLimiter(rpm, burst int) *gatewayRateLimiter {
@@ -78,6 +79,7 @@ func newGatewayRateLimiter(rpm, burst int) *gatewayRateLimiter {
 		buckets: make(map[string]*tokenBucket),
 		rpm:     rpm,
 		burst:   burst,
+		stopCh:  make(chan struct{}),
 	}
 }
 
@@ -92,6 +94,44 @@ func (rl *gatewayRateLimiter) allow(clientIP string) bool {
 		rl.buckets[clientIP] = bucket
 	}
 	return bucket.allow()
+}
+
+// startCleanup launches a background goroutine that evicts stale buckets every 5 minutes.
+func (rl *gatewayRateLimiter) startCleanup() {
+	go func() {
+		defer func() { recover() }() //nolint:errcheck
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				rl.evictStaleBuckets(10 * time.Minute)
+			case <-rl.stopCh:
+				return
+			}
+		}
+	}()
+}
+
+// stop shuts down the background cleanup goroutine.
+func (rl *gatewayRateLimiter) stop() {
+	select {
+	case <-rl.stopCh:
+	default:
+		close(rl.stopCh)
+	}
+}
+
+// evictStaleBuckets removes buckets not accessed within ttl.
+func (rl *gatewayRateLimiter) evictStaleBuckets(ttl time.Duration) {
+	cutoff := time.Now().Add(-ttl)
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	for k, b := range rl.buckets {
+		if b.lastRefill.Before(cutoff) {
+			delete(rl.buckets, k)
+		}
+	}
 }
 
 // APIGatewayOption is a functional option for configuring an APIGateway at construction time.
@@ -210,11 +250,27 @@ func (g *APIGateway) Name() string { return g.name }
 // Init initializes the module.
 func (g *APIGateway) Init(_ modular.Application) error { return nil }
 
-// Start is a no-op.
-func (g *APIGateway) Start(_ context.Context) error { return nil }
+// Start launches background cleanup goroutines for all rate limiters.
+func (g *APIGateway) Start(_ context.Context) error {
+	if g.instanceRateLimiter != nil {
+		g.instanceRateLimiter.startCleanup()
+	}
+	for _, rl := range g.rateLimiters {
+		rl.startCleanup()
+	}
+	return nil
+}
 
-// Stop is a no-op.
-func (g *APIGateway) Stop(_ context.Context) error { return nil }
+// Stop shuts down background cleanup goroutines for all rate limiters.
+func (g *APIGateway) Stop(_ context.Context) error {
+	if g.instanceRateLimiter != nil {
+		g.instanceRateLimiter.stop()
+	}
+	for _, rl := range g.rateLimiters {
+		rl.stop()
+	}
+	return nil
+}
 
 // ProvidesServices returns the services provided by this module.
 func (g *APIGateway) ProvidesServices() []modular.ServiceProvider {

@@ -1115,3 +1115,41 @@ func TestHTTPCallStep_ElapsedMS(t *testing.T) {
 		t.Errorf("expected elapsed_ms >= 0, got %d", elapsedMS)
 	}
 }
+
+func TestOAuthTokenCache_ExpiredEntryEviction(t *testing.T) {
+	cache := &oauthTokenCache{
+		entries: make(map[string]*oauthCacheEntry),
+		stopCh:  make(chan struct{}),
+	}
+
+	// Add entries: some expired, some valid
+	expiredEntry := &oauthCacheEntry{}
+	expiredEntry.set("expired-token", "", 1*time.Second)
+	expiredEntry.mu.Lock()
+	expiredEntry.expiry = time.Now().Add(-10 * time.Minute) // force expired
+	expiredEntry.mu.Unlock()
+
+	validEntry := &oauthCacheEntry{}
+	validEntry.set("valid-token", "", 1*time.Hour)
+
+	cache.mu.Lock()
+	cache.entries["expired-key"] = expiredEntry
+	cache.entries["valid-key"] = validEntry
+	cache.mu.Unlock()
+
+	cache.evictExpired()
+
+	cache.mu.RLock()
+	_, expiredStillPresent := cache.entries["expired-key"]
+	_, validStillPresent := cache.entries["valid-key"]
+	cache.mu.RUnlock()
+
+	if expiredStillPresent {
+		t.Error("expired entry should have been evicted")
+	}
+	if !validStillPresent {
+		t.Error("valid entry should not have been evicted")
+	}
+
+	close(cache.stopCh)
+}

@@ -30,20 +30,67 @@ type DistributedLock interface {
 // InMemoryLock implements DistributedLock for testing and single-server deployments.
 // Uses sync.Mutex per key with a map.
 type InMemoryLock struct {
-	mu    sync.Mutex
-	locks map[string]*lockEntry
+	mu     sync.Mutex
+	locks  map[string]*lockEntry
+	stopCh chan struct{}
 }
 
 type lockEntry struct {
-	mu      sync.Mutex
-	waiters chan struct{} // signals when the lock is released
-	held    bool
+	mu       sync.Mutex
+	waiters  chan struct{} // signals when the lock is released
+	held     bool
+	lastUsed time.Time // protected by InMemoryLock.mu
 }
 
 // NewInMemoryLock creates a new in-memory distributed lock.
 func NewInMemoryLock() *InMemoryLock {
 	return &InMemoryLock{
-		locks: make(map[string]*lockEntry),
+		locks:  make(map[string]*lockEntry),
+		stopCh: make(chan struct{}),
+	}
+}
+
+// Start launches the background goroutine that evicts stale lock entries.
+func (l *InMemoryLock) Start() {
+	go l.cleanupLoop()
+}
+
+// Stop shuts down the background cleanup goroutine.
+func (l *InMemoryLock) Stop() {
+	select {
+	case <-l.stopCh:
+	default:
+		close(l.stopCh)
+	}
+}
+
+// cleanupLoop evicts lock entries not used for 30 minutes, checking every 10 minutes.
+func (l *InMemoryLock) cleanupLoop() {
+	defer func() { recover() }() //nolint:errcheck
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			l.evictStaleLocks(30 * time.Minute)
+		case <-l.stopCh:
+			return
+		}
+	}
+}
+
+// evictStaleLocks removes idle lock entries that have not been used within ttl.
+func (l *InMemoryLock) evictStaleLocks(ttl time.Duration) {
+	cutoff := time.Now().Add(-ttl)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for key, entry := range l.locks {
+		entry.mu.Lock()
+		held := entry.held
+		entry.mu.Unlock()
+		if !held && entry.lastUsed.Before(cutoff) {
+			delete(l.locks, key)
+		}
 	}
 }
 
@@ -55,9 +102,12 @@ func (l *InMemoryLock) getOrCreateEntry(key string) *lockEntry {
 	entry, ok := l.locks[key]
 	if !ok {
 		entry = &lockEntry{
-			waiters: make(chan struct{}, 1),
+			waiters:  make(chan struct{}, 1),
+			lastUsed: time.Now(),
 		}
 		l.locks[key] = entry
+	} else {
+		entry.lastUsed = time.Now()
 	}
 	return entry
 }

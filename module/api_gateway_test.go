@@ -1,6 +1,8 @@
 package module
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -495,5 +497,62 @@ func TestAWSAPIGateway_SyncRoutesRequiresAPIID(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error when api_id is empty")
+	}
+}
+
+func TestGatewayRateLimiter_BucketEviction(t *testing.T) {
+	rl := newGatewayRateLimiter(60, 5)
+
+	// Fill with unique client IPs
+	for i := range 100 {
+		rl.allow(fmt.Sprintf("192.168.1.%d", i%256))
+	}
+
+	rl.mu.Lock()
+	count := len(rl.buckets)
+	rl.mu.Unlock()
+	if count == 0 {
+		t.Fatal("expected buckets to be populated")
+	}
+
+	// Backdate all buckets
+	rl.mu.Lock()
+	for _, b := range rl.buckets {
+		b.lastRefill = time.Now().Add(-20 * time.Minute)
+	}
+	rl.mu.Unlock()
+
+	rl.evictStaleBuckets(10 * time.Minute)
+
+	rl.mu.Lock()
+	count = len(rl.buckets)
+	rl.mu.Unlock()
+	if count != 0 {
+		t.Fatalf("expected 0 buckets after eviction, got %d", count)
+	}
+}
+
+func TestAPIGateway_StartStopRateLimiterCleanup(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	gw := NewAPIGateway("gw-lifecycle", WithRateLimit(&RateLimitConfig{
+		RequestsPerMinute: 60,
+		BurstSize:         10,
+	}))
+	if err := gw.SetRoutes([]GatewayRoute{
+		{PathPrefix: "/api", Backend: backend.URL, RateLimit: &RateLimitConfig{RequestsPerMinute: 30, BurstSize: 5}},
+	}); err != nil {
+		t.Fatalf("SetRoutes failed: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := gw.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	if err := gw.Stop(ctx); err != nil {
+		t.Fatalf("Stop failed: %v", err)
 	}
 }

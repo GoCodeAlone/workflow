@@ -23,16 +23,22 @@ import (
 // isolated entry.
 var globalOAuthCache = &oauthTokenCache{ //nolint:gochecknoglobals // intentional process-wide cache
 	entries: make(map[string]*oauthCacheEntry),
+	stopCh:  make(chan struct{}),
 }
 
 // oauthTokenCache is a registry of per-credential token cache entries.
 type oauthTokenCache struct {
-	mu      sync.RWMutex
-	entries map[string]*oauthCacheEntry
+	mu        sync.RWMutex
+	entries   map[string]*oauthCacheEntry
+	startOnce sync.Once
+	stopCh    chan struct{}
 }
 
 // getOrCreate returns the existing cache entry for key, or creates and stores a new one.
+// On first call it starts a background goroutine that evicts expired entries every 5 minutes.
 func (c *oauthTokenCache) getOrCreate(key string) *oauthCacheEntry {
+	c.startOnce.Do(func() { go c.cleanupLoop() })
+
 	c.mu.RLock()
 	entry, ok := c.entries[key]
 	c.mu.RUnlock()
@@ -47,6 +53,36 @@ func (c *oauthTokenCache) getOrCreate(key string) *oauthCacheEntry {
 	entry = &oauthCacheEntry{}
 	c.entries[key] = entry
 	return entry
+}
+
+// cleanupLoop evicts expired entries from the cache every 5 minutes.
+func (c *oauthTokenCache) cleanupLoop() {
+	defer func() { recover() }() //nolint:errcheck
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			c.evictExpired()
+		case <-c.stopCh:
+			return
+		}
+	}
+}
+
+// evictExpired removes entries whose tokens have expired.
+func (c *oauthTokenCache) evictExpired() {
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key, entry := range c.entries {
+		entry.mu.Lock()
+		expired := entry.accessToken == "" || now.After(entry.expiry)
+		entry.mu.Unlock()
+		if expired {
+			delete(c.entries, key)
+		}
+	}
 }
 
 // oauthCacheEntry holds a cached OAuth2 access token with expiry. A singleflight.Group is

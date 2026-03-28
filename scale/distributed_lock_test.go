@@ -2,6 +2,7 @@ package scale
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -444,4 +445,77 @@ func TestDistributedLockInterface(t *testing.T) {
 	var _ DistributedLock = (*InMemoryLock)(nil)
 	var _ DistributedLock = (*PGAdvisoryLock)(nil)
 	var _ DistributedLock = (*RedisLock)(nil)
+}
+
+func TestInMemoryLock_StaleEntryEviction(t *testing.T) {
+	lock := NewInMemoryLock()
+
+	ctx := context.Background()
+
+	// Acquire and release 50 distinct keys to populate the map
+	for i := range 50 {
+		key := fmt.Sprintf("lock-key-%d", i)
+		release, err := lock.Acquire(ctx, key, 0)
+		if err != nil {
+			t.Fatalf("Acquire(%s) failed: %v", key, err)
+		}
+		release()
+	}
+
+	lock.mu.Lock()
+	count := len(lock.locks)
+	lock.mu.Unlock()
+	if count != 50 {
+		t.Fatalf("expected 50 lock entries, got %d", count)
+	}
+
+	// Backdate all entries so they appear stale
+	lock.mu.Lock()
+	for _, entry := range lock.locks {
+		entry.lastUsed = time.Now().Add(-60 * time.Minute)
+	}
+	lock.mu.Unlock()
+
+	lock.evictStaleLocks(30 * time.Minute)
+
+	lock.mu.Lock()
+	count = len(lock.locks)
+	lock.mu.Unlock()
+	if count != 0 {
+		t.Fatalf("expected 0 lock entries after eviction, got %d", count)
+	}
+}
+
+func TestInMemoryLock_HeldEntryNotEvicted(t *testing.T) {
+	lock := NewInMemoryLock()
+	ctx := context.Background()
+
+	// Acquire and hold a lock (don't release)
+	release, err := lock.Acquire(ctx, "held-key", 0)
+	if err != nil {
+		t.Fatalf("Acquire failed: %v", err)
+	}
+	defer release()
+
+	// Backdate it
+	lock.mu.Lock()
+	if entry, ok := lock.locks["held-key"]; ok {
+		entry.lastUsed = time.Now().Add(-60 * time.Minute)
+	}
+	lock.mu.Unlock()
+
+	lock.evictStaleLocks(30 * time.Minute)
+
+	lock.mu.Lock()
+	_, stillPresent := lock.locks["held-key"]
+	lock.mu.Unlock()
+	if !stillPresent {
+		t.Error("held lock entry should not be evicted")
+	}
+}
+
+func TestInMemoryLock_StartStop(t *testing.T) {
+	lock := NewInMemoryLock()
+	lock.Start()
+	lock.Stop()
 }
