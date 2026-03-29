@@ -67,6 +67,13 @@ graph TD
     wfctl --> mcp
     wfctl --> editor-schemas["editor-schemas"]
     wfctl --> dsl-reference["dsl-reference"]
+    wfctl --> ports
+    wfctl --> security
+
+    ports --> ports-list["list"]
+
+    security --> security-audit["audit"]
+    security --> security-gennetpol["generate-network-policies"]
 
     infra --> infra-plan["plan"]
     infra --> infra-apply["apply"]
@@ -144,6 +151,7 @@ graph TD
 | **UI Generation** | `ui scaffold`, `build-ui` |
 | **Database Migrations** | `migrate status/diff/apply` |
 | **Git Integration** | `git connect`, `git push` |
+| **Platform Inspection** | `ports list`, `security audit`, `security generate-network-policies` |
 | **Utilities** | `snippets`, `manifest`, `pipeline`, `update`, `mcp` |
 
 ---
@@ -1551,6 +1559,101 @@ wfctl modernize --apply --plugin-dir data/plugins config.yaml
 # List all available rules including those from plugins
 wfctl modernize --plugin-dir data/plugins --list-rules
 ```
+
+---
+
+### `ports`
+
+Inspect port usage declared in a workflow config.
+
+```
+wfctl ports list [options] [config.yaml]
+```
+
+Scans the parsed config for all port-bearing sections (top-level `modules`, `services[*].expose`, and `networking.ingress`) and prints a table with service, module, port, protocol, and exposure classification (`public` / `internal`).
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | _(auto-detect)_ | Config file path |
+
+**Examples:**
+
+```bash
+wfctl ports list
+wfctl ports list --config config/app.yaml
+```
+
+**Sample output:**
+
+```
+SERVICE   MODULE       PORT  PROTOCOL  EXPOSURE
+-------   ------       ----  --------  --------
+(default) api-server   8080  http      public
+api       (expose)     8080  http      internal
+api       (ingress)    443   https     public
+worker    (expose)     9090  grpc      internal
+```
+
+---
+
+### `security`
+
+Security audit and policy generation for workflow configs.
+
+#### `wfctl security audit`
+
+Scan a workflow config and report security issues.
+
+```
+wfctl security audit [options] [config.yaml]
+```
+
+Checks TLS configuration, network isolation policy, ingress TLS termination, auth modules, runtime hardening settings, and scanning configuration. Reports each finding with a severity (`HIGH`, `WARN`, `INFO`). Exits with a non-zero status if any `HIGH` findings are present.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | _(auto-detect)_ | Config file path |
+
+**Examples:**
+
+```bash
+wfctl security audit
+wfctl security audit --config config/app.yaml
+```
+
+**Sample output:**
+
+```
+SEVERITY  CATEGORY  FINDING
+--------  --------  -------
+HIGH      TLS       security.tls.external is not enabled; external traffic is unencrypted
+WARN      Network   security.network.defaultPolicy is "allow"; recommend 'deny' for least-privilege
+INFO      Scanning  security.scanning.containerScan is disabled
+```
+
+#### `wfctl security generate-network-policies`
+
+Generate Kubernetes `NetworkPolicy` YAML from `networking.policies` and `mesh.routes` config.
+
+```
+wfctl security generate-network-policies [options] [config.yaml]
+```
+
+For each service, generates a `NetworkPolicy` that allows ingress only from the explicitly declared sources. When `security.network.defaultPolicy: deny` is set, `Egress` is also included in the policy types.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | _(auto-detect)_ | Config file path |
+| `--output` | `k8s` | Output directory for generated YAML files |
+
+**Examples:**
+
+```bash
+wfctl security generate-network-policies --output k8s/
+wfctl security generate-network-policies --config config/app.yaml --output deploy/k8s/
+```
+
+**Generated file per service:** `k8s/netpol-<service>.yaml`
 
 ---
 

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`services:` config section** (`config/services_config.go`): new top-level YAML key for multi-service applications. Each service declares a binary path, scaling policy (replicas/min/max/metric/target), exposed ports, per-service modules/pipelines, and plugins.
+- **`mesh:` config section** (`config/services_config.go`): inter-service communication config. Declares transport (nats/http/grpc), service discovery, NATS connection details, and explicit service-to-service routes with via/subject/endpoint.
+- **`networking:` config section** (`config/networking_config.go`): network exposure and policy config. Declares ingress entries (service, port, TLS termination), inter-service network policies, and DNS records.
+- **`security:` config section** (`config/security_config.go`): application security policies. Fields: `tls` (internal/external/provider/minVersion), `network` (defaultPolicy), `identity` (provider/perService), `runtime` (readOnlyFilesystem/noNewPrivileges/runAsNonRoot/drop+addCapabilities), `scanning` (containerScan/dependencyScan/sast).
+- **`wfctl ports list`** (`cmd/wfctl/ports.go`): scans config modules, `services[*].expose`, and `networking.ingress` for port bindings; prints a table with service, module, port, protocol, and exposure classification (public/internal).
+- **`wfctl security audit`** (`cmd/wfctl/security_cmd.go`): reports TLS, network policy, ingress TLS, auth module, runtime hardening, and scanning issues with severity HIGH/WARN/INFO. Exits non-zero on any HIGH finding.
+- **`wfctl security generate-network-policies`** (`cmd/wfctl/security_cmd.go`): generates Kubernetes `NetworkPolicy` YAML from `networking.policies` + `mesh.routes`; outputs one file per service to `--output` directory (default: `k8s/`).
+- **Validation** (`config/services_config_validate.go`, `config/networking_config_validate.go`): `ValidateServices` (scaling constraints, port ranges), `ValidateMeshRoutes` (from/to reference known services, via transport valid), `ValidateNetworking` (ingress service/port exists and is exposed, TLS provider valid, policy from required), `ValidateSecurity` (TLS provider valid), `CrossValidate` (warns on exposed ports with no ingress route). All wired into `wfctl validate`.
+
 - **`ci:` config section** (`config/ci_config.go`): new top-level YAML key declaring build (binaries/containers/assets), test (unit/integration/e2e with ephemeral deps), deploy (per-environment with strategy/healthCheck/approval), and infra phases. Includes `Validate()` method enforcing required fields.
 - **`environments:` config section** (`config/environments_config.go`): named deployment environments with provider, region, env vars, secrets provider, and exposure config (Tailscale Funnel, Cloudflare Tunnel, port-forward).
 - **`secrets:` config section** (`config/secrets_config.go`): provider, rotation policy (with `Strategy` field for `dual-credential`/`graceful`/`immediate`), and declared secret entries with per-secret rotation overrides.
@@ -19,8 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
-- `docs/dsl-reference.md` + `cmd/wfctl/dsl-reference-embedded.md`: added `ci:`, `environments:`, and `secrets:` sections with field reference and examples.
-- `docs/WFCTL.md`: added `ci run`, `ci init`, and `secrets` command documentation.
+- `docs/dsl-reference.md` + `cmd/wfctl/dsl-reference-embedded.md`: added `services:`, `mesh:`, `networking:`, and `security:` sections with full field reference and examples; also added `ci:`, `environments:`, and `secrets:` sections.
+- `docs/WFCTL.md`: added `ports list`, `security audit`, and `security generate-network-policies` command documentation; updated command tree and category table. Also added `ci run`, `ci init`, and `secrets` documentation.
 
 ---
 

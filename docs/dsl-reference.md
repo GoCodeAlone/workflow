@@ -933,3 +933,246 @@ secrets:
 - `environments[*].secretsProvider` overrides the top-level provider per environment
 - `environments[*].secretsPrefix` is prepended to secret names when resolving in that environment
 - `ci.deploy.environments` can reference secrets from the `secrets:` section
+
+---
+
+<!-- section: services -->
+## Services
+
+The optional `services:` section defines a multi-service application where each key is a service name. Each service can have its own binary, scaling policy, exposed ports, modules, pipelines, and plugins.
+
+### Fields
+
+- `services.<name>.description` (string) — human-readable description of this service
+- `services.<name>.binary` (string) — Go package path to compile for this service (e.g., `./cmd/api`)
+- `services.<name>.scaling` (object) — scaling policy:
+  - `replicas` (int) — desired replica count
+  - `min` (int) — minimum replicas for autoscaling
+  - `max` (int) — maximum replicas for autoscaling
+  - `metric` (string) — autoscaling metric (`cpu`, `memory`, `rps`)
+  - `target` (int) — target metric value (e.g., `70` for 70% CPU)
+- `services.<name>.expose` (array) — ports this service exposes. Each entry:
+  - `port` (int, required) — port number
+  - `protocol` (string) — protocol (`http`, `grpc`, `tcp`; default `tcp`)
+- `services.<name>.modules` (array) — per-service module config (same format as top-level `modules`)
+- `services.<name>.pipelines` (map) — per-service pipeline config
+- `services.<name>.workflows` (map) — per-service workflow config
+- `services.<name>.plugins` (string[]) — plugin names to load for this service
+
+### Example
+
+```yaml
+services:
+  api:
+    description: "Public REST API"
+    binary: ./cmd/api
+    scaling:
+      replicas: 2
+      min: 1
+      max: 10
+      metric: cpu
+      target: 70
+    expose:
+      - port: 8080
+        protocol: http
+    plugins:
+      - workflow-plugin-auth
+
+  worker:
+    description: "Background job processor"
+    binary: ./cmd/worker
+    scaling:
+      replicas: 1
+      min: 1
+      max: 5
+    expose:
+      - port: 9090
+        protocol: grpc
+```
+
+### Relationship to Other Sections
+
+- `networking.ingress` entries reference service names declared here
+- `mesh.routes` `from`/`to` fields reference service names
+- `wfctl ports list` scans `services[*].expose` for port bindings
+- `wfctl validate` checks scaling constraints (min ≤ max) and port ranges
+
+---
+
+<!-- section: mesh -->
+## Mesh
+
+The optional `mesh:` section configures inter-service communication for multi-service applications.
+
+### Fields
+
+- `mesh.transport` (string) — default transport for service-to-service calls (`nats`, `http`, `grpc`)
+- `mesh.discovery` (string) — service discovery mechanism (`dns`, `k8s`, `consul`)
+- `mesh.nats` (object) — NATS-specific configuration:
+  - `url` (string, required) — NATS server URL (e.g., `nats://nats:4222`)
+  - `clusterId` (string) — NATS cluster ID for streaming
+- `mesh.routes` (array) — inter-service communication declarations. Each route:
+  - `from` (string, required) — source service name
+  - `to` (string, required) — destination service name
+  - `via` (string, required) — transport (`nats`, `http`, `grpc`)
+  - `subject` (string) — NATS subject (when `via: nats`)
+  - `endpoint` (string) — HTTP endpoint path (when `via: http`)
+
+### Example
+
+```yaml
+mesh:
+  transport: nats
+  discovery: dns
+  nats:
+    url: nats://nats:4222
+    clusterId: my-cluster
+  routes:
+    - from: api
+      to: worker
+      via: nats
+      subject: tasks.process
+    - from: api
+      to: worker
+      via: http
+      endpoint: /internal/jobs
+```
+
+### Relationship to Other Sections
+
+- `mesh.routes` `from`/`to` must reference services declared in `services:`
+- `wfctl security generate-network-policies` uses `mesh.routes` to generate Kubernetes `NetworkPolicy` YAML
+- `wfctl validate` warns when `from`/`to` reference unknown services
+
+---
+
+<!-- section: networking -->
+## Networking
+
+The optional `networking:` section configures how services are exposed externally, what inter-service traffic is permitted, and DNS records.
+
+### Fields
+
+- `networking.ingress` (array) — externally-accessible endpoints. Each entry:
+  - `service` (string) — service name from `services:` (optional for single-service apps)
+  - `port` (int, required) — internal service port
+  - `externalPort` (int) — external-facing port (default: same as `port`)
+  - `protocol` (string) — protocol (`http`, `https`, `grpc`, `tcp`)
+  - `path` (string) — URL path prefix for HTTP routing
+  - `tls` (object) — TLS termination config:
+    - `provider` (string) — TLS certificate provider (`letsencrypt`, `manual`, `acm`, `cloudflare`)
+    - `domain` (string) — domain name for certificate provisioning
+    - `minVersion` (string) — minimum TLS version (`1.2`, `1.3`)
+- `networking.policies` (array) — allowed inter-service communication (used for `NetworkPolicy` generation). Each entry:
+  - `from` (string, required) — source service name
+  - `to` (string[], required) — list of destination service names
+- `networking.dns` (object) — DNS management:
+  - `provider` (string) — DNS provider (`cloudflare`, `route53`, `gcp`)
+  - `zone` (string) — DNS zone name
+  - `records` (array) — DNS records. Each record:
+    - `name` (string) — record name
+    - `type` (string) — record type (`A`, `CNAME`, `TXT`)
+    - `target` (string) — record value
+
+### Example
+
+```yaml
+networking:
+  ingress:
+    - service: api
+      port: 8080
+      externalPort: 443
+      protocol: https
+      path: /
+      tls:
+        provider: letsencrypt
+        domain: api.example.com
+        minVersion: "1.2"
+  policies:
+    - from: api
+      to: [worker, db]
+    - from: worker
+      to: [db]
+  dns:
+    provider: cloudflare
+    zone: example.com
+    records:
+      - name: api
+        type: CNAME
+        target: lb.example.com
+```
+
+### Relationship to Other Sections
+
+- `networking.ingress[*].service` must reference a service from `services:` that exposes the given port
+- `networking.policies` are used by `wfctl security generate-network-policies` to generate Kubernetes `NetworkPolicy` YAML
+- `wfctl ports list` includes ingress entries as `public` exposure
+- `wfctl validate` checks that ingress services exist, ports are actually exposed, and TLS providers are valid
+
+---
+
+<!-- section: security -->
+## Security
+
+The optional `security:` section declares security policies for the application, including TLS requirements, network isolation, service identity, container runtime hardening, and automated scanning configuration.
+
+### Fields
+
+- `security.tls` (object) — TLS requirements:
+  - `internal` (bool) — require TLS for service-to-service traffic
+  - `external` (bool) — require TLS for external traffic
+  - `provider` (string) — certificate provider (`letsencrypt`, `manual`, `acm`, `cloudflare`)
+  - `minVersion` (string) — minimum TLS version (`1.2`, `1.3`)
+- `security.network` (object) — network isolation:
+  - `defaultPolicy` (string) — default network policy (`deny`, `allow`)
+- `security.identity` (object) — service identity management:
+  - `provider` (string) — identity provider (`spiffe`, `istio`, `linkerd`)
+  - `perService` (bool) — issue a unique identity per service
+- `security.runtime` (object) — container runtime security:
+  - `readOnlyFilesystem` (bool) — mount container filesystem read-only
+  - `noNewPrivileges` (bool) — prevent privilege escalation
+  - `runAsNonRoot` (bool) — require non-root user
+  - `dropCapabilities` (string[]) — Linux capabilities to drop (e.g., `[ALL]`)
+  - `addCapabilities` (string[]) — Linux capabilities to add (e.g., `[NET_BIND_SERVICE]`)
+- `security.scanning` (object) — automated security scanning:
+  - `containerScan` (bool) — scan container images for vulnerabilities
+  - `dependencyScan` (bool) — scan Go/npm dependencies for CVEs
+  - `sast` (bool) — enable static application security testing
+
+### Example
+
+```yaml
+security:
+  tls:
+    internal: true
+    external: true
+    provider: letsencrypt
+    minVersion: "1.3"
+  network:
+    defaultPolicy: deny
+  identity:
+    provider: spiffe
+    perService: true
+  runtime:
+    readOnlyFilesystem: true
+    noNewPrivileges: true
+    runAsNonRoot: true
+    dropCapabilities: [ALL]
+    addCapabilities: [NET_BIND_SERVICE]
+  scanning:
+    containerScan: true
+    dependencyScan: true
+    sast: false
+```
+
+### CLI Commands
+
+- `wfctl security audit [--config app.yaml]` — scan config for TLS, network, auth, and runtime issues
+- `wfctl security generate-network-policies [--output k8s/]` — generate Kubernetes `NetworkPolicy` YAML
+
+### Relationship to Other Sections
+
+- `security.tls.provider` must be one of `letsencrypt`, `manual`, `acm`, `cloudflare`
+- `security.network.defaultPolicy: deny` causes `wfctl security generate-network-policies` to include `Egress` in policy types
+- `networking.ingress` entries without a `tls` block are flagged as `HIGH` by `wfctl security audit`
+- `wfctl validate` checks `security.tls.provider` for valid values
