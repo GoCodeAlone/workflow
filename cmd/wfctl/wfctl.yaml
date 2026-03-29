@@ -65,6 +65,10 @@ workflows:
         description: "Parse docs/dsl-reference.md and output structured JSON for IDE tooling"
       - name: test
         description: "Run *_test.yaml integration tests against workflow configs"
+      - name: ports
+        description: "Inspect port usage declared in a workflow config (list)"
+      - name: security
+        description: "Security tooling (audit: scan config for issues, generate-network-policies: output k8s NetworkPolicy YAML)"
 
 # Each command is expressed as a workflow pipeline triggered by the CLI.
 # The pipeline delegates to the registered Go implementation via step.cli_invoke,
@@ -412,3 +416,25 @@ pipelines:
         type: step.cli_invoke
         config:
           command: test
+
+  cmd-ports:
+    trigger:
+      type: cli
+      config:
+        command: ports
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: ports
+
+  cmd-security:
+    trigger:
+      type: cli
+      config:
+        command: security
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: security
