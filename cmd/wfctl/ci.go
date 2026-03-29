@@ -19,6 +19,10 @@ func runCI(args []string) error {
 	switch args[0] {
 	case "generate":
 		return runCIGenerate(args[1:])
+	case "run":
+		return runCIRun(args[1:])
+	case "init":
+		return runCIInit(args[1:])
 	default:
 		return ciUsage()
 	}
@@ -31,6 +35,8 @@ Generate CI/CD pipeline configuration files.
 
 Actions:
   generate  Generate CI config for a supported platform
+  run       Run CI phases (build, test, deploy) from workflow config
+  init      Generate bootstrap CI YAML for GitHub Actions or GitLab CI
 
 Options:
   --platform <name>   CI platform: github_actions, gitlab_ci (required)
