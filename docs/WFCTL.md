@@ -1216,6 +1216,139 @@ Generated configuration includes:
 
 ---
 
+### `ci run`
+
+Execute CI phases (build, test, deploy) defined in the `ci:` section of a workflow config.
+
+```
+wfctl ci run [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `app.yaml` | Workflow config file |
+| `--phase` | `build,test` | Comma-separated phases: `build`, `test`, `deploy` |
+| `--env` | `` | Target environment (required for `deploy` phase) |
+| `--verbose` | `false` | Show detailed command output |
+
+**Examples:**
+
+```bash
+# Run build and test phases
+wfctl ci run --phase build,test
+
+# Deploy to staging
+wfctl ci run --phase deploy --env staging
+
+# Full pipeline
+wfctl ci run --phase build,test,deploy --env production
+```
+
+**Build phase** compiles Go binaries (cross-platform), builds container images, and runs asset build commands.
+
+**Test phase** runs unit, integration, and e2e test phases. For integration/e2e phases with `needs:` declared, ephemeral Docker containers (postgres, redis, mysql) are started before tests and removed after.
+
+**Deploy phase** is a placeholder in Tier 1 — full provider implementations (k8s, aws-ecs, etc.) ship in Tier 2.
+
+---
+
+### `ci init`
+
+Generate a bootstrap CI YAML file for GitHub Actions or GitLab CI. The generated file calls `wfctl ci run` to execute build/test phases, and emits one deploy job per environment declared in `ci.deploy.environments`.
+
+```
+wfctl ci init [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--platform` | `github-actions` | CI platform: `github-actions`, `gitlab-ci` |
+| `--config` | `app.yaml` | Workflow config file |
+| `--output` | platform default | Output file path |
+
+**Examples:**
+
+```bash
+wfctl ci init --platform github-actions
+wfctl ci init --platform gitlab-ci
+wfctl ci init --platform github-actions --config my-app.yaml
+```
+
+---
+
+### `secrets`
+
+Manage application secret lifecycle. Reads the `secrets:` section of a workflow config.
+
+```
+wfctl secrets <action> [options]
+```
+
+#### `secrets detect`
+
+Scan a workflow config for secret-like field values (field names matching `token`, `password`, `apiKey`, `dsn`, etc.) and env var references.
+
+```bash
+wfctl secrets detect --config app.yaml
+```
+
+#### `secrets set`
+
+Set a secret value in the configured provider.
+
+```bash
+wfctl secrets set DATABASE_URL --value "postgres://..."
+wfctl secrets set TLS_CERT --from-file ./certs/server.crt
+```
+
+| Flag | Description |
+|------|-------------|
+| `--value` | Secret value to set |
+| `--from-file` | Read secret value from file (for certificates/keys) |
+| `--config` | Workflow config file (default: `app.yaml`) |
+
+#### `secrets list`
+
+List all declared secrets and their set/unset status.
+
+```bash
+wfctl secrets list --config app.yaml
+```
+
+#### `secrets validate`
+
+Verify that all secrets declared in `secrets.entries` are set in the provider. Exits non-zero if any are missing.
+
+```bash
+wfctl secrets validate --config app.yaml
+```
+
+#### `secrets init`
+
+Initialize the secrets provider configuration.
+
+```bash
+wfctl secrets init --provider env --env staging
+```
+
+#### `secrets rotate`
+
+Trigger rotation of a named secret (logs strategy and interval; full provider implementations in Tier 2).
+
+```bash
+wfctl secrets rotate DATABASE_URL --env production
+```
+
+#### `secrets sync`
+
+Copy secret structure from one environment to another (Tier 2 implementation).
+
+```bash
+wfctl secrets sync --from staging --to production
+```
+
+---
+
 ### `git connect`
 
 Connect a workflow project to a GitHub repository. Writes a `.wfctl.yaml` project file and optionally initializes the git repo.

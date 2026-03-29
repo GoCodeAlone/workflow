@@ -145,6 +145,13 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints b
 		return err
 	}
 
+	// Validate ci:, environments:, and secrets: sections when present.
+	if cfg.CI != nil {
+		if err := cfg.CI.Validate(); err != nil {
+			return fmt.Errorf("ci section: %w", err)
+		}
+	}
+
 	fmt.Printf("  PASS %s (%d modules, %d workflows, %d triggers)\n",
 		cfgPath, len(cfg.Modules), len(cfg.Workflows), len(cfg.Triggers))
 	return nil

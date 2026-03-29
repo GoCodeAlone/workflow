@@ -715,3 +715,221 @@ sidecars:
 - `platform.context` module type references the `platform` section org/environment values
 - Sidecars are deployed alongside the application container but are not addressable as workflow modules
 - `infrastructure` resources are provisioned by IaC plugins before application start
+
+---
+
+<!-- section: ci -->
+## CI
+
+The optional `ci:` section declares the CI/CD lifecycle: what to build, how to test, and where to deploy.
+
+### Fields
+
+- `ci.build` (object) — build phase configuration
+  - `ci.build.binaries` (array) — Go binaries to compile. Each entry:
+    - `name` (string, required) — output binary name
+    - `path` (string, required) — Go package path (e.g., `./cmd/server`)
+    - `os` (array of strings) — target OS list (default: current OS)
+    - `arch` (array of strings) — target arch list (default: current arch)
+    - `ldflags` (string) — `go build -ldflags` value; env vars expanded
+    - `env` (map) — additional environment variables for the build
+  - `ci.build.containers` (array) — container images to build. Each entry:
+    - `name` (string, required) — image name
+    - `dockerfile` (string) — path to Dockerfile (default: `Dockerfile`)
+    - `context` (string) — build context (default: `.`)
+    - `registry` (string) — container registry prefix
+    - `tag` (string) — image tag; env vars expanded
+  - `ci.build.assets` (array) — non-binary artifacts (e.g., frontend bundles). Each entry:
+    - `name` (string, required) — asset name
+    - `build` (string, required) — shell command to build the asset
+    - `path` (string, required) — output path
+- `ci.test` (object) — test phase configuration
+  - `ci.test.unit` / `ci.test.integration` / `ci.test.e2e` (object) — test phase:
+    - `command` (string, required) — shell command to run tests
+    - `coverage` (bool) — enable coverage reporting
+    - `needs` (array of strings) — ephemeral Docker services to start before testing (e.g., `postgres`, `redis`, `mysql`)
+- `ci.deploy` (object) — deployment configuration
+  - `ci.deploy.environments` (map) — keyed by environment name. Each entry:
+    - `provider` (string, required) — deployment provider (e.g., `aws-ecs`, `k8s`, `docker`)
+    - `cluster` (string) — target cluster name
+    - `namespace` (string) — Kubernetes namespace
+    - `region` (string) — cloud region
+    - `strategy` (string) — deployment strategy (`rolling`, `blue-green`, `canary`)
+    - `requireApproval` (bool) — gate deployment on manual approval
+    - `preDeploy` (array) — commands to run before deploying
+    - `healthCheck` (object) — post-deploy health check:
+      - `path` (string) — HTTP path to check
+      - `timeout` (string) — timeout duration (e.g., `30s`)
+- `ci.infra` (object) — infrastructure provisioning
+  - `ci.infra.provision` (bool) — provision infrastructure as part of CI
+  - `ci.infra.stateBackend` (string) — state backend name
+  - `ci.infra.resources` (array) — inline resource declarations (see `infrastructure:` section)
+
+### Example
+
+```yaml
+ci:
+  build:
+    binaries:
+      - name: server
+        path: ./cmd/server
+        os: [linux]
+        arch: [amd64, arm64]
+        ldflags: "-X main.version=${VERSION}"
+    containers:
+      - name: my-app
+        registry: ghcr.io/myorg
+        tag: "${VERSION}"
+  test:
+    unit:
+      command: go test ./... -race -count=1
+      coverage: true
+    integration:
+      command: go test ./... -tags=integration
+      needs: [postgres, redis]
+  deploy:
+    environments:
+      staging:
+        provider: k8s
+        namespace: staging
+        strategy: rolling
+      production:
+        provider: k8s
+        namespace: production
+        strategy: blue-green
+        requireApproval: true
+        healthCheck:
+          path: /healthz
+          timeout: 60s
+```
+
+### CLI Commands
+
+- `wfctl ci run --phase build,test` — execute build and test phases
+- `wfctl ci run --phase deploy --env staging` — deploy to a named environment
+- `wfctl ci init --platform github-actions` — generate bootstrap GitHub Actions YAML
+- `wfctl ci init --platform gitlab-ci` — generate bootstrap GitLab CI YAML
+- `wfctl ci generate --platform github_actions` — generate infra-focused CI config
+
+---
+
+<!-- section: environments -->
+## Environments
+
+The optional `environments:` section declares named deployment environments with provider, region, env vars, and exposure config.
+
+### Fields
+
+`environments` is a map keyed by environment name. Each entry:
+
+- `provider` (string, required) — deployment provider (e.g., `docker`, `k8s`, `aws-ecs`)
+- `region` (string) — cloud region
+- `envVars` (map) — environment variables injected at deploy time
+- `secretsProvider` (string) — secrets provider for this environment
+- `secretsPrefix` (string) — prefix applied to secret names in this environment
+- `approvalRequired` (bool) — gate deployments on manual approval
+- `exposure` (object) — how the service is exposed:
+  - `method` (string) — exposure method (`tailscale`, `cloudflare-tunnel`, `port-forward`)
+  - `exposure.tailscale` (object):
+    - `funnel` (bool) — enable Tailscale Funnel
+    - `hostname` (string) — Tailscale hostname
+  - `exposure.cloudflareTunnel` (object):
+    - `tunnelName` (string) — Cloudflare Tunnel name
+    - `domain` (string) — domain to route traffic to
+  - `exposure.portForward` (map) — local port-forward mappings
+
+### Example
+
+```yaml
+environments:
+  local:
+    provider: docker
+    envVars:
+      LOG_LEVEL: debug
+      DATABASE_URL: postgres://localhost/dev
+    exposure:
+      method: port-forward
+      portForward:
+        "8080": "8080"
+
+  staging:
+    provider: k8s
+    region: us-east-1
+    secretsProvider: env
+    secretsPrefix: STAGING_
+    exposure:
+      method: tailscale
+      tailscale:
+        funnel: true
+        hostname: my-app-staging
+
+  production:
+    provider: k8s
+    region: us-east-1
+    approvalRequired: true
+    secretsProvider: env
+    exposure:
+      method: cloudflare-tunnel
+      cloudflareTunnel:
+        tunnelName: my-app-prod
+        domain: api.myapp.com
+```
+
+---
+
+<!-- section: secrets -->
+## Secrets
+
+The optional `secrets:` section declares the application's secret management configuration: which provider to use, rotation policy, and what secrets the application needs.
+
+### Fields
+
+- `secrets.provider` (string, required) — secrets provider name. Currently supported: `env`
+- `secrets.config` (map) — provider-specific configuration
+- `secrets.rotation` (object) — default rotation policy:
+  - `enabled` (bool) — enable automatic rotation
+  - `interval` (string) — rotation interval (e.g., `30d`, `7d`)
+  - `strategy` (string) — rotation strategy (`dual-credential`, `graceful`, `immediate`)
+- `secrets.entries` (array) — declared secrets the application needs. Each entry:
+  - `name` (string, required) — secret name (typically an env var name)
+  - `description` (string) — human-readable description
+  - `rotation` (object) — per-secret rotation override (same fields as `secrets.rotation`)
+
+### Example
+
+```yaml
+secrets:
+  provider: env
+  rotation:
+    enabled: true
+    interval: 30d
+    strategy: dual-credential
+  entries:
+    - name: DATABASE_URL
+      description: PostgreSQL connection string
+    - name: JWT_SECRET
+      description: JWT signing key
+      rotation:
+        enabled: true
+        interval: 7d
+        strategy: graceful
+    - name: STRIPE_SECRET_KEY
+      description: Stripe payment API key
+```
+
+### CLI Commands
+
+- `wfctl secrets detect --config app.yaml` — scan config for secret-like values
+- `wfctl secrets set DATABASE_URL --value "..."` — set a secret in the provider
+- `wfctl secrets set TLS_CERT --from-file ./certs/server.crt` — set from file
+- `wfctl secrets list --config app.yaml` — list declared secrets and status
+- `wfctl secrets validate --config app.yaml` — verify all secrets are set
+- `wfctl secrets init --provider env --env staging` — initialize provider config
+- `wfctl secrets rotate DATABASE_URL --env production` — trigger rotation
+- `wfctl secrets sync --from staging --to production` — sync secret structure
+
+### Relationship to Other Sections
+
+- `environments[*].secretsProvider` overrides the top-level provider per environment
+- `environments[*].secretsPrefix` is prepended to secret names when resolving in that environment
+- `ci.deploy.environments` can reference secrets from the `secrets:` section

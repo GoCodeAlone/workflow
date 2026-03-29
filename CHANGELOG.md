@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ci:` config section** (`config/ci_config.go`): new top-level YAML key declaring build (binaries/containers/assets), test (unit/integration/e2e with ephemeral deps), deploy (per-environment with strategy/healthCheck/approval), and infra phases. Includes `Validate()` method enforcing required fields.
+- **`environments:` config section** (`config/environments_config.go`): named deployment environments with provider, region, env vars, secrets provider, and exposure config (Tailscale Funnel, Cloudflare Tunnel, port-forward).
+- **`secrets:` config section** (`config/secrets_config.go`): provider, rotation policy (with `Strategy` field for `dual-credential`/`graceful`/`immediate`), and declared secret entries with per-secret rotation overrides.
+- **`wfctl ci run`** (`cmd/wfctl/ci_run.go`): executes build, test, and deploy phases from the `ci:` config section. Build phase cross-compiles Go binaries and builds containers. Test phase supports ephemeral Docker deps (postgres/redis/mysql) via `needs:`. Deploy phase is stubbed for Tier 2.
+- **`wfctl ci init`** (`cmd/wfctl/ci_init.go`): generates bootstrap CI YAML for GitHub Actions (`.github/workflows/ci.yml`) or GitLab CI (`.gitlab-ci.yml`), with per-environment deploy jobs derived from `ci.deploy.environments`.
+- **`wfctl secrets`** (`cmd/wfctl/secrets.go`, `secrets_detect.go`, `secrets_providers.go`): secret lifecycle management. Subcommands: `detect` (scan config for secret-like values), `set` (with `--value` or `--from-file`), `list`, `validate`, `init`, `rotate`, `sync`. `SecretsProvider` interface with `env` backend.
+- **`wfctl validate`**: now validates `ci:` sections using `CIConfig.Validate()` when present.
+
+### Documentation
+
+- `docs/dsl-reference.md` + `cmd/wfctl/dsl-reference-embedded.md`: added `ci:`, `environments:`, and `secrets:` sections with field reference and examples.
+- `docs/WFCTL.md`: added `ci run`, `ci init`, and `secrets` command documentation.
+
 ---
 
 ## [0.4.1] - 2026-03-27
