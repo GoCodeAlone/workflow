@@ -24,6 +24,8 @@ func runSecrets(args []string) error {
 		return runSecretsRotate(args[1:])
 	case "sync":
 		return runSecretsSync(args[1:])
+	case "setup":
+		return runSecretsSetup(args[1:])
 	default:
 		return secretsUsage()
 	}
@@ -42,6 +44,7 @@ Actions:
   init      Initialize secrets provider configuration
   rotate    Trigger rotation of a secret
   sync      Copy secret structure between environments
+  setup     Interactively set all secrets for an environment
 
 Examples:
   wfctl secrets detect --config app.yaml
@@ -52,6 +55,8 @@ Examples:
   wfctl secrets init --provider env --env staging
   wfctl secrets rotate DATABASE_URL --env production
   wfctl secrets sync --from staging --to production
+  wfctl secrets setup --env local
+  wfctl secrets setup --env production --auto-gen-keys
 `)
 	return fmt.Errorf("missing or unknown action")
 }

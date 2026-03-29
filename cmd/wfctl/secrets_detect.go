@@ -190,6 +190,7 @@ func runSecretsSet(args []string) error {
 func runSecretsList(args []string) error {
 	fs := flag.NewFlagSet("secrets list", flag.ContinueOnError)
 	configFile := fs.String("config", "app.yaml", "Workflow config file")
+	envName := fs.String("env", "", "Environment name for store resolution (optional)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl secrets list [options]\n\nList declared secrets and their status.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -198,22 +199,43 @@ func runSecretsList(args []string) error {
 		return err
 	}
 
-	cfg, err := loadSecretsConfig(*configFile)
-	if err != nil {
-		return err
-	}
-
-	provider, err := newSecretsProvider(cfg.Provider)
+	// Load the full WorkflowConfig so we can use multi-store resolution.
+	wfCfg, err := loadWorkflowConfigForSecrets(*configFile)
 	if err != nil {
 		return err
 	}
 
 	ctx := context.Background()
-	fmt.Printf("Provider: %s\n\n", cfg.Provider)
+
+	// Use multi-store aware status building when secretStores are configured.
+	if wfCfg.SecretStores != nil || (wfCfg.Secrets != nil && wfCfg.Secrets.DefaultStore != "") {
+		statuses, err := buildSecretStatuses(ctx, *envName, wfCfg)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%-40s  %-12s  %-10s\n", "NAME", "STORE", "STATUS")
+		fmt.Printf("%-40s  %-12s  %-10s\n", strings.Repeat("-", 40), strings.Repeat("-", 12), strings.Repeat("-", 10))
+		for _, s := range statuses {
+			fmt.Printf("%-40s  %-12s  %-10s\n", s.Name, s.Store, secretStateLabel(s.State))
+		}
+		return nil
+	}
+
+	// Legacy single-provider path.
+	secretsCfg := wfCfg.Secrets
+	if secretsCfg == nil {
+		secretsCfg = &config.SecretsConfig{Provider: "env"}
+	}
+	provider, err := newSecretsProvider(secretsCfg.Provider)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Provider: %s\n\n", cmp(secretsCfg.Provider, "env"))
 	fmt.Printf("%-40s  %-6s\n", "NAME", "STATUS")
 	fmt.Printf("%-40s  %-6s\n", strings.Repeat("-", 40), "------")
 
-	for _, entry := range cfg.Entries {
+	for _, entry := range secretsCfg.Entries {
 		val, _ := provider.Get(ctx, entry.Name)
 		status := "unset"
 		if val != "" {
@@ -226,6 +248,43 @@ func runSecretsList(args []string) error {
 		fmt.Printf("%-40s  %-6s%s\n", entry.Name, status, desc)
 	}
 	return nil
+}
+
+// secretStateLabel returns a human-readable label for a SecretState.
+func secretStateLabel(state SecretState) string {
+	switch state {
+	case SecretSet:
+		return "set"
+	case SecretNotSet:
+		return "unset"
+	case SecretNoAccess:
+		return "no-access"
+	case SecretFetchError:
+		return "error"
+	case SecretUnconfigured:
+		return "unconfigured"
+	default:
+		return "unknown"
+	}
+}
+
+// loadWorkflowConfigForSecrets loads the full WorkflowConfig for secret operations.
+// Falls back to a default env-provider config if the file does not exist.
+func loadWorkflowConfigForSecrets(configFile string) (*config.WorkflowConfig, error) {
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return &config.WorkflowConfig{
+			Secrets: &config.SecretsConfig{Provider: "env"},
+		}, nil
+	}
+	var cfg config.WorkflowConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	if cfg.Secrets == nil {
+		cfg.Secrets = &config.SecretsConfig{Provider: "env"}
+	}
+	return &cfg, nil
 }
 
 func runSecretsValidate(args []string) error {

@@ -649,13 +649,14 @@ func (m wizardModel) handleScreenKey(msg tea.KeyPressMsg) wizardModel { //nolint
 			}
 		case tea.KeyBackspace:
 			m.bulkInput.deleteBack()
-		case tea.KeyCtrlG:
-			m.bulkInput.value = generateSecretValue()
-			if m.bulkCursor < len(m.bulkItems) {
-				m.bulkItems[m.bulkCursor].autoGen = true
-			}
 		default:
-			if msg.Text != "" {
+			// Ctrl+G: auto-generate a secret value
+			if msg.Code == 'g' && msg.Mod == tea.ModCtrl {
+				m.bulkInput.value = generateSecretValue()
+				if m.bulkCursor < len(m.bulkItems) {
+					m.bulkItems[m.bulkCursor].autoGen = true
+				}
+			} else if msg.Text != "" {
 				for _, r := range msg.Text {
 					m.bulkInput.insertChar(r)
 				}
