@@ -1,0 +1,46 @@
+ci:
+  build:
+    binaries:
+      - name: wfctl
+        path: ./cmd/wfctl
+        os: [linux, darwin]
+        arch: [amd64, arm64]
+        ldflags: "-s -w -X main.version=${VERSION}"
+      - name: workflow-server
+        path: ./cmd/server
+        os: [linux, darwin]
+        arch: [amd64, arm64]
+        ldflags: "-s -w"
+      - name: workflow-lsp-server
+        path: ./cmd/workflow-lsp-server
+        os: [linux, darwin]
+        arch: [amd64, arm64]
+        ldflags: "-s -w"
+    containers:
+      - name: workflow-server
+        dockerfile: Dockerfile
+        registry: ghcr.io/gocodealone
+        tag: ${VERSION}
+  test:
+    unit:
+      command: go test ./... -race -count=1
+      coverage: true
+  deploy:
+    environments:
+      staging:
+        provider: kubernetes
+        namespace: workflow-staging
+        strategy: rolling
+        healthCheck:
+          path: /healthz
+          timeout: 30s
+
+secrets:
+  defaultStore: github
+  entries:
+    - name: GITHUB_TOKEN
+      description: GitHub API token for releases and dispatches
+    - name: HOMEBREW_TAP_TOKEN
+      description: Token for updating Homebrew tap
+    - name: NPM_TOKEN
+      description: Token for npm package publishing
