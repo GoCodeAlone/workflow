@@ -85,6 +85,7 @@ var commands = map[string]func([]string) error{
 	"dsl-reference":  runDSLReference,
 	"ci":             runCI,
 	"test":           runTest,
+	"secrets":        runSecrets,
 }
 
 func main() {
