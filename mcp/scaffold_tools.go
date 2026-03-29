@@ -2,7 +2,10 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -124,13 +127,17 @@ func (s *Server) registerScaffoldTools() {
 			mcp.WithDescription("Analyze a workflow YAML config's modules and suggest the infrastructure "+
 				"components needed to run the application in production. Returns a structured list of "+
 				"infrastructure requirements (databases, caches, message brokers, storage buckets) "+
-				"with recommended cloud service types."),
+				"with recommended cloud service types. If plugins_dir is provided, also consults "+
+				"plugin.json manifests in that directory for plugin-declared infrastructure needs."),
 			mcp.WithString("yaml_content",
 				mcp.Required(),
 				mcp.Description("Workflow YAML config content to analyze"),
 			),
 			mcp.WithString("provider",
 				mcp.Description("Target cloud provider for service name suggestions: aws, gcp, azure, digitalocean (default: aws)"),
+			),
+			mcp.WithString("plugins_dir",
+				mcp.Description("Directory containing installed plugin sub-directories, each with a plugin.json (optional)"),
 			),
 		),
 		s.handleDetectInfraNeeds,
@@ -498,6 +505,7 @@ func (s *Server) handleDetectInfraNeeds(_ context.Context, req mcp.CallToolReque
 		return mcp.NewToolResultError("yaml_content is required"), nil
 	}
 	provider := mcp.ParseString(req, "provider", "aws")
+	pluginsDir := mcp.ParseString(req, "plugins_dir", "")
 
 	cfg, err := config.LoadFromString(yamlContent)
 	if err != nil {
@@ -510,28 +518,29 @@ func (s *Server) handleDetectInfraNeeds(_ context.Context, req mcp.CallToolReque
 		ModuleType  string `json:"module_type"`
 		Service     string `json:"recommended_service"`
 		Description string `json:"description"`
+		Source      string `json:"source,omitempty"` // "builtin" or plugin name
 	}
 
 	serviceMap := map[string]func(string) infraNeed{
 		"database.postgres": func(p string) infraNeed {
 			return infraNeed{Category: "database", Service: providerDBService(p),
-				Description: "Managed PostgreSQL database"}
+				Description: "Managed PostgreSQL database", Source: "builtin"}
 		},
 		"database.postgresql": func(p string) infraNeed {
 			return infraNeed{Category: "database", Service: providerDBService(p),
-				Description: "Managed PostgreSQL database"}
+				Description: "Managed PostgreSQL database", Source: "builtin"}
 		},
 		"cache.redis": func(p string) infraNeed {
 			return infraNeed{Category: "cache", Service: providerCacheService(p),
-				Description: "Managed Redis cache"}
+				Description: "Managed Redis cache", Source: "builtin"}
 		},
 		"storage.s3": func(p string) infraNeed {
 			return infraNeed{Category: "storage", Service: providerStorageService(p),
-				Description: "Object storage bucket"}
+				Description: "Object storage bucket", Source: "builtin"}
 		},
 		"storage.sqlite": func(_ string) infraNeed {
 			return infraNeed{Category: "storage", Service: "block-volume",
-				Description: "Persistent block volume for SQLite (consider migrating to managed DB for production)"}
+				Description: "Persistent block volume for SQLite (consider migrating to managed DB for production)", Source: "builtin"}
 		},
 	}
 
@@ -549,7 +558,28 @@ func (s *Server) handleDetectInfraNeeds(_ context.Context, req mcp.CallToolReque
 				ModuleType:  mod.Type,
 				Service:     providerMessagingService(provider),
 				Description: "Managed message broker",
+				Source:      "builtin",
 			})
+		}
+	}
+
+	// Consult plugin manifests for plugin-declared infrastructure needs.
+	if pluginsDir != "" {
+		pluginReqs, loadErr := loadPluginInfraNeeds(pluginsDir, cfg)
+		if loadErr == nil {
+			seen := make(map[string]bool, len(needs))
+			for _, n := range needs {
+				seen[n.ModuleType+":"+n.ModuleName] = true
+			}
+			for _, req := range pluginReqs {
+				needs = append(needs, infraNeed{
+					Category:    req.Type,
+					ModuleType:  req.Type,
+					Service:     req.Name,
+					Description: req.Description,
+					Source:      "plugin-manifest",
+				})
+			}
 		}
 	}
 
@@ -560,6 +590,60 @@ func (s *Server) handleDetectInfraNeeds(_ context.Context, req mcp.CallToolReque
 		"summary":  fmt.Sprintf("Detected %d infrastructure requirements for %d modules", len(needs), len(cfg.Modules)),
 	}
 	return marshalToolResult(result)
+}
+
+// loadPluginInfraNeeds reads plugin manifests from pluginsDir and returns
+// infrastructure requirements declared by plugins whose module types are used in cfg.
+func loadPluginInfraNeeds(pluginsDir string, cfg *config.WorkflowConfig) ([]config.InfraRequirement, error) {
+	entries, err := os.ReadDir(pluginsDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Collect all module types used in the config
+	usedTypes := make(map[string]bool)
+	for _, mod := range cfg.Modules {
+		usedTypes[mod.Type] = true
+	}
+	for _, svc := range cfg.Services {
+		if svc == nil {
+			continue
+		}
+		for _, mod := range svc.Modules {
+			usedTypes[mod.Type] = true
+		}
+	}
+
+	seen := make(map[string]bool)
+	var needs []config.InfraRequirement
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(pluginsDir, entry.Name(), "plugin.json"))
+		if err != nil {
+			continue
+		}
+		var manifest config.PluginManifestFile
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			continue
+		}
+		for moduleType, spec := range manifest.ModuleInfraRequirements {
+			if !usedTypes[moduleType] {
+				continue
+			}
+			for _, req := range spec.Requires {
+				key := req.Type + ":" + req.Name
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				needs = append(needs, req)
+			}
+		}
+	}
+	return needs, nil
 }
 
 // --- Helpers ---
