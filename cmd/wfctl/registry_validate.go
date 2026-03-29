@@ -133,6 +133,20 @@ func ValidateManifest(m *RegistryManifest, opts ValidationOptions) []ValidationE
 		}
 	}
 
+	// Dependencies validation
+	for i, dep := range m.Dependencies {
+		prefix := fmt.Sprintf("dependencies[%d]", i)
+		if dep.Name == "" {
+			errs = append(errs, ValidationError{Field: prefix + ".name", Message: "required field is empty"})
+		}
+		if dep.MinVersion != "" && !semverRegex.MatchString(dep.MinVersion) {
+			errs = append(errs, ValidationError{Field: prefix + ".minVersion", Message: fmt.Sprintf("must be semver format (got %q)", dep.MinVersion)})
+		}
+		if dep.MaxVersion != "" && !semverRegex.MatchString(dep.MaxVersion) {
+			errs = append(errs, ValidationError{Field: prefix + ".maxVersion", Message: fmt.Sprintf("must be semver format (got %q)", dep.MaxVersion)})
+		}
+	}
+
 	return errs
 }
 

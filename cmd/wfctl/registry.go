@@ -15,6 +15,13 @@ const (
 	registryBranch = "main"
 )
 
+// PluginDependency is a required plugin dependency declared in a manifest.
+type PluginDependency struct {
+	Name       string `json:"name"`
+	MinVersion string `json:"minVersion,omitempty"`
+	MaxVersion string `json:"maxVersion,omitempty"`
+}
+
 // RegistryManifest is the manifest format for the GoCodeAlone/workflow-registry.
 type RegistryManifest struct {
 	Name             string                `json:"name"`
@@ -32,6 +39,7 @@ type RegistryManifest struct {
 	Capabilities     *RegistryCapabilities `json:"capabilities,omitempty"`
 	Downloads        []PluginDownload      `json:"downloads,omitempty"`
 	Assets           *PluginAssets         `json:"assets,omitempty"`
+	Dependencies     []PluginDependency    `json:"dependencies,omitempty"`
 }
 
 // RegistryCapabilities describes what module/step/trigger types a plugin provides.

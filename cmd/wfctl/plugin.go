@@ -33,6 +33,8 @@ func runPlugin(args []string) error {
 		return runPluginValidate(args[1:])
 	case "info":
 		return runPluginInfo(args[1:])
+	case "deps":
+		return runPluginDeps(args[1:])
 	default:
 		return pluginUsage()
 	}
@@ -52,6 +54,7 @@ Subcommands:
   remove   Uninstall a plugin
   validate Validate a plugin manifest from the registry or a local file
   info     Show details about an installed plugin
+  deps     List dependencies for a plugin
 
 Use -plugin-dir to specify a custom plugin directory (replaces deprecated -data-dir).
 `)

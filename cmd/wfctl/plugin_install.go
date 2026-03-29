@@ -159,6 +159,14 @@ func runPluginInstall(args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Found in registry %q.\n", sourceName)
 
+	// Resolve and install dependencies before installing the plugin itself.
+	if len(manifest.Dependencies) > 0 {
+		resolved := make(map[string]string)
+		if err := resolveDependencies(pluginName, manifest, pluginDirVal, *cfgPath, []string{}, resolved); err != nil {
+			return fmt.Errorf("resolve dependencies for %q: %w", pluginName, err)
+		}
+	}
+
 	if err := installPluginFromManifest(pluginDirVal, pluginName, manifest); err != nil {
 		return err
 	}
