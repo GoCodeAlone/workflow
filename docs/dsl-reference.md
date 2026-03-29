@@ -668,7 +668,27 @@ These top-level sections describe infrastructure-as-code resources that the engi
   - `capabilities` (array) — resource capability definitions
 
 ### `infrastructure` Fields
-A map of infrastructure resource definitions. Structure is plugin-defined.
+
+The `infrastructure:` section declares infrastructure resources the application depends on. Each resource can specify per-environment resolution strategies.
+
+- `infrastructure.resources` (array) — list of infrastructure resource declarations. Each entry:
+  - `name` (string, required) — unique resource name
+  - `type` (string, required) — resource type (e.g., `postgresql`, `redis`, `nats`, `s3-bucket`)
+  - `provider` (string) — IaC provider to use for provisioning (e.g., `aws`, `gcp`, `azure`, `digitalocean`)
+  - `config` (map) — resource-specific configuration
+  - `environments` (map) — per-environment resolution strategies. Each key is an environment name and the value is an `InfraEnvironmentResolution` object:
+    - `strategy` (string, required) — how to resolve this resource in this environment:
+      - `container` — run a container locally (for local/CI environments)
+      - `provision` — provision via IaC plugin (for staging/production)
+      - `existing` — connect to an already-running instance
+    - `dockerImage` (string) — container image to use when `strategy: container`
+    - `port` (int) — container port when `strategy: container`
+    - `provider` (string) — override IaC provider for this environment
+    - `config` (map) — environment-specific resource configuration
+    - `connection` (object) — connection details when `strategy: existing`:
+      - `host` (string, required) — hostname or IP
+      - `port` (int) — port number
+      - `auth` (string) — authentication reference (e.g., a secret name)
 
 ### `sidecars` Fields
 - `sidecars` (array) — list of sidecar container definitions
@@ -699,6 +719,43 @@ platform:
             ports:
               - container_port: 8080
 
+infrastructure:
+  resources:
+    - name: db
+      type: postgresql
+      provider: aws
+      config:
+        instanceClass: db.t3.micro
+      environments:
+        local:
+          strategy: container
+          dockerImage: postgres:16
+          port: 5432
+        staging:
+          strategy: provision
+          provider: aws
+        production:
+          strategy: provision
+          provider: aws
+          config:
+            instanceClass: db.r6g.large
+    - name: cache
+      type: redis
+      environments:
+        local:
+          strategy: container
+          dockerImage: redis:7
+          port: 6379
+        staging:
+          strategy: existing
+          connection:
+            host: redis.internal.staging.example.com
+            port: 6379
+            auth: REDIS_PASSWORD
+        production:
+          strategy: provision
+          provider: aws
+
 sidecars:
   - name: redis-cache
     type: redis
@@ -715,6 +772,8 @@ sidecars:
 - `platform.context` module type references the `platform` section org/environment values
 - Sidecars are deployed alongside the application container but are not addressable as workflow modules
 - `infrastructure` resources are provisioned by IaC plugins before application start
+- `infrastructure.resources[*].environments` per-env strategies control `wfctl dev up` container lifecycle
+- Plugins declare their infra requirements in `plugin.json` via `moduleInfraRequirements` (see [Plugin Manifest Guide](plugin-manifest-guide.md))
 
 ---
 
@@ -877,15 +936,47 @@ environments:
 
 ---
 
-<!-- section: secrets -->
-## Secrets
+<!-- section: secretStores -->
+## Secret Stores
 
-The optional `secrets:` section declares the application's secret management configuration: which provider to use, rotation policy, and what secrets the application needs.
+The optional `secretStores:` section declares named secret storage backends. This enables routing different secrets to different backends (e.g., application secrets in environment variables, payment keys in AWS Secrets Manager).
 
 ### Fields
 
-- `secrets.provider` (string, required) — secrets provider name. Currently supported: `env`
-- `secrets.config` (map) — provider-specific configuration
+- `secretStores.<name>` (object) — a named store. Fields:
+  - `provider` (string, required) — backend provider: `env`, `vault`, `aws-secrets-manager`, `gcp-secret-manager`
+  - `config` (map) — provider-specific configuration (e.g., Vault address, AWS region)
+
+### Example
+
+```yaml
+secretStores:
+  primary:
+    provider: env
+  payment-vault:
+    provider: aws-secrets-manager
+    config:
+      region: us-east-1
+```
+
+### Relationship to Other Sections
+
+- `secrets.defaultStore` references a named store from `secretStores`
+- `secrets.entries[*].store` routes an individual secret to a specific store
+- `environments[*].secretsProvider` overrides the store name for all secrets in that environment
+
+---
+
+<!-- section: secrets -->
+## Secrets
+
+The optional `secrets:` section declares the application's secret management configuration: which stores to use, rotation policy, and what secrets the application needs.
+
+### Fields
+
+- `secrets.defaultStore` (string) — name of the default store from `secretStores`. When set, all secrets without an explicit `store` field use this store.
+- `secrets.provider` (string) — legacy single-provider name (use `defaultStore` + `secretStores` for new configs). Supported: `env`, `vault`, `aws-secrets-manager`, `gcp-secret-manager`
+- `secrets.config` (map) — provider-specific configuration (used with legacy `provider` field)
 - `secrets.rotation` (object) — default rotation policy:
   - `enabled` (bool) — enable automatic rotation
   - `interval` (string) — rotation interval (e.g., `30d`, `7d`)
@@ -893,9 +984,37 @@ The optional `secrets:` section declares the application's secret management con
 - `secrets.entries` (array) — declared secrets the application needs. Each entry:
   - `name` (string, required) — secret name (typically an env var name)
   - `description` (string) — human-readable description
+  - `store` (string) — name of a specific store from `secretStores`; overrides `defaultStore` and environment override
   - `rotation` (object) — per-secret rotation override (same fields as `secrets.rotation`)
 
-### Example
+### Example (multi-store)
+
+```yaml
+secretStores:
+  primary:
+    provider: env
+  payment-vault:
+    provider: aws-secrets-manager
+    config:
+      region: us-east-1
+
+secrets:
+  defaultStore: primary
+  entries:
+    - name: DATABASE_URL
+      description: PostgreSQL connection string
+    - name: JWT_SECRET
+      description: JWT signing key
+      rotation:
+        enabled: true
+        interval: 7d
+        strategy: graceful
+    - name: STRIPE_SECRET_KEY
+      description: Stripe payment API key
+      store: payment-vault
+```
+
+### Example (single provider, legacy)
 
 ```yaml
 secrets:
@@ -909,12 +1028,6 @@ secrets:
       description: PostgreSQL connection string
     - name: JWT_SECRET
       description: JWT signing key
-      rotation:
-        enabled: true
-        interval: 7d
-        strategy: graceful
-    - name: STRIPE_SECRET_KEY
-      description: Stripe payment API key
 ```
 
 ### CLI Commands
@@ -922,15 +1035,18 @@ secrets:
 - `wfctl secrets detect --config app.yaml` — scan config for secret-like values
 - `wfctl secrets set DATABASE_URL --value "..."` — set a secret in the provider
 - `wfctl secrets set TLS_CERT --from-file ./certs/server.crt` — set from file
-- `wfctl secrets list --config app.yaml` — list declared secrets and status
+- `wfctl secrets list --config app.yaml` — list declared secrets and their store routing
 - `wfctl secrets validate --config app.yaml` — verify all secrets are set
 - `wfctl secrets init --provider env --env staging` — initialize provider config
 - `wfctl secrets rotate DATABASE_URL --env production` — trigger rotation
 - `wfctl secrets sync --from staging --to production` — sync secret structure
+- `wfctl secrets setup --env local` — interactively set all secrets for an environment
+- `wfctl secrets setup --env production --auto-gen-keys` — set secrets, auto-generating key/token values
 
 ### Relationship to Other Sections
 
-- `environments[*].secretsProvider` overrides the top-level provider per environment
+- `secretStores` must be declared before referencing store names in `secrets.defaultStore` or `secrets.entries[*].store`
+- `environments[*].secretsProvider` overrides the store for all secrets in that environment (takes priority over per-secret `store` fields)
 - `environments[*].secretsPrefix` is prepended to secret names when resolving in that environment
 - `ci.deploy.environments` can reference secrets from the `secrets:` section
 

@@ -10,12 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`wfctl dev`** (`cmd/wfctl/dev.go`, `dev_compose.go`, `dev_process.go`, `dev_k8s.go`, `dev_expose.go`): local development cluster management. Subcommands: `up`, `down`, `logs`, `status`, `restart`. Three modes: docker-compose (default), process (`--local`, with hot-reload via fsnotify), and minikube (`--k8s`). Exposure integrations: Tailscale Funnel, Cloudflare Tunnel, ngrok (`--expose`). Auto-detects `environments.local.exposure.method` when `--expose` is omitted.
-- **`wfctl wizard`** (`cmd/wfctl/wizard.go`, `wizard_models.go`): interactive Bubbletea TUI wizard for project setup. Nine screens: project info → services → infrastructure → environments → deployment → secrets → CI/CD → review → write. Generates a complete `app.yaml` and optionally triggers `wfctl ci init`. Navigates with Enter/Esc/Tab/Space/arrows.
+- **`wfctl wizard`** (`cmd/wfctl/wizard.go`, `wizard_models.go`): interactive Bubbletea TUI wizard for project setup. Eleven screens: project info → services → infrastructure → infra resolution (per-env strategy) → environments → deployment → secret stores → secret routing → secret values → CI/CD → review → write. New screens vs prior version: per-environment infra resolution (container/provision/existing with connection details for "existing"), named secret store configuration with add/remove flow, per-secret store routing (← → to assign), and bulk hidden secret input with Ctrl+G auto-generation for keys/tokens. Generates a complete `app.yaml` including `secretStores:` and per-secret `store:` routing.
+- **`wfctl secrets setup`** (`cmd/wfctl/secrets_setup.go`): standalone interactive command to set all secrets for a given environment. Reads `secrets.entries` from config, resolves store per secret (env override → per-secret store → defaultStore → legacy provider), prompts with hidden terminal input, and supports `--auto-gen-keys` flag to auto-generate random hex values for names ending in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`.
+- **Plugin manifest `moduleInfraRequirements`** (`config/plugin_manifest.go`): `PluginManifestFile` struct with `moduleInfraRequirements` map, `ModuleInfraSpec`, and `InfraRequirement`. Allows plugin authors to declare infrastructure dependencies (type, name, Docker image, ports, secrets, providers) per module type.
+- **Multi-store secrets** (`config/secrets_config.go`, `config/config.go`): `SecretStoreConfig`, `SecretStores` map on `WorkflowConfig`, `DefaultStore` on `SecretsConfig`, and `Store` field on `SecretEntry` for per-secret store routing.
+- **Per-environment infra resolution** (`config/infra_resolution.go`): `InfraEnvironmentResolution` with `strategy` (container/provision/existing), `dockerImage`, `port`, `provider`, `config`, and `connection` (host/port/auth). Added `Environments` map to `InfraResourceConfig`.
+- **`SecretsProvider.Check()`** (`cmd/wfctl/secrets_providers.go`): `SecretState` enum (Set/NotSet/NoAccess/FetchError/Unconfigured) and `Check()` method on the interface with `envProvider` implementation. `SecretStatus` now includes `Store` and `State` fields.
+- **Multi-store secret resolution** (`cmd/wfctl/secrets_resolve.go`): `ResolveSecretStore` (priority: env override → per-secret store → defaultStore → legacy provider → "env"), `getProviderForStore` (maps SecretStores config to providers), `buildSecretStatuses` (access-aware status for `wfctl secrets list`).
+- **`detect_infra_needs` plugin manifest integration** (`cmd/wfctl/plugin_infra.go`, `mcp/scaffold_tools.go`): `LoadPluginManifests` and `DetectPluginInfraNeeds` scan local plugin directories for `plugin.json` manifests and surface module-type infra requirements. MCP tool gains optional `plugins_dir` parameter.
 
 ### Documentation
 
-- `docs/WFCTL.md`: added `dev up/down/logs/status/restart` reference (flags, mode table, exposure methods), `wizard` reference (screen list, navigation keys).
-- `CHANGELOG.md`: entry for wfctl dev + wizard.
+- `docs/WFCTL.md`: updated `wizard` reference (11 screens, new navigation keys); added `secrets setup` command reference with flag table and examples; updated `secrets list` description to mention multi-store routing.
+- `docs/dsl-reference.md` + `cmd/wfctl/dsl-reference-embedded.md`: expanded `infrastructure` fields with per-env resolution strategies, connection config, and extended example; added `secretStores:` section with example and relationships; updated `secrets:` section with `defaultStore`, per-secret `store` field, multi-store example, and `secrets setup` CLI command.
+- `docs/plugin-manifest-guide.md`: new guide for plugin authors on declaring infrastructure requirements in `plugin.json` via `moduleInfraRequirements`.
 
 
 

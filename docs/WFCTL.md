@@ -1326,7 +1326,7 @@ wfctl secrets set TLS_CERT --from-file ./certs/server.crt
 
 #### `secrets list`
 
-List all declared secrets and their set/unset status.
+List all declared secrets, their store routing, and access-aware set/unset status. For multi-store configs, each secret shows which store it resolves to and whether the store is accessible.
 
 ```bash
 wfctl secrets list --config app.yaml
@@ -1362,6 +1362,26 @@ Copy secret structure from one environment to another (Tier 2 implementation).
 
 ```bash
 wfctl secrets sync --from staging --to production
+```
+
+#### `secrets setup`
+
+Interactively set all secrets declared in the config for a given environment. Prompts for each secret's value with hidden terminal input. Secrets in inaccessible stores are skipped. Use `--auto-gen-keys` to automatically generate random values for secrets whose names end in `_KEY`, `_SECRET`, `_TOKEN`, or `_SIGNING`.
+
+```
+wfctl secrets setup [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--env` | `local` | Target environment name |
+| `--config` | `app.yaml` | Workflow config file |
+| `--auto-gen-keys` | `false` | Auto-generate random values for key/token/secret-named entries |
+
+```bash
+wfctl secrets setup --env local
+wfctl secrets setup --env production --auto-gen-keys
+wfctl secrets setup --env staging --config config/staging.yaml
 ```
 
 ---
@@ -1787,12 +1807,15 @@ No flags. The wizard runs in the terminal and collects:
 1. **Project info** — name and description
 2. **Services** — single-service or multi-service (comma-separated names)
 3. **Infrastructure** — PostgreSQL, Redis cache, NATS message queue (checkboxes)
-4. **Environments** — local, staging, production (checkboxes)
-5. **Deployment** — provider per environment (Docker Compose, Kubernetes, AWS ECS)
-6. **Secrets** — secrets provider (env vars, Vault, AWS Secrets Manager, GCP Secret Manager)
-7. **CI/CD** — generate CI bootstrap and select platform (GitHub Actions, GitLab CI)
-8. **Review** — preview generated YAML
-9. **Write** — save to `app.yaml`
+4. **Infra resolution** — per-environment strategy for each selected infrastructure resource (container/provision/existing); if "existing", prompts for host:port
+5. **Environments** — local, staging, production (checkboxes)
+6. **Deployment** — provider per environment (Docker Compose, Kubernetes, AWS ECS)
+7. **Secret stores** — define named stores (env, Vault, AWS Secrets Manager, GCP Secret Manager); Space to add, Delete to remove, Enter to continue
+8. **Secret routing** — assign each required secret to a store (← → to change store)
+9. **Secret values** — enter values for required secrets with hidden input; Ctrl+G auto-generates random values for keys/tokens
+10. **CI/CD** — generate CI bootstrap and select platform (GitHub Actions, GitLab CI)
+11. **Review** — preview generated YAML
+12. **Write** — save to `app.yaml`
 
 **Navigation:**
 
@@ -1801,8 +1824,10 @@ No flags. The wizard runs in the terminal and collects:
 | `Enter` | Advance to next screen / confirm |
 | `Esc` | Go back to previous screen |
 | `Tab` | Move focus between fields |
-| `Space` | Toggle checkbox / select option |
+| `Space` | Toggle checkbox / add store |
 | `↑` / `↓` | Move cursor in lists |
+| `←` / `→` | Change strategy or store selection |
+| `Ctrl+G` | Auto-generate a random secret value (bulk secrets screen) |
 | `Ctrl+C` | Quit without saving |
 
 **Example:**
@@ -1811,6 +1836,7 @@ No flags. The wizard runs in the terminal and collects:
 wfctl wizard
 # Follow the interactive prompts to generate app.yaml
 wfctl validate app.yaml
+wfctl secrets setup --env local   # set secret values interactively
 wfctl dev up
 ```
 
