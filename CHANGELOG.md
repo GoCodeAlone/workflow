@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`wfctl dev`** (`cmd/wfctl/dev.go`, `dev_compose.go`, `dev_process.go`, `dev_k8s.go`, `dev_expose.go`): local development cluster management. Subcommands: `up`, `down`, `logs`, `status`, `restart`. Three modes: docker-compose (default), process (`--local`, with hot-reload via fsnotify), and minikube (`--k8s`). Exposure integrations: Tailscale Funnel, Cloudflare Tunnel, ngrok (`--expose`). Auto-detects `environments.local.exposure.method` when `--expose` is omitted.
+- **`wfctl wizard`** (`cmd/wfctl/wizard.go`, `wizard_models.go`): interactive Bubbletea TUI wizard for project setup. Nine screens: project info → services → infrastructure → environments → deployment → secrets → CI/CD → review → write. Generates a complete `app.yaml` and optionally triggers `wfctl ci init`. Navigates with Enter/Esc/Tab/Space/arrows.
+
+### Documentation
+
+- `docs/WFCTL.md`: added `dev up/down/logs/status/restart` reference (flags, mode table, exposure methods), `wizard` reference (screen list, navigation keys).
+- `CHANGELOG.md`: entry for wfctl dev + wizard.
+
+
+
 - **`services:` config section** (`config/services_config.go`): new top-level YAML key for multi-service applications. Each service declares a binary path, scaling policy (replicas/min/max/metric/target), exposed ports, per-service modules/pipelines, and plugins.
 - **`mesh:` config section** (`config/services_config.go`): inter-service communication config. Declares transport (nats/http/grpc), service discovery, NATS connection details, and explicit service-to-service routes with via/subject/endpoint.
 - **`networking:` config section** (`config/networking_config.go`): network exposure and policy config. Declares ingress entries (service, port, TLS termination), inter-service network policies, and DNS records.

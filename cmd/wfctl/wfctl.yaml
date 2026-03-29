@@ -69,6 +69,10 @@ workflows:
         description: "Inspect port usage declared in a workflow config (list)"
       - name: security
         description: "Security tooling (audit: scan config for issues, generate-network-policies: output k8s NetworkPolicy YAML)"
+      - name: dev
+        description: "Local development cluster (up, down, logs, status, restart; --local, --k8s, --expose)"
+      - name: wizard
+        description: "Interactive TUI wizard for project setup (generates app.yaml)"
 
 # Each command is expressed as a workflow pipeline triggered by the CLI.
 # The pipeline delegates to the registered Go implementation via step.cli_invoke,
@@ -438,3 +442,25 @@ pipelines:
         type: step.cli_invoke
         config:
           command: security
+
+  cmd-dev:
+    trigger:
+      type: cli
+      config:
+        command: dev
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: dev
+
+  cmd-wizard:
+    trigger:
+      type: cli
+      config:
+        command: wizard
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: wizard

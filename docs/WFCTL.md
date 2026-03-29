@@ -69,6 +69,14 @@ graph TD
     wfctl --> dsl-reference["dsl-reference"]
     wfctl --> ports
     wfctl --> security
+    wfctl --> dev
+    wfctl --> wizard
+
+    dev --> dev-up["up"]
+    dev --> dev-down["down"]
+    dev --> dev-logs["logs"]
+    dev --> dev-status["status"]
+    dev --> dev-restart["restart"]
 
     ports --> ports-list["list"]
 
@@ -140,7 +148,8 @@ graph TD
 
 | Category | Commands |
 |----------|----------|
-| **Project Setup** | `init`, `run` |
+| **Project Setup** | `init`, `run`, `wizard` |
+| **Local Development** | `dev up/down/logs/status/restart` (--local, --k8s, --expose) |
 | **Validation & Inspection** | `validate`, `inspect`, `schema`, `compat check`, `template validate`, `editor-schemas`, `dsl-reference` |
 | **API & Contract** | `api extract`, `contract test`, `diff` |
 | **Deployment** | `deploy docker/kubernetes/helm/cloud`, `build-ui`, `generate github-actions` |
@@ -1654,6 +1663,156 @@ wfctl security generate-network-policies --config config/app.yaml --output deplo
 ```
 
 **Generated file per service:** `k8s/netpol-<service>.yaml`
+
+---
+
+### `dev`
+
+Manage a local development cluster for a workflow application. Reads the workflow config, generates the appropriate runtime (docker-compose, process, or minikube), and starts infrastructure + application services.
+
+```
+wfctl dev <subcommand> [options]
+```
+
+**Subcommands:**
+
+| Subcommand | Description |
+|------------|-------------|
+| `up` | Start local dev cluster |
+| `down` | Stop and remove local dev cluster |
+| `logs` | Stream service logs |
+| `status` | Show service health |
+| `restart` | Restart one or all services |
+
+#### `dev up`
+
+```
+wfctl dev up [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | `app.yaml` | Workflow config file |
+| `--local` | `false` | Run app services as local Go processes with hot-reload (infra still in Docker) |
+| `--k8s` | `false` | Deploy to local minikube cluster |
+| `--expose` | _(from config)_ | Expose services externally: `tailscale`, `cloudflare`, `ngrok` |
+| `--verbose` | `false` | Show detailed output |
+
+The default mode generates `docker-compose.dev.yml` from the workflow config, mapping infrastructure module types to Docker images:
+
+| Module type | Docker image |
+|-------------|-------------|
+| `database.postgres`, `database.workflow` | `postgres:16` |
+| `nosql.redis`, `cache.redis` | `redis:7-alpine` |
+| `messaging.nats` | `nats:latest` |
+| `messaging.kafka` | `confluentinc/cp-kafka:latest` |
+
+**Examples:**
+
+```bash
+# Default: docker-compose mode
+wfctl dev up
+
+# Process mode: services run as local Go binaries, hot-reload on file change
+wfctl dev up --local
+
+# Kubernetes mode: deploy to minikube dev namespace
+wfctl dev up --k8s
+
+# Expose via Tailscale Funnel
+wfctl dev up --expose tailscale
+
+# Expose via Cloudflare Tunnel
+wfctl dev up --expose cloudflare
+```
+
+The `--expose` method can also be configured in the workflow config under `environments.local.exposure.method`.
+
+#### `dev down`
+
+```
+wfctl dev down [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--k8s` | `false` | Delete the minikube `dev` namespace |
+| `--verbose` | `false` | Show detailed output |
+
+#### `dev logs`
+
+```
+wfctl dev logs [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--service` | _(all)_ | Service name to filter |
+| `--follow` | `false` | Follow log output |
+| `--k8s` | `false` | Stream from minikube pods |
+
+#### `dev status`
+
+```
+wfctl dev status [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--k8s` | `false` | Show pod status in minikube dev namespace |
+
+#### `dev restart`
+
+```
+wfctl dev restart [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--service` | _(all)_ | Service name to restart |
+| `--k8s` | `false` | Restart in minikube |
+
+---
+
+### `wizard`
+
+Interactive TUI wizard for generating a `app.yaml` workflow config. Walks through project setup step by step.
+
+```
+wfctl wizard
+```
+
+No flags. The wizard runs in the terminal and collects:
+
+1. **Project info** — name and description
+2. **Services** — single-service or multi-service (comma-separated names)
+3. **Infrastructure** — PostgreSQL, Redis cache, NATS message queue (checkboxes)
+4. **Environments** — local, staging, production (checkboxes)
+5. **Deployment** — provider per environment (Docker Compose, Kubernetes, AWS ECS)
+6. **Secrets** — secrets provider (env vars, Vault, AWS Secrets Manager, GCP Secret Manager)
+7. **CI/CD** — generate CI bootstrap and select platform (GitHub Actions, GitLab CI)
+8. **Review** — preview generated YAML
+9. **Write** — save to `app.yaml`
+
+**Navigation:**
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Advance to next screen / confirm |
+| `Esc` | Go back to previous screen |
+| `Tab` | Move focus between fields |
+| `Space` | Toggle checkbox / select option |
+| `↑` / `↓` | Move cursor in lists |
+| `Ctrl+C` | Quit without saving |
+
+**Example:**
+
+```bash
+wfctl wizard
+# Follow the interactive prompts to generate app.yaml
+wfctl validate app.yaml
+wfctl dev up
+```
 
 ---
 

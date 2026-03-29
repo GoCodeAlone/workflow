@@ -88,6 +88,8 @@ var commands = map[string]func([]string) error{
 	"secrets":        runSecrets,
 	"ports":          runPorts,
 	"security":       runSecurity,
+	"wizard":         runWizard,
+	"dev":            runDev,
 }
 
 func main() {
