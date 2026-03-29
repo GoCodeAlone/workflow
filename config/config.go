@@ -136,6 +136,10 @@ type WorkflowConfig struct {
 	CI             *CIConfig                       `json:"ci,omitempty" yaml:"ci,omitempty"`
 	Environments   map[string]*EnvironmentConfig   `json:"environments,omitempty" yaml:"environments,omitempty"`
 	Secrets        *SecretsConfig                  `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	Services       map[string]*ServiceConfig       `json:"services,omitempty" yaml:"services,omitempty"`
+	Mesh           *MeshConfig                     `json:"mesh,omitempty" yaml:"mesh,omitempty"`
+	Networking     *NetworkingConfig               `json:"networking,omitempty" yaml:"networking,omitempty"`
+	Security       *SecurityConfig                 `json:"security,omitempty" yaml:"security,omitempty"`
 	ConfigDir      string                          `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
 }
 
