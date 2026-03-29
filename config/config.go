@@ -136,6 +136,7 @@ type WorkflowConfig struct {
 	CI             *CIConfig                       `json:"ci,omitempty" yaml:"ci,omitempty"`
 	Environments   map[string]*EnvironmentConfig   `json:"environments,omitempty" yaml:"environments,omitempty"`
 	Secrets        *SecretsConfig                  `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	SecretStores   map[string]*SecretStoreConfig   `json:"secretStores,omitempty" yaml:"secretStores,omitempty"`
 	Services       map[string]*ServiceConfig       `json:"services,omitempty" yaml:"services,omitempty"`
 	Mesh           *MeshConfig                     `json:"mesh,omitempty" yaml:"mesh,omitempty"`
 	Networking     *NetworkingConfig               `json:"networking,omitempty" yaml:"networking,omitempty"`
@@ -164,8 +165,10 @@ type InfrastructureConfig struct {
 type InfraResourceConfig struct {
 	Name     string         `json:"name" yaml:"name"`
 	Type     string         `json:"type" yaml:"type"`
-	Provider string         `json:"provider" yaml:"provider"`
+	Provider string         `json:"provider,omitempty" yaml:"provider,omitempty"`
 	Config   map[string]any `json:"config,omitempty" yaml:"config,omitempty"`
+	// Environments maps environment names to per-environment resolution strategies.
+	Environments map[string]*InfraEnvironmentResolution `json:"environments,omitempty" yaml:"environments,omitempty"`
 }
 
 // ResolveRelativePath resolves a path relative to the config file's directory.
