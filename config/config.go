@@ -131,9 +131,12 @@ type WorkflowConfig struct {
 	Requires       *RequiresConfig       `json:"requires,omitempty" yaml:"requires,omitempty"`
 	Plugins        *PluginsConfig        `json:"plugins,omitempty" yaml:"plugins,omitempty"`
 	Sidecars       []SidecarConfig       `json:"sidecars,omitempty" yaml:"sidecars,omitempty"`
-	Infrastructure *InfrastructureConfig `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
-	Engine         *EngineConfig         `json:"engine,omitempty" yaml:"engine,omitempty"`
-	ConfigDir      string                `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
+	Infrastructure *InfrastructureConfig           `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
+	Engine         *EngineConfig                   `json:"engine,omitempty" yaml:"engine,omitempty"`
+	CI             *CIConfig                       `json:"ci,omitempty" yaml:"ci,omitempty"`
+	Environments   map[string]*EnvironmentConfig   `json:"environments,omitempty" yaml:"environments,omitempty"`
+	Secrets        *SecretsConfig                  `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	ConfigDir      string                          `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
 }
 
 // EngineConfig holds engine-level runtime settings.
