@@ -444,9 +444,440 @@ services:
     depends_on: [nats]
 ```
 
+## Feature 6: Environment & Secrets Management
+
+### Goal
+Detect, configure, and manage environment variables and secrets across environments — from local dev through production — with provider-agnostic abstraction and secure lifecycle management.
+
+### Environment Configuration (environments: section)
+
+```yaml
+environments:
+  local:
+    provider: docker          # docker | minikube | process
+    env_vars:
+      LOG_LEVEL: debug
+      DATABASE_URL: postgres://localhost:5432/app
+    secrets_provider: env     # secrets come from env vars in local dev
+
+  staging:
+    provider: aws-ecs
+    region: us-east-1
+    env_vars:
+      LOG_LEVEL: info
+      APP_ENV: staging
+    secrets_provider: aws-secrets-manager
+    secrets_prefix: staging/myapp/
+
+  production:
+    provider: aws-ecs
+    region: us-east-1
+    env_vars:
+      LOG_LEVEL: warn
+      APP_ENV: production
+    secrets_provider: aws-secrets-manager
+    secrets_prefix: prod/myapp/
+    approval_required: true
+```
+
+### Secret Detection from Config
+
+`wfctl secrets detect` scans the workflow config and identifies values that should be secrets:
+
+**Auto-detected patterns:**
+- `dsn:` or `DATABASE_URL` containing credentials → secret
+- `apiKey:`, `api_key:`, `token:`, `secret:` field names → secret
+- `${STRIPE_KEY}`, `${AWS_SECRET_ACCESS_KEY}` env var references → secret
+- Module configs for `auth.jwt` (signing keys), `auth.oauth2` (client secrets), integrations (API keys) → secrets
+- Any value matching regex patterns: API key formats, connection strings with passwords
+
+**Output:**
+```bash
+$ wfctl secrets detect
+Detected secrets in workflow config:
+
+  modules.database.config.dsn          → DATABASE_URL (connection string with credentials)
+  modules.stripe.config.secretKey      → STRIPE_SECRET_KEY (API key)
+  modules.auth-jwt.config.signingKey   → JWT_SIGNING_KEY (cryptographic key)
+  modules.nats.config.token            → NATS_TOKEN (auth token)
+
+  Recommended: Store these in your secrets provider.
+  Run: wfctl secrets init --provider aws-secrets-manager
+```
+
+### Secrets Lifecycle
+
+```yaml
+secrets:
+  provider: aws-secrets-manager  # aws-secrets-manager | vault | do-secrets |
+                                  # github-secrets | gcp-secret-manager | env
+  config:
+    region: us-east-1
+    # Provider-specific config
+
+  # Declare all secrets the app needs
+  entries:
+    - name: DATABASE_URL
+      description: "PostgreSQL connection string"
+      rotation:
+        enabled: true
+        interval: 90d
+        strategy: dual-credential  # rotate without downtime
+
+    - name: STRIPE_SECRET_KEY
+      description: "Stripe API secret key"
+      rotation:
+        enabled: false  # manual rotation via Stripe dashboard
+
+    - name: JWT_SIGNING_KEY
+      description: "HMAC signing key for JWT tokens"
+      rotation:
+        enabled: true
+        interval: 30d
+        strategy: graceful  # old key valid for 24h after rotation
+
+    - name: NATS_TOKEN
+      description: "NATS cluster authentication token"
+      rotation:
+        enabled: true
+        interval: 7d
+```
+
+### wfctl secrets Commands
+
+```bash
+# Initialize secrets provider for an environment
+wfctl secrets init --provider aws-secrets-manager --env production
+
+# Set a secret value (interactive — never in CLI args or logs)
+wfctl secrets set DATABASE_URL --env production
+> Enter value: [hidden input]
+> ✓ Stored in aws-secrets-manager as prod/myapp/DATABASE_URL
+
+# Set from a file (for certificates, keys)
+wfctl secrets set TLS_CERT --env production --from-file ./certs/server.pem
+
+# List configured secrets and their status
+wfctl secrets list --env production
+  DATABASE_URL        ✓ set  (last rotated: 2026-03-15, next: 2026-06-13)
+  STRIPE_SECRET_KEY   ✓ set  (manual rotation)
+  JWT_SIGNING_KEY     ✓ set  (last rotated: 2026-03-01, next: 2026-03-31)
+  NATS_TOKEN          ✗ NOT SET
+
+# Rotate a secret
+wfctl secrets rotate JWT_SIGNING_KEY --env production
+
+# Sync secrets between environments (copies structure, not values)
+wfctl secrets sync --from staging --to production
+  Will create 4 secret entries in production (values must be set separately)
+
+# Validate all required secrets are present for an environment
+wfctl secrets validate --env production
+  ✓ DATABASE_URL: present
+  ✓ STRIPE_SECRET_KEY: present
+  ✓ JWT_SIGNING_KEY: present
+  ✗ NATS_TOKEN: MISSING — run: wfctl secrets set NATS_TOKEN --env production
+```
+
+### Provider Abstraction
+
+All secrets providers implement the same interface:
+
+| Provider | Backend | Auth | Notes |
+|----------|---------|------|-------|
+| `aws-secrets-manager` | AWS Secrets Manager | IAM role or access key | Best for AWS deployments |
+| `vault` | HashiCorp Vault | Token, AppRole, or Kubernetes auth | Best for multi-cloud |
+| `gcp-secret-manager` | GCP Secret Manager | Service account | Best for GCP deployments |
+| `do-secrets` | DigitalOcean App Platform env vars | DO API token | Simple, no rotation |
+| `github-secrets` | GitHub Actions secrets | GitHub token | CI-only, not for runtime |
+| `env` | Environment variables | N/A | Local development only |
+| `file` | Encrypted file (age/sops) | age key or GPG | Git-storable secrets |
+
+## Feature 7: Networking, Ports & Exposure
+
+### Goal
+Detect required ports from config, manage external exposure, generate network policies, support tunnel-based access for local deployments.
+
+### Port Detection
+
+`wfctl` automatically detects all ports from the workflow config:
+
+```bash
+$ wfctl ports list
+Detected ports from workflow config:
+
+  Service          Module           Port    Protocol   Exposure
+  ─────────────────────────────────────────────────────────────
+  api              http.server      8080    HTTP       public (routes defined)
+  api              websocket        9090    WebSocket  public
+  worker           messaging.nats   4222    NATS       internal (mesh only)
+  -                database.postgres 5432   TCP        internal
+  -                cache.redis      6379    TCP        internal
+  api              observability    9090    HTTP       internal (metrics)
+  api              health.checker   8081    HTTP       internal (health)
+
+  External ports needed: 8080 (HTTP), 9090 (WebSocket)
+  Internal ports (no external access): 4222, 5432, 6379, 8081, 9090/metrics
+```
+
+### Port Mapping Configuration
+
+```yaml
+networking:
+  # External-facing ports — these need ingress/load balancer
+  ingress:
+    - service: api
+      port: 8080
+      external_port: 443     # defaults to same as internal if not set
+      protocol: https
+      tls:
+        provider: letsencrypt  # letsencrypt | manual | acm | cloudflare
+        domain: api.myapp.com
+    - service: api
+      port: 9090
+      external_port: 443
+      protocol: wss
+      path: /ws               # WebSocket upgrade path
+
+  # Network policies — which services can talk to what
+  policies:
+    - from: api
+      to: [postgres, redis, nats]
+    - from: worker
+      to: [postgres, nats]
+    - from: scheduler
+      to: [nats]
+    # Default: deny all not explicitly listed
+
+  # DNS configuration
+  dns:
+    provider: cloudflare      # cloudflare | route53 | do-dns | manual
+    zone: myapp.com
+    records:
+      - name: api
+        type: A
+        target: ${LOAD_BALANCER_IP}
+```
+
+### Local Exposure Options
+
+For local development (minikube, docker), users often need to expose services to the internet:
+
+```yaml
+environments:
+  local:
+    provider: minikube
+    exposure:
+      method: tailscale       # tailscale | cloudflare-tunnel | ngrok | port-forward
+      tailscale:
+        funnel: true          # expose via Tailscale Funnel (HTTPS)
+        hostname: dev-api     # dev-api.tail1234.ts.net
+      # OR
+      cloudflare_tunnel:
+        tunnel_name: myapp-dev
+        domain: dev.myapp.com
+      # OR
+      ngrok:
+        domain: myapp.ngrok.io
+      # OR (simplest — just port-forward, no internet exposure)
+      port_forward:
+        api: 8080:8080
+        ws: 9090:9090
+```
+
+### wfctl dev Networking
+
+```bash
+# Start with Tailscale Funnel exposure
+wfctl dev up --expose tailscale
+  ✓ api available at https://dev-api.tail1234.ts.net
+  ✓ ws available at wss://dev-api.tail1234.ts.net/ws
+
+# Start with Cloudflare Tunnel
+wfctl dev up --expose cloudflare
+  ✓ api available at https://dev.myapp.com
+
+# Start with simple port-forward (no internet exposure)
+wfctl dev up
+  ✓ api available at http://localhost:8080
+  ✓ ws available at ws://localhost:9090
+```
+
+## Feature 8: Infrastructure Security
+
+### Goal
+Generate and enforce security configurations for infrastructure — network policies, IAM roles, TLS, firewall rules — derived from the workflow config.
+
+### Security Configuration
+
+```yaml
+security:
+  # TLS everywhere — enforce encrypted communication
+  tls:
+    internal: true            # mutual TLS between services
+    external: true            # TLS for all ingress
+    provider: letsencrypt     # letsencrypt | vault-pki | manual | acm
+    min_version: "1.2"
+
+  # Network isolation
+  network:
+    default_policy: deny      # deny-all, then explicitly allow
+    # Auto-generated from mesh.routes + networking.policies
+
+  # IAM / service identity
+  identity:
+    provider: kubernetes      # kubernetes (service accounts) | aws-iam | vault
+    per_service: true         # each service gets its own identity
+    # Used for: secrets access, cloud API calls, inter-service auth
+
+  # Runtime protection
+  runtime:
+    read_only_filesystem: true
+    no_new_privileges: true
+    run_as_non_root: true
+    drop_capabilities: [ALL]
+    add_capabilities: [NET_BIND_SERVICE]  # only if ports < 1024
+
+  # Scanning
+  scanning:
+    container_scan: true      # scan container images for vulnerabilities
+    dependency_scan: true     # scan go.mod / package.json for known CVEs
+    sast: false               # static analysis (optional, slow)
+```
+
+### wfctl security Commands
+
+```bash
+# Audit the current config for security issues
+wfctl security audit
+  ✓ TLS configured for all external endpoints
+  ✓ Network policies restrict inter-service communication
+  ⚠ database.postgres has no connection encryption (add tls: true to config)
+  ✗ JWT signing key uses HMAC-SHA256 — consider RSA or EdDSA for production
+  ✗ No rate limiting on public endpoints
+
+# Generate Kubernetes NetworkPolicies from mesh.routes
+wfctl security generate-network-policies --output k8s/network-policies.yaml
+
+# Generate IAM roles/policies from infrastructure needs
+wfctl security generate-iam --provider aws --output infra/iam.tf
+```
+
+## Feature 2 (Expanded): MCP-Assisted Setup Guides
+
+### Complete Setup Flows
+
+The MCP server provides structured setup flows as resources. Each flow is a decision tree the AI assistant follows:
+
+### Flow 1: Infrastructure Setup (`workflow://guides/infra-setup`)
+
+```
+1. "What cloud provider are you using?"
+   → AWS | GCP | DigitalOcean | Local (minikube/docker) | Existing cluster
+
+2. If AWS:
+   "Do you need us to provision infrastructure, or connect to existing?"
+   → Provision new (→ IaC flow)
+   → Connect to existing (→ Connection flow)
+
+3. IaC Flow:
+   a. Detect needed resources from modules: (database.postgres → RDS, cache.redis → ElastiCache, etc.)
+   b. "Your app needs: PostgreSQL, Redis, NATS. Shall I configure these for AWS?"
+   c. Generate ci.infra section with resources, state backend, IAM
+   d. "What instance sizes? (t3.micro for dev, t3.medium for prod — I'll set sensible defaults)"
+   e. Generate environment-specific overrides
+
+4. Connection Flow:
+   a. "What's your ECS cluster name?" (or EKS, or EC2 instances)
+   b. "Where is your container registry?" → ECR | GitHub Packages | DockerHub
+   c. "How do you access the cluster?" → IAM role | kubeconfig | SSH
+   d. Generate deploy section with connection details
+
+5. For BOTH flows:
+   a. Detect required secrets from config
+   b. "I found 4 values that should be secrets: DATABASE_URL, STRIPE_KEY, JWT_SECRET, NATS_TOKEN"
+   c. "Where should secrets be stored?" → AWS Secrets Manager | Vault | GitHub Secrets
+   d. Generate secrets section
+   e. "Run `wfctl secrets set <name> --env <env>` for each secret"
+```
+
+### Flow 2: CI/CD Setup (`workflow://guides/ci-setup`)
+
+```
+1. "What CI platform?" → GitHub Actions | GitLab CI | Jenkins | CircleCI | Other
+2. "What does your build produce?" → Binary | Container | Both | npm package
+3. "What tests do you run?" → Unit | Integration (needs DB?) | E2E (needs browser?)
+4. "What environments?" → Just production | Staging + Production | Dev + Staging + Production
+5. "Deployment strategy?" → Rolling | Blue-green | Canary
+6. Generate ci: section
+7. Generate platform bootstrap YAML (e.g., .github/workflows/ci.yml)
+8. "Run `wfctl ci init` to create the bootstrap file"
+```
+
+### Flow 3: Deployment Setup (`workflow://guides/deployment-setup`)
+
+```
+1. Detect services from config (single service or multi-service?)
+2. For each service:
+   a. Detect exposed ports → prompt for external port mapping
+   b. Detect protocol (HTTP, WebSocket, gRPC) → suggest ingress configuration
+   c. Detect health check endpoints → configure health checks
+3. "How should your app be reached from the internet?"
+   → Load balancer (cloud) | Ingress controller (k8s) | Tailscale Funnel | Cloudflare Tunnel | Direct IP
+4. "Do you need a custom domain?" → Configure DNS
+5. "Do you need TLS?" → Let's Encrypt | ACM | Manual cert | Cloudflare (auto)
+6. Generate networking: section
+7. Generate security: section with sensible defaults
+8. Detect if rate limiting is needed (public HTTP endpoints) → suggest config
+```
+
+### Flow 4: Secrets Setup (`workflow://guides/secrets-setup`)
+
+```
+1. Run `wfctl secrets detect` to find values that should be secrets
+2. For each detected secret:
+   a. Confirm it should be a secret (user might disagree)
+   b. Classify: API key | Database credential | Signing key | Token | Certificate
+3. "Where should secrets be stored?"
+   → Provider selection based on deployment target
+4. For each environment:
+   a. Generate secrets entries with rotation policies
+   b. Provide commands to set values:
+      "Run these commands to configure your secrets:
+       wfctl secrets set DATABASE_URL --env staging
+       wfctl secrets set DATABASE_URL --env production
+       wfctl secrets set STRIPE_SECRET_KEY --env staging
+       ..."
+5. For secrets that can't be set via CLI (e.g., GitHub Secrets for the bootstrap workflow):
+   "You need to manually configure these in GitHub → Settings → Secrets:
+    - AWS_ACCESS_KEY_ID: Your AWS access key for deployments
+    - AWS_SECRET_ACCESS_KEY: Your AWS secret key
+    These are needed by the CI bootstrap to run wfctl"
+```
+
+### New MCP Tools (expanded)
+
+| Tool | Purpose |
+|------|---------|
+| `mcp.scaffold_ci` | Generate ci: section from description |
+| `mcp.scaffold_infra` | Generate infra: section from detected needs |
+| `mcp.scaffold_service` | Generate a service definition |
+| `mcp.scaffold_environment` | Generate environment config (env vars, secrets, provider) |
+| `mcp.scaffold_networking` | Generate networking section from detected ports |
+| `mcp.scaffold_security` | Generate security section with best practices |
+| `mcp.add_secret_config` | Configure secret management for a provider |
+| `mcp.add_deployment_target` | Add a deployment environment |
+| `mcp.detect_infra_needs` | Analyze modules → suggest infrastructure |
+| `mcp.detect_secrets` | Scan config for values that should be secrets |
+| `mcp.detect_ports` | Scan config for exposed ports |
+| `mcp.validate_service_topology` | Check inter-service communication paths |
+| `mcp.validate_secrets` | Check all required secrets are configured per environment |
+| `mcp.validate_networking` | Check port mappings, ingress, TLS configuration |
+| `mcp.generate_bootstrap` | Generate CI platform bootstrap YAML |
+
 ## Dogfooding Plan
 
-Use these features to manage GoCodeAlone's own repos:
+Use these features to manage GoCodeAlone's own repos.
 
 ### Phase 1: workflow repo itself
 - Add `ci:` section to workflow's own config
@@ -463,13 +894,152 @@ Use these features to manage GoCodeAlone's own repos:
 - Use `wfctl ci run --phase deploy --env production` for real deployments
 - Replace manual minikube deployments with `wfctl dev up --k8s`
 
+### Dogfooding Reference: BuyMyWishlist Migration
+
+Step-by-step guide for converting buymywishlist to use the full platform:
+
+#### Current State
+- workflow-server binary + bmw-plugin gRPC binary (2 services)
+- PostgreSQL database
+- React UI built with Vite
+- Deployed to minikube via manual `kubectl` + Tailscale sidecar for external access
+- ConfigMap for app.yaml, env vars for secrets
+- Manual docker build → minikube image load → kubectl rollout
+
+#### Target State
+
+```yaml
+# buymywishlist/app.yaml (workflow config)
+
+services:
+  api:
+    binary: ./cmd/server
+    modules:
+      - name: http-server
+        type: http.server
+        config: { address: ":8080" }
+      # ... existing modules ...
+    plugins:
+      - ./bmwplugin    # local gRPC plugin
+    expose:
+      - port: 8080
+        protocol: http
+
+environments:
+  local:
+    provider: minikube
+    exposure:
+      method: tailscale
+      tailscale:
+        funnel: true
+        hostname: bmw-dev
+    env_vars:
+      LOG_LEVEL: debug
+
+  production:
+    provider: minikube   # still minikube for now
+    exposure:
+      method: tailscale
+      tailscale:
+        serve_config: true
+        hostname: bmw
+
+ci:
+  build:
+    binaries:
+      - name: server
+        path: ./cmd/server
+        os: [linux]
+        arch: [arm64]
+        env: { CGO_ENABLED: "0" }
+      - name: bmw-plugin
+        path: ./bmwplugin
+        os: [linux]
+        arch: [arm64]
+        env: { CGO_ENABLED: "0" }
+    containers:
+      - name: bmw-app
+        dockerfile: Dockerfile.prebuilt
+        registry: local    # minikube local registry
+    assets:
+      - name: ui
+        build: cd ui && npm run build
+        path: ui/dist
+  test:
+    unit:
+      command: go test ./...
+  deploy:
+    environments:
+      production:
+        provider: kubernetes
+        namespace: bmw
+        strategy: rolling
+
+infrastructure:
+  postgres:
+    type: database.postgres
+    config:
+      dsn: ${DATABASE_URL}
+
+secrets:
+  provider: env   # for now — migrate to Vault later
+  entries:
+    - name: DATABASE_URL
+    - name: JWT_SECRET
+    - name: STRIPE_SECRET_KEY
+
+networking:
+  ingress:
+    - service: api
+      port: 8080
+      external_port: 443
+      protocol: https
+      tls:
+        provider: tailscale   # Tailscale Funnel provides TLS
+```
+
+#### Migration Steps (for an agent to execute)
+
+```bash
+# 1. Local development
+wfctl dev up                    # starts postgres + api + bmw-plugin
+                                # Tailscale Funnel exposes HTTPS automatically
+
+# 2. Build and deploy
+wfctl ci run --phase build      # cross-compile binaries, build UI, build container
+wfctl ci run --phase deploy --env production  # deploy to minikube namespace
+
+# 3. Secret management
+wfctl secrets detect            # finds DATABASE_URL, JWT_SECRET, STRIPE_SECRET_KEY
+wfctl secrets set DATABASE_URL --env production
+wfctl secrets set JWT_SECRET --env production
+
+# 4. Health check
+wfctl dev status                # shows service health, port mappings, Tailscale URLs
+```
+
 ## Implementation Order
 
-1. **GitHub plugin expansion** (1-2 days) — go-github SDK, 15 new steps
-2. **ci: section schema + wfctl ci run** (3-5 days) — build/test phases first, deploy later
-3. **MCP setup tools** (2-3 days) — scaffold_ci, scaffold_infra, scaffold_service
-4. **services: section schema** (3-5 days) — multi-service config parsing, validation
-5. **wfctl dev up** (3-5 days) — docker-compose generation, process mode
-6. **wfctl ci run deploy phase** (5-7 days) — IaC integration, secret injection, deployment strategies
-7. **Bubbletea TUI wizard** (2-3 days) — wraps MCP tool logic in interactive TUI
-8. **Dogfooding** (ongoing) — apply to GoCodeAlone repos incrementally
+### Tier 1: Foundation (enables everything else)
+1. **GitHub plugin expansion** — go-github SDK, 15 new steps, GitHub App auth
+2. **ci: section schema** — config parsing, validation, `wfctl ci run --phase build,test`
+3. **environments: section schema** — per-environment config, env var management
+4. **secrets: section schema** — detection, provider abstraction, `wfctl secrets` commands
+
+### Tier 2: Core Platform (self-sufficient)
+5. **services: section schema** — multi-service config parsing, validation, binary targets
+6. **networking: section schema** — port detection, ingress configuration, TLS
+7. **security: section schema** — network policies, IAM, runtime protection
+8. **wfctl ci run deploy phase** — IaC integration, secret injection, deployment strategies
+
+### Tier 3: Developer Experience
+9. **wfctl dev up** — docker-compose generation, process mode, minikube mode
+10. **Local exposure** — Tailscale Funnel, Cloudflare Tunnel, ngrok integration
+11. **MCP setup tools** — all scaffold/detect/validate tools + setup guide resources
+12. **Bubbletea TUI wizard** — wraps MCP tool logic in interactive TUI
+
+### Tier 4: Dogfooding & Polish
+13. **Dogfood: workflow repo** — replace release.yml with wfctl ci run
+14. **Dogfood: buymywishlist** — full migration (local dev, build, deploy, secrets)
+15. **Dogfood: ratchet-cli** — multi-service config (daemon + CLI)
+16. **CI platform abstraction** — GitLab CI, Jenkins bootstrap generation (beyond GitHub)
