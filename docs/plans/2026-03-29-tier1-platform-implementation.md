@@ -924,15 +924,44 @@ func (c *CIConfig) Validate() error {
 
 ---
 
+---
+
+## Alignment Fixes (from design-to-plan check)
+
+### Task 1 additions:
+- Add `Strategy string` field to `SecretsRotationConfig` (e.g., "dual-credential", "graceful")
+
+### Task 2 additions:
+- `runTestPhase` must handle `Needs` field: spin up ephemeral deps (postgres, redis) as Docker containers before running test command, tear down after
+- After test phase, if `GITHUB_TOKEN` env var is set, create a GitHub Check Run with test results summary
+
+### Task 4 additions:
+- Add `wfctl secrets init --provider <name> --env <env>` — initialize secrets provider config
+- Add `wfctl secrets rotate <name> --env <env>` — trigger secret rotation
+- Add `wfctl secrets sync --from <env> --to <env>` — copy secret structure between environments
+- Add `--from-file` flag to `wfctl secrets set` for certificates/keys
+
+### Task 5 additions:
+- Add `step.gh_pr_review` — request/submit PR review
+- Add `step.gh_issue_label` — add/remove labels on issues
+- Add `step.gh_secret_set` — set repository/org secret (encrypted)
+- Add enhanced `github.webhook` module — signature validation, event type routing (update existing module_webhook.go)
+
+### Task 6 additions:
+- Add `mcp.detect_infra_needs` tool (analyze modules → suggest infrastructure)
+- Change resource URI from `workflow://guides/setup` to `workflow://docs/setup-guide` (matches design)
+
+---
+
 ## Summary
 
 | Task | Scope | Repo |
 |------|-------|------|
-| 1 | Config structs (ci, environments, secrets) | workflow |
-| 2 | wfctl ci run (build + test phases) | workflow |
+| 1 | Config structs (ci, environments, secrets) + Strategy field | workflow |
+| 2 | wfctl ci run (build + test + ephemeral deps + Check Run) | workflow |
 | 3 | wfctl ci init (bootstrap YAML generation) | workflow |
-| 4 | wfctl secrets (detect, set, list, validate) | workflow |
-| 5 | GitHub plugin expansion (go-github SDK, 10+ steps) | workflow-plugin-github |
-| 6 | MCP scaffold tools + setup guide | workflow |
+| 4 | wfctl secrets (detect, set, list, validate, init, rotate, sync) | workflow |
+| 5 | GitHub plugin expansion (go-github SDK, 13 steps, github.app + webhook) | workflow-plugin-github |
+| 6 | MCP scaffold tools (7 tools) + setup guide resource | workflow |
 | 7 | Schema validation for new sections | workflow |
 | 8 | Documentation | workflow |
