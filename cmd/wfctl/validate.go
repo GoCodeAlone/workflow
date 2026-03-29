@@ -152,6 +152,31 @@ func validateFile(cfgPath string, strict, skipUnknownTypes, allowNoEntryPoints b
 		}
 	}
 
+	// Validate services:, mesh:, networking:, security: sections when present.
+	if len(cfg.Services) > 0 {
+		if err := config.ValidateServices(cfg.Services); err != nil {
+			return fmt.Errorf("services section: %w", err)
+		}
+	}
+	if cfg.Mesh != nil && len(cfg.Services) > 0 {
+		for _, warn := range config.ValidateMeshRoutes(cfg.Mesh, cfg.Services) {
+			fmt.Fprintf(os.Stderr, "  WARN %s: mesh: %s\n", cfgPath, warn)
+		}
+	}
+	if cfg.Networking != nil {
+		if err := config.ValidateNetworking(cfg.Networking, cfg.Services); err != nil {
+			return fmt.Errorf("networking section: %w", err)
+		}
+	}
+	if cfg.Security != nil {
+		if err := config.ValidateSecurity(cfg.Security); err != nil {
+			return fmt.Errorf("security section: %w", err)
+		}
+	}
+	for _, warn := range config.CrossValidate(cfg) {
+		fmt.Fprintf(os.Stderr, "  WARN %s: %s\n", cfgPath, warn)
+	}
+
 	fmt.Printf("  PASS %s (%d modules, %d workflows, %d triggers)\n",
 		cfgPath, len(cfg.Modules), len(cfg.Workflows), len(cfg.Triggers))
 	return nil
