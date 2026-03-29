@@ -120,6 +120,7 @@ func NewServer(pluginDir string, opts ...ServerOption) *Server {
 	s.registerTools()
 	s.registerNewTools()
 	s.registerWfctlTools()
+	s.registerScaffoldTools()
 	s.registerResources()
 
 	return s
@@ -261,6 +262,7 @@ func (s *Server) registerTools() {
 
 // registerResources registers documentation and example resources.
 func (s *Server) registerResources() {
+	s.registerSetupGuideResource()
 	s.mcpServer.AddResource(
 		mcp.NewResource(
 			"workflow://docs/overview",
