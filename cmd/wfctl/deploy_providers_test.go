@@ -221,7 +221,7 @@ func TestK8sStrategy(t *testing.T) {
 // ── injectSecrets ─────────────────────────────────────────────────────────────
 
 func TestInjectSecrets_Nil(t *testing.T) {
-	secrets, err := injectSecrets(context.Background(), nil)
+	secrets, err := injectSecrets(context.Background(), nil, "")
 	if err != nil {
 		t.Fatalf("injectSecrets(nil): unexpected error: %v", err)
 	}
@@ -233,13 +233,15 @@ func TestInjectSecrets_Nil(t *testing.T) {
 func TestInjectSecrets_EnvProvider(t *testing.T) {
 	t.Setenv("TEST_SECRET_KEY", "supersecret")
 
-	secretsCfg := &config.SecretsConfig{
-		Provider: "env",
-		Entries: []config.SecretEntry{
-			{Name: "TEST_SECRET_KEY"},
+	wfCfg := &config.WorkflowConfig{
+		Secrets: &config.SecretsConfig{
+			Provider: "env",
+			Entries: []config.SecretEntry{
+				{Name: "TEST_SECRET_KEY"},
+			},
 		},
 	}
-	secrets, err := injectSecrets(context.Background(), secretsCfg)
+	secrets, err := injectSecrets(context.Background(), wfCfg, "")
 	if err != nil {
 		t.Fatalf("injectSecrets: %v", err)
 	}

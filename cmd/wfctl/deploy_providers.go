@@ -445,9 +445,34 @@ func pollHealthCheck(ctx context.Context, cfg DeployConfig) error {
 
 // ── secret injection ──────────────────────────────────────────────────────────
 
-// injectSecrets fetches secrets from the configured provider and returns them
-// as a name→value map for use during deployment.
-func injectSecrets(ctx context.Context, secretsCfg *config.SecretsConfig) (map[string]string, error) {
+// injectSecrets fetches secrets from the configured provider(s) and returns them
+// as a name→value map for use during deployment. When cfg contains a SecretStores
+// map or per-secret Store fields, each secret is routed to its correct store.
+// The envName parameter is used to apply environment-level SecretsStoreOverride.
+func injectSecrets(ctx context.Context, cfg *config.WorkflowConfig, envName string) (map[string]string, error) {
+	if cfg == nil || cfg.Secrets == nil || len(cfg.Secrets.Entries) == 0 {
+		return nil, nil
+	}
+
+	result := make(map[string]string, len(cfg.Secrets.Entries))
+	for _, entry := range cfg.Secrets.Entries {
+		storeName := ResolveSecretStore(entry.Name, envName, cfg)
+		provider, err := getProviderForStore(storeName, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("secret %q: store %q: %w", entry.Name, storeName, err)
+		}
+		val, err := provider.Get(ctx, entry.Name)
+		if err != nil {
+			return nil, fmt.Errorf("secret %q: fetch from %q: %w", entry.Name, storeName, err)
+		}
+		result[entry.Name] = val
+	}
+	return result, nil
+}
+
+// injectSecretsLegacy is the pre-multi-store implementation kept for callers
+// that only have a SecretsConfig (not a full WorkflowConfig).
+func injectSecretsLegacy(ctx context.Context, secretsCfg *config.SecretsConfig) (map[string]string, error) {
 	if secretsCfg == nil || len(secretsCfg.Entries) == 0 {
 		return nil, nil
 	}

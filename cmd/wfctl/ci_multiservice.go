@@ -102,9 +102,9 @@ func buildServiceBinary(name string, svc *config.ServiceConfig, verbose bool) er
 func runMultiServiceDeploy(
 	deploy *config.CIDeployConfig,
 	envName string,
-	secretsCfg *config.SecretsConfig,
+	wfCfg *config.WorkflowConfig,
 	services map[string]*config.ServiceConfig,
 	verbose bool,
 ) error {
-	return runDeployPhaseWithConfig(deploy, envName, secretsCfg, services, verbose)
+	return runDeployPhaseWithConfig(deploy, envName, wfCfg, services, verbose)
 }

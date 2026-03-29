@@ -61,11 +61,11 @@ func runCIRun(args []string) error {
 				return fmt.Errorf("--env is required for deploy phase")
 			}
 			if len(cfg.Services) > 0 {
-				if err := runMultiServiceDeploy(cfg.CI.Deploy, *env, cfg.Secrets, cfg.Services, *verbose); err != nil {
+				if err := runMultiServiceDeploy(cfg.CI.Deploy, *env, &cfg, cfg.Services, *verbose); err != nil {
 					return fmt.Errorf("deploy phase failed: %w", err)
 				}
 			} else {
-				if err := runDeployPhaseWithConfig(cfg.CI.Deploy, *env, cfg.Secrets, nil, *verbose); err != nil {
+				if err := runDeployPhaseWithConfig(cfg.CI.Deploy, *env, &cfg, nil, *verbose); err != nil {
 					return fmt.Errorf("deploy phase failed: %w", err)
 				}
 			}
@@ -287,7 +287,7 @@ func runDeployPhase(deploy *config.CIDeployConfig, envName string, verbose bool)
 func runDeployPhaseWithConfig(
 	deploy *config.CIDeployConfig,
 	envName string,
-	secretsCfg *config.SecretsConfig,
+	wfCfg *config.WorkflowConfig,
 	services map[string]*config.ServiceConfig,
 	verbose bool,
 ) error {
@@ -319,8 +319,8 @@ func runDeployPhaseWithConfig(
 		}
 	}
 
-	// Step 2: secret injection.
-	secrets, err := injectSecrets(ctx, secretsCfg)
+	// Step 2: secret injection — route each secret to its correct store.
+	secrets, err := injectSecrets(ctx, wfCfg, envName)
 	if err != nil {
 		return fmt.Errorf("secret injection: %w", err)
 	}
