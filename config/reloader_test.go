@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -368,4 +369,158 @@ func TestConfigReloader_FullReloadError(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Errorf("expected sentinel error from HandleChange, got %v", err)
 	}
+}
+
+// TestConfigReloader_NoDeadlock_FullReloadCallsSetReconfigurer verifies that a
+// fullReloadFn which calls SetReconfigurer does not deadlock. This was the
+// original bug: HandleChange held mu during the callback, and SetReconfigurer
+// also locks mu.
+func TestConfigReloader_NoDeadlock_FullReloadCallsSetReconfigurer(t *testing.T) {
+	initial := makeWorkflowConfig(nil, map[string]any{"flow": "v1"})
+
+	var r *ConfigReloader
+
+	fullFn := func(cfg *WorkflowConfig) error {
+		// Simulate engine reload calling back into reloader.
+		r.SetReconfigurer(&mockReconfigurer{})
+		return nil
+	}
+
+	r = newTestReloader(t, initial, fullFn, nil)
+
+	newCfg := makeWorkflowConfig(nil, map[string]any{"flow": "v2"})
+	evt, err := makeChangeEvent(newCfg)
+	if err != nil {
+		t.Fatalf("makeChangeEvent: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := r.HandleChange(evt); err != nil {
+			t.Errorf("HandleChange: %v", err)
+		}
+	}()
+
+	select {
+	case <-done:
+		// Success — no deadlock.
+	case <-time.After(5 * time.Second):
+		t.Fatal("deadlock detected: HandleChange blocked for 5s (fullReloadFn calls SetReconfigurer)")
+	}
+}
+
+// TestConfigReloader_NoDeadlock_ReconfigureCallsSetReconfigurer verifies that
+// ReconfigureModules calling back into SetReconfigurer does not deadlock.
+func TestConfigReloader_NoDeadlock_ReconfigureCallsSetReconfigurer(t *testing.T) {
+	initial := makeWorkflowConfig(
+		[]ModuleConfig{{Name: "alpha", Type: "cache", Config: map[string]any{"ttl": 60}}},
+		nil,
+	)
+
+	var r *ConfigReloader
+
+	callbackRec := &callbackReconfigurer{fn: func(_ context.Context, _ []ModuleConfigChange) ([]string, error) {
+		// Simulate reconfigurer calling back into reloader.
+		r.SetReconfigurer(&mockReconfigurer{})
+		return nil, nil
+	}}
+
+	fullFn := func(cfg *WorkflowConfig) error { return nil }
+	r = newTestReloader(t, initial, fullFn, callbackRec)
+
+	newCfg := makeWorkflowConfig(
+		[]ModuleConfig{{Name: "alpha", Type: "cache", Config: map[string]any{"ttl": 120}}},
+		nil,
+	)
+	evt, err := makeChangeEvent(newCfg)
+	if err != nil {
+		t.Fatalf("makeChangeEvent: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := r.HandleChange(evt); err != nil {
+			t.Errorf("HandleChange: %v", err)
+		}
+	}()
+
+	select {
+	case <-done:
+		// Success — no deadlock.
+	case <-time.After(5 * time.Second):
+		t.Fatal("deadlock detected: HandleChange blocked for 5s (ReconfigureModules calls SetReconfigurer)")
+	}
+}
+
+// TestConfigReloader_ConcurrentHandleChange verifies that concurrent calls to
+// HandleChange do not race or deadlock (e.g. file watcher + DB poller firing
+// simultaneously).
+func TestConfigReloader_ConcurrentHandleChange(t *testing.T) {
+	initial := makeWorkflowConfig(
+		[]ModuleConfig{{Name: "alpha", Type: "cache", Config: map[string]any{"ttl": 60}}},
+		nil,
+	)
+
+	var mu sync.Mutex
+	var fullReloads int
+	fullFn := func(cfg *WorkflowConfig) error {
+		mu.Lock()
+		fullReloads++
+		mu.Unlock()
+		// Simulate slow reload
+		time.Sleep(10 * time.Millisecond)
+		return nil
+	}
+
+	r := newTestReloader(t, initial, fullFn, nil)
+
+	const goroutines = 10
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for i := range goroutines {
+		go func(i int) {
+			defer wg.Done()
+			newCfg := makeWorkflowConfig(
+				[]ModuleConfig{{Name: "alpha", Type: "cache", Config: map[string]any{"ttl": 60 + i}}},
+				nil,
+			)
+			evt, err := makeChangeEvent(newCfg)
+			if err != nil {
+				t.Errorf("makeChangeEvent: %v", err)
+				return
+			}
+			if err := r.HandleChange(evt); err != nil {
+				t.Errorf("HandleChange goroutine %d: %v", i, err)
+			}
+		}(i)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		mu.Lock()
+		if fullReloads == 0 {
+			t.Error("expected at least 1 full reload from concurrent calls")
+		}
+		mu.Unlock()
+	case <-time.After(10 * time.Second):
+		t.Fatal("deadlock detected: concurrent HandleChange calls blocked for 10s")
+	}
+}
+
+// callbackReconfigurer allows injecting arbitrary logic into ReconfigureModules.
+type callbackReconfigurer struct {
+	fn func(ctx context.Context, changes []ModuleConfigChange) ([]string, error)
+}
+
+func (c *callbackReconfigurer) ReconfigureModules(ctx context.Context, changes []ModuleConfigChange) ([]string, error) {
+	return c.fn(ctx, changes)
 }

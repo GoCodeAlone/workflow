@@ -64,52 +64,64 @@ func (r *ConfigReloader) SetReconfigurer(reconfigurer ModuleReconfigurer) {
 // HandleChange processes a config change event. It diffs the old and new configs,
 // attempts per-module reconfiguration for module-only changes, and falls back
 // to a full reload when necessary.
+//
+// The mutex is held only while reading/writing internal state, never during
+// external callbacks (fullReloadFn, ReconfigureModules) to avoid deadlocks.
 func (r *ConfigReloader) HandleChange(evt ConfigChangeEvent) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	current := r.current
+	reloadFn := r.fullReloadFn
+	reconfigurer := r.reconfigurer
+	r.mu.Unlock()
 
-	diff := DiffModuleConfigs(r.current, evt.Config)
+	diff := DiffModuleConfigs(current, evt.Config)
 
 	// Non-module sections changed, or modules were added/removed — full reload required.
-	if HasNonModuleChanges(r.current, evt.Config) ||
+	if HasNonModuleChanges(current, evt.Config) ||
 		len(diff.Added) > 0 || len(diff.Removed) > 0 {
 		r.logger.Info("non-module changes detected, performing full reload",
 			"added", len(diff.Added), "removed", len(diff.Removed))
-		if err := r.fullReloadFn(evt.Config); err != nil {
+		if err := reloadFn(evt.Config); err != nil {
 			return err
 		}
+		r.mu.Lock()
 		r.current = evt.Config
 		r.currentHash = evt.NewHash
+		r.mu.Unlock()
 		return nil
 	}
 
 	// Only module config changes — try partial reconfiguration.
 	if len(diff.Modified) > 0 {
-		if r.reconfigurer == nil {
+		if reconfigurer == nil {
 			// No reconfigurer available — fall back to full reload.
 			r.logger.Info("module changes detected but no reconfigurer, performing full reload",
 				"modified", len(diff.Modified))
-			if err := r.fullReloadFn(evt.Config); err != nil {
+			if err := reloadFn(evt.Config); err != nil {
 				return err
 			}
+			r.mu.Lock()
 			r.current = evt.Config
 			r.currentHash = evt.NewHash
+			r.mu.Unlock()
 			return nil
 		}
 
-		failed, err := r.reconfigurer.ReconfigureModules(context.Background(), diff.Modified)
+		failed, err := reconfigurer.ReconfigureModules(context.Background(), diff.Modified)
 		if err != nil {
 			return err
 		}
 		if len(failed) > 0 {
 			r.logger.Info("some modules cannot be reconfigured in-place, performing full reload",
 				"modules", failed)
-			if err := r.fullReloadFn(evt.Config); err != nil {
+			if err := reloadFn(evt.Config); err != nil {
 				return err
 			}
 		}
+		r.mu.Lock()
 		r.current = evt.Config
 		r.currentHash = evt.NewHash
+		r.mu.Unlock()
 		return nil
 	}
 
