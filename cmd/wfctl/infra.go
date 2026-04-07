@@ -413,12 +413,23 @@ func resourceSummaryKeys(resType string, cfg map[string]any) [][2]string {
 
 	case "infra.firewall":
 		add(&pairs, "name", str("name"))
-		// Inbound rules summary.
-		if inbound, ok := cfg["inbound"]; ok {
-			add(&pairs, "inbound", formatFirewallRules(inbound))
+		// Inbound rules — try both key variants.
+		for _, key := range []string{"inbound_rules", "inbound"} {
+			if rules, ok := cfg[key]; ok {
+				for _, line := range formatFirewallRulesList(rules) {
+					add(&pairs, "allow inbound", line)
+				}
+				break
+			}
 		}
-		if outbound, ok := cfg["outbound"]; ok {
-			add(&pairs, "outbound", formatFirewallRules(outbound))
+		// Outbound rules.
+		for _, key := range []string{"outbound_rules", "outbound"} {
+			if rules, ok := cfg[key]; ok {
+				for _, line := range formatFirewallRulesList(rules) {
+					add(&pairs, "allow outbound", line)
+				}
+				break
+			}
 		}
 
 	case "infra.database":
@@ -493,7 +504,68 @@ func resourceSummaryKeys(resType string, cfg map[string]any) [][2]string {
 	return pairs
 }
 
-// formatFirewallRules produces a compact summary of firewall rule config.
+// formatFirewallRulesList returns one summary line per firewall rule.
+func formatFirewallRulesList(v any) []string {
+	rules, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	var lines []string
+	for _, r := range rules {
+		rm, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		var parts []string
+		if proto, ok := rm["protocol"].(string); ok && proto != "" {
+			parts = append(parts, strings.ToUpper(proto))
+		}
+		if ports, ok := rm["ports"].(string); ok && ports != "" {
+			parts = append(parts, ports)
+		}
+		// Handle both "source"/"sources" and "destination"/"destinations".
+		if src := extractSources(rm, "source", "sources"); src != "" {
+			parts = append(parts, "from "+src)
+		}
+		if dst := extractSources(rm, "destination", "destinations"); dst != "" {
+			parts = append(parts, "to "+dst)
+		}
+		if len(parts) > 0 {
+			lines = append(lines, strings.Join(parts, " "))
+		}
+	}
+	return lines
+}
+
+// extractSources gets a string or []string from a map, trying both singular and plural keys.
+func extractSources(m map[string]any, singular, plural string) string {
+	// Try plural first (array of IPs).
+	if v, ok := m[plural]; ok {
+		switch sv := v.(type) {
+		case []any:
+			strs := make([]string, 0, len(sv))
+			for _, s := range sv {
+				if str, ok := s.(string); ok {
+					strs = append(strs, str)
+				}
+			}
+			return strings.Join(strs, ",")
+		case []string:
+			return strings.Join(sv, ",")
+		case string:
+			return sv
+		}
+	}
+	// Try singular.
+	if v, ok := m[singular]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// formatFirewallRules produces a compact summary of firewall rule config (legacy, single-line).
 func formatFirewallRules(v any) string {
 	switch rules := v.(type) {
 	case []any:
