@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"text/tabwriter"
-
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
 	"gopkg.in/yaml.v3"
@@ -63,10 +61,21 @@ Options:
 }
 
 // resolveInfraConfig finds the config file from flags or defaults.
-func resolveInfraConfig(fs *flag.FlagSet) (string, error) {
-	configFile := fs.Lookup("config").Value.String()
-	if configFile != "" {
-		return configFile, nil
+// configFile is the resolved value from --config / -c flags (may be empty).
+func resolveInfraConfig(fs *flag.FlagSet, configFile ...string) (string, error) {
+	// Accept optional pre-resolved value (from StringVar binding).
+	cfg := ""
+	if len(configFile) > 0 {
+		cfg = configFile[0]
+	}
+	// Fall back to looking up the long flag name if no value was passed.
+	if cfg == "" {
+		if f := fs.Lookup("config"); f != nil {
+			cfg = f.Value.String()
+		}
+	}
+	if cfg != "" {
+		return cfg, nil
 	}
 	for _, candidate := range []string{"infra.yaml", "config/infra.yaml"} {
 		if _, err := os.Stat(candidate); err == nil {
@@ -118,14 +127,22 @@ func discoverInfraModules(cfgFile string) (iacState []infraModuleEntry, platform
 
 func runInfraPlan(args []string) error {
 	fs := flag.NewFlagSet("infra plan", flag.ContinueOnError)
-	_ = fs.String("config", "", "Config file")
-	format := fs.String("format", "table", "Output format: table or markdown")
-	output := fs.String("output", "", "Write plan to JSON file")
+	var configFile string
+	fs.StringVar(&configFile, "config", "", "Config file")
+	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
+	var formatVal string
+	fs.StringVar(&formatVal, "format", "table", "Output format: table or markdown")
+	fs.StringVar(&formatVal, "f", "table", "Output format (short for --format)")
+	var outputVal string
+	fs.StringVar(&outputVal, "output", "", "Write plan to JSON file")
+	fs.StringVar(&outputVal, "o", "", "Write plan to JSON file (short for --output)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	format := &formatVal
+	output := &outputVal
 
-	cfgFile, err := resolveInfraConfig(fs)
+	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
 		return err
 	}
@@ -284,51 +301,236 @@ func configHashMap(config map[string]any) string {
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
-// formatPlanTable renders an interfaces.IaCPlan as a human-readable table.
+// formatPlanTable renders an interfaces.IaCPlan as a human-readable table
+// with per-resource config details shown as indented key-value lines.
 func formatPlanTable(plan interfaces.IaCPlan) string {
 	if len(plan.Actions) == 0 {
 		return "No changes. Infrastructure is up-to-date.\n"
 	}
 
 	var sb strings.Builder
-	tw := tabwriter.NewWriter(&sb, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "Action\tResource\tType")
-	fmt.Fprintln(tw, "------\t--------\t----")
 	for i := range plan.Actions {
 		a := &plan.Actions[i]
 		symbol := actionSymbol(a.Action)
-		fmt.Fprintf(tw, "%s %s\t%s\t%s\n", symbol, a.Action, a.Resource.Name, a.Resource.Type)
+		fmt.Fprintf(&sb, "%s %s  %s  (%s)\n", symbol, a.Action, a.Resource.Name, a.Resource.Type)
+		keys := resourceSummaryKeys(a.Resource.Type, a.Resource.Config)
+		if len(keys) > 0 {
+			// Align values: find longest key.
+			maxLen := 0
+			for _, kv := range keys {
+				if len(kv[0]) > maxLen {
+					maxLen = len(kv[0])
+				}
+			}
+			for _, kv := range keys {
+				padding := strings.Repeat(" ", maxLen-len(kv[0]))
+				fmt.Fprintf(&sb, "    %s:%s  %s\n", kv[0], padding, kv[1])
+			}
+		}
+		fmt.Fprintln(&sb)
 	}
-	tw.Flush()
 
 	creates, updates, deletes := countActions(plan)
-	fmt.Fprintf(&sb, "\nPlan: %d to create, %d to update, %d to destroy.\n",
+	fmt.Fprintf(&sb, "Plan: %d to create, %d to update, %d to destroy.\n",
 		creates, updates, deletes)
 	return sb.String()
 }
 
-// formatPlanMarkdown renders an interfaces.IaCPlan as a GitHub-flavored markdown
-// table suitable for PR comments.
+// formatPlanMarkdown renders an interfaces.IaCPlan as GitHub-flavored markdown
+// with collapsible sections per resource, suitable for PR comments.
 func formatPlanMarkdown(plan interfaces.IaCPlan) string {
 	if len(plan.Actions) == 0 {
 		return "## Infrastructure Plan\n\nNo changes. Infrastructure is up-to-date.\n"
 	}
 
 	var sb strings.Builder
-	sb.WriteString("## Infrastructure Plan\n\n")
+	sb.WriteString("### Infrastructure Plan\n\n")
 	sb.WriteString("| Action | Resource | Type |\n")
 	sb.WriteString("|--------|----------|------|\n")
 	for i := range plan.Actions {
 		a := &plan.Actions[i]
 		symbol := actionSymbol(a.Action)
-		fmt.Fprintf(&sb, "| %s %s | `%s` | `%s` |\n",
+		fmt.Fprintf(&sb, "| %s %s | `%s` | `%s` |\n", symbol, a.Action, a.Resource.Name, a.Resource.Type)
+	}
+	sb.WriteString("\n")
+
+	for i := range plan.Actions {
+		a := &plan.Actions[i]
+		symbol := actionSymbol(a.Action)
+		fmt.Fprintf(&sb, "<details>\n<summary>%s %s %s (%s)</summary>\n\n",
 			symbol, a.Action, a.Resource.Name, a.Resource.Type)
+
+		keys := resourceSummaryKeys(a.Resource.Type, a.Resource.Config)
+		if len(keys) > 0 {
+			sb.WriteString("| Property | Value |\n")
+			sb.WriteString("|----------|-------|\n")
+			for _, kv := range keys {
+				fmt.Fprintf(&sb, "| %s | %s |\n", kv[0], kv[1])
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString("</details>\n\n")
 	}
 
 	creates, updates, deletes := countActions(plan)
-	fmt.Fprintf(&sb, "\n**Plan: %d to create, %d to update, %d to destroy.**\n",
+	fmt.Fprintf(&sb, "**Plan: %d to create, %d to update, %d to destroy.**\n",
 		creates, updates, deletes)
 	return sb.String()
+}
+
+// resourceSummaryKeys returns the most relevant key-value pairs to display for
+// a given resource type. Each entry is a [key, value] pair.
+func resourceSummaryKeys(resType string, cfg map[string]any) [][2]string {
+	if len(cfg) == 0 {
+		return nil
+	}
+	// Helper to extract a string value from config.
+	str := func(key string) string {
+		if v, ok := cfg[key]; ok {
+			switch s := v.(type) {
+			case string:
+				return s
+			case int, int64, float64, bool:
+				return fmt.Sprintf("%v", s)
+			}
+		}
+		return ""
+	}
+
+	add := func(pairs *[][2]string, key, val string) {
+		if val != "" {
+			*pairs = append(*pairs, [2]string{key, val})
+		}
+	}
+
+	var pairs [][2]string
+
+	switch resType {
+	case "infra.vpc":
+		add(&pairs, "name", str("name"))
+		add(&pairs, "region", str("region"))
+		add(&pairs, "cidr", str("cidr"))
+
+	case "infra.firewall":
+		add(&pairs, "name", str("name"))
+		// Inbound rules summary.
+		if inbound, ok := cfg["inbound"]; ok {
+			add(&pairs, "inbound", formatFirewallRules(inbound))
+		}
+		if outbound, ok := cfg["outbound"]; ok {
+			add(&pairs, "outbound", formatFirewallRules(outbound))
+		}
+
+	case "infra.database":
+		add(&pairs, "name", str("name"))
+		engine := str("engine")
+		ver := str("version")
+		if engine != "" && ver != "" {
+			add(&pairs, "engine", engine+" v"+ver)
+		} else {
+			add(&pairs, "engine", engine)
+		}
+		add(&pairs, "size", str("size"))
+		add(&pairs, "nodes", str("nodes"))
+		add(&pairs, "region", str("region"))
+
+	case "infra.container_service":
+		add(&pairs, "name", str("name"))
+		add(&pairs, "image", str("image"))
+		add(&pairs, "http_port", str("http_port"))
+		add(&pairs, "instances", str("instances"))
+		add(&pairs, "region", str("region"))
+
+	case "infra.registry":
+		add(&pairs, "name", str("name"))
+		add(&pairs, "tier", str("tier"))
+		add(&pairs, "region", str("region"))
+
+	case "infra.cluster":
+		add(&pairs, "name", str("name"))
+		add(&pairs, "region", str("region"))
+		add(&pairs, "node_size", str("node_size"))
+		add(&pairs, "nodes", str("nodes"))
+
+	case "infra.cache":
+		add(&pairs, "name", str("name"))
+		add(&pairs, "engine", str("engine"))
+		add(&pairs, "size", str("size"))
+		add(&pairs, "region", str("region"))
+
+	case "infra.storage":
+		add(&pairs, "name", str("name"))
+		add(&pairs, "region", str("region"))
+
+	case "infra.dns":
+		add(&pairs, "name", str("name"))
+		add(&pairs, "domain", str("domain"))
+
+	case "infra.load_balancer":
+		add(&pairs, "name", str("name"))
+		add(&pairs, "region", str("region"))
+		add(&pairs, "algorithm", str("algorithm"))
+
+	default:
+		// For unknown types, show up to 5 top-level string/numeric keys.
+		count := 0
+		for k, v := range cfg {
+			if count >= 5 {
+				break
+			}
+			switch s := v.(type) {
+			case string:
+				if s != "" {
+					add(&pairs, k, s)
+					count++
+				}
+			case int, int64, float64, bool:
+				add(&pairs, k, fmt.Sprintf("%v", v))
+				count++
+			}
+		}
+	}
+	return pairs
+}
+
+// formatFirewallRules produces a compact summary of firewall rule config.
+func formatFirewallRules(v any) string {
+	switch rules := v.(type) {
+	case []any:
+		if len(rules) == 0 {
+			return ""
+		}
+		// Summarise first rule.
+		first, ok := rules[0].(map[string]any)
+		if !ok {
+			return fmt.Sprintf("%d rule(s)", len(rules))
+		}
+		proto, _ := first["protocol"].(string)
+		ports, _ := first["ports"].(string)
+		src, _ := first["source"].(string)
+		dst, _ := first["destination"].(string)
+		var parts []string
+		if proto != "" {
+			parts = append(parts, strings.ToUpper(proto))
+		}
+		if ports != "" {
+			parts = append(parts, ports)
+		}
+		if src != "" {
+			parts = append(parts, "from "+src)
+		}
+		if dst != "" {
+			parts = append(parts, "to "+dst)
+		}
+		summary := strings.Join(parts, " ")
+		if len(rules) > 1 {
+			summary += fmt.Sprintf(" (+%d more)", len(rules)-1)
+		}
+		return summary
+	case string:
+		return rules
+	}
+	return ""
 }
 
 func actionSymbol(action string) string {
@@ -370,9 +572,15 @@ func writePlanJSON(plan interfaces.IaCPlan, path string) error {
 // runInfraImport imports an existing cloud resource into the IaC state.
 func runInfraImport(args []string) error {
 	fs := flag.NewFlagSet("infra import", flag.ContinueOnError)
-	provider := fs.String("provider", "", "Provider name (aws, gcp, azure, digitalocean)")
-	resType := fs.String("type", "", "Abstract resource type (e.g. infra.database)")
-	cloudID := fs.String("id", "", "Cloud-provider resource ID")
+	var providerVal, resTypeVal, cloudIDVal string
+	fs.StringVar(&providerVal, "provider", "", "Provider name (aws, gcp, azure, digitalocean)")
+	fs.StringVar(&providerVal, "p", "", "Provider name (short for --provider)")
+	fs.StringVar(&resTypeVal, "type", "", "Abstract resource type (e.g. infra.database)")
+	fs.StringVar(&resTypeVal, "t", "", "Abstract resource type (short for --type)")
+	fs.StringVar(&cloudIDVal, "id", "", "Cloud-provider resource ID")
+	provider := &providerVal
+	resType := &resTypeVal
+	cloudID := &cloudIDVal
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -388,16 +596,21 @@ func runInfraImport(args []string) error {
 
 func runInfraApply(args []string) error {
 	fs := flag.NewFlagSet("infra apply", flag.ContinueOnError)
-	configFlag := fs.String("config", "", "Config file")
-	autoApprove := fs.Bool("auto-approve", false, "Skip confirmation")
+	var configFlag string
+	fs.StringVar(&configFlag, "config", "", "Config file")
+	fs.StringVar(&configFlag, "c", "", "Config file (short for --config)")
+	var autoApproveVal bool
+	fs.BoolVar(&autoApproveVal, "auto-approve", false, "Skip confirmation")
+	fs.BoolVar(&autoApproveVal, "y", false, "Skip confirmation (short for --auto-approve)")
+	autoApprove := &autoApproveVal
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	cfgFile := *configFlag
+	cfgFile := configFlag
 	if cfgFile == "" {
 		var err error
-		cfgFile, err = resolveInfraConfig(fs)
+		cfgFile, err = resolveInfraConfig(fs, configFlag)
 		if err != nil {
 			return err
 		}
@@ -421,12 +634,14 @@ func runInfraApply(args []string) error {
 
 func runInfraStatus(args []string) error {
 	fs := flag.NewFlagSet("infra status", flag.ContinueOnError)
-	_ = fs.String("config", "", "Config file")
+	var configFile string
+	fs.StringVar(&configFile, "config", "", "Config file")
+	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	cfgFile, err := resolveInfraConfig(fs)
+	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
 		return err
 	}
@@ -437,12 +652,14 @@ func runInfraStatus(args []string) error {
 
 func runInfraDrift(args []string) error {
 	fs := flag.NewFlagSet("infra drift", flag.ContinueOnError)
-	_ = fs.String("config", "", "Config file")
+	var configFile string
+	fs.StringVar(&configFile, "config", "", "Config file")
+	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	cfgFile, err := resolveInfraConfig(fs)
+	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
 		return err
 	}
@@ -453,16 +670,21 @@ func runInfraDrift(args []string) error {
 
 func runInfraDestroy(args []string) error {
 	fs := flag.NewFlagSet("infra destroy", flag.ContinueOnError)
-	configFlag := fs.String("config", "", "Config file")
-	autoApprove := fs.Bool("auto-approve", false, "Skip confirmation")
+	var configFlag string
+	fs.StringVar(&configFlag, "config", "", "Config file")
+	fs.StringVar(&configFlag, "c", "", "Config file (short for --config)")
+	var autoApproveVal bool
+	fs.BoolVar(&autoApproveVal, "auto-approve", false, "Skip confirmation")
+	fs.BoolVar(&autoApproveVal, "y", false, "Skip confirmation (short for --auto-approve)")
+	autoApprove := &autoApproveVal
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	cfgFile := *configFlag
+	cfgFile := configFlag
 	if cfgFile == "" {
 		var err error
-		cfgFile, err = resolveInfraConfig(fs)
+		cfgFile, err = resolveInfraConfig(fs, configFlag)
 		if err != nil {
 			return err
 		}

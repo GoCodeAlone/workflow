@@ -48,15 +48,17 @@ Options:
 
 func runInfraStateList(args []string) error {
 	fs := flag.NewFlagSet("infra state list", flag.ContinueOnError)
-	configFlag := fs.String("config", "", "Config file")
+	var configFlag string
+	fs.StringVar(&configFlag, "config", "", "Config file")
+	fs.StringVar(&configFlag, "c", "", "Config file (short for --config)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	cfgFile := *configFlag
+	cfgFile := configFlag
 	if cfgFile == "" {
 		var err error
-		cfgFile, err = resolveInfraConfig(fs)
+		cfgFile, err = resolveInfraConfig(fs, configFlag)
 		if err != nil {
 			// No config found — list is empty, not an error.
 			fmt.Println("No infrastructure config found. No state to list.")
@@ -84,17 +86,21 @@ func runInfraStateList(args []string) error {
 
 func runInfraStateExport(args []string) error {
 	fs := flag.NewFlagSet("infra state export", flag.ContinueOnError)
-	configFlag := fs.String("config", "", "Config file")
-	format := fs.String("format", "tfstate", "Export format: tfstate")
-	outputFlag := fs.String("output", "", "Output file (default: stdout)")
+	var configFlag, formatVal, outputFlag string
+	fs.StringVar(&configFlag, "config", "", "Config file")
+	fs.StringVar(&configFlag, "c", "", "Config file (short for --config)")
+	fs.StringVar(&formatVal, "format", "tfstate", "Export format: tfstate")
+	fs.StringVar(&formatVal, "f", "tfstate", "Export format (short for --format)")
+	fs.StringVar(&outputFlag, "output", "", "Output file (default: stdout)")
+	fs.StringVar(&outputFlag, "o", "", "Output file (short for --output)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	cfgFile := *configFlag
+	cfgFile := configFlag
 	if cfgFile == "" {
 		var err error
-		cfgFile, err = resolveInfraConfig(fs)
+		cfgFile, err = resolveInfraConfig(fs, configFlag)
 		if err != nil {
 			return err
 		}
@@ -104,31 +110,34 @@ func runInfraStateExport(args []string) error {
 
 	var data []byte
 	var err error
-	switch *format {
+	switch formatVal {
 	case "tfstate":
 		data, err = exportAsTFState(states)
 	default:
-		return fmt.Errorf("unknown export format %q (supported: tfstate)", *format)
+		return fmt.Errorf("unknown export format %q (supported: tfstate)", formatVal)
 	}
 	if err != nil {
 		return fmt.Errorf("export: %w", err)
 	}
 
-	if *outputFlag == "" {
+	if outputFlag == "" {
 		fmt.Println(string(data))
 		return nil
 	}
-	if err := os.WriteFile(*outputFlag, data, 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", *outputFlag, err)
+	if err := os.WriteFile(outputFlag, data, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", outputFlag, err)
 	}
-	fmt.Printf("State exported to %s (%s format)\n", *outputFlag, *format)
+	fmt.Printf("State exported to %s (%s format)\n", outputFlag, formatVal)
 	return nil
 }
 
 func runInfraStateImport(args []string) error {
 	fs := flag.NewFlagSet("infra state import", flag.ContinueOnError)
-	configFlag := fs.String("config", "", "Config file")
-	from := fs.String("from", "", "Source format: tfstate or pulumi")
+	var configFlag, fromVal string
+	fs.StringVar(&configFlag, "config", "", "Config file")
+	fs.StringVar(&configFlag, "c", "", "Config file (short for --config)")
+	fs.StringVar(&fromVal, "from", "", "Source format: tfstate or pulumi")
+	from := &fromVal
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -141,10 +150,10 @@ func runInfraStateImport(args []string) error {
 	}
 	srcFile := fs.Args()[0]
 
-	cfgFile := *configFlag
+	cfgFile := configFlag
 	if cfgFile == "" {
 		var err error
-		cfgFile, err = resolveInfraConfig(fs)
+		cfgFile, err = resolveInfraConfig(fs, configFlag)
 		if err != nil {
 			return err
 		}
