@@ -11,15 +11,18 @@ type ResourceDriver interface {
 	Diff(ctx context.Context, desired ResourceSpec, current *ResourceOutput) (*DiffResult, error)
 	HealthCheck(ctx context.Context, ref ResourceRef) (*HealthResult, error)
 	Scale(ctx context.Context, ref ResourceRef, replicas int) (*ResourceOutput, error)
+	// SensitiveKeys returns output keys whose values should be masked in logs and plan output.
+	SensitiveKeys() []string
 }
 
 // ResourceOutput is the concrete output of a provisioned or read resource.
 type ResourceOutput struct {
-	Name       string         `json:"name"`
-	Type       string         `json:"type"`
-	ProviderID string         `json:"provider_id"`
-	Outputs    map[string]any `json:"outputs"` // IPs, endpoints, connection strings
-	Status     string         `json:"status"`
+	Name       string          `json:"name"`
+	Type       string          `json:"type"`
+	ProviderID string          `json:"provider_id"`
+	Outputs    map[string]any  `json:"outputs"`             // IPs, endpoints, connection strings
+	Sensitive  map[string]bool `json:"sensitive,omitempty"` // keys whose values are sensitive
+	Status     string          `json:"status"`
 }
 
 // DiffResult summarises the differences between desired and actual resource state.

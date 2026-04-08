@@ -68,6 +68,7 @@ func (d *mockDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRef) (*
 func (d *mockDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ int) (*interfaces.ResourceOutput, error) {
 	return nil, nil
 }
+func (d *mockDriver) SensitiveKeys() []string { return nil }
 
 // noopLockHandle is a no-op IaCLockHandle for tests.
 type noopLockHandle struct{}

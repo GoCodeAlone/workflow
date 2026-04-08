@@ -139,6 +139,7 @@ func (d *infraMockDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRe
 func (d *infraMockDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ int) (*interfaces.ResourceOutput, error) {
 	return nil, nil
 }
+func (d *infraMockDriver) SensitiveKeys() []string { return nil }
 
 // helpers
 

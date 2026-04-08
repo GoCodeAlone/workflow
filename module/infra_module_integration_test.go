@@ -97,6 +97,7 @@ func (d *recordingDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRe
 func (d *recordingDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ int) (*interfaces.ResourceOutput, error) {
 	return nil, nil
 }
+func (d *recordingDriver) SensitiveKeys() []string { return nil }
 
 // ─── planningProvider: mock that implements Plan() with provider-specific types ──
 
