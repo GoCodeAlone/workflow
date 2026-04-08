@@ -10,6 +10,7 @@ import (
 	"strings"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
+	"github.com/GoCodeAlone/workflow/secrets"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,6 +33,8 @@ func runInfra(args []string) error {
 		return runInfraImport(args[1:])
 	case "state":
 		return runInfraState(args[1:])
+	case "bootstrap":
+		return runInfraBootstrap(args[1:])
 	default:
 		return infraUsage()
 	}
@@ -136,11 +139,15 @@ func runInfraPlan(args []string) error {
 	var outputVal string
 	fs.StringVar(&outputVal, "output", "", "Write plan to JSON file")
 	fs.StringVar(&outputVal, "o", "", "Write plan to JSON file (short for --output)")
+	var showSensitiveVal bool
+	fs.BoolVar(&showSensitiveVal, "show-sensitive", false, "Show sensitive values in plaintext")
+	fs.BoolVar(&showSensitiveVal, "S", false, "Show sensitive values in plaintext (short for --show-sensitive)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	format := &formatVal
 	output := &outputVal
+	showSensitive := showSensitiveVal
 
 	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
@@ -161,10 +168,10 @@ func runInfraPlan(args []string) error {
 
 	switch *format {
 	case "markdown":
-		fmt.Print(formatPlanMarkdown(plan))
+		fmt.Print(formatPlanMarkdown(plan, showSensitive))
 	default:
 		fmt.Printf("Infrastructure Plan — %s\n\n", cfgFile)
-		fmt.Print(formatPlanTable(plan))
+		fmt.Print(formatPlanTable(plan, showSensitive))
 	}
 
 	if *output != "" {
@@ -303,7 +310,7 @@ func configHashMap(config map[string]any) string {
 
 // formatPlanTable renders an interfaces.IaCPlan as a human-readable table
 // with per-resource config details shown as indented key-value lines.
-func formatPlanTable(plan interfaces.IaCPlan) string {
+func formatPlanTable(plan interfaces.IaCPlan, showSensitive bool) string {
 	if len(plan.Actions) == 0 {
 		return "No changes. Infrastructure is up-to-date.\n"
 	}
@@ -313,7 +320,7 @@ func formatPlanTable(plan interfaces.IaCPlan) string {
 		a := &plan.Actions[i]
 		symbol := actionSymbol(a.Action)
 		fmt.Fprintf(&sb, "%s %s  %s  (%s)\n", symbol, a.Action, a.Resource.Name, a.Resource.Type)
-		keys := resourceSummaryKeys(a.Resource.Type, a.Resource.Config)
+		keys := resourceSummaryKeys(a.Resource.Type, a.Resource.Config, showSensitive)
 		if len(keys) > 0 {
 			// Align values: find longest key.
 			maxLen := 0
@@ -338,7 +345,7 @@ func formatPlanTable(plan interfaces.IaCPlan) string {
 
 // formatPlanMarkdown renders an interfaces.IaCPlan as GitHub-flavored markdown
 // with collapsible sections per resource, suitable for PR comments.
-func formatPlanMarkdown(plan interfaces.IaCPlan) string {
+func formatPlanMarkdown(plan interfaces.IaCPlan, showSensitive bool) string {
 	if len(plan.Actions) == 0 {
 		return "## Infrastructure Plan\n\nNo changes. Infrastructure is up-to-date.\n"
 	}
@@ -360,7 +367,7 @@ func formatPlanMarkdown(plan interfaces.IaCPlan) string {
 		fmt.Fprintf(&sb, "<details>\n<summary>%s %s %s (%s)</summary>\n\n",
 			symbol, a.Action, a.Resource.Name, a.Resource.Type)
 
-		keys := resourceSummaryKeys(a.Resource.Type, a.Resource.Config)
+		keys := resourceSummaryKeys(a.Resource.Type, a.Resource.Config, showSensitive)
 		if len(keys) > 0 {
 			sb.WriteString("| Property | Value |\n")
 			sb.WriteString("|----------|-------|\n")
@@ -379,13 +386,28 @@ func formatPlanMarkdown(plan interfaces.IaCPlan) string {
 }
 
 // resourceSummaryKeys returns the most relevant key-value pairs to display for
-// a given resource type. Each entry is a [key, value] pair.
-func resourceSummaryKeys(resType string, cfg map[string]any) [][2]string {
+// a given resource type. Each entry is a [key, value] pair. Sensitive keys are
+// masked as "(sensitive)" unless showSensitive is true.
+func resourceSummaryKeys(resType string, cfg map[string]any, showSensitive bool) [][2]string {
 	if len(cfg) == 0 {
 		return nil
 	}
-	// Helper to extract a string value from config.
+
+	sensitiveSet := make(map[string]struct{})
+	if !showSensitive {
+		for _, k := range secrets.DefaultSensitiveKeys() {
+			sensitiveSet[k] = struct{}{}
+		}
+	}
+
+	// Helper to extract a string value from config, masking if sensitive.
 	str := func(key string) string {
+		if _, isSensitive := sensitiveSet[key]; isSensitive {
+			if _, ok := cfg[key]; ok {
+				return "(sensitive)"
+			}
+			return ""
+		}
 		if v, ok := cfg[key]; ok {
 			switch s := v.(type) {
 			case string:
@@ -488,6 +510,11 @@ func resourceSummaryKeys(resType string, cfg map[string]any) [][2]string {
 		for k, v := range cfg {
 			if count >= 5 {
 				break
+			}
+			if _, isSensitive := sensitiveSet[k]; isSensitive {
+				add(&pairs, k, "(sensitive)")
+				count++
+				continue
 			}
 			switch s := v.(type) {
 			case string:
@@ -674,10 +701,15 @@ func runInfraApply(args []string) error {
 	var autoApproveVal bool
 	fs.BoolVar(&autoApproveVal, "auto-approve", false, "Skip confirmation")
 	fs.BoolVar(&autoApproveVal, "y", false, "Skip confirmation (short for --auto-approve)")
+	var showSensitiveVal bool
+	fs.BoolVar(&showSensitiveVal, "show-sensitive", false, "Show sensitive values in plaintext")
+	fs.BoolVar(&showSensitiveVal, "S", false, "Show sensitive values in plaintext (short for --show-sensitive)")
 	autoApprove := &autoApproveVal
+	showSensitive := showSensitiveVal
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	_ = showSensitive // used in apply progress output when provider integration is complete
 
 	cfgFile := configFlag
 	if cfgFile == "" {
