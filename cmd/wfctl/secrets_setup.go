@@ -74,6 +74,11 @@ Options:
 		// Auto-generate for key/secret/token names if flag is set.
 		if *autoGenKeys && existing == "" && isAutoGenCandidate(entry.Name) {
 			val := generateSecretValue()
+			if val == "" {
+				fmt.Printf("  %-24s  [ERROR] crypto/rand unavailable; cannot auto-generate\n", entry.Name)
+				skipped++
+				continue
+			}
 			if setErr := provider.Set(ctx, entry.Name, val); setErr != nil {
 				fmt.Printf("  %-24s  [ERROR] %v\n", entry.Name, setErr)
 			} else {
@@ -119,17 +124,18 @@ Options:
 }
 
 // resolveSecretStoreForSetup determines which store to use for a secret in a given environment.
-// Priority: environment override → per-secret store field → defaultStore → legacy provider → "env".
+// Priority: per-secret store field → environment override → defaultStore → legacy provider → "env".
+// This matches the order in ResolveSecretStore so that setup and runtime agree on which store owns a secret.
 func resolveSecretStoreForSetup(entry config.SecretEntry, envName string, cfg *config.WorkflowConfig) string {
-	// 1. Environment-level store override.
+	// 1. Per-secret store field (highest priority).
+	if entry.Store != "" {
+		return entry.Store
+	}
+	// 2. Environment-level store override.
 	if cfg.Environments != nil {
 		if env, ok := cfg.Environments[envName]; ok && env.SecretsProvider != "" {
 			return env.SecretsProvider
 		}
-	}
-	// 2. Per-secret store field.
-	if entry.Store != "" {
-		return entry.Store
 	}
 	// 3. Default store from secretStores config.
 	if cfg.Secrets != nil && cfg.Secrets.DefaultStore != "" {

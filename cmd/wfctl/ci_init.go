@@ -4,11 +4,17 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"gopkg.in/yaml.v3"
 )
+
+// safeEnvNameRe matches environment names that are safe to embed in shell run
+// commands and YAML values. Only alphanumerics, hyphens, underscores, and dots
+// are permitted; anything else could inject commands or corrupt the YAML.
+var safeEnvNameRe = regexp.MustCompile(`^[a-zA-Z0-9_.\-]+$`)
 
 func runCIInit(args []string) error {
 	fs := flag.NewFlagSet("ci init", flag.ContinueOnError)
@@ -98,6 +104,11 @@ func generateGHABootstrap(cfg *config.WorkflowConfig) string {
 			if env == nil {
 				continue
 			}
+			if !safeEnvNameRe.MatchString(envName) {
+				// Skip environments whose names would corrupt the generated YAML or
+				// inject shell commands. Names must be [a-zA-Z0-9_.-] only.
+				continue
+			}
 			jobName := "deploy-" + strings.ReplaceAll(envName, ".", "-")
 			sb.WriteString("  " + jobName + ":\n")
 			sb.WriteString("    runs-on: ubuntu-latest\n")
@@ -125,6 +136,9 @@ func generateGitLabCIBootstrap(cfg *config.WorkflowConfig) string {
 	// Add deploy stages for each environment.
 	if cfg != nil && cfg.CI != nil && cfg.CI.Deploy != nil {
 		for envName := range cfg.CI.Deploy.Environments {
+			if !safeEnvNameRe.MatchString(envName) {
+				continue
+			}
 			sb.WriteString("  - deploy-" + strings.ReplaceAll(envName, ".", "-") + "\n")
 		}
 	}
@@ -150,6 +164,9 @@ func generateGitLabCIBootstrap(cfg *config.WorkflowConfig) string {
 	if cfg != nil && cfg.CI != nil && cfg.CI.Deploy != nil {
 		for envName, env := range cfg.CI.Deploy.Environments {
 			if env == nil {
+				continue
+			}
+			if !safeEnvNameRe.MatchString(envName) {
 				continue
 			}
 			stageID := strings.ReplaceAll(envName, ".", "-")
