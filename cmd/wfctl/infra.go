@@ -55,10 +55,11 @@ Actions:
   state     Manage IaC state (list, export, import)
 
 Options:
-  --config <file>    Config file (default: infra.yaml or config/infra.yaml)
-  --auto-approve     Skip confirmation prompt (apply/destroy only)
-  --format <fmt>     Output format: table (default) or markdown (plan only)
-  --output <file>    Write plan to JSON file (plan only)
+  --config <file>      Config file (default: infra.yaml or config/infra.yaml)
+  --auto-approve       Skip confirmation prompt (apply/destroy only)
+  --format <fmt>       Output format: table (default) or markdown (plan only)
+  --output <file>      Write plan to JSON file (plan only)
+  --show-sensitive/-S  Show sensitive values in plaintext (plan/apply only)
 `)
 	return fmt.Errorf("missing or unknown action")
 }
@@ -729,6 +730,20 @@ func runInfraApply(args []string) error {
 		if !strings.EqualFold(answer, "y") && !strings.EqualFold(answer, "yes") {
 			fmt.Println("Cancelled.")
 			return nil
+		}
+	}
+
+	// Auto-bootstrap: if infra.auto_bootstrap is true (default), run bootstrap
+	// before apply to ensure secrets and state backend are ready.
+	infraCfg, err := parseInfraConfig(cfgFile)
+	if err != nil {
+		return fmt.Errorf("parse infra config: %w", err)
+	}
+	autoBootstrap := infraCfg == nil || infraCfg.AutoBootstrap == nil || *infraCfg.AutoBootstrap
+	if autoBootstrap {
+		fmt.Println("Running bootstrap before apply...")
+		if err := runInfraBootstrap([]string{"--config", cfgFile}); err != nil {
+			return fmt.Errorf("bootstrap: %w", err)
 		}
 	}
 
