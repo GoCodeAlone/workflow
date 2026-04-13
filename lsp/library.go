@@ -81,7 +81,8 @@ func HoverAt(content string, line, col int, pluginDir ...string) *HoverResult {
 // convertDiagnostics converts protocol diagnostics to library Diagnostic values.
 func convertDiagnostics(diags []protocol.Diagnostic) []Diagnostic {
 	out := make([]Diagnostic, 0, len(diags))
-	for _, d := range diags {
+	for i := range diags {
+		d := &diags[i]
 		sev := SeverityWarning
 		if d.Severity != nil {
 			sev = DiagSeverity(*d.Severity)
@@ -106,7 +107,8 @@ func convertDiagnostics(diags []protocol.Diagnostic) []Diagnostic {
 // convertCompletions converts protocol completion items to library CompletionResult values.
 func convertCompletions(items []protocol.CompletionItem) []CompletionResult {
 	out := make([]CompletionResult, 0, len(items))
-	for _, item := range items {
+	for i := range items {
+		item := &items[i]
 		kind := ""
 		if item.Kind != nil {
 			kind = completionKindName(*item.Kind)
