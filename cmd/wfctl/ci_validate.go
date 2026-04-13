@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -75,7 +76,9 @@ Options:
 	// If failed but override provided, verify against a hash of the error summary.
 	if !allPassed && *override != "" {
 		secret := os.Getenv("WFCTL_ADMIN_SECRET")
-		if secret != "" {
+		if secret == "" {
+			fmt.Fprintln(os.Stderr, "WARNING: --override ignored: WFCTL_ADMIN_SECRET is not set")
+		} else {
 			rejHash := ciResultsHash(results)
 			if validation.VerifyChallenge(secret, rejHash, *override, time.Now()) {
 				fmt.Fprintln(os.Stderr, "WARNING: validation failures overridden by challenge token")
@@ -188,21 +191,22 @@ func checkImmutableSection(cfg *config.WorkflowConfig, section string) error {
 	return nil
 }
 
-// ciResultsHash produces a short string from the result set for use as a
-// rejection hash in override token verification.
+// ciResultsHash produces a SHA-256 hex digest of all failed file paths and
+// their errors, used as the rejection hash in override token verification.
 func ciResultsHash(results []ciFileResult) string {
 	var sb strings.Builder
 	for _, r := range results {
 		if !r.Passed {
 			sb.WriteString(r.File)
-			sb.WriteString(strings.Join(r.Errors, ";"))
+			sb.WriteByte('\n')
+			for _, e := range r.Errors {
+				sb.WriteString(e)
+				sb.WriteByte('\n')
+			}
 		}
 	}
-	h := sb.String()
-	if len(h) > 32 {
-		h = h[:32]
-	}
-	return h
+	sum := sha256.Sum256([]byte(sb.String()))
+	return fmt.Sprintf("%x", sum)
 }
 
 func ciCountFailed(results []ciFileResult) int {

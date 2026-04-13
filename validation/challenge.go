@@ -46,6 +46,7 @@ var bip39Subset = [wordCount]string{
 	"cactus", "cage", "cake", "call", "calm", "camera", "camp", "canal",
 	"cancel", "candy", "cannon", "canvas", "canyon", "capable", "capital", "captain",
 	"carbon", "card", "cargo", "carpet", "carry", "cart", "case", "castle",
+	"catalog", "catch", "category", "cause", "caution", "cave", "ceiling", "celery",
 }
 
 // timeBucketBytes returns the 1-hour bucket for t as a big-endian uint64 byte slice.
