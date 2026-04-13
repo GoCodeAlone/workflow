@@ -20,25 +20,25 @@ const (
 
 // Diagnostic is a language-server-style diagnostic returned by DiagnoseContent.
 type Diagnostic struct {
-	Line    int
-	Col     int
-	EndLine int
-	EndCol  int
-	Message  string
-	Severity DiagSeverity
-	Source   string
+	Line     int          `json:"line"`
+	Col      int          `json:"col"`
+	EndLine  int          `json:"end_line"`
+	EndCol   int          `json:"end_col"`
+	Message  string       `json:"message"`
+	Severity DiagSeverity `json:"severity"`
+	Source   string       `json:"source,omitempty"`
 }
 
 // CompletionResult is a single completion item returned by CompleteAt.
 type CompletionResult struct {
-	Label  string
-	Kind   string
-	Detail string
+	Label  string `json:"label"`
+	Kind   string `json:"kind,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // HoverResult is the hover content returned by HoverAt.
 type HoverResult struct {
-	Content string
+	Content string `json:"content"`
 }
 
 // DiagnoseContent analyses YAML content in-process and returns diagnostics
