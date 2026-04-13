@@ -40,6 +40,7 @@ import (
 	plugink8s "github.com/GoCodeAlone/workflow/plugins/k8s"
 	pluginlicense "github.com/GoCodeAlone/workflow/plugins/license"
 	pluginmarketplace "github.com/GoCodeAlone/workflow/plugins/marketplace"
+	pluginmcp "github.com/GoCodeAlone/workflow/plugins/mcp"
 	pluginmessaging "github.com/GoCodeAlone/workflow/plugins/messaging"
 	pluginmodcompat "github.com/GoCodeAlone/workflow/plugins/modularcompat"
 	pluginobs "github.com/GoCodeAlone/workflow/plugins/observability"
@@ -95,6 +96,7 @@ func DefaultPlugins() []plugin.EnginePlugin {
 		pluginpolicy.New(),
 		plugink8s.New(),
 		pluginmarketplace.New(),
+		pluginmcp.New(),
 		pluginscanner.New(),
 		pluginactors.New(),
 	}
