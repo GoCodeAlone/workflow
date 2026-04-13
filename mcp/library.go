@@ -49,8 +49,9 @@ func WithInProcessEngine(eng EngineProvider) InProcessOption {
 // InProcessServer exposes the workflow MCP tools for direct in-process
 // invocation without HTTP or subprocess overhead.
 type InProcessServer struct {
-	server *Server
-	tools  map[string]ToolHandlerFunc
+	server      *Server
+	tools       map[string]ToolHandlerFunc
+	auditLogger *slog.Logger
 }
 
 // NewInProcessServer creates an InProcessServer with all workflow tools registered.
@@ -75,8 +76,9 @@ func NewInProcessServer(opts ...InProcessOption) *InProcessServer {
 	}
 
 	return &InProcessServer{
-		server: s,
-		tools:  s.toolHandlers,
+		server:      s,
+		tools:       s.toolHandlers,
+		auditLogger: cfg.auditLogger,
 	}
 }
 
@@ -90,7 +92,7 @@ func (p *InProcessServer) ListTools() []string {
 }
 
 // CallTool invokes the named tool with the given arguments.
-// Returns the text content of the result as a string, or an error if the
+// Returns the tool result, which may be of any type, or an error if the
 // tool is not found or invocation fails.
 func (p *InProcessServer) CallTool(ctx context.Context, name string, args map[string]any) (any, error) {
 	handler, ok := p.tools[name]
@@ -110,9 +112,15 @@ func (p *InProcessServer) CallTool(ctx context.Context, name string, args map[st
 		return nil, fmt.Errorf("unmarshal args: %w", err)
 	}
 
-	result, err := handler(ctx, req)
-	if err != nil {
-		return nil, err
+	result, callErr := handler(ctx, req)
+	if p.auditLogger != nil {
+		p.auditLogger.Info("mcp tool call",
+			"tool", name,
+			"error", callErr,
+		)
+	}
+	if callErr != nil {
+		return nil, callErr
 	}
 
 	for _, c := range result.Content {

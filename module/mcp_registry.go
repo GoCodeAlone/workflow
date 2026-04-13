@@ -43,10 +43,17 @@ func NewMCPRegistry() *MCPRegistry {
 	}
 }
 
+// Logger returns the logger used by this registry.
+func (r *MCPRegistry) Logger() *slog.Logger {
+	return r.logger
+}
+
 // RegisterServer adds or replaces an MCP server entry in the registry.
+// The info.Name field is set to name to ensure consistent tool listings.
 func (r *MCPRegistry) RegisterServer(name string, info MCPServerInfo) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	info.Name = name
 	r.servers[name] = info
 	r.logger.Info("MCP server registered",
 		"name", name,

@@ -213,6 +213,13 @@ func (t *MCPToolTrigger) Configure(app modular.Application, triggerConfig any) e
 			if desc, ok := pm["description"].(string); ok {
 				p.Description = desc
 			}
+			if rawEnum, ok := pm["enum"].([]any); ok {
+				for _, ev := range rawEnum {
+					if s, ok := ev.(string); ok {
+						p.Enum = append(p.Enum, s)
+					}
+				}
+			}
 			params = append(params, p)
 		}
 	}
@@ -223,6 +230,9 @@ func (t *MCPToolTrigger) Configure(app modular.Application, triggerConfig any) e
 		Parameters:  params,
 	}
 
+	if existing, exists := t.tools[toolName]; exists && existing.pipeline != workflowType {
+		return fmt.Errorf("mcp_tool trigger: duplicate tool_name %q is already registered", toolName)
+	}
 	t.tools[toolName] = NewMCPToolTriggerRuntime(toolCfg, workflowType, t.executor)
 	return nil
 }

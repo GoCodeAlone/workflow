@@ -599,7 +599,15 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 |------|-------------|--------|
 | `agent.provider` | AI agent provider (Ollama, OpenAI, Anthropic) with model config | agent |
 | `agent.guardrails` | Safety guardrails: tool scope, command policy, immutable sections, override tokens | agent |
-| `mcp.registry` | Registry and audit log for MCP tool registrations and invocations | agent |
+
+### MCP
+
+> **Requires workflow-plugin-mcp.** Types in this section are provided by the MCP plugin.
+> Install with: `wfctl plugin install workflow-plugin-mcp`
+
+| Type | Description | Plugin |
+|------|-------------|--------|
+| `mcp.registry` | Registry and audit log for MCP tool registrations and invocations | mcp |
 
 ### Other
 | Type | Description | Plugin |

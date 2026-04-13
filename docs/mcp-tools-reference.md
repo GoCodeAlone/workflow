@@ -13,7 +13,7 @@ Validate a workflow YAML configuration string.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `config` | string | yes | YAML config content to validate |
+| `yaml_content` | string | yes | YAML config content to validate |
 | `skip_unknown_types` | bool | no | Skip unknown module/step type errors |
 | `strict` | bool | no | Fail on any warning |
 
@@ -22,7 +22,7 @@ Validate a workflow YAML configuration string.
 {
   "tool": "validate_config",
   "arguments": {
-    "config": "modules:\n  - name: server\n    type: http.server\n    config:\n      address: ':8080'\n"
+    "yaml_content": "modules:\n  - name: server\n    type: http.server\n    config:\n      address: ':8080'\n"
   }
 }
 ```
@@ -48,7 +48,7 @@ Inspect a config and get a structured summary.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `config` | string | yes | YAML config content |
+| `yaml_content` | string | yes | YAML config content |
 
 **Returns:** Structured summary with module names/types, workflow definitions, pipeline triggers, step counts.
 
@@ -60,8 +60,8 @@ Compute a semantic diff between two workflow configs.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `base` | string | yes | Base config YAML |
-| `proposed` | string | yes | Proposed config YAML |
+| `old_yaml` | string | yes | Base config YAML |
+| `new_yaml` | string | yes | Proposed config YAML |
 
 **Returns:** Structured diff showing added/modified/removed modules, pipelines, and steps.
 

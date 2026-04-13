@@ -41,10 +41,28 @@ func New() *Plugin {
 // ModuleFactories returns the factory for the mcp.registry module type.
 func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 	return map[string]plugin.ModuleFactory{
-		"mcp.registry": func(name string, _ map[string]any) modular.Module {
-			return newRegistryModule(name)
+		"mcp.registry": func(name string, cfg map[string]any) modular.Module {
+			return newRegistryModule(name, parseRegistryConfig(cfg))
 		},
 	}
+}
+
+// parseRegistryConfig converts a raw config map to MCPRegistryConfig.
+func parseRegistryConfig(cfg map[string]any) module.MCPRegistryConfig {
+	if cfg == nil {
+		return module.MCPRegistryConfig{}
+	}
+	var out module.MCPRegistryConfig
+	if v, ok := cfg["log_on_init"].(bool); ok {
+		out.LogOnInit = v
+	}
+	if v, ok := cfg["expose_admin_api"].(bool); ok {
+		out.ExposeAdminAPI = v
+	}
+	if v, ok := cfg["audit_tool_calls"].(bool); ok {
+		out.AuditToolCalls = v
+	}
+	return out
 }
 
 // TriggerFactories returns trigger constructors for the mcp_tool trigger type.
@@ -68,19 +86,26 @@ func (p *Plugin) WorkflowHandlers() map[string]plugin.WorkflowHandlerFactory {
 // registryModule wraps MCPRegistry as a modular.Module.
 type registryModule struct {
 	name     string
+	cfg      module.MCPRegistryConfig
 	registry *module.MCPRegistry
 }
 
-func newRegistryModule(name string) *registryModule {
+func newRegistryModule(name string, cfg module.MCPRegistryConfig) *registryModule {
 	return &registryModule{
 		name:     name,
+		cfg:      cfg,
 		registry: module.NewMCPRegistry(),
 	}
 }
 
-func (m *registryModule) Name() string         { return m.name }
+func (m *registryModule) Name() string           { return m.name }
 func (m *registryModule) Dependencies() []string { return nil }
-func (m *registryModule) Init(_ modular.Application) error { return nil }
+func (m *registryModule) Init(_ modular.Application) error {
+	if m.cfg.LogOnInit {
+		m.registry.Logger().Info("mcp.registry module initialized", "name", m.name)
+	}
+	return nil
+}
 
 // Registry returns the underlying MCPRegistry for wiring hooks.
 func (m *registryModule) Registry() *module.MCPRegistry {

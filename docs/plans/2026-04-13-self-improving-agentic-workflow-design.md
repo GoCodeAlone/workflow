@@ -37,8 +37,8 @@ graph TB
     end
 
     subgraph "Layer 3: Scenarios"
-        M[Scenario 69<br/>Self-Improving API + Custom Go] --> N[Scenario 70<br/>Self-Extending MCP Tooling]
-        N --> O[Scenario 71<br/>Autonomous Agile Agent]
+        M[Scenario 85<br/>Self-Improving API + Custom Go] --> N[Scenario 86<br/>Self-Extending MCP Tooling]
+        N --> O[Scenario 87<br/>Autonomous Agile Agent]
     end
 
     A -.->|consumed by| G

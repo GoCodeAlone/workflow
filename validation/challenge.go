@@ -81,11 +81,12 @@ func GenerateChallenge(adminSecret, rejectionHash string, t time.Time) string {
 // VerifyChallenge returns true if token matches the expected challenge for the
 // given rejection hash at time t. It checks both the current and previous
 // 1-hour buckets to provide a grace period across bucket boundaries.
+// Comparison is constant-time to prevent timing side-channel attacks.
 func VerifyChallenge(adminSecret, rejectionHash, token string, t time.Time) bool {
-	if token == computeToken(adminSecret, rejectionHash, t) {
+	if hmac.Equal([]byte(token), []byte(computeToken(adminSecret, rejectionHash, t))) {
 		return true
 	}
-	return token == computeToken(adminSecret, rejectionHash, t.Add(-time.Hour))
+	return hmac.Equal([]byte(token), []byte(computeToken(adminSecret, rejectionHash, t.Add(-time.Hour))))
 }
 
 // TokenFromParts joins three BIP-39 words with hyphens (inverse of parsing).

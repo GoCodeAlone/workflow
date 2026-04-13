@@ -91,7 +91,13 @@ Options:
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(map[string]any{"results": results, "passed": allPassed})
+		if err := enc.Encode(map[string]any{"results": results, "passed": allPassed}); err != nil {
+			return err
+		}
+		if !allPassed {
+			return fmt.Errorf("%d file(s) failed ci validate", ciCountFailed(results))
+		}
+		return nil
 	default:
 		for _, r := range results {
 			if r.Passed {
@@ -186,7 +192,10 @@ func checkImmutableSection(cfg *config.WorkflowConfig, section string) error {
 			return fmt.Errorf("immutable-sections: triggers section is empty")
 		}
 	default:
-		// Unknown section — silently skip.
+		return fmt.Errorf(
+			"immutable-sections: unknown section %q (allowed: modules, workflows, pipelines, triggers)",
+			section,
+		)
 	}
 	return nil
 }
