@@ -68,14 +68,18 @@ func WithDocumentationFile(path string) ServerOption {
 	}
 }
 
+// ToolHandlerFunc is the handler type for MCP tool calls.
+type ToolHandlerFunc = server.ToolHandlerFunc
+
 // Server wraps an MCP server instance and provides workflow-engine-specific
 // tools and resources.
 type Server struct {
 	mcpServer         *server.MCPServer
 	pluginDir         string
 	registryDir       string
-	documentationFile string         // optional explicit path to DOCUMENTATION.md
-	engine            EngineProvider // optional; enables execution tools when set
+	documentationFile string                    // optional explicit path to DOCUMENTATION.md
+	engine            EngineProvider            // optional; enables execution tools when set
+	toolHandlers      map[string]ToolHandlerFunc // populated by collectToolHandlers
 }
 
 // NewServer creates a new MCP server with all workflow engine tools and
@@ -122,8 +126,19 @@ func NewServer(pluginDir string, opts ...ServerOption) *Server {
 	s.registerWfctlTools()
 	s.registerScaffoldTools()
 	s.registerResources()
+	s.collectToolHandlers()
 
 	return s
+}
+
+// collectToolHandlers populates s.toolHandlers from the registered MCP tools.
+// Called after all register* methods in NewServer.
+func (s *Server) collectToolHandlers() {
+	tools := s.mcpServer.ListTools()
+	s.toolHandlers = make(map[string]ToolHandlerFunc, len(tools))
+	for name, st := range tools {
+		s.toolHandlers[name] = st.Handler
+	}
 }
 
 // MCPServer returns the underlying mcp-go server instance (useful for testing).
