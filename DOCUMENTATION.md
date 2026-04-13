@@ -591,6 +591,13 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 | `featureflag.service` | Feature flag evaluation engine with SSE change streaming | featureflags |
 | `config.provider` | Application configuration registry with schema validation, defaults, and source layering | configprovider |
 
+### AI Agents & Self-Improvement
+| Type | Description | Plugin |
+|------|-------------|--------|
+| `agent.provider` | AI agent provider (Ollama, OpenAI, Anthropic) with model config | agent |
+| `agent.guardrails` | Safety guardrails: tool scope, command policy, immutable sections, challenge tokens | agent |
+| `mcp.registry` | Registry and audit log for MCP tool registrations and invocations | agent |
+
 ### Other
 | Type | Description | Plugin |
 |------|-------------|--------|
@@ -1610,6 +1617,134 @@ steps:
 
 ---
 
+### `step.agent_execute`
+
+Executes an AI agent within a pipeline step. The agent uses the configured
+provider and has access to MCP tools. Tool access is filtered by the active
+guardrails configuration.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `provider` | string | yes | Named `agent.provider` module |
+| `system_prompt` | string | yes | System prompt for the agent |
+| `tools` | array | no | MCP tool URIs the agent may call (e.g., `"mcp:wfctl:validate_config"`) |
+| `max_iterations` | int | no | Maximum LLM turns (default: 10) |
+| `input_from` | string | no | Template expression for initial user message |
+| `tool_scope` | object | no | Per-step tool scope override (overrides guardrails defaults) |
+
+**Output fields:** `content`, `tool_calls`, `iterations`, `finish_reason`.
+
+**Example:**
+
+```yaml
+- name: designer
+  type: step.agent_execute
+  config:
+    provider: ai
+    system_prompt: "Improve this workflow config. Validate before submitting."
+    tools:
+      - "mcp:wfctl:validate_config"
+      - "mcp:wfctl:inspect_config"
+      - "mcp:lsp:diagnose"
+    max_iterations: 15
+```
+
+---
+
+### `step.blackboard_post`
+
+Posts an artifact to the shared blackboard for multi-agent coordination.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `phase` | string | yes | Blackboard phase (e.g., `design`, `review`, `deploy`) |
+| `artifact_type` | string | yes | Type of artifact (e.g., `config_proposal`, `diff`, `test_result`) |
+| `content_from` | string | no | Template expression for artifact content (defaults to previous step output) |
+
+---
+
+### `step.blackboard_read`
+
+Reads an artifact from the shared blackboard.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `phase` | string | yes | Blackboard phase to read from |
+| `artifact_type` | string | yes | Type of artifact to read |
+
+**Output fields:** `content`, `phase`, `artifact_type`, `created_at`.
+
+---
+
+### `step.self_improve_validate`
+
+Validates a proposed config change through wfctl and LSP before deployment.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `validation_level` | string | no | `strict` (zero errors) or `lenient` (warnings allowed) |
+| `require_zero_errors` | bool | no | Fail if any errors (default: true at strict level) |
+| `skip_unknown_types` | bool | no | Allow unknown module/step types (for forward-compatible configs) |
+
+**Output fields:** `valid`, `errors`, `warnings`, `diagnostics`.
+
+---
+
+### `step.self_improve_diff`
+
+Computes a semantic diff between the current and proposed config.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `force` | bool | no | Proceed even if diff is empty |
+| `base_config_path` | string | no | Override path to the current config |
+
+**Output fields:** `diff`, `added_modules`, `removed_modules`, `modified_modules`, `added_pipelines`, `removed_pipelines`.
+
+---
+
+### `step.self_improve_deploy`
+
+Deploys an improved config using the specified strategy.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `strategy` | string | yes | Deploy strategy: `hot_reload`, `git_pr`, `canary`, `blue_green` |
+| `config_path` | string | yes | Path to the config file to update |
+| `health_check_url` | string | no | URL to check after deployment |
+| `rollback_on_failure` | bool | no | Automatically rollback if health check fails |
+| `git` | object | no | Git settings for `git_pr` strategy |
+| `canary` | object | no | Canary settings for `canary` strategy |
+
+---
+
+### `step.lsp_diagnose`
+
+Runs LSP diagnostics on YAML content directly from a pipeline step.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `content` | string | yes | YAML content to diagnose (template expression) |
+| `min_severity` | string | no | Minimum severity to report: `error`, `warning`, `hint` |
+
+**Output fields:** `diagnostics`, `error_count`, `warning_count`, `hint_count`.
+
+---
+
 ### Admin Core Plugin (`plugin/admincore/`)
 
 The `admincore` plugin is a NativePlugin that registers the built-in admin UI page definitions. It declares no HTTP routes -- all views are rendered entirely in the React frontend. Registering this plugin ensures navigation is driven by the plugin system with no static fallbacks.
@@ -1646,6 +1781,7 @@ Workflows are configured in YAML and dispatched by the engine through registered
 | **Scheduler** | Cron-based recurring task execution |
 | **Integration** | External service composition and orchestration |
 | **Actors** | Message-driven stateful actor pools with per-message handler pipelines (goakt v4) |
+| **mcp** | MCP (Model Context Protocol) handler — serves pipeline-defined tools to AI agents and IDE clients |
 
 ## Trigger Types
 
@@ -1657,6 +1793,7 @@ Triggers start workflow execution in response to external events:
 | **Event** | EventBus subscription triggers workflow action |
 | **EventBus** | EventBus topic subscription |
 | **Schedule** | Cron expression-based scheduling |
+| **mcp_tool** | Exposes a pipeline as an MCP tool callable by AI agents or IDE clients |
 
 ## Configuration Format
 
