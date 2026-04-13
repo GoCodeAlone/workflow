@@ -592,10 +592,13 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 | `config.provider` | Application configuration registry with schema validation, defaults, and source layering | configprovider |
 
 ### AI Agents & Self-Improvement
+> **Requires workflow-plugin-agent v0.8.0+.** All types in this section are provided
+> by the agent plugin, not the workflow core engine. Install with: `wfctl plugin install workflow-plugin-agent`
+
 | Type | Description | Plugin |
 |------|-------------|--------|
 | `agent.provider` | AI agent provider (Ollama, OpenAI, Anthropic) with model config | agent |
-| `agent.guardrails` | Safety guardrails: tool scope, command policy, immutable sections, challenge tokens | agent |
+| `agent.guardrails` | Safety guardrails: tool scope, command policy, immutable sections, override tokens | agent |
 | `mcp.registry` | Registry and audit log for MCP tool registrations and invocations | agent |
 
 ### Other
@@ -1616,6 +1619,9 @@ steps:
 ```
 
 ---
+
+> **The following step types require workflow-plugin-agent v0.8.0+.**
+> Install with: `wfctl plugin install workflow-plugin-agent`
 
 ### `step.agent_execute`
 

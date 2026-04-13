@@ -362,6 +362,11 @@ Get hover documentation at a position in a YAML file.
 
 ## Workflow-Defined MCP Tools
 
+> **Requires workflow-plugin-agent v0.8.0+.** The `mcp_tool` trigger, `mcp.registry`
+> module, and all `step.agent_execute` / `step.self_improve_*` / `step.blackboard_*`
+> types are provided by this plugin, not the workflow core engine.
+> Install with: `wfctl plugin install workflow-plugin-agent`
+
 Workflow applications can expose their own pipelines as MCP tools using the
 `mcp_tool` trigger type and `mcp` workflow handler.
 
@@ -374,7 +379,7 @@ pipelines:
     trigger:
       type: mcp_tool
       config:
-        name: task_analytics
+        tool_name: task_analytics
         description: "Analyze task completion rates and identify bottlenecks"
         parameters:
           - name: date_range
@@ -410,17 +415,15 @@ pipelines:
 
 ### MCP Server Registry
 
-Use `mcp.registry` to manage and audit registered MCP tools:
+Use `mcp.registry` to track and audit registered MCP tool registrations
+(provided by workflow-plugin-agent v0.8.0+):
 
 ```yaml
 modules:
   - name: mcp-registry
     type: mcp.registry
     config:
-      storage: sqlite
-      db_path: /data/mcp-registry.db
       audit_log: true
-      require_schema: true     # Require parameter schemas for all tools
 ```
 
 ## In-Process vs External MCP Server

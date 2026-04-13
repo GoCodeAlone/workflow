@@ -36,7 +36,7 @@ modules:
           override: challenge_token
       override:
         mechanism: challenge_token
-        admin_secret_env: "WORKFLOW_ADMIN_SECRET"
+        admin_secret_env: "WFCTL_ADMIN_SECRET"
 ```
 
 ## Hierarchical Scopes
@@ -141,12 +141,13 @@ protection for a specific proposed change.
 ### Generation
 
 ```bash
-# Generate a challenge token for a specific config hash
-wfctl challenge-token generate \
-    --secret "${WORKFLOW_ADMIN_SECRET}" \
-    --config-hash "sha256:abc123..." \
-    --expires "1h"
+# Compute the SHA256 hash of the proposed config, then generate an override token
+HASH=$(echo "$PROPOSED_YAML" | sha256sum | cut -d' ' -f1)
+wfctl override generate "sha256:$HASH"
 ```
+
+The command reads `WFCTL_ADMIN_SECRET` from the environment and prints a
+time-limited HMAC token scoped to that exact config hash.
 
 ### Verification
 
@@ -160,7 +161,7 @@ The workflow engine verifies challenge tokens automatically when:
 ```yaml
 override:
   mechanism: challenge_token
-  admin_secret_env: "WORKFLOW_ADMIN_SECRET"  # Env var holding HMAC secret
+  admin_secret_env: "WFCTL_ADMIN_SECRET"  # Env var holding HMAC secret
   token_ttl: "1h"                            # Token validity window
   audit_log: true                            # Log all token usage
 ```
@@ -260,6 +261,6 @@ Regardless of use case, these settings should never be relaxed:
 - [ ] `block_pipe_to_shell: true`
 - [ ] `block_script_execution: true`
 - [ ] `max_iterations_per_cycle` is set (not unbounded)
-- [ ] `WORKFLOW_ADMIN_SECRET` is set from a secrets manager (not hardcoded)
+- [ ] `WFCTL_ADMIN_SECRET` is set from a secrets manager (not hardcoded)
 - [ ] Challenge token TTL is short (`1h` or less)
 - [ ] `audit_log: true` for override tracking

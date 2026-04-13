@@ -9,6 +9,12 @@ guardrails, run the first improvement cycle, and then review what changed.
 - Docker (with Compose)
 - Ollama running with Gemma 4: `ollama pull gemma4`
 - `wfctl` CLI installed
+- **workflow-plugin-agent v0.8.0+** — The `agent.provider`, `agent.guardrails`,
+  and all `step.self_improve_*` / `step.blackboard_*` types are provided by this
+  plugin, not the workflow core. Install it before running the examples:
+  ```bash
+  wfctl plugin install workflow-plugin-agent
+  ```
 
 ## Step 1: Build the Base Application
 
@@ -151,7 +157,7 @@ modules:
           override: challenge_token
       override:
         mechanism: challenge_token
-        admin_secret_env: "WORKFLOW_ADMIN_SECRET"
+        admin_secret_env: "WFCTL_ADMIN_SECRET"
 ```
 
 > **Security note:** Always include `modules.guardrails` in `immutable_sections`.
@@ -245,7 +251,7 @@ services:
       - app-data:/data
       - ./config:/data/config
     environment:
-      - WORKFLOW_ADMIN_SECRET=my-admin-secret
+      - WFCTL_ADMIN_SECRET=my-admin-secret
     command: ["-config", "/data/config/app.yaml", "-data-dir", "/data"]
     depends_on:
       ollama:
@@ -314,16 +320,13 @@ The artifact includes:
 If you need to modify a guardrails-protected section, generate a challenge token:
 
 ```bash
-# Get the SHA256 hash of the proposed config change
+# Compute the SHA256 hash of the proposed config change
 HASH=$(echo "$PROPOSED_YAML" | sha256sum | cut -d' ' -f1)
 
-# Generate a challenge token (valid for 1 hour)
-TOKEN=$(wfctl challenge-token generate \
-    --secret "$WORKFLOW_ADMIN_SECRET" \
-    --config-hash "sha256:$HASH" \
-    --expires "1h")
+# Generate an override token (reads WFCTL_ADMIN_SECRET from env)
+TOKEN=$(wfctl override generate "sha256:$HASH")
 
-echo "Challenge token: $TOKEN"
+echo "Override token: $TOKEN"
 ```
 
 Provide the token to the agent in the improvement request:

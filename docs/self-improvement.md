@@ -41,6 +41,17 @@ graph TB
     MCP --> Reg
 ```
 
+## Requirements
+
+The `agent.provider`, `agent.guardrails`, and all `step.self_improve_*` /
+`step.blackboard_*` / `step.agent_execute` types are provided by
+**workflow-plugin-agent v0.8.0+**, not the workflow core engine. Install it
+first:
+
+```bash
+wfctl plugin install workflow-plugin-agent
+```
+
 ## Quick Start
 
 Add self-improvement to any workflow application with three additions to your
