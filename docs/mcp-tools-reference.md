@@ -390,7 +390,6 @@ pipelines:
             type: string
             description: "Group results by: status, assignee, or priority"
             required: false
-            default: "status"
     steps:
       - name: query
         type: step.db_query
@@ -423,7 +422,7 @@ modules:
   - name: mcp-registry
     type: mcp.registry
     config:
-      audit_log: true
+      audit_tool_calls: true
 ```
 
 ## In-Process vs External MCP Server

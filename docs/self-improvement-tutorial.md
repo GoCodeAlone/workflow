@@ -94,7 +94,6 @@ workflows:
   http:
     router: router
     server: server
-    routes: []
 ```
 
 Validate the config:
