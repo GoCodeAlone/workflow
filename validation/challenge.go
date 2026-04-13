@@ -3,15 +3,18 @@ package validation
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"fmt"
+	"encoding/binary"
 	"strings"
 	"time"
 )
 
+// wordCount is the number of words in bip39Subset.
+const wordCount = 256
+
 // bip39Subset is a fixed 256-word subset of the BIP-39 English word list used
 // for generating readable challenge tokens. Words are chosen to be short,
 // unambiguous, and easy to type.
-var bip39Subset = [256]string{
+var bip39Subset = [wordCount]string{
 	"able", "about", "above", "absent", "absorb", "abstract", "absurd", "abuse",
 	"access", "account", "accuse", "achieve", "acid", "acoustic", "acquire", "across",
 	"act", "action", "actor", "actual", "adapt", "add", "addict", "address",
@@ -45,39 +48,43 @@ var bip39Subset = [256]string{
 	"carbon", "card", "cargo", "carpet", "carry", "cart", "case", "castle",
 }
 
-// timeBucket returns the current 1-hour time bucket as a string.
-func timeBucket(t time.Time) string {
-	return fmt.Sprintf("%d", t.UTC().Unix()/3600)
+// timeBucketBytes returns the 1-hour bucket for t as a big-endian uint64 byte slice.
+func timeBucketBytes(t time.Time) []byte {
+	bucket := uint64(t.UTC().Unix() / 3600) //nolint:gosec // G115: Unix() is always non-negative
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, bucket)
+	return b
 }
 
-// computeToken computes the 3-word token for the given hash and time bucket.
-func computeToken(secret, hash, bucket string) string {
+// computeToken computes the 3-word token for the given secret, hash, and time.
+func computeToken(secret, hash string, t time.Time) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(hash))
-	mac.Write([]byte(bucket))
+	mac.Write(timeBucketBytes(t))
 	sum := mac.Sum(nil)
-	return fmt.Sprintf("%s-%s-%s", bip39Subset[sum[0]], bip39Subset[sum[1]], bip39Subset[sum[2]])
+	w0 := binary.BigEndian.Uint16(sum[0:2]) % wordCount
+	w1 := binary.BigEndian.Uint16(sum[2:4]) % wordCount
+	w2 := binary.BigEndian.Uint16(sum[4:6]) % wordCount
+	return bip39Subset[w0] + "-" + bip39Subset[w1] + "-" + bip39Subset[w2]
 }
 
 // GenerateChallenge generates a 3-word HMAC challenge token for the given
-// rejection hash using the admin secret. The token is valid for the current
-// 1-hour window and the next (giving at least 1h of usability).
+// rejection hash using the admin secret, anchored to the 1-hour bucket of t.
+// Pass time.Now() for normal use; pass a fixed time in tests for determinism.
 //
 // adminSecret should come from an environment variable (e.g. WFCTL_ADMIN_SECRET).
-func GenerateChallenge(adminSecret, rejectionHash string) string {
-	return computeToken(adminSecret, rejectionHash, timeBucket(time.Now()))
+func GenerateChallenge(adminSecret, rejectionHash string, t time.Time) string {
+	return computeToken(adminSecret, rejectionHash, t)
 }
 
 // VerifyChallenge returns true if token matches the expected challenge for the
-// given rejection hash. It checks both the current and previous 1-hour buckets
-// to provide a grace period across bucket boundaries.
-func VerifyChallenge(adminSecret, rejectionHash, token string) bool {
-	now := time.Now()
-	if token == computeToken(adminSecret, rejectionHash, timeBucket(now)) {
+// given rejection hash at time t. It checks both the current and previous
+// 1-hour buckets to provide a grace period across bucket boundaries.
+func VerifyChallenge(adminSecret, rejectionHash, token string, t time.Time) bool {
+	if token == computeToken(adminSecret, rejectionHash, t) {
 		return true
 	}
-	prev := now.Add(-time.Hour)
-	return token == computeToken(adminSecret, rejectionHash, timeBucket(prev))
+	return token == computeToken(adminSecret, rejectionHash, t.Add(-time.Hour))
 }
 
 // TokenFromParts joins three BIP-39 words with hyphens (inverse of parsing).

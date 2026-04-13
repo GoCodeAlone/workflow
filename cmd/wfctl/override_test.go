@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/validation"
 )
@@ -50,7 +51,7 @@ func TestRunOverrideVerifyValidToken(t *testing.T) {
 	const secret = "test-secret"
 	const hash = "testhash"
 	t.Setenv("WFCTL_ADMIN_SECRET", secret)
-	token := validation.GenerateChallenge(secret, hash)
+	token := validation.GenerateChallenge(secret, hash, time.Now())
 	err := runOverrideVerify([]string{hash, token})
 	if err != nil {
 		t.Fatalf("expected valid token to pass: %v", err)

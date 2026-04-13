@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/validation"
 )
@@ -49,7 +50,7 @@ func runOverrideGenerate(args []string) error {
 	if secret == "" {
 		return fmt.Errorf("WFCTL_ADMIN_SECRET environment variable is required")
 	}
-	token := validation.GenerateChallenge(secret, hash)
+	token := validation.GenerateChallenge(secret, hash, time.Now())
 	fmt.Println(token)
 	return nil
 }
@@ -64,7 +65,7 @@ func runOverrideVerify(args []string) error {
 	if secret == "" {
 		return fmt.Errorf("WFCTL_ADMIN_SECRET environment variable is required")
 	}
-	if validation.VerifyChallenge(secret, hash, token) {
+	if validation.VerifyChallenge(secret, hash, token, time.Now()) {
 		fmt.Println("valid")
 		return nil
 	}

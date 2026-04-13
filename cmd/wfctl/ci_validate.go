@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/schema"
@@ -76,7 +77,7 @@ Options:
 		secret := os.Getenv("WFCTL_ADMIN_SECRET")
 		if secret != "" {
 			rejHash := ciResultsHash(results)
-			if validation.VerifyChallenge(secret, rejHash, *override) {
+			if validation.VerifyChallenge(secret, rejHash, *override, time.Now()) {
 				fmt.Fprintln(os.Stderr, "WARNING: validation failures overridden by challenge token")
 				allPassed = true
 			}
