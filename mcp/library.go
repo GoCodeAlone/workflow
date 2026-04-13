@@ -2,27 +2,88 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+// inProcessConfig holds the options for NewInProcessServer.
+type inProcessConfig struct {
+	pluginDir         string
+	registryDir       string
+	documentationFile string
+	auditLogger       *slog.Logger
+	engine            EngineProvider
+}
+
+// InProcessOption configures the in-process server.
+type InProcessOption func(*inProcessConfig)
+
+// WithInProcessPluginDir sets the plugin directory for type discovery.
+func WithInProcessPluginDir(dir string) InProcessOption {
+	return func(c *inProcessConfig) { c.pluginDir = dir }
+}
+
+// WithInProcessRegistryDir sets the registry directory for plugin search.
+func WithInProcessRegistryDir(dir string) InProcessOption {
+	return func(c *inProcessConfig) { c.registryDir = dir }
+}
+
+// WithInProcessDocFile sets an explicit path to DOCUMENTATION.md.
+func WithInProcessDocFile(path string) InProcessOption {
+	return func(c *inProcessConfig) { c.documentationFile = path }
+}
+
+// WithInProcessAuditLog enables audit logging for in-process tool calls.
+func WithInProcessAuditLog(logger *slog.Logger) InProcessOption {
+	return func(c *inProcessConfig) { c.auditLogger = logger }
+}
+
+// WithInProcessEngine attaches a workflow engine for run_workflow support.
+func WithInProcessEngine(eng EngineProvider) InProcessOption {
+	return func(c *inProcessConfig) { c.engine = eng }
+}
+
 // InProcessServer exposes the workflow MCP tools for direct in-process
 // invocation without HTTP or subprocess overhead.
 type InProcessServer struct {
-	s *Server
+	server *Server
+	tools  map[string]ToolHandlerFunc
 }
 
 // NewInProcessServer creates an InProcessServer with all workflow tools registered.
-func NewInProcessServer() *InProcessServer {
-	return &InProcessServer{s: NewServer("")}
+// All wfctl tools are available without HTTP or subprocess overhead.
+func NewInProcessServer(opts ...InProcessOption) *InProcessServer {
+	cfg := &inProcessConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	var serverOpts []ServerOption
+	if cfg.engine != nil {
+		serverOpts = append(serverOpts, WithEngine(cfg.engine))
+	}
+
+	s := NewServer(cfg.pluginDir, serverOpts...)
+	if cfg.registryDir != "" {
+		s.registryDir = cfg.registryDir
+	}
+	if cfg.documentationFile != "" {
+		s.documentationFile = cfg.documentationFile
+	}
+
+	return &InProcessServer{
+		server: s,
+		tools:  s.toolHandlers,
+	}
 }
 
 // ListTools returns the names of all registered tools.
 func (p *InProcessServer) ListTools() []string {
-	toolMap := p.s.MCPServer().ListTools()
-	names := make([]string, 0, len(toolMap))
-	for name := range toolMap {
+	names := make([]string, 0, len(p.tools))
+	for name := range p.tools {
 		names = append(names, name)
 	}
 	return names
@@ -32,17 +93,24 @@ func (p *InProcessServer) ListTools() []string {
 // Returns the text content of the result as a string, or an error if the
 // tool is not found or invocation fails.
 func (p *InProcessServer) CallTool(ctx context.Context, name string, args map[string]any) (any, error) {
-	toolMap := p.s.MCPServer().ListTools()
-	st, ok := toolMap[name]
+	handler, ok := p.tools[name]
 	if !ok {
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
 
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		return nil, fmt.Errorf("marshal args: %w", err)
+	}
+
 	var req mcp.CallToolRequest
 	req.Params.Name = name
-	req.Params.Arguments = args
+	req.Params.Arguments = make(map[string]any)
+	if err := json.Unmarshal(argsJSON, &req.Params.Arguments); err != nil {
+		return nil, fmt.Errorf("unmarshal args: %w", err)
+	}
 
-	result, err := st.Handler(ctx, req)
+	result, err := handler(ctx, req)
 	if err != nil {
 		return nil, err
 	}
