@@ -1,0 +1,64 @@
+package secrets_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/GoCodeAlone/workflow/secrets"
+	"github.com/zalando/go-keyring"
+)
+
+func TestKeychainProvider_SetAndGet(t *testing.T) {
+	keyring.MockInit()
+	p := secrets.NewKeychainProvider("test-service")
+
+	ctx := context.Background()
+	if err := p.Set(ctx, "api_key", "secret-123"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	got, err := p.Get(ctx, "api_key")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != "secret-123" {
+		t.Errorf("got %q, want secret-123", got)
+	}
+}
+
+func TestKeychainProvider_GetMissing(t *testing.T) {
+	keyring.MockInit()
+	p := secrets.NewKeychainProvider("test-service")
+	_, err := p.Get(context.Background(), "absent")
+	if err == nil {
+		t.Fatal("expected error for missing key, got nil")
+	}
+}
+
+func TestKeychainProvider_Delete(t *testing.T) {
+	keyring.MockInit()
+	p := secrets.NewKeychainProvider("test-service")
+	ctx := context.Background()
+	_ = p.Set(ctx, "x", "1")
+	if err := p.Delete(ctx, "x"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := p.Get(ctx, "x"); err == nil {
+		t.Fatal("expected error after Delete")
+	}
+}
+
+func TestKeychainProvider_List(t *testing.T) {
+	keyring.MockInit()
+	p := secrets.NewKeychainProvider("test-service")
+	ctx := context.Background()
+	_ = p.Set(ctx, "a", "1")
+	_ = p.Set(ctx, "b", "2")
+	keys, err := p.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Errorf("got %d keys, want 2", len(keys))
+	}
+}
