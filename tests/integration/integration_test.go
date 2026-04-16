@@ -16,7 +16,6 @@ import (
 	"github.com/GoCodeAlone/workflow/handlers"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
-	"github.com/GoCodeAlone/workflow/secrets"
 	pluginai "github.com/GoCodeAlone/workflow/plugins/ai"
 	pluginapi "github.com/GoCodeAlone/workflow/plugins/api"
 	pluginauth "github.com/GoCodeAlone/workflow/plugins/auth"
@@ -32,6 +31,7 @@ import (
 	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
 	pluginsm "github.com/GoCodeAlone/workflow/plugins/statemachine"
 	pluginstorage "github.com/GoCodeAlone/workflow/plugins/storage"
+	"github.com/GoCodeAlone/workflow/secrets"
 )
 
 // testLogger is a simple logger for integration tests.
@@ -657,6 +657,9 @@ func newIntegrationMemSecretsProvider(initial map[string]string) *integrationMem
 func (p *integrationMemSecretsProvider) Name() string { return "integration-mem-secrets" }
 
 func (p *integrationMemSecretsProvider) Get(_ context.Context, key string) (string, error) {
+	if key == "" {
+		return "", secrets.ErrInvalidKey
+	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	v, ok := p.data[key]
@@ -667,6 +670,9 @@ func (p *integrationMemSecretsProvider) Get(_ context.Context, key string) (stri
 }
 
 func (p *integrationMemSecretsProvider) Set(_ context.Context, key, value string) error {
+	if key == "" {
+		return secrets.ErrInvalidKey
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.data[key] = value
@@ -674,6 +680,9 @@ func (p *integrationMemSecretsProvider) Set(_ context.Context, key, value string
 }
 
 func (p *integrationMemSecretsProvider) Delete(_ context.Context, key string) error {
+	if key == "" {
+		return secrets.ErrInvalidKey
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	delete(p.data, key)

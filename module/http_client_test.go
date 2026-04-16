@@ -38,6 +38,9 @@ func newMemSecretsProvider(initial map[string]string) *memSecretsProvider {
 func (p *memSecretsProvider) Name() string { return "mem" }
 
 func (p *memSecretsProvider) Get(_ context.Context, key string) (string, error) {
+	if key == "" {
+		return "", secrets.ErrInvalidKey
+	}
 	v, ok := p.data[key]
 	if !ok {
 		return "", secrets.ErrNotFound
@@ -46,11 +49,17 @@ func (p *memSecretsProvider) Get(_ context.Context, key string) (string, error) 
 }
 
 func (p *memSecretsProvider) Set(_ context.Context, key, value string) error {
+	if key == "" {
+		return secrets.ErrInvalidKey
+	}
 	p.data[key] = value
 	return nil
 }
 
 func (p *memSecretsProvider) Delete(_ context.Context, key string) error {
+	if key == "" {
+		return secrets.ErrInvalidKey
+	}
 	delete(p.data, key)
 	return nil
 }
@@ -196,9 +205,9 @@ func TestHTTPClient_OAuth2ClientCredentials(t *testing.T) {
 		cfg: HTTPClientConfig{
 			Timeout: 5 * time.Second,
 			Auth: HTTPClientAuthConfig{
-				Type:         "oauth2_client_credentials",
-				TokenURL:     tokenSrv.URL + "/token",
-				ClientID:     "client-id",
+				Type:             "oauth2_client_credentials",
+				TokenURL:         tokenSrv.URL + "/token",
+				ClientID:         "client-id",
 				ClientCredential: "client-secret", //nolint:gosec // G101: test credential
 			},
 		},
@@ -650,6 +659,74 @@ func TestHTTPClient_OAuth2RefreshToken_401Retry_OversizeBody(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Test 7d: retryOn401Transport — oversize body reaches server intact.
+//          The replaySkip path must stitch buf+remaining so the full body is
+//          transmitted on the first (and only) attempt (Comment 1/2).
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_OversizeBody_FullTransmit(t *testing.T) {
+	initialToken := makeTestStoredToken("live-token", "live-refresh", time.Now().Add(1*time.Hour))
+	provider := newMemSecretsProvider(map[string]string{"oauth_token": initialToken})
+
+	// This server always responds 200 so there is no 401 retry; we only care that
+	// the body arrives completely.
+	var receivedLen int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, _ := io.Copy(io.Discard, r.Body)
+		receivedLen = n
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, makeTestTokenJSON("live-token", "live-refresh", 3600))
+	}))
+	defer tokenSrv.Close()
+
+	m := &HTTPClientModule{
+		moduleName: "test-rt-oversize-full",
+		cfg: HTTPClientConfig{
+			Timeout: 10 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          tokenSrv.URL + "/token",
+				ClientID:          "client-id",
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+		logger: &noopLogger{},
+	}
+	if err := m.buildClient(context.Background(), provider); err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+
+	const wantSize = 2*1024*1024 + 512 // > maxRetryBodySize (1 MiB)
+	bigBody := bytes.Repeat([]byte("z"), wantSize)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, upstream.URL,
+		bytes.NewReader(bigBody))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.GetBody = nil // force the fallback path (no GetBody)
+
+	resp, err := m.Client().Do(req)
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if receivedLen != wantSize {
+		t.Errorf("server received %d bytes, want %d (body was truncated)", receivedLen, wantSize)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Test 8: oauth2_refresh_token — late token arrival. Provider starts empty;
 //         first request errors; token is written to provider externally;
 //         subsequent request succeeds — no restart needed.
@@ -992,8 +1069,8 @@ func TestHTTPClient_OAuth2RefreshToken_MissingClientID(t *testing.T) {
 		cfg: HTTPClientConfig{
 			Timeout: 5 * time.Second,
 			Auth: HTTPClientAuthConfig{
-				Type:              "oauth2_refresh_token",
-				TokenURL:          "https://example.com/token",
+				Type:     "oauth2_refresh_token",
+				TokenURL: "https://example.com/token",
 				// ClientID intentionally empty
 				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
 				TokenProviderName: "mem",
@@ -1034,8 +1111,8 @@ func TestHTTPClient_RequiresServices_DeclaredDeps(t *testing.T) {
 			wantDeps: nil,
 		},
 		{
-			name: "static_bearer inline — no deps",
-			auth: HTTPClientAuthConfig{Type: "static_bearer", BearerToken: "tok"},
+			name:     "static_bearer inline — no deps",
+			auth:     HTTPClientAuthConfig{Type: "static_bearer", BearerToken: "tok"},
 			wantDeps: nil,
 		},
 		{
@@ -1060,8 +1137,8 @@ func TestHTTPClient_RequiresServices_DeclaredDeps(t *testing.T) {
 		{
 			name: "oauth2_refresh_token with client_id_from_secret — declares provider",
 			auth: HTTPClientAuthConfig{
-				Type:     "oauth2_refresh_token",
-				TokenURL: "https://example.com/token",
+				Type:        "oauth2_refresh_token",
+				TokenURL:    "https://example.com/token",
 				ClientIDRef: SecretRef{Provider: "foo", Key: "x"},
 			},
 			wantDeps: []string{"foo"},
@@ -1121,5 +1198,23 @@ func TestHTTPClient_RequiresServices_DeclaredDeps(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 13: memSecretsProvider stub guards empty keys (Comment 6)
+// ---------------------------------------------------------------------------
+
+func TestMemSecretsProvider_EmptyKeyGuard(t *testing.T) {
+	p := newMemSecretsProvider(map[string]string{"k": "v"})
+
+	if _, err := p.Get(context.Background(), ""); !errors.Is(err, secrets.ErrInvalidKey) {
+		t.Errorf("Get(\"\") want ErrInvalidKey, got %v", err)
+	}
+	if err := p.Set(context.Background(), "", "v"); !errors.Is(err, secrets.ErrInvalidKey) {
+		t.Errorf("Set(\"\") want ErrInvalidKey, got %v", err)
+	}
+	if err := p.Delete(context.Background(), ""); !errors.Is(err, secrets.ErrInvalidKey) {
+		t.Errorf("Delete(\"\") want ErrInvalidKey, got %v", err)
 	}
 }
