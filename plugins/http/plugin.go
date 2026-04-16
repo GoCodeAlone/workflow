@@ -31,6 +31,7 @@ func New() *HTTPPlugin {
 				Description: "HTTP server, router, handlers, middleware, proxy, and static file serving",
 				Tier:        plugin.TierCore,
 				ModuleTypes: []string{
+					"http.client",
 					"http.server",
 					"http.router",
 					"http.handler",

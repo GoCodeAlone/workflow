@@ -258,6 +258,12 @@ func (m *HTTPClientModule) buildClient(ctx context.Context, tokenProvider secret
 // Factory (used by plugins/http/modules.go)
 // ---------------------------------------------------------------------------
 
+// HTTPClientModuleFactory is the exported factory entry point used by plugins/http.
+// It delegates to httpClientFactory.
+func HTTPClientModuleFactory(name string, cfg map[string]any) *HTTPClientModule {
+	return httpClientFactory(name, cfg)
+}
+
 // httpClientFactory creates an HTTPClientModule from a YAML/JSON config map.
 // Supported keys:
 //
