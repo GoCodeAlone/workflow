@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/secrets"
@@ -436,5 +437,35 @@ func TestSecretSetStep_ProviderAccessorFallback(t *testing.T) {
 	}
 	if got != "accessor-value" {
 		t.Errorf("expected client_id=accessor-value, got %q", got)
+	}
+}
+
+// TestSecretSetStep_RejectsNoValueSentinel verifies that secret_set refuses to
+// write the Go template "<no value>" sentinel to the secrets backend. In
+// non-strict template mode, a missing map key resolves to "<no value>" rather
+// than returning an error. Silently persisting that string would corrupt the
+// secrets store.
+func TestSecretSetStep_RejectsNoValueSentinel(t *testing.T) {
+	provider := newMockSecretSetProvider()
+	app := mockAppWithSetProvider("test-secrets", provider)
+
+	step := &SecretSetStep{
+		name:       "reject-no-value",
+		moduleName: "test-secrets",
+		secrets:    map[string]string{"api_key": "{{.steps.missing_step.value}}"},
+		app:        app,
+		tmpl:       NewTemplateEngine(),
+	}
+
+	// PipelineContext with no "missing_step" in step outputs — template
+	// resolves to "<no value>" in non-strict mode.
+	pc := NewPipelineContext(nil, nil)
+
+	_, err := step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error for <no value> sentinel, got nil")
+	}
+	if !strings.Contains(err.Error(), "<no value>") {
+		t.Errorf("expected error mentioning '<no value>', got: %v", err)
 	}
 }

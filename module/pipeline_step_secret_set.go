@@ -115,6 +115,14 @@ func (s *SecretSetStep) Execute(ctx context.Context, pc *PipelineContext) (*Step
 			return nil, fmt.Errorf("secret_set step %q: failed to resolve value for %q: %w", s.name, keyName, resolveErr)
 		}
 
+		// Guard against writing Go template sentinel "<no value>" into the
+		// secrets backend. In non-strict mode the template engine resolves
+		// missing keys to this sentinel and logs a warning — acceptable for
+		// display but dangerous when persisting secrets.
+		if strings.Contains(resolvedValue, "<no value>") {
+			return nil, fmt.Errorf("secret_set step %q: resolved value for %q contains '<no value>' (template key may be missing or misspelled)", s.name, keyName)
+		}
+
 		if setErr := provider.Set(ctx, keyName, resolvedValue); setErr != nil {
 			return nil, fmt.Errorf("secret_set step %q: failed to set secret %q: %w", s.name, keyName, setErr)
 		}
