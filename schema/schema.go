@@ -392,6 +392,7 @@ var coreModuleTypes = []string{
 	"step.scan_sast",
 	"step.secret_fetch",
 	"step.secret_rotate",
+	"step.secret_set",
 	"step.set",
 	"step.shell_exec",
 	"step.statemachine_get",

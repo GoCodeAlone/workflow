@@ -1632,6 +1632,11 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"module", "secrets"},
 		},
+		"step.secret_set": {
+			Type:       "step.secret_set",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"module", "secrets"},
+		},
 	}
 	// Include any step types registered dynamically (e.g. from external plugins).
 	for _, t := range schema.KnownModuleTypes() {

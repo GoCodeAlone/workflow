@@ -1373,6 +1373,19 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 	})
 
 	r.Register(&StepSchema{
+		Type:        "step.secret_set",
+		Plugin:      "pipelinesteps",
+		Description: "Writes one or more secrets to a named secrets module (AWS/Vault). Values support Go template expressions resolved against the pipeline context.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Type: FieldTypeString, Description: "Service name of secrets module", Required: true},
+			{Key: "secrets", Type: FieldTypeMap, Description: "Map of secret key to value (supports template expressions)", Required: true},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "set_keys", Type: "array", Description: "Sorted list of secret keys that were written"},
+		},
+	})
+
+	r.Register(&StepSchema{
 		Type:        "step.http_proxy",
 		Plugin:      "pipelinesteps",
 		Description: "Forwards the original HTTP request to a dynamically resolved backend URL.",

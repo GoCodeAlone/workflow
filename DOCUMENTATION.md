@@ -186,6 +186,7 @@ flowchart TD
 | `step.hash` | Computes a cryptographic hash (md5/sha256/sha512) of a template-resolved input | pipelinesteps |
 | `step.regex_match` | Matches a regular expression against a template-resolved input | pipelinesteps |
 | `step.secret_fetch` | Fetches one or more secrets from a secrets module (secrets.aws, secrets.vault) with dynamic tenant-aware secret ID resolution | pipelinesteps |
+| `step.secret_set` | Writes one or more secrets to a secrets module; values are Go template expressions resolved against the pipeline context | pipelinesteps |
 | `step.jq` | Applies a JQ expression to pipeline data for complex transformations | pipelinesteps |
 | `step.ai_complete` | AI text completion using a configured provider | ai |
 | `step.ai_classify` | AI text classification into named categories | ai |
@@ -1282,6 +1283,33 @@ steps:
       module: aws-secrets
       secrets:
         api_key: "arn:aws:secretsmanager:us-east-1:123:secret:{{.tenant_id}}-api-key"
+```
+
+---
+
+### `step.secret_set`
+
+Writes one or more secrets to a named secrets module (`secrets.aws`, `secrets.vault`, etc.). Secret values are Go template expressions evaluated against the live pipeline context, enabling values from prior step outputs or trigger data to be persisted into a secrets provider.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `module` | string | yes | Service name of the secrets module (the `name` field in the module config). |
+| `secrets` | map[string]string | yes | Map of secret key → value (or template expression). Values support Go template syntax for dynamic resolution. |
+
+**Output fields:** `set_keys` — sorted list of secret keys that were written.
+
+**Example:**
+
+```yaml
+- type: step.secret_set
+  name: save-creds
+  config:
+    module: zoom-secrets
+    secrets:
+      client_id: "{{ .steps.setup_form.client_id }}"
+      client_secret: "{{ .steps.setup_form.client_secret }}"
 ```
 
 ---

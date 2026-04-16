@@ -105,6 +105,7 @@ func New() *Plugin {
 					"step.graphql",
 					"step.event_decrypt",
 					"step.secret_fetch",
+					"step.secret_set",
 				},
 				WorkflowTypes:    []string{"pipeline"},
 				OverridableTypes: []string{"step.authz_check"},
@@ -197,6 +198,7 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		"step.graphql":       wrapStepFactory(module.NewGraphQLStepFactory()),
 		"step.event_decrypt": wrapStepFactory(module.NewEventDecryptStepFactory()),
 		"step.secret_fetch":  wrapStepFactory(module.NewSecretFetchStepFactory()),
+		"step.secret_set":    wrapStepFactory(module.NewSecretSetStepFactory()),
 	}
 }
 

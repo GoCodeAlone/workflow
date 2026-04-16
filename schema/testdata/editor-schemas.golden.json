@@ -7859,6 +7859,28 @@
       "description": "Rotates a secret",
       "configFields": []
     },
+    "step.secret_set": {
+      "type": "step.secret_set",
+      "label": "Secret Set",
+      "category": "pipeline",
+      "description": "Writes one or more secrets to a named secrets module",
+      "configFields": [
+        {
+          "key": "module",
+          "label": "Module",
+          "type": "string",
+          "description": "Secrets module name",
+          "required": true
+        },
+        {
+          "key": "secrets",
+          "label": "Secrets",
+          "type": "map",
+          "description": "Map of secret key to value (supports template expressions)",
+          "required": true
+        }
+      ]
+    },
     "step.set": {
       "type": "step.set",
       "label": "Set Values",

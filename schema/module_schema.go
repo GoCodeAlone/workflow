@@ -2300,6 +2300,19 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		},
 	})
 
+	// ---- Secret Set ----
+
+	r.Register(&ModuleSchema{
+		Type:        "step.secret_set",
+		Label:       "Secret Set",
+		Category:    "pipeline",
+		Description: "Writes one or more secrets to a named secrets module",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "module", Label: "Module", Type: FieldTypeString, Required: true, Description: "Secrets module name"},
+			{Key: "secrets", Label: "Secrets", Type: FieldTypeMap, Required: true, Description: "Map of secret key to value (supports template expressions)"},
+		},
+	})
+
 	// ---- State Machine Get ----
 
 	r.Register(&ModuleSchema{
