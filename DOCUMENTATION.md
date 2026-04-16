@@ -166,6 +166,7 @@ flowchart TD
 | `step.validate_pagination` | Validates and normalizes pagination query params | pipelinesteps |
 | `step.validate_request_body` | Validates request body against a JSON schema | pipelinesteps |
 | `step.foreach` | Iterates over a slice and runs sub-steps per element. Optional `concurrency: N` for parallel processing | pipelinesteps |
+| `step.while` | Executes sub-steps repeatedly while a condition template is truthy, with a hard `max_iterations` cap (default 1000). Supports optional accumulator for paginated APIs | pipelinesteps |
 | `step.parallel` | Executes named sub-steps concurrently and collects results. O(max(branch)) time | pipelinesteps |
 | `step.webhook_verify` | Verifies an inbound webhook signature | pipelinesteps |
 | `step.base64_decode` | Decodes a base64-encoded field | pipelinesteps |
