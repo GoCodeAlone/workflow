@@ -197,7 +197,7 @@ func TestHTTPClient_OAuth2ClientCredentials(t *testing.T) {
 				Type:         "oauth2_client_credentials",
 				TokenURL:     tokenSrv.URL + "/token",
 				ClientID:     "client-id",
-				ClientCredential: "client-secret", //nolint:gosec // G117: test credential
+				ClientCredential: "client-secret", //nolint:gosec // G101: test credential
 			},
 		},
 	}
@@ -250,7 +250,7 @@ func TestHTTPClient_OAuth2RefreshToken_TokenAbsent(t *testing.T) {
 				Type:              "oauth2_refresh_token",
 				TokenURL:          tokenSrv.URL + "/token",
 				ClientID:          "client-id",
-				ClientCredential:  "client-secret", //nolint:gosec // G117: test credential
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
 				TokenProviderName: "mem",
 				TokenProviderKey:  "oauth_token",
 			},
@@ -316,7 +316,7 @@ func TestHTTPClient_OAuth2RefreshToken_TokenPresent(t *testing.T) {
 				Type:              "oauth2_refresh_token",
 				TokenURL:          tokenSrv.URL + "/token",
 				ClientID:          "client-id",
-				ClientCredential:  "client-secret", //nolint:gosec // G117: test credential
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
 				TokenProviderName: "mem",
 				TokenProviderKey:  "oauth_token",
 			},
@@ -377,7 +377,7 @@ func TestHTTPClient_OAuth2RefreshToken_Refresh(t *testing.T) {
 				Type:              "oauth2_refresh_token",
 				TokenURL:          tokenSrv.URL + "/token",
 				ClientID:          "client-id",
-				ClientCredential:  "client-secret", //nolint:gosec // G117: test credential
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
 				TokenProviderName: "mem",
 				TokenProviderKey:  "oauth_token",
 			},
@@ -458,7 +458,7 @@ func TestHTTPClient_OAuth2RefreshToken_401Retry(t *testing.T) {
 				Type:              "oauth2_refresh_token",
 				TokenURL:          tokenSrv.URL + "/token",
 				ClientID:          "client-id",
-				ClientCredential:  "client-secret", //nolint:gosec // G117: test credential
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
 				TokenProviderName: "mem",
 				TokenProviderKey:  "oauth_token",
 			},
@@ -508,7 +508,7 @@ func TestHTTPClient_OAuth2RefreshToken_LateTokenArrival(t *testing.T) {
 				Type:              "oauth2_refresh_token",
 				TokenURL:          tokenSrv.URL + "/token",
 				ClientID:          "client-id",
-				ClientCredential:  "client-secret", //nolint:gosec // G117: test credential
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
 				TokenProviderName: "mem",
 				TokenProviderKey:  "oauth_token",
 			},

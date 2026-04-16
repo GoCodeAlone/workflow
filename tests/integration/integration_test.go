@@ -824,5 +824,5 @@ triggers: {}
 		t.Errorf("Authorization header: got %q, want %q", got, want)
 	}
 
-	t.Logf("End-to-end: YAML config → engine → service registry → http.client → upstream OK (auth=%q)", got)
+	t.Logf("End-to-end: YAML config → engine → service registry → http.client → upstream OK (auth header set: %v)", got != "")
 }
