@@ -331,6 +331,52 @@ func TestWhileStep_FactoryRejectsNegativeMaxIterations(t *testing.T) {
 	}
 }
 
+// TestWhileStep_FactoryAcceptsInt64MaxIterations verifies that YAML/JSON
+// decoders delivering max_iterations as int64 are accepted (and are not
+// silently treated as 0 → default).
+func TestWhileStep_FactoryAcceptsInt64MaxIterations(t *testing.T) {
+	s, err := buildTestWhileStep(t, "int64-while", map[string]any{
+		"condition":      "true",
+		"max_iterations": int64(42),
+		"step": map[string]any{
+			"type":   "step.set",
+			"name":   "s",
+			"values": map[string]any{"x": "1"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error for max_iterations=int64(42): %v", err)
+	}
+	ws, ok := s.(*WhileStep)
+	if !ok {
+		t.Fatalf("expected *WhileStep, got %T", s)
+	}
+	if ws.maxIterations != 42 {
+		t.Errorf("expected max_iterations=42, got %d", ws.maxIterations)
+	}
+}
+
+// TestWhileStep_FactoryRejectsUnsupportedMaxIterationsType verifies that a
+// non-numeric max_iterations value is rejected with a clear error rather than
+// silently falling back to the default cap.
+func TestWhileStep_FactoryRejectsUnsupportedMaxIterationsType(t *testing.T) {
+	_, err := buildTestWhileStep(t, "bad-type-while", map[string]any{
+		"condition":      "true",
+		"max_iterations": "lots",
+		"step": map[string]any{
+			"type":   "step.set",
+			"name":   "s",
+			"values": map[string]any{"x": "1"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for non-numeric max_iterations")
+	}
+	if !strings.Contains(err.Error(), "max_iterations") {
+		t.Errorf("expected error to mention max_iterations, got: %v", err)
+	}
+}
+
 // TestWhileStep_FactoryMaxIterationsZeroUsesDefault verifies that
 // max_iterations: 0 is treated as "use default" rather than a validation error.
 func TestWhileStep_FactoryMaxIterationsZeroUsesDefault(t *testing.T) {

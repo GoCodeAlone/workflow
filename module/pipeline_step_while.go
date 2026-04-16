@@ -53,12 +53,19 @@ func NewWhileStepFactory(registryFn func() *StepRegistry) StepFactory {
 		// --- max_iterations (default 1000; 0 means "use default") ---
 		maxIterations := 1000
 		if v, ok := config["max_iterations"]; ok {
-			parsed := 0
+			var parsed int
 			switch val := v.(type) {
 			case int:
 				parsed = val
-			case float64:
+			case int64:
 				parsed = int(val)
+			case float64:
+				if val != float64(int(val)) {
+					return nil, fmt.Errorf("while step %q: 'max_iterations' must be a whole number, got %v", name, val)
+				}
+				parsed = int(val)
+			default:
+				return nil, fmt.Errorf("while step %q: 'max_iterations' must be a number, got %T", name, v)
 			}
 			if parsed < 0 {
 				return nil, fmt.Errorf("while step %q: 'max_iterations' must be >= 0, got %d", name, parsed)
@@ -204,16 +211,18 @@ func (s *WhileStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResu
 			pc.MergeStepOutput(stepName, childPC.StepOutputs[stepName])
 		}
 
-		// Accumulate if configured.
+		// Accumulate if configured. Resolve against childPC so that
+		// accumulate.from can reference the iteration_var and the per-iteration
+		// step outputs for this iteration.
 		if s.accumKey != "" {
-			fromStr, resolveErr := s.tmpl.Resolve(s.accumFrom, pc)
+			fromStr, resolveErr := s.tmpl.Resolve(s.accumFrom, childPC)
 			if resolveErr != nil {
 				return nil, fmt.Errorf("while step %q: accumulate.from resolve error: %w", s.name, resolveErr)
 			}
 
 			// Retrieve the raw value from step outputs for array detection.
 			// resolveStr is a string representation; we need the actual value.
-			val := s.resolveAccumValue(fromStr, childPC, pc)
+			val := s.resolveAccumValue(fromStr, childPC)
 			if val != nil {
 				if slice, err := foreachToSlice(val); err == nil {
 					accumulator = append(accumulator, slice...)
@@ -273,7 +282,9 @@ func (s *WhileStep) buildChildContext(parent *PipelineContext, index int) *Pipel
 // accumFrom resolves to a string via the template engine; we want the native value
 // (e.g. []any) so we look it up in the step outputs directly.
 // This mirrors the approach used by foreach's resolveCollection.
-func (s *WhileStep) resolveAccumValue(resolvedStr string, childPC, parentPC *PipelineContext) any {
+// childPC carries this iteration's injected iteration_var and step outputs, so
+// accumulate.from paths under any of those namespaces resolve consistently.
+func (s *WhileStep) resolveAccumValue(resolvedStr string, childPC *PipelineContext) any {
 	// If the resolved string contains "<no value>", skip.
 	if strings.Contains(resolvedStr, "<no value>") {
 		return nil
@@ -284,10 +295,10 @@ func (s *WhileStep) resolveAccumValue(resolvedStr string, childPC, parentPC *Pip
 	path := extractTemplatePath(s.accumFrom)
 	if path != "" {
 		data := make(map[string]any)
-		maps.Copy(data, parentPC.Current)
-		data["steps"] = parentPC.StepOutputs
-		data["trigger"] = parentPC.TriggerData
-		data["meta"] = parentPC.Metadata
+		maps.Copy(data, childPC.Current)
+		data["steps"] = childPC.StepOutputs
+		data["trigger"] = childPC.TriggerData
+		data["meta"] = childPC.Metadata
 		if val, found := foreachWalkPath(data, path); found {
 			return val
 		}
