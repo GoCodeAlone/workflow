@@ -135,13 +135,14 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "http.client",
 		Label:       "HTTP Client",
 		Category:    "http",
-		Description: "Reusable HTTP client with shared auth (bearer/basic/api_key/oauth2) referenced by step.http_call",
+		Description: "Reusable HTTP client with shared auth (none/static_bearer/oauth2_client_credentials/oauth2_refresh_token) referenced by step.http_call",
 		Outputs:     []ServiceIODef{{Name: "client", Type: "HTTPClient", Description: "Configured *http.Client with base URL and auth"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, Description: "Request timeout for outgoing calls", DefaultValue: "30s", Placeholder: "30s"},
 			{Key: "base_url", Label: "Base URL", Type: FieldTypeString, Description: "Optional base URL prepended to relative request paths", Placeholder: "https://api.example.com"},
-			{Key: "auth", Label: "Auth", Type: FieldTypeMap, Description: "Auth block: {type: bearer|basic|api_key|oauth2, ...}"},
+			{Key: "auth", Label: "Auth", Type: FieldTypeMap, Description: "Auth block. Supported values: {type: none}; {type: static_bearer, bearer_token: <token>} or {type: static_bearer, bearer_token_ref: <ref>}; {type: oauth2_client_credentials, token_url: <url>, client_id: <id>, client_secret: <secret>, scopes: [<scope>]}; {type: oauth2_refresh_token, token_secrets: <module-name>, token_secrets_key: <key>, scopes: [<scope>]}.", DefaultValue: map[string]any{"type": "none"}},
 		},
+		DefaultConfig: map[string]any{"timeout": "30s", "auth": map[string]any{"type": "none"}},
 	})
 
 	r.Register(&ModuleSchema{

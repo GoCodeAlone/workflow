@@ -331,6 +331,30 @@ func TestWhileStep_FactoryRejectsNegativeMaxIterations(t *testing.T) {
 	}
 }
 
+// TestWhileStep_FactoryMaxIterationsZeroUsesDefault verifies that
+// max_iterations: 0 is treated as "use default" rather than a validation error.
+func TestWhileStep_FactoryMaxIterationsZeroUsesDefault(t *testing.T) {
+	s, err := buildTestWhileStep(t, "zero-while", map[string]any{
+		"condition":      "true",
+		"max_iterations": 0,
+		"step": map[string]any{
+			"type":   "step.set",
+			"name":   "s",
+			"values": map[string]any{"x": "1"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error for max_iterations=0: %v", err)
+	}
+	ws, ok := s.(*WhileStep)
+	if !ok {
+		t.Fatalf("expected *WhileStep, got %T", s)
+	}
+	if ws.maxIterations != 1000 {
+		t.Errorf("expected max_iterations to default to 1000, got %d", ws.maxIterations)
+	}
+}
+
 // TestWhileStep_FactoryRejectsStepAndStepsTogether verifies that providing both
 // step and steps is rejected.
 func TestWhileStep_FactoryRejectsStepAndStepsTogether(t *testing.T) {

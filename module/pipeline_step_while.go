@@ -50,17 +50,21 @@ func NewWhileStepFactory(registryFn func() *StepRegistry) StepFactory {
 			return nil, fmt.Errorf("while step %q: 'condition' is required", name)
 		}
 
-		// --- max_iterations (default 1000) ---
+		// --- max_iterations (default 1000; 0 means "use default") ---
 		maxIterations := 1000
 		if v, ok := config["max_iterations"]; ok {
+			parsed := 0
 			switch val := v.(type) {
 			case int:
-				maxIterations = val
+				parsed = val
 			case float64:
-				maxIterations = int(val)
+				parsed = int(val)
 			}
-			if maxIterations <= 0 {
-				return nil, fmt.Errorf("while step %q: 'max_iterations' must be > 0, got %d", name, maxIterations)
+			if parsed < 0 {
+				return nil, fmt.Errorf("while step %q: 'max_iterations' must be >= 0, got %d", name, parsed)
+			}
+			if parsed > 0 {
+				maxIterations = parsed
 			}
 		}
 
