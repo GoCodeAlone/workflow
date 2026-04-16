@@ -266,7 +266,10 @@ func TestHTTPClient_OAuth2RefreshToken_TokenAbsent(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	_, err := m.Client().Get(upstream.URL)
+	resp, err := m.Client().Get(upstream.URL)
+	if resp != nil {
+		resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("expected error when no token is present, got nil")
 	}
@@ -524,7 +527,10 @@ func TestHTTPClient_OAuth2RefreshToken_LateTokenArrival(t *testing.T) {
 	defer upstream.Close()
 
 	// Phase 1 — no token yet; request should error.
-	_, err := m.Client().Get(upstream.URL)
+	resp1, err := m.Client().Get(upstream.URL)
+	if resp1 != nil {
+		resp1.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("expected error before token is available")
 	}
