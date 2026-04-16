@@ -32,11 +32,16 @@ type KeychainProvider struct {
 }
 
 // NewKeychainProvider returns a provider namespaced to the given service name.
-func NewKeychainProvider(service string) *KeychainProvider {
+// Service must not be empty — an empty service stores secrets in a shared
+// namespace where they can collide across applications.
+func NewKeychainProvider(service string) (*KeychainProvider, error) {
+	if service == "" {
+		return nil, fmt.Errorf("secrets.keychain: service name must not be empty")
+	}
 	return &KeychainProvider{
 		service:     service,
 		trackedKeys: make(map[string]struct{}),
-	}
+	}, nil
 }
 
 // Name returns the provider identifier "keychain".

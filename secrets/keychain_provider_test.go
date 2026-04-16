@@ -14,9 +14,19 @@ import (
 // Compile-time assertion: KeychainProvider must satisfy secrets.Provider.
 var _ secrets.Provider = (*secrets.KeychainProvider)(nil)
 
+// mustNewKeychainProvider is a test helper that creates a provider or fails the test.
+func mustNewKeychainProvider(t *testing.T, service string) *secrets.KeychainProvider {
+	t.Helper()
+	p, err := secrets.NewKeychainProvider(service)
+	if err != nil {
+		t.Fatalf("NewKeychainProvider(%q): %v", service, err)
+	}
+	return p
+}
+
 func TestKeychainProvider_SetAndGet(t *testing.T) {
 	keyring.MockInit()
-	p := secrets.NewKeychainProvider("test-service")
+	p := mustNewKeychainProvider(t, "test-service")
 
 	ctx := context.Background()
 	if err := p.Set(ctx, "api_key", "secret-123"); err != nil {
@@ -34,7 +44,7 @@ func TestKeychainProvider_SetAndGet(t *testing.T) {
 
 func TestKeychainProvider_GetMissing(t *testing.T) {
 	keyring.MockInit()
-	p := secrets.NewKeychainProvider("test-service")
+	p := mustNewKeychainProvider(t, "test-service")
 	_, err := p.Get(context.Background(), "absent")
 	if err == nil {
 		t.Fatal("expected error for missing key, got nil")
@@ -46,9 +56,11 @@ func TestKeychainProvider_GetMissing(t *testing.T) {
 
 func TestKeychainProvider_Delete(t *testing.T) {
 	keyring.MockInit()
-	p := secrets.NewKeychainProvider("test-service")
+	p := mustNewKeychainProvider(t, "test-service")
 	ctx := context.Background()
-	_ = p.Set(ctx, "x", "1")
+	if err := p.Set(ctx, "x", "1"); err != nil {
+		t.Fatalf("setup Set: %v", err)
+	}
 	if err := p.Delete(ctx, "x"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -59,10 +71,14 @@ func TestKeychainProvider_Delete(t *testing.T) {
 
 func TestKeychainProvider_List(t *testing.T) {
 	keyring.MockInit()
-	p := secrets.NewKeychainProvider("test-service")
+	p := mustNewKeychainProvider(t, "test-service")
 	ctx := context.Background()
-	_ = p.Set(ctx, "a", "1")
-	_ = p.Set(ctx, "b", "2")
+	if err := p.Set(ctx, "a", "1"); err != nil {
+		t.Fatalf("setup Set a: %v", err)
+	}
+	if err := p.Set(ctx, "b", "2"); err != nil {
+		t.Fatalf("setup Set b: %v", err)
+	}
 	keys, err := p.List(ctx)
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -74,9 +90,16 @@ func TestKeychainProvider_List(t *testing.T) {
 	}
 }
 
+func TestKeychainProvider_EmptyService(t *testing.T) {
+	_, err := secrets.NewKeychainProvider("")
+	if err == nil {
+		t.Fatal("expected error for empty service name")
+	}
+}
+
 func TestKeychainProvider_EmptyKey(t *testing.T) {
 	keyring.MockInit()
-	p := secrets.NewKeychainProvider("test-service")
+	p := mustNewKeychainProvider(t, "test-service")
 	ctx := context.Background()
 
 	if _, err := p.Get(ctx, ""); err != secrets.ErrInvalidKey {
@@ -92,12 +115,16 @@ func TestKeychainProvider_EmptyKey(t *testing.T) {
 
 func TestKeychainProvider_DeleteIdempotent_CleansTrackedKeys(t *testing.T) {
 	keyring.MockInit()
-	p := secrets.NewKeychainProvider("test-service")
+	p := mustNewKeychainProvider(t, "test-service")
 	ctx := context.Background()
 
 	// Set then delete a key.
-	_ = p.Set(ctx, "ephemeral", "val")
-	_ = p.Delete(ctx, "ephemeral")
+	if err := p.Set(ctx, "ephemeral", "val"); err != nil {
+		t.Fatalf("setup Set: %v", err)
+	}
+	if err := p.Delete(ctx, "ephemeral"); err != nil {
+		t.Fatalf("setup Delete: %v", err)
+	}
 
 	// Delete again (idempotent, key already gone from keyring).
 	if err := p.Delete(ctx, "ephemeral"); err != nil {

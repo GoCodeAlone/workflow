@@ -55,7 +55,11 @@ func (m *SecretsKeychainModule) Start(_ context.Context) error {
 	if m.service == "" {
 		return fmt.Errorf("secrets.keychain: 'service' is required")
 	}
-	m.provider = secrets.NewKeychainProvider(m.service)
+	provider, err := secrets.NewKeychainProvider(m.service)
+	if err != nil {
+		return err
+	}
+	m.provider = provider
 	m.logger.Info("Keychain secrets provider started", "service", m.service)
 	return nil
 }

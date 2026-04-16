@@ -103,7 +103,7 @@ func resolveSecretsProvider(cfg *SecretsConfig) (secrets.Provider, error) {
 		if service == "" {
 			return nil, fmt.Errorf("secrets.keychain: 'service' is required")
 		}
-		return secrets.NewKeychainProvider(service), nil
+		return secrets.NewKeychainProvider(service)
 
 	default:
 		return nil, fmt.Errorf("unknown secrets provider %q (supported: github, vault, aws, env, keychain)", cfg.Provider)
