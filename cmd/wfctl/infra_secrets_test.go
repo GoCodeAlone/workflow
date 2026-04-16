@@ -182,6 +182,3 @@ func TestResolveSecretsProvider_KeychainMissingService(t *testing.T) {
 
 // Ensure GitHubSecretsProvider satisfies secrets.Provider interface.
 var _ secrets.Provider = (*secrets.GitHubSecretsProvider)(nil)
-
-// Ensure KeychainProvider satisfies secrets.Provider interface.
-var _ secrets.Provider = (*secrets.KeychainProvider)(nil)

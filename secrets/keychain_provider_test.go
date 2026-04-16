@@ -2,11 +2,17 @@ package secrets_test
 
 import (
 	"context"
+	"errors"
+	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/secrets"
 	"github.com/zalando/go-keyring"
 )
+
+// Compile-time assertion: KeychainProvider must satisfy secrets.Provider.
+var _ secrets.Provider = (*secrets.KeychainProvider)(nil)
 
 func TestKeychainProvider_SetAndGet(t *testing.T) {
 	keyring.MockInit()
@@ -33,6 +39,9 @@ func TestKeychainProvider_GetMissing(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing key, got nil")
 	}
+	if !errors.Is(err, secrets.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
 }
 
 func TestKeychainProvider_Delete(t *testing.T) {
@@ -58,7 +67,9 @@ func TestKeychainProvider_List(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(keys) != 2 {
-		t.Errorf("got %d keys, want 2", len(keys))
+	sort.Strings(keys)
+	want := []string{"a", "b"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Errorf("List() = %v, want %v", keys, want)
 	}
 }
