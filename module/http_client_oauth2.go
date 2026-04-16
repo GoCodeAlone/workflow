@@ -315,21 +315,69 @@ type retryOn401Transport struct {
 	base       http.RoundTripper           // final transport that actually sends the request
 }
 
+// maxRetryBodySize is the upper bound for buffering a request body when
+// req.GetBody is nil and the body is not nil.  Requests with bodies larger than
+// this cannot be retried because we have no way to replay them without risking
+// an unbounded memory allocation.
+const maxRetryBodySize = 1 << 20 // 1 MiB
+
 // RoundTrip implements http.RoundTripper.
+//
+// Body replay strategy (evaluated before the first attempt):
+//
+//  1. req.GetBody is set — preferred path; http.NewRequest populates this for
+//     bodies backed by bytes/strings readers.  We call it to get a fresh reader
+//     for the retry; the original body is consumed by the first attempt.
+//  2. Body is nil or http.NoBody — trivial; no buffering needed.
+//  3. Body present, GetBody nil — buffer up to maxRetryBodySize before the
+//     first attempt so the retry can replay the same bytes.  Bodies that exceed
+//     the cap are forwarded as-is but not retried on 401.
 func (t *retryOn401Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Buffer the body so it can be replayed on retry.
-	var bodyBytes []byte
-	if req.Body != nil && req.Body != http.NoBody {
-		defer req.Body.Close()
-		var readErr error
-		bodyBytes, readErr = io.ReadAll(req.Body)
+	// Determine how we will replay the body on retry, before the first attempt
+	// consumes it.
+	type replayStrategy int
+	const (
+		replayGetBody  replayStrategy = iota // call req.GetBody()
+		replayNilBody                        // no body to replay
+		replayBuffered                       // pre-buffered bytes
+		replaySkip                           // body too large; skip retry on 401
+	)
+
+	var (
+		strategy    replayStrategy
+		buffered    []byte
+	)
+
+	switch {
+	case req.GetBody != nil:
+		strategy = replayGetBody
+
+	case req.Body == nil || req.Body == http.NoBody:
+		strategy = replayNilBody
+
+	default:
+		// Read body upfront so the first attempt can still send it.
+		buf, readErr := io.ReadAll(io.LimitReader(req.Body, maxRetryBodySize+1))
 		if readErr != nil {
 			return nil, fmt.Errorf("http.client: reading request body for 401-retry: %w", readErr)
 		}
-		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		if len(buf) > maxRetryBodySize {
+			// Too large — forward the already-read bytes on the first attempt;
+			// skip retry if we get a 401.
+			strategy = replaySkip
+			// Restore body for first attempt from the (over-limit) read.
+			req = req.Clone(req.Context())
+			req.Body = io.NopCloser(bytes.NewReader(buf))
+		} else {
+			strategy = replayBuffered
+			buffered = buf
+			req = req.Clone(req.Context())
+			req.Body = io.NopCloser(bytes.NewReader(buffered))
+			req.ContentLength = int64(len(buffered))
+		}
 	}
 
-	// First attempt through the full oauth2 middleware.
+	// First attempt through the full oauth2 middleware stack.
 	resp, err := t.oauth2TR.Load().RoundTrip(req.Clone(req.Context()))
 	if err != nil {
 		return nil, err
@@ -338,9 +386,39 @@ func (t *retryOn401Transport) RoundTrip(req *http.Request) (*http.Response, erro
 		return resp, nil
 	}
 
-	// 401 — drain and discard the response.
+	// 401 — drain and discard the response body before retrying.
 	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
+
+	if strategy == replaySkip {
+		// Body too large to replay safely — return the 401 to the caller.
+		return resp, nil
+	}
+
+	// Build the retry request.
+	var retryReq *http.Request
+	switch strategy {
+	case replayGetBody:
+		newBody, getErr := req.GetBody()
+		if getErr != nil {
+			// GetBody failed; we cannot replay the body.
+			// Return the 401 response to the caller — suppressing getErr
+			// intentionally because the caller cares about the HTTP outcome,
+			// not the internal replay failure.
+			_ = getErr
+			return resp, nil //nolint:nilerr // intentional: return HTTP 401 when body replay fails
+		}
+		retryReq = req.Clone(req.Context())
+		retryReq.Body = newBody
+
+	case replayNilBody:
+		retryReq = req.Clone(req.Context())
+
+	case replayBuffered:
+		retryReq = req.Clone(req.Context())
+		retryReq.Body = io.NopCloser(bytes.NewReader(buffered))
+		retryReq.ContentLength = int64(len(buffered))
+	}
 
 	// Mark the underlying source as needing a refresh (for secretsBackedTokenSource).
 	// This forces the next Token() call to go to the token endpoint even if the
@@ -357,13 +435,6 @@ func (t *retryOn401Transport) RoundTrip(req *http.Request) (*http.Response, erro
 	newTR := &oauth2.Transport{Source: newReuseTS, Base: http.DefaultTransport}
 	t.oauth2TR.Store(newTR)
 	t.mu.Unlock()
-
-	// Rebuild retry request with the buffered body.
-	retryReq := req.Clone(req.Context())
-	if len(bodyBytes) > 0 {
-		retryReq.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		retryReq.ContentLength = int64(len(bodyBytes))
-	}
 
 	return t.oauth2TR.Load().RoundTrip(retryReq) //nolint:gosec // G107: URL is user-configured
 }

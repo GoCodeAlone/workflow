@@ -1,12 +1,14 @@
 package module
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -485,6 +487,165 @@ func TestHTTPClient_OAuth2RefreshToken_401Retry(t *testing.T) {
 	}
 	if n := atomic.LoadInt32(&tokenFetchCount); n < 1 {
 		t.Errorf("expected at least 1 token fetch during 401 recovery, got %d", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 7b: retryOn401Transport — retry works for http.NewRequest-built request
+//          (which populates req.GetBody) — body is replayed on retry.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_401Retry_WithBody(t *testing.T) {
+	var tokenFetchCount int32
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tokenFetchCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, makeTestTokenJSON("fresh-token", "fresh-refresh", 3600))
+	}))
+	defer tokenSrv.Close()
+
+	initialToken := makeTestStoredToken("stale-token", "valid-refresh",
+		time.Now().Add(1*time.Hour))
+	provider := newMemSecretsProvider(map[string]string{
+		"oauth_token": initialToken,
+	})
+
+	var receivedBody string
+	var requestCount int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&requestCount, 1)
+		b, _ := io.ReadAll(r.Body)
+		receivedBody = string(b)
+		if n == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	m := &HTTPClientModule{
+		moduleName: "test-rt-body-retry",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          tokenSrv.URL + "/token",
+				ClientID:          "client-id",
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+		logger: &noopLogger{},
+	}
+	if err := m.buildClient(context.Background(), provider); err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+
+	const wantBody = `{"hello":"world"}`
+	// http.NewRequest with a strings.Reader body populates req.GetBody automatically.
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, upstream.URL,
+		strings.NewReader(wantBody))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 after retry, got %d", resp.StatusCode)
+	}
+	if receivedBody != wantBody {
+		t.Errorf("retried request body: got %q, want %q", receivedBody, wantBody)
+	}
+	if n := atomic.LoadInt32(&requestCount); n != 2 {
+		t.Errorf("expected 2 upstream requests, got %d", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 7c: retryOn401Transport — oversize body (>1 MiB) is NOT buffered;
+//          first 401 is returned as-is without a retry.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_401Retry_OversizeBody(t *testing.T) {
+	var tokenFetchCount int32
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tokenFetchCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, makeTestTokenJSON("fresh-token", "fresh-refresh", 3600))
+	}))
+	defer tokenSrv.Close()
+
+	initialToken := makeTestStoredToken("stale-token", "valid-refresh",
+		time.Now().Add(1*time.Hour))
+	provider := newMemSecretsProvider(map[string]string{
+		"oauth_token": initialToken,
+	})
+
+	var requestCount int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		// Always return 401 — the retry must not happen for oversize bodies.
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer upstream.Close()
+
+	m := &HTTPClientModule{
+		moduleName: "test-rt-oversize",
+		cfg: HTTPClientConfig{
+			Timeout: 10 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          tokenSrv.URL + "/token",
+				ClientID:          "client-id",
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+		logger: &noopLogger{},
+	}
+	if err := m.buildClient(context.Background(), provider); err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+
+	// Build a 2 MiB body with no GetBody factory (raw bytes.Reader has no GetBody).
+	bigBody := bytes.Repeat([]byte("x"), 2*1024*1024)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, upstream.URL,
+		bytes.NewReader(bigBody))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	// Nil out GetBody to force the fallback buffering path.
+	req.GetBody = nil
+
+	resp, err := m.Client().Do(req)
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// The oversize body must not be buffered; we should get the 401 back without retry.
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 (no retry for oversize body), got %d", resp.StatusCode)
+	}
+	// Only one upstream request should have been made (no retry).
+	if n := atomic.LoadInt32(&requestCount); n != 1 {
+		t.Errorf("expected 1 upstream request (no retry), got %d", n)
+	}
+	if n := atomic.LoadInt32(&tokenFetchCount); n != 0 {
+		t.Errorf("expected 0 token fetches (retry skipped), got %d", n)
 	}
 }
 
