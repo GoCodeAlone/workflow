@@ -75,6 +75,11 @@ func (s *SecretSetStep) Name() string { return s.name }
 // Execute resolves the value templates using the pipeline context, writes each
 // secret to the named secrets module via provider.Set, and returns the list of
 // written keys as step output for observability.
+//
+// Empty resolved values are permitted (useful for clearing a secret).
+// On partial failure (e.g., the 3rd of 5 keys fails), earlier writes are
+// already committed — secrets backends have no transaction primitive.
+// The returned error identifies which key failed.
 func (s *SecretSetStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
 	if s.app == nil {
 		return nil, fmt.Errorf("secret_set step %q: no application context", s.name)

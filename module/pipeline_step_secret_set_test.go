@@ -7,7 +7,8 @@ import (
 )
 
 // mockSecretSetProvider is an in-memory secrets.Provider for testing secret_set.
-// It supports both Get (for verification) and Set (under test).
+// It implements a broader interface than SecretSetProvider requires (including
+// Get/Delete/List) so that tests can verify written values via provider.Get.
 type mockSecretSetProvider struct {
 	data   map[string]string
 	setErr error
@@ -111,6 +112,19 @@ func TestSecretSetStep_EmptyKey(t *testing.T) {
 	}, nil)
 	if err == nil {
 		t.Fatal("expected error when secrets key is empty")
+	}
+}
+
+func TestSecretSetStep_WhitespaceOnlyKey(t *testing.T) {
+	factory := NewSecretSetStepFactory()
+	_, err := factory("bad", map[string]any{
+		"module": "zoom-secrets",
+		"secrets": map[string]any{
+			"   ": "some-value", // whitespace-only key
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error when secrets key is whitespace-only")
 	}
 }
 
@@ -320,4 +334,57 @@ func TestSecretSetStep_NoAppContext(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when app is nil")
 	}
+}
+
+// TestSecretSetStep_PartialFailure verifies that when writing multiple secrets
+// and the provider fails mid-way, earlier writes remain committed (no rollback).
+// This matches the documented behavior: secrets backends have no transaction primitive.
+func TestSecretSetStep_PartialFailure(t *testing.T) {
+	provider := &failAfterNProvider{
+		data:     make(map[string]string),
+		failAt:   1, // fail on the 2nd Set call
+		writeNum: 0,
+	}
+	app := mockAppWithSetProvider("zoom-secrets", provider)
+
+	factory := NewSecretSetStepFactory()
+	// Use sorted key names so iteration order is predictable for the test.
+	step, err := factory("save-creds", map[string]any{
+		"module": "zoom-secrets",
+		"secrets": map[string]any{
+			"aaa_first":  "value-1",
+			"bbb_second": "value-2",
+		},
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error from partial failure")
+	}
+
+	// At least one write should have succeeded before the failure.
+	if len(provider.data) == 0 {
+		t.Error("expected at least one write to have succeeded before failure")
+	}
+}
+
+// failAfterNProvider fails on the Nth Set call.
+type failAfterNProvider struct {
+	data     map[string]string
+	failAt   int
+	writeNum int
+}
+
+func (p *failAfterNProvider) Name() string { return "fail-after-n" }
+func (p *failAfterNProvider) Set(_ context.Context, key, value string) error {
+	if p.writeNum >= p.failAt {
+		return errors.New("simulated write failure")
+	}
+	p.data[key] = value
+	p.writeNum++
+	return nil
 }
