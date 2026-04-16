@@ -28,6 +28,7 @@ All modules are instantiated from YAML config via the plugin factory registry. O
 ### HTTP & Routing
 | Type | Description | Plugin |
 |------|-------------|--------|
+| `http.client` | Reusable authenticated HTTP client with oauth2 and bearer token support | http |
 | `http.server` | Configurable web server | http |
 | `http.router` | Request routing with path and method matching | http |
 | `http.handler` | HTTP request processing with configurable responses | http |
