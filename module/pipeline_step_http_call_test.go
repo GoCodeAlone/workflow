@@ -1165,7 +1165,7 @@ type fakeHTTPClient struct {
 }
 
 func (f *fakeHTTPClient) Client() *http.Client { return f.client }
-func (f *fakeHTTPClient) BaseURL() string       { return f.baseURL }
+func (f *fakeHTTPClient) BaseURL() string      { return f.baseURL }
 
 // fakeRoundTripper injects a fixed Authorization header into every request.
 type fakeRoundTripper struct {
@@ -1193,9 +1193,9 @@ func mockAppWithHTTPClient(name string, hc HTTPClient) *MockApplication {
 // TestHTTPCallStep_ClientRef_UsesReferencedTransport verifies that when client: is set the step
 // uses the transport from the referenced HTTPClient service (which injects Authorization).
 func TestHTTPCallStep_ClientRef_UsesReferencedTransport(t *testing.T) {
-	var gotAuth string
+	gotAuthCh := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
+		gotAuthCh <- r.Header.Get("Authorization")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -1225,6 +1225,7 @@ func TestHTTPCallStep_ClientRef_UsesReferencedTransport(t *testing.T) {
 	if result.Output["status_code"] != http.StatusOK {
 		t.Errorf("expected 200, got %v", result.Output["status_code"])
 	}
+	gotAuth := <-gotAuthCh
 	if gotAuth != "Bearer fake-token" {
 		t.Errorf("expected Authorization: Bearer fake-token, got %q", gotAuth)
 	}
@@ -1233,9 +1234,9 @@ func TestHTTPCallStep_ClientRef_UsesReferencedTransport(t *testing.T) {
 // TestHTTPCallStep_ClientRef_ResolvesRelativeURLAgainstBaseURL verifies that a relative URL
 // ("/items") is resolved against the HTTPClient's BaseURL.
 func TestHTTPCallStep_ClientRef_ResolvesRelativeURLAgainstBaseURL(t *testing.T) {
-	var gotPath string
+	gotPathCh := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
+		gotPathCh <- r.URL.Path
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))
 	}))
@@ -1261,6 +1262,7 @@ func TestHTTPCallStep_ClientRef_ResolvesRelativeURLAgainstBaseURL(t *testing.T) 
 		t.Fatalf("execute error: %v", err)
 	}
 
+	gotPath := <-gotPathCh
 	if gotPath != "/items" {
 		t.Errorf("expected path /items, got %q", gotPath)
 	}
@@ -1359,9 +1361,9 @@ func TestHTTPCallStep_ClientRef_WrongServiceType(t *testing.T) {
 // TestHTTPCallStep_ClientRef_AbsoluteURLBypassesBaseURL verifies that an absolute URL is not
 // prefixed with the HTTPClient's BaseURL.
 func TestHTTPCallStep_ClientRef_AbsoluteURLBypassesBaseURL(t *testing.T) {
-	var gotPath string
+	gotPathCh := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
+		gotPathCh <- r.URL.Path
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))
 	}))
@@ -1389,6 +1391,7 @@ func TestHTTPCallStep_ClientRef_AbsoluteURLBypassesBaseURL(t *testing.T) {
 		t.Fatalf("execute error: %v", err)
 	}
 
+	gotPath := <-gotPathCh
 	if gotPath != "/absolute/path" {
 		t.Errorf("expected path /absolute/path, got %q", gotPath)
 	}
