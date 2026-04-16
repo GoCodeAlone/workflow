@@ -241,7 +241,7 @@ func httpClientSchema() *schema.ModuleSchema {
 			{Key: "base_url", Label: "Base URL", Type: schema.FieldTypeString, Description: "Optional base URL prepended to relative request paths", Placeholder: "https://api.example.com"},
 			{Key: "timeout", Label: "Timeout", Type: schema.FieldTypeString, Description: "Per-request deadline (e.g. 30s, 1m)", DefaultValue: "30s"},
 			{Key: "auth.type", Label: "Auth Type", Type: schema.FieldTypeSelect,
-				Options: []string{"none", "static_bearer", "oauth2_client_credentials", "oauth2_refresh_token"},
+				Options:     []string{"none", "static_bearer", "oauth2_client_credentials", "oauth2_refresh_token"},
 				Description: "Authentication strategy for outgoing requests"},
 		},
 		DefaultConfig: map[string]any{

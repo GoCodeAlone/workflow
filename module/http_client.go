@@ -45,9 +45,9 @@ type HTTPClientAuthConfig struct {
 	BearerTokenRef SecretRef `json:"bearer_token_ref" yaml:"bearer_token_ref"` //nolint:gosec // G117: config DTO reference
 
 	// oauth2_client_credentials + oauth2_refresh_token shared fields
-	TokenURL         string    `json:"token_url"          yaml:"token_url"`
-	ClientID         string    `json:"client_id"          yaml:"client_id"`
-	ClientIDRef      SecretRef `json:"client_id_from_secret" yaml:"client_id_from_secret"`
+	TokenURL    string    `json:"token_url"          yaml:"token_url"`
+	ClientID    string    `json:"client_id"          yaml:"client_id"`
+	ClientIDRef SecretRef `json:"client_id_from_secret" yaml:"client_id_from_secret"`
 	// ClientCredential holds the client secret value.  Named "credential" to avoid
 	// taint-tracking false positives on the word "secret".
 	ClientCredential    string    `json:"client_secret"          yaml:"client_secret"` //nolint:gosec // G117: config DTO for OAuth2 client secret
@@ -183,7 +183,7 @@ func (m *HTTPClientModule) Start(ctx context.Context) error {
 	}
 
 	// Resolve client_id / client_secret from secret refs if inline values are empty.
-	if err := m.resolveCredentials(ctx, tokenProvider); err != nil {
+	if err := m.resolveCredentials(ctx); err != nil {
 		return err
 	}
 
@@ -201,10 +201,9 @@ func (m *HTTPClientModule) Start(ctx context.Context) error {
 }
 
 // resolveCredentials fills in BearerToken / ClientID / ClientCredential from SecretRef
-// fields when the inline values are absent.  tokenProvider is used only when the ref
-// points at the same provider that stores the OAuth2 token; for all other refs we look
-// up the named provider from the app service registry directly.
-func (m *HTTPClientModule) resolveCredentials(ctx context.Context, _ secrets.Provider) error {
+// fields when the inline values are absent.  Each ref is resolved by looking up the
+// named provider from the app service registry.
+func (m *HTTPClientModule) resolveCredentials(ctx context.Context) error {
 	auth := &m.cfg.Auth
 	if auth.BearerToken == "" && auth.BearerTokenRef.Provider != "" && auth.BearerTokenRef.Key != "" {
 		val, err := m.resolveSecretRef(ctx, auth.BearerTokenRef)
