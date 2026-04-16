@@ -164,12 +164,19 @@ func (m *HTTPClientModule) Start(ctx context.Context) error {
 	return m.buildClient(ctx, tokenProvider)
 }
 
-// resolveCredentials fills in ClientID / ClientCredential from SecretRef fields when
-// the inline values are absent.  tokenProvider is used only when the ref points at the
-// same provider that stores the OAuth2 token; for client_id/secret refs we use the app
-// service registry directly.
+// resolveCredentials fills in BearerToken / ClientID / ClientCredential from SecretRef
+// fields when the inline values are absent.  tokenProvider is used only when the ref
+// points at the same provider that stores the OAuth2 token; for all other refs we look
+// up the named provider from the app service registry directly.
 func (m *HTTPClientModule) resolveCredentials(ctx context.Context, _ secrets.Provider) error {
 	auth := &m.cfg.Auth
+	if auth.BearerToken == "" && auth.BearerTokenRef.Provider != "" && auth.BearerTokenRef.Key != "" {
+		val, err := m.resolveSecretRef(ctx, auth.BearerTokenRef)
+		if err != nil {
+			return fmt.Errorf("http.client %q: resolving bearer_token_ref: %w", m.moduleName, err)
+		}
+		auth.BearerToken = val
+	}
 	if auth.ClientID == "" && auth.ClientIDRef.Provider != "" && auth.ClientIDRef.Key != "" {
 		val, err := m.resolveSecretRef(ctx, auth.ClientIDRef)
 		if err != nil {

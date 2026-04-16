@@ -547,10 +547,70 @@ func TestHTTPClient_OAuth2RefreshToken_LateTokenArrival(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Test 9: static_bearer — bearer token resolved from a secrets provider ref
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_StaticBearer_SecretRef(t *testing.T) {
+	const wantToken = "secret-bearer-token-from-ref"
+
+	// Seed a secrets provider with the bearer token value.
+	prov := newMemSecretsProvider(map[string]string{
+		"bearer": wantToken,
+	})
+
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	// Build module with bearer_token_ref (no inline bearer_token).
+	m := &HTTPClientModule{
+		moduleName: "test-bearer-ref",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type: "static_bearer",
+				// BearerToken intentionally empty — must be resolved from ref.
+				BearerTokenRef: SecretRef{
+					Provider: "test-secrets",
+					Key:      "bearer",
+				},
+			},
+		},
+	}
+
+	// Create an isolated app and register the provider under the name the ref expects.
+	app := CreateIsolatedApp(t)
+	if err := app.RegisterService("test-secrets", prov); err != nil {
+		t.Fatalf("RegisterService: %v", err)
+	}
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = m.Stop(context.Background()) }()
+
+	resp, err := m.Client().Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	want := "Bearer " + wantToken
+	if gotAuth != want {
+		t.Errorf("Authorization header: got %q, want %q", gotAuth, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Integration test (Task 1.13) — load module via factory, do round-trip
 // ---------------------------------------------------------------------------
 
-func TestHTTPClient_Integration_NoneAuth(t *testing.T) {
+func TestHTTPClient_Factory_NoneAuth(t *testing.T) {
 	var requestCount int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&requestCount, 1)
