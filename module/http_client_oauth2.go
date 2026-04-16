@@ -144,7 +144,13 @@ func (ts *clientCredentialsTokenSource) Token() (*oauth2.Token, error) {
 // is nil or has no stored token — the error surfaces on the first HTTP request.
 func buildOAuth2RefreshTokenClient(_ context.Context, auth *HTTPClientAuthConfig, tokenProvider secrets.Provider, timeout time.Duration, logger modular.Logger) (*http.Client, error) {
 	if auth.TokenURL == "" {
-		return nil, fmt.Errorf("oauth2_refresh_token: token_url is required")
+		return nil, fmt.Errorf("oauth2_refresh_token: 'token_url' is required")
+	}
+	if auth.ClientID == "" {
+		return nil, fmt.Errorf("oauth2_refresh_token: 'client_id' or 'client_id_from_secret' is required")
+	}
+	if auth.ClientCredential == "" {
+		return nil, fmt.Errorf("oauth2_refresh_token: 'client_secret' or 'client_secret_from_secret' is required")
 	}
 
 	cfg := &oauth2.Config{

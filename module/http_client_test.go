@@ -918,6 +918,107 @@ func TestHTTPClient_Factory_NoneAuth(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Test 11a: oauth2_refresh_token — Start() fails when token_secrets is empty.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_MissingTokenSecrets(t *testing.T) {
+	m := &HTTPClientModule{
+		moduleName: "test-missing-token-secrets",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:             "oauth2_refresh_token",
+				TokenURL:         "https://example.com/token",
+				ClientID:         "client-id",
+				ClientCredential: "client-secret", //nolint:gosec // G101: test credential
+				// TokenProviderName intentionally empty
+				TokenProviderKey: "oauth_token",
+			},
+		},
+		logger: &noopLogger{},
+	}
+	app := CreateIsolatedApp(t)
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	err := m.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected Start() to fail when token_secrets is empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "token_secrets") {
+		t.Errorf("error message should mention 'token_secrets', got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 11b: static_bearer — Start() fails when bearer token is empty after
+//           resolution.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_StaticBearer_EmptyToken_Errors(t *testing.T) {
+	m := &HTTPClientModule{
+		moduleName: "test-empty-bearer",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type: "static_bearer",
+				// BearerToken and BearerTokenRef both empty.
+			},
+		},
+		logger: &noopLogger{},
+	}
+	app := CreateIsolatedApp(t)
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	err := m.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected Start() to fail when bearer token is empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "bearer_token") {
+		t.Errorf("error message should mention 'bearer_token', got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 11c: oauth2_refresh_token — Start() fails when client_id is empty.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_MissingClientID(t *testing.T) {
+	provider := newMemSecretsProvider(nil)
+
+	m := &HTTPClientModule{
+		moduleName: "test-missing-client-id",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          "https://example.com/token",
+				// ClientID intentionally empty
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+		logger: &noopLogger{},
+	}
+	app := CreateIsolatedApp(t)
+	if err := app.RegisterService("mem", provider); err != nil {
+		t.Fatalf("RegisterService: %v", err)
+	}
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	err := m.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected Start() to fail when client_id is empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "client_id") {
+		t.Errorf("error message should mention 'client_id', got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Test 12: RequiresServices — dynamic deps reflect auth config
 // ---------------------------------------------------------------------------
 

@@ -187,6 +187,11 @@ func (m *HTTPClientModule) Start(ctx context.Context) error {
 		return err
 	}
 
+	// Validate required fields after resolution so secret-ref values are in place.
+	if err := m.validateAuth(); err != nil {
+		return err
+	}
+
 	if err := m.buildClient(ctx, tokenProvider); err != nil {
 		return err
 	}
@@ -250,6 +255,30 @@ func (m *HTTPClientModule) resolveSecretRef(ctx context.Context, ref SecretRef) 
 		return "", fmt.Errorf("service %q does not implement secrets.Provider", ref.Provider)
 	}
 	return p.Get(ctx, ref.Key)
+}
+
+// validateAuth asserts that required fields are non-empty for each auth type.
+// It is called after resolveCredentials so any secret-ref resolution has already
+// populated the inline fields.
+func (m *HTTPClientModule) validateAuth() error {
+	auth := m.cfg.Auth
+	switch auth.Type {
+	case "static_bearer":
+		if auth.BearerToken == "" {
+			return fmt.Errorf("http.client %q: auth.type=static_bearer requires a non-empty 'bearer_token' or a 'bearer_token_ref' that resolves to a non-empty value",
+				m.moduleName)
+		}
+	case "oauth2_refresh_token":
+		if auth.TokenProviderName == "" {
+			return fmt.Errorf("http.client %q: auth.type=oauth2_refresh_token requires 'token_secrets' (name of secrets provider module)",
+				m.moduleName)
+		}
+		if auth.TokenProviderKey == "" {
+			return fmt.Errorf("http.client %q: auth.type=oauth2_refresh_token requires 'token_secrets_key' (key within the secrets provider)",
+				m.moduleName)
+		}
+	}
+	return nil
 }
 
 // buildClient constructs the *http.Client based on the auth type.
