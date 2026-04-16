@@ -197,6 +197,24 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 	})
 
 	r.Register(&StepSchema{
+		Type:        "step.while",
+		Plugin:      "pipelinesteps",
+		Description: "Executes sub-steps repeatedly while a condition template is truthy, with a hard iteration cap.",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "condition", Type: FieldTypeString, Required: true, Description: "Template expression evaluated each iteration; loop runs while truthy"},
+			{Key: "max_iterations", Type: FieldTypeNumber, Description: "Hard cap on iterations to prevent runaway loops", DefaultValue: 1000},
+			{Key: "iteration_var", Type: FieldTypeString, Description: "Optional context variable exposing {index, first} for the current iteration"},
+			{Key: "accumulate", Type: FieldTypeMap, Description: "Optional {key, from} block that flattens per-iteration values into an output slice"},
+			{Key: "step", Type: FieldTypeMap, Description: "Single step definition to execute per iteration (mutually exclusive with steps)"},
+			{Key: "steps", Type: FieldTypeArray, Description: "List of step definitions to execute per iteration (mutually exclusive with step)"},
+		},
+		Outputs: []StepOutputDef{
+			{Key: "iterations", Type: "number", Description: "Number of iterations executed before the condition became falsy"},
+			{Key: "(accumulate.key)", Type: "[]any", Description: "Flattened accumulator slice, keyed by accumulate.key (only when accumulate is set)"},
+		},
+	})
+
+	r.Register(&StepSchema{
 		Type:        "step.branch",
 		Plugin:      "pipelinesteps",
 		Description: "Switch/case routing: evaluates a field, executes only the matched branch's sub-steps inline, then jumps to merge_step. Unlike step.conditional, skipped branches never execute.",
