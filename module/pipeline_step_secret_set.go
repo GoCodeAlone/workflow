@@ -14,8 +14,8 @@ import (
 // Any module used by step.secret_set must expose a Set method matching this
 // signature — either directly on the registered service, or on the underlying
 // secrets.Provider accessible via a Provider() accessor. Built-in secrets
-// modules (secrets.aws, secrets.vault, secrets.keychain) satisfy this via
-// their Provider() method since the module wrappers don't expose Set directly.
+// modules (secrets.aws, secrets.vault) satisfy this via their Provider()
+// method since the module wrappers don't expose Set directly.
 type SecretSetProvider interface {
 	Set(ctx context.Context, key, value string) error
 }
@@ -122,9 +122,7 @@ func (s *SecretSetStep) Execute(ctx context.Context, pc *PipelineContext) (*Step
 		setKeys = append(setKeys, secretKey)
 	}
 
-	// Sort for deterministic output ordering.
-	sort.Strings(setKeys)
-
+	// setKeys is already in sorted order (built from sortedKeys iteration).
 	return &StepResult{Output: map[string]any{
 		"set_keys": setKeys,
 	}}, nil
@@ -133,8 +131,8 @@ func (s *SecretSetStep) Execute(ctx context.Context, pc *PipelineContext) (*Step
 // resolveProvider looks up the SecretSetProvider from the application service
 // registry using the configured module name. It first checks if the service
 // directly implements SecretSetProvider; if not, it checks for a Provider()
-// accessor (used by SecretsAWSModule, SecretsVaultModule, SecretsKeychainModule)
-// and asserts the underlying provider implements Set.
+// accessor (used by SecretsAWSModule, SecretsVaultModule) and asserts the
+// underlying provider implements Set.
 func (s *SecretSetStep) resolveProvider() (SecretSetProvider, error) {
 	svc, ok := s.app.SvcRegistry()[s.moduleName]
 	if !ok {
@@ -147,17 +145,17 @@ func (s *SecretSetStep) resolveProvider() (SecretSetProvider, error) {
 	}
 
 	// Indirect: service exposes a Provider() accessor (e.g. SecretsAWSModule,
-	// SecretsVaultModule, SecretsKeychainModule) whose underlying
-	// secrets.Provider implements Set.
+	// SecretsVaultModule) whose underlying secrets.Provider implements Set.
 	type providerAccessor interface {
 		Provider() secrets.Provider
 	}
 	if accessor, ok := svc.(providerAccessor); ok {
 		underlying := accessor.Provider()
-		if underlying != nil {
-			if provider, ok := underlying.(SecretSetProvider); ok {
-				return provider, nil
-			}
+		if underlying == nil {
+			return nil, fmt.Errorf("secret_set step %q: service %q exposes Provider() accessor but returned nil provider; secrets module may not be started or initialized", s.name, s.moduleName)
+		}
+		if provider, ok := underlying.(SecretSetProvider); ok {
+			return provider, nil
 		}
 	}
 
