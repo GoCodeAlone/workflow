@@ -77,8 +77,8 @@ type Server struct {
 	mcpServer         *server.MCPServer
 	pluginDir         string
 	registryDir       string
-	documentationFile string                    // optional explicit path to DOCUMENTATION.md
-	engine            EngineProvider            // optional; enables execution tools when set
+	documentationFile string                     // optional explicit path to DOCUMENTATION.md
+	engine            EngineProvider             // optional; enables execution tools when set
 	toolHandlers      map[string]ToolHandlerFunc // populated by collectToolHandlers
 }
 

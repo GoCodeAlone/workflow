@@ -2,16 +2,16 @@ package config
 
 // EnvironmentConfig defines a deployment environment with its provider and overrides.
 type EnvironmentConfig struct {
-	Provider             string            `json:"provider" yaml:"provider"`
-	Region               string            `json:"region,omitempty" yaml:"region,omitempty"`
-	EnvVars              map[string]string `json:"envVars,omitempty" yaml:"envVars,omitempty"`
-	SecretsProvider      string            `json:"secretsProvider,omitempty" yaml:"secretsProvider,omitempty"`
-	SecretsPrefix        string            `json:"secretsPrefix,omitempty" yaml:"secretsPrefix,omitempty"`
+	Provider        string            `json:"provider" yaml:"provider"`
+	Region          string            `json:"region,omitempty" yaml:"region,omitempty"`
+	EnvVars         map[string]string `json:"envVars,omitempty" yaml:"envVars,omitempty"`
+	SecretsProvider string            `json:"secretsProvider,omitempty" yaml:"secretsProvider,omitempty"`
+	SecretsPrefix   string            `json:"secretsPrefix,omitempty" yaml:"secretsPrefix,omitempty"`
 	// SecretsStoreOverride forces all secrets in this environment to use a specific named store.
 	// Overrides defaultStore but is itself overridden by a per-secret Store field.
-	SecretsStoreOverride string            `json:"secretsStoreOverride,omitempty" yaml:"secretsStoreOverride,omitempty"`
-	ApprovalRequired     bool              `json:"approvalRequired,omitempty" yaml:"approvalRequired,omitempty"`
-	Exposure             *ExposureConfig   `json:"exposure,omitempty" yaml:"exposure,omitempty"`
+	SecretsStoreOverride string          `json:"secretsStoreOverride,omitempty" yaml:"secretsStoreOverride,omitempty"`
+	ApprovalRequired     bool            `json:"approvalRequired,omitempty" yaml:"approvalRequired,omitempty"`
+	Exposure             *ExposureConfig `json:"exposure,omitempty" yaml:"exposure,omitempty"`
 }
 
 // ExposureConfig defines how a service is exposed to the network.

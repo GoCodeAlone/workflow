@@ -81,7 +81,8 @@ func HoverAt(content string, line, col int, pluginDir ...string) *HoverResult {
 // convertDiagnostics converts protocol diagnostics to library Diagnostic values.
 func convertDiagnostics(diags []protocol.Diagnostic) []Diagnostic {
 	out := make([]Diagnostic, 0, len(diags))
-	for _, d := range diags {
+	for i := range diags {
+		d := &diags[i]
 		sev := SeverityWarning
 		if d.Severity != nil {
 			sev = DiagSeverity(*d.Severity)
@@ -91,10 +92,10 @@ func convertDiagnostics(diags []protocol.Diagnostic) []Diagnostic {
 			src = *d.Source
 		}
 		out = append(out, Diagnostic{
-			Line:     int(d.Range.Start.Line),    //nolint:gosec // G115: LSP positions are non-negative
+			Line:     int(d.Range.Start.Line),      //nolint:gosec // G115: LSP positions are non-negative
 			Col:      int(d.Range.Start.Character), //nolint:gosec // G115: LSP positions are non-negative
-			EndLine:  int(d.Range.End.Line),       //nolint:gosec // G115: LSP positions are non-negative
-			EndCol:   int(d.Range.End.Character),  //nolint:gosec // G115: LSP positions are non-negative
+			EndLine:  int(d.Range.End.Line),        //nolint:gosec // G115: LSP positions are non-negative
+			EndCol:   int(d.Range.End.Character),   //nolint:gosec // G115: LSP positions are non-negative
 			Message:  d.Message,
 			Severity: sev,
 			Source:   src,
@@ -106,7 +107,8 @@ func convertDiagnostics(diags []protocol.Diagnostic) []Diagnostic {
 // convertCompletions converts protocol completion items to library CompletionResult values.
 func convertCompletions(items []protocol.CompletionItem) []CompletionResult {
 	out := make([]CompletionResult, 0, len(items))
-	for _, item := range items {
+	for i := range items {
+		item := &items[i]
 		kind := ""
 		if item.Kind != nil {
 			kind = completionKindName(*item.Kind)
