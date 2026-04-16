@@ -715,7 +715,7 @@ func TestHTTPClient_Factory_NoneAuth(t *testing.T) {
 		},
 	}
 
-	mod := httpClientFactory("integration-test", cfg)
+	mod := HTTPClientModuleFactory("integration-test", cfg)
 	if mod == nil {
 		t.Fatal("factory returned nil module")
 	}

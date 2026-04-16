@@ -161,7 +161,12 @@ func (m *HTTPClientModule) Start(ctx context.Context) error {
 		return err
 	}
 
-	return m.buildClient(ctx, tokenProvider)
+	if err := m.buildClient(ctx, tokenProvider); err != nil {
+		return err
+	}
+
+	m.logger.Info("http.client started", "name", m.moduleName, "auth", m.cfg.Auth.Type)
+	return nil
 }
 
 // resolveCredentials fills in BearerToken / ClientID / ClientCredential from SecretRef
@@ -265,13 +270,7 @@ func (m *HTTPClientModule) buildClient(ctx context.Context, tokenProvider secret
 // Factory (used by plugins/http/modules.go)
 // ---------------------------------------------------------------------------
 
-// HTTPClientModuleFactory is the exported factory entry point used by plugins/http.
-// It delegates to httpClientFactory.
-func HTTPClientModuleFactory(name string, cfg map[string]any) *HTTPClientModule {
-	return httpClientFactory(name, cfg)
-}
-
-// httpClientFactory creates an HTTPClientModule from a YAML/JSON config map.
+// HTTPClientModuleFactory creates an HTTPClientModule from a YAML/JSON config map.
 // Supported keys:
 //
 //	base_url  string          (optional)
@@ -280,7 +279,7 @@ func HTTPClientModuleFactory(name string, cfg map[string]any) *HTTPClientModule 
 //	                          oauth2_client_credentials, oauth2_refresh_token
 //
 // See HTTPClientAuthConfig for the full field list.
-func httpClientFactory(name string, cfg map[string]any) *HTTPClientModule {
+func HTTPClientModuleFactory(name string, cfg map[string]any) *HTTPClientModule {
 	m := NewHTTPClientModule(name)
 
 	if bu, ok := cfg["base_url"].(string); ok {
