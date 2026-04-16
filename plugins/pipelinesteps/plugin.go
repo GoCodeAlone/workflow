@@ -2,7 +2,7 @@
 // types: validate, transform, conditional, set, log, delegate, jq, publish,
 // http_call, http_proxy, request_parse, db_query, db_exec, db_query_cached, json_response,
 // raw_response, json_parse, static_file, validate_path_param, validate_pagination,
-// validate_request_body, foreach, webhook_verify, base64_decode, ui_scaffold,
+// validate_request_body, foreach, while, webhook_verify, base64_decode, ui_scaffold,
 // ui_scaffold_analyze, dlq_send, dlq_replay, retry_with_backoff, circuit_breaker (wrapping),
 // s3_upload, auth_validate, authz_check, token_revoke, sandbox_exec.
 // It also provides the PipelineWorkflowHandler for composable pipelines.
@@ -43,7 +43,7 @@ func New() *Plugin {
 			BaseNativePlugin: plugin.BaseNativePlugin{
 				PluginName:        "pipeline-steps",
 				PluginVersion:     "1.0.0",
-				PluginDescription: "Generic pipeline step types (validate, transform, conditional, set, log, delegate, jq, base64_decode, validate_path_param, validate_pagination, validate_request_body, foreach, webhook_verify, etc.)",
+				PluginDescription: "Generic pipeline step types (validate, transform, conditional, set, log, delegate, jq, base64_decode, validate_path_param, validate_pagination, validate_request_body, foreach, while, webhook_verify, etc.)",
 			},
 			Manifest: plugin.PluginManifest{
 				Name:        "pipeline-steps",
@@ -78,6 +78,7 @@ func New() *Plugin {
 					"step.validate_pagination",
 					"step.validate_request_body",
 					"step.foreach",
+					"step.while",
 					"step.webhook_verify",
 					"step.base64_decode",
 					"step.cache_get",
@@ -122,7 +123,7 @@ func (p *Plugin) Capabilities() []capability.Contract {
 	return []capability.Contract{
 		{
 			Name:        "pipeline-steps",
-			Description: "Generic pipeline step operations: validate, transform, conditional, set, log, delegate, jq, foreach, webhook_verify, etc.",
+			Description: "Generic pipeline step operations: validate, transform, conditional, set, log, delegate, jq, foreach, while, webhook_verify, etc.",
 		},
 	}
 }
@@ -157,6 +158,10 @@ func (p *Plugin) StepFactories() map[string]plugin.StepFactory {
 		// step.foreach uses a lazy registry getter so it can reference any registered step type,
 		// including types registered by other plugins loaded after this one.
 		"step.foreach": wrapStepFactory(module.NewForEachStepFactory(func() *module.StepRegistry {
+			return p.concreteStepRegistry
+		})),
+		// step.while uses a lazy registry getter so sub-steps can reference any registered type.
+		"step.while": wrapStepFactory(module.NewWhileStepFactory(func() *module.StepRegistry {
 			return p.concreteStepRegistry
 		})),
 		"step.webhook_verify":      wrapStepFactory(module.NewWebhookVerifyStepFactory()),
