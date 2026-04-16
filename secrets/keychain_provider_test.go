@@ -73,3 +73,45 @@ func TestKeychainProvider_List(t *testing.T) {
 		t.Errorf("List() = %v, want %v", keys, want)
 	}
 }
+
+func TestKeychainProvider_EmptyKey(t *testing.T) {
+	keyring.MockInit()
+	p := secrets.NewKeychainProvider("test-service")
+	ctx := context.Background()
+
+	if _, err := p.Get(ctx, ""); err != secrets.ErrInvalidKey {
+		t.Errorf("Get empty key: expected ErrInvalidKey, got %v", err)
+	}
+	if err := p.Set(ctx, "", "val"); err != secrets.ErrInvalidKey {
+		t.Errorf("Set empty key: expected ErrInvalidKey, got %v", err)
+	}
+	if err := p.Delete(ctx, ""); err != secrets.ErrInvalidKey {
+		t.Errorf("Delete empty key: expected ErrInvalidKey, got %v", err)
+	}
+}
+
+func TestKeychainProvider_DeleteIdempotent_CleansTrackedKeys(t *testing.T) {
+	keyring.MockInit()
+	p := secrets.NewKeychainProvider("test-service")
+	ctx := context.Background()
+
+	// Set then delete a key.
+	_ = p.Set(ctx, "ephemeral", "val")
+	_ = p.Delete(ctx, "ephemeral")
+
+	// Delete again (idempotent, key already gone from keyring).
+	if err := p.Delete(ctx, "ephemeral"); err != nil {
+		t.Fatalf("second Delete: %v", err)
+	}
+
+	// List should not contain the deleted key.
+	keys, err := p.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, k := range keys {
+		if k == "ephemeral" {
+			t.Error("List() still contains deleted key 'ephemeral'")
+		}
+	}
+}

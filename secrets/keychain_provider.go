@@ -47,6 +47,9 @@ func (p *KeychainProvider) Get(ctx context.Context, key string) (string, error) 
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	if key == "" {
+		return "", ErrInvalidKey
+	}
 	v, err := keyring.Get(p.service, key)
 	if err != nil {
 		if errors.Is(err, keyring.ErrNotFound) {
@@ -62,6 +65,9 @@ func (p *KeychainProvider) Set(ctx context.Context, key, value string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if key == "" {
+		return ErrInvalidKey
+	}
 	if err := keyring.Set(p.service, key, value); err != nil {
 		return fmt.Errorf("secrets.keychain set %q: %w", key, err)
 	}
@@ -76,9 +82,16 @@ func (p *KeychainProvider) Delete(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if key == "" {
+		return ErrInvalidKey
+	}
 	if err := keyring.Delete(p.service, key); err != nil {
 		if errors.Is(err, keyring.ErrNotFound) {
-			return nil // idempotent
+			// Idempotent: still clean up trackedKeys so List() stays consistent.
+			p.mu.Lock()
+			delete(p.trackedKeys, key)
+			p.mu.Unlock()
+			return nil
 		}
 		return fmt.Errorf("secrets.keychain delete %q: %w", key, err)
 	}
