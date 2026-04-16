@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -175,16 +176,23 @@ func buildOAuth2RefreshTokenClient(_ context.Context, auth *HTTPClientAuthConfig
 
 // secretsBackedTokenSource implements oauth2.TokenSource.  Each Token() call:
 //  1. Reads the serialised oauth2.Token JSON from the secrets provider.
-//  2. If the token is still valid, returns it as-is.
-//  3. If expired (but has a refresh_token), calls the token endpoint to refresh,
-//     then persists the rotated token back to the provider.
+//  2. If the token is still valid (and forceRefresh is not set), returns it as-is.
+//  3. If expired (or forceRefresh is set) and a refresh_token exists, calls the
+//     token endpoint to refresh, then persists the rotated token back to the provider.
 //  4. If not found (secrets.ErrNotFound), returns an *oauth2.RetrieveError with
 //     HTTP 401 — the module started cleanly; credentials arrive later.
 type secretsBackedTokenSource struct {
-	mu          sync.Mutex
-	cfg         *oauth2.Config
-	provider    secrets.Provider
-	providerKey string
+	mu           sync.Mutex
+	cfg          *oauth2.Config
+	provider     secrets.Provider
+	providerKey  string
+	forceRefresh atomic.Bool // set by invalidate(); cleared after next successful Token()
+}
+
+// invalidate marks the token as requiring a refresh on the next Token() call.
+// Called by retryOn401Transport when the upstream rejects the current access token.
+func (ts *secretsBackedTokenSource) invalidate() {
+	ts.forceRefresh.Store(true)
 }
 
 // Token satisfies oauth2.TokenSource.
@@ -209,14 +217,22 @@ func (ts *secretsBackedTokenSource) Token() (*oauth2.Token, error) {
 		return nil, fmt.Errorf("http.client: parsing stored token JSON: %w", unmarshalErr)
 	}
 
-	// Token still valid — return immediately.
-	if stored.Valid() {
+	// Token still valid and no forced refresh requested — return immediately.
+	forced := ts.forceRefresh.Swap(false)
+	if stored.Valid() && !forced {
 		return &stored, nil
 	}
 
-	// Expired — attempt refresh if we have a refresh_token.
+	// Expired or invalidated — attempt refresh if we have a refresh_token.
 	if stored.RefreshToken == "" {
 		return nil, noTokenError()
+	}
+
+	// When forcing refresh, clear the access token to ensure the oauth2 library
+	// issues a refresh_token grant rather than returning the cached value.
+	if forced {
+		stored.AccessToken = ""
+		stored.Expiry = time.Time{}
 	}
 
 	newTok, refreshErr := ts.cfg.TokenSource(context.Background(), &stored).Token()
@@ -265,8 +281,12 @@ func noTokenError() *oauth2.RetrieveError {
 // ---------------------------------------------------------------------------
 
 // retryOn401Transport sits above oauth2.Transport in the middleware stack.
-// On a 401 response it invalidates the in-process ReuseTokenSource cache and
-// retries once, forcing a fresh Token() call to the underlying source.
+// On a 401 response it:
+//  1. Calls invalidate() on the underlying secretsBackedTokenSource (if applicable),
+//     which marks the stored token as requiring a refresh on the next call.
+//  2. Replaces the ReuseTokenSource with a fresh one so the cached token is dropped.
+//  3. Retries the request exactly once.
+//
 // This allows externally-rotated credentials (via step.secret_set) to be
 // picked up without restarting the module.
 //
@@ -309,9 +329,15 @@ func (t *retryOn401Transport) RoundTrip(req *http.Request) (*http.Response, erro
 	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 
-	// Invalidate the cached token by replacing the ReuseTokenSource with a fresh
-	// one.  The next Token() call on newReuseTS will re-invoke the underlying
-	// source (secretsBackedTokenSource or clientCredentialsTokenSource).
+	// Mark the underlying source as needing a refresh (for secretsBackedTokenSource).
+	// This forces the next Token() call to go to the token endpoint even if the
+	// stored token timestamp looks valid.
+	if sbts, ok := t.underlying.(*secretsBackedTokenSource); ok {
+		sbts.invalidate()
+	}
+
+	// Replace the ReuseTokenSource with a fresh one so the cached access token
+	// is dropped.  The next Token() call will invoke the underlying source.
 	t.mu.Lock()
 	newReuseTS := oauth2.ReuseTokenSource(nil, t.underlying)
 	t.oauth2TR.Source = newReuseTS
