@@ -487,7 +487,7 @@ func parseHTTPResponse(resp *http.Response, respBody []byte) map[string]any {
 }
 
 // resolveClientRef looks up the HTTPClient service from the service registry when clientRef is set.
-// Returns the effective *http.Client to use and an error if the service cannot be resolved.
+// Returns the effective HTTPClient to use and an error if the service cannot be resolved.
 // If clientRef is empty, returns nil (caller uses s.httpClient unchanged).
 func (s *HTTPCallStep) resolveClientRef() (HTTPClient, error) {
 	if s.clientRef == "" {
@@ -507,7 +507,7 @@ func (s *HTTPCallStep) resolveClientRef() (HTTPClient, error) {
 	return hc, nil
 }
 
-// resolveURL applies base-URL resolution when the step URL is relative (no scheme) and a
+// resolveStepURL applies base-URL resolution when the step URL is relative (no scheme) and a
 // clientRef's base URL is available. Absolute URLs pass through unchanged.
 func resolveStepURL(rawURL, baseURL string) (string, error) {
 	if baseURL == "" {
@@ -542,6 +542,9 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 			return nil, err
 		}
 		activeClient = hc.Client()
+		if activeClient == nil {
+			return nil, fmt.Errorf("http_call step %q: referenced client %q returned nil *http.Client (module may not be started)", s.name, s.clientRef)
+		}
 		clientBaseURL = hc.BaseURL()
 	}
 
