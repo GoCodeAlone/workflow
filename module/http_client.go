@@ -248,7 +248,7 @@ func (m *HTTPClientModule) buildClient(ctx context.Context, tokenProvider secret
 		m.client = c
 
 	case "oauth2_refresh_token":
-		c, err := buildOAuth2RefreshTokenClient(ctx, &m.cfg.Auth, tokenProvider, timeout)
+		c, err := buildOAuth2RefreshTokenClient(ctx, &m.cfg.Auth, tokenProvider, timeout, m.logger)
 		if err != nil {
 			return fmt.Errorf("http.client %q: %w", m.moduleName, err)
 		}

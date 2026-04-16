@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -604,6 +605,93 @@ func TestHTTPClient_StaticBearer_SecretRef(t *testing.T) {
 	if gotAuth != want {
 		t.Errorf("Authorization header: got %q, want %q", gotAuth, want)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 10: oauth2_refresh_token — concurrent requests, one goroutine triggers a
+//          401/refresh mid-flight.  Must be race-free under -race.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_ConcurrentRefresh(t *testing.T) {
+	const goroutines = 2
+	const requestsEach = 10
+
+	// Token endpoint: always return a fresh token.
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, makeTestTokenJSON("concurrent-access-token", "concurrent-refresh-token", 3600))
+	}))
+	defer tokenSrv.Close()
+
+	// Upstream: first request from goroutine 0 returns 401 to trigger a refresh
+	// mid-flight while goroutine 1 may already be in RoundTrip.
+	var requestIdx int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&requestIdx, 1)
+		// Force one early 401 to exercise the swap path under concurrency.
+		if n == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	// Start with a "valid" token so ReuseTokenSource doesn't need to call Token()
+	// before the first request.
+	initialToken := makeTestStoredToken("stale-access-token", "valid-refresh-token",
+		time.Now().Add(1*time.Hour))
+	provider := newMemSecretsProvider(map[string]string{
+		"oauth_token": initialToken,
+	})
+
+	m := &HTTPClientModule{
+		moduleName: "test-concurrent",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          tokenSrv.URL + "/token",
+				ClientID:          "client-id",
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+		logger: &noopLogger{},
+	}
+	if err := m.buildClient(context.Background(), provider); err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	var errCount int32
+
+	for g := range goroutines {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for range requestsEach {
+				resp, err := m.Client().Get(upstream.URL)
+				if err != nil {
+					// oauth2.RetrieveError on the very first forced-401 is acceptable —
+					// the retry path handles it; transient errors from concurrent refresh
+					// are not expected but won't fail the race detector check.
+					atomic.AddInt32(&errCount, 1)
+					continue
+				}
+				resp.Body.Close()
+				if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusUnauthorized {
+					t.Errorf("goroutine %d: unexpected status %d", id, resp.StatusCode)
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+	// errCount may be non-zero due to the deliberate first-401; we only care about
+	// the absence of data races (enforced by -race flag at the go test level).
+	t.Logf("concurrent requests completed; transport errors (expected ~1): %d", atomic.LoadInt32(&errCount))
 }
 
 // ---------------------------------------------------------------------------

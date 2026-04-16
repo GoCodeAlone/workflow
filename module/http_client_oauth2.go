@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/oauth2"
 
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
 
@@ -41,20 +42,20 @@ func buildOAuth2ClientCredentialsClient(_ context.Context, auth *HTTPClientAuthC
 	ts := &clientCredentialsTokenSource{
 		tokenURL:         auth.TokenURL,
 		clientID:         auth.ClientID,
-		clientCredential: auth.ClientCredential, //nolint:gosec // G117: credential passed through to token source
+		clientCredential: auth.ClientCredential, //nolint:gosec // G101: credential passed through to token source
 		scopes:           append([]string(nil), auth.Scopes...),
 		base:             http.DefaultTransport,
 	}
 	reuseTS := oauth2.ReuseTokenSource(nil, ts)
-	oauth2TR := &oauth2.Transport{Source: reuseTS, Base: http.DefaultTransport}
+	tr := &retryOn401Transport{
+		underlying: ts,
+		base:       http.DefaultTransport,
+	}
+	tr.oauth2TR.Store(&oauth2.Transport{Source: reuseTS, Base: http.DefaultTransport})
 
 	return &http.Client{
-		Timeout: timeout,
-		Transport: &retryOn401Transport{
-			underlying: ts,
-			oauth2TR:   oauth2TR,
-			base:       http.DefaultTransport,
-		},
+		Timeout:   timeout,
+		Transport: tr,
 	}, nil
 }
 
@@ -63,12 +64,14 @@ func buildOAuth2ClientCredentialsClient(_ context.Context, auth *HTTPClientAuthC
 type clientCredentialsTokenSource struct {
 	tokenURL         string
 	clientID         string
-	clientCredential string //nolint:gosec // G117: credential field in token source
+	clientCredential string //nolint:gosec // G101: credential field in token source
 	scopes           []string
 	base             http.RoundTripper
 }
 
-// Token performs the client_credentials grant and returns the resulting token.
+// Token implements oauth2.TokenSource. Uses context.Background() because the
+// oauth2.TokenSource interface does not accept a per-call context; this means
+// a token refresh cannot be cancelled by a cancelled request.
 func (ts *clientCredentialsTokenSource) Token() (*oauth2.Token, error) {
 	params := url.Values{
 		"grant_type":    {"client_credentials"},
@@ -109,7 +112,7 @@ func (ts *clientCredentialsTokenSource) Token() (*oauth2.Token, error) {
 	}
 
 	var tokenResp struct {
-		AccessToken string  `json:"access_token"` //nolint:gosec // G117: parsing OAuth2 response
+		AccessToken string  `json:"access_token"` //nolint:gosec // G101: parsing OAuth2 response
 		ExpiresIn   float64 `json:"expires_in"`
 		TokenType   string  `json:"token_type"`
 	}
@@ -139,14 +142,14 @@ func (ts *clientCredentialsTokenSource) Token() (*oauth2.Token, error) {
 // buildOAuth2RefreshTokenClient constructs an *http.Client backed by a
 // secretsBackedTokenSource.  The module starts cleanly even when tokenProvider
 // is nil or has no stored token — the error surfaces on the first HTTP request.
-func buildOAuth2RefreshTokenClient(_ context.Context, auth *HTTPClientAuthConfig, tokenProvider secrets.Provider, timeout time.Duration) (*http.Client, error) {
+func buildOAuth2RefreshTokenClient(_ context.Context, auth *HTTPClientAuthConfig, tokenProvider secrets.Provider, timeout time.Duration, logger modular.Logger) (*http.Client, error) {
 	if auth.TokenURL == "" {
 		return nil, fmt.Errorf("oauth2_refresh_token: token_url is required")
 	}
 
 	cfg := &oauth2.Config{
 		ClientID:     auth.ClientID,
-		ClientSecret: auth.ClientCredential, //nolint:gosec // G117: OAuth2 config DTO
+		ClientSecret: auth.ClientCredential, //nolint:gosec // G101: OAuth2 config DTO
 		Endpoint:     oauth2.Endpoint{TokenURL: auth.TokenURL},
 		Scopes:       append([]string(nil), auth.Scopes...),
 	}
@@ -160,17 +163,18 @@ func buildOAuth2RefreshTokenClient(_ context.Context, auth *HTTPClientAuthConfig
 		cfg:         cfg,
 		provider:    tokenProvider,
 		providerKey: providerKey,
+		logger:      logger,
 	}
 	reuseTS := oauth2.ReuseTokenSource(nil, ts)
-	oauth2TR := &oauth2.Transport{Source: reuseTS, Base: http.DefaultTransport}
+	tr := &retryOn401Transport{
+		underlying: ts,
+		base:       http.DefaultTransport,
+	}
+	tr.oauth2TR.Store(&oauth2.Transport{Source: reuseTS, Base: http.DefaultTransport})
 
 	return &http.Client{
-		Timeout: timeout,
-		Transport: &retryOn401Transport{
-			underlying: ts,
-			oauth2TR:   oauth2TR,
-			base:       http.DefaultTransport,
-		},
+		Timeout:   timeout,
+		Transport: tr,
 	}, nil
 }
 
@@ -186,6 +190,7 @@ type secretsBackedTokenSource struct {
 	cfg          *oauth2.Config
 	provider     secrets.Provider
 	providerKey  string
+	logger       modular.Logger
 	forceRefresh atomic.Bool // set by invalidate(); cleared after next successful Token()
 }
 
@@ -195,7 +200,9 @@ func (ts *secretsBackedTokenSource) invalidate() {
 	ts.forceRefresh.Store(true)
 }
 
-// Token satisfies oauth2.TokenSource.
+// Token implements oauth2.TokenSource. Uses context.Background() because the
+// oauth2.TokenSource interface does not accept a per-call context; this means
+// a token refresh cannot be cancelled by a cancelled request.
 func (ts *secretsBackedTokenSource) Token() (*oauth2.Token, error) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
@@ -242,8 +249,10 @@ func (ts *secretsBackedTokenSource) Token() (*oauth2.Token, error) {
 
 	// Persist rotated token back to the provider.
 	if persistErr := ts.persistToken(newTok); persistErr != nil {
-		// Log but do not fail — we still have a valid token.
-		_ = persistErr // caller has no logger; persistence failure is non-fatal
+		if ts.logger != nil {
+			ts.logger.Warn("http.client: failed to persist rotated token; token still valid for this session",
+				"error", persistErr)
+		}
 	}
 
 	return newTok, nil
@@ -295,11 +304,15 @@ func noTokenError() *oauth2.RetrieveError {
 //	http.Client{Transport: retryOn401Transport}
 //	  └─ oauth2.Transport{Source: reuseTS, Base: http.DefaultTransport}
 //	       └─ underlying secretsBackedTokenSource / clientCredentialsTokenSource
+//
+// Thread-safety: oauth2TR is an atomic.Pointer so concurrent RoundTrip calls
+// always read a consistent snapshot.  The mu mutex serialises the swap-on-401
+// path so only one goroutine rebuilds the transport at a time.
 type retryOn401Transport struct {
 	mu         sync.Mutex
-	underlying oauth2.TokenSource // the raw (non-reuse) source
-	oauth2TR   *oauth2.Transport  // pointer to the oauth2.Transport — we swap its Source
-	base       http.RoundTripper  // final transport that actually sends the request
+	underlying oauth2.TokenSource          // the raw (non-reuse) source
+	oauth2TR   atomic.Pointer[oauth2.Transport] // atomic read; mu-protected write
+	base       http.RoundTripper           // final transport that actually sends the request
 }
 
 // RoundTrip implements http.RoundTripper.
@@ -307,17 +320,17 @@ func (t *retryOn401Transport) RoundTrip(req *http.Request) (*http.Response, erro
 	// Buffer the body so it can be replayed on retry.
 	var bodyBytes []byte
 	if req.Body != nil && req.Body != http.NoBody {
+		defer req.Body.Close()
 		var readErr error
 		bodyBytes, readErr = io.ReadAll(req.Body)
 		if readErr != nil {
 			return nil, fmt.Errorf("http.client: reading request body for 401-retry: %w", readErr)
 		}
-		req.Body.Close()
 		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	}
 
 	// First attempt through the full oauth2 middleware.
-	resp, err := t.oauth2TR.RoundTrip(req.Clone(req.Context()))
+	resp, err := t.oauth2TR.Load().RoundTrip(req.Clone(req.Context()))
 	if err != nil {
 		return nil, err
 	}
@@ -338,9 +351,11 @@ func (t *retryOn401Transport) RoundTrip(req *http.Request) (*http.Response, erro
 
 	// Replace the ReuseTokenSource with a fresh one so the cached access token
 	// is dropped.  The next Token() call will invoke the underlying source.
+	// mu serialises concurrent 401 swaps; Load() above is always safe to read.
 	t.mu.Lock()
 	newReuseTS := oauth2.ReuseTokenSource(nil, t.underlying)
-	t.oauth2TR.Source = newReuseTS
+	newTR := &oauth2.Transport{Source: newReuseTS, Base: http.DefaultTransport}
+	t.oauth2TR.Store(newTR)
 	t.mu.Unlock()
 
 	// Rebuild retry request with the buffered body.
@@ -350,5 +365,5 @@ func (t *retryOn401Transport) RoundTrip(req *http.Request) (*http.Response, erro
 		retryReq.ContentLength = int64(len(bodyBytes))
 	}
 
-	return t.oauth2TR.RoundTrip(retryReq) //nolint:gosec // G107: URL is user-configured
+	return t.oauth2TR.Load().RoundTrip(retryReq) //nolint:gosec // G107: URL is user-configured
 }
