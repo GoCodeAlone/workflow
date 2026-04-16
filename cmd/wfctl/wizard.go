@@ -39,7 +39,7 @@ var (
 			Foreground(lipgloss.Color("#10B981"))
 
 	checkboxOffStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280"))
+				Foreground(lipgloss.Color("#6B7280"))
 
 	hintStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6B7280")).
@@ -732,11 +732,12 @@ func (m wizardModel) progressBar() string {
 	current := int(m.screen)
 	var parts []string
 	for i := 0; i < total; i++ {
-		if i < current {
+		switch {
+		case i < current:
 			parts = append(parts, "●")
-		} else if i == current {
+		case i == current:
 			parts = append(parts, activeStyle.Render("●"))
-		} else {
+		default:
 			parts = append(parts, dimStyle.Render("○"))
 		}
 	}
@@ -774,9 +775,9 @@ func (m wizardModel) viewProjectInfo() string {
 			display = dimStyle.Render(f.placeholder)
 		}
 		if focused {
-			b.WriteString(fmt.Sprintf("%s %s: %s\n", cursor, headerStyle.Render(f.label), inputStyle.Render(display+" ")))
+			fmt.Fprintf(&b, "%s %s: %s\n", cursor, headerStyle.Render(f.label), inputStyle.Render(display+" "))
 		} else {
-			b.WriteString(fmt.Sprintf("%s %s: %s\n", cursor, dimStyle.Render(f.label), display))
+			fmt.Fprintf(&b, "%s %s: %s\n", cursor, dimStyle.Render(f.label), display)
 		}
 	}
 	return b.String()
@@ -807,7 +808,7 @@ func (m wizardModel) viewInfrastructure() string {
 		if item.checked {
 			box = checkboxOnStyle.Render("[x]")
 		}
-		b.WriteString(fmt.Sprintf("%s%s %s\n", cursor, box, item.label))
+		fmt.Fprintf(&b, "%s%s %s\n", cursor, box, item.label)
 	}
 	return b.String()
 }
@@ -822,7 +823,8 @@ func (m wizardModel) viewInfraResolution() string {
 	b.WriteString("Set how each infrastructure resource is resolved in each environment.\n")
 	b.WriteString(dimStyle.Render("Use ← → to change strategy, ↑ ↓ to move between rows.") + "\n\n")
 
-	for i, row := range m.infraResList {
+	for i := range m.infraResList {
+		row := &m.infraResList[i]
 		cursor := "  "
 		if i == m.infraResCursor {
 			cursor = activeStyle.Render("▶ ")
@@ -831,7 +833,7 @@ func (m wizardModel) viewInfraResolution() string {
 		if row.cursor < len(row.strategies) {
 			stratLabel = row.strategies[row.cursor].label
 		}
-		b.WriteString(fmt.Sprintf("%s%-12s  %-10s  %s\n", cursor, row.resource, row.env, activeStyle.Render(stratLabel)))
+		fmt.Fprintf(&b, "%s%-12s  %-10s  %s\n", cursor, row.resource, row.env, activeStyle.Render(stratLabel))
 		if i == m.infraResCursor && row.showConn {
 			conn := row.connInput.value
 			if conn == "" {
@@ -856,7 +858,7 @@ func (m wizardModel) viewEnvironments() string {
 		if item.checked {
 			box = checkboxOnStyle.Render("[x]")
 		}
-		b.WriteString(fmt.Sprintf("%s%s %s\n", cursor, box, item.label))
+		fmt.Fprintf(&b, "%s%s %s\n", cursor, box, item.label)
 	}
 	return b.String()
 }
@@ -870,7 +872,7 @@ func (m wizardModel) viewDeployment() string {
 		if i == m.deployCursor {
 			cursor = activeStyle.Render("▶ ")
 		}
-		b.WriteString(fmt.Sprintf("%s%s\n", cursor, item.label))
+		fmt.Fprintf(&b, "%s%s\n", cursor, item.label)
 	}
 	return b.String()
 }
@@ -888,7 +890,7 @@ func (m wizardModel) viewSecretStores() string {
 			if row.isDefault {
 				def = activeStyle.Render(" [default]")
 			}
-			b.WriteString(fmt.Sprintf("  %-12s  (%s)%s\n", row.name, row.provider, def))
+			fmt.Fprintf(&b, "  %-12s  (%s)%s\n", row.name, row.provider, def)
 		}
 		b.WriteString("\n")
 	}
@@ -900,7 +902,7 @@ func (m wizardModel) viewSecretStores() string {
 			if i == m.storeCursor {
 				cursor = activeStyle.Render("▶ ")
 			}
-			b.WriteString(fmt.Sprintf("%s%s\n", cursor, item.label))
+			fmt.Fprintf(&b, "%s%s\n", cursor, item.label)
 		}
 		b.WriteString("\n" + headerStyle.Render("Store name: "))
 		display := m.storeNameInput.value
@@ -916,7 +918,7 @@ func (m wizardModel) viewSecretStores() string {
 			if i == m.storeCursor {
 				cursor = activeStyle.Render("▶ ")
 			}
-			b.WriteString(fmt.Sprintf("%s%s\n", cursor, item.label))
+			fmt.Fprintf(&b, "%s%s\n", cursor, item.label)
 		}
 	}
 	return b.String()
@@ -941,7 +943,7 @@ func (m wizardModel) viewSecretRouting() string {
 		if row.cursor < len(row.storeItems) {
 			storeLabel = activeStyle.Render(row.storeItems[row.cursor].label)
 		}
-		b.WriteString(fmt.Sprintf("%s%-20s  →  %s\n", cursor, row.secretName, storeLabel))
+		fmt.Fprintf(&b, "%s%-20s  →  %s\n", cursor, row.secretName, storeLabel)
 	}
 	return b.String()
 }
@@ -968,15 +970,16 @@ func (m wizardModel) viewBulkSecrets() string {
 			}
 			valueDisplay = inputStyle.Render(masked + " ")
 		} else {
-			if row.autoGen {
+			switch {
+			case row.autoGen:
 				valueDisplay = activeStyle.Render("(auto-generated)")
-			} else if row.value != "" {
+			case row.value != "":
 				valueDisplay = activeStyle.Render(strings.Repeat("*", len(row.value)))
-			} else {
+			default:
 				valueDisplay = dimStyle.Render("(not set)")
 			}
 		}
-		b.WriteString(fmt.Sprintf("%s%-20s  %s\n", cursor, row.name, valueDisplay))
+		fmt.Fprintf(&b, "%s%-20s  %s\n", cursor, row.name, valueDisplay)
 	}
 	return b.String()
 }
@@ -998,7 +1001,7 @@ func (m wizardModel) viewCICD() string {
 			if i == m.ciPlatformCursor {
 				cursor = activeStyle.Render("  ▶ ")
 			}
-			b.WriteString(fmt.Sprintf("%s%s\n", cursor, item.label))
+			fmt.Fprintf(&b, "%s%s\n", cursor, item.label)
 		}
 	}
 	return b.String()
@@ -1055,7 +1058,7 @@ func buildWizardYAML(d *wizardData) string {
 		name = "my-app"
 	}
 
-	b.WriteString(fmt.Sprintf("# %s — generated by wfctl wizard\n\n", name))
+	fmt.Fprintf(&b, "# %s — generated by wfctl wizard\n\n", name)
 
 	// Modules.
 	var modules []string
@@ -1102,8 +1105,8 @@ func buildWizardYAML(d *wizardData) string {
 	if d.MultiService && len(d.ServiceNames) > 1 {
 		b.WriteString("services:\n")
 		for _, svc := range d.ServiceNames {
-			b.WriteString(fmt.Sprintf("  %s:\n", svc))
-			b.WriteString(fmt.Sprintf("    binary: ./cmd/%s\n", svc))
+			fmt.Fprintf(&b, "  %s:\n", svc)
+			fmt.Fprintf(&b, "    binary: ./cmd/%s\n", svc)
 			b.WriteString("    expose:\n")
 			b.WriteString("      - port: 8080\n")
 			b.WriteString("        protocol: http\n")
@@ -1117,14 +1120,14 @@ func buildWizardYAML(d *wizardData) string {
 		b.WriteString("environments:\n")
 		for _, env := range envNames {
 			provider := wizardEnvProvider(env, d.DeployProvider)
-			b.WriteString(fmt.Sprintf("  %s:\n", env))
-			b.WriteString(fmt.Sprintf("    provider: %s\n", provider))
+			fmt.Fprintf(&b, "  %s:\n", env)
+			fmt.Fprintf(&b, "    provider: %s\n", provider)
 			if env == "local" {
 				b.WriteString("    exposure:\n")
 				b.WriteString("      method: port-forward\n")
 			}
 			if d.SecretsProvider != "env" && env != "local" {
-				b.WriteString(fmt.Sprintf("    secretsProvider: %s\n", d.SecretsProvider))
+				fmt.Fprintf(&b, "    secretsProvider: %s\n", d.SecretsProvider)
 			}
 		}
 		b.WriteString("\n")
@@ -1134,8 +1137,8 @@ func buildWizardYAML(d *wizardData) string {
 	if len(d.SecretStores) > 1 || (len(d.SecretStores) == 1 && d.SecretStores[0].Provider != "env") {
 		b.WriteString("secretStores:\n")
 		for _, store := range d.SecretStores {
-			b.WriteString(fmt.Sprintf("  %s:\n", store.Name))
-			b.WriteString(fmt.Sprintf("    provider: %s\n", store.Provider))
+			fmt.Fprintf(&b, "  %s:\n", store.Name)
+			fmt.Fprintf(&b, "    provider: %s\n", store.Provider)
 		}
 		b.WriteString("\n")
 	}
@@ -1144,33 +1147,33 @@ func buildWizardYAML(d *wizardData) string {
 	if d.SecretsProvider != "" {
 		b.WriteString("secrets:\n")
 		if d.DefaultSecretStore != "" && d.DefaultSecretStore != "primary" {
-			b.WriteString(fmt.Sprintf("  defaultStore: %s\n", d.DefaultSecretStore))
+			fmt.Fprintf(&b, "  defaultStore: %s\n", d.DefaultSecretStore)
 		}
 		if d.SecretsProvider != "env" {
-			b.WriteString(fmt.Sprintf("  provider: %s\n", d.SecretsProvider))
+			fmt.Fprintf(&b, "  provider: %s\n", d.SecretsProvider)
 		}
 		b.WriteString("  entries:\n")
 		if d.HasDatabase {
 			b.WriteString("    - name: DATABASE_URL\n")
 			if store, ok := d.SecretRoutes["DATABASE_URL"]; ok && store != d.DefaultSecretStore {
-				b.WriteString(fmt.Sprintf("      store: %s\n", store))
+				fmt.Fprintf(&b, "      store: %s\n", store)
 			}
 		}
 		if d.HasCache {
 			b.WriteString("    - name: REDIS_URL\n")
 			if store, ok := d.SecretRoutes["REDIS_URL"]; ok && store != d.DefaultSecretStore {
-				b.WriteString(fmt.Sprintf("      store: %s\n", store))
+				fmt.Fprintf(&b, "      store: %s\n", store)
 			}
 		}
 		if d.HasMQ {
 			b.WriteString("    - name: NATS_URL\n")
 			if store, ok := d.SecretRoutes["NATS_URL"]; ok && store != d.DefaultSecretStore {
-				b.WriteString(fmt.Sprintf("      store: %s\n", store))
+				fmt.Fprintf(&b, "      store: %s\n", store)
 			}
 		}
 		b.WriteString("    - name: JWT_SECRET\n")
 		if store, ok := d.SecretRoutes["JWT_SECRET"]; ok && store != d.DefaultSecretStore {
-			b.WriteString(fmt.Sprintf("      store: %s\n", store))
+			fmt.Fprintf(&b, "      store: %s\n", store)
 		}
 		b.WriteString("\n")
 	}
@@ -1180,7 +1183,7 @@ func buildWizardYAML(d *wizardData) string {
 		b.WriteString("ci:\n")
 		b.WriteString("  build:\n")
 		b.WriteString("    binaries:\n")
-		b.WriteString(fmt.Sprintf("      - name: %s\n", name))
+		fmt.Fprintf(&b, "      - name: %s\n", name)
 		b.WriteString("        path: ./cmd/server\n")
 		b.WriteString("  test:\n")
 		b.WriteString("    unit:\n")
@@ -1191,8 +1194,8 @@ func buildWizardYAML(d *wizardData) string {
 			if env == "local" {
 				continue
 			}
-			b.WriteString(fmt.Sprintf("      - name: %s\n", env))
-			b.WriteString(fmt.Sprintf("        provider: %s\n", wizardEnvProvider(env, d.DeployProvider)))
+			fmt.Fprintf(&b, "      - name: %s\n", env)
+			fmt.Fprintf(&b, "        provider: %s\n", wizardEnvProvider(env, d.DeployProvider))
 		}
 		b.WriteString("\n")
 	}

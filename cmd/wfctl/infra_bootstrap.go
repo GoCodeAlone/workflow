@@ -57,7 +57,7 @@ func runInfraBootstrap(args []string) error {
 func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 	iacStates, _, _, err := discoverInfraModules(cfgFile)
 	if err != nil || len(iacStates) == 0 {
-		return nil // no state module configured — nothing to bootstrap
+		return nil //nolint:nilerr // no state module configured — nothing to bootstrap
 	}
 	m := iacStates[0]
 	backend, _ := m.Config["backend"].(string)

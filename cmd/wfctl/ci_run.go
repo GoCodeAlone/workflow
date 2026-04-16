@@ -373,6 +373,4 @@ func runPreDeploySteps(ctx context.Context, steps []string, verbose bool) error 
 }
 
 // newCommandContext wraps exec.CommandContext so tests can replace it.
-var newCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, name, args...)
-}
+var newCommandContext = exec.CommandContext //nolint:gosec // G204: subprocess args come from validated user config

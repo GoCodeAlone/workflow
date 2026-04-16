@@ -273,7 +273,7 @@ func secretStateLabel(state SecretState) string {
 func loadWorkflowConfigForSecrets(configFile string) (*config.WorkflowConfig, error) {
 	data, err := os.ReadFile(configFile)
 	if err != nil {
-		return &config.WorkflowConfig{
+		return &config.WorkflowConfig{ //nolint:nilerr // gracefully fall back when file is absent
 			Secrets: &config.SecretsConfig{Provider: "env"},
 		}, nil
 	}
@@ -421,7 +421,7 @@ func loadSecretsConfig(configFile string) (*config.SecretsConfig, error) {
 	data, err := os.ReadFile(configFile)
 	if err != nil {
 		// If the file doesn't exist, return a default env provider config.
-		return &config.SecretsConfig{Provider: "env"}, nil
+		return &config.SecretsConfig{Provider: "env"}, nil //nolint:nilerr // gracefully fall back when file is absent
 	}
 	var cfg config.WorkflowConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {

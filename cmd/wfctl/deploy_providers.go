@@ -470,29 +470,6 @@ func injectSecrets(ctx context.Context, cfg *config.WorkflowConfig, envName stri
 	return result, nil
 }
 
-// injectSecretsLegacy is the pre-multi-store implementation kept for callers
-// that only have a SecretsConfig (not a full WorkflowConfig).
-func injectSecretsLegacy(ctx context.Context, secretsCfg *config.SecretsConfig) (map[string]string, error) {
-	if secretsCfg == nil || len(secretsCfg.Entries) == 0 {
-		return nil, nil
-	}
-
-	provider, err := newSecretsProvider(secretsCfg.Provider)
-	if err != nil {
-		return nil, fmt.Errorf("secrets provider: %w", err)
-	}
-
-	result := make(map[string]string, len(secretsCfg.Entries))
-	for _, entry := range secretsCfg.Entries {
-		val, err := provider.Get(ctx, entry.Name)
-		if err != nil {
-			return nil, fmt.Errorf("fetch secret %q: %w", entry.Name, err)
-		}
-		result[entry.Name] = val
-	}
-	return result, nil
-}
-
 // cmp returns a if non-empty, otherwise b. Mirrors cmp.Or for strings.
 func cmp(a, b string) string {
 	if a != "" {
