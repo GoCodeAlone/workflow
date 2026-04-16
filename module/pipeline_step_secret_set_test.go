@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/GoCodeAlone/workflow/secrets"
 )
 
 // mockSecretSetProvider is an in-memory secrets.Provider for testing secret_set.
@@ -387,4 +389,52 @@ func (p *failAfterNProvider) Set(_ context.Context, key, value string) error {
 	p.data[key] = value
 	p.writeNum++
 	return nil
+}
+
+// mockModuleWithProviderAccessor simulates a built-in secrets module wrapper
+// (like SecretsAWSModule/SecretsVaultModule) that exposes Provider() returning
+// the underlying secrets.Provider but doesn't implement Set directly on itself.
+type mockModuleWithProviderAccessor struct {
+	provider secrets.Provider
+}
+
+func (m *mockModuleWithProviderAccessor) Provider() secrets.Provider {
+	return m.provider
+}
+
+// TestSecretSetStep_ProviderAccessorFallback verifies that resolveProvider
+// finds Set via the Provider() accessor when the service doesn't implement
+// SecretSetProvider directly — matching how SecretsAWSModule etc. work.
+func TestSecretSetStep_ProviderAccessorFallback(t *testing.T) {
+	// mockSecretSetProvider implements Set directly, but we wrap it in a
+	// module-like struct that only exposes it via Provider().
+	inner := newMockSecretSetProvider()
+	wrapper := &mockModuleWithProviderAccessor{provider: inner}
+	app := NewMockApplication()
+	app.Services["zoom-secrets"] = wrapper
+
+	factory := NewSecretSetStepFactory()
+	step, err := factory("save-creds", map[string]any{
+		"module": "zoom-secrets",
+		"secrets": map[string]any{
+			"client_id": "accessor-value",
+		},
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	got, getErr := inner.Get(context.Background(), "client_id")
+	if getErr != nil {
+		t.Fatalf("provider.Get: %v", getErr)
+	}
+	if got != "accessor-value" {
+		t.Errorf("expected client_id=accessor-value, got %q", got)
+	}
 }

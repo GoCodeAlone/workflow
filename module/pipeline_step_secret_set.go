@@ -7,11 +7,15 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/workflow/secrets"
 )
 
 // SecretSetProvider is the minimal interface required by SecretSetStep.
-// Both SecretsAWSModule and SecretsVaultModule satisfy this interface via
-// the secrets.Provider Set method.
+// Any module used by step.secret_set must expose a Set method matching this
+// signature — either directly on the registered service, or on the underlying
+// secrets.Provider accessible via a Provider() accessor. Built-in secrets
+// modules (secrets.aws, secrets.vault, secrets.keychain) satisfy this via
+// their Provider() method since the module wrappers don't expose Set directly.
 type SecretSetProvider interface {
 	Set(ctx context.Context, key, value string) error
 }
@@ -90,9 +94,19 @@ func (s *SecretSetStep) Execute(ctx context.Context, pc *PipelineContext) (*Step
 		return nil, err
 	}
 
+	// Sort keys for deterministic write order. This ensures partial failures
+	// (where provider.Set fails mid-way) are reproducible rather than
+	// dependent on Go's random map iteration order.
+	sortedKeys := make([]string, 0, len(s.secrets))
+	for k := range s.secrets {
+		sortedKeys = append(sortedKeys, k)
+	}
+	sort.Strings(sortedKeys)
+
 	setKeys := make([]string, 0, len(s.secrets))
 
-	for secretKey, valueTemplate := range s.secrets {
+	for _, secretKey := range sortedKeys {
+		valueTemplate := s.secrets[secretKey]
 		// Resolve the value template against the current pipeline context.
 		// This enables dynamic values such as form fields from prior steps:
 		//   "{{.steps.form.client_id}}"
@@ -117,15 +131,35 @@ func (s *SecretSetStep) Execute(ctx context.Context, pc *PipelineContext) (*Step
 }
 
 // resolveProvider looks up the SecretSetProvider from the application service
-// registry using the configured module name.
+// registry using the configured module name. It first checks if the service
+// directly implements SecretSetProvider; if not, it checks for a Provider()
+// accessor (used by SecretsAWSModule, SecretsVaultModule, SecretsKeychainModule)
+// and asserts the underlying provider implements Set.
 func (s *SecretSetStep) resolveProvider() (SecretSetProvider, error) {
 	svc, ok := s.app.SvcRegistry()[s.moduleName]
 	if !ok {
 		return nil, fmt.Errorf("secret_set step %q: secrets module %q not found in service registry", s.name, s.moduleName)
 	}
-	provider, ok := svc.(SecretSetProvider)
-	if !ok {
-		return nil, fmt.Errorf("secret_set step %q: service %q does not implement SecretSetProvider (Set method)", s.name, s.moduleName)
+
+	// Direct: service itself implements Set.
+	if provider, ok := svc.(SecretSetProvider); ok {
+		return provider, nil
 	}
-	return provider, nil
+
+	// Indirect: service exposes a Provider() accessor (e.g. SecretsAWSModule,
+	// SecretsVaultModule, SecretsKeychainModule) whose underlying
+	// secrets.Provider implements Set.
+	type providerAccessor interface {
+		Provider() secrets.Provider
+	}
+	if accessor, ok := svc.(providerAccessor); ok {
+		underlying := accessor.Provider()
+		if underlying != nil {
+			if provider, ok := underlying.(SecretSetProvider); ok {
+				return provider, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("secret_set step %q: service %q does not implement SecretSetProvider (Set method) directly or via Provider() accessor", s.name, s.moduleName)
 }
