@@ -177,6 +177,7 @@ func (s *WhileStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResu
 		childPC := s.buildChildContext(pc, i)
 
 		// Run sub-steps sequentially.
+		ranThisIter := make([]string, 0, len(s.subSteps))
 		for _, subStep := range s.subSteps {
 			result, execErr := subStep.Execute(ctx, childPC)
 			if execErr != nil {
@@ -185,15 +186,18 @@ func (s *WhileStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResu
 			}
 			if result != nil && result.Output != nil {
 				childPC.MergeStepOutput(subStep.Name(), result.Output)
+				ranThisIter = append(ranThisIter, subStep.Name())
 			}
 			if result != nil && result.Stop {
 				break
 			}
 		}
 
-		// Propagate child step outputs back to parent so the condition can see them.
-		for stepName, output := range childPC.StepOutputs {
-			pc.MergeStepOutput(stepName, output)
+		// Propagate only the sub-steps that ran this iteration back to the parent
+		// so the condition can see their outputs. Avoids re-merging the full set of
+		// deep-copied parent outputs on every iteration.
+		for _, stepName := range ranThisIter {
+			pc.MergeStepOutput(stepName, childPC.StepOutputs[stepName])
 		}
 
 		// Accumulate if configured.
@@ -207,7 +211,7 @@ func (s *WhileStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResu
 			// resolveStr is a string representation; we need the actual value.
 			val := s.resolveAccumValue(fromStr, childPC, pc)
 			if val != nil {
-				if slice, ok := val.([]any); ok {
+				if slice, err := foreachToSlice(val); err == nil {
 					accumulator = append(accumulator, slice...)
 				} else {
 					accumulator = append(accumulator, val)
@@ -279,6 +283,7 @@ func (s *WhileStep) resolveAccumValue(resolvedStr string, childPC, parentPC *Pip
 		maps.Copy(data, parentPC.Current)
 		data["steps"] = parentPC.StepOutputs
 		data["trigger"] = parentPC.TriggerData
+		data["meta"] = parentPC.Metadata
 		if val, found := foreachWalkPath(data, path); found {
 			return val
 		}

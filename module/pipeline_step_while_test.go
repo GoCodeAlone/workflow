@@ -448,6 +448,73 @@ func TestWhileStep_ContextCancellation(t *testing.T) {
 	}
 }
 
+// TestWhileStep_AccumulateFlattensTypedSlice verifies that when a sub-step returns
+// a typed slice ([]string rather than []any), the accumulator flattens the elements
+// rather than boxing the whole slice as a single scalar.
+func TestWhileStep_AccumulateFlattensTypedSlice(t *testing.T) {
+	calls := 0
+	maxRuns := 3
+	registry := NewStepRegistry()
+	registry.Register("step.str_pages", func(name string, _ map[string]any, _ modular.Application) (PipelineStep, error) {
+		return &mockStep{
+			name: name,
+			execFn: func(_ context.Context, _ *PipelineContext) (*StepResult, error) {
+				calls++
+				hasNext := calls < maxRuns
+				// Return a []string — the accumulator must flatten this, not box it.
+				items := []string{
+					fmt.Sprintf("item-%d-a", calls),
+					fmt.Sprintf("item-%d-b", calls),
+				}
+				return &StepResult{Output: map[string]any{
+					"items":    items,
+					"has_next": hasNext,
+				}}, nil
+			},
+		}, nil
+	})
+
+	factory := NewWhileStepFactory(func() *StepRegistry { return registry })
+	step, err := factory("paginate-typed", map[string]any{
+		"condition":      "{{.steps.fetch.has_next}}",
+		"max_iterations": 100,
+		"accumulate": map[string]any{
+			"key":  "all",
+			"from": "{{.steps.fetch.items}}",
+		},
+		"step": map[string]any{
+			"type": "step.str_pages",
+			"name": "fetch",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	pc.MergeStepOutput("fetch", map[string]any{"has_next": true, "items": []string{}})
+
+	result, execErr := step.Execute(context.Background(), pc)
+	if execErr != nil {
+		t.Fatalf("execute error: %v", execErr)
+	}
+
+	all, ok := result.Output["all"].([]any)
+	if !ok {
+		t.Fatalf("expected output['all'] to be []any, got %T: %v", result.Output["all"], result.Output["all"])
+	}
+	// 3 iterations × 2 strings = 6 individual string elements (not 3 boxed slices)
+	if len(all) != 6 {
+		t.Errorf("expected 6 flattened string elements, got %d: %v", len(all), all)
+	}
+	// Verify the elements are strings, not slices
+	for idx, elem := range all {
+		if _, isStr := elem.(string); !isStr {
+			t.Errorf("element[%d] should be string, got %T: %v", idx, elem, elem)
+		}
+	}
+}
+
 // TestWhileStep_TruthyNoValueSentinel checks that a condition resolving to
 // literal "<no value>" is treated as FALSE (loop exits immediately).
 func TestWhileStep_TruthyNoValueSentinel(t *testing.T) {
