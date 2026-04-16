@@ -581,6 +581,7 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 |------|-------------|--------|
 | `secrets.vault` | HashiCorp Vault integration | secrets |
 | `secrets.aws` | AWS Secrets Manager integration | secrets |
+| `secrets.keychain` | OS credential store (macOS Keychain, Linux Secret Service, Windows Credential Manager); requires libsecret/gnome-keyring/KWallet on Linux | secrets |
 
 ### Event Sourcing & Messaging Services
 | Type | Description | Plugin |
