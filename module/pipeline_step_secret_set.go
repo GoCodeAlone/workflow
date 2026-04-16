@@ -105,21 +105,21 @@ func (s *SecretSetStep) Execute(ctx context.Context, pc *PipelineContext) (*Step
 
 	setKeys := make([]string, 0, len(s.secrets))
 
-	for _, secretKey := range sortedKeys {
-		valueTemplate := s.secrets[secretKey]
+	for _, keyName := range sortedKeys {
+		valueTemplate := s.secrets[keyName]
 		// Resolve the value template against the current pipeline context.
 		// This enables dynamic values such as form fields from prior steps:
 		//   "{{.steps.form.client_id}}"
 		resolvedValue, resolveErr := s.tmpl.Resolve(valueTemplate, pc)
 		if resolveErr != nil {
-			return nil, fmt.Errorf("secret_set step %q: failed to resolve value for %q: %w", s.name, secretKey, resolveErr)
+			return nil, fmt.Errorf("secret_set step %q: failed to resolve value for %q: %w", s.name, keyName, resolveErr)
 		}
 
-		if setErr := provider.Set(ctx, secretKey, resolvedValue); setErr != nil {
-			return nil, fmt.Errorf("secret_set step %q: failed to set secret %q: %w", s.name, secretKey, setErr)
+		if setErr := provider.Set(ctx, keyName, resolvedValue); setErr != nil {
+			return nil, fmt.Errorf("secret_set step %q: failed to set secret %q: %w", s.name, keyName, setErr)
 		}
 
-		setKeys = append(setKeys, secretKey)
+		setKeys = append(setKeys, keyName)
 	}
 
 	// setKeys is already in sorted order (built from sortedKeys iteration).
