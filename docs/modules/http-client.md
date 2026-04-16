@@ -106,7 +106,7 @@ modules:
       auth:
         type: oauth2_refresh_token
         token_url: "https://zoom.us/oauth/token"
-        # Resolve client credentials from the secrets provider at Init time:
+        # Resolve client credentials from the secrets provider at Start() time:
         client_id_from_secret:
           provider: zoom-secrets
           key: client_id
@@ -148,8 +148,17 @@ fail `Init`.  The first HTTP request will fail with an `*oauth2.RetrieveError`
 `client_id_from_secret`, `client_secret_from_secret`, and `bearer_token_ref` all use
 the `{provider, key}` SecretRef shape.  `provider` must match the service-registry
 name of a running secrets module (e.g. `secrets.keychain`, `secrets.aws`,
-`secrets.vault`).  Resolution happens at `Start()` time so all secrets modules must
-be started before `http.client` modules that reference them.
+`secrets.vault`).
+
+### Secret resolution timing
+
+Secret references (`client_id_from_secret`, `client_secret_from_secret`,
+`bearer_token_ref`) are resolved during the module's `Start()` phase, after all
+`secrets.Provider` modules have initialized.  The module's `RequiresServices()`
+declaration tells the modular DI graph about these dependencies, so the framework
+ensures referenced provider modules are started before `http.client.Start()` runs.
+If a referenced provider is missing or the key is not found, module startup fails
+with a clear error.
 
 ---
 
