@@ -74,7 +74,7 @@ func resolveSecretsProvider(cfg *SecretsConfig) (secrets.Provider, error) {
 		repo, _ := c["repo"].(string)
 		tokenVar, _ := c["token_env"].(string)
 		if tokenVar == "" {
-			tokenVar = "GITHUB_TOKEN"
+			tokenVar = "GITHUB_TOKEN" //nolint:gosec // G101: this is an env var name, not a credential
 		}
 		return secrets.NewGitHubSecretsProvider(repo, tokenVar)
 

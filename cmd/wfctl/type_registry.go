@@ -686,6 +686,14 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			ConfigKeys: []string{"system", "workers", "handler"},
 		},
 
+		// mcp plugin
+		"mcp.registry": {
+			Type:       "mcp.registry",
+			Plugin:     "mcp",
+			Stateful:   false,
+			ConfigKeys: []string{"log_on_init", "expose_admin_api", "audit_tool_calls"},
+		},
+
 		// scanner plugin
 		"security.scanner": {
 			Type:       "security.scanner",

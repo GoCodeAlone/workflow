@@ -31,15 +31,15 @@ type HTTPServerTLSConfig struct {
 
 // StandardHTTPServer implements the HTTPServer interface and modular.Module interfaces
 type StandardHTTPServer struct {
-	name         string
-	server       *http.Server
-	address      string
-	router       HTTPRouter
-	logger       modular.Logger
-	readTimeout  time.Duration
-	writeTimeout time.Duration
-	idleTimeout  time.Duration
-	tlsCfg          HTTPServerTLSConfig
+	name             string
+	server           *http.Server
+	address          string
+	router           HTTPRouter
+	logger           modular.Logger
+	readTimeout      time.Duration
+	writeTimeout     time.Duration
+	idleTimeout      time.Duration
+	tlsCfg           HTTPServerTLSConfig
 	listenErr        chan error
 	acmeChallengeErr chan error
 }

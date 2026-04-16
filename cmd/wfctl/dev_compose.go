@@ -17,12 +17,12 @@ const devComposeFileName = "docker-compose.dev.yml"
 
 // moduleToDockerImage maps workflow module types to Docker images.
 var moduleToDockerImage = map[string]string{
-	"database.postgres": "postgres:16",
-	"database.workflow": "postgres:16",
-	"nosql.redis":       "redis:7-alpine",
-	"cache.redis":       "redis:7-alpine",
-	"messaging.nats":    "nats:latest",
-	"messaging.kafka":   "confluentinc/cp-kafka:latest",
+	"database.postgres":  "postgres:16",
+	"database.workflow":  "postgres:16",
+	"nosql.redis":        "redis:7-alpine",
+	"cache.redis":        "redis:7-alpine",
+	"messaging.nats":     "nats:latest",
+	"messaging.kafka":    "confluentinc/cp-kafka:latest",
 	"messaging.rabbitmq": "rabbitmq:3-management-alpine",
 }
 
@@ -58,13 +58,13 @@ var infraModuleVolumeMounts = map[string]string{
 
 // devComposeService represents a docker-compose service entry for dev mode.
 type devComposeService struct {
-	Image       string               `yaml:"image,omitempty"`
-	Build       *devComposeBuild     `yaml:"build,omitempty"`
-	Ports       []string             `yaml:"ports,omitempty"`
-	Environment map[string]string    `yaml:"environment,omitempty"`
-	Volumes     []string             `yaml:"volumes,omitempty"`
-	DependsOn   []string             `yaml:"depends_on,omitempty"`
-	Restart     string               `yaml:"restart,omitempty"`
+	Image       string                 `yaml:"image,omitempty"`
+	Build       *devComposeBuild       `yaml:"build,omitempty"`
+	Ports       []string               `yaml:"ports,omitempty"`
+	Environment map[string]string      `yaml:"environment,omitempty"`
+	Volumes     []string               `yaml:"volumes,omitempty"`
+	DependsOn   []string               `yaml:"depends_on,omitempty"`
+	Restart     string                 `yaml:"restart,omitempty"`
 	Healthcheck *devComposeHealthcheck `yaml:"healthcheck,omitempty"`
 }
 
@@ -254,8 +254,7 @@ func moduleTypeToDNS(modType string) string {
 	parts := strings.Split(modType, ".")
 	last := parts[len(parts)-1]
 	// Shorten well-known names.
-	switch last {
-	case "workflow":
+	if last == "workflow" {
 		return "postgres"
 	}
 	return last
@@ -271,7 +270,7 @@ func runDevCompose(cfg *config.WorkflowConfig, cfgPath string, verbose bool) err
 	// Write to the same directory as the config file.
 	outDir := filepath.Dir(cfgPath)
 	outPath := filepath.Join(outDir, devComposeFileName)
-	if err := os.WriteFile(outPath, []byte(composeYAML), 0o644); err != nil {
+	if err := os.WriteFile(outPath, []byte(composeYAML), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", outPath, err)
 	}
 	fmt.Printf("Generated %s\n", outPath)
