@@ -98,7 +98,14 @@ func resolveSecretsProvider(cfg *SecretsConfig) (secrets.Provider, error) {
 		prefix, _ := c["prefix"].(string)
 		return secrets.NewEnvProvider(prefix), nil
 
+	case "keychain":
+		service, _ := c["service"].(string)
+		if service == "" {
+			return nil, fmt.Errorf("secrets.keychain: 'service' is required")
+		}
+		return secrets.NewKeychainProvider(service)
+
 	default:
-		return nil, fmt.Errorf("unknown secrets provider %q (supported: github, vault, aws, env)", cfg.Provider)
+		return nil, fmt.Errorf("unknown secrets provider %q (supported: github, vault, aws, env, keychain)", cfg.Provider)
 	}
 }

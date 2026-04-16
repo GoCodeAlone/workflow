@@ -359,6 +359,12 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Stateful:   false,
 			ConfigKeys: []string{"region", "accessKeyId", "secretAccessKey"},
 		},
+		"secrets.keychain": {
+			Type:       "secrets.keychain",
+			Plugin:     "secrets",
+			Stateful:   false,
+			ConfigKeys: []string{"service"},
+		},
 
 		// ai plugin
 		"dynamic.component": {
