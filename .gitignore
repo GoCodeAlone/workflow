@@ -29,6 +29,10 @@
 go.work
 go.work.sum
 
+# macOS filesystem metadata
+.DS_Store
+**/.DS_Store
+
 # Node
 node_modules/
 

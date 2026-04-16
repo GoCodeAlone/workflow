@@ -89,6 +89,12 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Stateful:   false,
 			ConfigKeys: []string{"address", "readTimeout", "writeTimeout", "idleTimeout"},
 		},
+		"http.client": {
+			Type:       "http.client",
+			Plugin:     "http",
+			Stateful:   true,
+			ConfigKeys: []string{"timeout", "base_url", "auth"},
+		},
 		"http.router": {
 			Type:       "http.router",
 			Plugin:     "http",
@@ -1636,6 +1642,11 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Type:       "step.secret_set",
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"module", "secrets"},
+		},
+		"step.while": {
+			Type:       "step.while",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"condition", "max_iterations", "iteration_var", "accumulate", "step", "steps"},
 		},
 	}
 	// Include any step types registered dynamically (e.g. from external plugins).

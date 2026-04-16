@@ -132,6 +132,20 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	})
 
 	r.Register(&ModuleSchema{
+		Type:        "http.client",
+		Label:       "HTTP Client",
+		Category:    "http",
+		Description: "Reusable HTTP client with shared auth (none/static_bearer/oauth2_client_credentials/oauth2_refresh_token) referenced by step.http_call",
+		Outputs:     []ServiceIODef{{Name: "client", Type: "HTTPClient", Description: "Configured *http.Client with base URL and auth"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "timeout", Label: "Timeout", Type: FieldTypeDuration, Description: "Request timeout for outgoing calls", DefaultValue: "30s", Placeholder: "30s"},
+			{Key: "base_url", Label: "Base URL", Type: FieldTypeString, Description: "Optional base URL prepended to relative request paths", Placeholder: "https://api.example.com"},
+			{Key: "auth", Label: "Auth", Type: FieldTypeMap, Description: "Auth block. Supported values: {type: none}; {type: static_bearer, bearer_token: <token>} or {type: static_bearer, bearer_token_ref: <ref>}; {type: oauth2_client_credentials, token_url: <url>, client_id: <id>, client_secret: <secret>, scopes: [<scope>]}; {type: oauth2_refresh_token, token_secrets: <module-name>, token_secrets_key: <key>, scopes: [<scope>]}.", DefaultValue: map[string]any{"type": "none"}},
+		},
+		DefaultConfig: map[string]any{"timeout": "30s", "auth": map[string]any{"type": "none"}},
+	})
+
+	r.Register(&ModuleSchema{
 		Type:         "http.router",
 		Label:        "HTTP Router",
 		Category:     "http",
@@ -1772,6 +1786,21 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "index_key", Label: "Index Key", Type: FieldTypeString, Description: "Context variable name for the current index (defaults to 'index')", DefaultValue: "index"},
 			{Key: "step", Label: "Step", Type: FieldTypeMap, Description: "Single step map to execute for each item (mutually exclusive with steps); must include 'type' key"},
 			{Key: "steps", Label: "Steps", Type: FieldTypeArray, Description: "Array of step maps to execute for each item (mutually exclusive with step)"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
+		Type:        "step.while",
+		Label:       "While",
+		Category:    "pipeline_steps",
+		Description: "Executes sub-steps repeatedly while a condition template is truthy, with a hard iteration cap",
+		ConfigFields: []ConfigFieldDef{
+			{Key: "condition", Label: "Condition", Type: FieldTypeString, Required: true, Description: "Template expression evaluated each iteration; loop runs while truthy", Placeholder: "{{.steps.fetch.has_next_page}}"},
+			{Key: "max_iterations", Label: "Max Iterations", Type: FieldTypeNumber, Description: "Hard cap on iterations to prevent runaway loops", DefaultValue: 1000},
+			{Key: "iteration_var", Label: "Iteration Variable", Type: FieldTypeString, Description: "Optional context variable exposing {index, first} for the current iteration"},
+			{Key: "accumulate", Label: "Accumulate", Type: FieldTypeMap, Description: "Optional {key, from} block that flattens per-iteration values into an output slice"},
+			{Key: "step", Label: "Step", Type: FieldTypeMap, Description: "Single step map to execute per iteration (mutually exclusive with steps); must include 'type' key"},
+			{Key: "steps", Label: "Steps", Type: FieldTypeArray, Description: "Array of step maps to execute per iteration (mutually exclusive with step)"},
 		},
 	})
 
