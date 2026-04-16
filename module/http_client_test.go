@@ -1,0 +1,1220 @@
+package module
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"golang.org/x/oauth2"
+
+	"github.com/GoCodeAlone/workflow/secrets"
+)
+
+// ---------------------------------------------------------------------------
+// In-memory secrets.Provider for testing — map-backed, never touches keychain
+// ---------------------------------------------------------------------------
+
+type memSecretsProvider struct {
+	data map[string]string
+}
+
+func newMemSecretsProvider(initial map[string]string) *memSecretsProvider {
+	m := &memSecretsProvider{data: make(map[string]string)}
+	for k, v := range initial {
+		m.data[k] = v
+	}
+	return m
+}
+
+func (p *memSecretsProvider) Name() string { return "mem" }
+
+func (p *memSecretsProvider) Get(_ context.Context, key string) (string, error) {
+	if key == "" {
+		return "", secrets.ErrInvalidKey
+	}
+	v, ok := p.data[key]
+	if !ok {
+		return "", secrets.ErrNotFound
+	}
+	return v, nil
+}
+
+func (p *memSecretsProvider) Set(_ context.Context, key, value string) error {
+	if key == "" {
+		return secrets.ErrInvalidKey
+	}
+	p.data[key] = value
+	return nil
+}
+
+func (p *memSecretsProvider) Delete(_ context.Context, key string) error {
+	if key == "" {
+		return secrets.ErrInvalidKey
+	}
+	delete(p.data, key)
+	return nil
+}
+
+func (p *memSecretsProvider) List(_ context.Context) ([]string, error) {
+	keys := make([]string, 0, len(p.data))
+	for k := range p.data {
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+
+// makeTestTokenJSON returns a JSON response for a token endpoint.
+func makeTestTokenJSON(accessToken, refreshToken string, expiresIn int) string {
+	b, _ := json.Marshal(map[string]any{
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+		"expires_in":    expiresIn,
+		"token_type":    "Bearer",
+	})
+	return string(b)
+}
+
+// makeTestStoredToken serialises an oauth2.Token as JSON for storage in a secrets provider.
+func makeTestStoredToken(accessToken, refreshToken string, expiry time.Time) string {
+	tok := oauth2.Token{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		TokenType:    "Bearer",
+		Expiry:       expiry,
+	}
+	b, _ := json.Marshal(tok)
+	return string(b)
+}
+
+// ---------------------------------------------------------------------------
+// Test 1: none auth — plain *http.Client with configured timeout
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_NoneAuth(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Error("expected no Authorization header for none-auth client")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	m := &HTTPClientModule{
+		moduleName: "test-none",
+		cfg: HTTPClientConfig{
+			Timeout: 10 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type: "none",
+			},
+		},
+	}
+	if err := m.buildClient(context.Background(), nil); err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+
+	if m.Client() == nil {
+		t.Fatal("expected non-nil *http.Client")
+	}
+	if m.Client().Timeout != 10*time.Second {
+		t.Errorf("expected timeout 10s, got %v", m.Client().Timeout)
+	}
+
+	resp, err := m.Client().Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("unexpected status %d", resp.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 2: static_bearer — Authorization: Bearer <token> header injected
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_StaticBearer(t *testing.T) {
+	const wantToken = "my-static-token"
+
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	m := &HTTPClientModule{
+		moduleName: "test-bearer",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:        "static_bearer",
+				BearerToken: wantToken,
+			},
+		},
+	}
+	if err := m.buildClient(context.Background(), nil); err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+
+	resp, err := m.Client().Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	want := "Bearer " + wantToken
+	if gotAuth != want {
+		t.Errorf("Authorization header: got %q, want %q", gotAuth, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 3: oauth2_client_credentials — fetches token once, caches for next
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2ClientCredentials(t *testing.T) {
+	var tokenFetchCount int32
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tokenFetchCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, makeTestTokenJSON("access-token-cc", "", 3600))
+	}))
+	defer tokenSrv.Close()
+
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	m := &HTTPClientModule{
+		moduleName: "test-cc",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:             "oauth2_client_credentials",
+				TokenURL:         tokenSrv.URL + "/token",
+				ClientID:         "client-id",
+				ClientCredential: "client-secret", //nolint:gosec // G101: test credential
+			},
+		},
+	}
+	if err := m.buildClient(context.Background(), nil); err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+
+	// First request — should trigger token fetch.
+	resp, err := m.Client().Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("first request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if gotAuth != "Bearer access-token-cc" {
+		t.Errorf("Authorization header: got %q", gotAuth)
+	}
+
+	// Second request — token should still be valid; no additional token fetch.
+	resp2, err := m.Client().Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("second request failed: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	if n := atomic.LoadInt32(&tokenFetchCount); n != 1 {
+		t.Errorf("expected 1 token fetch, got %d", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 4: oauth2_refresh_token — missing token surfaces 401 error, no panic
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_TokenAbsent(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Should NOT be called — provider has no token.
+		t.Error("token endpoint called unexpectedly")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer tokenSrv.Close()
+
+	provider := newMemSecretsProvider(nil) // empty — no token
+
+	m := &HTTPClientModule{
+		moduleName: "test-rt-absent",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          tokenSrv.URL + "/token",
+				ClientID:          "client-id",
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+	}
+	if err := m.buildClient(context.Background(), provider); err != nil {
+		t.Fatalf("buildClient must not error on absent token: %v", err)
+	}
+
+	// Making a request should fail because no token is available.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	resp, err := m.Client().Get(upstream.URL)
+	if resp != nil {
+		resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected error when no token is present, got nil")
+	}
+
+	// The error must wrap *oauth2.RetrieveError (not a raw panic or other type).
+	var re *oauth2.RetrieveError
+	if !errors.As(err, &re) {
+		t.Errorf("expected *oauth2.RetrieveError, got %T: %v", err, err)
+	}
+	if re != nil && re.Response != nil && re.Response.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 status in RetrieveError, got %d", re.Response.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 5: oauth2_refresh_token — token present, used without refresh
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_TokenPresent(t *testing.T) {
+	var tokenFetchCount int32
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tokenFetchCount, 1)
+		w.WriteHeader(http.StatusInternalServerError) // should not be called
+	}))
+	defer tokenSrv.Close()
+
+	// Store a valid (non-expired) token in the provider.
+	validToken := makeTestStoredToken("live-access-token", "live-refresh-token",
+		time.Now().Add(1*time.Hour))
+	provider := newMemSecretsProvider(map[string]string{
+		"oauth_token": validToken,
+	})
+
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	m := &HTTPClientModule{
+		moduleName: "test-rt-present",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          tokenSrv.URL + "/token",
+				ClientID:          "client-id",
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+	}
+	if err := m.buildClient(context.Background(), provider); err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+
+	resp, err := m.Client().Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if gotAuth != "Bearer live-access-token" {
+		t.Errorf("Authorization header: got %q", gotAuth)
+	}
+	if n := atomic.LoadInt32(&tokenFetchCount); n != 0 {
+		t.Errorf("expected 0 token fetches, got %d", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 6: oauth2_refresh_token — expired token triggers refresh; rotated token
+//         persisted back to secrets provider.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_Refresh(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = body
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, makeTestTokenJSON("new-access-token", "new-refresh-token", 3600))
+	}))
+	defer tokenSrv.Close()
+
+	// Store an expired token (access token expired, refresh token valid).
+	expiredToken := makeTestStoredToken("expired-access-token", "valid-refresh-token",
+		time.Now().Add(-1*time.Hour))
+	provider := newMemSecretsProvider(map[string]string{
+		"oauth_token": expiredToken,
+	})
+
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	m := &HTTPClientModule{
+		moduleName: "test-rt-refresh",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          tokenSrv.URL + "/token",
+				ClientID:          "client-id",
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+	}
+	if err := m.buildClient(context.Background(), provider); err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+
+	resp, err := m.Client().Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if gotAuth != "Bearer new-access-token" {
+		t.Errorf("Authorization header: got %q", gotAuth)
+	}
+
+	// Verify the rotated token was persisted back to the provider.
+	stored, err := provider.Get(context.Background(), "oauth_token")
+	if err != nil {
+		t.Fatalf("failed to read persisted token: %v", err)
+	}
+	var persistedTok oauth2.Token
+	if err := json.Unmarshal([]byte(stored), &persistedTok); err != nil {
+		t.Fatalf("persisted token is not valid JSON: %v", err)
+	}
+	if persistedTok.AccessToken != "new-access-token" {
+		t.Errorf("persisted access token: got %q, want %q", persistedTok.AccessToken, "new-access-token")
+	}
+	if persistedTok.RefreshToken != "new-refresh-token" {
+		t.Errorf("persisted refresh token: got %q, want %q", persistedTok.RefreshToken, "new-refresh-token")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 7: oauth2_refresh_token — cached token rejected (401); client refreshes
+//         and retries once; second request succeeds.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_401Retry(t *testing.T) {
+	var tokenFetchCount int32
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tokenFetchCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, makeTestTokenJSON("fresh-access-token", "fresh-refresh-token", 3600))
+	}))
+	defer tokenSrv.Close()
+
+	// Start with a "valid" (not expired) token that the upstream will reject with 401.
+	initialToken := makeTestStoredToken("stale-access-token", "valid-refresh-token",
+		time.Now().Add(1*time.Hour))
+	provider := newMemSecretsProvider(map[string]string{
+		"oauth_token": initialToken,
+	})
+
+	var requestCount int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&requestCount, 1)
+		if n == 1 {
+			// Reject the first attempt with 401 to trigger the retry path.
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		// Second attempt (after token refresh) should succeed.
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	m := &HTTPClientModule{
+		moduleName: "test-rt-401",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          tokenSrv.URL + "/token",
+				ClientID:          "client-id",
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+	}
+	if err := m.buildClient(context.Background(), provider); err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+
+	resp, err := m.Client().Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 after retry, got %d", resp.StatusCode)
+	}
+	if n := atomic.LoadInt32(&requestCount); n != 2 {
+		t.Errorf("expected 2 upstream requests (original + retry), got %d", n)
+	}
+	if n := atomic.LoadInt32(&tokenFetchCount); n < 1 {
+		t.Errorf("expected at least 1 token fetch during 401 recovery, got %d", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 7b: retryOn401Transport — retry works for http.NewRequest-built request
+//          (which populates req.GetBody) — body is replayed on retry.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_401Retry_WithBody(t *testing.T) {
+	var tokenFetchCount int32
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tokenFetchCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, makeTestTokenJSON("fresh-token", "fresh-refresh", 3600))
+	}))
+	defer tokenSrv.Close()
+
+	initialToken := makeTestStoredToken("stale-token", "valid-refresh",
+		time.Now().Add(1*time.Hour))
+	provider := newMemSecretsProvider(map[string]string{
+		"oauth_token": initialToken,
+	})
+
+	var receivedBody string
+	var requestCount int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&requestCount, 1)
+		b, _ := io.ReadAll(r.Body)
+		receivedBody = string(b)
+		if n == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	m := &HTTPClientModule{
+		moduleName: "test-rt-body-retry",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          tokenSrv.URL + "/token",
+				ClientID:          "client-id",
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+		logger: &noopLogger{},
+	}
+	if err := m.buildClient(context.Background(), provider); err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+
+	const wantBody = `{"hello":"world"}`
+	// http.NewRequest with a strings.Reader body populates req.GetBody automatically.
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, upstream.URL,
+		strings.NewReader(wantBody))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 after retry, got %d", resp.StatusCode)
+	}
+	if receivedBody != wantBody {
+		t.Errorf("retried request body: got %q, want %q", receivedBody, wantBody)
+	}
+	if n := atomic.LoadInt32(&requestCount); n != 2 {
+		t.Errorf("expected 2 upstream requests, got %d", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 7c: retryOn401Transport — oversize body (>1 MiB) is NOT buffered;
+//          first 401 is returned as-is without a retry.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_401Retry_OversizeBody(t *testing.T) {
+	var tokenFetchCount int32
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tokenFetchCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, makeTestTokenJSON("fresh-token", "fresh-refresh", 3600))
+	}))
+	defer tokenSrv.Close()
+
+	initialToken := makeTestStoredToken("stale-token", "valid-refresh",
+		time.Now().Add(1*time.Hour))
+	provider := newMemSecretsProvider(map[string]string{
+		"oauth_token": initialToken,
+	})
+
+	var requestCount int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		// Always return 401 — the retry must not happen for oversize bodies.
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer upstream.Close()
+
+	m := &HTTPClientModule{
+		moduleName: "test-rt-oversize",
+		cfg: HTTPClientConfig{
+			Timeout: 10 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          tokenSrv.URL + "/token",
+				ClientID:          "client-id",
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+		logger: &noopLogger{},
+	}
+	if err := m.buildClient(context.Background(), provider); err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+
+	// Build a 2 MiB body with no GetBody factory (raw bytes.Reader has no GetBody).
+	bigBody := bytes.Repeat([]byte("x"), 2*1024*1024)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, upstream.URL,
+		bytes.NewReader(bigBody))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	// Nil out GetBody to force the fallback buffering path.
+	req.GetBody = nil
+
+	resp, err := m.Client().Do(req)
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// The oversize body must not be buffered; we should get the 401 back without retry.
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 (no retry for oversize body), got %d", resp.StatusCode)
+	}
+	// Only one upstream request should have been made (no retry).
+	if n := atomic.LoadInt32(&requestCount); n != 1 {
+		t.Errorf("expected 1 upstream request (no retry), got %d", n)
+	}
+	if n := atomic.LoadInt32(&tokenFetchCount); n != 0 {
+		t.Errorf("expected 0 token fetches (retry skipped), got %d", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 7d: retryOn401Transport — oversize body reaches server intact.
+//          The replaySkip path must stitch buf+remaining so the full body is
+//          transmitted on the first (and only) attempt (Comment 1/2).
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_OversizeBody_FullTransmit(t *testing.T) {
+	initialToken := makeTestStoredToken("live-token", "live-refresh", time.Now().Add(1*time.Hour))
+	provider := newMemSecretsProvider(map[string]string{"oauth_token": initialToken})
+
+	// This server always responds 200 so there is no 401 retry; we only care that
+	// the body arrives completely.
+	var receivedLen int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, _ := io.Copy(io.Discard, r.Body)
+		receivedLen = n
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, makeTestTokenJSON("live-token", "live-refresh", 3600))
+	}))
+	defer tokenSrv.Close()
+
+	m := &HTTPClientModule{
+		moduleName: "test-rt-oversize-full",
+		cfg: HTTPClientConfig{
+			Timeout: 10 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          tokenSrv.URL + "/token",
+				ClientID:          "client-id",
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+		logger: &noopLogger{},
+	}
+	if err := m.buildClient(context.Background(), provider); err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+
+	const wantSize = 2*1024*1024 + 512 // > maxRetryBodySize (1 MiB)
+	bigBody := bytes.Repeat([]byte("z"), wantSize)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, upstream.URL,
+		bytes.NewReader(bigBody))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.GetBody = nil // force the fallback path (no GetBody)
+
+	resp, err := m.Client().Do(req)
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if receivedLen != wantSize {
+		t.Errorf("server received %d bytes, want %d (body was truncated)", receivedLen, wantSize)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 8: oauth2_refresh_token — late token arrival. Provider starts empty;
+//         first request errors; token is written to provider externally;
+//         subsequent request succeeds — no restart needed.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_LateTokenArrival(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Not called in this scenario — we inject the token directly.
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer tokenSrv.Close()
+
+	provider := newMemSecretsProvider(nil) // empty initially
+
+	m := &HTTPClientModule{
+		moduleName: "test-rt-late",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          tokenSrv.URL + "/token",
+				ClientID:          "client-id",
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+	}
+	if err := m.buildClient(context.Background(), provider); err != nil {
+		t.Fatalf("buildClient must not error on absent token: %v", err)
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	// Phase 1 — no token yet; request should error.
+	resp1, err := m.Client().Get(upstream.URL)
+	if resp1 != nil {
+		resp1.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected error before token is available")
+	}
+
+	// Simulate external token arrival (e.g. via step.secret_set).
+	arrivedToken := makeTestStoredToken("arrived-access-token", "arrived-refresh-token",
+		time.Now().Add(1*time.Hour))
+	if err := provider.Set(context.Background(), "oauth_token", arrivedToken); err != nil {
+		t.Fatalf("failed to set token in provider: %v", err)
+	}
+
+	// Phase 2 — token now present; request should succeed without restart.
+	resp, err := m.Client().Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("request after token arrival failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 after token arrival, got %d", resp.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 9: static_bearer — bearer token resolved from a secrets provider ref
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_StaticBearer_SecretRef(t *testing.T) {
+	const wantToken = "secret-bearer-token-from-ref"
+
+	// Seed a secrets provider with the bearer token value.
+	prov := newMemSecretsProvider(map[string]string{
+		"bearer": wantToken,
+	})
+
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	// Build module with bearer_token_ref (no inline bearer_token).
+	m := &HTTPClientModule{
+		moduleName: "test-bearer-ref",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type: "static_bearer",
+				// BearerToken intentionally empty — must be resolved from ref.
+				BearerTokenRef: SecretRef{
+					Provider: "test-secrets",
+					Key:      "bearer",
+				},
+			},
+		},
+	}
+
+	// Create an isolated app and register the provider under the name the ref expects.
+	app := CreateIsolatedApp(t)
+	if err := app.RegisterService("test-secrets", prov); err != nil {
+		t.Fatalf("RegisterService: %v", err)
+	}
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = m.Stop(context.Background()) }()
+
+	resp, err := m.Client().Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	want := "Bearer " + wantToken
+	if gotAuth != want {
+		t.Errorf("Authorization header: got %q, want %q", gotAuth, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 10: oauth2_refresh_token — concurrent requests, one goroutine triggers a
+//          401/refresh mid-flight.  Must be race-free under -race.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_ConcurrentRefresh(t *testing.T) {
+	const goroutines = 2
+	const requestsEach = 10
+
+	// Token endpoint: always return a fresh token.
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, makeTestTokenJSON("concurrent-access-token", "concurrent-refresh-token", 3600))
+	}))
+	defer tokenSrv.Close()
+
+	// Upstream: first request from goroutine 0 returns 401 to trigger a refresh
+	// mid-flight while goroutine 1 may already be in RoundTrip.
+	var requestIdx int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&requestIdx, 1)
+		// Force one early 401 to exercise the swap path under concurrency.
+		if n == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	// Start with a "valid" token so ReuseTokenSource doesn't need to call Token()
+	// before the first request.
+	initialToken := makeTestStoredToken("stale-access-token", "valid-refresh-token",
+		time.Now().Add(1*time.Hour))
+	provider := newMemSecretsProvider(map[string]string{
+		"oauth_token": initialToken,
+	})
+
+	m := &HTTPClientModule{
+		moduleName: "test-concurrent",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          tokenSrv.URL + "/token",
+				ClientID:          "client-id",
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+		logger: &noopLogger{},
+	}
+	if err := m.buildClient(context.Background(), provider); err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	var errCount int32
+
+	for g := range goroutines {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for range requestsEach {
+				resp, err := m.Client().Get(upstream.URL)
+				if err != nil {
+					// oauth2.RetrieveError on the very first forced-401 is acceptable —
+					// the retry path handles it; transient errors from concurrent refresh
+					// are not expected but won't fail the race detector check.
+					atomic.AddInt32(&errCount, 1)
+					continue
+				}
+				resp.Body.Close()
+				if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusUnauthorized {
+					t.Errorf("goroutine %d: unexpected status %d", id, resp.StatusCode)
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+	// errCount may be non-zero due to the deliberate first-401; we only care about
+	// the absence of data races (enforced by -race flag at the go test level).
+	t.Logf("concurrent requests completed; transport errors (expected ~1): %d", atomic.LoadInt32(&errCount))
+}
+
+// ---------------------------------------------------------------------------
+// Integration test (Task 1.13) — load module via factory, do round-trip
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_Factory_NoneAuth(t *testing.T) {
+	var requestCount int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"hello": "world"})
+	}))
+	defer upstream.Close()
+
+	cfg := map[string]any{
+		"base_url": upstream.URL,
+		"timeout":  "5s",
+		"auth": map[string]any{
+			"type": "none",
+		},
+	}
+
+	mod := HTTPClientModuleFactory("integration-test", cfg)
+	if mod == nil {
+		t.Fatal("factory returned nil module")
+	}
+
+	// Init and Start
+	app := CreateIsolatedApp(t)
+	if err := mod.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := mod.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = mod.Stop(context.Background()) }()
+
+	// Verify HTTPClient interface is satisfied.
+	var _ HTTPClient = mod // compile-time assertion
+
+	if mod.BaseURL() != upstream.URL {
+		t.Errorf("BaseURL: got %q, want %q", mod.BaseURL(), upstream.URL)
+	}
+
+	resp, err := mod.Client().Get(upstream.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if n := atomic.LoadInt32(&requestCount); n != 1 {
+		t.Errorf("expected 1 upstream request, got %d", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 11a: oauth2_refresh_token — Start() fails when token_secrets is empty.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_MissingTokenSecrets(t *testing.T) {
+	m := &HTTPClientModule{
+		moduleName: "test-missing-token-secrets",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:             "oauth2_refresh_token",
+				TokenURL:         "https://example.com/token",
+				ClientID:         "client-id",
+				ClientCredential: "client-secret", //nolint:gosec // G101: test credential
+				// TokenProviderName intentionally empty
+				TokenProviderKey: "oauth_token",
+			},
+		},
+		logger: &noopLogger{},
+	}
+	app := CreateIsolatedApp(t)
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	err := m.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected Start() to fail when token_secrets is empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "token_secrets") {
+		t.Errorf("error message should mention 'token_secrets', got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 11b: static_bearer — Start() fails when bearer token is empty after
+//           resolution.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_StaticBearer_EmptyToken_Errors(t *testing.T) {
+	m := &HTTPClientModule{
+		moduleName: "test-empty-bearer",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type: "static_bearer",
+				// BearerToken and BearerTokenRef both empty.
+			},
+		},
+		logger: &noopLogger{},
+	}
+	app := CreateIsolatedApp(t)
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	err := m.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected Start() to fail when bearer token is empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "bearer_token") {
+		t.Errorf("error message should mention 'bearer_token', got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 11c: oauth2_refresh_token — Start() fails when client_id is empty.
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_OAuth2RefreshToken_MissingClientID(t *testing.T) {
+	provider := newMemSecretsProvider(nil)
+
+	m := &HTTPClientModule{
+		moduleName: "test-missing-client-id",
+		cfg: HTTPClientConfig{
+			Timeout: 5 * time.Second,
+			Auth: HTTPClientAuthConfig{
+				Type:     "oauth2_refresh_token",
+				TokenURL: "https://example.com/token",
+				// ClientID intentionally empty
+				ClientCredential:  "client-secret", //nolint:gosec // G101: test credential
+				TokenProviderName: "mem",
+				TokenProviderKey:  "oauth_token",
+			},
+		},
+		logger: &noopLogger{},
+	}
+	app := CreateIsolatedApp(t)
+	if err := app.RegisterService("mem", provider); err != nil {
+		t.Fatalf("RegisterService: %v", err)
+	}
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	err := m.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected Start() to fail when client_id is empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "client_id") {
+		t.Errorf("error message should mention 'client_id', got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 12: RequiresServices — dynamic deps reflect auth config
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_RequiresServices_DeclaredDeps(t *testing.T) {
+	tests := []struct {
+		name     string
+		auth     HTTPClientAuthConfig
+		wantDeps []string
+	}{
+		{
+			name:     "none auth — no deps",
+			auth:     HTTPClientAuthConfig{Type: "none"},
+			wantDeps: nil,
+		},
+		{
+			name:     "static_bearer inline — no deps",
+			auth:     HTTPClientAuthConfig{Type: "static_bearer", BearerToken: "tok"},
+			wantDeps: nil,
+		},
+		{
+			name: "static_bearer via ref — declares provider",
+			auth: HTTPClientAuthConfig{
+				Type:           "static_bearer",
+				BearerTokenRef: SecretRef{Provider: "my-secrets", Key: "tok"},
+			},
+			wantDeps: []string{"my-secrets"},
+		},
+		{
+			name: "oauth2_refresh_token with token_secrets — declares provider",
+			auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          "https://example.com/token",
+				ClientID:          "id",
+				ClientCredential:  "secret",
+				TokenProviderName: "foo",
+			},
+			wantDeps: []string{"foo"},
+		},
+		{
+			name: "oauth2_refresh_token with client_id_from_secret — declares provider",
+			auth: HTTPClientAuthConfig{
+				Type:        "oauth2_refresh_token",
+				TokenURL:    "https://example.com/token",
+				ClientIDRef: SecretRef{Provider: "foo", Key: "x"},
+			},
+			wantDeps: []string{"foo"},
+		},
+		{
+			name: "all refs pointing to same provider — deduplicated",
+			auth: HTTPClientAuthConfig{
+				Type:                "oauth2_refresh_token",
+				TokenURL:            "https://example.com/token",
+				ClientIDRef:         SecretRef{Provider: "zoom-secrets", Key: "client_id"},
+				ClientCredentialRef: SecretRef{Provider: "zoom-secrets", Key: "client_secret"},
+				TokenProviderName:   "zoom-secrets",
+			},
+			wantDeps: []string{"zoom-secrets"},
+		},
+		{
+			name: "refs pointing to different providers — all declared",
+			auth: HTTPClientAuthConfig{
+				Type:                "oauth2_refresh_token",
+				TokenURL:            "https://example.com/token",
+				ClientIDRef:         SecretRef{Provider: "id-secrets", Key: "client_id"},
+				ClientCredentialRef: SecretRef{Provider: "secret-secrets", Key: "client_secret"},
+				TokenProviderName:   "token-secrets",
+			},
+			wantDeps: []string{"id-secrets", "secret-secrets", "token-secrets"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &HTTPClientModule{
+				moduleName: "test",
+				cfg:        HTTPClientConfig{Auth: tc.auth},
+			}
+			deps := m.RequiresServices()
+
+			// Build a set of declared names.
+			got := make(map[string]bool, len(deps))
+			for _, d := range deps {
+				got[d.Name] = true
+			}
+
+			// Check every expected dep is present.
+			for _, want := range tc.wantDeps {
+				if !got[want] {
+					t.Errorf("expected dep %q not found in RequiresServices()", want)
+				}
+			}
+			// Check no unexpected extra deps.
+			want := make(map[string]bool, len(tc.wantDeps))
+			for _, w := range tc.wantDeps {
+				want[w] = true
+			}
+			for _, d := range deps {
+				if !want[d.Name] {
+					t.Errorf("unexpected dep %q in RequiresServices()", d.Name)
+				}
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 13: memSecretsProvider stub guards empty keys (Comment 6)
+// ---------------------------------------------------------------------------
+
+func TestMemSecretsProvider_EmptyKeyGuard(t *testing.T) {
+	p := newMemSecretsProvider(map[string]string{"k": "v"})
+
+	if _, err := p.Get(context.Background(), ""); !errors.Is(err, secrets.ErrInvalidKey) {
+		t.Errorf("Get(\"\") want ErrInvalidKey, got %v", err)
+	}
+	if err := p.Set(context.Background(), "", "v"); !errors.Is(err, secrets.ErrInvalidKey) {
+		t.Errorf("Set(\"\") want ErrInvalidKey, got %v", err)
+	}
+	if err := p.Delete(context.Background(), ""); !errors.Is(err, secrets.ErrInvalidKey) {
+		t.Errorf("Delete(\"\") want ErrInvalidKey, got %v", err)
+	}
+}
