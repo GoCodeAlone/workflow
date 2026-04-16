@@ -1153,3 +1153,246 @@ func TestOAuthTokenCache_ExpiredEntryEviction(t *testing.T) {
 
 	close(cache.stopCh)
 }
+
+// ---------------------------------------------------------------------------
+// client: ref field tests (Task 1.15)
+// ---------------------------------------------------------------------------
+
+// fakeHTTPClient is a minimal HTTPClient implementation for testing the client: ref path.
+type fakeHTTPClient struct {
+	client  *http.Client
+	baseURL string
+}
+
+func (f *fakeHTTPClient) Client() *http.Client { return f.client }
+func (f *fakeHTTPClient) BaseURL() string      { return f.baseURL }
+
+// fakeRoundTripper injects a fixed Authorization header into every request.
+type fakeRoundTripper struct {
+	base  http.RoundTripper
+	token string
+}
+
+func (rt *fakeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	clone.Header.Set("Authorization", "Bearer "+rt.token)
+	base := rt.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(clone)
+}
+
+// mockAppWithHTTPClient returns a MockApplication with an HTTPClient service registered under name.
+func mockAppWithHTTPClient(name string, hc HTTPClient) *MockApplication {
+	app := NewMockApplication()
+	app.Services[name] = hc
+	return app
+}
+
+// TestHTTPCallStep_ClientRef_UsesReferencedTransport verifies that when client: is set the step
+// uses the transport from the referenced HTTPClient service (which injects Authorization).
+func TestHTTPCallStep_ClientRef_UsesReferencedTransport(t *testing.T) {
+	gotAuthCh := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthCh <- r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	transport := &fakeRoundTripper{base: srv.Client().Transport, token: "fake-token"}
+	hc := &fakeHTTPClient{
+		client:  &http.Client{Transport: transport},
+		baseURL: srv.URL,
+	}
+	app := mockAppWithHTTPClient("zoom-client", hc)
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("ref-transport-test", map[string]any{
+		"url":    srv.URL + "/ping",
+		"client": "zoom-client",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if result.Output["status_code"] != http.StatusOK {
+		t.Errorf("expected 200, got %v", result.Output["status_code"])
+	}
+	gotAuth := <-gotAuthCh
+	if gotAuth != "Bearer fake-token" {
+		t.Errorf("expected Authorization: Bearer fake-token, got %q", gotAuth)
+	}
+}
+
+// TestHTTPCallStep_ClientRef_ResolvesRelativeURLAgainstBaseURL verifies that a relative URL
+// ("/items") is resolved against the HTTPClient's BaseURL.
+func TestHTTPCallStep_ClientRef_ResolvesRelativeURLAgainstBaseURL(t *testing.T) {
+	gotPathCh := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPathCh <- r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	hc := &fakeHTTPClient{
+		client:  srv.Client(),
+		baseURL: srv.URL,
+	}
+	app := mockAppWithHTTPClient("zoom-client", hc)
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("ref-relurl-test", map[string]any{
+		"url":    "/items",
+		"client": "zoom-client",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	if _, err := step.Execute(context.Background(), pc); err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	gotPath := <-gotPathCh
+	if gotPath != "/items" {
+		t.Errorf("expected path /items, got %q", gotPath)
+	}
+}
+
+// TestHTTPCallStep_ClientRef_RejectsInlineOAuth2 verifies that combining client: with oauth2 or
+// auth blocks is rejected at factory time with a clear error naming both fields.
+func TestHTTPCallStep_ClientRef_RejectsInlineOAuth2(t *testing.T) {
+	factory := NewHTTPCallStepFactory()
+
+	// client + oauth2 block
+	_, err := factory("bad-oauth2", map[string]any{
+		"url":    "http://example.com/api",
+		"client": "x",
+		"oauth2": map[string]any{
+			"token_url":     "http://example.com/token",
+			"client_id":     "cid",
+			"client_secret": "csec",
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error for client + oauth2 combination")
+	}
+	if !strings.Contains(err.Error(), "client") || !strings.Contains(err.Error(), "oauth2") {
+		t.Errorf("expected error to mention both 'client' and 'oauth2', got: %v", err)
+	}
+
+	// client + auth block
+	_, err = factory("bad-auth", map[string]any{
+		"url":    "http://example.com/api",
+		"client": "x",
+		"auth": map[string]any{
+			"type":          "oauth2_client_credentials",
+			"token_url":     "http://example.com/token",
+			"client_id":     "cid",
+			"client_secret": "csec",
+		},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error for client + auth combination")
+	}
+	if !strings.Contains(err.Error(), "client") || !strings.Contains(err.Error(), "auth") {
+		t.Errorf("expected error to mention both 'client' and 'auth', got: %v", err)
+	}
+}
+
+// TestHTTPCallStep_ClientRef_MissingService verifies that Execute returns an error identifying the
+// missing service name when client: names a service not in the registry.
+func TestHTTPCallStep_ClientRef_MissingService(t *testing.T) {
+	app := NewMockApplication() // empty registry; "nonexistent" is not registered
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("missing-svc-test", map[string]any{
+		"url":    "http://example.com/api",
+		"client": "nonexistent",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory should succeed (deferred lookup): %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error for missing service")
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Errorf("expected error to name the missing service, got: %v", err)
+	}
+}
+
+// TestHTTPCallStep_ClientRef_WrongServiceType verifies that Execute returns an error when the
+// registered service does not implement HTTPClient.
+func TestHTTPCallStep_ClientRef_WrongServiceType(t *testing.T) {
+	app := NewMockApplication()
+	app.Services["bad-svc"] = struct{ Name string }{Name: "not-an-http-client"} // wrong type
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("wrong-type-test", map[string]any{
+		"url":    "http://example.com/api",
+		"client": "bad-svc",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory should succeed: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error for wrong service type")
+	}
+	if !strings.Contains(err.Error(), "bad-svc") {
+		t.Errorf("expected error to name the service, got: %v", err)
+	}
+}
+
+// TestHTTPCallStep_ClientRef_AbsoluteURLBypassesBaseURL verifies that an absolute URL is not
+// prefixed with the HTTPClient's BaseURL.
+func TestHTTPCallStep_ClientRef_AbsoluteURLBypassesBaseURL(t *testing.T) {
+	gotPathCh := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPathCh <- r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	// BaseURL points to a different (hypothetical) base; the step uses an absolute URL
+	hc := &fakeHTTPClient{
+		client:  srv.Client(),
+		baseURL: "https://should-not-be-used.example.com",
+	}
+	app := mockAppWithHTTPClient("zoom-client", hc)
+
+	factory := NewHTTPCallStepFactory()
+	// Use srv.URL (absolute) as the step URL — base URL must NOT be prepended
+	step, err := factory("abs-url-test", map[string]any{
+		"url":    srv.URL + "/absolute/path",
+		"client": "zoom-client",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(nil, nil)
+	if _, err := step.Execute(context.Background(), pc); err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	gotPath := <-gotPathCh
+	if gotPath != "/absolute/path" {
+		t.Errorf("expected path /absolute/path, got %q", gotPath)
+	}
+}

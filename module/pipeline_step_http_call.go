@@ -152,11 +152,13 @@ type HTTPCallStep struct {
 	auth       *oauthConfig
 	oauthEntry *oauthCacheEntry // shared entry from globalOAuthCache; nil when no auth configured
 	httpClient *http.Client     // timeout is enforced via the context passed to each request
+	clientRef  string           // service name for an HTTPClient registered in the service registry
+	app        modular.Application
 }
 
 // NewHTTPCallStepFactory returns a StepFactory that creates HTTPCallStep instances.
 func NewHTTPCallStepFactory() StepFactory {
-	return func(name string, config map[string]any, _ modular.Application) (PipelineStep, error) {
+	return func(name string, config map[string]any, app modular.Application) (PipelineStep, error) {
 		rawURL, _ := config["url"].(string)
 		if rawURL == "" {
 			return nil, fmt.Errorf("http_call step %q: 'url' is required", name)
@@ -167,6 +169,19 @@ func NewHTTPCallStepFactory() StepFactory {
 			method = "GET"
 		}
 
+		clientRef, _ := config["client"].(string)
+
+		// Parse-time mutual exclusion: client: ref owns authentication; combining it with
+		// inline auth or oauth2 blocks is a configuration mistake.
+		if clientRef != "" {
+			if _, hasAuth := config["auth"]; hasAuth {
+				return nil, fmt.Errorf("http_call step %q: 'client' and 'auth' are mutually exclusive; the referenced http.client module owns authentication", name)
+			}
+			if _, hasOAuth2 := config["oauth2"]; hasOAuth2 {
+				return nil, fmt.Errorf("http_call step %q: 'client' and 'oauth2' are mutually exclusive; the referenced http.client module owns authentication", name)
+			}
+		}
+
 		step := &HTTPCallStep{
 			name:       name,
 			url:        rawURL,
@@ -174,6 +189,8 @@ func NewHTTPCallStepFactory() StepFactory {
 			timeout:    30 * time.Second,
 			tmpl:       NewTemplateEngine(),
 			httpClient: http.DefaultClient,
+			clientRef:  clientRef,
+			app:        app,
 		}
 
 		if headers, ok := config["headers"].(map[string]any); ok {
@@ -469,10 +486,67 @@ func parseHTTPResponse(resp *http.Response, respBody []byte) map[string]any {
 	return output
 }
 
+// resolveClientRef looks up the HTTPClient service from the service registry when clientRef is set.
+// Returns the effective HTTPClient to use and an error if the service cannot be resolved.
+// If clientRef is empty, returns nil (caller uses s.httpClient unchanged).
+func (s *HTTPCallStep) resolveClientRef() (HTTPClient, error) {
+	if s.clientRef == "" {
+		return nil, nil
+	}
+	if s.app == nil {
+		return nil, fmt.Errorf("http_call step %q: client %q requested but no application context available", s.name, s.clientRef)
+	}
+	svc, ok := s.app.SvcRegistry()[s.clientRef]
+	if !ok {
+		return nil, fmt.Errorf("http_call step %q: client service %q not found in service registry", s.name, s.clientRef)
+	}
+	hc, ok := svc.(HTTPClient)
+	if !ok {
+		return nil, fmt.Errorf("http_call step %q: service %q does not implement HTTPClient", s.name, s.clientRef)
+	}
+	return hc, nil
+}
+
+// resolveStepURL applies base-URL resolution when the step URL is relative (no scheme) and a
+// clientRef's base URL is available. Absolute URLs pass through unchanged.
+func resolveStepURL(rawURL, baseURL string) (string, error) {
+	if baseURL == "" {
+		return rawURL, nil
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	// If the URL already has a scheme it is absolute — do not prefix with BaseURL.
+	if parsed.IsAbs() {
+		return rawURL, nil
+	}
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return "", err
+	}
+	return base.ResolveReference(parsed).String(), nil
+}
+
 // Execute performs the HTTP request and returns the response.
 func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
+
+	// Resolve client: ref if configured. This replaces s.httpClient for this execution.
+	activeClient := s.httpClient
+	var clientBaseURL string
+	if s.clientRef != "" {
+		hc, err := s.resolveClientRef()
+		if err != nil {
+			return nil, err
+		}
+		activeClient = hc.Client()
+		if activeClient == nil {
+			return nil, fmt.Errorf("http_call step %q: referenced client %q returned nil *http.Client (module may not be started)", s.name, s.clientRef)
+		}
+		clientBaseURL = hc.BaseURL()
+	}
 
 	// Obtain OAuth2 bearer token first so that instance_url is available for URL template resolution.
 	var bearerToken string
@@ -496,6 +570,14 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		return nil, fmt.Errorf("http_call step %q: failed to resolve url: %w", s.name, err)
 	}
 
+	// Apply base-URL resolution for relative URLs when a client: ref is in use.
+	if clientBaseURL != "" {
+		resolvedURL, err = resolveStepURL(resolvedURL, clientBaseURL)
+		if err != nil {
+			return nil, fmt.Errorf("http_call step %q: failed to resolve url against base: %w", s.name, err)
+		}
+	}
+
 	bodyReader, rawBody, err := s.buildBodyReader(pc)
 	if err != nil {
 		return nil, err
@@ -507,7 +589,7 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 	}
 
 	start := time.Now()
-	resp, err := s.httpClient.Do(req) //nolint:gosec // G107: URL is user-configured
+	resp, err := activeClient.Do(req) //nolint:gosec // G107: URL is user-configured
 	if err != nil {
 		return nil, fmt.Errorf("http_call step %q: request failed: %w", s.name, err)
 	}
@@ -550,7 +632,7 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		}
 
 		retryStart := time.Now()
-		retryResp, doErr := s.httpClient.Do(retryReq) //nolint:gosec // G107: URL is user-configured
+		retryResp, doErr := activeClient.Do(retryReq) //nolint:gosec // G107: URL is user-configured
 		if doErr != nil {
 			return nil, fmt.Errorf("http_call step %q: retry request failed: %w", s.name, doErr)
 		}
