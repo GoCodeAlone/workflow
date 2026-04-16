@@ -266,7 +266,7 @@ func (ts *secretsBackedTokenSource) Token() (*oauth2.Token, error) {
 
 // persistToken serialises tok and writes it to the secrets provider.
 func (ts *secretsBackedTokenSource) persistToken(tok *oauth2.Token) error {
-	b, err := json.Marshal(tok)
+	b, err := json.Marshal(tok) //nolint:gosec // G117: legitimate OAuth2 token persistence; marshaling the token is the intended purpose of this function
 	if err != nil {
 		return fmt.Errorf("http.client: marshalling token for persistence: %w", err)
 	}
