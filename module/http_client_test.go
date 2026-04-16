@@ -567,32 +567,29 @@ func TestHTTPClient_Integration_NoneAuth(t *testing.T) {
 		},
 	}
 
-	m := httpClientFactory("integration-test", cfg)
-	if m == nil {
+	mod := httpClientFactory("integration-test", cfg)
+	if mod == nil {
 		t.Fatal("factory returned nil module")
 	}
 
 	// Init and Start
 	app := CreateIsolatedApp(t)
-	if err := m.Init(app); err != nil {
+	if err := mod.Init(app); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	if err := m.Start(context.Background()); err != nil {
+	if err := mod.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	defer func() { _ = m.Stop(context.Background()) }()
+	defer func() { _ = mod.Stop(context.Background()) }()
 
-	// Cast to HTTPClient interface and exercise it.
-	hcMod, ok := m.(HTTPClient)
-	if !ok {
-		t.Fatalf("module does not implement HTTPClient interface")
+	// Verify HTTPClient interface is satisfied.
+	var _ HTTPClient = mod // compile-time assertion
+
+	if mod.BaseURL() != upstream.URL {
+		t.Errorf("BaseURL: got %q, want %q", mod.BaseURL(), upstream.URL)
 	}
 
-	if hcMod.BaseURL() != upstream.URL {
-		t.Errorf("BaseURL: got %q, want %q", hcMod.BaseURL(), upstream.URL)
-	}
-
-	resp, err := hcMod.Client().Get(upstream.URL)
+	resp, err := mod.Client().Get(upstream.URL)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
