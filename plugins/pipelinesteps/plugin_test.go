@@ -82,6 +82,7 @@ func TestStepFactories(t *testing.T) {
 		"step.parallel",
 		"step.graphql",
 		"step.secret_fetch",
+		"step.secret_set",
 		"step.branch",
 	}
 
