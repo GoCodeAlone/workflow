@@ -916,3 +916,109 @@ func TestHTTPClient_Factory_NoneAuth(t *testing.T) {
 		t.Errorf("expected 1 upstream request, got %d", n)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Test 12: RequiresServices — dynamic deps reflect auth config
+// ---------------------------------------------------------------------------
+
+func TestHTTPClient_RequiresServices_DeclaredDeps(t *testing.T) {
+	tests := []struct {
+		name     string
+		auth     HTTPClientAuthConfig
+		wantDeps []string
+	}{
+		{
+			name:     "none auth — no deps",
+			auth:     HTTPClientAuthConfig{Type: "none"},
+			wantDeps: nil,
+		},
+		{
+			name: "static_bearer inline — no deps",
+			auth: HTTPClientAuthConfig{Type: "static_bearer", BearerToken: "tok"},
+			wantDeps: nil,
+		},
+		{
+			name: "static_bearer via ref — declares provider",
+			auth: HTTPClientAuthConfig{
+				Type:           "static_bearer",
+				BearerTokenRef: SecretRef{Provider: "my-secrets", Key: "tok"},
+			},
+			wantDeps: []string{"my-secrets"},
+		},
+		{
+			name: "oauth2_refresh_token with token_secrets — declares provider",
+			auth: HTTPClientAuthConfig{
+				Type:              "oauth2_refresh_token",
+				TokenURL:          "https://example.com/token",
+				ClientID:          "id",
+				ClientCredential:  "secret",
+				TokenProviderName: "foo",
+			},
+			wantDeps: []string{"foo"},
+		},
+		{
+			name: "oauth2_refresh_token with client_id_from_secret — declares provider",
+			auth: HTTPClientAuthConfig{
+				Type:     "oauth2_refresh_token",
+				TokenURL: "https://example.com/token",
+				ClientIDRef: SecretRef{Provider: "foo", Key: "x"},
+			},
+			wantDeps: []string{"foo"},
+		},
+		{
+			name: "all refs pointing to same provider — deduplicated",
+			auth: HTTPClientAuthConfig{
+				Type:                "oauth2_refresh_token",
+				TokenURL:            "https://example.com/token",
+				ClientIDRef:         SecretRef{Provider: "zoom-secrets", Key: "client_id"},
+				ClientCredentialRef: SecretRef{Provider: "zoom-secrets", Key: "client_secret"},
+				TokenProviderName:   "zoom-secrets",
+			},
+			wantDeps: []string{"zoom-secrets"},
+		},
+		{
+			name: "refs pointing to different providers — all declared",
+			auth: HTTPClientAuthConfig{
+				Type:                "oauth2_refresh_token",
+				TokenURL:            "https://example.com/token",
+				ClientIDRef:         SecretRef{Provider: "id-secrets", Key: "client_id"},
+				ClientCredentialRef: SecretRef{Provider: "secret-secrets", Key: "client_secret"},
+				TokenProviderName:   "token-secrets",
+			},
+			wantDeps: []string{"id-secrets", "secret-secrets", "token-secrets"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &HTTPClientModule{
+				moduleName: "test",
+				cfg:        HTTPClientConfig{Auth: tc.auth},
+			}
+			deps := m.RequiresServices()
+
+			// Build a set of declared names.
+			got := make(map[string]bool, len(deps))
+			for _, d := range deps {
+				got[d.Name] = true
+			}
+
+			// Check every expected dep is present.
+			for _, want := range tc.wantDeps {
+				if !got[want] {
+					t.Errorf("expected dep %q not found in RequiresServices()", want)
+				}
+			}
+			// Check no unexpected extra deps.
+			want := make(map[string]bool, len(tc.wantDeps))
+			for _, w := range tc.wantDeps {
+				want[w] = true
+			}
+			for _, d := range deps {
+				if !want[d.Name] {
+					t.Errorf("unexpected dep %q in RequiresServices()", d.Name)
+				}
+			}
+		})
+	}
+}

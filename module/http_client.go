@@ -117,11 +117,37 @@ func (m *HTTPClientModule) ProvidesServices() []modular.ServiceProvider {
 	}
 }
 
-// RequiresServices declares runtime service dependencies.
-// oauth2_refresh_token requires the named secrets provider but we resolve it
-// lazily in Start so Init ordering is unrestricted.
+// RequiresServices declares the secrets-provider dependencies inferred from the
+// auth configuration.  By declaring them here the DI graph ensures referenced
+// provider modules are started before this module's Start() runs.
+//
+// Collected provider names:
+//   - auth.bearer_token_ref.provider
+//   - auth.client_id_from_secret.provider
+//   - auth.client_secret_from_secret.provider
+//   - auth.token_secrets (the module name, not a ref)
 func (m *HTTPClientModule) RequiresServices() []modular.ServiceDependency {
-	return nil
+	seen := map[string]bool{}
+	var deps []modular.ServiceDependency
+
+	addDep := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		deps = append(deps, modular.ServiceDependency{
+			Name:     name,
+			Required: true,
+		})
+	}
+
+	auth := m.cfg.Auth
+	addDep(auth.BearerTokenRef.Provider)
+	addDep(auth.ClientIDRef.Provider)
+	addDep(auth.ClientCredentialRef.Provider)
+	addDep(auth.TokenProviderName)
+
+	return deps
 }
 
 // Start builds the underlying *http.Client and wires authentication.
