@@ -5,6 +5,7 @@ package pipeline
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -687,6 +688,11 @@ func TemplateFuncMap() template.FuncMap {
 		"trimSpace": strings.TrimSpace,
 		// urlEncode percent-encodes a string for use in URLs.
 		"urlEncode": url.QueryEscape,
+		// b64 encodes a string as standard base64 (RFC 4648). Typical use:
+		// constructing an HTTP Basic auth header from an id:secret pair.
+		"b64": func(s string) string {
+			return base64.StdEncoding.EncodeToString([]byte(s))
+		},
 
 		// --- Math functions ---
 

@@ -361,6 +361,46 @@ func TestTemplateEngine_ResolveMap_ErrorPropagation(t *testing.T) {
 	}
 }
 
+func TestTemplateEngine_FuncB64(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"secret": "hello"}, nil)
+
+	result, err := te.Resolve(`{{ b64 .secret }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "aGVsbG8=" {
+		t.Errorf("expected b64 of 'hello' = 'aGVsbG8=', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncB64_BasicAuthHeader(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(map[string]any{"id": "client", "sec": "secret"}, nil)
+
+	result, err := te.Resolve(`Basic {{ b64 (printf "%s:%s" .id .sec) }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// "client:secret" base64-encoded is "Y2xpZW50OnNlY3JldA=="
+	if result != "Basic Y2xpZW50OnNlY3JldA==" {
+		t.Errorf("expected 'Basic Y2xpZW50OnNlY3JldA==', got %q", result)
+	}
+}
+
+func TestTemplateEngine_FuncB64_EmptyString(t *testing.T) {
+	te := NewTemplateEngine()
+	pc := NewPipelineContext(nil, nil)
+
+	result, err := te.Resolve(`{{ b64 "" }}`, pc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "" {
+		t.Errorf("expected empty string, got %q", result)
+	}
+}
+
 func TestTemplateEngine_FuncUUID(t *testing.T) {
 	te := NewTemplateEngine()
 	pc := NewPipelineContext(nil, nil)
