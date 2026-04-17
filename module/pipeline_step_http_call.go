@@ -141,19 +141,20 @@ type oauthConfig struct {
 
 // HTTPCallStep makes an HTTP request as a pipeline step.
 type HTTPCallStep struct {
-	name       string
-	url        string
-	method     string
-	headers    map[string]string
-	body       map[string]any
-	bodyFrom   string // dot-path into pc.Current or a prior step result via "steps.<name>..."; if set, the resolved value is used as the request body (strings/[]byte sent as-is, other types JSON-marshaled)
-	timeout    time.Duration
-	tmpl       *TemplateEngine
-	auth       *oauthConfig
-	oauthEntry *oauthCacheEntry // shared entry from globalOAuthCache; nil when no auth configured
-	httpClient *http.Client     // timeout is enforced via the context passed to each request
-	clientRef  string           // service name for an HTTPClient registered in the service registry
-	app        modular.Application
+	name          string
+	url           string
+	method        string
+	headers       map[string]string
+	body          map[string]any
+	bodyFrom      string // dot-path into pc.Current or a prior step result via "steps.<name>..."; if set, the resolved value is used as the request body (strings/[]byte sent as-is, other types JSON-marshaled)
+	timeout       time.Duration
+	tmpl          *TemplateEngine
+	auth          *oauthConfig
+	oauthEntry    *oauthCacheEntry // shared entry from globalOAuthCache; nil when no auth configured
+	httpClient    *http.Client     // timeout is enforced via the context passed to each request
+	clientRef     string           // service name for an HTTPClient registered in the service registry
+	errorOnStatus bool             // when true (default), non-2xx responses return an error; when false, the response is returned as normal step output so downstream steps can inspect status
+	app           modular.Application
 }
 
 // NewHTTPCallStepFactory returns a StepFactory that creates HTTPCallStep instances.
@@ -183,14 +184,19 @@ func NewHTTPCallStepFactory() StepFactory {
 		}
 
 		step := &HTTPCallStep{
-			name:       name,
-			url:        rawURL,
-			method:     method,
-			timeout:    30 * time.Second,
-			tmpl:       NewTemplateEngine(),
-			httpClient: http.DefaultClient,
-			clientRef:  clientRef,
-			app:        app,
+			name:          name,
+			url:           rawURL,
+			method:        method,
+			timeout:       30 * time.Second,
+			tmpl:          NewTemplateEngine(),
+			httpClient:    http.DefaultClient,
+			clientRef:     clientRef,
+			errorOnStatus: true,
+			app:           app,
+		}
+
+		if v, ok := config["error_on_status"].(bool); ok {
+			step.errorOnStatus = v
 		}
 
 		if headers, ok := config["headers"].(map[string]any); ok {
@@ -649,7 +655,7 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		if instanceURL := s.oauthEntry.getInstanceURL(); instanceURL != "" {
 			output["instance_url"] = instanceURL
 		}
-		if retryResp.StatusCode >= 400 {
+		if s.errorOnStatus && retryResp.StatusCode >= 400 {
 			return nil, fmt.Errorf("http_call step %q: HTTP %d: %s", s.name, retryResp.StatusCode, string(respBody))
 		}
 		return &StepResult{Output: output}, nil
@@ -663,7 +669,7 @@ func (s *HTTPCallStep) Execute(ctx context.Context, pc *PipelineContext) (*StepR
 		}
 	}
 
-	if resp.StatusCode >= 400 {
+	if s.errorOnStatus && resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("http_call step %q: HTTP %d: %s", s.name, resp.StatusCode, string(respBody))
 	}
 

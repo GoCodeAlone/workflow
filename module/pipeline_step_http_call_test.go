@@ -86,6 +86,72 @@ func TestHTTPCallStep_ErrorResponse(t *testing.T) {
 	}
 }
 
+// TestHTTPCallStep_ErrorOnStatus_FalsePreservesResponse verifies that when
+// error_on_status is false, a non-2xx response is returned as normal step
+// output (with status_code, headers, body) instead of failing the pipeline.
+// Downstream steps (step.jq, step.branch) can then inspect the status and
+// shape the final output accordingly.
+func TestHTTPCallStep_ErrorOnStatus_FalsePreservesResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"code":429,"message":"rate limit exceeded"}`))
+	}))
+	defer srv.Close()
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("rl-test", map[string]any{
+		"url":              srv.URL,
+		"error_on_status":  false,
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	step.(*HTTPCallStep).httpClient = srv.Client()
+
+	pc := NewPipelineContext(nil, nil)
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("unexpected error with error_on_status=false: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Output["status_code"] != http.StatusTooManyRequests {
+		t.Errorf("expected status_code=429, got %v", result.Output["status_code"])
+	}
+	headers, _ := result.Output["headers"].(map[string]any)
+	if headers == nil || headers["Retry-After"] != "30" {
+		t.Errorf("expected Retry-After=30 header, got headers=%v", headers)
+	}
+	body, _ := result.Output["body"].(map[string]any)
+	if body == nil || body["code"] != float64(429) {
+		t.Errorf("expected parsed JSON body with code=429, got body=%v", result.Output["body"])
+	}
+}
+
+// TestHTTPCallStep_ErrorOnStatus_DefaultErrorsOnNon2xx verifies that omitting
+// error_on_status preserves the default behavior: non-2xx returns an error.
+func TestHTTPCallStep_ErrorOnStatus_DefaultErrorsOnNon2xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	factory := NewHTTPCallStepFactory()
+	step, err := factory("default-test", map[string]any{"url": srv.URL}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	step.(*HTTPCallStep).httpClient = srv.Client()
+
+	pc := NewPipelineContext(nil, nil)
+	_, err = step.Execute(context.Background(), pc)
+	if err == nil {
+		t.Fatal("expected error for 404 response with default settings")
+	}
+}
+
 // TestHTTPCallStep_OAuth2_FetchesToken verifies that a bearer token is obtained and sent.
 func TestHTTPCallStep_OAuth2_FetchesToken(t *testing.T) {
 	var tokenRequests int32

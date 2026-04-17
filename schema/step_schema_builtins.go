@@ -80,6 +80,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "body_from", Type: FieldTypeString, Description: "Template expression to build body from step outputs"},
 			{Key: "timeout", Type: FieldTypeDuration, Description: "Request timeout duration (e.g. 30s)", DefaultValue: "30s"},
 			{Key: "auth", Type: FieldTypeMap, Description: "Authentication config (type, token, client_id, client_secret, token_url for OAuth2)"},
+			{Key: "error_on_status", Type: FieldTypeBool, Description: "When true (default), non-2xx responses fail the pipeline. When false, the response is returned as normal step output so downstream steps can inspect status_code and shape error responses.", DefaultValue: "true"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "status_code", Type: "number", Description: "HTTP response status code (e.g. 200)"},
