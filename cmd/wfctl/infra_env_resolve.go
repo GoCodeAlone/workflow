@@ -12,11 +12,10 @@ import (
 // writeEnvResolvedConfig loads cfgFile (honoring imports:), resolves every
 // module for envName (ResolveForEnv is called on ALL module types so that
 // environments[envName]: null is honored for iac.*, cloud.account, etc.),
-// applies top-level environments[env] defaults, and writes the result to a
-// temp file in the same directory as cfgFile, preserving all top-level
-// sections (secrets, secretStores, infra, environments, ...) so that
-// bootstrap and pipeline commands have full context. The caller must
-// defer os.Remove(tmpPath).
+// applies top-level environments[env] defaults, and writes the entire
+// WorkflowConfig back to a temp file — preserving secrets, secretStores,
+// infra, environments, ci, workflows, pipelines, etc. so that bootstrap and
+// pipeline commands have full context. The caller must defer os.Remove(tmpPath).
 func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error) {
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
@@ -28,17 +27,17 @@ func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error)
 		topEnv = cfg.Environments[envName]
 	}
 
-	var resolvedModules []map[string]any
+	// Resolve modules for envName. ResolveForEnv is called on ALL module types
+	// (not just infra.*) so environments[envName]: null is honored for iac.state,
+	// cloud.account, etc. Infra/platform defaults from topEnv are applied here.
+	var resolved []config.ModuleConfig
 	for i := range cfg.Modules {
 		m := &cfg.Modules[i]
-		// Call ResolveForEnv on ALL module types (not just infra.*) so that
-		// environments[envName]: null is honored for iac.state, cloud.account, etc.
 		rm, ok := m.ResolveForEnv(envName)
 		if !ok {
-			continue // skip this module for envName (explicit null)
+			continue
 		}
 		if topEnv != nil && isInfraType(rm.Type) {
-			// Apply top-level defaults only to infra/platform modules.
 			if rm.Region == "" {
 				rm.Region = topEnv.Region
 				if rm.Region != "" {
@@ -74,37 +73,25 @@ func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error)
 				rm.Config["env_vars"] = ev
 			}
 		}
-		resolvedModules = append(resolvedModules, resolvedModuleToMap(rm))
+		// Rebuild as ModuleConfig preserving DependsOn and Branches from the
+		// original (ResolvedModule doesn't carry them).
+		resolved = append(resolved, config.ModuleConfig{
+			Name:      rm.Name,
+			Type:      rm.Type,
+			Config:    rm.Config,
+			DependsOn: m.DependsOn,
+			Branches:  m.Branches,
+		})
 	}
 
-	// Build output preserving all top-level sections so pipeline and bootstrap
-	// commands have full context (secrets, secretStores, infra, environments, ...).
-	out := map[string]any{
-		"modules": resolvedModules,
-	}
-	if cfg.Secrets != nil {
-		out["secrets"] = cfg.Secrets
-	}
-	if len(cfg.SecretStores) > 0 {
-		out["secretStores"] = cfg.SecretStores
-	}
-	if cfg.Infrastructure != nil {
-		out["infrastructure"] = cfg.Infrastructure
-	}
-	if len(cfg.Environments) > 0 {
-		out["environments"] = cfg.Environments
-	}
-	if cfg.CI != nil {
-		out["ci"] = cfg.CI
-	}
-	if len(cfg.Workflows) > 0 {
-		out["workflows"] = cfg.Workflows
-	}
-	if len(cfg.Pipelines) > 0 {
-		out["pipelines"] = cfg.Pipelines
-	}
+	// Replace modules with the env-resolved list; clear Imports so the temp
+	// file doesn't try to re-import files that may resolve relative to a
+	// different directory.
+	cfg.Modules = resolved
+	cfg.Imports = nil
+	cfg.ConfigDir = "" // internal field, not serialised
 
-	data, err := yaml.Marshal(out)
+	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return "", fmt.Errorf("marshal resolved config: %w", err)
 	}
@@ -121,15 +108,4 @@ func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error)
 	}
 	f.Close()
 	return f.Name(), nil
-}
-
-func resolvedModuleToMap(r *config.ResolvedModule) map[string]any {
-	out := map[string]any{
-		"name": r.Name,
-		"type": r.Type,
-	}
-	if len(r.Config) > 0 {
-		out["config"] = r.Config
-	}
-	return out
 }

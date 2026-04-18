@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/GoCodeAlone/workflow/config"
 )
 
 // infraEnvWireFixture writes a config with two-env setup where staging omits
@@ -131,5 +133,95 @@ func TestInfraApply_EnvFlagProducesResolvedConfig(t *testing.T) {
 		if r.Name == "bmw-dns" {
 			t.Fatal("apply with --env staging should not include bmw-dns")
 		}
+	}
+}
+
+// TestWriteEnvResolvedConfig_PreservesTopLevelSections verifies that secrets,
+// secretStores, and other non-module sections survive in the temp file.
+func TestWriteEnvResolvedConfig_PreservesTopLevelSections(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `secretStores:
+  my-store:
+    provider: env
+secrets:
+  defaultStore: my-store
+  entries:
+    - name: DB_PASS
+environments:
+  staging:
+    provider: digitalocean
+    region: nyc3
+    secretsStoreOverride: my-store
+  prod:
+    provider: digitalocean
+    region: nyc1
+modules:
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: filesystem
+    environments:
+      staging:
+        config:
+          prefix: staging/
+      prod:
+        config:
+          prefix: prod/
+  - name: bmw-database
+    type: infra.database
+    config:
+      size: small
+    environments:
+      staging:
+        config:
+          size: small
+      prod:
+        config:
+          size: large
+  - name: bmw-dns
+    type: infra.dns
+    environments:
+      staging: null
+      prod:
+        config:
+          domain: example.com
+`
+	path := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tmp, err := writeEnvResolvedConfig(path, "staging")
+	if err != nil {
+		t.Fatalf("writeEnvResolvedConfig: %v", err)
+	}
+	defer os.Remove(tmp)
+
+	// Re-parse using planResourcesForEnv to check modules.
+	resources, resErr := planResourcesForEnv(tmp, "")
+	if resErr != nil {
+		t.Fatalf("planResourcesForEnv on temp file: %v", resErr)
+	}
+
+	// bmw-dns should be excluded (staging: null).
+	for _, r := range resources {
+		if r.Name == "bmw-dns" {
+			t.Fatal("staging temp config should not contain bmw-dns")
+		}
+	}
+
+	// Verify secrets section is preserved by loading the temp file with LoadFromFile.
+	tmpCfg, cfgErr := config.LoadFromFile(tmp)
+	if cfgErr != nil {
+		t.Fatalf("load temp file: %v", cfgErr)
+	}
+	if tmpCfg.Secrets == nil {
+		t.Fatal("secrets section must be preserved in temp file")
+	}
+	if tmpCfg.Secrets.DefaultStore != "my-store" {
+		t.Fatalf("want defaultStore=my-store, got %q", tmpCfg.Secrets.DefaultStore)
+	}
+	if len(tmpCfg.SecretStores) == 0 {
+		t.Fatal("secretStores section must be preserved in temp file")
 	}
 }
