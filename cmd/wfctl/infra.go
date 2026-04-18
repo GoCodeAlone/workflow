@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
 	"github.com/GoCodeAlone/workflow/secrets"
@@ -102,28 +104,21 @@ type infraModuleEntry struct {
 	Config map[string]any `yaml:"config"`
 }
 
-// discoverInfraModules parses the config and finds IaC-related modules.
+// discoverInfraModules parses the config (resolving imports) and finds IaC-related modules.
 func discoverInfraModules(cfgFile string) (iacState []infraModuleEntry, platforms []infraModuleEntry, cloudAccounts []infraModuleEntry, err error) {
-	data, readErr := os.ReadFile(cfgFile)
-	if readErr != nil {
-		return nil, nil, nil, fmt.Errorf("read %s: %w", cfgFile, readErr)
+	cfg, loadErr := config.LoadFromFile(cfgFile)
+	if loadErr != nil {
+		return nil, nil, nil, fmt.Errorf("load %s: %w", cfgFile, loadErr)
 	}
-
-	var parsed struct {
-		Modules []infraModuleEntry `yaml:"modules"`
-	}
-	if yamlErr := yaml.Unmarshal(data, &parsed); yamlErr != nil {
-		return nil, nil, nil, fmt.Errorf("parse %s: %w", cfgFile, yamlErr)
-	}
-
-	for _, m := range parsed.Modules {
+	for _, m := range cfg.Modules {
+		entry := infraModuleEntry{Name: m.Name, Type: m.Type, Config: m.Config}
 		switch {
 		case m.Type == "iac.state":
-			iacState = append(iacState, m)
+			iacState = append(iacState, entry)
 		case m.Type == "cloud.account":
-			cloudAccounts = append(cloudAccounts, m)
-		case strings.HasPrefix(m.Type, "platform."):
-			platforms = append(platforms, m)
+			cloudAccounts = append(cloudAccounts, entry)
+		case strings.HasPrefix(m.Type, "platform.") || strings.HasPrefix(m.Type, "infra."):
+			platforms = append(platforms, entry)
 		}
 	}
 	return
