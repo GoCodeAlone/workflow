@@ -693,6 +693,14 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Stateful:   false,
 			ConfigKeys: []string{"trivy", "semgrep", "snyk"},
 		},
+
+		// mcp plugin
+		"mcp.registry": {
+			Type:       "mcp.registry",
+			Plugin:     "mcp",
+			Stateful:   false,
+			ConfigKeys: []string{"log_on_init", "expose_admin_api", "audit_tool_calls"},
+		},
 	}
 	// Include any types registered dynamically (e.g. from external plugins loaded via LoadPluginTypesFromDir).
 	for _, t := range schema.KnownModuleTypes() {
