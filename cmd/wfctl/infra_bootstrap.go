@@ -18,6 +18,7 @@ func runInfraBootstrap(args []string) error {
 	var configFile string
 	fs.StringVar(&configFile, "config", "", "Config file")
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
+	fs.String("env", "", "Environment name (resolves per-module environments: overrides)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
