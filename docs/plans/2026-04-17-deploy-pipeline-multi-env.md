@@ -12,6 +12,8 @@
 
 **Gap called out during planning:** `wfctl infra` parses `modules:` using `ModuleConfig` (no Environments field), while `InfraResourceConfig` (which has `Environments`) lives under `infrastructure.resources:` and is never read. Canonical path: add `Environments` to `ModuleConfig`; leave `InfraResourceConfig` alone for now (or wire it as an alternative schema in a follow-up).
 
+**Design-to-plan divergence ratified:** The design doc says `ResolveForEnv` lives on `InfraResourceConfig` returning `*ResolvedResource`. Because `wfctl infra` actually reads `modules:` (`ModuleConfig`), this plan places `ResolveForEnv` on `ModuleConfig` returning `*ResolvedModule`. `InfraResourceConfig` wiring is explicitly deferred to a follow-up — documented in Task 11's CHANGELOG.
+
 ---
 
 ## Phase 1 — Engine multi-env in `workflow`
@@ -216,6 +218,24 @@ func TestResolveForEnv_EnvNotListed_UsesTopLevel(t *testing.T) {
 		t.Fatalf("want size=small, got %v", resolved.Config["size"])
 	}
 }
+
+func TestResolveForEnv_RegionPopulatedFromConfig(t *testing.T) {
+	m := &ModuleConfig{
+		Name:   "db",
+		Type:   "infra.database",
+		Config: map[string]any{"size": "small"},
+		Environments: map[string]*InfraEnvironmentResolution{
+			"prod": {Config: map[string]any{"region": "nyc1"}},
+		},
+	}
+	resolved, ok := m.ResolveForEnv("prod")
+	if !ok {
+		t.Fatal("want ok=true")
+	}
+	if resolved.Region != "nyc1" {
+		t.Fatalf("want region=nyc1 populated from resolved config, got %q", resolved.Region)
+	}
+}
 ```
 
 **Step 2: Run tests, confirm failure**
@@ -238,6 +258,7 @@ type ResolvedModule struct {
 	Name     string
 	Type     string
 	Provider string
+	Region   string
 	Config   map[string]any
 }
 
@@ -274,6 +295,11 @@ func (m *ModuleConfig) ResolveForEnv(envName string) (*ResolvedModule, bool) {
 			resolved.Config = map[string]any{}
 		}
 		resolved.Config[k] = v
+	}
+	// Region is read from the module's own Config (resolved.Config["region"]) if present;
+	// top-level environments[envName].Region defaulting is applied by the caller (planResourcesForEnv).
+	if r, ok := resolved.Config["region"].(string); ok {
+		resolved.Region = r
 	}
 	return resolved, true
 }
@@ -606,13 +632,13 @@ git add cmd/wfctl/infra.go cmd/wfctl/infra_env_flag_test.go
 git commit -m "wfctl infra plan: add --env flag with per-module resolution"
 ```
 
-### Task 7: Wire `--env` into `apply`, `destroy`, `status`, `drift`, `bootstrap`
+### Task 7: Wire `--env` into `apply`, `destroy`, `status`, `drift`, `bootstrap`, `import`
 
 **Files:**
-- Modify: `cmd/wfctl/infra.go` — each of `runInfraApply`, `runInfraDestroy`, `runInfraStatus`, `runInfraDrift`
+- Modify: `cmd/wfctl/infra.go` — each of `runInfraApply`, `runInfraDestroy`, `runInfraStatus`, `runInfraDrift`, `runInfraImport`
 - Modify: `cmd/wfctl/infra_bootstrap.go` — `runInfraBootstrap`
 
-**Step 1: For each command, add the `envName` flag** — follow Task 6's pattern exactly.
+**Step 1: For each command, add the `envName` flag** — follow Task 6's pattern exactly. All seven subcommands (`plan`, `apply`, `bootstrap`, `destroy`, `status`, `drift`, `import`) must accept `--env` for a consistent surface.
 
 **Step 2: Write an integration test** per command confirming that the resolved resource list honors `--env`.
 
@@ -624,7 +650,7 @@ package main
 import "testing"
 
 func TestInfraCommands_AllHonorEnvFlag(t *testing.T) {
-	cmds := []string{"plan", "apply", "status", "drift", "bootstrap", "destroy"}
+	cmds := []string{"plan", "apply", "status", "drift", "bootstrap", "destroy", "import"}
 	for _, cmd := range cmds {
 		t.Run(cmd, func(t *testing.T) {
 			fs := newInfraFlagSet(cmd)
@@ -653,12 +679,12 @@ git add cmd/wfctl/infra.go cmd/wfctl/infra_bootstrap.go cmd/wfctl/infra_env_inte
 git commit -m "wfctl infra: add --env to apply/destroy/status/drift/bootstrap"
 ```
 
-### Task 8: Inject `environments[env].envVars` into provisioned containers
+### Task 8: Inject `environments[env].envVars` + default region/provider from top-level
 
 **Files:**
-- Modify: `cmd/wfctl/infra.go` — wherever container resources are rendered (search `http_port|container_service|dockerImage`)
+- Modify: `cmd/wfctl/infra.go` — `planResourcesForEnv` and wherever container resources are rendered (search `http_port|container_service|dockerImage`)
 
-**Step 1: Write a test**
+**Step 1: Write tests**
 
 Create `cmd/wfctl/infra_env_vars_test.go`:
 
@@ -676,10 +702,12 @@ func TestInfraPlan_MergesTopLevelEnvVars(t *testing.T) {
 	cfg := `environments:
   staging:
     provider: digitalocean
+    region: nyc3
     envVars:
       LOG_LEVEL: debug
   prod:
     provider: digitalocean
+    region: nyc1
     envVars:
       LOG_LEVEL: info
 modules:
@@ -698,23 +726,140 @@ modules:
 	if err != nil {
 		t.Fatal(err)
 	}
-	var app *struct{ envVars map[string]string }
-	_ = app
-	// Assert LOG_LEVEL=info was merged into app's env_vars and PORT preserved.
-	// (fill in with actual shape once render path is wired.)
-	_ = resolved
+	// Find the app resource
+	var app *ResolvedModule
+	for _, r := range resolved {
+		if r.Name == "app" {
+			app = r
+			break
+		}
+	}
+	if app == nil {
+		t.Fatal("app resource not found")
+	}
+	envVars := app.Config["env_vars"].(map[string]any)
+	if envVars["LOG_LEVEL"] != "info" {
+		t.Fatalf("want LOG_LEVEL=info merged from top-level, got %v", envVars["LOG_LEVEL"])
+	}
+	if envVars["PORT"] != "8080" {
+		t.Fatalf("want PORT=8080 preserved from module, got %v", envVars["PORT"])
+	}
+}
+
+func TestInfraPlan_DefaultsRegionFromTopLevel(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `environments:
+  prod:
+    provider: digitalocean
+    region: nyc1
+modules:
+  - name: db
+    type: infra.database
+    config:
+      size: large
+`
+	path := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := planResourcesForEnv(path, "prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved[0].Region != "nyc1" {
+		t.Fatalf("want region=nyc1 defaulted from top-level environments[prod], got %q", resolved[0].Region)
+	}
+}
+
+func TestInfraPlan_ModuleRegionWinsOverTopLevel(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `environments:
+  prod:
+    provider: digitalocean
+    region: nyc1
+modules:
+  - name: db
+    type: infra.database
+    config:
+      size: large
+      region: sfo3
+`
+	path := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := planResourcesForEnv(path, "prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved[0].Region != "sfo3" {
+		t.Fatalf("want module's own region=sfo3 to win, got %q", resolved[0].Region)
+	}
 }
 ```
 
-**Step 2: Implement the merge** — when resolving each module, if the top-level `environments[envName].envVars` is set and the module is a container/service type, merge keys into `resolved.Config["env_vars"]` (module wins on conflict).
+**Step 2: Extend `planResourcesForEnv` to apply top-level defaults**
 
-**Step 3: Run test, pass.**
+```go
+func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error) {
+	cfg, err := config.LoadFromFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("load %s: %w", path, err)
+	}
+	var topEnv *config.EnvironmentConfig
+	if envName != "" && cfg.Environments != nil {
+		topEnv = cfg.Environments[envName]
+	}
+	var out []*config.ResolvedModule
+	for i := range cfg.Modules {
+		m := &cfg.Modules[i]
+		resolved, ok := m.ResolveForEnv(envName)
+		if !ok {
+			continue
+		}
+		if topEnv != nil {
+			// Default region/provider from top-level when module omits its own.
+			if resolved.Region == "" {
+				resolved.Region = topEnv.Region
+			}
+			if resolved.Provider == "" {
+				resolved.Provider = topEnv.Provider
+			}
+			// Merge envVars into container resources; module keys win.
+			if isContainerType(resolved.Type) && len(topEnv.EnvVars) > 0 {
+				ev, _ := resolved.Config["env_vars"].(map[string]any)
+				if ev == nil {
+					ev = map[string]any{}
+				}
+				for k, v := range topEnv.EnvVars {
+					if _, present := ev[k]; !present {
+						ev[k] = v
+					}
+				}
+				resolved.Config["env_vars"] = ev
+			}
+		}
+		out = append(out, resolved)
+	}
+	return out, nil
+}
+
+func isContainerType(t string) bool {
+	return t == "infra.container_service" || t == "platform.do_app"
+}
+```
+
+**Step 3: Run tests, pass.**
+
+```
+go test ./cmd/wfctl/ -run "TestInfraPlan_(MergesTopLevelEnvVars|DefaultsRegion|ModuleRegionWins)" -v
+```
 
 **Step 4: Commit**
 
 ```
 git add cmd/wfctl/infra.go cmd/wfctl/infra_env_vars_test.go
-git commit -m "wfctl infra: merge top-level environments[].envVars into container resources"
+git commit -m "wfctl infra: default region/provider + merge envVars from top-level environments[env]"
 ```
 
 ### Task 9: Wire `environments[env].secretsStoreOverride` into infra secret injection
@@ -750,10 +895,14 @@ git commit -m "wfctl infra: merge top-level environments[].envVars into containe
 
 ```markdown
 ### Added
-- `wfctl infra plan|apply|bootstrap|destroy|status|drift` now accept `--env <name>`.
+- `wfctl infra plan|apply|bootstrap|destroy|status|drift|import` now accept `--env <name>`.
 - Module configs support an `environments:` block for per-environment resolution (provider/config/image). Set an env value to `null` to skip the module in that env.
-- Top-level `environments:` `envVars` are merged into container resources during infra apply.
+- Top-level `environments:` `envVars` are merged into container resources during infra apply; `region` and `provider` default from `environments[env]` when a module omits them.
 - `wfctl infra` now honors `imports:` (consistent with every other wfctl subcommand).
+
+### Notes
+- `ci.deploy.environments[].requireApproval` continues to work via `wfctl ci init` emitting `environment: <name>` in generated GitHub Actions. No engine change needed — GitHub's native environment approval UI handles the gate.
+- `InfraResourceConfig` (under `infrastructure.resources:`) already had an `Environments` field but was never wired to `wfctl infra` (which parses `modules:`). Multi-env is now wired to `ModuleConfig`; `InfraResourceConfig` consumption is deferred to a follow-up and `infrastructure.resources:` remains unused by wfctl infra commands in this release.
 
 ### Fixed
 - `ModuleConfig` previously lacked an `Environments` field; it was defined on the unused `InfraResourceConfig` type. Multi-env is now wired to the schema `wfctl infra` actually parses.
@@ -1100,6 +1249,11 @@ modules:
       tier: basic
       region: nyc3
       provider: do-provider
+      # Retention: DOCR Basic tier has 5 GB storage. Auto-prune keeps the
+      # 10 most recent tags per repo and deletes untagged manifests older than 7d.
+      retention_policy:
+        keep_latest: 10
+        untagged_ttl: 168h
 
   - name: bmw-database
     type: infra.database
@@ -1123,7 +1277,6 @@ modules:
   - name: bmw-app
     type: infra.container_service
     config:
-      image: registry.digitalocean.com/bmw-registry/buymywishlist:latest
       http_port: 8080
       provider: do-provider
       env_vars:
@@ -1134,6 +1287,8 @@ modules:
       staging:
         config:
           name: bmw-staging
+          # IMAGE_SHA is injected by the deploy-staging job from the build-image job output
+          image: "registry.digitalocean.com/bmw-registry/buymywishlist:${IMAGE_SHA}"
           instance_count: 1
           region: nyc3
           env_vars:
@@ -1141,6 +1296,7 @@ modules:
       prod:
         config:
           name: buymywishlist
+          image: "registry.digitalocean.com/bmw-registry/buymywishlist:${IMAGE_SHA}"
           instance_count: 2
           region: nyc1
           env_vars:
@@ -1246,7 +1402,7 @@ Insert a `build-image` job between `build-test` and `deploy-staging`:
         run: |
           cp -r ui/dist dist
           cp bmwplugin/plugin.json plugin.json
-      - name: Build and push image
+      - name: Build and push image to DOCR
         id: meta
         run: |
           doctl registry login
@@ -1255,6 +1411,20 @@ Insert a `build-image` job between `build-test` and `deploy-staging`:
           docker push registry.digitalocean.com/bmw-registry/buymywishlist:${{ github.sha }}
           docker push registry.digitalocean.com/bmw-registry/buymywishlist:latest
           echo "sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+      # GHCR parallel publish — kept for one release cycle as rollback path.
+      # Remove after two clean prod deploys via DOCR (tracked in docs/plans GHCR sunset).
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push image to GHCR (rollback fallback)
+        run: |
+          docker tag registry.digitalocean.com/bmw-registry/buymywishlist:${{ github.sha }} ghcr.io/gocodealone/buymywishlist:${{ github.sha }}
+          docker tag registry.digitalocean.com/bmw-registry/buymywishlist:${{ github.sha }} ghcr.io/gocodealone/buymywishlist:latest
+          docker push ghcr.io/gocodealone/buymywishlist:${{ github.sha }}
+          docker push ghcr.io/gocodealone/buymywishlist:latest
 ```
 
 Make `deploy-staging` and `deploy-prod` depend on `build-image`:
@@ -1284,7 +1454,15 @@ Both deploy jobs run:
 git rm .github/workflows/infra.yml
 ```
 
-**Step 4: Commit**
+**Step 4: Confirm ci.yml and release.yml are untouched**
+
+```
+git diff --stat .github/workflows/ci.yml .github/workflows/release.yml
+```
+
+Expected: no output (both files stay on self-hosted runners; only `deploy.yml` migrates to `ubuntu-latest`).
+
+**Step 5: Commit**
 
 ```
 git add .github/workflows/deploy.yml
