@@ -71,11 +71,12 @@ func IsApplicationConfig(data []byte) bool {
 
 // ModuleConfig represents a single module configuration
 type ModuleConfig struct {
-	Name      string            `json:"name" yaml:"name"`
-	Type      string            `json:"type" yaml:"type"`
-	Config    map[string]any    `json:"config,omitempty" yaml:"config,omitempty"`
-	DependsOn []string          `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
-	Branches  map[string]string `json:"branches,omitempty" yaml:"branches,omitempty"`
+	Name         string                                 `json:"name" yaml:"name"`
+	Type         string                                 `json:"type" yaml:"type"`
+	Config       map[string]any                         `json:"config,omitempty" yaml:"config,omitempty"`
+	DependsOn    []string                               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
+	Branches     map[string]string                      `json:"branches,omitempty" yaml:"branches,omitempty"`
+	Environments map[string]*InfraEnvironmentResolution `json:"environments,omitempty" yaml:"environments,omitempty"`
 }
 
 // RequiresConfig declares what capabilities and plugins a workflow needs.
@@ -122,26 +123,26 @@ type PluginsConfig struct {
 
 // WorkflowConfig represents the overall configuration for the workflow engine
 type WorkflowConfig struct {
-	Imports        []string              `json:"imports,omitempty" yaml:"imports,omitempty"`
-	Modules        []ModuleConfig        `json:"modules" yaml:"modules"`
-	Workflows      map[string]any        `json:"workflows" yaml:"workflows"`
-	Triggers       map[string]any        `json:"triggers" yaml:"triggers"`
-	Pipelines      map[string]any        `json:"pipelines,omitempty" yaml:"pipelines,omitempty"`
-	Platform       map[string]any        `json:"platform,omitempty" yaml:"platform,omitempty"`
-	Requires       *RequiresConfig       `json:"requires,omitempty" yaml:"requires,omitempty"`
-	Plugins        *PluginsConfig        `json:"plugins,omitempty" yaml:"plugins,omitempty"`
-	Sidecars       []SidecarConfig       `json:"sidecars,omitempty" yaml:"sidecars,omitempty"`
-	Infrastructure *InfrastructureConfig           `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
-	Engine         *EngineConfig                   `json:"engine,omitempty" yaml:"engine,omitempty"`
-	CI             *CIConfig                       `json:"ci,omitempty" yaml:"ci,omitempty"`
-	Environments   map[string]*EnvironmentConfig   `json:"environments,omitempty" yaml:"environments,omitempty"`
-	Secrets        *SecretsConfig                  `json:"secrets,omitempty" yaml:"secrets,omitempty"`
-	SecretStores   map[string]*SecretStoreConfig   `json:"secretStores,omitempty" yaml:"secretStores,omitempty"`
-	Services       map[string]*ServiceConfig       `json:"services,omitempty" yaml:"services,omitempty"`
-	Mesh           *MeshConfig                     `json:"mesh,omitempty" yaml:"mesh,omitempty"`
-	Networking     *NetworkingConfig               `json:"networking,omitempty" yaml:"networking,omitempty"`
-	Security       *SecurityConfig                 `json:"security,omitempty" yaml:"security,omitempty"`
-	ConfigDir      string                          `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
+	Imports        []string                      `json:"imports,omitempty" yaml:"imports,omitempty"`
+	Modules        []ModuleConfig                `json:"modules" yaml:"modules"`
+	Workflows      map[string]any                `json:"workflows" yaml:"workflows"`
+	Triggers       map[string]any                `json:"triggers" yaml:"triggers"`
+	Pipelines      map[string]any                `json:"pipelines,omitempty" yaml:"pipelines,omitempty"`
+	Platform       map[string]any                `json:"platform,omitempty" yaml:"platform,omitempty"`
+	Requires       *RequiresConfig               `json:"requires,omitempty" yaml:"requires,omitempty"`
+	Plugins        *PluginsConfig                `json:"plugins,omitempty" yaml:"plugins,omitempty"`
+	Sidecars       []SidecarConfig               `json:"sidecars,omitempty" yaml:"sidecars,omitempty"`
+	Infrastructure *InfrastructureConfig         `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
+	Engine         *EngineConfig                 `json:"engine,omitempty" yaml:"engine,omitempty"`
+	CI             *CIConfig                     `json:"ci,omitempty" yaml:"ci,omitempty"`
+	Environments   map[string]*EnvironmentConfig `json:"environments,omitempty" yaml:"environments,omitempty"`
+	Secrets        *SecretsConfig                `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	SecretStores   map[string]*SecretStoreConfig `json:"secretStores,omitempty" yaml:"secretStores,omitempty"`
+	Services       map[string]*ServiceConfig     `json:"services,omitempty" yaml:"services,omitempty"`
+	Mesh           *MeshConfig                   `json:"mesh,omitempty" yaml:"mesh,omitempty"`
+	Networking     *NetworkingConfig             `json:"networking,omitempty" yaml:"networking,omitempty"`
+	Security       *SecurityConfig               `json:"security,omitempty" yaml:"security,omitempty"`
+	ConfigDir      string                        `json:"-" yaml:"-"` // directory containing the config file, used for relative path resolution
 }
 
 // EngineConfig holds engine-level runtime settings.
