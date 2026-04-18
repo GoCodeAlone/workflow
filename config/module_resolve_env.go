@@ -40,10 +40,8 @@ func (m *ModuleConfig) ResolveForEnv(envName string) (*ResolvedModule, bool) {
 		if resolved.Config == nil {
 			resolved.Config = map[string]any{}
 		}
-		// Write into Config so ResourceSpec construction sees it.
-		if _, present := resolved.Config["provider"]; !present {
-			resolved.Config["provider"] = envRes.Provider
-		}
+		// Override always wins — env-level provider beats base config provider.
+		resolved.Config["provider"] = envRes.Provider
 	}
 
 	// Deep-merge env overrides so nested maps (e.g. env_vars) are merged

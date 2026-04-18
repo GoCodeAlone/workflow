@@ -173,3 +173,24 @@ func TestResolveForEnv_ProviderWrittenToConfig(t *testing.T) {
 		t.Fatalf("want provider written to Config map, got %v", resolved.Config["provider"])
 	}
 }
+
+func TestResolveForEnv_ProviderOverrideWins(t *testing.T) {
+	m := &ModuleConfig{
+		Name:   "db",
+		Type:   "infra.database",
+		Config: map[string]any{"provider": "do"},
+		Environments: map[string]*InfraEnvironmentResolution{
+			"prod": {Provider: "aws"},
+		},
+	}
+	resolved, ok := m.ResolveForEnv("prod")
+	if !ok {
+		t.Fatal("want ok=true")
+	}
+	if resolved.Config["provider"] != "aws" {
+		t.Fatalf("env provider override should win over base Config, got %v", resolved.Config["provider"])
+	}
+	if resolved.Provider != "aws" {
+		t.Fatalf("want Provider=aws, got %q", resolved.Provider)
+	}
+}
