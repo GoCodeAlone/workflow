@@ -762,7 +762,8 @@ func runInfraImport(args []string) error {
 	fs.StringVar(&resTypeVal, "type", "", "Abstract resource type (e.g. infra.database)")
 	fs.StringVar(&resTypeVal, "t", "", "Abstract resource type (short for --type)")
 	fs.StringVar(&cloudIDVal, "id", "", "Cloud-provider resource ID")
-	fs.String("env", "", "Environment name (resolves per-module environments: overrides)")
+	var envName string
+	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
 	provider := &providerVal
 	resType := &resTypeVal
 	cloudID := &cloudIDVal
@@ -850,8 +851,18 @@ func runInfraApply(args []string) error {
 		}
 	}
 
+	pipelineCfg := cfgFile
+	if envName != "" {
+		tmp, resErr := writeEnvResolvedConfig(cfgFile, envName)
+		if resErr != nil {
+			return resErr
+		}
+		defer os.Remove(tmp)
+		pipelineCfg = tmp
+	}
+
 	fmt.Printf("Applying infrastructure from %s...\n", cfgFile)
-	return runPipelineRun([]string{"-c", cfgFile, "-p", "apply"})
+	return runPipelineRun([]string{"-c", pipelineCfg, "-p", "apply"})
 }
 
 func runInfraStatus(args []string) error {
@@ -859,7 +870,8 @@ func runInfraStatus(args []string) error {
 	var configFile string
 	fs.StringVar(&configFile, "config", "", "Config file")
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
-	fs.String("env", "", "Environment name (resolves per-module environments: overrides)")
+	var envName string
+	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -869,8 +881,18 @@ func runInfraStatus(args []string) error {
 		return err
 	}
 
+	pipelineCfg := cfgFile
+	if envName != "" {
+		tmp, resErr := writeEnvResolvedConfig(cfgFile, envName)
+		if resErr != nil {
+			return resErr
+		}
+		defer os.Remove(tmp)
+		pipelineCfg = tmp
+	}
+
 	fmt.Printf("Infrastructure status from %s...\n", cfgFile)
-	return runPipelineRun([]string{"-c", cfgFile, "-p", "status"})
+	return runPipelineRun([]string{"-c", pipelineCfg, "-p", "status"})
 }
 
 func runInfraDrift(args []string) error {
@@ -878,7 +900,8 @@ func runInfraDrift(args []string) error {
 	var configFile string
 	fs.StringVar(&configFile, "config", "", "Config file")
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
-	fs.String("env", "", "Environment name (resolves per-module environments: overrides)")
+	var envName string
+	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -888,8 +911,18 @@ func runInfraDrift(args []string) error {
 		return err
 	}
 
+	pipelineCfg := cfgFile
+	if envName != "" {
+		tmp, resErr := writeEnvResolvedConfig(cfgFile, envName)
+		if resErr != nil {
+			return resErr
+		}
+		defer os.Remove(tmp)
+		pipelineCfg = tmp
+	}
+
 	fmt.Printf("Detecting drift for %s...\n", cfgFile)
-	return runPipelineRun([]string{"-c", cfgFile, "-p", "drift"})
+	return runPipelineRun([]string{"-c", pipelineCfg, "-p", "drift"})
 }
 
 func runInfraDestroy(args []string) error {
@@ -900,7 +933,8 @@ func runInfraDestroy(args []string) error {
 	var autoApproveVal bool
 	fs.BoolVar(&autoApproveVal, "auto-approve", false, "Skip confirmation")
 	fs.BoolVar(&autoApproveVal, "y", false, "Skip confirmation (short for --auto-approve)")
-	fs.String("env", "", "Environment name (resolves per-module environments: overrides)")
+	var envName string
+	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
 	autoApprove := &autoApproveVal
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -927,8 +961,18 @@ func runInfraDestroy(args []string) error {
 		}
 	}
 
+	pipelineCfg := cfgFile
+	if envName != "" {
+		tmp, resErr := writeEnvResolvedConfig(cfgFile, envName)
+		if resErr != nil {
+			return resErr
+		}
+		defer os.Remove(tmp)
+		pipelineCfg = tmp
+	}
+
 	fmt.Printf("Destroying infrastructure from %s...\n", cfgFile)
-	return runPipelineRun([]string{"-c", cfgFile, "-p", "destroy"})
+	return runPipelineRun([]string{"-c", pipelineCfg, "-p", "destroy"})
 }
 
 // newInfraFlagSet returns a *flag.FlagSet pre-configured with the flags for the
