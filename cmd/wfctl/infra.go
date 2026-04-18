@@ -138,6 +138,8 @@ func runInfraPlan(args []string) error {
 	var showSensitiveVal bool
 	fs.BoolVar(&showSensitiveVal, "show-sensitive", false, "Show sensitive values in plaintext")
 	fs.BoolVar(&showSensitiveVal, "S", false, "Show sensitive values in plaintext (short for --show-sensitive)")
+	var envName string
+	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -150,9 +152,28 @@ func runInfraPlan(args []string) error {
 		return err
 	}
 
-	desired, err := parseInfraResourceSpecs(cfgFile)
-	if err != nil {
-		return err
+	var desired []interfaces.ResourceSpec
+	if envName != "" {
+		resolved, resErr := planResourcesForEnv(cfgFile, envName)
+		if resErr != nil {
+			return resErr
+		}
+		for _, r := range resolved {
+			spec := interfaces.ResourceSpec{
+				Name:   r.Name,
+				Type:   r.Type,
+				Config: r.Config,
+			}
+			if size, ok := r.Config["size"].(string); ok {
+				spec.Size = interfaces.Size(size)
+			}
+			desired = append(desired, spec)
+		}
+	} else {
+		desired, err = parseInfraResourceSpecs(cfgFile)
+		if err != nil {
+			return err
+		}
 	}
 
 	current := loadCurrentState(cfgFile)
@@ -229,6 +250,29 @@ func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) 
 		specs = append(specs, spec)
 	}
 	return specs, nil
+}
+
+// planResourcesForEnv loads the config at path and returns the list of
+// resolved modules for envName. Resources whose environments[envName] is
+// explicitly null are skipped. If envName is empty, all modules are returned
+// with their top-level config.
+func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error) {
+	cfg, err := config.LoadFromFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("load %s: %w", path, err)
+	}
+	var out []*config.ResolvedModule
+	for i := range cfg.Modules {
+		m := &cfg.Modules[i]
+		if envName == "" {
+			out = append(out, &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: m.Config})
+			continue
+		}
+		if resolved, ok := m.ResolveForEnv(envName); ok {
+			out = append(out, resolved)
+		}
+	}
+	return out, nil
 }
 
 // loadCurrentState attempts to load ResourceStates from the iac.state backend
