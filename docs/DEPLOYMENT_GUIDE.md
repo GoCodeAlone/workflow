@@ -2,6 +2,8 @@
 
 This guide covers building, deploying, configuring, and operating the Workflow Engine.
 
+**See also:** [Deploy Pipeline Tutorial: Multi-Environment with Auto-Promotion](tutorials/deploy-pipeline.md) — step-by-step walkthrough for setting up multi-env `infra.yaml`, auto-promotion pipelines, and zero-secret bootstrap with `wfctl`.
+
 ---
 
 ## Table of Contents
