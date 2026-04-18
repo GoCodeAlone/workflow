@@ -7,10 +7,11 @@ import (
 
 // CIConfig holds the ci: section of a workflow config — build, test, and deploy lifecycle.
 type CIConfig struct {
-	Build  *CIBuildConfig  `json:"build,omitempty" yaml:"build,omitempty"`
-	Test   *CITestConfig   `json:"test,omitempty" yaml:"test,omitempty"`
-	Deploy *CIDeployConfig `json:"deploy,omitempty" yaml:"deploy,omitempty"`
-	Infra  *CIInfraConfig  `json:"infra,omitempty" yaml:"infra,omitempty"`
+	Build      *CIBuildConfig  `json:"build,omitempty" yaml:"build,omitempty"`
+	Test       *CITestConfig   `json:"test,omitempty" yaml:"test,omitempty"`
+	Deploy     *CIDeployConfig `json:"deploy,omitempty" yaml:"deploy,omitempty"`
+	Infra      *CIInfraConfig  `json:"infra,omitempty" yaml:"infra,omitempty"`
+	Registries []CIRegistry    `json:"registries,omitempty" yaml:"registries,omitempty"`
 }
 
 // CIBuildConfig defines what artifacts the build phase produces.
