@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"flag"
@@ -152,28 +153,9 @@ func runInfraPlan(args []string) error {
 		return err
 	}
 
-	var desired []interfaces.ResourceSpec
-	if envName != "" {
-		resolved, resErr := planResourcesForEnv(cfgFile, envName)
-		if resErr != nil {
-			return resErr
-		}
-		for _, r := range resolved {
-			spec := interfaces.ResourceSpec{
-				Name:   r.Name,
-				Type:   r.Type,
-				Config: r.Config,
-			}
-			if size, ok := r.Config["size"].(string); ok {
-				spec.Size = interfaces.Size(size)
-			}
-			desired = append(desired, spec)
-		}
-	} else {
-		desired, err = parseInfraResourceSpecs(cfgFile)
-		if err != nil {
-			return err
-		}
+	desired, err := parseInfraResourceSpecsForEnv(cfgFile, envName)
+	if err != nil {
+		return err
 	}
 
 	current := loadCurrentState(cfgFile)
@@ -246,6 +228,33 @@ func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) 
 			case []string:
 				spec.DependsOn = v
 			}
+		}
+		specs = append(specs, spec)
+	}
+	return specs, nil
+}
+
+// parseInfraResourceSpecsForEnv returns ResourceSpecs for plan computation,
+// applying per-environment resolution when envName is non-empty. Both the
+// --env and no-env paths produce the same ResourceSpec shape so callers never
+// need to duplicate the ResolvedModule->ResourceSpec mapping.
+func parseInfraResourceSpecsForEnv(cfgFile, envName string) ([]interfaces.ResourceSpec, error) {
+	if envName == "" {
+		return parseInfraResourceSpecs(cfgFile)
+	}
+	resolved, err := planResourcesForEnv(cfgFile, envName)
+	if err != nil {
+		return nil, err
+	}
+	specs := make([]interfaces.ResourceSpec, 0, len(resolved))
+	for _, r := range resolved {
+		spec := interfaces.ResourceSpec{
+			Name:   r.Name,
+			Type:   r.Type,
+			Config: r.Config,
+		}
+		if size, ok := r.Config["size"].(string); ok {
+			spec.Size = interfaces.Size(size)
 		}
 		specs = append(specs, spec)
 	}
@@ -776,7 +785,8 @@ func runInfraApply(args []string) error {
 	var showSensitiveVal bool
 	fs.BoolVar(&showSensitiveVal, "show-sensitive", false, "Show sensitive values in plaintext")
 	fs.BoolVar(&showSensitiveVal, "S", false, "Show sensitive values in plaintext (short for --show-sensitive)")
-	fs.String("env", "", "Environment name (resolves per-module environments: overrides)")
+	var envName string
+	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
 	autoApprove := &autoApproveVal
 	showSensitive := showSensitiveVal
 	if err := fs.Parse(args); err != nil {
@@ -802,6 +812,22 @@ func runInfraApply(args []string) error {
 		if !strings.EqualFold(answer, "y") && !strings.EqualFold(answer, "yes") {
 			fmt.Println("Cancelled.")
 			return nil
+		}
+	}
+
+	// Inject secrets using the env-specific secretsStoreOverride so that
+	// ${SECRET_NAME} templates in the config resolve to the correct store.
+	if envName != "" {
+		wfCfg, loadErr := config.LoadFromFile(cfgFile)
+		if loadErr == nil && wfCfg.Secrets != nil && len(wfCfg.Secrets.Entries) > 0 {
+			ctx := context.Background()
+			secretVals, secretErr := injectSecrets(ctx, wfCfg, envName)
+			if secretErr != nil {
+				return fmt.Errorf("inject secrets for env %q: %w", envName, secretErr)
+			}
+			for k, v := range secretVals {
+				os.Setenv(k, v)
+			}
 		}
 	}
 
