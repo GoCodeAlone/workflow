@@ -12,7 +12,9 @@ type ResolvedModule struct {
 // ResolveForEnv returns the effective module config for envName.
 // If m.Environments is empty or envName is not listed, the top-level fields are returned.
 // If m.Environments[envName] is explicitly nil, ok=false (resource skipped in this env).
-// Otherwise the per-env resolution is merged over the top-level fields.
+// Otherwise the per-env resolution is deep-merged over the top-level fields.
+// region and provider are written into the Config map so downstream ResourceSpec
+// construction (which reads only Config) picks them up.
 func (m *ModuleConfig) ResolveForEnv(envName string) (*ResolvedModule, bool) {
 	resolved := &ResolvedModule{
 		Name:   m.Name,
@@ -35,14 +37,31 @@ func (m *ModuleConfig) ResolveForEnv(envName string) (*ResolvedModule, bool) {
 
 	if envRes.Provider != "" {
 		resolved.Provider = envRes.Provider
-	}
-	for k, v := range envRes.Config {
 		if resolved.Config == nil {
 			resolved.Config = map[string]any{}
 		}
-		resolved.Config[k] = v
+		// Write into Config so ResourceSpec construction sees it.
+		if _, present := resolved.Config["provider"]; !present {
+			resolved.Config["provider"] = envRes.Provider
+		}
 	}
+
+	// Deep-merge env overrides so nested maps (e.g. env_vars) are merged
+	// rather than replaced wholesale.
+	if len(envRes.Config) > 0 {
+		if resolved.Config == nil {
+			resolved.Config = map[string]any{}
+		}
+		resolved.Config = deepMergeMap(resolved.Config, envRes.Config)
+	}
+
 	setRegionFromConfig(resolved) // re-apply after env overrides
+	// Write region into Config so downstream ResourceSpec construction sees it.
+	if resolved.Region != "" {
+		if _, present := resolved.Config["region"]; !present {
+			resolved.Config["region"] = resolved.Region
+		}
+	}
 	return resolved, true
 }
 

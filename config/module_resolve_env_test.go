@@ -105,3 +105,71 @@ func TestResolveForEnv_RegionPopulatedFromConfig(t *testing.T) {
 		t.Fatalf("want region=nyc1 populated from resolved config, got %q", resolved.Region)
 	}
 }
+
+func TestResolveForEnv_DeepMergesNestedMaps(t *testing.T) {
+	m := &ModuleConfig{
+		Name: "app",
+		Type: "infra.container_service",
+		Config: map[string]any{
+			"env_vars": map[string]any{"PORT": "8080"},
+		},
+		Environments: map[string]*InfraEnvironmentResolution{
+			"prod": {Config: map[string]any{
+				"env_vars": map[string]any{"LOG_LEVEL": "info"},
+			}},
+		},
+	}
+	resolved, ok := m.ResolveForEnv("prod")
+	if !ok {
+		t.Fatal("want ok=true")
+	}
+	ev, _ := resolved.Config["env_vars"].(map[string]any)
+	if ev["PORT"] != "8080" {
+		t.Fatalf("want PORT=8080 preserved after deep merge, got %v", ev["PORT"])
+	}
+	if ev["LOG_LEVEL"] != "info" {
+		t.Fatalf("want LOG_LEVEL=info from env override, got %v", ev["LOG_LEVEL"])
+	}
+}
+
+func TestResolveForEnv_RegionWrittenToConfig(t *testing.T) {
+	m := &ModuleConfig{
+		Name:   "db",
+		Type:   "infra.database",
+		Config: map[string]any{"size": "large"},
+		Environments: map[string]*InfraEnvironmentResolution{
+			"prod": {Config: map[string]any{"region": "nyc1"}},
+		},
+	}
+	resolved, ok := m.ResolveForEnv("prod")
+	if !ok {
+		t.Fatal("want ok=true")
+	}
+	if resolved.Config["region"] != "nyc1" {
+		t.Fatalf("want region in Config[region], got %v", resolved.Config["region"])
+	}
+	if resolved.Region != "nyc1" {
+		t.Fatalf("want Region field set, got %q", resolved.Region)
+	}
+}
+
+func TestResolveForEnv_ProviderWrittenToConfig(t *testing.T) {
+	m := &ModuleConfig{
+		Name:   "db",
+		Type:   "infra.database",
+		Config: map[string]any{"size": "large"},
+		Environments: map[string]*InfraEnvironmentResolution{
+			"prod": {Provider: "digitalocean"},
+		},
+	}
+	resolved, ok := m.ResolveForEnv("prod")
+	if !ok {
+		t.Fatal("want ok=true")
+	}
+	if resolved.Provider != "digitalocean" {
+		t.Fatalf("want Provider field set, got %q", resolved.Provider)
+	}
+	if resolved.Config["provider"] != "digitalocean" {
+		t.Fatalf("want provider written to Config map, got %v", resolved.Config["provider"])
+	}
+}
