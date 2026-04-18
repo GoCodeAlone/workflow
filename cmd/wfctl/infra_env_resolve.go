@@ -10,10 +10,13 @@ import (
 )
 
 // writeEnvResolvedConfig loads cfgFile (honoring imports:), resolves every
-// module for envName (skipping null-env entries), applies top-level
-// environments[env] defaults (region, provider, envVars), and writes the
-// result to a temp file in the same directory as cfgFile. The caller is
-// responsible for removing the temp file (defer os.Remove(tmpPath)).
+// module for envName (ResolveForEnv is called on ALL module types so that
+// environments[envName]: null is honored for iac.*, cloud.account, etc.),
+// applies top-level environments[env] defaults, and writes the result to a
+// temp file in the same directory as cfgFile, preserving all top-level
+// sections (secrets, secretStores, infra, environments, ...) so that
+// bootstrap and pipeline commands have full context. The caller must
+// defer os.Remove(tmpPath).
 func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error) {
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
@@ -25,22 +28,23 @@ func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error)
 		topEnv = cfg.Environments[envName]
 	}
 
-	var resolved []map[string]any
+	var resolvedModules []map[string]any
 	for i := range cfg.Modules {
 		m := &cfg.Modules[i]
-		if !isInfraType(m.Type) {
-			// Non-infra modules pass through unchanged.
-			resolved = append(resolved, moduleToMap(m))
-			continue
-		}
+		// Call ResolveForEnv on ALL module types (not just infra.*) so that
+		// environments[envName]: null is honored for iac.state, cloud.account, etc.
 		rm, ok := m.ResolveForEnv(envName)
 		if !ok {
-			continue // skip this module for envName
+			continue // skip this module for envName (explicit null)
 		}
-		if topEnv != nil {
+		if topEnv != nil && isInfraType(rm.Type) {
+			// Apply top-level defaults only to infra/platform modules.
 			if rm.Region == "" {
 				rm.Region = topEnv.Region
-				if rm.Region != "" && rm.Config != nil {
+				if rm.Region != "" {
+					if rm.Config == nil {
+						rm.Config = map[string]any{}
+					}
 					if _, present := rm.Config["region"]; !present {
 						rm.Config["region"] = rm.Region
 					}
@@ -48,7 +52,10 @@ func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error)
 			}
 			if rm.Provider == "" {
 				rm.Provider = topEnv.Provider
-				if rm.Provider != "" && rm.Config != nil {
+				if rm.Provider != "" {
+					if rm.Config == nil {
+						rm.Config = map[string]any{}
+					}
 					if _, present := rm.Config["provider"]; !present {
 						rm.Config["provider"] = rm.Provider
 					}
@@ -67,12 +74,34 @@ func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error)
 				rm.Config["env_vars"] = ev
 			}
 		}
-		resolved = append(resolved, resolvedModuleToMap(rm))
+		resolvedModules = append(resolvedModules, resolvedModuleToMap(rm))
 	}
 
-	// Build a minimal config map for the resolved YAML.
+	// Build output preserving all top-level sections so pipeline and bootstrap
+	// commands have full context (secrets, secretStores, infra, environments, ...).
 	out := map[string]any{
-		"modules": resolved,
+		"modules": resolvedModules,
+	}
+	if cfg.Secrets != nil {
+		out["secrets"] = cfg.Secrets
+	}
+	if len(cfg.SecretStores) > 0 {
+		out["secretStores"] = cfg.SecretStores
+	}
+	if cfg.Infrastructure != nil {
+		out["infrastructure"] = cfg.Infrastructure
+	}
+	if len(cfg.Environments) > 0 {
+		out["environments"] = cfg.Environments
+	}
+	if cfg.CI != nil {
+		out["ci"] = cfg.CI
+	}
+	if len(cfg.Workflows) > 0 {
+		out["workflows"] = cfg.Workflows
+	}
+	if len(cfg.Pipelines) > 0 {
+		out["pipelines"] = cfg.Pipelines
 	}
 
 	data, err := yaml.Marshal(out)
@@ -92,20 +121,6 @@ func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error)
 	}
 	f.Close()
 	return f.Name(), nil
-}
-
-func moduleToMap(m *config.ModuleConfig) map[string]any {
-	out := map[string]any{
-		"name": m.Name,
-		"type": m.Type,
-	}
-	if len(m.Config) > 0 {
-		out["config"] = m.Config
-	}
-	if len(m.DependsOn) > 0 {
-		out["dependsOn"] = m.DependsOn
-	}
-	return out
 }
 
 func resolvedModuleToMap(r *config.ResolvedModule) map[string]any {

@@ -12,12 +12,14 @@ import (
 // TestPlanResourcesForEnv_SecretsStoreOverride verifies that secretsStoreOverride
 // is respected when resolving secrets per environment.
 func TestPlanResourcesForEnv_SecretsStoreOverride(t *testing.T) {
-	// Put two distinct values into env vars; each store ("staging-env", "prod-env")
-	// is backed by the env provider but routed through different stores.
-	// The secret named DB_PASS lives in both — staging resolves to "staging-val",
-	// prod resolves to "prod-val". We verify by calling injectSecrets directly
-	// with each envName and confirming the right store is consulted.
-	t.Setenv("DB_PASS", "prod-val") // default env var (prod store uses env provider)
+	// Both "staging-env" and "prod-env" stores are backed by the env provider,
+	// so they both read from the same process environment variable DB_PASS.
+	// The test verifies that each env is routed to the correct named store
+	// (staging→staging-env, prod→prod-env) and that injectSecrets returns the
+	// value from that store without error — store selection is the invariant,
+	// not distinct per-store values (which would require separate env vars or
+	// a real secret backend).
+	t.Setenv("DB_PASS", "test-secret-value")
 
 	dir := t.TempDir()
 	cfg := `secretStores:
@@ -74,9 +76,9 @@ modules:
 		if secretErr != nil {
 			t.Fatalf("injectSecrets staging: %v", secretErr)
 		}
-		if secrets["DB_PASS"] != "prod-val" {
+		if secrets["DB_PASS"] != "test-secret-value" {
 			// Both stores use env provider, so value comes from DB_PASS env var.
-			t.Fatalf("want DB_PASS=prod-val from env provider, got %q", secrets["DB_PASS"])
+			t.Fatalf("want DB_PASS=test-secret-value from env provider, got %q", secrets["DB_PASS"])
 		}
 	})
 
@@ -97,8 +99,8 @@ modules:
 		if secretErr != nil {
 			t.Fatalf("injectSecrets prod: %v", secretErr)
 		}
-		if secrets["DB_PASS"] != "prod-val" {
-			t.Fatalf("want DB_PASS=prod-val, got %q", secrets["DB_PASS"])
+		if secrets["DB_PASS"] != "test-secret-value" {
+			t.Fatalf("want DB_PASS=test-secret-value, got %q", secrets["DB_PASS"])
 		}
 	})
 

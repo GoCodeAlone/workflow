@@ -166,40 +166,21 @@ Staging output (note: `app-dns` is absent — skipped by `staging: null`):
 ```
 Infrastructure Plan — infra.yaml
 
-+ create  do-provider  (iac.provider)
-    credentials:  env
-    provider:     digitalocean
-
-+ create  iac-state  (iac.state)
-    backend:    spaces
-    bucket:     my-app-iac-state
-    accessKey:  ${SPACES_ACCESS_KEY}
-    prefix:     staging/
-
 + create  app-database  (infra.database)
     name:    myapp-staging-db
     engine:  pg v16
     size:    db-s-1vcpu-1gb
     region:  nyc3
 
-Plan: 3 to create, 0 to update, 0 to destroy.
+Plan: 1 to create, 0 to update, 0 to destroy.
 ```
+
+`iac.provider`, `iac.state`, and `cloud.account` modules are managed by `wfctl infra bootstrap` and never appear in plan output. Only `infra.*` and `platform.*` modules show as resource diffs.
 
 Prod output (note: `app-dns` is present and `size` is `db-s-2vcpu-4gb`):
 
 ```
 Infrastructure Plan — infra.yaml
-
-+ create  do-provider  (iac.provider)
-    credentials:  env
-    provider:     digitalocean
-
-+ create  iac-state  (iac.state)
-    backend:    spaces
-    bucket:     my-app-iac-state
-    accessKey:  ${SPACES_ACCESS_KEY}
-    prefix:     prod/
-    region:     nyc1
 
 + create  app-database  (infra.database)
     name:    myapp-prod-db
@@ -210,7 +191,7 @@ Infrastructure Plan — infra.yaml
 + create  app-dns  (infra.dns)
     domain:  myapp.com
 
-Plan: 4 to create, 0 to update, 0 to destroy.
+Plan: 2 to create, 0 to update, 0 to destroy.
 ```
 
 **Key resolution rules:**

@@ -294,9 +294,25 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 		if topEnv != nil {
 			if resolved.Region == "" {
 				resolved.Region = topEnv.Region
+				if resolved.Region != "" {
+					if resolved.Config == nil {
+						resolved.Config = map[string]any{}
+					}
+					if _, present := resolved.Config["region"]; !present {
+						resolved.Config["region"] = resolved.Region
+					}
+				}
 			}
 			if resolved.Provider == "" {
 				resolved.Provider = topEnv.Provider
+				if resolved.Provider != "" {
+					if resolved.Config == nil {
+						resolved.Config = map[string]any{}
+					}
+					if _, present := resolved.Config["provider"]; !present {
+						resolved.Config["provider"] = resolved.Provider
+					}
+				}
 			}
 			if isContainerType(resolved.Type) && len(topEnv.EnvVars) > 0 {
 				ev, _ := resolved.Config["env_vars"].(map[string]any)
@@ -846,7 +862,11 @@ func runInfraApply(args []string) error {
 	autoBootstrap := infraCfg == nil || infraCfg.AutoBootstrap == nil || *infraCfg.AutoBootstrap
 	if autoBootstrap {
 		fmt.Println("Running bootstrap before apply...")
-		if err := runInfraBootstrap([]string{"--config", cfgFile}); err != nil {
+		bootstrapArgs := []string{"--config", cfgFile}
+		if envName != "" {
+			bootstrapArgs = append(bootstrapArgs, "--env", envName)
+		}
+		if err := runInfraBootstrap(bootstrapArgs); err != nil {
 			return fmt.Errorf("bootstrap: %w", err)
 		}
 	}
