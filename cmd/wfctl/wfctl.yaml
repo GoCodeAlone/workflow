@@ -73,6 +73,8 @@ workflows:
         description: "Local development cluster (up, down, logs, status, restart; --local, --k8s, --expose)"
       - name: wizard
         description: "Interactive TUI wizard for project setup (generates app.yaml)"
+      - name: ci
+        description: "CI/CD tooling (init, run, generate, validate)"
 
 # Each command is expressed as a workflow pipeline triggered by the CLI.
 # The pipeline delegates to the registered Go implementation via step.cli_invoke,
@@ -376,6 +378,17 @@ pipelines:
         type: step.cli_invoke
         config:
           command: infra
+
+  cmd-ci:
+    trigger:
+      type: cli
+      config:
+        command: ci
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: ci
 
   cmd-docs:
     trigger:
