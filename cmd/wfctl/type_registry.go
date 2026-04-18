@@ -89,6 +89,12 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Stateful:   false,
 			ConfigKeys: []string{"address", "readTimeout", "writeTimeout", "idleTimeout"},
 		},
+		"http.client": {
+			Type:       "http.client",
+			Plugin:     "http",
+			Stateful:   true,
+			ConfigKeys: []string{"timeout", "base_url", "auth"},
+		},
 		"http.router": {
 			Type:       "http.router",
 			Plugin:     "http",
@@ -358,6 +364,12 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Plugin:     "secrets",
 			Stateful:   false,
 			ConfigKeys: []string{"region", "accessKeyId", "secretAccessKey"},
+		},
+		"secrets.keychain": {
+			Type:       "secrets.keychain",
+			Plugin:     "secrets",
+			Stateful:   false,
+			ConfigKeys: []string{"service"},
 		},
 
 		// ai plugin
@@ -686,6 +698,14 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			ConfigKeys: []string{"system", "workers", "handler"},
 		},
 
+		// mcp plugin
+		"mcp.registry": {
+			Type:       "mcp.registry",
+			Plugin:     "mcp",
+			Stateful:   false,
+			ConfigKeys: []string{"log_on_init", "expose_admin_api", "audit_tool_calls"},
+		},
+
 		// scanner plugin
 		"security.scanner": {
 			Type:       "security.scanner",
@@ -694,13 +714,6 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			ConfigKeys: []string{"trivy", "semgrep", "snyk"},
 		},
 
-		// mcp plugin
-		"mcp.registry": {
-			Type:       "mcp.registry",
-			Plugin:     "mcp",
-			Stateful:   false,
-			ConfigKeys: []string{"log_on_init", "expose_admin_api", "audit_tool_calls"},
-		},
 	}
 	// Include any types registered dynamically (e.g. from external plugins loaded via LoadPluginTypesFromDir).
 	for _, t := range schema.KnownModuleTypes() {
@@ -1625,6 +1638,16 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Type:       "step.secret_fetch",
 			Plugin:     "pipelinesteps",
 			ConfigKeys: []string{"module", "secrets"},
+		},
+		"step.secret_set": {
+			Type:       "step.secret_set",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"module", "secrets"},
+		},
+		"step.while": {
+			Type:       "step.while",
+			Plugin:     "pipelinesteps",
+			ConfigKeys: []string{"condition", "max_iterations", "iteration_var", "accumulate", "step", "steps"},
 		},
 	}
 	// Include any step types registered dynamically (e.g. from external plugins).

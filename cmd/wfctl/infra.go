@@ -693,46 +693,6 @@ func extractSources(m map[string]any, singular, plural string) string {
 	return ""
 }
 
-// formatFirewallRules produces a compact summary of firewall rule config (legacy, single-line).
-func formatFirewallRules(v any) string {
-	switch rules := v.(type) {
-	case []any:
-		if len(rules) == 0 {
-			return ""
-		}
-		// Summarise first rule.
-		first, ok := rules[0].(map[string]any)
-		if !ok {
-			return fmt.Sprintf("%d rule(s)", len(rules))
-		}
-		proto, _ := first["protocol"].(string)
-		ports, _ := first["ports"].(string)
-		src, _ := first["source"].(string)
-		dst, _ := first["destination"].(string)
-		var parts []string
-		if proto != "" {
-			parts = append(parts, strings.ToUpper(proto))
-		}
-		if ports != "" {
-			parts = append(parts, ports)
-		}
-		if src != "" {
-			parts = append(parts, "from "+src)
-		}
-		if dst != "" {
-			parts = append(parts, "to "+dst)
-		}
-		summary := strings.Join(parts, " ")
-		if len(rules) > 1 {
-			summary += fmt.Sprintf(" (+%d more)", len(rules)-1)
-		}
-		return summary
-	case string:
-		return rules
-	}
-	return ""
-}
-
 func actionSymbol(action string) string {
 	switch action {
 	case "create":

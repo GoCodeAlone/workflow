@@ -1,6 +1,6 @@
 // Package secrets provides a plugin that registers secrets management modules:
-// secrets.vault (HashiCorp Vault) and secrets.aws (AWS Secrets Manager),
-// as well as the step.secret_rotate pipeline step type.
+// secrets.vault (HashiCorp Vault), secrets.aws (AWS Secrets Manager),
+// secrets.keychain (OS credential store), and the step.secret_rotate pipeline step type.
 package secrets
 
 import (
@@ -22,15 +22,15 @@ func New() *Plugin {
 			BaseNativePlugin: plugin.BaseNativePlugin{
 				PluginName:        "secrets",
 				PluginVersion:     "1.0.0",
-				PluginDescription: "Secrets management modules (Vault, AWS Secrets Manager)",
+				PluginDescription: "Secrets management modules (Vault, AWS Secrets Manager, OS Keychain)",
 			},
 			Manifest: plugin.PluginManifest{
 				Name:        "secrets",
 				Version:     "1.0.0",
 				Author:      "GoCodeAlone",
-				Description: "Secrets management modules (Vault, AWS Secrets Manager)",
+				Description: "Secrets management modules (Vault, AWS Secrets Manager, OS Keychain)",
 				Tier:        plugin.TierCore,
-				ModuleTypes: []string{"secrets.vault", "secrets.aws"},
+				ModuleTypes: []string{"secrets.vault", "secrets.aws", "secrets.keychain"},
 				StepTypes:   []string{"step.secret_rotate"},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "secrets-management", Role: "provider", Priority: 50},
@@ -84,6 +84,13 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 				am.SetSecretAccessKey(sak)
 			}
 			return am
+		},
+		"secrets.keychain": func(name string, config map[string]any) modular.Module {
+			km := module.NewSecretsKeychainModule(name)
+			if svc, ok := config["service"].(string); ok && svc != "" {
+				km.SetService(svc)
+			}
+			return km
 		},
 	}
 }

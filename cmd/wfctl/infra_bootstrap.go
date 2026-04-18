@@ -68,8 +68,11 @@ func runInfraBootstrap(args []string) error {
 // backing infrastructure (e.g. a DO Spaces bucket) if it does not already exist.
 func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 	iacStates, _, _, err := discoverInfraModules(cfgFile)
-	if err != nil || len(iacStates) == 0 {
-		return nil // no state module configured — nothing to bootstrap
+	if err != nil {
+		return fmt.Errorf("discover infra modules: %w", err)
+	}
+	if len(iacStates) == 0 {
+		return nil
 	}
 	m := iacStates[0]
 	backend, _ := m.Config["backend"].(string)

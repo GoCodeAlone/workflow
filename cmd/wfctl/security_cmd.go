@@ -207,11 +207,12 @@ func runSecurityGenerateNetworkPolicies(args []string) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(*outputDir, 0755); err != nil {
+	if err := os.MkdirAll(*outputDir, 0750); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	for name, policy := range policies {
+	for name := range policies {
+		policy := policies[name]
 		outPath := filepath.Join(*outputDir, fmt.Sprintf("netpol-%s.yaml", name))
 		data, err := yaml.Marshal(policy)
 		if err != nil {
@@ -229,10 +230,10 @@ func runSecurityGenerateNetworkPolicies(args []string) error {
 
 // k8sNetworkPolicy is a minimal Kubernetes NetworkPolicy for YAML generation.
 type k8sNetworkPolicy struct {
-	APIVersion string                    `yaml:"apiVersion"`
-	Kind       string                    `yaml:"kind"`
-	Metadata   k8sMetadata               `yaml:"metadata"`
-	Spec       k8sNetworkPolicySpec      `yaml:"spec"`
+	APIVersion string               `yaml:"apiVersion"`
+	Kind       string               `yaml:"kind"`
+	Metadata   k8sMetadata          `yaml:"metadata"`
+	Spec       k8sNetworkPolicySpec `yaml:"spec"`
 }
 
 type k8sMetadata struct {

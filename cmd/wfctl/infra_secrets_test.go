@@ -155,5 +155,30 @@ func TestParseSecretsConfig_MissingFile(t *testing.T) {
 	}
 }
 
+func TestResolveSecretsProvider_KeychainProvider(t *testing.T) {
+	cfg := &SecretsConfig{
+		Provider: "keychain",
+		Config:   map[string]any{"service": "test-workflow-app"},
+	}
+	p, err := resolveSecretsProvider(cfg)
+	if err != nil {
+		t.Fatalf("resolveSecretsProvider keychain: %v", err)
+	}
+	if p.Name() != "keychain" {
+		t.Errorf("provider name = %q, want %q", p.Name(), "keychain")
+	}
+}
+
+func TestResolveSecretsProvider_KeychainMissingService(t *testing.T) {
+	cfg := &SecretsConfig{
+		Provider: "keychain",
+		Config:   map[string]any{},
+	}
+	_, err := resolveSecretsProvider(cfg)
+	if err == nil {
+		t.Error("expected error when 'service' is missing")
+	}
+}
+
 // Ensure GitHubSecretsProvider satisfies secrets.Provider interface.
 var _ secrets.Provider = (*secrets.GitHubSecretsProvider)(nil)

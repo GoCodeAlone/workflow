@@ -7,35 +7,26 @@ import (
 // --- test structs ---
 
 type allTagsStruct struct {
-	Driver    string `json:"driver" editor:"type=select,options=postgres|mysql|sqlite,required,description=Database driver"`
-	DSN       string `json:"dsn" editor:"type=string,required,sensitive,description=Connection string,placeholder=postgres://user:pass@host/db"`
-	MaxConns  int    `json:"maxConns" editor:"type=number,description=Max connections,default=25"`
-	Enabled   bool   `json:"enabled" editor:"type=boolean,description=Enable feature,default=true"`
-	Tags      []string `json:"tags" editor:"type=array,arrayItemType=string"`
-	Meta      map[string]string `json:"meta" editor:"type=map,mapValueType=string"`
+	Driver   string            `json:"driver" editor:"type=select,options=postgres|mysql|sqlite,required,description=Database driver"`
+	DSN      string            `json:"dsn" editor:"type=string,required,sensitive,description=Connection string,placeholder=postgres://user:pass@host/db"`
+	MaxConns int               `json:"maxConns" editor:"type=number,description=Max connections,default=25"`
+	Enabled  bool              `json:"enabled" editor:"type=boolean,description=Enable feature,default=true"`
+	Tags     []string          `json:"tags" editor:"type=array,arrayItemType=string"`
+	Meta     map[string]string `json:"meta" editor:"type=map,mapValueType=string"`
 }
 
 type inferredTypesStruct struct {
-	Name    string  `json:"name" editor:"description=Name"`
-	Count   int     `json:"count" editor:"description=Count"`
-	Ratio   float64 `json:"ratio" editor:"description=Ratio"`
-	Active  bool    `json:"active" editor:"description=Active"`
-	Items   []string `json:"items" editor:"description=Items"`
-	Labels  map[string]string `json:"labels" editor:"description=Labels"`
+	Name   string            `json:"name" editor:"description=Name"`
+	Count  int               `json:"count" editor:"description=Count"`
+	Ratio  float64           `json:"ratio" editor:"description=Ratio"`
+	Active bool              `json:"active" editor:"description=Active"`
+	Items  []string          `json:"items" editor:"description=Items"`
+	Labels map[string]string `json:"labels" editor:"description=Labels"`
 }
 
 type noEditorTagsStruct struct {
 	Name string `json:"name"`
 	Age  int    `json:"age"`
-}
-
-type nestedStruct struct {
-	Name  string      `json:"name" editor:"type=string,description=Name"`
-	Inner innerStruct `json:"inner" editor:"type=string,description=Inner"`
-}
-
-type innerStruct struct {
-	Value string `json:"value" editor:"type=string"`
 }
 
 type sensitiveStruct struct {
@@ -52,10 +43,10 @@ type groupStruct struct {
 }
 
 type defaultValueStruct struct {
-	Count   int     `json:"count" editor:"type=number,default=42"`
-	Ratio   float64 `json:"ratio" editor:"type=number,default=3.14"`
-	Active  bool    `json:"active" editor:"type=boolean,default=true"`
-	Name    string  `json:"name" editor:"type=string,default=hello"`
+	Count  int     `json:"count" editor:"type=number,default=42"`
+	Ratio  float64 `json:"ratio" editor:"type=number,default=3.14"`
+	Active bool    `json:"active" editor:"type=boolean,default=true"`
+	Name   string  `json:"name" editor:"type=string,default=hello"`
 }
 
 // --- tests ---

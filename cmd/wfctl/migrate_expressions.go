@@ -79,7 +79,7 @@ Options:
 		return nil
 	}
 
-	if err := os.WriteFile(dest, []byte(converted), 0o644); err != nil {
+	if err := os.WriteFile(dest, []byte(converted), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", dest, err)
 	}
 	fmt.Printf("Wrote %s: %d expression(s) converted, %d marked as TODO\n",
@@ -191,12 +191,12 @@ func convertGoTemplateExpr(inner string) (string, bool) {
 
 	// .steps.stepName.field → steps["stepName"]["field"]
 	if m := stepsDotRe.FindStringSubmatch(inner); m != nil {
-		return fmt.Sprintf(`steps["%s"]["%s"]`, m[1], m[2]), true
+		return fmt.Sprintf(`steps[%q][%q]`, m[1], m[2]), true
 	}
 
 	// index .steps "name" "field" → steps["name"]["field"]
 	if m := indexStepsRe.FindStringSubmatch(inner); m != nil {
-		return fmt.Sprintf(`steps["%s"]["%s"]`, m[1], m[2]), true
+		return fmt.Sprintf(`steps[%q][%q]`, m[1], m[2]), true
 	}
 
 	// eq .field "value" → field == "value"

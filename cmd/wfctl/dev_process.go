@@ -48,7 +48,7 @@ func runDevProcess(cfg *config.WorkflowConfig, verbose bool) error {
 		return fmt.Errorf("generate infra compose: %w", err)
 	}
 	const infraComposeFile = "docker-compose.dev-infra.yml"
-	if err := os.WriteFile(infraComposeFile, []byte(composeYAML), 0o644); err != nil {
+	if err := os.WriteFile(infraComposeFile, []byte(composeYAML), 0o600); err != nil {
 		return fmt.Errorf("write infra compose: %w", err)
 	}
 
@@ -309,7 +309,7 @@ func collectWatchDirs(root string) []string {
 	seen := map[string]bool{}
 	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // intentionally skip unreadable paths in watch dirs
 		}
 		if !info.IsDir() {
 			return nil

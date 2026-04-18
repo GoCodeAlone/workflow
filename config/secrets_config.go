@@ -14,8 +14,8 @@ type SecretsConfig struct {
 	Entries []SecretEntry `json:"entries,omitempty" yaml:"entries,omitempty"`
 	// Provider is the legacy single-store provider name. Kept for backward compatibility.
 	// Prefer secretStores + defaultStore for new configs.
-	Provider string                `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Config   map[string]any        `json:"config,omitempty" yaml:"config,omitempty"`
+	Provider string                 `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Config   map[string]any         `json:"config,omitempty" yaml:"config,omitempty"`
 	Rotation *SecretsRotationConfig `json:"rotation,omitempty" yaml:"rotation,omitempty"`
 }
 
@@ -28,8 +28,8 @@ type SecretsRotationConfig struct {
 
 // SecretEntry declares a single secret the application needs.
 type SecretEntry struct {
-	Name        string                 `json:"name" yaml:"name"`
-	Description string                 `json:"description,omitempty" yaml:"description,omitempty"`
+	Name        string `json:"name" yaml:"name"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 	// Store names the store (from secretStores) this secret lives in.
 	// Overrides defaultStore and environment secretsStoreOverride.
 	Store    string                 `json:"store,omitempty" yaml:"store,omitempty"`

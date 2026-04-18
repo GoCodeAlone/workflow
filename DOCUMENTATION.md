@@ -28,6 +28,7 @@ All modules are instantiated from YAML config via the plugin factory registry. O
 ### HTTP & Routing
 | Type | Description | Plugin |
 |------|-------------|--------|
+| `http.client` | Reusable authenticated HTTP client with oauth2 and bearer token support | http |
 | `http.server` | Configurable web server | http |
 | `http.router` | Request routing with path and method matching | http |
 | `http.handler` | HTTP request processing with configurable responses | http |
@@ -165,6 +166,7 @@ flowchart TD
 | `step.validate_pagination` | Validates and normalizes pagination query params | pipelinesteps |
 | `step.validate_request_body` | Validates request body against a JSON schema | pipelinesteps |
 | `step.foreach` | Iterates over a slice and runs sub-steps per element. Optional `concurrency: N` for parallel processing | pipelinesteps |
+| `step.while` | Executes sub-steps repeatedly while a condition template is truthy, with a hard `max_iterations` cap (default 1000). Supports optional accumulator for paginated APIs | pipelinesteps |
 | `step.parallel` | Executes named sub-steps concurrently and collects results. O(max(branch)) time | pipelinesteps |
 | `step.webhook_verify` | Verifies an inbound webhook signature | pipelinesteps |
 | `step.base64_decode` | Decodes a base64-encoded field | pipelinesteps |
@@ -186,6 +188,7 @@ flowchart TD
 | `step.hash` | Computes a cryptographic hash (md5/sha256/sha512) of a template-resolved input | pipelinesteps |
 | `step.regex_match` | Matches a regular expression against a template-resolved input | pipelinesteps |
 | `step.secret_fetch` | Fetches one or more secrets from a secrets module (secrets.aws, secrets.vault) with dynamic tenant-aware secret ID resolution | pipelinesteps |
+| `step.secret_set` | Writes one or more secrets to a secrets module; values are Go template expressions resolved against the pipeline context | pipelinesteps |
 | `step.jq` | Applies a JQ expression to pipeline data for complex transformations | pipelinesteps |
 | `step.ai_complete` | AI text completion using a configured provider | ai |
 | `step.ai_classify` | AI text classification into named categories | ai |
@@ -581,6 +584,7 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 |------|-------------|--------|
 | `secrets.vault` | HashiCorp Vault integration | secrets |
 | `secrets.aws` | AWS Secrets Manager integration | secrets |
+| `secrets.keychain` | OS credential store (macOS Keychain, Linux Secret Service, Windows Credential Manager); requires libsecret/gnome-keyring/KWallet on Linux | secrets |
 
 ### Event Sourcing & Messaging Services
 | Type | Description | Plugin |
@@ -1281,6 +1285,33 @@ steps:
       module: aws-secrets
       secrets:
         api_key: "arn:aws:secretsmanager:us-east-1:123:secret:{{.tenant_id}}-api-key"
+```
+
+---
+
+### `step.secret_set`
+
+Writes one or more secrets to a named secrets module (`secrets.aws`, `secrets.vault`, etc.). Secret values are Go template expressions evaluated against the live pipeline context, enabling values from prior step outputs or trigger data to be persisted into a secrets provider.
+
+**Configuration:**
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `module` | string | yes | Service name of the secrets module (the `name` field in the module config). |
+| `secrets` | map[string]string | yes | Map of secret key → value (or template expression). Values support Go template syntax for dynamic resolution. |
+
+**Output fields:** `set_keys` — sorted list of secret keys that were written.
+
+**Example:**
+
+```yaml
+- type: step.secret_set
+  name: save-creds
+  config:
+    module: zoom-secrets
+    secrets:
+      client_id: "{{ .steps.setup_form.client_id }}"
+      client_secret: "{{ .steps.setup_form.client_secret }}"
 ```
 
 ---

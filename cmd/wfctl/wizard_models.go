@@ -48,30 +48,22 @@ type secretStoreEntry struct {
 	IsDefault bool
 }
 
-// infraResolutionEntry stores per-environment resolution strategy for one resource.
-type infraResolutionEntry struct {
-	ResourceName string
-	EnvName      string
-	Strategy     string // container, provision, existing
-	Connection   string // host:port for existing
-}
-
 // screenID identifies a wizard screen.
 type screenID int
 
 const (
-	screenProjectInfo    screenID = iota
-	screenServices                // 1
-	screenInfrastructure          // 2
-	screenInfraResolution         // 3: per-env strategy for each detected infra resource
-	screenEnvironments            // 4
-	screenDeployment              // 5
-	screenSecretStores            // 6: define named secret stores + default
-	screenSecretRouting           // 7: per-secret store override
-	screenBulkSecrets             // 8: hidden input for each required secret
-	screenCICD                    // 9
-	screenReview                  // 10
-	screenDone                    // 11
+	screenProjectInfo     screenID = iota
+	screenServices                 // 1
+	screenInfrastructure           // 2
+	screenInfraResolution          // 3: per-env strategy for each detected infra resource
+	screenEnvironments             // 4
+	screenDeployment               // 5
+	screenSecretStores             // 6: define named secret stores + default
+	screenSecretRouting            // 7: per-secret store override
+	screenBulkSecrets              // 8: hidden input for each required secret
+	screenCICD                     // 9
+	screenReview                   // 10
+	screenDone                     // 11
 )
 
 // inputField holds a named text input.
@@ -145,5 +137,4 @@ type wizardBulkRow struct {
 	name    string
 	value   string
 	autoGen bool // true when the secret was auto-generated
-	skip    bool // true for no-access stores
 }

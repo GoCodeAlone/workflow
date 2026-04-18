@@ -756,7 +756,7 @@ func (s *GraphQLStep) fetchTokenDirect(ctx context.Context) (string, error) {
 	}
 
 	var tokenResp struct {
-		AccessToken string  `json:"access_token"`
+		AccessToken string  `json:"access_token"` //nolint:gosec // G117: parsing OAuth2 token response; field name is required by protocol
 		ExpiresIn   float64 `json:"expires_in"`
 	}
 	if err := json.Unmarshal(body, &tokenResp); err != nil {
