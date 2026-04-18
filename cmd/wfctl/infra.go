@@ -738,8 +738,8 @@ func runInfraImport(args []string) error {
 	fs.StringVar(&resTypeVal, "type", "", "Abstract resource type (e.g. infra.database)")
 	fs.StringVar(&resTypeVal, "t", "", "Abstract resource type (short for --type)")
 	fs.StringVar(&cloudIDVal, "id", "", "Cloud-provider resource ID")
-	var envName string
-	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
+	// Note: --env is intentionally absent from import. wfctl infra import is not
+	// yet config-aware; env-scoped imports will be added in a follow-up.
 	provider := &providerVal
 	resType := &resTypeVal
 	cloudID := &cloudIDVal
@@ -952,38 +952,4 @@ func runInfraDestroy(args []string) error {
 
 	fmt.Printf("Destroying infrastructure from %s...\n", cfgFile)
 	return runPipelineRun([]string{"-c", pipelineCfg, "-p", "destroy"})
-}
-
-// newInfraFlagSet returns a *flag.FlagSet pre-configured with the flags for the
-// given infra subcommand. Used by tests to verify flag registration without
-// executing the command.
-func newInfraFlagSet(cmd string) *flag.FlagSet {
-	fs := flag.NewFlagSet("infra "+cmd, flag.ContinueOnError)
-	fs.String("config", "", "Config file")
-	fs.String("c", "", "Config file (short for --config)")
-	fs.String("env", "", "Environment name (resolves per-module environments: overrides)")
-	switch cmd {
-	case "plan":
-		fs.String("format", "table", "Output format: table or markdown")
-		fs.String("f", "table", "Output format (short for --format)")
-		fs.String("output", "", "Write plan to JSON file")
-		fs.String("o", "", "Write plan to JSON file (short for --output)")
-		fs.Bool("show-sensitive", false, "Show sensitive values in plaintext")
-		fs.Bool("S", false, "Show sensitive values in plaintext (short for --show-sensitive)")
-	case "apply":
-		fs.Bool("auto-approve", false, "Skip confirmation")
-		fs.Bool("y", false, "Skip confirmation (short for --auto-approve)")
-		fs.Bool("show-sensitive", false, "Show sensitive values in plaintext")
-		fs.Bool("S", false, "Show sensitive values in plaintext (short for --show-sensitive)")
-	case "destroy":
-		fs.Bool("auto-approve", false, "Skip confirmation")
-		fs.Bool("y", false, "Skip confirmation (short for --auto-approve)")
-	case "import":
-		fs.String("provider", "", "Provider name")
-		fs.String("p", "", "Provider name (short for --provider)")
-		fs.String("type", "", "Abstract resource type")
-		fs.String("t", "", "Abstract resource type (short for --type)")
-		fs.String("id", "", "Cloud-provider resource ID")
-	}
-	return fs
 }

@@ -55,7 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `wfctl infra plan|apply|bootstrap|destroy|status|drift|import` now accept `--env <name>`.
+- `wfctl infra plan|apply|bootstrap|destroy|status|drift` now accept `--env <name>`.
+- `wfctl infra import` does not currently accept `--env`; env-scoped imports will land alongside config-aware import in a follow-up.
 - Module configs support an `environments:` block for per-environment resolution (provider/config/image). Set an env value to `null` to skip the module in that env.
 - Top-level `environments:` `envVars` are merged into container resources during infra apply; `region` and `provider` default from `environments[env]` when a module omits them.
 - `wfctl infra` now honors `imports:` (consistent with every other wfctl subcommand).

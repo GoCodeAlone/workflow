@@ -298,20 +298,10 @@ Infrastructure Plan — infra.yaml
     engine:  pg v16
     size:    db-s-1vcpu-1gb
 
-+ create  do-provider  (iac.provider)
-    credentials:  env
-    provider:     digitalocean
-
-+ create  iac-state  (iac.state)
-    backend:    spaces
-    bucket:     my-app-iac-state
-    accessKey:  ${SPACES_ACCESS_KEY}
-    prefix:     staging/
-
-Plan: 3 to create, 0 to update, 0 to destroy.
+Plan: 1 to create, 0 to update, 0 to destroy.
 ```
 
-`do-provider` and `iac-state` come from `shared.yaml` — confirming `imports:` is resolved before computing the plan.
+`iac.provider` and `iac.state` modules from `shared.yaml` are handled by `wfctl infra bootstrap` and never appear in plan output — only `infra.*` and `platform.*` modules show as resource diffs. The imported modules are still parsed and validated; `imports:` resolution is confirmed by the validate output above.
 
 ---
 
