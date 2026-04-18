@@ -19,6 +19,7 @@ type CIBuildConfig struct {
 	Binaries   []CIBinaryTarget    `json:"binaries,omitempty" yaml:"binaries,omitempty"`
 	Containers []CIContainerTarget `json:"containers,omitempty" yaml:"containers,omitempty"`
 	Assets     []CIAssetTarget     `json:"assets,omitempty" yaml:"assets,omitempty"`
+	Security   *CIBuildSecurity    `json:"security,omitempty" yaml:"security,omitempty"`
 }
 
 // CIBinaryTarget is a Go binary to compile.
