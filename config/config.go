@@ -71,11 +71,12 @@ func IsApplicationConfig(data []byte) bool {
 
 // ModuleConfig represents a single module configuration
 type ModuleConfig struct {
-	Name      string            `json:"name" yaml:"name"`
-	Type      string            `json:"type" yaml:"type"`
-	Config    map[string]any    `json:"config,omitempty" yaml:"config,omitempty"`
-	DependsOn []string          `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
-	Branches  map[string]string `json:"branches,omitempty" yaml:"branches,omitempty"`
+	Name         string                                 `json:"name" yaml:"name"`
+	Type         string                                 `json:"type" yaml:"type"`
+	Config       map[string]any                         `json:"config,omitempty" yaml:"config,omitempty"`
+	DependsOn    []string                               `json:"dependsOn,omitempty" yaml:"dependsOn,omitempty"`
+	Branches     map[string]string                      `json:"branches,omitempty" yaml:"branches,omitempty"`
+	Environments map[string]*InfraEnvironmentResolution `json:"environments,omitempty" yaml:"environments,omitempty"`
 }
 
 // RequiresConfig declares what capabilities and plugins a workflow needs.

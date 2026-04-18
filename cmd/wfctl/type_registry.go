@@ -713,6 +713,7 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Stateful:   false,
 			ConfigKeys: []string{"trivy", "semgrep", "snyk"},
 		},
+
 	}
 	// Include any types registered dynamically (e.g. from external plugins loaded via LoadPluginTypesFromDir).
 	for _, t := range schema.KnownModuleTypes() {

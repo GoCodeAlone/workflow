@@ -18,6 +18,8 @@ func runInfraBootstrap(args []string) error {
 	var configFile string
 	fs.StringVar(&configFile, "config", "", "Config file")
 	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
+	var envName string
+	fs.StringVar(&envName, "env", "", "Environment name (resolves per-module environments: overrides)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -25,6 +27,16 @@ func runInfraBootstrap(args []string) error {
 	cfgFile, err := resolveInfraConfig(fs, configFile)
 	if err != nil {
 		return err
+	}
+
+	// If --env is set, resolve the config for that environment before bootstrapping.
+	if envName != "" {
+		tmp, resErr := writeEnvResolvedConfig(cfgFile, envName)
+		if resErr != nil {
+			return resErr
+		}
+		defer os.Remove(tmp)
+		cfgFile = tmp
 	}
 
 	ctx := context.Background()

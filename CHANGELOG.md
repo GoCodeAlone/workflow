@@ -51,6 +51,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.11.0] - 2026-04-17
+
+### Added
+
+- `wfctl infra plan|apply|bootstrap|destroy|status|drift` now accept `--env <name>`.
+- `wfctl infra import` does not currently accept `--env`; env-scoped imports will land alongside config-aware import in a follow-up.
+- Module configs support an `environments:` block for per-environment resolution (provider/config/image). Set an env value to `null` to skip the module in that env.
+- Top-level `environments:` `envVars` are merged into container resources during infra apply; `region` and `provider` default from `environments[env]` when a module omits them.
+- `wfctl infra` now honors `imports:` (consistent with every other wfctl subcommand).
+
+### Notes
+
+- `ci.deploy.environments[].requireApproval` continues to work via `wfctl ci init` emitting `environment: <name>` in generated GitHub Actions. No engine change needed — GitHub's native environment approval UI handles the gate.
+- `InfraResourceConfig` (under `infrastructure.resources:`) already had an `Environments` field but was never wired to `wfctl infra` (which parses `modules:`). Multi-env is now wired to `ModuleConfig`; `InfraResourceConfig` consumption is deferred to a follow-up and `infrastructure.resources:` remains unused by wfctl infra commands in this release.
+
+### Fixed
+
+- `ModuleConfig` previously lacked an `Environments` field; it was defined on the unused `InfraResourceConfig` type. Multi-env is now wired to the schema `wfctl infra` actually parses.
+
 ## [0.4.1] - 2026-03-27
 
 ### Fixed
