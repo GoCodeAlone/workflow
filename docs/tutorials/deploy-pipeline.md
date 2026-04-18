@@ -82,7 +82,7 @@ Infrastructure Plan — infra.yaml
 Plan: 1 to create, 0 to update, 0 to destroy.
 ```
 
-`infra plan` only shows `infra.*` resources — `iac.provider` and `iac.state` are handled separately during `wfctl infra bootstrap`.
+`infra plan` is primarily focused on `infra.*` resource changes. `iac.provider` and `iac.state` are bootstrap-related modules managed via `wfctl infra bootstrap`; some CLI output may still show them for context, but they are not the main resource diff shown above.
 
 ---
 
@@ -596,7 +596,7 @@ Supported secret providers: `github`, `vault`, `aws`, `env`.
 
 ### `wfctl infra plan` shows 0 resources
 
-`infra plan` only shows `infra.*` and `platform.*` modules. Modules of type `cloud.account`, `iac.state`, `iac.provider`, and non-infra module types are categorised separately and won't appear in the plan output — they are still parsed and used internally.
+`infra plan` only shows `infra.*` modules. Modules of type `platform.*`, `cloud.account`, `iac.state`, `iac.provider`, and other non-infra module types are categorised separately and won't appear in the plan output — they are still parsed and used internally.
 
 ### `imports:` file not found
 
