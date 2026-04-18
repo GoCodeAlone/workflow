@@ -14,7 +14,6 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/platform"
 	"github.com/GoCodeAlone/workflow/secrets"
-	"gopkg.in/yaml.v3"
 )
 
 func runInfra(args []string) error {
@@ -185,51 +184,62 @@ func runInfraPlan(args []string) error {
 
 // parseInfraResourceSpecs reads an infra YAML file and returns the list of
 // infra.* modules as ResourceSpecs for plan computation.
-func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) {
-	data, err := os.ReadFile(cfgFile)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", cfgFile, err)
-	}
+// isInfraType returns true for module types handled by wfctl infra commands.
+func isInfraType(t string) bool {
+	return strings.HasPrefix(t, "infra.") || strings.HasPrefix(t, "platform.")
+}
 
-	var parsed struct {
-		Modules []struct {
-			Name   string         `yaml:"name"`
-			Type   string         `yaml:"type"`
-			Config map[string]any `yaml:"config"`
-		} `yaml:"modules"`
+// extractDependsOn pulls the depends_on value from a module config map.
+func extractDependsOn(cfg map[string]any) []string {
+	raw, ok := cfg["depends_on"]
+	if !ok {
+		return nil
 	}
-	if err := yaml.Unmarshal(data, &parsed); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", cfgFile, err)
-	}
-
-	var specs []interfaces.ResourceSpec
-	for _, m := range parsed.Modules {
-		if !strings.HasPrefix(m.Type, "infra.") {
-			continue
-		}
-		spec := interfaces.ResourceSpec{
-			Name:   m.Name,
-			Type:   m.Type,
-			Config: m.Config,
-		}
-		// Extract size from config if present.
-		if size, ok := m.Config["size"].(string); ok {
-			spec.Size = interfaces.Size(size)
-		}
-		// Extract depends_on from config if present.
-		if raw, ok := m.Config["depends_on"]; ok {
-			switch v := raw.(type) {
-			case []any:
-				for _, d := range v {
-					if s, ok := d.(string); ok {
-						spec.DependsOn = append(spec.DependsOn, s)
-					}
-				}
-			case []string:
-				spec.DependsOn = v
+	switch v := raw.(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, d := range v {
+			if s, ok := d.(string); ok {
+				out = append(out, s)
 			}
 		}
-		specs = append(specs, spec)
+		return out
+	}
+	return nil
+}
+
+// resourceSpecFromResolvedModule converts a ResolvedModule to a ResourceSpec,
+// populating Size and DependsOn from the resolved Config. Used by both the
+// --env and no-env paths so field extraction never diverges.
+func resourceSpecFromResolvedModule(r *config.ResolvedModule) interfaces.ResourceSpec {
+	spec := interfaces.ResourceSpec{
+		Name:      r.Name,
+		Type:      r.Type,
+		Config:    r.Config,
+		DependsOn: extractDependsOn(r.Config),
+	}
+	if size, ok := r.Config["size"].(string); ok {
+		spec.Size = interfaces.Size(size)
+	}
+	return spec
+}
+
+// parseInfraResourceSpecs reads an infra config (resolving imports:) and
+// returns ResourceSpecs for all infra.* and platform.* modules.
+func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) {
+	cfg, err := config.LoadFromFile(cfgFile)
+	if err != nil {
+		return nil, fmt.Errorf("load %s: %w", cfgFile, err)
+	}
+	var specs []interfaces.ResourceSpec
+	for _, m := range cfg.Modules {
+		if !isInfraType(m.Type) {
+			continue
+		}
+		r := &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: m.Config}
+		specs = append(specs, resourceSpecFromResolvedModule(r))
 	}
 	return specs, nil
 }
@@ -248,15 +258,7 @@ func parseInfraResourceSpecsForEnv(cfgFile, envName string) ([]interfaces.Resour
 	}
 	specs := make([]interfaces.ResourceSpec, 0, len(resolved))
 	for _, r := range resolved {
-		spec := interfaces.ResourceSpec{
-			Name:   r.Name,
-			Type:   r.Type,
-			Config: r.Config,
-		}
-		if size, ok := r.Config["size"].(string); ok {
-			spec.Size = interfaces.Size(size)
-		}
-		specs = append(specs, spec)
+		specs = append(specs, resourceSpecFromResolvedModule(r))
 	}
 	return specs, nil
 }
@@ -278,6 +280,9 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 	var out []*config.ResolvedModule
 	for i := range cfg.Modules {
 		m := &cfg.Modules[i]
+		if !isInfraType(m.Type) {
+			continue
+		}
 		if envName == "" {
 			out = append(out, &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: m.Config})
 			continue
