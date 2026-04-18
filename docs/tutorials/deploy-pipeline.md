@@ -82,7 +82,7 @@ Infrastructure Plan — infra.yaml
 Plan: 1 to create, 0 to update, 0 to destroy.
 ```
 
-`infra plan` is primarily focused on `infra.*` resource changes. `iac.provider` and `iac.state` are bootstrap-related modules managed via `wfctl infra bootstrap`; some CLI output may still show them for context, but they are not the main resource diff shown above.
+`infra plan` shows only `infra.*` and `platform.*` modules. `iac.provider` and `iac.state` are bootstrap-related modules managed by `wfctl infra bootstrap` and never appear in plan output — `cloud.account` modules are also excluded. All module types are still parsed and used internally; only the resource diff is filtered.
 
 ---
 
