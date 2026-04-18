@@ -255,11 +255,16 @@ func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) 
 // planResourcesForEnv loads the config at path and returns the list of
 // resolved modules for envName. Resources whose environments[envName] is
 // explicitly null are skipped. If envName is empty, all modules are returned
-// with their top-level config.
+// with their top-level config. Top-level environments[envName] defaults
+// (region, provider, envVars) are applied after per-module resolution.
 func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error) {
 	cfg, err := config.LoadFromFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("load %s: %w", path, err)
+	}
+	var topEnv *config.EnvironmentConfig
+	if envName != "" && cfg.Environments != nil {
+		topEnv = cfg.Environments[envName]
 	}
 	var out []*config.ResolvedModule
 	for i := range cfg.Modules {
@@ -268,11 +273,37 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 			out = append(out, &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: m.Config})
 			continue
 		}
-		if resolved, ok := m.ResolveForEnv(envName); ok {
-			out = append(out, resolved)
+		resolved, ok := m.ResolveForEnv(envName)
+		if !ok {
+			continue
 		}
+		if topEnv != nil {
+			if resolved.Region == "" {
+				resolved.Region = topEnv.Region
+			}
+			if resolved.Provider == "" {
+				resolved.Provider = topEnv.Provider
+			}
+			if isContainerType(resolved.Type) && len(topEnv.EnvVars) > 0 {
+				ev, _ := resolved.Config["env_vars"].(map[string]any)
+				if ev == nil {
+					ev = map[string]any{}
+				}
+				for k, v := range topEnv.EnvVars {
+					if _, present := ev[k]; !present {
+						ev[k] = v
+					}
+				}
+				resolved.Config["env_vars"] = ev
+			}
+		}
+		out = append(out, resolved)
 	}
 	return out, nil
+}
+
+func isContainerType(t string) bool {
+	return t == "infra.container_service" || t == "platform.do_app"
 }
 
 // loadCurrentState attempts to load ResourceStates from the iac.state backend
