@@ -73,6 +73,21 @@ func TestResolveForEnv_EnvNotListed_UsesTopLevel(t *testing.T) {
 	}
 }
 
+func TestResolveForEnv_RegionFromTopLevelConfigNoEnvs(t *testing.T) {
+	m := &ModuleConfig{
+		Name:   "db",
+		Type:   "infra.database",
+		Config: map[string]any{"region": "sfo3"},
+	}
+	resolved, ok := m.ResolveForEnv("prod")
+	if !ok {
+		t.Fatal("want ok=true")
+	}
+	if resolved.Region != "sfo3" {
+		t.Fatalf("want region=sfo3 from module config, got %q", resolved.Region)
+	}
+}
+
 func TestResolveForEnv_RegionPopulatedFromConfig(t *testing.T) {
 	m := &ModuleConfig{
 		Name:   "db",

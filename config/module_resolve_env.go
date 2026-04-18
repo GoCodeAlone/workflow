@@ -19,6 +19,7 @@ func (m *ModuleConfig) ResolveForEnv(envName string) (*ResolvedModule, bool) {
 		Type:   m.Type,
 		Config: cloneMap(m.Config),
 	}
+	setRegionFromConfig(resolved)
 
 	if len(m.Environments) == 0 {
 		return resolved, true
@@ -41,11 +42,17 @@ func (m *ModuleConfig) ResolveForEnv(envName string) (*ResolvedModule, bool) {
 		}
 		resolved.Config[k] = v
 	}
-	// Region is read from the module's own Config (resolved.Config["region"]) if present.
-	if r, ok := resolved.Config["region"].(string); ok {
-		resolved.Region = r
-	}
+	setRegionFromConfig(resolved) // re-apply after env overrides
 	return resolved, true
+}
+
+func setRegionFromConfig(r *ResolvedModule) {
+	if r == nil {
+		return
+	}
+	if v, ok := r.Config["region"].(string); ok {
+		r.Region = v
+	}
 }
 
 func cloneMap(m map[string]any) map[string]any {
