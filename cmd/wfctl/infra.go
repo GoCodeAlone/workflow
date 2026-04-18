@@ -797,24 +797,8 @@ func runInfraApply(args []string) error {
 		}
 	}
 
-	// Inject secrets using the env-specific secretsStoreOverride so that
-	// ${SECRET_NAME} templates in the config resolve to the correct store.
-	if envName != "" {
-		wfCfg, loadErr := config.LoadFromFile(cfgFile)
-		if loadErr == nil && wfCfg.Secrets != nil && len(wfCfg.Secrets.Entries) > 0 {
-			ctx := context.Background()
-			secretVals, secretErr := injectSecrets(ctx, wfCfg, envName)
-			if secretErr != nil {
-				return fmt.Errorf("inject secrets for env %q: %w", envName, secretErr)
-			}
-			for k, v := range secretVals {
-				os.Setenv(k, v)
-			}
-		}
-	}
-
-	// Auto-bootstrap: if infra.auto_bootstrap is true (default), run bootstrap
-	// before apply to ensure secrets and state backend are ready.
+	// Auto-bootstrap first: generates secrets (secrets: generate:) and ensures
+	// the state backend exists before we attempt to inject/use secrets.
 	infraCfg, err := parseInfraConfig(cfgFile)
 	if err != nil {
 		return fmt.Errorf("parse infra config: %w", err)
@@ -828,6 +812,21 @@ func runInfraApply(args []string) error {
 		}
 		if err := runInfraBootstrap(bootstrapArgs); err != nil {
 			return fmt.Errorf("bootstrap: %w", err)
+		}
+	}
+
+	// Inject secrets after bootstrap so generated secrets are available.
+	if envName != "" {
+		wfCfg, loadErr := config.LoadFromFile(cfgFile)
+		if loadErr == nil && wfCfg.Secrets != nil && len(wfCfg.Secrets.Entries) > 0 {
+			ctx := context.Background()
+			secretVals, secretErr := injectSecrets(ctx, wfCfg, envName)
+			if secretErr != nil {
+				return fmt.Errorf("inject secrets for env %q: %w", envName, secretErr)
+			}
+			for k, v := range secretVals {
+				os.Setenv(k, v)
+			}
 		}
 	}
 
