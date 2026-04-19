@@ -50,12 +50,6 @@ Use 'wfctl plugin-registry' for plugin catalog management.
 	return fmt.Errorf("missing or unknown subcommand")
 }
 
-// runRegistryPush stub — full implementation in T24.
-func runRegistryPush(args []string) error {
-	fmt.Println("wfctl registry push: not yet implemented (T24)")
-	return nil
-}
-
 // runRegistryPrune stub — full implementation in T25/T26.
 func runRegistryPrune(args []string) error {
 	fmt.Println("wfctl registry prune: not yet implemented (T25/T26)")
