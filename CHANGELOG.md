@@ -11,13 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### `wfctl build` command family
 
-- **`wfctl build`** — top-level orchestrator; chains `go → ui → image → push` per `ci.build` config. Flags: `--config`, `--dry-run`, `--only`, `--skip`, `--tag`, `--format json|yaml|table`, `--no-push`, `--env`, `--security-audit`.
+- **`wfctl build`** — top-level orchestrator; chains `go → ui → image → push` per `ci.build` config. Flags: `--config`, `--dry-run`, `--only`, `--skip`, `--tag`, `--format json|yaml|table`, `--no-push`, `--env`.
 - **`wfctl build go`** — builds all `type: go` targets via the built-in Go builder plugin. `--target` flag to select a single target.
 - **`wfctl build ui`** — builds all `type: nodejs` targets via the built-in Node.js builder plugin.
 - **`wfctl build image`** — builds all `ci.build.containers[]` entries. Supports `method: dockerfile` (BuildKit with secrets/cache/platforms) and `method: ko`. External images (`external: true`) are resolved via the `tag_from` chain instead of being built.
 - **`wfctl build push`** — pushes each container's image refs to registries declared in `push_to[]`.
 - **`wfctl build custom`** — runs all `type: custom` targets via the custom builder plugin.
-- **`wfctl build --security-audit`** — lints Dockerfiles and builder configs for security issues; exits 1 on critical findings (e.g. `USER root`, embedded secrets, policy violations).
 
 #### Builder plugin contract (`plugin/builder`, `plugins/builder-*`)
 
@@ -101,6 +100,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Manual: ci.build schema](docs/manual/build-deploy/01-ci-build-schema.md)
 - [Manual: CLI reference](docs/manual/build-deploy/05-cli-reference.md)
 - [Manual: Security hardening](docs/manual/build-deploy/07-security-hardening.md)
+
+### Deferred to v0.14.1
+
+- **GitLab registry auth** (T31) — full GitLab Container Registry Login/Push/Prune implementation.
+- **BuildKit provenance attestation** (T33) — `--provenance=mode=max` attestation via BuildKit.
+- **`wfctl build --security-audit`** (T34) — Dockerfile and builder config linting; exits 1 on critical findings (e.g. `USER root`, embedded secrets, policy violations).
 
 ## [Unreleased]
 
