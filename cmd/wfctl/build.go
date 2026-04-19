@@ -162,7 +162,11 @@ func runBuildOrchestrate(cfg *config.WorkflowConfig, opts buildOpts) error {
 
 	// Push step (unless --no-push).
 	if !opts.noPush && !opts.dryRun {
-		if err := runBuildPush([]string{}); err != nil {
+		pushArgs := []string{}
+		if opts.cfgPath != "" {
+			pushArgs = append(pushArgs, "--config", opts.cfgPath)
+		}
+		if err := runBuildPush(pushArgs); err != nil {
 			return fmt.Errorf("push: %w", err)
 		}
 	}
