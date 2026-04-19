@@ -39,6 +39,46 @@ type CIContainerTarget struct {
 	Context    string `json:"context,omitempty" yaml:"context,omitempty"`
 	Registry   string `json:"registry,omitempty" yaml:"registry,omitempty"`
 	Tag        string `json:"tag,omitempty" yaml:"tag,omitempty"`
+
+	// Method selects the build driver: "dockerfile" (default) or "ko".
+	Method     string            `json:"method,omitempty" yaml:"method,omitempty"`
+	KoPackage  string            `json:"ko_package,omitempty" yaml:"ko_package,omitempty"`
+	KoBaseImage string           `json:"ko_base_image,omitempty" yaml:"ko_base_image,omitempty"`
+	KoBare     bool              `json:"ko_bare,omitempty" yaml:"ko_bare,omitempty"`
+	Platforms  []string          `json:"platforms,omitempty" yaml:"platforms,omitempty"`
+	BuildArgs  map[string]string `json:"build_args,omitempty" yaml:"build_args,omitempty"`
+	Secrets    []CIContainerSecret `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	Cache      *CIContainerCache `json:"cache,omitempty" yaml:"cache,omitempty"`
+	Target     string            `json:"target,omitempty" yaml:"target,omitempty"`
+	Labels     map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
+	ExtraFlags []string          `json:"extra_flags,omitempty" yaml:"extra_flags,omitempty"`
+	External   bool              `json:"external,omitempty" yaml:"external,omitempty"`
+	Source     *CIExternalSource `json:"source,omitempty" yaml:"source,omitempty"`
+	PushTo     []string          `json:"push_to,omitempty" yaml:"push_to,omitempty"`
+}
+
+// CIContainerSecret passes a BuildKit secret into a docker build step.
+type CIContainerSecret struct {
+	ID  string `json:"id" yaml:"id"`
+	Env string `json:"env,omitempty" yaml:"env,omitempty"`
+	Src string `json:"src,omitempty" yaml:"src,omitempty"`
+}
+
+// CIContainerCache configures BuildKit layer cache import/export.
+type CIContainerCache struct {
+	From []CIContainerCacheRef `json:"from,omitempty" yaml:"from,omitempty"`
+	To   []CIContainerCacheRef `json:"to,omitempty" yaml:"to,omitempty"`
+}
+
+// CIContainerCacheRef is a single cache reference (type + ref).
+type CIContainerCacheRef struct {
+	Type string `json:"type,omitempty" yaml:"type,omitempty"` // registry | local | gha
+	Ref  string `json:"ref,omitempty" yaml:"ref,omitempty"`
+}
+
+// CIExternalSource is an upstream image to pull and re-push rather than build locally.
+type CIExternalSource struct {
+	Ref string `json:"ref" yaml:"ref"`
 }
 
 // CIAssetTarget is a non-binary build artifact (e.g., frontend bundle).
