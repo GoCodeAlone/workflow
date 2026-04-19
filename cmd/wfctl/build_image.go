@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -16,6 +17,10 @@ import (
 //   - method:ko      — invoke `ko build`
 //   - method:dockerfile (default) — invoke `docker build` via BuildKit
 func runBuildImage(args []string) error {
+	return runBuildImageWithOutput(args, os.Stdout)
+}
+
+func runBuildImageWithOutput(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("build image", flag.ContinueOnError)
 	cfgPath := fs.String("config", "", "Config file")
 	dryRun := fs.Bool("dry-run", false, "Print planned actions without executing")
@@ -56,14 +61,12 @@ func runBuildImage(args []string) error {
 		}
 
 		if ctr.External {
-			img := ""
-			if ctr.Source != nil {
-				img = ctr.Source.Ref
-			}
+			resolvedTag := resolveExternalTag(ctr, tag)
+			imageRef := buildExternalImageRef(ctr, resolvedTag, cfg.CI.Registries)
 			if *dryRun {
-				fmt.Printf("[dry-run] image external ref: %s → %s\n", ctr.Name, img)
+				fmt.Fprintf(out, "[dry-run] external image: %s → %s\n", ctr.Name, imageRef)
 			} else {
-				fmt.Printf("image: %s resolved from external source %s\n", ctr.Name, img)
+				fmt.Fprintf(out, "image: %s resolved from external source %s\n", ctr.Name, imageRef)
 			}
 			continue
 		}
@@ -75,11 +78,11 @@ func runBuildImage(args []string) error {
 
 		switch method {
 		case "ko":
-			if err := buildWithKo(ctr, tag, *dryRun); err != nil {
+			if err := buildWithKo(ctr, tag, *dryRun, out); err != nil {
 				return fmt.Errorf("ko build %q: %w", ctr.Name, err)
 			}
 		default: // dockerfile
-			if err := buildWithDockerfile(ctr, tag, *dryRun); err != nil {
+			if err := buildWithDockerfile(ctr, tag, *dryRun, out); err != nil {
 				return fmt.Errorf("dockerfile build %q: %w", ctr.Name, err)
 			}
 		}
@@ -87,7 +90,7 @@ func runBuildImage(args []string) error {
 	return nil
 }
 
-func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool) error {
+func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, out io.Writer) error {
 	dockerfile := ctr.Dockerfile
 	if dockerfile == "" {
 		dockerfile = "Dockerfile"
@@ -139,18 +142,18 @@ func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool) 
 	args = append(args, ".")
 
 	if dryRun {
-		fmt.Printf("[dry-run] docker %s\n", strings.Join(args, " "))
+		fmt.Fprintf(out, "[dry-run] docker %s\n", strings.Join(args, " "))
 		return nil
 	}
 
 	cmd := exec.Command("docker", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = out
+	cmd.Stderr = out
 	cmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
 	return cmd.Run()
 }
 
-func buildWithKo(ctr config.CIContainerTarget, tag string, dryRun bool) error {
+func buildWithKo(ctr config.CIContainerTarget, tag string, dryRun bool, out io.Writer) error {
 	pkg := ctr.KoPackage
 	if pkg == "" {
 		pkg = "."
@@ -169,14 +172,58 @@ func buildWithKo(ctr config.CIContainerTarget, tag string, dryRun bool) error {
 	args = append(args, pkg)
 
 	if dryRun {
-		fmt.Printf("[dry-run] ko %s\n", strings.Join(args, " "))
+		fmt.Fprintf(out, "[dry-run] ko %s\n", strings.Join(args, " "))
 		return nil
 	}
 
 	cmd := exec.Command("ko", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = out
+	cmd.Stderr = out
 	return cmd.Run()
+}
+
+// resolveExternalTag resolves the image tag for an external container via
+// the TagFrom chain (env var → shell command) falling back to ctr.Tag or "latest".
+func resolveExternalTag(ctr config.CIContainerTarget, fallback string) string {
+	if ctr.Source != nil {
+		for _, entry := range ctr.Source.TagFrom {
+			if entry.Env != "" {
+				if v := os.Getenv(entry.Env); v != "" {
+					return v
+				}
+			}
+			if entry.Command != "" {
+				out, err := exec.Command("sh", "-c", entry.Command).Output() //nolint:gosec
+				if err == nil && len(out) > 0 {
+					return strings.TrimSpace(string(out))
+				}
+			}
+		}
+	}
+	if fallback != "" && fallback != "latest" {
+		return fallback
+	}
+	if ctr.Tag != "" {
+		return ctr.Tag
+	}
+	return "latest"
+}
+
+// buildExternalImageRef constructs the full image reference for an external container.
+// It resolves the registry path from the first push_to entry in registries.
+func buildExternalImageRef(ctr config.CIContainerTarget, tag string, registries []config.CIRegistry) string {
+	if ctr.Source != nil && ctr.Source.Ref != "" {
+		return ctr.Source.Ref + ":" + tag
+	}
+	// Fallback: build from registry path + container name.
+	for _, regName := range ctr.PushTo {
+		for _, reg := range registries {
+			if reg.Name == regName {
+				return reg.Path + "/" + ctr.Name + ":" + tag
+			}
+		}
+	}
+	return ctr.Name + ":" + tag
 }
 
 func imageRefForContainer(ctr config.CIContainerTarget, tag string) string {

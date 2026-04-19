@@ -81,7 +81,15 @@ type CIContainerCacheRef struct {
 
 // CIExternalSource is an upstream image to pull and re-push rather than build locally.
 type CIExternalSource struct {
-	Ref string `json:"ref" yaml:"ref"`
+	Ref     string         `json:"ref" yaml:"ref"`
+	TagFrom []TagFromEntry `json:"tag_from,omitempty" yaml:"tag_from,omitempty"`
+}
+
+// TagFromEntry is one step in a tag resolution chain.
+// The first non-empty result wins; Command is run via sh -c.
+type TagFromEntry struct {
+	Env     string `json:"env,omitempty" yaml:"env,omitempty"`
+	Command string `json:"command,omitempty" yaml:"command,omitempty"`
 }
 
 // CIAssetTarget is a non-binary build artifact (e.g., frontend bundle).
