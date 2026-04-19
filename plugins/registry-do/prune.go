@@ -3,6 +3,7 @@ package registrydo
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 
@@ -37,7 +38,7 @@ func pruneTagsFromJSON(ctx registry.Context, token, registryPath string, raw []b
 		deleteArgs := []string{"registry", "repository", "delete-tag",
 			registryPath, t.Tag, "--force"}
 		cmd := exec.CommandContext(ctx, "doctl", deleteArgs...) //nolint:gosec
-		cmd.Env = append([]string{}, "DIGITALOCEAN_TOKEN="+token)
+		cmd.Env = append(os.Environ(), "DIGITALOCEAN_TOKEN="+token)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			fmt.Fprintf(ctx.Out(), "warn: failed to delete tag %s: %v\n%s", t.Tag, err, out)
 		} else {

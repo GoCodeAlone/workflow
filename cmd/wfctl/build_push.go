@@ -34,7 +34,8 @@ func runBuildPush(args []string) error {
 
 	dryRun := os.Getenv("WFCTL_BUILD_DRY_RUN") == "1"
 
-	for _, ct := range cfg.CI.Build.Containers {
+	for i := range cfg.CI.Build.Containers {
+		ct := cfg.CI.Build.Containers[i]
 		if ct.External {
 			continue
 		}

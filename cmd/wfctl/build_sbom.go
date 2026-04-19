@@ -43,25 +43,24 @@ func GenerateSBOM(ctx context.Context, imageRef string, sec *config.CIBuildSecur
 // AttachSBOM attaches a local SBOM file to imageRef as an OCI artifact.
 // It tries oras first, then cosign, then logs a warning if neither is available.
 func AttachSBOM(ctx context.Context, imageRef, sbomPath string, out io.Writer) error {
-	if os.Getenv("WFCTL_BUILD_DRY_RUN") == "1" {
-		if orasAvailable() {
-			fmt.Fprintf(out, "[dry-run] oras attach %s --artifact-type application/vnd.cyclonedx+json %s:application/vnd.cyclonedx+json\n", imageRef, sbomPath)
-		} else if cosignAvailable() {
-			fmt.Fprintf(out, "[dry-run] cosign attach sbom --sbom %s --type cyclonedx %s\n", sbomPath, imageRef)
-		} else {
-			fmt.Fprintf(out, "[dry-run] SBOM attachment skipped (neither oras nor cosign found on PATH)\n")
-		}
+	switch {
+	case os.Getenv("WFCTL_BUILD_DRY_RUN") == "1" && orasAvailable():
+		fmt.Fprintf(out, "[dry-run] oras attach %s --artifact-type application/vnd.cyclonedx+json %s:application/vnd.cyclonedx+json\n", imageRef, sbomPath)
+		return nil
+	case os.Getenv("WFCTL_BUILD_DRY_RUN") == "1" && cosignAvailable():
+		fmt.Fprintf(out, "[dry-run] cosign attach sbom --sbom %s --type cyclonedx %s\n", sbomPath, imageRef)
+		return nil
+	case os.Getenv("WFCTL_BUILD_DRY_RUN") == "1":
+		fmt.Fprintf(out, "[dry-run] SBOM attachment skipped (neither oras nor cosign found on PATH)\n")
+		return nil
+	case orasAvailable():
+		return attachWithOras(ctx, imageRef, sbomPath, out)
+	case cosignAvailable():
+		return attachWithCosign(ctx, imageRef, sbomPath, out)
+	default:
+		fmt.Fprintf(out, "warning: SBOM generated but not attached — install oras or cosign to enable OCI attachment\n")
 		return nil
 	}
-
-	if orasAvailable() {
-		return attachWithOras(ctx, imageRef, sbomPath, out)
-	}
-	if cosignAvailable() {
-		return attachWithCosign(ctx, imageRef, sbomPath, out)
-	}
-	fmt.Fprintf(out, "warning: SBOM generated but not attached — install oras or cosign to enable OCI attachment\n")
-	return nil
 }
 
 func runSyft(ctx context.Context, imageRef, sbomPath string, out io.Writer) error {

@@ -87,20 +87,35 @@ func runBuildPhase(build *config.CIBuildConfig, verbose bool) error {
 		if bin.Type != "go" && bin.Type != "" {
 			continue // non-go targets handled by dedicated builders (Phase 2)
 		}
-		// Extract os/arch from Config map (set by backcompat shim or user config)
+		// Extract os/arch from Config map (set by backcompat shim or user config).
+		// Values may be []string (direct config) or []any (YAML unmarshal).
 		var osList, archList []string
 		if v, ok := bin.Config["os"]; ok {
-			if sl, ok := v.([]any); ok {
-				for _, s := range sl { osList = append(osList, fmt.Sprintf("%v", s)) }
+			switch val := v.(type) {
+			case []string:
+				osList = val
+			case []any:
+				for _, s := range val {
+					osList = append(osList, fmt.Sprintf("%v", s))
+				}
 			}
 		}
-		if len(osList) == 0 { osList = []string{runtime.GOOS} }
+		if len(osList) == 0 {
+			osList = []string{runtime.GOOS}
+		}
 		if v, ok := bin.Config["arch"]; ok {
-			if sl, ok := v.([]any); ok {
-				for _, s := range sl { archList = append(archList, fmt.Sprintf("%v", s)) }
+			switch val := v.(type) {
+			case []string:
+				archList = val
+			case []any:
+				for _, s := range val {
+					archList = append(archList, fmt.Sprintf("%v", s))
+				}
 			}
 		}
-		if len(archList) == 0 { archList = []string{runtime.GOARCH} }
+		if len(archList) == 0 {
+			archList = []string{runtime.GOARCH}
+		}
 		for _, goos := range osList {
 			for _, goarch := range archList {
 				outputName := fmt.Sprintf("bin/%s-%s-%s", bin.Name, goos, goarch)
@@ -118,8 +133,13 @@ func runBuildPhase(build *config.CIBuildConfig, verbose bool) error {
 					"GOOS="+goos,
 					"GOARCH="+goarch,
 				)
-				if envMap, ok := bin.Config["env"].(map[string]any); ok {
-					for k, v := range envMap {
+				switch envVal := bin.Config["env"].(type) {
+				case map[string]string:
+					for k, v := range envVal {
+						cmd.Env = append(cmd.Env, k+"="+os.ExpandEnv(v))
+					}
+				case map[string]any:
+					for k, v := range envVal {
 						cmd.Env = append(cmd.Env, k+"="+os.ExpandEnv(fmt.Sprintf("%v", v)))
 					}
 				}

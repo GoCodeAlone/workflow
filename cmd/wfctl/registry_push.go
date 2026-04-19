@@ -51,13 +51,10 @@ func runRegistryPush(args []string) error {
 	}
 	var jobs []pushJob
 
-	for _, ctr := range cfg.CI.Build.Containers {
+	for i := range cfg.CI.Build.Containers {
+		ctr := cfg.CI.Build.Containers[i]
 		if ctr.External {
 			continue // external refs are not built locally → don't push
-		}
-		ref := *imageRef
-		if ref == "" {
-			ref = ctr.Name + ":latest"
 		}
 		targets := ctr.PushTo
 		if *registryName != "" {
@@ -67,6 +64,10 @@ func runRegistryPush(args []string) error {
 			reg, ok := regs[regName]
 			if !ok {
 				return fmt.Errorf("registry push: container %q push_to references unknown registry %q", ctr.Name, regName)
+			}
+			ref := *imageRef
+			if ref == "" {
+				ref = reg.Path + "/" + ctr.Name + ":latest"
 			}
 			jobs = append(jobs, pushJob{imageRef: ref, registryName: regName, registry: reg})
 		}

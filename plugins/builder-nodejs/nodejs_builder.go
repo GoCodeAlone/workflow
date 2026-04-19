@@ -60,7 +60,7 @@ func (n *NodejsBuilder) Build(ctx context.Context, cfg builder.Config, out *buil
 
 	// Install step: <pm> ci (or install equivalent).
 	installArgs := installCommand(pm, cfg.Fields)
-	installCmd := exec.CommandContext(ctx, installArgs[0], installArgs[1:]...)
+	installCmd := exec.CommandContext(ctx, installArgs[0], installArgs[1:]...) //nolint:gosec // G204: command constructed from config, not user input
 	installCmd.Dir = cwd
 	installCmd.Env = os.Environ()
 	if output, err := installCmd.CombinedOutput(); err != nil {
@@ -69,7 +69,7 @@ func (n *NodejsBuilder) Build(ctx context.Context, cfg builder.Config, out *buil
 
 	// Build step: <pm> run <script> [npm_flags...]
 	runArgs := runCommand(pm, scr, cfg.Fields)
-	runCmd := exec.CommandContext(ctx, runArgs[0], runArgs[1:]...)
+	runCmd := exec.CommandContext(ctx, runArgs[0], runArgs[1:]...) //nolint:gosec // G204: command constructed from config, not user input
 	runCmd.Dir = cwd
 	runCmd.Env = os.Environ()
 	if output, err := runCmd.CombinedOutput(); err != nil {
@@ -109,16 +109,28 @@ func (n *NodejsBuilder) SecurityLint(cfg builder.Config) []builder.Finding {
 		}
 	}
 
-	// Warn if package-lock.json is absent (when path is a real directory).
+	// Warn if the expected lockfile for the detected package manager is absent.
 	cwd := cfg.Path
 	if cwd == "" {
 		cwd = "."
 	}
-	lockFile := filepath.Join(cwd, "package-lock.json")
+	var lockFile string
+	var lockMsg string
+	switch pm {
+	case "yarn":
+		lockFile = filepath.Join(cwd, "yarn.lock")
+		lockMsg = "yarn.lock not found; commit it for reproducible installs"
+	case "pnpm":
+		lockFile = filepath.Join(cwd, "pnpm-lock.yaml")
+		lockMsg = "pnpm-lock.yaml not found; commit it for reproducible installs"
+	default:
+		lockFile = filepath.Join(cwd, "package-lock.json")
+		lockMsg = "package-lock.json not found; commit it for reproducible installs"
+	}
 	if _, err := os.Stat(lockFile); os.IsNotExist(err) {
 		findings = append(findings, builder.Finding{
 			Severity: "warn",
-			Message:  "package-lock.json not found; commit it for reproducible installs",
+			Message:  lockMsg,
 			File:     lockFile,
 		})
 	}

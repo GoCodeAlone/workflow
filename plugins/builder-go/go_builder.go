@@ -44,9 +44,7 @@ func (g *GoBuilder) Build(ctx context.Context, cfg builder.Config, out *builder.
 	if tags, ok := cfg.Fields["tags"].(string); ok && tags != "" {
 		args = append(args, "-tags", tags)
 	}
-	for _, flag := range extraFlags(cfg.Fields) {
-		args = append(args, flag)
-	}
+	args = append(args, extraFlags(cfg.Fields)...)
 	args = append(args, cfg.Path)
 
 	// Dry-run: skip exec, emit the planned artifact.
@@ -63,7 +61,7 @@ func (g *GoBuilder) Build(ctx context.Context, cfg builder.Config, out *builder.
 		return nil
 	}
 
-	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd := exec.CommandContext(ctx, "go", args...) //nolint:gosec // G204: command constructed from config, not user input
 	cmd.Env = os.Environ()
 	for k, v := range cfg.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)
@@ -113,9 +111,7 @@ func (g *GoBuilder) SecurityLint(cfg builder.Config) []builder.Finding {
 		}
 		builderImage, _ := cfg.Fields["builder_image"].(string)
 		safeImages := map[string]bool{
-			"golang:alpine":   true,
-			"golang:bookworm": true,
-			"golang:bullseye": true,
+			"golang": true,
 		}
 		if builderImage != "" {
 			imageBase := strings.SplitN(builderImage, ":", 2)[0]

@@ -54,7 +54,8 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 		return nil
 	}
 
-	for _, ctr := range cfg.CI.Build.Containers {
+	for i := range cfg.CI.Build.Containers {
+		ctr := cfg.CI.Build.Containers[i]
 		tag := *tagOverride
 		if tag == "" {
 			tag = "latest"

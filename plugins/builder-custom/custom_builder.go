@@ -61,7 +61,7 @@ func (c *CustomBuilder) Build(ctx context.Context, cfg builder.Config, out *buil
 		return nil
 	}
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd := exec.CommandContext(ctx, "sh", "-c", command) //nolint:gosec // G204: command constructed from config, not user input
 	cmd.Env = os.Environ()
 	for k, v := range cfg.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)

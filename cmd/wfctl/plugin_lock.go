@@ -45,7 +45,7 @@ func runPluginLock(args []string) error {
 	if err != nil {
 		return fmt.Errorf("marshal lockfile: %w", err)
 	}
-	if err := os.WriteFile(*lockPath, data, 0640); err != nil {
+	if err := os.WriteFile(*lockPath, data, 0600); err != nil {
 		return fmt.Errorf("write lockfile: %w", err)
 	}
 	fmt.Printf("Lockfile written to %s\n", *lockPath)
