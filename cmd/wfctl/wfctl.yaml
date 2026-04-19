@@ -75,6 +75,8 @@ workflows:
         description: "Interactive TUI wizard for project setup (generates app.yaml)"
       - name: ci
         description: "CI/CD tooling (init, run, generate, validate)"
+      - name: build
+        description: "Build artifacts from ci.build config (go, ui, image, push, custom)"
 
 # Each command is expressed as a workflow pipeline triggered by the CLI.
 # The pipeline delegates to the registered Go implementation via step.cli_invoke,

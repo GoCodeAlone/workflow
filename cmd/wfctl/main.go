@@ -91,6 +91,7 @@ var commands = map[string]func([]string) error{
 	"security":       runSecurity,
 	"wizard":         runWizard,
 	"dev":            runDev,
+	"build":          runBuild,
 }
 
 func main() {
