@@ -58,8 +58,51 @@ func (d *DOProvider) Push(ctx registry.Context, cfg registry.ProviderConfig, ima
 	return nil
 }
 
-func (d *DOProvider) Prune(_ registry.Context, _ registry.ProviderConfig) error {
-	return registry.ErrNotImplemented
+// Prune runs garbage collection and deletes tags beyond retention.keep_latest.
+// It always preserves the "latest" tag.
+func (d *DOProvider) Prune(ctx registry.Context, cfg registry.ProviderConfig) error {
+	ret := cfg.Registry.Retention
+	if ret == nil || ret.KeepLatest <= 0 {
+		return nil
+	}
+
+	token, err := resolveToken(cfg)
+	if err != nil {
+		return err
+	}
+
+	gcArgs := []string{"registry", "garbage-collection", "start",
+		"--force", "--include-untagged-manifests"}
+
+	if ctx.DryRun() {
+		fmt.Fprintf(ctx.Out(), "[dry-run] DIGITALOCEAN_TOKEN=<token> doctl %s\n", joinArgs(gcArgs))
+		fmt.Fprintf(ctx.Out(), "[dry-run] doctl registry repository list-tags --format Tag,UpdatedAt (keep latest %d, preserve 'latest')\n",
+			ret.KeepLatest)
+		return nil
+	}
+
+	gcCmd := exec.CommandContext(ctx, "doctl", gcArgs...) //nolint:gosec
+	gcCmd.Env = append(os.Environ(), "DIGITALOCEAN_TOKEN="+token)
+	gcCmd.Stdout = ctx.Out()
+	gcCmd.Stderr = ctx.Out()
+	if err := gcCmd.Run(); err != nil {
+		return fmt.Errorf("doctl garbage-collection: %w", err)
+	}
+
+	// List tags sorted by updated_at, delete beyond keep_latest (preserve "latest").
+	listArgs := []string{"registry", "repository", "list-tags",
+		"--format", "Tag,UpdatedAt", "--no-header", "--output", "json"}
+	listCmd := exec.CommandContext(ctx, "doctl", listArgs...) //nolint:gosec
+	listCmd.Env = append(os.Environ(), "DIGITALOCEAN_TOKEN="+token)
+	out, err := listCmd.Output()
+	if err != nil {
+		return fmt.Errorf("doctl list tags: %w", err)
+	}
+
+	if err := pruneTagsFromJSON(ctx, token, cfg.Registry.Path, out, ret.KeepLatest); err != nil {
+		return err
+	}
+	return nil
 }
 
 func resolveToken(cfg registry.ProviderConfig) (string, error) {
