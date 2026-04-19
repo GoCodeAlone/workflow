@@ -129,3 +129,59 @@ func TestPluginLockfile_Save_RoundTrip(t *testing.T) {
 		t.Error("expected 'git' field to be preserved after save")
 	}
 }
+
+func TestPluginInstall_FromConfig_NoRequires(t *testing.T) {
+	dir := t.TempDir()
+	cfg := "modules: []\n"
+	cfgPath := writeLockTestFile(t, dir, "workflow.yaml", cfg)
+	err := runPluginInstall([]string{"--from-config", cfgPath, "--plugin-dir", dir})
+	if err != nil {
+		t.Fatalf("--from-config with no requires: %v", err)
+	}
+}
+
+func TestPluginLock_NoPlugins(t *testing.T) {
+	dir := t.TempDir()
+	cfg := "modules: []\n"
+	cfgPath := writeLockTestFile(t, dir, "workflow.yaml", cfg)
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	err := runPluginLock([]string{"--config", cfgPath, "--lock-file", lockPath})
+	if err != nil {
+		t.Fatalf("plugin lock with no plugins: %v", err)
+	}
+	// Empty lockfile is created.
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		t.Fatal("lockfile not created")
+	}
+}
+
+func TestPluginLock_PinsVersions(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `requires:
+  plugins:
+    - name: workflow-plugin-ai
+      version: "1.0.0"
+`
+	cfgPath := writeLockTestFile(t, dir, "workflow.yaml", cfg)
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	err := runPluginLock([]string{"--config", cfgPath, "--lock-file", lockPath})
+	if err != nil {
+		t.Fatalf("plugin lock: %v", err)
+	}
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("read lockfile: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("lockfile is empty")
+	}
+}
+
+func writeLockTestFile(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
