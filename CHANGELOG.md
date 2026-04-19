@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-04-19
+
+### Added
+
+#### `wfctl build audit` — supply-chain security checks (T34)
+
+- **`wfctl build audit`** — scans the build config for supply-chain security issues. Six checks:
+  1. `ci.build.security.hardened=false` → WARN
+  2. Dockerfile containers without `sbom` or `provenance` configured → WARN
+  3. Registries without a `retention:` policy → WARN
+  4. `requires.plugins` or `plugins.external` declared without a `.wfctl.yaml` lockfile → WARN
+  5. Registry `auth.env` pointing to an env var not set at audit time → WARN
+  6. `environments.local.build.security.hardened=false` → NOTE (expected for local dev)
+- **`--strict`** flag — exits 1 if any WARN-level findings are present (default: exit 0 always).
+
+#### BuildKit provenance attestation (T33)
+
+- When `ci.build.security.hardened=true`, `wfctl build image` appends `--provenance=mode=max` and `--sbom=true` to every `docker build` invocation.
+- Emits a warning when `DOCKER_BUILDKIT` is not set to `1`, since BuildKit is required for provenance attestation to work.
+
+#### GitLab Container Registry provider (T31)
+
+- **`plugins/registry-gitlab`** — full implementation replacing the stub:
+  - `Login`: uses `gitlab-ci-token` + `$CI_JOB_TOKEN` in CI context; falls back to `oauth2` + `auth.env` token.
+  - `Push`: `docker push <ref>` (GitLab accepts anything under the logged-in registry path).
+  - `Prune`: calls GitLab API (`GET /api/v4/projects/:id/registry/repositories` + `DELETE .../tags/:name`) to delete tags beyond `retention.keep_latest`.
+
 ## [0.14.0] - 2026-04-19
 
 ### Added
