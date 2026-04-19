@@ -12,6 +12,8 @@ type EnvironmentConfig struct {
 	SecretsStoreOverride string          `json:"secretsStoreOverride,omitempty" yaml:"secretsStoreOverride,omitempty"`
 	ApprovalRequired     bool            `json:"approvalRequired,omitempty" yaml:"approvalRequired,omitempty"`
 	Exposure             *ExposureConfig `json:"exposure,omitempty" yaml:"exposure,omitempty"`
+	// Build overrides ci.build values for this environment.
+	Build *CIBuildConfig `json:"build,omitempty" yaml:"build,omitempty"`
 }
 
 // ExposureConfig defines how a service is exposed to the network.
