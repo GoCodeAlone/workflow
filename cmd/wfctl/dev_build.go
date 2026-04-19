@@ -19,7 +19,7 @@ func resolveBuildForEnv(cfg *config.WorkflowConfig, envName string) *config.CIBu
 	base := cfg.CI.Build
 	envBuild := envBuildOverride(cfg, envName)
 	if envBuild == nil {
-		return base
+		return applyLocalEnvDefaults(base, envName)
 	}
 
 	// Merge: build a map of env-override targets keyed by name.
@@ -46,7 +46,54 @@ func resolveBuildForEnv(cfg *config.WorkflowConfig, envName string) *config.CIBu
 		result.Security = envBuild.Security
 	}
 
+	return applyLocalEnvDefaults(&result, envName)
+}
+
+// applyLocalEnvDefaults applies T38 (skip hardening) and T39 (local cache)
+// when envName is "local" and no explicit override has already been set.
+func applyLocalEnvDefaults(build *config.CIBuildConfig, envName string) *config.CIBuildConfig {
+	if envName != "local" {
+		return build
+	}
+
+	result := *build
+
+	// T38: local env defaults to hardened=false, sbom=false unless explicitly overridden.
+	if result.Security == nil || (result.Security.Hardened && result.Security.SBOM) {
+		// Only override when security came from the global hardened defaults, not from
+		// an explicit environments.local.build.security block (which sets Security != nil
+		// with the user's choices).
+		if build.Security == nil || isHardenedDefault(build.Security) {
+			result.Security = &config.CIBuildSecurity{
+				Hardened:   false,
+				SBOM:       false,
+				Provenance: "",
+				NonRoot:    false,
+			}
+		}
+	}
+
+	// T39: inject local Docker layer cache into all containers that don't already have one.
+	if len(result.Containers) > 0 {
+		containers := make([]config.CIContainerTarget, len(result.Containers))
+		copy(containers, result.Containers)
+		for i := range containers {
+			if containers[i].Cache == nil {
+				containers[i].Cache = &config.CIContainerCache{
+					From: []config.CIContainerCacheRef{{Type: "local"}},
+				}
+			}
+		}
+		result.Containers = containers
+	}
+
 	return &result
+}
+
+// isHardenedDefault returns true when sec matches the auto-applied hardened defaults,
+// indicating no explicit user override was present.
+func isHardenedDefault(sec *config.CIBuildSecurity) bool {
+	return sec != nil && sec.Hardened && sec.SBOM && sec.Provenance == "slsa-3" && sec.NonRoot
 }
 
 // mergeTarget overlays env-specific config fields onto base, merging the
