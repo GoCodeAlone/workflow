@@ -5,6 +5,103 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-04-19
+
+### Added
+
+#### `wfctl build` command family
+
+- **`wfctl build`** — top-level orchestrator; chains `go → ui → image → push` per `ci.build` config. Flags: `--config`, `--dry-run`, `--only`, `--skip`, `--tag`, `--format json|yaml|table`, `--no-push`, `--env`, `--security-audit`.
+- **`wfctl build go`** — builds all `type: go` targets via the built-in Go builder plugin. `--target` flag to select a single target.
+- **`wfctl build ui`** — builds all `type: nodejs` targets via the built-in Node.js builder plugin.
+- **`wfctl build image`** — builds all `ci.build.containers[]` entries. Supports `method: dockerfile` (BuildKit with secrets/cache/platforms) and `method: ko`. External images (`external: true`) are resolved via the `tag_from` chain instead of being built.
+- **`wfctl build push`** — pushes each container's image refs to registries declared in `push_to[]`.
+- **`wfctl build custom`** — runs all `type: custom` targets via the custom builder plugin.
+- **`wfctl build --security-audit`** — lints Dockerfiles and builder configs for security issues; exits 1 on critical findings (e.g. `USER root`, embedded secrets, policy violations).
+
+#### Builder plugin contract (`plugin/builder`, `plugins/builder-*`)
+
+- **`plugin/builder.Builder` interface** — `Name()`, `Validate(cfg)`, `Build(ctx, cfg, out)`, `SecurityLint(cfg)` contract for all builder plugins.
+- **Built-in `go` builder** — invokes `go build` with ldflags, tags, CGO, cross-compilation. SecurityLint warns on secret-embedding ldflags, CGO without link_mode, and unknown builder images.
+- **Built-in `nodejs` builder** — runs `npm ci && npm run <script>` (or yarn/pnpm). SecurityLint warns on missing `package-lock.json`.
+- **Built-in `custom` builder** — runs arbitrary shell commands via `sh -c`. Always emits a SecurityLint warn.
+- **Builder registry** (`plugin/builder/registry.go`) — `Register`, `Get`, `List` with init-time registration.
+
+#### `wfctl registry` container commands
+
+- **`wfctl registry login`** — logs into declared registries. DO provider uses `doctl registry login`; GHCR provider uses `docker login ghcr.io --password-stdin`.
+- **`wfctl registry push`** — pushes image refs to declared registries.
+- **`wfctl registry prune`** — runs `doctl registry garbage-collection` + tag pruning (DO provider); GH API version pruning (GHCR provider). Preserves `latest`. Dry-run supported.
+- **RegistryProvider interface** (`plugin/registry/provider.go`) — `Name()`, `Login()`, `Push()`, `Prune()` with `Context` carrying `io.Writer` + `dryRun`.
+- **DO provider** (`plugins/registry-do`) — full Login/Push/Prune implementation.
+- **GHCR provider** (`plugins/registry-github`) — full Login/Push/Prune implementation via GH API.
+- **Stub providers** for GitLab, AWS, GCP, Azure — register and return `ErrNotImplemented`; full implementations in future releases.
+
+#### Config schema additions
+
+- **`ci.build.targets[]`** — typed build targets with `name`, `type`, `path`, `config`, `environments` overrides. Supersedes `binaries:` (legacy `binaries:` auto-coerced with deprecation warning).
+- **`ci.registries[]`** — `CIRegistry` + `CIRegistryAuth` + `CIRegistryRetention` types. Retention supports `keep_latest`, `untagged_ttl`, `schedule`.
+- **`CIContainerTarget` extensions** — `method`, `ko_*`, `platforms`, `build_args`, `secrets`, `cache`, `target`, `labels`, `extra_flags`, `external`, `source` (with `tag_from` chain), `push_to`.
+- **`CIBuildSecurity`** — `hardened`, `sbom`, `provenance`, `sign`, `non_root`, `base_image_policy`. Defaults applied automatically at `LoadFromFile` time: `hardened: true`, `sbom: true`, `provenance: slsa-3`, `non_root: true`.
+- **`TagFromEntry`** — `env` + `command` fields for tag resolution chains on external images.
+- **`EnvironmentConfig.Build`** — `*CIBuildConfig` field for per-environment build overrides consumed by `wfctl dev up`.
+- **`PluginRequirement` auth** — `source` + `auth.env` fields for private plugin repos.
+
+#### Plugin install enhancements
+
+- **`wfctl plugin install --from-config <file>`** — batch-installs `requires.plugins[]` from a workflow config; skips already-installed plugins.
+- **`wfctl plugin lock`** — regenerates the `.wfctl.yaml` lockfile from `requires.plugins[]`.
+- **Private repo auth** — `requires.plugins[].auth.env` triggers `git config --global url."...".insteadOf` + `GOPRIVATE` injection before fetching; undone after install.
+
+#### Supply-chain hardening
+
+- **Hardened defaults** applied at load time (`LoadFromFile` → `applyBuildDefaults()`).
+- **`CIConfig.ValidateWithWarnings()`** — emits `"hardened defaults disabled — images may not meet supply-chain baseline"` when `security.hardened: false`.
+- **SBOM generation** (`build_sbom.go`) — shells out to `syft` binary; attaches via `oras attach` or `cosign attach sbom`. No-op when `security.sbom: false`.
+
+#### Local dev symmetry
+
+- **`environments.local.build`** overrides — target config keys merged by name; env keys win over base.
+- **Local hardening skip** — when `env == "local"`, auto-applied hardened defaults are replaced with `{hardened: false, sbom: false}` for fast iteration.
+- **Local Docker cache** — container targets under `env == "local"` get `cache.from: [{type: local}]` injected.
+- **`wfctl dev up`** now calls `runDevBuild(cfgPath, "local")` before starting services.
+
+#### External image support
+
+- **`external: true`** on container targets — skips `docker build`; resolves image ref via `source.tag_from` chain (env var → shell command → fallback).
+- **`ResolveTag`** (`build_resolve_tag.go`) — generic tag resolver used by external and built containers.
+
+#### CI init emitter
+
+- **`wfctl ci init`** now emits three files for GitHub Actions:
+  - `.github/workflows/ci.yml` — build + test (unchanged)
+  - `.github/workflows/deploy.yml` (**new**) — minimal ~45-line pipeline with `workflow_run` trigger, `build-image` job using `wfctl build --push --format json`, chained `deploy-*` jobs with correct SHA pinning (`${{ github.event.workflow_run.head_sha || github.sha }}`), and `concurrency` block.
+  - `.github/workflows/registry-retention.yml` (**new, conditional**) — emitted when any registry has `retention.schedule`; wraps `wfctl registry prune`.
+
+#### Documentation
+
+- **Tutorial**: `docs/tutorials/build-deploy-pipeline.md` — 16-section step-by-step guide from hello-world Go deployment to polyglot multi-registry pipeline with signing and attestation.
+- **Manual** (`docs/manual/build-deploy/`): 9-page reference covering `ci.build` schema, `ci.registries` schema, deploy environments, builder plugins, CLI reference, auth providers, security hardening, local dev, and troubleshooting.
+
+### Changed
+
+- **`wfctl registry`** now refers to **container registry** commands (`login`, `push`, `prune`). The plugin catalog command is renamed to **`wfctl plugin-registry`**. A deprecation alias `wfctl registry` (routing to `wfctl plugin-registry`) is kept until v1.0.
+- **`ci.build.security` defaults are on** — configs that omit `ci.build.security` get `hardened: true`, `sbom: true`, `provenance: slsa-3`, `non_root: true` applied automatically.
+
+### Notes
+
+- **Hardened defaults are on by default.** Opt out with `ci.build.security.hardened: false` — a supply-chain warning is emitted. See [Security Hardening](docs/manual/build-deploy/07-security-hardening.md).
+- Rust, Python, JVM, cmake builder plugins ship as separate `workflow-plugin-builder-*` packages.
+- Kubernetes, ECS, Nomad, Cloud Run deploy targets ship as separate provider plugins.
+- GitLab/AWS/GCP/Azure registry providers are stub-registered in v0.14.0; full implementations tracked in the issue tracker.
+
+### Links
+
+- [Build + Deploy Pipeline Tutorial](docs/tutorials/build-deploy-pipeline.md)
+- [Manual: ci.build schema](docs/manual/build-deploy/01-ci-build-schema.md)
+- [Manual: CLI reference](docs/manual/build-deploy/05-cli-reference.md)
+- [Manual: Security hardening](docs/manual/build-deploy/07-security-hardening.md)
+
 ## [Unreleased]
 
 ### Added
