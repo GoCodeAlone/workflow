@@ -445,3 +445,25 @@ ci:
 		t.Errorf("expected exit 0 for WARN without --strict, got: %v", err)
 	}
 }
+
+// TestBuildAudit_NoteOnlyStrictExitsZero checks that NOTE-only findings do NOT trigger
+// exit 1 even with --strict (NOTE is informational, not a warning).
+func TestBuildAudit_NoteOnlyStrictExitsZero(t *testing.T) {
+	cfgPath := writeBuildAuditConfig(t, `
+ci:
+  build:
+    security:
+      hardened: true
+      sbom: true
+      provenance: slsa-3
+environments:
+  local:
+    build:
+      security:
+        hardened: false
+`)
+	err := runBuildSecurityAudit([]string{"--strict", "--config", cfgPath})
+	if err != nil {
+		t.Errorf("expected exit 0 for NOTE-only findings with --strict, got: %v", err)
+	}
+}

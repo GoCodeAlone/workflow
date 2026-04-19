@@ -75,17 +75,26 @@ func runBuildSecurityAudit(args []string) error {
 	}
 
 	// Critical always exits 1.
+	criticalCount := 0
 	for _, f := range findings {
 		if f.Severity == "CRITICAL" {
-			return fmt.Errorf("%d build security issue(s) found", len(findings))
+			criticalCount++
 		}
 	}
-	// --strict exits 1 on any warn.
+	if criticalCount > 0 {
+		return fmt.Errorf("%d critical build security issue(s) found", criticalCount)
+	}
+
+	// --strict exits 1 on any WARN (NOTE does not count).
 	if *strict {
+		warnCount := 0
 		for _, f := range findings {
 			if f.Severity == "WARN" {
-				return fmt.Errorf("%d build security issue(s) found", len(findings))
+				warnCount++
 			}
+		}
+		if warnCount > 0 {
+			return fmt.Errorf("%d build security warning(s) found", warnCount)
 		}
 	}
 	return nil
