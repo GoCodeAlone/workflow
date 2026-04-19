@@ -481,3 +481,14 @@ pipelines:
         type: step.cli_invoke
         config:
           command: wizard
+
+  cmd-build:
+    trigger:
+      type: cli
+      config:
+        command: build
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: build
