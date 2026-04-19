@@ -73,12 +73,18 @@ func runPluginInstall(args []string) error {
 	registryName := fs.String("registry", "", "Use a specific registry by name")
 	directURL := fs.String("url", "", "Install from a direct download URL (tar.gz archive)")
 	localPath := fs.String("local", "", "Install from a local plugin directory")
+	fromConfig := fs.String("from-config", "", "Install all requires.plugins[] from a workflow config file")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] [<name>[@<version>]]\n\nInstall a plugin from the registry, a URL, a local directory, or from the lockfile.\n\n  wfctl plugin install <name>         Install latest from registry\n  wfctl plugin install <name>@v1.0.0  Install specific version\n  wfctl plugin install --url <url>     Install from a direct download URL\n  wfctl plugin install --local <dir>   Install from a local build directory\n  wfctl plugin install                 Install all plugins from .wfctl.yaml\n\nOptions:\n")
+		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] [<name>[@<version>]]\n\nInstall a plugin from the registry, a URL, a local directory, or from the lockfile.\n\n  wfctl plugin install <name>              Install latest from registry\n  wfctl plugin install <name>@v1.0.0       Install specific version\n  wfctl plugin install --url <url>          Install from a direct download URL\n  wfctl plugin install --local <dir>        Install from a local build directory\n  wfctl plugin install --from-config <f>    Install all requires.plugins[] from workflow config\n  wfctl plugin install                      Install all plugins from .wfctl.yaml\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	// --from-config: batch install from workflow requires.plugins[].
+	if *fromConfig != "" {
+		return installFromWorkflowConfig(*fromConfig, pluginDirVal, *cfgPath)
 	}
 
 	// Validate mutual exclusivity of install modes.

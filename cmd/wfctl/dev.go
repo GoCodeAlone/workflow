@@ -99,6 +99,11 @@ func runDevUp(args []string) error {
 		}
 	}
 
+	// Build local artifacts before starting services.
+	if err := runDevBuild(cfgPath, "local"); err != nil {
+		return fmt.Errorf("dev build: %w", err)
+	}
+
 	switch {
 	case *k8s:
 		if err := runDevK8s(cfg, *verbose); err != nil {

@@ -87,8 +87,15 @@ type RequiresConfig struct {
 
 // PluginRequirement specifies a required plugin with optional version constraint.
 type PluginRequirement struct {
-	Name    string `json:"name" yaml:"name"`
-	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+	Name    string                 `json:"name" yaml:"name"`
+	Version string                 `json:"version,omitempty" yaml:"version,omitempty"`
+	Source  string                 `json:"source,omitempty" yaml:"source,omitempty"`
+	Auth    *PluginRequirementAuth `json:"auth,omitempty" yaml:"auth,omitempty"`
+}
+
+// PluginRequirementAuth holds credentials for fetching a private plugin.
+type PluginRequirementAuth struct {
+	Env string `json:"env,omitempty" yaml:"env,omitempty"`
 }
 
 // SidecarConfig defines a sidecar container to run alongside the workflow application.
@@ -227,6 +234,9 @@ func loadFromFileWithImports(filepath string, seen map[string]bool) (*WorkflowCo
 			return nil, err
 		}
 	}
+
+	// Apply hardened defaults for ci.build.security after all merging is done.
+	cfg.applyBuildDefaults()
 
 	return &cfg, nil
 }

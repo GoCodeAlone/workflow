@@ -7,7 +7,19 @@ import (
 	"path/filepath"
 )
 
-func runRegistry(args []string) error {
+// runPluginRegistry is the canonical name for the plugin catalog registry command.
+func runPluginRegistry(args []string) error {
+	return runRegistryPluginCatalog(args)
+}
+
+// runRegistryDeprecated is the backward-compat alias kept on "wfctl registry"
+// until T21 replaces it with the container-registry dispatcher.
+func runRegistryDeprecated(args []string) error {
+	fmt.Fprintln(os.Stderr, "DEPRECATED: `wfctl registry` now refers to container registries. Use `wfctl plugin-registry` for the plugin catalog. This alias will be removed in v1.0.")
+	return runPluginRegistry(args)
+}
+
+func runRegistryPluginCatalog(args []string) error {
 	if len(args) < 1 {
 		return registryUsage()
 	}

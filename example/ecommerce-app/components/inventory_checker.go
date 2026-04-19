@@ -70,8 +70,8 @@ func Execute(ctx context.Context, params map[string]interface{}) (map[string]int
 			checkedItems[i] = fmt.Sprintf("%v", item)
 		}
 		return map[string]interface{}{
-			"available":     true,
-			"checked_items": checkedItems,
+			"available":      true,
+			"checked_items":  checkedItems,
 			"reserved_until": time.Now().Add(15 * time.Minute).Format(time.RFC3339),
 		}, nil
 	}

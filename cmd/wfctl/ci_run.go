@@ -82,13 +82,37 @@ func runBuildPhase(build *config.CIBuildConfig, verbose bool) error {
 		return nil
 	}
 
-	// Build binaries
-	for _, bin := range build.Binaries {
-		osList := bin.OS
+	// Build go targets (type: go or legacy binaries coerced to go)
+	for _, bin := range build.Targets {
+		if bin.Type != "go" && bin.Type != "" {
+			continue // non-go targets handled by dedicated builders (Phase 2)
+		}
+		// Extract os/arch from Config map (set by backcompat shim or user config).
+		// Values may be []string (direct config) or []any (YAML unmarshal).
+		var osList, archList []string
+		if v, ok := bin.Config["os"]; ok {
+			switch val := v.(type) {
+			case []string:
+				osList = val
+			case []any:
+				for _, s := range val {
+					osList = append(osList, fmt.Sprintf("%v", s))
+				}
+			}
+		}
 		if len(osList) == 0 {
 			osList = []string{runtime.GOOS}
 		}
-		archList := bin.Arch
+		if v, ok := bin.Config["arch"]; ok {
+			switch val := v.(type) {
+			case []string:
+				archList = val
+			case []any:
+				for _, s := range val {
+					archList = append(archList, fmt.Sprintf("%v", s))
+				}
+			}
+		}
 		if len(archList) == 0 {
 			archList = []string{runtime.GOARCH}
 		}
@@ -98,8 +122,8 @@ func runBuildPhase(build *config.CIBuildConfig, verbose bool) error {
 				fmt.Printf("Building %s (%s/%s)...\n", bin.Name, goos, goarch)
 
 				buildArgs := []string{"build", "-o", outputName}
-				if bin.LDFlags != "" {
-					ldflags := os.ExpandEnv(bin.LDFlags)
+				if ldf, ok := bin.Config["ldflags"].(string); ok && ldf != "" {
+					ldflags := os.ExpandEnv(ldf)
 					buildArgs = append(buildArgs, "-ldflags", ldflags)
 				}
 				buildArgs = append(buildArgs, bin.Path)
@@ -109,8 +133,15 @@ func runBuildPhase(build *config.CIBuildConfig, verbose bool) error {
 					"GOOS="+goos,
 					"GOARCH="+goarch,
 				)
-				for k, v := range bin.Env {
-					cmd.Env = append(cmd.Env, k+"="+os.ExpandEnv(v))
+				switch envVal := bin.Config["env"].(type) {
+				case map[string]string:
+					for k, v := range envVal {
+						cmd.Env = append(cmd.Env, k+"="+os.ExpandEnv(v))
+					}
+				case map[string]any:
+					for k, v := range envVal {
+						cmd.Env = append(cmd.Env, k+"="+os.ExpandEnv(fmt.Sprintf("%v", v)))
+					}
 				}
 				if verbose {
 					cmd.Stdout = os.Stdout
@@ -125,7 +156,8 @@ func runBuildPhase(build *config.CIBuildConfig, verbose bool) error {
 	}
 
 	// Build containers
-	for _, ctr := range build.Containers {
+	for i := range build.Containers {
+		ctr := &build.Containers[i]
 		fmt.Printf("Building container %s...\n", ctr.Name)
 		dockerfile := ctr.Dockerfile
 		if dockerfile == "" {

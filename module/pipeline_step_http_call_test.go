@@ -101,8 +101,8 @@ func TestHTTPCallStep_ErrorOnStatus_FalsePreservesResponse(t *testing.T) {
 
 	factory := NewHTTPCallStepFactory()
 	step, err := factory("rl-test", map[string]any{
-		"url":              srv.URL,
-		"error_on_status":  false,
+		"url":             srv.URL,
+		"error_on_status": false,
 	}, nil)
 	if err != nil {
 		t.Fatalf("factory error: %v", err)

@@ -6,7 +6,74 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/GoCodeAlone/workflow/config"
 )
+
+// installFromWorkflowConfig reads requires.plugins[] from a workflow config file
+// and installs each plugin that is not already present on disk.
+func installFromWorkflowConfig(workflowCfgPath, pluginDir, registryCfgPath string) error {
+	cfg, err := config.LoadFromFile(workflowCfgPath)
+	if err != nil {
+		return fmt.Errorf("load workflow config: %w", err)
+	}
+
+	if cfg.Requires == nil || len(cfg.Requires.Plugins) == 0 {
+		fmt.Println("No requires.plugins[] in config — nothing to install.")
+		return nil
+	}
+
+	var failed []string
+	for _, req := range cfg.Requires.Plugins {
+		installDir := filepath.Join(pluginDir, req.Name)
+		if ver := readInstalledVersion(installDir); ver != "" && ver != "unknown" {
+			fmt.Fprintf(os.Stderr, "%s v%s already installed, skipping.\n", req.Name, ver)
+			continue
+		}
+
+		// Apply private repo auth if declared.
+		var authCleanup func()
+		if req.Auth != nil && req.Auth.Env != "" {
+			domain := extractDomain(req.Source)
+			if domain == "" {
+				domain = "github.com"
+			}
+			cleanup, authErr := applyPrivateAuth(req.Auth.Env, domain)
+			if authErr != nil {
+				fmt.Fprintf(os.Stderr, "auth error for %s: %v\n", req.Name, authErr)
+				failed = append(failed, req.Name)
+				continue
+			}
+			authCleanup = cleanup
+		}
+
+		nameArg := req.Name
+		if req.Version != "" {
+			nameArg = req.Name + "@" + req.Version
+		}
+
+		installArgs := []string{"--plugin-dir", pluginDir}
+		if registryCfgPath != "" {
+			installArgs = append(installArgs, "--config", registryCfgPath)
+		}
+		installArgs = append(installArgs, nameArg)
+
+		fmt.Fprintf(os.Stderr, "Installing %s...\n", nameArg)
+		installErr := runPluginInstall(installArgs)
+		if authCleanup != nil {
+			authCleanup()
+		}
+		if installErr != nil {
+			fmt.Fprintf(os.Stderr, "error installing %s: %v\n", req.Name, installErr)
+			failed = append(failed, req.Name)
+		}
+	}
+
+	if len(failed) > 0 {
+		return fmt.Errorf("failed to install: %s", strings.Join(failed, ", "))
+	}
+	return nil
+}
 
 // runPluginDeps lists dependencies for a plugin without installing them.
 func runPluginDeps(args []string) error {

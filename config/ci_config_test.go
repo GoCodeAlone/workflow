@@ -41,11 +41,11 @@ environments:
 	if cfg.CI == nil {
 		t.Fatal("ci section missing")
 	}
-	if len(cfg.CI.Build.Binaries) != 1 {
-		t.Fatalf("expected 1 binary, got %d", len(cfg.CI.Build.Binaries))
+	if len(cfg.CI.Build.Targets) != 1 {
+		t.Fatalf("expected 1 target (coerced from binaries:), got %d", len(cfg.CI.Build.Targets))
 	}
-	if cfg.CI.Build.Binaries[0].Name != "server" {
-		t.Errorf("expected 'server', got %q", cfg.CI.Build.Binaries[0].Name)
+	if cfg.CI.Build.Targets[0].Name != "server" {
+		t.Errorf("expected 'server', got %q", cfg.CI.Build.Targets[0].Name)
 	}
 	if cfg.CI.Test.Unit.Command != "go test ./... -race" {
 		t.Errorf("unexpected test command: %q", cfg.CI.Test.Unit.Command)
@@ -84,8 +84,8 @@ func TestCIConfig_Validate(t *testing.T) {
 	t.Run("binary missing name", func(t *testing.T) {
 		c := &CIConfig{
 			Build: &CIBuildConfig{
-				Binaries: []CIBinaryTarget{
-					{Name: "", Path: "./cmd/server"},
+				Targets: []CITarget{
+					{Name: "", Type: "go", Path: "./cmd/server"},
 				},
 			},
 		}
@@ -97,8 +97,8 @@ func TestCIConfig_Validate(t *testing.T) {
 	t.Run("binary missing path", func(t *testing.T) {
 		c := &CIConfig{
 			Build: &CIBuildConfig{
-				Binaries: []CIBinaryTarget{
-					{Name: "server", Path: ""},
+				Targets: []CITarget{
+					{Name: "server", Type: "go", Path: ""},
 				},
 			},
 		}
@@ -123,8 +123,8 @@ func TestCIConfig_Validate(t *testing.T) {
 	t.Run("valid config passes", func(t *testing.T) {
 		c := &CIConfig{
 			Build: &CIBuildConfig{
-				Binaries: []CIBinaryTarget{
-					{Name: "server", Path: "./cmd/server"},
+				Targets: []CITarget{
+					{Name: "server", Type: "go", Path: "./cmd/server"},
 				},
 			},
 			Deploy: &CIDeployConfig{
