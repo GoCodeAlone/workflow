@@ -18,7 +18,11 @@ func runBuild(args []string) error {
 		case "go":
 			return runBuildGo(rest)
 		case "ui":
-			return runBuildUI(rest)
+			return runBuildUIPlugin(rest)
+		case "push":
+			return runBuildPush(rest)
+		case "custom":
+			return runBuildCustom(rest)
 		default:
 			return fmt.Errorf("unknown build subcommand %q — valid: go, ui, image, push, custom", sub)
 		}
