@@ -15,8 +15,10 @@ type CIConfig struct {
 }
 
 // CIBuildConfig defines what artifacts the build phase produces.
+// UnmarshalYAML is implemented in ci_target.go to handle the binaries:→targets: migration.
 type CIBuildConfig struct {
-	Binaries   []CIBinaryTarget    `json:"binaries,omitempty" yaml:"binaries,omitempty"`
+	// Targets is the canonical field (type-dispatched). Populated from binaries: (legacy) or targets:.
+	Targets    []CITarget          `json:"targets,omitempty" yaml:"targets,omitempty"`
 	Containers []CIContainerTarget `json:"containers,omitempty" yaml:"containers,omitempty"`
 	Assets     []CIAssetTarget     `json:"assets,omitempty" yaml:"assets,omitempty"`
 	Security   *CIBuildSecurity    `json:"security,omitempty" yaml:"security,omitempty"`
@@ -139,12 +141,12 @@ func (c *CIConfig) Validate() error {
 	}
 	var errs []error
 	if c.Build != nil {
-		for _, bin := range c.Build.Binaries {
-			if bin.Name == "" {
-				errs = append(errs, fmt.Errorf("ci.build.binaries: name is required"))
+		for _, target := range c.Build.Targets {
+			if target.Name == "" {
+				errs = append(errs, fmt.Errorf("ci.build.targets: name is required"))
 			}
-			if bin.Path == "" {
-				errs = append(errs, fmt.Errorf("ci.build.binaries[%s]: path is required", bin.Name))
+			if target.Path == "" && target.Type != "custom" {
+				errs = append(errs, fmt.Errorf("ci.build.targets[%s]: path is required", target.Name))
 			}
 		}
 	}

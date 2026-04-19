@@ -82,24 +82,33 @@ func runBuildPhase(build *config.CIBuildConfig, verbose bool) error {
 		return nil
 	}
 
-	// Build binaries
-	for _, bin := range build.Binaries {
-		osList := bin.OS
-		if len(osList) == 0 {
-			osList = []string{runtime.GOOS}
+	// Build go targets (type: go or legacy binaries coerced to go)
+	for _, bin := range build.Targets {
+		if bin.Type != "go" && bin.Type != "" {
+			continue // non-go targets handled by dedicated builders (Phase 2)
 		}
-		archList := bin.Arch
-		if len(archList) == 0 {
-			archList = []string{runtime.GOARCH}
+		// Extract os/arch from Config map (set by backcompat shim or user config)
+		var osList, archList []string
+		if v, ok := bin.Config["os"]; ok {
+			if sl, ok := v.([]any); ok {
+				for _, s := range sl { osList = append(osList, fmt.Sprintf("%v", s)) }
+			}
 		}
+		if len(osList) == 0 { osList = []string{runtime.GOOS} }
+		if v, ok := bin.Config["arch"]; ok {
+			if sl, ok := v.([]any); ok {
+				for _, s := range sl { archList = append(archList, fmt.Sprintf("%v", s)) }
+			}
+		}
+		if len(archList) == 0 { archList = []string{runtime.GOARCH} }
 		for _, goos := range osList {
 			for _, goarch := range archList {
 				outputName := fmt.Sprintf("bin/%s-%s-%s", bin.Name, goos, goarch)
 				fmt.Printf("Building %s (%s/%s)...\n", bin.Name, goos, goarch)
 
 				buildArgs := []string{"build", "-o", outputName}
-				if bin.LDFlags != "" {
-					ldflags := os.ExpandEnv(bin.LDFlags)
+				if ldf, ok := bin.Config["ldflags"].(string); ok && ldf != "" {
+					ldflags := os.ExpandEnv(ldf)
 					buildArgs = append(buildArgs, "-ldflags", ldflags)
 				}
 				buildArgs = append(buildArgs, bin.Path)
@@ -109,8 +118,10 @@ func runBuildPhase(build *config.CIBuildConfig, verbose bool) error {
 					"GOOS="+goos,
 					"GOARCH="+goarch,
 				)
-				for k, v := range bin.Env {
-					cmd.Env = append(cmd.Env, k+"="+os.ExpandEnv(v))
+				if envMap, ok := bin.Config["env"].(map[string]any); ok {
+					for k, v := range envMap {
+						cmd.Env = append(cmd.Env, k+"="+os.ExpandEnv(fmt.Sprintf("%v", v)))
+					}
 				}
 				if verbose {
 					cmd.Stdout = os.Stdout
