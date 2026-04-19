@@ -143,7 +143,8 @@ func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, 
 
 	// T33: BuildKit provenance attestation when hardened=true.
 	if hardened {
-		if os.Getenv("DOCKER_BUILDKIT") != "1" {
+		// Warn only in dry-run: in live mode DOCKER_BUILDKIT=1 is already forced on cmd.Env.
+		if dryRun && os.Getenv("DOCKER_BUILDKIT") != "1" {
 			fmt.Fprintf(out, "warning: DOCKER_BUILDKIT is not set to 1; provenance attestation requires BuildKit\n")
 		}
 		args = append(args, "--provenance=mode=max", "--sbom=true")

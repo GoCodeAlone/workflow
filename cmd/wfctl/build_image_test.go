@@ -91,6 +91,39 @@ func TestRunBuildImage_HardenedProvenanceArgs(t *testing.T) {
 	}
 }
 
+// TestRunBuildImage_HardenedBuildKitWarning verifies the DOCKER_BUILDKIT warning is only
+// emitted in dry-run mode (in live mode the env is forced via cmd.Env).
+func TestRunBuildImage_HardenedBuildKitWarning(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `ci:
+  build:
+    security:
+      hardened: true
+      sbom: true
+      provenance: slsa-3
+    containers:
+      - name: app
+        method: dockerfile
+        dockerfile: Dockerfile
+`
+	cfgPath := filepath.Join(dir, "ci.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Ensure DOCKER_BUILDKIT is unset to trigger the warning path.
+	t.Setenv("DOCKER_BUILDKIT", "")
+
+	// Dry-run: warning should appear.
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+	var dryBuf bytes.Buffer
+	if err := runBuildImageWithOutput([]string{"--config", cfgPath}, &dryBuf); err != nil {
+		t.Fatalf("hardened dry-run: %v", err)
+	}
+	if !strings.Contains(dryBuf.String(), "DOCKER_BUILDKIT") {
+		t.Errorf("expected DOCKER_BUILDKIT warning in dry-run output, got: %q", dryBuf.String())
+	}
+}
+
 // TestRunBuildImage_NotHardenedNoProvenanceArgs verifies that provenance flags are
 // NOT added when hardened=false (T33).
 func TestRunBuildImage_NotHardenedNoProvenanceArgs(t *testing.T) {
