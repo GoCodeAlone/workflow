@@ -10,10 +10,10 @@ import (
 // It supersedes the legacy CIBinaryTarget; old configs using binaries:
 // are automatically coerced via the CIBuildConfig.UnmarshalYAML shim.
 type CITarget struct {
-	Name         string                      `json:"name" yaml:"name"`
-	Type         string                      `json:"type" yaml:"type"` // go | nodejs | rust | python | custom
-	Path         string                      `json:"path,omitempty" yaml:"path,omitempty"`
-	Config       map[string]any              `json:"config,omitempty" yaml:"config,omitempty"`
+	Name         string                       `json:"name" yaml:"name"`
+	Type         string                       `json:"type" yaml:"type"` // go | nodejs | rust | python | custom
+	Path         string                       `json:"path,omitempty" yaml:"path,omitempty"`
+	Config       map[string]any               `json:"config,omitempty" yaml:"config,omitempty"`
 	Environments map[string]*CITargetOverride `json:"environments,omitempty" yaml:"environments,omitempty"`
 }
 
