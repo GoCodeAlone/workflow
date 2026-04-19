@@ -160,7 +160,8 @@ func (c *CIConfig) Validate() error {
 		}
 	}
 	if c.Build != nil {
-		for i, ctr := range c.Build.Containers {
+		for i := range c.Build.Containers {
+			ctr := &c.Build.Containers[i]
 			method := ctr.Method
 			switch method {
 			case "dockerfile", "":
@@ -211,7 +212,8 @@ func (c *CIConfig) Validate() error {
 
 	// Validate push_to references declared registries.
 	if c.Build != nil {
-		for i, ctr := range c.Build.Containers {
+		for i := range c.Build.Containers {
+			ctr := &c.Build.Containers[i]
 			for _, ref := range ctr.PushTo {
 				if !registryNames[ref] {
 					errs = append(errs, fmt.Errorf("ci.build.containers[%d] (%s): push_to %q references undeclared registry", i, ctr.Name, ref))

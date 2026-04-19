@@ -147,6 +147,7 @@ func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, 
 		return nil
 	}
 
+	//nolint:gosec // G204: docker command constructed from validated config fields
 	cmd := exec.Command("docker", args...)
 	cmd.Stdout = out
 	cmd.Stderr = out

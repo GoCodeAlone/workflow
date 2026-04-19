@@ -156,7 +156,8 @@ func runBuildPhase(build *config.CIBuildConfig, verbose bool) error {
 	}
 
 	// Build containers
-	for _, ctr := range build.Containers {
+	for i := range build.Containers {
+		ctr := &build.Containers[i]
 		fmt.Printf("Building container %s...\n", ctr.Name)
 		dockerfile := ctr.Dockerfile
 		if dockerfile == "" {
