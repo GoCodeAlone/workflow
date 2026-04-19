@@ -77,13 +77,14 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 			method = "dockerfile"
 		}
 
+		hardened := cfg.CI.Build.Security != nil && cfg.CI.Build.Security.Hardened
 		switch method {
 		case "ko":
 			if err := buildWithKo(ctr, tag, *dryRun, out); err != nil {
 				return fmt.Errorf("ko build %q: %w", ctr.Name, err)
 			}
 		default: // dockerfile
-			if err := buildWithDockerfile(ctr, tag, *dryRun, out); err != nil {
+			if err := buildWithDockerfile(ctr, tag, *dryRun, hardened, out); err != nil {
 				return fmt.Errorf("dockerfile build %q: %w", ctr.Name, err)
 			}
 		}
@@ -91,7 +92,7 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 	return nil
 }
 
-func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, out io.Writer) error {
+func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, hardened bool, out io.Writer) error {
 	dockerfile := ctr.Dockerfile
 	if dockerfile == "" {
 		dockerfile = "Dockerfile"
@@ -138,6 +139,14 @@ func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, 
 	// Build target (multi-stage).
 	if ctr.Target != "" {
 		args = append(args, "--target", ctr.Target)
+	}
+
+	// T33: BuildKit provenance attestation when hardened=true.
+	if hardened {
+		if os.Getenv("DOCKER_BUILDKIT") != "1" {
+			fmt.Fprintf(out, "warning: DOCKER_BUILDKIT is not set to 1; provenance attestation requires BuildKit\n")
+		}
+		args = append(args, "--provenance=mode=max", "--sbom=true")
 	}
 
 	args = append(args, ".")
