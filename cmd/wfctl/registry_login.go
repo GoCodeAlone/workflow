@@ -8,7 +8,12 @@ import (
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/plugin/registry"
+	_ "github.com/GoCodeAlone/workflow/plugins/registry-aws"
+	_ "github.com/GoCodeAlone/workflow/plugins/registry-azure"
 	_ "github.com/GoCodeAlone/workflow/plugins/registry-do"
+	_ "github.com/GoCodeAlone/workflow/plugins/registry-gcp"
+	_ "github.com/GoCodeAlone/workflow/plugins/registry-github"
+	_ "github.com/GoCodeAlone/workflow/plugins/registry-gitlab"
 )
 
 func runRegistryLogin(args []string) error {

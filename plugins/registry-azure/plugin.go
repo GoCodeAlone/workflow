@@ -1,5 +1,5 @@
 // Package registryazure is a stub registry provider for Azure Container Registry.
-// Full implementation tracked at https://github.com/GoCodeAlone/workflow/issues.
+// Full implementation tracked in the issue tracker.
 package registryazure
 
 import (
@@ -17,6 +17,10 @@ func New() registry.RegistryProvider { return &AzureProvider{} }
 func (a *AzureProvider) Name() string { return "azure" }
 
 func (a *AzureProvider) Login(_ registry.Context, _ registry.ProviderConfig) error {
+	return registry.ErrNotImplemented
+}
+
+func (a *AzureProvider) Logout(_ registry.Context, _ registry.ProviderConfig) error {
 	return registry.ErrNotImplemented
 }
 

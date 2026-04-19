@@ -44,6 +44,21 @@ func (d *DOProvider) Login(ctx registry.Context, cfg registry.ProviderConfig) er
 	return nil
 }
 
+func (d *DOProvider) Logout(ctx registry.Context, cfg registry.ProviderConfig) error {
+	args := []string{"registry", "logout"}
+	if ctx.DryRun() {
+		fmt.Fprintf(ctx.Out(), "[dry-run] doctl %s\n", joinArgs(args))
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "doctl", args...) //nolint:gosec // G204: command constructed from config, not user input
+	cmd.Stdout = ctx.Out()
+	cmd.Stderr = ctx.Out()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("doctl registry logout: %w", err)
+	}
+	return nil
+}
+
 func (d *DOProvider) Push(ctx registry.Context, cfg registry.ProviderConfig, imageRef string) error {
 	if ctx.DryRun() {
 		fmt.Fprintf(ctx.Out(), "[dry-run] docker push %s\n", imageRef)
@@ -74,10 +89,12 @@ func (d *DOProvider) Prune(ctx registry.Context, cfg registry.ProviderConfig) er
 	gcArgs := []string{"registry", "garbage-collection", "start",
 		"--force", "--include-untagged-manifests"}
 
+	repo := registryRepo(cfg.Registry.Path)
+
 	if ctx.DryRun() {
 		fmt.Fprintf(ctx.Out(), "[dry-run] DIGITALOCEAN_TOKEN=<token> doctl %s\n", joinArgs(gcArgs))
-		fmt.Fprintf(ctx.Out(), "[dry-run] doctl registry repository list-tags --format Tag,UpdatedAt (keep latest %d, preserve 'latest')\n",
-			ret.KeepLatest)
+		fmt.Fprintf(ctx.Out(), "[dry-run] doctl registry repository list-tags %s --format Tag,UpdatedAt (keep latest %d, preserve 'latest')\n",
+			repo, ret.KeepLatest)
 		return nil
 	}
 
@@ -90,7 +107,7 @@ func (d *DOProvider) Prune(ctx registry.Context, cfg registry.ProviderConfig) er
 	}
 
 	// List tags sorted by updated_at, delete beyond keep_latest (preserve "latest").
-	listArgs := []string{"registry", "repository", "list-tags",
+	listArgs := []string{"registry", "repository", "list-tags", repo,
 		"--format", "Tag,UpdatedAt", "--no-header", "--output", "json"}
 	listCmd := exec.CommandContext(ctx, "doctl", listArgs...) //nolint:gosec
 	listCmd.Env = append(os.Environ(), "DIGITALOCEAN_TOKEN="+token)
@@ -115,6 +132,17 @@ func resolveToken(cfg registry.ProviderConfig) (string, error) {
 		return "", fmt.Errorf("do registry %q: env var %s is not set or empty", cfg.Registry.Name, envVar)
 	}
 	return token, nil
+}
+
+// registryRepo returns the last slash-separated component of path,
+// which is the repository name expected by `doctl registry repository list-tags`.
+func registryRepo(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' {
+			return path[i+1:]
+		}
+	}
+	return path
 }
 
 func joinArgs(args []string) string {

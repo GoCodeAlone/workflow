@@ -47,6 +47,21 @@ func (g *GHCRProvider) Login(ctx registry.Context, cfg registry.ProviderConfig) 
 	return nil
 }
 
+func (g *GHCRProvider) Logout(ctx registry.Context, cfg registry.ProviderConfig) error {
+	args := []string{"logout", "ghcr.io"}
+	if ctx.DryRun() {
+		fmt.Fprintf(ctx.Out(), "[dry-run] docker %s\n", joinArgs(args))
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // G204: command constructed from config, not user input
+	cmd.Stdout = ctx.Out()
+	cmd.Stderr = ctx.Out()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker logout ghcr.io: %w", err)
+	}
+	return nil
+}
+
 func (g *GHCRProvider) Push(ctx registry.Context, cfg registry.ProviderConfig, imageRef string) error {
 	if ctx.DryRun() {
 		fmt.Fprintf(ctx.Out(), "[dry-run] docker push %s\n", imageRef)

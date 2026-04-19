@@ -37,6 +37,7 @@ type ProviderConfig struct {
 type RegistryProvider interface {
 	Name() string
 	Login(ctx Context, cfg ProviderConfig) error
+	Logout(ctx Context, cfg ProviderConfig) error
 	Push(ctx Context, cfg ProviderConfig, imageRef string) error
 	Prune(ctx Context, cfg ProviderConfig) error
 }

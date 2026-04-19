@@ -1,5 +1,5 @@
 // Package registrygcp is a stub registry provider for Google Artifact Registry / GCR.
-// Full implementation tracked at https://github.com/GoCodeAlone/workflow/issues.
+// Full implementation tracked in the issue tracker.
 package registrygcp
 
 import (
@@ -17,6 +17,10 @@ func New() registry.RegistryProvider { return &GCPProvider{} }
 func (g *GCPProvider) Name() string { return "gcp" }
 
 func (g *GCPProvider) Login(_ registry.Context, _ registry.ProviderConfig) error {
+	return registry.ErrNotImplemented
+}
+
+func (g *GCPProvider) Logout(_ registry.Context, _ registry.ProviderConfig) error {
 	return registry.ErrNotImplemented
 }
 

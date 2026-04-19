@@ -8,8 +8,9 @@ import (
 
 type mockProvider struct{ name string }
 
-func (m *mockProvider) Name() string                                              { return m.name }
-func (m *mockProvider) Login(_ registry.Context, _ registry.ProviderConfig) error { return nil }
+func (m *mockProvider) Name() string                                               { return m.name }
+func (m *mockProvider) Login(_ registry.Context, _ registry.ProviderConfig) error  { return nil }
+func (m *mockProvider) Logout(_ registry.Context, _ registry.ProviderConfig) error { return nil }
 func (m *mockProvider) Push(_ registry.Context, _ registry.ProviderConfig, _ string) error {
 	return nil
 }

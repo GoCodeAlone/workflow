@@ -1,8 +1,13 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
 	"os"
+
+	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/plugin/registry"
 )
 
 // runRegistry is the new container-registry dispatcher for `wfctl registry`.
@@ -50,14 +55,68 @@ Use 'wfctl plugin-registry' for plugin catalog management.
 	return fmt.Errorf("missing or unknown subcommand")
 }
 
-// runRegistryPrune stub — full implementation in T25/T26.
+// runRegistryPrune garbage-collects and prunes old tags for all registries (or one named by --registry).
 func runRegistryPrune(args []string) error {
-	fmt.Println("wfctl registry prune: not yet implemented (T25/T26)")
+	fs := flag.NewFlagSet("registry prune", flag.ContinueOnError)
+	cfgPath := fs.String("config", "workflow.yaml", "Path to workflow config file")
+	regName := fs.String("registry", "", "Prune this registry only (default: all)")
+	dryRun := fs.Bool("dry-run", false, "Print planned commands without executing")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, err := config.LoadFromFile(*cfgPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	regs := resolveRegistries(cfg, *regName)
+	if *regName != "" && len(regs) == 0 {
+		return fmt.Errorf("no registry named %q found in config", *regName)
+	}
+
+	ctx := registry.NewContext(context.Background(), os.Stdout, *dryRun)
+	for _, reg := range regs {
+		provider, ok := registry.Get(reg.Type)
+		if !ok {
+			return fmt.Errorf("no provider registered for registry type %q (registry: %s)", reg.Type, reg.Name)
+		}
+		if err := provider.Prune(ctx, registry.ProviderConfig{Registry: reg}); err != nil {
+			return fmt.Errorf("prune %s: %w", reg.Name, err)
+		}
+	}
 	return nil
 }
 
-// runRegistryLogout removes stored credentials for a registry.
+// runRegistryLogout removes stored credentials for all registries (or one named by --registry).
 func runRegistryLogout(args []string) error {
-	fmt.Println("wfctl registry logout: credentials cleared (provider implementation in T22/T23)")
+	fs := flag.NewFlagSet("registry logout", flag.ContinueOnError)
+	cfgPath := fs.String("config", "workflow.yaml", "Path to workflow config file")
+	regName := fs.String("registry", "", "Logout from this registry only (default: all)")
+	dryRun := fs.Bool("dry-run", false, "Print planned commands without executing")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, err := config.LoadFromFile(*cfgPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	regs := resolveRegistries(cfg, *regName)
+	if *regName != "" && len(regs) == 0 {
+		return fmt.Errorf("no registry named %q found in config", *regName)
+	}
+
+	ctx := registry.NewContext(context.Background(), os.Stdout, *dryRun)
+	for _, reg := range regs {
+		provider, ok := registry.Get(reg.Type)
+		if !ok {
+			return fmt.Errorf("no provider registered for registry type %q (registry: %s)", reg.Type, reg.Name)
+		}
+		if err := provider.Logout(ctx, registry.ProviderConfig{Registry: reg}); err != nil {
+			return fmt.Errorf("logout %s: %w", reg.Name, err)
+		}
+	}
 	return nil
 }
