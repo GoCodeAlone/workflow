@@ -207,6 +207,17 @@ pipelines:
         config:
           command: build-ui
 
+  cmd-build:
+    trigger:
+      type: cli
+      config:
+        command: build
+    steps:
+      - name: run
+        type: step.cli_invoke
+        config:
+          command: build
+
   cmd-ui:
     trigger:
       type: cli
