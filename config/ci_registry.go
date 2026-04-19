@@ -7,6 +7,10 @@ type CIRegistry struct {
 	Path      string               `json:"path" yaml:"path"`
 	Auth      *CIRegistryAuth      `json:"auth,omitempty" yaml:"auth,omitempty"`
 	Retention *CIRegistryRetention `json:"retention,omitempty" yaml:"retention,omitempty"`
+	// APIBaseURL is the base URL for the registry provider's API.
+	// Used by the GitLab provider to support self-managed instances.
+	// Defaults to https://gitlab.com when unset.
+	APIBaseURL string `json:"api_base_url,omitempty" yaml:"api_base_url,omitempty"`
 }
 
 // CIRegistryAuth holds credentials for pushing/pulling from a registry.

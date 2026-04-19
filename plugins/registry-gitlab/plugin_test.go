@@ -150,3 +150,69 @@ func TestGitLabProvider_Prune_DryRun_WithRetention(t *testing.T) {
 		t.Errorf("expected prune/keep info in dry-run output, got: %q", out)
 	}
 }
+
+// TestGitLabProvider_Prune_SelfManaged checks dry-run mentions the custom API base URL.
+func TestGitLabProvider_Prune_SelfManaged(t *testing.T) {
+	p := registrygitlab.New()
+	reg := config.CIRegistry{
+		Name:       "self-managed",
+		Type:       "gitlab",
+		Path:       "registry.example.com/myorg/myproject",
+		APIBaseURL: "https://gitlab.example.com",
+		Auth:       &config.CIRegistryAuth{Env: "GITLAB_TOKEN"},
+		Retention:  &config.CIRegistryRetention{KeepLatest: 3},
+	}
+	t.Setenv("GITLAB_TOKEN", "glpat-selfmanaged-token")
+
+	var buf bytes.Buffer
+	ctx := registry.NewContext(t.Context(), &buf, true)
+	if err := p.Prune(ctx, registry.ProviderConfig{Registry: reg}); err != nil {
+		t.Fatalf("Prune dry-run self-managed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "myorg/myproject") {
+		t.Errorf("expected project path in dry-run output, got: %q", out)
+	}
+}
+
+// TestGitLabProvider_Login_SelfManaged checks login works with a non-default registry host.
+func TestGitLabProvider_Login_SelfManaged(t *testing.T) {
+	p := registrygitlab.New()
+	reg := config.CIRegistry{
+		Name: "self-managed",
+		Type: "gitlab",
+		Path: "registry.example.com/myorg/myproject",
+		Auth: &config.CIRegistryAuth{Env: "GITLAB_TOKEN"},
+	}
+	t.Setenv("GITLAB_TOKEN", "glpat-selfmanaged")
+
+	var buf bytes.Buffer
+	ctx := registry.NewContext(t.Context(), &buf, true)
+	if err := p.Login(ctx, registry.ProviderConfig{Registry: reg}); err != nil {
+		t.Fatalf("Login dry-run self-managed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "registry.example.com") {
+		t.Errorf("expected self-managed host in login output, got: %q", out)
+	}
+}
+
+// TestAuthHeaderFor checks that JOB-TOKEN is used for CI tokens and PRIVATE-TOKEN for PATs.
+func TestAuthHeaderFor(t *testing.T) {
+	tests := []struct {
+		tokenType string
+		want      string
+	}{
+		{"job", "JOB-TOKEN"},
+		{"private", "PRIVATE-TOKEN"},
+		{"", "PRIVATE-TOKEN"},
+	}
+	for _, tt := range tests {
+		got := registrygitlab.AuthHeaderFor(tt.tokenType)
+		if got != tt.want {
+			t.Errorf("AuthHeaderFor(%q) = %q, want %q", tt.tokenType, got, tt.want)
+		}
+	}
+}
