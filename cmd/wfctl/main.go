@@ -74,7 +74,7 @@ var commands = map[string]func([]string) error{
 	"compat":          runCompat,
 	"generate":        runGenerate,
 	"git":             runGit,
-	"registry":        runRegistryDeprecated,
+	"registry":        runRegistry,
 	"plugin-registry": runPluginRegistry,
 	"update":          runUpdate,
 	"mcp":             runMCP,
