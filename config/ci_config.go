@@ -44,20 +44,20 @@ type CIContainerTarget struct {
 	Tag        string `json:"tag,omitempty" yaml:"tag,omitempty"`
 
 	// Method selects the build driver: "dockerfile" (default) or "ko".
-	Method     string            `json:"method,omitempty" yaml:"method,omitempty"`
-	KoPackage  string            `json:"ko_package,omitempty" yaml:"ko_package,omitempty"`
-	KoBaseImage string           `json:"ko_base_image,omitempty" yaml:"ko_base_image,omitempty"`
-	KoBare     bool              `json:"ko_bare,omitempty" yaml:"ko_bare,omitempty"`
-	Platforms  []string          `json:"platforms,omitempty" yaml:"platforms,omitempty"`
-	BuildArgs  map[string]string `json:"build_args,omitempty" yaml:"build_args,omitempty"`
-	Secrets    []CIContainerSecret `json:"secrets,omitempty" yaml:"secrets,omitempty"`
-	Cache      *CIContainerCache `json:"cache,omitempty" yaml:"cache,omitempty"`
-	Target     string            `json:"target,omitempty" yaml:"target,omitempty"`
-	Labels     map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
-	ExtraFlags []string          `json:"extra_flags,omitempty" yaml:"extra_flags,omitempty"`
-	External   bool              `json:"external,omitempty" yaml:"external,omitempty"`
-	Source     *CIExternalSource `json:"source,omitempty" yaml:"source,omitempty"`
-	PushTo     []string          `json:"push_to,omitempty" yaml:"push_to,omitempty"`
+	Method      string              `json:"method,omitempty" yaml:"method,omitempty"`
+	KoPackage   string              `json:"ko_package,omitempty" yaml:"ko_package,omitempty"`
+	KoBaseImage string              `json:"ko_base_image,omitempty" yaml:"ko_base_image,omitempty"`
+	KoBare      bool                `json:"ko_bare,omitempty" yaml:"ko_bare,omitempty"`
+	Platforms   []string            `json:"platforms,omitempty" yaml:"platforms,omitempty"`
+	BuildArgs   map[string]string   `json:"build_args,omitempty" yaml:"build_args,omitempty"`
+	Secrets     []CIContainerSecret `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	Cache       *CIContainerCache   `json:"cache,omitempty" yaml:"cache,omitempty"`
+	Target      string              `json:"target,omitempty" yaml:"target,omitempty"`
+	Labels      map[string]string   `json:"labels,omitempty" yaml:"labels,omitempty"`
+	ExtraFlags  []string            `json:"extra_flags,omitempty" yaml:"extra_flags,omitempty"`
+	External    bool                `json:"external,omitempty" yaml:"external,omitempty"`
+	Source      *CIExternalSource   `json:"source,omitempty" yaml:"source,omitempty"`
+	PushTo      []string            `json:"push_to,omitempty" yaml:"push_to,omitempty"`
 }
 
 // CIContainerSecret passes a BuildKit secret into a docker build step.
@@ -220,6 +220,29 @@ func (c *CIConfig) Validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// ValidateWithWarnings runs Validate and additionally collects non-fatal
+// supply-chain warnings (e.g. security.hardened=false opt-out).
+func (c *CIConfig) ValidateWithWarnings() (warnings []string, err error) {
+	if c == nil {
+		return nil, nil
+	}
+	err = c.Validate()
+
+	if c.Build != nil && c.Build.Security != nil && !c.Build.Security.Hardened {
+		warnings = append(warnings, "hardened defaults disabled — images may not meet supply-chain baseline")
+	}
+	return warnings, err
+}
+
+// applyBuildDefaults fills in opinionated secure defaults for ci.build.security
+// when the field is absent or partially specified. Called automatically by LoadFromFile.
+func (cfg *WorkflowConfig) applyBuildDefaults() {
+	if cfg.CI == nil || cfg.CI.Build == nil {
+		return
+	}
+	cfg.CI.Build.Security = cfg.CI.Build.Security.ApplyDefaults()
 }
 
 // containsWord reports whether word appears as a whitespace-separated token in s.

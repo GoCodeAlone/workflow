@@ -235,6 +235,9 @@ func loadFromFileWithImports(filepath string, seen map[string]bool) (*WorkflowCo
 		}
 	}
 
+	// Apply hardened defaults for ci.build.security after all merging is done.
+	cfg.applyBuildDefaults()
+
 	return &cfg, nil
 }
 
