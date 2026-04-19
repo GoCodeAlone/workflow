@@ -261,3 +261,187 @@ func hasMatch(findings []buildAuditFinding, severity, msgSubstr string) bool {
 	}
 	return false
 }
+
+// --- T34 Dockerfile linting tests ---
+
+func writeDockerfileAuditFixture(t *testing.T, cfgYAML, dockerfileContent string) (cfgPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	cfgPath = filepath.Join(dir, "workflow.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if dockerfileContent != "" {
+		if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfileContent), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return cfgPath
+}
+
+// TestDockerfileAudit_UserRoot checks that USER root → critical.
+func TestDockerfileAudit_UserRoot(t *testing.T) {
+	cfgPath := writeDockerfileAuditFixture(t, `
+ci:
+  build:
+    containers:
+      - name: app
+        method: dockerfile
+`, `FROM golang:1.22
+USER root
+RUN go build .
+`)
+	findings := runBuildAuditChecks(cfgPath, filepath.Dir(cfgPath))
+	if !hasMatch(findings, "CRITICAL", "root") {
+		t.Errorf("expected CRITICAL for USER root, got: %v", findings)
+	}
+}
+
+// TestDockerfileAudit_NoUser checks that missing USER → critical.
+func TestDockerfileAudit_NoUser(t *testing.T) {
+	cfgPath := writeDockerfileAuditFixture(t, `
+ci:
+  build:
+    containers:
+      - name: app
+        method: dockerfile
+`, `FROM golang:1.22
+RUN go build .
+COPY . .
+`)
+	findings := runBuildAuditChecks(cfgPath, filepath.Dir(cfgPath))
+	if !hasMatch(findings, "CRITICAL", "user") {
+		t.Errorf("expected CRITICAL for missing USER directive, got: %v", findings)
+	}
+}
+
+// TestDockerfileAudit_LatestTag checks FROM :latest → warn.
+func TestDockerfileAudit_LatestTag(t *testing.T) {
+	cfgPath := writeDockerfileAuditFixture(t, `
+ci:
+  build:
+    containers:
+      - name: app
+        method: dockerfile
+`, `FROM golang:latest
+USER app
+RUN go build .
+`)
+	findings := runBuildAuditChecks(cfgPath, filepath.Dir(cfgPath))
+	if !hasMatch(findings, "WARN", "latest") {
+		t.Errorf("expected WARN for FROM :latest, got: %v", findings)
+	}
+}
+
+// TestDockerfileAudit_AddURL checks ADD https:// → warn.
+func TestDockerfileAudit_AddURL(t *testing.T) {
+	cfgPath := writeDockerfileAuditFixture(t, `
+ci:
+  build:
+    containers:
+      - name: app
+        method: dockerfile
+`, `FROM golang:1.22
+USER app
+ADD https://example.com/file.tar.gz /tmp/
+`)
+	findings := runBuildAuditChecks(cfgPath, filepath.Dir(cfgPath))
+	if !hasMatch(findings, "WARN", "add") {
+		t.Errorf("expected WARN for ADD URL, got: %v", findings)
+	}
+}
+
+// TestDockerfileAudit_EmbeddedSecret checks secret pattern → critical.
+func TestDockerfileAudit_EmbeddedSecret(t *testing.T) {
+	cfgPath := writeDockerfileAuditFixture(t, `
+ci:
+  build:
+    containers:
+      - name: app
+        method: dockerfile
+`, `FROM golang:1.22
+USER app
+ENV API_KEY=abc123secret
+`)
+	findings := runBuildAuditChecks(cfgPath, filepath.Dir(cfgPath))
+	if !hasMatch(findings, "CRITICAL", "secret") && !hasMatch(findings, "CRITICAL", "api") {
+		t.Errorf("expected CRITICAL for embedded secret, got: %v", findings)
+	}
+}
+
+// TestDockerfileAudit_Clean checks a clean Dockerfile produces no Dockerfile findings.
+func TestDockerfileAudit_Clean(t *testing.T) {
+	cfgPath := writeDockerfileAuditFixture(t, `
+ci:
+  build:
+    containers:
+      - name: app
+        method: dockerfile
+`, `FROM golang:1.22-alpine
+RUN addgroup -S app && adduser -S app -G app
+USER app
+COPY . .
+RUN go build .
+`)
+	findings := runBuildAuditChecks(cfgPath, filepath.Dir(cfgPath))
+	for _, f := range findings {
+		if f.File != "" && (f.Severity == "CRITICAL" || f.Severity == "WARN") {
+			t.Errorf("unexpected Dockerfile finding in clean file: %v", f)
+		}
+	}
+}
+
+// TestDockerfileAudit_BaseImagePolicy checks allow_prefixes enforcement.
+func TestDockerfileAudit_BaseImagePolicy(t *testing.T) {
+	cfgPath := writeDockerfileAuditFixture(t, `
+ci:
+  build:
+    security:
+      hardened: true
+      sbom: true
+      provenance: slsa-3
+      base_image_policy:
+        allow_prefixes:
+          - gcr.io/distroless/
+    containers:
+      - name: app
+        method: dockerfile
+`, `FROM golang:1.22-alpine
+USER app
+`)
+	findings := runBuildAuditChecks(cfgPath, filepath.Dir(cfgPath))
+	if !hasMatch(findings, "WARN", "policy") && !hasMatch(findings, "WARN", "allow") {
+		t.Errorf("expected WARN for base image policy violation, got: %v", findings)
+	}
+}
+
+// TestBuildAudit_CriticalExitsOne checks that CRITICAL findings cause exit 1 even without --strict.
+func TestBuildAudit_CriticalExitsOne(t *testing.T) {
+	cfgPath := writeDockerfileAuditFixture(t, `
+ci:
+  build:
+    containers:
+      - name: app
+        method: dockerfile
+`, `FROM golang:1.22
+USER root
+`)
+	err := runBuildSecurityAudit([]string{"--config", cfgPath})
+	if err == nil {
+		t.Error("expected non-nil error when critical findings exist")
+	}
+}
+
+// TestBuildAudit_WarnNoStrictExitsZero checks that WARN alone exits 0 without --strict.
+func TestBuildAudit_WarnNoStrictExitsZero(t *testing.T) {
+	cfgPath := writeDockerfileAuditFixture(t, `
+ci:
+  build:
+    security:
+      hardened: false
+`, "")
+	err := runBuildSecurityAudit([]string{"--config", cfgPath})
+	if err != nil {
+		t.Errorf("expected exit 0 for WARN without --strict, got: %v", err)
+	}
+}

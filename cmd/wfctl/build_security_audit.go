@@ -1,23 +1,32 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/plugin/builder"
 )
 
 // buildAuditFinding is a single finding from the build security audit.
 type buildAuditFinding struct {
-	Severity string // WARN | NOTE
+	Severity string // CRITICAL | WARN | NOTE
 	Check    string
 	Message  string
+	File     string // non-empty for Dockerfile findings
+	Line     int    // 1-based line number for Dockerfile findings
 }
 
 func (f buildAuditFinding) String() string {
+	if f.File != "" {
+		return fmt.Sprintf("[%s] %s: %s (%s:%d)", f.Severity, f.Check, f.Message, f.File, f.Line)
+	}
 	return fmt.Sprintf("[%s] %s: %s", f.Severity, f.Check, f.Message)
 }
 
@@ -26,7 +35,7 @@ func runBuildSecurityAudit(args []string) error {
 	fs := flag.NewFlagSet("build audit", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	cfgPath := fs.String("config", "", "Path to workflow config file")
-	strict := fs.Bool("strict", false, "Exit 1 if any warnings are found")
+	strict := fs.Bool("strict", false, "Exit 1 if any warnings are found (critical always exits 1)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -55,12 +64,23 @@ func runBuildSecurityAudit(args []string) error {
 	fmt.Fprintln(tw, "SEVERITY\tCHECK\tFINDING")
 	fmt.Fprintln(tw, "--------\t-----\t-------")
 	for _, f := range findings {
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", f.Severity, f.Check, f.Message)
+		loc := ""
+		if f.File != "" {
+			loc = fmt.Sprintf(" (%s:%d)", f.File, f.Line)
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s%s\n", f.Severity, f.Check, f.Message, loc)
 	}
 	if err := tw.Flush(); err != nil {
 		return err
 	}
 
+	// Critical always exits 1.
+	for _, f := range findings {
+		if f.Severity == "CRITICAL" {
+			return fmt.Errorf("%d build security issue(s) found", len(findings))
+		}
+	}
+	// --strict exits 1 on any warn.
 	if *strict {
 		for _, f := range findings {
 			if f.Severity == "WARN" {
@@ -72,7 +92,7 @@ func runBuildSecurityAudit(args []string) error {
 }
 
 // runBuildAuditChecks runs all audit checks and returns the findings.
-// workDir is the directory used to locate the plugins lockfile.
+// workDir is the directory used to locate the plugins lockfile and Dockerfiles.
 func runBuildAuditChecks(cfgPath, workDir string) []buildAuditFinding {
 	cfg, err := config.LoadFromFile(cfgPath)
 	if err != nil {
@@ -81,7 +101,7 @@ func runBuildAuditChecks(cfgPath, workDir string) []buildAuditFinding {
 	return auditBuildSecurity(cfg, workDir)
 }
 
-// auditBuildSecurity performs all six T34 audit checks against cfg.
+// auditBuildSecurity performs all audit checks against cfg.
 func auditBuildSecurity(cfg *config.WorkflowConfig, workDir string) []buildAuditFinding {
 	var findings []buildAuditFinding
 
@@ -160,5 +180,154 @@ func auditBuildSecurity(cfg *config.WorkflowConfig, workDir string) []buildAudit
 		}
 	}
 
+	if build == nil {
+		return findings
+	}
+
+	// Target-level audits: builder.SecurityLint() for each typed target.
+	for _, target := range build.Targets {
+		b, ok := builder.Get(target.Type)
+		if !ok {
+			continue
+		}
+		var sec *builder.SecurityConfig
+		if build.Security != nil {
+			sec = &builder.SecurityConfig{
+				Hardened:   build.Security.Hardened,
+				SBOM:       build.Security.SBOM,
+				Provenance: build.Security.Provenance,
+				NonRoot:    build.Security.NonRoot,
+			}
+		}
+		lintFindings := b.SecurityLint(builder.Config{
+			TargetName: target.Name,
+			Path:       target.Path,
+			Fields:     target.Config,
+			Security:   sec,
+		})
+		for _, lf := range lintFindings {
+			severity := strings.ToUpper(lf.Severity)
+			findings = append(findings, buildAuditFinding{
+				Severity: severity,
+				Check:    fmt.Sprintf("target:%s", target.Name),
+				Message:  lf.Message,
+				File:     lf.File,
+				Line:     lf.Line,
+			})
+		}
+	}
+
+	// Dockerfile linting for each container target with method=dockerfile.
+	var allowPrefixes []string
+	if build.Security != nil && build.Security.BaseImagePolicy != nil {
+		allowPrefixes = build.Security.BaseImagePolicy.AllowPrefixes
+	}
+	for i := range build.Containers {
+		ctr := &build.Containers[i]
+		method := ctr.Method
+		if method == "" {
+			method = "dockerfile"
+		}
+		if method != "dockerfile" {
+			continue
+		}
+		dfPath := ctr.Dockerfile
+		if dfPath == "" {
+			dfPath = "Dockerfile"
+		}
+		if !filepath.IsAbs(dfPath) {
+			dfPath = filepath.Join(workDir, dfPath)
+		}
+		dfFindings := lintDockerfile(dfPath, ctr.Name, allowPrefixes)
+		findings = append(findings, dfFindings...)
+	}
+
 	return findings
+}
+
+var (
+	reUserRoot       = regexp.MustCompile(`(?i)^USER\s+root\s*$`)
+	reUserAny        = regexp.MustCompile(`(?i)^USER\s+\S`)
+	reFromLatest     = regexp.MustCompile(`(?i)^FROM\s+[^:\s]+:latest(\s|$)`)
+	reFromImage      = regexp.MustCompile(`(?i)^FROM\s+(\S+)`)
+	reAddURL         = regexp.MustCompile(`(?i)^ADD\s+https?://`)
+	reEmbeddedSecret = regexp.MustCompile(`(?i)(password|secret|token|api[_-]?key)\s*=\s*["']?[A-Za-z0-9]`)
+)
+
+// lintDockerfile scans a Dockerfile and returns security findings.
+func lintDockerfile(dfPath, containerName string, allowPrefixes []string) []buildAuditFinding {
+	var findings []buildAuditFinding
+
+	data, err := os.ReadFile(dfPath)
+	if err != nil {
+		// Dockerfile not present — skip silently (may not exist in audit-only context).
+		return findings
+	}
+
+	checkName := "dockerfile:" + containerName
+	addDF := func(severity, msg string, lineNum int) {
+		findings = append(findings, buildAuditFinding{
+			Severity: severity,
+			Check:    checkName,
+			Message:  msg,
+			File:     dfPath,
+			Line:     lineNum,
+		})
+	}
+
+	hasUser := false
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		line := strings.TrimSpace(scanner.Text())
+
+		if reUserRoot.MatchString(line) {
+			addDF("CRITICAL", "USER root detected — container will run as root", lineNum)
+		}
+		if reUserAny.MatchString(line) {
+			hasUser = true
+		}
+		if reFromLatest.MatchString(line) {
+			addDF("WARN", "FROM uses :latest tag — pin to a digest or explicit version for reproducibility", lineNum)
+		}
+		if reAddURL.MatchString(line) {
+			addDF("WARN", "ADD with URL is untrusted — use RUN curl/wget with checksum verification instead", lineNum)
+		}
+		if reEmbeddedSecret.MatchString(line) {
+			addDF("CRITICAL", fmt.Sprintf("possible embedded secret in line %d — use BuildKit secrets (--secret) instead", lineNum), lineNum)
+		}
+
+		// Base image policy.
+		if len(allowPrefixes) > 0 && reFromImage.MatchString(line) {
+			m := reFromImage.FindStringSubmatch(line)
+			if len(m) > 1 && m[1] != "scratch" {
+				img := m[1]
+				if !matchesAnyPrefix(img, allowPrefixes) {
+					addDF("WARN", fmt.Sprintf("base image %q does not match allow_prefixes policy %v", img, allowPrefixes), lineNum)
+				}
+			}
+		}
+	}
+
+	if !hasUser {
+		findings = append(findings, buildAuditFinding{
+			Severity: "CRITICAL",
+			Check:    checkName,
+			Message:  "no USER directive found — container will run as root by default",
+			File:     dfPath,
+			Line:     0,
+		})
+	}
+
+	return findings
+}
+
+func matchesAnyPrefix(image string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(image, p) {
+			return true
+		}
+	}
+	return false
 }
