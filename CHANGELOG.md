@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-04-19
+
+### Added
+
+#### `wfctl build audit` — supply-chain security checks (T34)
+
+- **`wfctl build audit`** — two-layer security audit combining CI config checks and per-target Dockerfile linting.
+
+  **Config-level checks (six):**
+  1. `ci.build.security.hardened=false` → WARN
+  2. Dockerfile containers without `sbom` or `provenance` configured → WARN
+  3. Registries without a `retention:` policy → WARN
+  4. `requires.plugins` or `plugins.external` declared without a `.wfctl.yaml` lockfile → WARN
+  5. Registry `auth.env` pointing to an env var not set at audit time → WARN
+  6. `environments.local.build.security.hardened=false` → NOTE (expected for local dev)
+
+  **Target-level checks:**
+  - Calls `builder.SecurityLint(cfg)` for each typed build target (go, nodejs, custom) and aggregates findings.
+  - For each `method: dockerfile` container, lints the Dockerfile for:
+    - `USER root` → CRITICAL
+    - Missing `USER` directive → CRITICAL
+    - `FROM <image>:latest` without version pinning → WARN
+    - `ADD https?://` URL (untrusted remote fetch) → WARN
+    - Embedded secret patterns (`password=`, `token=`, `api_key=`, etc.) → CRITICAL
+    - Base image not in `ci.build.security.base_image_policy.allow_prefixes` → WARN (when policy is set)
+
+  **Exit codes:** CRITICAL findings always exit 1. `--strict` also exits 1 on any WARN. Plain runs exit 0 unless CRITICAL.
+
+#### BuildKit provenance attestation (T33)
+
+- When `ci.build.security.hardened=true`, `wfctl build image` appends `--provenance=mode=max` and `--sbom=true` to every `docker build` invocation.
+- Emits a warning when `DOCKER_BUILDKIT` is not set to `1`, since BuildKit is required for provenance attestation to work.
+
+#### GitLab Container Registry provider (T31)
+
+- **`plugins/registry-gitlab`** — full implementation replacing the stub:
+  - `Login`: uses `gitlab-ci-token` + `$CI_JOB_TOKEN` in CI context; falls back to `oauth2` + `auth.env` token.
+  - `Push`: `docker push <ref>` (GitLab accepts anything under the logged-in registry path).
+  - `Prune`: calls GitLab API (`GET /api/v4/projects/:id/registry/repositories` + `DELETE .../tags/:name`) to delete tags beyond `retention.keep_latest`.
+
 ## [0.14.0] - 2026-04-19
 
 ### Added

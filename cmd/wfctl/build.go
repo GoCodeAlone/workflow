@@ -30,8 +30,10 @@ func runBuild(args []string) error {
 			return runBuildPush(rest)
 		case "custom":
 			return runBuildCustom(rest)
+		case "audit":
+			return runBuildSecurityAudit(rest)
 		default:
-			return fmt.Errorf("unknown build subcommand %q — valid: go, ui, image, push, custom", sub)
+			return fmt.Errorf("unknown build subcommand %q — valid: go, ui, image, push, custom, audit", sub)
 		}
 	}
 
