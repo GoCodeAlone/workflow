@@ -46,7 +46,9 @@ workflows:
       - name: git
         description: "Git integration (connect: link to GitHub repo, push: commit and push)"
       - name: registry
-        description: "Registry management (list, add, remove plugin registry sources)"
+        description: "Container registry commands (login, push, prune, logout). DEPRECATED for plugin catalog — use plugin-registry instead."
+      - name: plugin-registry
+        description: "Plugin catalog registry management (list, add, remove plugin registry sources)"
       - name: update
         description: "Update wfctl to the latest version (use --check to only check)"
       - name: mcp
