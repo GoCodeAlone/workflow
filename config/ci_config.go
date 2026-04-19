@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // CIConfig holds the ci: section of a workflow config — build, test, and deploy lifecycle.
@@ -150,6 +151,67 @@ func (c *CIConfig) Validate() error {
 			}
 		}
 	}
+	if c.Build != nil {
+		for i, ctr := range c.Build.Containers {
+			method := ctr.Method
+			switch method {
+			case "dockerfile", "":
+				if ctr.Dockerfile == "" {
+					errs = append(errs, fmt.Errorf("ci.build.containers[%d] (%s): method=dockerfile requires dockerfile field", i, ctr.Name))
+				}
+			case "ko":
+				if ctr.KoPackage == "" {
+					errs = append(errs, fmt.Errorf("ci.build.containers[%d] (%s): method=ko requires ko_package", i, ctr.Name))
+				}
+			default:
+				errs = append(errs, fmt.Errorf("ci.build.containers[%d] (%s): unknown method %q (allowed: dockerfile, ko)", i, ctr.Name, method))
+			}
+		}
+
+		const knownTargetTypes = "go nodejs rust python custom"
+		for i, target := range c.Build.Targets {
+			if target.Type != "" && !containsWord(knownTargetTypes, target.Type) {
+				errs = append(errs, fmt.Errorf("ci.build.targets[%d] (%s): unknown type %q (allowed: go, nodejs, rust, python, custom)", i, target.Name, target.Type))
+			}
+		}
+	}
+
+	// Build registry name index for push_to cross-reference validation.
+	registryNames := make(map[string]bool, len(c.Registries))
+	for i, reg := range c.Registries {
+		if registryNames[reg.Name] {
+			errs = append(errs, fmt.Errorf("ci.registries[%d]: duplicate name %q", i, reg.Name))
+		}
+		registryNames[reg.Name] = true
+
+		const knownRegistryTypes = "do ghcr ecr gcr dockerhub acr"
+		if reg.Type != "" && !containsWord(knownRegistryTypes, reg.Type) {
+			errs = append(errs, fmt.Errorf("ci.registries[%d] (%s): unknown type %q (allowed: do, ghcr, ecr, gcr, dockerhub, acr)", i, reg.Name, reg.Type))
+		}
+
+		if reg.Retention != nil {
+			if reg.Retention.KeepLatest < 1 {
+				errs = append(errs, fmt.Errorf("ci.registries[%d] (%s): retention.keep_latest must be ≥ 1", i, reg.Name))
+			}
+			if reg.Retention.UntaggedTTL != "" {
+				if _, err := time.ParseDuration(reg.Retention.UntaggedTTL); err != nil {
+					errs = append(errs, fmt.Errorf("ci.registries[%d] (%s): retention.untagged_ttl %q is not a valid duration", i, reg.Name, reg.Retention.UntaggedTTL))
+				}
+			}
+		}
+	}
+
+	// Validate push_to references declared registries.
+	if c.Build != nil {
+		for i, ctr := range c.Build.Containers {
+			for _, ref := range ctr.PushTo {
+				if !registryNames[ref] {
+					errs = append(errs, fmt.Errorf("ci.build.containers[%d] (%s): push_to %q references undeclared registry", i, ctr.Name, ref))
+				}
+			}
+		}
+	}
+
 	if c.Deploy != nil {
 		for name, env := range c.Deploy.Environments {
 			if env.Provider == "" {
@@ -158,4 +220,27 @@ func (c *CIConfig) Validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// containsWord reports whether word appears as a whitespace-separated token in s.
+func containsWord(s, word string) bool {
+	for len(s) > 0 {
+		var tok string
+		if i := len(s); i == 0 {
+			break
+		}
+		for i, c := range s {
+			if c == ' ' {
+				tok, s = s[:i], s[i+1:]
+				break
+			} else if i == len(s)-1 {
+				tok, s = s, ""
+				break
+			}
+		}
+		if tok == word {
+			return true
+		}
+	}
+	return false
 }
