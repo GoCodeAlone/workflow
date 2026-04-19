@@ -31,6 +31,22 @@ func installFromWorkflowConfig(workflowCfgPath, pluginDir, registryCfgPath strin
 			continue
 		}
 
+		// Apply private repo auth if declared.
+		var authCleanup func()
+		if req.Auth != nil && req.Auth.Env != "" {
+			domain := extractDomain(req.Source)
+			if domain == "" {
+				domain = "github.com"
+			}
+			cleanup, authErr := applyPrivateAuth(req.Auth.Env, domain)
+			if authErr != nil {
+				fmt.Fprintf(os.Stderr, "auth error for %s: %v\n", req.Name, authErr)
+				failed = append(failed, req.Name)
+				continue
+			}
+			authCleanup = cleanup
+		}
+
 		nameArg := req.Name
 		if req.Version != "" {
 			nameArg = req.Name + "@" + req.Version
@@ -43,8 +59,12 @@ func installFromWorkflowConfig(workflowCfgPath, pluginDir, registryCfgPath strin
 		installArgs = append(installArgs, nameArg)
 
 		fmt.Fprintf(os.Stderr, "Installing %s...\n", nameArg)
-		if err := runPluginInstall(installArgs); err != nil {
-			fmt.Fprintf(os.Stderr, "error installing %s: %v\n", req.Name, err)
+		installErr := runPluginInstall(installArgs)
+		if authCleanup != nil {
+			authCleanup()
+		}
+		if installErr != nil {
+			fmt.Fprintf(os.Stderr, "error installing %s: %v\n", req.Name, installErr)
 			failed = append(failed, req.Name)
 		}
 	}
