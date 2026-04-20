@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -377,5 +381,138 @@ func TestDockerProvider_GeneratesAndRemovesComposeFile(t *testing.T) {
 	if _, err := os.Stat("docker-compose.wfctl.yml"); err == nil {
 		os.Remove("docker-compose.wfctl.yml")
 		t.Error("unexpected leftover docker-compose.wfctl.yml")
+	}
+}
+
+// ── DigitalOcean provider ─────────────────────────────────────────────────────
+
+func TestDigitalOceanProvider_NewProvider(t *testing.T) {
+	for _, name := range []string{"digitalocean", "do"} {
+		p, err := newDeployProvider(name)
+		if err != nil {
+			t.Fatalf("newDeployProvider(%q): unexpected error: %v", name, err)
+		}
+		if _, ok := p.(*digitaloceanProvider); !ok {
+			t.Fatalf("expected *digitaloceanProvider, got %T", p)
+		}
+	}
+}
+
+func TestDigitalOceanProvider_MissingToken(t *testing.T) {
+	t.Setenv("DIGITALOCEAN_TOKEN", "")
+	p := &digitaloceanProvider{}
+	err := p.Deploy(context.Background(), DeployConfig{
+		AppName:  "myapp",
+		ImageTag: "registry.digitalocean.com/myreg/myapp:sha",
+		Env:      &config.CIDeployEnvironment{Region: "nyc3"},
+	})
+	if err == nil {
+		t.Fatal("expected error when DIGITALOCEAN_TOKEN is unset")
+	}
+	if !strings.Contains(err.Error(), "DIGITALOCEAN_TOKEN") {
+		t.Errorf("expected DIGITALOCEAN_TOKEN in error, got: %v", err)
+	}
+}
+
+func TestDigitalOceanProvider_Deploy_CreatesNewApp(t *testing.T) {
+	var postBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v2/apps"):
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(doListAppsResponse{Apps: []doApp{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/v2/apps":
+			postBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(doAppResponse{App: doApp{ID: "new-app-1"}})
+		default:
+			http.Error(w, "unexpected: "+r.Method+" "+r.URL.Path, http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("DIGITALOCEAN_TOKEN", "test-token")
+	p := &digitaloceanProvider{baseURL: srv.URL}
+	cfg := DeployConfig{
+		AppName:  "myapp",
+		ImageTag: "registry.digitalocean.com/myreg/myapp:abc123",
+		Env:      &config.CIDeployEnvironment{Region: "nyc3"},
+	}
+	if err := p.Deploy(context.Background(), cfg); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if !strings.Contains(string(postBody), "myapp") {
+		t.Errorf("expected app name in POST body, got: %s", postBody)
+	}
+	if p.appID != "new-app-1" {
+		t.Errorf("expected appID 'new-app-1', got %q", p.appID)
+	}
+}
+
+func TestDigitalOceanProvider_Deploy_UpdatesExistingApp(t *testing.T) {
+	var putPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v2/apps"):
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(doListAppsResponse{Apps: []doApp{
+				{ID: "existing-1", Spec: doAppSpec{Name: "myapp"}},
+			}})
+		case r.Method == http.MethodPut:
+			putPath = r.URL.Path
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(doAppResponse{App: doApp{ID: "existing-1"}})
+		default:
+			http.Error(w, "unexpected: "+r.Method+" "+r.URL.Path, http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("DIGITALOCEAN_TOKEN", "test-token")
+	p := &digitaloceanProvider{baseURL: srv.URL}
+	cfg := DeployConfig{
+		AppName:  "myapp",
+		ImageTag: "registry.digitalocean.com/myreg/myapp:newsha",
+		Env:      &config.CIDeployEnvironment{Region: "nyc3"},
+	}
+	if err := p.Deploy(context.Background(), cfg); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if putPath != "/v2/apps/existing-1" {
+		t.Errorf("expected PUT /v2/apps/existing-1, got %s", putPath)
+	}
+}
+
+func TestDigitalOceanProvider_HealthCheck(t *testing.T) {
+	// Mock health check endpoint
+	hcSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer hcSrv.Close()
+
+	// Mock DO API returning the live URL
+	doSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(doAppResponse{App: doApp{
+			ID:      "app-hc",
+			LiveURL: hcSrv.URL,
+		}})
+	}))
+	defer doSrv.Close()
+
+	t.Setenv("DIGITALOCEAN_TOKEN", "test-token")
+	p := &digitaloceanProvider{baseURL: doSrv.URL, appID: "app-hc"}
+	cfg := DeployConfig{
+		AppName: "myapp",
+		Env: &config.CIDeployEnvironment{
+			HealthCheck: &config.CIHealthCheck{
+				Path:    "/",
+				Timeout: "5s",
+			},
+		},
+	}
+	if err := p.HealthCheck(context.Background(), cfg); err != nil {
+		t.Fatalf("HealthCheck: %v", err)
 	}
 }

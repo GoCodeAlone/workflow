@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -49,8 +51,10 @@ func newDeployProvider(provider string) (DeployProvider, error) {
 		return &dockerProvider{}, nil
 	case "aws-ecs":
 		return &awsECSProvider{}, nil
+	case "digitalocean", "do":
+		return &digitaloceanProvider{}, nil
 	default:
-		return nil, fmt.Errorf("unsupported deploy provider %q (supported: kubernetes, docker, aws-ecs)", provider)
+		return nil, fmt.Errorf("unsupported deploy provider %q (supported: kubernetes, docker, aws-ecs, digitalocean)", provider)
 	}
 }
 
@@ -476,4 +480,312 @@ func cmp(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// ── digitalocean provider ─────────────────────────────────────────────────────
+
+type digitaloceanProvider struct {
+	baseURL string // defaults to "https://api.digitalocean.com"; injectable for testing
+	appID   string // populated after successful Deploy, used by HealthCheck
+}
+
+// DO App Platform API request/response types (minimal subset).
+type doAppSpec struct {
+	Name     string         `json:"name"`
+	Region   string         `json:"region,omitempty"`
+	Services []doAppService `json:"services"`
+}
+
+type doAppService struct {
+	Name          string      `json:"name"`
+	Image         *doAppImage `json:"image"`
+	HTTPPort      int         `json:"http_port,omitempty"`
+	InstanceCount int         `json:"instance_count,omitempty"`
+	Envs          []doAppEnv  `json:"envs,omitempty"`
+}
+
+type doAppImage struct {
+	RegistryType string `json:"registry_type"`
+	Registry     string `json:"registry"`
+	Repository   string `json:"repository"`
+	Tag          string `json:"tag"`
+}
+
+type doAppEnv struct {
+	Key   string `json:"key"`
+	Value string `json:"value,omitempty"`
+	Type  string `json:"type,omitempty"`
+}
+
+type doApp struct {
+	ID      string    `json:"id"`
+	Spec    doAppSpec `json:"spec"`
+	LiveURL string    `json:"live_url,omitempty"`
+}
+
+type doListAppsResponse struct {
+	Apps []doApp `json:"apps"`
+}
+
+type doCreateAppRequest struct {
+	Spec doAppSpec `json:"spec"`
+}
+
+type doAppResponse struct {
+	App doApp `json:"app"`
+}
+
+func (p *digitaloceanProvider) doBase() string {
+	if p.baseURL != "" {
+		return p.baseURL
+	}
+	return "https://api.digitalocean.com"
+}
+
+func (p *digitaloceanProvider) Deploy(ctx context.Context, cfg DeployConfig) error {
+	token := os.Getenv("DIGITALOCEAN_TOKEN")
+	if token == "" {
+		return fmt.Errorf("DIGITALOCEAN_TOKEN is required for DigitalOcean deployments")
+	}
+
+	spec := p.buildAppSpec(cfg)
+
+	existingID, err := p.findApp(ctx, token, cfg.AppName)
+	if err != nil {
+		return fmt.Errorf("find app: %w", err)
+	}
+
+	var appID string
+	if existingID != "" {
+		appID, err = p.updateApp(ctx, token, existingID, spec)
+		if err != nil {
+			return fmt.Errorf("update app: %w", err)
+		}
+		fmt.Printf("  updated DO app %q (id: %s)\n", cfg.AppName, appID)
+	} else {
+		appID, err = p.createApp(ctx, token, spec)
+		if err != nil {
+			return fmt.Errorf("create app: %w", err)
+		}
+		fmt.Printf("  created DO app %q (id: %s)\n", cfg.AppName, appID)
+	}
+	p.appID = appID
+	return nil
+}
+
+func (p *digitaloceanProvider) buildAppSpec(cfg DeployConfig) doAppSpec {
+	region := cmp(cfg.Env.Region, "nyc3")
+	registry, repository, tag := parseImageRef(cfg.ImageTag)
+
+	var envs []doAppEnv
+	for k, v := range cfg.Secrets {
+		envs = append(envs, doAppEnv{Key: k, Value: v, Type: "SECRET"})
+	}
+
+	instanceCount := 1
+	if len(cfg.Services) == 1 {
+		for _, svc := range cfg.Services {
+			if svc.Scaling != nil && svc.Scaling.Replicas > 0 {
+				instanceCount = svc.Scaling.Replicas
+			}
+		}
+	}
+
+	httpPort := 8080
+	if len(cfg.Services) == 1 {
+		for _, svc := range cfg.Services {
+			if len(svc.Expose) > 0 {
+				httpPort = svc.Expose[0].Port
+			}
+		}
+	}
+
+	svc := doAppService{
+		Name: cfg.AppName,
+		Image: &doAppImage{
+			RegistryType: "DOCR",
+			Registry:     registry,
+			Repository:   repository,
+			Tag:          tag,
+		},
+		HTTPPort:      httpPort,
+		InstanceCount: instanceCount,
+		Envs:          envs,
+	}
+
+	return doAppSpec{
+		Name:     cfg.AppName,
+		Region:   region,
+		Services: []doAppService{svc},
+	}
+}
+
+// parseImageRef splits "registry.digitalocean.com/myreg/myapp:sha" into (registry, repo, tag).
+func parseImageRef(imageTag string) (registry, repository, tag string) {
+	if i := strings.LastIndex(imageTag, ":"); i >= 0 {
+		tag = imageTag[i+1:]
+		imageTag = imageTag[:i]
+	}
+	if i := strings.Index(imageTag, "/"); i >= 0 {
+		registry = imageTag[:i]
+		repository = imageTag[i+1:]
+	} else {
+		repository = imageTag
+	}
+	return
+}
+
+func (p *digitaloceanProvider) findApp(ctx context.Context, token, name string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.doBase()+"/v2/apps?name="+name, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("GET /v2/apps: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("GET /v2/apps: HTTP %d: %s", resp.StatusCode, body)
+	}
+
+	var result doListAppsResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("decode apps list: %w", err)
+	}
+	for _, app := range result.Apps {
+		if app.Spec.Name == name {
+			return app.ID, nil
+		}
+	}
+	return "", nil
+}
+
+func (p *digitaloceanProvider) createApp(ctx context.Context, token string, spec doAppSpec) (string, error) {
+	payload, err := json.Marshal(doCreateAppRequest{Spec: spec})
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.doBase()+"/v2/apps", bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("POST /v2/apps: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("POST /v2/apps: HTTP %d: %s", resp.StatusCode, body)
+	}
+
+	var result doAppResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("decode create app response: %w", err)
+	}
+	return result.App.ID, nil
+}
+
+func (p *digitaloceanProvider) updateApp(ctx context.Context, token, appID string, spec doAppSpec) (string, error) {
+	payload, err := json.Marshal(doCreateAppRequest{Spec: spec})
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, p.doBase()+"/v2/apps/"+appID, bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("PUT /v2/apps/%s: %w", appID, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("PUT /v2/apps/%s: HTTP %d: %s", appID, resp.StatusCode, body)
+	}
+
+	var result doAppResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("decode update app response: %w", err)
+	}
+	return result.App.ID, nil
+}
+
+func (p *digitaloceanProvider) HealthCheck(ctx context.Context, cfg DeployConfig) error {
+	if cfg.Env.HealthCheck == nil {
+		return nil
+	}
+
+	// If we have the app ID and a token, fetch the live URL from DO and prepend it.
+	if p.appID != "" {
+		if token := os.Getenv("DIGITALOCEAN_TOKEN"); token != "" {
+			liveURL, err := p.fetchLiveURL(ctx, token)
+			if err == nil && liveURL != "" {
+				hcPath := cfg.Env.HealthCheck.Path
+				fullURL := strings.TrimRight(liveURL, "/") + "/" + strings.TrimLeft(hcPath, "/")
+				hcCopy := *cfg.Env.HealthCheck
+				hcCopy.Path = fullURL
+				envCopy := *cfg.Env
+				envCopy.HealthCheck = &hcCopy
+				cfgCopy := cfg
+				cfgCopy.Env = &envCopy
+				return pollHealthCheck(ctx, cfgCopy)
+			}
+		}
+	}
+
+	return pollHealthCheck(ctx, cfg)
+}
+
+func (p *digitaloceanProvider) fetchLiveURL(ctx context.Context, token string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.doBase()+"/v2/apps/"+p.appID, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("GET /v2/apps/%s: HTTP %d: %s", p.appID, resp.StatusCode, body)
+	}
+
+	var result doAppResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+	return result.App.LiveURL, nil
 }
