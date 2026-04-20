@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 
 	"github.com/GoCodeAlone/workflow/secrets"
 )
@@ -134,6 +135,11 @@ func bootstrapDOSpacesBucket(ctx context.Context, bucket, region string) error {
 
 // bootstrapSecrets generates and stores secrets that don't already exist.
 func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *SecretsConfig) error {
+	// Cache List() results so a repeated bootstrap run with many secrets only
+	// hits the provider once. Resolved lazily on first write-only Get.
+	var listCache []string
+	var listErr error
+	var listDone bool
 	for _, gen := range cfg.Generate {
 		// Build generator config from SecretGen fields.
 		genConfig := map[string]any{}
@@ -144,14 +150,41 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 			genConfig["source"] = gen.Source
 		}
 
-		// Check if already set (skip if supported, ignore ErrUnsupported).
-		_, err := provider.Get(ctx, gen.Key)
-		if err == nil {
+		// Determine the probe key to check for existence. provider_credential
+		// generators (e.g. digitalocean.spaces) expand to multiple sub-keys
+		// (<key>_access_key, <key>_secret_key), so probe the access_key suffix.
+		probeKey := gen.Key
+		if gen.Type == "provider_credential" {
+			probeKey = gen.Key + "_access_key"
+		}
+
+		// Check if already set. GitHub Actions secrets are write-only, so Get
+		// returns ErrUnsupported — fall back to List() and scan for the name.
+		// Without this fallback, every run regenerates the secret, and for
+		// provider_credential that creates orphaned upstream credentials
+		// (e.g. duplicate DO Spaces access keys) on every run.
+		exists := false
+		_, err := provider.Get(ctx, probeKey)
+		switch {
+		case err == nil:
+			exists = true
+		case errors.Is(err, secrets.ErrNotFound):
+			// Confirmed absent.
+		case errors.Is(err, secrets.ErrUnsupported):
+			if !listDone {
+				listCache, listErr = provider.List(ctx)
+				listDone = true
+			}
+			if listErr != nil && !errors.Is(listErr, secrets.ErrUnsupported) {
+				return fmt.Errorf("list secrets to check %q: %w", probeKey, listErr)
+			}
+			exists = slices.Contains(listCache, probeKey)
+		default:
+			return fmt.Errorf("check secret %q: %w", probeKey, err)
+		}
+		if exists {
 			fmt.Printf("  secret %q: already exists — skipped\n", gen.Key)
 			continue
-		}
-		if !errors.Is(err, secrets.ErrNotFound) && !errors.Is(err, secrets.ErrUnsupported) {
-			return fmt.Errorf("check secret %q: %w", gen.Key, err)
 		}
 
 		// Generate the secret value.
