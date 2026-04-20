@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/secrets"
@@ -13,7 +14,7 @@ type writeOnlyProvider struct {
 	existing []string
 	stored   map[string]string
 	getCalls int
-	setCalls int
+	listCalls int
 	listOK   bool
 }
 
@@ -25,7 +26,6 @@ func (p *writeOnlyProvider) Get(_ context.Context, _ string) (string, error) {
 }
 
 func (p *writeOnlyProvider) Set(_ context.Context, key, value string) error {
-	p.setCalls++
 	if p.stored == nil {
 		p.stored = map[string]string{}
 	}
@@ -38,16 +38,26 @@ func (p *writeOnlyProvider) Delete(_ context.Context, _ string) error {
 }
 
 func (p *writeOnlyProvider) List(_ context.Context) ([]string, error) {
+	p.listCalls++
 	if !p.listOK {
 		return nil, secrets.ErrUnsupported
 	}
 	return append([]string(nil), p.existing...), nil
 }
 
+// withStubGenerator swaps the package-level generateSecret for the duration
+// of the test, so provider_credential paths don't reach out to cloud APIs.
+func withStubGenerator(t *testing.T, fn func(ctx context.Context, genType string, cfg map[string]any) (string, error)) {
+	t.Helper()
+	prev := generateSecret
+	generateSecret = fn
+	t.Cleanup(func() { generateSecret = prev })
+}
+
 // TestBootstrapSecrets_WriteOnlyProviderSkipsExisting verifies that when the
 // provider is write-only (GitHub Actions), bootstrapSecrets consults List()
 // and skips regeneration if the secret name already exists. Without this,
-// every bootstrap run regenerates and for provider_credential that orphans
+// every bootstrap run regenerates, and for provider_credential that orphans
 // upstream credentials (e.g. DO Spaces access keys).
 func TestBootstrapSecrets_WriteOnlyProviderSkipsExisting(t *testing.T) {
 	p := &writeOnlyProvider{
@@ -63,8 +73,11 @@ func TestBootstrapSecrets_WriteOnlyProviderSkipsExisting(t *testing.T) {
 	if err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
-	if p.setCalls != 0 {
-		t.Fatalf("Set called %d times, want 0 (all secrets already exist)", p.setCalls)
+	if len(p.stored) != 0 {
+		t.Fatalf("stored = %v, want empty (all secrets already exist)", p.stored)
+	}
+	if p.listCalls != 1 {
+		t.Fatalf("List called %d times, want 1 (should be cached)", p.listCalls)
 	}
 }
 
@@ -101,16 +114,19 @@ func TestBootstrapSecrets_WriteOnlyProviderListUnsupported(t *testing.T) {
 	if err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
-	if p.setCalls != 1 {
-		t.Fatalf("Set called %d times, want 1 (List unsupported → regenerate)", p.setCalls)
+	if len(p.stored) != 1 {
+		t.Fatalf("stored = %v, want 1 entry (List unsupported → regenerate)", p.stored)
 	}
 }
 
-// TestBootstrapSecrets_ProviderCredentialSubKeyCheck verifies that for
-// provider_credential entries, existence is probed via the _access_key
-// sub-key (which is what actually gets stored).
-func TestBootstrapSecrets_ProviderCredentialSubKeyCheck(t *testing.T) {
-	// First case: sub-key exists → skip.
+// TestBootstrapSecrets_ProviderCredentialAllSubKeysPresent verifies the
+// provider_credential skip path: both access_key and secret_key sub-keys
+// must exist before the generator is skipped.
+func TestBootstrapSecrets_ProviderCredentialAllSubKeysPresent(t *testing.T) {
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		t.Fatal("generator must not be called when both sub-keys already exist")
+		return "", nil
+	})
 	p := &writeOnlyProvider{
 		existing: []string{"SPACES_access_key", "SPACES_secret_key"},
 		listOK:   true,
@@ -123,35 +139,70 @@ func TestBootstrapSecrets_ProviderCredentialSubKeyCheck(t *testing.T) {
 	if err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
-	if p.setCalls != 0 {
-		t.Fatalf("Set called %d times, want 0 (SPACES_access_key present)", p.setCalls)
-	}
-
-	// Second case: a same-named but unrelated plain secret exists → still regenerate,
-	// because the probe key is SPACES_access_key, not SPACES.
-	p2 := &writeOnlyProvider{
-		existing: []string{"SPACES"}, // wrong name — the real sub-keys are absent
-		listOK:   true,
-	}
-	// Stub the actual generation so we don't hit DO.
-	// bootstrapSecrets calls secrets.GenerateSecret, which for
-	// provider_credential contacts DO. To keep the test hermetic, we assert
-	// the code path up to the pre-generation decision by checking setCalls
-	// would be non-zero *if* generation succeeded — so instead verify the
-	// existence check decided "missing" by confirming no error precedes gen.
-	// We can detect this via a custom gen type that returns a known value:
-	// but since GenerateSecret has a fixed switch, we assert indirectly by
-	// running a random_hex entry with the same semantics.
-	cfg2 := &SecretsConfig{
-		Generate: []SecretGen{
-			{Key: "OTHER", Type: "random_hex", Length: 4},
-		},
-	}
-	if err := bootstrapSecrets(context.Background(), p2, cfg2); err != nil {
-		t.Fatalf("bootstrapSecrets: %v", err)
-	}
-	if p2.setCalls != 1 {
-		t.Fatalf("Set called %d times, want 1", p2.setCalls)
+	if len(p.stored) != 0 {
+		t.Fatalf("stored = %v, want empty", p.stored)
 	}
 }
 
+// TestBootstrapSecrets_ProviderCredentialPartialRegenerates verifies that a
+// partial prior write (one sub-key missing) triggers regeneration.
+func TestBootstrapSecrets_ProviderCredentialPartialRegenerates(t *testing.T) {
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		out, _ := json.Marshal(map[string]string{
+			"access_key": "new-access",
+			"secret_key": "new-secret",
+		})
+		return string(out), nil
+	})
+	// Only the access_key is present — the secret_key is missing, so the
+	// stored credential is unusable and bootstrap must regenerate.
+	p := &writeOnlyProvider{
+		existing: []string{"SPACES_access_key"},
+		listOK:   true,
+	}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
+		},
+	}
+	if err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
+		t.Fatalf("bootstrapSecrets: %v", err)
+	}
+	if got := p.stored["SPACES_access_key"]; got != "new-access" {
+		t.Errorf("SPACES_access_key = %q, want %q", got, "new-access")
+	}
+	if got := p.stored["SPACES_secret_key"]; got != "new-secret" {
+		t.Errorf("SPACES_secret_key = %q, want %q", got, "new-secret")
+	}
+}
+
+// TestBootstrapSecrets_ProviderCredentialProbeIgnoresBareKey verifies that a
+// plain secret named the same as the provider_credential key (without the
+// _access_key / _secret_key suffixes) does not cause a false skip.
+func TestBootstrapSecrets_ProviderCredentialProbeIgnoresBareKey(t *testing.T) {
+	generateCalls := 0
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		generateCalls++
+		out, _ := json.Marshal(map[string]string{
+			"access_key": "a",
+			"secret_key": "b",
+		})
+		return string(out), nil
+	})
+	// "SPACES" is present, but the real sub-keys are not — must regenerate.
+	p := &writeOnlyProvider{
+		existing: []string{"SPACES"},
+		listOK:   true,
+	}
+	cfg := &SecretsConfig{
+		Generate: []SecretGen{
+			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
+		},
+	}
+	if err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
+		t.Fatalf("bootstrapSecrets: %v", err)
+	}
+	if generateCalls != 1 {
+		t.Fatalf("generator called %d times, want 1", generateCalls)
+	}
+}

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"slices"
 
 	"github.com/GoCodeAlone/workflow/secrets"
 )
@@ -133,13 +132,78 @@ func bootstrapDOSpacesBucket(ctx context.Context, bucket, region string) error {
 	return nil
 }
 
+// providerCredentialSubKeys lists the sub-key names produced by each
+// provider_credential source. Existence checks must verify ALL of them so a
+// partial prior write (e.g. one sub-key manually deleted) triggers a full
+// regeneration rather than an incorrect skip.
+var providerCredentialSubKeys = map[string][]string{
+	"digitalocean.spaces": {"access_key", "secret_key"},
+}
+
+// generateSecret is the package-level hook used by bootstrapSecrets. Tests
+// override it to exercise provider_credential code paths without reaching
+// out to cloud APIs.
+var generateSecret = secrets.GenerateSecret
+
+// expectedStoredKeys returns every key name that a completed generation of
+// gen would have stored in the provider. For provider_credential with a
+// known source, that is "<key>_<subkey>" for each subkey; for simple
+// generators it is just gen.Key.
+func expectedStoredKeys(gen SecretGen) []string {
+	if gen.Type == "provider_credential" {
+		if subs, ok := providerCredentialSubKeys[gen.Source]; ok {
+			out := make([]string, len(subs))
+			for i, s := range subs {
+				out[i] = gen.Key + "_" + s
+			}
+			return out
+		}
+		// Unknown source — best-effort single probe.
+		return []string{gen.Key + "_access_key"}
+	}
+	return []string{gen.Key}
+}
+
 // bootstrapSecrets generates and stores secrets that don't already exist.
 func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *SecretsConfig) error {
-	// Cache List() results so a repeated bootstrap run with many secrets only
-	// hits the provider once. Resolved lazily on first write-only Get.
-	var listCache []string
+	// Cache List() as a set so repeated probes in a bootstrap run only hit
+	// the provider once and subsequent lookups are O(1). Resolved lazily on
+	// the first write-only Get.
+	var listSet map[string]struct{}
 	var listErr error
 	var listDone bool
+	lookupViaList := func(key string) (bool, error) {
+		if !listDone {
+			names, err := provider.List(ctx)
+			listErr = err
+			if err == nil {
+				listSet = make(map[string]struct{}, len(names))
+				for _, n := range names {
+					listSet[n] = struct{}{}
+				}
+			}
+			listDone = true
+		}
+		if listErr != nil && !errors.Is(listErr, secrets.ErrUnsupported) {
+			return false, fmt.Errorf("list secrets to check %q: %w", key, listErr)
+		}
+		_, ok := listSet[key]
+		return ok, nil
+	}
+	secretExists := func(key string) (bool, error) {
+		_, err := provider.Get(ctx, key)
+		switch {
+		case err == nil:
+			return true, nil
+		case errors.Is(err, secrets.ErrNotFound):
+			return false, nil
+		case errors.Is(err, secrets.ErrUnsupported):
+			return lookupViaList(key)
+		default:
+			return false, fmt.Errorf("check secret %q: %w", key, err)
+		}
+	}
+
 	for _, gen := range cfg.Generate {
 		// Build generator config from SecretGen fields.
 		genConfig := map[string]any{}
@@ -150,45 +214,31 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 			genConfig["source"] = gen.Source
 		}
 
-		// Determine the probe key to check for existence. provider_credential
-		// generators (e.g. digitalocean.spaces) expand to multiple sub-keys
-		// (<key>_access_key, <key>_secret_key), so probe the access_key suffix.
-		probeKey := gen.Key
-		if gen.Type == "provider_credential" {
-			probeKey = gen.Key + "_access_key"
-		}
-
-		// Check if already set. GitHub Actions secrets are write-only, so Get
-		// returns ErrUnsupported — fall back to List() and scan for the name.
-		// Without this fallback, every run regenerates the secret, and for
-		// provider_credential that creates orphaned upstream credentials
-		// (e.g. duplicate DO Spaces access keys) on every run.
-		exists := false
-		_, err := provider.Get(ctx, probeKey)
-		switch {
-		case err == nil:
-			exists = true
-		case errors.Is(err, secrets.ErrNotFound):
-			// Confirmed absent.
-		case errors.Is(err, secrets.ErrUnsupported):
-			if !listDone {
-				listCache, listErr = provider.List(ctx)
-				listDone = true
+		// Check that EVERY expected stored key is already present before
+		// skipping. provider_credential writes multiple sub-keys; if a prior
+		// write was partial or one sub-key was manually removed, we must
+		// regenerate to produce a usable credential. Without this loop,
+		// every run regenerates for write-only providers (GH Actions), and
+		// provider_credential regeneration orphans upstream credentials.
+		expected := expectedStoredKeys(gen)
+		allExist := true
+		for _, key := range expected {
+			present, err := secretExists(key)
+			if err != nil {
+				return err
 			}
-			if listErr != nil && !errors.Is(listErr, secrets.ErrUnsupported) {
-				return fmt.Errorf("list secrets to check %q: %w", probeKey, listErr)
+			if !present {
+				allExist = false
+				break
 			}
-			exists = slices.Contains(listCache, probeKey)
-		default:
-			return fmt.Errorf("check secret %q: %w", probeKey, err)
 		}
-		if exists {
+		if allExist {
 			fmt.Printf("  secret %q: already exists — skipped\n", gen.Key)
 			continue
 		}
 
 		// Generate the secret value.
-		value, err := secrets.GenerateSecret(ctx, gen.Type, genConfig)
+		value, err := generateSecret(ctx, gen.Type, genConfig)
 		if err != nil {
 			return fmt.Errorf("generate secret %q: %w", gen.Key, err)
 		}
