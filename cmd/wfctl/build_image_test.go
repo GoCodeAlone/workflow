@@ -156,6 +156,68 @@ func TestRunBuildImage_NotHardenedNoProvenanceArgs(t *testing.T) {
 	}
 }
 
+// TestRunBuildImage_HardenedUsesBuildx verifies hardened=true produces "docker buildx build".
+func TestRunBuildImage_HardenedUsesBuildx(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `ci:
+  build:
+    security:
+      hardened: true
+    containers:
+      - name: app
+        method: dockerfile
+        dockerfile: Dockerfile
+`
+	cfgPath := filepath.Join(dir, "ci.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+	t.Setenv("DOCKER_BUILDKIT", "1")
+
+	var buf bytes.Buffer
+	if err := runBuildImageWithOutput([]string{"--config", cfgPath}, &buf); err != nil {
+		t.Fatalf("hardened buildx dry-run: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "docker buildx build") {
+		t.Errorf("expected 'docker buildx build' in hardened dry-run output, got: %q", out)
+	}
+}
+
+// TestRunBuildImage_NonHardenedUsesPlainDocker verifies hardened=false produces "docker build" (no buildx).
+func TestRunBuildImage_NonHardenedUsesPlainDocker(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `ci:
+  build:
+    security:
+      hardened: false
+    containers:
+      - name: app
+        method: dockerfile
+        dockerfile: Dockerfile
+`
+	cfgPath := filepath.Join(dir, "ci.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+
+	var buf bytes.Buffer
+	if err := runBuildImageWithOutput([]string{"--config", cfgPath}, &buf); err != nil {
+		t.Fatalf("non-hardened dry-run: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "buildx") {
+		t.Errorf("expected no 'buildx' in non-hardened dry-run output, got: %q", out)
+	}
+	if !strings.Contains(out, "docker build") {
+		t.Errorf("expected 'docker build' in non-hardened dry-run output, got: %q", out)
+	}
+}
+
 // TestImageRefForContainer_RegistryNameResolvesToPath verifies that imageRefForContainer
 // resolves a registry name to its path via ci.registries.
 func TestImageRefForContainer_RegistryNameResolvesToPath(t *testing.T) {
