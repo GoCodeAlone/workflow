@@ -84,7 +84,7 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 				return fmt.Errorf("ko build %q: %w", ctr.Name, err)
 			}
 		default: // dockerfile
-			if err := buildWithDockerfile(ctr, tag, *dryRun, hardened, out); err != nil {
+			if err := buildWithDockerfile(ctr, tag, *dryRun, hardened, cfg.CI.Registries, out); err != nil {
 				return fmt.Errorf("dockerfile build %q: %w", ctr.Name, err)
 			}
 		}
@@ -92,13 +92,13 @@ func runBuildImageWithOutput(args []string, out io.Writer) error {
 	return nil
 }
 
-func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, hardened bool, out io.Writer) error {
+func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, hardened bool, registries []config.CIRegistry, out io.Writer) error {
 	dockerfile := ctr.Dockerfile
 	if dockerfile == "" {
 		dockerfile = "Dockerfile"
 	}
 
-	imageRef := imageRefForContainer(ctr, tag)
+	imageRef := imageRefForContainer(ctr, tag, registries)
 	args := []string{"build", "--file", dockerfile, "--tag", imageRef}
 
 	// Platforms (BuildKit multi-arch).
@@ -238,7 +238,15 @@ func buildExternalImageRef(ctr config.CIContainerTarget, tag string, registries 
 	return ctr.Name + ":" + tag
 }
 
-func imageRefForContainer(ctr config.CIContainerTarget, tag string) string {
+func imageRefForContainer(ctr config.CIContainerTarget, tag string, registries []config.CIRegistry) string {
+	for _, regName := range ctr.PushTo {
+		for _, reg := range registries {
+			if reg.Name == regName {
+				return reg.Path + "/" + ctr.Name + ":" + tag
+			}
+		}
+	}
+	// Fall back to raw push_to name when no registry path is configured.
 	if len(ctr.PushTo) > 0 {
 		return ctr.PushTo[0] + "/" + ctr.Name + ":" + tag
 	}
