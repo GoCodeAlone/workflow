@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/GoCodeAlone/workflow/config"
 )
 
 func TestRunBuildImage_DockerfileDryRun(t *testing.T) {
@@ -151,6 +153,93 @@ func TestRunBuildImage_NotHardenedNoProvenanceArgs(t *testing.T) {
 	out := buf.String()
 	if strings.Contains(out, "--provenance") {
 		t.Errorf("expected no --provenance flag when hardened=false, got: %q", out)
+	}
+}
+
+// TestImageRefForContainer_RegistryNameResolvesToPath verifies that imageRefForContainer
+// resolves a registry name to its path via ci.registries.
+func TestImageRefForContainer_RegistryNameResolvesToPath(t *testing.T) {
+	ctr := config.CIContainerTarget{Name: "buymywishlist", PushTo: []string{"docr"}}
+	registries := []config.CIRegistry{
+		{Name: "docr", Path: "registry.digitalocean.com/bmw-registry"},
+	}
+	got := imageRefForContainer(ctr, "abc123", registries)
+	want := "registry.digitalocean.com/bmw-registry/buymywishlist:abc123"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestImageRefForContainer_NoMatchFallback verifies fallback when no registry matches.
+func TestImageRefForContainer_NoMatchFallback(t *testing.T) {
+	ctr := config.CIContainerTarget{Name: "app", PushTo: []string{"unknown-reg"}}
+	registries := []config.CIRegistry{
+		{Name: "docr", Path: "registry.digitalocean.com/bmw-registry"},
+	}
+	got := imageRefForContainer(ctr, "latest", registries)
+	want := "unknown-reg/app:latest"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestImageRefForContainer_EmptyPushTo verifies fallback when push_to is empty.
+func TestImageRefForContainer_EmptyPushTo(t *testing.T) {
+	ctr := config.CIContainerTarget{Name: "myapp"}
+	got := imageRefForContainer(ctr, "v1.0", nil)
+	want := "myapp:v1.0"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestImageRefForContainer_MultiplePushTo verifies first resolvable path is used.
+func TestImageRefForContainer_MultiplePushTo(t *testing.T) {
+	ctr := config.CIContainerTarget{Name: "app", PushTo: []string{"docr", "ghcr"}}
+	registries := []config.CIRegistry{
+		{Name: "docr", Path: "registry.digitalocean.com/bmw-registry"},
+		{Name: "ghcr", Path: "ghcr.io/gocodalone"},
+	}
+	got := imageRefForContainer(ctr, "sha256abc", registries)
+	want := "registry.digitalocean.com/bmw-registry/app:sha256abc"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestRunBuildImage_ImageRefUsesRegistryPath verifies the dry-run output shows registry path.
+func TestRunBuildImage_ImageRefUsesRegistryPath(t *testing.T) {
+	dir := t.TempDir()
+	cfg := `ci:
+  registries:
+    - name: docr
+      type: do
+      path: registry.digitalocean.com/bmw-registry
+  build:
+    containers:
+      - name: buymywishlist
+        method: dockerfile
+        dockerfile: Dockerfile
+        push_to:
+          - docr
+`
+	cfgPath := filepath.Join(dir, "ci.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+
+	var buf bytes.Buffer
+	if err := runBuildImageWithOutput([]string{"--config", cfgPath}, &buf); err != nil {
+		t.Fatalf("dry-run: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "registry.digitalocean.com/bmw-registry/buymywishlist") {
+		t.Errorf("expected registry path in dry-run output, got: %q", out)
+	}
+	if strings.Contains(out, "docr/buymywishlist") {
+		t.Errorf("expected no registry name prefix in dry-run output, got: %q", out)
 	}
 }
 
