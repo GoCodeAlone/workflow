@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 
@@ -91,6 +92,12 @@ func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 
 // bootstrapDOSpacesBucket creates a DO Spaces bucket if it does not already exist.
 func bootstrapDOSpacesBucket(ctx context.Context, bucket, region string) error {
+	return bootstrapDOSpacesBucketAt(ctx, bucket, region, "https://api.digitalocean.com")
+}
+
+// bootstrapDOSpacesBucketAt is the testable core of bootstrapDOSpacesBucket.
+// apiBase is the DO API base URL (injectable for tests).
+func bootstrapDOSpacesBucketAt(ctx context.Context, bucket, region, apiBase string) error {
 	token := os.Getenv("DIGITALOCEAN_TOKEN")
 	if token == "" {
 		return fmt.Errorf("DIGITALOCEAN_TOKEN not set")
@@ -99,9 +106,12 @@ func bootstrapDOSpacesBucket(ctx context.Context, bucket, region string) error {
 		region = "nyc3"
 	}
 
-	// Check if bucket exists.
-	checkURL := fmt.Sprintf("https://api.digitalocean.com/v2/spaces/%s", bucket)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, nil)
+	// Check if bucket exists using the Spaces Buckets REST API.
+	checkURL := fmt.Sprintf("%s/v2/spaces/buckets/%s", apiBase, bucket)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, nil)
+	if err != nil {
+		return fmt.Errorf("check bucket %q: %w", bucket, err)
+	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -114,19 +124,23 @@ func bootstrapDOSpacesBucket(ctx context.Context, bucket, region string) error {
 		return nil
 	}
 
-	// Create bucket.
+	// Create bucket via POST /v2/spaces/buckets.
 	payload := map[string]string{"name": bucket, "region": region}
 	body, _ := json.Marshal(payload)
-	createReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.digitalocean.com/v2/spaces", bytes.NewReader(body))
+	createReq, err := http.NewRequestWithContext(ctx, http.MethodPost, apiBase+"/v2/spaces/buckets", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create bucket %q: %w", bucket, err)
+	}
 	createReq.Header.Set("Authorization", "Bearer "+token)
 	createReq.Header.Set("Content-Type", "application/json")
 	createResp, err := http.DefaultClient.Do(createReq)
 	if err != nil {
 		return fmt.Errorf("create bucket %q: %w", bucket, err)
 	}
-	createResp.Body.Close()
+	defer createResp.Body.Close()
 	if createResp.StatusCode != http.StatusCreated && createResp.StatusCode != http.StatusOK {
-		return fmt.Errorf("create bucket %q: HTTP %d", bucket, createResp.StatusCode)
+		respBody, _ := io.ReadAll(createResp.Body)
+		return fmt.Errorf("create bucket %q: HTTP %d: %s", bucket, createResp.StatusCode, respBody)
 	}
 	fmt.Printf("  state backend: created DO Spaces bucket %q in %s\n", bucket, region)
 	return nil
