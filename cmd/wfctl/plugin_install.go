@@ -116,7 +116,7 @@ func runPluginInstall(args []string) error {
 	}
 
 	nameArg := fs.Arg(0)
-	rawName, _ := parseNameVersion(nameArg)
+	rawName, requestedVersion := parseNameVersion(nameArg)
 	pluginName := normalizePluginName(rawName)
 
 	cfg, err := LoadRegistryConfig(*cfgPath)
@@ -165,6 +165,14 @@ func runPluginInstall(args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Found in registry %q.\n", sourceName)
 
+	// Pin the manifest to the requested version when it differs from what the registry has.
+	// The registry manifest may be stale (e.g. v0.1.0) while the user requests v0.2.1.
+	// pinManifestToVersion rewrites download URLs in-place so the right release is fetched.
+	registryVersion := manifest.Version
+	if requestedVersion != "" && requestedVersion != manifest.Version {
+		pinManifestToVersion(manifest, requestedVersion)
+	}
+
 	// Resolve and install dependencies before installing the plugin itself.
 	if len(manifest.Dependencies) > 0 {
 		resolved := make(map[string]string)
@@ -174,6 +182,10 @@ func runPluginInstall(args []string) error {
 	}
 
 	if err := installPluginFromManifest(pluginDirVal, pluginName, manifest); err != nil {
+		if requestedVersion != "" && requestedVersion != registryVersion {
+			return fmt.Errorf("requested version %s not available for %q (registry manifest is at %s): %w",
+				requestedVersion, pluginName, registryVersion, err)
+		}
 		return err
 	}
 
@@ -628,6 +640,35 @@ func installFromLocal(srcDir, pluginDir string) error {
 
 	fmt.Printf("Installed %s v%s from %s to %s\n", pluginName, pj.Version, srcDir, destDir)
 	return nil
+}
+
+// pinManifestToVersion rewrites the manifest's version and all download URLs to
+// use requestedVersion. The registry manifest may lag behind the actual release
+// (e.g. manifest says v0.1.0 but the user requests v0.2.1). GitHub release URLs
+// follow a predictable pattern: replace /releases/download/<old>/<filename> with
+// /releases/download/<new>/<filename>. SHA256 checksums are cleared since they are
+// only valid for the original version's assets.
+//
+// If requestedVersion matches manifest.Version, this is a no-op.
+func pinManifestToVersion(manifest *RegistryManifest, requestedVersion string) {
+	if requestedVersion == manifest.Version {
+		return
+	}
+	oldVersion := manifest.Version
+	manifest.Version = requestedVersion
+	for i := range manifest.Downloads {
+		url := manifest.Downloads[i].URL
+		// Replace the release tag in the GitHub releases download path.
+		rewritten := strings.ReplaceAll(url,
+			"/releases/download/"+oldVersion+"/",
+			"/releases/download/"+requestedVersion+"/")
+		// If the version string also appears in the filename, rewrite that too.
+		if rewritten == url && oldVersion != "" {
+			rewritten = strings.ReplaceAll(url, oldVersion, requestedVersion)
+		}
+		manifest.Downloads[i].URL = rewritten
+		manifest.Downloads[i].SHA256 = "" // checksums are for the old version's assets
+	}
 }
 
 // parseNameVersion splits "name@version" into (name, version). Version is empty if absent.
