@@ -13,7 +13,7 @@ import (
 
 func TestNewDeployProvider_Kubernetes(t *testing.T) {
 	for _, name := range []string{"kubernetes", "k8s"} {
-		p, err := newDeployProvider(name)
+		p, err := newDeployProvider(name, nil)
 		if err != nil {
 			t.Fatalf("newDeployProvider(%q): unexpected error: %v", name, err)
 		}
@@ -25,7 +25,7 @@ func TestNewDeployProvider_Kubernetes(t *testing.T) {
 
 func TestNewDeployProvider_Docker(t *testing.T) {
 	for _, name := range []string{"docker", "docker-compose"} {
-		p, err := newDeployProvider(name)
+		p, err := newDeployProvider(name, nil)
 		if err != nil {
 			t.Fatalf("newDeployProvider(%q): unexpected error: %v", name, err)
 		}
@@ -36,7 +36,7 @@ func TestNewDeployProvider_Docker(t *testing.T) {
 }
 
 func TestNewDeployProvider_AWSECS(t *testing.T) {
-	p, err := newDeployProvider("aws-ecs")
+	p, err := newDeployProvider("aws-ecs", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestNewDeployProvider_AWSECS(t *testing.T) {
 }
 
 func TestNewDeployProvider_Unknown(t *testing.T) {
-	_, err := newDeployProvider("unknown-provider")
+	_, err := newDeployProvider("unknown-provider", nil)
 	if err == nil {
 		t.Fatal("expected error for unknown provider")
 	}

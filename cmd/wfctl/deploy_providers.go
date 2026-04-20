@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
 // DeployConfig holds all parameters needed to execute a deployment.
@@ -41,7 +42,10 @@ type DeployProvider interface {
 }
 
 // newDeployProvider returns the DeployProvider for the given provider name.
-func newDeployProvider(provider string) (DeployProvider, error) {
+// For non-built-in providers, wfCfg is consulted to find a matching iac.provider
+// module and its infra.container_service resource. Pass nil wfCfg to restrict to
+// built-ins only.
+func newDeployProvider(provider string, wfCfg *config.WorkflowConfig) (DeployProvider, error) {
 	switch provider {
 	case "kubernetes", "k8s":
 		return &kubernetesProvider{}, nil
@@ -50,8 +54,116 @@ func newDeployProvider(provider string) (DeployProvider, error) {
 	case "aws-ecs":
 		return &awsECSProvider{}, nil
 	default:
-		return nil, fmt.Errorf("unsupported deploy provider %q (supported: kubernetes, docker, aws-ecs)", provider)
+		return newPluginDeployProvider(provider, wfCfg)
 	}
+}
+
+// resolveIaCProvider is the factory used by newPluginDeployProvider to obtain a
+// live IaCProvider from module config. Tests override this to inject fakes.
+var resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, error) {
+	return nil, fmt.Errorf("no in-process provider loader available; use pre-deploy steps with 'wfctl infra apply' to deploy via a workflow plugin")
+}
+
+// newPluginDeployProvider looks up a matching iac.provider + infra.container_service
+// module pair in wfCfg and wraps them as a DeployProvider.
+func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig) (DeployProvider, error) {
+	const hint = "\n  Example:\n    modules:\n    - name: my-provider\n      type: iac.provider\n      config:\n        provider: %s\n        credentials: env"
+	if wfCfg == nil || len(wfCfg.Modules) == 0 {
+		return nil, fmt.Errorf("unsupported deploy provider %q (built-ins: kubernetes, docker, aws-ecs; to use a plugin provider, declare an iac.provider module in your workflow config)%s", providerName, fmt.Sprintf(hint, providerName))
+	}
+
+	// Find the iac.provider module matching the requested provider name.
+	var providerModName string
+	var providerModCfg map[string]any
+	for _, m := range wfCfg.Modules {
+		if m.Type != "iac.provider" {
+			continue
+		}
+		cfgProvider, _ := m.Config["provider"].(string)
+		if cfgProvider == providerName || m.Name == providerName {
+			providerModName = m.Name
+			providerModCfg = m.Config
+			break
+		}
+	}
+	if providerModName == "" {
+		return nil, fmt.Errorf("unsupported deploy provider %q (built-ins: kubernetes, docker, aws-ecs; to use a plugin provider, declare an iac.provider module in your workflow config)%s", providerName, fmt.Sprintf(hint, providerName))
+	}
+
+	// Find the first infra.container_service module referencing this provider.
+	var resourceName string
+	var resourceCfg map[string]any
+	for _, m := range wfCfg.Modules {
+		if m.Type != "infra.container_service" {
+			continue
+		}
+		if p, _ := m.Config["provider"].(string); p == providerModName {
+			resourceName = m.Name
+			resourceCfg = m.Config
+			break
+		}
+	}
+	if resourceName == "" {
+		return nil, fmt.Errorf("no infra.container_service module found for provider %q in workflow config", providerModName)
+	}
+
+	iacProvider, err := resolveIaCProvider(context.Background(), providerName, providerModCfg)
+	if err != nil {
+		return nil, fmt.Errorf("resolve provider %q: %w", providerName, err)
+	}
+
+	return &pluginDeployProvider{
+		provider:     iacProvider,
+		resourceName: resourceName,
+		resourceType: "infra.container_service",
+		resourceCfg:  resourceCfg,
+	}, nil
+}
+
+// pluginDeployProvider wraps an IaCProvider and a single infra resource as a DeployProvider.
+type pluginDeployProvider struct {
+	provider     interfaces.IaCProvider
+	resourceName string
+	resourceType string
+	resourceCfg  map[string]any
+}
+
+func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) error {
+	driver, err := p.provider.ResourceDriver(p.resourceType)
+	if err != nil {
+		return fmt.Errorf("plugin deploy: no driver for %q: %w", p.resourceType, err)
+	}
+	merged := make(map[string]any, len(p.resourceCfg)+1)
+	for k, v := range p.resourceCfg {
+		merged[k] = v
+	}
+	merged["image"] = cfg.ImageTag
+	ref := interfaces.ResourceRef{Name: p.resourceName, Type: p.resourceType}
+	spec := interfaces.ResourceSpec{Name: p.resourceName, Type: p.resourceType, Config: merged}
+	if _, err := driver.Update(ctx, ref, spec); err != nil {
+		return fmt.Errorf("plugin deploy %q: update image: %w", p.resourceName, err)
+	}
+	fmt.Printf("  plugin deploy: updated %q to %s\n", p.resourceName, cfg.ImageTag)
+	return nil
+}
+
+func (p *pluginDeployProvider) HealthCheck(ctx context.Context, cfg DeployConfig) error {
+	if cfg.Env == nil || cfg.Env.HealthCheck == nil {
+		return nil
+	}
+	driver, err := p.provider.ResourceDriver(p.resourceType)
+	if err != nil {
+		return fmt.Errorf("plugin health check: no driver for %q: %w", p.resourceType, err)
+	}
+	ref := interfaces.ResourceRef{Name: p.resourceName, Type: p.resourceType}
+	result, err := driver.HealthCheck(ctx, ref)
+	if err != nil {
+		return fmt.Errorf("plugin health check %q: %w", p.resourceName, err)
+	}
+	if !result.Healthy {
+		return fmt.Errorf("plugin health check %q: unhealthy: %s", p.resourceName, result.Message)
+	}
+	return nil
 }
 
 // ── kubernetes provider ───────────────────────────────────────────────────────

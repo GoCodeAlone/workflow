@@ -358,7 +358,7 @@ func runDeployPhaseWithConfig(
 	}
 
 	// Step 3: resolve provider and deploy.
-	provider, err := newDeployProvider(env.Provider)
+	provider, err := newDeployProvider(env.Provider, wfCfg)
 	if err != nil {
 		return err
 	}
