@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -485,8 +486,16 @@ func cmp(a, b string) string {
 // ── digitalocean provider ─────────────────────────────────────────────────────
 
 type digitaloceanProvider struct {
-	baseURL string // defaults to "https://api.digitalocean.com"; injectable for testing
-	appID   string // populated after successful Deploy, used by HealthCheck
+	baseURL string       // defaults to "https://api.digitalocean.com"; injectable for testing
+	appID   string       // populated after successful Deploy, used by HealthCheck
+	client  *http.Client // injectable for testing; nil uses a 2-minute default
+}
+
+func (p *digitaloceanProvider) httpClient() *http.Client {
+	if p.client != nil {
+		return p.client
+	}
+	return &http.Client{Timeout: 2 * time.Minute}
 }
 
 // DO App Platform API request/response types (minimal subset).
@@ -546,6 +555,10 @@ func (p *digitaloceanProvider) Deploy(ctx context.Context, cfg DeployConfig) err
 	token := os.Getenv("DIGITALOCEAN_TOKEN")
 	if token == "" {
 		return fmt.Errorf("DIGITALOCEAN_TOKEN is required for DigitalOcean deployments")
+	}
+
+	if len(cfg.Services) > 1 {
+		fmt.Printf("  warning: DO App Platform deploys all services under a single app spec; per-service resource tuning is best-effort\n")
 	}
 
 	spec := p.buildAppSpec(cfg)
@@ -636,13 +649,13 @@ func parseImageRef(imageTag string) (registry, repository, tag string) {
 }
 
 func (p *digitaloceanProvider) findApp(ctx context.Context, token, name string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.doBase()+"/v2/apps?name="+name, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.doBase()+"/v2/apps?name="+url.QueryEscape(name), nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.httpClient().Do(req)
 	if err != nil {
 		return "", fmt.Errorf("GET /v2/apps: %w", err)
 	}
@@ -681,7 +694,7 @@ func (p *digitaloceanProvider) createApp(ctx context.Context, token string, spec
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.httpClient().Do(req)
 	if err != nil {
 		return "", fmt.Errorf("POST /v2/apps: %w", err)
 	}
@@ -715,7 +728,7 @@ func (p *digitaloceanProvider) updateApp(ctx context.Context, token, appID strin
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.httpClient().Do(req)
 	if err != nil {
 		return "", fmt.Errorf("PUT /v2/apps/%s: %w", appID, err)
 	}
@@ -745,7 +758,9 @@ func (p *digitaloceanProvider) HealthCheck(ctx context.Context, cfg DeployConfig
 	if p.appID != "" {
 		if token := os.Getenv("DIGITALOCEAN_TOKEN"); token != "" {
 			liveURL, err := p.fetchLiveURL(ctx, token)
-			if err == nil && liveURL != "" {
+			if err != nil {
+				fmt.Printf("  warning: could not fetch live_url from DO API: %v — falling back to config health check path\n", err)
+			} else if liveURL != "" {
 				hcPath := cfg.Env.HealthCheck.Path
 				fullURL := strings.TrimRight(liveURL, "/") + "/" + strings.TrimLeft(hcPath, "/")
 				hcCopy := *cfg.Env.HealthCheck
@@ -769,7 +784,7 @@ func (p *digitaloceanProvider) fetchLiveURL(ctx context.Context, token string) (
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.httpClient().Do(req)
 	if err != nil {
 		return "", err
 	}
