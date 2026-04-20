@@ -74,6 +74,94 @@ func TestPinManifestToVersion_SameVersion(t *testing.T) {
 	}
 }
 
+// TestRunPluginInstall_NoVersionUsesManifest verifies that when no @version suffix
+// is given, the manifest version is used as-is (existing behavior unchanged).
+func TestRunPluginInstall_NoVersionUsesManifest(t *testing.T) {
+	const pluginName = "payments"
+	const manifestVersion = "v0.1.0"
+
+	binaryContent := []byte("#!/bin/sh\necho payments\n")
+	tarball := buildPluginTarGz(t, pluginName, binaryContent, minimalPluginJSON(pluginName, manifestVersion))
+
+	var hitManifestVersion atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/plugins/"+pluginName+"/manifest.json":
+			manifest := RegistryManifest{
+				Name:        pluginName,
+				Version:     manifestVersion,
+				Author:      "tester",
+				Description: "test payments plugin",
+				Type:        "external",
+				Tier:        "community",
+				License:     "MIT",
+				Downloads: []PluginDownload{
+					{
+						OS:   runtime.GOOS,
+						Arch: runtime.GOARCH,
+						URL:  "http://" + r.Host + "/releases/download/" + manifestVersion + "/" + pluginName + ".tar.gz",
+					},
+				},
+			}
+			data, _ := json.Marshal(manifest)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(data) //nolint:errcheck
+		case strings.Contains(r.URL.Path, manifestVersion):
+			hitManifestVersion.Add(1)
+			w.WriteHeader(http.StatusOK)
+			w.Write(tarball) //nolint:errcheck
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cfgDir := t.TempDir()
+	regCfg := "registries:\n  - name: test\n    type: static\n    url: " + srv.URL + "\n    priority: 0\n"
+	regCfgPath := filepath.Join(cfgDir, "registry.yaml")
+	if err := os.WriteFile(regCfgPath, []byte(regCfg), 0600); err != nil {
+		t.Fatalf("write registry config: %v", err)
+	}
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
+
+	pluginsDir := t.TempDir()
+	// No @version suffix — should use manifest version unchanged.
+	if err := runPluginInstall([]string{
+		"--config", regCfgPath,
+		"--plugin-dir", pluginsDir,
+		pluginName, // no @version
+	}); err != nil {
+		t.Fatalf("runPluginInstall (no version): %v", err)
+	}
+
+	if hitManifestVersion.Load() == 0 {
+		t.Error("expected download from manifest version URL, got none")
+	}
+
+	// Installed plugin.json should record the manifest version.
+	pjPath := filepath.Join(pluginsDir, pluginName, "plugin.json")
+	data, err := os.ReadFile(pjPath)
+	if err != nil {
+		t.Fatalf("read plugin.json: %v", err)
+	}
+	var pj installedPluginJSON
+	if err := json.Unmarshal(data, &pj); err != nil {
+		t.Fatalf("parse plugin.json: %v", err)
+	}
+	if pj.Version != manifestVersion {
+		t.Errorf("installed version: got %q, want %q", pj.Version, manifestVersion)
+	}
+}
+
 // TestRunPluginInstall_VersionPinHitsNewURL verifies that when name@vX.Y.Z is
 // requested and the registry manifest has an older version, the installer
 // rewrites download URLs to the requested version and successfully installs it.
