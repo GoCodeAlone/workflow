@@ -99,7 +99,13 @@ func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, 
 	}
 
 	imageRef := imageRefForContainer(ctr, tag, registries)
-	args := []string{"build", "--file", dockerfile, "--tag", imageRef}
+	// hardened mode uses buildx for provenance/SBOM attestation support.
+	var args []string
+	if hardened {
+		args = []string{"buildx", "build", "--file", dockerfile, "--tag", imageRef}
+	} else {
+		args = []string{"build", "--file", dockerfile, "--tag", imageRef}
+	}
 
 	// Platforms (BuildKit multi-arch).
 	if len(ctr.Platforms) > 0 {
@@ -155,6 +161,15 @@ func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, 
 	if dryRun {
 		fmt.Fprintf(out, "[dry-run] docker %s\n", strings.Join(args, " "))
 		return nil
+	}
+
+	if hardened {
+		// buildx with the docker-container driver is required for attestation flags.
+		// Verify a non-default builder is active; the default "docker" driver rejects --provenance.
+		if err := exec.Command("docker", "buildx", "inspect", "--bootstrap").Run(); err != nil {
+			return fmt.Errorf("hardened build requires docker buildx: run 'docker buildx create --use' " +
+				"or add 'docker/setup-buildx-action@v3' to your CI workflow (%w)", err)
+		}
 	}
 
 	//nolint:gosec // G204: docker command constructed from validated config fields
