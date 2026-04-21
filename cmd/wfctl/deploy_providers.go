@@ -763,7 +763,10 @@ func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) err
 	for k, v := range p.resourceCfg {
 		merged[k] = v
 	}
-	merged["image"] = cfg.ImageTag
+	if cfg.ImageTag != "" {
+		merged["image"] = cfg.ImageTag
+	}
+	// else: preserve spec.Config["image"] from the (already-substituted) module config
 
 	// Secrets carried in DeployConfig (fetched from vault / external stores by
 	// injectSecrets) are not in the OS environment. Export them temporarily so

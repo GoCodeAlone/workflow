@@ -192,3 +192,66 @@ func TestPluginDeployProvider_Deploy_SecretsExpandedViaEnv(t *testing.T) {
 		t.Errorf("updateCfg[token]: want %q, got %q", "vault_secret_abc", got)
 	}
 }
+
+// ── TestPluginDeployProvider_Deploy_EmptyImageTagPreservesConfig ──────────────
+
+// TestPluginDeployProvider_Deploy_EmptyImageTagPreservesConfig verifies that when
+// cfg.ImageTag is empty the spec.Config["image"] set in the YAML (post-substitution)
+// is passed through to the driver unchanged. This is the BMW scenario where the
+// image ref is encoded in the YAML and IMAGE_TAG is not set.
+func TestPluginDeployProvider_Deploy_EmptyImageTagPreservesConfig(t *testing.T) {
+	driver := &captureResourceDriver{}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{"image": "registry/org/app:sha256abc"},
+	}
+	cfg := DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "", // not set — e.g. IMAGE_TAG env var absent
+		Env:      &config.CIDeployEnvironment{},
+	}
+	if err := p.Deploy(context.Background(), cfg); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	got, _ := driver.updateCfg["image"].(string)
+	if got != "registry/org/app:sha256abc" {
+		t.Errorf("updateCfg[image]: want %q, got %q", "registry/org/app:sha256abc", got)
+	}
+}
+
+// ── TestPluginDeployProvider_Deploy_NonEmptyImageTagOverrides ────────────────
+
+// TestPluginDeployProvider_Deploy_NonEmptyImageTagOverrides verifies that when
+// cfg.ImageTag is non-empty it overrides whatever the YAML config provided,
+// preserving the existing IMAGE_TAG env-override CI path.
+func TestPluginDeployProvider_Deploy_NonEmptyImageTagOverrides(t *testing.T) {
+	driver := &captureResourceDriver{}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{"image": "old:tag"},
+	}
+	cfg := DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "new:tag",
+		Env:      &config.CIDeployEnvironment{},
+	}
+	if err := p.Deploy(context.Background(), cfg); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	got, _ := driver.updateCfg["image"].(string)
+	if got != "new:tag" {
+		t.Errorf("updateCfg[image]: want %q, got %q", "new:tag", got)
+	}
+}
