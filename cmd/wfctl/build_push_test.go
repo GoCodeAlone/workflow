@@ -51,6 +51,53 @@ func TestRunBuildPush_DryRun_PrintsPlannedPushes(t *testing.T) {
 	}
 }
 
+// TestRunBuildPush_TagOverride verifies that --tag is threaded into the
+// image ref, overriding the container's static tag field. Without this,
+// `wfctl build --tag X` would still push :latest (the container default),
+// which breaks tagged-commit deploys where the build step tagged with X
+// but the subsequent push step didn't know about X.
+func TestRunBuildPush_TagOverride(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+ci:
+  registries:
+    - name: docr
+      type: do
+      path: registry.digitalocean.com/myorg
+  build:
+    containers:
+      - name: api
+        method: dockerfile
+        dockerfile: Dockerfile
+        push_to: [docr]
+`
+	cfgPath := filepath.Join(dir, "workflow.yaml")
+	if err := os.WriteFile(cfgPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	t.Setenv("WFCTL_BUILD_DRY_RUN", "1")
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runBuildPush([]string{"--config", cfgPath, "--tag", "abc1234"})
+	w.Close()
+	os.Stdout = oldStdout
+	if err != nil {
+		t.Fatalf("runBuildPush: %v", err)
+	}
+	var buf [4096]byte
+	n, _ := r.Read(buf[:])
+	out := string(buf[:n])
+	want := "registry.digitalocean.com/myorg/api:abc1234"
+	if !strings.Contains(out, want) {
+		t.Errorf("output should reference %q, got: %q", want, out)
+	}
+	if strings.Contains(out, ":latest") {
+		t.Errorf("output should not reference :latest, got: %q", out)
+	}
+}
+
 func TestRunBuildPush_UnknownRegistry(t *testing.T) {
 	dir := t.TempDir()
 	content := `
