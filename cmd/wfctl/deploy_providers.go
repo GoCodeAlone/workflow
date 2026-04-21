@@ -403,6 +403,23 @@ type remoteResourceDriver struct {
 	resourceType string
 }
 
+// wrapNotFound re-wraps err as ErrResourceNotFound when the error message
+// contains a known not-found pattern. Errors crossing the plugin boundary
+// arrive as plain strings, so errors.Is can't match the sentinel directly —
+// this function bridges that gap for Update, Read, and Delete.
+func wrapNotFound(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	for _, pat := range []string{"not found", "404", "405", "does not exist", "no such"} {
+		if strings.Contains(msg, pat) {
+			return fmt.Errorf("%w: %v", interfaces.ErrResourceNotFound, err)
+		}
+	}
+	return err
+}
+
 // decodeResourceOutput converts an InvokeService response map into a *interfaces.ResourceOutput,
 // including the Outputs map and Sensitive flags that the previous Update implementation discarded.
 func decodeResourceOutput(m map[string]any) *interfaces.ResourceOutput {
@@ -455,7 +472,7 @@ func (d *remoteResourceDriver) Read(_ context.Context, ref interfaces.ResourceRe
 		"ref_provider_id": ref.ProviderID,
 	})
 	if err != nil {
-		return nil, err
+		return nil, wrapNotFound(err)
 	}
 	return decodeResourceOutput(res), nil
 }
@@ -471,7 +488,7 @@ func (d *remoteResourceDriver) Update(_ context.Context, ref interfaces.Resource
 		"spec_config":     spec.Config,
 	})
 	if err != nil {
-		return nil, err
+		return nil, wrapNotFound(err)
 	}
 	return decodeResourceOutput(res), nil
 }
@@ -483,7 +500,7 @@ func (d *remoteResourceDriver) Delete(_ context.Context, ref interfaces.Resource
 		"ref_type":        ref.Type,
 		"ref_provider_id": ref.ProviderID,
 	})
-	return err
+	return wrapNotFound(err)
 }
 
 func (d *remoteResourceDriver) Diff(_ context.Context, desired interfaces.ResourceSpec, current *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {

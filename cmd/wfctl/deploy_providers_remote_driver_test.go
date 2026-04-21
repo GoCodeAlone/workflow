@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -325,5 +326,142 @@ func TestRemoteDriver_SensitiveKeys_Error(t *testing.T) {
 	keys := d.SensitiveKeys()
 	if len(keys) != 0 {
 		t.Errorf("expected empty keys on error, got %v", keys)
+	}
+}
+
+// ── wrapNotFound ──────────────────────────────────────────────────────────────
+
+func TestWrapNotFound_Patterns(t *testing.T) {
+	patterns := []string{
+		"not found",
+		"NOT FOUND",
+		"Not Found",
+		"404",
+		"405",
+		"does not exist",
+		"Does Not Exist",
+		"no such",
+		"No Such Resource",
+		"resource 404: gone",
+		"error: the item does not exist in the store",
+	}
+	for _, msg := range patterns {
+		err := wrapNotFound(fmt.Errorf("%s", msg))
+		if !errors.Is(err, interfaces.ErrResourceNotFound) {
+			t.Errorf("pattern %q: expected ErrResourceNotFound, got %v", msg, err)
+		}
+	}
+}
+
+func TestWrapNotFound_PassThrough(t *testing.T) {
+	msgs := []string{
+		"permission denied",
+		"internal server error",
+		"timeout",
+		"rate limit exceeded",
+		"conflict",
+	}
+	for _, msg := range msgs {
+		orig := fmt.Errorf("%s", msg)
+		err := wrapNotFound(orig)
+		if errors.Is(err, interfaces.ErrResourceNotFound) {
+			t.Errorf("message %q: should NOT be wrapped as ErrResourceNotFound", msg)
+		}
+		if err.Error() != orig.Error() {
+			t.Errorf("message %q: error string changed: got %q", msg, err.Error())
+		}
+	}
+}
+
+func TestWrapNotFound_Nil(t *testing.T) {
+	if wrapNotFound(nil) != nil {
+		t.Error("wrapNotFound(nil) should return nil")
+	}
+}
+
+// ── Update/Read/Delete not-found wrapping ─────────────────────────────────────
+
+func TestRemoteDriver_Update_WrapsNotFound(t *testing.T) {
+	si := &stubInvoker{err: fmt.Errorf("resource 404: not found")}
+	d := newDriver(si)
+	_, err := d.Update(context.Background(), sampleRef(), sampleSpec())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, interfaces.ErrResourceNotFound) {
+		t.Errorf("Update: expected ErrResourceNotFound, got %v", err)
+	}
+}
+
+func TestRemoteDriver_Read_WrapsNotFound(t *testing.T) {
+	si := &stubInvoker{err: fmt.Errorf("no such resource: pid-123")}
+	d := newDriver(si)
+	_, err := d.Read(context.Background(), sampleRef())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, interfaces.ErrResourceNotFound) {
+		t.Errorf("Read: expected ErrResourceNotFound, got %v", err)
+	}
+}
+
+func TestRemoteDriver_Delete_WrapsNotFound(t *testing.T) {
+	si := &stubInvoker{err: fmt.Errorf("does not exist")}
+	d := newDriver(si)
+	err := d.Delete(context.Background(), sampleRef())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, interfaces.ErrResourceNotFound) {
+		t.Errorf("Delete: expected ErrResourceNotFound, got %v", err)
+	}
+}
+
+func TestRemoteDriver_Update_PreservesOtherErrors(t *testing.T) {
+	si := &stubInvoker{err: fmt.Errorf("permission denied")}
+	d := newDriver(si)
+	_, err := d.Update(context.Background(), sampleRef(), sampleSpec())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if errors.Is(err, interfaces.ErrResourceNotFound) {
+		t.Error("Update: 'permission denied' should NOT be wrapped as ErrResourceNotFound")
+	}
+}
+
+func TestRemoteDriver_Read_PreservesOtherErrors(t *testing.T) {
+	si := &stubInvoker{err: fmt.Errorf("rate limit exceeded")}
+	d := newDriver(si)
+	_, err := d.Read(context.Background(), sampleRef())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if errors.Is(err, interfaces.ErrResourceNotFound) {
+		t.Error("Read: 'rate limit exceeded' should NOT be wrapped as ErrResourceNotFound")
+	}
+}
+
+func TestRemoteDriver_Delete_PreservesOtherErrors(t *testing.T) {
+	si := &stubInvoker{err: fmt.Errorf("internal server error")}
+	d := newDriver(si)
+	err := d.Delete(context.Background(), sampleRef())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if errors.Is(err, interfaces.ErrResourceNotFound) {
+		t.Error("Delete: 'internal server error' should NOT be wrapped as ErrResourceNotFound")
+	}
+}
+
+// Create must NOT wrap not-found — it's the fallback target of upsert.
+func TestRemoteDriver_Create_DoesNotWrapNotFound(t *testing.T) {
+	si := &stubInvoker{err: fmt.Errorf("404 not found")}
+	d := newDriver(si)
+	_, err := d.Create(context.Background(), sampleSpec())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if errors.Is(err, interfaces.ErrResourceNotFound) {
+		t.Error("Create: must NOT wrap errors as ErrResourceNotFound")
 	}
 }
