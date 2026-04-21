@@ -145,3 +145,114 @@ func TestGenerateSecret_ProviderCredential_MissingToken(t *testing.T) {
 		t.Error("expected error when DIGITALOCEAN_TOKEN is unset")
 	}
 }
+
+// ── infra_output generator ────────────────────────────────────────────────────
+
+func sampleStateOutputs() map[string]map[string]any {
+	return map[string]map[string]any{
+		"bmw-database": {
+			"uri":      "postgres://user:pass@db.example.com:5432/app",
+			"host":     "db.example.com",
+			"port":     "5432",
+			"readonly": "true",
+		},
+	}
+}
+
+func TestGenerateSecret_InfraOutput_Success(t *testing.T) {
+	val, err := GenerateSecret(context.Background(), "infra_output", map[string]any{
+		"source":         "bmw-database.uri",
+		"_state_outputs": sampleStateOutputs(),
+	})
+	if err != nil {
+		t.Fatalf("infra_output: unexpected error: %v", err)
+	}
+	if val != "postgres://user:pass@db.example.com:5432/app" {
+		t.Errorf("got %q", val)
+	}
+}
+
+func TestGenerateSecret_InfraOutput_DifferentField(t *testing.T) {
+	val, err := GenerateSecret(context.Background(), "infra_output", map[string]any{
+		"source":         "bmw-database.host",
+		"_state_outputs": sampleStateOutputs(),
+	})
+	if err != nil {
+		t.Fatalf("infra_output: unexpected error: %v", err)
+	}
+	if val != "db.example.com" {
+		t.Errorf("got %q", val)
+	}
+}
+
+func TestGenerateSecret_InfraOutput_MissingSource(t *testing.T) {
+	_, err := GenerateSecret(context.Background(), "infra_output", map[string]any{
+		"_state_outputs": sampleStateOutputs(),
+	})
+	if err == nil {
+		t.Fatal("expected error for missing source")
+	}
+	if !containsStr(err.Error(), "source") {
+		t.Errorf("error should mention 'source': %v", err)
+	}
+}
+
+func TestGenerateSecret_InfraOutput_InvalidSourceFormat(t *testing.T) {
+	for _, bad := range []string{"nodot", ".nomodule", "nofield."} {
+		_, err := GenerateSecret(context.Background(), "infra_output", map[string]any{
+			"source":         bad,
+			"_state_outputs": sampleStateOutputs(),
+		})
+		if err == nil {
+			t.Errorf("source=%q: expected error for invalid format", bad)
+		}
+	}
+}
+
+func TestGenerateSecret_InfraOutput_NoStateOutputs(t *testing.T) {
+	_, err := GenerateSecret(context.Background(), "infra_output", map[string]any{
+		"source": "bmw-database.uri",
+		// _state_outputs intentionally absent
+	})
+	if err == nil {
+		t.Fatal("expected error when state outputs not provided")
+	}
+}
+
+func TestGenerateSecret_InfraOutput_MissingModule(t *testing.T) {
+	_, err := GenerateSecret(context.Background(), "infra_output", map[string]any{
+		"source":         "nonexistent-module.uri",
+		"_state_outputs": sampleStateOutputs(),
+	})
+	if err == nil {
+		t.Fatal("expected error for missing module")
+	}
+	if !containsStr(err.Error(), "nonexistent-module") {
+		t.Errorf("error should name the missing module: %v", err)
+	}
+}
+
+func TestGenerateSecret_InfraOutput_MissingField(t *testing.T) {
+	_, err := GenerateSecret(context.Background(), "infra_output", map[string]any{
+		"source":         "bmw-database.nonexistent_field",
+		"_state_outputs": sampleStateOutputs(),
+	})
+	if err == nil {
+		t.Fatal("expected error for missing field")
+	}
+	if !containsStr(err.Error(), "nonexistent_field") {
+		t.Errorf("error should name the missing field: %v", err)
+	}
+}
+
+func containsStr(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
+		func() bool {
+			for i := 0; i <= len(s)-len(sub); i++ {
+				if s[i:i+len(sub)] == sub {
+					return true
+				}
+			}
+			return false
+		}())
+}
