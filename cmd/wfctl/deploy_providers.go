@@ -213,34 +213,180 @@ func (r *remoteIaCProvider) Initialize(_ context.Context, cfg map[string]any) er
 	return err
 }
 
-func (r *remoteIaCProvider) Capabilities() []interfaces.IaCCapabilityDeclaration { return nil }
-
-func (r *remoteIaCProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
-	return nil, fmt.Errorf("IaCProvider.Plan not supported via remote deploy — use wfctl infra apply")
+// jsonToAny converts any typed value to a JSON-compatible any (map[string]any,
+// []any, etc.) suitable for embedding in InvokeService arg maps.
+func jsonToAny(v any) (any, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var out any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
-func (r *remoteIaCProvider) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
-	return nil, fmt.Errorf("IaCProvider.Apply not supported via remote deploy — use wfctl infra apply")
+// anyToStruct decodes a JSON-compatible any value (map[string]any / []any) into
+// a typed struct using a JSON round-trip.
+func anyToStruct(src any, dst any) error {
+	b, err := json.Marshal(src)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, dst)
 }
 
-func (r *remoteIaCProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
-	return nil, fmt.Errorf("IaCProvider.Destroy not supported via remote deploy — use wfctl infra apply")
+func (r *remoteIaCProvider) Capabilities() []interfaces.IaCCapabilityDeclaration {
+	res, err := r.invoker.InvokeService("IaCProvider.Capabilities", nil)
+	if err != nil {
+		return nil
+	}
+	raw, ok := res["capabilities"]
+	if !ok {
+		return nil
+	}
+	var caps []interfaces.IaCCapabilityDeclaration
+	if err := anyToStruct(raw, &caps); err != nil {
+		return nil
+	}
+	return caps
 }
 
-func (r *remoteIaCProvider) Status(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
-	return nil, fmt.Errorf("IaCProvider.Status not supported via remote deploy")
+func (r *remoteIaCProvider) Plan(_ context.Context, desired []interfaces.ResourceSpec, current []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	desiredAny, err := jsonToAny(desired)
+	if err != nil {
+		return nil, fmt.Errorf("IaCProvider.Plan: marshal desired: %w", err)
+	}
+	currentAny, err := jsonToAny(current)
+	if err != nil {
+		return nil, fmt.Errorf("IaCProvider.Plan: marshal current: %w", err)
+	}
+	res, err := r.invoker.InvokeService("IaCProvider.Plan", map[string]any{
+		"desired": desiredAny,
+		"current": currentAny,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var plan interfaces.IaCPlan
+	if err := anyToStruct(res, &plan); err != nil {
+		return nil, fmt.Errorf("IaCProvider.Plan: decode result: %w", err)
+	}
+	return &plan, nil
 }
 
-func (r *remoteIaCProvider) DetectDrift(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
-	return nil, fmt.Errorf("IaCProvider.DetectDrift not supported via remote deploy")
+func (r *remoteIaCProvider) Apply(_ context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	planAny, err := jsonToAny(plan)
+	if err != nil {
+		return nil, fmt.Errorf("IaCProvider.Apply: marshal plan: %w", err)
+	}
+	res, err := r.invoker.InvokeService("IaCProvider.Apply", map[string]any{"plan": planAny})
+	if err != nil {
+		return nil, err
+	}
+	var result interfaces.ApplyResult
+	if err := anyToStruct(res, &result); err != nil {
+		return nil, fmt.Errorf("IaCProvider.Apply: decode result: %w", err)
+	}
+	return &result, nil
 }
 
-func (r *remoteIaCProvider) Import(_ context.Context, _ string, _ string) (*interfaces.ResourceState, error) {
-	return nil, fmt.Errorf("IaCProvider.Import not supported via remote deploy")
+func (r *remoteIaCProvider) Destroy(_ context.Context, refs []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
+	refsAny, err := jsonToAny(refs)
+	if err != nil {
+		return nil, fmt.Errorf("IaCProvider.Destroy: marshal refs: %w", err)
+	}
+	res, err := r.invoker.InvokeService("IaCProvider.Destroy", map[string]any{
+		"refs": refsAny,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var result interfaces.DestroyResult
+	if err := anyToStruct(res, &result); err != nil {
+		return nil, fmt.Errorf("IaCProvider.Destroy: decode result: %w", err)
+	}
+	return &result, nil
 }
 
-func (r *remoteIaCProvider) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
-	return nil, fmt.Errorf("IaCProvider.ResolveSizing not supported via remote deploy")
+func (r *remoteIaCProvider) Status(_ context.Context, refs []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
+	refsAny, err := jsonToAny(refs)
+	if err != nil {
+		return nil, fmt.Errorf("IaCProvider.Status: marshal refs: %w", err)
+	}
+	res, err := r.invoker.InvokeService("IaCProvider.Status", map[string]any{
+		"refs": refsAny,
+	})
+	if err != nil {
+		return nil, err
+	}
+	raw, ok := res["statuses"]
+	if !ok {
+		return nil, nil
+	}
+	var statuses []interfaces.ResourceStatus
+	if err := anyToStruct(raw, &statuses); err != nil {
+		return nil, fmt.Errorf("IaCProvider.Status: decode result: %w", err)
+	}
+	return statuses, nil
+}
+
+func (r *remoteIaCProvider) DetectDrift(_ context.Context, refs []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
+	refsAny, err := jsonToAny(refs)
+	if err != nil {
+		return nil, fmt.Errorf("IaCProvider.DetectDrift: marshal refs: %w", err)
+	}
+	res, err := r.invoker.InvokeService("IaCProvider.DetectDrift", map[string]any{
+		"refs": refsAny,
+	})
+	if err != nil {
+		return nil, err
+	}
+	raw, ok := res["drifts"]
+	if !ok {
+		return nil, nil
+	}
+	var drifts []interfaces.DriftResult
+	if err := anyToStruct(raw, &drifts); err != nil {
+		return nil, fmt.Errorf("IaCProvider.DetectDrift: decode result: %w", err)
+	}
+	return drifts, nil
+}
+
+func (r *remoteIaCProvider) Import(_ context.Context, cloudID string, resourceType string) (*interfaces.ResourceState, error) {
+	res, err := r.invoker.InvokeService("IaCProvider.Import", map[string]any{
+		"provider_id":   cloudID,
+		"resource_type": resourceType,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var state interfaces.ResourceState
+	if err := anyToStruct(res, &state); err != nil {
+		return nil, fmt.Errorf("IaCProvider.Import: decode result: %w", err)
+	}
+	return &state, nil
+}
+
+func (r *remoteIaCProvider) ResolveSizing(resourceType string, size interfaces.Size, hints *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
+	hintsAny, err := jsonToAny(hints)
+	if err != nil {
+		return nil, fmt.Errorf("IaCProvider.ResolveSizing: marshal hints: %w", err)
+	}
+	res, err := r.invoker.InvokeService("IaCProvider.ResolveSizing", map[string]any{
+		"resource_type": resourceType,
+		"size":          string(size),
+		"hints":         hintsAny,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var sizing interfaces.ProviderSizing
+	if err := anyToStruct(res, &sizing); err != nil {
+		return nil, fmt.Errorf("IaCProvider.ResolveSizing: decode result: %w", err)
+	}
+	return &sizing, nil
 }
 
 func (r *remoteIaCProvider) ResourceDriver(resourceType string) (interfaces.ResourceDriver, error) {
