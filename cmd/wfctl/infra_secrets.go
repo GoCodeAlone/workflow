@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/secrets"
 	"gopkg.in/yaml.v3"
 )
@@ -61,11 +62,15 @@ func parseInfraConfig(cfgFile string) (*InfraConfig, error) {
 }
 
 // resolveSecretsProvider constructs the appropriate secrets.Provider from cfg.
+// ${VAR} / $VAR references in cfg.Config are expanded via os.ExpandEnv before
+// the provider is constructed, so credentials can be passed through the environment
+// (e.g. VAULT_TOKEN=s.xxx in CI) rather than hard-coded in YAML. cfg.Config is
+// never mutated — expansion produces a deep copy.
 func resolveSecretsProvider(cfg *SecretsConfig) (secrets.Provider, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("no secrets config provided")
 	}
-	c := cfg.Config
+	c := config.ExpandEnvInMap(cfg.Config)
 	if c == nil {
 		c = map[string]any{}
 	}

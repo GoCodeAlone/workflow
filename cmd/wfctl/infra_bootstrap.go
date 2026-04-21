@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
 
@@ -65,8 +66,15 @@ func runInfraBootstrap(args []string) error {
 	return bootstrapSecrets(ctx, provider, secretsCfg)
 }
 
+// bootstrapDOSpacesBucketFn is the package-level hook used by bootstrapStateBackend.
+// Tests override it to inject a fake HTTP server without touching the filesystem.
+var bootstrapDOSpacesBucketFn = bootstrapDOSpacesBucket
+
 // bootstrapStateBackend checks the iac.state config and creates any required
 // backing infrastructure (e.g. a DO Spaces bucket) if it does not already exist.
+// ${VAR} / $VAR references in the module config are expanded via os.ExpandEnv
+// before the config fields are read, so secrets can be injected through the
+// environment (e.g. BUCKET_NAME=my-bucket in CI).
 func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 	iacStates, _, _, err := discoverInfraModules(cfgFile)
 	if err != nil {
@@ -76,18 +84,20 @@ func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 		return nil
 	}
 	m := iacStates[0]
-	backend, _ := m.Config["backend"].(string)
+	// Expand ${VAR} / $VAR references before reading individual fields.
+	cfg := config.ExpandEnvInMap(m.Config)
+	backend, _ := cfg["backend"].(string)
 	if backend != "spaces" {
 		// Only DO Spaces requires bootstrap; filesystem/memory are self-contained.
 		return nil
 	}
 
-	bucket, _ := m.Config["bucket"].(string)
-	region, _ := m.Config["region"].(string)
+	bucket, _ := cfg["bucket"].(string)
+	region, _ := cfg["region"].(string)
 	if bucket == "" {
 		return fmt.Errorf("iac.state backend=spaces requires 'bucket' in config")
 	}
-	return bootstrapDOSpacesBucket(ctx, bucket, region)
+	return bootstrapDOSpacesBucketFn(ctx, bucket, region)
 }
 
 // bootstrapDOSpacesBucket creates a DO Spaces bucket if it does not already exist.
