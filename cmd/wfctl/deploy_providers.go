@@ -255,6 +255,63 @@ type remoteResourceDriver struct {
 	resourceType string
 }
 
+// decodeResourceOutput converts an InvokeService response map into a *interfaces.ResourceOutput,
+// including the Outputs map and Sensitive flags that the previous Update implementation discarded.
+func decodeResourceOutput(m map[string]any) *interfaces.ResourceOutput {
+	out := &interfaces.ResourceOutput{
+		ProviderID: stringFromMap(m, "provider_id"),
+		Name:       stringFromMap(m, "name"),
+		Type:       stringFromMap(m, "type"),
+		Status:     stringFromMap(m, "status"),
+	}
+	if raw, ok := m["outputs"]; ok {
+		if outputs, ok := raw.(map[string]any); ok {
+			out.Outputs = outputs
+		}
+	}
+	if raw, ok := m["sensitive"]; ok {
+		switch v := raw.(type) {
+		case map[string]bool:
+			out.Sensitive = v
+		case map[string]any:
+			sens := make(map[string]bool, len(v))
+			for k, val := range v {
+				if b, ok := val.(bool); ok {
+					sens[k] = b
+				}
+			}
+			out.Sensitive = sens
+		}
+	}
+	return out
+}
+
+func (d *remoteResourceDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	res, err := d.invoker.InvokeService("ResourceDriver.Create", map[string]any{
+		"resource_type": d.resourceType,
+		"spec_name":     spec.Name,
+		"spec_type":     spec.Type,
+		"spec_config":   spec.Config,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return decodeResourceOutput(res), nil
+}
+
+func (d *remoteResourceDriver) Read(_ context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
+	res, err := d.invoker.InvokeService("ResourceDriver.Read", map[string]any{
+		"resource_type":   d.resourceType,
+		"ref_name":        ref.Name,
+		"ref_type":        ref.Type,
+		"ref_provider_id": ref.ProviderID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return decodeResourceOutput(res), nil
+}
+
 func (d *remoteResourceDriver) Update(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
 	res, err := d.invoker.InvokeService("ResourceDriver.Update", map[string]any{
 		"resource_type":   d.resourceType,
@@ -268,12 +325,55 @@ func (d *remoteResourceDriver) Update(_ context.Context, ref interfaces.Resource
 	if err != nil {
 		return nil, err
 	}
-	return &interfaces.ResourceOutput{
-		ProviderID: stringFromMap(res, "provider_id"),
-		Name:       stringFromMap(res, "name"),
-		Type:       stringFromMap(res, "type"),
-		Status:     stringFromMap(res, "status"),
-	}, nil
+	return decodeResourceOutput(res), nil
+}
+
+func (d *remoteResourceDriver) Delete(_ context.Context, ref interfaces.ResourceRef) error {
+	_, err := d.invoker.InvokeService("ResourceDriver.Delete", map[string]any{
+		"resource_type":   d.resourceType,
+		"ref_name":        ref.Name,
+		"ref_type":        ref.Type,
+		"ref_provider_id": ref.ProviderID,
+	})
+	return err
+}
+
+func (d *remoteResourceDriver) Diff(_ context.Context, desired interfaces.ResourceSpec, current *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
+	args := map[string]any{
+		"resource_type":       d.resourceType,
+		"spec_name":           desired.Name,
+		"spec_type":           desired.Type,
+		"spec_config":         desired.Config,
+		"current_name":        current.Name,
+		"current_type":        current.Type,
+		"current_provider_id": current.ProviderID,
+		"current_status":      current.Status,
+		"current_outputs":     current.Outputs,
+		"current_sensitive":   current.Sensitive,
+	}
+	res, err := d.invoker.InvokeService("ResourceDriver.Diff", args)
+	if err != nil {
+		return nil, err
+	}
+	result := &interfaces.DiffResult{}
+	result.NeedsUpdate, _ = res["needs_update"].(bool)
+	result.NeedsReplace, _ = res["needs_replace"].(bool)
+	if rawChanges, ok := res["changes"]; ok {
+		if changes, ok := rawChanges.([]any); ok {
+			for _, c := range changes {
+				if cm, ok := c.(map[string]any); ok {
+					fc := interfaces.FieldChange{
+						Path: stringFromMap(cm, "path"),
+						Old:  cm["old"],
+						New:  cm["new"],
+					}
+					fc.ForceNew, _ = cm["force_new"].(bool)
+					result.Changes = append(result.Changes, fc)
+				}
+			}
+		}
+	}
+	return result, nil
 }
 
 func (d *remoteResourceDriver) HealthCheck(_ context.Context, ref interfaces.ResourceRef) (*interfaces.HealthResult, error) {
@@ -291,22 +391,43 @@ func (d *remoteResourceDriver) HealthCheck(_ context.Context, ref interfaces.Res
 	return &interfaces.HealthResult{Healthy: healthy, Message: message}, nil
 }
 
-func (d *remoteResourceDriver) Create(_ context.Context, _ interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	return nil, fmt.Errorf("ResourceDriver.Create not yet supported via remote deploy — use wfctl infra apply")
+func (d *remoteResourceDriver) Scale(_ context.Context, ref interfaces.ResourceRef, replicas int) (*interfaces.ResourceOutput, error) {
+	res, err := d.invoker.InvokeService("ResourceDriver.Scale", map[string]any{
+		"resource_type":   d.resourceType,
+		"ref_name":        ref.Name,
+		"ref_type":        ref.Type,
+		"ref_provider_id": ref.ProviderID,
+		"replicas":        replicas,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return decodeResourceOutput(res), nil
 }
-func (d *remoteResourceDriver) Read(_ context.Context, _ interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
-	return nil, fmt.Errorf("ResourceDriver.Read not yet supported via remote deploy — use wfctl infra apply")
+
+func (d *remoteResourceDriver) SensitiveKeys() []string {
+	res, err := d.invoker.InvokeService("ResourceDriver.SensitiveKeys", map[string]any{
+		"resource_type": d.resourceType,
+	})
+	if err != nil {
+		return nil
+	}
+	raw, ok := res["keys"]
+	if !ok {
+		return nil
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		if s, ok := item.(string); ok {
+			keys = append(keys, s)
+		}
+	}
+	return keys
 }
-func (d *remoteResourceDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error {
-	return fmt.Errorf("ResourceDriver.Delete not yet supported via remote deploy — use wfctl infra apply")
-}
-func (d *remoteResourceDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
-	return nil, fmt.Errorf("ResourceDriver.Diff not yet supported via remote deploy")
-}
-func (d *remoteResourceDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ int) (*interfaces.ResourceOutput, error) {
-	return nil, fmt.Errorf("ResourceDriver.Scale not yet supported via remote deploy")
-}
-func (d *remoteResourceDriver) SensitiveKeys() []string { return nil }
 
 func stringFromMap(m map[string]any, key string) string {
 	v, _ := m[key].(string)
