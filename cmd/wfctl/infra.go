@@ -238,7 +238,7 @@ func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) 
 		if !isInfraType(m.Type) {
 			continue
 		}
-		r := &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: m.Config}
+		r := &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMap(m.Config)}
 		specs = append(specs, resourceSpecFromResolvedModule(r))
 	}
 	return specs, nil
@@ -284,7 +284,7 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 			continue
 		}
 		if envName == "" {
-			out = append(out, &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: m.Config})
+			out = append(out, &config.ResolvedModule{Name: m.Name, Type: m.Type, Config: config.ExpandEnvInMap(m.Config)})
 			continue
 		}
 		resolved, ok := m.ResolveForEnv(envName)
@@ -327,6 +327,9 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 				resolved.Config["env_vars"] = ev
 			}
 		}
+		// Expand ${VAR} / $VAR references in the per-env resolved config so
+		// that plan output and apply pipeline both see substituted values.
+		resolved.Config = config.ExpandEnvInMap(resolved.Config)
 		out = append(out, resolved)
 	}
 	return out, nil
@@ -344,8 +347,9 @@ func loadCurrentState(cfgFile string) []interfaces.ResourceState {
 		return nil
 	}
 	m := iacStates[0]
-	backend, _ := m.Config["backend"].(string)
-	dir, _ := m.Config["directory"].(string)
+	cfg := config.ExpandEnvInMap(m.Config)
+	backend, _ := cfg["backend"].(string)
+	dir, _ := cfg["directory"].(string)
 
 	switch backend {
 	case "filesystem":
