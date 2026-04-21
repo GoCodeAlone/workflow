@@ -3,16 +3,19 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/plugin/external"
 )
 
 // DeployConfig holds all parameters needed to execute a deployment.
@@ -58,10 +61,104 @@ func newDeployProvider(provider string, wfCfg *config.WorkflowConfig) (DeployPro
 	}
 }
 
-// resolveIaCProvider is the factory used by newPluginDeployProvider to obtain a
-// live IaCProvider from module config. Tests override this to inject fakes.
-var resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, error) {
-	return nil, fmt.Errorf("no in-process provider loader available; use pre-deploy steps with 'wfctl infra apply' to deploy via a workflow plugin")
+// resolveIaCProvider is the factory used by pluginDeployProvider.ensureProvider
+// to load a live IaCProvider from an installed external plugin. Tests override
+// this var to inject fakes without touching the filesystem.
+var resolveIaCProvider = func(ctx context.Context, providerName string, cfg map[string]any) (interfaces.IaCProvider, error) {
+	return discoverAndLoadIaCProvider(ctx, providerName, cfg)
+}
+
+// iacPluginManifest is the minimal shape needed to read capabilities.iacProvider.name
+// from a plugin.json without relying on the full PluginCapabilities struct.
+type iacPluginManifest struct {
+	Capabilities struct {
+		IaCProvider struct {
+			Name string `json:"name"`
+		} `json:"iacProvider"`
+	} `json:"capabilities"`
+}
+
+// findIaCPluginDir scans pluginDir subdirectories for a plugin.json that
+// declares capabilities.iacProvider.name == providerName.
+// Returns ("", false, nil) when not found; ("name", true/false, nil) when the
+// manifest matches (hasBinary indicates whether the executable is present).
+func findIaCPluginDir(pluginDir, providerName string) (name string, hasBinary bool, err error) {
+	entries, err := os.ReadDir(pluginDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("scan plugin directory %q: %w", pluginDir, err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pluginName := entry.Name()
+		data, readErr := os.ReadFile(filepath.Join(pluginDir, pluginName, "plugin.json"))
+		if readErr != nil {
+			continue
+		}
+		var m iacPluginManifest
+		if jsonErr := json.Unmarshal(data, &m); jsonErr != nil {
+			continue
+		}
+		if m.Capabilities.IaCProvider.Name != providerName {
+			continue
+		}
+		binaryPath := filepath.Join(pluginDir, pluginName, pluginName)
+		_, statErr := os.Stat(binaryPath)
+		return pluginName, statErr == nil, nil
+	}
+	return "", false, nil
+}
+
+// discoverAndLoadIaCProvider implements the default resolveIaCProvider: it scans
+// the plugin directory for a plugin that declares iacProvider.name == providerName,
+// loads it via ExternalPluginManager, and returns the IaCProvider.
+func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg map[string]any) (interfaces.IaCProvider, error) {
+	pluginDir := os.Getenv("WFCTL_PLUGIN_DIR")
+	if pluginDir == "" {
+		pluginDir = "./data/plugins"
+	}
+
+	pluginName, hasBinary, err := findIaCPluginDir(pluginDir, providerName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve IaC provider %q: %w", providerName, err)
+	}
+	if pluginName == "" {
+		return nil, fmt.Errorf("no plugin found for IaC provider %q in %s — run: wfctl plugin install <plugin-name>", providerName, pluginDir)
+	}
+	if !hasBinary {
+		return nil, fmt.Errorf("plugin %q declares provider %q but binary is missing — run: wfctl plugin install %s", pluginName, providerName, pluginName)
+	}
+
+	mgr := external.NewExternalPluginManager(pluginDir, nil)
+	adapter, loadErr := mgr.LoadPlugin(pluginName)
+	if loadErr != nil {
+		return nil, fmt.Errorf("load plugin %q for provider %q: %w", pluginName, providerName, loadErr)
+	}
+
+	factories := adapter.ModuleFactories()
+	factory, ok := factories["iac.provider"]
+	if !ok {
+		return nil, fmt.Errorf("plugin %q does not expose an iac.provider module type — upgrade with: wfctl plugin update %s", pluginName, pluginName)
+	}
+
+	mod := factory("iac-provider", cfg)
+	if mod == nil {
+		return nil, fmt.Errorf("plugin %q iac.provider factory returned nil", pluginName)
+	}
+
+	iacProvider, ok := mod.(interfaces.IaCProvider)
+	if !ok {
+		return nil, fmt.Errorf("plugin %q iac.provider module (%T) does not implement interfaces.IaCProvider — upgrade with: wfctl plugin update %s", pluginName, mod, pluginName)
+	}
+
+	if initErr := iacProvider.Initialize(ctx, cfg); initErr != nil {
+		return nil, fmt.Errorf("initialize provider %q: %w", providerName, initErr)
+	}
+	return iacProvider, nil
 }
 
 // newPluginDeployProvider looks up a matching iac.provider + infra.container_service
@@ -90,45 +187,64 @@ func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig) 
 		return nil, fmt.Errorf("unsupported deploy provider %q (built-ins: kubernetes, docker, aws-ecs; to use a plugin provider, declare an iac.provider module in your workflow config)%s", providerName, fmt.Sprintf(hint, providerName))
 	}
 
-	// Find the first infra.container_service module referencing this provider.
-	var resourceName string
+	// Find the first infra resource module referencing this provider.
+	var resourceName, resourceType string
 	var resourceCfg map[string]any
 	for _, m := range wfCfg.Modules {
-		if m.Type != "infra.container_service" {
+		if m.Type == "iac.provider" || m.Type == "" {
 			continue
 		}
 		if p, _ := m.Config["provider"].(string); p == providerModName {
 			resourceName = m.Name
+			resourceType = m.Type
 			resourceCfg = m.Config
 			break
 		}
 	}
 	if resourceName == "" {
-		return nil, fmt.Errorf("no infra.container_service module found for provider %q in workflow config", providerModName)
+		return nil, fmt.Errorf("no infra resource module found for provider %q in workflow config", providerModName)
 	}
 
-	iacProvider, err := resolveIaCProvider(context.Background(), providerName, providerModCfg)
-	if err != nil {
-		return nil, fmt.Errorf("resolve provider %q: %w", providerName, err)
-	}
-
+	// Provider is resolved lazily on first Deploy/HealthCheck to thread the real ctx.
 	return &pluginDeployProvider{
-		provider:     iacProvider,
+		providerName: providerName,
+		providerCfg:  providerModCfg,
 		resourceName: resourceName,
-		resourceType: "infra.container_service",
+		resourceType: resourceType,
 		resourceCfg:  resourceCfg,
 	}, nil
 }
 
 // pluginDeployProvider wraps an IaCProvider and a single infra resource as a DeployProvider.
+// The IaCProvider is resolved lazily on first use so the real request context is threaded
+// through to Initialize rather than a synthetic context.Background().
 type pluginDeployProvider struct {
+	// lazy-resolution fields (set at construction)
+	providerName string
+	providerCfg  map[string]any
+	// resolved on first ensureProvider call
 	provider     interfaces.IaCProvider
 	resourceName string
 	resourceType string
 	resourceCfg  map[string]any
 }
 
+func (p *pluginDeployProvider) ensureProvider(ctx context.Context) error {
+	if p.provider != nil {
+		return nil
+	}
+	prov, err := resolveIaCProvider(ctx, p.providerName, p.providerCfg)
+	if err != nil {
+		return fmt.Errorf("resolve provider %q: %w", p.providerName, err)
+	}
+	p.provider = prov
+	return nil
+}
+
 func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) error {
+	if err := p.ensureProvider(ctx); err != nil {
+		return err
+	}
 	driver, err := p.provider.ResourceDriver(p.resourceType)
 	if err != nil {
 		return fmt.Errorf("plugin deploy: no driver for %q: %w", p.resourceType, err)
@@ -150,6 +266,9 @@ func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) err
 func (p *pluginDeployProvider) HealthCheck(ctx context.Context, cfg DeployConfig) error {
 	if cfg.Env == nil || cfg.Env.HealthCheck == nil {
 		return nil
+	}
+	if err := p.ensureProvider(ctx); err != nil {
+		return err
 	}
 	driver, err := p.provider.ResourceDriver(p.resourceType)
 	if err != nil {

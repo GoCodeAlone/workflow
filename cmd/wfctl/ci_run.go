@@ -20,6 +20,7 @@ func runCIRun(args []string) error {
 	phases := fs.String("phase", "build,test", "Comma-separated phases: build, test, deploy")
 	env := fs.String("env", "", "Target environment (required for deploy phase)")
 	verbose := fs.Bool("verbose", false, "Show detailed output")
+	pluginDir := fs.String("plugin-dir", "", "Directory containing installed plugins (default: $WFCTL_PLUGIN_DIR or ./data/plugins)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl ci run [options]\n\nRun CI phases from workflow config.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -59,6 +60,9 @@ func runCIRun(args []string) error {
 		case "deploy":
 			if *env == "" {
 				return fmt.Errorf("--env is required for deploy phase")
+			}
+			if *pluginDir != "" {
+				os.Setenv("WFCTL_PLUGIN_DIR", *pluginDir) //nolint:errcheck
 			}
 			if len(cfg.Services) > 0 {
 				if err := runMultiServiceDeploy(cfg.CI.Deploy, *env, &cfg, cfg.Services, *verbose); err != nil {
