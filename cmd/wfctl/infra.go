@@ -841,7 +841,21 @@ func runInfraApply(args []string) error {
 	}
 
 	fmt.Printf("Applying infrastructure from %s...\n", cfgFile)
-	return runPipelineRun([]string{"-c", pipelineCfg, "-p", "apply"})
+	if err := runPipelineRun([]string{"-c", pipelineCfg, "-p", "apply"}); err != nil {
+		return err
+	}
+
+	// Post-apply: sync infra_output secrets from the now-written state.
+	secretsCfg, err := parseSecretsConfig(cfgFile)
+	if err != nil || secretsCfg == nil {
+		return err
+	}
+	provider, err := resolveSecretsProvider(secretsCfg)
+	if err != nil {
+		return fmt.Errorf("resolve secrets provider for infra_output sync: %w", err)
+	}
+	states := loadCurrentState(cfgFile)
+	return syncInfraOutputSecrets(context.Background(), secretsCfg, provider, states)
 }
 
 func runInfraStatus(args []string) error {

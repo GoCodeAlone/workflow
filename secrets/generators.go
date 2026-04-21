@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strings"
 )
 
 const alphanumChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -28,6 +29,8 @@ func GenerateSecret(ctx context.Context, genType string, config map[string]any) 
 		return generateRandomAlphanumeric(config)
 	case "provider_credential":
 		return generateProviderCredential(ctx, config)
+	case "infra_output":
+		return generateFromInfraOutput(config)
 	default:
 		return "", fmt.Errorf("secrets: unknown generator type %q", genType)
 	}
@@ -85,6 +88,53 @@ func generateProviderCredential(ctx context.Context, config map[string]any) (str
 	default:
 		return "", fmt.Errorf("secrets: provider_credential: unknown source %q", source)
 	}
+}
+
+// generateFromInfraOutput resolves a secret value from the outputs of a
+// previously-applied IaC resource. The caller is expected to pre-load the
+// resource outputs into config["_state_outputs"] (map[string]map[string]any)
+// before invoking GenerateSecret. This separation keeps the generator
+// stateless and fully testable without a real state backend.
+//
+// config["source"] must be "module_name.output_field" (e.g. "bmw-database.uri").
+func generateFromInfraOutput(config map[string]any) (string, error) {
+	source, _ := config["source"].(string)
+	if source == "" {
+		return "", fmt.Errorf("secrets: infra_output: 'source' is required (format: \"module.field\")")
+	}
+	dot := strings.Index(source, ".")
+	if dot < 1 || dot >= len(source)-1 {
+		return "", fmt.Errorf("secrets: infra_output: invalid source %q: expected \"module.field\" format", source)
+	}
+	moduleName := source[:dot]
+	field := source[dot+1:]
+
+	stateOutputs, _ := config["_state_outputs"].(map[string]map[string]any)
+	if stateOutputs == nil {
+		return "", fmt.Errorf("secrets: infra_output: state outputs not available for source %q — did infra apply succeed?", source)
+	}
+	outputs, ok := stateOutputs[moduleName]
+	if !ok {
+		return "", fmt.Errorf("secrets: infra_output: module %q not found in state (available: %s)", moduleName, joinKeys(stateOutputs))
+	}
+	val, ok := outputs[field]
+	if !ok {
+		return "", fmt.Errorf("secrets: infra_output: field %q not found in outputs of module %q", field, moduleName)
+	}
+	s, ok := val.(string)
+	if !ok {
+		return "", fmt.Errorf("secrets: infra_output: output field %q of module %q is %T, expected string", field, moduleName, val)
+	}
+	return s, nil
+}
+
+// joinKeys returns a comma-separated list of map keys for error messages.
+func joinKeys(m map[string]map[string]any) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return strings.Join(keys, ", ")
 }
 
 func generateDOSpacesKey(ctx context.Context, config map[string]any) (string, error) {

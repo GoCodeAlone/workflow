@@ -219,6 +219,11 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 	}
 
 	for _, gen := range cfg.Generate {
+		// infra_output secrets depend on apply-time state; skip during bootstrap.
+		if gen.Type == "infra_output" {
+			continue
+		}
+
 		// Build generator config from SecretGen fields.
 		genConfig := map[string]any{}
 		if gen.Length > 0 {
