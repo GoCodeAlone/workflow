@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"io"
 	"net/http"
 	"os"
@@ -587,10 +589,20 @@ func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) err
 	merged["image"] = cfg.ImageTag
 	ref := interfaces.ResourceRef{Name: p.resourceName, Type: p.resourceType}
 	spec := interfaces.ResourceSpec{Name: p.resourceName, Type: p.resourceType, Config: merged}
-	if _, err := driver.Update(ctx, ref, spec); err != nil {
-		return fmt.Errorf("plugin deploy %q: update image: %w", p.resourceName, err)
+	_, updateErr := driver.Update(ctx, ref, spec)
+	if updateErr == nil {
+		fmt.Printf("  plugin deploy: updated %q to %s\n", p.resourceName, cfg.ImageTag)
+		return nil
 	}
-	fmt.Printf("  plugin deploy: updated %q to %s\n", p.resourceName, cfg.ImageTag)
+	if !errors.Is(updateErr, interfaces.ErrResourceNotFound) {
+		return fmt.Errorf("plugin deploy %q: update image: %w", p.resourceName, updateErr)
+	}
+	// Resource does not exist yet — fall back to Create.
+	log.Printf("plugin deploy %q: resource not found, creating new", p.resourceName)
+	if _, createErr := driver.Create(ctx, spec); createErr != nil {
+		return fmt.Errorf("plugin deploy %q: create failed: %w", p.resourceName, createErr)
+	}
+	fmt.Printf("  plugin deploy: created %q at %s\n", p.resourceName, cfg.ImageTag)
 	return nil
 }
 

@@ -14,19 +14,35 @@ import (
 // ── fakes ─────────────────────────────────────────────────────────────────────
 
 type fakeResourceDriver struct {
-	updateImage string
-	hcResult    *interfaces.HealthResult
-	hcErr       error
+	updateImage  string
+	updateErr    error
+	hcResult     *interfaces.HealthResult
+	hcErr        error
+	createCalled bool
+	createSpec   interfaces.ResourceSpec
+	createOut    *interfaces.ResourceOutput
+	createErr    error
 }
 
-func (d *fakeResourceDriver) Create(_ context.Context, _ interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
-	return nil, nil
+func (d *fakeResourceDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	d.createCalled = true
+	d.createSpec = spec
+	if d.createErr != nil {
+		return nil, d.createErr
+	}
+	if d.createOut != nil {
+		return d.createOut, nil
+	}
+	return &interfaces.ResourceOutput{}, nil
 }
 func (d *fakeResourceDriver) Read(_ context.Context, _ interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
 	return nil, nil
 }
 func (d *fakeResourceDriver) Update(_ context.Context, _ interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
 	d.updateImage, _ = spec.Config["image"].(string)
+	if d.updateErr != nil {
+		return nil, d.updateErr
+	}
 	return &interfaces.ResourceOutput{}, nil
 }
 func (d *fakeResourceDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
@@ -243,5 +259,122 @@ func TestPluginDeployProvider_HealthCheck_Unhealthy(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not ready") {
 		t.Errorf("expected 'not ready' in error, got: %v", err)
+	}
+}
+
+func TestPluginDeployProvider_Deploy_FallsBackToCreateOnNotFound(t *testing.T) {
+	driver := &fakeResourceDriver{
+		updateErr: interfaces.ErrResourceNotFound,
+	}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{"http_port": 8080},
+	}
+	cfg := DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "registry.example.com/myapp:new123",
+		Env:      &config.CIDeployEnvironment{},
+	}
+	if err := p.Deploy(context.Background(), cfg); err != nil {
+		t.Fatalf("Deploy: unexpected error: %v", err)
+	}
+	if !driver.createCalled {
+		t.Error("expected Create to be called after Update returned ErrResourceNotFound")
+	}
+	if driver.createSpec.Config["image"] != "registry.example.com/myapp:new123" {
+		t.Errorf("expected image %q in Create spec, got %v", "registry.example.com/myapp:new123", driver.createSpec.Config["image"])
+	}
+}
+
+func TestPluginDeployProvider_Deploy_WrappedNotFoundFallsBack(t *testing.T) {
+	driver := &fakeResourceDriver{
+		updateErr: fmt.Errorf("service layer: %w", interfaces.ErrResourceNotFound),
+	}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{},
+	}
+	cfg := DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "registry.example.com/myapp:wrapped",
+		Env:      &config.CIDeployEnvironment{},
+	}
+	if err := p.Deploy(context.Background(), cfg); err != nil {
+		t.Fatalf("Deploy: unexpected error: %v", err)
+	}
+	if !driver.createCalled {
+		t.Error("expected Create to be called for wrapped ErrResourceNotFound")
+	}
+}
+
+func TestPluginDeployProvider_Deploy_OtherUpdateErrorNotRetried(t *testing.T) {
+	driver := &fakeResourceDriver{
+		updateErr: fmt.Errorf("quota exceeded"),
+	}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{},
+	}
+	cfg := DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "registry.example.com/myapp:v1",
+		Env:      &config.CIDeployEnvironment{},
+	}
+	err := p.Deploy(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("expected error for non-not-found update failure")
+	}
+	if driver.createCalled {
+		t.Error("expected Create NOT to be called for non-not-found update error")
+	}
+	if !strings.Contains(err.Error(), "quota exceeded") {
+		t.Errorf("expected original error in message, got: %v", err)
+	}
+}
+
+func TestPluginDeployProvider_Deploy_CreateFailureReturnsError(t *testing.T) {
+	driver := &fakeResourceDriver{
+		updateErr: interfaces.ErrResourceNotFound,
+		createErr: fmt.Errorf("capacity unavailable"),
+	}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{},
+	}
+	cfg := DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "registry.example.com/myapp:v1",
+		Env:      &config.CIDeployEnvironment{},
+	}
+	err := p.Deploy(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("expected error when Create fails")
+	}
+	if !strings.Contains(err.Error(), "capacity unavailable") {
+		t.Errorf("expected create error in message, got: %v", err)
 	}
 }
