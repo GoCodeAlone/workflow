@@ -771,17 +771,26 @@ func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) err
 	// not already substituted at construction time. Each secret is restored to
 	// its previous value (or unset) after expansion to avoid leaking values into
 	// other goroutines or child processes.
+	type envSnapshot struct {
+		key        string
+		prev       string
+		wasDefined bool
+	}
+	snapshots := make([]envSnapshot, 0, len(cfg.Secrets))
 	for k, v := range cfg.Secrets {
 		prev, had := os.LookupEnv(k)
 		os.Setenv(k, v) //nolint:errcheck
-		defer func(key, previous string, wasDefined bool) {
-			if wasDefined {
-				os.Setenv(key, previous) //nolint:errcheck
-			} else {
-				os.Unsetenv(key) //nolint:errcheck
-			}
-		}(k, prev, had)
+		snapshots = append(snapshots, envSnapshot{key: k, prev: prev, wasDefined: had})
 	}
+	defer func() {
+		for _, s := range snapshots {
+			if s.wasDefined {
+				os.Setenv(s.key, s.prev) //nolint:errcheck
+			} else {
+				os.Unsetenv(s.key) //nolint:errcheck
+			}
+		}
+	}()
 	merged = config.ExpandEnvInMap(merged)
 	ref := interfaces.ResourceRef{Name: p.resourceName, Type: p.resourceType}
 	spec := interfaces.ResourceSpec{Name: p.resourceName, Type: p.resourceType, Config: merged}
