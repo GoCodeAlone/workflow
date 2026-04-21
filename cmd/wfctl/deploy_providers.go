@@ -344,18 +344,54 @@ func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig) 
 		return nil, fmt.Errorf("unsupported deploy provider %q (built-ins: kubernetes, docker, aws-ecs; to use a plugin provider, declare an iac.provider module in your workflow config)%s", providerName, fmt.Sprintf(hint, providerName))
 	}
 
-	// Find the first infra resource module referencing this provider.
+	// Find the deploy-target resource module referencing this provider.
+	// Prefer known container/app deployment types (where Update(image) makes
+	// sense) over generic infra resources like VPC, firewall, DNS, etc. which
+	// don't have an "image" concept and would reject the Update call. The
+	// ordered preference list captures the common deployment targets; if none
+	// match, fall back to the first infra.* module with a warning so the
+	// behaviour is predictable rather than silently wrong.
+	deployTargetTypes := []string{
+		"infra.container_service",
+		"platform.do_app",
+		"platform.app_platform",
+		"infra.k8s_cluster",
+	}
 	var resourceName, resourceType string
 	var resourceCfg map[string]any
-	for _, m := range wfCfg.Modules {
-		if m.Type == "iac.provider" || m.Type == "" {
-			continue
+	findByType := func(target string) bool {
+		for _, m := range wfCfg.Modules {
+			if m.Type != target {
+				continue
+			}
+			if p, _ := m.Config["provider"].(string); p == providerModName {
+				resourceName = m.Name
+				resourceType = m.Type
+				resourceCfg = m.Config
+				return true
+			}
 		}
-		if p, _ := m.Config["provider"].(string); p == providerModName {
-			resourceName = m.Name
-			resourceType = m.Type
-			resourceCfg = m.Config
+		return false
+	}
+	for _, t := range deployTargetTypes {
+		if findByType(t) {
 			break
+		}
+	}
+	if resourceName == "" {
+		// Fallback: first infra.* module with matching provider.
+		for _, m := range wfCfg.Modules {
+			if m.Type == "iac.provider" || m.Type == "" {
+				continue
+			}
+			if p, _ := m.Config["provider"].(string); p == providerModName {
+				fmt.Fprintf(os.Stderr, "warning: no deploy-target module (%v) found for provider %q; falling back to first infra module %q (type %q)\n",
+					deployTargetTypes, providerModName, m.Name, m.Type)
+				resourceName = m.Name
+				resourceType = m.Type
+				resourceCfg = m.Config
+				break
+			}
 		}
 	}
 	if resourceName == "" {
