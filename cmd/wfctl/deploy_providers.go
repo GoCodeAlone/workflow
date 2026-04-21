@@ -68,9 +68,7 @@ func newDeployProvider(provider string, wfCfg *config.WorkflowConfig) (DeployPro
 // the provider and an io.Closer that shuts down any background subprocess.
 // Tests override this var to inject fakes without touching the filesystem;
 // they may return nil for the closer.
-var resolveIaCProvider = func(ctx context.Context, providerName string, cfg map[string]any) (interfaces.IaCProvider, io.Closer, error) {
-	return discoverAndLoadIaCProvider(ctx, providerName, cfg)
-}
+var resolveIaCProvider = discoverAndLoadIaCProvider
 
 // iacPluginManifest is the minimal shape needed to read capabilities.iacProvider.name
 // from a plugin.json without relying on the full PluginCapabilities struct.
