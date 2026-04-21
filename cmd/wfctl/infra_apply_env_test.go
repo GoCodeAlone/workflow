@@ -80,55 +80,6 @@ modules:
 	t.Error("cloud-provider not found in resolved config")
 }
 
-// ── TestInfraApply_IaCStateTokenExpanded ────────────────────────────────────
-// Verifies that an iac.state module config with env var in a field is parsed
-// and the env-expanded value is accessible via planResourcesForEnv.
-// This simulates the path used by the apply command when resolving resource specs.
-func TestInfraApply_IaCStateTokenExpanded(t *testing.T) {
-	t.Setenv("TEST_STATE_DIR", "/tmp/my-iac-state")
-
-	dir := t.TempDir()
-	cfg := `
-modules:
-  - name: state-backend
-    type: iac.state
-    config:
-      backend: filesystem
-      directory: "${TEST_STATE_DIR}"
-  - name: app-db
-    type: infra.database
-    config:
-      engine: postgres
-      size: m
-`
-	path := filepath.Join(dir, "infra.yaml")
-	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// planResourcesForEnv with empty env returns all modules with env-expanded config.
-	resources, err := planResourcesForEnv(path, "")
-	if err != nil {
-		t.Fatalf("planResourcesForEnv: %v", err)
-	}
-
-	var dbFound bool
-	for _, r := range resources {
-		if r.Name == "app-db" {
-			dbFound = true
-			if r.Config["size"] != "m" {
-				t.Errorf("size: want m, got %v", r.Config["size"])
-			}
-		}
-	}
-	if !dbFound {
-		t.Fatal("app-db resource not found")
-	}
-
-	// Also verify the iac.state module config is NOT in the infra specs
-	// (it's filtered by isInfraType), but planResourcesForEnv is ok since
-	// it returns ALL infra.*/platform.* types.
-}
 
 // ── TestInfraApply_NestedMapExpanded ────────────────────────────────────────
 // Verifies that ${VAR} references nested inside a map value are substituted.

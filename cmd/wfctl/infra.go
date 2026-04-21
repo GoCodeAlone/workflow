@@ -347,8 +347,9 @@ func loadCurrentState(cfgFile string) []interfaces.ResourceState {
 		return nil
 	}
 	m := iacStates[0]
-	backend, _ := m.Config["backend"].(string)
-	dir, _ := m.Config["directory"].(string)
+	cfg := config.ExpandEnvInMap(m.Config)
+	backend, _ := cfg["backend"].(string)
+	dir, _ := cfg["directory"].(string)
 
 	switch backend {
 	case "filesystem":
