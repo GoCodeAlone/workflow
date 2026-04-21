@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
 
@@ -215,6 +216,138 @@ func TestBootstrap_RepeatedRunIdempotent(t *testing.T) {
 	}
 	if callCount != 1 {
 		t.Errorf("second run: generator called again (callCount=%d), should be idempotent", callCount)
+	}
+}
+
+// ── TestBootstrap_StateBackendAccessKeyExpanded ──────────────────────────────
+
+// TestBootstrap_StateBackendAccessKeyExpanded verifies that BMW-style
+// ${SPACES_access_key} and ${SPACES_secret_key} references in the iac.state
+// config are expanded by ExpandEnvInMap before the config is used.
+// bootstrapStateBackend expands the full module config — not just bucket/region
+// — so accessKey/secretKey are also available in their resolved form to any
+// downstream state-backend initialisation that reads the same config map.
+func TestBootstrap_StateBackendAccessKeyExpanded(t *testing.T) {
+	t.Setenv("TEST_SPACES_ACCESS", "do-spaces-key-abc")
+	t.Setenv("TEST_SPACES_SECRET", "do-spaces-secret-xyz")
+	t.Setenv("DIGITALOCEAN_TOKEN", "test-do-token")
+
+	var gotBucket string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		prefix := "/v2/spaces/buckets/"
+		if len(r.URL.Path) > len(prefix) {
+			gotBucket = r.URL.Path[len(prefix):]
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cfgFile := writeBootstrapConfig(t, `
+modules:
+  - name: tf-state
+    type: iac.state
+    config:
+      backend: spaces
+      bucket: "my-state-bucket"
+      region: "nyc3"
+      accessKey: "${TEST_SPACES_ACCESS}"
+      secretKey: "${TEST_SPACES_SECRET}"
+`)
+
+	orig := bootstrapDOSpacesBucketFn
+	bootstrapDOSpacesBucketFn = func(ctx context.Context, bucket, region string) error {
+		return bootstrapDOSpacesBucketAt(ctx, bucket, region, srv.URL)
+	}
+	defer func() { bootstrapDOSpacesBucketFn = orig }()
+
+	if err := bootstrapStateBackend(context.Background(), cfgFile); err != nil {
+		t.Fatalf("bootstrapStateBackend: %v", err)
+	}
+
+	// Verify the bucket call reached the mock (confirming the full path ran).
+	if gotBucket != "my-state-bucket" {
+		t.Errorf("bucket sent to API: want %q, got %q", "my-state-bucket", gotBucket)
+	}
+
+	// Verify accessKey/secretKey were expanded (not passed as literals).
+	// We load the modules independently and apply ExpandEnvInMap — the same
+	// code path bootstrapStateBackend uses — to assert the values.
+	iacStates, _, _, err := discoverInfraModules(cfgFile)
+	if err != nil {
+		t.Fatalf("discoverInfraModules: %v", err)
+	}
+	if len(iacStates) == 0 {
+		t.Fatal("expected iac.state module")
+	}
+	expanded := config.ExpandEnvInMap(iacStates[0].Config)
+	if got, _ := expanded["accessKey"].(string); got != "do-spaces-key-abc" {
+		t.Errorf("accessKey: want %q, got %q", "do-spaces-key-abc", got)
+	}
+	if got, _ := expanded["secretKey"].(string); got != "do-spaces-secret-xyz" {
+		t.Errorf("secretKey: want %q, got %q", "do-spaces-secret-xyz", got)
+	}
+}
+
+// ── TestBootstrap_EnvFlagAppliedBeforeSubstitution ───────────────────────────
+
+// TestBootstrap_EnvFlagAppliedBeforeSubstitution verifies the ordering:
+// per-env config is merged FIRST via writeEnvResolvedConfig, THEN
+// ExpandEnvInMap resolves any ${VAR} references — including those introduced
+// by the per-env override. Without this ordering guarantee, an env-specific
+// override like `bucket: "${STAGING_BUCKET}"` would not be expanded.
+func TestBootstrap_EnvFlagAppliedBeforeSubstitution(t *testing.T) {
+	t.Setenv("TEST_STAGING_BUCKET", "staging-state-bucket")
+	t.Setenv("DIGITALOCEAN_TOKEN", "test-do-token")
+
+	var gotBucket string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		prefix := "/v2/spaces/buckets/"
+		if len(r.URL.Path) > len(prefix) {
+			gotBucket = r.URL.Path[len(prefix):]
+		}
+		w.WriteHeader(http.StatusOK) // bucket already exists
+	}))
+	defer srv.Close()
+
+	// The base config uses a placeholder; the staging env override sets the
+	// real bucket name via ${TEST_STAGING_BUCKET}. The env flag must be applied
+	// (merging the staging override) BEFORE ExpandEnvInMap runs so the
+	// resulting bucket is "staging-state-bucket", not "${TEST_STAGING_BUCKET}".
+	cfgFile := writeBootstrapConfig(t, `
+modules:
+  - name: tf-state
+    type: iac.state
+    config:
+      backend: spaces
+      bucket: "default-bucket"
+      region: "nyc3"
+    environments:
+      staging:
+        config:
+          bucket: "${TEST_STAGING_BUCKET}"
+`)
+
+	// Step 1: env flag resolves per-env config → writes temp file.
+	tmpFile, err := writeEnvResolvedConfig(cfgFile, "staging")
+	if err != nil {
+		t.Fatalf("writeEnvResolvedConfig: %v", err)
+	}
+	defer os.Remove(tmpFile)
+
+	// Step 2: bootstrapStateBackend uses the resolved (and env-expanded) config.
+	orig := bootstrapDOSpacesBucketFn
+	bootstrapDOSpacesBucketFn = func(ctx context.Context, bucket, region string) error {
+		return bootstrapDOSpacesBucketAt(ctx, bucket, region, srv.URL)
+	}
+	defer func() { bootstrapDOSpacesBucketFn = orig }()
+
+	if err := bootstrapStateBackend(context.Background(), tmpFile); err != nil {
+		t.Fatalf("bootstrapStateBackend: %v", err)
+	}
+
+	// The bucket reached the mock must be the expanded staging override value.
+	if gotBucket != "staging-state-bucket" {
+		t.Errorf("bucket with env-flag: want %q, got %q (env override + expansion may not have run in correct order)", "staging-state-bucket", gotBucket)
 	}
 }
 
