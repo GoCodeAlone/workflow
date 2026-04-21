@@ -1,6 +1,13 @@
 package interfaces
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrResourceNotFound is returned by ResourceDriver methods when the target
+// resource does not exist. Callers should use errors.Is to detect it.
+var ErrResourceNotFound = errors.New("iac: resource not found")
 
 // ResourceDriver handles CRUD for a single resource type within a provider.
 type ResourceDriver interface {
