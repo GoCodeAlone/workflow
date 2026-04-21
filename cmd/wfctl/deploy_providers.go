@@ -795,6 +795,9 @@ func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) err
 		}
 	}()
 	merged = config.ExpandEnvInMap(merged)
+	if img, _ := merged["image"].(string); img == "" {
+		return fmt.Errorf("plugin deploy %q: image is empty — set IMAGE_TAG or configure image in YAML", p.resourceName)
+	}
 	ref := interfaces.ResourceRef{Name: p.resourceName, Type: p.resourceType}
 	spec := interfaces.ResourceSpec{Name: p.resourceName, Type: p.resourceType, Config: merged}
 	_, updateErr := driver.Update(ctx, ref, spec)

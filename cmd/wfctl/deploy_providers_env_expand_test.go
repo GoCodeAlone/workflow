@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -253,5 +254,145 @@ func TestPluginDeployProvider_Deploy_NonEmptyImageTagOverrides(t *testing.T) {
 	got, _ := driver.updateCfg["image"].(string)
 	if got != "new:tag" {
 		t.Errorf("updateCfg[image]: want %q, got %q", "new:tag", got)
+	}
+}
+
+// ── TestPluginDeployProvider_Deploy_BMWScenario ───────────────────────────────
+
+// TestPluginDeployProvider_Deploy_BMWScenario mirrors BMW's deploy.yml setup:
+// the image field in YAML contains ${IMAGE_SHA}, IMAGE_SHA is set in the
+// environment, and IMAGE_TAG (cfg.ImageTag) is absent. The driver must receive
+// the fully-substituted image reference.
+func TestPluginDeployProvider_Deploy_BMWScenario(t *testing.T) {
+	t.Setenv("IMAGE_SHA_DEPLOY_BMW_TEST", "sha256deadbeef")
+
+	driver := &captureResourceDriver{}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "buymywishlist",
+		resourceType: "infra.container_service",
+		resourceCfg: map[string]any{
+			"image": "registry.digitalocean.com/bmw-registry/buymywishlist:${IMAGE_SHA_DEPLOY_BMW_TEST}",
+		},
+	}
+	cfg := DeployConfig{
+		AppName:  "buymywishlist",
+		ImageTag: "", // IMAGE_TAG not set
+		Env:      &config.CIDeployEnvironment{},
+	}
+	if err := p.Deploy(context.Background(), cfg); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	want := "registry.digitalocean.com/bmw-registry/buymywishlist:sha256deadbeef"
+	got, _ := driver.updateCfg["image"].(string)
+	if got != want {
+		t.Errorf("updateCfg[image]: want %q, got %q", want, got)
+	}
+}
+
+// ── TestPluginDeployProvider_Deploy_ImageTagWinsOverYAMLSHA ──────────────────
+
+// TestPluginDeployProvider_Deploy_ImageTagWinsOverYAMLSHA verifies that a
+// non-empty cfg.ImageTag (IMAGE_TAG env) wins over the ${IMAGE_SHA}-encoded
+// image in the YAML, even when IMAGE_SHA is also set.
+func TestPluginDeployProvider_Deploy_ImageTagWinsOverYAMLSHA(t *testing.T) {
+	t.Setenv("IMAGE_SHA_DEPLOY_BMW_OVERRIDE_TEST", "sha256deadbeef")
+
+	driver := &captureResourceDriver{}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "buymywishlist",
+		resourceType: "infra.container_service",
+		resourceCfg: map[string]any{
+			"image": "registry.digitalocean.com/bmw-registry/buymywishlist:${IMAGE_SHA_DEPLOY_BMW_OVERRIDE_TEST}",
+		},
+	}
+	cfg := DeployConfig{
+		AppName:  "buymywishlist",
+		ImageTag: "explicit-override:latest",
+		Env:      &config.CIDeployEnvironment{},
+	}
+	if err := p.Deploy(context.Background(), cfg); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	got, _ := driver.updateCfg["image"].(string)
+	if got != "explicit-override:latest" {
+		t.Errorf("updateCfg[image]: want %q, got %q", "explicit-override:latest", got)
+	}
+}
+
+// ── TestPluginDeployProvider_Deploy_EmptyImageBothLayers ─────────────────────
+
+// TestPluginDeployProvider_Deploy_EmptyImageBothLayers verifies that Deploy
+// returns a clear, actionable error when both IMAGE_TAG (cfg.ImageTag) and the
+// YAML module config have no image — rather than sending an empty image to the
+// remote API and getting an opaque provider error back.
+func TestPluginDeployProvider_Deploy_EmptyImageBothLayers(t *testing.T) {
+	driver := &captureResourceDriver{}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{"region": "nyc3"}, // no "image" key
+	}
+	cfg := DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "", // IMAGE_TAG also absent
+		Env:      &config.CIDeployEnvironment{},
+	}
+	err := p.Deploy(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("Deploy: expected error for empty image, got nil")
+	}
+	if !strings.Contains(err.Error(), "image") {
+		t.Errorf("Deploy error should mention 'image', got: %v", err)
+	}
+}
+
+// ── TestPluginDeployProvider_Deploy_SecretImageSubstitution ──────────────────
+
+// TestPluginDeployProvider_Deploy_SecretImageSubstitution verifies that when
+// the YAML image field contains a ${SECRET_VAR} reference, and that secret is
+// carried in cfg.Secrets (not the OS env), Deploy fully substitutes the image
+// before calling the driver.
+func TestPluginDeployProvider_Deploy_SecretImageSubstitution(t *testing.T) {
+	// Ensure the secret key is not already in the environment.
+	t.Setenv("SECRET_IMAGE_DEPLOY_TEST_UNIQUE", "")
+
+	driver := &captureResourceDriver{}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{"image": "${SECRET_IMAGE_DEPLOY_TEST_UNIQUE}"},
+	}
+	cfg := DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "",
+		Env:      &config.CIDeployEnvironment{},
+		Secrets:  map[string]string{"SECRET_IMAGE_DEPLOY_TEST_UNIQUE": "foo:bar"},
+	}
+	if err := p.Deploy(context.Background(), cfg); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	got, _ := driver.updateCfg["image"].(string)
+	if got != "foo:bar" {
+		t.Errorf("updateCfg[image]: want %q, got %q", "foo:bar", got)
 	}
 }
