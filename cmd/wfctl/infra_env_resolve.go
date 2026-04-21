@@ -73,12 +73,22 @@ func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error)
 				rm.Config["env_vars"] = ev
 			}
 		}
+		// Expand ${VAR} / $VAR env-var references in the resolved module config
+		// before writing to the temp file. At this point in the apply flow,
+		// `injectSecrets` has already called os.Setenv for any env-provider
+		// secrets, so they are available to os.ExpandEnv here.
+		//
+		// Note: ${scheme:path} secret references (vault, aws-sm, etc.) are
+		// intentionally NOT supported at this stage. Use the env-provider
+		// secrets injection to make those values available as env vars first.
+		expandedCfg := config.ExpandEnvInMap(rm.Config)
+
 		// Rebuild as ModuleConfig preserving DependsOn and Branches from the
 		// original (ResolvedModule doesn't carry them).
 		resolved = append(resolved, config.ModuleConfig{
 			Name:      rm.Name,
 			Type:      rm.Type,
-			Config:    rm.Config,
+			Config:    expandedCfg,
 			DependsOn: m.DependsOn,
 			Branches:  m.Branches,
 		})
