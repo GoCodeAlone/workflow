@@ -9,11 +9,13 @@ import (
 )
 
 // ── TestInfraApply_TokenEnvVarExpanded ──────────────────────────────────────
-// Verifies that a ${VAR} reference in an iac.provider module config is
-// substituted by parseInfraResourceSpecs (the shared spec-building helper used
-// by both plan and the apply resource pass).
+// Verifies that ${VAR} references are substituted across both code paths used
+// by the apply command:
+//   - parseInfraResourceSpecs (infra.* types via the spec-building pass)
+//   - writeEnvResolvedConfig (all module types, including iac.provider)
 func TestInfraApply_TokenEnvVarExpanded(t *testing.T) {
 	t.Setenv("FAKE_TOKEN", "tok_live_abc123")
+	t.Setenv("REGISTRY_TOKEN", "reg_secret_xyz")
 
 	dir := t.TempDir()
 	cfg := `
@@ -23,41 +25,59 @@ modules:
     config:
       provider: digitalocean
       token: "${FAKE_TOKEN}"
-  - name: state-backend
-    type: iac.state
-    config:
-      backend: filesystem
-      directory: /tmp/test-state
   - name: app
     type: infra.container_service
     config:
       provider: cloud-provider
       image: registry.example.com/app:latest
+      registry_token: "${REGISTRY_TOKEN}"
 `
 	path := filepath.Join(dir, "infra.yaml")
 	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	// parseInfraResourceSpecs covers the infra.* types.
+	// parseInfraResourceSpecs covers infra.* types — verify registry_token is expanded.
 	specs, err := parseInfraResourceSpecs(path)
 	if err != nil {
 		t.Fatalf("parseInfraResourceSpecs: %v", err)
 	}
-
-	// Find app spec and verify provider key isn't a ${VAR} literal.
-	var appSpec *struct{ cfg map[string]any }
+	var appCfg map[string]any
 	for _, s := range specs {
 		if s.Name == "app" {
-			appSpec = &struct{ cfg map[string]any }{cfg: s.Config}
+			appCfg = s.Config
+			break
 		}
 	}
-	if appSpec == nil {
-		t.Fatal("app spec not found")
+	if appCfg == nil {
+		t.Fatal("app spec not found in parseInfraResourceSpecs results")
 	}
-	if appSpec.cfg["provider"] == "${FAKE_TOKEN}" {
-		t.Errorf("provider should not be the literal ${FAKE_TOKEN}")
+	if tok, _ := appCfg["registry_token"].(string); tok != "reg_secret_xyz" {
+		t.Errorf("app.registry_token: want reg_secret_xyz (expanded), got %q", tok)
 	}
+
+	// writeEnvResolvedConfig covers all module types (iac.provider included) —
+	// verify cloud-provider.token is baked into the resolved temp file.
+	tmp, err := writeEnvResolvedConfig(path, "")
+	if err != nil {
+		t.Fatalf("writeEnvResolvedConfig: %v", err)
+	}
+	defer os.Remove(tmp)
+
+	resolved, err := config.LoadFromFile(tmp)
+	if err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	for _, m := range resolved.Modules {
+		if m.Name == "cloud-provider" {
+			tok, _ := m.Config["token"].(string)
+			if tok != "tok_live_abc123" {
+				t.Errorf("cloud-provider.token: want tok_live_abc123 (expanded), got %q", tok)
+			}
+			return
+		}
+	}
+	t.Error("cloud-provider not found in resolved config")
 }
 
 // ── TestInfraApply_IaCStateTokenExpanded ────────────────────────────────────
@@ -255,8 +275,8 @@ modules:
 // required vars are set; missing vars surface early as empty values rather than
 // being silently forwarded as unexpanded literals to the cloud API.
 func TestInfraApply_UnsetVarExpandsToEmpty(t *testing.T) {
-	// Explicitly unset to ensure the env var is not present.
-	os.Unsetenv("INFRA_TEST_DEFINITELY_UNSET_VAR")
+	// Set to empty string — same expansion result as unset, and auto-restored on cleanup.
+	t.Setenv("INFRA_TEST_DEFINITELY_UNSET_VAR", "")
 
 	dir := t.TempDir()
 	cfg := `
