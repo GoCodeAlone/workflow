@@ -68,9 +68,7 @@ func newDeployProvider(provider string, wfCfg *config.WorkflowConfig) (DeployPro
 // the provider and an io.Closer that shuts down any background subprocess.
 // Tests override this var to inject fakes without touching the filesystem;
 // they may return nil for the closer.
-var resolveIaCProvider = func(ctx context.Context, providerName string, cfg map[string]any) (interfaces.IaCProvider, io.Closer, error) {
-	return discoverAndLoadIaCProvider(ctx, providerName, cfg)
-}
+var resolveIaCProvider = discoverAndLoadIaCProvider
 
 // iacPluginManifest is the minimal shape needed to read capabilities.iacProvider.name
 // from a plugin.json without relying on the full PluginCapabilities struct.
@@ -160,17 +158,159 @@ func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg ma
 		return nil, nil, fmt.Errorf("plugin %q iac.provider factory returned nil", pluginName)
 	}
 
-	iacProvider, ok := mod.(interfaces.IaCProvider)
+	// RemoteModule does not directly implement interfaces.IaCProvider; instead it
+	// exposes InvokeService for cross-process method dispatch. Wrap it in a
+	// remoteIaCProvider that routes each IaCProvider call through InvokeService.
+	invoker, ok := mod.(remoteServiceInvoker)
 	if !ok {
 		mgr.Shutdown()
-		return nil, nil, fmt.Errorf("plugin %q iac.provider module (%T) does not implement interfaces.IaCProvider — upgrade with: wfctl plugin update %s", pluginName, mod, pluginName)
+		return nil, nil, fmt.Errorf("plugin %q iac.provider module (%T) does not support service invocation — upgrade with: wfctl plugin update %s", pluginName, mod, pluginName)
 	}
 
+	iacProvider := &remoteIaCProvider{invoker: invoker}
+	// Notify the plugin that Initialize has been called (the plugin may treat
+	// this as a no-op if it already ran Initialize inside CreateModule).
 	if initErr := iacProvider.Initialize(ctx, cfg); initErr != nil {
 		mgr.Shutdown()
 		return nil, nil, fmt.Errorf("initialize provider %q: %w", providerName, initErr)
 	}
 	return iacProvider, closer, nil
+}
+
+// remoteServiceInvoker is satisfied by *external.RemoteModule, which provides
+// InvokeService for cross-process method dispatch.
+type remoteServiceInvoker interface {
+	InvokeService(method string, args map[string]any) (map[string]any, error)
+}
+
+// remoteIaCProvider implements interfaces.IaCProvider by routing every method
+// through InvokeService to the plugin subprocess. Only the methods needed by
+// wfctl ci run deploy are fully implemented; the rest return a clear error.
+type remoteIaCProvider struct {
+	invoker remoteServiceInvoker
+}
+
+func (r *remoteIaCProvider) Name() string {
+	res, err := r.invoker.InvokeService("IaCProvider.Name", nil)
+	if err != nil {
+		return ""
+	}
+	name, _ := res["name"].(string)
+	return name
+}
+
+func (r *remoteIaCProvider) Version() string {
+	res, err := r.invoker.InvokeService("IaCProvider.Version", nil)
+	if err != nil {
+		return ""
+	}
+	v, _ := res["version"].(string)
+	return v
+}
+
+func (r *remoteIaCProvider) Initialize(_ context.Context, cfg map[string]any) error {
+	_, err := r.invoker.InvokeService("IaCProvider.Initialize", cfg)
+	return err
+}
+
+func (r *remoteIaCProvider) Capabilities() []interfaces.IaCCapabilityDeclaration { return nil }
+
+func (r *remoteIaCProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	return nil, fmt.Errorf("IaCProvider.Plan not supported via remote deploy — use wfctl infra apply")
+}
+
+func (r *remoteIaCProvider) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	return nil, fmt.Errorf("IaCProvider.Apply not supported via remote deploy — use wfctl infra apply")
+}
+
+func (r *remoteIaCProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
+	return nil, fmt.Errorf("IaCProvider.Destroy not supported via remote deploy — use wfctl infra apply")
+}
+
+func (r *remoteIaCProvider) Status(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
+	return nil, fmt.Errorf("IaCProvider.Status not supported via remote deploy")
+}
+
+func (r *remoteIaCProvider) DetectDrift(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
+	return nil, fmt.Errorf("IaCProvider.DetectDrift not supported via remote deploy")
+}
+
+func (r *remoteIaCProvider) Import(_ context.Context, _ string, _ string) (*interfaces.ResourceState, error) {
+	return nil, fmt.Errorf("IaCProvider.Import not supported via remote deploy")
+}
+
+func (r *remoteIaCProvider) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
+	return nil, fmt.Errorf("IaCProvider.ResolveSizing not supported via remote deploy")
+}
+
+func (r *remoteIaCProvider) ResourceDriver(resourceType string) (interfaces.ResourceDriver, error) {
+	return &remoteResourceDriver{invoker: r.invoker, resourceType: resourceType}, nil
+}
+
+func (r *remoteIaCProvider) Close() error { return nil }
+
+// remoteResourceDriver routes ResourceDriver calls to the plugin via InvokeService.
+type remoteResourceDriver struct {
+	invoker      remoteServiceInvoker
+	resourceType string
+}
+
+func (d *remoteResourceDriver) Update(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	res, err := d.invoker.InvokeService("ResourceDriver.Update", map[string]any{
+		"resource_type":   d.resourceType,
+		"ref_name":        ref.Name,
+		"ref_type":        ref.Type,
+		"ref_provider_id": ref.ProviderID,
+		"spec_name":       spec.Name,
+		"spec_type":       spec.Type,
+		"spec_config":     spec.Config,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &interfaces.ResourceOutput{
+		ProviderID: stringFromMap(res, "provider_id"),
+		Name:       stringFromMap(res, "name"),
+		Type:       stringFromMap(res, "type"),
+		Status:     stringFromMap(res, "status"),
+	}, nil
+}
+
+func (d *remoteResourceDriver) HealthCheck(_ context.Context, ref interfaces.ResourceRef) (*interfaces.HealthResult, error) {
+	res, err := d.invoker.InvokeService("ResourceDriver.HealthCheck", map[string]any{
+		"resource_type":   d.resourceType,
+		"ref_name":        ref.Name,
+		"ref_type":        ref.Type,
+		"ref_provider_id": ref.ProviderID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	healthy, _ := res["healthy"].(bool)
+	message, _ := res["message"].(string)
+	return &interfaces.HealthResult{Healthy: healthy, Message: message}, nil
+}
+
+func (d *remoteResourceDriver) Create(_ context.Context, _ interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return nil, fmt.Errorf("ResourceDriver.Create not yet supported via remote deploy — use wfctl infra apply")
+}
+func (d *remoteResourceDriver) Read(_ context.Context, _ interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
+	return nil, fmt.Errorf("ResourceDriver.Read not yet supported via remote deploy — use wfctl infra apply")
+}
+func (d *remoteResourceDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error {
+	return fmt.Errorf("ResourceDriver.Delete not yet supported via remote deploy — use wfctl infra apply")
+}
+func (d *remoteResourceDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
+	return nil, fmt.Errorf("ResourceDriver.Diff not yet supported via remote deploy")
+}
+func (d *remoteResourceDriver) Scale(_ context.Context, _ interfaces.ResourceRef, _ int) (*interfaces.ResourceOutput, error) {
+	return nil, fmt.Errorf("ResourceDriver.Scale not yet supported via remote deploy")
+}
+func (d *remoteResourceDriver) SensitiveKeys() []string { return nil }
+
+func stringFromMap(m map[string]any, key string) string {
+	v, _ := m[key].(string)
+	return v
 }
 
 // closerFunc adapts a func() error to io.Closer.
