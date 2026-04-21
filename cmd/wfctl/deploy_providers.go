@@ -684,6 +684,20 @@ func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig) 
 		return nil, fmt.Errorf("no infra resource module found for provider %q in workflow config", providerModName)
 	}
 
+	// Expand env-var references in both configs before storing. This resolves
+	// ${TOKEN} / $TOKEN placeholders that were written into the YAML using
+	// environment variables (e.g. token: ${DIGITALOCEAN_TOKEN}). Expansion
+	// happens here — at construction time — so the resolved values are always
+	// used downstream, regardless of which method accesses them.
+	//
+	// Secrets flow: if the caller has already injected secrets via os.Setenv
+	// (e.g. env-provider secrets), ExpandEnvInMap picks them up here. Secrets
+	// that come from vault / other stores and are carried in DeployConfig.Secrets
+	// are NOT yet available at this point; those are applied in Deploy() just
+	// before the final config is sent to the resource driver.
+	providerModCfg = config.ExpandEnvInMap(providerModCfg)
+	resourceCfg = config.ExpandEnvInMap(resourceCfg)
+
 	// Provider is resolved lazily on first Deploy/HealthCheck to thread the real ctx.
 	return &pluginDeployProvider{
 		providerName: providerName,
@@ -750,6 +764,25 @@ func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) err
 		merged[k] = v
 	}
 	merged["image"] = cfg.ImageTag
+
+	// Secrets carried in DeployConfig (fetched from vault / external stores by
+	// injectSecrets) are not in the OS environment. Export them temporarily so
+	// that ExpandEnvInMap can resolve any ${SECRET_NAME} references that were
+	// not already substituted at construction time. Each secret is restored to
+	// its previous value (or unset) after expansion to avoid leaking values into
+	// other goroutines or child processes.
+	for k, v := range cfg.Secrets {
+		prev, had := os.LookupEnv(k)
+		os.Setenv(k, v) //nolint:errcheck
+		defer func(key, previous string, wasDefined bool) {
+			if wasDefined {
+				os.Setenv(key, previous) //nolint:errcheck
+			} else {
+				os.Unsetenv(key) //nolint:errcheck
+			}
+		}(k, prev, had)
+	}
+	merged = config.ExpandEnvInMap(merged)
 	ref := interfaces.ResourceRef{Name: p.resourceName, Type: p.resourceType}
 	spec := interfaces.ResourceSpec{Name: p.resourceName, Type: p.resourceType, Config: merged}
 	_, updateErr := driver.Update(ctx, ref, spec)
