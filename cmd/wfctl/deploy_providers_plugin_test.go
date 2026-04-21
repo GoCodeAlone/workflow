@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -376,5 +377,8 @@ func TestPluginDeployProvider_Deploy_CreateFailureReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "capacity unavailable") {
 		t.Errorf("expected create error in message, got: %v", err)
+	}
+	if !errors.Is(err, interfaces.ErrResourceNotFound) {
+		t.Errorf("expected update error (ErrResourceNotFound) also joined into returned error, got: %v", err)
 	}
 }

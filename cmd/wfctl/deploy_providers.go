@@ -600,7 +600,7 @@ func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) err
 	// Resource does not exist yet — fall back to Create.
 	log.Printf("plugin deploy %q: resource not found, creating new", p.resourceName)
 	if _, createErr := driver.Create(ctx, spec); createErr != nil {
-		return fmt.Errorf("plugin deploy %q: create failed: %w", p.resourceName, createErr)
+		return fmt.Errorf("plugin deploy %q: create failed: %w", p.resourceName, errors.Join(createErr, updateErr))
 	}
 	fmt.Printf("  plugin deploy: created %q at %s\n", p.resourceName, cfg.ImageTag)
 	return nil
