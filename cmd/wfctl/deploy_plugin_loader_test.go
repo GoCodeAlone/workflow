@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,7 @@ import (
 // stub message.
 func TestDefaultResolveIaCProvider_IsNotPlaceholder(t *testing.T) {
 	t.Setenv("WFCTL_PLUGIN_DIR", t.TempDir()) // empty dir — no plugins
-	_, err := resolveIaCProvider(context.Background(), "any-provider", nil)
+	_, _, err := resolveIaCProvider(context.Background(), "any-provider", nil)
 	if err == nil {
 		t.Skip("resolveIaCProvider succeeded unexpectedly")
 	}
@@ -29,7 +30,7 @@ func TestDefaultResolveIaCProvider_IsNotPlaceholder(t *testing.T) {
 // 'wfctl plugin install' when the plugin directory does not exist.
 func TestDefaultResolveIaCProvider_NoPluginDir(t *testing.T) {
 	t.Setenv("WFCTL_PLUGIN_DIR", filepath.Join(t.TempDir(), "nonexistent"))
-	_, err := resolveIaCProvider(context.Background(), "fake-provider", nil)
+	_, _, err := resolveIaCProvider(context.Background(), "fake-provider", nil)
 	if err == nil {
 		t.Fatal("expected error when plugin dir does not exist")
 	}
@@ -52,7 +53,7 @@ func TestDefaultResolveIaCProvider_NoMatchingPlugin(t *testing.T) {
 	}
 
 	t.Setenv("WFCTL_PLUGIN_DIR", dir)
-	_, err := resolveIaCProvider(context.Background(), "digitalocean", nil)
+	_, _, err := resolveIaCProvider(context.Background(), "digitalocean", nil)
 	if err == nil {
 		t.Fatal("expected error when no matching plugin found")
 	}
@@ -78,7 +79,7 @@ func TestDefaultResolveIaCProvider_MatchingPlugin_NotLoaded(t *testing.T) {
 	// No binary present → load will fail.
 
 	t.Setenv("WFCTL_PLUGIN_DIR", dir)
-	_, err := resolveIaCProvider(context.Background(), "digitalocean", nil)
+	_, _, err := resolveIaCProvider(context.Background(), "digitalocean", nil)
 	if err == nil {
 		t.Fatal("expected error when plugin binary is absent")
 	}
@@ -99,9 +100,9 @@ func TestPluginDeployProvider_LazyResolution(t *testing.T) {
 		name:    "fake-cloud",
 		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
 	}
-	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, error) {
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
 		callCount++
-		return fake, nil
+		return fake, nil, nil
 	}
 
 	cfg := makePluginTestConfig("fake-cloud", "fake-provider")
@@ -146,8 +147,8 @@ func TestPluginDeployProvider_ResourceTypeFromModule(t *testing.T) {
 
 	orig := resolveIaCProvider
 	defer func() { resolveIaCProvider = orig }()
-	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, error) {
-		return fake, nil
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, nil, nil
 	}
 
 	cfg := makePluginTestConfig("fake-cloud", "fake-provider")

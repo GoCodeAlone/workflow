@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -365,6 +366,9 @@ func runDeployPhaseWithConfig(
 	provider, err := newDeployProvider(env.Provider, wfCfg)
 	if err != nil {
 		return err
+	}
+	if c, ok := provider.(io.Closer); ok {
+		defer c.Close() //nolint:errcheck
 	}
 
 	deployCfg := DeployConfig{

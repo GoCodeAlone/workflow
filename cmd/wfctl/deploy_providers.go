@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -62,9 +64,11 @@ func newDeployProvider(provider string, wfCfg *config.WorkflowConfig) (DeployPro
 }
 
 // resolveIaCProvider is the factory used by pluginDeployProvider.ensureProvider
-// to load a live IaCProvider from an installed external plugin. Tests override
-// this var to inject fakes without touching the filesystem.
-var resolveIaCProvider = func(ctx context.Context, providerName string, cfg map[string]any) (interfaces.IaCProvider, error) {
+// to load a live IaCProvider from an installed external plugin. It returns both
+// the provider and an io.Closer that shuts down any background subprocess.
+// Tests override this var to inject fakes without touching the filesystem;
+// they may return nil for the closer.
+var resolveIaCProvider = func(ctx context.Context, providerName string, cfg map[string]any) (interfaces.IaCProvider, io.Closer, error) {
 	return discoverAndLoadIaCProvider(ctx, providerName, cfg)
 }
 
@@ -115,8 +119,9 @@ func findIaCPluginDir(pluginDir, providerName string) (name string, hasBinary bo
 
 // discoverAndLoadIaCProvider implements the default resolveIaCProvider: it scans
 // the plugin directory for a plugin that declares iacProvider.name == providerName,
-// loads it via ExternalPluginManager, and returns the IaCProvider.
-func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg map[string]any) (interfaces.IaCProvider, error) {
+// loads it via ExternalPluginManager, and returns the IaCProvider plus a Closer
+// that shuts down the plugin subprocess. The caller must call Close() when done.
+func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg map[string]any) (interfaces.IaCProvider, io.Closer, error) {
 	pluginDir := os.Getenv("WFCTL_PLUGIN_DIR")
 	if pluginDir == "" {
 		pluginDir = "./data/plugins"
@@ -124,42 +129,54 @@ func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg ma
 
 	pluginName, hasBinary, err := findIaCPluginDir(pluginDir, providerName)
 	if err != nil {
-		return nil, fmt.Errorf("resolve IaC provider %q: %w", providerName, err)
+		return nil, nil, fmt.Errorf("resolve IaC provider %q: %w", providerName, err)
 	}
 	if pluginName == "" {
-		return nil, fmt.Errorf("no plugin found for IaC provider %q in %s — run: wfctl plugin install <plugin-name>", providerName, pluginDir)
+		return nil, nil, fmt.Errorf("no plugin found for IaC provider %q in %s — run: wfctl plugin install <plugin-name>", providerName, pluginDir)
 	}
 	if !hasBinary {
-		return nil, fmt.Errorf("plugin %q declares provider %q but binary is missing — run: wfctl plugin install %s", pluginName, providerName, pluginName)
+		return nil, nil, fmt.Errorf("plugin %q declares provider %q but binary is missing — run: wfctl plugin install %s", pluginName, providerName, pluginName)
 	}
 
 	mgr := external.NewExternalPluginManager(pluginDir, nil)
+	closer := closerFunc(func() error { mgr.Shutdown(); return nil })
+
 	adapter, loadErr := mgr.LoadPlugin(pluginName)
 	if loadErr != nil {
-		return nil, fmt.Errorf("load plugin %q for provider %q: %w", pluginName, providerName, loadErr)
+		mgr.Shutdown()
+		return nil, nil, fmt.Errorf("load plugin %q for provider %q: %w", pluginName, providerName, loadErr)
 	}
 
 	factories := adapter.ModuleFactories()
 	factory, ok := factories["iac.provider"]
 	if !ok {
-		return nil, fmt.Errorf("plugin %q does not expose an iac.provider module type — upgrade with: wfctl plugin update %s", pluginName, pluginName)
+		mgr.Shutdown()
+		return nil, nil, fmt.Errorf("plugin %q does not expose an iac.provider module type — upgrade with: wfctl plugin update %s", pluginName, pluginName)
 	}
 
 	mod := factory("iac-provider", cfg)
 	if mod == nil {
-		return nil, fmt.Errorf("plugin %q iac.provider factory returned nil", pluginName)
+		mgr.Shutdown()
+		return nil, nil, fmt.Errorf("plugin %q iac.provider factory returned nil", pluginName)
 	}
 
 	iacProvider, ok := mod.(interfaces.IaCProvider)
 	if !ok {
-		return nil, fmt.Errorf("plugin %q iac.provider module (%T) does not implement interfaces.IaCProvider — upgrade with: wfctl plugin update %s", pluginName, mod, pluginName)
+		mgr.Shutdown()
+		return nil, nil, fmt.Errorf("plugin %q iac.provider module (%T) does not implement interfaces.IaCProvider — upgrade with: wfctl plugin update %s", pluginName, mod, pluginName)
 	}
 
 	if initErr := iacProvider.Initialize(ctx, cfg); initErr != nil {
-		return nil, fmt.Errorf("initialize provider %q: %w", providerName, initErr)
+		mgr.Shutdown()
+		return nil, nil, fmt.Errorf("initialize provider %q: %w", providerName, initErr)
 	}
-	return iacProvider, nil
+	return iacProvider, closer, nil
 }
+
+// closerFunc adapts a func() error to io.Closer.
+type closerFunc func() error
+
+func (f closerFunc) Close() error { return f() }
 
 // newPluginDeployProvider looks up a matching iac.provider + infra.container_service
 // module pair in wfCfg and wraps them as a DeployProvider.
@@ -222,22 +239,39 @@ type pluginDeployProvider struct {
 	// lazy-resolution fields (set at construction)
 	providerName string
 	providerCfg  map[string]any
-	// resolved on first ensureProvider call
-	provider     interfaces.IaCProvider
+	// resource target (set at construction)
 	resourceName string
 	resourceType string
 	resourceCfg  map[string]any
+	// resolved once on first ensureProvider call
+	once     sync.Once
+	provider interfaces.IaCProvider
+	provErr  error
+	closer   io.Closer
 }
 
 func (p *pluginDeployProvider) ensureProvider(ctx context.Context) error {
-	if p.provider != nil {
-		return nil
+	p.once.Do(func() {
+		if p.provider != nil {
+			return // already injected (e.g. by tests constructing the struct directly)
+		}
+		prov, closer, err := resolveIaCProvider(ctx, p.providerName, p.providerCfg)
+		p.provider = prov
+		p.closer = closer
+		p.provErr = err
+	})
+	if p.provErr != nil {
+		return fmt.Errorf("resolve provider %q: %w", p.providerName, p.provErr)
 	}
-	prov, err := resolveIaCProvider(ctx, p.providerName, p.providerCfg)
-	if err != nil {
-		return fmt.Errorf("resolve provider %q: %w", p.providerName, err)
+	return nil
+}
+
+// Close shuts down the plugin subprocess, if any. The DeployProvider interface
+// does not include Close; callers should type-assert to io.Closer after use.
+func (p *pluginDeployProvider) Close() error {
+	if p.closer != nil {
+		return p.closer.Close()
 	}
-	p.provider = prov
 	return nil
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -137,8 +138,8 @@ func TestNewDeployProvider_PluginProvider_Resolves(t *testing.T) {
 
 	orig := resolveIaCProvider
 	defer func() { resolveIaCProvider = orig }()
-	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, error) {
-		return fake, nil
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, nil, nil
 	}
 
 	cfg := makePluginTestConfig("fake-cloud", "fake-provider")
