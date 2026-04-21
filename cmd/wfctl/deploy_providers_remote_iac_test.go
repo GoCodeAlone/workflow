@@ -158,9 +158,9 @@ func TestRemoteIaC_Apply(t *testing.T) {
 	if si.method != "IaCProvider.Apply" {
 		t.Errorf("method: got %q, want IaCProvider.Apply", si.method)
 	}
-	// Plan fields should be present in args
-	if si.args["id"] != "plan-abc" {
-		t.Errorf("plan id arg: got %v", si.args["id"])
+	// Plan must be wrapped under "plan" key
+	if _, ok := si.args["plan"]; !ok {
+		t.Error("missing arg key 'plan'")
 	}
 	if result.PlanID != "plan-abc" {
 		t.Errorf("PlanID: got %q", result.PlanID)
@@ -202,8 +202,8 @@ func TestRemoteIaC_Destroy(t *testing.T) {
 	if si.method != "IaCProvider.Destroy" {
 		t.Errorf("method: got %q, want IaCProvider.Destroy", si.method)
 	}
-	if _, ok := si.args["resources"]; !ok {
-		t.Error("missing arg key 'resources'")
+	if _, ok := si.args["refs"]; !ok {
+		t.Error("missing arg key 'refs'")
 	}
 	if len(result.Destroyed) != 2 {
 		t.Fatalf("expected 2 destroyed, got %d", len(result.Destroyed))
@@ -243,8 +243,8 @@ func TestRemoteIaC_Status(t *testing.T) {
 	if si.method != "IaCProvider.Status" {
 		t.Errorf("method: got %q, want IaCProvider.Status", si.method)
 	}
-	if _, ok := si.args["resources"]; !ok {
-		t.Error("missing arg key 'resources'")
+	if _, ok := si.args["refs"]; !ok {
+		t.Error("missing arg key 'refs'")
 	}
 	if len(statuses) != 1 {
 		t.Fatalf("expected 1 status, got %d", len(statuses))
@@ -294,8 +294,8 @@ func TestRemoteIaC_DetectDrift(t *testing.T) {
 	if si.method != "IaCProvider.DetectDrift" {
 		t.Errorf("method: got %q, want IaCProvider.DetectDrift", si.method)
 	}
-	if _, ok := si.args["resources"]; !ok {
-		t.Error("missing arg key 'resources'")
+	if _, ok := si.args["refs"]; !ok {
+		t.Error("missing arg key 'refs'")
 	}
 	if len(drifts) != 1 {
 		t.Fatalf("expected 1 drift, got %d", len(drifts))

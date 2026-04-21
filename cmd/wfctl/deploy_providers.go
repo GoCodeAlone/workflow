@@ -281,11 +281,7 @@ func (r *remoteIaCProvider) Apply(_ context.Context, plan *interfaces.IaCPlan) (
 	if err != nil {
 		return nil, fmt.Errorf("IaCProvider.Apply: marshal plan: %w", err)
 	}
-	args, ok := planAny.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("IaCProvider.Apply: unexpected plan type %T", planAny)
-	}
-	res, err := r.invoker.InvokeService("IaCProvider.Apply", args)
+	res, err := r.invoker.InvokeService("IaCProvider.Apply", map[string]any{"plan": planAny})
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +298,7 @@ func (r *remoteIaCProvider) Destroy(_ context.Context, refs []interfaces.Resourc
 		return nil, fmt.Errorf("IaCProvider.Destroy: marshal refs: %w", err)
 	}
 	res, err := r.invoker.InvokeService("IaCProvider.Destroy", map[string]any{
-		"resources": refsAny,
+		"refs": refsAny,
 	})
 	if err != nil {
 		return nil, err
@@ -320,7 +316,7 @@ func (r *remoteIaCProvider) Status(_ context.Context, refs []interfaces.Resource
 		return nil, fmt.Errorf("IaCProvider.Status: marshal refs: %w", err)
 	}
 	res, err := r.invoker.InvokeService("IaCProvider.Status", map[string]any{
-		"resources": refsAny,
+		"refs": refsAny,
 	})
 	if err != nil {
 		return nil, err
@@ -342,7 +338,7 @@ func (r *remoteIaCProvider) DetectDrift(_ context.Context, refs []interfaces.Res
 		return nil, fmt.Errorf("IaCProvider.DetectDrift: marshal refs: %w", err)
 	}
 	res, err := r.invoker.InvokeService("IaCProvider.DetectDrift", map[string]any{
-		"resources": refsAny,
+		"refs": refsAny,
 	})
 	if err != nil {
 		return nil, err
