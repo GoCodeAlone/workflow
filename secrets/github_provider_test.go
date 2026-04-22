@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/blake2b"
@@ -173,6 +174,134 @@ func TestGitHubProvider_Delete_NotFound(t *testing.T) {
 	err := p.Delete(context.Background(), "MISSING")
 	if err == nil {
 		t.Fatal("expected error for 404")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Error body inclusion tests
+// ---------------------------------------------------------------------------
+
+// TestGitHubProvider_Set_ErrorBodyIncluded verifies that a non-2xx response from
+// the secrets PUT endpoint includes the response body in the returned error.
+func TestGitHubProvider_Set_ErrorBodyIncluded(t *testing.T) {
+	recipientPub, _, err := box.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/actions/secrets/public-key":
+			json.NewEncoder(w).Encode(repoPublicKeyResponse{
+				KeyID: "key123",
+				Key:   base64.StdEncoding.EncodeToString(recipientPub[:]),
+			})
+		default:
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			w.Write([]byte(`{"message":"Validation Failed","errors":[{"resource":"Secret","code":"invalid"}]}`)) //nolint:errcheck
+		}
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	err = p.Set(context.Background(), "BAD_SECRET", "value")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "422") {
+		t.Errorf("error should contain status code 422, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Validation Failed") {
+		t.Errorf("error should contain response body, got: %v", err)
+	}
+}
+
+// TestGitHubProvider_Delete_ErrorBodyIncluded verifies that a non-204/404 response
+// from the secrets DELETE endpoint includes the response body in the error.
+func TestGitHubProvider_Delete_ErrorBodyIncluded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"Must have admin rights to Repository."}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	err := p.Delete(context.Background(), "SOME_SECRET")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error should contain 403, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "admin rights") {
+		t.Errorf("error should contain response body, got: %v", err)
+	}
+}
+
+// TestGitHubProvider_List_ErrorBodyIncluded verifies that a non-200 response from
+// the list endpoint includes the response body in the error.
+func TestGitHubProvider_List_ErrorBodyIncluded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"message":"Bad credentials","documentation_url":"https://docs.github.com"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	_, err := p.List(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("error should contain 401, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Bad credentials") {
+		t.Errorf("error should contain response body, got: %v", err)
+	}
+}
+
+// TestGitHubProvider_RepoPublicKey_ErrorBodyIncluded verifies that a non-200 from
+// the public-key endpoint (used internally by Set) includes the body in the error.
+func TestGitHubProvider_RepoPublicKey_ErrorBodyIncluded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"Resource not accessible by integration"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	// Set calls repoPublicKey internally; the body should bubble up.
+	err := p.Set(context.Background(), "MY_KEY", "value")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error should contain 403, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Resource not accessible") {
+		t.Errorf("error should contain response body, got: %v", err)
+	}
+}
+
+// TestGitHubProvider_EmptyBodyNoTrailingColon verifies that when the error
+// response has an empty body the error message doesn't end with ": ".
+func TestGitHubProvider_EmptyBodyNoTrailingColon(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		// No body written.
+	}))
+	defer srv.Close()
+
+	p := newTestGitHubProvider(t, srv)
+	_, err := p.List(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if strings.HasSuffix(msg, ": ") {
+		t.Errorf("error should not end with trailing colon-space when body is empty, got: %q", msg)
+	}
+	if !strings.Contains(msg, "500") {
+		t.Errorf("error should contain 500, got: %v", err)
 	}
 }
 
