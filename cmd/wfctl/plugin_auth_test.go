@@ -52,8 +52,10 @@ func TestInstallFromConfig_WithAuth_SkipsInstalledPrivate(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "plugins")
 
-	// Pre-install the private plugin.
-	fakeInstalledPlugin(t, pluginDir, "workflow-plugin-payments", "1.0.0")
+	// Pre-install the private plugin using the normalized name ("payments"), since
+	// runPluginInstall normalizes "workflow-plugin-payments" → "payments" and
+	// installs to <pluginDir>/payments. The skip check also uses the normalized name.
+	fakeInstalledPlugin(t, pluginDir, "payments", "1.0.0")
 
 	content := `
 requires:

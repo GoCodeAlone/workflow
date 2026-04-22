@@ -26,23 +26,26 @@ type RegistrySourceConfig struct {
 	Token    string `yaml:"token" json:"token"`       // Auth token (optional)
 }
 
-// DefaultRegistryConfig returns the built-in config with a static GitHub Pages
-// primary registry and a GitHub API fallback.
+// DefaultRegistryConfig returns the built-in registry config.
+// The GitHub raw source is the primary registry (priority 0) because it serves
+// manifest.json files directly from the repo and is always up to date.
+// The static GitHub Pages source is a secondary fallback (priority 100) for
+// organisations that mirror the registry to a CDN for lower-latency reads.
 func DefaultRegistryConfig() *RegistryConfig {
 	return &RegistryConfig{
 		Registries: []RegistrySourceConfig{
 			{
 				Name:     "default",
-				Type:     "static",
-				URL:      "https://gocodealone.github.io/workflow-registry/v1",
-				Priority: 0,
-			},
-			{
-				Name:     "github-fallback",
 				Type:     "github",
 				Owner:    registryOwner,
 				Repo:     registryRepo,
 				Branch:   registryBranch,
+				Priority: 0,
+			},
+			{
+				Name:     "static-mirror",
+				Type:     "static",
+				URL:      "https://gocodealone.github.io/workflow-registry/v1",
 				Priority: 100,
 			},
 		},

@@ -57,25 +57,33 @@ func normalizePluginName(name string) string {
 }
 
 // FetchManifest tries each source in priority order, returning the first successful result.
-// It first tries the normalized name (stripping "workflow-plugin-" prefix); if the
-// normalized name differs from the original, it also tries the original name as a fallback.
+// It first tries the original name across all sources; if the original name differs from
+// its normalized form (after stripping the "workflow-plugin-" prefix) and no source
+// matched the original, it retries with the normalized name as a fallback.
+//
+// Trying the original name first prevents name collisions where both "auth" (a builtin
+// module plugin) and "workflow-plugin-auth" (an external plugin) exist in the registry —
+// the caller's intent is respected rather than conflating the two.
 func (m *MultiRegistry) FetchManifest(name string) (*RegistryManifest, string, error) {
 	normalized := normalizePluginName(name)
 
-	// Try normalized name first across all sources.
+	// Try the original name first across all sources.
 	var lastErr error
 	for _, src := range m.sources {
-		manifest, err := src.FetchManifest(normalized)
+		manifest, err := src.FetchManifest(name)
 		if err == nil {
 			return manifest, src.Name(), nil
 		}
 		lastErr = err
 	}
 
-	// If normalized differs from original, try original name as fallback.
+	// If the original name was not found and the normalized short name differs,
+	// retry with the short name. This lets callers omit the "workflow-plugin-"
+	// prefix (e.g. passing "auth" resolves to the registry entry named "auth"
+	// when no entry named "auth" exists under the full original name).
 	if normalized != name {
 		for _, src := range m.sources {
-			manifest, err := src.FetchManifest(name)
+			manifest, err := src.FetchManifest(normalized)
 			if err == nil {
 				return manifest, src.Name(), nil
 			}

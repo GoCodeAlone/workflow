@@ -25,7 +25,13 @@ func installFromWorkflowConfig(workflowCfgPath, pluginDir, registryCfgPath strin
 
 	var failed []string
 	for _, req := range cfg.Requires.Plugins {
-		installDir := filepath.Join(pluginDir, req.Name)
+		// Normalize the name before checking the install directory so the skip check
+		// matches the actual install location. runPluginInstall normalizes names via
+		// normalizePluginName (stripping "workflow-plugin-" prefix), so
+		// "workflow-plugin-auth" is installed at <pluginDir>/auth, not
+		// <pluginDir>/workflow-plugin-auth.
+		normalizedName := normalizePluginName(req.Name)
+		installDir := filepath.Join(pluginDir, normalizedName)
 		if ver := readInstalledVersion(installDir); ver != "" && ver != "unknown" {
 			fmt.Fprintf(os.Stderr, "%s v%s already installed, skipping.\n", req.Name, ver)
 			continue
@@ -101,9 +107,11 @@ func runPluginDeps(args []string) error {
 	}
 	mr := NewMultiRegistry(cfg)
 
-	manifest, _, err := mr.FetchManifest(pluginName)
+	// Pass rawName (original, un-normalized) to FetchManifest so the original-
+	// name-first lookup in MultiRegistry can engage before the short-name fallback.
+	manifest, _, err := mr.FetchManifest(rawName)
 	if err != nil {
-		return fmt.Errorf("fetch manifest for %q: %w", pluginName, err)
+		return fmt.Errorf("fetch manifest for %q: %w", rawName, err)
 	}
 
 	if len(manifest.Dependencies) == 0 {

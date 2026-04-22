@@ -12,6 +12,84 @@ import (
 	"testing"
 )
 
+// TestPinManifestToVersion_VPrefixMismatchSameVersion verifies that when the
+// registry manifest stores a version without a "v" prefix (e.g. "0.6.1") but the
+// user requests the same version with a "v" prefix (e.g. "@v0.6.1"), pinManifestToVersion
+// treats them as equal and makes no changes — preventing the double-v bug where
+// the fallback replacement would turn ".../v0.6.1/..." into ".../vv0.6.1/...".
+func TestPinManifestToVersion_VPrefixMismatchSameVersion(t *testing.T) {
+	origURL := "https://github.com/owner/repo/releases/download/v0.6.1/plugin-linux-amd64.tar.gz"
+	manifest := &RegistryManifest{
+		Name:    "auth",
+		Version: "0.6.1", // registry stores without v prefix
+		Downloads: []PluginDownload{
+			{OS: "linux", Arch: "amd64", URL: origURL, SHA256: "checksum"},
+		},
+	}
+
+	// User passes @v0.6.1 — same version, just different prefix convention.
+	pinManifestToVersion(manifest, "v0.6.1")
+
+	// Version should NOT have been changed (they're the same version).
+	// More importantly: URL must not contain "vv0.6.1".
+	if strings.Contains(manifest.Downloads[0].URL, "vv0.6.1") {
+		t.Errorf("double-v bug: URL contains %q: %s", "vv0.6.1", manifest.Downloads[0].URL)
+	}
+	if manifest.Downloads[0].URL != origURL {
+		t.Errorf("URL should be unchanged for same version: got %q, want %q",
+			manifest.Downloads[0].URL, origURL)
+	}
+	// SHA256 should NOT be cleared because no rewrite happened.
+	if manifest.Downloads[0].SHA256 == "" {
+		t.Error("SHA256 should not be cleared when version is unchanged")
+	}
+}
+
+// TestPinManifestToVersion_CrossPrefixPin verifies that when the manifest stores
+// a version without "v" (e.g. "0.5.0") and the URL has "v0.5.0", pinning to a
+// new version (e.g. "v0.6.1") correctly rewrites the URL to "v0.6.1" without
+// introducing a double-v or losing the prefix.
+func TestPinManifestToVersion_CrossPrefixPin(t *testing.T) {
+	manifest := &RegistryManifest{
+		Name:    "auth",
+		Version: "0.5.0", // registry stores without v prefix
+		Downloads: []PluginDownload{
+			{
+				OS:   "linux",
+				Arch: "amd64",
+				// URL uses the standard GitHub release tag format (with v prefix).
+				URL:    "https://github.com/owner/repo/releases/download/v0.5.0/auth-linux-amd64.tar.gz",
+				SHA256: "oldchecksum",
+			},
+			{
+				OS:   "darwin",
+				Arch: "arm64",
+				URL:  "https://github.com/owner/repo/releases/download/v0.5.0/auth-darwin-arm64.tar.gz",
+			},
+		},
+	}
+
+	pinManifestToVersion(manifest, "v0.6.1")
+
+	if manifest.Version != "v0.6.1" {
+		t.Errorf("manifest.Version: got %q, want %q", manifest.Version, "v0.6.1")
+	}
+	for i, dl := range manifest.Downloads {
+		if strings.Contains(dl.URL, "vv0.6.1") {
+			t.Errorf("download[%d]: double-v bug in URL: %s", i, dl.URL)
+		}
+		if !strings.Contains(dl.URL, "v0.6.1") {
+			t.Errorf("download[%d]: URL should contain v0.6.1: %s", i, dl.URL)
+		}
+		if strings.Contains(dl.URL, "0.5.0") {
+			t.Errorf("download[%d]: URL still contains old version 0.5.0: %s", i, dl.URL)
+		}
+		if dl.SHA256 != "" {
+			t.Errorf("download[%d]: SHA256 should be cleared after version pin, got %q", i, dl.SHA256)
+		}
+	}
+}
+
 // TestPinManifestToVersion_URLRewritten verifies that pinManifestToVersion
 // replaces the old version string in download URLs and updates manifest.Version.
 func TestPinManifestToVersion_URLRewritten(t *testing.T) {
@@ -326,5 +404,116 @@ func TestRunPluginInstall_VersionPinNotFound(t *testing.T) {
 	// Error should mention the requested version.
 	if !strings.Contains(err.Error(), "v99.99.99") {
 		t.Errorf("error should mention requested version v99.99.99, got: %v", err)
+	}
+}
+
+// TestRunPluginInstall_FullNameNotNormalizedBeforeLookup verifies that when
+// runPluginInstall is given "workflow-plugin-auth@v0.1.2" the full name
+// "workflow-plugin-auth" is sent to the registry rather than the normalized
+// "auth". This prevents collisions where a builtin "auth" entry would be
+// returned instead of the external workflow-plugin-auth plugin.
+//
+// The test server exposes two manifest paths:
+//   - /plugins/workflow-plugin-auth/manifest.json → external auth v0.1.2
+//   - /plugins/auth/manifest.json                 → builtin auth v0.3.51 (wrong one)
+//
+// Only the external v0.1.2 tarball exists; hitting the builtin path would
+// fail with "no download for linux/amd64" because it has no Downloads entry.
+func TestRunPluginInstall_FullNameNotNormalizedBeforeLookup(t *testing.T) {
+	const externalVersion = "v0.1.2"
+	const builtinVersion = "v0.3.51"
+
+	binaryContent := []byte("#!/bin/sh\necho auth\n")
+	// Tarball uses the normalized name "auth" as the binary name (as GoReleaser would).
+	tarball := buildPluginTarGz(t, "auth", binaryContent, minimalPluginJSON("auth", externalVersion))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/plugins/workflow-plugin-auth/manifest.json":
+			// The correct external plugin.
+			m := RegistryManifest{
+				Name:        "workflow-plugin-auth",
+				Version:     externalVersion,
+				Author:      "tester",
+				Description: "external auth plugin",
+				Type:        "external",
+				Tier:        "community",
+				License:     "MIT",
+				Downloads: []PluginDownload{
+					{
+						OS:   runtime.GOOS,
+						Arch: runtime.GOARCH,
+						URL:  "http://" + r.Host + "/releases/download/" + externalVersion + "/auth.tar.gz",
+					},
+				},
+			}
+			data, _ := json.Marshal(m)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(data) //nolint:errcheck
+
+		case "/plugins/auth/manifest.json":
+			// The builtin plugin — no Downloads, so installing it would fail.
+			m := RegistryManifest{
+				Name:        "auth",
+				Version:     builtinVersion,
+				Author:      "engine",
+				Description: "builtin auth module",
+				Type:        "builtin",
+				Tier:        "core",
+				License:     "MIT",
+				// No Downloads — installing this would return "no download for OS/arch".
+			}
+			data, _ := json.Marshal(m)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(data) //nolint:errcheck
+
+		case "/releases/download/" + externalVersion + "/auth.tar.gz":
+			w.WriteHeader(http.StatusOK)
+			w.Write(tarball) //nolint:errcheck
+
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cfgDir := t.TempDir()
+	regCfg := "registries:\n  - name: test\n    type: static\n    url: " + srv.URL + "\n    priority: 0\n"
+	regCfgPath := filepath.Join(cfgDir, "registry.yaml")
+	if err := os.WriteFile(regCfgPath, []byte(regCfg), 0600); err != nil {
+		t.Fatalf("write registry config: %v", err)
+	}
+
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
+
+	pluginsDir := t.TempDir()
+	if err := runPluginInstall([]string{
+		"--config", regCfgPath,
+		"--plugin-dir", pluginsDir,
+		"workflow-plugin-auth@" + externalVersion,
+	}); err != nil {
+		t.Fatalf("runPluginInstall workflow-plugin-auth: %v", err)
+	}
+
+	// Plugin should be installed under the normalized name "auth".
+	pjPath := filepath.Join(pluginsDir, "auth", "plugin.json")
+	data, err := os.ReadFile(pjPath)
+	if err != nil {
+		t.Fatalf("read plugin.json: %v — did the builtin path get hit instead?", err)
+	}
+	var pj installedPluginJSON
+	if err := json.Unmarshal(data, &pj); err != nil {
+		t.Fatalf("parse plugin.json: %v", err)
+	}
+	if pj.Version != externalVersion {
+		t.Errorf("installed version: got %q, want %q (builtin %q would indicate name-collision bug)",
+			pj.Version, externalVersion, builtinVersion)
 	}
 }
