@@ -49,17 +49,16 @@ type SubdomainSelector struct {
 }
 
 func (s *SubdomainSelector) Match(r *http.Request) (string, bool, error) {
-	host := r.Host
+	host := strings.ToLower(r.Host)
 	// Strip port.
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
 		host = host[:idx]
 	}
-	suffix := "." + s.RootDomain
+	suffix := "." + strings.ToLower(s.RootDomain)
 	if !strings.HasSuffix(host, suffix) {
 		return "", false, nil
 	}
 	subdomain := strings.TrimSuffix(host, suffix)
-	// Reject empty subdomain (root domain match) or multi-level subdomain.
 	if subdomain == "" || strings.Contains(subdomain, ".") {
 		return "", false, nil
 	}

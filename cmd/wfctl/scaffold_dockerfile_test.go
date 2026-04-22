@@ -158,3 +158,28 @@ func TestScaffoldDockerfile_InvalidMode(t *testing.T) {
 		t.Error("invalid mode should return error")
 	}
 }
+
+func TestValidateBaseImage_FullyQualifiedRefs(t *testing.T) {
+	// Fully-qualified ubuntu refs should be blocked the same as short "ubuntu:22.04".
+	cases := []struct {
+		image     string
+		allowShell bool
+		wantErr   bool
+	}{
+		{"docker.io/library/ubuntu:22.04", false, true},
+		{"docker.io/library/ubuntu:22.04", true, false},
+		{"ghcr.io/org/ubuntu:22.04", false, true},
+		{"ghcr.io/org/ubuntu:22.04", true, false},
+		{"docker.io/library/alpine:3.20", false, false}, // warning only, no error
+		{"gcr.io/distroless/base-debian12:nonroot", false, false},
+	}
+	for _, tc := range cases {
+		err := validateBaseImage(tc.image, tc.allowShell)
+		if tc.wantErr && err == nil {
+			t.Errorf("validateBaseImage(%q, allowShell=%v): expected error, got nil", tc.image, tc.allowShell)
+		}
+		if !tc.wantErr && err != nil {
+			t.Errorf("validateBaseImage(%q, allowShell=%v): unexpected error: %v", tc.image, tc.allowShell, err)
+		}
+	}
+}

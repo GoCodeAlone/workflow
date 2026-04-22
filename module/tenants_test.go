@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"io/fs"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -217,11 +218,12 @@ func splitLines(s string) []string {
 	return splitByNewline(s)
 }
 func joinLines(lines []string) string {
-	result := ""
+	var sb strings.Builder
 	for _, l := range lines {
-		result += l + "\n"
+		sb.WriteString(l)
+		sb.WriteByte('\n')
 	}
-	return result
+	return sb.String()
 }
 func splitByNewline(s string) []string {
 	var out []string
@@ -238,5 +240,5 @@ func splitByNewline(s string) []string {
 	return out
 }
 func containsGoose(s string) bool {
-	return len(s) > 8 && s[3:8] == "goose"
+	return strings.Contains(s, "+goose")
 }

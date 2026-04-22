@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
@@ -54,23 +55,34 @@ type SQLTenantRegistry struct {
 type SQLTenantRegistryConfig struct {
 	DB        *sql.DB
 	Schema    TenantSchemaConfig
-	CacheSize int           // 0 = disable cache; default 256
+	// CacheSize controls the in-memory LRU cache size.
+	//   < 0 — disable cache entirely (no LRU)
+	//   0   — use default (256 entries)
+	//   > 0 — use this many entries
+	CacheSize int
 	CacheTTL  time.Duration // 0 = use default 60s
 }
 
 // NewSQLTenantRegistry creates a new SQLTenantRegistry.
 func NewSQLTenantRegistry(cfg SQLTenantRegistryConfig) (*SQLTenantRegistry, error) {
-	size := cfg.CacheSize
-	if size == 0 {
-		size = 256
+	if cfg.DB == nil {
+		return nil, fmt.Errorf("tenant registry: cfg.DB is required")
 	}
 	ttl := cfg.CacheTTL
 	if ttl == 0 {
 		ttl = 60 * time.Second
 	}
-	cache, err := lru.New(size)
-	if err != nil {
-		return nil, fmt.Errorf("create lru cache: %w", err)
+	var cache *lru.Cache
+	if cfg.CacheSize >= 0 {
+		size := cfg.CacheSize
+		if size == 0 {
+			size = 256
+		}
+		var err error
+		cache, err = lru.New(size)
+		if err != nil {
+			return nil, fmt.Errorf("create lru cache: %w", err)
+		}
 	}
 	return &SQLTenantRegistry{
 		db:       cfg.DB,
@@ -87,6 +99,9 @@ type cacheEntry struct {
 }
 
 func (r *SQLTenantRegistry) fromCache(key string) (interfaces.Tenant, bool) {
+	if r.cache == nil {
+		return interfaces.Tenant{}, false
+	}
 	v, ok := r.cache.Get(key)
 	if !ok {
 		return interfaces.Tenant{}, false
@@ -100,10 +115,16 @@ func (r *SQLTenantRegistry) fromCache(key string) (interfaces.Tenant, bool) {
 }
 
 func (r *SQLTenantRegistry) toCache(key string, t interfaces.Tenant) {
+	if r.cache == nil {
+		return
+	}
 	r.cache.Add(key, cacheEntry{tenant: t, expiresAt: time.Now().Add(r.cacheTTL)})
 }
 
 func (r *SQLTenantRegistry) invalidate(t interfaces.Tenant) {
+	if r.cache == nil {
+		return
+	}
 	r.cache.Remove("id:" + t.ID)
 	r.cache.Remove("slug:" + t.Slug)
 	for _, d := range t.Domains {
@@ -170,8 +191,11 @@ func (r *SQLTenantRegistry) Ensure(spec interfaces.TenantSpec) (interfaces.Tenan
 
 	// Check if it already exists.
 	existing, err := r.GetBySlug(spec.Slug)
-	if err == nil && !existing.IsZero() {
+	if err == nil {
 		return existing, nil
+	}
+	if !errors.Is(err, interfaces.ErrResourceNotFound) {
+		return interfaces.Tenant{}, fmt.Errorf("ensure tenant %q: lookup: %w", spec.Slug, err)
 	}
 
 	domainsJSON, _ := json.Marshal(spec.Domains)
@@ -346,6 +370,12 @@ func (r *SQLTenantRegistry) List(filter interfaces.TenantFilter) ([]interfaces.T
 
 // Update applies a partial patch to an existing tenant.
 func (r *SQLTenantRegistry) Update(id string, patch interfaces.TenantPatch) (interfaces.Tenant, error) {
+	// Fetch existing so we can invalidate stale domain cache keys if domains changed.
+	existing, fetchErr := r.GetByID(id)
+	if fetchErr != nil && !errors.Is(fetchErr, interfaces.ErrResourceNotFound) {
+		return interfaces.Tenant{}, fmt.Errorf("update tenant: fetch existing: %w", fetchErr)
+	}
+
 	tbl := r.schema.table()
 	var setClauses []string
 	var args []any
@@ -401,6 +431,9 @@ func (r *SQLTenantRegistry) Update(id string, patch interfaces.TenantPatch) (int
 			return interfaces.Tenant{}, interfaces.ErrResourceNotFound
 		}
 		return interfaces.Tenant{}, fmt.Errorf("update tenant %q: %w", id, err)
+	}
+	if fetchErr == nil {
+		r.invalidate(existing) // clear old domain entries
 	}
 	r.invalidate(t)
 	r.toCache("id:"+t.ID, t)

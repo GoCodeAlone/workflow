@@ -51,10 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Build-pipeline hook system
 
-- **12 hook event types** (`HookEventPreBuild`, `HookEventPostBuild`, `HookEventPrePush`,
-  `HookEventPostPush`, `HookEventPreDeploy`, `HookEventPostDeploy`, `HookEventPreTest`,
-  `HookEventPostTest`, `HookEventPreScan`, `HookEventPostScan`, `HookEventPreRelease`,
-  `HookEventInstallVerify`) in `interfaces`.
+- **12 hook event types** (`pre_build`, `pre_target_build`, `post_target_build`,
+  `pre_container_build`, `post_container_build`, `pre_container_push`,
+  `post_container_push`, `pre_artifacts_publish`, `post_artifacts_publish`,
+  `pre_build_fail`, `post_build`, `install_verify`) in `interfaces`.
 - **`wfctl` hook dispatcher** — priority-ordered subprocess dispatch with configurable
   timeout; plugins register handlers via `BuildHookDeclaration` in `plugin.json`.
 - **`plugin.json` schema extensions** — `BuildHooks`, `CLICommands`, `MigrationDrivers`,

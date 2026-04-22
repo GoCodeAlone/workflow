@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func writeTestPlugin(t *testing.T, pluginsDir, name string, hooks []config.Build
 	recordFile := filepath.Join(pluginsDir, "invocations.txt")
 	script := "#!/bin/sh\n"
 	script += "echo '" + name + "' >> " + recordFile + "\n"
-	script += "exit " + itoa(exitCode) + "\n"
+	script += "exit " + strconv.Itoa(exitCode) + "\n"
 
 	binPath := filepath.Join(dir, name)
 	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
@@ -49,13 +50,6 @@ func writeTestPlugin(t *testing.T, pluginsDir, name string, hooks []config.Build
 	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), b, 0644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	return strings.TrimSpace(string(rune('0' + n)))
 }
 
 func readInvocations(pluginsDir string) []string {

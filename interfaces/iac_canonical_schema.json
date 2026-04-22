@@ -33,7 +33,7 @@
         "properties": {
           "name":     { "type": "string" },
           "port":     { "type": "integer", "minimum": 1, "maximum": 65535 },
-          "protocol": { "type": "string", "enum": ["tcp", "udp", "sctp"] },
+          "protocol": { "type": "string", "enum": ["http", "tcp", "udp"] },
           "public":   { "type": "boolean" }
         },
         "required": ["port"]

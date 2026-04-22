@@ -169,15 +169,33 @@ func scaffoldDockerfile(a scaffoldDockerfileArgs) error {
 	return nil
 }
 
+// imageBaseName returns the last path segment of an image reference,
+// stripped of any tag or digest suffix. This handles both short refs
+// ("ubuntu:22.04") and fully-qualified refs ("docker.io/library/ubuntu:22.04").
+func imageBaseName(ref string) string {
+	// Strip digest first.
+	if idx := strings.Index(ref, "@"); idx != -1 {
+		ref = ref[:idx]
+	}
+	// Strip tag (last colon that is not part of a registry host:port).
+	if idx := strings.LastIndex(ref, ":"); idx != -1 && !strings.Contains(ref[idx:], "/") {
+		ref = ref[:idx]
+	}
+	// Take last path segment.
+	if idx := strings.LastIndex(ref, "/"); idx != -1 {
+		ref = ref[idx+1:]
+	}
+	return strings.ToLower(ref)
+}
+
 // validateBaseImage checks the base image against security policy.
 // Warning images (alpine) continue; shell-containing images are blocked unless
 // --allow-shell is passed.
 func validateBaseImage(base string, allowShell bool) error {
-	lower := strings.ToLower(base)
+	name := imageBaseName(base)
 
-	// Check shell-containing bases (blocked by default).
 	for _, s := range shellContainingBases {
-		if strings.HasPrefix(lower, s+":") || strings.HasPrefix(lower, s+"@") || lower == s {
+		if name == strings.ToLower(s) {
 			if !allowShell {
 				return fmt.Errorf("base image %q contains a shell — use a distroless image or pass --allow-shell to override", base)
 			}
@@ -185,9 +203,8 @@ func validateBaseImage(base string, allowShell bool) error {
 		}
 	}
 
-	// Check warning bases.
 	for _, w := range glibcWarningBases {
-		if strings.HasPrefix(lower, w+":") || strings.HasPrefix(lower, w+"@") || lower == w {
+		if name == strings.ToLower(w) {
 			fmt.Fprintf(os.Stderr, "warning: base image %q has a large attack surface; consider gcr.io/distroless/base-debian12:nonroot\n", base)
 			return nil
 		}
