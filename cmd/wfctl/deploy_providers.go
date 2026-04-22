@@ -396,6 +396,12 @@ func (r *remoteIaCProvider) ResourceDriver(resourceType string) (interfaces.Reso
 	return &remoteResourceDriver{invoker: r.invoker, resourceType: resourceType}, nil
 }
 
+// SupportedCanonicalKeys returns the full canonical key set for remote providers.
+// External plugin providers may override this via the plugin manifest in a future phase.
+func (r *remoteIaCProvider) SupportedCanonicalKeys() []string {
+	return interfaces.CanonicalKeys()
+}
+
 func (r *remoteIaCProvider) Close() error { return nil }
 
 // remoteResourceDriver routes ResourceDriver calls to the plugin via InvokeService.

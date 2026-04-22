@@ -30,6 +30,12 @@ type IaCProvider interface {
 	// Resource drivers for fine-grained CRUD
 	ResourceDriver(resourceType string) (ResourceDriver, error)
 
+	// SupportedCanonicalKeys returns the subset of canonical IaC config keys
+	// that this provider understands. Providers may return a subset; callers
+	// use this to warn on unrecognised fields before applying a plan.
+	// Built-in and stub providers return the full canonical key set.
+	SupportedCanonicalKeys() []string
+
 	Close() error
 }
 
