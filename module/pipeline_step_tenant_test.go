@@ -172,9 +172,16 @@ func TestTenantListStep_Execute(t *testing.T) {
 	if !reg.listCalled.ActiveOnly {
 		t.Error("expected ActiveOnly=true")
 	}
-	list, _ := result.Output["tenants"].([]interfaces.Tenant)
+	list, _ := result.Output["tenants"].([]map[string]any)
 	if len(list) != 2 {
 		t.Errorf("expected 2 tenants, got %d", len(list))
+	}
+	if list[0]["id"] != "t1" {
+		t.Errorf("expected first tenant id=t1, got %v", list[0]["id"])
+	}
+	count, _ := result.Output["count"].(int)
+	if count != 2 {
+		t.Errorf("expected count=2, got %d", count)
 	}
 }
 
@@ -287,6 +294,67 @@ func TestTenantDisableStep_MissingID(t *testing.T) {
 	}
 
 	pc := newTenantStepPC(nil) // no tenant_id in context
+	_, err = step.Execute(t.Context(), pc)
+	if err == nil {
+		t.Fatal("expected error when id missing")
+	}
+}
+
+// ---- empty-key guards ----
+
+func TestTenantEnsureStep_MissingSlug(t *testing.T) {
+	reg := &fakeTenantRegistry{}
+	app := newTenantStepApp(reg)
+
+	factory := NewTenantEnsureStepFactory()
+	step, err := factory("ensure-tenant", map[string]any{
+		"name_key": "n",
+		"slug_key": "s",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := newTenantStepPC(map[string]any{"n": "Acme"}) // no slug
+	_, err = step.Execute(t.Context(), pc)
+	if err == nil {
+		t.Fatal("expected error when slug missing")
+	}
+}
+
+func TestTenantGetByDomainStep_MissingDomain(t *testing.T) {
+	reg := &fakeTenantRegistry{}
+	app := newTenantStepApp(reg)
+
+	factory := NewTenantGetByDomainStepFactory()
+	step, err := factory("get-by-domain", map[string]any{
+		"domain_key": "host",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := newTenantStepPC(nil) // no host in context
+	_, err = step.Execute(t.Context(), pc)
+	if err == nil {
+		t.Fatal("expected error when domain missing")
+	}
+}
+
+func TestTenantUpdateStep_MissingID(t *testing.T) {
+	reg := &fakeTenantRegistry{}
+	app := newTenantStepApp(reg)
+
+	factory := NewTenantUpdateStepFactory()
+	step, err := factory("update-tenant", map[string]any{
+		"id_key":   "tenant_id",
+		"name_key": "new_name",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := newTenantStepPC(map[string]any{"new_name": "Corp"}) // no tenant_id
 	_, err = step.Execute(t.Context(), pc)
 	if err == nil {
 		t.Fatal("expected error when id missing")

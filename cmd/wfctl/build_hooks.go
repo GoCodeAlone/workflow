@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -64,7 +65,7 @@ func (d *HookDispatcher) Dispatch(ctx context.Context, event interfaces.HookEven
 			case hookFailPolicyFail, "":
 				return fmt.Errorf("hook %s from plugin %s: %w", event, h.pluginName, err)
 			case hookFailPolicyWarn:
-				fmt.Printf("warning: hook %s from plugin %s failed (continuing): %v\n", event, h.pluginName, err)
+				fmt.Fprintf(os.Stderr, "warning: hook %s from plugin %s failed (continuing): %v\n", event, h.pluginName, err)
 			case hookFailPolicySkip:
 				// silent
 			}

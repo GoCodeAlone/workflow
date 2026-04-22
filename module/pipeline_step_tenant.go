@@ -90,6 +90,9 @@ func (s *TenantEnsureStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 
 	tenantName, _ := pc.Current[s.nameKey].(string)
 	tenantSlug, _ := pc.Current[s.slugKey].(string)
+	if tenantSlug == "" {
+		return nil, fmt.Errorf("tenant ensure: %q is required but missing from pipeline context", s.slugKey)
+	}
 
 	tenant, err := reg.Ensure(interfaces.TenantSpec{Name: tenantName, Slug: tenantSlug})
 	if err != nil {
@@ -152,7 +155,11 @@ func (s *TenantListStep) Execute(_ context.Context, _ *PipelineContext) (*StepRe
 		return nil, fmt.Errorf("tenant list: %w", err)
 	}
 
-	return &StepResult{Output: map[string]any{"tenants": tenants}}, nil
+	mapped := make([]map[string]any, len(tenants))
+	for i, t := range tenants {
+		mapped[i] = tenantToMap(t)
+	}
+	return &StepResult{Output: map[string]any{"tenants": mapped, "count": len(tenants)}}, nil
 }
 
 // ── tenant_get_by_domain ──────────────────────────────────────────────────────
@@ -189,6 +196,9 @@ func (s *TenantGetByDomainStep) Execute(_ context.Context, pc *PipelineContext) 
 	}
 
 	domain, _ := pc.Current[s.domainKey].(string)
+	if domain == "" {
+		return nil, fmt.Errorf("tenant get by domain: %q is required but missing from pipeline context", s.domainKey)
+	}
 	tenant, err := reg.GetByDomain(domain)
 	if err != nil {
 		return nil, fmt.Errorf("tenant get by domain %q: %w", domain, err)
@@ -233,6 +243,9 @@ func (s *TenantUpdateStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 	}
 
 	id, _ := pc.Current[s.idKey].(string)
+	if id == "" {
+		return nil, fmt.Errorf("tenant update: %q is required but missing from pipeline context", s.idKey)
+	}
 
 	var patch interfaces.TenantPatch
 	if s.nameKey != "" {

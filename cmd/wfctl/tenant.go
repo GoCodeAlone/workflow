@@ -75,6 +75,10 @@ func runTenantWithRegistry(args []string, w io.Writer, reg interfaces.TenantRegi
 		filteredArgs = append(filteredArgs, a)
 	}
 
+	if len(filteredArgs) == 0 {
+		return tenantUsage(w)
+	}
+
 	subcmd := filteredArgs[0]
 	rest := filteredArgs[1:]
 

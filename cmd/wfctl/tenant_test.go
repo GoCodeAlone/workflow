@@ -160,3 +160,13 @@ func TestTenantCLI_NoSubcommand(t *testing.T) {
 		t.Fatal("expected error when no subcommand given")
 	}
 }
+
+func TestTenantCLI_FormatOnlyNoPanic(t *testing.T) {
+	// Passing only --format flags (no subcommand) must return an error, not panic.
+	reg := &fakeTenantReg{}
+	var buf bytes.Buffer
+	err := runTenantWithRegistry([]string{"--format", "json"}, &buf, reg)
+	if err == nil {
+		t.Fatal("expected error when only --format flag given with no subcommand")
+	}
+}
