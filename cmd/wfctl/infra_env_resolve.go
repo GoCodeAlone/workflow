@@ -73,22 +73,26 @@ func writeEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error)
 				rm.Config["env_vars"] = ev
 			}
 		}
-		// Expand ${VAR} / $VAR env-var references in the resolved module config
-		// before writing to the temp file. At this point in the apply flow,
-		// `injectSecrets` has already called os.Setenv for any env-provider
-		// secrets, so they are available to os.ExpandEnv here.
+		// Intentionally DO NOT expand ${VAR} / $VAR env-var references here.
+		// Bootstrap generates some secrets (e.g. SPACES_access_key) AFTER
+		// this temp file is written, so eager expansion here substitutes
+		// empty strings for those variables. Instead, leave the literal
+		// "${VAR}" references intact and let downstream consumers call
+		// config.ExpandEnvInMap at read time (they all already do: infra.go
+		// apply/plan/status/destroy, infra_bootstrap.go bootstrapStateBackend).
+		// ExpandEnvInMap is idempotent on already-expanded values, so this
+		// is safe even for callers whose secrets are Setenv'd before this
+		// runs.
 		//
 		// Note: ${scheme:path} secret references (vault, aws-sm, etc.) are
-		// intentionally NOT supported at this stage. Use the env-provider
-		// secrets injection to make those values available as env vars first.
-		expandedCfg := config.ExpandEnvInMap(rm.Config)
+		// resolved at apply time via injectSecrets, not here.
 
 		// Rebuild as ModuleConfig preserving DependsOn and Branches from the
 		// original (ResolvedModule doesn't carry them).
 		resolved = append(resolved, config.ModuleConfig{
 			Name:      rm.Name,
 			Type:      rm.Type,
-			Config:    expandedCfg,
+			Config:    rm.Config,
 			DependsOn: m.DependsOn,
 			Branches:  m.Branches,
 		})

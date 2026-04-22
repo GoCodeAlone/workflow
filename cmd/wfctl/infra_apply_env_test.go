@@ -56,8 +56,9 @@ modules:
 		t.Errorf("app.registry_token: want reg_secret_xyz (expanded), got %q", tok)
 	}
 
-	// writeEnvResolvedConfig covers all module types (iac.provider included) —
-	// verify cloud-provider.token is baked into the resolved temp file.
+	// writeEnvResolvedConfig covers all module types (iac.provider included).
+	// It intentionally leaves ${VAR} references as literals so downstream
+	// consumers can expand them at read time after secrets are Setenv'd.
 	tmp, err := writeEnvResolvedConfig(path, "")
 	if err != nil {
 		t.Fatalf("writeEnvResolvedConfig: %v", err)
@@ -71,8 +72,13 @@ modules:
 	for _, m := range resolved.Modules {
 		if m.Name == "cloud-provider" {
 			tok, _ := m.Config["token"].(string)
-			if tok != "tok_live_abc123" {
-				t.Errorf("cloud-provider.token: want tok_live_abc123 (expanded), got %q", tok)
+			if tok != "${FAKE_TOKEN}" {
+				t.Errorf("cloud-provider.token: want ${FAKE_TOKEN} literal, got %q", tok)
+			}
+			// Verify the downstream read-time expansion still works.
+			expanded := config.ExpandEnvInMap(m.Config)
+			if got, _ := expanded["token"].(string); got != "tok_live_abc123" {
+				t.Errorf("ExpandEnvInMap(token): want tok_live_abc123, got %q", got)
 			}
 			return
 		}
@@ -256,11 +262,13 @@ modules:
 	}
 }
 
-// ── TestWriteEnvResolvedConfig_ExpandsEnvVarsInModuleConfigs ────────────────
-// Verifies that writeEnvResolvedConfig bakes env var values into the temp
-// file's module configs. The resolved file should contain the literal value,
-// not the ${VAR} placeholder.
-func TestWriteEnvResolvedConfig_ExpandsEnvVarsInModuleConfigs(t *testing.T) {
+// ── TestWriteEnvResolvedConfig_PreservesEnvVarLiterals ─────────────────────
+// writeEnvResolvedConfig intentionally does NOT expand ${VAR} references in
+// module configs — callers do so at read time via config.ExpandEnvInMap.
+// This preserves the ability to read the temp file after secrets have been
+// Setenv'd (e.g. bootstrapStateBackend reads SPACES_access_key after
+// bootstrapSecrets generates it).
+func TestWriteEnvResolvedConfig_PreservesEnvVarLiterals(t *testing.T) {
 	t.Setenv("TEST_DO_TOKEN", "live_token_xyz")
 	t.Setenv("TEST_BUCKET_REGION", "nyc3")
 
@@ -314,28 +322,30 @@ modules:
 		modMap[m.Name] = m.Config
 	}
 
-	// iac.provider: token must be expanded.
+	// iac.provider: token must remain a ${VAR} literal; consumer calls
+	// ExpandEnvInMap at read time.
 	if provCfg, ok := modMap["cloud-provider"]; ok {
-		if tok, _ := provCfg["token"].(string); tok != "live_token_xyz" {
-			t.Errorf("cloud-provider.token: want live_token_xyz, got %q", tok)
+		if tok, _ := provCfg["token"].(string); tok != "${TEST_DO_TOKEN}" {
+			t.Errorf("cloud-provider.token: want ${TEST_DO_TOKEN} literal, got %q", tok)
 		}
 	} else {
 		t.Error("cloud-provider module not found in resolved config")
 	}
 
-	// iac.state: region must be expanded.
+	// iac.state: region must remain a ${VAR} literal.
 	if stateCfg, ok := modMap["state-backend"]; ok {
-		if region, _ := stateCfg["region"].(string); region != "nyc3" {
-			t.Errorf("state-backend.region: want nyc3, got %q", region)
+		if region, _ := stateCfg["region"].(string); region != "${TEST_BUCKET_REGION}" {
+			t.Errorf("state-backend.region: want ${TEST_BUCKET_REGION} literal, got %q", region)
 		}
 	} else {
 		t.Error("state-backend module not found in resolved config")
 	}
 
-	// infra.container_service: prod override image must NOT contain ${}.
+	// infra.container_service: prod override image has no ${VAR}, so it stays
+	// a regular string.
 	if appCfg, ok := modMap["app"]; ok {
-		if img, _ := appCfg["image"].(string); img == "" || img[0] == '$' {
-			t.Errorf("app.image should be a resolved value, got %q", img)
+		if img, _ := appCfg["image"].(string); img != "registry.example.com/app:prod" {
+			t.Errorf("app.image: want registry.example.com/app:prod, got %q", img)
 		}
 	} else {
 		t.Error("app module not found in resolved config")
@@ -379,7 +389,7 @@ modules:
 	}
 	defer os.Remove(tmp2)
 
-	// Both resolved files must contain the expanded value.
+	// Both resolved files must preserve the ${VAR} literal (no eager expansion).
 	for _, tmp := range []string{tmp1, tmp2} {
 		resolved, loadErr := config.LoadFromFile(tmp)
 		if loadErr != nil {
@@ -388,8 +398,8 @@ modules:
 		for _, m := range resolved.Modules {
 			if m.Name == "cloud-provider" {
 				tok, _ := m.Config["token"].(string)
-				if tok != "will-be-expanded" {
-					t.Errorf("token in %s: want will-be-expanded, got %q", tmp, tok)
+				if tok != "${TEST_IMMUTABLE_TOKEN}" {
+					t.Errorf("token in %s: want ${TEST_IMMUTABLE_TOKEN} literal, got %q", tmp, tok)
 				}
 			}
 		}
