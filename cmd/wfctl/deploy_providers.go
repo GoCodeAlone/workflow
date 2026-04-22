@@ -991,6 +991,18 @@ func (p *pluginDeployProvider) doCreate(ctx context.Context, driver interfaces.R
 	return nil
 }
 
+// healthPollInitialInterval is the poll interval for the first healthPollBackoffAfter of waiting.
+var healthPollInitialInterval = 10 * time.Second
+
+// healthPollBackoffInterval is the poll interval after healthPollBackoffAfter has elapsed.
+var healthPollBackoffInterval = 30 * time.Second
+
+// healthPollBackoffAfter is the duration after which the poll interval switches to healthPollBackoffInterval.
+var healthPollBackoffAfter = 60 * time.Second
+
+// healthPollDefaultTimeout is the default maximum time to wait for a healthy result.
+var healthPollDefaultTimeout = 10 * time.Minute
+
 func (p *pluginDeployProvider) HealthCheck(ctx context.Context, cfg DeployConfig) error {
 	if cfg.Env == nil || cfg.Env.HealthCheck == nil {
 		return nil
@@ -1006,18 +1018,61 @@ func (p *pluginDeployProvider) HealthCheck(ctx context.Context, cfg DeployConfig
 		return fmt.Errorf("health check: no ProviderID available — Deploy must run first")
 	}
 	ref := interfaces.ResourceRef{Name: p.resourceName, Type: p.resourceType, ProviderID: p.lastProviderID}
-	var result *interfaces.HealthResult
-	if hcErr := retryOnTransient(ctx, func() error {
-		var err error
-		result, err = driver.HealthCheck(ctx, ref)
+	if err := pollUntilHealthy(ctx, driver, ref, p.resourceName); err != nil {
 		return err
-	}); hcErr != nil {
-		return fmt.Errorf("plugin health check %q: %w", p.resourceName, hcErr)
-	}
-	if !result.Healthy {
-		return fmt.Errorf("plugin health check %q: unhealthy: %s", p.resourceName, result.Message)
 	}
 	return nil
+}
+
+// pollUntilHealthy polls driver.HealthCheck until Healthy=true, context cancels,
+// or the default timeout elapses.  ErrTransient/ErrRateLimited are treated as
+// "keep polling"; any other error fails fast.
+func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref interfaces.ResourceRef, name string) error {
+	deadline := time.Now().Add(healthPollDefaultTimeout)
+	pollCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+
+	start := time.Now()
+	var lastMsg string
+
+	for {
+		result, hcErr := driver.HealthCheck(pollCtx, ref)
+		if hcErr != nil {
+			wrapped := wrapIaCError(hcErr)
+			if errors.Is(wrapped, interfaces.ErrTransient) || errors.Is(wrapped, interfaces.ErrRateLimited) {
+				log.Printf("plugin health check %q: transient error, continuing poll: %v", name, hcErr)
+			} else {
+				return fmt.Errorf("plugin health check %q: %w", name, wrapped)
+			}
+		} else if result.Healthy {
+			return nil
+		} else {
+			lastMsg = result.Message
+		}
+
+		// Choose poll interval based on elapsed time.
+		interval := healthPollInitialInterval
+		if time.Since(start) >= healthPollBackoffAfter {
+			interval = healthPollBackoffInterval
+		}
+
+		select {
+		case <-pollCtx.Done():
+			if lastMsg != "" {
+				return fmt.Errorf("plugin health check %q: timed out waiting for healthy; last status: %s", name, lastMsg)
+			}
+			return fmt.Errorf("plugin health check %q: timed out waiting for healthy", name)
+		case <-time.After(interval):
+		}
+
+		// Check again after sleeping (context may have expired during sleep).
+		if pollCtx.Err() != nil {
+			if lastMsg != "" {
+				return fmt.Errorf("plugin health check %q: timed out waiting for healthy; last status: %s", name, lastMsg)
+			}
+			return fmt.Errorf("plugin health check %q: timed out waiting for healthy", name)
+		}
+	}
 }
 
 // ── kubernetes provider ───────────────────────────────────────────────────────

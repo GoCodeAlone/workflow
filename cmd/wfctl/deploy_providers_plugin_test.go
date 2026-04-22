@@ -22,6 +22,12 @@ type driverCallResult struct {
 	err error
 }
 
+// hcCallResult holds the outcome of one fake HealthCheck call.
+type hcCallResult struct {
+	result *interfaces.HealthResult
+	err    error
+}
+
 type fakeResourceDriver struct {
 	updateImage  string
 	updateErr    error
@@ -34,6 +40,9 @@ type fakeResourceDriver struct {
 	hcResult      *interfaces.HealthResult
 	hcErr         error
 	lastHCRef     interfaces.ResourceRef
+	// hcResults: if non-empty, each call uses the next entry (last is repeated).
+	hcResults []hcCallResult
+	hcCallN   int
 	createCalled  bool
 	createSpec    interfaces.ResourceSpec
 	createOut     *interfaces.ResourceOutput
@@ -116,6 +125,16 @@ func (d *fakeResourceDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, 
 }
 func (d *fakeResourceDriver) HealthCheck(_ context.Context, ref interfaces.ResourceRef) (*interfaces.HealthResult, error) {
 	d.lastHCRef = ref
+	callIdx := d.hcCallN
+	d.hcCallN++
+	if len(d.hcResults) > 0 {
+		idx := callIdx
+		if idx >= len(d.hcResults) {
+			idx = len(d.hcResults) - 1
+		}
+		r := d.hcResults[idx]
+		return r.result, r.err
+	}
 	if d.hcResult != nil {
 		return d.hcResult, d.hcErr
 	}
@@ -302,6 +321,8 @@ func TestPluginDeployProvider_HealthCheck(t *testing.T) {
 }
 
 func TestPluginDeployProvider_HealthCheck_Unhealthy(t *testing.T) {
+	zeroHealthPollIntervals(t)
+	zeroHealthPollTimeout(t)
 	driver := &fakeResourceDriver{
 		hcResult: &interfaces.HealthResult{Healthy: false, Message: "not ready"},
 	}
@@ -880,5 +901,149 @@ func TestDeploy_AlreadyExistsFallsBackToUpdate(t *testing.T) {
 	}
 	if p.lastProviderID != "race-id" {
 		t.Errorf("lastProviderID: want %q, got %q", "race-id", p.lastProviderID)
+	}
+}
+
+// ── HealthCheck polling ───────────────────────────────────────────────────────
+
+// zeroHealthPollIntervals overrides poll intervals to zero so tests don't sleep.
+func zeroHealthPollIntervals(t *testing.T) {
+	t.Helper()
+	origInitial := healthPollInitialInterval
+	origBackoff := healthPollBackoffInterval
+	origAfter := healthPollBackoffAfter
+	healthPollInitialInterval = 0
+	healthPollBackoffInterval = 0
+	healthPollBackoffAfter = 0
+	t.Cleanup(func() {
+		healthPollInitialInterval = origInitial
+		healthPollBackoffInterval = origBackoff
+		healthPollBackoffAfter = origAfter
+	})
+}
+
+// zeroHealthPollTimeout sets a very short default timeout (1ms) so tests that
+// expect timeout failures finish quickly.
+func zeroHealthPollTimeout(t *testing.T) {
+	t.Helper()
+	orig := healthPollDefaultTimeout
+	healthPollDefaultTimeout = time.Millisecond
+	t.Cleanup(func() { healthPollDefaultTimeout = orig })
+}
+
+func makeHealthPollProvider(driver *fakeResourceDriver, providerID string) *pluginDeployProvider {
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	return &pluginDeployProvider{
+		provider:       fake,
+		resourceName:   "my-app",
+		resourceType:   "infra.container_service",
+		resourceCfg:    map[string]any{},
+		lastProviderID: providerID,
+	}
+}
+
+func healthCfg() DeployConfig {
+	return DeployConfig{
+		Env: &config.CIDeployEnvironment{
+			HealthCheck: &config.CIHealthCheck{Path: "/healthz"},
+		},
+	}
+}
+
+// TestHealthCheck_HealthyOnFirstCall: HealthCheck returns immediately when
+// driver returns Healthy=true on the first poll.
+func TestHealthCheck_HealthyOnFirstCall(t *testing.T) {
+	zeroHealthPollIntervals(t)
+	driver := &fakeResourceDriver{
+		hcResult: &interfaces.HealthResult{Healthy: true},
+	}
+	p := makeHealthPollProvider(driver, "pid-hc-1")
+	if err := p.HealthCheck(context.Background(), healthCfg()); err != nil {
+		t.Fatalf("HealthCheck: unexpected error: %v", err)
+	}
+	if driver.hcCallN != 1 {
+		t.Errorf("expected 1 HealthCheck call, got %d", driver.hcCallN)
+	}
+}
+
+// TestHealthCheck_HealthyAfterNPolls: HealthCheck returns success after
+// Healthy=false on the first two calls then Healthy=true on the third.
+func TestHealthCheck_HealthyAfterNPolls(t *testing.T) {
+	zeroHealthPollIntervals(t)
+	driver := &fakeResourceDriver{
+		hcResults: []hcCallResult{
+			{result: &interfaces.HealthResult{Healthy: false, Message: "deploying"}},
+			{result: &interfaces.HealthResult{Healthy: false, Message: "deploying"}},
+			{result: &interfaces.HealthResult{Healthy: true}},
+		},
+	}
+	p := makeHealthPollProvider(driver, "pid-hc-2")
+	if err := p.HealthCheck(context.Background(), healthCfg()); err != nil {
+		t.Fatalf("HealthCheck: unexpected error: %v", err)
+	}
+	if driver.hcCallN != 3 {
+		t.Errorf("expected 3 HealthCheck calls, got %d", driver.hcCallN)
+	}
+}
+
+// TestHealthCheck_TransientContinuesPolling: ErrTransient from driver is logged
+// and polling continues; succeeds on the next call.
+func TestHealthCheck_TransientContinuesPolling(t *testing.T) {
+	zeroHealthPollIntervals(t)
+	driver := &fakeResourceDriver{
+		hcResults: []hcCallResult{
+			{err: interfaces.ErrTransient},
+			{result: &interfaces.HealthResult{Healthy: true}},
+		},
+	}
+	p := makeHealthPollProvider(driver, "pid-hc-3")
+	if err := p.HealthCheck(context.Background(), healthCfg()); err != nil {
+		t.Fatalf("HealthCheck: unexpected error: %v", err)
+	}
+	if driver.hcCallN != 2 {
+		t.Errorf("expected 2 HealthCheck calls (transient + success), got %d", driver.hcCallN)
+	}
+}
+
+// TestHealthCheck_UnauthorizedFailsFast: ErrUnauthorized from driver causes
+// HealthCheck to fail immediately without further polling.
+func TestHealthCheck_UnauthorizedFailsFast(t *testing.T) {
+	zeroHealthPollIntervals(t)
+	driver := &fakeResourceDriver{
+		hcResults: []hcCallResult{
+			{err: interfaces.ErrUnauthorized},
+		},
+	}
+	p := makeHealthPollProvider(driver, "pid-hc-4")
+	err := p.HealthCheck(context.Background(), healthCfg())
+	if err == nil {
+		t.Fatal("expected error for ErrUnauthorized")
+	}
+	if !errors.Is(err, interfaces.ErrUnauthorized) {
+		t.Errorf("expected ErrUnauthorized in error chain, got: %v", err)
+	}
+	if driver.hcCallN != 1 {
+		t.Errorf("expected 1 HealthCheck call (no retry on auth error), got %d", driver.hcCallN)
+	}
+}
+
+// TestHealthCheck_TimeoutExceeded: when the context/timeout expires before
+// Healthy=true, HealthCheck returns an error containing the last status message.
+func TestHealthCheck_TimeoutExceeded(t *testing.T) {
+	zeroHealthPollIntervals(t)
+	zeroHealthPollTimeout(t)
+	driver := &fakeResourceDriver{
+		hcResult: &interfaces.HealthResult{Healthy: false, Message: "still deploying"},
+	}
+	p := makeHealthPollProvider(driver, "pid-hc-5")
+	err := p.HealthCheck(context.Background(), healthCfg())
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "still deploying") {
+		t.Errorf("expected last status in timeout error, got: %v", err)
 	}
 }
