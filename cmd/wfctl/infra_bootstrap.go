@@ -1,15 +1,17 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
+
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/secrets"
@@ -43,38 +45,51 @@ func runInfraBootstrap(args []string) error {
 
 	ctx := context.Background()
 
-	// 1. Bootstrap state backend.
-	if err := bootstrapStateBackend(ctx, cfgFile); err != nil {
-		return fmt.Errorf("bootstrap state backend: %w", err)
-	}
-
-	// 2. Generate and store secrets.
+	// 1. Generate and store secrets FIRST so that Spaces access keys are available
+	//    in the current process environment before bootstrapStateBackend runs.
+	//    (DO Spaces bucket creation requires S3 API auth with the Spaces key pair,
+	//    which is generated here via the provider_credential source.)
 	secretsCfg, err := parseSecretsConfig(cfgFile)
 	if err != nil {
 		return fmt.Errorf("parse secrets config: %w", err)
 	}
-	if secretsCfg == nil || len(secretsCfg.Generate) == 0 {
+
+	if secretsCfg != nil && len(secretsCfg.Generate) > 0 {
+		provider, err := resolveSecretsProvider(secretsCfg)
+		if err != nil {
+			return fmt.Errorf("resolve secrets provider: %w", err)
+		}
+		generated, err := bootstrapSecrets(ctx, provider, secretsCfg)
+		if err != nil {
+			return err
+		}
+		// Export freshly generated secrets to the current process environment so
+		// that bootstrapStateBackend can read them via ${VAR} expansion in the
+		// module config (e.g. accessKey: "${SPACES_access_key}").
+		for k, v := range generated {
+			os.Setenv(k, v) //nolint:errcheck
+		}
+	} else {
 		fmt.Println("No secrets to generate.")
-		return nil
 	}
 
-	provider, err := resolveSecretsProvider(secretsCfg)
-	if err != nil {
-		return fmt.Errorf("resolve secrets provider: %w", err)
+	// 2. Bootstrap state backend (uses Spaces keys now in env from step 1).
+	if err := bootstrapStateBackend(ctx, cfgFile); err != nil {
+		return fmt.Errorf("bootstrap state backend: %w", err)
 	}
 
-	return bootstrapSecrets(ctx, provider, secretsCfg)
+	return nil
 }
 
 // bootstrapDOSpacesBucketFn is the package-level hook used by bootstrapStateBackend.
-// Tests override it to inject a fake HTTP server without touching the filesystem.
+// Tests override it to inject fakes without touching the filesystem or S3.
 var bootstrapDOSpacesBucketFn = bootstrapDOSpacesBucket
 
 // bootstrapStateBackend checks the iac.state config and creates any required
 // backing infrastructure (e.g. a DO Spaces bucket) if it does not already exist.
 // ${VAR} / $VAR references in the module config are expanded via os.ExpandEnv
 // before the config fields are read, so secrets can be injected through the
-// environment (e.g. BUCKET_NAME=my-bucket in CI).
+// environment (e.g. SPACES_access_key=xxx in CI).
 func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 	iacStates, _, _, err := discoverInfraModules(cfgFile)
 	if err != nil {
@@ -97,60 +112,88 @@ func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 	if bucket == "" {
 		return fmt.Errorf("iac.state backend=spaces requires 'bucket' in config")
 	}
-	return bootstrapDOSpacesBucketFn(ctx, bucket, region)
+
+	// Read Spaces credentials from the expanded module config.
+	// Convention: the YAML uses accessKey/secretKey (camelCase) or access_key/secret_key (snake_case).
+	accessKey, _ := cfg["accessKey"].(string)
+	if accessKey == "" {
+		accessKey, _ = cfg["access_key"].(string)
+	}
+	secretKey, _ := cfg["secretKey"].(string)
+	if secretKey == "" {
+		secretKey, _ = cfg["secret_key"].(string)
+	}
+
+	return bootstrapDOSpacesBucketFn(ctx, bucket, region, accessKey, secretKey)
+}
+
+// spacesBucketClient is the minimal S3 client interface used by bootstrapDOSpacesBucketWithClient.
+// Keeping it narrow makes it easy to inject fakes in tests.
+type spacesBucketClient interface {
+	HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
+	CreateBucket(ctx context.Context, params *s3.CreateBucketInput, optFns ...func(*s3.Options)) (*s3.CreateBucketOutput, error)
 }
 
 // bootstrapDOSpacesBucket creates a DO Spaces bucket if it does not already exist.
-func bootstrapDOSpacesBucket(ctx context.Context, bucket, region string) error {
-	return bootstrapDOSpacesBucketAt(ctx, bucket, region, "https://api.digitalocean.com")
-}
-
-// bootstrapDOSpacesBucketAt is the testable core of bootstrapDOSpacesBucket.
-// apiBase is the DO API base URL (injectable for tests).
-func bootstrapDOSpacesBucketAt(ctx context.Context, bucket, region, apiBase string) error {
-	token := os.Getenv("DIGITALOCEAN_TOKEN")
-	if token == "" {
-		return fmt.Errorf("DIGITALOCEAN_TOKEN not set")
-	}
+// It uses the S3-compatible Spaces API authenticated with Spaces access keys —
+// NOT the DO Bearer token, which is only valid for the DO REST API, not for Spaces.
+func bootstrapDOSpacesBucket(ctx context.Context, bucket, region, accessKey, secretKey string) error {
 	if region == "" {
 		region = "nyc3"
 	}
-
-	// Check if bucket exists using the Spaces Buckets REST API.
-	checkURL := fmt.Sprintf("%s/v2/spaces/buckets/%s", apiBase, bucket)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, nil)
-	if err != nil {
-		return fmt.Errorf("check bucket %q: %w", bucket, err)
+	if accessKey == "" || secretKey == "" {
+		return fmt.Errorf("spaces access key and secret key must be set — " +
+			"ensure secrets are bootstrapped (step 1) before state backend (step 2); " +
+			"set accessKey/secretKey in the iac.state module config referencing ${SPACES_access_key} and ${SPACES_secret_key}")
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("check bucket %q: %w", bucket, err)
-	}
-	resp.Body.Close()
+	endpoint := fmt.Sprintf("https://%s.digitaloceanspaces.com", region)
 
-	if resp.StatusCode == http.StatusOK {
+	cfg, cfgErr := awsconfig.LoadDefaultConfig(ctx,
+		awsconfig.WithRegion(region),
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
+	)
+	if cfgErr != nil {
+		return fmt.Errorf("spaces bootstrap: build S3 config: %w", cfgErr)
+	}
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.BaseEndpoint = &endpoint
+		o.UsePathStyle = true
+	})
+	return bootstrapDOSpacesBucketWithClient(ctx, bucket, region, client)
+}
+
+// bootstrapDOSpacesBucketWithClient is the testable core of bootstrapDOSpacesBucket.
+// It uses HeadBucket to check existence and CreateBucket to create if absent.
+func bootstrapDOSpacesBucketWithClient(ctx context.Context, bucket, region string, client spacesBucketClient) error {
+	// Check whether the bucket already exists.
+	_, headErr := client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: &bucket})
+	if headErr == nil {
 		fmt.Printf("  state backend: bucket %q already exists — skipped\n", bucket)
 		return nil
 	}
 
-	// Create bucket via POST /v2/spaces/buckets.
-	payload := map[string]string{"name": bucket, "region": region}
-	body, _ := json.Marshal(payload)
-	createReq, err := http.NewRequestWithContext(ctx, http.MethodPost, apiBase+"/v2/spaces/buckets", bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create bucket %q: %w", bucket, err)
+	// HeadBucket returns types.NotFound (HTTP 404) when the bucket does not exist.
+	// Any other error (e.g. 403 Forbidden — bucket owned by another account) is fatal.
+	var notFound *s3types.NotFound
+	if !errors.As(headErr, &notFound) {
+		return fmt.Errorf("check bucket %q: %w", bucket, headErr)
 	}
-	createReq.Header.Set("Authorization", "Bearer "+token)
-	createReq.Header.Set("Content-Type", "application/json")
-	createResp, err := http.DefaultClient.Do(createReq)
-	if err != nil {
-		return fmt.Errorf("create bucket %q: %w", bucket, err)
-	}
-	defer createResp.Body.Close()
-	if createResp.StatusCode != http.StatusCreated && createResp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(createResp.Body)
-		return fmt.Errorf("create bucket %q: HTTP %d: %s", bucket, createResp.StatusCode, respBody)
+
+	// Create the bucket.
+	_, createErr := client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: &bucket,
+		CreateBucketConfiguration: &s3types.CreateBucketConfiguration{
+			LocationConstraint: s3types.BucketLocationConstraint(region),
+		},
+	})
+	if createErr != nil {
+		// BucketAlreadyOwnedByYou: a concurrent create won the race — still OK.
+		var alreadyOwned *s3types.BucketAlreadyOwnedByYou
+		if errors.As(createErr, &alreadyOwned) {
+			fmt.Printf("  state backend: bucket %q already owned — skipped\n", bucket)
+			return nil
+		}
+		return fmt.Errorf("create bucket %q: %w", bucket, createErr)
 	}
 	fmt.Printf("  state backend: created DO Spaces bucket %q in %s\n", bucket, region)
 	return nil
@@ -189,7 +232,12 @@ func expectedStoredKeys(gen SecretGen) []string {
 }
 
 // bootstrapSecrets generates and stores secrets that don't already exist.
-func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *SecretsConfig) error {
+// It returns a map of every key-value pair that was newly generated in this
+// run (skipped/pre-existing keys are NOT included). The caller can export
+// these to the process environment for downstream steps.
+func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *SecretsConfig) (map[string]string, error) {
+	generated := map[string]string{}
+
 	// Cache List() as a set so repeated probes in a bootstrap run only hit
 	// the provider once and subsequent lookups are O(1). Resolved lazily on
 	// the first write-only Get.
@@ -254,7 +302,7 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 		for _, key := range expected {
 			present, err := secretExists(key)
 			if err != nil {
-				return err
+				return generated, err
 			}
 			if !present {
 				allExist = false
@@ -269,7 +317,7 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 		// Generate the secret value.
 		value, err := generateSecret(ctx, gen.Type, genConfig)
 		if err != nil {
-			return fmt.Errorf("generate secret %q: %w", gen.Key, err)
+			return generated, fmt.Errorf("generate secret %q: %w", gen.Key, err)
 		}
 
 		// For provider_credential results (JSON map), store each sub-key.
@@ -279,8 +327,9 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 				for subKey, subVal := range subKeys {
 					fullKey := gen.Key + "_" + subKey
 					if setErr := provider.Set(ctx, fullKey, subVal); setErr != nil {
-						return fmt.Errorf("store secret %q: %w", fullKey, setErr)
+						return generated, fmt.Errorf("store secret %q: %w", fullKey, setErr)
 					}
+					generated[fullKey] = subVal
 					fmt.Printf("  secret %q: created\n", fullKey)
 				}
 				continue
@@ -288,9 +337,10 @@ func bootstrapSecrets(ctx context.Context, provider secrets.Provider, cfg *Secre
 		}
 
 		if err := provider.Set(ctx, gen.Key, value); err != nil {
-			return fmt.Errorf("store secret %q: %w", gen.Key, err)
+			return generated, fmt.Errorf("store secret %q: %w", gen.Key, err)
 		}
+		generated[gen.Key] = value
 		fmt.Printf("  secret %q: created\n", gen.Key)
 	}
-	return nil
+	return generated, nil
 }
