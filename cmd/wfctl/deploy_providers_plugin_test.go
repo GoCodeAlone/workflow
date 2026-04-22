@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -15,27 +16,50 @@ import (
 
 // ── fakes ─────────────────────────────────────────────────────────────────────
 
+// driverCallResult holds the outcome of one fake driver method call.
+type driverCallResult struct {
+	out *interfaces.ResourceOutput
+	err error
+}
+
 type fakeResourceDriver struct {
 	updateImage  string
 	updateErr    error
 	updateOut    *interfaces.ResourceOutput
 	updateRef    interfaces.ResourceRef
 	updateCalled bool
-	hcResult     *interfaces.HealthResult
-	hcErr        error
-	lastHCRef    interfaces.ResourceRef
-	createCalled bool
-	createSpec   interfaces.ResourceSpec
-	createOut    *interfaces.ResourceOutput
-	createErr    error
-	readOut      *interfaces.ResourceOutput
-	readErr      error
-	readCalled   bool
+	// updateResults: if non-empty, each call pops the next entry (last is repeated).
+	updateResults []driverCallResult
+	updateCallN   int
+	hcResult      *interfaces.HealthResult
+	hcErr         error
+	lastHCRef     interfaces.ResourceRef
+	createCalled  bool
+	createSpec    interfaces.ResourceSpec
+	createOut     *interfaces.ResourceOutput
+	createErr     error
+	createResults []driverCallResult
+	createCallN   int
+	readOut       *interfaces.ResourceOutput
+	readErr       error
+	readCalled    bool
+	readResults   []driverCallResult
+	readCallN     int
 }
 
 func (d *fakeResourceDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
 	d.createCalled = true
 	d.createSpec = spec
+	callIdx := d.createCallN
+	d.createCallN++ // always count
+	if len(d.createResults) > 0 {
+		idx := callIdx
+		if idx >= len(d.createResults) {
+			idx = len(d.createResults) - 1
+		}
+		r := d.createResults[idx]
+		return r.out, r.err
+	}
 	if d.createErr != nil {
 		return nil, d.createErr
 	}
@@ -46,6 +70,16 @@ func (d *fakeResourceDriver) Create(_ context.Context, spec interfaces.ResourceS
 }
 func (d *fakeResourceDriver) Read(_ context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
 	d.readCalled = true
+	callIdx := d.readCallN
+	d.readCallN++ // always count
+	if len(d.readResults) > 0 {
+		idx := callIdx
+		if idx >= len(d.readResults) {
+			idx = len(d.readResults) - 1
+		}
+		r := d.readResults[idx]
+		return r.out, r.err
+	}
 	if d.readErr != nil {
 		return nil, d.readErr
 	}
@@ -58,6 +92,16 @@ func (d *fakeResourceDriver) Update(_ context.Context, ref interfaces.ResourceRe
 	d.updateCalled = true
 	d.updateRef = ref
 	d.updateImage, _ = spec.Config["image"].(string)
+	callIdx := d.updateCallN
+	d.updateCallN++ // always count
+	if len(d.updateResults) > 0 {
+		idx := callIdx
+		if idx >= len(d.updateResults) {
+			idx = len(d.updateResults) - 1
+		}
+		r := d.updateResults[idx]
+		return r.out, r.err
+	}
 	if d.updateErr != nil {
 		return nil, d.updateErr
 	}
@@ -401,8 +445,10 @@ func TestPluginDeployProvider_Deploy_CreateFailureReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "capacity unavailable") {
 		t.Errorf("expected create error in message, got: %v", err)
 	}
-	if !errors.Is(err, interfaces.ErrResourceNotFound) {
-		t.Errorf("expected update error (ErrResourceNotFound) also joined into returned error, got: %v", err)
+	// The refactored Deploy no longer joins the update-not-found error into the
+	// create failure — the create error is surfaced directly.
+	if !strings.Contains(err.Error(), "capacity unavailable") {
+		t.Errorf("expected create error 'capacity unavailable' in message, got: %v", err)
 	}
 }
 
@@ -668,5 +714,171 @@ func TestPluginDeployProvider_Deploy_ReadErrorPropagates(t *testing.T) {
 	}
 	if driver.createCalled {
 		t.Error("expected Create NOT to be called when Read returns an error")
+	}
+}
+
+// ── retry + already-exists ────────────────────────────────────────────────────
+
+// noRetryDelays overrides deployRetryDelays for the duration of t so tests
+// don't actually sleep. It resets the var after the test.
+func noRetryDelays(t *testing.T) {
+	t.Helper()
+	orig := deployRetryDelays
+	deployRetryDelays = []time.Duration{0, 0, 0, 0}
+	t.Cleanup(func() { deployRetryDelays = orig })
+}
+
+// makeRetryProvider builds a pluginDeployProvider with the given fakeResourceDriver.
+func makeRetryProvider(driver *fakeResourceDriver) *pluginDeployProvider {
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	return &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{},
+	}
+}
+
+func retryCfg() DeployConfig {
+	return DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "registry.example.com/myapp:v1",
+		Env:      &config.CIDeployEnvironment{},
+	}
+}
+
+// TestDeploy_RateLimitRetries: Update returns ErrRateLimited twice then succeeds;
+// Deploy must succeed and have called Update exactly 3 times.
+func TestDeploy_RateLimitRetries(t *testing.T) {
+	noRetryDelays(t)
+	driver := &fakeResourceDriver{
+		readOut: &interfaces.ResourceOutput{ProviderID: "pid-1"},
+		updateResults: []driverCallResult{
+			{err: interfaces.ErrRateLimited},
+			{err: interfaces.ErrRateLimited},
+			{out: &interfaces.ResourceOutput{ProviderID: "pid-1"}},
+		},
+	}
+	p := makeRetryProvider(driver)
+	if err := p.Deploy(context.Background(), retryCfg()); err != nil {
+		t.Fatalf("Deploy: unexpected error: %v", err)
+	}
+	if driver.updateCallN != 3 {
+		t.Errorf("expected 3 Update calls, got %d", driver.updateCallN)
+	}
+	if p.lastProviderID != "pid-1" {
+		t.Errorf("lastProviderID: want %q, got %q", "pid-1", p.lastProviderID)
+	}
+}
+
+// TestDeploy_TransientRetries: Update returns ErrTransient twice then succeeds.
+func TestDeploy_TransientRetries(t *testing.T) {
+	noRetryDelays(t)
+	driver := &fakeResourceDriver{
+		readOut: &interfaces.ResourceOutput{ProviderID: "pid-2"},
+		updateResults: []driverCallResult{
+			{err: interfaces.ErrTransient},
+			{err: interfaces.ErrTransient},
+			{out: &interfaces.ResourceOutput{ProviderID: "pid-2"}},
+		},
+	}
+	p := makeRetryProvider(driver)
+	if err := p.Deploy(context.Background(), retryCfg()); err != nil {
+		t.Fatalf("Deploy: unexpected error: %v", err)
+	}
+	if driver.updateCallN != 3 {
+		t.Errorf("expected 3 Update calls, got %d", driver.updateCallN)
+	}
+}
+
+// TestDeploy_RetryCeiling: Update always returns ErrRateLimited; Deploy must fail
+// after exhausting all retries and return a wrapped "exhausted retries" error.
+func TestDeploy_RetryCeiling(t *testing.T) {
+	noRetryDelays(t)
+	driver := &fakeResourceDriver{
+		readOut:    &interfaces.ResourceOutput{ProviderID: "pid-3"},
+		updateResults: []driverCallResult{
+			{err: interfaces.ErrRateLimited},
+		}, // last entry is repeated for all calls
+	}
+	p := makeRetryProvider(driver)
+	err := p.Deploy(context.Background(), retryCfg())
+	if err == nil {
+		t.Fatal("expected error after retry exhaustion")
+	}
+	if !strings.Contains(err.Error(), "exhausted") {
+		t.Errorf("expected 'exhausted' in error, got: %v", err)
+	}
+	if !errors.Is(err, interfaces.ErrRateLimited) {
+		t.Errorf("expected ErrRateLimited wrapped in final error, got: %v", err)
+	}
+	wantCalls := len(deployRetryDelays)
+	if driver.updateCallN != wantCalls {
+		t.Errorf("expected %d Update calls (one per retry slot), got %d", wantCalls, driver.updateCallN)
+	}
+}
+
+// TestDeploy_UnauthorizedFailsFast: Update returns ErrUnauthorized; Deploy must
+// fail after a single call and surface an actionable auth message.
+func TestDeploy_UnauthorizedFailsFast(t *testing.T) {
+	noRetryDelays(t)
+	driver := &fakeResourceDriver{
+		readOut:    &interfaces.ResourceOutput{ProviderID: "pid-4"},
+		updateResults: []driverCallResult{
+			{err: interfaces.ErrUnauthorized},
+		},
+	}
+	p := makeRetryProvider(driver)
+	err := p.Deploy(context.Background(), retryCfg())
+	if err == nil {
+		t.Fatal("expected error for ErrUnauthorized")
+	}
+	if driver.updateCallN != 1 {
+		t.Errorf("expected single Update call (no retry), got %d", driver.updateCallN)
+	}
+	if !errors.Is(err, interfaces.ErrUnauthorized) {
+		t.Errorf("expected ErrUnauthorized in error chain, got: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "token") &&
+		!strings.Contains(strings.ToLower(err.Error()), "auth") &&
+		!strings.Contains(strings.ToLower(err.Error()), "permission") {
+		t.Errorf("expected actionable auth hint in error, got: %v", err)
+	}
+}
+
+// TestDeploy_AlreadyExistsFallsBackToUpdate: Read returns not-found, Create returns
+// ErrResourceAlreadyExists (race condition), Deploy re-reads to get ProviderID, then
+// Updates successfully.
+func TestDeploy_AlreadyExistsFallsBackToUpdate(t *testing.T) {
+	noRetryDelays(t)
+	driver := &fakeResourceDriver{
+		readResults: []driverCallResult{
+			{err: fmt.Errorf("app not found: %w", interfaces.ErrResourceNotFound)},
+			{out: &interfaces.ResourceOutput{ProviderID: "race-id"}},
+		},
+		createResults: []driverCallResult{
+			{err: fmt.Errorf("app already exists: %w", interfaces.ErrResourceAlreadyExists)},
+		},
+		// Update uses fixed success
+		updateOut: &interfaces.ResourceOutput{ProviderID: "race-id"},
+	}
+	p := makeRetryProvider(driver)
+	if err := p.Deploy(context.Background(), retryCfg()); err != nil {
+		t.Fatalf("Deploy: unexpected error: %v", err)
+	}
+	if driver.createCallN != 1 {
+		t.Errorf("expected 1 Create call, got %d", driver.createCallN)
+	}
+	if driver.readCallN != 2 {
+		t.Errorf("expected 2 Read calls (initial + post-already-exists), got %d", driver.readCallN)
+	}
+	if driver.updateCallN != 1 {
+		t.Errorf("expected 1 Update call (post-already-exists fallback), got %d", driver.updateCallN)
+	}
+	if p.lastProviderID != "race-id" {
+		t.Errorf("lastProviderID: want %q, got %q", "race-id", p.lastProviderID)
 	}
 }

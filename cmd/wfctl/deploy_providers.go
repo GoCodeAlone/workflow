@@ -443,6 +443,51 @@ func containsAny(s string, subs ...string) bool {
 	return false
 }
 
+// deployRetryDelays controls the per-attempt sleep for retryOnTransient.
+// The first entry is always 0 (no delay before the first attempt); subsequent
+// entries are the delays before each retry. Overriding this var in tests
+// prevents real sleeping. Total attempts = len(deployRetryDelays).
+var deployRetryDelays = []time.Duration{0, time.Second, 2 * time.Second, 4 * time.Second}
+
+// retryOnTransient calls op repeatedly, sleeping deployRetryDelays[i] before
+// attempt i. Returns nil on the first success. Returns immediately (without
+// retry) if the error is not ErrRateLimited or ErrTransient. Returns a
+// "exhausted retries" error wrapping the last error when all attempts fail.
+func retryOnTransient(ctx context.Context, op func() error) error {
+	var lastErr error
+	for i, d := range deployRetryDelays {
+		if d > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(d):
+			}
+		}
+		lastErr = op()
+		if lastErr == nil {
+			return nil
+		}
+		if !errors.Is(lastErr, interfaces.ErrRateLimited) && !errors.Is(lastErr, interfaces.ErrTransient) {
+			return lastErr // non-retryable: surface immediately
+		}
+		log.Printf("plugin deploy: retry %d/%d (after %v): %v", i+1, len(deployRetryDelays)-1, d, lastErr)
+	}
+	return fmt.Errorf("exhausted retries: %w", lastErr)
+}
+
+// deployOpError annotates an operation error with context and, for auth/validation
+// failures, an actionable hint so operators know what to fix.
+func deployOpError(resourceName, op string, err error) error {
+	switch {
+	case errors.Is(err, interfaces.ErrUnauthorized) || errors.Is(err, interfaces.ErrForbidden):
+		return fmt.Errorf("plugin deploy %q: %s: auth failed — check DIGITALOCEAN_TOKEN permissions: %w", resourceName, op, err)
+	case errors.Is(err, interfaces.ErrValidation):
+		return fmt.Errorf("plugin deploy %q: %s: validation error: %w", resourceName, op, err)
+	default:
+		return fmt.Errorf("plugin deploy %q: %s failed: %w", resourceName, op, err)
+	}
+}
+
 // decodeResourceOutput converts an InvokeService response map into a *interfaces.ResourceOutput,
 // including the Outputs map and Sensitive flags that the previous Update implementation discarded.
 func decodeResourceOutput(m map[string]any) *interfaces.ResourceOutput {
@@ -864,43 +909,85 @@ func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) err
 
 	// Read-by-name first: discover the existing ProviderID (if any) so Update
 	// can target the exact cloud resource rather than a blank ID.
-	readOut, readErr := driver.Read(ctx, ref)
+	var readOut *interfaces.ResourceOutput
+	readErr := retryOnTransient(ctx, func() error {
+		var err error
+		readOut, err = driver.Read(ctx, ref)
+		return err
+	})
 	switch {
 	case readErr == nil && readOut != nil && readOut.ProviderID != "":
 		ref.ProviderID = readOut.ProviderID
 		log.Printf("plugin deploy %q: found existing resource (id=%s)", p.resourceName, ref.ProviderID)
 	case readErr != nil && errors.Is(readErr, interfaces.ErrResourceNotFound):
 		// Resource confirmed absent — skip Update, go straight to Create.
-		log.Printf("plugin deploy %q: resource not found via Read, creating new", p.resourceName)
-		out, createErr := driver.Create(ctx, spec)
-		if createErr != nil {
-			return fmt.Errorf("plugin deploy %q: create failed: %w", p.resourceName, createErr)
-		}
-		p.lastProviderID = out.ProviderID
-		fmt.Printf("  plugin deploy: created %q at %s (id=%s)\n", p.resourceName, imageStr, out.ProviderID)
-		return nil
+		return p.doCreate(ctx, driver, ref, spec, imageStr)
 	case readErr != nil:
-		return fmt.Errorf("plugin deploy %q: read existing resource: %w", p.resourceName, readErr)
+		return deployOpError(p.resourceName, "read", readErr)
 	}
 
 	// Belt-and-suspenders: Update first; fall back to Create on not-found.
-	out, updateErr := driver.Update(ctx, ref, spec)
+	var out *interfaces.ResourceOutput
+	updateErr := retryOnTransient(ctx, func() error {
+		var err error
+		out, err = driver.Update(ctx, ref, spec)
+		return err
+	})
 	if updateErr == nil {
 		p.lastProviderID = out.ProviderID
 		fmt.Printf("  plugin deploy: updated %q at %s (id=%s)\n", p.resourceName, imageStr, out.ProviderID)
 		return nil
 	}
 	if !errors.Is(updateErr, interfaces.ErrResourceNotFound) {
-		return fmt.Errorf("plugin deploy %q: update image: %w", p.resourceName, updateErr)
+		return deployOpError(p.resourceName, "update", updateErr)
 	}
 	// Resource does not exist yet — fall back to Create.
+	return p.doCreate(ctx, driver, ref, spec, imageStr)
+}
+
+// doCreate calls driver.Create with retry. On ErrResourceAlreadyExists (a race
+// where another process created the resource between our Read and Create), it
+// re-reads by name to discover the ProviderID and falls back to Update.
+func (p *pluginDeployProvider) doCreate(ctx context.Context, driver interfaces.ResourceDriver, ref interfaces.ResourceRef, spec interfaces.ResourceSpec, imageStr string) error {
 	log.Printf("plugin deploy %q: resource not found, creating new", p.resourceName)
-	out, createErr := driver.Create(ctx, spec)
-	if createErr != nil {
-		return fmt.Errorf("plugin deploy %q: create failed: %w", p.resourceName, errors.Join(createErr, updateErr))
+	var out *interfaces.ResourceOutput
+	createErr := retryOnTransient(ctx, func() error {
+		var err error
+		out, err = driver.Create(ctx, spec)
+		return err
+	})
+	if createErr == nil {
+		p.lastProviderID = out.ProviderID
+		fmt.Printf("  plugin deploy: created %q at %s (id=%s)\n", p.resourceName, imageStr, out.ProviderID)
+		return nil
 	}
-	p.lastProviderID = out.ProviderID
-	fmt.Printf("  plugin deploy: created %q at %s (id=%s)\n", p.resourceName, imageStr, out.ProviderID)
+	if !errors.Is(createErr, interfaces.ErrResourceAlreadyExists) {
+		return deployOpError(p.resourceName, "create", createErr)
+	}
+
+	// Race condition: re-read by name to discover the ProviderID, then Update.
+	log.Printf("plugin deploy %q: create returned already-exists, re-reading to discover ProviderID", p.resourceName)
+	var raceOut *interfaces.ResourceOutput
+	if raceReadErr := retryOnTransient(ctx, func() error {
+		var err error
+		raceOut, err = driver.Read(ctx, ref)
+		return err
+	}); raceReadErr != nil {
+		return fmt.Errorf("plugin deploy %q: create raced (already-exists), re-read failed: %w", p.resourceName, raceReadErr)
+	}
+	if raceOut != nil && raceOut.ProviderID != "" {
+		ref.ProviderID = raceOut.ProviderID
+	}
+	var updateOut *interfaces.ResourceOutput
+	if updateErr := retryOnTransient(ctx, func() error {
+		var err error
+		updateOut, err = driver.Update(ctx, ref, spec)
+		return err
+	}); updateErr != nil {
+		return deployOpError(p.resourceName, "post-already-exists update", updateErr)
+	}
+	p.lastProviderID = updateOut.ProviderID
+	fmt.Printf("  plugin deploy: updated %q at %s (id=%s) [post-conflict]\n", p.resourceName, imageStr, updateOut.ProviderID)
 	return nil
 }
 
@@ -919,9 +1006,13 @@ func (p *pluginDeployProvider) HealthCheck(ctx context.Context, cfg DeployConfig
 		return fmt.Errorf("health check: no ProviderID available — Deploy must run first")
 	}
 	ref := interfaces.ResourceRef{Name: p.resourceName, Type: p.resourceType, ProviderID: p.lastProviderID}
-	result, err := driver.HealthCheck(ctx, ref)
-	if err != nil {
-		return fmt.Errorf("plugin health check %q: %w", p.resourceName, err)
+	var result *interfaces.HealthResult
+	if hcErr := retryOnTransient(ctx, func() error {
+		var err error
+		result, err = driver.HealthCheck(ctx, ref)
+		return err
+	}); hcErr != nil {
+		return fmt.Errorf("plugin health check %q: %w", p.resourceName, hcErr)
 	}
 	if !result.Healthy {
 		return fmt.Errorf("plugin health check %q: unhealthy: %s", p.resourceName, result.Message)
