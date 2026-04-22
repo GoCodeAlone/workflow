@@ -2,8 +2,11 @@ package module_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -52,6 +55,25 @@ func (r *stubRegistry) Update(_ string, _ interfaces.TenantPatch) (interfaces.Te
 	return interfaces.Tenant{}, nil
 }
 func (r *stubRegistry) Disable(_ string) error { return nil }
+
+// spyEmitter captures calls to EmitTenantMismatch for test assertions.
+type spyEmitter struct {
+	mu     sync.Mutex
+	events []map[string]any
+}
+
+func (e *spyEmitter) EmitTenantMismatch(_ context.Context, data map[string]any) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, data)
+	return nil
+}
+
+func (e *spyEmitter) count() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.events)
+}
 
 func makeReq() *http.Request {
 	return httptest.NewRequest(http.MethodGet, "/", nil)
@@ -126,9 +148,11 @@ func TestTenantContextResolver_AllMustMatch_Disagree(t *testing.T) {
 		"acme": {ID: "1", Slug: "acme", IsActive: true},
 		"beta": {ID: "2", Slug: "beta", IsActive: true},
 	}}
+	spy := &spyEmitter{}
 	resolver := module.NewTenantContextResolver(module.TenantContextResolverConfig{
-		Mode:     "all_must_match",
-		Registry: reg,
+		Mode:         "all_must_match",
+		Registry:     reg,
+		EventEmitter: spy,
 		Selectors: []interfaces.Selector{
 			&stubSelector{key: "acme", matched: true},
 			&stubSelector{key: "beta", matched: true},
@@ -137,7 +161,13 @@ func TestTenantContextResolver_AllMustMatch_Disagree(t *testing.T) {
 
 	_, err := resolver.Resolve(context.Background(), makeReq())
 	if err == nil {
-		t.Error("all_must_match with disagreement should return error")
+		t.Fatal("all_must_match with disagreement should return error")
+	}
+	if !errors.Is(err, module.ErrTenantMismatch) {
+		t.Errorf("expected ErrTenantMismatch, got: %v", err)
+	}
+	if spy.count() != 1 {
+		t.Errorf("expected 1 mismatch event, got %d", spy.count())
 	}
 }
 
@@ -162,6 +192,88 @@ func TestTenantContextResolver_Consensus_Majority(t *testing.T) {
 	}
 	if tenant.Slug != "acme" {
 		t.Errorf("consensus: expected 'acme' (2/3 votes), got %q", tenant.Slug)
+	}
+}
+
+func TestTenantContextResolver_Consensus_MinVotes(t *testing.T) {
+	reg := &stubRegistry{tenants: map[string]interfaces.Tenant{
+		"acme": {ID: "1", Slug: "acme", IsActive: true},
+	}}
+	// Require 3 votes but only 2 agree — should return zero tenant.
+	resolver := module.NewTenantContextResolver(module.TenantContextResolverConfig{
+		Mode:     "consensus",
+		MinVotes: 3,
+		Registry: reg,
+		Selectors: []interfaces.Selector{
+			&stubSelector{key: "acme", matched: true},
+			&stubSelector{key: "acme", matched: true},
+		},
+	})
+
+	tenant, err := resolver.Resolve(context.Background(), makeReq())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !tenant.IsZero() {
+		t.Errorf("expected zero tenant when votes < MinVotes, got %+v", tenant)
+	}
+}
+
+// TestTenantMiddleware_SessionHijackEmulation verifies that when a request carries
+// conflicting tenant signals (simulating a session-hijack attempt), the middleware:
+//  1. Responds with HTTP 403 Forbidden
+//  2. Emits a tenant.mismatch event via the EventEmitter
+func TestTenantMiddleware_SessionHijackEmulation(t *testing.T) {
+	reg := &stubRegistry{tenants: map[string]interfaces.Tenant{
+		"acme": {ID: "1", Slug: "acme", IsActive: true},
+		"evil": {ID: "2", Slug: "evil", IsActive: true},
+	}}
+	spy := &spyEmitter{}
+
+	// Simulate two selectors disagreeing: cookie says "acme", JWT claim says "evil".
+	resolver := module.NewTenantContextResolver(module.TenantContextResolverConfig{
+		Mode:         "all_must_match",
+		Registry:     reg,
+		EventEmitter: spy,
+		Selectors: []interfaces.Selector{
+			&stubSelector{key: "acme", matched: true}, // cookie selector
+			&stubSelector{key: "evil", matched: true}, // tampered JWT claim
+		},
+	})
+
+	// Wrap a no-op handler with TenantMiddleware.
+	nextCalled := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := module.TenantMiddleware(resolver, next)
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, makeReq())
+
+	// 1. Verify 403 Forbidden.
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden, got %d", w.Code)
+	}
+
+	// 2. Verify JSON error body.
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if body["error"] != "tenant.mismatch" {
+		t.Errorf("expected error=tenant.mismatch, got %v", body)
+	}
+
+	// 3. Verify mismatch event was emitted.
+	if spy.count() != 1 {
+		t.Errorf("expected 1 mismatch event emitted, got %d", spy.count())
+	}
+
+	// 4. Verify next handler was NOT called.
+	if nextCalled {
+		t.Error("next handler should not be called on mismatch")
 	}
 }
 
