@@ -51,8 +51,9 @@ type DeployProvider interface {
 // newDeployProvider returns the DeployProvider for the given provider name.
 // For non-built-in providers, wfCfg is consulted to find a matching iac.provider
 // module and its infra.container_service resource. Pass nil wfCfg to restrict to
-// built-ins only.
-func newDeployProvider(provider string, wfCfg *config.WorkflowConfig) (DeployProvider, error) {
+// built-ins only. envName selects the per-environment config overlay; pass ""
+// to use top-level config only.
+func newDeployProvider(provider string, wfCfg *config.WorkflowConfig, envName string) (DeployProvider, error) {
 	switch provider {
 	case "kubernetes", "k8s":
 		return &kubernetesProvider{}, nil
@@ -61,7 +62,7 @@ func newDeployProvider(provider string, wfCfg *config.WorkflowConfig) (DeployPro
 	case "aws-ecs":
 		return &awsECSProvider{}, nil
 	default:
-		return newPluginDeployProvider(provider, wfCfg)
+		return newPluginDeployProvider(provider, wfCfg, envName)
 	}
 }
 
@@ -605,24 +606,45 @@ type closerFunc func() error
 func (f closerFunc) Close() error { return f() }
 
 // newPluginDeployProvider looks up a matching iac.provider + infra.container_service
-// module pair in wfCfg and wraps them as a DeployProvider.
-func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig) (DeployProvider, error) {
+// module pair in wfCfg and wraps them as a DeployProvider. envName selects the
+// per-environment config overlay via ModuleConfig.ResolveForEnv; pass "" to use
+// top-level config only (modules marked deleted for the env are skipped).
+func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig, envName string) (DeployProvider, error) {
 	const hint = "\n  Example:\n    modules:\n    - name: my-provider\n      type: iac.provider\n      config:\n        provider: %s\n        credentials: env"
 	if wfCfg == nil || len(wfCfg.Modules) == 0 {
 		return nil, fmt.Errorf("unsupported deploy provider %q (built-ins: kubernetes, docker, aws-ecs; to use a plugin provider, declare an iac.provider module in your workflow config)%s", providerName, fmt.Sprintf(hint, providerName))
 	}
 
+	// resolveModCfg returns the effective config map for m after applying the
+	// per-env overlay (when envName is set). ok=false means the module is
+	// explicitly deleted for this env and should be skipped.
+	resolveModCfg := func(m *config.ModuleConfig) (map[string]any, bool) {
+		if envName == "" {
+			return m.Config, true
+		}
+		resolved, ok := m.ResolveForEnv(envName)
+		if !ok {
+			return nil, false
+		}
+		return resolved.Config, true
+	}
+
 	// Find the iac.provider module matching the requested provider name.
 	var providerModName string
 	var providerModCfg map[string]any
-	for _, m := range wfCfg.Modules {
+	for i := range wfCfg.Modules {
+		m := &wfCfg.Modules[i]
 		if m.Type != "iac.provider" {
 			continue
 		}
-		cfgProvider, _ := m.Config["provider"].(string)
+		cfg, ok := resolveModCfg(m)
+		if !ok {
+			continue
+		}
+		cfgProvider, _ := cfg["provider"].(string)
 		if cfgProvider == providerName || m.Name == providerName {
 			providerModName = m.Name
-			providerModCfg = m.Config
+			providerModCfg = cfg
 			break
 		}
 	}
@@ -646,14 +668,19 @@ func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig) 
 	var resourceName, resourceType string
 	var resourceCfg map[string]any
 	findByType := func(target string) bool {
-		for _, m := range wfCfg.Modules {
+		for i := range wfCfg.Modules {
+			m := &wfCfg.Modules[i]
 			if m.Type != target {
 				continue
 			}
-			if p, _ := m.Config["provider"].(string); p == providerModName {
+			cfg, ok := resolveModCfg(m)
+			if !ok {
+				continue
+			}
+			if p, _ := cfg["provider"].(string); p == providerModName {
 				resourceName = m.Name
 				resourceType = m.Type
-				resourceCfg = m.Config
+				resourceCfg = cfg
 				return true
 			}
 		}
@@ -666,16 +693,21 @@ func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig) 
 	}
 	if resourceName == "" {
 		// Fallback: first infra.* module with matching provider.
-		for _, m := range wfCfg.Modules {
+		for i := range wfCfg.Modules {
+			m := &wfCfg.Modules[i]
 			if m.Type == "iac.provider" || m.Type == "" {
 				continue
 			}
-			if p, _ := m.Config["provider"].(string); p == providerModName {
+			cfg, ok := resolveModCfg(m)
+			if !ok {
+				continue
+			}
+			if p, _ := cfg["provider"].(string); p == providerModName {
 				fmt.Fprintf(os.Stderr, "warning: no deploy-target module (%v) found for provider %q; falling back to first infra module %q (type %q)\n",
 					deployTargetTypes, providerModName, m.Name, m.Type)
 				resourceName = m.Name
 				resourceType = m.Type
-				resourceCfg = m.Config
+				resourceCfg = cfg
 				break
 			}
 		}
@@ -684,11 +716,13 @@ func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig) 
 		return nil, fmt.Errorf("no infra resource module found for provider %q in workflow config", providerModName)
 	}
 
-	// Expand env-var references in both configs before storing. This resolves
-	// ${TOKEN} / $TOKEN placeholders that were written into the YAML using
-	// environment variables (e.g. token: ${DIGITALOCEAN_TOKEN}). Expansion
-	// happens here — at construction time — so the resolved values are always
-	// used downstream, regardless of which method accesses them.
+	// Expand env-var references in both configs after the env-config merge.
+	// This resolves ${TOKEN} / $TOKEN placeholders written into the YAML.
+	// Expansion happens here — at construction time — so the resolved values
+	// are always used downstream, regardless of which method accesses them.
+	//
+	// Order matters: ResolveForEnv (above) merges per-env config into the map
+	// first, so ${VAR} refs introduced by per-env overlays are expanded here.
 	//
 	// Secrets flow: if the caller has already injected secrets via os.Setenv
 	// (e.g. env-provider secrets), ExpandEnvInMap picks them up here. Secrets

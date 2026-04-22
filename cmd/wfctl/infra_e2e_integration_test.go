@@ -151,7 +151,7 @@ secrets:
 		t.Fatalf("phase 3 load config: %v", err)
 	}
 
-	dp, err := newDeployProvider("fake-cloud", wfCfg)
+	dp, err := newDeployProvider("fake-cloud", wfCfg, "")
 	if err != nil {
 		t.Fatalf("phase 3 newDeployProvider: %v", err)
 	}
@@ -391,7 +391,7 @@ secrets:
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	dp, err := newDeployProvider("fake-cloud", wfCfg)
+	dp, err := newDeployProvider("fake-cloud", wfCfg, "")
 	if err != nil {
 		t.Fatalf("newDeployProvider: %v", err)
 	}

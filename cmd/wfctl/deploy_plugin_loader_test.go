@@ -106,7 +106,7 @@ func TestPluginDeployProvider_LazyResolution(t *testing.T) {
 	}
 
 	cfg := makePluginTestConfig("fake-cloud", "fake-provider")
-	p, err := newDeployProvider("fake-cloud", cfg)
+	p, err := newDeployProvider("fake-cloud", cfg, "")
 	if err != nil {
 		t.Fatalf("newDeployProvider: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestPluginDeployProvider_ResourceTypeFromModule(t *testing.T) {
 	}
 
 	cfg := makePluginTestConfig("fake-cloud", "fake-provider")
-	p, err := newDeployProvider("fake-cloud", cfg)
+	p, err := newDeployProvider("fake-cloud", cfg, "")
 	if err != nil {
 		t.Fatalf("newDeployProvider: %v", err)
 	}
