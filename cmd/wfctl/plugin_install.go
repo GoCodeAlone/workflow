@@ -649,22 +649,39 @@ func installFromLocal(srcDir, pluginDir string) error {
 // /releases/download/<new>/<filename>. SHA256 checksums are cleared since they are
 // only valid for the original version's assets.
 //
-// If requestedVersion matches manifest.Version, this is a no-op.
+// Version comparison is v-prefix-tolerant: "v0.6.1" and "0.6.1" are treated as
+// the same version, so passing @v0.6.1 when the registry manifest has "0.6.1" is
+// a no-op rather than a rewrite that would corrupt download URLs.
+//
+// If requestedVersion matches manifest.Version (after v-normalization), this is a no-op.
 func pinManifestToVersion(manifest *RegistryManifest, requestedVersion string) {
-	if requestedVersion == manifest.Version {
-		return
+	// Normalize both versions by stripping the leading "v" for comparison.
+	// This prevents treating "0.6.1" and "v0.6.1" as different versions, which
+	// would corrupt download URLs by producing "vv0.6.1" via the fallback replacement.
+	normalizedOld := strings.TrimPrefix(manifest.Version, "v")
+	normalizedNew := strings.TrimPrefix(requestedVersion, "v")
+	if normalizedOld == normalizedNew {
+		return // same version, v-prefix convention mismatch only
 	}
 	oldVersion := manifest.Version
 	manifest.Version = requestedVersion
 	for i := range manifest.Downloads {
 		url := manifest.Downloads[i].URL
-		// Replace the release tag in the GitHub releases download path.
+		// 1. Try replacing the exact manifest version string in the GitHub releases path.
 		rewritten := strings.ReplaceAll(url,
 			"/releases/download/"+oldVersion+"/",
 			"/releases/download/"+requestedVersion+"/")
-		// If the version string also appears in the filename, rewrite that too.
-		if rewritten == url && oldVersion != "" {
-			rewritten = strings.ReplaceAll(url, oldVersion, requestedVersion)
+		// 2. If no match, try v-normalized replacement. This handles the common case
+		//    where the manifest stores "0.6.1" but the GitHub release tag is "v0.6.1".
+		if rewritten == url {
+			rewritten = strings.ReplaceAll(url,
+				"/releases/download/v"+normalizedOld+"/",
+				"/releases/download/v"+normalizedNew+"/")
+		}
+		// 3. Fallback: replace the bare version number anywhere in the URL, using
+		//    normalized (no-v) forms so we don't double-up the "v" prefix.
+		if rewritten == url && normalizedOld != "" {
+			rewritten = strings.ReplaceAll(url, normalizedOld, normalizedNew)
 		}
 		manifest.Downloads[i].URL = rewritten
 		manifest.Downloads[i].SHA256 = "" // checksums are for the old version's assets

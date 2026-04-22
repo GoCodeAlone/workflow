@@ -12,6 +12,84 @@ import (
 	"testing"
 )
 
+// TestPinManifestToVersion_VPrefixMismatchSameVersion verifies that when the
+// registry manifest stores a version without a "v" prefix (e.g. "0.6.1") but the
+// user requests the same version with a "v" prefix (e.g. "@v0.6.1"), pinManifestToVersion
+// treats them as equal and makes no changes — preventing the double-v bug where
+// the fallback replacement would turn ".../v0.6.1/..." into ".../vv0.6.1/...".
+func TestPinManifestToVersion_VPrefixMismatchSameVersion(t *testing.T) {
+	origURL := "https://github.com/owner/repo/releases/download/v0.6.1/plugin-linux-amd64.tar.gz"
+	manifest := &RegistryManifest{
+		Name:    "auth",
+		Version: "0.6.1", // registry stores without v prefix
+		Downloads: []PluginDownload{
+			{OS: "linux", Arch: "amd64", URL: origURL, SHA256: "checksum"},
+		},
+	}
+
+	// User passes @v0.6.1 — same version, just different prefix convention.
+	pinManifestToVersion(manifest, "v0.6.1")
+
+	// Version should NOT have been changed (they're the same version).
+	// More importantly: URL must not contain "vv0.6.1".
+	if strings.Contains(manifest.Downloads[0].URL, "vv0.6.1") {
+		t.Errorf("double-v bug: URL contains %q: %s", "vv0.6.1", manifest.Downloads[0].URL)
+	}
+	if manifest.Downloads[0].URL != origURL {
+		t.Errorf("URL should be unchanged for same version: got %q, want %q",
+			manifest.Downloads[0].URL, origURL)
+	}
+	// SHA256 should NOT be cleared because no rewrite happened.
+	if manifest.Downloads[0].SHA256 == "" {
+		t.Error("SHA256 should not be cleared when version is unchanged")
+	}
+}
+
+// TestPinManifestToVersion_CrossPrefixPin verifies that when the manifest stores
+// a version without "v" (e.g. "0.5.0") and the URL has "v0.5.0", pinning to a
+// new version (e.g. "v0.6.1") correctly rewrites the URL to "v0.6.1" without
+// introducing a double-v or losing the prefix.
+func TestPinManifestToVersion_CrossPrefixPin(t *testing.T) {
+	manifest := &RegistryManifest{
+		Name:    "auth",
+		Version: "0.5.0", // registry stores without v prefix
+		Downloads: []PluginDownload{
+			{
+				OS:   "linux",
+				Arch: "amd64",
+				// URL uses the standard GitHub release tag format (with v prefix).
+				URL:    "https://github.com/owner/repo/releases/download/v0.5.0/auth-linux-amd64.tar.gz",
+				SHA256: "oldchecksum",
+			},
+			{
+				OS:   "darwin",
+				Arch: "arm64",
+				URL:  "https://github.com/owner/repo/releases/download/v0.5.0/auth-darwin-arm64.tar.gz",
+			},
+		},
+	}
+
+	pinManifestToVersion(manifest, "v0.6.1")
+
+	if manifest.Version != "v0.6.1" {
+		t.Errorf("manifest.Version: got %q, want %q", manifest.Version, "v0.6.1")
+	}
+	for i, dl := range manifest.Downloads {
+		if strings.Contains(dl.URL, "vv0.6.1") {
+			t.Errorf("download[%d]: double-v bug in URL: %s", i, dl.URL)
+		}
+		if !strings.Contains(dl.URL, "v0.6.1") {
+			t.Errorf("download[%d]: URL should contain v0.6.1: %s", i, dl.URL)
+		}
+		if strings.Contains(dl.URL, "0.5.0") {
+			t.Errorf("download[%d]: URL still contains old version 0.5.0: %s", i, dl.URL)
+		}
+		if dl.SHA256 != "" {
+			t.Errorf("download[%d]: SHA256 should be cleared after version pin, got %q", i, dl.SHA256)
+		}
+	}
+}
+
 // TestPinManifestToVersion_URLRewritten verifies that pinManifestToVersion
 // replaces the old version string in download URLs and updates manifest.Version.
 func TestPinManifestToVersion_URLRewritten(t *testing.T) {
