@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -464,6 +465,52 @@ func TestMultiRegistryFetchNotFound(t *testing.T) {
 	_, _, err := mr.FetchManifest("does-not-exist")
 	if err == nil {
 		t.Fatal("expected error when plugin not found in any registry")
+	}
+}
+
+// TestMultiRegistryFetchNoSources verifies that an empty MultiRegistry returns a
+// clear, actionable error rather than the generic "not found in any configured
+// registry" message (which would be misleading when the real problem is zero sources).
+func TestMultiRegistryFetchNoSources(t *testing.T) {
+	mr := NewMultiRegistryFromSources() // zero sources
+	_, _, err := mr.FetchManifest("any-plugin")
+	if err == nil {
+		t.Fatal("expected error for empty registry")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "no registry sources configured") {
+		t.Errorf("error should mention empty sources, got: %q", msg)
+	}
+}
+
+// TestMultiRegistryDebugLogging verifies that setting WFCTL_DEBUG produces
+// trace lines on stderr. We test this by checking the package-level
+// debugRegistryLog flag can be flipped and the function path is exercised.
+// (We do not capture stderr output — just confirm no panic / data race.)
+func TestMultiRegistryDebugLogging_NoSourcesPanic(t *testing.T) {
+	// Temporarily enable debug logging.
+	orig := debugRegistryLog
+	debugRegistryLog = true
+	t.Cleanup(func() { debugRegistryLog = orig })
+
+	src := &mockRegistrySource{
+		name: "test",
+		manifests: map[string]*RegistryManifest{
+			"myplugin": {Name: "myplugin", Version: "v1.0.0"},
+		},
+	}
+	mr := NewMultiRegistryFromSources(src)
+
+	// Should succeed without panicking even with debug on.
+	manifest, srcName, err := mr.FetchManifest("myplugin")
+	if err != nil {
+		t.Fatalf("FetchManifest: %v", err)
+	}
+	if manifest.Name != "myplugin" {
+		t.Errorf("name: got %q, want %q", manifest.Name, "myplugin")
+	}
+	if srcName != "test" {
+		t.Errorf("source: got %q, want %q", srcName, "test")
 	}
 }
 
