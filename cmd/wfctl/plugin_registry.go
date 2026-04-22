@@ -44,11 +44,21 @@ type RegistryManifest struct {
 
 // RegistryCapabilities describes what module/step/trigger types a plugin provides.
 type RegistryCapabilities struct {
-	ConfigProvider   bool     `json:"configProvider,omitempty"`
-	ModuleTypes      []string `json:"moduleTypes,omitempty"`
-	StepTypes        []string `json:"stepTypes,omitempty"`
-	TriggerTypes     []string `json:"triggerTypes,omitempty"`
-	WorkflowHandlers []string `json:"workflowHandlers,omitempty"`
+	ConfigProvider   bool                 `json:"configProvider,omitempty"`
+	ModuleTypes      []string             `json:"moduleTypes,omitempty"`
+	StepTypes        []string             `json:"stepTypes,omitempty"`
+	TriggerTypes     []string             `json:"triggerTypes,omitempty"`
+	WorkflowHandlers []string             `json:"workflowHandlers,omitempty"`
+	IaCProvider      *RegistryIaCProvider `json:"iacProvider,omitempty"`
+}
+
+// RegistryIaCProvider describes an IaC provider plugin's provider name and the
+// infra.* resource types it manages. findIaCPluginDir reads this from the
+// installed plugin.json to match a requested provider name (e.g. "digitalocean")
+// to a plugin directory.
+type RegistryIaCProvider struct {
+	Name          string   `json:"name"`
+	ResourceTypes []string `json:"resourceTypes,omitempty"`
 }
 
 // PluginDownload describes a platform-specific binary download for a plugin.

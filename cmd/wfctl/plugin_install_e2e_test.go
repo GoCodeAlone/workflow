@@ -196,11 +196,14 @@ func TestPluginInstallE2E(t *testing.T) {
 	if pj.Type != "external" {
 		t.Errorf("plugin.json type: got %q, want %q", pj.Type, "external")
 	}
-	if len(pj.ModuleTypes) != 1 || pj.ModuleTypes[0] != "test.module" {
-		t.Errorf("plugin.json moduleTypes: got %v, want [test.module]", pj.ModuleTypes)
+	if pj.Capabilities == nil {
+		t.Fatalf("plugin.json capabilities is nil, want ModuleTypes + StepTypes")
 	}
-	if len(pj.StepTypes) != 1 || pj.StepTypes[0] != "step.test_action" {
-		t.Errorf("plugin.json stepTypes: got %v, want [step.test_action]", pj.StepTypes)
+	if len(pj.Capabilities.ModuleTypes) != 1 || pj.Capabilities.ModuleTypes[0] != "test.module" {
+		t.Errorf("plugin.json capabilities.moduleTypes: got %v, want [test.module]", pj.Capabilities.ModuleTypes)
+	}
+	if len(pj.Capabilities.StepTypes) != 1 || pj.Capabilities.StepTypes[0] != "step.test_action" {
+		t.Errorf("plugin.json capabilities.stepTypes: got %v, want [step.test_action]", pj.Capabilities.StepTypes)
 	}
 
 	// --- Step 7: ExternalPluginManager.DiscoverPlugins ---
@@ -814,7 +817,9 @@ func TestPluginUpdateFallbackToRepo(t *testing.T) {
 		Tier:        "core",
 		License:     "MIT",
 		Repository:  fmt.Sprintf("https://github.com/%s/%s", owner, pluginName),
-		ModuleTypes: []string{"authz.casbin"},
+		Capabilities: &installedPluginCapabilities{
+			ModuleTypes: []string{"authz.casbin"},
+		},
 	}
 	installedJSONBytes, _ := json.Marshal(installedJSON)
 	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), installedJSONBytes, 0640); err != nil {

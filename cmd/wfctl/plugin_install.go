@@ -480,14 +480,19 @@ func runPluginInfo(args []string) error {
 	if m.Repository != "" {
 		fmt.Printf("Repository:   %s\n", m.Repository)
 	}
-	if len(m.ModuleTypes) > 0 {
-		fmt.Printf("Module Types: %s\n", strings.Join(m.ModuleTypes, ", "))
-	}
-	if len(m.StepTypes) > 0 {
-		fmt.Printf("Step Types:   %s\n", strings.Join(m.StepTypes, ", "))
-	}
-	if len(m.TriggerTypes) > 0 {
-		fmt.Printf("Trigger Types: %s\n", strings.Join(m.TriggerTypes, ", "))
+	if m.Capabilities != nil {
+		if len(m.Capabilities.ModuleTypes) > 0 {
+			fmt.Printf("Module Types: %s\n", strings.Join(m.Capabilities.ModuleTypes, ", "))
+		}
+		if len(m.Capabilities.StepTypes) > 0 {
+			fmt.Printf("Step Types:   %s\n", strings.Join(m.Capabilities.StepTypes, ", "))
+		}
+		if len(m.Capabilities.TriggerTypes) > 0 {
+			fmt.Printf("Trigger Types: %s\n", strings.Join(m.Capabilities.TriggerTypes, ", "))
+		}
+		if m.Capabilities.IaCProvider != nil {
+			fmt.Printf("IaC Provider: %s\n", m.Capabilities.IaCProvider.Name)
+		}
 	}
 	if len(m.Tags) > 0 {
 		fmt.Printf("Tags:         %s\n", strings.Join(m.Tags, ", "))
@@ -862,20 +867,27 @@ func safeJoin(base, name string) (string, error) {
 
 // installedPluginJSON is the JSON format for plugin.json written after install.
 // This must be compatible with plugin.PluginManifest so that
-// ExternalPluginManager.LoadPlugin() can validate it.
+// ExternalPluginManager.LoadPlugin() can validate it AND compatible with
+// wfctl's deploy_providers.iacPluginManifest so findIaCPluginDir can read
+// capabilities.iacProvider.name.
 type installedPluginJSON struct {
-	Name         string   `json:"name"`
-	Version      string   `json:"version"`
-	Author       string   `json:"author"`
-	Description  string   `json:"description"`
-	License      string   `json:"license,omitempty"`
-	Repository   string   `json:"repository,omitempty"`
-	Tier         string   `json:"tier,omitempty"`
-	Tags         []string `json:"tags,omitempty"`
-	Type         string   `json:"type,omitempty"`
-	ModuleTypes  []string `json:"moduleTypes,omitempty"`
-	StepTypes    []string `json:"stepTypes,omitempty"`
-	TriggerTypes []string `json:"triggerTypes,omitempty"`
+	Name         string                       `json:"name"`
+	Version      string                       `json:"version"`
+	Author       string                       `json:"author"`
+	Description  string                       `json:"description"`
+	License      string                       `json:"license,omitempty"`
+	Repository   string                       `json:"repository,omitempty"`
+	Tier         string                       `json:"tier,omitempty"`
+	Tags         []string                     `json:"tags,omitempty"`
+	Type         string                       `json:"type,omitempty"`
+	Capabilities *installedPluginCapabilities `json:"capabilities,omitempty"`
+}
+
+type installedPluginCapabilities struct {
+	ModuleTypes  []string             `json:"moduleTypes,omitempty"`
+	StepTypes    []string             `json:"stepTypes,omitempty"`
+	TriggerTypes []string             `json:"triggerTypes,omitempty"`
+	IaCProvider  *RegistryIaCProvider `json:"iacProvider,omitempty"`
 }
 
 // writeInstalledManifest writes a full plugin.json compatible with the engine's
@@ -893,9 +905,12 @@ func writeInstalledManifest(path string, m *RegistryManifest) error {
 		Type:        m.Type,
 	}
 	if m.Capabilities != nil {
-		pj.ModuleTypes = m.Capabilities.ModuleTypes
-		pj.StepTypes = m.Capabilities.StepTypes
-		pj.TriggerTypes = m.Capabilities.TriggerTypes
+		pj.Capabilities = &installedPluginCapabilities{
+			ModuleTypes:  m.Capabilities.ModuleTypes,
+			StepTypes:    m.Capabilities.StepTypes,
+			TriggerTypes: m.Capabilities.TriggerTypes,
+			IaCProvider:  m.Capabilities.IaCProvider,
+		}
 	}
 	data, err := json.MarshalIndent(pj, "", "  ")
 	if err != nil {
