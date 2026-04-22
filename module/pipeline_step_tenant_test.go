@@ -64,12 +64,10 @@ func (f *fakeTenantRegistry) Disable(id string) error {
 	return f.disableErr
 }
 
-// newTenantTestApp creates a MockApplication with the given TenantRegistry registered.
-func newTenantTestApp(reg interfaces.TenantRegistry) *MockApplication {
+// newTenantStepApp builds a MockApplication with a fake TenantRegistry registered.
+func newTenantStepApp(reg interfaces.TenantRegistry) *MockApplication {
 	app := NewMockApplication()
-	if reg != nil {
-		app.Services[TenantRegistryServiceName] = reg
-	}
+	app.Services[TenantRegistryServiceName] = reg
 	return app
 }
 
@@ -92,7 +90,7 @@ func TestTenantEnsureStep_Execute(t *testing.T) {
 	reg := &fakeTenantRegistry{
 		ensureResult: interfaces.Tenant{ID: "t1", Name: "Acme", Slug: "acme", IsActive: true},
 	}
-	app := newTenantTestApp(reg)
+	app := newTenantStepApp(reg)
 
 	factory := NewTenantEnsureStepFactory()
 	step, err := factory("ensure-tenant", map[string]any{
@@ -129,7 +127,7 @@ func TestTenantEnsureStep_Execute(t *testing.T) {
 }
 
 func TestTenantEnsureStep_MissingRegistry(t *testing.T) {
-	app := newTenantTestApp(nil) // no registry registered
+	app := NewMockApplication() // no registry registered
 	factory := NewTenantEnsureStepFactory()
 	step, err := factory("ensure-tenant", map[string]any{
 		"name_key": "n",
@@ -153,7 +151,7 @@ func TestTenantListStep_Execute(t *testing.T) {
 		{ID: "t2", Slug: "beta", IsActive: true},
 	}
 	reg := &fakeTenantRegistry{listResult: tenants}
-	app := newTenantTestApp(reg)
+	app := newTenantStepApp(reg)
 
 	factory := NewTenantListStepFactory()
 	step, err := factory("list-tenants", map[string]any{
@@ -186,7 +184,7 @@ func TestTenantGetByDomainStep_Execute(t *testing.T) {
 	reg := &fakeTenantRegistry{
 		getByDomainResult: interfaces.Tenant{ID: "t1", Slug: "acme"},
 	}
-	app := newTenantTestApp(reg)
+	app := newTenantStepApp(reg)
 
 	factory := NewTenantGetByDomainStepFactory()
 	step, err := factory("get-by-domain", map[string]any{
@@ -216,7 +214,7 @@ func TestTenantUpdateStep_Execute(t *testing.T) {
 	reg := &fakeTenantRegistry{
 		updateResult: interfaces.Tenant{ID: "t1", Name: newName, Slug: "acme"},
 	}
-	app := newTenantTestApp(reg)
+	app := newTenantStepApp(reg)
 
 	factory := NewTenantUpdateStepFactory()
 	step, err := factory("update-tenant", map[string]any{
@@ -253,7 +251,7 @@ func TestTenantUpdateStep_Execute(t *testing.T) {
 
 func TestTenantDisableStep_Execute(t *testing.T) {
 	reg := &fakeTenantRegistry{}
-	app := newTenantTestApp(reg)
+	app := newTenantStepApp(reg)
 
 	factory := NewTenantDisableStepFactory()
 	step, err := factory("disable-tenant", map[string]any{
@@ -278,7 +276,7 @@ func TestTenantDisableStep_Execute(t *testing.T) {
 
 func TestTenantDisableStep_MissingID(t *testing.T) {
 	reg := &fakeTenantRegistry{}
-	app := newTenantTestApp(reg)
+	app := newTenantStepApp(reg)
 
 	factory := NewTenantDisableStepFactory()
 	step, err := factory("disable-tenant", map[string]any{
