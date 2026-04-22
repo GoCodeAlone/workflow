@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"testing"
 
@@ -29,25 +27,22 @@ func writeBootstrapConfig(t *testing.T, yaml string) string {
 // ── TestBootstrap_StateBackendBucketExpanded ─────────────────────────────────
 
 // TestBootstrap_StateBackendBucketExpanded verifies that ${BUCKET_NAME} in the
-// iac.state config is resolved before bootstrapStateBackend issues HTTP calls.
+// iac.state config is resolved before bootstrapStateBackend calls the bucket fn.
 // Without env expansion, the literal "${BUCKET_NAME}" would be used as the
-// bucket name, causing the cloud API to reject it.
+// bucket name.
 func TestBootstrap_StateBackendBucketExpanded(t *testing.T) {
 	t.Setenv("TEST_BS_BUCKET", "my-state-bucket")
 	t.Setenv("TEST_BS_REGION", "sfo3")
-	t.Setenv("DIGITALOCEAN_TOKEN", "test-do-token")
+	t.Setenv("TEST_BS_ACCESS", "ak")
+	t.Setenv("TEST_BS_SECRET", "sk")
 
-	// Track which bucket name the mock server receives.
 	var gotBucket string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The URL path is /v2/spaces/buckets/<bucket>
-		prefix := "/v2/spaces/buckets/"
-		if len(r.URL.Path) > len(prefix) {
-			gotBucket = r.URL.Path[len(prefix):]
-		}
-		w.WriteHeader(http.StatusOK) // pretend bucket exists
-	}))
-	defer srv.Close()
+	orig := bootstrapDOSpacesBucketFn
+	bootstrapDOSpacesBucketFn = func(_ context.Context, bucket, _, _, _ string) error {
+		gotBucket = bucket
+		return nil
+	}
+	defer func() { bootstrapDOSpacesBucketFn = orig }()
 
 	cfgFile := writeBootstrapConfig(t, `
 modules:
@@ -57,21 +52,16 @@ modules:
       backend: spaces
       bucket: "${TEST_BS_BUCKET}"
       region: "${TEST_BS_REGION}"
+      accessKey: "${TEST_BS_ACCESS}"
+      secretKey: "${TEST_BS_SECRET}"
 `)
-
-	// Swap the injectable DO Spaces function to inject our test server.
-	orig := bootstrapDOSpacesBucketFn
-	bootstrapDOSpacesBucketFn = func(ctx context.Context, bucket, region string) error {
-		return bootstrapDOSpacesBucketAt(ctx, bucket, region, srv.URL)
-	}
-	defer func() { bootstrapDOSpacesBucketFn = orig }()
 
 	if err := bootstrapStateBackend(context.Background(), cfgFile); err != nil {
 		t.Fatalf("bootstrapStateBackend: %v", err)
 	}
 
 	if gotBucket != "my-state-bucket" {
-		t.Errorf("bucket sent to API: want %q, got %q", "my-state-bucket", gotBucket)
+		t.Errorf("bucket: want %q, got %q", "my-state-bucket", gotBucket)
 	}
 }
 
@@ -82,7 +72,6 @@ modules:
 func TestBootstrap_StateBackendEmptyEnvVar(t *testing.T) {
 	// Set to empty to simulate unset (t.Setenv("X", "") still sets the var).
 	t.Setenv("TEST_BS_EMPTY_BUCKET", "")
-	t.Setenv("DIGITALOCEAN_TOKEN", "test-token")
 
 	cfgFile := writeBootstrapConfig(t, `
 modules:
@@ -200,7 +189,7 @@ func TestBootstrap_RepeatedRunIdempotent(t *testing.T) {
 	}
 
 	// First run: generates the secret.
-	if err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
+	if _, err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
 		t.Fatalf("first bootstrapSecrets: %v", err)
 	}
 	if callCount != 1 {
@@ -211,7 +200,7 @@ func TestBootstrap_RepeatedRunIdempotent(t *testing.T) {
 	}
 
 	// Second run: secret already exists — generator must NOT be called again.
-	if err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
+	if _, err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
 		t.Fatalf("second bootstrapSecrets: %v", err)
 	}
 	if callCount != 1 {
@@ -223,24 +212,21 @@ func TestBootstrap_RepeatedRunIdempotent(t *testing.T) {
 
 // TestBootstrap_StateBackendAccessKeyExpanded verifies that BMW-style
 // ${SPACES_access_key} and ${SPACES_secret_key} references in the iac.state
-// config are expanded by ExpandEnvInMap before the config is used.
-// bootstrapStateBackend expands the full module config — not just bucket/region
-// — so accessKey/secretKey are also available in their resolved form to any
-// downstream state-backend initialisation that reads the same config map.
+// config are expanded by ExpandEnvInMap and the resolved values are passed
+// through to bootstrapDOSpacesBucketFn.
 func TestBootstrap_StateBackendAccessKeyExpanded(t *testing.T) {
 	t.Setenv("TEST_SPACES_ACCESS", "do-spaces-key-abc")
 	t.Setenv("TEST_SPACES_SECRET", "do-spaces-secret-xyz")
-	t.Setenv("DIGITALOCEAN_TOKEN", "test-do-token")
 
-	var gotBucket string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		prefix := "/v2/spaces/buckets/"
-		if len(r.URL.Path) > len(prefix) {
-			gotBucket = r.URL.Path[len(prefix):]
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
+	var gotBucket, gotAccessKey, gotSecretKey string
+	orig := bootstrapDOSpacesBucketFn
+	bootstrapDOSpacesBucketFn = func(_ context.Context, bucket, _, accessKey, secretKey string) error {
+		gotBucket = bucket
+		gotAccessKey = accessKey
+		gotSecretKey = secretKey
+		return nil
+	}
+	defer func() { bootstrapDOSpacesBucketFn = orig }()
 
 	cfgFile := writeBootstrapConfig(t, `
 modules:
@@ -254,24 +240,21 @@ modules:
       secretKey: "${TEST_SPACES_SECRET}"
 `)
 
-	orig := bootstrapDOSpacesBucketFn
-	bootstrapDOSpacesBucketFn = func(ctx context.Context, bucket, region string) error {
-		return bootstrapDOSpacesBucketAt(ctx, bucket, region, srv.URL)
-	}
-	defer func() { bootstrapDOSpacesBucketFn = orig }()
-
 	if err := bootstrapStateBackend(context.Background(), cfgFile); err != nil {
 		t.Fatalf("bootstrapStateBackend: %v", err)
 	}
 
-	// Verify the bucket call reached the mock (confirming the full path ran).
 	if gotBucket != "my-state-bucket" {
-		t.Errorf("bucket sent to API: want %q, got %q", "my-state-bucket", gotBucket)
+		t.Errorf("bucket: want %q, got %q", "my-state-bucket", gotBucket)
+	}
+	if gotAccessKey != "do-spaces-key-abc" {
+		t.Errorf("accessKey: want %q, got %q", "do-spaces-key-abc", gotAccessKey)
+	}
+	if gotSecretKey != "do-spaces-secret-xyz" {
+		t.Errorf("secretKey: want %q, got %q", "do-spaces-secret-xyz", gotSecretKey)
 	}
 
-	// Verify accessKey/secretKey were expanded (not passed as literals).
-	// We load the modules independently and apply ExpandEnvInMap — the same
-	// code path bootstrapStateBackend uses — to assert the values.
+	// Verify ExpandEnvInMap produced the right values without mutating original config.
 	iacStates, _, _, err := discoverInfraModules(cfgFile)
 	if err != nil {
 		t.Fatalf("discoverInfraModules: %v", err)
@@ -281,10 +264,10 @@ modules:
 	}
 	expanded := config.ExpandEnvInMap(iacStates[0].Config)
 	if got, _ := expanded["accessKey"].(string); got != "do-spaces-key-abc" {
-		t.Errorf("accessKey: want %q, got %q", "do-spaces-key-abc", got)
+		t.Errorf("expanded accessKey: want %q, got %q", "do-spaces-key-abc", got)
 	}
 	if got, _ := expanded["secretKey"].(string); got != "do-spaces-secret-xyz" {
-		t.Errorf("secretKey: want %q, got %q", "do-spaces-secret-xyz", got)
+		t.Errorf("expanded secretKey: want %q, got %q", "do-spaces-secret-xyz", got)
 	}
 }
 
@@ -297,22 +280,17 @@ modules:
 // override like `bucket: "${STAGING_BUCKET}"` would not be expanded.
 func TestBootstrap_EnvFlagAppliedBeforeSubstitution(t *testing.T) {
 	t.Setenv("TEST_STAGING_BUCKET", "staging-state-bucket")
-	t.Setenv("DIGITALOCEAN_TOKEN", "test-do-token")
+	t.Setenv("TEST_STAGING_ACCESS", "staging-ak")
+	t.Setenv("TEST_STAGING_SECRET", "staging-sk")
 
 	var gotBucket string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		prefix := "/v2/spaces/buckets/"
-		if len(r.URL.Path) > len(prefix) {
-			gotBucket = r.URL.Path[len(prefix):]
-		}
-		w.WriteHeader(http.StatusOK) // bucket already exists
-	}))
-	defer srv.Close()
+	orig := bootstrapDOSpacesBucketFn
+	bootstrapDOSpacesBucketFn = func(_ context.Context, bucket, _, _, _ string) error {
+		gotBucket = bucket
+		return nil
+	}
+	defer func() { bootstrapDOSpacesBucketFn = orig }()
 
-	// The base config uses a placeholder; the staging env override sets the
-	// real bucket name via ${TEST_STAGING_BUCKET}. The env flag must be applied
-	// (merging the staging override) BEFORE ExpandEnvInMap runs so the
-	// resulting bucket is "staging-state-bucket", not "${TEST_STAGING_BUCKET}".
 	cfgFile := writeBootstrapConfig(t, `
 modules:
   - name: tf-state
@@ -321,6 +299,8 @@ modules:
       backend: spaces
       bucket: "default-bucket"
       region: "nyc3"
+      accessKey: "${TEST_STAGING_ACCESS}"
+      secretKey: "${TEST_STAGING_SECRET}"
     environments:
       staging:
         config:
@@ -335,12 +315,6 @@ modules:
 	defer os.Remove(tmpFile)
 
 	// Step 2: bootstrapStateBackend uses the resolved (and env-expanded) config.
-	orig := bootstrapDOSpacesBucketFn
-	bootstrapDOSpacesBucketFn = func(ctx context.Context, bucket, region string) error {
-		return bootstrapDOSpacesBucketAt(ctx, bucket, region, srv.URL)
-	}
-	defer func() { bootstrapDOSpacesBucketFn = orig }()
-
 	if err := bootstrapStateBackend(context.Background(), tmpFile); err != nil {
 		t.Fatalf("bootstrapStateBackend: %v", err)
 	}

@@ -70,7 +70,7 @@ func TestBootstrapSecrets_WriteOnlyProviderSkipsExisting(t *testing.T) {
 			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
 		},
 	}
-	if err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
+	if _, err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 	if len(p.stored) != 0 {
@@ -93,7 +93,7 @@ func TestBootstrapSecrets_WriteOnlyProviderGeneratesWhenMissing(t *testing.T) {
 			{Key: "JWT_SECRET", Type: "random_hex", Length: 8},
 		},
 	}
-	if err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
+	if _, err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 	if _, ok := p.stored["JWT_SECRET"]; !ok {
@@ -111,7 +111,7 @@ func TestBootstrapSecrets_WriteOnlyProviderListUnsupported(t *testing.T) {
 			{Key: "JWT_SECRET", Type: "random_hex", Length: 8},
 		},
 	}
-	if err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
+	if _, err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 	if len(p.stored) != 1 {
@@ -136,7 +136,7 @@ func TestBootstrapSecrets_ProviderCredentialAllSubKeysPresent(t *testing.T) {
 			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
 		},
 	}
-	if err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
+	if _, err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 	if len(p.stored) != 0 {
@@ -165,7 +165,7 @@ func TestBootstrapSecrets_ProviderCredentialPartialRegenerates(t *testing.T) {
 			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
 		},
 	}
-	if err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
+	if _, err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 	if got := p.stored["SPACES_access_key"]; got != "new-access" {
@@ -199,7 +199,7 @@ func TestBootstrapSecrets_ProviderCredentialProbeIgnoresBareKey(t *testing.T) {
 			{Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces"},
 		},
 	}
-	if err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
+	if _, err := bootstrapSecrets(context.Background(), p, cfg); err != nil {
 		t.Fatalf("bootstrapSecrets: %v", err)
 	}
 	if generateCalls != 1 {

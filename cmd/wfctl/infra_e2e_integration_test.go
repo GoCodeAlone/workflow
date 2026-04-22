@@ -101,7 +101,7 @@ secrets:
 		t.Fatal("phase 1: expected secrets config")
 	}
 	p := &fakeSecretsProvider{stored: map[string]string{}}
-	if err := bootstrapSecrets(context.Background(), p, secretsCfg); err != nil {
+	if _, err := bootstrapSecrets(context.Background(), p, secretsCfg); err != nil {
 		t.Fatalf("phase 1 bootstrapSecrets: %v", err)
 	}
 	if p.stored["APP_SECRET"] != "deadbeefcafe1234" {
