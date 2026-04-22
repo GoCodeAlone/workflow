@@ -149,7 +149,20 @@ func generateDOSpacesKey(ctx context.Context, config map[string]any) (string, er
 		name = "workflow-spaces-key"
 	}
 
-	payload := map[string]any{"name": name, "grants": []map[string]any{{"bucket": "*", "permission": "readwrite"}}}
+	// DO Spaces Keys API requires a concrete bucket name (3-63 chars) when
+	// using "read" / "write" / "readwrite" permissions. A wildcard bucket
+	// value is rejected ("bucket name must be 3 to 63 characters long").
+	// If the caller passes `bucket:` in config, grant that specific bucket;
+	// otherwise use "fullaccess" which needs no bucket and is the right
+	// default for a bootstrap key that manages its own IaC state bucket.
+	bucket, _ := config["bucket"].(string)
+	var grant map[string]any
+	if bucket != "" {
+		grant = map[string]any{"bucket": bucket, "permission": "readwrite"}
+	} else {
+		grant = map[string]any{"permission": "fullaccess"}
+	}
+	payload := map[string]any{"name": name, "grants": []map[string]any{grant}}
 	body, _ := json.Marshal(payload)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.digitalocean.com/v2/spaces/keys", bytes.NewReader(body))
