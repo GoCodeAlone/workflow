@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
 // reservedCLICommands is the set of static wfctl command names that plugins
@@ -116,7 +115,7 @@ func BuildCLIRegistry(pluginsDir string) (CLIRegistry, error) {
 // The plugin's stdout/stderr are inherited.
 func DispatchCLICommand(entry *CLIRegistryEntry, args []string) error {
 	cmdArgs := append([]string{"--wfctl-cli"}, args...)
-	cmd := exec.Command(entry.BinaryPath, cmdArgs...)
+	cmd := exec.Command(entry.BinaryPath, cmdArgs...) //nolint:gosec // BinaryPath comes from validated plugin manifest, not user input
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -133,26 +132,3 @@ func (r CLIRegistry) LookupCLICommand(name string) *CLIRegistryEntry {
 	return r[name]
 }
 
-// formatCLIHelp returns a help string listing all dynamic commands.
-func (r CLIRegistry) formatCLIHelp() string {
-	if len(r) == 0 {
-		return ""
-	}
-	names := make([]string, 0, len(r))
-	for n := range r {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-
-	var sb strings.Builder
-	sb.WriteString("Plugin commands:\n")
-	for _, n := range names {
-		e := r[n]
-		desc := e.Description
-		if desc == "" {
-			desc = fmt.Sprintf("(from plugin %s)", e.PluginName)
-		}
-		fmt.Fprintf(&sb, "  %-20s %s\n", n, desc)
-	}
-	return sb.String()
-}

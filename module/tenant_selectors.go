@@ -88,7 +88,7 @@ func (s *CookieSelector) Match(r *http.Request) (string, bool, error) {
 	c, err := r.Cookie(s.Cookie)
 	if err != nil {
 		// http.ErrNoCookie — not an error worth surfacing.
-		return "", false, nil
+		return "", false, nil //nolint:nilerr
 	}
 	if c.Value == "" {
 		return "", false, nil

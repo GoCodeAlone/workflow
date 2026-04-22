@@ -55,7 +55,7 @@ func TestMigrationProvider_InMemoryFS(t *testing.T) {
 
 func TestMigrationProvider_NoDependencies(t *testing.T) {
 	p := &fakeMigrationProvider{files: fstest.MapFS{}}
-	if deps := p.MigrationsDependencies(); deps != nil && len(deps) != 0 {
+	if deps := p.MigrationsDependencies(); len(deps) != 0 {
 		t.Errorf("expected nil/empty deps, got %v", deps)
 	}
 }

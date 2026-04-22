@@ -123,7 +123,7 @@ func (d *HookDispatcher) invoke(ctx context.Context, h hookEntry, payload []byte
 	ctx, cancel := context.WithTimeout(ctx, h.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, h.binaryPath, wfctlHookFlag, string(h.event))
+	cmd := exec.CommandContext(ctx, h.binaryPath, wfctlHookFlag, string(h.event)) //nolint:gosec // binaryPath comes from validated plugin config, not user input
 	cmd.Stdin = bytes.NewReader(payload)
 
 	out, err := cmd.CombinedOutput()

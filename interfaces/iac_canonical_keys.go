@@ -12,7 +12,7 @@ const (
 	KeyInstanceCount    = "instance_count"
 	KeySize             = "size"
 	KeyEnvVars          = "env_vars"
-	KeyEnvVarsSecret    = "env_vars_secret"
+	KeyEnvVarsSecret    = "env_vars_secret" //nolint:gosec // G101 false positive: this is a config key name, not a credential
 	KeyVPCRef           = "vpc_ref"
 	KeyAutoscaling      = "autoscaling"
 	KeyRoutes           = "routes"

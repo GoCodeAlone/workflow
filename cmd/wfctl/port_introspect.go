@@ -39,8 +39,8 @@ func IntrospectPorts(cfg *config.WorkflowConfig, pluginsDir string) []interfaces
 	// Collect explicit expose_ports overrides from ci.build.containers.
 	var explicit []int
 	if cfg.CI != nil && cfg.CI.Build != nil {
-		for _, ctr := range cfg.CI.Build.Containers {
-			explicit = append(explicit, ctr.ExposePorts...)
+		for i := range cfg.CI.Build.Containers {
+			explicit = append(explicit, cfg.CI.Build.Containers[i].ExposePorts...)
 		}
 	}
 	if len(explicit) > 0 {

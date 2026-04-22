@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"strings"
-	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
@@ -48,7 +47,6 @@ type SQLTenantRegistry struct {
 	db       *sql.DB
 	schema   TenantSchemaConfig
 	cache    *lru.Cache
-	cacheMu  sync.RWMutex
 	cacheTTL time.Duration
 }
 
@@ -186,7 +184,7 @@ func (r *SQLTenantRegistry) Ensure(spec interfaces.TenantSpec) (interfaces.Tenan
 	}
 
 	tbl := r.schema.table()
-	q := fmt.Sprintf(
+	q := fmt.Sprintf( //nolint:gosec // table/column names come from internal config, not user input
 		`INSERT INTO %s (%s,%s,%s,%s) VALUES ($1,$2,$3::jsonb,$4::jsonb) RETURNING %s,%s,%s,%s,%s,%s`,
 		tbl,
 		r.c(r.schema.ColSlug, "slug"),
@@ -218,7 +216,7 @@ func (r *SQLTenantRegistry) GetByID(id string) (interfaces.Tenant, error) {
 	if t, ok := r.fromCache("id:" + id); ok {
 		return t, nil
 	}
-	q := r.selectSQL() + " WHERE " + r.c(r.schema.ColID, "id") + " = $1"
+	q := r.selectSQL() + " WHERE " + r.c(r.schema.ColID, "id") + " = $1" //nolint:gosec
 	row := r.db.QueryRowContext(context.Background(), q, id)
 	t, err := r.scanTenant(row)
 	if err != nil {
@@ -240,7 +238,7 @@ func (r *SQLTenantRegistry) GetByDomain(domain string) (interfaces.Tenant, error
 	// Use JSONB containment: domains @> '["acme.example.com"]'::jsonb
 	domainJSON, _ := json.Marshal([]string{domain})
 	tbl := r.schema.table()
-	q := fmt.Sprintf(
+	q := fmt.Sprintf( //nolint:gosec // table/column names come from internal config, not user input
 		"SELECT %s,%s,%s,%s,%s,%s FROM %s WHERE %s @> $1::jsonb",
 		r.c(r.schema.ColID, "id"),
 		r.c(r.schema.ColSlug, "slug"),
@@ -270,7 +268,7 @@ func (r *SQLTenantRegistry) GetBySlug(slug string) (interfaces.Tenant, error) {
 	if t, ok := r.fromCache(cacheKey); ok {
 		return t, nil
 	}
-	q := r.selectSQL() + " WHERE " + r.c(r.schema.ColSlug, "slug") + " = $1"
+	q := r.selectSQL() + " WHERE " + r.c(r.schema.ColSlug, "slug") + " = $1" //nolint:gosec
 	row := r.db.QueryRowContext(context.Background(), q, slug)
 	t, err := r.scanTenant(row)
 	if err != nil {
@@ -306,10 +304,9 @@ func (r *SQLTenantRegistry) List(filter interfaces.TenantFilter) ([]interfaces.T
 		domainJSON, _ := json.Marshal([]string{filter.Domain})
 		conditions = append(conditions, fmt.Sprintf("%s @> $%d::jsonb", r.c(r.schema.ColDomains, "domains"), argN))
 		args = append(args, string(domainJSON))
-		argN++
 	}
 
-	q := fmt.Sprintf(
+	q := fmt.Sprintf( //nolint:gosec // table/column names come from internal config, not user input
 		"SELECT %s,%s,%s,%s,%s,%s FROM %s",
 		r.c(r.schema.ColID, "id"),
 		r.c(r.schema.ColSlug, "slug"),
@@ -383,7 +380,7 @@ func (r *SQLTenantRegistry) Update(id string, patch interfaces.TenantPatch) (int
 	// Always bump updated_at.
 	setClauses = append(setClauses, fmt.Sprintf("%s=NOW()", r.c(r.schema.ColUpdatedAt, "updated_at")))
 
-	q := fmt.Sprintf(
+	q := fmt.Sprintf( //nolint:gosec // table/column names come from internal config, not user input
 		"UPDATE %s SET %s WHERE %s=$%d RETURNING %s,%s,%s,%s,%s,%s",
 		tbl,
 		strings.Join(setClauses, ","),
@@ -420,7 +417,7 @@ func (r *SQLTenantRegistry) Disable(id string) error {
 	}
 
 	tbl := r.schema.table()
-	q := fmt.Sprintf(
+	q := fmt.Sprintf( //nolint:gosec // table/column names come from internal config, not user input
 		"UPDATE %s SET %s=FALSE,%s=NOW() WHERE %s=$1",
 		tbl,
 		r.c(r.schema.ColIsActive, "is_active"),
