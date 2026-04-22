@@ -44,7 +44,7 @@ func (m *mockProvider) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.
 	return nil, nil
 }
 func (m *mockProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) { return nil, nil }
-func (m *mockProvider) SupportedCanonicalKeys() []string                          { return interfaces.CanonicalKeys() }
+func (m *mockProvider) SupportedCanonicalKeys() []string                           { return interfaces.CanonicalKeys() }
 func (m *mockProvider) Close() error                                               { return nil }
 
 // mockDriver implements ResourceDriver

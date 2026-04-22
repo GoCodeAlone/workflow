@@ -26,6 +26,23 @@ func TestHostSelector_Match(t *testing.T) {
 	}
 }
 
+func TestHostSelector_MixedCase(t *testing.T) {
+	sel := &HostSelector{}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Host = "ACME.EXAMPLE.COM:8080"
+
+	key, matched, err := sel.Match(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !matched {
+		t.Error("expected matched=true")
+	}
+	if key != "acme.example.com" {
+		t.Errorf("expected lowercased host without port, got %q", key)
+	}
+}
+
 func TestHostSelector_Empty(t *testing.T) {
 	sel := &HostSelector{}
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

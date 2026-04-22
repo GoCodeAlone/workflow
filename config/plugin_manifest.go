@@ -40,14 +40,14 @@ type PluginCapabilities struct {
 	// PortPaths is a list of dot-notation JSON paths into module config that
 	// contain port values (e.g. ["config.api_port", "config.grpc_port"]).
 	// The port introspector walks these paths for modules of any type declared by this plugin.
-	PortPaths     []string               `json:"portPaths,omitempty" yaml:"portPaths,omitempty"`
-	CLICommands   []CLICommandDeclaration `json:"cliCommands,omitempty" yaml:"cliCommands,omitempty"`
+	PortPaths   []string                `json:"portPaths,omitempty" yaml:"portPaths,omitempty"`
+	CLICommands []CLICommandDeclaration `json:"cliCommands,omitempty" yaml:"cliCommands,omitempty"`
 }
 
 // BuildHookDeclaration registers a plugin as a handler for a specific hook event.
 type BuildHookDeclaration struct {
 	Event          string `json:"event" yaml:"event"`
-	Priority       int    `json:"priority" yaml:"priority"`                           // lower = runs first
+	Priority       int    `json:"priority" yaml:"priority"` // lower = runs first
 	Description    string `json:"description,omitempty" yaml:"description,omitempty"`
 	TimeoutSeconds int    `json:"timeoutSeconds,omitempty" yaml:"timeoutSeconds,omitempty"` // 0 = use global default
 }

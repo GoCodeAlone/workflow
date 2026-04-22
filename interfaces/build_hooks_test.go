@@ -52,9 +52,9 @@ func TestHookPayload_Marshaling(t *testing.T) {
 		BuildID:   "build-123",
 		Timestamp: 1700000000,
 		Data: map[string]any{
-			"image_ref":    "registry.example.com/myapp:latest",
-			"digest":       "sha256:abc123",
-			"duration_ms":  int64(5000),
+			"image_ref":   "registry.example.com/myapp:latest",
+			"digest":      "sha256:abc123",
+			"duration_ms": int64(5000),
 		},
 	}
 

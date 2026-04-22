@@ -15,14 +15,14 @@ var corePortPaths = map[string]struct {
 	public bool
 	proto  string
 }{
-	"http.server":          {key: "port", public: true, proto: "http"},
-	"http.gateway":         {key: "port", public: true, proto: "http"},
-	"websocket.server":     {key: "port", public: true, proto: "ws"},
+	"http.server":           {key: "port", public: true, proto: "http"},
+	"http.gateway":          {key: "port", public: true, proto: "http"},
+	"websocket.server":      {key: "port", public: true, proto: "ws"},
 	"observability.metrics": {key: "port", public: false, proto: "http"},
-	"grpc.server":          {key: "port", public: false, proto: "grpc"},
-	"database.postgres":    {key: "port", public: false, proto: "tcp"},
-	"database.workflow":    {key: "port", public: false, proto: "tcp"},
-	"messaging.nats":       {key: "port", public: false, proto: "tcp"},
+	"grpc.server":           {key: "port", public: false, proto: "grpc"},
+	"database.postgres":     {key: "port", public: false, proto: "tcp"},
+	"database.workflow":     {key: "port", public: false, proto: "tcp"},
+	"messaging.nats":        {key: "port", public: false, proto: "tcp"},
 }
 
 // IntrospectPorts aggregates port declarations from:

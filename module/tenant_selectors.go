@@ -39,7 +39,7 @@ func (s *HostSelector) Match(r *http.Request) (string, bool, error) {
 	if host == "" {
 		return "", false, nil
 	}
-	return host, true, nil
+	return strings.ToLower(host), true, nil
 }
 
 // SubdomainSelector extracts the leftmost subdomain under a configured root domain.

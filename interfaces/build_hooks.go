@@ -5,17 +5,17 @@ type HookEvent string
 
 const (
 	// Build lifecycle events emitted by wfctl build.
-	HookEventPreBuild              HookEvent = "pre_build"
-	HookEventPreTargetBuild        HookEvent = "pre_target_build"
-	HookEventPostTargetBuild       HookEvent = "post_target_build"
-	HookEventPreContainerBuild     HookEvent = "pre_container_build"
-	HookEventPostContainerBuild    HookEvent = "post_container_build"
-	HookEventPreContainerPush      HookEvent = "pre_container_push"
-	HookEventPostContainerPush     HookEvent = "post_container_push"
-	HookEventPreArtifactsPublish   HookEvent = "pre_artifacts_publish"
-	HookEventPostArtifactsPublish  HookEvent = "post_artifacts_publish"
-	HookEventPreBuildFail          HookEvent = "pre_build_fail"
-	HookEventPostBuild             HookEvent = "post_build"
+	HookEventPreBuild             HookEvent = "pre_build"
+	HookEventPreTargetBuild       HookEvent = "pre_target_build"
+	HookEventPostTargetBuild      HookEvent = "post_target_build"
+	HookEventPreContainerBuild    HookEvent = "pre_container_build"
+	HookEventPostContainerBuild   HookEvent = "post_container_build"
+	HookEventPreContainerPush     HookEvent = "pre_container_push"
+	HookEventPostContainerPush    HookEvent = "post_container_push"
+	HookEventPreArtifactsPublish  HookEvent = "pre_artifacts_publish"
+	HookEventPostArtifactsPublish HookEvent = "post_artifacts_publish"
+	HookEventPreBuildFail         HookEvent = "pre_build_fail"
+	HookEventPostBuild            HookEvent = "post_build"
 
 	// HookEventInstallVerify is emitted by wfctl plugin install after tarball
 	// download and before extraction. The supply-chain plugin registers a handler
@@ -80,26 +80,26 @@ type PreTargetBuildPayload struct {
 }
 
 type PostTargetBuildPayload struct {
-	Target     string `json:"target"`
-	Type       string `json:"type"`
+	Target     string   `json:"target"`
+	Type       string   `json:"type"`
 	Outputs    []string `json:"outputs,omitempty"`
-	DurationMs int64  `json:"duration_ms"`
+	DurationMs int64    `json:"duration_ms"`
 }
 
 // PreContainerBuildPayload carries Dockerfile + context for a container build start.
 type PreContainerBuildPayload struct {
-	Target         string `json:"target"`
-	DockerfilePath string `json:"dockerfile_path"`
-	ContextPath    string `json:"context_path"`
+	Target         string   `json:"target"`
+	DockerfilePath string   `json:"dockerfile_path"`
+	ContextPath    string   `json:"context_path"`
 	Tags           []string `json:"tags"`
 }
 
 // PostContainerBuildPayload carries the built image digest.
 type PostContainerBuildPayload struct {
-	Target         string `json:"target"`
-	ImageRef       string `json:"image_ref"`
-	Digest         string `json:"digest"`
-	DurationMs     int64  `json:"duration_ms"`
+	Target     string `json:"target"`
+	ImageRef   string `json:"image_ref"`
+	Digest     string `json:"digest"`
+	DurationMs int64  `json:"duration_ms"`
 }
 
 // PreContainerPushPayload / PostContainerPushPayload describe registry push.

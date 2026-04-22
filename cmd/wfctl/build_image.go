@@ -167,7 +167,7 @@ func buildWithDockerfile(ctr config.CIContainerTarget, tag string, dryRun bool, 
 		// buildx with the docker-container driver is required for attestation flags.
 		// Verify a non-default builder is active; the default "docker" driver rejects --provenance.
 		if err := exec.Command("docker", "buildx", "inspect", "--bootstrap").Run(); err != nil {
-			return fmt.Errorf("hardened build requires docker buildx: run 'docker buildx create --use' " +
+			return fmt.Errorf("hardened build requires docker buildx: run 'docker buildx create --use' "+
 				"or add 'docker/setup-buildx-action@v3' to your CI workflow (%w)", err)
 		}
 	}

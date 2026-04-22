@@ -18,15 +18,15 @@ import (
 // TenantSchemaConfig allows operators to customise the underlying table name
 // and column names, supporting legacy schemas or multi-schema deployments.
 type TenantSchemaConfig struct {
-	TableName        string // default: "tenants"
-	ColID            string // default: "id"
-	ColSlug          string // default: "slug"
-	ColName          string // default: "name"
-	ColDomains       string // default: "domains"
-	ColMetadata      string // default: "metadata"
-	ColIsActive      string // default: "is_active"
-	ColCreatedAt     string // default: "created_at"
-	ColUpdatedAt     string // default: "updated_at"
+	TableName    string // default: "tenants"
+	ColID        string // default: "id"
+	ColSlug      string // default: "slug"
+	ColName      string // default: "name"
+	ColDomains   string // default: "domains"
+	ColMetadata  string // default: "metadata"
+	ColIsActive  string // default: "is_active"
+	ColCreatedAt string // default: "created_at"
+	ColUpdatedAt string // default: "updated_at"
 }
 
 func (c *TenantSchemaConfig) table() string {
@@ -45,19 +45,19 @@ func (c *TenantSchemaConfig) col(override, def string) string {
 // SQLTenantRegistry is a PostgreSQL-backed implementation of interfaces.TenantRegistry.
 // It maintains a bounded LRU cache in front of the database to reduce hot-path latency.
 type SQLTenantRegistry struct {
-	db     *sql.DB
-	schema TenantSchemaConfig
-	cache  *lru.Cache
-	cacheMu sync.RWMutex
+	db       *sql.DB
+	schema   TenantSchemaConfig
+	cache    *lru.Cache
+	cacheMu  sync.RWMutex
 	cacheTTL time.Duration
 }
 
 // SQLTenantRegistryConfig is the constructor configuration.
 type SQLTenantRegistryConfig struct {
-	DB         *sql.DB
-	Schema     TenantSchemaConfig
-	CacheSize  int           // 0 = disable cache; default 256
-	CacheTTL   time.Duration // 0 = use default 60s
+	DB        *sql.DB
+	Schema    TenantSchemaConfig
+	CacheSize int           // 0 = disable cache; default 256
+	CacheTTL  time.Duration // 0 = use default 60s
 }
 
 // NewSQLTenantRegistry creates a new SQLTenantRegistry.
@@ -84,7 +84,7 @@ func NewSQLTenantRegistry(cfg SQLTenantRegistryConfig) (*SQLTenantRegistry, erro
 
 // cacheEntry wraps a Tenant with an expiry time.
 type cacheEntry struct {
-	tenant  interfaces.Tenant
+	tenant    interfaces.Tenant
 	expiresAt time.Time
 }
 

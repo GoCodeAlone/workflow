@@ -15,11 +15,11 @@ func TestJobSpec_ZeroValue(t *testing.T) {
 
 func TestJobSpec_Fields(t *testing.T) {
 	j := interfaces.JobSpec{
-		Name:       "migrate",
-		Kind:       "PRE_DEPLOY",
-		Image:      "gcr.io/distroless/base-debian12:nonroot",
-		RunCommand: "workflow-migrate up",
-		EnvVars:    map[string]string{"ENV": "prod"},
+		Name:          "migrate",
+		Kind:          "PRE_DEPLOY",
+		Image:         "gcr.io/distroless/base-debian12:nonroot",
+		RunCommand:    "workflow-migrate up",
+		EnvVars:       map[string]string{"ENV": "prod"},
 		EnvVarsSecret: map[string]string{"DB_URL": "DB_URL"},
 	}
 	if j.Name != "migrate" {
@@ -43,8 +43,8 @@ func TestWorkerSpec_Fields(t *testing.T) {
 
 func TestStaticSiteSpec_Fields(t *testing.T) {
 	s := interfaces.StaticSiteSpec{
-		Name:       "frontend",
-		OutputDir:  "dist",
+		Name:         "frontend",
+		OutputDir:    "dist",
 		BuildCommand: "npm run build",
 	}
 	if s.Name != "frontend" {
@@ -54,9 +54,9 @@ func TestStaticSiteSpec_Fields(t *testing.T) {
 
 func TestSidecarSpec_Fields(t *testing.T) {
 	sc := interfaces.SidecarSpec{
-		Name:             "tailscale",
-		Image:            "tailscale/tailscale:latest",
-		RunCommand:       "tailscaled",
+		Name:              "tailscale",
+		Image:             "tailscale/tailscale:latest",
+		RunCommand:        "tailscaled",
 		SharesNetworkWith: "main-service",
 	}
 	if sc.Name != "tailscale" {

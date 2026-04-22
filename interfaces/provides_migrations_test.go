@@ -10,9 +10,9 @@ import (
 
 // fakeMigrationProvider implements MigrationProvider for compile-time check.
 type fakeMigrationProvider struct {
-	files  fstest.MapFS
-	deps   []string
-	fsErr  error
+	files fstest.MapFS
+	deps  []string
+	fsErr error
 }
 
 func (f *fakeMigrationProvider) ProvidesMigrations() (fs.FS, error) {

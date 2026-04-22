@@ -70,7 +70,7 @@ func TestNewPluginDeployProvider_MergesEnvironmentConfig(t *testing.T) {
 				Name: "bmw-app",
 				Type: "infra.container_service",
 				Config: map[string]any{
-					"provider": "do-provider",
+					"provider":  "do-provider",
 					"http_port": 8080,
 				},
 				Environments: map[string]*config.InfraEnvironmentResolution{

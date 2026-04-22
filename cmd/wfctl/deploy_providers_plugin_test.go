@@ -41,8 +41,8 @@ type fakeResourceDriver struct {
 	hcErr         error
 	lastHCRef     interfaces.ResourceRef
 	// hcResults: if non-empty, each call uses the next entry (last is repeated).
-	hcResults []hcCallResult
-	hcCallN   int
+	hcResults     []hcCallResult
+	hcCallN       int
 	createCalled  bool
 	createSpec    interfaces.ResourceSpec
 	createOut     *interfaces.ResourceOutput
@@ -150,8 +150,8 @@ type fakeIaCProvider struct {
 	drivers map[string]interfaces.ResourceDriver
 }
 
-func (f *fakeIaCProvider) Name() string                          { return f.name }
-func (f *fakeIaCProvider) Version() string                       { return "0.0.0" }
+func (f *fakeIaCProvider) Name() string                                         { return f.name }
+func (f *fakeIaCProvider) Version() string                                      { return "0.0.0" }
 func (f *fakeIaCProvider) Initialize(_ context.Context, _ map[string]any) error { return nil }
 func (f *fakeIaCProvider) Capabilities() []interfaces.IaCCapabilityDeclaration  { return nil }
 func (f *fakeIaCProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
@@ -182,7 +182,7 @@ func (f *fakeIaCProvider) ResourceDriver(rt string) (interfaces.ResourceDriver, 
 	}
 	return d, nil
 }
-func (f *fakeIaCProvider) Close() error { return nil }
+func (f *fakeIaCProvider) Close() error                     { return nil }
 func (f *fakeIaCProvider) SupportedCanonicalKeys() []string { return nil }
 
 // makePluginTestConfig builds a WorkflowConfig with an iac.provider + infra.container_service.
@@ -821,7 +821,7 @@ func TestDeploy_TransientRetries(t *testing.T) {
 func TestDeploy_RetryCeiling(t *testing.T) {
 	noRetryDelays(t)
 	driver := &fakeResourceDriver{
-		readOut:    &interfaces.ResourceOutput{ProviderID: "pid-3"},
+		readOut: &interfaces.ResourceOutput{ProviderID: "pid-3"},
 		updateResults: []driverCallResult{
 			{err: interfaces.ErrRateLimited},
 		}, // last entry is repeated for all calls
@@ -848,7 +848,7 @@ func TestDeploy_RetryCeiling(t *testing.T) {
 func TestDeploy_UnauthorizedFailsFast(t *testing.T) {
 	noRetryDelays(t)
 	driver := &fakeResourceDriver{
-		readOut:    &interfaces.ResourceOutput{ProviderID: "pid-4"},
+		readOut: &interfaces.ResourceOutput{ProviderID: "pid-4"},
 		updateResults: []driverCallResult{
 			{err: interfaces.ErrUnauthorized},
 		},

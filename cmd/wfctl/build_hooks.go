@@ -14,11 +14,11 @@ import (
 )
 
 const (
-	defaultHookTimeout       = 60 * time.Second
-	hookFailPolicyFail       = "fail"
-	hookFailPolicyWarn       = "warn"
-	hookFailPolicySkip       = "skip"
-	wfctlHookFlag            = "--wfctl-hook"
+	defaultHookTimeout = 60 * time.Second
+	hookFailPolicyFail = "fail"
+	hookFailPolicyWarn = "warn"
+	hookFailPolicySkip = "skip"
+	wfctlHookFlag      = "--wfctl-hook"
 )
 
 // hookEntry is a resolved handler entry ready to dispatch.
