@@ -160,26 +160,43 @@ func TestScaffoldDockerfile_InvalidMode(t *testing.T) {
 }
 
 func TestValidateBaseImage_FullyQualifiedRefs(t *testing.T) {
-	// Fully-qualified ubuntu refs should be blocked the same as short "ubuntu:22.04".
+	// Fully-qualified and edge-case image refs tested via subtests.
 	cases := []struct {
 		image      string
 		allowShell bool
 		wantErr    bool
 	}{
+		// Fully-qualified ubuntu refs blocked same as short "ubuntu:22.04".
 		{"docker.io/library/ubuntu:22.04", false, true},
 		{"docker.io/library/ubuntu:22.04", true, false},
 		{"ghcr.io/org/ubuntu:22.04", false, true},
 		{"ghcr.io/org/ubuntu:22.04", true, false},
-		{"docker.io/library/alpine:3.20", false, false}, // warning only, no error
+		// Alpine: warning only, no error.
+		{"docker.io/library/alpine:3.20", false, false},
+		// Distroless: always allowed.
 		{"gcr.io/distroless/base-debian12:nonroot", false, false},
+		// Digest-only form: base name resolves to "ubuntu" → blocked.
+		{"ubuntu@sha256:aaaabbbbccccdddd0000111122223333", false, true},
+		// Registry with port: base name resolves to "ubuntu" → blocked.
+		{"registry.internal:5000/library/ubuntu:22.04", false, true},
+		// Tag+digest combined: base name resolves to "ubuntu" → blocked.
+		{"ubuntu:22.04@sha256:aaaabbbb11112222", false, true},
+		// Empty string: no match against any blocked or warning base → no error, no panic.
+		{"", false, false},
+		// Allowed minimal base via docker.io path.
+		{"docker.io/library/alpine:3.20", false, false},
 	}
 	for _, tc := range cases {
-		err := validateBaseImage(tc.image, tc.allowShell)
-		if tc.wantErr && err == nil {
-			t.Errorf("validateBaseImage(%q, allowShell=%v): expected error, got nil", tc.image, tc.allowShell)
-		}
-		if !tc.wantErr && err != nil {
-			t.Errorf("validateBaseImage(%q, allowShell=%v): unexpected error: %v", tc.image, tc.allowShell, err)
-		}
+		tc := tc
+		t.Run(tc.image, func(t *testing.T) {
+			t.Helper()
+			err := validateBaseImage(tc.image, tc.allowShell)
+			if tc.wantErr && err == nil {
+				t.Errorf("validateBaseImage(%q, allowShell=%v): expected error, got nil", tc.image, tc.allowShell)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("validateBaseImage(%q, allowShell=%v): unexpected error: %v", tc.image, tc.allowShell, err)
+			}
+		})
 	}
 }

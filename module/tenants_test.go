@@ -2,14 +2,189 @@ package module
 
 import (
 	"database/sql"
+	"database/sql/driver"
+	"encoding/json"
+	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
+
+// ---------------------------------------------------------------------------
+// Minimal database/sql/driver mock for unit tests that need a *sql.DB but
+// do not have access to a real PostgreSQL instance.  Tests that use the mock
+// push pre-programmed responses via tenantMockPushQuery / tenantMockPushExec
+// before exercising the registry methods.
+// ---------------------------------------------------------------------------
+
+func init() {
+	sql.Register("workflow_tenant_mock", &tenantMockDriver{})
+}
+
+// tenantQueryResp is a pre-programmed response for a Query (SELECT / INSERT RETURNING / UPDATE RETURNING).
+type tenantQueryResp struct {
+	err  error            // non-nil → returned as query error (surfaces via row.Scan)
+	cols []string         // column names
+	rows [][]driver.Value // nil or empty → io.EOF → sql.ErrNoRows
+}
+
+// tenantExecResp is a pre-programmed response for an Exec (UPDATE / DELETE without RETURNING).
+type tenantExecResp struct {
+	err error
+	n   int64 // RowsAffected
+}
+
+var (
+	tenantMockMu         sync.Mutex
+	tenantMockQueryQueue []*tenantQueryResp
+	tenantMockExecQueue  []*tenantExecResp
+)
+
+func tenantMockPushQuery(r *tenantQueryResp) {
+	tenantMockMu.Lock()
+	tenantMockQueryQueue = append(tenantMockQueryQueue, r)
+	tenantMockMu.Unlock()
+}
+
+func tenantMockPushExec(r *tenantExecResp) {
+	tenantMockMu.Lock()
+	tenantMockExecQueue = append(tenantMockExecQueue, r)
+	tenantMockMu.Unlock()
+}
+
+func tenantMockPopQuery() *tenantQueryResp {
+	tenantMockMu.Lock()
+	defer tenantMockMu.Unlock()
+	if len(tenantMockQueryQueue) == 0 {
+		return &tenantQueryResp{} // empty rows → sql.ErrNoRows
+	}
+	r := tenantMockQueryQueue[0]
+	tenantMockQueryQueue = tenantMockQueryQueue[1:]
+	return r
+}
+
+func tenantMockPopExec() *tenantExecResp {
+	tenantMockMu.Lock()
+	defer tenantMockMu.Unlock()
+	if len(tenantMockExecQueue) == 0 {
+		return &tenantExecResp{n: 0}
+	}
+	r := tenantMockExecQueue[0]
+	tenantMockExecQueue = tenantMockExecQueue[1:]
+	return r
+}
+
+func tenantMockClear() {
+	tenantMockMu.Lock()
+	tenantMockQueryQueue = nil
+	tenantMockExecQueue = nil
+	tenantMockMu.Unlock()
+}
+
+// openMockDB opens a *sql.DB backed by the mock driver and registers cleanup.
+func openMockDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("workflow_tenant_mock", "")
+	if err != nil {
+		t.Fatalf("sql.Open mock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+// tenantColNames are the columns that scanTenant expects (must match selectSQL order).
+var tenantColNames = []string{"id", "slug", "name", "domains", "metadata", "is_active"}
+
+// tenantDriverRow builds a driver.Value slice for scanTenant.
+func tenantDriverRow(ten interfaces.Tenant) []driver.Value {
+	domains, _ := json.Marshal(ten.Domains)
+	metadata, _ := json.Marshal(ten.Metadata)
+	if ten.Metadata == nil {
+		metadata = []byte("{}")
+	}
+	if ten.Domains == nil {
+		domains = []byte("[]")
+	}
+	return []driver.Value{ten.ID, ten.Slug, ten.Name, domains, metadata, ten.IsActive}
+}
+
+// --- driver.Driver ---
+
+type tenantMockDriver struct{}
+
+func (d *tenantMockDriver) Open(string) (driver.Conn, error) { return &tenantMockConn{}, nil }
+
+// --- driver.Conn ---
+
+type tenantMockConn struct{}
+
+func (c *tenantMockConn) Prepare(query string) (driver.Stmt, error) {
+	return &tenantMockStmt{}, nil
+}
+func (c *tenantMockConn) Close() error              { return nil }
+func (c *tenantMockConn) Begin() (driver.Tx, error) { return &tenantMockTx{}, nil }
+
+// --- driver.Tx ---
+
+type tenantMockTx struct{}
+
+func (t *tenantMockTx) Commit() error   { return nil }
+func (t *tenantMockTx) Rollback() error { return nil }
+
+// --- driver.Stmt ---
+
+type tenantMockStmt struct{}
+
+func (s *tenantMockStmt) Close() error  { return nil }
+func (s *tenantMockStmt) NumInput() int { return -1 } // variadic
+
+func (s *tenantMockStmt) Query(args []driver.Value) (driver.Rows, error) {
+	r := tenantMockPopQuery()
+	if r.err != nil {
+		return nil, r.err
+	}
+	return &tenantMockRows{cols: r.cols, data: r.rows}, nil
+}
+
+func (s *tenantMockStmt) Exec(args []driver.Value) (driver.Result, error) {
+	r := tenantMockPopExec()
+	if r.err != nil {
+		return nil, r.err
+	}
+	return &tenantMockExecResult{n: r.n}, nil
+}
+
+// --- driver.Rows ---
+
+type tenantMockRows struct {
+	cols []string
+	data [][]driver.Value
+	pos  int
+}
+
+func (r *tenantMockRows) Columns() []string { return r.cols }
+func (r *tenantMockRows) Close() error      { return nil }
+func (r *tenantMockRows) Next(dest []driver.Value) error {
+	if r.pos >= len(r.data) {
+		return io.EOF
+	}
+	copy(dest, r.data[r.pos])
+	r.pos++
+	return nil
+}
+
+// --- driver.Result ---
+
+type tenantMockExecResult struct{ n int64 }
+
+func (r *tenantMockExecResult) LastInsertId() (int64, error) { return 0, nil }
+func (r *tenantMockExecResult) RowsAffected() (int64, error) { return r.n, nil }
 
 // TestSQLTenantRegistry_Interface verifies compile-time conformance.
 func TestSQLTenantRegistry_Interface(t *testing.T) {
@@ -241,4 +416,178 @@ func splitByNewline(s string) []string {
 }
 func containsGoose(s string) bool {
 	return strings.Contains(s, "+goose")
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests using the mock driver
+// ---------------------------------------------------------------------------
+
+// TestNewSQLTenantRegistry_NilDB asserts that NewSQLTenantRegistry returns a
+// non-nil error containing "cfg.DB is required" when DB is nil.
+func TestNewSQLTenantRegistry_NilDB(t *testing.T) {
+	_, err := NewSQLTenantRegistry(SQLTenantRegistryConfig{})
+	if err == nil {
+		t.Fatal("expected error for nil DB")
+	}
+	if !strings.Contains(err.Error(), "cfg.DB is required") {
+		t.Errorf("error should mention 'cfg.DB is required', got: %v", err)
+	}
+}
+
+// TestNewSQLTenantRegistry_CacheDisabled verifies that CacheSize=-1 produces a
+// registry with a nil cache, and that all cache-adjacent code paths (Ensure →
+// GetBySlug → Disable → GetBySlug) do not panic when the cache is absent.
+func TestNewSQLTenantRegistry_CacheDisabled(t *testing.T) {
+	tenantMockClear()
+
+	ten := interfaces.Tenant{
+		ID:       "t-nocache-1",
+		Slug:     "nocache",
+		Name:     "No Cache Test",
+		Domains:  []string{"nocache.example.com"},
+		IsActive: true,
+	}
+	disabledTen := ten
+	disabledTen.IsActive = false
+
+	// Ensure → GetBySlug (empty, not found).
+	tenantMockPushQuery(&tenantQueryResp{cols: tenantColNames, rows: nil})
+	// Ensure → INSERT RETURNING.
+	tenantMockPushQuery(&tenantQueryResp{cols: tenantColNames, rows: [][]driver.Value{tenantDriverRow(ten)}})
+	// GetBySlug.
+	tenantMockPushQuery(&tenantQueryResp{cols: tenantColNames, rows: [][]driver.Value{tenantDriverRow(ten)}})
+	// Disable → GetByID.
+	tenantMockPushQuery(&tenantQueryResp{cols: tenantColNames, rows: [][]driver.Value{tenantDriverRow(ten)}})
+	// Disable → ExecContext (UPDATE SET is_active=FALSE).
+	tenantMockPushExec(&tenantExecResp{n: 1})
+	// GetBySlug after disable.
+	tenantMockPushQuery(&tenantQueryResp{cols: tenantColNames, rows: [][]driver.Value{tenantDriverRow(disabledTen)}})
+
+	db := openMockDB(t)
+	reg, err := NewSQLTenantRegistry(SQLTenantRegistryConfig{DB: db, CacheSize: -1})
+	if err != nil {
+		t.Fatalf("NewSQLTenantRegistry: %v", err)
+	}
+
+	// Cache must be nil for CacheSize=-1.
+	if reg.cache != nil {
+		t.Error("expected nil cache for CacheSize=-1")
+	}
+
+	// Exercise the sequence — must not panic with nil cache.
+	spec := interfaces.TenantSpec{Name: ten.Name, Slug: ten.Slug, Domains: ten.Domains}
+	got, err := reg.Ensure(spec)
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if got.ID != ten.ID {
+		t.Errorf("Ensure: unexpected ID %q", got.ID)
+	}
+
+	got2, err := reg.GetBySlug(ten.Slug)
+	if err != nil {
+		t.Fatalf("GetBySlug: %v", err)
+	}
+	if got2.Slug != ten.Slug {
+		t.Errorf("GetBySlug: unexpected slug %q", got2.Slug)
+	}
+
+	if err := reg.Disable(got.ID); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+
+	got3, err := reg.GetBySlug(ten.Slug)
+	if err != nil {
+		t.Fatalf("GetBySlug after Disable: %v", err)
+	}
+	if got3.IsActive {
+		t.Error("expected is_active=false after Disable")
+	}
+}
+
+// TestEnsure_PropagatesNonNotFoundError verifies that a transient DB error
+// (neither sql.ErrNoRows nor ErrResourceNotFound) is propagated by Ensure
+// rather than treated as a "not found" and triggering an INSERT.
+func TestEnsure_PropagatesNonNotFoundError(t *testing.T) {
+	tenantMockClear()
+
+	transientErr := errors.New("transient: connection reset by peer")
+
+	// GetBySlug (inside Ensure) returns a transient error.
+	tenantMockPushQuery(&tenantQueryResp{err: transientErr})
+
+	db := openMockDB(t)
+	reg, err := NewSQLTenantRegistry(SQLTenantRegistryConfig{DB: db})
+	if err != nil {
+		t.Fatalf("NewSQLTenantRegistry: %v", err)
+	}
+
+	spec := interfaces.TenantSpec{Name: "Acme", Slug: "acme"}
+	_, err = reg.Ensure(spec)
+	if err == nil {
+		t.Fatal("expected error from Ensure on transient DB error")
+	}
+	if !errors.Is(err, transientErr) {
+		t.Errorf("Ensure error should wrap transient error via %%w; got: %v", err)
+	}
+}
+
+// TestUpdate_InvalidatesStaleDomainCache verifies that after calling Update with
+// changed domains, the stale "old.example.com" domain cache entry is evicted so
+// that a subsequent GetByDomain goes to the DB (not a stale cache hit).
+func TestUpdate_InvalidatesStaleDomainCache(t *testing.T) {
+	tenantMockClear()
+
+	oldTen := interfaces.Tenant{
+		ID:       "t-cache-1",
+		Slug:     "acme-cache",
+		Name:     "Acme Cache Test",
+		Domains:  []string{"old.example.com"},
+		IsActive: true,
+	}
+	updatedTen := interfaces.Tenant{
+		ID:       "t-cache-1",
+		Slug:     "acme-cache",
+		Name:     "Acme Cache Test",
+		Domains:  []string{"new.example.com"},
+		IsActive: true,
+	}
+
+	// GetByDomain("old.example.com") → old tenant.
+	tenantMockPushQuery(&tenantQueryResp{cols: tenantColNames, rows: [][]driver.Value{tenantDriverRow(oldTen)}})
+	// Update → GetByID hits cache (no extra mock needed) → UPDATE RETURNING.
+	tenantMockPushQuery(&tenantQueryResp{cols: tenantColNames, rows: [][]driver.Value{tenantDriverRow(updatedTen)}})
+	// GetByDomain("old.example.com") after update → empty (not found).
+	tenantMockPushQuery(&tenantQueryResp{cols: tenantColNames, rows: nil})
+
+	db := openMockDB(t)
+	reg, err := NewSQLTenantRegistry(SQLTenantRegistryConfig{DB: db, CacheSize: 32})
+	if err != nil {
+		t.Fatalf("NewSQLTenantRegistry: %v", err)
+	}
+
+	// Prime cache via GetByDomain.
+	got, err := reg.GetByDomain("old.example.com")
+	if err != nil {
+		t.Fatalf("GetByDomain: %v", err)
+	}
+	if got.ID != oldTen.ID {
+		t.Fatalf("GetByDomain returned wrong tenant: %+v", got)
+	}
+
+	// GetByDomain also caches "id:t-cache-1"; Update.GetByID will hit cache.
+	newDomains := []string{"new.example.com"}
+	updated, err := reg.Update(oldTen.ID, interfaces.TenantPatch{Domains: newDomains})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(updated.Domains) == 0 || updated.Domains[0] != "new.example.com" {
+		t.Errorf("Update returned wrong domains: %v", updated.Domains)
+	}
+
+	// Old domain must now be a cache miss → DB path → ErrResourceNotFound.
+	_, err = reg.GetByDomain("old.example.com")
+	if !errors.Is(err, interfaces.ErrResourceNotFound) {
+		t.Errorf("GetByDomain after Update: want ErrResourceNotFound, got %v", err)
+	}
 }

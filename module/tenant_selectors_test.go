@@ -76,6 +76,35 @@ func TestSubdomainSelector_Match(t *testing.T) {
 	}
 }
 
+func TestSubdomainSelector_MixedCase(t *testing.T) {
+	cases := []struct {
+		rootDomain string
+		host       string
+		wantKey    string
+	}{
+		// Mixed-case host with mixed-case root domain.
+		{rootDomain: "Example.com", host: "ACME.EXAMPLE.COM", wantKey: "acme"},
+		// Mixed-case host with lowercase root domain.
+		{rootDomain: "example.com", host: "Acme.Example.com", wantKey: "acme"},
+	}
+	for _, tc := range cases {
+		sel := &SubdomainSelector{RootDomain: tc.rootDomain}
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = tc.host
+
+		key, matched, err := sel.Match(req)
+		if err != nil {
+			t.Fatalf("Match(%q): unexpected error: %v", tc.host, err)
+		}
+		if !matched {
+			t.Errorf("Match(%q): expected matched=true", tc.host)
+		}
+		if key != tc.wantKey {
+			t.Errorf("Match(%q): got key %q, want %q", tc.host, key, tc.wantKey)
+		}
+	}
+}
+
 func TestSubdomainSelector_NoSubdomain(t *testing.T) {
 	sel := &SubdomainSelector{RootDomain: "example.com"}
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
