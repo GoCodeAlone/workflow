@@ -247,7 +247,7 @@ func TestCanonicalKeys_AllPresent(t *testing.T) {
 - Create: `interfaces/build_hooks.go`
 - Create: `interfaces/build_hooks_test.go`
 
-**Step 1-4:** Define `HookEvent` string type + constants for all 11 events (pre_build, pre_target_build, post_target_build, pre_container_build, post_container_build, pre_container_push, post_container_push, pre_artifacts_publish, post_artifacts_publish, pre_build_fail, post_build). Add `HookPayload` marshaling types per event. `IsValidHookEvent(string) bool` test.
+**Step 1-4:** Define `HookEvent` string type + constants for all 12 events: `pre_build`, `pre_target_build`, `post_target_build`, `pre_container_build`, `post_container_build`, `pre_container_push`, `post_container_push`, `pre_artifacts_publish`, `post_artifacts_publish`, `pre_build_fail`, `post_build`, plus **`install_verify`** (emitted by `wfctl plugin install` during tarball verification — consumed by Task 47b). Add `HookPayload` marshaling types per event. `IsValidHookEvent(string) bool` test.
 
 **Step 5: Commit** — `feat(interfaces): add build-pipeline hook event types`
 
@@ -307,15 +307,17 @@ func TestHookDispatcher_PriorityOrder(t *testing.T) {
 
 **Step 5: Commit** — `feat(wfctl): add dynamic CLI command registration from plugin manifests`
 
-### Task 12: plugin.json schema additions
+### Task 12: plugin.json schema + plugin install verification config
 
 **Files:**
 - Modify: `cmd/wfctl/plugin_registry.go` — extend `RegistryCapabilities` with `BuildHooks`, `CLICommands`, `MigrationDrivers`, `PortIntrospect`.
-- Modify: test
+- Modify: `config/plugins_config.go` or similar — extend `PluginRequirement` with `Verify *PluginVerifyConfig` field (subfields: `Signature string` [required|allow-missing|off], `SBOM string` [required|allow-missing|off], `VulnPolicy string` [block-critical|warn|off]).
+- Modify: `cmd/wfctl/plugin_install.go` — after tarball download, if `req.Verify != nil`, emit `install_verify` hook with payload `{tarball_path, expected_signature_identity, vuln_policy}`; abort install on non-zero dispatch exit.
+- Modify: tests
 
-**Step 1-4:** Add new optional capability fields. JSON parse test confirms unmarshaling from a sample registry manifest.
+**Step 1-4:** Add new optional capability fields. Add `PluginRequirement.Verify` config shape (consumed by Task 47b's supply-chain hook handler). JSON parse test confirms unmarshaling from a sample registry manifest AND from `app.yaml` `requires.plugins[].verify:` block. Install flow emits hook at the right point. Hook dispatch failure aborts install with clear error.
 
-**Step 5: Commit** — `feat(registry): extend capability schema with buildHooks, cliCommands, portIntrospect`
+**Step 5: Commit** — `feat(wfctl): plugin manifest schema + install-verify hook emission point`
 
 ### Task 13: ProvidesMigrations() module contract
 
