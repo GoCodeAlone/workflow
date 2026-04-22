@@ -196,7 +196,7 @@ func validateBaseImage(base string, allowShell bool) error {
 	name := imageBaseName(base)
 
 	for _, s := range shellContainingBases {
-		if name == strings.ToLower(s) {
+		if strings.EqualFold(name, s) {
 			if !allowShell {
 				return fmt.Errorf("base image %q contains a shell — use a distroless image or pass --allow-shell to override", base)
 			}
@@ -205,7 +205,7 @@ func validateBaseImage(base string, allowShell bool) error {
 	}
 
 	for _, w := range glibcWarningBases {
-		if name == strings.ToLower(w) {
+		if strings.EqualFold(name, w) {
 			fmt.Fprintf(os.Stderr, "warning: base image %q has a large attack surface; consider gcr.io/distroless/base-debian12:nonroot\n", base)
 			return nil
 		}

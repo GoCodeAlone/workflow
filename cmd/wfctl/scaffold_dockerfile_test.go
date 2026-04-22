@@ -183,8 +183,8 @@ func TestValidateBaseImage_FullyQualifiedRefs(t *testing.T) {
 		{"ubuntu:22.04@sha256:aaaabbbb11112222", false, true},
 		// Empty string: no match against any blocked or warning base → no error, no panic.
 		{"", false, false},
-		// Allowed minimal base via docker.io path.
-		{"docker.io/library/alpine:3.20", false, false},
+		// Busybox via fully-qualified path: shell-containing → blocked without --allow-shell.
+		{"docker.io/library/busybox:1.36", false, true},
 	}
 	for _, tc := range cases {
 		tc := tc
