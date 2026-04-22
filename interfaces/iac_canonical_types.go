@@ -3,59 +3,59 @@ package interfaces
 // JobSpec describes a one-off or scheduled job workload.
 // Kind is one of: PRE_DEPLOY, POST_DEPLOY, FAILED_DEPLOY, SCHEDULED.
 type JobSpec struct {
-	Name            string            `json:"name" yaml:"name"`
-	Kind            string            `json:"kind" yaml:"kind"`
-	Image           string            `json:"image,omitempty" yaml:"image,omitempty"`
-	RunCommand      string            `json:"run_command" yaml:"run_command"`
-	EnvVars         map[string]string `json:"env_vars,omitempty" yaml:"env_vars,omitempty"`
-	EnvVarsSecret   map[string]string `json:"env_vars_secret,omitempty" yaml:"env_vars_secret,omitempty"`
-	Cron            string            `json:"cron,omitempty" yaml:"cron,omitempty"` // non-empty for SCHEDULED kind
-	Termination     *TerminationSpec  `json:"termination,omitempty" yaml:"termination,omitempty"`
-	Alerts          []AlertSpec       `json:"alerts,omitempty" yaml:"alerts,omitempty"`
-	LogDestinations []LogDestinationSpec `json:"log_destinations,omitempty" yaml:"log_destinations,omitempty"`
-}
-
-// WorkerSpec describes a long-running background worker workload.
-type WorkerSpec struct {
 	Name            string               `json:"name" yaml:"name"`
+	Kind            string               `json:"kind" yaml:"kind"`
 	Image           string               `json:"image,omitempty" yaml:"image,omitempty"`
 	RunCommand      string               `json:"run_command" yaml:"run_command"`
 	EnvVars         map[string]string    `json:"env_vars,omitempty" yaml:"env_vars,omitempty"`
 	EnvVarsSecret   map[string]string    `json:"env_vars_secret,omitempty" yaml:"env_vars_secret,omitempty"`
-	InstanceCount   int                  `json:"instance_count" yaml:"instance_count"`
-	Size            string               `json:"size,omitempty" yaml:"size,omitempty"`
-	Autoscaling     *AutoscalingSpec     `json:"autoscaling,omitempty" yaml:"autoscaling,omitempty"`
-	HealthCheck     *HealthCheckSpec     `json:"health_check,omitempty" yaml:"health_check,omitempty"`
-	Resources       *WorkloadResourceSpec `json:"resources,omitempty" yaml:"resources,omitempty"`
+	Cron            string               `json:"cron,omitempty" yaml:"cron,omitempty"` // non-empty for SCHEDULED kind
 	Termination     *TerminationSpec     `json:"termination,omitempty" yaml:"termination,omitempty"`
 	Alerts          []AlertSpec          `json:"alerts,omitempty" yaml:"alerts,omitempty"`
 	LogDestinations []LogDestinationSpec `json:"log_destinations,omitempty" yaml:"log_destinations,omitempty"`
 }
 
+// WorkerSpec describes a long-running background worker workload.
+type WorkerSpec struct {
+	Name            string                `json:"name" yaml:"name"`
+	Image           string                `json:"image,omitempty" yaml:"image,omitempty"`
+	RunCommand      string                `json:"run_command" yaml:"run_command"`
+	EnvVars         map[string]string     `json:"env_vars,omitempty" yaml:"env_vars,omitempty"`
+	EnvVarsSecret   map[string]string     `json:"env_vars_secret,omitempty" yaml:"env_vars_secret,omitempty"`
+	InstanceCount   int                   `json:"instance_count" yaml:"instance_count"`
+	Size            string                `json:"size,omitempty" yaml:"size,omitempty"`
+	Autoscaling     *AutoscalingSpec      `json:"autoscaling,omitempty" yaml:"autoscaling,omitempty"`
+	HealthCheck     *HealthCheckSpec      `json:"health_check,omitempty" yaml:"health_check,omitempty"`
+	Resources       *WorkloadResourceSpec `json:"resources,omitempty" yaml:"resources,omitempty"`
+	Termination     *TerminationSpec      `json:"termination,omitempty" yaml:"termination,omitempty"`
+	Alerts          []AlertSpec           `json:"alerts,omitempty" yaml:"alerts,omitempty"`
+	LogDestinations []LogDestinationSpec  `json:"log_destinations,omitempty" yaml:"log_destinations,omitempty"`
+}
+
 // StaticSiteSpec describes a statically-built web front-end.
 type StaticSiteSpec struct {
-	Name         string      `json:"name" yaml:"name"`
-	BuildCommand string      `json:"build_command" yaml:"build_command"`
-	OutputDir    string      `json:"output_dir" yaml:"output_dir"`
+	Name         string            `json:"name" yaml:"name"`
+	BuildCommand string            `json:"build_command" yaml:"build_command"`
+	OutputDir    string            `json:"output_dir" yaml:"output_dir"`
 	EnvVars      map[string]string `json:"env_vars,omitempty" yaml:"env_vars,omitempty"`
-	Routes       []RouteSpec `json:"routes,omitempty" yaml:"routes,omitempty"`
-	CORS         *CORSSpec   `json:"cors,omitempty" yaml:"cors,omitempty"`
-	Domains      []DomainSpec `json:"domains,omitempty" yaml:"domains,omitempty"`
-	Alerts       []AlertSpec `json:"alerts,omitempty" yaml:"alerts,omitempty"`
+	Routes       []RouteSpec       `json:"routes,omitempty" yaml:"routes,omitempty"`
+	CORS         *CORSSpec         `json:"cors,omitempty" yaml:"cors,omitempty"`
+	Domains      []DomainSpec      `json:"domains,omitempty" yaml:"domains,omitempty"`
+	Alerts       []AlertSpec       `json:"alerts,omitempty" yaml:"alerts,omitempty"`
 }
 
 // SidecarSpec describes a companion container that shares the network with
 // the main service (e.g. Tailscale, Envoy).
 type SidecarSpec struct {
-	Name              string               `json:"name" yaml:"name"`
-	Image             string               `json:"image,omitempty" yaml:"image,omitempty"`
-	RunCommand        string               `json:"run_command" yaml:"run_command"`
-	EnvVars           map[string]string    `json:"env_vars,omitempty" yaml:"env_vars,omitempty"`
-	EnvVarsSecret     map[string]string    `json:"env_vars_secret,omitempty" yaml:"env_vars_secret,omitempty"`
-	Ports             []PortSpec           `json:"ports,omitempty" yaml:"ports,omitempty"`
+	Name              string                `json:"name" yaml:"name"`
+	Image             string                `json:"image,omitempty" yaml:"image,omitempty"`
+	RunCommand        string                `json:"run_command" yaml:"run_command"`
+	EnvVars           map[string]string     `json:"env_vars,omitempty" yaml:"env_vars,omitempty"`
+	EnvVarsSecret     map[string]string     `json:"env_vars_secret,omitempty" yaml:"env_vars_secret,omitempty"`
+	Ports             []PortSpec            `json:"ports,omitempty" yaml:"ports,omitempty"`
 	Resources         *WorkloadResourceSpec `json:"resources,omitempty" yaml:"resources,omitempty"`
-	HealthCheck       *HealthCheckSpec     `json:"health_check,omitempty" yaml:"health_check,omitempty"`
-	SharesNetworkWith string               `json:"shares_network_with,omitempty" yaml:"shares_network_with,omitempty"` // name of the service this sidecar attaches to
+	HealthCheck       *HealthCheckSpec      `json:"health_check,omitempty" yaml:"health_check,omitempty"`
+	SharesNetworkWith string                `json:"shares_network_with,omitempty" yaml:"shares_network_with,omitempty"` // name of the service this sidecar attaches to
 }
 
 // PortSpec describes a named port exposed by a service or sidecar.
@@ -141,13 +141,13 @@ type IngressSpec struct {
 
 // IngressRule maps an HTTP match to a backend component.
 type IngressRule struct {
-	Match     string `json:"match" yaml:"match"`     // path prefix or header expression
+	Match     string `json:"match" yaml:"match"`         // path prefix or header expression
 	Component string `json:"component" yaml:"component"` // target service/worker name
 }
 
 // EgressSpec controls outbound traffic policy.
 type EgressSpec struct {
-	Bandwidth string      `json:"bandwidth,omitempty" yaml:"bandwidth,omitempty"` // informational budget, e.g. "1Gbps"
+	Bandwidth string       `json:"bandwidth,omitempty" yaml:"bandwidth,omitempty"` // informational budget, e.g. "1Gbps"
 	Rules     []EgressRule `json:"rules,omitempty" yaml:"rules,omitempty"`
 }
 

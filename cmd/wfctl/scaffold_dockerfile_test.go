@@ -162,9 +162,9 @@ func TestScaffoldDockerfile_InvalidMode(t *testing.T) {
 func TestValidateBaseImage_FullyQualifiedRefs(t *testing.T) {
 	// Fully-qualified ubuntu refs should be blocked the same as short "ubuntu:22.04".
 	cases := []struct {
-		image     string
+		image      string
 		allowShell bool
-		wantErr   bool
+		wantErr    bool
 	}{
 		{"docker.io/library/ubuntu:22.04", false, true},
 		{"docker.io/library/ubuntu:22.04", true, false},

@@ -53,8 +53,8 @@ type SQLTenantRegistry struct {
 
 // SQLTenantRegistryConfig is the constructor configuration.
 type SQLTenantRegistryConfig struct {
-	DB        *sql.DB
-	Schema    TenantSchemaConfig
+	DB     *sql.DB
+	Schema TenantSchemaConfig
 	// CacheSize controls the in-memory LRU cache size.
 	//   < 0 — disable cache entirely (no LRU)
 	//   0   — use default (256 entries)
