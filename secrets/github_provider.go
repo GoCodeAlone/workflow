@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -83,7 +84,7 @@ func (p *GitHubSecretsProvider) Set(ctx context.Context, key, value string) erro
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("secrets: github set secret %q: HTTP %d", key, resp.StatusCode)
+		return fmt.Errorf("secrets: github set secret %q: HTTP %d%s", key, resp.StatusCode, readErrorBody(resp))
 	}
 	return nil
 }
@@ -108,7 +109,7 @@ func (p *GitHubSecretsProvider) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("%w: %s", ErrNotFound, key)
 	}
 	if resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("secrets: github delete secret %q: HTTP %d", key, resp.StatusCode)
+		return fmt.Errorf("secrets: github delete secret %q: HTTP %d%s", key, resp.StatusCode, readErrorBody(resp))
 	}
 	return nil
 }
@@ -127,7 +128,7 @@ func (p *GitHubSecretsProvider) List(ctx context.Context) ([]string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("secrets: github list secrets: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("secrets: github list secrets: HTTP %d%s", resp.StatusCode, readErrorBody(resp))
 	}
 	var result struct {
 		Secrets []struct {
@@ -142,6 +143,19 @@ func (p *GitHubSecretsProvider) List(ctx context.Context) ([]string, error) {
 		names[i] = s.Name
 	}
 	return names, nil
+}
+
+// readErrorBody reads up to 512 bytes from resp.Body and returns them as a
+// trimmed string prefixed with ": " for appending to an error message.
+// Returns "" when the body is empty, so callers don't emit a trailing ": ".
+// resp.Body must not yet be closed; the caller is responsible for closing it.
+func readErrorBody(resp *http.Response) string {
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	s := strings.TrimSpace(string(b))
+	if s == "" {
+		return ""
+	}
+	return ": " + s
 }
 
 func (p *GitHubSecretsProvider) setHeaders(req *http.Request) {
@@ -169,7 +183,7 @@ func (p *GitHubSecretsProvider) repoPublicKey(ctx context.Context) (keyID, keyBa
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
+		return "", "", fmt.Errorf("HTTP %d%s", resp.StatusCode, readErrorBody(resp))
 	}
 	var pk repoPublicKeyResponse
 	if err := json.NewDecoder(resp.Body).Decode(&pk); err != nil {
