@@ -135,7 +135,7 @@ func TestNewDeployProvider_BuiltIns(t *testing.T) {
 		"aws-ecs":        (*awsECSProvider)(nil),
 	}
 	for name := range cases {
-		p, err := newDeployProvider(name, nil)
+		p, err := newDeployProvider(name, nil, "")
 		if err != nil {
 			t.Errorf("newDeployProvider(%q): unexpected error: %v", name, err)
 			continue
@@ -160,7 +160,7 @@ func TestNewDeployProvider_PluginProvider_Resolves(t *testing.T) {
 	}
 
 	cfg := makePluginTestConfig("fake-cloud", "fake-provider")
-	p, err := newDeployProvider("fake-cloud", cfg)
+	p, err := newDeployProvider("fake-cloud", cfg, "")
 	if err != nil {
 		t.Fatalf("newDeployProvider: unexpected error: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestNewDeployProvider_PluginProvider_Resolves(t *testing.T) {
 }
 
 func TestNewDeployProvider_UnknownProvider_ErrorsClearly(t *testing.T) {
-	_, err := newDeployProvider("nonexistent-cloud", nil)
+	_, err := newDeployProvider("nonexistent-cloud", nil, "")
 	if err == nil {
 		t.Fatal("expected error for unknown provider")
 	}

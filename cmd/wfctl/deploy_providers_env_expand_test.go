@@ -62,7 +62,7 @@ func TestPluginDeployProvider_ProviderConfigExpanded(t *testing.T) {
 		},
 	}
 
-	p, err := newPluginDeployProvider("digitalocean", wfCfg)
+	p, err := newPluginDeployProvider("digitalocean", wfCfg, "")
 	if err != nil {
 		t.Fatalf("newPluginDeployProvider: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestPluginDeployProvider_ResourceConfigExpanded(t *testing.T) {
 		},
 	}
 
-	p, err := newPluginDeployProvider("digitalocean", wfCfg)
+	p, err := newPluginDeployProvider("digitalocean", wfCfg, "")
 	if err != nil {
 		t.Fatalf("newPluginDeployProvider: %v", err)
 	}
