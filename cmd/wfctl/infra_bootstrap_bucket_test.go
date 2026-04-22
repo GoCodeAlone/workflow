@@ -12,12 +12,12 @@ import (
 
 // fakeBucketClient implements spacesBucketClient for unit tests.
 type fakeBucketClient struct {
-	headErr      error // nil → bucket exists; *s3types.NotFound → bucket absent; other → fatal
-	createErr    error
-	headCalled   bool
+	headErr     error // nil → bucket exists; *s3types.NotFound → bucket absent; other → fatal
+	createErr   error
+	headCalled  bool
 	createCalled bool
-	lastBucket   string
-	lastRegion   string
+	lastBucket  string
+	lastRegion  string
 }
 
 func (f *fakeBucketClient) HeadBucket(_ context.Context, input *s3.HeadBucketInput, _ ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {

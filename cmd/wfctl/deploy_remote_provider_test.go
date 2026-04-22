@@ -32,8 +32,8 @@ func (e errString) Error() string { return string(e) }
 func newFakeInvoker() *fakeRemoteInvoker {
 	return &fakeRemoteInvoker{
 		methods: map[string]map[string]any{
-			"IaCProvider.Name":       {"name": "test-provider"},
-			"IaCProvider.Version":    {"version": "1.0.0"},
+			"IaCProvider.Name":    {"name": "test-provider"},
+			"IaCProvider.Version": {"version": "1.0.0"},
 			"IaCProvider.Initialize": {},
 			"ResourceDriver.Update": {
 				"provider_id": "app-123",

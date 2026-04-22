@@ -93,8 +93,6 @@ var commands = map[string]func([]string) error{
 	"wizard":          runWizard,
 	"dev":             runDev,
 	"build":           runBuild,
-	"scaffold":        runScaffold,
-	"tenant":          runTenant,
 }
 
 func main() {

@@ -51,16 +51,16 @@ func (p *simpleProvider) List(_ context.Context) ([]string, error) {
 func sampleStates() []interfaces.ResourceState {
 	return []interfaces.ResourceState{
 		{
-			Name: "bmw-database",
-			Type: "infra.database",
+			Name:   "bmw-database",
+			Type:   "infra.database",
 			Outputs: map[string]any{
 				"uri":  "postgres://user:pass@db.example.com:5432/app",
 				"host": "db.example.com",
 			},
 		},
 		{
-			Name: "bmw-cache",
-			Type: "infra.cache",
+			Name:   "bmw-cache",
+			Type:   "infra.cache",
 			Outputs: map[string]any{
 				"url": "redis://cache.example.com:6379",
 			},

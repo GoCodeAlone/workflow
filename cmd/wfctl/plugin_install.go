@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -17,7 +16,6 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/GoCodeAlone/workflow/config"
 	engineplugin "github.com/GoCodeAlone/workflow/plugin"
 )
 
@@ -187,7 +185,7 @@ func runPluginInstall(args []string) error {
 		}
 	}
 
-	if err := installPluginFromManifest(pluginDirVal, pluginName, manifest, nil); err != nil {
+	if err := installPluginFromManifest(pluginDirVal, pluginName, manifest); err != nil {
 		if requestedVersion != "" && requestedVersion != registryVersion {
 			return fmt.Errorf("requested version %s not available for %q (registry manifest is at %s): %w",
 				requestedVersion, pluginName, registryVersion, err)
@@ -214,11 +212,7 @@ func runPluginInstall(args []string) error {
 // installPluginFromManifest downloads, extracts, and installs a plugin using the
 // provided registry manifest. It is shared by runPluginInstall and runPluginUpdate.
 // The plugin.json is always written/updated from the manifest to keep version tracking correct.
-//
-// When verify is non-nil, the install_verify hook is emitted after tarball download
-// and before extraction. If the hook dispatcher returns a non-zero error the install
-// is aborted and the error is returned.
-func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryManifest, verify *config.PluginVerifyConfig) error {
+func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryManifest) error {
 	dl, err := manifest.FindDownload(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return err
@@ -240,19 +234,6 @@ func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryMan
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "Checksum verified.\n")
-	}
-
-	// Emit install_verify hook after download and before extraction (opt-in via req.Verify).
-	// Write tarball to disk so hook handlers can inspect it (e.g. sigstore cosign verify).
-	if verify != nil {
-		tarballPath := filepath.Join(destDir, pluginName+".tar.gz")
-		if writeErr := os.WriteFile(tarballPath, data, 0600); writeErr != nil {
-			return fmt.Errorf("write tarball for verify hook: %w", writeErr)
-		}
-		defer os.Remove(tarballPath) //nolint:errcheck
-		if hookErr := emitInstallVerifyHook(context.Background(), tarballPath, verify, defaultInstallVerifyHookFn(dataDir)); hookErr != nil {
-			return fmt.Errorf("install_verify hook aborted install of %q: %w", pluginName, hookErr)
-		}
 	}
 
 	fmt.Fprintf(os.Stderr, "Extracting to %s...\n", destDir)
@@ -392,7 +373,7 @@ func runPluginUpdate(args []string) error {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
-		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil)
+		return installPluginFromManifest(pluginDirVal, pluginName, manifest)
 	}
 
 	// Registry lookup failed. If the plugin's manifest declares a repository
@@ -413,7 +394,7 @@ func runPluginUpdate(args []string) error {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
-		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil)
+		return installPluginFromManifest(pluginDirVal, pluginName, manifest)
 	}
 
 	return registryErr

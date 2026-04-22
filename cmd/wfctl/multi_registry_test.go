@@ -381,7 +381,7 @@ func TestMultiRegistryFetchOriginalNameFirst(t *testing.T) {
 	srcA := &mockRegistrySource{
 		name: "registry",
 		manifests: map[string]*RegistryManifest{
-			"auth":                 {Name: "auth", Version: "0.3.51", Description: "builtin auth module"},
+			"auth":               {Name: "auth", Version: "0.3.51", Description: "builtin auth module"},
 			"workflow-plugin-auth": {Name: "workflow-plugin-auth", Version: "0.1.2", Description: "external auth plugin"},
 		},
 	}

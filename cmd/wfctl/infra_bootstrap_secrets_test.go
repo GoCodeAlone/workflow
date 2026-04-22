@@ -11,11 +11,11 @@ import (
 // writeOnlyProvider simulates a GitHub-style provider where Get is not
 // supported but List returns known names.
 type writeOnlyProvider struct {
-	existing  []string
-	stored    map[string]string
-	getCalls  int
+	existing []string
+	stored   map[string]string
+	getCalls int
 	listCalls int
-	listOK    bool
+	listOK   bool
 }
 
 func (p *writeOnlyProvider) Name() string { return "write-only-fake" }

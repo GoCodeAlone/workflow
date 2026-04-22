@@ -86,6 +86,7 @@ modules:
 	t.Error("cloud-provider not found in resolved config")
 }
 
+
 // ── TestInfraApply_NestedMapExpanded ────────────────────────────────────────
 // Verifies that ${VAR} references nested inside a map value are substituted.
 func TestInfraApply_NestedMapExpanded(t *testing.T) {

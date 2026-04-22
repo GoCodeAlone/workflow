@@ -75,8 +75,7 @@ func (p *recordingProvider) ResourceDriver(resourceType string) (interfaces.Reso
 	p.driverType = resourceType
 	return p.driver, nil
 }
-func (p *recordingProvider) SupportedCanonicalKeys() []string { return nil }
-func (p *recordingProvider) Close() error                     { return nil }
+func (p *recordingProvider) Close() error { return nil }
 
 func (d *recordingDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
 	d.createSpecs = append(d.createSpecs, spec)
