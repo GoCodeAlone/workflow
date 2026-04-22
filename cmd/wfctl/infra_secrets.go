@@ -9,25 +9,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// SecretsConfig is the "secrets:" section of an infra config file.
-type SecretsConfig struct {
-	Provider string         `yaml:"provider"`
-	Config   map[string]any `yaml:"config"`
-	Generate []SecretGen    `yaml:"generate"`
-}
-
-// SecretGen describes a secret to generate and store.
-type SecretGen struct {
-	Key    string `yaml:"key"`
-	Type   string `yaml:"type"`   // e.g. "random_hex", "provider_credential"
-	Length int    `yaml:"length"` // for random generators
-	Source string `yaml:"source"` // for provider_credential
-}
-
-// InfraConfig is the "infra:" top-level section of an infra config file.
-type InfraConfig struct {
-	AutoBootstrap *bool `yaml:"auto_bootstrap"`
-}
+// SecretsConfig, SecretGen and InfraConfig are type aliases for the canonical
+// definitions in the config package. Aliases keep all existing cmd/wfctl code
+// (including test files) working without renaming, while ensuring that any
+// round-trip through config.WorkflowConfig preserves the generate[] and
+// infra.auto_bootstrap fields (which were previously dropped because the local
+// struct definitions were not reflected in config.WorkflowConfig).
+type SecretsConfig = config.SecretsConfig
+type SecretGen = config.SecretGen
+type InfraConfig = config.InfraConfig
 
 // parseSecretsConfig reads the "secrets:" top-level key from a YAML file.
 // Returns nil, nil if the section is absent.
