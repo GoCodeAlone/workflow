@@ -183,6 +183,7 @@ func (f *fakeIaCProvider) ResourceDriver(rt string) (interfaces.ResourceDriver, 
 	return d, nil
 }
 func (f *fakeIaCProvider) Close() error { return nil }
+func (f *fakeIaCProvider) SupportedCanonicalKeys() []string { return nil }
 
 // makePluginTestConfig builds a WorkflowConfig with an iac.provider + infra.container_service.
 func makePluginTestConfig(providerName, moduleName string) *config.WorkflowConfig {
