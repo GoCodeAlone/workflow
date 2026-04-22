@@ -463,18 +463,23 @@ Create new repo `github.com/GoCodeAlone/workflow-plugin-migrations`. All work in
 **Step 4:** Commit initial scaffold.
 **Step 5:** Push to main (scaffold is fine on main; features come as PRs).
 
-### Task 23: Shared pkg/driver types + module types
+### Task 23: Shared pkg/driver types + module types + step types
 
 **Files:**
 - pkg/driver/driver.go — adapter around `interfaces.MigrationDriver`
 - pkg/driver/registry.go — in-process driver registry
 - internal/module_migrations.go — `database.migrations` module type
 - internal/module_driver.go — `database.migration_driver` module type
+- internal/steps/migrate_up.go — `step.migrate_up`
+- internal/steps/migrate_down.go — `step.migrate_down`
+- internal/steps/migrate_status.go — `step.migrate_status`
+- internal/steps/migrate_to.go — `step.migrate_to`
 - internal/module_migrations_test.go, internal/module_driver_test.go
+- internal/steps/migrate_*_test.go
 
-**Step 1-4:** TDD the module types. Config parsing + `driver_ref` resolution via modular service registry.
+**Step 1-4:** TDD the module types AND step factories. Each step resolves the named `database.migrations` module from the modular service registry, pulls its configured driver, and invokes the matching method. Config parsing + `driver_ref` resolution.
 
-**Step 5:** `feat: database.migrations + database.migration_driver module types`
+**Step 5:** `feat: database.migrations + database.migration_driver module types + step.migrate_up/down/status/to`
 
 ### Task 24: golang-migrate driver
 
@@ -550,6 +555,20 @@ Same as Task 24 with `github.com/pressly/goose/v3`.
 
 Tag `v0.1.0`. Verify three artifacts release cleanly: `workflow-plugin-migrations` tarball, `workflow-plugin-atlas-migrate` tarball, `workflow-migrate` binary + image.
 
+### Task 31b: Publish migration plugin manifests to workflow-registry
+
+**Files:**
+- workflow-registry/plugins/workflow-plugin-migrations/manifest.json (new)
+- workflow-registry/plugins/workflow-plugin-atlas-migrate/manifest.json (new)
+
+**Step 1:** Clone workflow-registry if not already; `git switch -c feat/add-workflow-plugin-migrations`.
+**Step 2:** Create the two manifest.json files with v0.1.0 metadata, full downloads[] for linux/darwin × amd64/arm64, SBOM URLs, capability block declaring `moduleTypes: [database.migrations, database.migration_driver]`, `migrationDrivers: [golang-migrate, goose, atlas]`, `cliCommands: [migrate]`, `buildHooks: []`.
+**Step 3:** Validate: `python3 scripts/validate_manifest.py plugins/workflow-plugin-migrations/manifest.json`.
+**Step 4:** Commit, push, open PR, admin-merge.
+**Step 5:** Verify registry PR #X merged; manifests accessible via GitHub raw URL.
+
+Commit message: `feat(registry): add workflow-plugin-migrations and workflow-plugin-atlas-migrate at v0.1.0`
+
 ---
 
 ## Phase 3 — workflow-plugin-digitalocean v0.7.0
@@ -621,7 +640,16 @@ Same pattern for: `InstanceSizeSlug` (via existing `resolveSizing`), `Autoscalin
 
 ### Task 40: Release v0.7.0
 
-Bump version, update registry manifest, tag `v0.7.0`.
+Bump version in internal/provider.go + internal/plugin.go + plugin.json. Tag `v0.7.0`. Confirm release workflow publishes tarballs + SBOMs + signatures.
+
+### Task 40b: Bump DO plugin manifest in workflow-registry
+
+**Files:**
+- workflow-registry/plugins/digitalocean/manifest.json
+
+**Step 1-4:** Update `version` from `0.6.2` → `0.7.0`; update every `downloads[].url` from `/v0.6.2/` → `/v0.7.0/`; add `buildHooks` capability if any were declared (none yet for DO); verify `iacProvider.resourceTypes` list still current. Validate, commit, push, PR, admin-merge.
+
+**Step 5:** `fix(registry): bump digitalocean plugin to v0.7.0`
 
 ---
 
@@ -637,7 +665,7 @@ Bump version, update registry manifest, tag `v0.7.0`.
 
 **Step 5:** `feat(supply-chain): post_container_build hook generates and attaches SBOM`
 
-### Task 42: Signing hook
+### Task 42: Signing hook (post_container_build)
 
 **Files:**
 - internal/hooks/sign.go + sign_test.go
@@ -645,6 +673,16 @@ Bump version, update registry manifest, tag `v0.7.0`.
 **Step 1-4:** Keyless cosign sign on the image digest. In CI, uses GitHub OIDC. Locally, skips with a warning.
 
 **Step 5:** `feat(supply-chain): post_container_build hook signs image via cosign keyless`
+
+### Task 42b: Asset signing hook (post_artifacts_publish)
+
+**Files:**
+- internal/hooks/sign_assets.go + sign_assets_test.go
+- cmd/workflow-plugin-supply-chain/main.go — register `post_artifacts_publish` handler alongside existing `post_container_build`
+
+**Step 1-4:** After release artifacts publish (tarballs, binaries, SBOMs), invoke cosign sign-blob on each, emit matching `.sig` + `.cert` files alongside. Rekor entry written. Test exercises a fake publish event with two assets and asserts signatures appear in the output payload.
+
+**Step 5:** `feat(supply-chain): post_artifacts_publish hook signs release assets via cosign`
 
 ### Task 43: SLSA provenance
 
@@ -689,7 +727,34 @@ Bump version, update registry manifest, tag `v0.7.0`.
 
 **Step 5:** `docs: consolidate supply-chain docs into plugin repo`
 
+### Task 47b: wfctl plugin install --verify integration
+
+**Files:**
+- Modify: workflow/cmd/wfctl/plugin_install.go (Phase 1 base already supports --verify flag stub; this fills it in via the supply-chain plugin)
+- internal/verify/install_verifier.go + install_verifier_test.go — plugin's install-verification helper invoked via `--wfctl-hook install_verify`
+- Modify: cmd/workflow-plugin-supply-chain/plugin.json — add `buildHooks: [{event: install_verify, priority: 500}]`
+- Modify: workflow/interfaces/build_hooks.go — add `install_verify` event constant (if not already added in Phase 1)
+- Modify: workflow/cmd/wfctl/plugin_install.go — emit `install_verify` hook after tarball download, before extraction; dispatch receives `{tarball_path, expected_signature, expected_sbom_hash, vuln_policy}` payload; plugin verifies cosign signature, SBOM presence, OSV vuln scan per policy; non-zero exit aborts install.
+- Modify: workflow/config/config.go — extend `PluginRequirement` with `Verify *PluginVerifyConfig` struct (signature/sbom/vuln_policy fields) so app.yaml `requires.plugins[].verify:` parses.
+
+**Step 1-4:** TDD. Test with a tampered tarball (cosign verify fails → install aborts), a valid tarball (passes), and a valid tarball containing a known-CVE package (OSV catches it under `vuln_policy: block-critical`). Wire all three through the hook mechanism so core stays feature-free.
+
+**Step 5:** `feat(supply-chain): wfctl plugin install --verify via install_verify hook`
+
+Note: the `install_verify` event constant + `PluginRequirement.Verify` config shape land in Phase 1 (workflow v0.18.0) as part of Tasks 8 and 12 — explicitly add them there when implementing. The Phase 4 task here is the plugin-side handler + test coverage.
+
 ### Task 48: Release v0.3.0
+
+Tag `v0.3.0`. Verify release workflow publishes signed tarball + SBOM + provenance.
+
+### Task 48b: Bump supply-chain plugin manifest in workflow-registry
+
+**Files:**
+- workflow-cloud-registry/plugins/workflow-plugin-supply-chain/manifest.json (private registry since supply-chain is private)
+
+**Step 1-4:** Update version → 0.3.0; update download URLs; add `buildHooks: [{event: post_container_build, priority: 500}, {event: post_container_build, priority: 600}, {event: post_artifacts_publish, priority: 500}, {event: install_verify, priority: 500}]`; add `cliCommands: [{name: supply-chain, subcommands: [scan, verify, sbom, report]}, {name: scaffold, subcommands: [sbom, sign]}, {name: ci, subcommands: [doctor]}]`. Validate, commit, push, PR, admin-merge.
+
+**Step 5:** `fix(cloud-registry): bump workflow-plugin-supply-chain to v0.3.0`
 
 ---
 
@@ -775,6 +840,18 @@ Open PR with tasks 49–52 combined. Admin-merge once CI green.
 Only once staging E2E is green + supply-chain verification clean. Use existing BMW deploy gate.
 
 ---
+
+## Registry manifest update summary
+
+After the drift-check revision, registry updates are distributed across phases rather than a single end-phase task:
+
+| Phase | Task | Registry target |
+|---|---|---|
+| 2 | 31b | `workflow-registry/plugins/workflow-plugin-migrations/manifest.json` (new) + `workflow-plugin-atlas-migrate/manifest.json` (new) |
+| 3 | 40b | `workflow-registry/plugins/digitalocean/manifest.json` (bump to 0.7.0) |
+| 4 | 48b | `workflow-cloud-registry/plugins/workflow-plugin-supply-chain/manifest.json` (bump to 0.3.0; private registry) |
+
+BMW never needs a manifest change — its `app.yaml` references plugins by version, and registry lookups by wfctl resolve to the updated manifests.
 
 ## Commit discipline
 
