@@ -33,6 +33,16 @@ func TestTenantSpec_Validate(t *testing.T) {
 			spec:    interfaces.TenantSpec{Name: "Acme", Slug: "acme"},
 			wantErr: nil,
 		},
+		{
+			name:    "uppercase slug",
+			spec:    interfaces.TenantSpec{Name: "Acme", Slug: "Acme"},
+			wantErr: interfaces.ErrValidation,
+		},
+		{
+			name:    "mixed-case slug",
+			spec:    interfaces.TenantSpec{Name: "Acme", Slug: "ACME-Corp"},
+			wantErr: interfaces.ErrValidation,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
