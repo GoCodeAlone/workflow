@@ -69,6 +69,21 @@ func LoadRegistryConfig(explicitPath string) (*RegistryConfig, error) {
 		if err != nil {
 			continue
 		}
+		// First, check whether the file contains a "registries" key at all.
+		// A lockfile (plugins: ...) has no such key, and silently treating it as
+		// an empty registry config would cause "no registry sources configured"
+		// for every subsequent plugin install.
+		// We distinguish "key absent" (lockfile / unrelated file → skip) from
+		// "key present but empty" (intentional empty config → respect it).
+		var raw map[string]any
+		if err := yaml.Unmarshal(data, &raw); err != nil {
+			return nil, fmt.Errorf("parse registry config %s: %w", p, err)
+		}
+		if _, hasKey := raw["registries"]; !hasKey {
+			// No "registries" key — this is probably a lockfile or project config.
+			// Fall through to the next candidate.
+			continue
+		}
 		var cfg RegistryConfig
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
 			return nil, fmt.Errorf("parse registry config %s: %w", p, err)

@@ -9,6 +9,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// wfctlLockPath is the canonical lockfile path.
+// Historically the lockfile shared the same file as the registry config
+// (.wfctl.yaml), which caused a collision: after the first plugin install wrote
+// the lockfile, subsequent LoadRegistryConfig reads found no "registries:" section
+// and fell back to zero sources.  The lockfile is now written to .wfctl-lock.yaml.
+// Backward-compat: loadPluginLockfile falls back to .wfctl.yaml when the new path
+// is absent, and migrates the plugins section on the first write.
+const wfctlLockPath = ".wfctl-lock.yaml"
+
+// wfctlYAMLPath is kept for backward-compat reads and for the project config
+// (git connect, deploy defaults). It is no longer used as the lockfile write target.
 const wfctlYAMLPath = ".wfctl.yaml"
 
 // PluginLockEntry records a pinned plugin version in the lockfile.
@@ -28,12 +39,23 @@ type PluginLockfile struct {
 
 // loadPluginLockfile reads path and returns the plugins section.
 // If the file does not exist, an empty lockfile is returned without error.
+// When path equals wfctlLockPath and the file does not exist, it falls back to
+// wfctlYAMLPath for backward compatibility with repositories that predate the
+// lockfile rename. Content read from the legacy path is transparently migrated
+// on the next Save call (which writes to wfctlLockPath).
 func loadPluginLockfile(path string) (*PluginLockfile, error) {
 	lf := &PluginLockfile{
 		Plugins: make(map[string]PluginLockEntry),
 		raw:     make(map[string]any),
 	}
 	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) && path == wfctlLockPath {
+		// New lockfile absent — try the legacy .wfctl.yaml for migration.
+		data, err = os.ReadFile(wfctlYAMLPath)
+		if os.IsNotExist(err) {
+			return lf, nil
+		}
+	}
 	if os.IsNotExist(err) {
 		return lf, nil
 	}
@@ -56,15 +78,16 @@ func loadPluginLockfile(path string) (*PluginLockfile, error) {
 	return lf, nil
 }
 
-// installFromLockfile reads .wfctl.yaml and installs all plugins in the
-// plugins section. If no lockfile is found, it prints a helpful message.
+// installFromLockfile reads .wfctl-lock.yaml (with .wfctl.yaml fallback) and
+// installs all plugins in the plugins section. If no lockfile is found, it
+// prints a helpful message.
 func installFromLockfile(pluginDir, cfgPath string) error {
-	lf, err := loadPluginLockfile(wfctlYAMLPath)
+	lf, err := loadPluginLockfile(wfctlLockPath)
 	if err != nil {
 		return fmt.Errorf("load lockfile: %w", err)
 	}
 	if len(lf.Plugins) == 0 {
-		fmt.Println("No plugins pinned in .wfctl.yaml.")
+		fmt.Println("No plugins pinned in .wfctl-lock.yaml.")
 		fmt.Println("Run 'wfctl plugin install <name>@<version>' to install and pin a plugin.")
 		return nil
 	}
@@ -105,11 +128,12 @@ func installFromLockfile(pluginDir, cfgPath string) error {
 	return nil
 }
 
-// updateLockfileWithChecksum adds or updates a plugin entry in .wfctl.yaml with SHA-256 checksum.
-// The sha256Hash must be the hash of the installed binary, not the download archive.
+// updateLockfileWithChecksum adds or updates a plugin entry in .wfctl-lock.yaml
+// with SHA-256 checksum. The sha256Hash must be the hash of the installed binary,
+// not the download archive.
 // Silently no-ops if the lockfile cannot be read or written (install still succeeds).
 func updateLockfileWithChecksum(pluginName, version, repository, registry, sha256Hash string) {
-	lf, err := loadPluginLockfile(wfctlYAMLPath)
+	lf, err := loadPluginLockfile(wfctlLockPath)
 	if err != nil {
 		return
 	}
@@ -122,7 +146,7 @@ func updateLockfileWithChecksum(pluginName, version, repository, registry, sha25
 		Registry:   registry,
 		SHA256:     sha256Hash,
 	}
-	_ = lf.Save(wfctlYAMLPath)
+	_ = lf.Save(wfctlLockPath)
 }
 
 // Save writes the lockfile back to path, updating the plugins section while

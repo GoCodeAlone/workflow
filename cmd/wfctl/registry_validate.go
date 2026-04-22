@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -122,12 +123,19 @@ func ValidateManifest(m *RegistryManifest, opts ValidationOptions) []ValidationE
 					Message: fmt.Sprintf("URL unreachable: %v", err),
 				})
 			} else {
-				resp.Body.Close()
 				if resp.StatusCode >= 400 {
+					body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+					resp.Body.Close()
+					msg := fmt.Sprintf("URL returned HTTP %d", resp.StatusCode)
+					if s := strings.TrimSpace(string(body)); s != "" {
+						msg += ": " + s
+					}
 					errs = append(errs, ValidationError{
 						Field:   fmt.Sprintf("downloads[%d].url", i),
-						Message: fmt.Sprintf("URL returned HTTP %d", resp.StatusCode),
+						Message: msg,
 					})
+				} else {
+					resp.Body.Close()
 				}
 			}
 		}
