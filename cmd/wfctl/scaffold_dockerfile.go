@@ -177,7 +177,8 @@ func imageBaseName(ref string) string {
 	if idx := strings.Index(ref, "@"); idx != -1 {
 		ref = ref[:idx]
 	}
-	// Strip tag (last colon that is not part of a registry host:port).
+	// A colon after the last slash is a tag separator; a colon before the last
+	// slash (e.g. registry host:port) is part of the address.
 	if idx := strings.LastIndex(ref, ":"); idx != -1 && !strings.Contains(ref[idx:], "/") {
 		ref = ref[:idx]
 	}
@@ -195,7 +196,7 @@ func validateBaseImage(base string, allowShell bool) error {
 	name := imageBaseName(base)
 
 	for _, s := range shellContainingBases {
-		if name == strings.ToLower(s) {
+		if strings.EqualFold(name, s) {
 			if !allowShell {
 				return fmt.Errorf("base image %q contains a shell — use a distroless image or pass --allow-shell to override", base)
 			}
@@ -204,7 +205,7 @@ func validateBaseImage(base string, allowShell bool) error {
 	}
 
 	for _, w := range glibcWarningBases {
-		if name == strings.ToLower(w) {
+		if strings.EqualFold(name, w) {
 			fmt.Fprintf(os.Stderr, "warning: base image %q has a large attack surface; consider gcr.io/distroless/base-debian12:nonroot\n", base)
 			return nil
 		}

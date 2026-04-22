@@ -53,8 +53,8 @@ type SQLTenantRegistry struct {
 
 // SQLTenantRegistryConfig is the constructor configuration.
 type SQLTenantRegistryConfig struct {
-	DB        *sql.DB
-	Schema    TenantSchemaConfig
+	DB     *sql.DB
+	Schema TenantSchemaConfig
 	// CacheSize controls the in-memory LRU cache size.
 	//   < 0 — disable cache entirely (no LRU)
 	//   0   — use default (256 entries)
@@ -195,7 +195,7 @@ func (r *SQLTenantRegistry) Ensure(spec interfaces.TenantSpec) (interfaces.Tenan
 		return existing, nil
 	}
 	if !errors.Is(err, interfaces.ErrResourceNotFound) {
-		return interfaces.Tenant{}, fmt.Errorf("ensure tenant %q: lookup: %w", spec.Slug, err)
+		return interfaces.Tenant{}, fmt.Errorf("ensure tenant: lookup: %w", err)
 	}
 
 	domainsJSON, _ := json.Marshal(spec.Domains)

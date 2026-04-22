@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-04-22
+
+### Fixed
+
+Post-hoc review (two independent agents audited commit `a48a9b7`) surfaced the
+following items; all fixed in #467 (`fix/v0.18.1-polish`).
+
+- **gofmt alignment** — `interfaces/iac_canonical_types.go`, `module/tenants.go`,
+  `cmd/wfctl/scaffold_dockerfile_test.go` had minor formatting drift; corrected.
+- **Missing nil-DB test** — `TestNewSQLTenantRegistry_NilDB` asserts the constructor
+  returns a descriptive error ("cfg.DB is required") when `DB` is nil.
+- **Cache-disabled coverage** — `TestNewSQLTenantRegistry_CacheDisabled` exercises
+  the full `Ensure → GetBySlug → Disable → GetBySlug` sequence with `CacheSize=-1`,
+  proving nil-cache code paths do not panic.
+- **Transient-error propagation** — `TestEnsure_PropagatesNonNotFoundError` guards
+  against a regression where a transient DB error could be silently swallowed and
+  trigger a spurious `INSERT`.
+- **Stale domain-cache invalidation** — `TestUpdate_InvalidatesStaleDomainCache`
+  verifies that after `Update` changes a tenant's domains, the old domain key is
+  evicted from the LRU cache so the next `GetByDomain` goes to the DB.
+- **Mixed-case subdomain matching** — `TestSubdomainSelector_MixedCase` confirms
+  that both the root domain and the incoming host are lowercased before comparison,
+  returning a consistent lowercase tenant key.
+- **Dockerfile validation subtests** — `TestValidateBaseImage_FullyQualifiedRefs`
+  converted to `t.Run` subtests with five additional cases: digest-only ref,
+  registry-with-port, tag+digest combined, empty string, and `docker.io/library/alpine`.
+- **Double-slug in Ensure error** — the outer `fmt.Errorf` in `Ensure` no longer
+  re-embeds the slug (it was already present in the wrapped `GetBySlug` error).
+- **Misleading scaffold comment** — replaced the ambiguous comment at
+  `scaffold_dockerfile.go:181` with a precise description of the colon-after-last-slash
+  heuristic used to distinguish tag separators from registry host:port colons.
+- **Hand-rolled string helpers removed** — `splitByNewline`, `splitLines`, and
+  `joinLines` in `module/tenants_test.go` replaced with `strings.Split` /
+  `strings.Join`.
+
+### Breaking changes
+
+- **`TenantSpec.Slug` must be all-lowercase.** `TenantSpec.Validate()` now returns
+  `ErrValidation` when `Slug != strings.ToLower(Slug)`. Mixed-case slugs were
+  previously accepted and stored verbatim, which caused cache-key collisions and
+  inconsistent URL routing. If you have existing tenants with mixed-case slugs,
+  lowercase the `slug` column before upgrading.
+- **`SubdomainSelector` now returns a lowercase subdomain key.** The host header is
+  already lowercased before suffix matching, so the returned key is always lowercase.
+  `HostSelector` has had this behaviour since v0.18.0; this change makes both
+  selectors consistent. If your code compared the key against a mixed-case string,
+  update the comparison.
+
 ## [0.18.0] - 2026-04-22
 
 ### Added

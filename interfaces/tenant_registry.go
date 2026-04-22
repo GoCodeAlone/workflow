@@ -1,6 +1,9 @@
 package interfaces
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // TenantRegistry persists and retrieves Tenant records.
 type TenantRegistry interface {
@@ -34,13 +37,18 @@ type TenantSpec struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// Validate checks that TenantSpec has the required fields.
+// Validate checks that TenantSpec has the required fields and that the slug
+// is well-formed. Slug must be non-empty and all-lowercase; mixed-case slugs
+// are rejected to ensure consistent URL routing and cache key derivation.
 func (s TenantSpec) Validate() error {
 	if s.Name == "" {
 		return fmt.Errorf("%w: tenant name is required", ErrValidation)
 	}
 	if s.Slug == "" {
 		return fmt.Errorf("%w: tenant slug is required", ErrValidation)
+	}
+	if s.Slug != strings.ToLower(s.Slug) {
+		return fmt.Errorf("%w: tenant slug must be lowercase", ErrValidation)
 	}
 	return nil
 }
