@@ -33,7 +33,14 @@ func runInfraBootstrap(args []string) error {
 		return err
 	}
 
+	// originalCfgFile is used for parseSecretsConfig so that the secrets.generate[]
+	// block is always read from the original YAML. writeEnvResolvedConfig marshals
+	// via config.WorkflowConfig which has no Generate field, so the generate[] section
+	// would be silently dropped from the env-resolved temp file.
+	originalCfgFile := cfgFile
+
 	// If --env is set, resolve the config for that environment before bootstrapping.
+	// cfgFile is reassigned to the temp path; originalCfgFile retains the original.
 	if envName != "" {
 		tmp, resErr := writeEnvResolvedConfig(cfgFile, envName)
 		if resErr != nil {
@@ -49,7 +56,9 @@ func runInfraBootstrap(args []string) error {
 	//    in the current process environment before bootstrapStateBackend runs.
 	//    (DO Spaces bucket creation requires S3 API auth with the Spaces key pair,
 	//    which is generated here via the provider_credential source.)
-	secretsCfg, err := parseSecretsConfig(cfgFile)
+	// Use originalCfgFile — not cfgFile — so the generate[] block is not lost
+	// in the env-resolved temp file's round-trip through config.WorkflowConfig.
+	secretsCfg, err := parseSecretsConfig(originalCfgFile)
 	if err != nil {
 		return fmt.Errorf("parse secrets config: %w", err)
 	}

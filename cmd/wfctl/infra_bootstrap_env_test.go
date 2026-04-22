@@ -325,6 +325,69 @@ modules:
 	}
 }
 
+// ── TestBootstrap_EnvFlagPreservesSecretsGenerate ────────────────────────────
+
+// TestBootstrap_EnvFlagPreservesSecretsGenerate is a regression test for the
+// bug where --env caused parseSecretsConfig to read from the env-resolved temp
+// file, which was marshalled via config.WorkflowConfig (no Generate field) and
+// silently dropped the secrets.generate[] block. The result was "No secrets to
+// generate." followed by "access key must be set" because the Spaces keys were
+// never generated.
+//
+// Fix: runInfraBootstrap must call parseSecretsConfig(originalCfgFile), not
+// parseSecretsConfig(cfgFile) after cfgFile was reassigned to the temp path.
+func TestBootstrap_EnvFlagPreservesSecretsGenerate(t *testing.T) {
+	t.Setenv("TEST_STAGING_SECRET_BUCKET", "staging-bucket")
+	t.Setenv("TEST_STAGING_SECRET_REGION", "sfo3")
+
+	// Track whether bootstrapSecrets was called with a non-empty Generate list.
+	var observedGenerateLen int
+	withStubGenerator(t, func(_ context.Context, _ string, _ map[string]any) (string, error) {
+		observedGenerateLen++ // called once per generated secret
+		return "generated-value", nil
+	})
+
+	// Stub the bucket function so no real S3 call is made.
+	orig := bootstrapDOSpacesBucketFn
+	bootstrapDOSpacesBucketFn = func(_ context.Context, _, _, _, _ string) error { return nil }
+	defer func() { bootstrapDOSpacesBucketFn = orig }()
+
+	// Config has both environments.staging override AND secrets.generate[].
+	// The env resolution will flatten the staging config into modules, but must
+	// NOT drop the secrets block.
+	cfgFile := writeBootstrapConfig(t, `
+modules:
+  - name: tf-state
+    type: iac.state
+    config:
+      backend: spaces
+      bucket: "${TEST_STAGING_SECRET_BUCKET}"
+      region: "${TEST_STAGING_SECRET_REGION}"
+      accessKey: "ak"
+      secretKey: "sk"
+    environments:
+      staging:
+        config:
+          bucket: "${TEST_STAGING_SECRET_BUCKET}"
+
+secrets:
+  provider: env
+  generate:
+    - key: JWT_SECRET
+      type: random_hex
+      length: 32
+`)
+
+	if err := runInfraBootstrap([]string{"--config", cfgFile, "--env", "staging"}); err != nil {
+		t.Fatalf("runInfraBootstrap: %v", err)
+	}
+
+	// The generator must have been called (secrets.generate was not dropped).
+	if observedGenerateLen == 0 {
+		t.Error("secrets.generate[] was not processed — generate[] block was likely dropped by env-resolved config round-trip")
+	}
+}
+
 // ── fakeSecretsProvider ──────────────────────────────────────────────────────
 
 // fakeSecretsProvider is a simple in-memory secrets provider for tests.
