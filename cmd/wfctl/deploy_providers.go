@@ -1037,16 +1037,16 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 
 	for {
 		result, hcErr := driver.HealthCheck(pollCtx, ref)
-		if hcErr != nil {
+		switch {
+		case hcErr != nil:
 			wrapped := wrapIaCError(hcErr)
-			if errors.Is(wrapped, interfaces.ErrTransient) || errors.Is(wrapped, interfaces.ErrRateLimited) {
-				log.Printf("plugin health check %q: transient error, continuing poll: %v", name, hcErr)
-			} else {
+			if !errors.Is(wrapped, interfaces.ErrTransient) && !errors.Is(wrapped, interfaces.ErrRateLimited) {
 				return fmt.Errorf("plugin health check %q: %w", name, wrapped)
 			}
-		} else if result.Healthy {
+			log.Printf("plugin health check %q: transient error, continuing poll: %v", name, hcErr)
+		case result.Healthy:
 			return nil
-		} else {
+		default:
 			lastMsg = result.Message
 		}
 
