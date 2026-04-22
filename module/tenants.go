@@ -195,7 +195,7 @@ func (r *SQLTenantRegistry) Ensure(spec interfaces.TenantSpec) (interfaces.Tenan
 		return existing, nil
 	}
 	if !errors.Is(err, interfaces.ErrResourceNotFound) {
-		return interfaces.Tenant{}, fmt.Errorf("ensure tenant %q: lookup: %w", spec.Slug, err)
+		return interfaces.Tenant{}, fmt.Errorf("ensure tenant: lookup: %w", err)
 	}
 
 	domainsJSON, _ := json.Marshal(spec.Domains)

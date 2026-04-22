@@ -177,7 +177,8 @@ func imageBaseName(ref string) string {
 	if idx := strings.Index(ref, "@"); idx != -1 {
 		ref = ref[:idx]
 	}
-	// Strip tag (last colon that is not part of a registry host:port).
+	// A colon after the last slash is a tag separator; a colon before the last
+	// slash (e.g. registry host:port) is part of the address.
 	if idx := strings.LastIndex(ref, ":"); idx != -1 && !strings.Contains(ref[idx:], "/") {
 		ref = ref[:idx]
 	}

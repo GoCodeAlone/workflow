@@ -378,44 +378,15 @@ func newTestSQLRegistry(t *testing.T, dsn string) (*SQLTenantRegistry, interface
 }
 
 // stripGooseAnnotations removes goose comment directives so SQL can be executed directly.
-func stripGooseAnnotations(sql string) string {
-	var lines []string
-	for _, line := range splitLines(sql) {
-		if len(line) > 0 && line[0] == '-' && containsGoose(line) {
+func stripGooseAnnotations(s string) string {
+	var kept []string
+	for _, line := range strings.Split(s, "\n") {
+		if len(line) > 0 && line[0] == '-' && strings.Contains(line, "+goose") {
 			continue
 		}
-		lines = append(lines, line)
+		kept = append(kept, line)
 	}
-	return joinLines(lines)
-}
-
-func splitLines(s string) []string {
-	return splitByNewline(s)
-}
-func joinLines(lines []string) string {
-	var sb strings.Builder
-	for _, l := range lines {
-		sb.WriteString(l)
-		sb.WriteByte('\n')
-	}
-	return sb.String()
-}
-func splitByNewline(s string) []string {
-	var out []string
-	start := 0
-	for i, c := range s {
-		if c == '\n' {
-			out = append(out, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		out = append(out, s[start:])
-	}
-	return out
-}
-func containsGoose(s string) bool {
-	return strings.Contains(s, "+goose")
+	return strings.Join(kept, "\n")
 }
 
 // ---------------------------------------------------------------------------
