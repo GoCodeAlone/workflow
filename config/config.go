@@ -144,6 +144,7 @@ type WorkflowConfig struct {
 	CI             *CIConfig                     `json:"ci,omitempty" yaml:"ci,omitempty"`
 	Environments   map[string]*EnvironmentConfig `json:"environments,omitempty" yaml:"environments,omitempty"`
 	Secrets        *SecretsConfig                `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	Infra          *InfraConfig                  `json:"infra,omitempty" yaml:"infra,omitempty"`
 	SecretStores   map[string]*SecretStoreConfig `json:"secretStores,omitempty" yaml:"secretStores,omitempty"`
 	Services       map[string]*ServiceConfig     `json:"services,omitempty" yaml:"services,omitempty"`
 	Mesh           *MeshConfig                   `json:"mesh,omitempty" yaml:"mesh,omitempty"`
