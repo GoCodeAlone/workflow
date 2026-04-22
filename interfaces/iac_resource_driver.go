@@ -5,9 +5,17 @@ import (
 	"errors"
 )
 
-// ErrResourceNotFound is returned by ResourceDriver methods when the target
-// resource does not exist. Callers should use errors.Is to detect it.
-var ErrResourceNotFound = errors.New("iac: resource not found")
+// Sentinel errors for common IaC resource operation response categories.
+// Use errors.Is to identify them after wrapping.
+var (
+	ErrResourceNotFound      = errors.New("iac: resource not found")      // 404/410
+	ErrResourceAlreadyExists = errors.New("iac: resource already exists") // 409 Conflict
+	ErrRateLimited           = errors.New("iac: rate limited")            // 429
+	ErrTransient             = errors.New("iac: transient error")         // 502/503/504
+	ErrUnauthorized          = errors.New("iac: unauthorized")            // 401
+	ErrForbidden             = errors.New("iac: forbidden")               // 403
+	ErrValidation            = errors.New("iac: validation error")        // 400/422
+)
 
 // ResourceDriver handles CRUD for a single resource type within a provider.
 type ResourceDriver interface {
