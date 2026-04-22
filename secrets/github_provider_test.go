@@ -132,8 +132,10 @@ func TestGitHubProvider_Set_SendsEncryptedPayload(t *testing.T) {
 	var senderPub [32]byte
 	copy(senderPub[:], ciphertext[:32])
 
-	// Reconstruct nonce: BLAKE2b-32(senderPub || recipientPub)[:24]
-	h, _ := blake2b.New(32, nil)
+	// Reconstruct nonce: BLAKE2b-192(senderPub || recipientPub).
+	// Must use a native 24-byte output — blake2b(x,24) != blake2b(x,32)[:24]
+	// because BLAKE2b parameterises the output length into the hash itself.
+	h, _ := blake2b.New(24, nil)
 	h.Write(senderPub[:])
 	h.Write(recipientPub[:])
 	var nonce [24]byte
@@ -318,5 +320,44 @@ func TestNewGitHubSecretsProvider_MissingToken(t *testing.T) {
 	_, err := NewGitHubSecretsProvider("owner/repo", "MISSING_TOKEN_VAR")
 	if err == nil {
 		t.Error("expected error for empty token")
+	}
+}
+
+// TestBlake2bNonceLengthMatters is a regression guard for the BLAKE2b nonce
+// derivation in encryptSecret. libsodium's crypto_box_seal specifies a 24-byte
+// nonce derived by hashing to exactly 24 bytes (BLAKE2b-192). Deriving a 32-byte
+// hash and truncating to 24 bytes produces a *different* value because BLAKE2b
+// parameterises the output length into the hash state — blake2b(x,24) != blake2b(x,32)[:24].
+//
+// GitHub's secret encryption endpoint rejects payloads encrypted with the wrong
+// nonce with "improperly encrypted secret" (HTTP 422). This test documents and
+// enforces the distinction so that future refactors cannot silently regress to
+// the truncation approach.
+func TestBlake2bNonceLengthMatters(t *testing.T) {
+	input := []byte("some deterministic test input for blake2b nonce derivation")
+
+	// 24-byte native output (correct — matches libsodium crypto_box_seal).
+	h24, err := blake2b.New(24, nil)
+	if err != nil {
+		t.Fatalf("blake2b.New(24): %v", err)
+	}
+	h24.Write(input)
+	nonce24 := h24.Sum(nil) // exactly 24 bytes
+
+	// 32-byte output truncated to 24 bytes (incorrect — old implementation).
+	h32, err := blake2b.New(32, nil)
+	if err != nil {
+		t.Fatalf("blake2b.New(32): %v", err)
+	}
+	h32.Write(input)
+	nonce32truncated := h32.Sum(nil)[:24]
+
+	if len(nonce24) != 24 {
+		t.Fatalf("expected 24-byte output from blake2b.New(24), got %d", len(nonce24))
+	}
+	if string(nonce24) == string(nonce32truncated) {
+		t.Fatal("blake2b(x,24) == blake2b(x,32)[:24] — they should differ; " +
+			"if this fails the nonce regression guard is broken and GitHub will " +
+			"reject secrets with 'improperly encrypted secret'")
 	}
 }

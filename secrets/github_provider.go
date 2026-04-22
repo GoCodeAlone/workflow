@@ -213,8 +213,13 @@ func encryptSecret(pubKeyBase64, plaintext string) (string, error) {
 		return "", fmt.Errorf("generate ephemeral key: %w", err)
 	}
 
-	// Derive 24-byte nonce = BLAKE2b256(senderPub || recipientKey)[:24]
-	h, err := blake2b.New(32, nil)
+	// Derive 24-byte nonce = BLAKE2b-192(senderPub || recipientKey).
+	// Must use a native 24-byte BLAKE2b output to match libsodium's
+	// crypto_box_seal: BLAKE2b parameterises the output size into the hash
+	// itself, so blake2b(x, 24) != blake2b(x, 32)[:24]. GitHub rejects
+	// the encrypted value ("improperly encrypted secret") if we truncate
+	// a 32-byte digest instead of hashing to 24 bytes directly.
+	h, err := blake2b.New(24, nil)
 	if err != nil {
 		return "", fmt.Errorf("blake2b init: %w", err)
 	}
