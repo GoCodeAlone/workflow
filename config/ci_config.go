@@ -37,11 +37,12 @@ type CIBinaryTarget struct {
 
 // CIContainerTarget is a container image to build.
 type CIContainerTarget struct {
-	Name       string `json:"name" yaml:"name"`
-	Dockerfile string `json:"dockerfile,omitempty" yaml:"dockerfile,omitempty"`
-	Context    string `json:"context,omitempty" yaml:"context,omitempty"`
-	Registry   string `json:"registry,omitempty" yaml:"registry,omitempty"`
-	Tag        string `json:"tag,omitempty" yaml:"tag,omitempty"`
+	Name        string `json:"name" yaml:"name"`
+	Dockerfile  string `json:"dockerfile,omitempty" yaml:"dockerfile,omitempty"`
+	Context     string `json:"context,omitempty" yaml:"context,omitempty"`
+	Registry    string `json:"registry,omitempty" yaml:"registry,omitempty"`
+	Tag         string `json:"tag,omitempty" yaml:"tag,omitempty"`
+	ExposePorts []int  `json:"expose_ports,omitempty" yaml:"expose_ports,omitempty"`
 
 	// Method selects the build driver: "dockerfile" (default) or "ko".
 	Method      string              `json:"method,omitempty" yaml:"method,omitempty"`

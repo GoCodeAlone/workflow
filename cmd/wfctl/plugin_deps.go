@@ -58,14 +58,8 @@ func installFromWorkflowConfig(workflowCfgPath, pluginDir, registryCfgPath strin
 			nameArg = req.Name + "@" + req.Version
 		}
 
-		installArgs := []string{"--plugin-dir", pluginDir}
-		if registryCfgPath != "" {
-			installArgs = append(installArgs, "--config", registryCfgPath)
-		}
-		installArgs = append(installArgs, nameArg)
-
 		fmt.Fprintf(os.Stderr, "Installing %s...\n", nameArg)
-		installErr := runPluginInstall(installArgs)
+		installErr := installPluginReqDirect(pluginDir, registryCfgPath, req)
 		if authCleanup != nil {
 			authCleanup()
 		}
@@ -79,6 +73,42 @@ func installFromWorkflowConfig(workflowCfgPath, pluginDir, registryCfgPath strin
 		return fmt.Errorf("failed to install: %s", strings.Join(failed, ", "))
 	}
 	return nil
+}
+
+// installPluginReqDirect installs a single PluginRequirement by performing a
+// registry lookup and calling installPluginFromManifest directly, propagating
+// req.Verify so that the install_verify hook fires when a supply-chain verify
+// config is present. This avoids re-parsing CLI args and losing the Verify field.
+func installPluginReqDirect(pluginDir, registryCfgPath string, req config.PluginRequirement) error {
+	rawName, requestedVersion := parseNameVersion(req.Name)
+	if requestedVersion == "" {
+		requestedVersion = req.Version
+	}
+	pluginName := normalizePluginName(rawName)
+
+	regCfg, err := LoadRegistryConfig(registryCfgPath)
+	if err != nil {
+		return fmt.Errorf("load registry config: %w", err)
+	}
+	mr := NewMultiRegistry(regCfg)
+
+	manifest, _, registryErr := mr.FetchManifest(rawName)
+	if registryErr != nil {
+		return registryErr
+	}
+
+	if requestedVersion != "" && requestedVersion != manifest.Version {
+		pinManifestToVersion(manifest, requestedVersion)
+	}
+
+	if len(manifest.Dependencies) > 0 {
+		resolved := make(map[string]string)
+		if err := resolveDependencies(pluginName, manifest, pluginDir, registryCfgPath, []string{}, resolved); err != nil {
+			return fmt.Errorf("resolve dependencies for %q: %w", pluginName, err)
+		}
+	}
+
+	return installPluginFromManifest(pluginDir, pluginName, manifest, req.Verify)
 }
 
 // runPluginDeps lists dependencies for a plugin without installing them.
@@ -235,7 +265,7 @@ func resolveDependencies(
 
 		// Install the dependency.
 		fmt.Fprintf(os.Stderr, "Installing %s v%s (dependency of %s)...\n", dep.Name, depManifest.Version, pluginName)
-		if err := installPluginFromManifest(pluginDir, dep.Name, depManifest); err != nil {
+		if err := installPluginFromManifest(pluginDir, dep.Name, depManifest, nil); err != nil {
 			return fmt.Errorf("install dependency %q of %q: %w", dep.Name, pluginName, err)
 		}
 		resolved[dep.Name] = depManifest.Version

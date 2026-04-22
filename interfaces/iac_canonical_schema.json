@@ -1,0 +1,250 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/GoCodeAlone/workflow/interfaces/iac_canonical_schema.json",
+  "title": "Canonical IaC Container Service Config",
+  "description": "Portable configuration schema for infra.container_service resources across all IaC providers.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Unique name for the container service."
+    },
+    "region": {
+      "type": "string",
+      "description": "Deployment region (provider-specific slug)."
+    },
+    "image": {
+      "type": "string",
+      "description": "Container image reference."
+    },
+    "http_port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "description": "Primary HTTP port exposed by the container."
+    },
+    "internal_ports": {
+      "type": "array",
+      "description": "Additional named ports exposed by the container.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name":     { "type": "string" },
+          "port":     { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "protocol": { "type": "string", "enum": ["tcp", "udp", "sctp"] },
+          "public":   { "type": "boolean" }
+        },
+        "required": ["port"]
+      }
+    },
+    "protocol": {
+      "type": "string",
+      "enum": ["tcp", "http", "http2", "grpc"],
+      "description": "Application-layer protocol."
+    },
+    "instance_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Desired number of running instances."
+    },
+    "size": {
+      "type": "string",
+      "enum": ["xs", "s", "m", "l", "xl"],
+      "description": "Abstract sizing tier."
+    },
+    "env_vars": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Plaintext environment variables."
+    },
+    "env_vars_secret": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Secret references for environment variables (resolved at deploy time)."
+    },
+    "vpc_ref": {
+      "type": "string",
+      "description": "Reference to a named VPC resource."
+    },
+    "autoscaling": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min":            { "type": "integer", "minimum": 0 },
+        "max":            { "type": "integer", "minimum": 1 },
+        "cpu_percent":    { "type": "integer", "minimum": 1, "maximum": 100 },
+        "memory_percent": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path":        { "type": "string" },
+          "preserve_path_prefix": { "type": "boolean" }
+        }
+      }
+    },
+    "cors": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "domains": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "health_check": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "path":                { "type": "string" },
+        "port":                { "type": "integer" },
+        "period_seconds":      { "type": "integer" },
+        "timeout_seconds":     { "type": "integer" },
+        "success_threshold":   { "type": "integer" },
+        "failure_threshold":   { "type": "integer" },
+        "initial_delay_seconds": { "type": "integer" }
+      }
+    },
+    "liveness_check": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "path":                  { "type": "string" },
+        "port":                  { "type": "integer" },
+        "period_seconds":        { "type": "integer" },
+        "timeout_seconds":       { "type": "integer" },
+        "success_threshold":     { "type": "integer" },
+        "failure_threshold":     { "type": "integer" },
+        "initial_delay_seconds": { "type": "integer" }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "egress": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "alerts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "rule":     { "type": "string" },
+          "disabled": { "type": "boolean" },
+          "value":    { "type": "number" },
+          "operator": { "type": "string", "enum": ["GREATER_THAN", "LESS_THAN"] },
+          "window":   { "type": "string", "enum": ["FIVE_MINUTES", "TEN_MINUTES", "THIRTY_MINUTES", "ONE_HOUR"] }
+        }
+      }
+    },
+    "log_destinations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name": { "type": "string" }
+        }
+      }
+    },
+    "termination": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "drain_seconds":        { "type": "integer", "minimum": 0 },
+        "grace_period_seconds": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "maintenance": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name":        { "type": "string" },
+          "kind":        { "type": "string", "enum": ["pre_deploy", "post_deploy", "failed_deploy", "scheduled"] },
+          "image":       { "type": "string" },
+          "run_command": { "type": "string" },
+          "cron":        { "type": "string" },
+          "env_vars":    { "type": "object", "additionalProperties": { "type": "string" } },
+          "env_vars_secret": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      }
+    },
+    "workers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name":        { "type": "string" },
+          "image":       { "type": "string" },
+          "run_command": { "type": "string" },
+          "instance_count": { "type": "integer" },
+          "size":        { "type": "string", "enum": ["xs", "s", "m", "l", "xl"] },
+          "env_vars":    { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      }
+    },
+    "static_sites": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name":           { "type": "string" },
+          "build_command":  { "type": "string" },
+          "output_dir":     { "type": "string" },
+          "index_document": { "type": "string" },
+          "error_document": { "type": "string" }
+        }
+      }
+    },
+    "sidecars": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name":        { "type": "string" },
+          "image":       { "type": "string" },
+          "run_command": { "type": "string" },
+          "env_vars":    { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      }
+    },
+    "build_command": {
+      "type": "string",
+      "description": "Command to build the application from source."
+    },
+    "run_command": {
+      "type": "string",
+      "description": "Command to start the application."
+    },
+    "dockerfile_path": {
+      "type": "string",
+      "description": "Relative path to the Dockerfile."
+    },
+    "source_dir": {
+      "type": "string",
+      "description": "Subdirectory within the repo containing the app source."
+    },
+    "provider_specific": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Provider-specific config overflow. Keyed by provider name (digitalocean, aws, gcp, azure)."
+    }
+  }
+}

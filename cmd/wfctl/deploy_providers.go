@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -394,6 +394,12 @@ func (r *remoteIaCProvider) ResolveSizing(resourceType string, size interfaces.S
 
 func (r *remoteIaCProvider) ResourceDriver(resourceType string) (interfaces.ResourceDriver, error) {
 	return &remoteResourceDriver{invoker: r.invoker, resourceType: resourceType}, nil
+}
+
+// SupportedCanonicalKeys returns the full canonical key set for remote providers.
+// External plugin providers may override this via the plugin manifest in a future phase.
+func (r *remoteIaCProvider) SupportedCanonicalKeys() []string {
+	return interfaces.CanonicalKeys()
 }
 
 func (r *remoteIaCProvider) Close() error { return nil }

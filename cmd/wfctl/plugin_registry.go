@@ -50,6 +50,22 @@ type RegistryCapabilities struct {
 	TriggerTypes     []string             `json:"triggerTypes,omitempty"`
 	WorkflowHandlers []string             `json:"workflowHandlers,omitempty"`
 	IaCProvider      *RegistryIaCProvider `json:"iacProvider,omitempty"`
+	BuildHooks       []RegistryBuildHook  `json:"buildHooks,omitempty"`
+	CLICommands      []RegistryCLICommand `json:"cliCommands,omitempty"`
+	MigrationDrivers []string             `json:"migrationDrivers,omitempty"`
+	PortIntrospect   bool                 `json:"portIntrospect,omitempty"`
+}
+
+// RegistryBuildHook declares a hook event + priority a plugin handles.
+type RegistryBuildHook struct {
+	Event    string `json:"event"`
+	Priority int    `json:"priority,omitempty"`
+}
+
+// RegistryCLICommand declares a top-level wfctl subcommand a plugin provides.
+type RegistryCLICommand struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // RegistryIaCProvider describes an IaC provider plugin's provider name and the

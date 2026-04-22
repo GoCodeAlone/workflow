@@ -11,10 +11,10 @@ type SecretStoreConfig struct {
 // is preserved when a config round-trips through config.LoadFromFile / marshal.
 type SecretGen struct {
 	Key    string `json:"key" yaml:"key"`
-	Type   string `json:"type" yaml:"type"` // e.g. "random_hex", "provider_credential"
+	Type   string `json:"type" yaml:"type"`                         // e.g. "random_hex", "provider_credential"
 	Length int    `json:"length,omitempty" yaml:"length,omitempty"` // for random generators
 	Source string `json:"source,omitempty" yaml:"source,omitempty"` // for provider_credential
-	Name   string `json:"name,omitempty" yaml:"name,omitempty"`   // optional human-readable label
+	Name   string `json:"name,omitempty" yaml:"name,omitempty"`     // optional human-readable label
 }
 
 // SecretsConfig defines secret management for the application.
