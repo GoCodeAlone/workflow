@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -274,6 +275,43 @@ func TestTenantMiddleware_SessionHijackEmulation(t *testing.T) {
 	// 4. Verify next handler was NOT called.
 	if nextCalled {
 		t.Error("next handler should not be called on mismatch")
+	}
+}
+
+// errorResolver always returns the configured error from Resolve.
+type errorResolver struct{ err error }
+
+func (e *errorResolver) Resolve(_ context.Context, _ *http.Request) (interfaces.Tenant, error) {
+	return interfaces.Tenant{}, e.err
+}
+
+// TestTenantMiddleware_InfraError verifies that non-mismatch errors (e.g. registry
+// timeouts, slug lookup failures) produce 500 Internal Server Error with plain text,
+// NOT 403 + mismatch JSON — preventing infra failures from being misclassified as
+// security events.
+func TestTenantMiddleware_InfraError(t *testing.T) {
+	infraErr := fmt.Errorf("postgres: connection refused")
+	resolver := &errorResolver{err: infraErr}
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("next handler must not be called on infra error")
+	})
+	handler := module.TenantMiddleware(resolver, next)
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, makeReq())
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 Internal Server Error, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if body == "" {
+		t.Error("expected non-empty error body")
+	}
+	// Must NOT be a JSON mismatch response.
+	var jsonBody map[string]string
+	if json.Unmarshal([]byte(body), &jsonBody) == nil && jsonBody["error"] == "tenant.mismatch" {
+		t.Error("infra error must not produce tenant.mismatch JSON body")
 	}
 }
 

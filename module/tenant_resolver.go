@@ -203,16 +203,21 @@ func (r *TenantContextResolver) lookup(key string) (interfaces.Tenant, error) {
 
 // TenantMiddleware returns an http.Handler that resolves the tenant and stores
 // it in the request context via WithTenant before calling next.
-// On ErrTenantMismatch the middleware responds with 403 Forbidden and a
-// JSON body {"error":"tenant.mismatch"}.
+//
+// Error discrimination:
+//   - ErrTenantMismatch → 403 Forbidden + JSON {"error":"tenant.mismatch"}
+//   - Any other error   → 500 Internal Server Error + plain text
 func TenantMiddleware(resolver interfaces.TenantResolver, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tenant, err := resolver.Resolve(r.Context(), r)
 		if err != nil {
-			status := http.StatusForbidden
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(status)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "tenant.mismatch"})
+			if errors.Is(err, ErrTenantMismatch) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "tenant.mismatch"})
+			} else {
+				http.Error(w, "internal error resolving tenant", http.StatusInternalServerError)
+			}
 			return
 		}
 		if !tenant.IsZero() {
