@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -17,8 +18,10 @@ import (
 type fakeResourceDriver struct {
 	updateImage  string
 	updateErr    error
+	updateOut    *interfaces.ResourceOutput
 	hcResult     *interfaces.HealthResult
 	hcErr        error
+	lastHCRef    interfaces.ResourceRef
 	createCalled bool
 	createSpec   interfaces.ResourceSpec
 	createOut    *interfaces.ResourceOutput
@@ -44,13 +47,17 @@ func (d *fakeResourceDriver) Update(_ context.Context, _ interfaces.ResourceRef,
 	if d.updateErr != nil {
 		return nil, d.updateErr
 	}
+	if d.updateOut != nil {
+		return d.updateOut, nil
+	}
 	return &interfaces.ResourceOutput{}, nil
 }
 func (d *fakeResourceDriver) Delete(_ context.Context, _ interfaces.ResourceRef) error { return nil }
 func (d *fakeResourceDriver) Diff(_ context.Context, _ interfaces.ResourceSpec, _ *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
 	return nil, nil
 }
-func (d *fakeResourceDriver) HealthCheck(_ context.Context, _ interfaces.ResourceRef) (*interfaces.HealthResult, error) {
+func (d *fakeResourceDriver) HealthCheck(_ context.Context, ref interfaces.ResourceRef) (*interfaces.HealthResult, error) {
+	d.lastHCRef = ref
 	if d.hcResult != nil {
 		return d.hcResult, d.hcErr
 	}
@@ -220,10 +227,11 @@ func TestPluginDeployProvider_HealthCheck(t *testing.T) {
 		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
 	}
 	p := &pluginDeployProvider{
-		provider:     fake,
-		resourceName: "my-app",
-		resourceType: "infra.container_service",
-		resourceCfg:  map[string]any{},
+		provider:       fake,
+		resourceName:   "my-app",
+		resourceType:   "infra.container_service",
+		resourceCfg:    map[string]any{},
+		lastProviderID: "pre-existing-id",
 	}
 	cfg := DeployConfig{
 		Env: &config.CIDeployEnvironment{
@@ -244,10 +252,11 @@ func TestPluginDeployProvider_HealthCheck_Unhealthy(t *testing.T) {
 		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
 	}
 	p := &pluginDeployProvider{
-		provider:     fake,
-		resourceName: "my-app",
-		resourceType: "infra.container_service",
-		resourceCfg:  map[string]any{},
+		provider:       fake,
+		resourceName:   "my-app",
+		resourceType:   "infra.container_service",
+		resourceCfg:    map[string]any{},
+		lastProviderID: "pre-existing-id",
 	}
 	cfg := DeployConfig{
 		Env: &config.CIDeployEnvironment{
@@ -380,5 +389,160 @@ func TestPluginDeployProvider_Deploy_CreateFailureReturnsError(t *testing.T) {
 	}
 	if !errors.Is(err, interfaces.ErrResourceNotFound) {
 		t.Errorf("expected update error (ErrResourceNotFound) also joined into returned error, got: %v", err)
+	}
+}
+
+// ── ProviderID propagation ────────────────────────────────────────────────────
+
+func TestPluginDeployProvider_HealthCheck_UsesCreatedProviderID(t *testing.T) {
+	driver := &fakeResourceDriver{
+		updateErr: interfaces.ErrResourceNotFound, // force Create path
+		createOut: &interfaces.ResourceOutput{ProviderID: "abc-123"},
+		hcResult:  &interfaces.HealthResult{Healthy: true},
+	}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{"image": "app:v1"},
+	}
+
+	if err := p.Deploy(context.Background(), DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "app:v1",
+		Env:      &config.CIDeployEnvironment{},
+	}); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	cfg := DeployConfig{
+		Env: &config.CIDeployEnvironment{
+			HealthCheck: &config.CIHealthCheck{Path: "/healthz"},
+		},
+	}
+	if err := p.HealthCheck(context.Background(), cfg); err != nil {
+		t.Fatalf("HealthCheck: %v", err)
+	}
+	if driver.lastHCRef.ProviderID != "abc-123" {
+		t.Errorf("HealthCheck ref.ProviderID: want %q, got %q", "abc-123", driver.lastHCRef.ProviderID)
+	}
+}
+
+func TestPluginDeployProvider_HealthCheck_UsesUpdatedProviderID(t *testing.T) {
+	driver := &fakeResourceDriver{
+		updateOut: &interfaces.ResourceOutput{ProviderID: "upd-456"},
+		hcResult:  &interfaces.HealthResult{Healthy: true},
+	}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{},
+	}
+
+	if err := p.Deploy(context.Background(), DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "app:v2",
+		Env:      &config.CIDeployEnvironment{},
+	}); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	cfg := DeployConfig{
+		Env: &config.CIDeployEnvironment{
+			HealthCheck: &config.CIHealthCheck{Path: "/healthz"},
+		},
+	}
+	if err := p.HealthCheck(context.Background(), cfg); err != nil {
+		t.Fatalf("HealthCheck: %v", err)
+	}
+	if driver.lastHCRef.ProviderID != "upd-456" {
+		t.Errorf("HealthCheck ref.ProviderID: want %q, got %q", "upd-456", driver.lastHCRef.ProviderID)
+	}
+}
+
+func TestPluginDeployProvider_HealthCheck_WithoutDeploy(t *testing.T) {
+	driver := &fakeResourceDriver{
+		hcResult: &interfaces.HealthResult{Healthy: true},
+	}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{},
+	}
+	cfg := DeployConfig{
+		Env: &config.CIDeployEnvironment{
+			HealthCheck: &config.CIHealthCheck{Path: "/healthz"},
+		},
+	}
+	err := p.HealthCheck(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("expected error when HealthCheck called without prior Deploy")
+	}
+	if !strings.Contains(err.Error(), "no ProviderID") {
+		t.Errorf("expected 'no ProviderID' in error, got: %v", err)
+	}
+}
+
+func TestPluginDeployProvider_Deploy_LogsImageAndID(t *testing.T) {
+	driver := &fakeResourceDriver{
+		updateOut: &interfaces.ResourceOutput{ProviderID: "log-999"},
+	}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{},
+	}
+
+	// Redirect stdout to capture log output.
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+
+	deployErr := p.Deploy(context.Background(), DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "registry/myapp:abc",
+		Env:      &config.CIDeployEnvironment{},
+	})
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	if deployErr != nil {
+		t.Fatalf("Deploy: %v", deployErr)
+	}
+
+	var buf strings.Builder
+	if _, copyErr := io.Copy(&buf, r); copyErr != nil {
+		t.Fatalf("reading captured stdout: %v", copyErr)
+	}
+	output := buf.String()
+
+	if !strings.Contains(output, "registry/myapp:abc") {
+		t.Errorf("expected image in log output, got: %q", output)
+	}
+	if !strings.Contains(output, "log-999") {
+		t.Errorf("expected ProviderID in log output, got: %q", output)
 	}
 }

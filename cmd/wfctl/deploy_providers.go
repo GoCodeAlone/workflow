@@ -758,6 +758,10 @@ type pluginDeployProvider struct {
 	provider interfaces.IaCProvider
 	provErr  error
 	closer   io.Closer
+	// lastProviderID holds the ProviderID returned by the most recent successful
+	// Deploy call (from either Update or Create). It is passed to HealthCheck so
+	// the driver can locate the exact cloud resource rather than a blank ID.
+	lastProviderID string
 }
 
 func (p *pluginDeployProvider) ensureProvider(ctx context.Context) error {
@@ -832,11 +836,13 @@ func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) err
 	if img, _ := merged["image"].(string); img == "" {
 		return fmt.Errorf("plugin deploy %q: image is empty — set IMAGE_TAG or configure image in YAML", p.resourceName)
 	}
+	imageStr, _ := merged["image"].(string)
 	ref := interfaces.ResourceRef{Name: p.resourceName, Type: p.resourceType}
 	spec := interfaces.ResourceSpec{Name: p.resourceName, Type: p.resourceType, Config: merged}
-	_, updateErr := driver.Update(ctx, ref, spec)
+	out, updateErr := driver.Update(ctx, ref, spec)
 	if updateErr == nil {
-		fmt.Printf("  plugin deploy: updated %q to %s\n", p.resourceName, cfg.ImageTag)
+		p.lastProviderID = out.ProviderID
+		fmt.Printf("  plugin deploy: updated %q at %s (id=%s)\n", p.resourceName, imageStr, out.ProviderID)
 		return nil
 	}
 	if !errors.Is(updateErr, interfaces.ErrResourceNotFound) {
@@ -844,10 +850,12 @@ func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) err
 	}
 	// Resource does not exist yet — fall back to Create.
 	log.Printf("plugin deploy %q: resource not found, creating new", p.resourceName)
-	if _, createErr := driver.Create(ctx, spec); createErr != nil {
+	out, createErr := driver.Create(ctx, spec)
+	if createErr != nil {
 		return fmt.Errorf("plugin deploy %q: create failed: %w", p.resourceName, errors.Join(createErr, updateErr))
 	}
-	fmt.Printf("  plugin deploy: created %q at %s\n", p.resourceName, cfg.ImageTag)
+	p.lastProviderID = out.ProviderID
+	fmt.Printf("  plugin deploy: created %q at %s (id=%s)\n", p.resourceName, imageStr, out.ProviderID)
 	return nil
 }
 
@@ -862,7 +870,10 @@ func (p *pluginDeployProvider) HealthCheck(ctx context.Context, cfg DeployConfig
 	if err != nil {
 		return fmt.Errorf("plugin health check: no driver for %q: %w", p.resourceType, err)
 	}
-	ref := interfaces.ResourceRef{Name: p.resourceName, Type: p.resourceType}
+	if p.lastProviderID == "" {
+		return fmt.Errorf("health check: no ProviderID available — Deploy must run first")
+	}
+	ref := interfaces.ResourceRef{Name: p.resourceName, Type: p.resourceType, ProviderID: p.lastProviderID}
 	result, err := driver.HealthCheck(ctx, ref)
 	if err != nil {
 		return fmt.Errorf("plugin health check %q: %w", p.resourceName, err)
