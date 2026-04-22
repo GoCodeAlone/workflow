@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,85 @@ import (
 	"sync/atomic"
 	"testing"
 )
+
+// TestInstallPluginFromManifest_NoDoubleVInSuccessMessage verifies that when a
+// manifest's Version field already starts with "v" (e.g. "v0.6.1"), the success
+// line printed by installPluginFromManifest reads "Installed X v0.6.1 ..." not
+// "Installed X vv0.6.1 ...".
+func TestInstallPluginFromManifest_NoDoubleVInSuccessMessage(t *testing.T) {
+	const pluginName = "payments"
+	const version = "v0.6.1" // manifest stores version WITH v prefix
+
+	binaryContent := []byte("#!/bin/sh\necho payments\n")
+	tarball := buildPluginTarGz(t, pluginName, binaryContent, minimalPluginJSON(pluginName, version))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/plugins/"+pluginName+"/manifest.json" {
+			m := RegistryManifest{
+				Name:        pluginName,
+				Version:     version, // "v0.6.1" — already has v prefix
+				Author:      "tester",
+				Description: "test",
+				Type:        "external",
+				Tier:        "community",
+				License:     "MIT",
+				Downloads: []PluginDownload{
+					{OS: runtime.GOOS, Arch: runtime.GOARCH,
+						URL: "http://" + r.Host + "/dl/" + pluginName + ".tar.gz"},
+				},
+			}
+			data, _ := json.Marshal(m)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(data) //nolint:errcheck
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, ".tar.gz") {
+			w.Write(tarball) //nolint:errcheck
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	cfgDir := t.TempDir()
+	regCfg := "registries:\n  - name: test\n    type: static\n    url: " + srv.URL + "\n    priority: 0\n"
+	regCfgPath := filepath.Join(cfgDir, "registry.yaml")
+	if err := os.WriteFile(regCfgPath, []byte(regCfg), 0600); err != nil {
+		t.Fatalf("write registry config: %v", err)
+	}
+
+	origWD, _ := os.Getwd()
+	_ = os.Chdir(t.TempDir())
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+
+	// Capture stdout to check the success message.
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	pluginsDir := t.TempDir()
+	installErr := runPluginInstall([]string{
+		"--config", regCfgPath,
+		"--plugin-dir", pluginsDir,
+		pluginName,
+	})
+
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if installErr != nil {
+		t.Fatalf("runPluginInstall: %v", installErr)
+	}
+	if strings.Contains(output, "vv") {
+		t.Errorf("success message contains double-v: %q", output)
+	}
+	if !strings.Contains(output, "v0.6.1") {
+		t.Errorf("success message should contain v0.6.1: %q", output)
+	}
+}
 
 // TestPinManifestToVersion_VPrefixMismatchSameVersion verifies that when the
 // registry manifest stores a version without a "v" prefix (e.g. "0.6.1") but the

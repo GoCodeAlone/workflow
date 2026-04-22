@@ -261,7 +261,9 @@ func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryMan
 		return fmt.Errorf("post-install verification failed: %w", verifyErr)
 	}
 
-	fmt.Printf("Installed %s v%s to %s\n", manifest.Name, manifest.Version, destDir)
+	// Strip any existing "v" prefix from the version before printing so that
+	// manifests that store "v0.6.1" don't produce "Installed X vv0.6.1".
+	fmt.Printf("Installed %s v%s to %s\n", manifest.Name, strings.TrimPrefix(manifest.Version, "v"), destDir)
 	return nil
 }
 
@@ -564,7 +566,7 @@ func installFromURL(url, pluginDir string) error {
 	}
 	updateLockfileWithChecksum(pluginName, pj.Version, pj.Repository, "", checksum)
 
-	fmt.Printf("Installed %s v%s to %s\n", pluginName, pj.Version, destDir)
+	fmt.Printf("Installed %s v%s to %s\n", pluginName, strings.TrimPrefix(pj.Version, "v"), destDir)
 	return nil
 }
 
@@ -642,7 +644,7 @@ func installFromLocal(srcDir, pluginDir string) error {
 	}
 	updateLockfileWithChecksum(pluginName, pj.Version, "", "", binaryChecksum)
 
-	fmt.Printf("Installed %s v%s from %s to %s\n", pluginName, pj.Version, srcDir, destDir)
+	fmt.Printf("Installed %s v%s from %s to %s\n", pluginName, strings.TrimPrefix(pj.Version, "v"), srcDir, destDir)
 	return nil
 }
 
