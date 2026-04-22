@@ -19,6 +19,8 @@ type fakeResourceDriver struct {
 	updateImage  string
 	updateErr    error
 	updateOut    *interfaces.ResourceOutput
+	updateRef    interfaces.ResourceRef
+	updateCalled bool
 	hcResult     *interfaces.HealthResult
 	hcErr        error
 	lastHCRef    interfaces.ResourceRef
@@ -26,6 +28,9 @@ type fakeResourceDriver struct {
 	createSpec   interfaces.ResourceSpec
 	createOut    *interfaces.ResourceOutput
 	createErr    error
+	readOut      *interfaces.ResourceOutput
+	readErr      error
+	readCalled   bool
 }
 
 func (d *fakeResourceDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
@@ -39,10 +44,19 @@ func (d *fakeResourceDriver) Create(_ context.Context, spec interfaces.ResourceS
 	}
 	return &interfaces.ResourceOutput{}, nil
 }
-func (d *fakeResourceDriver) Read(_ context.Context, _ interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
+func (d *fakeResourceDriver) Read(_ context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceOutput, error) {
+	d.readCalled = true
+	if d.readErr != nil {
+		return nil, d.readErr
+	}
+	if d.readOut != nil {
+		return d.readOut, nil
+	}
 	return nil, nil
 }
-func (d *fakeResourceDriver) Update(_ context.Context, _ interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+func (d *fakeResourceDriver) Update(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	d.updateCalled = true
+	d.updateRef = ref
 	d.updateImage, _ = spec.Config["image"].(string)
 	if d.updateErr != nil {
 		return nil, d.updateErr
@@ -544,5 +558,115 @@ func TestPluginDeployProvider_Deploy_LogsImageAndID(t *testing.T) {
 	}
 	if !strings.Contains(output, "log-999") {
 		t.Errorf("expected ProviderID in log output, got: %q", output)
+	}
+}
+
+// ── Read-then-upsert ──────────────────────────────────────────────────────────
+
+// TestPluginDeployProvider_Deploy_ReadsExistingBeforeUpdate verifies that when
+// Read returns a resource with a non-empty ProviderID, Deploy passes that
+// ProviderID to Update and does not call Create.
+func TestPluginDeployProvider_Deploy_ReadsExistingBeforeUpdate(t *testing.T) {
+	driver := &fakeResourceDriver{
+		readOut: &interfaces.ResourceOutput{ProviderID: "abc"},
+	}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{},
+	}
+	cfg := DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "registry.example.com/myapp:v1",
+		Env:      &config.CIDeployEnvironment{},
+	}
+	if err := p.Deploy(context.Background(), cfg); err != nil {
+		t.Fatalf("Deploy: unexpected error: %v", err)
+	}
+	if !driver.readCalled {
+		t.Error("expected Read to be called before Update")
+	}
+	if !driver.updateCalled {
+		t.Error("expected Update to be called")
+	}
+	if driver.updateRef.ProviderID != "abc" {
+		t.Errorf("expected Update called with ref.ProviderID=%q, got %q", "abc", driver.updateRef.ProviderID)
+	}
+	if driver.createCalled {
+		t.Error("expected Create NOT to be called when Read finds an existing resource")
+	}
+}
+
+// TestPluginDeployProvider_Deploy_ReadNotFoundCreates verifies that when Read
+// returns ErrResourceNotFound, Deploy skips Update and goes straight to Create.
+func TestPluginDeployProvider_Deploy_ReadNotFoundCreates(t *testing.T) {
+	driver := &fakeResourceDriver{
+		readErr: fmt.Errorf("app not found: %w", interfaces.ErrResourceNotFound),
+	}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{},
+	}
+	cfg := DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "registry.example.com/myapp:new",
+		Env:      &config.CIDeployEnvironment{},
+	}
+	if err := p.Deploy(context.Background(), cfg); err != nil {
+		t.Fatalf("Deploy: unexpected error: %v", err)
+	}
+	if !driver.createCalled {
+		t.Error("expected Create to be called when Read returns ErrResourceNotFound")
+	}
+	if driver.updateCalled {
+		t.Error("expected Update NOT to be called when Read returns ErrResourceNotFound")
+	}
+}
+
+// TestPluginDeployProvider_Deploy_ReadErrorPropagates verifies that when Read
+// returns a non-not-found error (e.g. permission denied), Deploy surfaces it
+// immediately without calling Update or Create.
+func TestPluginDeployProvider_Deploy_ReadErrorPropagates(t *testing.T) {
+	driver := &fakeResourceDriver{
+		readErr: fmt.Errorf("permission denied"),
+	}
+	fake := &fakeIaCProvider{
+		name:    "fake-cloud",
+		drivers: map[string]interfaces.ResourceDriver{"infra.container_service": driver},
+	}
+	p := &pluginDeployProvider{
+		provider:     fake,
+		resourceName: "my-app",
+		resourceType: "infra.container_service",
+		resourceCfg:  map[string]any{},
+	}
+	cfg := DeployConfig{
+		AppName:  "my-app",
+		ImageTag: "registry.example.com/myapp:v1",
+		Env:      &config.CIDeployEnvironment{},
+	}
+	err := p.Deploy(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("expected error when Read returns a non-not-found error")
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("expected 'permission denied' in error, got: %v", err)
+	}
+	if driver.updateCalled {
+		t.Error("expected Update NOT to be called when Read returns an error")
+	}
+	if driver.createCalled {
+		t.Error("expected Create NOT to be called when Read returns an error")
 	}
 }
