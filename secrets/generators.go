@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"os"
@@ -165,7 +166,8 @@ func generateDOSpacesKey(ctx context.Context, config map[string]any) (string, er
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("secrets: DO spaces key create: HTTP %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return "", fmt.Errorf("secrets: DO spaces key create: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var result struct {
