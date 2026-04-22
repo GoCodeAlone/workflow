@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug        TEXT UNIQUE NOT NULL,
     name        TEXT NOT NULL,
-    domains     TEXT[] NOT NULL DEFAULT '{}',
+    domains     JSONB NOT NULL DEFAULT '[]'::jsonb,
     metadata    JSONB NOT NULL DEFAULT '{}',
     is_active   BOOLEAN NOT NULL DEFAULT TRUE,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),

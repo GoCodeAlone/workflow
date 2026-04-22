@@ -237,9 +237,11 @@ func (r *SQLTenantRegistry) GetByDomain(domain string) (interfaces.Tenant, error
 	if t, ok := r.fromCache(cacheKey); ok {
 		return t, nil
 	}
+	// Use JSONB containment: domains @> '["acme.example.com"]'::jsonb
+	domainJSON, _ := json.Marshal([]string{domain})
 	tbl := r.schema.table()
 	q := fmt.Sprintf(
-		"SELECT %s,%s,%s,%s,%s,%s FROM %s WHERE $1 = ANY(%s)",
+		"SELECT %s,%s,%s,%s,%s,%s FROM %s WHERE %s @> $1::jsonb",
 		r.c(r.schema.ColID, "id"),
 		r.c(r.schema.ColSlug, "slug"),
 		r.c(r.schema.ColName, "name"),
@@ -249,7 +251,7 @@ func (r *SQLTenantRegistry) GetByDomain(domain string) (interfaces.Tenant, error
 		tbl,
 		r.c(r.schema.ColDomains, "domains"),
 	)
-	row := r.db.QueryRowContext(context.Background(), q, domain)
+	row := r.db.QueryRowContext(context.Background(), q, string(domainJSON))
 	t, err := r.scanTenant(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -300,8 +302,10 @@ func (r *SQLTenantRegistry) List(filter interfaces.TenantFilter) ([]interfaces.T
 		argN++
 	}
 	if filter.Domain != "" {
-		conditions = append(conditions, fmt.Sprintf("$%d = ANY(%s)", argN, r.c(r.schema.ColDomains, "domains")))
-		args = append(args, filter.Domain)
+		// Use JSONB containment: domains @> '["acme.example.com"]'::jsonb
+		domainJSON, _ := json.Marshal([]string{filter.Domain})
+		conditions = append(conditions, fmt.Sprintf("%s @> $%d::jsonb", r.c(r.schema.ColDomains, "domains"), argN))
+		args = append(args, string(domainJSON))
 		argN++
 	}
 
@@ -409,6 +413,12 @@ func (r *SQLTenantRegistry) Update(id string, patch interfaces.TenantPatch) (int
 
 // Disable soft-deletes a tenant by setting is_active = false.
 func (r *SQLTenantRegistry) Disable(id string) error {
+	// Fetch first so we can invalidate slug and domain cache keys after the update.
+	existing, err := r.GetByID(id)
+	if err != nil {
+		return err
+	}
+
 	tbl := r.schema.table()
 	q := fmt.Sprintf(
 		"UPDATE %s SET %s=FALSE,%s=NOW() WHERE %s=$1",
@@ -425,6 +435,8 @@ func (r *SQLTenantRegistry) Disable(id string) error {
 	if n == 0 {
 		return interfaces.ErrResourceNotFound
 	}
-	r.cache.Remove("id:" + id)
+	// Invalidate all cache keys (id, slug, and every domain) so stale IsActive=true
+	// entries cannot be served after a tenant is disabled.
+	r.invalidate(existing)
 	return nil
 }

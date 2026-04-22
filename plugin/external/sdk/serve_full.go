@@ -24,7 +24,7 @@ import (
 //	    sdk.ServePluginFull(&myPlugin{}, &myCLI{}, &myHooks{})
 //	}
 func ServePluginFull(p PluginProvider, cli CLIProvider, hooks HookHandler) {
-	code := DispatchArgs(os.Args, p, cli, hooks)
+	code := DispatchArgs(os.Args, p, cli, hooks, os.Stdin, os.Stdout)
 	if code < 0 {
 		// code -1 means "no special flag found — run normal gRPC serve"
 		Serve(p)
@@ -35,12 +35,14 @@ func ServePluginFull(p PluginProvider, cli CLIProvider, hooks HookHandler) {
 
 // DispatchArgs is the testable core of ServePluginFull. It inspects args (which
 // should be os.Args in production) and dispatches accordingly.
+// stdin and stdout are used for hook payload I/O; pass os.Stdin/os.Stdout in
+// production and an in-memory reader/writer in tests.
 //
 // Returns:
 //   - -1 if no wfctl flag is present (caller should fall back to Serve)
 //   - 0 on success
 //   - >0 on error
-func DispatchArgs(args []string, p PluginProvider, cli CLIProvider, hooks HookHandler) int {
+func DispatchArgs(args []string, p PluginProvider, cli CLIProvider, hooks HookHandler, stdin io.Reader, stdout io.Writer) int {
 	for i, arg := range args {
 		switch arg {
 		case "--wfctl-cli":
@@ -68,7 +70,7 @@ func DispatchArgs(args []string, p PluginProvider, cli CLIProvider, hooks HookHa
 				_, _ = fmt.Fprintln(os.Stderr, "wfctl-hook: missing event name after --wfctl-hook")
 				return 1
 			}
-			payload, err := io.ReadAll(os.Stdin)
+			payload, err := io.ReadAll(stdin)
 			if err != nil {
 				_, _ = fmt.Fprintf(os.Stderr, "wfctl-hook: read stdin: %v\n", err)
 				return 1
@@ -79,7 +81,7 @@ func DispatchArgs(args []string, p PluginProvider, cli CLIProvider, hooks HookHa
 				return 1
 			}
 			if len(result) > 0 {
-				if _, err := os.Stdout.Write(result); err != nil {
+				if _, err := stdout.Write(result); err != nil {
 					_, _ = fmt.Fprintf(os.Stderr, "wfctl-hook: write result: %v\n", err)
 					return 1
 				}

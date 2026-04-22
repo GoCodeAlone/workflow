@@ -1,8 +1,9 @@
 package sdk_test
 
 import (
+	"bytes"
 	"encoding/json"
-	"os"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/plugin/external/sdk"
@@ -50,7 +51,9 @@ func TestServePluginFull_DispatchCLI(t *testing.T) {
 
 	// Simulate: plugin-binary --wfctl-cli supply-chain scan
 	args := []string{"plugin-binary", "--wfctl-cli", "supply-chain", "scan"}
-	exitCode := sdk.DispatchArgs(args, &fakePlugin{}, cli, hooks)
+	stdin := strings.NewReader("")
+	var stdout bytes.Buffer
+	exitCode := sdk.DispatchArgs(args, &fakePlugin{}, cli, hooks, stdin, &stdout)
 
 	if !cli.called {
 		t.Error("expected CLI handler to be called")
@@ -74,25 +77,10 @@ func TestServePluginFull_DispatchHook(t *testing.T) {
 	payload := map[string]any{"image": "myapp:latest"}
 	payloadBytes, _ := json.Marshal(payload)
 
-	// Write payload to a temp file to simulate stdin.
-	tmpFile, err := os.CreateTemp("", "hook-payload-*.json")
-	if err != nil {
-		t.Fatalf("create temp file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-	if _, err := tmpFile.Write(payloadBytes); err != nil {
-		t.Fatalf("write payload: %v", err)
-	}
-	if _, err := tmpFile.Seek(0, 0); err != nil {
-		t.Fatalf("seek: %v", err)
-	}
-	// Replace stdin.
-	origStdin := os.Stdin
-	os.Stdin = tmpFile
-	defer func() { os.Stdin = origStdin }()
-
 	args := []string{"plugin-binary", "--wfctl-hook", "post_container_build"}
-	exitCode := sdk.DispatchArgs(args, &fakePlugin{}, cli, hooks)
+	stdin := bytes.NewReader(payloadBytes)
+	var stdout bytes.Buffer
+	exitCode := sdk.DispatchArgs(args, &fakePlugin{}, cli, hooks, stdin, &stdout)
 
 	if !hooks.called {
 		t.Error("expected hook handler to be called")
@@ -106,12 +94,48 @@ func TestServePluginFull_DispatchHook(t *testing.T) {
 	if cli.called {
 		t.Error("CLI handler should not be called for --wfctl-hook dispatch")
 	}
+	// Verify the hook received the correct payload.
+	if !bytes.Equal(hooks.payload, payloadBytes) {
+		t.Errorf("hook payload mismatch: got %s, want %s", hooks.payload, payloadBytes)
+	}
+	// Verify the result was written to stdout.
+	if !bytes.Equal(stdout.Bytes(), hooks.result) {
+		t.Errorf("stdout mismatch: got %s, want %s", stdout.Bytes(), hooks.result)
+	}
+}
+
+func TestServePluginFull_DispatchHook_NoResult(t *testing.T) {
+	// When the hook returns nil/empty result, nothing should be written to stdout.
+	hooks := &fakeHooks{result: nil}
+	args := []string{"plugin-binary", "--wfctl-hook", "pre_build"}
+	stdin := strings.NewReader(`{}`)
+	var stdout bytes.Buffer
+	exitCode := sdk.DispatchArgs(args, &fakePlugin{}, nil, hooks, stdin, &stdout)
+	if exitCode != 0 {
+		t.Errorf("expected exit 0, got %d", exitCode)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("expected empty stdout, got %q", stdout.String())
+	}
+}
+
+func TestServePluginFull_NoFlags(t *testing.T) {
+	// No wfctl flags → DispatchArgs returns -1 (caller falls back to gRPC Serve).
+	args := []string{"plugin-binary"}
+	stdin := strings.NewReader("")
+	var stdout bytes.Buffer
+	exitCode := sdk.DispatchArgs(args, &fakePlugin{}, nil, nil, stdin, &stdout)
+	if exitCode != -1 {
+		t.Errorf("expected -1 (fallback), got %d", exitCode)
+	}
 }
 
 func TestServePluginFull_NilCLI(t *testing.T) {
 	// When CLI provider is nil, --wfctl-cli should return exit 1.
 	args := []string{"plugin-binary", "--wfctl-cli", "some-command"}
-	exitCode := sdk.DispatchArgs(args, &fakePlugin{}, nil, nil)
+	stdin := strings.NewReader("")
+	var stdout bytes.Buffer
+	exitCode := sdk.DispatchArgs(args, &fakePlugin{}, nil, nil, stdin, &stdout)
 	if exitCode == 0 {
 		t.Error("expected non-zero exit when CLIProvider is nil")
 	}
@@ -120,7 +144,9 @@ func TestServePluginFull_NilCLI(t *testing.T) {
 func TestServePluginFull_NilHooks(t *testing.T) {
 	// When HookHandler is nil, --wfctl-hook should return exit 1.
 	args := []string{"plugin-binary", "--wfctl-hook", "post_build"}
-	exitCode := sdk.DispatchArgs(args, &fakePlugin{}, nil, nil)
+	stdin := strings.NewReader("")
+	var stdout bytes.Buffer
+	exitCode := sdk.DispatchArgs(args, &fakePlugin{}, nil, nil, stdin, &stdout)
 	if exitCode == 0 {
 		t.Error("expected non-zero exit when HookHandler is nil")
 	}
