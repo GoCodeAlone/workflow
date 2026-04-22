@@ -15,7 +15,7 @@ import (
 func runPluginLock(args []string) error {
 	fs := flag.NewFlagSet("plugin lock", flag.ContinueOnError)
 	cfgPath := fs.String("config", "workflow.yaml", "Path to workflow config file")
-	lockPath := fs.String("lock-file", wfctlYAMLPath, "Path to lockfile to write")
+	lockPath := fs.String("lock-file", wfctlLockPath, "Path to lockfile to write")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

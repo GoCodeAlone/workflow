@@ -162,7 +162,7 @@ func auditBuildSecurity(cfg *config.WorkflowConfig, workDir string) []buildAudit
 	hasPlugins := (cfg.Requires != nil && len(cfg.Requires.Plugins) > 0) ||
 		(cfg.Plugins != nil && len(cfg.Plugins.External) > 0)
 	if hasPlugins {
-		lockPath := filepath.Join(workDir, wfctlYAMLPath)
+		lockPath := filepath.Join(workDir, wfctlLockPath)
 		lf, err := loadPluginLockfile(lockPath)
 		if err != nil || len(lf.Plugins) == 0 {
 			add("WARN", "lockfile", fmt.Sprintf("plugins are declared in config but no plugins lockfile found at %s", lockPath))

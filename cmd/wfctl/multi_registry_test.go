@@ -1055,3 +1055,70 @@ func TestNewMultiRegistryPriorityOrder(t *testing.T) {
 		t.Errorf("second source: got %q, want %q", sources[1].Name(), "low-prio")
 	}
 }
+
+// TestLoadRegistryConfig_LockfileCollision is a regression test for the bug where
+// writing a plugin lockfile to .wfctl.yaml caused subsequent LoadRegistryConfig calls
+// to find no registries section and return zero sources, making every install fail with
+// "not found in any configured registry".
+//
+// The fix: LoadRegistryConfig skips YAML files that lack a "registries" key entirely
+// (i.e., have no top-level "registries:" field), falling back to DefaultRegistryConfig.
+func TestLoadRegistryConfig_LockfileCollision(t *testing.T) {
+	// Simulate a .wfctl.yaml that was written as a lockfile (has plugins: but no registries:).
+	lockfileContent := `plugins:
+  authz:
+    version: v0.3.1
+    repository: GoCodeAlone/workflow-plugin-authz
+    sha256: abc123
+  payments:
+    version: v0.1.0
+    repository: GoCodeAlone/workflow-plugin-payments
+`
+	tmpDir := t.TempDir()
+	wfctlYAML := filepath.Join(tmpDir, ".wfctl.yaml")
+	if err := os.WriteFile(wfctlYAML, []byte(lockfileContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Change to tmpDir so LoadRegistryConfig finds our fake .wfctl.yaml.
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+	// Also redirect HOME so ~/.config/wfctl/config.yaml is not found.
+	t.Setenv("HOME", tmpDir)
+
+	cfg, err := LoadRegistryConfig("")
+	if err != nil {
+		t.Fatalf("LoadRegistryConfig with lockfile at .wfctl.yaml: %v", err)
+	}
+	// Must fall back to defaults — not return empty sources.
+	if len(cfg.Registries) == 0 {
+		t.Fatal("LoadRegistryConfig returned zero registries when .wfctl.yaml is a lockfile; " +
+			"expected fallback to DefaultRegistryConfig")
+	}
+	// Default primary source must be github.
+	if cfg.Registries[0].Type != "github" {
+		t.Errorf("expected github primary source, got %q", cfg.Registries[0].Type)
+	}
+}
+
+// TestLoadRegistryConfig_ExplicitEmptyRegistries verifies that a file with an
+// explicit "registries: []" is respected (not silently skipped), so users can
+// intentionally configure an empty registry list (e.g., in tests or air-gapped envs).
+func TestLoadRegistryConfig_ExplicitEmptyRegistries(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "custom.yaml")
+	if err := os.WriteFile(cfgPath, []byte("registries: []\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadRegistryConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadRegistryConfig: %v", err)
+	}
+	// Explicit empty registries list must be returned as-is (0 sources).
+	if len(cfg.Registries) != 0 {
+		t.Errorf("expected 0 registries for explicit empty list, got %d: %v", len(cfg.Registries), cfg.Registries)
+	}
+}

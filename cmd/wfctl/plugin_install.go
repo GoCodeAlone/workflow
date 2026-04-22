@@ -75,7 +75,7 @@ func runPluginInstall(args []string) error {
 	localPath := fs.String("local", "", "Install from a local plugin directory")
 	fromConfig := fs.String("from-config", "", "Install all requires.plugins[] from a workflow config file")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] [<name>[@<version>]]\n\nInstall a plugin from the registry, a URL, a local directory, or from the lockfile.\n\n  wfctl plugin install <name>              Install latest from registry\n  wfctl plugin install <name>@v1.0.0       Install specific version\n  wfctl plugin install --url <url>          Install from a direct download URL\n  wfctl plugin install --local <dir>        Install from a local build directory\n  wfctl plugin install --from-config <f>    Install all requires.plugins[] from workflow config\n  wfctl plugin install                      Install all plugins from .wfctl.yaml\n\nOptions:\n")
+		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] [<name>[@<version>]]\n\nInstall a plugin from the registry, a URL, a local directory, or from the lockfile.\n\n  wfctl plugin install <name>              Install latest from registry\n  wfctl plugin install <name>@v1.0.0       Install specific version\n  wfctl plugin install --url <url>          Install from a direct download URL\n  wfctl plugin install --local <dir>        Install from a local build directory\n  wfctl plugin install --from-config <f>    Install all requires.plugins[] from workflow config\n  wfctl plugin install                      Install all plugins from .wfctl-lock.yaml\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -110,7 +110,7 @@ func runPluginInstall(args []string) error {
 		return installFromLocal(*localPath, pluginDirVal)
 	}
 
-	// No args: install all plugins from .wfctl.yaml lockfile.
+	// No args: install all plugins from .wfctl-lock.yaml lockfile.
 	if fs.NArg() < 1 {
 		return installFromLockfile(pluginDirVal, *cfgPath)
 	}
@@ -193,7 +193,7 @@ func runPluginInstall(args []string) error {
 		return err
 	}
 
-	// Update .wfctl.yaml lockfile if name@version was provided.
+	// Update .wfctl-lock.yaml lockfile if name@version was provided.
 	if _, ver := parseNameVersion(nameArg); ver != "" {
 		pluginName = normalizePluginName(pluginName)
 		binaryChecksum := ""
