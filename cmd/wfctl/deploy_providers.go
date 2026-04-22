@@ -839,6 +839,29 @@ func (p *pluginDeployProvider) Deploy(ctx context.Context, cfg DeployConfig) err
 	imageStr, _ := merged["image"].(string)
 	ref := interfaces.ResourceRef{Name: p.resourceName, Type: p.resourceType}
 	spec := interfaces.ResourceSpec{Name: p.resourceName, Type: p.resourceType, Config: merged}
+
+	// Read-by-name first: discover the existing ProviderID (if any) so Update
+	// can target the exact cloud resource rather than a blank ID.
+	readOut, readErr := driver.Read(ctx, ref)
+	switch {
+	case readErr == nil && readOut != nil && readOut.ProviderID != "":
+		ref.ProviderID = readOut.ProviderID
+		log.Printf("plugin deploy %q: found existing resource (id=%s)", p.resourceName, ref.ProviderID)
+	case readErr != nil && errors.Is(readErr, interfaces.ErrResourceNotFound):
+		// Resource confirmed absent — skip Update, go straight to Create.
+		log.Printf("plugin deploy %q: resource not found via Read, creating new", p.resourceName)
+		out, createErr := driver.Create(ctx, spec)
+		if createErr != nil {
+			return fmt.Errorf("plugin deploy %q: create failed: %w", p.resourceName, createErr)
+		}
+		p.lastProviderID = out.ProviderID
+		fmt.Printf("  plugin deploy: created %q at %s (id=%s)\n", p.resourceName, imageStr, out.ProviderID)
+		return nil
+	case readErr != nil:
+		return fmt.Errorf("plugin deploy %q: read existing resource: %w", p.resourceName, readErr)
+	}
+
+	// Belt-and-suspenders: Update first; fall back to Create on not-found.
 	out, updateErr := driver.Update(ctx, ref, spec)
 	if updateErr == nil {
 		p.lastProviderID = out.ProviderID
