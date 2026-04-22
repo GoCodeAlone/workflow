@@ -142,7 +142,7 @@ func bootstrapDOSpacesBucket(ctx context.Context, bucket, region, accessKey, sec
 		region = "nyc3"
 	}
 	if accessKey == "" || secretKey == "" {
-		return fmt.Errorf("Spaces access key and secret key must be set — " +
+		return fmt.Errorf("spaces access key and secret key must be set — " +
 			"ensure secrets are bootstrapped (step 1) before state backend (step 2); " +
 			"set accessKey/secretKey in the iac.state module config referencing ${SPACES_access_key} and ${SPACES_secret_key}")
 	}
