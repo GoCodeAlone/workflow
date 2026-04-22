@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -329,139 +330,249 @@ func TestRemoteDriver_SensitiveKeys_Error(t *testing.T) {
 	}
 }
 
-// ── wrapNotFound ──────────────────────────────────────────────────────────────
+// ── wrapIaCError ──────────────────────────────────────────────────────────────
 
-func TestWrapNotFound_Patterns(t *testing.T) {
-	patterns := []string{
-		"not found",
-		"NOT FOUND",
-		"Not Found",
-		"404",
-		"405",
-		"does not exist",
-		"Does Not Exist",
-		"no such",
-		"No Such Resource",
-		"resource 404: gone",
-		"error: the item does not exist in the store",
+func TestWrapIaCError_Nil(t *testing.T) {
+	if wrapIaCError(nil) != nil {
+		t.Error("wrapIaCError(nil) should return nil")
 	}
-	for _, msg := range patterns {
-		err := wrapNotFound(fmt.Errorf("%s", msg))
-		if !errors.Is(err, interfaces.ErrResourceNotFound) {
-			t.Errorf("pattern %q: expected ErrResourceNotFound, got %v", msg, err)
+}
+
+func TestWrapIaCError_Sentinels(t *testing.T) {
+	cases := []struct {
+		msg      string
+		sentinel error
+	}{
+		// ErrResourceNotFound
+		{"not found", interfaces.ErrResourceNotFound},
+		{"NOT FOUND", interfaces.ErrResourceNotFound},
+		{"404 returned", interfaces.ErrResourceNotFound},
+		{"405 method not allowed", interfaces.ErrResourceNotFound},
+		{"does not exist", interfaces.ErrResourceNotFound},
+		{"Does Not Exist", interfaces.ErrResourceNotFound},
+		{"no such resource", interfaces.ErrResourceNotFound},
+		{"No Such Resource", interfaces.ErrResourceNotFound},
+		// ErrResourceAlreadyExists
+		{"app already exists", interfaces.ErrResourceAlreadyExists},
+		{"ALREADY EXISTS", interfaces.ErrResourceAlreadyExists},
+		{"409 conflict", interfaces.ErrResourceAlreadyExists},
+		{"conflict: name taken", interfaces.ErrResourceAlreadyExists},
+		// ErrRateLimited
+		{"rate limit exceeded", interfaces.ErrRateLimited},
+		{"Rate Limit", interfaces.ErrRateLimited},
+		{"429 too many requests", interfaces.ErrRateLimited},
+		{"too many requests", interfaces.ErrRateLimited},
+		// ErrTransient
+		{"500 internal server error", interfaces.ErrTransient},
+		{"502 bad gateway", interfaces.ErrTransient},
+		{"503 service unavailable", interfaces.ErrTransient},
+		{"504 gateway timeout", interfaces.ErrTransient},
+		{"bad gateway", interfaces.ErrTransient},
+		{"gateway timeout", interfaces.ErrTransient},
+		{"service unavailable", interfaces.ErrTransient},
+		// ErrUnauthorized
+		{"401 unauthorized", interfaces.ErrUnauthorized},
+		{"unauthorized", interfaces.ErrUnauthorized},
+		{"unable to authenticate", interfaces.ErrUnauthorized},
+		// ErrForbidden
+		{"403 forbidden", interfaces.ErrForbidden},
+		{"forbidden", interfaces.ErrForbidden},
+		// ErrValidation
+		{"400 bad request", interfaces.ErrValidation},
+		{"422 unprocessable entity", interfaces.ErrValidation},
+		{"validation failed", interfaces.ErrValidation},
+		{"invalid field: name", interfaces.ErrValidation},
+	}
+	for _, tc := range cases {
+		err := wrapIaCError(fmt.Errorf("%s", tc.msg))
+		if !errors.Is(err, tc.sentinel) {
+			t.Errorf("msg %q: expected %v, got %v", tc.msg, tc.sentinel, err)
+		}
+		// Original message must be preserved.
+		if !strings.Contains(err.Error(), tc.msg) {
+			t.Errorf("msg %q: original message not preserved in %q", tc.msg, err.Error())
 		}
 	}
 }
 
-func TestWrapNotFound_PassThrough(t *testing.T) {
+func TestWrapIaCError_PassThrough(t *testing.T) {
 	msgs := []string{
-		"permission denied",
-		"internal server error",
-		"timeout",
-		"rate limit exceeded",
-		"conflict",
+		"connection reset by peer",
+		"timeout waiting for lock",
+		"unexpected end of stream",
 	}
 	for _, msg := range msgs {
 		orig := fmt.Errorf("%s", msg)
-		err := wrapNotFound(orig)
-		if errors.Is(err, interfaces.ErrResourceNotFound) {
-			t.Errorf("message %q: should NOT be wrapped as ErrResourceNotFound", msg)
+		err := wrapIaCError(orig)
+		for _, s := range []error{
+			interfaces.ErrResourceNotFound,
+			interfaces.ErrResourceAlreadyExists,
+			interfaces.ErrRateLimited,
+			interfaces.ErrTransient,
+			interfaces.ErrUnauthorized,
+			interfaces.ErrForbidden,
+			interfaces.ErrValidation,
+		} {
+			if errors.Is(err, s) {
+				t.Errorf("msg %q: should not match %v", msg, s)
+			}
 		}
 		if err.Error() != orig.Error() {
-			t.Errorf("message %q: error string changed: got %q", msg, err.Error())
+			t.Errorf("msg %q: error string changed: got %q", msg, err.Error())
 		}
 	}
 }
 
-func TestWrapNotFound_Nil(t *testing.T) {
-	if wrapNotFound(nil) != nil {
-		t.Error("wrapNotFound(nil) should return nil")
+// ── per-method wrapIaCError coverage ─────────────────────────────────────────
+
+// methodSentinelCases lists (error message, expected sentinel) pairs used
+// across all driver method wrapping tests below.
+var methodSentinelCases = []struct {
+	msg      string
+	sentinel error
+}{
+	{"404 not found", interfaces.ErrResourceNotFound},
+	{"already exists", interfaces.ErrResourceAlreadyExists},
+	{"429 too many requests", interfaces.ErrRateLimited},
+	{"503 service unavailable", interfaces.ErrTransient},
+	{"401 unauthorized", interfaces.ErrUnauthorized},
+	{"403 forbidden", interfaces.ErrForbidden},
+	{"422 validation failed", interfaces.ErrValidation},
+}
+
+func TestRemoteDriver_Create_WrapsAllSentinels(t *testing.T) {
+	for _, tc := range methodSentinelCases {
+		si := &stubInvoker{err: fmt.Errorf("%s", tc.msg)}
+		d := newDriver(si)
+		_, err := d.Create(context.Background(), sampleSpec())
+		if err == nil {
+			t.Fatalf("Create %q: expected error", tc.msg)
+		}
+		if !errors.Is(err, tc.sentinel) {
+			t.Errorf("Create %q: expected %v, got %v", tc.msg, tc.sentinel, err)
+		}
 	}
 }
 
-// ── Update/Read/Delete not-found wrapping ─────────────────────────────────────
-
-func TestRemoteDriver_Update_WrapsNotFound(t *testing.T) {
-	si := &stubInvoker{err: fmt.Errorf("resource 404: not found")}
-	d := newDriver(si)
-	_, err := d.Update(context.Background(), sampleRef(), sampleSpec())
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !errors.Is(err, interfaces.ErrResourceNotFound) {
-		t.Errorf("Update: expected ErrResourceNotFound, got %v", err)
-	}
-}
-
-func TestRemoteDriver_Read_WrapsNotFound(t *testing.T) {
-	si := &stubInvoker{err: fmt.Errorf("no such resource: pid-123")}
-	d := newDriver(si)
-	_, err := d.Read(context.Background(), sampleRef())
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !errors.Is(err, interfaces.ErrResourceNotFound) {
-		t.Errorf("Read: expected ErrResourceNotFound, got %v", err)
+func TestRemoteDriver_Read_WrapsAllSentinels(t *testing.T) {
+	for _, tc := range methodSentinelCases {
+		si := &stubInvoker{err: fmt.Errorf("%s", tc.msg)}
+		d := newDriver(si)
+		_, err := d.Read(context.Background(), sampleRef())
+		if err == nil {
+			t.Fatalf("Read %q: expected error", tc.msg)
+		}
+		if !errors.Is(err, tc.sentinel) {
+			t.Errorf("Read %q: expected %v, got %v", tc.msg, tc.sentinel, err)
+		}
 	}
 }
 
-func TestRemoteDriver_Delete_WrapsNotFound(t *testing.T) {
-	si := &stubInvoker{err: fmt.Errorf("does not exist")}
-	d := newDriver(si)
-	err := d.Delete(context.Background(), sampleRef())
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !errors.Is(err, interfaces.ErrResourceNotFound) {
-		t.Errorf("Delete: expected ErrResourceNotFound, got %v", err)
-	}
-}
-
-func TestRemoteDriver_Update_PreservesOtherErrors(t *testing.T) {
-	si := &stubInvoker{err: fmt.Errorf("permission denied")}
-	d := newDriver(si)
-	_, err := d.Update(context.Background(), sampleRef(), sampleSpec())
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if errors.Is(err, interfaces.ErrResourceNotFound) {
-		t.Error("Update: 'permission denied' should NOT be wrapped as ErrResourceNotFound")
+func TestRemoteDriver_Update_WrapsAllSentinels(t *testing.T) {
+	for _, tc := range methodSentinelCases {
+		si := &stubInvoker{err: fmt.Errorf("%s", tc.msg)}
+		d := newDriver(si)
+		_, err := d.Update(context.Background(), sampleRef(), sampleSpec())
+		if err == nil {
+			t.Fatalf("Update %q: expected error", tc.msg)
+		}
+		if !errors.Is(err, tc.sentinel) {
+			t.Errorf("Update %q: expected %v, got %v", tc.msg, tc.sentinel, err)
+		}
 	}
 }
 
-func TestRemoteDriver_Read_PreservesOtherErrors(t *testing.T) {
-	si := &stubInvoker{err: fmt.Errorf("rate limit exceeded")}
-	d := newDriver(si)
-	_, err := d.Read(context.Background(), sampleRef())
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if errors.Is(err, interfaces.ErrResourceNotFound) {
-		t.Error("Read: 'rate limit exceeded' should NOT be wrapped as ErrResourceNotFound")
-	}
-}
-
-func TestRemoteDriver_Delete_PreservesOtherErrors(t *testing.T) {
-	si := &stubInvoker{err: fmt.Errorf("internal server error")}
-	d := newDriver(si)
-	err := d.Delete(context.Background(), sampleRef())
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if errors.Is(err, interfaces.ErrResourceNotFound) {
-		t.Error("Delete: 'internal server error' should NOT be wrapped as ErrResourceNotFound")
+func TestRemoteDriver_Delete_WrapsAllSentinels(t *testing.T) {
+	for _, tc := range methodSentinelCases {
+		si := &stubInvoker{err: fmt.Errorf("%s", tc.msg)}
+		d := newDriver(si)
+		err := d.Delete(context.Background(), sampleRef())
+		if err == nil {
+			t.Fatalf("Delete %q: expected error", tc.msg)
+		}
+		if !errors.Is(err, tc.sentinel) {
+			t.Errorf("Delete %q: expected %v, got %v", tc.msg, tc.sentinel, err)
+		}
 	}
 }
 
-// Create must NOT wrap not-found — it's the fallback target of upsert.
-func TestRemoteDriver_Create_DoesNotWrapNotFound(t *testing.T) {
-	si := &stubInvoker{err: fmt.Errorf("404 not found")}
-	d := newDriver(si)
-	_, err := d.Create(context.Background(), sampleSpec())
-	if err == nil {
-		t.Fatal("expected error")
+func TestRemoteDriver_Diff_WrapsAllSentinels(t *testing.T) {
+	current := &interfaces.ResourceOutput{ProviderID: "pid-123"}
+	for _, tc := range methodSentinelCases {
+		si := &stubInvoker{err: fmt.Errorf("%s", tc.msg)}
+		d := newDriver(si)
+		_, err := d.Diff(context.Background(), sampleSpec(), current)
+		if err == nil {
+			t.Fatalf("Diff %q: expected error", tc.msg)
+		}
+		if !errors.Is(err, tc.sentinel) {
+			t.Errorf("Diff %q: expected %v, got %v", tc.msg, tc.sentinel, err)
+		}
 	}
-	if errors.Is(err, interfaces.ErrResourceNotFound) {
-		t.Error("Create: must NOT wrap errors as ErrResourceNotFound")
+}
+
+func TestRemoteDriver_Scale_WrapsAllSentinels(t *testing.T) {
+	for _, tc := range methodSentinelCases {
+		si := &stubInvoker{err: fmt.Errorf("%s", tc.msg)}
+		d := newDriver(si)
+		_, err := d.Scale(context.Background(), sampleRef(), 2)
+		if err == nil {
+			t.Fatalf("Scale %q: expected error", tc.msg)
+		}
+		if !errors.Is(err, tc.sentinel) {
+			t.Errorf("Scale %q: expected %v, got %v", tc.msg, tc.sentinel, err)
+		}
+	}
+}
+
+func TestRemoteDriver_HealthCheck_WrapsAllSentinels(t *testing.T) {
+	for _, tc := range methodSentinelCases {
+		si := &stubInvoker{err: fmt.Errorf("%s", tc.msg)}
+		d := newDriver(si)
+		_, err := d.HealthCheck(context.Background(), sampleRef())
+		if err == nil {
+			t.Fatalf("HealthCheck %q: expected error", tc.msg)
+		}
+		if !errors.Is(err, tc.sentinel) {
+			t.Errorf("HealthCheck %q: expected %v, got %v", tc.msg, tc.sentinel, err)
+		}
+	}
+}
+
+func TestRemoteDriver_PassThroughUnknownErrors(t *testing.T) {
+	msg := "connection reset by peer"
+	for _, method := range []string{"create", "read", "update", "delete", "diff", "scale", "hc"} {
+		var err error
+		si := &stubInvoker{err: fmt.Errorf("%s", msg)}
+		d := newDriver(si)
+		current := &interfaces.ResourceOutput{ProviderID: "pid-123"}
+		switch method {
+		case "create":
+			_, err = d.Create(context.Background(), sampleSpec())
+		case "read":
+			_, err = d.Read(context.Background(), sampleRef())
+		case "update":
+			_, err = d.Update(context.Background(), sampleRef(), sampleSpec())
+		case "delete":
+			err = d.Delete(context.Background(), sampleRef())
+		case "diff":
+			_, err = d.Diff(context.Background(), sampleSpec(), current)
+		case "scale":
+			_, err = d.Scale(context.Background(), sampleRef(), 2)
+		case "hc":
+			_, err = d.HealthCheck(context.Background(), sampleRef())
+		}
+		if err == nil {
+			t.Fatalf("%s: expected error", method)
+		}
+		for _, s := range []error{
+			interfaces.ErrResourceNotFound, interfaces.ErrResourceAlreadyExists,
+			interfaces.ErrRateLimited, interfaces.ErrTransient,
+			interfaces.ErrUnauthorized, interfaces.ErrForbidden, interfaces.ErrValidation,
+		} {
+			if errors.Is(err, s) {
+				t.Errorf("%s: unknown error %q should not match sentinel %v", method, msg, s)
+			}
+		}
 	}
 }

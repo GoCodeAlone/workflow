@@ -404,21 +404,43 @@ type remoteResourceDriver struct {
 	resourceType string
 }
 
-// wrapNotFound re-wraps err as ErrResourceNotFound when the error message
-// contains a known not-found pattern. Errors crossing the plugin boundary
-// arrive as plain strings, so errors.Is can't match the sentinel directly —
-// this function bridges that gap for Update, Read, and Delete.
-func wrapNotFound(err error) error {
+// wrapIaCError categorizes plugin errors by matching HTTP status codes and
+// common message patterns, wrapping with the appropriate IaC sentinel so
+// callers can use errors.Is for control flow. Errors crossing the plugin
+// boundary arrive as plain strings, so sentinel matching must be text-based.
+// Returns err unchanged when no pattern matches.
+func wrapIaCError(err error) error {
 	if err == nil {
 		return nil
 	}
 	msg := strings.ToLower(err.Error())
-	for _, pat := range []string{"not found", "404", "405", "does not exist", "no such"} {
-		if strings.Contains(msg, pat) {
-			return fmt.Errorf("%w: %v", interfaces.ErrResourceNotFound, err)
-		}
+	switch {
+	case containsAny(msg, "not found", "404", "405", "does not exist", "no such"):
+		return fmt.Errorf("%w: %v", interfaces.ErrResourceNotFound, err)
+	case containsAny(msg, "already exists", "409", "conflict"):
+		return fmt.Errorf("%w: %v", interfaces.ErrResourceAlreadyExists, err)
+	case containsAny(msg, "rate limit", "429", "too many requests"):
+		return fmt.Errorf("%w: %v", interfaces.ErrRateLimited, err)
+	case containsAny(msg, "500", "502", "503", "504", "bad gateway", "gateway timeout", "service unavailable"):
+		return fmt.Errorf("%w: %v", interfaces.ErrTransient, err)
+	case containsAny(msg, "401", "unauthorized", "unable to authenticate"):
+		return fmt.Errorf("%w: %v", interfaces.ErrUnauthorized, err)
+	case containsAny(msg, "403", "forbidden"):
+		return fmt.Errorf("%w: %v", interfaces.ErrForbidden, err)
+	case containsAny(msg, "400", "422", "validation", "invalid"):
+		return fmt.Errorf("%w: %v", interfaces.ErrValidation, err)
 	}
 	return err
+}
+
+// containsAny reports whether s contains any of the provided substrings.
+func containsAny(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 // decodeResourceOutput converts an InvokeService response map into a *interfaces.ResourceOutput,
@@ -460,7 +482,7 @@ func (d *remoteResourceDriver) Create(_ context.Context, spec interfaces.Resourc
 		"spec_config":   spec.Config,
 	})
 	if err != nil {
-		return nil, err
+		return nil, wrapIaCError(err)
 	}
 	return decodeResourceOutput(res), nil
 }
@@ -473,7 +495,7 @@ func (d *remoteResourceDriver) Read(_ context.Context, ref interfaces.ResourceRe
 		"ref_provider_id": ref.ProviderID,
 	})
 	if err != nil {
-		return nil, wrapNotFound(err)
+		return nil, wrapIaCError(err)
 	}
 	return decodeResourceOutput(res), nil
 }
@@ -489,7 +511,7 @@ func (d *remoteResourceDriver) Update(_ context.Context, ref interfaces.Resource
 		"spec_config":     spec.Config,
 	})
 	if err != nil {
-		return nil, wrapNotFound(err)
+		return nil, wrapIaCError(err)
 	}
 	return decodeResourceOutput(res), nil
 }
@@ -501,7 +523,7 @@ func (d *remoteResourceDriver) Delete(_ context.Context, ref interfaces.Resource
 		"ref_type":        ref.Type,
 		"ref_provider_id": ref.ProviderID,
 	})
-	return wrapNotFound(err)
+	return wrapIaCError(err)
 }
 
 func (d *remoteResourceDriver) Diff(_ context.Context, desired interfaces.ResourceSpec, current *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
@@ -519,7 +541,7 @@ func (d *remoteResourceDriver) Diff(_ context.Context, desired interfaces.Resour
 	}
 	res, err := d.invoker.InvokeService("ResourceDriver.Diff", args)
 	if err != nil {
-		return nil, err
+		return nil, wrapIaCError(err)
 	}
 	result := &interfaces.DiffResult{}
 	result.NeedsUpdate, _ = res["needs_update"].(bool)
@@ -550,7 +572,7 @@ func (d *remoteResourceDriver) HealthCheck(_ context.Context, ref interfaces.Res
 		"ref_provider_id": ref.ProviderID,
 	})
 	if err != nil {
-		return nil, err
+		return nil, wrapIaCError(err)
 	}
 	healthy, _ := res["healthy"].(bool)
 	message, _ := res["message"].(string)
@@ -566,7 +588,7 @@ func (d *remoteResourceDriver) Scale(_ context.Context, ref interfaces.ResourceR
 		"replicas":        replicas,
 	})
 	if err != nil {
-		return nil, err
+		return nil, wrapIaCError(err)
 	}
 	return decodeResourceOutput(res), nil
 }
