@@ -77,9 +77,10 @@ func (m *MultiRegistry) FetchManifest(name string) (*RegistryManifest, string, e
 		lastErr = err
 	}
 
-	// If the normalized name differs from the original, retry with the short name.
-	// This allows users to omit the "workflow-plugin-" prefix (e.g. "auth" finds
-	// "workflow-plugin-auth" when no plugin named "auth" exists in any source).
+	// If the original name was not found and the normalized short name differs,
+	// retry with the short name. This lets callers omit the "workflow-plugin-"
+	// prefix (e.g. passing "auth" resolves to the registry entry named "auth"
+	// when no entry named "auth" exists under the full original name).
 	if normalized != name {
 		for _, src := range m.sources {
 			manifest, err := src.FetchManifest(normalized)

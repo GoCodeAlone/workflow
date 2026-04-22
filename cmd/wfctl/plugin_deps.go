@@ -107,9 +107,11 @@ func runPluginDeps(args []string) error {
 	}
 	mr := NewMultiRegistry(cfg)
 
-	manifest, _, err := mr.FetchManifest(pluginName)
+	// Pass rawName (original, un-normalized) to FetchManifest so the original-
+	// name-first lookup in MultiRegistry can engage before the short-name fallback.
+	manifest, _, err := mr.FetchManifest(rawName)
 	if err != nil {
-		return fmt.Errorf("fetch manifest for %q: %w", pluginName, err)
+		return fmt.Errorf("fetch manifest for %q: %w", rawName, err)
 	}
 
 	if len(manifest.Dependencies) == 0 {

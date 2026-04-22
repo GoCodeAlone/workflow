@@ -142,8 +142,12 @@ func runPluginInstall(args []string) error {
 		mr = NewMultiRegistry(cfg)
 	}
 
-	fmt.Fprintf(os.Stderr, "Fetching manifest for %q...\n", pluginName)
-	manifest, sourceName, registryErr := mr.FetchManifest(pluginName)
+	// Pass rawName (the original, un-normalized name) to FetchManifest so that
+	// "workflow-plugin-auth" is tried first in the registry before falling back
+	// to the normalized short name "auth". pluginName (normalized) is used only
+	// for the on-disk install directory path.
+	fmt.Fprintf(os.Stderr, "Fetching manifest for %q...\n", rawName)
+	manifest, sourceName, registryErr := mr.FetchManifest(rawName)
 
 	if registryErr != nil {
 		// Registry lookup failed. Try GitHub direct install if input looks like owner/repo[@version].
