@@ -131,4 +131,3 @@ func DispatchCLICommand(entry *CLIRegistryEntry, args []string) error {
 func (r CLIRegistry) LookupCLICommand(name string) *CLIRegistryEntry {
 	return r[name]
 }
-

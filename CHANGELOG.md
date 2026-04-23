@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.3] - 2026-04-23
+
+### Fixed
+
+- **wfctl plugin install auth** — `downloadURL` now sends an `Authorization: token <tok>` header for any `github.com` URL. Token resolution order: `RELEASES_TOKEN` → `GH_TOKEN` → `GITHUB_TOKEN`. Falls back to unauthenticated for public repos or non-GitHub URLs. Enables `wfctl plugin install` to fetch release assets from private GitHub repositories when a token is present in the environment (e.g. BMW CI with `RELEASES_TOKEN`).
+
 ## [0.18.1] - 2026-04-22
 
 ### Fixed
