@@ -819,11 +819,12 @@ func runInfraApply(args []string) error {
 		}
 	}
 
+	ctx := context.Background()
+
 	// Inject secrets after bootstrap so generated secrets are available.
 	if envName != "" {
 		wfCfg, loadErr := config.LoadFromFile(cfgFile)
 		if loadErr == nil && wfCfg.Secrets != nil && len(wfCfg.Secrets.Entries) > 0 {
-			ctx := context.Background()
 			secretVals, secretErr := injectSecrets(ctx, wfCfg, envName)
 			if secretErr != nil {
 				return fmt.Errorf("inject secrets for env %q: %w", envName, secretErr)
@@ -834,19 +835,36 @@ func runInfraApply(args []string) error {
 		}
 	}
 
-	pipelineCfg := cfgFile
-	if envName != "" {
-		tmp, resErr := writeEnvResolvedConfig(cfgFile, envName)
-		if resErr != nil {
-			return resErr
-		}
-		defer os.Remove(tmp)
-		pipelineCfg = tmp
-	}
-
 	fmt.Printf("Applying infrastructure from %s...\n", cfgFile)
-	if err := runPipelineRun([]string{"-c", pipelineCfg, "-p", "apply"}); err != nil {
-		return err
+
+	// Dispatch: infra.* modules use the direct IaCProvider path; legacy
+	// platform.* configs fall back to the pipeline runner (pipelines.apply).
+	// Mixing both types in the same config is not supported — fail fast with a
+	// descriptive error rather than silently skipping one class of modules.
+	if hasInfraModules(cfgFile) && hasPlatformModules(cfgFile) {
+		return fmt.Errorf(
+			"config %q mixes infra.* and platform.* module types — "+
+				"use one style per config file, or split into separate configs",
+			cfgFile,
+		)
+	}
+	if hasInfraModules(cfgFile) {
+		if err := applyInfraModules(ctx, cfgFile, envName); err != nil {
+			return err
+		}
+	} else {
+		pipelineCfg := cfgFile
+		if envName != "" {
+			tmp, resErr := writeEnvResolvedConfig(cfgFile, envName)
+			if resErr != nil {
+				return resErr
+			}
+			defer os.Remove(tmp)
+			pipelineCfg = tmp
+		}
+		if err := runPipelineRun([]string{"-c", pipelineCfg, "-p", "apply"}); err != nil {
+			return err
+		}
 	}
 
 	// Post-apply: sync infra_output secrets from the now-written state.
@@ -854,12 +872,12 @@ func runInfraApply(args []string) error {
 	if err != nil || secretsCfg == nil {
 		return err
 	}
-	provider, err := resolveSecretsProvider(secretsCfg)
+	secretsProvider, err := resolveSecretsProvider(secretsCfg)
 	if err != nil {
 		return fmt.Errorf("resolve secrets provider for infra_output sync: %w", err)
 	}
 	states := loadCurrentState(cfgFile)
-	return syncInfraOutputSecrets(context.Background(), secretsCfg, provider, states)
+	return syncInfraOutputSecrets(ctx, secretsCfg, secretsProvider, states)
 }
 
 func runInfraStatus(args []string) error {
