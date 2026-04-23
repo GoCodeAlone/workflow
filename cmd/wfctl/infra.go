@@ -845,6 +845,13 @@ func runInfraStatus(args []string) error {
 		return err
 	}
 
+	fmt.Printf("Infrastructure status from %s...\n", cfgFile)
+
+	// Direct path for infra.* module configs; legacy pipeline path for platform.*.
+	if hasInfraModules(cfgFile) {
+		return statusInfraModules(context.Background(), cfgFile, envName)
+	}
+
 	pipelineCfg := cfgFile
 	if envName != "" {
 		tmp, resErr := writeEnvResolvedConfig(cfgFile, envName)
@@ -854,8 +861,6 @@ func runInfraStatus(args []string) error {
 		defer os.Remove(tmp)
 		pipelineCfg = tmp
 	}
-
-	fmt.Printf("Infrastructure status from %s...\n", cfgFile)
 	return runPipelineRun([]string{"-c", pipelineCfg, "-p", "status"})
 }
 
@@ -875,6 +880,13 @@ func runInfraDrift(args []string) error {
 		return err
 	}
 
+	fmt.Printf("Detecting drift for %s...\n", cfgFile)
+
+	// Direct path for infra.* module configs; legacy pipeline path for platform.*.
+	if hasInfraModules(cfgFile) {
+		return driftInfraModules(context.Background(), cfgFile, envName)
+	}
+
 	pipelineCfg := cfgFile
 	if envName != "" {
 		tmp, resErr := writeEnvResolvedConfig(cfgFile, envName)
@@ -884,8 +896,6 @@ func runInfraDrift(args []string) error {
 		defer os.Remove(tmp)
 		pipelineCfg = tmp
 	}
-
-	fmt.Printf("Detecting drift for %s...\n", cfgFile)
 	return runPipelineRun([]string{"-c", pipelineCfg, "-p", "drift"})
 }
 
@@ -925,6 +935,13 @@ func runInfraDestroy(args []string) error {
 		}
 	}
 
+	fmt.Printf("Destroying infrastructure from %s...\n", cfgFile)
+
+	// Direct path for infra.* module configs; legacy pipeline path for platform.*.
+	if hasInfraModules(cfgFile) {
+		return destroyInfraModules(context.Background(), cfgFile, envName)
+	}
+
 	pipelineCfg := cfgFile
 	if envName != "" {
 		tmp, resErr := writeEnvResolvedConfig(cfgFile, envName)
@@ -934,7 +951,5 @@ func runInfraDestroy(args []string) error {
 		defer os.Remove(tmp)
 		pipelineCfg = tmp
 	}
-
-	fmt.Printf("Destroying infrastructure from %s...\n", cfgFile)
 	return runPipelineRun([]string{"-c", pipelineCfg, "-p", "destroy"})
 }
