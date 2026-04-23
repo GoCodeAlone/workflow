@@ -191,23 +191,26 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 
 	// Resolve abstract sizing tiers into concrete provider-specific values
 	// (e.g. Size: "m" → instance_type: "s-1vcpu-2gb") for each spec that
-	// declares a Size. The resolved values are merged into spec.Config so that
-	// plan output and apply are always in sync.
+	// declares an abstract Size tier. Provider-specific slugs (e.g.
+	// "db-s-1vcpu-1gb") are passed through as-is to avoid double-resolution.
+	// The resolved values are merged into spec.Config so that plan output and
+	// apply are always in sync.
 	for i := range specs {
-		if specs[i].Size == "" {
+		spec := &specs[i]
+		if spec.Size == "" || !isAbstractSize(spec.Size) {
 			continue
 		}
-		sizing, err := provider.ResolveSizing(specs[i].Type, specs[i].Size, specs[i].Hints)
+		sizing, err := provider.ResolveSizing(spec.Type, spec.Size, spec.Hints)
 		if err != nil {
-			return fmt.Errorf("%s/%s: resolve sizing: %w", specs[i].Type, specs[i].Name, err)
+			return fmt.Errorf("%s/%s: resolve sizing: %w", spec.Type, spec.Name, err)
 		}
 		if sizing != nil {
-			if specs[i].Config == nil {
-				specs[i].Config = map[string]any{}
+			if spec.Config == nil {
+				spec.Config = map[string]any{}
 			}
-			specs[i].Config["instance_type"] = sizing.InstanceType
+			spec.Config["instance_type"] = sizing.InstanceType
 			for k, v := range sizing.Specs {
-				specs[i].Config[k] = v
+				spec.Config[k] = v
 			}
 		}
 	}
@@ -293,4 +296,16 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		}
 	}
 	return nil
+}
+
+// isAbstractSize reports whether s is one of the canonical abstract size tiers
+// (xs/s/m/l/xl). Provider-specific slugs such as "db-s-1vcpu-1gb" return false
+// so that ResolveSizing is not called for already-concrete values.
+func isAbstractSize(s interfaces.Size) bool {
+	switch s {
+	case interfaces.SizeXS, interfaces.SizeS, interfaces.SizeM, interfaces.SizeL, interfaces.SizeXL:
+		return true
+	default:
+		return false
+	}
 }
