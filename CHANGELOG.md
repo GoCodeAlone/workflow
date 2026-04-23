@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.6] - 2026-04-23
+
+### Fixed
+
+- **`wfctl infra apply` — state persistence** — `applyWithProviderAndStore` now saves a `ResourceState` record for each successfully provisioned resource. Previously, state was never written after apply, so every subsequent run re-attempted creates on resources that already existed. Save failures log a loud warning but do not abort the apply (the cloud resource exists). Delete-action resources are removed from state after provider.Destroy succeeds.
+- **`loadCurrentState` — remote state backends** — `resolveStateStore` supports filesystem and DO Spaces backends; previously only the filesystem path was wired up. `loadCurrentState` now delegates to `resolveStateStore` so Spaces-backed state is readable by plan and apply.
+- **`wfctl infra destroy` — direct-path for infra.\* modules** — `runInfraDestroy` dispatches to `destroyInfraModules` when the config contains `infra.*` modules. Previously it required a non-existent `pipelines.destroy` pipeline and always failed for modern configs.
+- **`wfctl infra status` / `wfctl infra drift` — direct-path for infra.\* modules** — same dispatch fix; now calls `provider.Status` / `provider.DetectDrift` directly on tracked state records.
+- **`wfctl infra bootstrap` — Spaces bucket URL export** — after creating or confirming the DO Spaces state bucket, bootstrap prints `export DO_SPACES_BUCKET=<name>` to stdout for CI capture and writes the resolved bucket name back to the on-disk config so downstream commands can load state without the env var.
+
 ## [0.18.5] - 2026-04-23
 
 ### Fixed
