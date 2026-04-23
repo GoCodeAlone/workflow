@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
 	engineplugin "github.com/GoCodeAlone/workflow/plugin"
@@ -727,22 +728,160 @@ func parseNameVersion(arg string) (name, ver string) {
 	return arg, ""
 }
 
+// gitHubAPIBaseURL is the GitHub API base URL. It is a package-level variable
+// so tests can override it to point at a local mock server.
+var gitHubAPIBaseURL = "https://api.github.com"
+
+// gitHubAPIClient is used for GitHub API metadata calls (releases/tags,
+// releases/assets). Separate from http.DefaultClient so tests can override it
+// independently. A generous timeout covers large binary asset downloads.
+var gitHubAPIClient = &http.Client{Timeout: 10 * time.Minute}
+
+// gitHubToken returns the first non-empty GitHub token from the environment,
+// checking RELEASES_TOKEN, GH_TOKEN, and GITHUB_TOKEN in order.
+func gitHubToken() string {
+	for _, k := range []string{"RELEASES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} {
+		if tok := os.Getenv(k); tok != "" {
+			return tok
+		}
+	}
+	return ""
+}
+
+// isGitHubHost returns true only for github.com and its subdomains (e.g.
+// api.github.com). Requires the dot separator to avoid matching evilgithub.com.
+func isGitHubHost(host string) bool {
+	h := strings.ToLower(host)
+	return h == "github.com" || strings.HasSuffix(h, ".github.com")
+}
+
+// parseGitHubReleaseDownloadURL parses a GitHub release download URL of the form
+// https://github.com/OWNER/REPO/releases/download/TAG/FILENAME and returns the
+// components. Returns ok=false for any URL that doesn't match this exact pattern,
+// including non-HTTPS schemes and non-GitHub hosts.
+func parseGitHubReleaseDownloadURL(rawURL string) (owner, repo, tag, filename string, ok bool) {
+	u, err := neturl.Parse(rawURL)
+	if err != nil || !strings.EqualFold(u.Scheme, "https") || !isGitHubHost(u.Hostname()) {
+		return
+	}
+	// Path must be exactly: /owner/repo/releases/download/tag/filename (6 segments).
+	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
+	if len(parts) != 6 || parts[2] != "releases" || parts[3] != "download" ||
+		parts[0] == "" || parts[1] == "" || parts[4] == "" || parts[5] == "" {
+		return
+	}
+	return parts[0], parts[1], parts[4], parts[5], true
+}
+
+// downloadGitHubReleaseAsset downloads a private GitHub release asset using the
+// two-step REST API flow:
+//  1. GET api.github.com/repos/OWNER/REPO/releases/tags/TAG — find the asset ID
+//     matching filename in the release's assets array.
+//  2. GET api.github.com/repos/OWNER/REPO/releases/assets/:id with
+//     Accept: application/octet-stream — streams the binary content.
+//
+// This is the correct approach for private repos; the plain download URL
+// (github.com/.../releases/download/.../file) redirects to a signed S3 URL and
+// does not propagate the Authorization header correctly.
+func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byte, error) {
+	// Step 1: resolve the asset ID from the release metadata.
+	releaseURL := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", //nolint:gosec // G107
+		gitHubAPIBaseURL,
+		neturl.PathEscape(owner),
+		neturl.PathEscape(repo),
+		neturl.PathEscape(tag),
+	)
+	req, err := http.NewRequest(http.MethodGet, releaseURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "wfctl/"+version)
+
+	resp, err := gitHubAPIClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub releases API: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub releases API: HTTP %d for %s/%s@%s", resp.StatusCode, owner, repo, tag)
+	}
+
+	var release struct {
+		Assets []struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, fmt.Errorf("decode GitHub release response: %w", err)
+	}
+
+	var assetID int64
+	for _, a := range release.Assets {
+		if a.Name == filename {
+			assetID = a.ID
+			break
+		}
+	}
+	if assetID == 0 {
+		return nil, fmt.Errorf("asset %q not found in release %s/%s@%s", filename, owner, repo, tag)
+	}
+
+	// Step 2: download the asset binary.
+	assetURL := fmt.Sprintf("%s/repos/%s/%s/releases/assets/%d", //nolint:gosec // G107
+		gitHubAPIBaseURL,
+		neturl.PathEscape(owner),
+		neturl.PathEscape(repo),
+		assetID,
+	)
+	req2, err := http.NewRequest(http.MethodGet, assetURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req2.Header.Set("Authorization", "Bearer "+token)
+	req2.Header.Set("Accept", "application/octet-stream")
+	req2.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req2.Header.Set("User-Agent", "wfctl/"+version)
+
+	resp2, err := gitHubAPIClient.Do(req2)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub asset download API: %w", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub asset download API: HTTP %d for asset %d", resp2.StatusCode, assetID)
+	}
+	return io.ReadAll(resp2.Body)
+}
+
 // downloadURL fetches a URL and returns the body bytes.
-// For github.com URLs (matched by hostname, not substring), it injects an
-// Authorization header from the first non-empty env var in: RELEASES_TOKEN,
-// GH_TOKEN, GITHUB_TOKEN. This allows downloading assets from private GitHub
-// repos when a token is available in the environment.
+//
+// For GitHub release download URLs (github.com/OWNER/REPO/releases/download/...),
+// when a token is available it uses the two-step GitHub REST API flow
+// (releases/tags + releases/assets) which correctly handles private repos.
+// Without a token it falls back to a direct GET (works for public repos).
+//
+// For all other github.com URLs a Bearer header is injected when a token is
+// available. Non-GitHub URLs are fetched unauthenticated.
 func downloadURL(rawURL string) ([]byte, error) {
+	// Private GitHub release asset path: use the API two-step flow.
+	if owner, repo, tag, filename, ok := parseGitHubReleaseDownloadURL(rawURL); ok {
+		if tok := gitHubToken(); tok != "" {
+			return downloadGitHubReleaseAsset(owner, repo, tag, filename, tok)
+		}
+	}
+
+	// Public repos and non-release GitHub URLs: direct GET with optional Bearer.
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil) //nolint:gosec // G107: URL comes from registry manifest
 	if err != nil {
 		return nil, err
 	}
-	if parsed, err2 := neturl.Parse(rawURL); err2 == nil && strings.HasSuffix(parsed.Hostname(), "github.com") {
-		for _, envKey := range []string{"RELEASES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} {
-			if tok := os.Getenv(envKey); tok != "" {
-				req.Header.Set("Authorization", "Bearer "+tok)
-				break
-			}
+	if parsed, err2 := neturl.Parse(rawURL); err2 == nil && isGitHubHost(parsed.Hostname()) {
+		if tok := gitHubToken(); tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
 		}
 	}
 	resp, err := http.DefaultClient.Do(req)

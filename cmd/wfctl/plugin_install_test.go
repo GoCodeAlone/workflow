@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -106,9 +107,9 @@ func installTestClient(t *testing.T, ct *captureTransport) {
 }
 
 // TestDownloadURL_GitHubAuthHeader verifies that downloadURL injects a Bearer
-// Authorization header for github.com URLs using the first non-empty token env
-// var (RELEASES_TOKEN > GH_TOKEN > GITHUB_TOKEN), and sends no header when none
-// are set.
+// Authorization header for non-release github.com URLs (direct-download path)
+// using the first non-empty token env var (RELEASES_TOKEN > GH_TOKEN >
+// GITHUB_TOKEN), and sends no header when none are set.
 func TestDownloadURL_GitHubAuthHeader(t *testing.T) {
 	const sentinel = "test-token-value"
 
@@ -143,8 +144,9 @@ func TestDownloadURL_GitHubAuthHeader(t *testing.T) {
 				t.Setenv(tc.envKey, sentinel)
 			}
 
-			// Use a real github.com URL — captureTransport redirects it to srv.
-			testURL := "https://github.com/GoCodeAlone/plugin/releases/download/v1.0.0/asset.tar.gz"
+			// Use a non-release github.com URL so we exercise the direct-download
+			// path (not the two-step API flow). captureTransport redirects it to srv.
+			testURL := "https://github.com/GoCodeAlone/plugin/archive/main.tar.gz"
 			if _, err := downloadURL(testURL); err != nil {
 				t.Fatalf("downloadURL: %v", err)
 			}
@@ -195,7 +197,7 @@ func TestDownloadURL_NonGitHubNoAuthHeader(t *testing.T) {
 }
 
 // TestDownloadURL_TokenPriority verifies that RELEASES_TOKEN takes precedence over
-// GH_TOKEN and GITHUB_TOKEN when multiple env vars are set.
+// GH_TOKEN and GITHUB_TOKEN when multiple env vars are set (direct-download path).
 func TestDownloadURL_TokenPriority(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -210,12 +212,188 @@ func TestDownloadURL_TokenPriority(t *testing.T) {
 	t.Setenv("GH_TOKEN", "gh-loses")
 	t.Setenv("GITHUB_TOKEN", "github-loses")
 
-	testURL := "https://github.com/GoCodeAlone/plugin/releases/download/v1.0.0/asset.tar.gz"
+	// Non-release github.com URL exercises the direct-download path.
+	testURL := "https://github.com/GoCodeAlone/plugin/archive/main.tar.gz"
 	if _, err := downloadURL(testURL); err != nil {
 		t.Fatalf("downloadURL: %v", err)
 	}
 	const want = "Bearer releases-wins"
 	if got := ct.gotHeader(); got != want {
 		t.Errorf("Authorization header = %q, want %q", got, want)
+	}
+}
+
+// TestParseGitHubReleaseDownloadURL verifies URL parsing for the GitHub release
+// download pattern.
+func TestParseGitHubReleaseDownloadURL(t *testing.T) {
+	cases := []struct {
+		rawURL   string
+		owner    string
+		repo     string
+		tag      string
+		filename string
+		ok       bool
+	}{
+		{
+			rawURL:   "https://github.com/GoCodeAlone/workflow-plugin-supply-chain/releases/download/v0.3.0/workflow-plugin-supply-chain-linux-amd64.tar.gz",
+			owner:    "GoCodeAlone",
+			repo:     "workflow-plugin-supply-chain",
+			tag:      "v0.3.0",
+			filename: "workflow-plugin-supply-chain-linux-amd64.tar.gz",
+			ok:       true,
+		},
+		{
+			// Non-release URL
+			rawURL: "https://github.com/GoCodeAlone/plugin/archive/main.tar.gz",
+			ok:     false,
+		},
+		{
+			// Non-GitHub host
+			rawURL: "https://example.com/owner/repo/releases/download/v1.0.0/file.tar.gz",
+			ok:     false,
+		},
+		{
+			// Suffix-matching but not github.com — must be rejected to prevent token leakage
+			rawURL: "https://evilgithub.com/owner/repo/releases/download/v1.0.0/file.tar.gz",
+			ok:     false,
+		},
+		{
+			// http scheme — must be rejected (only https allowed)
+			rawURL: "http://github.com/owner/repo/releases/download/v1.0.0/file.tar.gz",
+			ok:     false,
+		},
+		{
+			// Too few path segments
+			rawURL: "https://github.com/owner/repo/releases/download/v1.0.0",
+			ok:     false,
+		},
+		{
+			// Extra path segments (len > 6) — must be rejected for exact match
+			rawURL: "https://github.com/owner/repo/releases/download/v1.0.0/file.tar.gz/extra",
+			ok:     false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.rawURL, func(t *testing.T) {
+			owner, repo, tag, filename, ok := parseGitHubReleaseDownloadURL(tc.rawURL)
+			if ok != tc.ok {
+				t.Fatalf("ok = %v, want %v", ok, tc.ok)
+			}
+			if !tc.ok {
+				return
+			}
+			if owner != tc.owner || repo != tc.repo || tag != tc.tag || filename != tc.filename {
+				t.Errorf("got (%q, %q, %q, %q), want (%q, %q, %q, %q)",
+					owner, repo, tag, filename,
+					tc.owner, tc.repo, tc.tag, tc.filename)
+			}
+		})
+	}
+}
+
+// TestDownloadURL_PrivateReleaseAsset verifies the two-step GitHub API flow used
+// to download assets from private repos. A mock server handles both the
+// releases/tags and releases/assets endpoints.
+func TestDownloadURL_PrivateReleaseAsset(t *testing.T) {
+	const (
+		wantAssetID  = int64(99)
+		wantFilename = "plugin-linux-amd64.tar.gz"
+		wantTag      = "v1.0.0"
+		wantOwner    = "GoCodeAlone"
+		wantRepo     = "test-plugin"
+		wantToken    = "test-secret-token"
+	)
+	wantPayload := []byte("fake tarball bytes")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/releases/tags/%s", wantOwner, wantRepo, wantTag),
+		func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer "+wantToken {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if r.Header.Get("Accept") != "application/vnd.github+json" {
+				http.Error(w, "bad accept", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"assets":[{"id":%d,"name":%q}]}`, wantAssetID, wantFilename)
+		},
+	)
+	mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/releases/assets/%d", wantOwner, wantRepo, wantAssetID),
+		func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer "+wantToken {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if r.Header.Get("Accept") != "application/octet-stream" {
+				http.Error(w, "bad accept", http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write(wantPayload) //nolint:errcheck
+		},
+	)
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// Override API base URL and client to point at the mock server.
+	origAPIBase := gitHubAPIBaseURL
+	origAPIClient := gitHubAPIClient
+	gitHubAPIBaseURL = srv.URL
+	gitHubAPIClient = srv.Client()
+	t.Cleanup(func() {
+		gitHubAPIBaseURL = origAPIBase
+		gitHubAPIClient = origAPIClient
+	})
+
+	t.Setenv("RELEASES_TOKEN", wantToken)
+	for _, k := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		t.Setenv(k, "")
+	}
+
+	rawURL := fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s",
+		wantOwner, wantRepo, wantTag, wantFilename)
+	got, err := downloadURL(rawURL)
+	if err != nil {
+		t.Fatalf("downloadURL: %v", err)
+	}
+	if string(got) != string(wantPayload) {
+		t.Errorf("payload = %q, want %q", got, wantPayload)
+	}
+}
+
+// TestDownloadURL_PublicReleaseNoToken verifies that when no token is set,
+// downloadURL falls back to a plain GET for release download URLs (public repos).
+func TestDownloadURL_PublicReleaseNoToken(t *testing.T) {
+	wantPayload := []byte("public tarball bytes")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write(wantPayload) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	// No token — release URL goes through direct-download path.
+	for _, k := range []string{"RELEASES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} {
+		t.Setenv(k, "")
+	}
+
+	srvURL, _ := url.Parse(srv.URL)
+	ct := &captureTransport{target: srvURL.Host}
+	installTestClient(t, ct)
+
+	rawURL := "https://github.com/GoCodeAlone/public-plugin/releases/download/v1.0.0/plugin.tar.gz"
+	got, err := downloadURL(rawURL)
+	if err != nil {
+		t.Fatalf("downloadURL: %v", err)
+	}
+	if string(got) != string(wantPayload) {
+		t.Errorf("payload = %q, want %q", got, wantPayload)
+	}
+	// No auth header should be sent when there is no token.
+	if hdr := ct.gotHeader(); hdr != "" {
+		t.Errorf("expected no Authorization header with no token, got %q", hdr)
 	}
 }
