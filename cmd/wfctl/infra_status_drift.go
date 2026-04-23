@@ -27,12 +27,11 @@ func statusInfraModules(ctx context.Context, cfgFile, envName string) error {
 
 	groups, groupOrder := groupStatesByProvider(states, cfgFile, envName)
 
-	for _, moduleRef := range groupOrder {
-		g := groups[moduleRef]
+	statusGroup := func(moduleRef string, g *providerGroup) {
 		provider, closer, err := resolveIaCProvider(ctx, g.provType, g.provCfg)
 		if err != nil {
 			fmt.Printf("WARNING: load provider %q: %v\n", moduleRef, err)
-			continue
+			return
 		}
 		if closer != nil {
 			defer closer.Close() //nolint:errcheck
@@ -41,7 +40,7 @@ func statusInfraModules(ctx context.Context, cfgFile, envName string) error {
 		statuses, err := provider.Status(ctx, g.refs)
 		if err != nil {
 			fmt.Printf("WARNING: status for provider %q: %v\n", moduleRef, err)
-			continue
+			return
 		}
 
 		for _, s := range statuses {
@@ -53,6 +52,9 @@ func statusInfraModules(ctx context.Context, cfgFile, envName string) error {
 				fmt.Printf("  %-40s  %-20s  (unknown — provider returned no status)\n", ref.Name, ref.Type)
 			}
 		}
+	}
+	for _, moduleRef := range groupOrder {
+		statusGroup(moduleRef, groups[moduleRef])
 	}
 	return nil
 }
@@ -77,12 +79,11 @@ func driftInfraModules(ctx context.Context, cfgFile, envName string) error {
 	groups, groupOrder := groupStatesByProvider(states, cfgFile, envName)
 
 	driftFound := false
-	for _, moduleRef := range groupOrder {
-		g := groups[moduleRef]
+	driftGroup := func(moduleRef string, g *providerGroup) bool {
 		provider, closer, err := resolveIaCProvider(ctx, g.provType, g.provCfg)
 		if err != nil {
 			fmt.Printf("WARNING: load provider %q: %v\n", moduleRef, err)
-			continue
+			return false
 		}
 		if closer != nil {
 			defer closer.Close() //nolint:errcheck
@@ -91,12 +92,13 @@ func driftInfraModules(ctx context.Context, cfgFile, envName string) error {
 		results, err := provider.DetectDrift(ctx, g.refs)
 		if err != nil {
 			fmt.Printf("WARNING: drift detection for provider %q: %v\n", moduleRef, err)
-			continue
+			return false
 		}
 
+		found := false
 		for _, d := range results {
 			if d.Drifted {
-				driftFound = true
+				found = true
 				fmt.Printf("  DRIFT  %s (%s)\n", d.Name, d.Type)
 				for k, v := range d.Expected {
 					actual := d.Actual[k]
@@ -112,6 +114,12 @@ func driftInfraModules(ctx context.Context, cfgFile, envName string) error {
 			for _, ref := range g.refs {
 				fmt.Printf("  OK     %s (%s)  (provider returned no drift result)\n", ref.Name, ref.Type)
 			}
+		}
+		return found
+	}
+	for _, moduleRef := range groupOrder {
+		if driftGroup(moduleRef, groups[moduleRef]) {
+			driftFound = true
 		}
 	}
 
@@ -144,7 +152,8 @@ func groupStatesByProvider(states []interfaces.ResourceState, cfgFile, envName s
 	groups := map[string]*providerGroup{}
 	var groupOrder []string
 
-	for _, st := range states {
+	for i := range states {
+		st := &states[i]
 		moduleRef := ""
 		if spec, ok := specByName[st.Name]; ok {
 			moduleRef, _ = spec.Config["provider"].(string)

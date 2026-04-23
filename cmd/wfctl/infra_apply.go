@@ -150,10 +150,8 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	}
 
 	// Apply each provider group in declaration order.
-	for _, moduleRef := range groupOrder {
-		g := groups[moduleRef]
+	applyGroup := func(moduleRef string, g *provGroup) error {
 		fmt.Printf("Applying %d resource(s) via provider %q (%s)...\n", len(g.specs), moduleRef, g.provType)
-
 		provider, closer, err := resolveIaCProvider(ctx, g.provType, g.provCfg)
 		if err != nil {
 			return fmt.Errorf("provider %q (%s): load provider: %w", moduleRef, g.provType, err)
@@ -161,9 +159,11 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 		if closer != nil {
 			defer closer.Close() //nolint:errcheck
 		}
-
-		if err := applyWithProviderAndStore(ctx, provider, g.provType, g.specs, current, store); err != nil {
-			return fmt.Errorf("provider %q (%s): %w", moduleRef, g.provType, err)
+		return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, current, store)
+	}
+	for _, moduleRef := range groupOrder {
+		if err := applyGroup(moduleRef, groups[moduleRef]); err != nil {
+			return fmt.Errorf("provider %q: %w", moduleRef, err)
 		}
 	}
 	return nil
@@ -205,9 +205,9 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 
 	// Collect delete-action resource names so we can clean up state afterward.
 	deleteNames := make(map[string]struct{})
-	for _, a := range plan.Actions {
-		if a.Action == "delete" {
-			deleteNames[a.Resource.Name] = struct{}{}
+	for i := range plan.Actions {
+		if plan.Actions[i].Action == "delete" {
+			deleteNames[plan.Actions[i].Resource.Name] = struct{}{}
 		}
 	}
 

@@ -59,7 +59,8 @@ func destroyInfraModules(ctx context.Context, cfgFile, envName string) error { /
 	groups := map[string]*group{}
 	var groupOrder []string
 
-	for _, st := range states {
+	for i := range states {
+		st := &states[i]
 		// Try to find the provider ref from the spec.
 		moduleRef := ""
 		if spec, ok := specByName[st.Name]; ok {
@@ -102,8 +103,7 @@ func destroyInfraModules(ctx context.Context, cfgFile, envName string) error { /
 	}
 
 	// Destroy each provider group in order.
-	for _, moduleRef := range groupOrder {
-		g := groups[moduleRef]
+	destroyGroup := func(moduleRef string, g *group) error {
 		provider, closer, err := resolveIaCProvider(ctx, g.provType, g.provCfg)
 		if err != nil {
 			return fmt.Errorf("load provider %q: %w", moduleRef, err)
@@ -135,6 +135,12 @@ func destroyInfraModules(ctx context.Context, cfgFile, envName string) error { /
 			if delErr := store.DeleteResource(ctx, name); delErr != nil {
 				fmt.Printf("  WARNING: failed to remove state for %q: %v\n", name, delErr)
 			}
+		}
+		return nil
+	}
+	for _, moduleRef := range groupOrder {
+		if err := destroyGroup(moduleRef, groups[moduleRef]); err != nil {
+			return err
 		}
 	}
 	return nil

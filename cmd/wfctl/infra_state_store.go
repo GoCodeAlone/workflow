@@ -41,7 +41,10 @@ func (n *noopStateStore) DeleteResource(_ context.Context, _ string) error { ret
 // iac.state module is present — first-run callers just get no-op persistence.
 func resolveStateStore(cfgFile string) (infraStateStore, error) {
 	iacStates, _, _, err := discoverInfraModules(cfgFile)
-	if err != nil || len(iacStates) == 0 {
+	if err != nil {
+		return &noopStateStore{}, nil //nolint:nilerr // config not found / parse error means no state module; noop is correct
+	}
+	if len(iacStates) == 0 {
 		return &noopStateStore{}, nil
 	}
 	m := iacStates[0]
