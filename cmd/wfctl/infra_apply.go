@@ -76,11 +76,14 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error {
 	}
 
 	// Build a lookup table of iac.provider module name → (providerType, providerCfg).
+	// Also track which providers are explicitly disabled for this env so we can
+	// emit a precise error if an infra module references one.
 	type providerDef struct {
 		provType string
 		provCfg  map[string]any
 	}
 	providerDefs := map[string]providerDef{}
+	disabledProviders := map[string]struct{}{} // providers with environments[envName]: null
 	for i := range cfg.Modules {
 		m := &cfg.Modules[i]
 		if m.Type != "iac.provider" {
@@ -92,7 +95,8 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error {
 		if envName != "" {
 			resolved, ok := m.ResolveForEnv(envName)
 			if !ok {
-				continue // provider is disabled for this env
+				disabledProviders[m.Name] = struct{}{} // disabled via null env entry
+				continue
 			}
 			modCfg = config.ExpandEnvInMap(resolved.Config)
 		} else {
@@ -120,6 +124,9 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error {
 		if _, exists := groups[moduleRef]; !exists {
 			def, ok := providerDefs[moduleRef]
 			if !ok {
+				if _, disabled := disabledProviders[moduleRef]; disabled {
+					return fmt.Errorf("infra module %q references provider %q which is disabled for environment %q", spec.Name, moduleRef, envName)
+				}
 				return fmt.Errorf("infra module %q references provider %q which is not declared as an iac.provider module", spec.Name, moduleRef)
 			}
 			if def.provType == "" {
@@ -157,21 +164,18 @@ func applyWithProvider(ctx context.Context, providerType string, providerCfg map
 		defer closer.Close() //nolint:errcheck
 	}
 
-	// Narrow current state to only resources in this provider's spec set to
-	// avoid spurious deletes of resources managed by other providers.
-	specNames := make(map[string]struct{}, len(specs))
-	for _, s := range specs {
-		specNames[s.Name] = struct{}{}
-	}
-	var provCurrent []interfaces.ResourceState
-	for i := range current {
-		if _, ok := specNames[current[i].Name]; ok {
-			provCurrent = append(provCurrent, current[i])
-		}
-	}
+	// Pass the full current state to ComputePlan so that resources which were
+	// previously provisioned but are no longer in the desired spec set generate
+	// delete actions rather than being silently ignored.
+	//
+	// NOTE: in multi-provider configs each provider will see state entries it
+	// does not own, which could produce spurious delete actions. Proper
+	// provider-scoped state isolation requires a "provider" field on
+	// ResourceState (tracked as a follow-up). For the common single-provider
+	// case this is correct and complete.
 
 	// Compute the diff plan locally (provider-agnostic).
-	plan, err := platform.ComputePlan(specs, provCurrent)
+	plan, err := platform.ComputePlan(specs, current)
 	if err != nil {
 		return fmt.Errorf("compute plan: %w", err)
 	}

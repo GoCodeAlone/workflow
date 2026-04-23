@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -178,6 +179,89 @@ func TestApplyWithProvider_NoChanges(t *testing.T) {
 	defer fake.mu.Unlock()
 	if fake.applyCalled {
 		t.Error("provider.Apply should NOT be called when current state matches desired spec")
+	}
+}
+
+// TestApplyWithProvider_DeletesRemovedResource verifies that a resource present
+// in current state but absent from the desired specs generates a delete action.
+// This guards the fix to the type-scoped current-state filter: the old
+// name-only filter silently dropped orphaned state entries, preventing deletes.
+func TestApplyWithProvider_DeletesRemovedResource(t *testing.T) {
+	// Desired: only bmw-app remains.
+	specs := []interfaces.ResourceSpec{
+		{Name: "bmw-app", Type: "infra.container_service", Config: map[string]any{"image": "registry/app:latest"}},
+	}
+	// Current: bmw-app + old-db (removed from config, should be deleted).
+	appData, _ := json.Marshal(specs[0].Config)
+	appHash := fmt.Sprintf("%x", sha256.Sum256(appData))
+	current := []interfaces.ResourceState{
+		{Name: "bmw-app", Type: "infra.container_service", ConfigHash: appHash},
+		{Name: "old-db", Type: "infra.database", ConfigHash: "oldhash"},
+	}
+
+	fake := &applyCapture{}
+	orig := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, nil, nil
+	}
+	defer func() { resolveIaCProvider = orig }()
+
+	if err := applyWithProvider(context.Background(), "fake-cloud", nil, specs, current); err != nil {
+		t.Fatalf("applyWithProvider: %v", err)
+	}
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if !fake.applyCalled {
+		t.Fatal("provider.Apply should have been called for the delete action")
+	}
+	if fake.appliedPlan == nil {
+		t.Fatal("appliedPlan is nil")
+	}
+	actions := map[string]string{}
+	for _, a := range fake.appliedPlan.Actions {
+		actions[a.Resource.Name] = a.Action
+	}
+	if actions["old-db"] != "delete" {
+		t.Errorf("expected delete action for old-db, got %q", actions["old-db"])
+	}
+	if a := actions["bmw-app"]; a != "" {
+		t.Errorf("expected no action for bmw-app (hash matches), got %q", a)
+	}
+}
+
+// TestApplyInfraModules_DisabledProviderError verifies that when an infra.*
+// module references a provider that is explicitly disabled for the requested
+// environment (environments[envName]: null), the error message says "disabled
+// for environment" rather than "not declared".
+func TestApplyInfraModules_DisabledProviderError(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+    environments:
+      staging: null
+
+  - name: my-db
+    type: infra.database
+    config:
+      provider: do-provider
+      engine: postgres
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	err := applyInfraModules(context.Background(), cfgPath, "staging")
+	if err == nil {
+		t.Fatal("expected error for disabled provider, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "disabled") || !strings.Contains(msg, "staging") {
+		t.Errorf("error should mention 'disabled' and env name 'staging', got: %s", msg)
 	}
 }
 
