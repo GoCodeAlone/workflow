@@ -53,6 +53,14 @@ func (m *ModuleConfig) ResolveForEnv(envName string) (*ResolvedModule, bool) {
 		resolved.Config = deepMergeMap(resolved.Config, envRes.Config)
 	}
 
+	// If an env override sets "name", lift it into ResolvedModule.Name and
+	// delete it from Config so downstream ResourceSpec construction uses the
+	// correct identity. Empty string is ignored to prevent accidental erasure.
+	if n, ok := resolved.Config["name"].(string); ok && n != "" {
+		resolved.Name = n
+		delete(resolved.Config, "name")
+	}
+
 	setRegionFromConfig(resolved) // re-apply after env overrides
 	// Write region into Config so downstream ResourceSpec construction sees it.
 	if resolved.Region != "" {
