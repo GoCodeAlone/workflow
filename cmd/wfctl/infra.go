@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -354,11 +355,26 @@ func loadCurrentState(cfgFile string) []interfaces.ResourceState {
 }
 
 // configHashMap computes a deterministic SHA-256 hex hash of a config map.
+// Keys are explicitly sorted before marshalling to match platform.configHash
+// so that saved ConfigHash values are comparable across calls and round-trips.
 func configHashMap(config map[string]any) string {
 	if len(config) == 0 {
 		return ""
 	}
-	data, _ := json.Marshal(config)
+	keys := make([]string, 0, len(config))
+	for k := range config {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	type kv struct {
+		K string
+		V any
+	}
+	ordered := make([]kv, len(keys))
+	for i, k := range keys {
+		ordered[i] = kv{K: k, V: config[k]}
+	}
+	data, _ := json.Marshal(ordered)
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 

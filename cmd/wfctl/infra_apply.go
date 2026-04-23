@@ -183,6 +183,29 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		store = &noopStateStore{}
 	}
 
+	// Resolve abstract sizing tiers into concrete provider-specific values
+	// (e.g. Size: "m" → instance_type: "s-1vcpu-2gb") for each spec that
+	// declares a Size. The resolved values are merged into spec.Config so that
+	// plan output and apply are always in sync.
+	for i := range specs {
+		if specs[i].Size == "" {
+			continue
+		}
+		sizing, err := provider.ResolveSizing(specs[i].Type, specs[i].Size, specs[i].Hints)
+		if err != nil {
+			return fmt.Errorf("%s/%s: resolve sizing: %w", specs[i].Type, specs[i].Name, err)
+		}
+		if sizing != nil {
+			if specs[i].Config == nil {
+				specs[i].Config = map[string]any{}
+			}
+			specs[i].Config["instance_type"] = sizing.InstanceType
+			for k, v := range sizing.Specs {
+				specs[i].Config[k] = v
+			}
+		}
+	}
+
 	// Pass the full current state to ComputePlan so that resources which were
 	// previously provisioned but are no longer in the desired spec set generate
 	// delete actions rather than being silently ignored.
