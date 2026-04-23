@@ -76,7 +76,10 @@ func (p *recordingProvider) ResourceDriver(resourceType string) (interfaces.Reso
 	return p.driver, nil
 }
 func (p *recordingProvider) SupportedCanonicalKeys() []string { return nil }
-func (p *recordingProvider) Close() error                     { return nil }
+func (p *recordingProvider) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
+	return nil, nil
+}
+func (p *recordingProvider) Close() error { return nil }
 
 func (d *recordingDriver) Create(_ context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
 	d.createSpecs = append(d.createSpecs, spec)

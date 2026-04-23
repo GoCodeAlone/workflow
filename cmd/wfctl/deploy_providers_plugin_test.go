@@ -182,6 +182,9 @@ func (f *fakeIaCProvider) ResourceDriver(rt string) (interfaces.ResourceDriver, 
 	}
 	return d, nil
 }
+func (f *fakeIaCProvider) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
+	return nil, nil
+}
 func (f *fakeIaCProvider) Close() error                     { return nil }
 func (f *fakeIaCProvider) SupportedCanonicalKeys() []string { return nil }
 

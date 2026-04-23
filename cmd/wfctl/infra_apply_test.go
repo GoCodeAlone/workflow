@@ -61,7 +61,10 @@ func (f *applyCapture) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.
 }
 func (f *applyCapture) ResourceDriver(_ string) (interfaces.ResourceDriver, error) { return nil, nil }
 func (f *applyCapture) SupportedCanonicalKeys() []string                           { return nil }
-func (f *applyCapture) Close() error                                               { return nil }
+func (f *applyCapture) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
+	return nil, nil
+}
+func (f *applyCapture) Close() error { return nil }
 
 // ── TestApplyInfraModules_DirectPath ───────────────────────────────────────────
 
@@ -303,7 +306,10 @@ func (p *stateReturningProvider) ResourceDriver(_ string) (interfaces.ResourceDr
 	return nil, nil
 }
 func (p *stateReturningProvider) SupportedCanonicalKeys() []string { return nil }
-func (p *stateReturningProvider) Close() error                     { return nil }
+func (p *stateReturningProvider) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
+	return nil, nil
+}
+func (p *stateReturningProvider) Close() error { return nil }
 
 // TestApplyWithProvider_SavesStateForSuccessfulResources asserts that
 // applyWithProviderAndStore calls store.SaveResource for each resource in

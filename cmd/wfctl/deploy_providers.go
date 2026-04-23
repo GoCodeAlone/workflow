@@ -398,6 +398,21 @@ func (r *remoteIaCProvider) ResourceDriver(resourceType string) (interfaces.Reso
 
 // SupportedCanonicalKeys returns the full canonical key set for remote providers.
 // External plugin providers may override this via the plugin manifest in a future phase.
+func (r *remoteIaCProvider) BootstrapStateBackend(ctx context.Context, cfg map[string]any) (*interfaces.BootstrapResult, error) {
+	res, err := r.invoker.InvokeService("IaCProvider.BootstrapStateBackend", cfg)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		return nil, nil
+	}
+	var result interfaces.BootstrapResult
+	if err := anyToStruct(res, &result); err != nil {
+		return nil, fmt.Errorf("BootstrapStateBackend: decode result: %w", err)
+	}
+	return &result, nil
+}
+
 func (r *remoteIaCProvider) SupportedCanonicalKeys() []string {
 	return interfaces.CanonicalKeys()
 }

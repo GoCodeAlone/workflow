@@ -63,7 +63,10 @@ func (f *destroyCapture) ResolveSizing(_ string, _ interfaces.Size, _ *interface
 }
 func (f *destroyCapture) ResourceDriver(_ string) (interfaces.ResourceDriver, error) { return nil, nil }
 func (f *destroyCapture) SupportedCanonicalKeys() []string                           { return nil }
-func (f *destroyCapture) Close() error                                               { return nil }
+func (f *destroyCapture) BootstrapStateBackend(_ context.Context, _ map[string]any) (*interfaces.BootstrapResult, error) {
+	return nil, nil
+}
+func (f *destroyCapture) Close() error { return nil }
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
