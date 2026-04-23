@@ -138,9 +138,9 @@ func applyWithProvider(ctx context.Context, providerType string, providerCfg map
 		specNames[s.Name] = struct{}{}
 	}
 	var provCurrent []interfaces.ResourceState
-	for _, rs := range current {
-		if _, ok := specNames[rs.Name]; ok {
-			provCurrent = append(provCurrent, rs)
+	for i := range current {
+		if _, ok := specNames[current[i].Name]; ok {
+			provCurrent = append(provCurrent, current[i])
 		}
 	}
 
