@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.4] - 2026-04-23
+
+### Fixed
+
+- **wfctl plugin install private repos** — for `github.com/.../releases/download/...` URLs, when a GitHub token is present, `downloadURL` now uses the two-step GitHub REST API flow (`releases/tags/:tag` to resolve the asset ID, then `releases/assets/:id` with `Accept: application/octet-stream`) instead of a plain GET. The direct download URL redirects to a signed S3 URL which does not propagate the Authorization header, causing 404s on private repos. Falls back to direct GET when no token is set (public repos unaffected).
+
 ## [0.18.3] - 2026-04-23
 
 ### Fixed
