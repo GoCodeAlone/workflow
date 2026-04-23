@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -727,18 +728,19 @@ func parseNameVersion(arg string) (name, ver string) {
 }
 
 // downloadURL fetches a URL and returns the body bytes.
-// For github.com URLs, it injects an Authorization header from the first non-empty
-// env var in: RELEASES_TOKEN, GH_TOKEN, GITHUB_TOKEN. This allows downloading
-// assets from private GitHub repos when a token is available in the environment.
-func downloadURL(url string) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil) //nolint:gosec // G107: URL comes from registry manifest
+// For github.com URLs (matched by hostname, not substring), it injects an
+// Authorization header from the first non-empty env var in: RELEASES_TOKEN,
+// GH_TOKEN, GITHUB_TOKEN. This allows downloading assets from private GitHub
+// repos when a token is available in the environment.
+func downloadURL(rawURL string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil) //nolint:gosec // G107: URL comes from registry manifest
 	if err != nil {
 		return nil, err
 	}
-	if strings.Contains(url, "github.com") {
+	if parsed, err2 := neturl.Parse(rawURL); err2 == nil && strings.HasSuffix(parsed.Hostname(), "github.com") {
 		for _, envKey := range []string{"RELEASES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} {
 			if tok := os.Getenv(envKey); tok != "" {
-				req.Header.Set("Authorization", "token "+tok)
+				req.Header.Set("Authorization", "Bearer "+tok)
 				break
 			}
 		}
@@ -749,7 +751,7 @@ func downloadURL(url string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, rawURL)
 	}
 	return io.ReadAll(resp.Body)
 }
