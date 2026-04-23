@@ -727,8 +727,23 @@ func parseNameVersion(arg string) (name, ver string) {
 }
 
 // downloadURL fetches a URL and returns the body bytes.
+// For github.com URLs, it injects an Authorization header from the first non-empty
+// env var in: RELEASES_TOKEN, GH_TOKEN, GITHUB_TOKEN. This allows downloading
+// assets from private GitHub repos when a token is available in the environment.
 func downloadURL(url string) ([]byte, error) {
-	resp, err := http.Get(url) //nolint:gosec // G107: URL comes from registry manifest
+	req, err := http.NewRequest(http.MethodGet, url, nil) //nolint:gosec // G107: URL comes from registry manifest
+	if err != nil {
+		return nil, err
+	}
+	if strings.Contains(url, "github.com") {
+		for _, envKey := range []string{"RELEASES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} {
+			if tok := os.Getenv(envKey); tok != "" {
+				req.Header.Set("Authorization", "token "+tok)
+				break
+			}
+		}
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
