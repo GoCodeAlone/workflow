@@ -53,9 +53,9 @@ func runInfraBootstrap(args []string) error {
 
 	ctx := context.Background()
 
-	// 1. Generate and store secrets FIRST so that Spaces access keys are available
-	//    in the current process environment before bootstrapStateBackend runs.
-	//    (DO Spaces bucket creation requires S3 API auth with the Spaces key pair,
+	// 1. Generate and store secrets FIRST so that state-backend access keys are
+	//    available in the current process environment before bootstrapStateBackend
+	//    runs. (Remote bucket creation requires API auth with the provider key pair,
 	//    which is generated here via the provider_credential source.)
 	// Use originalCfgFile — not cfgFile — so the generate[] block is not lost
 	// in the env-resolved temp file's round-trip through config.WorkflowConfig.
@@ -83,7 +83,7 @@ func runInfraBootstrap(args []string) error {
 		fmt.Println("No secrets to generate.")
 	}
 
-	// 2. Bootstrap state backend (uses Spaces keys now in env from step 1).
+	// 2. Bootstrap state backend (uses provider keys now in env from step 1).
 	if err := bootstrapStateBackend(ctx, cfgFile); err != nil {
 		return fmt.Errorf("bootstrap state backend: %w", err)
 	}
@@ -96,14 +96,26 @@ func runInfraBootstrap(args []string) error {
 var bootstrapDOSpacesBucketFn = bootstrapDOSpacesBucket
 
 // bootstrapStateBackend checks the iac.state config and creates any required
-// backing infrastructure (e.g. a DO Spaces bucket) if it does not already exist.
-// ${VAR} / $VAR references in the module config are expanded via os.ExpandEnv
-// before the config fields are read, so secrets can be injected through the
-// environment (e.g. SPACES_access_key=xxx in CI).
+// backing infrastructure for the configured backend. It dispatches by the
+// backend type declared in the iac.state module:
 //
-// After a successful Spaces bootstrap, the resolved bucket name is written back
-// to cfgFile (so env-var-referenced values are permanently baked in) and printed
-// as `export DO_SPACES_BUCKET=<name>` for CI capture via $GITHUB_ENV or similar.
+//   - spaces     → creates/verifies a DO Spaces bucket via the S3-compatible API
+//   - s3         → not yet implemented (returns a descriptive error)
+//   - gcs        → not yet implemented (returns a descriptive error)
+//   - azure      → not yet implemented (returns a descriptive error)
+//   - filesystem → no-op (directory is created on first write)
+//   - memory     → no-op (in-process, no external resource required)
+//   - postgres   → no-op (connection string validated at connect time)
+//
+// ${VAR} / $VAR references in the module config are expanded before fields are
+// read, so secrets can be injected via the environment.
+//
+// On a successful bucket bootstrap the resolved name is written back to cfgFile
+// (so env-var-referenced values are permanently baked in) and two export lines
+// are printed:
+//
+//	export WFCTL_STATE_BUCKET=<name>    (generic — stable across backends)
+//	export <BACKEND>_BUCKET=<name>      (backend-specific, e.g. SPACES_BUCKET)
 func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 	iacStates, _, _, err := discoverInfraModules(cfgFile)
 	if err != nil {
@@ -116,18 +128,53 @@ func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 	// Expand ${VAR} / $VAR references before reading individual fields.
 	cfg := config.ExpandEnvInMap(m.Config)
 	backend, _ := cfg["backend"].(string)
-	if backend != "spaces" {
-		// Only DO Spaces requires bootstrap; filesystem/memory are self-contained.
-		return nil
-	}
 
+	switch backend {
+	case "spaces":
+		return bootstrapStateBackendSpaces(ctx, cfgFile, cfg)
+
+	case "s3":
+		return fmt.Errorf("s3 state bucket bootstrap not yet implemented; " +
+			"create the bucket manually and reference it in iac.state.bucket. " +
+			"Contribute a bootstrapStateBackendS3 helper to unblock this")
+
+	case "gcs":
+		return fmt.Errorf("gcs state bucket bootstrap not yet implemented; " +
+			"create the bucket manually and reference it in iac.state.bucket. " +
+			"Contribute a bootstrapStateBackendGCS helper to unblock this")
+
+	case "azure":
+		return fmt.Errorf("azure state bucket bootstrap not yet implemented; " +
+			"create the container manually and reference it in iac.state.bucket. " +
+			"Contribute a bootstrapStateBackendAzure helper to unblock this")
+
+	case "filesystem", "memory", "postgres", "":
+		// Self-contained backends — no remote bucket creation required.
+		return nil
+
+	default:
+		return fmt.Errorf("unknown iac.state backend %q — no bootstrap action taken", backend)
+	}
+}
+
+// bootstrapStateBackendSpaces handles the DO Spaces bootstrap path. It
+// constructs the DO Spaces endpoint URL, creates the bucket if it does not
+// exist, exports the resolved bucket name, and writes it back to the config.
+func bootstrapStateBackendSpaces(ctx context.Context, cfgFile string, cfg map[string]any) error {
 	bucket, _ := cfg["bucket"].(string)
 	region, _ := cfg["region"].(string)
 	if bucket == "" {
 		return fmt.Errorf("iac.state backend=spaces requires 'bucket' in config")
 	}
+	if region == "" {
+		region = "nyc3"
+	}
 
-	// Read Spaces credentials from the expanded module config.
+	// Build the DO Spaces S3-compatible endpoint URL here (Spaces-specific knowledge
+	// belongs in the Spaces helper, not in lower-level S3 client helpers).
+	endpoint := fmt.Sprintf("https://%s.digitaloceanspaces.com", region)
+
+	// Read credentials from the expanded module config.
 	// Convention: the YAML uses accessKey/secretKey (camelCase) or access_key/secret_key (snake_case).
 	accessKey, _ := cfg["accessKey"].(string)
 	if accessKey == "" {
@@ -138,14 +185,18 @@ func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 		secretKey, _ = cfg["secret_key"].(string)
 	}
 
-	if err := bootstrapDOSpacesBucketFn(ctx, bucket, region, accessKey, secretKey); err != nil {
+	if err := bootstrapDOSpacesBucketFn(ctx, bucket, region, endpoint, accessKey, secretKey); err != nil {
 		return err
 	}
 
-	// Export the resolved bucket name for CI capture and bake it back into the
-	// on-disk config so downstream wfctl commands can load state without needing
-	// the env var to be set again.
-	fmt.Printf("export DO_SPACES_BUCKET=%s\n", bucket)
+	// Export the resolved bucket name for CI capture:
+	//   - WFCTL_STATE_BUCKET is the generic, backend-agnostic variable.
+	//   - SPACES_BUCKET is the backend-specific variable (no cloud-provider prefix).
+	fmt.Printf("export WFCTL_STATE_BUCKET=%s\n", bucket)
+	fmt.Printf("export SPACES_BUCKET=%s\n", bucket)
+
+	// Write the resolved name back to the on-disk config so downstream wfctl
+	// commands can load state without the env var being set again.
 	if writeErr := writeBucketBackToConfig(cfgFile, bucket); writeErr != nil {
 		// Non-fatal: bucket exists; warn and continue.
 		fmt.Printf("WARNING: could not write bucket back to config: %v\n", writeErr)
@@ -154,8 +205,10 @@ func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 }
 
 // writeBucketBackToConfig rewrites the iac.state module's `bucket:` field in
-// cfgFile with the resolved bucket name. It uses a line-level text replacement
-// to preserve YAML formatting, comments, and indentation.
+// cfgFile with the resolved bucket name. It is backend-neutral — the same
+// field name is used by all remote backends (spaces, s3, gcs, azure). It uses
+// a line-level text replacement to preserve YAML formatting, comments, and
+// indentation.
 func writeBucketBackToConfig(cfgFile, bucket string) error {
 	data, err := os.ReadFile(cfgFile)
 	if err != nil {
@@ -202,18 +255,17 @@ type spacesBucketClient interface {
 }
 
 // bootstrapDOSpacesBucket creates a DO Spaces bucket if it does not already exist.
-// It uses the S3-compatible Spaces API authenticated with Spaces access keys —
-// NOT the DO Bearer token, which is only valid for the DO REST API, not for Spaces.
-func bootstrapDOSpacesBucket(ctx context.Context, bucket, region, accessKey, secretKey string) error {
-	if region == "" {
-		region = "nyc3"
-	}
+// It uses the S3-compatible API authenticated with Spaces access keys — NOT the
+// DO Bearer token, which is only valid for the DO REST API, not for Spaces.
+// The endpoint URL (e.g. https://nyc3.digitaloceanspaces.com) is constructed by
+// the caller (bootstrapStateBackendSpaces) and passed in, keeping DO-specific URL
+// knowledge in the Spaces helper rather than here.
+func bootstrapDOSpacesBucket(ctx context.Context, bucket, region, endpoint, accessKey, secretKey string) error {
 	if accessKey == "" || secretKey == "" {
 		return fmt.Errorf("spaces access key and secret key must be set — " +
 			"ensure secrets are bootstrapped (step 1) before state backend (step 2); " +
-			"set accessKey/secretKey in the iac.state module config referencing ${SPACES_access_key} and ${SPACES_secret_key}")
+			"set accessKey/secretKey in the iac.state module config (backend=spaces)")
 	}
-	endpoint := fmt.Sprintf("https://%s.digitaloceanspaces.com", region)
 
 	cfg, cfgErr := awsconfig.LoadDefaultConfig(ctx,
 		awsconfig.WithRegion(region),
@@ -262,7 +314,7 @@ func bootstrapDOSpacesBucketWithClient(ctx context.Context, bucket, region strin
 		}
 		return fmt.Errorf("create bucket %q: %w", bucket, createErr)
 	}
-	fmt.Printf("  state backend: created DO Spaces bucket %q in %s\n", bucket, region)
+	fmt.Printf("  state backend: created spaces state bucket %q in %s\n", bucket, region)
 	return nil
 }
 
@@ -270,6 +322,11 @@ func bootstrapDOSpacesBucketWithClient(ctx context.Context, bucket, region strin
 // provider_credential source. Existence checks must verify ALL of them so a
 // partial prior write (e.g. one sub-key manually deleted) triggers a full
 // regeneration rather than an incorrect skip.
+//
+// TODO(follow-up #29): this map is hard-coded for DO Spaces. It should be
+// registered by provider plugins via a hook (e.g. CredentialSubKeys() method
+// on EnginePlugin) so that third-party providers can declare their own sub-keys
+// without modifying wfctl core.
 var providerCredentialSubKeys = map[string][]string{
 	"digitalocean.spaces": {"access_key", "secret_key"},
 }

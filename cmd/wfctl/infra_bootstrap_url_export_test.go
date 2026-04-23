@@ -33,7 +33,7 @@ modules:
 
 	// Override the real S3 bootstrap with a no-op fake.
 	origFn := bootstrapDOSpacesBucketFn
-	bootstrapDOSpacesBucketFn = func(_ context.Context, bucket, region, _, _ string) error {
+	bootstrapDOSpacesBucketFn = func(_ context.Context, bucket, _, _, _, _ string) error {
 		fmt.Printf("  state backend: bucket %q already exists — skipped\n", bucket)
 		return nil
 	}
@@ -56,8 +56,11 @@ modules:
 		t.Fatalf("bootstrapStateBackend: %v", err)
 	}
 
-	if !strings.Contains(output, "export DO_SPACES_BUCKET=bmw-iac-state-test") {
-		t.Errorf("expected 'export DO_SPACES_BUCKET=bmw-iac-state-test' in output, got:\n%s", output)
+	if !strings.Contains(output, "export WFCTL_STATE_BUCKET=bmw-iac-state-test") {
+		t.Errorf("expected 'export WFCTL_STATE_BUCKET=bmw-iac-state-test' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "export SPACES_BUCKET=bmw-iac-state-test") {
+		t.Errorf("expected 'export SPACES_BUCKET=bmw-iac-state-test' in output, got:\n%s", output)
 	}
 }
 
@@ -82,7 +85,7 @@ func TestBootstrapStateBackend_WritesBucketBackToConfig(t *testing.T) {
 	}
 
 	origFn := bootstrapDOSpacesBucketFn
-	bootstrapDOSpacesBucketFn = func(_ context.Context, _, _, _, _ string) error { return nil }
+	bootstrapDOSpacesBucketFn = func(_ context.Context, _, _, _, _, _ string) error { return nil }
 	defer func() { bootstrapDOSpacesBucketFn = origFn }()
 
 	// Suppress stdout output.

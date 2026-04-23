@@ -686,7 +686,7 @@ func writePlanJSON(plan interfaces.IaCPlan, path string) error {
 func runInfraImport(args []string) error {
 	fs := flag.NewFlagSet("infra import", flag.ContinueOnError)
 	var providerVal, resTypeVal, cloudIDVal string
-	fs.StringVar(&providerVal, "provider", "", "Provider name (aws, gcp, azure, digitalocean)")
+	fs.StringVar(&providerVal, "provider", "", "Provider plugin name. See plugin docs for supported providers")
 	fs.StringVar(&providerVal, "p", "", "Provider name (short for --provider)")
 	fs.StringVar(&resTypeVal, "type", "", "Abstract resource type (e.g. infra.database)")
 	fs.StringVar(&resTypeVal, "t", "", "Abstract resource type (short for --type)")

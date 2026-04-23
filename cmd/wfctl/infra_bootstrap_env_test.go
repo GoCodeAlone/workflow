@@ -38,7 +38,7 @@ func TestBootstrap_StateBackendBucketExpanded(t *testing.T) {
 
 	var gotBucket string
 	orig := bootstrapDOSpacesBucketFn
-	bootstrapDOSpacesBucketFn = func(_ context.Context, bucket, _, _, _ string) error {
+	bootstrapDOSpacesBucketFn = func(_ context.Context, bucket, _, _, _, _ string) error {
 		gotBucket = bucket
 		return nil
 	}
@@ -220,7 +220,7 @@ func TestBootstrap_StateBackendAccessKeyExpanded(t *testing.T) {
 
 	var gotBucket, gotAccessKey, gotSecretKey string
 	orig := bootstrapDOSpacesBucketFn
-	bootstrapDOSpacesBucketFn = func(_ context.Context, bucket, _, accessKey, secretKey string) error {
+	bootstrapDOSpacesBucketFn = func(_ context.Context, bucket, _, _, accessKey, secretKey string) error {
 		gotBucket = bucket
 		gotAccessKey = accessKey
 		gotSecretKey = secretKey
@@ -285,7 +285,7 @@ func TestBootstrap_EnvFlagAppliedBeforeSubstitution(t *testing.T) {
 
 	var gotBucket string
 	orig := bootstrapDOSpacesBucketFn
-	bootstrapDOSpacesBucketFn = func(_ context.Context, bucket, _, _, _ string) error {
+	bootstrapDOSpacesBucketFn = func(_ context.Context, bucket, _, _, _, _ string) error {
 		gotBucket = bucket
 		return nil
 	}
@@ -349,7 +349,7 @@ func TestBootstrap_EnvFlagPreservesSecretsGenerate(t *testing.T) {
 
 	// Stub the bucket function so no real S3 call is made.
 	orig := bootstrapDOSpacesBucketFn
-	bootstrapDOSpacesBucketFn = func(_ context.Context, _, _, _, _ string) error { return nil }
+	bootstrapDOSpacesBucketFn = func(_ context.Context, _, _, _, _, _ string) error { return nil }
 	defer func() { bootstrapDOSpacesBucketFn = orig }()
 
 	// Config has both environments.staging override AND secrets.generate[].

@@ -62,11 +62,26 @@ func resolveStateStore(cfgFile string) (infraStateStore, error) {
 	case "spaces":
 		return resolveSpacesStateStore(cfg)
 
+	case "postgres":
+		return resolvePostgresStateStore(cfg)
+
+	case "s3":
+		return nil, fmt.Errorf("s3 state store backend not yet supported by wfctl direct-path commands; " +
+			"create the bucket manually and reference it in iac.state.bucket. " +
+			"Contribute a resolveS3StateStore helper to unblock this")
+
+	case "gcs":
+		return nil, fmt.Errorf("gcs state store backend not yet supported by wfctl direct-path commands; " +
+			"create the bucket manually and reference it in iac.state.bucket. " +
+			"Contribute a resolveGCSStateStore helper to unblock this")
+
+	case "azure":
+		return nil, fmt.Errorf("azure state store backend not yet supported by wfctl direct-path commands; " +
+			"create the container manually and reference it in iac.state.bucket. " +
+			"Contribute a resolveAzureStateStore helper to unblock this")
+
 	default:
-		// s3, gcs, azure, postgres — not yet implemented; log a warning and
-		// continue with no-op so callers don't fail on unsupported backends.
-		fmt.Printf("WARNING: iac.state backend %q is not yet supported by wfctl direct-path commands — state will not be persisted\n", backend)
-		return &noopStateStore{}, nil
+		return nil, fmt.Errorf("unknown iac.state backend %q", backend)
 	}
 }
 
@@ -208,6 +223,52 @@ func (s *spacesWfctlStateStore) SaveResource(_ context.Context, state interfaces
 }
 
 func (s *spacesWfctlStateStore) DeleteResource(_ context.Context, name string) error {
+	return s.inner.DeleteState(name)
+}
+
+// ── Postgres backend ───────────────────────────────────────────────────────────
+
+// resolvePostgresStateStore builds a Postgres-backed state store from the
+// expanded iac.state module config. The config must include a `dsn` field
+// (or `connection_string`) with a valid PostgreSQL DSN.
+func resolvePostgresStateStore(cfg map[string]any) (infraStateStore, error) {
+	dsn, _ := cfg["dsn"].(string)
+	if dsn == "" {
+		dsn, _ = cfg["connection_string"].(string)
+	}
+	if dsn == "" {
+		return nil, fmt.Errorf("iac.state backend=postgres requires 'dsn' or 'connection_string' in config")
+	}
+	inner, err := module.NewPostgresIaCStateStore(context.Background(), dsn)
+	if err != nil {
+		return nil, fmt.Errorf("init postgres state store: %w", err)
+	}
+	return &postgresWfctlStateStore{inner: inner}, nil
+}
+
+// postgresWfctlStateStore wraps module.PostgresIaCStateStore to implement
+// infraStateStore, bridging module.IaCState ↔ interfaces.ResourceState.
+type postgresWfctlStateStore struct {
+	inner *module.PostgresIaCStateStore
+}
+
+func (s *postgresWfctlStateStore) ListResources(_ context.Context) ([]interfaces.ResourceState, error) {
+	records, err := s.inner.ListStates(nil)
+	if err != nil {
+		return nil, fmt.Errorf("list postgres state: %w", err)
+	}
+	states := make([]interfaces.ResourceState, 0, len(records))
+	for _, r := range records {
+		states = append(states, iacStateToResourceState(r))
+	}
+	return states, nil
+}
+
+func (s *postgresWfctlStateStore) SaveResource(_ context.Context, state interfaces.ResourceState) error {
+	return s.inner.SaveState(resourceStateToIaCState(state))
+}
+
+func (s *postgresWfctlStateStore) DeleteResource(_ context.Context, name string) error {
 	return s.inner.DeleteState(name)
 }
 

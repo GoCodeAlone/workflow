@@ -861,6 +861,9 @@ Options:
 			provider, _ := ca.Config["provider"].(string)
 			region, _ := ca.Config["region"].(string)
 			fmt.Printf("  - %s (provider: %s, region: %s)\n", ca.Name, provider, region)
+			// TODO(follow-up #28): delegate credential validation to the provider plugin
+			// rather than hard-coding per-provider env var names here. Each provider
+			// plugin should expose a ValidateCredentials() method or similar.
 			// Validate credentials exist
 			switch {
 			case provider == "aws":

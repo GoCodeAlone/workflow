@@ -118,7 +118,7 @@ func TestBootstrapDOSpacesBucket_AlreadyOwnedIsOK(t *testing.T) {
 
 func TestBootstrapDOSpacesBucket_MissingCredentials(t *testing.T) {
 	// bootstrapDOSpacesBucket (the real entry point) must fail if credentials are absent.
-	err := bootstrapDOSpacesBucket(context.Background(), "my-bucket", "nyc3", "", "")
+	err := bootstrapDOSpacesBucket(context.Background(), "my-bucket", "nyc3", "https://nyc3.digitaloceanspaces.com", "", "")
 	if err == nil {
 		t.Fatal("expected error when access key and secret key are empty")
 	}
