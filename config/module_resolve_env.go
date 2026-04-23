@@ -1,5 +1,7 @@
 package config
 
+import "strings"
+
 // ResolvedModule is the effective module config for a specific environment.
 type ResolvedModule struct {
 	Name     string
@@ -53,12 +55,17 @@ func (m *ModuleConfig) ResolveForEnv(envName string) (*ResolvedModule, bool) {
 		resolved.Config = deepMergeMap(resolved.Config, envRes.Config)
 	}
 
-	// If an env override sets "name", lift it into ResolvedModule.Name and
-	// delete it from Config so downstream ResourceSpec construction uses the
-	// correct identity. Empty string is ignored to prevent accidental erasure.
-	if n, ok := resolved.Config["name"].(string); ok && n != "" {
-		resolved.Name = n
-		delete(resolved.Config, "name")
+	// If an env override sets "name" on an infra.* module, lift it into
+	// ResolvedModule.Name and delete it from Config so downstream ResourceSpec
+	// construction uses the correct identity. The guard limits this behaviour to
+	// infra.* types to avoid accidentally renaming non-infra modules that happen
+	// to have a "name" key in their Config (e.g. display-name fields).
+	// Empty string is ignored to prevent accidental erasure.
+	if strings.HasPrefix(resolved.Type, "infra.") {
+		if n, ok := resolved.Config["name"].(string); ok && n != "" {
+			resolved.Name = n
+			delete(resolved.Config, "name")
+		}
 	}
 
 	setRegionFromConfig(resolved) // re-apply after env overrides
