@@ -89,6 +89,14 @@ func ComputePlan(desired []interfaces.ResourceSpec, current []interfaces.Resourc
 	}, nil
 }
 
+// ConfigHash is the exported counterpart of configHash. It allows callers
+// outside the platform package (e.g. cmd/wfctl) to compute hashes that are
+// byte-for-byte identical to those stored by ComputePlan, eliminating the
+// risk of independent re-implementations diverging.
+func ConfigHash(config map[string]any) string {
+	return configHash(config)
+}
+
 // configHash returns a deterministic SHA-256 hex hash of a config map.
 // Keys are explicitly sorted before marshalling so the hash is stable across
 // Go's randomised map-iteration order — matching the DO plugin's pattern.
