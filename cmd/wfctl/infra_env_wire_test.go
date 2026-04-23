@@ -225,3 +225,57 @@ modules:
 		t.Fatal("secretStores section must be preserved in temp file")
 	}
 }
+
+// TestPlanResourcesForEnv_UsesEnvOverrideNames asserts that planResourcesForEnv
+// returns ResolvedModule.Name values from env-level config overrides (not the
+// raw module names). This is the unit-level companion to
+// TestPlanApplyEquivalence_EnvOverrideNames.
+func TestPlanResourcesForEnv_UsesEnvOverrideNames(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: bmw-vpc
+    type: infra.vpc
+    config:
+      cidr: "10.0.0.0/24"
+    environments:
+      staging:
+        config:
+          name: bmw-staging-vpc
+
+  - name: bmw-db
+    type: infra.database
+    config:
+      engine: postgres
+    environments:
+      staging:
+        config:
+          name: bmw-staging-db
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	resources, err := planResourcesForEnv(cfgPath, "staging")
+	if err != nil {
+		t.Fatalf("planResourcesForEnv: %v", err)
+	}
+
+	names := map[string]bool{}
+	for _, r := range resources {
+		names[r.Name] = true
+	}
+
+	if !names["bmw-staging-vpc"] {
+		t.Errorf("want bmw-staging-vpc in plan names, got %v", names)
+	}
+	if !names["bmw-staging-db"] {
+		t.Errorf("want bmw-staging-db in plan names, got %v", names)
+	}
+	if names["bmw-vpc"] {
+		t.Errorf("bmw-vpc (raw module name) should NOT appear after env override; got %v", names)
+	}
+	if names["bmw-db"] {
+		t.Errorf("bmw-db (raw module name) should NOT appear after env override; got %v", names)
+	}
+}
