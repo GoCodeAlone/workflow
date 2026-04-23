@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -99,6 +100,10 @@ var bootstrapDOSpacesBucketFn = bootstrapDOSpacesBucket
 // ${VAR} / $VAR references in the module config are expanded via os.ExpandEnv
 // before the config fields are read, so secrets can be injected through the
 // environment (e.g. SPACES_access_key=xxx in CI).
+//
+// After a successful Spaces bootstrap, the resolved bucket name is written back
+// to cfgFile (so env-var-referenced values are permanently baked in) and printed
+// as `export DO_SPACES_BUCKET=<name>` for CI capture via $GITHUB_ENV or similar.
 func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 	iacStates, _, _, err := discoverInfraModules(cfgFile)
 	if err != nil {
@@ -133,7 +138,60 @@ func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 		secretKey, _ = cfg["secret_key"].(string)
 	}
 
-	return bootstrapDOSpacesBucketFn(ctx, bucket, region, accessKey, secretKey)
+	if err := bootstrapDOSpacesBucketFn(ctx, bucket, region, accessKey, secretKey); err != nil {
+		return err
+	}
+
+	// Export the resolved bucket name for CI capture and bake it back into the
+	// on-disk config so downstream wfctl commands can load state without needing
+	// the env var to be set again.
+	fmt.Printf("export DO_SPACES_BUCKET=%s\n", bucket)
+	if writeErr := writeBucketBackToConfig(cfgFile, bucket); writeErr != nil {
+		// Non-fatal: bucket exists; warn and continue.
+		fmt.Printf("WARNING: could not write bucket back to config: %v\n", writeErr)
+	}
+	return nil
+}
+
+// writeBucketBackToConfig rewrites the iac.state module's `bucket:` field in
+// cfgFile with the resolved bucket name. It uses a line-level text replacement
+// to preserve YAML formatting, comments, and indentation.
+func writeBucketBackToConfig(cfgFile, bucket string) error {
+	data, err := os.ReadFile(cfgFile)
+	if err != nil {
+		return fmt.Errorf("read config: %w", err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	inIACState := false
+	bucketReplaced := false
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Track when we enter an iac.state module block.
+		if strings.Contains(trimmed, "type: iac.state") {
+			inIACState = true
+		}
+		// Leave the block when we encounter the next top-level module entry.
+		if inIACState && strings.HasPrefix(trimmed, "- name:") {
+			inIACState = false
+		}
+
+		if inIACState && strings.HasPrefix(trimmed, "bucket:") {
+			// Preserve leading whitespace from the original line.
+			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+			lines[i] = indent + "bucket: " + bucket
+			bucketReplaced = true
+		}
+	}
+
+	if !bucketReplaced {
+		// Nothing to replace — bucket field not present or already correct.
+		return nil
+	}
+
+	return os.WriteFile(cfgFile, []byte(strings.Join(lines, "\n")), 0o600)
 }
 
 // spacesBucketClient is the minimal S3 client interface used by bootstrapDOSpacesBucketWithClient.
