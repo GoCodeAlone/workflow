@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
 	engineplugin "github.com/GoCodeAlone/workflow/plugin"
@@ -731,6 +732,11 @@ func parseNameVersion(arg string) (name, ver string) {
 // so tests can override it to point at a local mock server.
 var gitHubAPIBaseURL = "https://api.github.com"
 
+// gitHubAPIClient is used for GitHub API metadata calls (releases/tags,
+// releases/assets). Separate from http.DefaultClient so tests can override it
+// independently. A generous timeout covers large binary asset downloads.
+var gitHubAPIClient = &http.Client{Timeout: 10 * time.Minute}
+
 // gitHubToken returns the first non-empty GitHub token from the environment,
 // checking RELEASES_TOKEN, GH_TOKEN, and GITHUB_TOKEN in order.
 func gitHubToken() string {
@@ -742,17 +748,25 @@ func gitHubToken() string {
 	return ""
 }
 
+// isGitHubHost returns true only for github.com and its subdomains (e.g.
+// api.github.com). Requires the dot separator to avoid matching evilgithub.com.
+func isGitHubHost(host string) bool {
+	h := strings.ToLower(host)
+	return h == "github.com" || strings.HasSuffix(h, ".github.com")
+}
+
 // parseGitHubReleaseDownloadURL parses a GitHub release download URL of the form
 // https://github.com/OWNER/REPO/releases/download/TAG/FILENAME and returns the
-// components. Returns ok=false for any URL that doesn't match this exact pattern.
+// components. Returns ok=false for any URL that doesn't match this exact pattern,
+// including non-HTTPS schemes and non-GitHub hosts.
 func parseGitHubReleaseDownloadURL(rawURL string) (owner, repo, tag, filename string, ok bool) {
 	u, err := neturl.Parse(rawURL)
-	if err != nil || !strings.HasSuffix(u.Hostname(), "github.com") {
+	if err != nil || !strings.EqualFold(u.Scheme, "https") || !isGitHubHost(u.Hostname()) {
 		return
 	}
-	// Path: /owner/repo/releases/download/tag/filename
+	// Path must be exactly: /owner/repo/releases/download/tag/filename (6 segments).
 	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
-	if len(parts) < 6 || parts[2] != "releases" || parts[3] != "download" ||
+	if len(parts) != 6 || parts[2] != "releases" || parts[3] != "download" ||
 		parts[0] == "" || parts[1] == "" || parts[4] == "" || parts[5] == "" {
 		return
 	}
@@ -771,15 +785,22 @@ func parseGitHubReleaseDownloadURL(rawURL string) (owner, repo, tag, filename st
 // does not propagate the Authorization header correctly.
 func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byte, error) {
 	// Step 1: resolve the asset ID from the release metadata.
-	releaseURL := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", gitHubAPIBaseURL, owner, repo, tag) //nolint:gosec // G107
+	releaseURL := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", //nolint:gosec // G107
+		gitHubAPIBaseURL,
+		neturl.PathEscape(owner),
+		neturl.PathEscape(repo),
+		neturl.PathEscape(tag),
+	)
 	req, err := http.NewRequest(http.MethodGet, releaseURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "wfctl/"+version)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := gitHubAPIClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("GitHub releases API: %w", err)
 	}
@@ -810,15 +831,22 @@ func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byt
 	}
 
 	// Step 2: download the asset binary.
-	assetURL := fmt.Sprintf("%s/repos/%s/%s/releases/assets/%d", gitHubAPIBaseURL, owner, repo, assetID) //nolint:gosec // G107
+	assetURL := fmt.Sprintf("%s/repos/%s/%s/releases/assets/%d", //nolint:gosec // G107
+		gitHubAPIBaseURL,
+		neturl.PathEscape(owner),
+		neturl.PathEscape(repo),
+		assetID,
+	)
 	req2, err := http.NewRequest(http.MethodGet, assetURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req2.Header.Set("Authorization", "Bearer "+token)
 	req2.Header.Set("Accept", "application/octet-stream")
+	req2.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req2.Header.Set("User-Agent", "wfctl/"+version)
 
-	resp2, err := http.DefaultClient.Do(req2)
+	resp2, err := gitHubAPIClient.Do(req2)
 	if err != nil {
 		return nil, fmt.Errorf("GitHub asset download API: %w", err)
 	}
@@ -851,7 +879,7 @@ func downloadURL(rawURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if parsed, err2 := neturl.Parse(rawURL); err2 == nil && strings.HasSuffix(parsed.Hostname(), "github.com") {
+	if parsed, err2 := neturl.Parse(rawURL); err2 == nil && isGitHubHost(parsed.Hostname()) {
 		if tok := gitHubToken(); tok != "" {
 			req.Header.Set("Authorization", "Bearer "+tok)
 		}

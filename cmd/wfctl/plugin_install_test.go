@@ -253,8 +253,23 @@ func TestParseGitHubReleaseDownloadURL(t *testing.T) {
 			ok:     false,
 		},
 		{
+			// Suffix-matching but not github.com — must be rejected to prevent token leakage
+			rawURL: "https://evilgithub.com/owner/repo/releases/download/v1.0.0/file.tar.gz",
+			ok:     false,
+		},
+		{
+			// http scheme — must be rejected (only https allowed)
+			rawURL: "http://github.com/owner/repo/releases/download/v1.0.0/file.tar.gz",
+			ok:     false,
+		},
+		{
 			// Too few path segments
 			rawURL: "https://github.com/owner/repo/releases/download/v1.0.0",
+			ok:     false,
+		},
+		{
+			// Extra path segments (len > 6) — must be rejected for exact match
+			rawURL: "https://github.com/owner/repo/releases/download/v1.0.0/file.tar.gz/extra",
 			ok:     false,
 		},
 	}
@@ -323,10 +338,15 @@ func TestDownloadURL_PrivateReleaseAsset(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	// Override API base URL to point at the mock server.
+	// Override API base URL and client to point at the mock server.
 	origAPIBase := gitHubAPIBaseURL
+	origAPIClient := gitHubAPIClient
 	gitHubAPIBaseURL = srv.URL
-	t.Cleanup(func() { gitHubAPIBaseURL = origAPIBase })
+	gitHubAPIClient = srv.Client()
+	t.Cleanup(func() {
+		gitHubAPIBaseURL = origAPIBase
+		gitHubAPIClient = origAPIClient
+	})
 
 	t.Setenv("RELEASES_TOKEN", wantToken)
 	for _, k := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
