@@ -36,7 +36,30 @@ type IaCProvider interface {
 	// Built-in and stub providers return the full canonical key set.
 	SupportedCanonicalKeys() []string
 
+	// BootstrapStateBackend ensures the state backend resource (bucket/container)
+	// exists on this provider. It is idempotent: if the resource already exists,
+	// it returns the current metadata without error. cfg is the expanded
+	// iac.state module config (backend, bucket, region, credentials, etc.).
+	//
+	// Providers that do not manage a state backend should return (nil, nil).
+	// The caller prints each entry in result.EnvVars as `export KEY=VALUE` for
+	// CI capture and writes result.Bucket back to the on-disk config.
+	BootstrapStateBackend(ctx context.Context, cfg map[string]any) (*BootstrapResult, error)
+
 	Close() error
+}
+
+// BootstrapResult contains metadata returned by a successful BootstrapStateBackend call.
+type BootstrapResult struct {
+	// Bucket is the name of the created or confirmed state bucket/container.
+	Bucket string `json:"bucket,omitempty"`
+	// Region is the region where the bucket resides.
+	Region string `json:"region,omitempty"`
+	// Endpoint is the S3-compatible API endpoint URL (if applicable).
+	Endpoint string `json:"endpoint,omitempty"`
+	// EnvVars is a map of environment variable names to values that should be
+	// exported for CI capture (e.g. WFCTL_STATE_BUCKET, SPACES_BUCKET).
+	EnvVars map[string]string `json:"env_vars,omitempty"`
 }
 
 // Size is the abstract sizing tier for a resource.

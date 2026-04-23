@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
 
@@ -24,10 +26,68 @@ func writeBootstrapConfig(t *testing.T, yaml string) string {
 	return f.Name()
 }
 
+// envBootstrapProvider is a minimal IaCProvider stub for env-expansion tests.
+// It captures the cfg map passed to BootstrapStateBackend.
+type envBootstrapProvider struct {
+	gotCfg map[string]any
+	result *interfaces.BootstrapResult
+	err    error
+}
+
+func (p *envBootstrapProvider) Name() string    { return "env-test-fake" }
+func (p *envBootstrapProvider) Version() string { return "0.0.0" }
+func (p *envBootstrapProvider) Initialize(_ context.Context, _ map[string]any) error {
+	return nil
+}
+func (p *envBootstrapProvider) Capabilities() []interfaces.IaCCapabilityDeclaration { return nil }
+func (p *envBootstrapProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	return nil, nil
+}
+func (p *envBootstrapProvider) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	return nil, nil
+}
+func (p *envBootstrapProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
+	return nil, nil
+}
+func (p *envBootstrapProvider) Status(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
+	return nil, nil
+}
+func (p *envBootstrapProvider) DetectDrift(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
+	return nil, nil
+}
+func (p *envBootstrapProvider) Import(_ context.Context, _ string, _ string) (*interfaces.ResourceState, error) {
+	return nil, nil
+}
+func (p *envBootstrapProvider) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
+	return nil, nil
+}
+func (p *envBootstrapProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
+	return nil, nil
+}
+func (p *envBootstrapProvider) SupportedCanonicalKeys() []string { return nil }
+func (p *envBootstrapProvider) BootstrapStateBackend(_ context.Context, cfg map[string]any) (*interfaces.BootstrapResult, error) {
+	p.gotCfg = cfg
+	return p.result, p.err
+}
+func (p *envBootstrapProvider) Close() error { return nil }
+
+// withEnvBootstrapFake overrides resolveIaCProvider for the duration of the
+// test and returns the fake so callers can inspect captured values.
+func withEnvBootstrapFake(t *testing.T, result *interfaces.BootstrapResult) *envBootstrapProvider {
+	t.Helper()
+	fake := &envBootstrapProvider{result: result}
+	orig := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = orig })
+	return fake
+}
+
 // ── TestBootstrap_StateBackendBucketExpanded ─────────────────────────────────
 
 // TestBootstrap_StateBackendBucketExpanded verifies that ${BUCKET_NAME} in the
-// iac.state config is resolved before bootstrapStateBackend calls the bucket fn.
+// iac.state config is resolved before bootstrapStateBackend calls the provider.
 // Without env expansion, the literal "${BUCKET_NAME}" would be used as the
 // bucket name.
 func TestBootstrap_StateBackendBucketExpanded(t *testing.T) {
@@ -36,16 +96,15 @@ func TestBootstrap_StateBackendBucketExpanded(t *testing.T) {
 	t.Setenv("TEST_BS_ACCESS", "ak")
 	t.Setenv("TEST_BS_SECRET", "sk")
 
-	var gotBucket string
-	orig := bootstrapDOSpacesBucketFn
-	bootstrapDOSpacesBucketFn = func(_ context.Context, bucket, _, _, _ string) error {
-		gotBucket = bucket
-		return nil
-	}
-	defer func() { bootstrapDOSpacesBucketFn = orig }()
+	fake := withEnvBootstrapFake(t, &interfaces.BootstrapResult{Bucket: "my-state-bucket"})
 
 	cfgFile := writeBootstrapConfig(t, `
 modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+
   - name: tf-state
     type: iac.state
     config:
@@ -60,15 +119,17 @@ modules:
 		t.Fatalf("bootstrapStateBackend: %v", err)
 	}
 
-	if gotBucket != "my-state-bucket" {
-		t.Errorf("bucket: want %q, got %q", "my-state-bucket", gotBucket)
+	if got, _ := fake.gotCfg["bucket"].(string); got != "my-state-bucket" {
+		t.Errorf("bucket: want %q, got %q", "my-state-bucket", got)
 	}
 }
 
 // ── TestBootstrap_StateBackendEmptyEnvVar ────────────────────────────────────
 
-// TestBootstrap_StateBackendEmptyEnvVar documents os.ExpandEnv behaviour:
-// an unset variable becomes an empty string, which causes a missing-bucket error.
+// TestBootstrap_StateBackendEmptyEnvVar documents that a remote backend with
+// no iac.provider module in the config produces an error rather than silently
+// skipping. The backend is "spaces" (not a self-contained type) so
+// bootstrapStateBackend requires an iac.provider module to dispatch through.
 func TestBootstrap_StateBackendEmptyEnvVar(t *testing.T) {
 	// Set to empty to simulate unset (t.Setenv("X", "") still sets the var).
 	t.Setenv("TEST_BS_EMPTY_BUCKET", "")
@@ -84,9 +145,9 @@ modules:
 `)
 
 	err := bootstrapStateBackend(context.Background(), cfgFile)
-	// An empty bucket name after expansion must produce an error.
+	// No iac.provider module in the config — must produce an error.
 	if err == nil {
-		t.Fatal("expected error when bucket env var is unset (expands to empty string)")
+		t.Fatal("expected error when no iac.provider module is declared for a remote backend")
 	}
 }
 
@@ -210,26 +271,23 @@ func TestBootstrap_RepeatedRunIdempotent(t *testing.T) {
 
 // ── TestBootstrap_StateBackendAccessKeyExpanded ──────────────────────────────
 
-// TestBootstrap_StateBackendAccessKeyExpanded verifies that BMW-style
-// ${SPACES_access_key} and ${SPACES_secret_key} references in the iac.state
-// config are expanded by ExpandEnvInMap and the resolved values are passed
-// through to bootstrapDOSpacesBucketFn.
+// TestBootstrap_StateBackendAccessKeyExpanded verifies that ${VAR} references
+// in the iac.state config (e.g. accessKey, secretKey) are expanded by
+// ExpandEnvInMap and the resolved values are passed to the provider's
+// BootstrapStateBackend call.
 func TestBootstrap_StateBackendAccessKeyExpanded(t *testing.T) {
 	t.Setenv("TEST_SPACES_ACCESS", "do-spaces-key-abc")
 	t.Setenv("TEST_SPACES_SECRET", "do-spaces-secret-xyz")
 
-	var gotBucket, gotAccessKey, gotSecretKey string
-	orig := bootstrapDOSpacesBucketFn
-	bootstrapDOSpacesBucketFn = func(_ context.Context, bucket, _, accessKey, secretKey string) error {
-		gotBucket = bucket
-		gotAccessKey = accessKey
-		gotSecretKey = secretKey
-		return nil
-	}
-	defer func() { bootstrapDOSpacesBucketFn = orig }()
+	fake := withEnvBootstrapFake(t, &interfaces.BootstrapResult{Bucket: "my-state-bucket"})
 
 	cfgFile := writeBootstrapConfig(t, `
 modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+
   - name: tf-state
     type: iac.state
     config:
@@ -244,14 +302,11 @@ modules:
 		t.Fatalf("bootstrapStateBackend: %v", err)
 	}
 
-	if gotBucket != "my-state-bucket" {
-		t.Errorf("bucket: want %q, got %q", "my-state-bucket", gotBucket)
+	if got, _ := fake.gotCfg["accessKey"].(string); got != "do-spaces-key-abc" {
+		t.Errorf("accessKey: want %q, got %q", "do-spaces-key-abc", got)
 	}
-	if gotAccessKey != "do-spaces-key-abc" {
-		t.Errorf("accessKey: want %q, got %q", "do-spaces-key-abc", gotAccessKey)
-	}
-	if gotSecretKey != "do-spaces-secret-xyz" {
-		t.Errorf("secretKey: want %q, got %q", "do-spaces-secret-xyz", gotSecretKey)
+	if got, _ := fake.gotCfg["secretKey"].(string); got != "do-spaces-secret-xyz" {
+		t.Errorf("secretKey: want %q, got %q", "do-spaces-secret-xyz", got)
 	}
 
 	// Verify ExpandEnvInMap produced the right values without mutating original config.
@@ -283,16 +338,15 @@ func TestBootstrap_EnvFlagAppliedBeforeSubstitution(t *testing.T) {
 	t.Setenv("TEST_STAGING_ACCESS", "staging-ak")
 	t.Setenv("TEST_STAGING_SECRET", "staging-sk")
 
-	var gotBucket string
-	orig := bootstrapDOSpacesBucketFn
-	bootstrapDOSpacesBucketFn = func(_ context.Context, bucket, _, _, _ string) error {
-		gotBucket = bucket
-		return nil
-	}
-	defer func() { bootstrapDOSpacesBucketFn = orig }()
+	fake := withEnvBootstrapFake(t, &interfaces.BootstrapResult{Bucket: "staging-state-bucket"})
 
 	cfgFile := writeBootstrapConfig(t, `
 modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+
   - name: tf-state
     type: iac.state
     config:
@@ -319,9 +373,9 @@ modules:
 		t.Fatalf("bootstrapStateBackend: %v", err)
 	}
 
-	// The bucket reached the mock must be the expanded staging override value.
-	if gotBucket != "staging-state-bucket" {
-		t.Errorf("bucket with env-flag: want %q, got %q (env override + expansion may not have run in correct order)", "staging-state-bucket", gotBucket)
+	// The bucket reached the provider must be the expanded staging override value.
+	if got, _ := fake.gotCfg["bucket"].(string); got != "staging-state-bucket" {
+		t.Errorf("bucket with env-flag: want %q, got %q (env override + expansion may not have run in correct order)", "staging-state-bucket", got)
 	}
 }
 
@@ -331,8 +385,7 @@ modules:
 // bug where --env caused parseSecretsConfig to read from the env-resolved temp
 // file, which was marshalled via config.WorkflowConfig (no Generate field) and
 // silently dropped the secrets.generate[] block. The result was "No secrets to
-// generate." followed by "access key must be set" because the Spaces keys were
-// never generated.
+// generate." followed by a missing credentials error.
 //
 // Fix: runInfraBootstrap must call parseSecretsConfig(originalCfgFile), not
 // parseSecretsConfig(cfgFile) after cfgFile was reassigned to the temp path.
@@ -347,16 +400,19 @@ func TestBootstrap_EnvFlagPreservesSecretsGenerate(t *testing.T) {
 		return "generated-value", nil
 	})
 
-	// Stub the bucket function so no real S3 call is made.
-	orig := bootstrapDOSpacesBucketFn
-	bootstrapDOSpacesBucketFn = func(_ context.Context, _, _, _, _ string) error { return nil }
-	defer func() { bootstrapDOSpacesBucketFn = orig }()
+	// Stub the provider so no real plugin call is made.
+	withEnvBootstrapFake(t, &interfaces.BootstrapResult{Bucket: "staging-bucket"})
 
 	// Config has both environments.staging override AND secrets.generate[].
 	// The env resolution will flatten the staging config into modules, but must
 	// NOT drop the secrets block.
 	cfgFile := writeBootstrapConfig(t, `
 modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+
   - name: tf-state
     type: iac.state
     config:
