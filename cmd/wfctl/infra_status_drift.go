@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -34,7 +35,12 @@ func statusInfraModules(ctx context.Context, cfgFile, envName string) error {
 			return
 		}
 		if closer != nil {
-			defer closer.Close() //nolint:errcheck
+			provType := g.provType
+			defer func() {
+				if cerr := closer.Close(); cerr != nil {
+					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", provType, cerr)
+				}
+			}()
 		}
 
 		statuses, err := provider.Status(ctx, g.refs)
@@ -86,7 +92,12 @@ func driftInfraModules(ctx context.Context, cfgFile, envName string) error {
 			return false
 		}
 		if closer != nil {
-			defer closer.Close() //nolint:errcheck
+			provType := g.provType
+			defer func() {
+				if cerr := closer.Close(); cerr != nil {
+					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", provType, cerr)
+				}
+			}()
 		}
 
 		results, err := provider.DetectDrift(ctx, g.refs)

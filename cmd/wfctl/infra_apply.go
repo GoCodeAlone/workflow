@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -157,7 +158,12 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 			return fmt.Errorf("provider %q (%s): load provider: %w", moduleRef, g.provType, err)
 		}
 		if closer != nil {
-			defer closer.Close() //nolint:errcheck
+			provType := g.provType
+			defer func() {
+				if cerr := closer.Close(); cerr != nil {
+					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", provType, cerr)
+				}
+			}()
 		}
 		return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, current, store)
 	}

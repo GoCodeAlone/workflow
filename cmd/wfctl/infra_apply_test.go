@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -578,5 +579,72 @@ modules:
 	}
 	if hasInfraModules(legacyOnly) {
 		t.Error("hasInfraModules: want false for platform.* config, got true")
+	}
+}
+
+// ── TestApplyWithProvider_LogsCloseError ──────────────────────────────────────
+
+// errCloser is an io.Closer that always returns an error.
+type errCloser struct{ msg string }
+
+func (e *errCloser) Close() error { return fmt.Errorf("%s", e.msg) }
+
+// TestApplyWithProvider_LogsCloseError verifies that when the provider closer
+// returns an error during applyInfraModules, a warning is written to stderr
+// (instead of silently discarding the error via nolint:errcheck).
+func TestApplyWithProvider_LogsCloseError(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: myprov
+    type: iac.provider
+    config:
+      provider: fake-cloud
+  - name: my-vpc
+    type: infra.vpc
+    config:
+      provider: myprov
+      region: nyc3
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	// Override resolveIaCProvider to return a provider + error-producing closer.
+	orig := resolveIaCProvider
+	fake := &applyCapture{}
+	closerErr := "shutdown-sentinel-error"
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, &errCloser{msg: closerErr}, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = orig })
+
+	// Redirect stderr to capture warning output.
+	oldStderr := os.Stderr
+	r, w, pipeErr := os.Pipe()
+	if pipeErr != nil {
+		t.Fatalf("os.Pipe: %v", pipeErr)
+	}
+	os.Stderr = w
+
+	err := applyInfraModules(context.Background(), cfgPath, "")
+
+	w.Close()
+	os.Stderr = oldStderr
+
+	var buf bytes.Buffer
+	if _, readErr := buf.ReadFrom(r); readErr != nil {
+		t.Fatalf("read stderr: %v", readErr)
+	}
+	stderrOutput := buf.String()
+
+	if err != nil {
+		t.Fatalf("applyInfraModules returned unexpected error: %v", err)
+	}
+	if !strings.Contains(stderrOutput, closerErr) {
+		t.Errorf("stderr = %q, want it to contain %q", stderrOutput, closerErr)
+	}
+	if !strings.Contains(stderrOutput, "warning") {
+		t.Errorf("stderr = %q, want it to contain 'warning'", stderrOutput)
 	}
 }
