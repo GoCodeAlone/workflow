@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -339,67 +338,17 @@ func isContainerType(t string) bool {
 	return t == "infra.container_service" || t == "platform.do_app"
 }
 
-// loadCurrentState attempts to load ResourceStates from the iac.state backend
-// configured in cfgFile. Returns an empty slice on any error (first run).
+// loadCurrentState loads ResourceStates from the configured iac.state backend.
+// Returns nil on any error (first run or unconfigured backend). Uses
+// resolveStateStore so that remote backends (Spaces, S3, etc.) are supported.
 func loadCurrentState(cfgFile string) []interfaces.ResourceState {
-	iacStates, _, _, err := discoverInfraModules(cfgFile)
-	if err != nil || len(iacStates) == 0 {
-		return nil
-	}
-	m := iacStates[0]
-	cfg := config.ExpandEnvInMap(m.Config)
-	backend, _ := cfg["backend"].(string)
-	dir, _ := cfg["directory"].(string)
-
-	switch backend {
-	case "filesystem":
-		if dir == "" {
-			dir = "/var/lib/workflow/iac-state"
-		}
-		return loadFSState(dir)
-	default:
-		// memory, spaces, gcs, azure, postgres — not accessible without credentials
-		return nil
-	}
-}
-
-// loadFSState reads IaC state records from a filesystem directory and converts
-// them to interfaces.ResourceState values for use with the differ.
-func loadFSState(dir string) []interfaces.ResourceState {
-	entries, err := os.ReadDir(dir)
+	store, err := resolveStateStore(cfgFile)
 	if err != nil {
 		return nil
 	}
-
-	var states []interfaces.ResourceState
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasSuffix(e.Name(), ".lock.json") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			continue
-		}
-		var s struct {
-			ResourceID   string         `json:"resource_id"`
-			ResourceType string         `json:"resource_type"`
-			Provider     string         `json:"provider"`
-			Config       map[string]any `json:"config"`
-			Outputs      map[string]any `json:"outputs"`
-		}
-		if err := json.Unmarshal(data, &s); err != nil {
-			continue
-		}
-		states = append(states, interfaces.ResourceState{
-			ID:            s.ResourceID,
-			Name:          s.ResourceID,
-			Type:          s.ResourceType,
-			Provider:      s.Provider,
-			ProviderID:    s.ResourceID,
-			ConfigHash:    configHashMap(s.Config),
-			AppliedConfig: s.Config,
-			Outputs:       s.Outputs,
-		})
+	states, err := store.ListResources(context.Background())
+	if err != nil {
+		return nil
 	}
 	return states
 }

@@ -138,11 +138,42 @@ modules:
 	}
 }
 
+// ── fakeStateStore ─────────────────────────────────────────────────────────────
+
+// fakeStateStore captures SaveResource and DeleteResource calls for use in tests.
+type fakeStateStore struct {
+	mu      sync.Mutex
+	saved   []interfaces.ResourceState
+	deleted []string
+	saveErr error // if non-nil, SaveResource returns this error
+}
+
+func (f *fakeStateStore) ListResources(_ context.Context) ([]interfaces.ResourceState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]interfaces.ResourceState(nil), f.saved...), nil
+}
+func (f *fakeStateStore) SaveResource(_ context.Context, s interfaces.ResourceState) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.saveErr != nil {
+		return f.saveErr
+	}
+	f.saved = append(f.saved, s)
+	return nil
+}
+func (f *fakeStateStore) DeleteResource(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleted = append(f.deleted, name)
+	return nil
+}
+
+// ── TestApplyWithProvider_NoChanges ────────────────────────────────────────────
+
 // TestApplyWithProvider_NoChanges verifies that when the current state already
 // matches the desired spec (identical config hash), Apply is NOT called.
-// It exercises the no-op branch of applyWithProvider directly by injecting a
-// ResourceState whose ConfigHash matches the hash platform.ComputePlan computes
-// for the spec's Config map.
+// It exercises the no-op branch of applyWithProviderAndStore directly.
 func TestApplyWithProvider_NoChanges(t *testing.T) {
 	spec := interfaces.ResourceSpec{
 		Name:   "my-db",
@@ -165,14 +196,8 @@ func TestApplyWithProvider_NoChanges(t *testing.T) {
 	}}
 
 	fake := &applyCapture{}
-	orig := resolveIaCProvider
-	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
-		return fake, nil, nil
-	}
-	defer func() { resolveIaCProvider = orig }()
-
-	if err := applyWithProvider(context.Background(), "fake-cloud", nil, []interfaces.ResourceSpec{spec}, current); err != nil {
-		t.Fatalf("applyWithProvider: %v", err)
+	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", []interfaces.ResourceSpec{spec}, current, nil); err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 
 	fake.mu.Lock()
@@ -200,14 +225,9 @@ func TestApplyWithProvider_DeletesRemovedResource(t *testing.T) {
 	}
 
 	fake := &applyCapture{}
-	orig := resolveIaCProvider
-	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
-		return fake, nil, nil
-	}
-	defer func() { resolveIaCProvider = orig }()
-
-	if err := applyWithProvider(context.Background(), "fake-cloud", nil, specs, current); err != nil {
-		t.Fatalf("applyWithProvider: %v", err)
+	store := &fakeStateStore{}
+	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", specs, current, store); err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 
 	fake.mu.Lock()
@@ -227,6 +247,154 @@ func TestApplyWithProvider_DeletesRemovedResource(t *testing.T) {
 	}
 	if a := actions["bmw-app"]; a != "" {
 		t.Errorf("expected no action for bmw-app (hash matches), got %q", a)
+	}
+
+	// The delete action for old-db must remove it from the store.
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	found := false
+	for _, d := range store.deleted {
+		if d == "old-db" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("store.DeleteResource not called for old-db; deleted=%v", store.deleted)
+	}
+}
+
+// ── TestApplyWithProvider_SavesState* ──────────────────────────────────────────
+
+// stateReturningProvider is a minimal IaCProvider whose Apply method returns
+// a configurable result, used for state-persistence tests.
+type stateReturningProvider struct {
+	applyResult *interfaces.ApplyResult
+	applyErr    error
+}
+
+func (p *stateReturningProvider) Name() string    { return "fake" }
+func (p *stateReturningProvider) Version() string { return "0.0.0" }
+func (p *stateReturningProvider) Initialize(_ context.Context, _ map[string]any) error {
+	return nil
+}
+func (p *stateReturningProvider) Capabilities() []interfaces.IaCCapabilityDeclaration { return nil }
+func (p *stateReturningProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	return nil, nil
+}
+func (p *stateReturningProvider) Apply(_ context.Context, _ *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	return p.applyResult, p.applyErr
+}
+func (p *stateReturningProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
+	return nil, nil
+}
+func (p *stateReturningProvider) Status(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
+	return nil, nil
+}
+func (p *stateReturningProvider) DetectDrift(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
+	return nil, nil
+}
+func (p *stateReturningProvider) Import(_ context.Context, _ string, _ string) (*interfaces.ResourceState, error) {
+	return nil, nil
+}
+func (p *stateReturningProvider) ResolveSizing(_ string, _ interfaces.Size, _ *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
+	return nil, nil
+}
+func (p *stateReturningProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
+	return nil, nil
+}
+func (p *stateReturningProvider) SupportedCanonicalKeys() []string { return nil }
+func (p *stateReturningProvider) Close() error                     { return nil }
+
+// TestApplyWithProvider_SavesStateForSuccessfulResources asserts that
+// applyWithProviderAndStore calls store.SaveResource for each resource in
+// the Apply result.
+func TestApplyWithProvider_SavesStateForSuccessfulResources(t *testing.T) {
+	specs := []interfaces.ResourceSpec{
+		{Name: "r1", Type: "infra.vpc", Config: map[string]any{"region": "nyc3"}},
+		{Name: "r2", Type: "infra.database", Config: map[string]any{"engine": "postgres"}},
+	}
+	fake := &stateReturningProvider{
+		applyResult: &interfaces.ApplyResult{
+			Resources: []interfaces.ResourceOutput{
+				{Name: "r1", Type: "infra.vpc", ProviderID: "vpc-1", Outputs: map[string]any{"id": "vpc-1"}},
+				{Name: "r2", Type: "infra.database", ProviderID: "db-1", Outputs: map[string]any{"uri": "postgres://..."}},
+			},
+		},
+	}
+	store := &fakeStateStore{}
+
+	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 2 {
+		t.Errorf("saved = %d, want 2", len(store.saved))
+	}
+	found := map[string]string{}
+	for _, s := range store.saved {
+		found[s.Name] = s.ProviderID
+	}
+	if found["r1"] != "vpc-1" {
+		t.Errorf("r1 ProviderID = %q, want vpc-1", found["r1"])
+	}
+	if found["r2"] != "db-1" {
+		t.Errorf("r2 ProviderID = %q, want db-1", found["r2"])
+	}
+}
+
+// TestApplyWithProvider_SavesStateOnPartialFailure asserts that when Apply
+// returns partial success (some resources + some errors), states are saved for
+// the successful resources, and an error is returned for the failures.
+func TestApplyWithProvider_SavesStateOnPartialFailure(t *testing.T) {
+	specs := []interfaces.ResourceSpec{
+		{Name: "r1", Type: "infra.vpc", Config: nil},
+		{Name: "r2", Type: "infra.database", Config: nil},
+		{Name: "r3", Type: "infra.container_service", Config: nil},
+	}
+	fake := &stateReturningProvider{
+		applyResult: &interfaces.ApplyResult{
+			Resources: []interfaces.ResourceOutput{
+				{Name: "r1", ProviderID: "id-1"},
+				{Name: "r2", ProviderID: "id-2"},
+			},
+			Errors: []interfaces.ActionError{
+				{Resource: "r3", Action: "create", Error: "boom"},
+			},
+		},
+	}
+	store := &fakeStateStore{}
+
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store)
+	if err == nil {
+		t.Fatal("expected error on partial failure, got nil")
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 2 {
+		t.Errorf("saved = %d, want 2 (partial success should still persist successful resources)", len(store.saved))
+	}
+}
+
+// TestApplyWithProvider_StoreSaveFailureIsNonFatal asserts that a SaveResource
+// error does NOT cause applyWithProviderAndStore to fail — the cloud resource
+// already exists and the warning is logged.
+func TestApplyWithProvider_StoreSaveFailureIsNonFatal(t *testing.T) {
+	specs := []interfaces.ResourceSpec{
+		{Name: "r1", Type: "infra.vpc", Config: nil},
+	}
+	fake := &stateReturningProvider{
+		applyResult: &interfaces.ApplyResult{
+			Resources: []interfaces.ResourceOutput{{Name: "r1", ProviderID: "vpc-1"}},
+		},
+	}
+	store := &fakeStateStore{saveErr: fmt.Errorf("disk full")}
+
+	// Should succeed even though SaveResource errors.
+	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store); err != nil {
+		t.Fatalf("expected no error despite save failure, got: %v", err)
 	}
 }
 

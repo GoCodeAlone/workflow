@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -50,7 +51,7 @@ func hasPlatformModules(cfgFile string) bool {
 //
 // This is the new dispatch path used when the config contains infra.* modules
 // instead of the legacy platform.* + pipelines.apply pipeline path.
-func applyInfraModules(ctx context.Context, cfgFile, envName string) error {
+func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //nolint:cyclop
 	// Resolve specs (env overrides applied when envName is set).
 	specs, err := parseInfraResourceSpecsForEnv(cfgFile, envName)
 	if err != nil {
@@ -141,27 +142,45 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error {
 	// Load current state once; each provider call filters to its own resources.
 	current := loadCurrentState(cfgFile)
 
+	// Resolve the state store once; failure is non-fatal (state is best-effort).
+	store, storeErr := resolveStateStore(cfgFile)
+	if storeErr != nil {
+		fmt.Printf("WARNING: cannot open state store: %v — state will not be persisted\n", storeErr)
+		store = &noopStateStore{}
+	}
+
 	// Apply each provider group in declaration order.
 	for _, moduleRef := range groupOrder {
 		g := groups[moduleRef]
 		fmt.Printf("Applying %d resource(s) via provider %q (%s)...\n", len(g.specs), moduleRef, g.provType)
-		if err := applyWithProvider(ctx, g.provType, g.provCfg, g.specs, current); err != nil {
+
+		provider, closer, err := resolveIaCProvider(ctx, g.provType, g.provCfg)
+		if err != nil {
+			return fmt.Errorf("provider %q (%s): load provider: %w", moduleRef, g.provType, err)
+		}
+		if closer != nil {
+			defer closer.Close() //nolint:errcheck
+		}
+
+		if err := applyWithProviderAndStore(ctx, provider, g.provType, g.specs, current, store); err != nil {
 			return fmt.Errorf("provider %q (%s): %w", moduleRef, g.provType, err)
 		}
 	}
 	return nil
 }
 
-// applyWithProvider loads the named IaCProvider plugin, computes a diff plan
-// for the given specs against the current state, and executes it via Apply.
-// Returns nil when there are no changes to apply.
-func applyWithProvider(ctx context.Context, providerType string, providerCfg map[string]any, specs []interfaces.ResourceSpec, current []interfaces.ResourceState) error {
-	provider, closer, err := resolveIaCProvider(ctx, providerType, providerCfg)
-	if err != nil {
-		return fmt.Errorf("load provider: %w", err)
-	}
-	if closer != nil {
-		defer closer.Close() //nolint:errcheck
+// applyWithProviderAndStore computes a diff plan for the given specs against
+// the current state and executes it via provider.Apply. On success, each
+// provisioned resource is persisted to store (failures log a warning but do
+// not abort the apply — the cloud resource already exists). Deleted resources
+// are removed from store after a successful destroy action.
+//
+// providerType is used only as a label when constructing ResourceState records.
+// Callers pass a nil store (or noopStateStore) when state persistence is not
+// required.
+func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore) error {
+	if store == nil {
+		store = &noopStateStore{}
 	}
 
 	// Pass the full current state to ComputePlan so that resources which were
@@ -184,15 +203,58 @@ func applyWithProvider(ctx context.Context, providerType string, providerCfg map
 		return nil
 	}
 
+	// Collect delete-action resource names so we can clean up state afterward.
+	deleteNames := make(map[string]struct{})
+	for _, a := range plan.Actions {
+		if a.Action == "delete" {
+			deleteNames[a.Resource.Name] = struct{}{}
+		}
+	}
+
 	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
 	result, err := provider.Apply(ctx, &plan)
 	if err != nil {
 		return fmt.Errorf("apply: %w", err)
 	}
 	if result != nil {
+		// Persist state for every successfully provisioned resource.
 		for _, r := range result.Resources {
 			fmt.Printf("  ✓ %s (%s)\n", r.Name, r.Type)
+
+			// Find the matching spec to get the applied config.
+			var appliedCfg map[string]any
+			for i := range specs {
+				if specs[i].Name == r.Name {
+					appliedCfg = specs[i].Config
+					break
+				}
+			}
+
+			now := time.Now().UTC()
+			rs := interfaces.ResourceState{
+				ID:            r.Name,
+				Name:          r.Name,
+				Type:          r.Type,
+				Provider:      providerType,
+				ProviderID:    r.ProviderID,
+				ConfigHash:    configHashMap(appliedCfg),
+				AppliedConfig: appliedCfg,
+				Outputs:       r.Outputs,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			}
+			if saveErr := store.SaveResource(ctx, rs); saveErr != nil {
+				fmt.Printf("  WARNING: failed to persist state for %q: %v — apply succeeded but state may be out of sync\n", r.Name, saveErr)
+			}
 		}
+
+		// Delete state records for resources that were destroyed.
+		for name := range deleteNames {
+			if delErr := store.DeleteResource(ctx, name); delErr != nil {
+				fmt.Printf("  WARNING: failed to remove state for %q: %v\n", name, delErr)
+			}
+		}
+
 		if len(result.Errors) > 0 {
 			msgs := make([]string, 0, len(result.Errors))
 			for _, ae := range result.Errors {
