@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.7] - 2026-04-23
+
+### Fixed
+
+- **`ResolveForEnv` lifts `Config["name"]` into `ResolvedModule.Name`** — when an environment override sets `config.name`, the value is promoted to `ResolvedModule.Name` and removed from `Config`. This closes the plan-vs-apply divergence where `wfctl infra plan --env staging` displayed `bmw-staging-vpc` but `wfctl infra apply --env staging` created a resource named `bmw-vpc` (the raw module name). Downstream `ResourceSpec.Name` now carries the env-resolved identity in both paths. (closes follow-up #32)
+- **`platform.configHash` — deterministic key ordering** — `configHash` now sorts map keys explicitly before JSON-marshalling, matching the DO plugin's existing pattern. Previously, Go's randomised map-iteration order could produce different hashes for identical configs on successive runs, generating spurious "update" plan actions on second apply with no config change.
+- **`applyWithProviderAndStore` calls `provider.ResolveSizing`** — for each spec with a non-empty `Size` field, `ResolveSizing(type, size, hints)` is now called before `platform.ComputePlan`. The returned `ProviderSizing.InstanceType` and extra `Specs` are merged into `spec.Config` so that plan and apply agree on the concrete instance type.
+- **Provider `closer.Close()` errors logged as warnings** — `defer closer.Close() //nolint:errcheck` replaced with an explicit defer that writes `warning: provider %q shutdown: %v` to stderr in `infra_apply.go`, `infra_destroy.go`, `infra_status_drift.go`, and `infra_bootstrap.go`. Plugin subprocess leaks now surface instead of being silently discarded.
+- **`configHashMap` in `infra.go` uses sorted kv encoding** — aligns with `platform.configHash` so `ResourceState.ConfigHash` values written during apply are comparable to hashes computed by `ComputePlan` on the next run.
+
+### Tests
+
+- `config/module_resolve_env_test.go` — `TestResolveForEnv_LiftsConfigNameIntoIdentity`, `TestResolveForEnv_PreservesNameWhenNoOverride`, `TestResolveForEnv_EmptyNameFieldIgnored`
+- `platform/differ_hash_test.go` — `TestConfigHash_Stable_AcrossMapIterationOrder` (100 iterations), `TestConfigHash_EmptyMapReturnsEmpty`, `TestConfigHash_DifferentConfigsDifferentHashes`
+- `cmd/wfctl/infra_apply_test.go` — `TestApplyInfraModules_CallsResolveSizing_ForEachSpec`, `TestApplyWithProvider_LogsCloseError`
+- `cmd/wfctl/infra_plan_apply_equivalence_test.go` — `TestPlanApplyEquivalence_EnvOverrideNames` (end-to-end regression gate for plan-vs-apply name divergence)
+- `cmd/wfctl/infra_env_wire_test.go` — `TestPlanResourcesForEnv_UsesEnvOverrideNames`
+
 ## [0.18.6] - 2026-04-23
 
 ### Fixed

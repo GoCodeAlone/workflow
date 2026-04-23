@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -109,7 +110,12 @@ func destroyInfraModules(ctx context.Context, cfgFile, envName string) error { /
 			return fmt.Errorf("load provider %q: %w", moduleRef, err)
 		}
 		if closer != nil {
-			defer closer.Close() //nolint:errcheck
+			provType := g.provType
+			defer func() {
+				if cerr := closer.Close(); cerr != nil {
+					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", provType, cerr)
+				}
+			}()
 		}
 
 		fmt.Printf("Destroying %d resource(s) via provider %q (%s)...\n", len(g.refs), moduleRef, g.provType)

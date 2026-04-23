@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
@@ -11,9 +12,26 @@ import (
 	"github.com/GoCodeAlone/workflow/platform"
 )
 
-// hashConfig produces a deterministic SHA-256 hex hash of a config map for test setup.
+// hashConfig produces a deterministic SHA-256 hex hash of a config map for
+// test setup. Must match platform.configHash — sorted kv-pair encoding.
 func hashConfig(config map[string]any) string {
-	data, _ := json.Marshal(config)
+	if len(config) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(config))
+	for k := range config {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	type kv struct {
+		K string
+		V any
+	}
+	ordered := make([]kv, len(keys))
+	for i, k := range keys {
+		ordered[i] = kv{K: k, V: config[k]}
+	}
+	data, _ := json.Marshal(ordered)
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 

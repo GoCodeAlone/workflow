@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -88,13 +89,35 @@ func ComputePlan(desired []interfaces.ResourceSpec, current []interfaces.Resourc
 	}, nil
 }
 
+// ConfigHash is the exported counterpart of configHash. It allows callers
+// outside the platform package (e.g. cmd/wfctl) to compute hashes that are
+// byte-for-byte identical to those stored by ComputePlan, eliminating the
+// risk of independent re-implementations diverging.
+func ConfigHash(config map[string]any) string {
+	return configHash(config)
+}
+
 // configHash returns a deterministic SHA-256 hex hash of a config map.
-// json.Marshal error is intentionally ignored: map[string]any always marshals.
+// Keys are explicitly sorted before marshalling so the hash is stable across
+// Go's randomised map-iteration order — matching the DO plugin's pattern.
 func configHash(config map[string]any) string {
 	if len(config) == 0 {
 		return ""
 	}
-	data, _ := json.Marshal(config) // map[string]any is always marshalable
+	keys := make([]string, 0, len(config))
+	for k := range config {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	type kv struct {
+		K string
+		V any
+	}
+	ordered := make([]kv, len(keys))
+	for i, k := range keys {
+		ordered[i] = kv{K: k, V: config[k]}
+	}
+	data, _ := json.Marshal(ordered)
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 

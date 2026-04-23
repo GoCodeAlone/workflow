@@ -1,9 +1,8 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -184,13 +183,9 @@ func TestApplyWithProvider_NoChanges(t *testing.T) {
 		Config: map[string]any{"engine": "postgres"},
 	}
 
-	// Reproduce the hash that platform.ComputePlan computes via configHash:
-	//   sha256(json.Marshal(spec.Config)) in hex.
-	cfgData, err := json.Marshal(spec.Config)
-	if err != nil {
-		t.Fatalf("marshal config: %v", err)
-	}
-	cfgHash := fmt.Sprintf("%x", sha256.Sum256(cfgData))
+	// Reproduce the hash that platform.ComputePlan computes via configHash
+	// (sorted kv-pair encoding):
+	cfgHash := configHashMap(spec.Config)
 
 	current := []interfaces.ResourceState{{
 		Name:       spec.Name,
@@ -220,8 +215,7 @@ func TestApplyWithProvider_DeletesRemovedResource(t *testing.T) {
 		{Name: "bmw-app", Type: "infra.container_service", Config: map[string]any{"image": "registry/app:latest"}},
 	}
 	// Current: bmw-app + old-db (removed from config, should be deleted).
-	appData, _ := json.Marshal(specs[0].Config)
-	appHash := fmt.Sprintf("%x", sha256.Sum256(appData))
+	appHash := configHashMap(specs[0].Config)
 	current := []interfaces.ResourceState{
 		{Name: "bmw-app", Type: "infra.container_service", ConfigHash: appHash},
 		{Name: "old-db", Type: "infra.database", ConfigHash: "oldhash"},
@@ -464,6 +458,98 @@ modules:
 	}
 }
 
+// ── TestApplyInfraModules_CallsResolveSizing_ForEachSpec ──────────────────────
+
+// sizingCapture is an IaCProvider that records every ResolveSizing call and
+// returns a concrete ProviderSizing so we can assert spec.Config is enriched.
+type sizingCapture struct {
+	applyCapture
+	sizingCalls []struct {
+		resType string
+		size    interfaces.Size
+	}
+	sizingResult *interfaces.ProviderSizing
+	appliedSpecs []interfaces.ResourceSpec
+}
+
+func (s *sizingCapture) ResolveSizing(resType string, size interfaces.Size, _ *interfaces.ResourceHints) (*interfaces.ProviderSizing, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sizingCalls = append(s.sizingCalls, struct {
+		resType string
+		size    interfaces.Size
+	}{resType: resType, size: size})
+	return s.sizingResult, nil
+}
+
+func (s *sizingCapture) Apply(_ context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, a := range plan.Actions {
+		s.appliedSpecs = append(s.appliedSpecs, a.Resource)
+	}
+	return &interfaces.ApplyResult{}, nil
+}
+
+// TestApplyInfraModules_CallsResolveSizing_ForEachSpec verifies that
+// applyWithProviderAndStore invokes provider.ResolveSizing for each spec
+// that has a non-empty Size field, and that the resolved InstanceType and
+// extra Specs are merged into spec.Config before the plan is computed.
+func TestApplyInfraModules_CallsResolveSizing_ForEachSpec(t *testing.T) {
+	specs := []interfaces.ResourceSpec{
+		{Name: "db", Type: "infra.database", Size: interfaces.SizeM, Config: map[string]any{"engine": "postgres"}},
+		{Name: "vpc", Type: "infra.vpc", Config: map[string]any{"region": "nyc3"}}, // no Size → ResolveSizing should NOT be called
+		{Name: "app", Type: "infra.container_service", Size: interfaces.SizeS, Config: map[string]any{"image": "nginx"}},
+	}
+
+	fake := &sizingCapture{
+		sizingResult: &interfaces.ProviderSizing{
+			InstanceType: "s-1vcpu-2gb",
+			Specs:        map[string]any{"memory_mb": 2048},
+		},
+	}
+
+	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, nil); err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
+	}
+
+	// ResolveSizing should have been called twice (db + app), not for vpc.
+	fake.mu.Lock()
+	calls := fake.sizingCalls
+	applied := fake.appliedSpecs
+	fake.mu.Unlock()
+
+	if len(calls) != 2 {
+		t.Errorf("ResolveSizing calls = %d, want 2 (only sized specs)", len(calls))
+	}
+	callTypes := map[string]interfaces.Size{}
+	for _, c := range calls {
+		callTypes[c.resType] = c.size
+	}
+	if callTypes["infra.database"] != interfaces.SizeM {
+		t.Errorf("infra.database sizing call size = %q, want %q", callTypes["infra.database"], interfaces.SizeM)
+	}
+	if callTypes["infra.container_service"] != interfaces.SizeS {
+		t.Errorf("infra.container_service sizing call size = %q, want %q", callTypes["infra.container_service"], interfaces.SizeS)
+	}
+
+	// The applied specs should carry the resolved instance_type in their Config.
+	if len(applied) == 0 {
+		t.Fatal("no specs were applied — Apply was not called or plan had no actions")
+	}
+	for _, s := range applied {
+		if s.Size == "" {
+			continue // vpc — no sizing expected
+		}
+		if s.Config["instance_type"] != "s-1vcpu-2gb" {
+			t.Errorf("spec %q: Config[instance_type] = %v, want s-1vcpu-2gb", s.Name, s.Config["instance_type"])
+		}
+		if s.Config["memory_mb"] != 2048 {
+			t.Errorf("spec %q: Config[memory_mb] = %v, want 2048", s.Name, s.Config["memory_mb"])
+		}
+	}
+}
+
 // TestHasInfraModules verifies detection of infra.* vs platform.* configs.
 func TestHasInfraModules(t *testing.T) {
 	dir := t.TempDir()
@@ -493,5 +579,77 @@ modules:
 	}
 	if hasInfraModules(legacyOnly) {
 		t.Error("hasInfraModules: want false for platform.* config, got true")
+	}
+}
+
+// ── TestApplyWithProvider_LogsCloseError ──────────────────────────────────────
+
+// errCloser is an io.Closer that always returns an error.
+type errCloser struct{ msg string }
+
+func (e *errCloser) Close() error { return fmt.Errorf("%s", e.msg) }
+
+// TestApplyWithProvider_LogsCloseError verifies that when the provider closer
+// returns an error during applyInfraModules, a warning is written to stderr
+// (instead of silently discarding the error via nolint:errcheck).
+func TestApplyWithProvider_LogsCloseError(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: myprov
+    type: iac.provider
+    config:
+      provider: fake-cloud
+  - name: my-vpc
+    type: infra.vpc
+    config:
+      provider: myprov
+      region: nyc3
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	// Override resolveIaCProvider to return a provider + error-producing closer.
+	orig := resolveIaCProvider
+	fake := &applyCapture{}
+	closerErr := "shutdown-sentinel-error"
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, &errCloser{msg: closerErr}, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = orig })
+
+	// Redirect stderr to capture warning output.
+	oldStderr := os.Stderr
+	r, w, pipeErr := os.Pipe()
+	if pipeErr != nil {
+		t.Fatalf("os.Pipe: %v", pipeErr)
+	}
+	os.Stderr = w
+	t.Cleanup(func() {
+		os.Stderr = oldStderr
+		_ = w.Close()
+		_ = r.Close()
+	})
+
+	err := applyInfraModules(context.Background(), cfgPath, "")
+
+	w.Close()
+	os.Stderr = oldStderr
+
+	var buf bytes.Buffer
+	if _, readErr := buf.ReadFrom(r); readErr != nil {
+		t.Fatalf("read stderr: %v", readErr)
+	}
+	stderrOutput := buf.String()
+
+	if err != nil {
+		t.Fatalf("applyInfraModules returned unexpected error: %v", err)
+	}
+	if !strings.Contains(stderrOutput, closerErr) {
+		t.Errorf("stderr = %q, want it to contain %q", stderrOutput, closerErr)
+	}
+	if !strings.Contains(stderrOutput, "warning") {
+		t.Errorf("stderr = %q, want it to contain 'warning'", stderrOutput)
 	}
 }

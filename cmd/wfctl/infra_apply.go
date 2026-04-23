@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -157,7 +158,12 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 			return fmt.Errorf("provider %q (%s): load provider: %w", moduleRef, g.provType, err)
 		}
 		if closer != nil {
-			defer closer.Close() //nolint:errcheck
+			provType := g.provType
+			defer func() {
+				if cerr := closer.Close(); cerr != nil {
+					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", provType, cerr)
+				}
+			}()
 		}
 		return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, current, store)
 	}
@@ -181,6 +187,32 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore) error {
 	if store == nil {
 		store = &noopStateStore{}
+	}
+
+	// Resolve abstract sizing tiers into concrete provider-specific values
+	// (e.g. Size: "m" → instance_type: "s-1vcpu-2gb") for each spec that
+	// declares an abstract Size tier. Provider-specific slugs (e.g.
+	// "db-s-1vcpu-1gb") are passed through as-is to avoid double-resolution.
+	// The resolved values are merged into spec.Config so that plan output and
+	// apply are always in sync.
+	for i := range specs {
+		spec := &specs[i]
+		if spec.Size == "" || !isAbstractSize(spec.Size) {
+			continue
+		}
+		sizing, err := provider.ResolveSizing(spec.Type, spec.Size, spec.Hints)
+		if err != nil {
+			return fmt.Errorf("%s/%s: resolve sizing: %w", spec.Type, spec.Name, err)
+		}
+		if sizing != nil {
+			if spec.Config == nil {
+				spec.Config = map[string]any{}
+			}
+			spec.Config["instance_type"] = sizing.InstanceType
+			for k, v := range sizing.Specs {
+				spec.Config[k] = v
+			}
+		}
 	}
 
 	// Pass the full current state to ComputePlan so that resources which were
@@ -264,4 +296,16 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		}
 	}
 	return nil
+}
+
+// isAbstractSize reports whether s is one of the canonical abstract size tiers
+// (xs/s/m/l/xl). Provider-specific slugs such as "db-s-1vcpu-1gb" return false
+// so that ResolveSizing is not called for already-concrete values.
+func isAbstractSize(s interfaces.Size) bool {
+	switch s {
+	case interfaces.SizeXS, interfaces.SizeS, interfaces.SizeM, interfaces.SizeL, interfaces.SizeXL:
+		return true
+	default:
+		return false
+	}
 }

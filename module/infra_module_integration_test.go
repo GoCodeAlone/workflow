@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -148,11 +149,26 @@ func (p *planningProvider) Plan(_ context.Context, desired []interfaces.Resource
 }
 
 // configHashIntegration replicates platform.configHash for test assertions.
+// Keys are explicitly sorted before marshalling to match the sorted kv-pair
+// encoding used by platform.ComputePlan — ensuring test hashes are stable.
 func configHashIntegration(config map[string]any) string {
 	if len(config) == 0 {
 		return ""
 	}
-	data, _ := json.Marshal(config)
+	keys := make([]string, 0, len(config))
+	for k := range config {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	type kv struct {
+		K string
+		V any
+	}
+	ordered := make([]kv, len(keys))
+	for i, k := range keys {
+		ordered[i] = kv{K: k, V: config[k]}
+	}
+	data, _ := json.Marshal(ordered)
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 

@@ -149,7 +149,12 @@ func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 		return fmt.Errorf("load provider %q for state backend bootstrap: %w", provType, err)
 	}
 	if closer != nil {
-		defer closer.Close() //nolint:errcheck
+		pType := provType
+		defer func() {
+			if cerr := closer.Close(); cerr != nil {
+				fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", pType, cerr)
+			}
+		}()
 	}
 
 	result, err := provider.BootstrapStateBackend(ctx, cfg)

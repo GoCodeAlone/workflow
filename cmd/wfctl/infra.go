@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -353,13 +352,11 @@ func loadCurrentState(cfgFile string) []interfaces.ResourceState {
 	return states
 }
 
-// configHashMap computes a deterministic SHA-256 hex hash of a config map.
+// configHashMap delegates to platform.ConfigHash so that the CLI always
+// produces hashes byte-for-byte identical to those stored by ComputePlan.
+// The local duplication that previously existed here has been removed.
 func configHashMap(config map[string]any) string {
-	if len(config) == 0 {
-		return ""
-	}
-	data, _ := json.Marshal(config)
-	return fmt.Sprintf("%x", sha256.Sum256(data))
+	return platform.ConfigHash(config)
 }
 
 // formatPlanTable renders an interfaces.IaCPlan as a human-readable table
