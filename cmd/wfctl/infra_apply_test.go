@@ -626,6 +626,11 @@ modules:
 		t.Fatalf("os.Pipe: %v", pipeErr)
 	}
 	os.Stderr = w
+	t.Cleanup(func() {
+		os.Stderr = oldStderr
+		_ = w.Close()
+		_ = r.Close()
+	})
 
 	err := applyInfraModules(context.Background(), cfgPath, "")
 
