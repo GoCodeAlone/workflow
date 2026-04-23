@@ -27,6 +27,21 @@ func hasInfraModules(cfgFile string) bool {
 	return false
 }
 
+// hasPlatformModules reports whether cfgFile contains any modules with the legacy
+// platform.* type prefix.
+func hasPlatformModules(cfgFile string) bool {
+	cfg, err := config.LoadFromFile(cfgFile)
+	if err != nil {
+		return false
+	}
+	for _, m := range cfg.Modules {
+		if strings.HasPrefix(m.Type, "platform.") {
+			return true
+		}
+	}
+	return false
+}
+
 // applyInfraModules applies all infra.* modules in cfgFile by directly loading
 // each referenced IaCProvider plugin, computing a diff plan, and executing it.
 // Modules are grouped by their provider: reference; each unique provider is
@@ -71,9 +86,20 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error {
 		if m.Type != "iac.provider" {
 			continue
 		}
-		expanded := config.ExpandEnvInMap(m.Config)
-		pt, _ := expanded["provider"].(string)
-		providerDefs[m.Name] = providerDef{provType: pt, provCfg: expanded}
+		// Apply per-env overrides when envName is set so that provider credentials
+		// or regions declared under environments: are respected.
+		var modCfg map[string]any
+		if envName != "" {
+			resolved, ok := m.ResolveForEnv(envName)
+			if !ok {
+				continue // provider is disabled for this env
+			}
+			modCfg = config.ExpandEnvInMap(resolved.Config)
+		} else {
+			modCfg = config.ExpandEnvInMap(m.Config)
+		}
+		pt, _ := modCfg["provider"].(string)
+		providerDefs[m.Name] = providerDef{provType: pt, provCfg: modCfg}
 	}
 
 	// Group infra specs by iac.provider module name, preserving declaration order.

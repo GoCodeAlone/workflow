@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -134,26 +137,31 @@ modules:
 	}
 }
 
-// TestApplyInfraModules_NoChanges verifies that when the current state already
-// matches the desired specs (identical config hashes), Apply is NOT called.
-func TestApplyInfraModules_NoChanges(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "infra.yaml")
-	if err := os.WriteFile(cfgPath, []byte(`
-modules:
-  - name: prov
-    type: iac.provider
-    config:
-      provider: fake-cloud
-
-  - name: my-db
-    type: infra.database
-    config:
-      provider: prov
-      engine: postgres
-`), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
+// TestApplyWithProvider_NoChanges verifies that when the current state already
+// matches the desired spec (identical config hash), Apply is NOT called.
+// It exercises the no-op branch of applyWithProvider directly by injecting a
+// ResourceState whose ConfigHash matches the hash platform.ComputePlan computes
+// for the spec's Config map.
+func TestApplyWithProvider_NoChanges(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name:   "my-db",
+		Type:   "infra.database",
+		Config: map[string]any{"engine": "postgres"},
 	}
+
+	// Reproduce the hash that platform.ComputePlan computes via configHash:
+	//   sha256(json.Marshal(spec.Config)) in hex.
+	cfgData, err := json.Marshal(spec.Config)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	cfgHash := fmt.Sprintf("%x", sha256.Sum256(cfgData))
+
+	current := []interfaces.ResourceState{{
+		Name:       spec.Name,
+		Type:       spec.Type,
+		ConfigHash: cfgHash,
+	}}
 
 	fake := &applyCapture{}
 	orig := resolveIaCProvider
@@ -162,17 +170,14 @@ modules:
 	}
 	defer func() { resolveIaCProvider = orig }()
 
-	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
-		t.Fatalf("applyInfraModules: %v", err)
+	if err := applyWithProvider(context.Background(), "fake-cloud", nil, []interfaces.ResourceSpec{spec}, current); err != nil {
+		t.Fatalf("applyWithProvider: %v", err)
 	}
 
-	// With no current state there will be 1 create action, so Apply is called.
-	// This sub-test re-runs with a faked "already applied" state to verify no-op.
-	fake.applyCalled = false
-	// (Real no-op testing would require injecting state; this test documents the
-	// Create path and guards that Apply is reached when actions exist.)
-	if !fake.applyCalled {
-		t.Log("no further actions after initial apply — no-op path tested via zero current state scenario")
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.applyCalled {
+		t.Error("provider.Apply should NOT be called when current state matches desired spec")
 	}
 }
 

@@ -839,6 +839,15 @@ func runInfraApply(args []string) error {
 
 	// Dispatch: infra.* modules use the direct IaCProvider path; legacy
 	// platform.* configs fall back to the pipeline runner (pipelines.apply).
+	// Mixing both types in the same config is not supported — fail fast with a
+	// descriptive error rather than silently skipping one class of modules.
+	if hasInfraModules(cfgFile) && hasPlatformModules(cfgFile) {
+		return fmt.Errorf(
+			"config %q mixes infra.* and platform.* module types — "+
+				"use one style per config file, or split into separate configs",
+			cfgFile,
+		)
+	}
 	if hasInfraModules(cfgFile) {
 		if err := applyInfraModules(ctx, cfgFile, envName); err != nil {
 			return err
