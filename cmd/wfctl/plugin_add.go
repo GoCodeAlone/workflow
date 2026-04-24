@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -44,18 +45,25 @@ func runPluginAdd(args []string) error {
 	if err := config.SaveWfctlManifest(*manifestPath, m); err != nil {
 		return fmt.Errorf("save manifest: %w", err)
 	}
-	fmt.Printf("Added %s@%s to wfctl.yaml\n", name, version)
+	if version != "" {
+		fmt.Printf("Added %s@%s to wfctl.yaml\n", name, version)
+	} else {
+		fmt.Printf("Added %s to wfctl.yaml\n", name)
+	}
 
 	// Re-lock to refresh lockfile.
 	return runPluginLockFromManifest(*manifestPath, *lockPath)
 }
 
 // loadOrInitManifest loads an existing wfctl.yaml or returns an empty manifest.
+// Only swallows file-not-found; parse errors and permission errors are returned.
 func loadOrInitManifest(path string) (*config.WfctlManifest, error) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return &config.WfctlManifest{Version: 1}, nil
+	}
 	m, err := config.LoadWfctlManifest(path)
 	if err != nil {
-		// File doesn't exist — start fresh.
-		return &config.WfctlManifest{Version: 1}, nil
+		return nil, fmt.Errorf("load manifest %s: %w", path, err)
 	}
 	return m, nil
 }

@@ -251,6 +251,9 @@ func loadFromFileWithImports(filepath string, seen map[string]bool) (*WorkflowCo
 	// Apply hardened defaults for ci.build.security after all merging is done.
 	cfg.applyBuildDefaults()
 
+	// Emit deprecation warning when inline plugin version/source fields are present.
+	warnIfInlinePluginVersions(&cfg)
+
 	return &cfg, nil
 }
 

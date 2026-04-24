@@ -74,7 +74,11 @@ func TestInstallFromWfctlLockfile_SHA256EmptySkipsVerification(t *testing.T) {
 	}
 }
 
-func TestInstallFromWfctlLockfile_SHA256MatchPasses(t *testing.T) {
+// TestVerifyWfctlLockfileChecksums_EmptyEntryAlwaysPasses verifies that when a
+// plugin's top-level sha256 field is empty, the check is skipped entirely.
+// Alpha.1 lockfiles often have empty sha256 (no real download performed), so
+// this must be a no-op rather than a hard failure.
+func TestVerifyWfctlLockfileChecksums_EmptyEntryAlwaysPasses(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "plugins")
 
@@ -84,14 +88,14 @@ func TestInstallFromWfctlLockfile_SHA256MatchPasses(t *testing.T) {
 		Plugins: map[string]config.WfctlLockPluginEntry{
 			"workflow-plugin-foo": {
 				Version: "v1.0.0",
-				SHA256:  "", // alpha.1: leave empty so we don't need real binaries
+				SHA256:  "", // empty — skip verification; no binary needed
 			},
 		},
 	}
 
-	// With empty sha256, should always pass.
+	// No plugin binary present; should succeed because sha256 is empty.
 	err := verifyWfctlLockfileChecksums(pluginDir, lf)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("expected no error when sha256 is empty, got: %v", err)
 	}
 }

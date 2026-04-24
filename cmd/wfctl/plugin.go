@@ -48,14 +48,16 @@ func pluginUsage() error {
 	fmt.Fprintf(flag.CommandLine.Output(), `Usage: wfctl plugin <subcommand> [options]
 
 Subcommands:
+  add      Add a plugin to wfctl.yaml manifest
+  lock     Regenerate .wfctl-lock.yaml from wfctl.yaml manifest
   init     Scaffold a new plugin project
   docs     Generate documentation for an existing plugin
   test     Run a plugin through its full lifecycle in a test harness
   search   Search the plugin registry
-  install  Install a plugin from the registry
+  install  Install plugins (reads .wfctl-lock.yaml when present)
   list     List installed plugins
   update   Update an installed plugin to its latest version
-  remove   Uninstall a plugin
+  remove   Uninstall a plugin (also removes from manifest + lockfile)
   validate Validate a plugin manifest from the registry or a local file
   info     Show details about an installed plugin
   deps     List dependencies for a plugin

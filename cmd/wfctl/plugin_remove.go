@@ -31,7 +31,7 @@ func removeFromManifestAndLockfile(name, manifestPath, lockPath string) error {
 		if err != nil {
 			return fmt.Errorf("load manifest: %w", err)
 		}
-		filtered := m.Plugins[:0]
+		filtered := make([]config.WfctlPluginEntry, 0, len(m.Plugins))
 		for _, p := range m.Plugins {
 			if p.Name != name {
 				filtered = append(filtered, p)
