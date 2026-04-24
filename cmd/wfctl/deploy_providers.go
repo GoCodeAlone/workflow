@@ -1109,7 +1109,7 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 
 	start := time.Now()
 	var lastMsg string
-	var lastProgress time.Time
+	lastProgress := start // initialise to start so the first heartbeat fires after healthPollProgressInterval
 
 	fmt.Printf("  → health poll: waiting for %q to become healthy (timeout: %s)\n", name, healthPollDefaultTimeout)
 
@@ -1152,12 +1152,19 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 
 		select {
 		case <-pollCtx.Done():
+			// Distinguish parent-cancel (Ctrl-C / pipeline abort) from our own deadline.
+			if errors.Is(pollCtx.Err(), context.Canceled) {
+				return fmt.Errorf("plugin health check %q: cancelled", name)
+			}
 			return healthPollTimeout(ctx, driver, ref, name, lastMsg, start)
 		case <-time.After(interval):
 		}
 
 		// Check again after sleeping (context may have expired during sleep).
 		if pollCtx.Err() != nil {
+			if errors.Is(pollCtx.Err(), context.Canceled) {
+				return fmt.Errorf("plugin health check %q: cancelled", name)
+			}
 			return healthPollTimeout(ctx, driver, ref, name, lastMsg, start)
 		}
 
@@ -1173,12 +1180,14 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 func healthPollTimeout(ctx context.Context, driver interfaces.ResourceDriver, ref interfaces.ResourceRef, name, lastMsg string, start time.Time) error {
 	elapsed := time.Since(start).Round(time.Second)
 
-	baseErr := fmt.Sprintf("plugin health check %q: timed out waiting for healthy after %s", name, elapsed)
+	// Keep the returned error text identical to the pre-v0.18.10 format so
+	// grep-based CI parsers are not broken (observability is additive).
+	baseErr := fmt.Sprintf("plugin health check %q: timed out waiting for healthy", name)
 	if lastMsg != "" {
 		baseErr = fmt.Sprintf("%s; last status: %s", baseErr, lastMsg)
 	}
 
-	// Print structured failure block.
+	// Print structured failure block (elapsed only in the human-readable output).
 	fmt.Fprintf(os.Stderr, "\n❌ Deploy health check timed out for %q after %s\n", name, elapsed)
 	if lastMsg != "" {
 		fmt.Fprintf(os.Stderr, "   Last observed status: %s\n", lastMsg)
