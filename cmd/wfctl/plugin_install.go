@@ -454,7 +454,10 @@ func runPluginRemove(args []string) error {
 	}
 
 	pluginName := fs.Arg(0)
-	pluginDir := filepath.Join(pluginDirVal, pluginName)
+	// Normalize name for filesystem paths: installs use short names (e.g. "digitalocean"),
+	// but the CLI accepts full names too (e.g. "workflow-plugin-digitalocean").
+	fsName := normalizePluginName(pluginName)
+	pluginDir := filepath.Join(pluginDirVal, fsName)
 	binaryInstalled := true
 	if _, err := os.Stat(pluginDir); os.IsNotExist(err) {
 		binaryInstalled = false
@@ -466,7 +469,11 @@ func runPluginRemove(args []string) error {
 		return fmt.Errorf("check manifest: %w", manifestErr)
 	}
 
-	if !binaryInstalled && !inManifest {
+	// Check lockfile as well: covers the legacy case where no manifest exists
+	// but the plugin was recorded in .wfctl-lock.yaml.
+	inLockfile := pluginExistsInLockfile(pluginName, *lockPath)
+
+	if !binaryInstalled && !inManifest && !inLockfile {
 		return fmt.Errorf("plugin %q is not installed", pluginName)
 	}
 
