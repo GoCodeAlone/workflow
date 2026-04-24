@@ -47,6 +47,11 @@ func LoadWfctlLockfile(path string) (*WfctlLockfile, error) {
 
 // SaveWfctlLockfile writes a lockfile to disk with sorted plugin keys for determinism.
 func SaveWfctlLockfile(path string, lf *WfctlLockfile) error {
+	// Default zero GeneratedAt to now so the field is always meaningful.
+	if lf.GeneratedAt.IsZero() {
+		lf.GeneratedAt = time.Now().UTC()
+	}
+
 	// Build a sorted yaml.Node to ensure deterministic key order.
 	root := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 

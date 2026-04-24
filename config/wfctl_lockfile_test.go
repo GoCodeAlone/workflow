@@ -60,7 +60,7 @@ func TestWfctlLockfile_RoundTrip(t *testing.T) {
 
 func TestWfctlLockfile_DeterministicOutput(t *testing.T) {
 	// Two lockfiles with identical content should produce byte-identical YAML.
-	make := func() WfctlLockfile {
+	mkLockfile := func() WfctlLockfile {
 		return WfctlLockfile{
 			Version:     1,
 			GeneratedAt: time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC),
@@ -73,10 +73,10 @@ func TestWfctlLockfile_DeterministicOutput(t *testing.T) {
 	dir := t.TempDir()
 	p1 := filepath.Join(dir, "lock1.yaml")
 	p2 := filepath.Join(dir, "lock2.yaml")
-	if err := SaveWfctlLockfile(p1, func() *WfctlLockfile { l := make(); return &l }()); err != nil {
+	if err := SaveWfctlLockfile(p1, func() *WfctlLockfile { l := mkLockfile(); return &l }()); err != nil {
 		t.Fatal(err)
 	}
-	if err := SaveWfctlLockfile(p2, func() *WfctlLockfile { l := make(); return &l }()); err != nil {
+	if err := SaveWfctlLockfile(p2, func() *WfctlLockfile { l := mkLockfile(); return &l }()); err != nil {
 		t.Fatal(err)
 	}
 	b1, _ := os.ReadFile(p1)

@@ -57,9 +57,12 @@ func runPluginLockFromManifest(manifestPath, lockPath string) error {
 			Version: p.Version,
 			Source:  p.Source,
 		}
-		// Preserve existing sha256/platforms if version matches.
+		// Preserve existing sha256/platforms only when both version AND source match.
+		// A source change means the binary origin changed, so cached checksums are stale.
 		if existing != nil {
-			if prev, ok := existing.Plugins[p.Name]; ok && prev.Version == p.Version {
+			if prev, ok := existing.Plugins[p.Name]; ok &&
+				prev.Version == p.Version &&
+				prev.Source == p.Source {
 				entry.SHA256 = prev.SHA256
 				entry.Platforms = prev.Platforms
 			}

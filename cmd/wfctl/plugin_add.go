@@ -13,11 +13,12 @@ func runPluginAdd(args []string) error {
 	fs := flag.NewFlagSet("plugin add", flag.ContinueOnError)
 	manifestPath := fs.String("manifest", wfctlManifestPath, "Path to wfctl.yaml manifest")
 	lockPath := fs.String("lock-file", wfctlLockPath, "Path to lockfile")
+	sourceFlag := fs.String("source", "", "Plugin source (e.g. github.com/org/repo); optional for registry plugins")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: wfctl plugin add <name>[@version]")
+		return fmt.Errorf("usage: wfctl plugin add <name>[@version] [--source <repo>]")
 	}
 	spec := fs.Args()[0]
 	name, version, _ := strings.Cut(spec, "@")
@@ -30,16 +31,19 @@ func runPluginAdd(args []string) error {
 		return err
 	}
 
-	// Check for duplicate.
+	// Check for duplicate — compare by normalized name so both
+	// "workflow-plugin-foo" and "foo" are treated as the same entry.
+	normName := normalizePluginName(name)
 	for _, p := range m.Plugins {
-		if p.Name == name {
-			return fmt.Errorf("plugin %q already in manifest; use wfctl plugin update to change version", name)
+		if normalizePluginName(p.Name) == normName {
+			return fmt.Errorf("plugin %q already in manifest; use wfctl plugin update to change version", p.Name)
 		}
 	}
 
 	m.Plugins = append(m.Plugins, config.WfctlPluginEntry{
 		Name:    name,
 		Version: version,
+		Source:  *sourceFlag,
 	})
 
 	if err := config.SaveWfctlManifest(*manifestPath, m); err != nil {

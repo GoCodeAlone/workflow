@@ -27,11 +27,13 @@ Subcommands:
   status    Show applied and pending migrations
   diff      Show pending migrations without applying them
   apply     Apply pending migrations
+  plugins   Migrate requires.plugins[] from app.yaml → wfctl.yaml + .wfctl-lock.yaml
 
 Examples:
   wfctl migrate status --db workflow.db
   wfctl migrate diff --db workflow.db
   wfctl migrate apply --db workflow.db
+  wfctl migrate plugins --config workflow.yaml
 
 Options:
 `)

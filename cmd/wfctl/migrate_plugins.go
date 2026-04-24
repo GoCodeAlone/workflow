@@ -9,8 +9,9 @@ import (
 
 // runMigratePlugins migrates requires.plugins[] from app.yaml into wfctl.yaml
 // (manifest) and .wfctl-lock.yaml (lockfile).
-// On --auto, it additionally strips the version/source fields from app.yaml inline
-// plugin entries (leaving just the name as a capability declaration).
+// It is safe to re-run (idempotent): plugins already present in wfctl.yaml are skipped.
+// Stripping the inline fields from app.yaml after migration is a manual step in v0.19.0;
+// automated stripping (--auto) is deferred to v0.20.0.
 func runMigratePlugins(args []string) error {
 	fs := flag.NewFlagSet("migrate plugins", flag.ContinueOnError)
 	cfgPath := fs.String("config", "workflow.yaml", "Path to workflow app config")

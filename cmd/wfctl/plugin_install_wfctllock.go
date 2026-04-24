@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -23,15 +24,28 @@ func installFromWfctlLockfile(pluginDirVal string, lf *config.WfctlLockfile) err
 		return nil
 	}
 
+	// Sort plugin names for deterministic install order.
+	names := make([]string, 0, len(lf.Plugins))
+	for name := range lf.Plugins {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	var failed []string
-	for name, entry := range lf.Plugins {
+	for _, name := range names {
+		entry := lf.Plugins[name]
 		fmt.Fprintf(os.Stderr, "Installing %s@%s...\n", name, entry.Version)
 
+		// Normalize name for filesystem paths — the install layer uses short names
+		// (e.g. "digitalocean") while the manifest/lockfile stores full names
+		// (e.g. "workflow-plugin-digitalocean").
+		fsName := normalizePluginName(name)
 		installed := false
+
 		// If we have platform-specific URL, install from that URL.
 		platKey := currentPlatformKey()
 		if plat, ok := entry.Platforms[platKey]; ok && plat.URL != "" {
-			destDir := filepath.Join(pluginDirVal, name)
+			destDir := filepath.Join(pluginDirVal, fsName)
 			if err := installFromURL(plat.URL, pluginDirVal); err != nil {
 				fmt.Fprintf(os.Stderr, "error installing %s from URL: %v\n", name, err)
 				failed = append(failed, name)
@@ -39,7 +53,7 @@ func installFromWfctlLockfile(pluginDirVal string, lf *config.WfctlLockfile) err
 			}
 			// Verify platform-specific sha256 if present.
 			if plat.SHA256 != "" {
-				binary := filepath.Join(destDir, name)
+				binary := filepath.Join(destDir, fsName)
 				got, err := hashFileSHA256(binary)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "CHECKSUM ERROR for %s: %v\n", name, err)
@@ -70,10 +84,10 @@ func installFromWfctlLockfile(pluginDirVal string, lf *config.WfctlLockfile) err
 			}
 		}
 
-		// Verify top-level binary sha256 if present.
+		// Verify top-level binary sha256 if present (uses normalized fs name).
 		if entry.SHA256 != "" {
-			destDir := filepath.Join(pluginDirVal, name)
-			if verifyErr := verifyInstalledChecksum(destDir, name, entry.SHA256); verifyErr != nil {
+			destDir := filepath.Join(pluginDirVal, fsName)
+			if verifyErr := verifyInstalledChecksum(destDir, fsName, entry.SHA256); verifyErr != nil {
 				fmt.Fprintf(os.Stderr, "CHECKSUM MISMATCH for %s: %v\n", name, verifyErr)
 				_ = os.RemoveAll(destDir)
 				failed = append(failed, name)
@@ -97,8 +111,11 @@ func verifyWfctlLockfileChecksums(pluginDirVal string, lf *config.WfctlLockfile)
 		if entry.SHA256 == "" {
 			continue
 		}
-		destDir := filepath.Join(pluginDirVal, name)
-		if err := verifyInstalledChecksum(destDir, name, entry.SHA256); err != nil {
+		// Normalize name for filesystem path — manifest stores full names,
+		// install layer uses short names (strips "workflow-plugin-" prefix).
+		fsName := normalizePluginName(name)
+		destDir := filepath.Join(pluginDirVal, fsName)
+		if err := verifyInstalledChecksum(destDir, fsName, entry.SHA256); err != nil {
 			mismatches = append(mismatches, fmt.Sprintf("%s: %v", name, err))
 		}
 	}

@@ -461,7 +461,10 @@ func runPluginRemove(args []string) error {
 	}
 
 	// Check if the plugin is in the manifest.
-	inManifest := pluginExistsInManifest(pluginName, *manifestPath)
+	inManifest, manifestErr := pluginExistsInManifest(pluginName, *manifestPath)
+	if manifestErr != nil {
+		return fmt.Errorf("check manifest: %w", manifestErr)
+	}
 
 	if !binaryInstalled && !inManifest {
 		return fmt.Errorf("plugin %q is not installed", pluginName)

@@ -19,9 +19,10 @@ func updateManifestVersion(name, newVersion, manifestPath, lockPath string) erro
 		return fmt.Errorf("load manifest: %w", err)
 	}
 
+	normName := normalizePluginName(name)
 	found := false
 	for i, p := range m.Plugins {
-		if p.Name == name {
+		if p.Name == name || normalizePluginName(p.Name) == normName {
 			m.Plugins[i].Version = newVersion
 			found = true
 			break

@@ -15,6 +15,7 @@ func TestInlinePluginVersion_EmitsDeprecationWarning(t *testing.T) {
 
 	// Capture stderr.
 	old := os.Stderr
+	t.Cleanup(func() { os.Stderr = old })
 	r, w, _ := os.Pipe()
 	os.Stderr = w
 
@@ -45,6 +46,7 @@ func TestInlinePluginNameOnly_NoDeprecationWarning(t *testing.T) {
 	resetInlinePluginDeprecationOnce()
 
 	old := os.Stderr
+	t.Cleanup(func() { os.Stderr = old })
 	r, w, _ := os.Pipe()
 	os.Stderr = w
 
