@@ -556,7 +556,8 @@ func TestRemoteDriver_Troubleshoot_Success(t *testing.T) {
 		},
 	}
 	d := newDriver(si)
-	diags, err := d.Troubleshoot(context.Background(), interfaces.ResourceRef{Name: "x"}, "boom")
+	ref := interfaces.ResourceRef{Name: "bmw-staging", Type: "app_platform", ProviderID: "abc-123"}
+	diags, err := d.Troubleshoot(context.Background(), ref, "boom")
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
@@ -568,6 +569,24 @@ func TestRemoteDriver_Troubleshoot_Success(t *testing.T) {
 	}
 	if diags[0].Detail != "log tail" {
 		t.Errorf("Detail: got %q", diags[0].Detail)
+	}
+
+	// Assert args are flat primitives — structpb.NewStruct (gRPC transport)
+	// cannot encode Go structs; ref must be decomposed to scalar fields.
+	if si.args["ref_name"] != ref.Name {
+		t.Errorf("args[ref_name] = %q, want %q", si.args["ref_name"], ref.Name)
+	}
+	if si.args["ref_type"] != ref.Type {
+		t.Errorf("args[ref_type] = %q, want %q", si.args["ref_type"], ref.Type)
+	}
+	if si.args["ref_provider_id"] != ref.ProviderID {
+		t.Errorf("args[ref_provider_id] = %q, want %q", si.args["ref_provider_id"], ref.ProviderID)
+	}
+	if si.args["failure_msg"] != "boom" {
+		t.Errorf("args[failure_msg] = %q, want %q", si.args["failure_msg"], "boom")
+	}
+	if _, hasOldRef := si.args["ref"]; hasOldRef {
+		t.Error("args must not contain a nested 'ref' struct — structpb cannot encode it")
 	}
 }
 

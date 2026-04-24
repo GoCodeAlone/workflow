@@ -11,14 +11,27 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
-// applyFailProvider is an IaCProvider that always fails Apply and implements
-// Troubleshooter so we can verify diagnostics are surfaced on failure.
+// troubleshootingRD satisfies interfaces.ResourceDriver via embedding and adds
+// a Troubleshoot method. Used as the return value of ResourceDriver() so the
+// infra_apply Bug 2 path is actually exercised.
+type troubleshootingRD struct {
+	interfaces.ResourceDriver // embedded — non-overridden methods panic (not called in tests)
+	diags                     []interfaces.Diagnostic
+	tsErr                     error
+	tsCalls                   *int
+}
+
+func (d *troubleshootingRD) Troubleshoot(_ context.Context, _ interfaces.ResourceRef, _ string) ([]interfaces.Diagnostic, error) {
+	*d.tsCalls++
+	return d.diags, d.tsErr
+}
+
+// applyFailProvider is an IaCProvider that always fails Apply and returns a
+// Troubleshooter-capable ResourceDriver via ResourceDriver().
 type applyFailProvider struct {
 	applyCapture
 	applyErr error
-	diags    []interfaces.Diagnostic
-	tsErr    error
-	tsCalls  int
+	tsDriver *troubleshootingRD // nil → ResourceDriver returns (nil, nil)
 }
 
 func (p *applyFailProvider) Apply(_ context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
@@ -29,13 +42,14 @@ func (p *applyFailProvider) Apply(_ context.Context, plan *interfaces.IaCPlan) (
 	return nil, p.applyErr
 }
 
-func (p *applyFailProvider) Troubleshoot(_ context.Context, _ interfaces.ResourceRef, _ string) ([]interfaces.Diagnostic, error) {
-	p.tsCalls++
-	return p.diags, p.tsErr
+func (p *applyFailProvider) ResourceDriver(_ string) (interfaces.ResourceDriver, error) {
+	if p.tsDriver != nil {
+		return p.tsDriver, nil
+	}
+	return nil, nil
 }
 
-// plainFailProvider is an IaCProvider that always fails Apply but does NOT
-// implement Troubleshooter. Used to verify the non-troubleshooter path is a no-op.
+// plainFailProvider fails Apply and returns a ResourceDriver with no Troubleshoot.
 type plainFailProvider struct {
 	applyCapture
 	applyErr error
@@ -55,16 +69,18 @@ func TestInfraApply_EmitsDiagnosticsOnFailure(t *testing.T) {
 	diags := []interfaces.Diagnostic{
 		{ID: "dep-abc", Phase: "pre_deploy", Cause: "migration failed", At: mustTime("2026-04-24T00:00:00Z")},
 	}
+	tsCalls := 0
 	provider := &applyFailProvider{
 		applyErr: errors.New("API error"),
-		diags:    diags,
+		tsDriver: &troubleshootingRD{diags: diags, tsCalls: &tsCalls},
 	}
 
 	infraApplyTroubleshootTimeout = 5 * time.Second
 	defer func() { infraApplyTroubleshootTimeout = 30 * time.Second }()
 
-	var diagBuf bytes.Buffer
+	// spec.Type must be non-empty so ref.Type is set and ResourceDriver is called.
 	specs := []interfaces.ResourceSpec{{Name: "bmw-staging", Type: "app_platform"}}
+	var diagBuf bytes.Buffer
 	err := applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf)
 	if err == nil {
 		t.Fatal("expected error from failing apply")
@@ -72,8 +88,8 @@ func TestInfraApply_EmitsDiagnosticsOnFailure(t *testing.T) {
 	if !strings.Contains(err.Error(), "API error") {
 		t.Errorf("original error not preserved: %v", err)
 	}
-	if provider.tsCalls != 1 {
-		t.Errorf("Troubleshoot not called: tsCalls=%d", provider.tsCalls)
+	if tsCalls != 1 {
+		t.Errorf("Troubleshoot not called via ResourceDriver: tsCalls=%d", tsCalls)
 	}
 	out := diagBuf.String()
 	if !strings.Contains(out, "::group::") {
@@ -85,10 +101,8 @@ func TestInfraApply_EmitsDiagnosticsOnFailure(t *testing.T) {
 }
 
 func TestInfraApply_NonTroubleshooterNocrash(t *testing.T) {
-	// plainFailProvider does not implement Troubleshooter — should be a silent no-op.
-	provider := &plainFailProvider{
-		applyErr: errors.New("boom"),
-	}
+	// plainFailProvider.ResourceDriver returns (nil, nil); nil driver → no-op.
+	provider := &plainFailProvider{applyErr: errors.New("boom")}
 	var diagBuf bytes.Buffer
 	specs := []interfaces.ResourceSpec{{Name: "x", Type: "app_platform"}}
 	err := applyWithProviderAndStore(context.Background(), provider, "digitalocean", specs, nil, nil, &diagBuf)

@@ -689,9 +689,13 @@ func (d *remoteResourceDriver) SensitiveKeys() []string {
 // Returns (nil, nil) silently when the plugin returns Unimplemented so
 // the caller doesn't need to probe for capability — absence is a valid answer.
 func (d *remoteResourceDriver) Troubleshoot(ctx context.Context, ref interfaces.ResourceRef, failureMsg string) ([]interfaces.Diagnostic, error) {
+	// Pass ref as flat primitives — structpb.NewStruct (the gRPC transport)
+	// cannot encode arbitrary Go structs; each field must be a scalar.
 	res, err := d.invoker.InvokeService("ResourceDriver.Troubleshoot", map[string]any{
-		"ref":         ref,
-		"failure_msg": failureMsg,
+		"ref_name":        ref.Name,
+		"ref_provider_id": ref.ProviderID,
+		"ref_type":        ref.Type,
+		"failure_msg":     failureMsg,
 	})
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.Unimplemented {
