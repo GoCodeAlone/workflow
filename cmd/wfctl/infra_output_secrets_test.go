@@ -109,7 +109,7 @@ func TestBuildStateOutputsMap_Empty(t *testing.T) {
 
 func TestSyncInfraOutputSecrets_NilConfig(t *testing.T) {
 	p := newSimpleProvider()
-	err := syncInfraOutputSecrets(context.Background(), nil, p, sampleStates())
+	err := syncInfraOutputSecrets(context.Background(), nil, p, sampleStates(), nil, "")
 	if err != nil {
 		t.Fatalf("nil config should be no-op: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestSyncInfraOutputSecrets_NoInfraOutputGens(t *testing.T) {
 			{Key: "JWT_SECRET", Type: "random_hex", Length: 32},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates())
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "")
 	if err != nil {
 		t.Fatalf("no infra_output generators should be no-op: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestSyncInfraOutputSecrets_WritesSecret(t *testing.T) {
 			{Key: "STAGING_DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates())
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "")
 	if err != nil {
 		t.Fatalf("syncInfraOutputSecrets: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestSyncInfraOutputSecrets_WritesMultiple(t *testing.T) {
 			{Key: "REDIS_URL", Type: "infra_output", Source: "bmw-cache.url"},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates())
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "")
 	if err != nil {
 		t.Fatalf("syncInfraOutputSecrets: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestSyncInfraOutputSecrets_SkipsExisting(t *testing.T) {
 			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates())
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "")
 	if err != nil {
 		t.Fatalf("syncInfraOutputSecrets: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestSyncInfraOutputSecrets_WriteOnlyProviderSkips(t *testing.T) {
 			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates())
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "")
 	if err != nil {
 		t.Fatalf("syncInfraOutputSecrets: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestSyncInfraOutputSecrets_WriteOnlyProviderWrites(t *testing.T) {
 			{Key: "DATABASE_URL", Type: "infra_output", Source: "bmw-database.uri"},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates())
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "")
 	if err != nil {
 		t.Fatalf("syncInfraOutputSecrets: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestSyncInfraOutputSecrets_MissingModule(t *testing.T) {
 			{Key: "X", Type: "infra_output", Source: "nonexistent.uri"},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates())
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, sampleStates(), nil, "")
 	if err == nil {
 		t.Fatal("expected error for missing module in state")
 	}
@@ -246,7 +246,7 @@ func TestSyncInfraOutputSecrets_EmptyStates(t *testing.T) {
 			{Key: "X", Type: "infra_output", Source: "bmw-database.uri"},
 		},
 	}
-	err := syncInfraOutputSecrets(context.Background(), cfg, p, nil)
+	err := syncInfraOutputSecrets(context.Background(), cfg, p, nil, nil, "")
 	if err == nil {
 		t.Fatal("expected error when state has no matching module")
 	}
