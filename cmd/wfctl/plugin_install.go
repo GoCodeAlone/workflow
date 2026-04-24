@@ -426,6 +426,8 @@ func runPluginRemove(args []string) error {
 	var pluginDirVal string
 	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
 	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
+	manifestPath := fs.String("manifest", wfctlManifestPath, "Path to wfctl.yaml manifest")
+	lockPath := fs.String("lock-file", wfctlLockPath, "Path to lockfile")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin remove [options] <name>\n\nUninstall a plugin.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -439,9 +441,17 @@ func runPluginRemove(args []string) error {
 	}
 
 	pluginName := fs.Arg(0)
+
+	// Remove from manifest + lockfile when those files exist.
+	if err := removeFromManifestAndLockfile(pluginName, *manifestPath, *lockPath); err != nil {
+		return err
+	}
+
 	pluginDir := filepath.Join(pluginDirVal, pluginName)
 	if _, err := os.Stat(pluginDir); os.IsNotExist(err) {
-		return fmt.Errorf("plugin %q is not installed", pluginName)
+		// Binary wasn't installed (manifest-only removal is valid).
+		fmt.Printf("Removed plugin %q from manifest\n", pluginName)
+		return nil
 	}
 	if err := os.RemoveAll(pluginDir); err != nil {
 		return fmt.Errorf("remove plugin %q: %w", pluginName, err)
