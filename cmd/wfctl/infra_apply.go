@@ -141,10 +141,10 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	}
 
 	// Load current state once; each provider call filters to its own resources.
-	current := loadCurrentState(cfgFile)
+	current := loadCurrentState(cfgFile, envName)
 
 	// Resolve the state store once; failure is non-fatal (state is best-effort).
-	store, storeErr := resolveStateStore(cfgFile)
+	store, storeErr := resolveStateStore(cfgFile, envName)
 	if storeErr != nil {
 		fmt.Printf("WARNING: cannot open state store: %v — state will not be persisted\n", storeErr)
 		store = &noopStateStore{}

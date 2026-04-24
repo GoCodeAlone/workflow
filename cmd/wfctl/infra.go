@@ -155,7 +155,7 @@ func runInfraPlan(args []string) error {
 		return err
 	}
 
-	current := loadCurrentState(cfgFile)
+	current := loadCurrentState(cfgFile, envName)
 
 	plan, err := platform.ComputePlan(desired, current)
 	if err != nil {
@@ -340,8 +340,10 @@ func isContainerType(t string) bool {
 // loadCurrentState loads ResourceStates from the configured iac.state backend.
 // Returns nil on any error (first run or unconfigured backend). Uses
 // resolveStateStore so that remote backends (Spaces, S3, etc.) are supported.
-func loadCurrentState(cfgFile string) []interfaces.ResourceState {
-	store, err := resolveStateStore(cfgFile)
+// envName is forwarded to resolveStateStore so per-env backend config
+// (e.g. region, prefix) is applied when reading state.
+func loadCurrentState(cfgFile, envName string) []interfaces.ResourceState {
+	store, err := resolveStateStore(cfgFile, envName)
 	if err != nil {
 		return nil
 	}
@@ -822,7 +824,7 @@ func runInfraApply(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve secrets provider for infra_output sync: %w", err)
 	}
-	states := loadCurrentState(cfgFile)
+	states := loadCurrentState(cfgFile, envName)
 	return syncInfraOutputSecrets(ctx, secretsCfg, secretsProvider, states)
 }
 
