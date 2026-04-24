@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // stubInvoker is a test double for remoteServiceInvoker that records calls
@@ -536,6 +538,57 @@ func TestRemoteDriver_HealthCheck_WrapsAllSentinels(t *testing.T) {
 		if !errors.Is(err, tc.sentinel) {
 			t.Errorf("HealthCheck %q: expected %v, got %v", tc.msg, tc.sentinel, err)
 		}
+	}
+}
+
+// ── Troubleshoot ──────────────────────────────────────────────────────────────
+
+func TestRemoteDriver_Troubleshoot_Success(t *testing.T) {
+	si := &stubInvoker{
+		resp: map[string]any{
+			"diagnostics": []any{
+				map[string]any{
+					"id": "dep-1", "phase": "pre_deploy",
+					"cause": "exit 1", "at": "2026-04-24T00:00:00Z",
+					"detail": "log tail",
+				},
+			},
+		},
+	}
+	d := newDriver(si)
+	diags, err := d.Troubleshoot(context.Background(), interfaces.ResourceRef{Name: "x"}, "boom")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(diags) != 1 || diags[0].Cause != "exit 1" {
+		t.Fatalf("unexpected diags: %+v", diags)
+	}
+	if si.method != "ResourceDriver.Troubleshoot" {
+		t.Errorf("wrong svc: %s", si.method)
+	}
+	if diags[0].Detail != "log tail" {
+		t.Errorf("Detail: got %q", diags[0].Detail)
+	}
+}
+
+func TestRemoteDriver_Troubleshoot_UnimplementedSilent(t *testing.T) {
+	si := &stubInvoker{err: status.Error(codes.Unimplemented, "method not implemented")}
+	d := newDriver(si)
+	diags, err := d.Troubleshoot(context.Background(), interfaces.ResourceRef{Name: "x"}, "boom")
+	if err != nil {
+		t.Fatalf("Unimplemented should not surface: %v", err)
+	}
+	if diags != nil {
+		t.Fatalf("expected nil diags, got %+v", diags)
+	}
+}
+
+func TestRemoteDriver_Troubleshoot_OtherErrorSurfaces(t *testing.T) {
+	si := &stubInvoker{err: errors.New("network oops")}
+	d := newDriver(si)
+	_, err := d.Troubleshoot(context.Background(), interfaces.ResourceRef{Name: "x"}, "boom")
+	if err == nil {
+		t.Fatal("expected error to surface")
 	}
 }
 

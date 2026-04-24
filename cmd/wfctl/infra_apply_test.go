@@ -194,7 +194,7 @@ func TestApplyWithProvider_NoChanges(t *testing.T) {
 	}}
 
 	fake := &applyCapture{}
-	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", []interfaces.ResourceSpec{spec}, current, nil); err != nil {
+	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", []interfaces.ResourceSpec{spec}, current, nil, io.Discard); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 
@@ -223,7 +223,7 @@ func TestApplyWithProvider_DeletesRemovedResource(t *testing.T) {
 
 	fake := &applyCapture{}
 	store := &fakeStateStore{}
-	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", specs, current, store); err != nil {
+	if err := applyWithProviderAndStore(context.Background(), fake, "fake-cloud", specs, current, store, io.Discard); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 
@@ -323,7 +323,7 @@ func TestApplyWithProvider_SavesStateForSuccessfulResources(t *testing.T) {
 	}
 	store := &fakeStateStore{}
 
-	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -366,7 +366,7 @@ func TestApplyWithProvider_SavesStateOnPartialFailure(t *testing.T) {
 	}
 	store := &fakeStateStore{}
 
-	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store)
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard)
 	if err == nil {
 		t.Fatal("expected error on partial failure, got nil")
 	}
@@ -393,7 +393,7 @@ func TestApplyWithProvider_StoreSaveFailureIsNonFatal(t *testing.T) {
 	store := &fakeStateStore{saveErr: fmt.Errorf("disk full")}
 
 	// Should succeed even though SaveResource errors.
-	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard); err != nil {
 		t.Fatalf("expected no error despite save failure, got: %v", err)
 	}
 }
@@ -509,7 +509,7 @@ func TestApplyInfraModules_CallsResolveSizing_ForEachSpec(t *testing.T) {
 		},
 	}
 
-	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, nil); err != nil {
+	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, nil, io.Discard); err != nil {
 		t.Fatalf("applyWithProviderAndStore: %v", err)
 	}
 

@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.10] - 2026-04-24
+
+### Added
+
+- **`interfaces.Troubleshooter`** optional interface on `ResourceDriver`. Drivers implementing it
+  return structured `[]Diagnostic` (phase, cause, timestamp, log-tail detail) that wfctl renders
+  in CI output on deploy/apply failure. No changes required for drivers that don't implement it;
+  `codes.Unimplemented` is swallowed silently.
+- **`cmd/wfctl/ci_output.go`**: CI-provider detection (GitHub Actions, GitLab CI, Jenkins, CircleCI)
+  with grouped output via provider-native markers (`::group::`, `section_start`, dashed separators).
+- **`cmd/wfctl/ci_output_summary.go`**: Markdown step-summary writer for
+  `$GITHUB_STEP_SUMMARY` (and equivalents) with resource, root cause, phase timings,
+  and collapsible per-diagnostic log tails.
+
+### Changed
+
+- `wfctl ci run --phase deploy` and `wfctl infra apply` automatically invoke
+  `Troubleshooter.Troubleshoot` on any terminal failure (health-check timeout or driver
+  error), render diagnostics, and write the step-summary. Original exit codes and error
+  messages are preserved (observability is additive).
+
+### Not yet
+
+- Generic `IaCProvider.StreamLogs` for real-time log display during builds — deferred to
+  v0.19.0 alongside plugin-manifest split (#42) and provider-agnostic CI summary (#63).
+- AWS, GCP, Azure, tofu Troubleshoot implementations — DO only in v0.7.8; others no-op.
+
 ## [0.18.9] - 2026-04-24
 
 ### Fixed

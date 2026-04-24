@@ -20,6 +20,8 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/plugin/external"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // DeployConfig holds all parameters needed to execute a deployment.
@@ -683,6 +685,48 @@ func (d *remoteResourceDriver) SensitiveKeys() []string {
 	return keys
 }
 
+// Troubleshoot calls the plugin's optional Troubleshooter.Troubleshoot.
+// Returns (nil, nil) silently when the plugin returns Unimplemented so
+// the caller doesn't need to probe for capability — absence is a valid answer.
+func (d *remoteResourceDriver) Troubleshoot(ctx context.Context, ref interfaces.ResourceRef, failureMsg string) ([]interfaces.Diagnostic, error) {
+	res, err := d.invoker.InvokeService("ResourceDriver.Troubleshoot", map[string]any{
+		"ref":         ref,
+		"failure_msg": failureMsg,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.Unimplemented {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("resource driver Troubleshoot: %w", err)
+	}
+	raw, _ := res["diagnostics"].([]any)
+	out := make([]interfaces.Diagnostic, 0, len(raw))
+	for _, r := range raw {
+		m, _ := r.(map[string]any)
+		diag := interfaces.Diagnostic{
+			ID:     stringVal(m, "id"),
+			Phase:  stringVal(m, "phase"),
+			Cause:  stringVal(m, "cause"),
+			Detail: stringVal(m, "detail"),
+		}
+		if s := stringVal(m, "at"); s != "" {
+			if t, perr := time.Parse(time.RFC3339, s); perr == nil {
+				diag.At = t
+			}
+		}
+		out = append(out, diag)
+	}
+	return out, nil
+}
+
+// stringVal returns a string field from a map or "" if missing/wrong type.
+func stringVal(m map[string]any, k string) string {
+	if v, ok := m[k].(string); ok {
+		return v
+	}
+	return ""
+}
+
 func stringFromMap(m map[string]any, key string) string {
 	v, _ := m[key].(string)
 	return v
@@ -1046,9 +1090,18 @@ func (p *pluginDeployProvider) HealthCheck(ctx context.Context, cfg DeployConfig
 	return nil
 }
 
+// healthPollProgressInterval is how often a "still waiting" heartbeat is printed
+// when no new status message has arrived.
+var healthPollProgressInterval = 30 * time.Second
+
 // pollUntilHealthy polls driver.HealthCheck until Healthy=true, context cancels,
 // or the default timeout elapses.  ErrTransient/ErrRateLimited are treated as
 // "keep polling"; any other error fails fast.
+//
+// Progress lines are emitted on every status change and at least every
+// healthPollProgressInterval so the user can see the deploy is still running.
+// On timeout, if the driver implements interfaces.Troubleshooter, recent
+// provider-side events are fetched and printed in a structured failure block.
 func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref interfaces.ResourceRef, name string) error {
 	deadline := time.Now().Add(healthPollDefaultTimeout)
 	pollCtx, cancel := context.WithDeadline(ctx, deadline)
@@ -1056,6 +1109,20 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 
 	start := time.Now()
 	var lastMsg string
+	lastProgress := start // initialise to start so the first heartbeat fires after healthPollProgressInterval
+
+	fmt.Printf("  → health poll: waiting for %q to become healthy (timeout: %s)\n", name, healthPollDefaultTimeout)
+
+	emitProgress := func(msg string) {
+		elapsed := time.Since(start).Round(time.Second)
+		ts := time.Now().Format("15:04:05")
+		if msg != "" {
+			fmt.Printf("  [%s] health poll %q: %s (%s elapsed)\n", ts, name, msg, elapsed)
+		} else {
+			fmt.Printf("  [%s] health poll %q: still waiting (%s elapsed)\n", ts, name, elapsed)
+		}
+		lastProgress = time.Now()
+	}
 
 	for {
 		result, hcErr := driver.HealthCheck(pollCtx, ref)
@@ -1067,9 +1134,14 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 			}
 			log.Printf("plugin health check %q: transient error, continuing poll: %v", name, hcErr)
 		case result.Healthy:
+			elapsed := time.Since(start).Round(time.Second)
+			fmt.Printf("  [%s] health poll %q: ✓ healthy (%s)\n", time.Now().Format("15:04:05"), name, elapsed)
 			return nil
 		default:
-			lastMsg = result.Message
+			if result.Message != lastMsg {
+				lastMsg = result.Message
+				emitProgress(lastMsg)
+			}
 		}
 
 		// Choose poll interval based on elapsed time.
@@ -1080,21 +1152,88 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 
 		select {
 		case <-pollCtx.Done():
-			if lastMsg != "" {
-				return fmt.Errorf("plugin health check %q: timed out waiting for healthy; last status: %s", name, lastMsg)
+			// Distinguish parent-cancel (Ctrl-C / pipeline abort) from our own deadline.
+			if errors.Is(pollCtx.Err(), context.Canceled) {
+				return fmt.Errorf("plugin health check %q: cancelled", name)
 			}
-			return fmt.Errorf("plugin health check %q: timed out waiting for healthy", name)
+			return healthPollTimeout(ctx, driver, ref, name, lastMsg, start)
 		case <-time.After(interval):
 		}
 
 		// Check again after sleeping (context may have expired during sleep).
 		if pollCtx.Err() != nil {
-			if lastMsg != "" {
-				return fmt.Errorf("plugin health check %q: timed out waiting for healthy; last status: %s", name, lastMsg)
+			if errors.Is(pollCtx.Err(), context.Canceled) {
+				return fmt.Errorf("plugin health check %q: cancelled", name)
 			}
-			return fmt.Errorf("plugin health check %q: timed out waiting for healthy", name)
+			return healthPollTimeout(ctx, driver, ref, name, lastMsg, start)
+		}
+
+		// Emit a heartbeat if nothing has been logged recently.
+		if time.Since(lastProgress) >= healthPollProgressInterval {
+			emitProgress(lastMsg)
 		}
 	}
+}
+
+// healthPollTimeout builds the timeout error, emits a structured failure block,
+// and auto-troubleshoots via the driver's Troubleshooter (if any) before returning.
+func healthPollTimeout(ctx context.Context, driver interfaces.ResourceDriver, ref interfaces.ResourceRef, name, lastMsg string, start time.Time) error {
+	elapsed := time.Since(start).Round(time.Second)
+
+	// Keep the returned error text identical to the pre-v0.18.10 format so
+	// grep-based CI parsers are not broken (observability is additive).
+	baseErr := fmt.Sprintf("plugin health check %q: timed out waiting for healthy", name)
+	if lastMsg != "" {
+		baseErr = fmt.Sprintf("%s; last status: %s", baseErr, lastMsg)
+	}
+
+	// Print structured failure block (elapsed only in the human-readable output).
+	fmt.Fprintf(os.Stderr, "\n❌ Deploy health check timed out for %q after %s\n", name, elapsed)
+	if lastMsg != "" {
+		fmt.Fprintf(os.Stderr, "   Last observed status: %s\n", lastMsg)
+	}
+	fmt.Fprintln(os.Stderr)
+
+	em := detectCIProvider()
+	troubleshootAfterFailure(ctx, os.Stderr, driver, ref, errors.New(baseErr), 30*time.Second, em)
+
+	return errors.New(baseErr)
+}
+
+// emitDiagnostics renders diagnostics into a CI group block on w.
+// No-op when diags is empty.
+func emitDiagnostics(w io.Writer, resource string, diags []interfaces.Diagnostic, em CIGroupEmitter) {
+	if len(diags) == 0 {
+		return
+	}
+	em.GroupStart(w, fmt.Sprintf("Troubleshoot: %s", resource))
+	for _, d := range diags {
+		fmt.Fprintf(w, "  [%s] %s — %s (at %s)\n", d.Phase, d.ID, d.Cause, d.At.Format(time.RFC3339))
+		if d.Detail != "" {
+			for _, line := range strings.Split(strings.TrimRight(d.Detail, "\n"), "\n") {
+				fmt.Fprintf(w, "    %s\n", line)
+			}
+		}
+	}
+	em.GroupEnd(w)
+}
+
+// troubleshootAfterFailure probes driver for Troubleshooter, calls it with a bounded
+// timeout, and renders diagnostics via the provided emitter. All errors are swallowed —
+// observability is additive; it never masks the original failure.
+func troubleshootAfterFailure(ctx context.Context, w io.Writer, driver interface{}, ref interfaces.ResourceRef, origErr error, timeout time.Duration, em CIGroupEmitter) {
+	ts, ok := driver.(interfaces.Troubleshooter)
+	if !ok {
+		return
+	}
+	tsCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	diags, err := ts.Troubleshoot(tsCtx, ref, origErr.Error())
+	if err != nil {
+		log.Printf("troubleshoot: %v (ignored)", err)
+		return
+	}
+	emitDiagnostics(w, ref.Name, diags, em)
 }
 
 // ── kubernetes provider ───────────────────────────────────────────────────────
