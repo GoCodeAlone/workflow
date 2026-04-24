@@ -20,6 +20,8 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/plugin/external"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // DeployConfig holds all parameters needed to execute a deployment.
@@ -681,6 +683,48 @@ func (d *remoteResourceDriver) SensitiveKeys() []string {
 		}
 	}
 	return keys
+}
+
+// Troubleshoot calls the plugin's optional Troubleshooter.Troubleshoot.
+// Returns (nil, nil) silently when the plugin returns Unimplemented so
+// the caller doesn't need to probe for capability — absence is a valid answer.
+func (d *remoteResourceDriver) Troubleshoot(ctx context.Context, ref interfaces.ResourceRef, failureMsg string) ([]interfaces.Diagnostic, error) {
+	res, err := d.invoker.InvokeService("ResourceDriver.Troubleshoot", map[string]any{
+		"ref":         ref,
+		"failure_msg": failureMsg,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.Unimplemented {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("resource driver Troubleshoot: %w", err)
+	}
+	raw, _ := res["diagnostics"].([]any)
+	out := make([]interfaces.Diagnostic, 0, len(raw))
+	for _, r := range raw {
+		m, _ := r.(map[string]any)
+		diag := interfaces.Diagnostic{
+			ID:     stringVal(m, "id"),
+			Phase:  stringVal(m, "phase"),
+			Cause:  stringVal(m, "cause"),
+			Detail: stringVal(m, "detail"),
+		}
+		if s := stringVal(m, "at"); s != "" {
+			if t, perr := time.Parse(time.RFC3339, s); perr == nil {
+				diag.At = t
+			}
+		}
+		out = append(out, diag)
+	}
+	return out, nil
+}
+
+// stringVal returns a string field from a map or "" if missing/wrong type.
+func stringVal(m map[string]any, k string) string {
+	if v, ok := m[k].(string); ok {
+		return v
+	}
+	return ""
 }
 
 func stringFromMap(m map[string]any, key string) string {
