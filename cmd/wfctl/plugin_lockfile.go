@@ -89,7 +89,7 @@ func loadPluginLockfile(path string) (*PluginLockfile, error) {
 func installFromLockfile(pluginDir, cfgPath string) error {
 	// Try new WfctlLockfile format first.
 	if newLF, err := config.LoadWfctlLockfile(wfctlLockPath); err == nil && newLF.Version > 0 {
-		return installFromWfctlLockfile(pluginDir, newLF)
+		return installFromWfctlLockfile(pluginDir, wfctlLockPath, newLF)
 	}
 
 	// Legacy path.

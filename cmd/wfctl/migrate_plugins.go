@@ -46,15 +46,16 @@ Options:
 		return err
 	}
 
-	// Build set of names already in manifest to avoid duplicates.
+	// Build set of normalized names already in manifest to avoid duplicates.
+	// Normalize both sides so "foo" and "workflow-plugin-foo" are treated as the same plugin.
 	existing := make(map[string]bool, len(m.Plugins))
 	for _, p := range m.Plugins {
-		existing[p.Name] = true
+		existing[normalizePluginName(p.Name)] = true
 	}
 
 	added := 0
 	for _, req := range cfg.Requires.Plugins {
-		if existing[req.Name] {
+		if existing[normalizePluginName(req.Name)] {
 			continue
 		}
 		entry := config.WfctlPluginEntry{
@@ -66,7 +67,7 @@ Options:
 			entry.Auth = &config.WfctlPluginAuth{Env: req.Auth.Env}
 		}
 		m.Plugins = append(m.Plugins, entry)
-		existing[req.Name] = true
+		existing[normalizePluginName(req.Name)] = true
 		added++
 	}
 
