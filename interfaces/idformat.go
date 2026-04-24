@@ -33,11 +33,11 @@ func validateUUID(s string) bool {
 	if s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
 		return false
 	}
-	for i, c := range s {
+	for i := 0; i < len(s); i++ {
 		if i == 8 || i == 13 || i == 18 || i == 23 {
 			continue
 		}
-		if !isHex(byte(c)) {
+		if !isHex(s[i]) {
 			return false
 		}
 	}
@@ -78,7 +78,7 @@ func validateDomainName(s string) bool {
 		}
 		for i := 0; i < len(label); i++ {
 			c := label[i]
-			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-') {
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' {
 				return false
 			}
 		}

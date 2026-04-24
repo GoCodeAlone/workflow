@@ -13,7 +13,8 @@ import (
 // validation is soft-warn (not fail): the driver may have a self-heal
 // path that recovers from stale state.
 func validateInputProviderIDs(provider interfaces.IaCProvider, plan *interfaces.IaCPlan) {
-	for _, act := range plan.Actions {
+	for i := range plan.Actions {
+		act := &plan.Actions[i]
 		if act.Action != "update" && act.Action != "delete" {
 			continue
 		}
@@ -51,7 +52,8 @@ func validateInputProviderIDs(provider interfaces.IaCProvider, plan *interfaces.
 func validateOutputProviderID(provider interfaces.IaCProvider, providerType string, r *interfaces.ResourceOutput) error {
 	rd, err := provider.ResourceDriver(r.Type)
 	if err != nil {
-		return nil // cannot probe; let today's behavior apply
+		log.Printf("warn: wfctl: cannot probe ResourceDriver for validation of %s %q: %v", r.Type, r.Name, err)
+		return nil
 	}
 	v, ok := rd.(interfaces.ProviderIDValidator)
 	if !ok {
