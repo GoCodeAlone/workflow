@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -21,6 +22,9 @@ const wfctlLockPath = ".wfctl-lock.yaml"
 // wfctlYAMLPath is kept for backward-compat reads and for the project config
 // (git connect, deploy defaults). It is no longer used as the lockfile write target.
 const wfctlYAMLPath = ".wfctl.yaml"
+
+// wfctlManifestPath is the canonical path for the human-editable plugin manifest.
+const wfctlManifestPath = "wfctl.yaml"
 
 // PluginLockEntry records a pinned plugin version in the lockfile.
 type PluginLockEntry struct {
@@ -78,10 +82,17 @@ func loadPluginLockfile(path string) (*PluginLockfile, error) {
 	return lf, nil
 }
 
-// installFromLockfile reads .wfctl-lock.yaml (with .wfctl.yaml fallback) and
-// installs all plugins in the plugins section. If no lockfile is found, it
-// prints a helpful message.
+// installFromLockfile reads .wfctl-lock.yaml and installs all plugins.
+// If the lockfile is in the new config.WfctlLockfile format (has version field),
+// it uses installFromWfctlLockfile which supports platform URLs and sha256 verification.
+// Otherwise it falls back to the legacy PluginLockfile behavior.
 func installFromLockfile(pluginDir, cfgPath string) error {
+	// Try new WfctlLockfile format first.
+	if newLF, err := config.LoadWfctlLockfile(wfctlLockPath); err == nil && newLF.Version > 0 {
+		return installFromWfctlLockfile(pluginDir, wfctlLockPath, newLF)
+	}
+
+	// Legacy path.
 	lf, err := loadPluginLockfile(wfctlLockPath)
 	if err != nil {
 		return fmt.Errorf("load lockfile: %w", err)
