@@ -1168,8 +1168,8 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 	}
 }
 
-// healthPollTimeout builds the timeout error and auto-troubleshoots via the
-// driver's Troubleshooter implementation (if any) before returning.
+// healthPollTimeout builds the timeout error, emits a structured failure block,
+// and auto-troubleshoots via the driver's Troubleshooter (if any) before returning.
 func healthPollTimeout(ctx context.Context, driver interfaces.ResourceDriver, ref interfaces.ResourceRef, name, lastMsg string, start time.Time) error {
 	elapsed := time.Since(start).Round(time.Second)
 
@@ -1179,35 +1179,52 @@ func healthPollTimeout(ctx context.Context, driver interfaces.ResourceDriver, re
 	}
 
 	// Print structured failure block.
-	fmt.Printf("\n❌ Deploy health check timed out for %q after %s\n", name, elapsed)
+	fmt.Fprintf(os.Stderr, "\n❌ Deploy health check timed out for %q after %s\n", name, elapsed)
 	if lastMsg != "" {
-		fmt.Printf("   Last observed status: %s\n", lastMsg)
+		fmt.Fprintf(os.Stderr, "   Last observed status: %s\n", lastMsg)
 	}
+	fmt.Fprintln(os.Stderr)
 
-	// Auto-troubleshoot if the driver supports it.
-	if ts, ok := driver.(interfaces.Troubleshooter); ok {
-		tCtx, tCancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer tCancel()
-		diags, tErr := ts.Troubleshoot(tCtx, ref, lastMsg)
-		if tErr != nil {
-			fmt.Printf("   (auto-troubleshoot unavailable: %v)\n", tErr)
-		} else if len(diags) == 0 {
-			fmt.Printf("   (auto-troubleshoot: no recent deployments found)\n")
-		} else {
-			fmt.Printf("   Recent deployments (via provider API):\n")
-			for _, d := range diags {
-				cause := d.Cause
-				if cause == "" {
-					cause = "(no error detail)"
-				}
-				fmt.Printf("     • %-36s  phase=%-14s  %s  — %s\n",
-					d.ID, d.Phase, d.At.Format("15:04:05"), cause)
+	em := detectCIProvider()
+	troubleshootAfterFailure(ctx, os.Stderr, driver, ref, errors.New(baseErr), 30*time.Second, em)
+
+	return errors.New(baseErr)
+}
+
+// emitDiagnostics renders diagnostics into a CI group block on w.
+// No-op when diags is empty.
+func emitDiagnostics(w io.Writer, resource string, diags []interfaces.Diagnostic, em CIGroupEmitter) {
+	if len(diags) == 0 {
+		return
+	}
+	em.GroupStart(w, fmt.Sprintf("Troubleshoot: %s", resource))
+	for _, d := range diags {
+		fmt.Fprintf(w, "  [%s] %s — %s (at %s)\n", d.Phase, d.ID, d.Cause, d.At.Format(time.RFC3339))
+		if d.Detail != "" {
+			for _, line := range strings.Split(strings.TrimRight(d.Detail, "\n"), "\n") {
+				fmt.Fprintf(w, "    %s\n", line)
 			}
 		}
 	}
-	fmt.Println()
+	em.GroupEnd(w)
+}
 
-	return fmt.Errorf("%s", baseErr)
+// troubleshootAfterFailure probes driver for Troubleshooter, calls it with a bounded
+// timeout, and renders diagnostics via the provided emitter. All errors are swallowed —
+// observability is additive; it never masks the original failure.
+func troubleshootAfterFailure(ctx context.Context, w io.Writer, driver interface{}, ref interfaces.ResourceRef, origErr error, timeout time.Duration, em CIGroupEmitter) {
+	ts, ok := driver.(interfaces.Troubleshooter)
+	if !ok {
+		return
+	}
+	tsCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	diags, err := ts.Troubleshoot(tsCtx, ref, origErr.Error())
+	if err != nil {
+		log.Printf("troubleshoot: %v (ignored)", err)
+		return
+	}
+	emitDiagnostics(w, ref.Name, diags, em)
 }
 
 // ── kubernetes provider ───────────────────────────────────────────────────────
