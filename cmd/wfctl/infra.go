@@ -825,9 +825,22 @@ func runInfraApply(args []string) error {
 		return fmt.Errorf("resolve secrets provider for infra_output sync: %w", err)
 	}
 	states := loadCurrentState(cfgFile, envName)
-	wfCfg, err := config.LoadFromFile(cfgFile)
-	if err != nil {
-		return fmt.Errorf("load config for infra_output env resolution: %w", err)
+	// Only reload the workflow config when env resolution is actually needed:
+	// it is needed only when --env is set AND at least one infra_output secret
+	// generator is configured (otherwise syncInfraOutputSecrets is a no-op for
+	// env resolution regardless).
+	var wfCfg *config.WorkflowConfig
+	if envName != "" {
+		for _, g := range secretsCfg.Generate {
+			if g.Type == "infra_output" {
+				var loadErr error
+				wfCfg, loadErr = config.LoadFromFile(cfgFile)
+				if loadErr != nil {
+					return fmt.Errorf("load config for infra_output env resolution: %w", loadErr)
+				}
+				break
+			}
+		}
 	}
 	return syncInfraOutputSecrets(ctx, secretsCfg, secretsProvider, states, wfCfg, envName)
 }
