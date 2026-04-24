@@ -67,10 +67,11 @@ type HealthResult struct {
 // enough context to understand why a health check failed without visiting the
 // provider's console.
 type Diagnostic struct {
-	ID    string    `json:"id"`    // provider-side identifier (e.g. deployment ID)
-	Phase string    `json:"phase"` // terminal or current phase
-	Cause string    `json:"cause"` // human-readable root cause or error summary
-	At    time.Time `json:"at"`    // when the event was created or last updated
+	ID     string    `json:"id"`               // provider-side identifier (e.g. deployment ID)
+	Phase  string    `json:"phase"`            // terminal or current phase
+	Cause  string    `json:"cause"`            // human-readable root cause or error summary
+	At     time.Time `json:"at"`               // when the event was created or last updated
+	Detail string    `json:"detail,omitempty"` // optional verbose tail (log excerpt, stack)
 }
 
 // Troubleshooter is an optional interface that ResourceDrivers may implement.
