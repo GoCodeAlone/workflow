@@ -5,8 +5,16 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 )
+
+// resetInlinePluginDeprecationOnce resets the once guard so each test gets a
+// fresh run. Defined here (test file) so the reset helper is not part of the
+// production binary.
+func resetInlinePluginDeprecationOnce() {
+	inlinePluginDeprecationOnce = sync.Once{}
+}
 
 func TestInlinePluginVersion_EmitsDeprecationWarning(t *testing.T) {
 	// Reset the once so each test gets a fresh run.

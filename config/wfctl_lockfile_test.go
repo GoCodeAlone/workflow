@@ -93,7 +93,9 @@ func TestWfctlLockfile_DeterministicOutput(t *testing.T) {
 	// Also assert plugin keys appear in alphabetical order.
 	idx_a := strings.Index(string(b1), "a-plugin")
 	idx_b := strings.Index(string(b1), "b-plugin")
-	if idx_a > idx_b {
+	if idx_a < 0 || idx_b < 0 {
+		t.Errorf("expected both a-plugin and b-plugin in output; a@%d b@%d", idx_a, idx_b)
+	} else if idx_a > idx_b {
 		t.Errorf("expected a-plugin before b-plugin in output, got a@%d b@%d", idx_a, idx_b)
 	}
 }

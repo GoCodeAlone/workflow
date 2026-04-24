@@ -9,12 +9,6 @@ import (
 // inlinePluginDeprecationOnce ensures the warning fires at most once per process run.
 var inlinePluginDeprecationOnce sync.Once
 
-// resetInlinePluginDeprecationOnce resets the once for tests that need to observe
-// the warning independently. Must only be called from test code.
-func resetInlinePluginDeprecationOnce() {
-	inlinePluginDeprecationOnce = sync.Once{}
-}
-
 // warnIfInlinePluginVersions emits a deprecation notice to stderr when a WorkflowConfig
 // contains requires.plugins[] entries with non-empty version or source fields.
 // The warning fires at most once per process lifetime.

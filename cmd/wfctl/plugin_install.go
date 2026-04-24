@@ -471,7 +471,10 @@ func runPluginRemove(args []string) error {
 
 	// Check lockfile as well: covers the legacy case where no manifest exists
 	// but the plugin was recorded in .wfctl-lock.yaml.
-	inLockfile := pluginExistsInLockfile(pluginName, *lockPath)
+	inLockfile, lockfileErr := pluginExistsInLockfile(pluginName, *lockPath)
+	if lockfileErr != nil {
+		return fmt.Errorf("check lockfile: %w", lockfileErr)
+	}
 
 	if !binaryInstalled && !inManifest && !inLockfile {
 		return fmt.Errorf("plugin %q is not installed", pluginName)

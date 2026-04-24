@@ -128,8 +128,16 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 // against the lockfile. Only checks plugins with non-empty sha256 entries.
 // Returns an error if any mismatch is detected.
 func verifyWfctlLockfileChecksums(pluginDirVal string, lf *config.WfctlLockfile) error {
+	// Sort plugin names for deterministic verification order and predictable error messages.
+	names := make([]string, 0, len(lf.Plugins))
+	for name := range lf.Plugins {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	var mismatches []string
-	for name, entry := range lf.Plugins {
+	for _, name := range names {
+		entry := lf.Plugins[name]
 		if entry.SHA256 == "" {
 			continue
 		}

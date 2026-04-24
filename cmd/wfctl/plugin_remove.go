@@ -9,21 +9,24 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 )
 
-// pluginExistsInLockfile returns true when name (or its normalized form) is
-// recorded in the lockfile. Returns false when the file doesn't exist or the
-// plugin isn't in it. Errors loading the lockfile are treated as "not found".
-func pluginExistsInLockfile(name, lockPath string) bool {
+// pluginExistsInLockfile returns (true, nil) when name (or its normalized form)
+// is recorded in the lockfile. Returns (false, nil) when the file doesn't exist
+// or the plugin isn't in it. Returns (false, err) on parse or permission errors.
+func pluginExistsInLockfile(name, lockPath string) (bool, error) {
 	lf, err := config.LoadWfctlLockfile(lockPath)
 	if err != nil {
-		return false
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
 	}
 	normName := normalizePluginName(name)
 	for k := range lf.Plugins {
 		if k == name || normalizePluginName(k) == normName {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // pluginExistsInManifest returns (true, nil) when name (or its normalized form)
