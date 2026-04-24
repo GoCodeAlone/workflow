@@ -1046,9 +1046,18 @@ func (p *pluginDeployProvider) HealthCheck(ctx context.Context, cfg DeployConfig
 	return nil
 }
 
+// healthPollProgressInterval is how often a "still waiting" heartbeat is printed
+// when no new status message has arrived.
+var healthPollProgressInterval = 30 * time.Second
+
 // pollUntilHealthy polls driver.HealthCheck until Healthy=true, context cancels,
 // or the default timeout elapses.  ErrTransient/ErrRateLimited are treated as
 // "keep polling"; any other error fails fast.
+//
+// Progress lines are emitted on every status change and at least every
+// healthPollProgressInterval so the user can see the deploy is still running.
+// On timeout, if the driver implements interfaces.Troubleshooter, recent
+// provider-side events are fetched and printed in a structured failure block.
 func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref interfaces.ResourceRef, name string) error {
 	deadline := time.Now().Add(healthPollDefaultTimeout)
 	pollCtx, cancel := context.WithDeadline(ctx, deadline)
@@ -1056,6 +1065,20 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 
 	start := time.Now()
 	var lastMsg string
+	var lastProgress time.Time
+
+	fmt.Printf("  → health poll: waiting for %q to become healthy (timeout: %s)\n", name, healthPollDefaultTimeout)
+
+	emitProgress := func(msg string) {
+		elapsed := time.Since(start).Round(time.Second)
+		ts := time.Now().Format("15:04:05")
+		if msg != "" {
+			fmt.Printf("  [%s] health poll %q: %s (%s elapsed)\n", ts, name, msg, elapsed)
+		} else {
+			fmt.Printf("  [%s] health poll %q: still waiting (%s elapsed)\n", ts, name, elapsed)
+		}
+		lastProgress = time.Now()
+	}
 
 	for {
 		result, hcErr := driver.HealthCheck(pollCtx, ref)
@@ -1067,9 +1090,14 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 			}
 			log.Printf("plugin health check %q: transient error, continuing poll: %v", name, hcErr)
 		case result.Healthy:
+			elapsed := time.Since(start).Round(time.Second)
+			fmt.Printf("  [%s] health poll %q: ✓ healthy (%s)\n", time.Now().Format("15:04:05"), name, elapsed)
 			return nil
 		default:
-			lastMsg = result.Message
+			if result.Message != lastMsg {
+				lastMsg = result.Message
+				emitProgress(lastMsg)
+			}
 		}
 
 		// Choose poll interval based on elapsed time.
@@ -1080,21 +1108,62 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 
 		select {
 		case <-pollCtx.Done():
-			if lastMsg != "" {
-				return fmt.Errorf("plugin health check %q: timed out waiting for healthy; last status: %s", name, lastMsg)
-			}
-			return fmt.Errorf("plugin health check %q: timed out waiting for healthy", name)
+			return healthPollTimeout(ctx, driver, ref, name, lastMsg, start)
 		case <-time.After(interval):
 		}
 
 		// Check again after sleeping (context may have expired during sleep).
 		if pollCtx.Err() != nil {
-			if lastMsg != "" {
-				return fmt.Errorf("plugin health check %q: timed out waiting for healthy; last status: %s", name, lastMsg)
-			}
-			return fmt.Errorf("plugin health check %q: timed out waiting for healthy", name)
+			return healthPollTimeout(ctx, driver, ref, name, lastMsg, start)
+		}
+
+		// Emit a heartbeat if nothing has been logged recently.
+		if time.Since(lastProgress) >= healthPollProgressInterval {
+			emitProgress(lastMsg)
 		}
 	}
+}
+
+// healthPollTimeout builds the timeout error and auto-troubleshoots via the
+// driver's Troubleshooter implementation (if any) before returning.
+func healthPollTimeout(ctx context.Context, driver interfaces.ResourceDriver, ref interfaces.ResourceRef, name, lastMsg string, start time.Time) error {
+	elapsed := time.Since(start).Round(time.Second)
+
+	baseErr := fmt.Sprintf("plugin health check %q: timed out waiting for healthy after %s", name, elapsed)
+	if lastMsg != "" {
+		baseErr = fmt.Sprintf("%s; last status: %s", baseErr, lastMsg)
+	}
+
+	// Print structured failure block.
+	fmt.Printf("\n❌ Deploy health check timed out for %q after %s\n", name, elapsed)
+	if lastMsg != "" {
+		fmt.Printf("   Last observed status: %s\n", lastMsg)
+	}
+
+	// Auto-troubleshoot if the driver supports it.
+	if ts, ok := driver.(interfaces.Troubleshooter); ok {
+		tCtx, tCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer tCancel()
+		diags, tErr := ts.Troubleshoot(tCtx, ref, lastMsg)
+		if tErr != nil {
+			fmt.Printf("   (auto-troubleshoot unavailable: %v)\n", tErr)
+		} else if len(diags) == 0 {
+			fmt.Printf("   (auto-troubleshoot: no recent deployments found)\n")
+		} else {
+			fmt.Printf("   Recent deployments (via provider API):\n")
+			for _, d := range diags {
+				cause := d.Cause
+				if cause == "" {
+					cause = "(no error detail)"
+				}
+				fmt.Printf("     • %-36s  phase=%-14s  %s  — %s\n",
+					d.ID, d.Phase, d.At.Format("15:04:05"), cause)
+			}
+		}
+	}
+	fmt.Println()
+
+	return fmt.Errorf("%s", baseErr)
 }
 
 // ── kubernetes provider ───────────────────────────────────────────────────────
