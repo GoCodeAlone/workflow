@@ -22,6 +22,9 @@ const wfctlLockPath = ".wfctl-lock.yaml"
 // (git connect, deploy defaults). It is no longer used as the lockfile write target.
 const wfctlYAMLPath = ".wfctl.yaml"
 
+// wfctlManifestPath is the canonical path for the human-editable plugin manifest.
+const wfctlManifestPath = "wfctl.yaml"
+
 // PluginLockEntry records a pinned plugin version in the lockfile.
 type PluginLockEntry struct {
 	Version    string `yaml:"version"`
