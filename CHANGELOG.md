@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.10.1] - 2026-04-24
+
+### Fixed
+
+- **`cmd/wfctl/deploy_providers.go`**: `remoteResourceDriver.Troubleshoot` was passing
+  `interfaces.ResourceRef` as a nested struct in the `InvokeService` args map. The gRPC
+  transport (`structpb.NewStruct`) cannot encode Go structs — the plugin received empty args
+  and Troubleshoot was a silent no-op. Args are now flattened to scalar primitives:
+  `ref_name`, `ref_type`, `ref_provider_id`, `failure_msg`.
+- **`cmd/wfctl/infra_apply.go`**: `applyWithProviderAndStore` was passing the `IaCProvider`
+  to `troubleshootAfterFailure`, whose type assertion against `interfaces.Troubleshooter` always
+  failed — the hook was a silent no-op. Now calls `provider.ResourceDriver(ref.Type)` and passes
+  the resulting `ResourceDriver` to `troubleshootAfterFailure`, enabling real plugin-backed
+  diagnostics on `wfctl infra apply` failure.
+- **`cmd/wfctl/ci_output_summary.go`**: `WriteStepSummary` used `defer f.Close()` which
+  discards the close error (potential data loss on buffer flush). Now uses a named return
+  and captures the close error, surfacing it only when there is no prior write error.
+
 ## [0.18.10] - 2026-04-24
 
 ### Added

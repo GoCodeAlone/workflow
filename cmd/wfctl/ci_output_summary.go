@@ -31,7 +31,7 @@ type PhaseTiming struct {
 
 // WriteStepSummary appends Markdown to the CI provider's summary destination.
 // No-ops when the provider has no summary destination (all non-GHA for now).
-func WriteStepSummary(emitter CIGroupEmitter, in SummaryInput) error {
+func WriteStepSummary(emitter CIGroupEmitter, in SummaryInput) (err error) {
 	path := emitter.SummaryPath()
 	if path == "" {
 		return nil
@@ -40,7 +40,13 @@ func WriteStepSummary(emitter CIGroupEmitter, in SummaryInput) error {
 	if err != nil {
 		return fmt.Errorf("open summary: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		// Capture the close error (may flush buffered writes) and surface it
+		// only when there is no earlier write error to preserve.
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
 	return renderSummary(f, in)
 }
 
