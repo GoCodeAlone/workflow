@@ -3,6 +3,7 @@ package interfaces
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // Sentinel errors for common IaC resource operation response categories.
@@ -59,4 +60,27 @@ type FieldChange struct {
 type HealthResult struct {
 	Healthy bool   `json:"healthy"`
 	Message string `json:"message,omitempty"`
+}
+
+// Diagnostic is a single troubleshooting finding returned by a Troubleshooter.
+// It describes a recent provider-side event (deployment, job run, etc.) with
+// enough context to understand why a health check failed without visiting the
+// provider's console.
+type Diagnostic struct {
+	ID    string    `json:"id"`    // provider-side identifier (e.g. deployment ID)
+	Phase string    `json:"phase"` // terminal or current phase
+	Cause string    `json:"cause"` // human-readable root cause or error summary
+	At    time.Time `json:"at"`    // when the event was created or last updated
+}
+
+// Troubleshooter is an optional interface that ResourceDrivers may implement.
+// wfctl calls Troubleshoot automatically when a health-check poll times out or
+// a deploy operation returns a generic error, surfacing provider-side context
+// that would otherwise require visiting the provider's web console.
+//
+// Implementations should return the N most recent relevant events (deployments,
+// job runs, etc.) in reverse-chronological order.  Returning an error is
+// non-fatal — wfctl logs it and continues with the original failure message.
+type Troubleshooter interface {
+	Troubleshoot(ctx context.Context, ref ResourceRef, failureMsg string) ([]Diagnostic, error)
 }
