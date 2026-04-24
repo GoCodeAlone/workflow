@@ -1,0 +1,83 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+
+	"github.com/GoCodeAlone/workflow/config"
+)
+
+// runMigratePlugins migrates requires.plugins[] from app.yaml into wfctl.yaml
+// (manifest) and .wfctl-lock.yaml (lockfile).
+// On --auto, it additionally strips the version/source fields from app.yaml inline
+// plugin entries (leaving just the name as a capability declaration).
+func runMigratePlugins(args []string) error {
+	fs := flag.NewFlagSet("migrate plugins", flag.ContinueOnError)
+	cfgPath := fs.String("config", "workflow.yaml", "Path to workflow app config")
+	manifestPath := fs.String("manifest", wfctlManifestPath, "Path to wfctl.yaml manifest to create/update")
+	lockPath := fs.String("lock-file", wfctlLockPath, "Path to .wfctl-lock.yaml to create/update")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), `Usage: wfctl migrate plugins [options]
+
+Migrate requires.plugins[] from app.yaml into wfctl.yaml + .wfctl-lock.yaml.
+
+Options:
+`)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, err := config.LoadFromFile(*cfgPath)
+	if err != nil {
+		return fmt.Errorf("load config %s: %w", *cfgPath, err)
+	}
+
+	if cfg.Requires == nil || len(cfg.Requires.Plugins) == 0 {
+		fmt.Println("No requires.plugins[] found in config — nothing to migrate.")
+		return nil
+	}
+
+	// Load or initialize manifest.
+	m, err := loadOrInitManifest(*manifestPath)
+	if err != nil {
+		return err
+	}
+
+	// Build set of names already in manifest to avoid duplicates.
+	existing := make(map[string]bool, len(m.Plugins))
+	for _, p := range m.Plugins {
+		existing[p.Name] = true
+	}
+
+	added := 0
+	for _, req := range cfg.Requires.Plugins {
+		if existing[req.Name] {
+			continue
+		}
+		entry := config.WfctlPluginEntry{
+			Name:    req.Name,
+			Version: req.Version,
+			Source:  req.Source,
+		}
+		if req.Auth != nil {
+			entry.Auth = &config.WfctlPluginAuth{Env: req.Auth.Env}
+		}
+		m.Plugins = append(m.Plugins, entry)
+		existing[req.Name] = true
+		added++
+	}
+
+	if added == 0 {
+		fmt.Println("All plugins already present in manifest — nothing to add.")
+	} else {
+		if err := config.SaveWfctlManifest(*manifestPath, m); err != nil {
+			return fmt.Errorf("save manifest: %w", err)
+		}
+		fmt.Printf("Migrated %d plugin(s) to %s\n", added, *manifestPath)
+	}
+
+	// Re-lock to produce/update .wfctl-lock.yaml.
+	return runPluginLockFromManifest(*manifestPath, *lockPath)
+}
