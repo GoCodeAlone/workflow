@@ -703,18 +703,19 @@ func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig, 
 		return nil, fmt.Errorf("unsupported deploy provider %q (built-ins: kubernetes, docker, aws-ecs; to use a plugin provider, declare an iac.provider module in your workflow config)%s", providerName, fmt.Sprintf(hint, providerName))
 	}
 
-	// resolveModCfg returns the effective config map for m after applying the
+	// resolveModule returns the effective ResolvedModule for m after applying the
 	// per-env overlay (when envName is set). ok=false means the module is
 	// explicitly deleted for this env and should be skipped.
-	resolveModCfg := func(m *config.ModuleConfig) (map[string]any, bool) {
+	// Callers must read resolved.Name (not m.Name) to get the env-overridden identity.
+	resolveModule := func(m *config.ModuleConfig) (*config.ResolvedModule, bool) {
 		if envName == "" {
-			return m.Config, true
+			return &config.ResolvedModule{
+				Name:   m.Name,
+				Type:   m.Type,
+				Config: m.Config,
+			}, true
 		}
-		resolved, ok := m.ResolveForEnv(envName)
-		if !ok {
-			return nil, false
-		}
-		return resolved.Config, true
+		return m.ResolveForEnv(envName)
 	}
 
 	// Find the iac.provider module matching the requested provider name.
@@ -725,14 +726,14 @@ func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig, 
 		if m.Type != "iac.provider" {
 			continue
 		}
-		cfg, ok := resolveModCfg(m)
+		resolved, ok := resolveModule(m)
 		if !ok {
 			continue
 		}
-		cfgProvider, _ := cfg["provider"].(string)
-		if cfgProvider == providerName || m.Name == providerName {
-			providerModName = m.Name
-			providerModCfg = cfg
+		cfgProvider, _ := resolved.Config["provider"].(string)
+		if cfgProvider == providerName || resolved.Name == providerName {
+			providerModName = resolved.Name
+			providerModCfg = resolved.Config
 			break
 		}
 	}
@@ -761,14 +762,14 @@ func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig, 
 			if m.Type != target {
 				continue
 			}
-			cfg, ok := resolveModCfg(m)
+			resolved, ok := resolveModule(m)
 			if !ok {
 				continue
 			}
-			if p, _ := cfg["provider"].(string); p == providerModName {
-				resourceName = m.Name
-				resourceType = m.Type
-				resourceCfg = cfg
+			if p, _ := resolved.Config["provider"].(string); p == providerModName {
+				resourceName = resolved.Name
+				resourceType = resolved.Type
+				resourceCfg = resolved.Config
 				return true
 			}
 		}
@@ -786,16 +787,16 @@ func newPluginDeployProvider(providerName string, wfCfg *config.WorkflowConfig, 
 			if m.Type == "iac.provider" || m.Type == "" {
 				continue
 			}
-			cfg, ok := resolveModCfg(m)
+			resolved, ok := resolveModule(m)
 			if !ok {
 				continue
 			}
-			if p, _ := cfg["provider"].(string); p == providerModName {
+			if p, _ := resolved.Config["provider"].(string); p == providerModName {
 				fmt.Fprintf(os.Stderr, "warning: no deploy-target module (%v) found for provider %q; falling back to first infra module %q (type %q)\n",
-					deployTargetTypes, providerModName, m.Name, m.Type)
-				resourceName = m.Name
-				resourceType = m.Type
-				resourceCfg = cfg
+					deployTargetTypes, providerModName, resolved.Name, resolved.Type)
+				resourceName = resolved.Name
+				resourceType = resolved.Type
+				resourceCfg = resolved.Config
 				break
 			}
 		}
