@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -169,7 +170,7 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 				}
 			}()
 		}
-		return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, current, store)
+		return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, current, store, os.Stderr)
 	}
 	for _, moduleRef := range groupOrder {
 		if err := applyGroup(moduleRef, groups[moduleRef]); err != nil {
@@ -187,8 +188,9 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 //
 // providerType is used only as a label when constructing ResourceState records.
 // Callers pass a nil store (or noopStateStore) when state persistence is not
-// required.
-func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore) error {
+// required. w receives diagnostic output; callers typically pass os.Stderr but
+// tests may supply a bytes.Buffer to capture and assert the output.
+func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore, w io.Writer) error {
 	if store == nil {
 		store = &noopStateStore{}
 	}
@@ -250,8 +252,19 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
 	result, err := provider.Apply(ctx, &plan)
 	if err != nil {
+		// Derive the most specific resource ref we can for troubleshooting.
+		// Single-action plans give us an exact resource; multi-resource plans
+		// fall back to the first spec so the troubleshooter has at least a name.
+		ref := interfaces.ResourceRef{}
+		if len(plan.Actions) == 1 {
+			ref.Name = plan.Actions[0].Resource.Name
+			ref.Type = plan.Actions[0].Resource.Type
+		} else if len(specs) == 1 {
+			ref.Name = specs[0].Name
+			ref.Type = specs[0].Type
+		}
 		em := detectCIProvider()
-		troubleshootAfterFailure(ctx, os.Stderr, provider, interfaces.ResourceRef{}, err, infraApplyTroubleshootTimeout, em)
+		troubleshootAfterFailure(ctx, w, provider, ref, err, infraApplyTroubleshootTimeout, em)
 		return fmt.Errorf("apply: %w", err)
 	}
 	if result != nil {

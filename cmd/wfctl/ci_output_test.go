@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -21,8 +22,8 @@ func TestDetectCIProvider_GitLab(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "")
 	t.Setenv("GITLAB_CI", "true")
 	e := detectCIProvider()
-	if _, ok := e.(gitlabEmitter); !ok {
-		t.Fatalf("expected gitlabEmitter, got %T", e)
+	if _, ok := e.(*gitlabEmitter); !ok {
+		t.Fatalf("expected *gitlabEmitter, got %T", e)
 	}
 }
 
@@ -54,15 +55,26 @@ func TestGithubEmitter_GroupMarkers(t *testing.T) {
 
 func TestGitlabEmitter_GroupMarkers(t *testing.T) {
 	var buf bytes.Buffer
-	e := gitlabEmitter{}
+	e := &gitlabEmitter{}
 	e.GroupStart(&buf, "my-section")
 	e.GroupEnd(&buf)
 	out := buf.String()
-	if !strings.Contains(out, "section_start") {
-		t.Errorf("missing section_start: %q", out)
+
+	// Verify both markers are present and share the same section ID so GitLab
+	// correctly closes the fold (mismatched IDs leave sections open forever).
+	startRe := regexp.MustCompile(`section_start:\d+:(\S+)`)
+	endRe := regexp.MustCompile(`section_end:\d+:(\S+)`)
+
+	sm := startRe.FindStringSubmatch(out)
+	if sm == nil {
+		t.Fatalf("missing section_start: %q", out)
 	}
-	if !strings.Contains(out, "section_end") {
-		t.Errorf("missing section_end: %q", out)
+	em := endRe.FindStringSubmatch(out)
+	if em == nil {
+		t.Fatalf("missing section_end: %q", out)
+	}
+	if sm[1] != em[1] {
+		t.Errorf("section ID mismatch: start=%q end=%q — GitLab won't close the fold", sm[1], em[1])
 	}
 }
 

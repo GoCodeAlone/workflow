@@ -23,7 +23,7 @@ func detectCIProvider() CIGroupEmitter {
 	case os.Getenv("GITHUB_ACTIONS") == "true":
 		return githubEmitter{summaryPath: os.Getenv("GITHUB_STEP_SUMMARY")}
 	case os.Getenv("GITLAB_CI") == "true":
-		return gitlabEmitter{}
+		return &gitlabEmitter{}
 	case os.Getenv("JENKINS_HOME") != "":
 		return jenkinsEmitter{}
 	case os.Getenv("CIRCLECI") == "true":
@@ -45,17 +45,21 @@ func (g githubEmitter) SummaryPath() string  { return g.summaryPath }
 
 // --- GitLab CI ---
 
-type gitlabEmitter struct{}
+// gitlabEmitter stores the section ID generated in GroupStart so that
+// GroupEnd can emit a matching ID — GitLab requires identical IDs on both
+// markers to close the fold correctly.
+type gitlabEmitter struct {
+	sectionID string
+}
 
-func (g gitlabEmitter) GroupStart(w io.Writer, name string) {
-	id := fmt.Sprintf("wfctl_%d", time.Now().UnixNano())
-	fmt.Fprintf(w, "\x1b[0Ksection_start:%d:%s\r\x1b[0K%s\n", time.Now().Unix(), id, name)
+func (g *gitlabEmitter) GroupStart(w io.Writer, name string) {
+	g.sectionID = fmt.Sprintf("wfctl_%d", time.Now().UnixNano())
+	fmt.Fprintf(w, "\x1b[0Ksection_start:%d:%s\r\x1b[0K%s\n", time.Now().Unix(), g.sectionID, name)
 }
-func (g gitlabEmitter) GroupEnd(w io.Writer) {
-	id := fmt.Sprintf("wfctl_%d", time.Now().UnixNano())
-	fmt.Fprintf(w, "\x1b[0Ksection_end:%d:%s\r\x1b[0K\n", time.Now().Unix(), id)
+func (g *gitlabEmitter) GroupEnd(w io.Writer) {
+	fmt.Fprintf(w, "\x1b[0Ksection_end:%d:%s\r\x1b[0K\n", time.Now().Unix(), g.sectionID)
 }
-func (g gitlabEmitter) SummaryPath() string { return "" }
+func (g *gitlabEmitter) SummaryPath() string { return "" }
 
 // --- Jenkins ---
 
