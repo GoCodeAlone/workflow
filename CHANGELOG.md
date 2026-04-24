@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.8] - 2026-04-24
+
+### Fixed
+
+- **`resolveStateStore` and `loadCurrentState` now accept `envName`** — when `--env` is passed to `wfctl infra apply/destroy/status/drift`, per-environment overrides on the `iac.state` module (e.g. `region`, `bucket` prefix) are now applied before the state backend is initialised. Previously the base config was always used, so remote backends (Spaces, S3) that declare credentials or endpoints only under `environments.<env>:` failed with "region or endpoint must be set", silently falling back to no-op persistence and causing every deploy to re-create already-provisioned resources (409 cascades).
+
+### Tests
+
+- `cmd/wfctl/infra_state_store_test.go` — `TestResolveStateStore_NoEnv_FallsBackToBase`, `TestResolveStateStore_EnvOverride_UsesEnvConfig`, `TestApplyInfraModules_PersistsResourceState` (end-to-end regression gate: verifies provider.Apply results are persisted to state store)
+
 ## [0.18.7] - 2026-04-23
 
 ### Fixed

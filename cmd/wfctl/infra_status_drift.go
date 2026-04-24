@@ -13,7 +13,7 @@ import (
 // state store and prints a human-readable summary. It is the direct-path
 // implementation used for infra.* module configs.
 func statusInfraModules(ctx context.Context, cfgFile, envName string) error {
-	store, err := resolveStateStore(cfgFile)
+	store, err := resolveStateStore(cfgFile, envName)
 	if err != nil {
 		return fmt.Errorf("open state store: %w", err)
 	}
@@ -69,7 +69,7 @@ func statusInfraModules(ctx context.Context, cfgFile, envName string) error {
 // the state store and prints any differences. It is the direct-path
 // implementation used for infra.* module configs.
 func driftInfraModules(ctx context.Context, cfgFile, envName string) error {
-	store, err := resolveStateStore(cfgFile)
+	store, err := resolveStateStore(cfgFile, envName)
 	if err != nil {
 		return fmt.Errorf("open state store: %w", err)
 	}

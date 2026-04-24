@@ -39,8 +39,24 @@ func (n *noopStateStore) DeleteResource(_ context.Context, _ string) error { ret
 // resolveStateStore returns an infraStateStore for the iac.state backend
 // declared in cfgFile. Returns a noopStateStore (not an error) when no
 // iac.state module is present — first-run callers just get no-op persistence.
-func resolveStateStore(cfgFile string) (infraStateStore, error) {
-	iacStates, _, _, err := discoverInfraModules(cfgFile)
+//
+// When envName is non-empty, per-environment overrides (e.g. region, bucket
+// prefix) are applied before the backend is initialised. This is required for
+// remote backends (Spaces, S3, etc.) where credentials or endpoints differ per
+// environment — without it the base config is used, which may be missing
+// required fields such as region, causing init to fail.
+func resolveStateStore(cfgFile, envName string) (infraStateStore, error) {
+	cfgToUse := cfgFile
+	if envName != "" {
+		// Attempt env resolution so per-env backend config (e.g. region, prefix)
+		// is applied before initialising the store. Failure is non-fatal — fall
+		// back to the base config rather than dropping state persistence entirely.
+		if tmp, err := writeEnvResolvedConfig(cfgFile, envName); err == nil {
+			defer os.Remove(tmp)
+			cfgToUse = tmp
+		}
+	}
+	iacStates, _, _, err := discoverInfraModules(cfgToUse)
 	if err != nil {
 		return &noopStateStore{}, nil //nolint:nilerr // config not found / parse error means no state module; noop is correct
 	}

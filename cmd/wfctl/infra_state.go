@@ -66,7 +66,7 @@ func runInfraStateList(args []string) error {
 		}
 	}
 
-	states := loadCurrentState(cfgFile)
+	states := loadCurrentState(cfgFile, "")
 	if len(states) == 0 {
 		fmt.Println("No resources tracked in state.")
 		return nil
@@ -106,7 +106,7 @@ func runInfraStateExport(args []string) error {
 		}
 	}
 
-	states := loadCurrentState(cfgFile)
+	states := loadCurrentState(cfgFile, "")
 
 	var data []byte
 	var err error

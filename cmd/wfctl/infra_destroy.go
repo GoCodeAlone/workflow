@@ -18,7 +18,7 @@ import (
 // This is the direct-path destroy used when the config contains infra.* modules.
 // The legacy platform.* path continues to run pipelines.destroy via runPipelineRun.
 func destroyInfraModules(ctx context.Context, cfgFile, envName string) error { //nolint:cyclop
-	store, err := resolveStateStore(cfgFile)
+	store, err := resolveStateStore(cfgFile, envName)
 	if err != nil {
 		return fmt.Errorf("open state store: %w", err)
 	}
