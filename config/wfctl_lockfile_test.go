@@ -79,8 +79,14 @@ func TestWfctlLockfile_DeterministicOutput(t *testing.T) {
 	if err := SaveWfctlLockfile(p2, func() *WfctlLockfile { l := mkLockfile(); return &l }()); err != nil {
 		t.Fatal(err)
 	}
-	b1, _ := os.ReadFile(p1)
-	b2, _ := os.ReadFile(p2)
+	b1, err := os.ReadFile(p1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := os.ReadFile(p2)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(b1) != string(b2) {
 		t.Errorf("non-deterministic output:\n--- lock1 ---\n%s\n--- lock2 ---\n%s", b1, b2)
 	}

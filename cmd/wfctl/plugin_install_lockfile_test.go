@@ -33,12 +33,14 @@ func TestInstallFromWfctlLockfile_SHA256MismatchFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a fake plugin binary with wrong content.
-	fooDir := filepath.Join(pluginDir, "workflow-plugin-foo")
+	// Create a fake plugin binary at the NORMALIZED path.
+	// verifyWfctlLockfileChecksums calls normalizePluginName("workflow-plugin-foo") → "foo",
+	// so the binary must live at plugins/foo/foo, not plugins/workflow-plugin-foo/workflow-plugin-foo.
+	fooDir := filepath.Join(pluginDir, "foo")
 	if err := os.MkdirAll(fooDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(fooDir, "workflow-plugin-foo"), []byte("wrong content"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(fooDir, "foo"), []byte("wrong content"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 

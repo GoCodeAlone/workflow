@@ -18,8 +18,8 @@ type WfctlManifest struct {
 // WfctlPluginEntry is a single plugin declared in wfctl.yaml.
 type WfctlPluginEntry struct {
 	Name    string             `yaml:"name"`
-	Version string             `yaml:"version"`
-	Source  string             `yaml:"source"`
+	Version string             `yaml:"version,omitempty"`
+	Source  string             `yaml:"source,omitempty"`
 	Auth    *WfctlPluginAuth   `yaml:"auth,omitempty"`
 	Verify  *WfctlPluginVerify `yaml:"verify,omitempty"`
 }
