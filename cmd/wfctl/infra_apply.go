@@ -12,6 +12,10 @@ import (
 	"github.com/GoCodeAlone/workflow/platform"
 )
 
+// infraApplyTroubleshootTimeout is the budget for a Troubleshoot call when
+// infra apply fails. Kept separate so tests can override it.
+var infraApplyTroubleshootTimeout = 30 * time.Second
+
 // hasInfraModules reports whether cfgFile contains any modules with the new
 // infra.* type prefix. Used by runInfraApply to select the dispatch path:
 // direct IaCProvider path for infra.* configs, pipeline path for legacy
@@ -246,6 +250,8 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
 	result, err := provider.Apply(ctx, &plan)
 	if err != nil {
+		em := detectCIProvider()
+		troubleshootAfterFailure(ctx, os.Stderr, provider, interfaces.ResourceRef{}, err, infraApplyTroubleshootTimeout, em)
 		return fmt.Errorf("apply: %w", err)
 	}
 	if result != nil {
