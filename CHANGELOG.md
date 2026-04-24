@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.9] - 2026-04-24
+
+### Fixed
+
+- **`wfctl ci run --phase deploy` now uses env-resolved module name** — `pluginDeployProvider.resourceName` was populated from `m.Name` (base config name) instead of `ResolvedModule.Name` (env-override lifted from `Config["name"]`). When infra apply had env-renamed a module (e.g. BMW's `bmw-app` → `bmw-staging` for staging), the deploy phase used the base name for `driver.Read` lookup, didn't find the resource, and went down the Create path — producing duplicate DO resources. Same class as v0.18.7 Task #32 fix, but in the ci-run code path. Root cause from BMW deploy run 24888583717.
+- **`infra_output` source resolution now applies env override to module name** — `secrets.generate[].source: "bmw-database.uri"` now resolves to the env-resolved state key (e.g. `bmw-staging-db`) when `--env staging` is set, matching how infra apply persists state. Closes task #56.
+
+### Tests
+
+- `cmd/wfctl/deploy_providers_env_test.go` — `TestPluginDeployProvider_UsesEnvResolvedName`, `TestPluginDeployProvider_FallsBackToModuleNameWhenNoEnv`
+- `cmd/wfctl/infra_secrets_env_test.go` — `TestInfraOutput_EnvResolvesModuleSource`, `TestInfraOutput_NoEnvUsesBaseName`
+
 ## [0.18.8] - 2026-04-24
 
 ### Fixed

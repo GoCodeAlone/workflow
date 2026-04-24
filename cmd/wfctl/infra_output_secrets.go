@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
@@ -23,10 +26,78 @@ func buildStateOutputsMap(states []interfaces.ResourceState) map[string]map[stri
 	return m
 }
 
+// resolveInfraOutput resolves a single "module.field" source string against the
+// pre-loaded state outputs map, applying per-env module name resolution so that
+// a source like "bmw-database.uri" finds the state keyed by the env-resolved
+// name (e.g. "bmw-staging-db") when --env staging renames the module.
+//
+// wfCfg may be nil (e.g. tests that only care about base-name resolution).
+// When envName is empty no resolution is performed and the source module name
+// is used verbatim.
+func resolveInfraOutput(wfCfg *config.WorkflowConfig, source, envName string, stateOutputs map[string]map[string]any) (string, error) {
+	if source == "" {
+		return "", fmt.Errorf("infra_output: source is required (format: \"module.field\")")
+	}
+	dot := strings.Index(source, ".")
+	if dot < 1 || dot >= len(source)-1 {
+		return "", fmt.Errorf("infra_output: invalid source %q: expected \"module.field\" format", source)
+	}
+	moduleName := source[:dot]
+	field := source[dot+1:]
+
+	// Apply env resolution: the state was persisted under the env-resolved name.
+	if envName != "" && wfCfg != nil {
+		for i := range wfCfg.Modules {
+			m := &wfCfg.Modules[i]
+			if m.Name != moduleName {
+				continue
+			}
+			resolved, ok := m.ResolveForEnv(envName)
+			if !ok {
+				return "", fmt.Errorf("infra_output: module %q is explicitly disabled for environment %q — cannot read infra_output from a disabled module", moduleName, envName)
+			}
+			if resolved.Name != "" {
+				moduleName = resolved.Name
+			}
+			break
+		}
+	}
+
+	if stateOutputs == nil {
+		return "", fmt.Errorf("infra_output: state outputs not available for source %q — did infra apply succeed?", source)
+	}
+	outputs, ok := stateOutputs[moduleName]
+	if !ok {
+		return "", fmt.Errorf("infra_output: module %q not found in state (available: %s)", moduleName, strings.Join(stateKeys(stateOutputs), ", "))
+	}
+	val, ok := outputs[field]
+	if !ok {
+		return "", fmt.Errorf("infra_output: field %q not found in outputs of module %q", field, moduleName)
+	}
+	s, ok := val.(string)
+	if !ok {
+		return "", fmt.Errorf("infra_output: output field %q of module %q is %T, expected string", field, moduleName, val)
+	}
+	return s, nil
+}
+
+// stateKeys returns the sorted keys of a state outputs map for error messages.
+func stateKeys(m map[string]map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // syncInfraOutputSecrets writes infra_output-typed secrets after a successful
 // apply. It skips secrets that already exist in the provider so idempotent
 // re-runs never overwrite live values.
-func syncInfraOutputSecrets(ctx context.Context, secretsCfg *SecretsConfig, provider secrets.Provider, states []interfaces.ResourceState) error {
+// wfCfg and envName are used to resolve source module names through per-env
+// overrides so that "bmw-database.uri" finds "bmw-staging-db" in state when
+// --env staging renames the module.
+func syncInfraOutputSecrets(ctx context.Context, secretsCfg *SecretsConfig, provider secrets.Provider, states []interfaces.ResourceState, wfCfg *config.WorkflowConfig, envName string) error {
 	if secretsCfg == nil {
 		return nil
 	}
@@ -89,11 +160,7 @@ func syncInfraOutputSecrets(ctx context.Context, secretsCfg *SecretsConfig, prov
 			continue
 		}
 
-		genConfig := map[string]any{
-			"source":         gen.Source,
-			"_state_outputs": stateOutputs,
-		}
-		value, err := generateSecret(ctx, "infra_output", genConfig)
+		value, err := resolveInfraOutput(wfCfg, gen.Source, envName, stateOutputs)
 		if err != nil {
 			return fmt.Errorf("generate infra_output secret %q: %w", gen.Key, err)
 		}
