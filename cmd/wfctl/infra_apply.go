@@ -264,6 +264,11 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 			ref.Type = specs[0].Type
 		}
 		em := detectCIProvider()
+		// TODO(v0.18.11): provider is interfaces.IaCProvider, which does not implement
+		// interfaces.Troubleshooter. troubleshootAfterFailure's type assertion always
+		// returns false here — this hook is currently a no-op for all IaC providers.
+		// Full diagnostics require per-ResourceDriver access to be threaded through
+		// applyInfraModules (see task #69).
 		troubleshootAfterFailure(ctx, w, provider, ref, err, infraApplyTroubleshootTimeout, em)
 		return fmt.Errorf("apply: %w", err)
 	}
