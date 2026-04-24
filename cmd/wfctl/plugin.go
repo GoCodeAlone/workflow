@@ -21,6 +21,10 @@ func runPlugin(args []string) error {
 		return runPluginTest(args[1:])
 	case "search":
 		return runPluginSearch(args[1:])
+	case "add":
+		return runPluginAdd(args[1:])
+	case "lock":
+		return runPluginLock(args[1:])
 	case "install":
 		return runPluginInstall(args[1:])
 	case "list":
