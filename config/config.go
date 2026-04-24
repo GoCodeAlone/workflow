@@ -373,6 +373,7 @@ func LoadFromBytes(data []byte) (*WorkflowConfig, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config bytes: %w", err)
 	}
+	warnIfInlinePluginVersions(&cfg)
 	return &cfg, nil
 }
 
@@ -384,6 +385,7 @@ func LoadFromString(yamlContent string) (*WorkflowConfig, error) {
 	if err := yaml.Unmarshal([]byte(yamlContent), &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config string: %w", err)
 	}
+	warnIfInlinePluginVersions(&cfg)
 	return &cfg, nil
 }
 
