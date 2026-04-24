@@ -54,7 +54,7 @@ func resolveInfraOutput(wfCfg *config.WorkflowConfig, source, envName string, st
 			}
 			resolved, ok := m.ResolveForEnv(envName)
 			if !ok {
-				return "", fmt.Errorf("infra_output: module %q is not available in env %q (no environment override defined)", moduleName, envName)
+				return "", fmt.Errorf("infra_output: module %q is explicitly disabled for environment %q — cannot read infra_output from a disabled module", moduleName, envName)
 			}
 			if resolved.Name != "" {
 				moduleName = resolved.Name
