@@ -454,15 +454,25 @@ func runPluginRemove(args []string) error {
 	}
 
 	pluginName := fs.Arg(0)
+	pluginDir := filepath.Join(pluginDirVal, pluginName)
+	binaryInstalled := true
+	if _, err := os.Stat(pluginDir); os.IsNotExist(err) {
+		binaryInstalled = false
+	}
+
+	// Check if the plugin is in the manifest.
+	inManifest := pluginExistsInManifest(pluginName, *manifestPath)
+
+	if !binaryInstalled && !inManifest {
+		return fmt.Errorf("plugin %q is not installed", pluginName)
+	}
 
 	// Remove from manifest + lockfile when those files exist.
 	if err := removeFromManifestAndLockfile(pluginName, *manifestPath, *lockPath); err != nil {
 		return err
 	}
 
-	pluginDir := filepath.Join(pluginDirVal, pluginName)
-	if _, err := os.Stat(pluginDir); os.IsNotExist(err) {
-		// Binary wasn't installed (manifest-only removal is valid).
+	if !binaryInstalled {
 		fmt.Printf("Removed plugin %q from manifest\n", pluginName)
 		return nil
 	}

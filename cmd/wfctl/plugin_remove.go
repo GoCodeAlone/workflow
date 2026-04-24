@@ -7,6 +7,21 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 )
 
+// pluginExistsInManifest returns true if pluginName is listed in the manifest at manifestPath.
+// Returns false when the file doesn't exist or the plugin isn't in it.
+func pluginExistsInManifest(name, manifestPath string) bool {
+	m, err := config.LoadWfctlManifest(manifestPath)
+	if err != nil {
+		return false
+	}
+	for _, p := range m.Plugins {
+		if p.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 // removeFromManifestAndLockfile removes a plugin entry from wfctl.yaml and
 // .wfctl-lock.yaml if those files exist. Silently no-ops when files are absent.
 func removeFromManifestAndLockfile(name, manifestPath, lockPath string) error {
