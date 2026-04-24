@@ -825,7 +825,10 @@ func runInfraApply(args []string) error {
 		return fmt.Errorf("resolve secrets provider for infra_output sync: %w", err)
 	}
 	states := loadCurrentState(cfgFile, envName)
-	wfCfg, _ := config.LoadFromFile(cfgFile)
+	wfCfg, err := config.LoadFromFile(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config for infra_output env resolution: %w", err)
+	}
 	return syncInfraOutputSecrets(ctx, secretsCfg, secretsProvider, states, wfCfg, envName)
 }
 
