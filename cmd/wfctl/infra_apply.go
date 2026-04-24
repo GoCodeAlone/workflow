@@ -249,6 +249,10 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		}
 	}
 
+	// Soft-warn if any update/delete action targets a resource whose ProviderID
+	// does not match the driver's declared format. The driver may self-heal, so
+	// we log and continue rather than blocking the apply.
+	validateInputProviderIDs(provider, &plan)
 	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
 	result, err := provider.Apply(ctx, &plan)
 	if err != nil {
@@ -280,6 +284,12 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		// Persist state for every successfully provisioned resource.
 		for _, r := range result.Resources {
 			fmt.Printf("  ✓ %s (%s)\n", r.Name, r.Type)
+
+			// Hard-fail when the driver returns a malformed ProviderID for a strict
+			// format. This prevents corrupt state from reaching the store.
+			if err := validateOutputProviderID(provider, providerType, &r); err != nil {
+				return fmt.Errorf("state write rejected: %w", err)
+			}
 
 			// Find the matching spec to get the applied config.
 			var appliedCfg map[string]any

@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.11] - 2026-04-24
+
+### Added
+
+- **`interfaces.ProviderIDFormat`** enum (`IDFormatUnknown`, `IDFormatUUID`, `IDFormatDomainName`,
+  `IDFormatARN`, `IDFormatFreeform`) with `String()` and a `ProviderIDValidator` optional interface
+  that `ResourceDriver` implementations can adopt to declare their identifier shape.
+- **`interfaces.ValidateProviderID(s string, format ProviderIDFormat) bool`** dispatch function
+  with three unexported validators: `validateUUID` (positional, no-alloc), `validateDomainName`
+  (RFC 1035 relaxed), `validateARN` (6-segment colon split). Unknown and unrecognized formats
+  always return true for forward compatibility.
+- **`cmd/wfctl/infra_validation.go`**: two helpers wired into `applyWithProviderAndStore`:
+  - `validateInputProviderIDs` — soft-warn (log only) before `provider.Apply` when an
+    update/delete action's current-state ProviderID does not match the driver's declared format;
+    lets the driver's self-heal path recover without blocking the apply.
+  - `validateOutputProviderID` — hard-fail (return error) before state write when the driver
+    returns a malformed ProviderID for a strict format (UUID/DomainName/ARN), preventing corrupt
+    data from ever reaching the state store.
+
+### Changed
+
+- Validation helpers are no-ops when the `ResourceDriver` does not implement `ProviderIDValidator`
+  — fully backward compatible with existing plugins.
+
 ## [0.18.10.1] - 2026-04-24
 
 ### Fixed

@@ -85,3 +85,57 @@ type Diagnostic struct {
 type Troubleshooter interface {
 	Troubleshoot(ctx context.Context, ref ResourceRef, failureMsg string) ([]Diagnostic, error)
 }
+
+// ProviderIDFormat identifies the shape of provider-specific resource
+// identifiers so wfctl can validate them at the driver boundary without
+// knowing provider-specific semantics.
+//
+// The zero value IDFormatUnknown disables validation for backward
+// compatibility — drivers that don't opt in get today's behavior.
+type ProviderIDFormat int
+
+const (
+	// IDFormatUnknown disables validation (zero value).
+	IDFormatUnknown ProviderIDFormat = iota
+	// IDFormatUUID is the canonical 36-character hyphenated UUID shape.
+	IDFormatUUID
+	// IDFormatDomainName is an RFC 1035 domain name.
+	IDFormatDomainName
+	// IDFormatARN is an AWS-style colon-separated ARN.
+	IDFormatARN
+	// IDFormatFreeform allows any non-empty string.
+	IDFormatFreeform
+)
+
+// String returns a stable identifier for logs and error messages.
+func (f ProviderIDFormat) String() string {
+	switch f {
+	case IDFormatUUID:
+		return "uuid"
+	case IDFormatDomainName:
+		return "domain_name"
+	case IDFormatARN:
+		return "arn"
+	case IDFormatFreeform:
+		return "freeform"
+	default:
+		return "unknown"
+	}
+}
+
+// ProviderIDValidator is an optional interface ResourceDriver implementations
+// may provide to declare the shape of their ProviderIDs. wfctl uses the
+// declaration to validate ProviderIDs at two boundaries:
+//
+//   - Input: before Update/Delete, probe ref.ProviderID against the declared
+//     format. On mismatch, wfctl logs a warning but still calls the driver so
+//     its own heal logic (if any) can run.
+//   - Output: after Apply, probe r.ProviderID before persisting to state.
+//     Mismatch for non-Unknown, non-Freeform formats is a HARD failure — the
+//     driver has a bug and state must not be corrupted.
+//
+// Drivers that do not implement this interface receive today's behavior:
+// no validation, no warning, no failure.
+type ProviderIDValidator interface {
+	ProviderIDFormat() ProviderIDFormat
+}
