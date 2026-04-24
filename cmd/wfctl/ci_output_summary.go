@@ -36,7 +36,7 @@ func WriteStepSummary(emitter CIGroupEmitter, in SummaryInput) error {
 	if path == "" {
 		return nil
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // summary path comes from GITHUB_STEP_SUMMARY env var, not user input
 	if err != nil {
 		return fmt.Errorf("open summary: %w", err)
 	}
