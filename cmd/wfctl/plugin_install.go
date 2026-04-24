@@ -348,6 +348,9 @@ func runPluginUpdate(args []string) error {
 	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
 	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
 	cfgPath := fs.String("config", "", "Registry config file path")
+	pinVersion := fs.String("version", "", "Pin to this specific version in wfctl.yaml (skips registry lookup)")
+	manifestPath := fs.String("manifest", wfctlManifestPath, "Path to wfctl.yaml manifest")
+	lockPath := fs.String("lock-file", wfctlLockPath, "Path to lockfile")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin update [options] <name>\n\nUpdate an installed plugin to its latest version.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -361,6 +364,16 @@ func runPluginUpdate(args []string) error {
 	}
 
 	pluginName := fs.Arg(0)
+
+	// --version: pin a specific version in the manifest without hitting registry.
+	if *pinVersion != "" {
+		if err := updateManifestVersion(pluginName, *pinVersion, *manifestPath, *lockPath); err != nil {
+			return err
+		}
+		fmt.Printf("Pinned %s@%s in wfctl.yaml\n", pluginName, *pinVersion)
+		return nil
+	}
+
 	pluginDir := filepath.Join(pluginDirVal, pluginName)
 	if _, err := os.Stat(pluginDir); os.IsNotExist(err) {
 		return fmt.Errorf("plugin %q is not installed", pluginName)
