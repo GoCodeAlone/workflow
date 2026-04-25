@@ -31,7 +31,7 @@ there is no manifest SHA to check against.
 | `wfctl plugin install --url <url>` | ⚠️ no verification | ❌ requires `--sha256 <hex>` or auto-fetch |
 | `wfctl update` (self-update) — `checksums.txt` present | ✅ verifies | unchanged |
 | `wfctl update` — `checksums.txt` absent | ⚠️ skips silently | ❌ fails closed |
-| Lockfile-based reinstalls (`wfctl-lock.yaml` SHA present) | ⚠️ not enforced | ✅ use lockfile SHA |
+| Lockfile-based reinstalls (`.wfctl-lock.yaml` SHA present) | ⚠️ not enforced | ✅ use lockfile SHA |
 | `setup-wfctl` action | ⚠️ no verification | out of scope (separate repo) |
 
 ---
