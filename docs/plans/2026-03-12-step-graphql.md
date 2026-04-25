@@ -1,3 +1,31 @@
+---
+status: implemented
+area: core
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 9d9ac78
+  - repo: workflow
+    commit: 34761ba
+  - repo: workflow
+    commit: 35e1a5a
+  - repo: workflow
+    commit: 8971300
+  - repo: workflow
+    commit: ab05370
+external_refs:
+  - "buymywishlist-phase3: app.yaml uses step.graphql for BwP delivery preview, create order, status, cancel, and return flows"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"step\\.graphql|NewGraphQLStepFactory|GraphQLStep\" module plugins/pipelinesteps schema DOCUMENTATION.md"
+    - "git log --oneline --all -- module/pipeline_step_graphql.go module/pipeline_step_graphql_test.go plugins/pipelinesteps/plugin.go"
+    - "rg -n \"step\\.bmw\\.bwp|step\\.graphql|bwp_\" /Users/jon/workspace/buymywishlist-phase3/app.yaml"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # step.graphql Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

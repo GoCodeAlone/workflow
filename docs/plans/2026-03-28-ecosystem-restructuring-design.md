@@ -1,3 +1,28 @@
+---
+status: in_progress
+area: ecosystem
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 57ae52f
+  - repo: workflow
+    commit: abbb53f
+  - repo: workflow
+    commit: be62358
+  - repo: workflow
+    commit: 8399629
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"expr-lang|ExprEngine|\\$\\{|migrate expressions|dual-mode|templateFuncMap|Resolve\" go.mod module cmd docs -g '!docs/plans/**'"
+    - "git log --oneline --all -- module/pipeline_expr.go module/pipeline_template.go go.mod cmd/wfctl"
+    - "GOWORK=off go test ./module ./plugins/pipelinesteps -run 'TestRawResponse|TestPipelineOutput|TestHTTPTrigger_PipelineOutput|TestResolve_PureExpr|TestExprEngine|TestSkip'"
+  result: partial
+supersedes: []
+superseded_by: []
+---
+
 # Ecosystem Restructuring Design
 
 **Date:** 2026-03-28

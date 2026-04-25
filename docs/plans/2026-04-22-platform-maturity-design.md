@@ -1,3 +1,37 @@
+---
+status: implemented
+area: workflow
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: d41d77e
+  - repo: workflow
+    commit: 175023f
+  - repo: workflow
+    commit: b7ecc5e
+  - repo: workflow
+    commit: d8e074f
+  - repo: workflow
+    commit: 1b464ab
+  - repo: workflow
+    commit: 0b5414d
+  - repo: workflow
+    commit: 0b6ce72
+  - repo: workflow
+    commit: 81e703b
+  - repo: workflow
+    commit: b664768
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - rg -n "MigrationDriver|TenantResolver|TenantRegistry|SupportedCanonicalKeys|BuildHook|install_verify|tenant subcommand|distroless" interfaces cmd/wfctl config module
+    - GOWORK=off go test ./interfaces ./config ./platform ./cmd/wfctl -run 'Test(Migration|Tenant|Canonical|BuildHook|PluginCLI|ScaffoldDockerfile|ResolveForEnv|ConfigHash|ApplyInfraModules|Diagnostic|Troubleshoot|ProviderID|ValidateProviderID|PluginInstall|ParseChecksums|Audit|WfctlManifest|WfctlLockfile|PluginLock|PluginAdd|PluginRemove|MigratePlugins|InfraOutputs)' -count=1
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Platform maturity design — 2026-04-22
 
 Brings six structural gaps to resolution in one coordinated rollout: schema migrations, tenancy, canonical IaC config, hardened base image, supply-chain verification, and plugin-extensible wfctl (dynamic CLI commands + build-pipeline hooks).

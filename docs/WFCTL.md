@@ -40,6 +40,7 @@ wfctl update --check  # check for updates without installing
 ```mermaid
 graph TD
     wfctl --> init
+    wfctl --> audit
     wfctl --> validate
     wfctl --> inspect
     wfctl --> run
@@ -82,6 +83,9 @@ graph TD
 
     security --> security-audit["audit"]
     security --> security-gennetpol["generate-network-policies"]
+
+    audit --> audit-plans["plans"]
+    audit --> audit-plugins["plugins"]
 
     infra --> infra-plan["plan"]
     infra --> infra-apply["apply"]
@@ -162,12 +166,91 @@ graph TD
 | **UI Generation** | `ui scaffold`, `build-ui` |
 | **Database Migrations** | `migrate status/diff/apply` |
 | **Git Integration** | `git connect`, `git push` |
-| **Platform Inspection** | `ports list`, `security audit`, `security generate-network-policies` |
+| **Platform Inspection** | `audit plans`, `audit plugins`, `ports list`, `security audit`, `security generate-network-policies` |
 | **Utilities** | `snippets`, `manifest`, `pipeline`, `update`, `mcp` |
 
 ---
 
 ## Command Reference
+
+### `audit`
+
+Audit Workflow ecosystem metadata without mutating project code. The command is intended for dogfooding release readiness checks: plans and design docs should carry implementation evidence, and plugin repos should expose compatible manifests.
+
+```
+wfctl audit <subject> [options]
+```
+
+#### `wfctl audit plans`
+
+Scan `docs/plans` Markdown files for tracking metadata and implementation evidence.
+
+```
+wfctl audit plans [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--dir` | `docs/plans` | Plan directory to scan |
+| `--json` | `false` | Emit machine-readable JSON |
+| `--stale-after` | `30d` | Warn when verification evidence is older than this duration |
+| `--fix-index` | `false` | Regenerate `docs/plans/INDEX.md` from parsed metadata |
+
+The audit warns on legacy docs without frontmatter and fails on unverifiable implementation claims, invalid metadata, broken supersession links, duplicate active designs, or local implementation commits that cannot be found.
+
+New design docs should use this frontmatter shape:
+
+```yaml
+---
+status: approved
+area: wfctl
+owner: workflow
+implementation_refs: []
+external_refs:
+  - "#123"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - GOWORK=off go test ./cmd/wfctl
+  result: pass
+supersedes: []
+superseded_by: []
+---
+```
+
+Status values are `proposed`, `approved`, `planned`, `in_progress`, `implemented`, `superseded`, and `abandoned`. Area values are `ecosystem`, `wfctl`, `plugins`, `editor`, `cloud`, `ide`, `core`, `runtime`, `scenarios`, `workflow`, and `bmw`. A doc marked `implemented` must include implementation refs and verification commands.
+
+Examples:
+
+```bash
+wfctl audit plans --dir docs/plans
+wfctl audit plans --dir docs/plans --json
+wfctl audit plans --dir docs/plans --fix-index
+```
+
+#### `wfctl audit plugins`
+
+Scan local `workflow-plugin-*` repositories and classify `plugin.json` manifest shape.
+
+```
+wfctl audit plugins [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--repo-root` | parent of current repo | Directory containing `workflow-plugin-*` repos |
+| `--json` | `false` | Emit machine-readable JSON |
+| `--strict` | `false` | Treat warnings and errors as command failures |
+
+Default mode reports canonical, legacy, missing, and invalid manifest counts but exits 0 so it can be used as an inventory command. Use `--strict` in release gates.
+
+Examples:
+
+```bash
+wfctl audit plugins
+wfctl audit plugins --repo-root /path/to/workspace --json
+wfctl audit plugins --repo-root /path/to/workspace --strict
+```
 
 ### `init`
 

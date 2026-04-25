@@ -1,3 +1,29 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: ee2f925
+  - repo: workflow
+    commit: 90257d9
+  - repo: workflow
+    commit: 48440c7
+  - repo: workflow-dnd
+    commit: 02c4815e
+external_refs:
+  - "core-dump: infra.yaml ci.registries evidence"
+  - "buymywishlist: app.yaml/infra.yaml ci.registries evidence"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - 'rg -n "func runBuild|wfctl build|func runRegistry|CIRegistry|CIBuildSecurity|GenerateSBOM" cmd config plugins docs -S'
+    - 'rg -n "wfctl build|wfctl registry|ci.registries|registries:" /Users/jon/workspace/core-dump /Users/jon/workspace/workflow-dnd /Users/jon/workspace/buymywishlist -S'
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # wfctl Build + Deploy Orchestration Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

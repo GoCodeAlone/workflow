@@ -1,3 +1,33 @@
+---
+status: implemented
+area: plugins
+owner: workflow
+implementation_refs:
+  - repo: workflow-plugin-okta
+    commit: 0fb0455
+  - repo: workflow-plugin-datadog
+    commit: 8d50982
+  - repo: workflow-plugin-launchdarkly
+    commit: 530a0c7
+  - repo: workflow-plugin-salesforce
+    commit: 44bd98c
+  - repo: workflow-plugin-openlms
+    commit: 1070766
+  - repo: workflow-plugin-authz
+    commit: c50b786
+external_refs:
+  - "workflow-scenarios: scenarios/54-okta-integration through scenarios/58-openlms-integration"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "jq -r '.name, (.capabilities.stepTypes // .stepTypes // [] | length)' /Users/jon/workspace/workflow-plugin-{okta,datadog,launchdarkly,salesforce,openlms}/plugin.json"
+    - "rg -n \"permit|Permit\" /Users/jon/workspace/workflow-plugin-authz"
+    - "rg -n \"scenarios/5[4-8]-.*integration\" /Users/jon/workspace/workflow-scenarios"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Integration Plugins Wave 2 Design: Okta, Datadog, LaunchDarkly, Permit.io, Salesforce, OpenLMS
 
 **Date**: 2026-03-11

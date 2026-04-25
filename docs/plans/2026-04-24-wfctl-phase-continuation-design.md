@@ -1,3 +1,27 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: cc22551
+  - repo: workflow
+    commit: f0faf96
+  - repo: workflow
+    commit: b50e3f3
+  - repo: workflow
+    commit: 856a7b9
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - rg -n "ResolveForEnv|resourceName = resolved.Name|resolveInfraOutput" cmd/wfctl config
+    - GOWORK=off go test ./interfaces ./config ./platform ./cmd/wfctl -run 'Test(Migration|Tenant|Canonical|BuildHook|PluginCLI|ScaffoldDockerfile|ResolveForEnv|ConfigHash|ApplyInfraModules|Diagnostic|Troubleshoot|ProviderID|ValidateProviderID|PluginInstall|ParseChecksums|Audit|WfctlManifest|WfctlLockfile|PluginLock|PluginAdd|PluginRemove|MigratePlugins|InfraOutputs)' -count=1
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # wfctl Phase Continuation — Module Env-Resolution Consistency — Design
 
 **Status:** Approved (autonomous pipeline, 2026-04-24)

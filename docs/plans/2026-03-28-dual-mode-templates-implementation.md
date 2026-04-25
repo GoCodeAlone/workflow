@@ -1,3 +1,23 @@
+---
+status: implemented
+area: runtime
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 57ae52f
+  - repo: workflow
+    commit: abbb53f
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"expr-lang|ExprEngine|\\$\\{|migrate expressions|dual-mode|templateFuncMap|Resolve\" go.mod module cmd docs -g '!docs/plans/**'"
+    - "GOWORK=off go test ./module ./plugins/pipelinesteps -run 'TestRawResponse|TestPipelineOutput|TestHTTPTrigger_PipelineOutput|TestResolve_PureExpr|TestExprEngine|TestSkip'"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Dual-Mode Template System Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

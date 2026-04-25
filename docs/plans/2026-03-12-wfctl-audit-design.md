@@ -1,3 +1,27 @@
+---
+status: implemented
+area: wfctl
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 31f2154
+  - repo: workflow
+    commit: c114e1f
+  - repo: workflow
+    commit: 6942e83
+  - repo: workflow
+    commit: d369b77
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"isHelpRequested|checkTrailingFlags|plugin-dir|data-dir|PluginManifest|include:\" cmd/wfctl mcp plugins schema .github"
+    - "git log --oneline --all -- cmd/wfctl/main.go cmd/wfctl/plugin_install.go cmd/wfctl/flag_helpers.go cmd/wfctl/validate.go"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Design: wfctl CLI Audit & Plugin Ecosystem Improvements
 
 **Date:** 2026-03-12

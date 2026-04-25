@@ -1,3 +1,34 @@
+---
+status: in_progress
+area: ecosystem
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 31d4447
+  - repo: workflow
+    commit: 1eb473c
+  - repo: workflow
+    commit: 065844f
+  - repo: workflow
+    commit: 7695ee0
+  - repo: workflow
+    commit: 0317ab2
+  - repo: workflow
+    commit: 71d80f1
+  - repo: workflow
+    commit: 49d7b64
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"scaffold_ci|scaffold_infra|scaffold_service|detect_infra_needs|validate_service_topology|wfctl ci run|ci run|ci init|services:|init --wizard|Bubbletea|github.app|gh_pr_create|step.gh_|workflow-plugin-github\" cmd module plugin plugins docs -g '!docs/plans/**'"
+    - "git log --oneline --all -- cmd/wfctl/ci_run.go cmd/wfctl/ci_init.go cmd/wfctl/dev_compose.go cmd/wfctl/dev_process.go cmd/wfctl/wizard.go cmd/wfctl/validate.go docs/dsl-reference.md docs/mcp-tools-reference.md"
+    - "GOWORK=off go test ./interfaces ./platform ./cmd/wfctl -run 'TestSize|TestResourceSpec|TestComputePlan|TestResolveSizing|TestGenerateCI|TestCIRun|TestInfra'"
+  result: partial
+supersedes: []
+superseded_by: []
+---
+
 # Platform Vision: GitHub Integration, Universal CI, Multi-Service Architecture
 
 **Date:** 2026-03-28

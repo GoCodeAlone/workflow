@@ -1,3 +1,26 @@
+---
+status: implemented
+area: editor
+owner: workflow
+implementation_refs:
+  - repo: workflow-editor
+    commit: 53ff6b6
+  - repo: workflow-vscode
+    commit: 3acb100
+  - repo: workflow-jetbrains
+    commit: 7e2582b
+external_refs:
+  - "workflow ui/src/App.tsx imports NodePalette, WorkflowCanvas, and PropertyPanel from @gocodealone/workflow-editor"
+  - "workflow ui/package.json depends on @gocodealone/workflow-editor"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"WorkflowEditor|@gocodealone/workflow-editor|webview|JCEF\" /Users/jon/workspace/workflow-editor /Users/jon/workspace/workflow-vscode /Users/jon/workspace/workflow-jetbrains ui"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Visual Workflow Editor Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

@@ -1,3 +1,27 @@
+---
+status: implemented
+area: runtime
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 8adfcac
+  - repo: workflow
+    commit: d13fca0
+  - repo: workflow
+    commit: ebec203
+  - repo: workflow
+    commit: baf2626
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"actor.system|step.actor_send|step.actor_ask\" plugins/actors cmd examples"
+    - "GOWORK=off go test ./plugins/actors"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Actor Model Integration Design
 
 ## Problem

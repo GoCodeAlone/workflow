@@ -1,3 +1,27 @@
+---
+status: implemented
+area: runtime
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 3d2eb47
+  - repo: workflow
+    commit: c4f775a
+  - repo: workflow
+    commit: 566fb5a
+  - repo: workflow
+    commit: 50f9c06
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"step.parallel|concurrency|groupBy\" module plugins cmd"
+    - "GOWORK=off go test ./module -run 'Test(ExplicitTraceHeader|TrackPipelineExecution|ParallelStep|ForEachStep|TemplateEngine_Func|Scan)'"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Fan-Out / Fan-In / Map-Reduce Implementation Plan
 
 **Goal:** Add parallel execution capabilities (`step.parallel`, concurrent `step.foreach`) and collection template functions (`sum`, `pluck`, `groupBy`, etc.) to the workflow engine.

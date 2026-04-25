@@ -1,3 +1,27 @@
+---
+status: implemented
+area: core
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 7baff63
+  - repo: workflow
+    commit: 8ba999a
+  - repo: workflow
+    commit: 548cce5
+  - repo: workflow
+    commit: 5cdbcc1
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "git log --oneline --all -- wftest go.mod docs/testing.md"
+    - "GOWORK=off go test ./wftest ./wftest/bdd"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # wftest/bdd Gherkin Support — Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

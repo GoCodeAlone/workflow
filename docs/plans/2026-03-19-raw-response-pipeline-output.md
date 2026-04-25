@@ -1,3 +1,25 @@
+---
+status: implemented
+area: runtime
+owner: workflow
+implementation_refs:
+  - repo: workflow
+    commit: 75cf47e
+  - repo: workflow
+    commit: a3d9e43
+  - repo: workflow
+    commit: baa9105
+external_refs: []
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "rg -n \"raw_response|pipeline_output|ExecutePipeline|_pipeline_output|PipelineExecutor\" engine.go interfaces module plugins cmd wftest docs -g '!docs/plans/**'"
+    - "GOWORK=off go test ./module ./plugins/pipelinesteps -run 'TestRawResponse|TestPipelineOutput|TestHTTPTrigger_PipelineOutput|TestResolve_PureExpr|TestExprEngine|TestSkip'"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # step.pipeline_output + engine.ExecutePipeline() Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

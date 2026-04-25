@@ -1,3 +1,34 @@
+---
+status: implemented
+area: plugins
+owner: workflow
+implementation_refs:
+  - repo: workflow-plugin-twilio
+    commit: 1345186
+  - repo: workflow-plugin-monday
+    commit: 94ccd28
+  - repo: workflow-plugin-turnio
+    commit: 670fdbf
+external_refs:
+  - "workflow-scenarios: scenarios/52-monday-integration"
+  - "workflow-scenarios: scenarios/53-turnio-integration"
+  - "workflow-scenarios: scenarios/63-twilio-integration"
+  - "workflow-plugin-auth: tags include v0.1.0+"
+  - "workflow-plugin-security-scanner: tags include v0.1.0+"
+verification:
+  last_checked: 2026-04-25
+  commands:
+    - "git -C /Users/jon/workspace/workflow-plugin-twilio tag --list 'v*'"
+    - "git -C /Users/jon/workspace/workflow-plugin-monday tag --list 'v*'"
+    - "git -C /Users/jon/workspace/workflow-plugin-turnio tag --list 'v*'"
+    - "git -C /Users/jon/workspace/workflow-plugin-auth tag --list 'v*'"
+    - "git -C /Users/jon/workspace/workflow-plugin-security-scanner tag --list 'v*'"
+    - "rg -n \"workflow-plugin-(twilio|monday|turnio)\" /Users/jon/workspace/workflow-scenarios"
+  result: pass
+supersedes: []
+superseded_by: []
+---
+
 # Plugin Releases & Validation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

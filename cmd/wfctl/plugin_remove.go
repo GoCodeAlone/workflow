@@ -63,14 +63,19 @@ func removeFromManifestAndLockfile(name, manifestPath, lockPath string) error {
 			return fmt.Errorf("load manifest: %w", err)
 		}
 		filtered := make([]config.WfctlPluginEntry, 0, len(m.Plugins))
+		removed := false
 		for _, p := range m.Plugins {
 			if p.Name != name && normalizePluginName(p.Name) != normName {
 				filtered = append(filtered, p)
+			} else {
+				removed = true
 			}
 		}
-		m.Plugins = filtered
-		if err := config.SaveWfctlManifest(manifestPath, m); err != nil {
-			return fmt.Errorf("save manifest: %w", err)
+		if removed {
+			m.Plugins = filtered
+			if err := config.SaveWfctlManifest(manifestPath, m); err != nil {
+				return fmt.Errorf("save manifest: %w", err)
+			}
 		}
 	}
 
@@ -81,13 +86,17 @@ func removeFromManifestAndLockfile(name, manifestPath, lockPath string) error {
 		if err != nil {
 			return fmt.Errorf("load lockfile: %w", err)
 		}
+		removed := false
 		for k := range lf.Plugins {
 			if k == name || normalizePluginName(k) == normName {
 				delete(lf.Plugins, k)
+				removed = true
 			}
 		}
-		if err := config.SaveWfctlLockfile(lockPath, lf); err != nil {
-			return fmt.Errorf("save lockfile: %w", err)
+		if removed {
+			if err := config.SaveWfctlLockfile(lockPath, lf); err != nil {
+				return fmt.Errorf("save lockfile: %w", err)
+			}
 		}
 	}
 
