@@ -48,17 +48,16 @@ func (n *noopStateStore) DeleteResource(_ context.Context, _ string) error { ret
 func resolveStateStore(cfgFile, envName string) (infraStateStore, error) {
 	cfgToUse := cfgFile
 	if envName != "" {
-		// Attempt env resolution so per-env backend config (e.g. region, prefix)
-		// is applied before initialising the store. Failure is non-fatal — fall
-		// back to the base config rather than dropping state persistence entirely.
-		if tmp, err := writeEnvResolvedConfig(cfgFile, envName); err == nil {
-			defer os.Remove(tmp)
-			cfgToUse = tmp
+		tmp, err := writeEnvResolvedConfig(cfgFile, envName)
+		if err != nil {
+			return nil, fmt.Errorf("resolve %q environment for state store: %w", envName, err)
 		}
+		defer os.Remove(tmp)
+		cfgToUse = tmp
 	}
 	iacStates, _, _, err := discoverInfraModules(cfgToUse)
 	if err != nil {
-		return &noopStateStore{}, nil //nolint:nilerr // config not found / parse error means no state module; noop is correct
+		return nil, fmt.Errorf("discover iac.state modules: %w", err)
 	}
 	if len(iacStates) == 0 {
 		return &noopStateStore{}, nil
@@ -143,11 +142,11 @@ func (s *fsWfctlStateStore) ListResources(_ context.Context) ([]interfaces.Resou
 		}
 		data, err := os.ReadFile(filepath.Join(s.dir, e.Name()))
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("read state %q: %w", e.Name(), err)
 		}
 		var r iacStateRecord
 		if err := json.Unmarshal(data, &r); err != nil {
-			continue
+			return nil, fmt.Errorf("parse state %q: %w", e.Name(), err)
 		}
 		states = append(states, iacRecordToResourceState(r))
 	}

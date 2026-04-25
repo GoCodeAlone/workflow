@@ -161,8 +161,14 @@ func runInfraPlan(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateUniqueInfraResourceNames(desired); err != nil {
+		return err
+	}
 
-	current, _ := loadCurrentState(cfgFile, envName) // nil on first run is valid
+	current, err := loadCurrentState(cfgFile, envName)
+	if err != nil {
+		return fmt.Errorf("load current state: %w", err)
+	}
 
 	plan, err := platform.ComputePlan(desired, current)
 	if err != nil {
@@ -752,7 +758,14 @@ func runInfraImport(args []string) error {
 		if err != nil {
 			return fmt.Errorf("%s/%s: resolve resource driver: %w", spec.Type, spec.Name, err)
 		}
-		live, err := driver.Read(context.Background(), readRefForSpec(spec))
+		ref, adoptable, err := adoptionRefForSpec(driver, spec)
+		if err != nil {
+			return err
+		}
+		if !adoptable {
+			return fmt.Errorf("%s/%s: resource type is not importable without --id", spec.Type, spec.Name)
+		}
+		live, err := driver.Read(context.Background(), ref)
 		if err != nil {
 			return fmt.Errorf("%s/%s: read existing resource: %w", spec.Type, spec.Name, err)
 		}
@@ -1000,7 +1013,10 @@ func runInfraApply(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve secrets provider for infra_output sync: %w", err)
 	}
-	states, _ := loadCurrentState(cfgFile, envName) // nil on missing/empty state is valid for sync
+	states, err := loadCurrentState(cfgFile, envName)
+	if err != nil {
+		return fmt.Errorf("load current state for infra_output sync: %w", err)
+	}
 	// Only reload the workflow config when env resolution is actually needed:
 	// it is needed only when --env is set AND at least one infra_output secret
 	// generator is configured (otherwise syncInfraOutputSecrets is a no-op for

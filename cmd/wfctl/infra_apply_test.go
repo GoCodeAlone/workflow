@@ -110,6 +110,17 @@ func (d *readDriver) ProviderIDFormat() interfaces.ProviderIDFormat {
 	return d.format
 }
 
+func (d *readDriver) AdoptionRef(spec interfaces.ResourceSpec) (interfaces.ResourceRef, bool, error) {
+	providerID, _ := spec.Config["provider_id"].(string)
+	if providerID == "" {
+		providerID, _ = spec.Config["domain"].(string)
+	}
+	if providerID == "" {
+		providerID = spec.Name
+	}
+	return interfaces.ResourceRef{Name: spec.Name, Type: spec.Type, ProviderID: providerID}, true, nil
+}
+
 type readBackedProvider struct {
 	applyCapture
 	driver interfaces.ResourceDriver
@@ -130,6 +141,14 @@ func (p *readBackedFailingApplyProvider) Apply(_ context.Context, plan *interfac
 	p.appliedPlan = plan
 	p.mu.Unlock()
 	return nil, p.applyErr
+}
+
+type noDriverApplyProvider struct {
+	applyCapture
+}
+
+func (p *noDriverApplyProvider) ResourceDriver(resourceType string) (interfaces.ResourceDriver, error) {
+	return nil, fmt.Errorf("no driver for %s", resourceType)
 }
 
 // ── TestApplyInfraModules_DirectPath ───────────────────────────────────────────
@@ -299,6 +318,137 @@ modules:
 	}
 }
 
+func TestApplyInfraModules_AllowsUniqueLegacyProviderTypeFallbackInMixedProviders(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: aws-provider
+    type: iac.provider
+    config:
+      provider: aws
+
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: digitalocean
+
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: `+stateDir+`
+
+  - name: aws-dns
+    type: infra.dns
+    config:
+      provider: aws-provider
+      domain: example.com
+
+  - name: do-dns
+    type: infra.dns
+    config:
+      provider: do-provider
+      domain: example.org
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	store := &fsWfctlStateStore{dir: stateDir}
+	for _, st := range []interfaces.ResourceState{
+		{
+			ID:            "aws-dns",
+			Name:          "aws-dns",
+			Type:          "infra.dns",
+			Provider:      "aws",
+			ProviderID:    "Z123456789",
+			ConfigHash:    configHashMap(map[string]any{"provider": "aws-provider", "domain": "example.com"}),
+			AppliedConfig: map[string]any{"domain": "example.com"},
+		},
+		{
+			ID:            "do-dns",
+			Name:          "do-dns",
+			Type:          "infra.dns",
+			Provider:      "digitalocean",
+			ProviderID:    "example.org",
+			ConfigHash:    configHashMap(map[string]any{"provider": "do-provider", "domain": "example.org"}),
+			AppliedConfig: map[string]any{"domain": "example.org"},
+		},
+	} {
+		if err := store.SaveResource(context.Background(), st); err != nil {
+			t.Fatalf("seed state %s: %v", st.Name, err)
+		}
+	}
+
+	providers := map[string]*applyCapture{
+		"aws":          {},
+		"digitalocean": {},
+	}
+	orig := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, providerType string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		p, ok := providers[providerType]
+		if !ok {
+			t.Fatalf("unexpected provider type %q", providerType)
+		}
+		return p, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = orig })
+
+	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
+		t.Fatalf("applyInfraModules: %v", err)
+	}
+
+	for providerType, provider := range providers {
+		provider.mu.Lock()
+		applyCalled := provider.applyCalled
+		appliedPlan := provider.appliedPlan
+		provider.mu.Unlock()
+		if applyCalled {
+			t.Fatalf("%s Apply was called with plan %+v; unique legacy provider-type state should match", providerType, appliedPlan)
+		}
+	}
+}
+
+func TestApplyInfraModules_RejectsDuplicateResourceNameAcrossProviders(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: aws-provider
+    type: iac.provider
+    config:
+      provider: aws
+
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: digitalocean
+
+  - name: shared-dns
+    type: infra.dns
+    config:
+      provider: aws-provider
+      domain: example.com
+
+  - name: shared-dns
+    type: infra.dns
+    config:
+      provider: do-provider
+      domain: example.org
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	err := applyInfraModules(context.Background(), cfgPath, "")
+	if err == nil {
+		t.Fatal("expected duplicate resource name error, got nil")
+	}
+	if !strings.Contains(err.Error(), "state identity is name-based") {
+		t.Fatalf("error = %v, want state identity message", err)
+	}
+}
+
 func TestApplyInfraModules_SameProviderTypeDoesNotDeleteOtherProviderInstanceState(t *testing.T) {
 	dir := t.TempDir()
 	stateDir := filepath.Join(dir, "state")
@@ -368,6 +518,87 @@ modules:
 		if action.Action == "delete" && action.Resource.Name == "east-vpc" {
 			t.Fatalf("west-provider plan included east-provider delete: %+v", appliedPlan.Actions)
 		}
+	}
+}
+
+func TestFilterCurrentStateForProvider_DoesNotMatchUnscopedSameNameAcrossProviderGroups(t *testing.T) {
+	current := []interfaces.ResourceState{
+		{
+			Name:       "site-dns",
+			Type:       "infra.dns",
+			Provider:   "aws",
+			ProviderID: "Z123456789",
+		},
+		{
+			Name:        "site-dns",
+			Type:        "infra.dns",
+			Provider:    "digitalocean",
+			ProviderRef: "do-provider",
+			ProviderID:  "example.com",
+		},
+	}
+	specs := []interfaces.ResourceSpec{{
+		Name:   "site-dns",
+		Type:   "infra.dns",
+		Config: map[string]any{"provider": "do-provider", "domain": "example.com"},
+	}}
+
+	scoped := filterCurrentStateForProvider(current, "digitalocean", "do-provider", specs, false)
+	if len(scoped) != 1 {
+		t.Fatalf("scoped states = %d, want 1: %#v", len(scoped), scoped)
+	}
+	if scoped[0].ProviderID != "example.com" {
+		t.Fatalf("scoped ProviderID = %q, want example.com", scoped[0].ProviderID)
+	}
+}
+
+func TestFilterCurrentStateForProvider_ExplicitProviderRefMismatchNeverFallsBack(t *testing.T) {
+	current := []interfaces.ResourceState{
+		{
+			Name:        "site-dns",
+			Type:        "infra.dns",
+			Provider:    "digitalocean",
+			ProviderRef: "other-do-provider",
+			ProviderID:  "example.com",
+		},
+	}
+	specs := []interfaces.ResourceSpec{{
+		Name:   "site-dns",
+		Type:   "infra.dns",
+		Config: map[string]any{"provider": "do-provider", "domain": "example.com"},
+	}}
+
+	scoped := filterCurrentStateForProvider(current, "digitalocean", "do-provider", specs, true)
+	if len(scoped) != 0 {
+		t.Fatalf("scoped states = %#v, want none for explicit provider_ref mismatch", scoped)
+	}
+}
+
+func TestFilterCurrentStateForProvider_AllowsUnscopedLegacyStateByDesiredName(t *testing.T) {
+	current := []interfaces.ResourceState{
+		{
+			Name:       "site-dns",
+			Type:       "infra.dns",
+			ProviderID: "example.com",
+		},
+		{
+			Name:       "other-dns",
+			Type:       "infra.dns",
+			ProviderID: "other.example.com",
+		},
+	}
+	specs := []interfaces.ResourceSpec{{
+		Name:   "site-dns",
+		Type:   "infra.dns",
+		Config: map[string]any{"provider": "do-provider", "domain": "example.com"},
+	}}
+
+	scoped := filterCurrentStateForProvider(current, "digitalocean", "do-provider", specs, true)
+	if len(scoped) != 1 {
+		t.Fatalf("scoped states = %#v, want only desired legacy state", scoped)
+	}
+	if scoped[0].Name != "site-dns" {
+		t.Fatalf("scoped state = %#v, want site-dns", scoped[0])
 	}
 }
 
@@ -669,6 +900,74 @@ func TestApplyWithProvider_DNSAdoptionRequiresWritableStateStore(t *testing.T) {
 	provider.mu.Unlock()
 	if applyCalled {
 		t.Fatal("Apply should not be called when DNS adoption cannot be persisted")
+	}
+}
+
+func TestApplyWithProvider_AdoptsResourceThroughDriverLocator(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name:   "site-app",
+		Type:   "infra.container_service",
+		Config: map[string]any{"provider_id": "app-123", "image": "old"},
+	}
+	driver := &readDriver{
+		expectedProviderID: "app-123",
+		readOut: &interfaces.ResourceOutput{
+			Name:       "site-app",
+			Type:       "infra.container_service",
+			ProviderID: "app-123",
+			Outputs:    map[string]any{"image": "old"},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+	store := &fakeStateStore{}
+
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	if err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
+	}
+	if len(driver.reads) != 1 {
+		t.Fatalf("driver reads = %d, want 1", len(driver.reads))
+	}
+	if driver.reads[0].ProviderID != "app-123" {
+		t.Fatalf("read ProviderID = %q, want app-123", driver.reads[0].ProviderID)
+	}
+	if len(store.saved) != 1 {
+		t.Fatalf("saved states = %d, want adopted state", len(store.saved))
+	}
+	if store.saved[0].Type != "infra.container_service" || store.saved[0].ProviderID != "app-123" {
+		t.Fatalf("adopted state = %#v", store.saved[0])
+	}
+	provider.mu.Lock()
+	applyCalled := provider.applyCalled
+	appliedPlan := provider.appliedPlan
+	provider.mu.Unlock()
+	if !applyCalled {
+		t.Fatal("Apply should be called to reconcile desired config after adoption")
+	}
+	if appliedPlan == nil || len(appliedPlan.Actions) != 1 || appliedPlan.Actions[0].Current == nil || appliedPlan.Actions[0].Current.ProviderID != "app-123" {
+		t.Fatalf("applied plan = %#v, want update using adopted current state", appliedPlan)
+	}
+}
+
+func TestApplyWithProvider_SkipsAdoptionWhenAppDriverHasNoLocator(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name:   "site-app",
+		Type:   "infra.container_service",
+		Config: map[string]any{"image": "example/app:latest"},
+	}
+	provider := &noDriverApplyProvider{}
+
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "")
+	if err != nil {
+		t.Fatalf("applyWithProviderAndStore: %v", err)
+	}
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if !provider.applyCalled {
+		t.Fatal("Apply should be called for normal create when app driver lacks adoption locator")
+	}
+	if provider.appliedPlan == nil || len(provider.appliedPlan.Actions) != 1 || provider.appliedPlan.Actions[0].Action != "create" {
+		t.Fatalf("applied plan = %#v, want one create", provider.appliedPlan)
 	}
 }
 

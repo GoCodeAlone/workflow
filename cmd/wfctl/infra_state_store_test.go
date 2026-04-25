@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -45,6 +46,16 @@ modules:
 	}
 	if len(states) != 0 {
 		t.Errorf("expected empty state, got %d records", len(states))
+	}
+}
+
+func TestResolveStateStore_ReturnsDiscoverErrors(t *testing.T) {
+	_, err := resolveStateStore(filepath.Join(t.TempDir(), "missing.yaml"), "")
+	if err == nil {
+		t.Fatal("expected missing config error, got nil")
+	}
+	if !strings.Contains(err.Error(), "discover iac.state modules") {
+		t.Fatalf("error = %v, want discover context", err)
 	}
 }
 
@@ -103,6 +114,109 @@ modules:
 	baseEntries, _ := os.ReadDir(baseDir)
 	if len(baseEntries) != 0 {
 		t.Errorf("base state dir should be empty (env override applied), got %d files", len(baseEntries))
+	}
+}
+
+func TestRunInfraPlan_ReturnsStateLoadErrors(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: `+stateDir+`
+
+  - name: site-dns
+    type: infra.dns
+    config:
+      domain: example.com
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("mkdir state: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "bad.json"), []byte(`{`), 0o600); err != nil {
+		t.Fatalf("write bad state: %v", err)
+	}
+
+	err := runInfraPlan([]string{"--config", cfgPath})
+	if err == nil {
+		t.Fatal("expected state load error, got nil")
+	}
+	if !strings.Contains(err.Error(), "load current state") {
+		t.Fatalf("error = %v, want load current state context", err)
+	}
+}
+
+func TestRunInfraPlan_RejectsDuplicateResourceNames(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: site-dns
+    type: infra.dns
+    config:
+      domain: example.com
+
+  - name: site-dns
+    type: infra.dns
+    config:
+      domain: example.org
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	err := runInfraPlan([]string{"--config", cfgPath})
+	if err == nil {
+		t.Fatal("expected duplicate resource name error, got nil")
+	}
+	if !strings.Contains(err.Error(), "declared more than once") {
+		t.Fatalf("error = %v, want duplicate declaration message", err)
+	}
+}
+
+func TestApplyInfraModules_FailsOnCorruptFilesystemState(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.MkdirAll(stateDir, 0o750); err != nil {
+		t.Fatalf("mkdir state: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "broken.json"), []byte("{not-json"), 0o600); err != nil {
+		t.Fatalf("write corrupt state: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: my-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: `+stateDir+`
+
+  - name: my-vpc
+    type: infra.vpc
+    config:
+      provider: my-provider
+      region: nyc3
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	err := applyInfraModules(context.Background(), cfgPath, "")
+	if err == nil {
+		t.Fatal("expected corrupt state error, got nil")
+	}
+	if !strings.Contains(err.Error(), "load current state") || !strings.Contains(err.Error(), "parse state") {
+		t.Fatalf("error = %v, want load current state parse state", err)
 	}
 }
 

@@ -77,6 +77,9 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 		fmt.Println("No infra.* modules to apply.")
 		return nil
 	}
+	if err := validateUniqueInfraResourceNames(infraSpecs); err != nil {
+		return err
+	}
 
 	// Load full config to resolve iac.provider module definitions.
 	cfg, err := config.LoadFromFile(cfgFile)
@@ -152,13 +155,18 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 	}
 
 	// Load current state once; nil on first run is valid (no prior state).
-	current, _ := loadCurrentState(cfgFile, envName)
+	current, err := loadCurrentState(cfgFile, envName)
+	if err != nil {
+		return fmt.Errorf("load current state: %w", err)
+	}
 
-	// Resolve the state store once; failure is non-fatal (state is best-effort).
+	// Resolve the state store once. A missing iac.state module resolves to a
+	// noop store, but a configured backend that cannot be opened is fatal:
+	// applying cloud mutations without durable state risks losing provider_ref
+	// ownership metadata.
 	store, storeErr := resolveStateStore(cfgFile, envName)
 	if storeErr != nil {
-		fmt.Printf("WARNING: cannot open state store: %v — state will not be persisted\n", storeErr)
-		store = &noopStateStore{}
+		return fmt.Errorf("open state store: %w", storeErr)
 	}
 
 	// Apply each provider group in declaration order.
@@ -176,7 +184,7 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 				}
 			}()
 		}
-		allowProviderTypeFallback := len(groupOrder) == 1 && providerTypeCounts[g.provType] == 1
+		allowProviderTypeFallback := providerTypeCounts[g.provType] == 1
 		scopedCurrent := filterCurrentStateForProvider(current, g.provType, moduleRef, g.specs, allowProviderTypeFallback)
 		return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, scopedCurrent, store, os.Stderr, envName)
 	}
@@ -192,32 +200,50 @@ func filterCurrentStateForProvider(current []interfaces.ResourceState, providerT
 	if len(current) == 0 {
 		return nil
 	}
-	desiredNames := make(map[string]struct{}, len(specs))
-	for i := range specs {
-		desiredNames[specs[i].Name] = struct{}{}
-	}
 	scoped := make([]interfaces.ResourceState, 0, len(current))
 	for i := range current {
 		st := current[i]
 		if stateProviderRef := resourceStateProviderRef(st); stateProviderRef != "" {
 			if stateProviderRef == moduleRef {
 				scoped = append(scoped, st)
+				continue
 			}
-			continue
-		}
-		if _, desired := desiredNames[st.Name]; desired {
-			scoped = append(scoped, st)
 			continue
 		}
 		if st.Provider == providerType && allowProviderTypeFallback {
 			scoped = append(scoped, st)
 			continue
 		}
-		if st.Provider == "" && allowProviderTypeFallback {
+		if st.Provider == "" && allowProviderTypeFallback && stateNameInSpecs(st.Name, specs) {
 			scoped = append(scoped, st)
 		}
 	}
 	return scoped
+}
+
+func stateNameInSpecs(name string, specs []interfaces.ResourceSpec) bool {
+	for i := range specs {
+		if specs[i].Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func validateUniqueInfraResourceNames(specs []interfaces.ResourceSpec) error {
+	seen := make(map[string]interfaces.ResourceSpec, len(specs))
+	for _, spec := range specs {
+		if prev, exists := seen[spec.Name]; exists {
+			prevProvider := resourceSpecProviderRef(prev)
+			provider := resourceSpecProviderRef(spec)
+			if prevProvider != provider || prev.Type != spec.Type {
+				return fmt.Errorf("infra resource name %q is used by both %s/provider %q and %s/provider %q; state identity is name-based, so resource names must be unique across provider groups", spec.Name, prev.Type, prevProvider, spec.Type, provider)
+			}
+			return fmt.Errorf("infra resource name %q is declared more than once", spec.Name)
+		}
+		seen[spec.Name] = spec
+	}
+	return nil
 }
 
 func resourceStateProviderRef(st interfaces.ResourceState) string {
@@ -290,7 +316,7 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// group; applyInfraModules does that before invoking this helper.
 
 	var err error
-	current, err = adoptExistingDNSResources(ctx, provider, providerType, specs, current, store)
+	current, err = adoptExistingResources(ctx, provider, providerType, specs, current, store)
 	if err != nil {
 		return err
 	}
@@ -418,7 +444,7 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	return nil
 }
 
-func adoptExistingDNSResources(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore) ([]interfaces.ResourceState, error) {
+func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore) ([]interfaces.ResourceState, error) {
 	if len(specs) == 0 {
 		return current, nil
 	}
@@ -427,22 +453,32 @@ func adoptExistingDNSResources(ctx context.Context, provider interfaces.IaCProvi
 		currentByName[current[i].Name] = struct{}{}
 	}
 
-	var driver interfaces.ResourceDriver
+	drivers := make(map[string]interfaces.ResourceDriver)
 	for _, spec := range specs {
-		if spec.Type != "infra.dns" {
-			continue
-		}
 		if _, exists := currentByName[spec.Name]; exists {
 			continue
 		}
-		if driver == nil {
+		builtinAdoptable := hasBuiltInAdoptionRef(spec.Type)
+		driver, ok := drivers[spec.Type]
+		if !ok {
 			var err error
 			driver, err = provider.ResourceDriver(spec.Type)
 			if err != nil {
+				if !builtinAdoptable {
+					continue
+				}
 				return nil, fmt.Errorf("%s/%s: resolve resource driver: %w", spec.Type, spec.Name, err)
 			}
+			drivers[spec.Type] = driver
 		}
-		live, err := driver.Read(ctx, readRefForSpec(spec))
+		ref, adoptable, err := adoptionRefForSpec(driver, spec)
+		if err != nil {
+			return nil, err
+		}
+		if !adoptable {
+			continue
+		}
+		live, err := driver.Read(ctx, ref)
 		if err != nil {
 			if isIaCNotFound(err) {
 				continue
@@ -453,7 +489,7 @@ func adoptExistingDNSResources(ctx context.Context, provider interfaces.IaCProvi
 			continue
 		}
 		if isNoopStateStore(store) {
-			return nil, fmt.Errorf("%s/%s: DNS adoption requires a writable iac.state backend; add an iac.state module before applying existing DNS resources", spec.Type, spec.Name)
+			return nil, fmt.Errorf("%s/%s: adoption requires a writable iac.state backend; add an iac.state module before applying existing resources", spec.Type, spec.Name)
 		}
 		state, err := resourceStateFromLiveOutput(spec, providerType, live)
 		if err != nil {
@@ -472,16 +508,35 @@ func adoptExistingDNSResources(ctx context.Context, provider interfaces.IaCProvi
 	return current, nil
 }
 
-func readRefForSpec(spec interfaces.ResourceSpec) interfaces.ResourceRef {
-	ref := interfaces.ResourceRef{Name: spec.Name, Type: spec.Type}
+func adoptionRefForSpec(driver interfaces.ResourceDriver, spec interfaces.ResourceSpec) (interfaces.ResourceRef, bool, error) {
+	if driver == nil {
+		return interfaces.ResourceRef{}, false, nil
+	}
+	if locator, ok := driver.(interfaces.ResourceAdoptionLocator); ok {
+		return locator.AdoptionRef(spec)
+	}
+	if !hasBuiltInAdoptionRef(spec.Type) {
+		return interfaces.ResourceRef{}, false, nil
+	}
 	if spec.Type == "infra.dns" {
+		ref := interfaces.ResourceRef{Name: spec.Name, Type: spec.Type}
 		if domain, _ := spec.Config["domain"].(string); domain != "" {
 			ref.ProviderID = domain
 		} else {
 			ref.ProviderID = spec.Name
 		}
+		return ref, true, nil
 	}
-	return ref
+	return interfaces.ResourceRef{}, false, nil
+}
+
+func hasBuiltInAdoptionRef(resourceType string) bool {
+	switch resourceType {
+	case "infra.dns":
+		return true
+	default:
+		return false
+	}
 }
 
 func isIaCNotFound(err error) bool {

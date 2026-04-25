@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS iac_resources (
     name           TEXT PRIMARY KEY,
     type           TEXT NOT NULL DEFAULT '',
     provider       TEXT NOT NULL DEFAULT '',
+    provider_ref   TEXT NOT NULL DEFAULT '',
     provider_id    TEXT NOT NULL DEFAULT '',
     status         TEXT NOT NULL DEFAULT '',
     config_hash    TEXT NOT NULL DEFAULT '',
@@ -175,6 +176,7 @@ CREATE TABLE IF NOT EXISTS iac_resources (
 // Workflow versions before provider metadata and config_hash were tracked.
 var MigrateTableSQL = []string{
 	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS provider_ref TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS provider_id TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS config_hash TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS dependencies TEXT[] NOT NULL DEFAULT '{}'`,
@@ -202,18 +204,19 @@ func (c *pgxRealConn) UpsertState(ctx context.Context, st *IaCState) error {
 		return err
 	}
 	_, err = c.pool.Exec(ctx, `
-		INSERT INTO iac_resources (name, type, provider, provider_id, config_hash, status, applied_config, outputs, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+		INSERT INTO iac_resources (name, type, provider, provider_ref, provider_id, config_hash, status, applied_config, outputs, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
 		ON CONFLICT (name) DO UPDATE SET
 			type           = EXCLUDED.type,
 			provider       = EXCLUDED.provider,
+			provider_ref   = EXCLUDED.provider_ref,
 			provider_id    = EXCLUDED.provider_id,
 			config_hash    = EXCLUDED.config_hash,
 			status         = EXCLUDED.status,
 			applied_config = EXCLUDED.applied_config,
 			outputs        = EXCLUDED.outputs,
 			updated_at     = NOW()
-	`, st.ResourceID, st.ResourceType, st.Provider, st.ProviderID, st.ConfigHash, st.Status, string(cfg), string(out))
+	`, st.ResourceID, st.ResourceType, st.Provider, st.ProviderRef, st.ProviderID, st.ConfigHash, st.Status, string(cfg), string(out))
 	return err
 }
 
@@ -222,9 +225,9 @@ func (c *pgxRealConn) GetState(ctx context.Context, name string) (*IaCState, err
 	var cfgJSON, outJSON string
 	var deps []string
 	err := c.pool.QueryRow(ctx, `
-		SELECT name, type, provider, provider_id, config_hash, status, applied_config::text, outputs::text, dependencies, created_at, updated_at
+		SELECT name, type, provider, provider_ref, provider_id, config_hash, status, applied_config::text, outputs::text, dependencies, created_at, updated_at
 		FROM iac_resources WHERE name = $1
-	`, name).Scan(&st.ResourceID, &st.ResourceType, &st.Provider, &st.ProviderID, &st.ConfigHash, &st.Status,
+	`, name).Scan(&st.ResourceID, &st.ResourceType, &st.Provider, &st.ProviderRef, &st.ProviderID, &st.ConfigHash, &st.Status,
 		&cfgJSON, &outJSON, &deps, &st.CreatedAt, &st.UpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -232,35 +235,54 @@ func (c *pgxRealConn) GetState(ctx context.Context, name string) (*IaCState, err
 		}
 		return nil, err
 	}
-	// Unmarshal errors are intentionally discarded: corrupt JSONB is treated
-	// as an empty map so the caller still receives the record's other fields.
-	_ = json.Unmarshal([]byte(cfgJSON), &st.Config)
-	_ = json.Unmarshal([]byte(outJSON), &st.Outputs)
+	if err := decodeIaCStatePayloads(&st, cfgJSON, outJSON); err != nil {
+		return nil, err
+	}
 	return &st, nil
 }
 
 func (c *pgxRealConn) ListRows(ctx context.Context) ([]*IaCState, error) {
 	rows, err := c.pool.Query(ctx, `
-		SELECT name, type, provider, provider_id, config_hash, status, applied_config::text, outputs::text
+		SELECT name, type, provider, provider_ref, provider_id, config_hash, status, applied_config::text, outputs::text
 		FROM iac_resources
 	`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanIaCStateRows(rows)
+}
+
+type iacStateRows interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+}
+
+func scanIaCStateRows(rows iacStateRows) ([]*IaCState, error) {
 	var results []*IaCState
 	for rows.Next() {
 		var st IaCState
 		var cfgJSON, outJSON string
-		if err := rows.Scan(&st.ResourceID, &st.ResourceType, &st.Provider, &st.ProviderID, &st.ConfigHash, &st.Status, &cfgJSON, &outJSON); err != nil {
-			continue
+		if err := rows.Scan(&st.ResourceID, &st.ResourceType, &st.Provider, &st.ProviderRef, &st.ProviderID, &st.ConfigHash, &st.Status, &cfgJSON, &outJSON); err != nil {
+			return nil, fmt.Errorf("scan iac_resources row: %w", err)
 		}
-		// Unmarshal errors discarded: corrupt JSONB yields empty map, row still included.
-		_ = json.Unmarshal([]byte(cfgJSON), &st.Config)
-		_ = json.Unmarshal([]byte(outJSON), &st.Outputs)
+		if err := decodeIaCStatePayloads(&st, cfgJSON, outJSON); err != nil {
+			return nil, err
+		}
 		results = append(results, &st)
 	}
 	return results, rows.Err()
+}
+
+func decodeIaCStatePayloads(st *IaCState, cfgJSON, outJSON string) error {
+	if err := json.Unmarshal([]byte(cfgJSON), &st.Config); err != nil {
+		return fmt.Errorf("decode iac_resources %q applied_config: %w", st.ResourceID, err)
+	}
+	if err := json.Unmarshal([]byte(outJSON), &st.Outputs); err != nil {
+		return fmt.Errorf("decode iac_resources %q outputs: %w", st.ResourceID, err)
+	}
+	return nil
 }
 
 func (c *pgxRealConn) DeleteRow(ctx context.Context, name string) (bool, error) {
