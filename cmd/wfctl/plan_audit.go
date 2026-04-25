@@ -80,8 +80,8 @@ var validPlanAreas = map[string]bool{
 	"bmw":       true,
 }
 
-func planAuditNow() time.Time {
-	return time.Date(2026, 4, 25, 0, 0, 0, 0, time.UTC)
+var planAuditNow = func() time.Time {
+	return time.Now().UTC()
 }
 
 func parsePlanDoc(path string, data []byte, now time.Time, staleAfter time.Duration) (planDoc, []planFinding) {
@@ -228,6 +228,9 @@ func validatePlanDocs(docs []planDoc, repoRoot string) []planFinding {
 			if ref.Commit == "" || repoRoot == "" {
 				continue
 			}
+			if !planCommitRepoAvailable(repoRoot, ref) {
+				continue
+			}
 			if !planCommitExists(repoRoot, ref) {
 				findings = append(findings, planFinding{
 					Path:    doc.Path,
@@ -295,7 +298,7 @@ func renderPlanIndex(docs []planDoc) string {
 		b.WriteString("| ")
 		b.WriteString(markdownCell(doc.Title))
 		b.WriteString(" | ")
-		b.WriteString(markdownCell(markdownLink(filepath.Base(doc.Path), doc.Path)))
+		b.WriteString(markdownCell(markdownLink(filepath.Base(doc.Path), filepath.Base(doc.Path))))
 		b.WriteString(" | ")
 		b.WriteString(markdownCell(doc.Area))
 		b.WriteString(" | ")
@@ -351,13 +354,24 @@ func isActivePlanStatus(status string) bool {
 }
 
 func planCommitExists(repoRoot string, ref planImplementationRef) bool {
+	repoPath := planCommitRepoPath(repoRoot, ref)
+	cmd := exec.Command("git", "cat-file", "-e", ref.Commit+"^{commit}")
+	cmd.Dir = repoPath
+	return cmd.Run() == nil
+}
+
+func planCommitRepoAvailable(repoRoot string, ref planImplementationRef) bool {
+	repoPath := planCommitRepoPath(repoRoot, ref)
+	info, err := os.Stat(filepath.Join(repoPath, ".git"))
+	return err == nil && (info.IsDir() || info.Mode().IsRegular())
+}
+
+func planCommitRepoPath(repoRoot string, ref planImplementationRef) string {
 	repoPath := repoRoot
 	if ref.Repo != "" && ref.Repo != "workflow" {
 		repoPath = filepath.Join(filepath.Dir(repoRoot), ref.Repo)
 	}
-	cmd := exec.Command("git", "cat-file", "-e", ref.Commit+"^{commit}")
-	cmd.Dir = repoPath
-	return cmd.Run() == nil
+	return repoPath
 }
 
 func sortPlanDocs(docs []planDoc) {

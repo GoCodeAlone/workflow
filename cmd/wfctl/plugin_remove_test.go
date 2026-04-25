@@ -117,3 +117,29 @@ workflows:
 		t.Fatalf("manifest was rewritten:\n%s", data)
 	}
 }
+
+func TestPluginRemove_DoesNotRewriteLockfileWhenPluginAbsent(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "wfctl.yaml")
+	lockPath := filepath.Join(dir, ".wfctl-lock.yaml")
+	lockfile := `version: 1
+plugins:
+  workflow-plugin-bar:
+    version: v2.0.0
+    source: github.com/GoCodeAlone/workflow-plugin-bar
+`
+	if err := os.WriteFile(lockPath, []byte(lockfile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeFromManifestAndLockfile("workflow-plugin-foo", manifestPath, lockPath); err != nil {
+		t.Fatalf("removeFromManifestAndLockfile: %v", err)
+	}
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != lockfile {
+		t.Fatalf("lockfile was rewritten:\n%s", data)
+	}
+}

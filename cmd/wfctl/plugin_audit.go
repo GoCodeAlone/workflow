@@ -83,7 +83,11 @@ func auditPluginRepos(root string) ([]pluginAuditResult, error) {
 		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "workflow-plugin-") {
 			continue
 		}
-		results = append(results, auditPluginRepo(filepath.Join(root, entry.Name())))
+		repoPath := filepath.Join(root, entry.Name())
+		if !pluginAuditFileExists(filepath.Join(repoPath, "go.mod")) && !pluginAuditFileExists(filepath.Join(repoPath, "plugin.json")) {
+			continue
+		}
+		results = append(results, auditPluginRepo(repoPath))
 	}
 	sort.SliceStable(results, func(i, j int) bool {
 		return results[i].Name < results[j].Name

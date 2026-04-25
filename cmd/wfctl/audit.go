@@ -221,7 +221,7 @@ func summarizePluginAudit(results []pluginAuditResult) pluginAuditSummary {
 			summary.Missing++
 		case "invalid-json":
 			summary.Invalid++
-		default:
+		case "top-level-types", "capabilities-array", "provider-resources":
 			summary.Legacy++
 		}
 		for _, finding := range result.Findings {

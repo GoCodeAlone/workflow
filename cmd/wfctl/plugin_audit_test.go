@@ -112,6 +112,9 @@ func TestAuditPluginReposDiscoversWorkflowPlugins(t *testing.T) {
   "version": "0.1.0",
   "capabilities": {}
 }`)
+	if err := os.MkdirAll(filepath.Join(root, "workflow-plugin-not-repo"), 0o755); err != nil {
+		t.Fatalf("mkdir non-repo: %v", err)
+	}
 
 	results, err := auditPluginRepos(root)
 	if err != nil {

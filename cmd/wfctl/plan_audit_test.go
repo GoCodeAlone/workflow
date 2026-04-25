@@ -31,7 +31,7 @@ superseded_by: []
 # Example Design
 `
 
-	doc, findings := parsePlanDoc("docs/plans/example.md", []byte(input), planAuditNow(), 30*24*time.Hour)
+	doc, findings := parsePlanDoc("docs/plans/example.md", []byte(input), fixedPlanAuditNow(), 30*24*time.Hour)
 	if len(findings) != 0 {
 		t.Fatalf("findings = %v", findings)
 	}
@@ -47,7 +47,7 @@ superseded_by: []
 }
 
 func TestParsePlanDocLegacyWarning(t *testing.T) {
-	doc, findings := parsePlanDoc("docs/plans/legacy.md", []byte("# Legacy Plan\n"), planAuditNow(), 30*24*time.Hour)
+	doc, findings := parsePlanDoc("docs/plans/legacy.md", []byte("# Legacy Plan\n"), fixedPlanAuditNow(), 30*24*time.Hour)
 	if doc.Title != "Legacy Plan" {
 		t.Fatalf("title = %q", doc.Title)
 	}
@@ -57,7 +57,7 @@ func TestParsePlanDocLegacyWarning(t *testing.T) {
 }
 
 func TestValidatePlanDocFindings(t *testing.T) {
-	now := planAuditNow()
+	now := fixedPlanAuditNow()
 	input := `---
 status: done
 area: unknown
@@ -95,7 +95,7 @@ verification:
 # Missing Evidence
 `
 
-	_, findings := parsePlanDoc("docs/plans/missing.md", []byte(input), planAuditNow(), 30*24*time.Hour)
+	_, findings := parsePlanDoc("docs/plans/missing.md", []byte(input), fixedPlanAuditNow(), 30*24*time.Hour)
 	for _, want := range []string{"implemented_without_refs", "implemented_without_verification"} {
 		if !hasPlanFindingCode(findings, want) {
 			t.Fatalf("expected %s finding, got %v", want, findings)
@@ -154,6 +154,25 @@ func TestValidatePlanDocsAcceptsExistingCommitAndSupersession(t *testing.T) {
 	}
 }
 
+func TestValidatePlanDocsSkipsUnavailableSiblingRepoCommit(t *testing.T) {
+	repo := initPlanAuditGitRepo(t)
+	doc := planDoc{
+		Path:           "docs/plans/a.md",
+		Title:          "External",
+		Status:         "implemented",
+		Area:           "wfctl",
+		HasFrontmatter: true,
+		ImplementationRefs: []planImplementationRef{
+			{Repo: "workflow-plugin-missing", Commit: "deadbeef"},
+		},
+	}
+
+	findings := validatePlanDocs([]planDoc{doc}, repo)
+	if hasPlanFindingCode(findings, "missing_local_commit") {
+		t.Fatalf("unexpected missing commit for unavailable sibling repo: %v", findings)
+	}
+}
+
 func TestRenderPlanIndex(t *testing.T) {
 	docs := []planDoc{
 		{
@@ -182,6 +201,12 @@ func TestRenderPlanIndex(t *testing.T) {
 			t.Fatalf("index missing %q:\n%s", want, got)
 		}
 	}
+	if strings.Contains(got, "](docs/plans/") {
+		t.Fatalf("index contains non-relative plan link:\n%s", got)
+	}
+	if !strings.Contains(got, "[a.md](a.md)") {
+		t.Fatalf("index missing basename link:\n%s", got)
+	}
 }
 
 func TestWritePlanIndexFixture(t *testing.T) {
@@ -193,7 +218,7 @@ func TestWritePlanIndexFixture(t *testing.T) {
 		t.Fatal("could not discover repo root")
 	}
 	plansDir := filepath.Join(root, "docs/plans")
-	docs, findings, err := collectPlanDocs(plansDir, planAuditNow(), 30*24*time.Hour)
+	docs, findings, err := collectPlanDocs(plansDir, fixedPlanAuditNow(), 30*24*time.Hour)
 	if err != nil {
 		t.Fatalf("collect plans: %v", err)
 	}
@@ -204,6 +229,10 @@ func TestWritePlanIndexFixture(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(plansDir, "INDEX.md"), []byte(renderPlanIndex(docs)), 0o644); err != nil {
 		t.Fatalf("write index: %v", err)
 	}
+}
+
+func fixedPlanAuditNow() time.Time {
+	return time.Date(2026, 4, 25, 0, 0, 0, 0, time.UTC)
 }
 
 func hasPlanFinding(findings []planFinding, level, code string) bool {

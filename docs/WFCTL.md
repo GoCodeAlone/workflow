@@ -247,9 +247,9 @@ Default mode reports canonical, legacy, missing, and invalid manifest counts but
 Examples:
 
 ```bash
-wfctl audit plugins --repo-root /Users/jon/workspace
-wfctl audit plugins --repo-root /Users/jon/workspace --json
-wfctl audit plugins --repo-root /Users/jon/workspace --strict
+wfctl audit plugins
+wfctl audit plugins --repo-root /path/to/workspace --json
+wfctl audit plugins --repo-root /path/to/workspace --strict
 ```
 
 ### `init`

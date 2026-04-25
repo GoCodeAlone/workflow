@@ -10,6 +10,7 @@ import (
 )
 
 func TestRunAuditPlansReportsFindings(t *testing.T) {
+	withFixedPlanAuditNow(t)
 	dir := t.TempDir()
 	writePlanAuditDoc(t, dir, "legacy.md", "# Legacy\n")
 
@@ -24,6 +25,7 @@ func TestRunAuditPlansReportsFindings(t *testing.T) {
 }
 
 func TestRunAuditPlansReportsInitialDesignFindings(t *testing.T) {
+	withFixedPlanAuditNow(t)
 	repo := initPlanAuditGitRepo(t)
 	dir := filepath.Join(repo, "docs/plans")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -109,6 +111,7 @@ verification:
 }
 
 func TestRunAuditPlansJSON(t *testing.T) {
+	withFixedPlanAuditNow(t)
 	dir := t.TempDir()
 	writePlanAuditDoc(t, dir, "legacy.md", "# Legacy\n")
 
@@ -127,6 +130,7 @@ func TestRunAuditPlansJSON(t *testing.T) {
 }
 
 func TestRunAuditPlansFixIndex(t *testing.T) {
+	withFixedPlanAuditNow(t)
 	dir := t.TempDir()
 	writePlanAuditDoc(t, dir, "tracked.md", `---
 status: approved
@@ -222,6 +226,19 @@ func TestRunAuditPluginsJSON(t *testing.T) {
 	}
 }
 
+func TestSummarizePluginAuditDoesNotCountUnknownAsLegacy(t *testing.T) {
+	summary := summarizePluginAudit([]pluginAuditResult{
+		{Name: "workflow-plugin-unknown", ManifestShape: "unknown"},
+		{Name: "workflow-plugin-legacy", ManifestShape: "top-level-types"},
+	})
+	if summary.Legacy != 1 {
+		t.Fatalf("legacy = %d, want 1", summary.Legacy)
+	}
+	if summary.Shapes["unknown"] != 1 {
+		t.Fatalf("unknown shape count = %d, want 1", summary.Shapes["unknown"])
+	}
+}
+
 func TestRunAuditPluginsStrictFailsOnWarnings(t *testing.T) {
 	root := t.TempDir()
 	writePluginAuditRepoAt(t, root, "workflow-plugin-legacy", `{
@@ -238,6 +255,15 @@ func TestRunAuditPluginsStrictFailsOnWarnings(t *testing.T) {
 	if !strings.Contains(err.Error(), "plugin audit finding") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func withFixedPlanAuditNow(t *testing.T) {
+	t.Helper()
+	original := planAuditNow
+	planAuditNow = fixedPlanAuditNow
+	t.Cleanup(func() {
+		planAuditNow = original
+	})
 }
 
 func writePlanAuditDoc(t *testing.T, dir, name, content string) {

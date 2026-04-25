@@ -86,13 +86,17 @@ func removeFromManifestAndLockfile(name, manifestPath, lockPath string) error {
 		if err != nil {
 			return fmt.Errorf("load lockfile: %w", err)
 		}
+		removed := false
 		for k := range lf.Plugins {
 			if k == name || normalizePluginName(k) == normName {
 				delete(lf.Plugins, k)
+				removed = true
 			}
 		}
-		if err := config.SaveWfctlLockfile(lockPath, lf); err != nil {
-			return fmt.Errorf("save lockfile: %w", err)
+		if removed {
+			if err := config.SaveWfctlLockfile(lockPath, lf); err != nil {
+				return fmt.Errorf("save lockfile: %w", err)
+			}
 		}
 	}
 
