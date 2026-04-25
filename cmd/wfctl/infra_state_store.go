@@ -118,6 +118,8 @@ type iacStateRecord struct {
 	ResourceID   string         `json:"resource_id"`
 	ResourceType string         `json:"resource_type"`
 	Provider     string         `json:"provider"`
+	ProviderID   string         `json:"provider_id,omitempty"`
+	ConfigHash   string         `json:"config_hash,omitempty"`
 	Status       string         `json:"status"`
 	Config       map[string]any `json:"config"`
 	Outputs      map[string]any `json:"outputs"`
@@ -160,6 +162,8 @@ func (s *fsWfctlStateStore) SaveResource(_ context.Context, state interfaces.Res
 		ResourceID:   state.ID,
 		ResourceType: state.Type,
 		Provider:     state.Provider,
+		ProviderID:   state.ProviderID,
+		ConfigHash:   state.ConfigHash,
 		Status:       "active",
 		Config:       state.AppliedConfig,
 		Outputs:      state.Outputs,
@@ -291,13 +295,21 @@ func (s *postgresWfctlStateStore) DeleteResource(_ context.Context, name string)
 // ── Conversion helpers ─────────────────────────────────────────────────────────
 
 func iacRecordToResourceState(r iacStateRecord) interfaces.ResourceState {
+	providerID := r.ProviderID
+	if providerID == "" {
+		providerID = r.ResourceID
+	}
+	cfgHash := r.ConfigHash
+	if cfgHash == "" {
+		cfgHash = configHashMap(r.Config)
+	}
 	return interfaces.ResourceState{
 		ID:            r.ResourceID,
 		Name:          r.ResourceID,
 		Type:          r.ResourceType,
 		Provider:      r.Provider,
-		ProviderID:    r.ResourceID,
-		ConfigHash:    configHashMap(r.Config),
+		ProviderID:    providerID,
+		ConfigHash:    cfgHash,
 		AppliedConfig: r.Config,
 		Outputs:       r.Outputs,
 	}

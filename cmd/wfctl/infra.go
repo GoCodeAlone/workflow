@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -689,28 +690,168 @@ func writePlanJSON(plan interfaces.IaCPlan, path string) error {
 // runInfraImport imports an existing cloud resource into the IaC state.
 func runInfraImport(args []string) error {
 	fs := flag.NewFlagSet("infra import", flag.ContinueOnError)
-	var providerVal, resTypeVal, cloudIDVal string
-	fs.StringVar(&providerVal, "provider", "", "Provider plugin name. See plugin docs for supported providers")
-	fs.StringVar(&providerVal, "p", "", "Provider name (short for --provider)")
-	fs.StringVar(&resTypeVal, "type", "", "Abstract resource type (e.g. infra.database)")
-	fs.StringVar(&resTypeVal, "t", "", "Abstract resource type (short for --type)")
+	var configFile, envName, nameVal, cloudIDVal string
+	fs.StringVar(&configFile, "config", "", "Config file")
+	fs.StringVar(&configFile, "c", "", "Config file (short for --config)")
+	fs.StringVar(&envName, "env", "", "Environment name")
+	fs.StringVar(&nameVal, "name", "", "Desired resource name from config")
 	fs.StringVar(&cloudIDVal, "id", "", "Cloud-provider resource ID")
-	// Note: --env is intentionally absent from import. wfctl infra import is not
-	// yet config-aware; env-scoped imports will be added in a follow-up.
-	provider := &providerVal
-	resType := &resTypeVal
-	cloudID := &cloudIDVal
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *provider == "" || *resType == "" || *cloudID == "" {
-		return fmt.Errorf("import requires --provider, --type, and --id\n\nExample:\n  wfctl infra import --provider aws --type infra.database --id db-abc123")
+	cfgFile, err := resolveInfraConfig(fs, configFile)
+	if err != nil {
+		return err
 	}
-	fmt.Printf("Import: provider=%s type=%s id=%s\n\n", *provider, *resType, *cloudID)
-	fmt.Println("NOTE: Provider plugins (Phase 2) are required to call provider.Import().")
-	fmt.Println("Once a provider plugin is installed, this command will query the cloud API")
-	fmt.Println("and record the resource in the IaC state store.")
+	if nameVal == "" {
+		return fmt.Errorf("import requires --name with the desired resource name from config")
+	}
+
+	spec, err := findInfraSpecByName(cfgFile, envName, nameVal)
+	if err != nil {
+		return err
+	}
+	providerType, providerCfg, err := resolveProviderForSpec(cfgFile, envName, spec)
+	if err != nil {
+		return err
+	}
+	provider, closer, err := resolveIaCProvider(context.Background(), providerType, providerCfg)
+	if err != nil {
+		return fmt.Errorf("load provider %q: %w", providerType, err)
+	}
+	if closer != nil {
+		defer func() {
+			if cerr := closer.Close(); cerr != nil {
+				fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", providerType, cerr)
+			}
+		}()
+	}
+
+	var state interfaces.ResourceState
+	if cloudIDVal != "" {
+		imported, err := provider.Import(context.Background(), cloudIDVal, spec.Type)
+		if err != nil {
+			return fmt.Errorf("%s/%s: import provider id %q: %w", spec.Type, spec.Name, cloudIDVal, err)
+		}
+		state = resourceStateFromImportedState(spec, providerType, imported)
+	} else {
+		driver, err := provider.ResourceDriver(spec.Type)
+		if err != nil {
+			return fmt.Errorf("%s/%s: resolve resource driver: %w", spec.Type, spec.Name, err)
+		}
+		live, err := driver.Read(context.Background(), interfaces.ResourceRef{Name: spec.Name, Type: spec.Type})
+		if err != nil {
+			return fmt.Errorf("%s/%s: read existing resource: %w", spec.Type, spec.Name, err)
+		}
+		state = resourceStateFromLiveOutput(spec, providerType, live)
+	}
+
+	store, err := resolveStateStore(cfgFile, envName)
+	if err != nil {
+		return fmt.Errorf("resolve state store: %w", err)
+	}
+	if err := store.SaveResource(context.Background(), state); err != nil {
+		return fmt.Errorf("save imported state %q: %w", state.Name, err)
+	}
+	fmt.Printf("Imported %q (%s) id=%s provider=%s\n", state.Name, state.Type, state.ProviderID, state.Provider)
 	return nil
+}
+
+func findInfraSpecByName(cfgFile, envName, name string) (interfaces.ResourceSpec, error) {
+	specs, err := parseInfraResourceSpecsForEnv(cfgFile, envName)
+	if err != nil {
+		return interfaces.ResourceSpec{}, err
+	}
+	for _, spec := range specs {
+		if spec.Name == name {
+			return spec, nil
+		}
+	}
+	if envName != "" {
+		return interfaces.ResourceSpec{}, fmt.Errorf("infra resource %q not found in %s for env %q", name, cfgFile, envName)
+	}
+	return interfaces.ResourceSpec{}, fmt.Errorf("infra resource %q not found in %s", name, cfgFile)
+}
+
+func resolveProviderForSpec(cfgFile, envName string, spec interfaces.ResourceSpec) (string, map[string]any, error) {
+	moduleRef, _ := spec.Config["provider"].(string)
+	if moduleRef == "" {
+		return "", nil, fmt.Errorf("infra module %q (%s): missing required 'provider' field", spec.Name, spec.Type)
+	}
+	cfg, err := config.LoadFromFile(cfgFile)
+	if err != nil {
+		return "", nil, fmt.Errorf("load %s: %w", cfgFile, err)
+	}
+	for i := range cfg.Modules {
+		m := &cfg.Modules[i]
+		if m.Type != "iac.provider" || m.Name != moduleRef {
+			continue
+		}
+		var modCfg map[string]any
+		if envName != "" {
+			resolved, ok := m.ResolveForEnv(envName)
+			if !ok {
+				return "", nil, fmt.Errorf("infra module %q references provider %q which is disabled for environment %q", spec.Name, moduleRef, envName)
+			}
+			modCfg = config.ExpandEnvInMap(resolved.Config)
+		} else {
+			modCfg = config.ExpandEnvInMap(m.Config)
+		}
+		providerType, _ := modCfg["provider"].(string)
+		if providerType == "" {
+			return "", nil, fmt.Errorf("provider module %q has no 'provider' type configured", moduleRef)
+		}
+		return providerType, modCfg, nil
+	}
+	return "", nil, fmt.Errorf("infra module %q references provider %q which is not declared as an iac.provider module", spec.Name, moduleRef)
+}
+
+func resourceStateFromImportedState(spec interfaces.ResourceSpec, providerType string, imported *interfaces.ResourceState) interfaces.ResourceState {
+	if imported == nil {
+		imported = &interfaces.ResourceState{}
+	}
+	providerID := imported.ProviderID
+	if providerID == "" {
+		providerID = imported.ID
+	}
+	if providerID == "" {
+		providerID = imported.Name
+	}
+	cfgHash := imported.ConfigHash
+	if cfgHash == "" {
+		cfgHash = configHashMap(imported.AppliedConfig)
+	}
+	if cfgHash == "" {
+		cfgHash = configHashMap(liveConfigFromOutputs(imported.Outputs))
+	}
+	now := imported.CreatedAt
+	if now.IsZero() {
+		now = imported.UpdatedAt
+	}
+	if now.IsZero() {
+		now = platformNow()
+	}
+	updated := imported.UpdatedAt
+	if updated.IsZero() {
+		updated = platformNow()
+	}
+	return interfaces.ResourceState{
+		ID:            spec.Name,
+		Name:          spec.Name,
+		Type:          spec.Type,
+		Provider:      providerType,
+		ProviderID:    providerID,
+		ConfigHash:    cfgHash,
+		AppliedConfig: cloneMap(spec.Config),
+		Outputs:       cloneMap(imported.Outputs),
+		Dependencies:  append([]string(nil), spec.DependsOn...),
+		CreatedAt:     now,
+		UpdatedAt:     updated,
+	}
+}
+
+func platformNow() time.Time {
+	return time.Now().UTC()
 }
 
 func runInfraApply(args []string) error {

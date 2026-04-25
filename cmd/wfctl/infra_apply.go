@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -235,6 +236,12 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// ResourceState (tracked as a follow-up). For the common single-provider
 	// case this is correct and complete.
 
+	var err error
+	current, err = adoptExistingDNSResources(ctx, provider, providerType, specs, current, store)
+	if err != nil {
+		return err
+	}
+
 	// Compute the diff plan locally (provider-agnostic).
 	plan, err := platform.ComputePlan(specs, current)
 	if err != nil {
@@ -353,6 +360,114 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		}
 	}
 	return nil
+}
+
+func adoptExistingDNSResources(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore) ([]interfaces.ResourceState, error) {
+	if len(specs) == 0 {
+		return current, nil
+	}
+	currentByName := make(map[string]struct{}, len(current))
+	for i := range current {
+		currentByName[current[i].Name] = struct{}{}
+	}
+
+	var driver interfaces.ResourceDriver
+	for _, spec := range specs {
+		if spec.Type != "infra.dns" {
+			continue
+		}
+		if _, exists := currentByName[spec.Name]; exists {
+			continue
+		}
+		if driver == nil {
+			var err error
+			driver, err = provider.ResourceDriver(spec.Type)
+			if err != nil {
+				return nil, fmt.Errorf("%s/%s: resolve resource driver: %w", spec.Type, spec.Name, err)
+			}
+		}
+		live, err := driver.Read(ctx, interfaces.ResourceRef{Name: spec.Name, Type: spec.Type})
+		if err != nil {
+			if isIaCNotFound(err) {
+				continue
+			}
+			return nil, fmt.Errorf("%s/%s: read existing resource for adoption: %w", spec.Type, spec.Name, err)
+		}
+		if live == nil {
+			continue
+		}
+		state := resourceStateFromLiveOutput(spec, providerType, live)
+		if saveErr := store.SaveResource(ctx, state); saveErr != nil {
+			fmt.Printf("  WARNING: failed to persist adopted state for %q: %v\n", spec.Name, saveErr)
+		}
+		fmt.Printf("  Adopted existing %s %q (id=%s)\n", spec.Type, spec.Name, state.ProviderID)
+		current = append(current, state)
+		currentByName[spec.Name] = struct{}{}
+	}
+	return current, nil
+}
+
+func isIaCNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, interfaces.ErrResourceNotFound) {
+		return true
+	}
+	var platformNotFound *platform.ResourceNotFoundError
+	return errors.As(err, &platformNotFound)
+}
+
+func resourceStateFromLiveOutput(spec interfaces.ResourceSpec, providerType string, live *interfaces.ResourceOutput) interfaces.ResourceState {
+	now := time.Now().UTC()
+	return interfaces.ResourceState{
+		ID:            spec.Name,
+		Name:          spec.Name,
+		Type:          spec.Type,
+		Provider:      providerType,
+		ProviderID:    live.ProviderID,
+		ConfigHash:    configHashMap(liveConfigFromOutputs(live.Outputs)),
+		AppliedConfig: cloneMap(spec.Config),
+		Outputs:       cloneMap(live.Outputs),
+		Dependencies:  append([]string(nil), spec.DependsOn...),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+}
+
+func liveConfigFromOutputs(outputs map[string]any) map[string]any {
+	for _, key := range []string{"config", "applied_config", "appliedConfig"} {
+		if cfg, ok := mapStringAny(outputs[key]); ok {
+			return cfg
+		}
+	}
+	return cloneMap(outputs)
+}
+
+func mapStringAny(v any) (map[string]any, bool) {
+	switch m := v.(type) {
+	case map[string]any:
+		return cloneMap(m), true
+	case map[string]string:
+		out := make(map[string]any, len(m))
+		for k, v := range m {
+			out[k] = v
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // isAbstractSize reports whether s is one of the canonical abstract size tiers
