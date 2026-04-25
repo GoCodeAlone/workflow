@@ -418,3 +418,49 @@ func TestPostgresIaCStateStore_Migration_AddsColumnsForExistingPreChangeSchema(t
 		}
 	}
 }
+
+func TestPostgresIaCStateStore_Migration_SkipsAlterForExistingColumns(t *testing.T) {
+	columns := []string{
+		"name",
+		"type",
+		"provider",
+		"provider_ref",
+		"provider_id",
+		"status",
+		"config_hash",
+		"applied_config",
+		"outputs",
+		"dependencies",
+		"created_at",
+		"updated_at",
+	}
+	statements := module.MigrateStatementsForExistingColumnsForTest(columns)
+	if len(statements) != 0 {
+		t.Fatalf("migration statements = %#v, want none for up-to-date schema", statements)
+	}
+}
+
+func TestPostgresIaCStateStore_Migration_AltersOnlyMissingColumns(t *testing.T) {
+	columns := []string{
+		"name",
+		"type",
+		"provider",
+		"provider_id",
+		"status",
+		"config_hash",
+		"applied_config",
+		"outputs",
+		"created_at",
+		"updated_at",
+	}
+	statements := module.MigrateStatementsForExistingColumnsForTest(columns)
+	if len(statements) != 2 {
+		t.Fatalf("migration statements = %#v, want provider_ref and dependencies only", statements)
+	}
+	if !strings.Contains(statements[0], "provider_ref") {
+		t.Fatalf("first migration statement = %q, want provider_ref", statements[0])
+	}
+	if !strings.Contains(statements[1], "dependencies") {
+		t.Fatalf("second migration statement = %q, want dependencies", statements[1])
+	}
+}

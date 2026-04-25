@@ -1063,6 +1063,29 @@ func TestApplyWithProvider_DNSReadErrorFailsBeforeApply(t *testing.T) {
 	}
 }
 
+func TestApplyWithProvider_DNSReadNilLiveOutputFailsBeforeApply(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name:   "site-dns",
+		Type:   "infra.dns",
+		Config: map[string]any{"domain": "example.com"},
+	}
+	driver := &readDriver{}
+	provider := &readBackedProvider{driver: driver}
+
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "")
+	if err == nil {
+		t.Fatal("expected nil live output adoption error")
+	}
+	if !strings.Contains(err.Error(), "driver returned nil resource without error") {
+		t.Fatalf("error = %v, want nil live output message", err)
+	}
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if provider.applyCalled {
+		t.Fatal("Apply should not be called after nil live output adoption failure")
+	}
+}
+
 func TestApplyWithProvider_DNSReadEmptyProviderIDFailsBeforeApply(t *testing.T) {
 	spec := interfaces.ResourceSpec{
 		Name:   "site-dns",

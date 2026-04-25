@@ -182,16 +182,67 @@ var MigrateTableSQL = []string{
 	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS dependencies TEXT[] NOT NULL DEFAULT '{}'`,
 }
 
+var migrateTableColumns = []string{
+	"provider",
+	"provider_ref",
+	"provider_id",
+	"config_hash",
+	"dependencies",
+}
+
 func (c *pgxRealConn) createTable(ctx context.Context) error {
 	if _, err := c.pool.Exec(ctx, CreateTableSQL); err != nil {
 		return err
 	}
-	for _, stmt := range MigrateTableSQL {
+	existingColumns, err := c.iacResourceColumns(ctx)
+	if err != nil {
+		return err
+	}
+	for _, stmt := range migrateStatementsForExistingColumns(existingColumns) {
 		if _, err := c.pool.Exec(ctx, stmt); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (c *pgxRealConn) iacResourceColumns(ctx context.Context) (map[string]struct{}, error) {
+	rows, err := c.pool.Query(ctx, `
+		SELECT column_name
+		FROM information_schema.columns
+		WHERE table_schema = current_schema()
+		  AND table_name = 'iac_resources'
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns := make(map[string]struct{})
+	for rows.Next() {
+		var column string
+		if err := rows.Scan(&column); err != nil {
+			return nil, err
+		}
+		columns[column] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return columns, nil
+}
+
+func migrateStatementsForExistingColumns(existingColumns map[string]struct{}) []string {
+	if len(existingColumns) == 0 {
+		return MigrateTableSQL
+	}
+	statements := make([]string, 0, len(MigrateTableSQL))
+	for i, column := range migrateTableColumns {
+		if _, ok := existingColumns[column]; !ok {
+			statements = append(statements, MigrateTableSQL[i])
+		}
+	}
+	return statements
 }
 
 func (c *pgxRealConn) UpsertState(ctx context.Context, st *IaCState) error {

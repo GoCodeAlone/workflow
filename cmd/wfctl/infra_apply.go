@@ -486,7 +486,7 @@ func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider
 			return nil, fmt.Errorf("%s/%s: read existing resource for adoption: %w", spec.Type, spec.Name, err)
 		}
 		if live == nil {
-			continue
+			return nil, fmt.Errorf("%s/%s: read existing resource for adoption: driver returned nil resource without error", spec.Type, spec.Name)
 		}
 		if isNoopStateStore(store) {
 			return nil, fmt.Errorf("%s/%s: adoption requires a writable iac.state backend; add an iac.state module before applying existing resources", spec.Type, spec.Name)
