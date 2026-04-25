@@ -316,13 +316,21 @@ func iacRecordToResourceState(r iacStateRecord) interfaces.ResourceState {
 }
 
 func iacStateToResourceState(r *module.IaCState) interfaces.ResourceState {
+	providerID := r.ProviderID
+	if providerID == "" {
+		providerID = r.ResourceID
+	}
+	cfgHash := r.ConfigHash
+	if cfgHash == "" {
+		cfgHash = configHashMap(r.Config)
+	}
 	return interfaces.ResourceState{
 		ID:            r.ResourceID,
 		Name:          r.ResourceID,
 		Type:          r.ResourceType,
 		Provider:      r.Provider,
-		ProviderID:    r.ResourceID,
-		ConfigHash:    configHashMap(r.Config),
+		ProviderID:    providerID,
+		ConfigHash:    cfgHash,
 		AppliedConfig: r.Config,
 		Outputs:       r.Outputs,
 	}
@@ -334,6 +342,8 @@ func resourceStateToIaCState(state interfaces.ResourceState) *module.IaCState {
 		ResourceID:   state.ID,
 		ResourceType: state.Type,
 		Provider:     state.Provider,
+		ProviderID:   state.ProviderID,
+		ConfigHash:   state.ConfigHash,
 		Status:       "active",
 		Config:       state.AppliedConfig,
 		Outputs:      state.Outputs,

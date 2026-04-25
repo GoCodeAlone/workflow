@@ -86,6 +86,53 @@ modules:
 	return cfgPath, stateDir
 }
 
+func writeImportConfigWithoutState(t *testing.T, dir string) string {
+	t.Helper()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+
+  - name: site-dns
+    type: infra.dns
+    config:
+      provider: do-provider
+      domain: example.com
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return cfgPath
+}
+
+func TestInfraImport_RequiresRealStateBackend(t *testing.T) {
+	cfgPath := writeImportConfigWithoutState(t, t.TempDir())
+	fake := &importCaptureProvider{
+		importState: &interfaces.ResourceState{ProviderID: "provider-domain-id"},
+	}
+
+	orig := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = orig })
+
+	_, err := captureInfraImportStdout(t, func() error {
+		return runInfraImport([]string{"--config", cfgPath, "--name", "site-dns", "--id", "provider-domain-id"})
+	})
+	if err == nil {
+		t.Fatal("expected import to fail without a real iac.state backend")
+	}
+	if !strings.Contains(err.Error(), "iac.state") {
+		t.Fatalf("error = %v, want message about iac.state backend", err)
+	}
+	if fake.importCalled {
+		t.Fatal("provider.Import should not be called before validating state backend")
+	}
+}
+
 func TestInfraImport_ConfigAwareWithIDUsesProviderImport(t *testing.T) {
 	cfgPath, _ := writeImportConfig(t, t.TempDir())
 	desiredConfig := map[string]any{"provider": "do-provider", "domain": "example.com", "ttl": 300}
@@ -197,5 +244,55 @@ func TestInfraImport_ConfigAwareWithoutIDReadsByDesiredName(t *testing.T) {
 	}
 	if states[0].ProviderID != "domain-by-name" {
 		t.Fatalf("saved ProviderID = %q, want domain-by-name", states[0].ProviderID)
+	}
+}
+
+func TestInfraImport_ReadNilOutputFails(t *testing.T) {
+	cfgPath, _ := writeImportConfig(t, t.TempDir())
+	driver := &readDriver{readOut: nil, readErr: nil}
+	fake := &importCaptureProvider{driver: driver}
+
+	orig := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = orig })
+
+	_, err := captureInfraImportStdout(t, func() error {
+		return runInfraImport([]string{"--config", cfgPath, "--name", "site-dns"})
+	})
+	if err == nil {
+		t.Fatal("expected error when ResourceDriver.Read returns nil output")
+	}
+	if !strings.Contains(err.Error(), "returned no state") {
+		t.Fatalf("error = %v, want nil live state message", err)
+	}
+}
+
+func TestInfraImport_ReadEmptyProviderIDFails(t *testing.T) {
+	cfgPath, _ := writeImportConfig(t, t.TempDir())
+	driver := &readDriver{
+		readOut: &interfaces.ResourceOutput{
+			Name:    "site-dns",
+			Type:    "infra.dns",
+			Outputs: map[string]any{"domain": "example.com"},
+		},
+	}
+	fake := &importCaptureProvider{driver: driver}
+
+	orig := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, _ string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return fake, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = orig })
+
+	_, err := captureInfraImportStdout(t, func() error {
+		return runInfraImport([]string{"--config", cfgPath, "--name", "site-dns"})
+	})
+	if err == nil {
+		t.Fatal("expected error when imported live output has empty ProviderID")
+	}
+	if !strings.Contains(err.Error(), "ProviderID") {
+		t.Fatalf("error = %v, want ProviderID message", err)
 	}
 }

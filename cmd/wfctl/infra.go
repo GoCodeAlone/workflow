@@ -715,6 +715,13 @@ func runInfraImport(args []string) error {
 	if err != nil {
 		return err
 	}
+	store, err := resolveStateStore(cfgFile, envName)
+	if err != nil {
+		return fmt.Errorf("resolve state store: %w", err)
+	}
+	if isNoopStateStore(store) {
+		return fmt.Errorf("infra import requires a writable iac.state backend; add an iac.state module before importing %q", spec.Name)
+	}
 	provider, closer, err := resolveIaCProvider(context.Background(), providerType, providerCfg)
 	if err != nil {
 		return fmt.Errorf("load provider %q: %w", providerType, err)
@@ -733,7 +740,10 @@ func runInfraImport(args []string) error {
 		if err != nil {
 			return fmt.Errorf("%s/%s: import provider id %q: %w", spec.Type, spec.Name, cloudIDVal, err)
 		}
-		state = resourceStateFromImportedState(spec, providerType, imported)
+		state, err = resourceStateFromImportedState(spec, providerType, imported, cloudIDVal)
+		if err != nil {
+			return err
+		}
 	} else {
 		driver, err := provider.ResourceDriver(spec.Type)
 		if err != nil {
@@ -743,12 +753,13 @@ func runInfraImport(args []string) error {
 		if err != nil {
 			return fmt.Errorf("%s/%s: read existing resource: %w", spec.Type, spec.Name, err)
 		}
-		state = resourceStateFromLiveOutput(spec, providerType, live)
-	}
-
-	store, err := resolveStateStore(cfgFile, envName)
-	if err != nil {
-		return fmt.Errorf("resolve state store: %w", err)
+		if live == nil {
+			return fmt.Errorf("%s/%s: read existing resource returned no state", spec.Type, spec.Name)
+		}
+		state, err = resourceStateFromLiveOutput(spec, providerType, live)
+		if err != nil {
+			return err
+		}
 	}
 	if err := store.SaveResource(context.Background(), state); err != nil {
 		return fmt.Errorf("save imported state %q: %w", state.Name, err)
@@ -806,16 +817,27 @@ func resolveProviderForSpec(cfgFile, envName string, spec interfaces.ResourceSpe
 	return "", nil, fmt.Errorf("infra module %q references provider %q which is not declared as an iac.provider module", spec.Name, moduleRef)
 }
 
-func resourceStateFromImportedState(spec interfaces.ResourceSpec, providerType string, imported *interfaces.ResourceState) interfaces.ResourceState {
+func isNoopStateStore(store infraStateStore) bool {
+	_, ok := store.(*noopStateStore)
+	return ok
+}
+
+func resourceStateFromImportedState(spec interfaces.ResourceSpec, providerType string, imported *interfaces.ResourceState, providerIDOverride string) (interfaces.ResourceState, error) {
 	if imported == nil {
-		imported = &interfaces.ResourceState{}
+		return interfaces.ResourceState{}, fmt.Errorf("%s/%s: provider import returned no state", spec.Type, spec.Name)
 	}
 	providerID := imported.ProviderID
+	if providerID == "" {
+		providerID = providerIDOverride
+	}
 	if providerID == "" {
 		providerID = imported.ID
 	}
 	if providerID == "" {
 		providerID = imported.Name
+	}
+	if providerID == "" {
+		return interfaces.ResourceState{}, fmt.Errorf("%s/%s: imported resource returned empty ProviderID; state not persisted", spec.Type, spec.Name)
 	}
 	cfgHash := imported.ConfigHash
 	if cfgHash == "" {
@@ -847,7 +869,7 @@ func resourceStateFromImportedState(spec interfaces.ResourceSpec, providerType s
 		Dependencies:  append([]string(nil), spec.DependsOn...),
 		CreatedAt:     now,
 		UpdatedAt:     updated,
-	}
+	}, nil
 }
 
 func platformNow() time.Time {

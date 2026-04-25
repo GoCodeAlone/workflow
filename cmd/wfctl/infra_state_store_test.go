@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/module"
 )
 
 // ── TestResolveStateStore_NoEnv_FallsBackToBase ────────────────────────────────
@@ -172,5 +173,42 @@ modules:
 	}
 	if states[0].Type != "infra.vpc" {
 		t.Errorf("persisted resource type = %q, want infra.vpc", states[0].Type)
+	}
+}
+
+func TestResourceStateModuleConversion_PreservesProviderMetadata(t *testing.T) {
+	state := interfaces.ResourceState{
+		ID:            "site-dns",
+		Name:          "site-dns",
+		Type:          "infra.dns",
+		Provider:      "digitalocean",
+		ProviderID:    "do-domain-123",
+		ConfigHash:    "live-config-hash",
+		AppliedConfig: map[string]any{"domain": "example.com"},
+		Outputs:       map[string]any{"domain": "example.com"},
+	}
+
+	moduleState := resourceStateToIaCState(state)
+	if moduleState.ProviderID != "do-domain-123" {
+		t.Fatalf("module ProviderID = %q, want do-domain-123", moduleState.ProviderID)
+	}
+	if moduleState.ConfigHash != "live-config-hash" {
+		t.Fatalf("module ConfigHash = %q, want live-config-hash", moduleState.ConfigHash)
+	}
+
+	roundTripped := iacStateToResourceState(&module.IaCState{
+		ResourceID:   "site-dns",
+		ResourceType: "infra.dns",
+		Provider:     "digitalocean",
+		ProviderID:   "do-domain-123",
+		ConfigHash:   "live-config-hash",
+		Config:       map[string]any{"domain": "example.com"},
+		Outputs:      map[string]any{"domain": "example.com"},
+	})
+	if roundTripped.ProviderID != "do-domain-123" {
+		t.Fatalf("round-tripped ProviderID = %q, want do-domain-123", roundTripped.ProviderID)
+	}
+	if roundTripped.ConfigHash != "live-config-hash" {
+		t.Fatalf("round-tripped ConfigHash = %q, want live-config-hash", roundTripped.ConfigHash)
 	}
 }

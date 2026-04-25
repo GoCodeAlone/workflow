@@ -102,6 +102,8 @@ func TestPostgresIaCStateStore_SaveAndGetState(t *testing.T) {
 		ResourceID:   "pg-cluster",
 		ResourceType: "kubernetes",
 		Provider:     "aws",
+		ProviderID:   "provider-cluster-123",
+		ConfigHash:   "config-hash-123",
 		Status:       "active",
 		Config:       map[string]any{"region": "us-east-1"},
 		Outputs:      map[string]any{"endpoint": "https://k8s.example.com"},
@@ -119,6 +121,12 @@ func TestPostgresIaCStateStore_SaveAndGetState(t *testing.T) {
 	}
 	if got.Provider != "aws" {
 		t.Errorf("Provider = %q, want %q", got.Provider, "aws")
+	}
+	if got.ProviderID != "provider-cluster-123" {
+		t.Errorf("ProviderID = %q, want %q", got.ProviderID, "provider-cluster-123")
+	}
+	if got.ConfigHash != "config-hash-123" {
+		t.Errorf("ConfigHash = %q, want %q", got.ConfigHash, "config-hash-123")
 	}
 	if got.Status != "active" {
 		t.Errorf("Status = %q, want %q", got.Status, "active")
@@ -223,5 +231,8 @@ func TestPostgresIaCStateStore_Unlock_NotLocked(t *testing.T) {
 func TestPostgresIaCStateStore_Schema_HasProviderID(t *testing.T) {
 	if !strings.Contains(module.CreateTableSQL, "provider_id") {
 		t.Error("createTableSQL is missing provider_id column (required by spec)")
+	}
+	if !strings.Contains(module.CreateTableSQL, "config_hash") {
+		t.Error("createTableSQL is missing config_hash column (required by spec)")
 	}
 }

@@ -396,7 +396,10 @@ func adoptExistingDNSResources(ctx context.Context, provider interfaces.IaCProvi
 		if live == nil {
 			continue
 		}
-		state := resourceStateFromLiveOutput(spec, providerType, live)
+		state, err := resourceStateFromLiveOutput(spec, providerType, live)
+		if err != nil {
+			return nil, err
+		}
 		if saveErr := store.SaveResource(ctx, state); saveErr != nil {
 			fmt.Printf("  WARNING: failed to persist adopted state for %q: %v\n", spec.Name, saveErr)
 		}
@@ -418,7 +421,10 @@ func isIaCNotFound(err error) bool {
 	return errors.As(err, &platformNotFound)
 }
 
-func resourceStateFromLiveOutput(spec interfaces.ResourceSpec, providerType string, live *interfaces.ResourceOutput) interfaces.ResourceState {
+func resourceStateFromLiveOutput(spec interfaces.ResourceSpec, providerType string, live *interfaces.ResourceOutput) (interfaces.ResourceState, error) {
+	if live.ProviderID == "" {
+		return interfaces.ResourceState{}, fmt.Errorf("%s/%s: live resource returned empty ProviderID; state not persisted", spec.Type, spec.Name)
+	}
 	now := time.Now().UTC()
 	return interfaces.ResourceState{
 		ID:            spec.Name,
@@ -432,7 +438,7 @@ func resourceStateFromLiveOutput(spec interfaces.ResourceSpec, providerType stri
 		Dependencies:  append([]string(nil), spec.DependsOn...),
 		CreatedAt:     now,
 		UpdatedAt:     now,
-	}
+	}, nil
 }
 
 func liveConfigFromOutputs(outputs map[string]any) map[string]any {

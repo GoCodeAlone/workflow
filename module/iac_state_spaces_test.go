@@ -370,6 +370,8 @@ func TestSpacesIaCStateStore_JSONRoundTrip(t *testing.T) {
 		ResourceID:   "rt-1",
 		ResourceType: "ecs",
 		Provider:     "aws",
+		ProviderID:   "arn:aws:ecs:us-east-1:123:cluster/test",
+		ConfigHash:   "config-hash-rt-1",
 		Status:       "provisioning",
 		Outputs:      map[string]any{"arn": "arn:aws:ecs:us-east-1:123:cluster/test"},
 		Config:       map[string]any{"cpu": float64(256), "memory": float64(512)},

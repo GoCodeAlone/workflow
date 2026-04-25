@@ -389,6 +389,42 @@ func TestApplyWithProvider_DNSReadErrorFailsBeforeApply(t *testing.T) {
 	}
 }
 
+func TestApplyWithProvider_DNSReadEmptyProviderIDFailsBeforeApply(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name:   "site-dns",
+		Type:   "infra.dns",
+		Config: map[string]any{"domain": "example.com"},
+	}
+	driver := &readDriver{
+		readOut: &interfaces.ResourceOutput{
+			Name:    "site-dns",
+			Type:    "infra.dns",
+			Outputs: map[string]any{"domain": "example.com"},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+	store := &fakeStateStore{}
+
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	if err == nil {
+		t.Fatal("expected error when adopted live output has empty ProviderID")
+	}
+	if !strings.Contains(err.Error(), "ProviderID") {
+		t.Fatalf("error = %v, want ProviderID message", err)
+	}
+	provider.mu.Lock()
+	applyCalled := provider.applyCalled
+	provider.mu.Unlock()
+	if applyCalled {
+		t.Fatal("Apply should not be called after empty ProviderID adoption failure")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 0 {
+		t.Fatalf("saved states = %d, want none for invalid adoption", len(store.saved))
+	}
+}
+
 // TestApplyWithProvider_DeletesRemovedResource verifies that a resource present
 // in current state but absent from the desired specs generates a delete action.
 // This guards the fix to the type-scoped current-state filter: the old
