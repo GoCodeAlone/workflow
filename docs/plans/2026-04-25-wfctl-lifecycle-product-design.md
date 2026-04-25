@@ -3,6 +3,19 @@ status: approved
 area: wfctl
 owner: workflow
 implementation_refs: []
+external_refs:
+  - "#15"
+  - "#28"
+  - "#29"
+  - "#30"
+  - "#33"
+  - "#35"
+  - "#48"
+  - "#50"
+  - "#63"
+  - "#78"
+  - "#118"
+  - "wfctl-mcp-hot-reload"
 verification:
   last_checked: 2026-04-25
   commands:
@@ -58,6 +71,34 @@ The user-facing behavior should be identical regardless of owner. The command sh
 The rule is: CI systems call `wfctl`; `wfctl` handles platform and provider differences.
 
 Provider-specific shell in generated GitHub Actions, GitLab CI, Jenkins, or local scripts is a bug unless there is no supported provider abstraction yet. The correct response is to add a provider or plugin extension point, not to document copy-pasted shell.
+
+This design covers the queued lifecycle work:
+
+- `#15`, `#33`, and `#50` improve infra apply selectivity, dry-run visibility, and planned-action output.
+- `#28`, `#29`, and `#35` remove provider-specific assumptions from deploy and sizing behavior.
+- `#30` expands state backend portability.
+- `#48` makes registry auth part of the provider abstraction instead of CI shell.
+- `#63` makes build output portable across CI platforms.
+- `#78` adds migration smoke testing as a lifecycle command.
+- `#118` removes scattered base-version pins from application and deployment files.
+
+### MCP Hot Reload
+
+`wfctl mcp` should support the same iterative development pattern used by `workflow-dnd` and `workflow-cardgame`: a stable supervisor process owns stdio, the MCP server binary can exit with a reload-specific code, and the supervisor re-execs the latest rebuilt binary.
+
+The reference behavior from `workflow-dnd` is:
+
+- `.mcp.json` points to a supervisor script instead of the direct binary.
+- `reload_mcp` triggers process exit and supervisor restart.
+- connection handles are invalidated and agents reconnect.
+- current sessions may not discover brand-new tool names because some clients cache MCP tool lists at session start.
+
+For `wfctl mcp`, the design should add:
+
+- `wfctl mcp-supervisor` or a generated supervisor script.
+- `reload_mcp` MCP tool registered by default.
+- a documented rebuild plus reload workflow for agents improving `wfctl` itself.
+- clear limitations around tool-list caching and when a new session is still required.
 
 `wfctl ci init` and `wfctl generate` should prefer the smallest portable command sequence:
 

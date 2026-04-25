@@ -3,6 +3,10 @@ status: approved
 area: core
 owner: workflow
 implementation_refs: []
+external_refs:
+  - "#48"
+  - "#76"
+  - "wfctl-mcp-hot-reload"
 verification:
   last_checked: 2026-04-25
   commands:
@@ -65,6 +69,19 @@ Interface changes require:
 - plugin matrix update
 
 The typed IaC args work is the model to follow: silent `map[string]any` mismatches should become decode errors with method names and missing-field context.
+
+`#76` generalizes this rule beyond IaC. Every plugin-facing RPC boundary should move toward generated proto types, validation annotations, and conformance tests. Core should avoid adding new loosely typed service calls unless there is a documented migration path to typed calls.
+
+## MCP Server Reload Boundary
+
+`wfctl mcp` is both a product feature and a developer loop for improving Workflow. It should have a hot-reload boundary similar to the game MCP servers:
+
+- the long-lived process owns stdio and restart policy
+- the reloadable child owns tool registration and request handling
+- `reload_mcp` exits the child with a documented reload code
+- the supervisor restarts the child without requiring users to edit MCP client config
+
+This belongs in core because the MCP server exposes `wfctl` and Workflow authoring behavior. Domain-specific MCP tools remain plugin/application-owned.
 
 ## Extraction Rules
 

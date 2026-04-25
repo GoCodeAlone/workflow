@@ -3,6 +3,10 @@ status: approved
 area: ecosystem
 owner: workflow
 implementation_refs: []
+external_refs:
+  - "#76"
+  - "#118"
+  - "wfctl-mcp-hot-reload"
 verification:
   last_checked: 2026-04-25
   commands:
@@ -75,6 +79,9 @@ implementation_refs:
   - repo: workflow
     pr: 486
     commit: ab6edc2
+external_refs:
+  - "#76"
+  - "wfctl-mcp-hot-reload"
 verification:
   last_checked: 2026-04-25
   commands:
@@ -97,6 +104,43 @@ Status semantics:
 
 No doc may claim `implemented` only because related code exists. It needs implementation refs and verification evidence.
 
+`external_refs` records work tracked outside the local design file. Examples include GitHub issue numbers, team-task IDs, production blocker IDs, downstream repo branches, or named backlog items. These refs are not implementation evidence; they are indexable context so planned and in-flight work does not disappear between sessions.
+
+## Known Work Queue
+
+Seed the first audit index with these external refs from the current Workflow and Buymywishlist backlog.
+
+Design-only brainstorms:
+
+- `#76`: all plugins, not only IaC, adopt strict proto-enforced types plus `buf.validate`.
+- `#118`: single source of truth for base versions across `workflow-server`, `setup-wfctl`, base images, `app.yaml`, `infra.yaml`, `deploy.yml`, and Dockerfiles.
+- `wfctl-mcp-hot-reload`: apply the `workflow-dnd` and `workflow-cardgame` MCP supervisor/reload pattern to `wfctl mcp` so the MCP server can be rebuilt and restarted during iterative development.
+
+In-progress or production-pending:
+
+- `#16`: Buymywishlist/BMW `STRIPE_SECRET_KEY` secret capture. This is user-side secret action and remains a production blocker.
+- `#25`: Buymywishlist/BMW staging deploy plus Playwright verification. Gated on trusted-sources fix flowing through and another deploy attempt.
+- `#26`: Buymywishlist/BMW production auto-promote plus `/healthz`. Blocked by `#25`.
+- `#42`: Buymywishlist/BMW v0.19.0 plugin manifest adoption. Existing local branch is `chore/bmw-plugin-manifest-v0.19.0`; design and plan are committed there, but tasks 1-9 are not executed.
+
+Queued wfctl/workflow core follow-ups:
+
+- `#15`: `wfctl infra apply --only <module>`.
+- `#28`: provider-agnostic `deploy.go` env var detection.
+- `#29`: plugin-registered `providerCredentialSubKeys` map.
+- `#30`: S3/GCS/Azure state store backends.
+- `#33`: `wfctl infra apply` dry-run mode showing API calls.
+- `#35`: size tier versus provider slug disambiguation.
+- `#48`: multi-registry support plus `IaCProvider.EnsureRegistryAuth`.
+- `#50`: `wfctl infra apply` prints full planned action list, not only successes.
+- `#63`: `wfctl build` provider-agnostic CI summary plus structured outputs for GitHub Actions, GitLab, and others.
+- `#78`: `wfctl migrations validate` subcommand with ephemeral-DB migration smoke test.
+
+Queued plugin and Buymywishlist build hygiene:
+
+- `#51`: reproducible Buymywishlist plugin build plus Docker layer reuse.
+- `#66`: `workflow-plugin-migrations` v0.3.1 evaluation of consolidating image publish into GoReleaser dockers.
+
 ## Plan Index
 
 Add a generated `docs/plans/INDEX.md` in a follow-up implementation. It should list every design and plan with:
@@ -107,6 +151,7 @@ Add a generated `docs/plans/INDEX.md` in a follow-up implementation. It should l
 - status
 - owner
 - implementation refs
+- external refs
 - last checked date
 - verification result
 - superseded/supersedes links

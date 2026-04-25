@@ -3,6 +3,9 @@ status: approved
 area: editor
 owner: workflow
 implementation_refs: []
+external_refs:
+  - "#25"
+  - "#26"
 verification:
   last_checked: 2026-04-25
   commands:
@@ -86,6 +89,8 @@ Authoring clients should expose the same flows:
 - show plugin install/enable state
 
 The cloud UI can add tenancy and organization context, but the core authoring interactions should remain portable.
+
+Buymywishlist/BMW staging and production gates (`#25`, `#26`) should be treated as downstream runtime UX evidence. A staging deploy followed by Playwright verification and `/healthz` promotion checks is concrete proof that the authoring/deploy surfaces work outside the core repo.
 
 ## Bundle Health
 
