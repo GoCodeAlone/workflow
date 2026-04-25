@@ -124,9 +124,9 @@ func TestInfraApply_OutputValidation_RejectsBadProviderID(t *testing.T) {
 	}
 }
 
-// TestInfraApply_OutputValidation_SkipsFreeform verifies that freeform drivers
-// pass through validation unconditionally — even non-UUID values are accepted.
-func TestInfraApply_OutputValidation_SkipsFreeform(t *testing.T) {
+// TestInfraApply_OutputValidation_AcceptsNonEmptyFreeform verifies that
+// freeform drivers accept arbitrary non-empty provider IDs.
+func TestInfraApply_OutputValidation_AcceptsNonEmptyFreeform(t *testing.T) {
 	provider := newValidationProvider(freeformRD{})
 	output := interfaces.ResourceOutput{
 		Name:       "my-bucket",
@@ -138,6 +138,24 @@ func TestInfraApply_OutputValidation_SkipsFreeform(t *testing.T) {
 
 	if err != nil {
 		t.Errorf("Freeform format should not fail, got: %v", err)
+	}
+}
+
+func TestInfraApply_OutputValidation_RejectsEmptyFreeform(t *testing.T) {
+	provider := newValidationProvider(freeformRD{})
+	output := interfaces.ResourceOutput{
+		Name:       "my-bucket",
+		Type:       "infra.spaces",
+		ProviderID: "",
+	}
+
+	err := validateOutputProviderID(provider, "digitalocean", &output)
+
+	if err == nil {
+		t.Fatal("expected error for empty freeform ProviderID, got nil")
+	}
+	if !strings.Contains(err.Error(), "freeform") || !strings.Contains(err.Error(), "state not persisted") {
+		t.Fatalf("error = %v, want freeform ProviderID validation failure", err)
 	}
 }
 

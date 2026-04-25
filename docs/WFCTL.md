@@ -1059,6 +1059,9 @@ wfctl infra <action> [options] [config.yaml]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--config` | _(auto-detected)_ | Config file (searches `infra.yaml`, `config/infra.yaml`) |
+| `--env` | `` | Environment name for config and state resolution |
+| `--name` | `` | Desired resource name from config (`infra import` only) |
+| `--id` | `` | Cloud-provider resource ID (`infra import` only; omitted imports by desired provider ID) |
 | `--auto-approve` | `false` | Skip confirmation prompt (apply/destroy only) |
 | `--parallelism` | `10` | Number of parallel operations |
 | `--lock-timeout` | `0s` | Timeout for state lock acquisition |
@@ -1083,7 +1086,8 @@ wfctl infra apply --auto-approve infra.yaml
 wfctl infra status --config infra.yaml
 wfctl infra drift infra.yaml
 wfctl infra destroy --auto-approve infra.yaml
-wfctl infra import --config infra.yaml
+wfctl infra import --config infra.yaml --env staging --name site-dns --id do-domain-123
+wfctl infra import --config infra.yaml --name site-dns
 wfctl infra state list
 wfctl infra state export --output state.json
 wfctl infra state import --source state.json

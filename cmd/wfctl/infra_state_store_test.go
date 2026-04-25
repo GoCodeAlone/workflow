@@ -5,9 +5,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/module"
 )
 
 // ── TestResolveStateStore_NoEnv_FallsBackToBase ────────────────────────────────
@@ -44,6 +46,16 @@ modules:
 	}
 	if len(states) != 0 {
 		t.Errorf("expected empty state, got %d records", len(states))
+	}
+}
+
+func TestResolveStateStore_ReturnsDiscoverErrors(t *testing.T) {
+	_, err := resolveStateStore(filepath.Join(t.TempDir(), "missing.yaml"), "")
+	if err == nil {
+		t.Fatal("expected missing config error, got nil")
+	}
+	if !strings.Contains(err.Error(), "discover iac.state modules") {
+		t.Fatalf("error = %v, want discover context", err)
 	}
 }
 
@@ -102,6 +114,109 @@ modules:
 	baseEntries, _ := os.ReadDir(baseDir)
 	if len(baseEntries) != 0 {
 		t.Errorf("base state dir should be empty (env override applied), got %d files", len(baseEntries))
+	}
+}
+
+func TestRunInfraPlan_ReturnsStateLoadErrors(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: `+stateDir+`
+
+  - name: site-dns
+    type: infra.dns
+    config:
+      domain: example.com
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("mkdir state: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "bad.json"), []byte(`{`), 0o600); err != nil {
+		t.Fatalf("write bad state: %v", err)
+	}
+
+	err := runInfraPlan([]string{"--config", cfgPath})
+	if err == nil {
+		t.Fatal("expected state load error, got nil")
+	}
+	if !strings.Contains(err.Error(), "load current state") {
+		t.Fatalf("error = %v, want load current state context", err)
+	}
+}
+
+func TestRunInfraPlan_RejectsDuplicateResourceNames(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: site-dns
+    type: infra.dns
+    config:
+      domain: example.com
+
+  - name: site-dns
+    type: infra.dns
+    config:
+      domain: example.org
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	err := runInfraPlan([]string{"--config", cfgPath})
+	if err == nil {
+		t.Fatal("expected duplicate resource name error, got nil")
+	}
+	if !strings.Contains(err.Error(), "declared more than once") {
+		t.Fatalf("error = %v, want duplicate declaration message", err)
+	}
+}
+
+func TestApplyInfraModules_FailsOnCorruptFilesystemState(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.MkdirAll(stateDir, 0o750); err != nil {
+		t.Fatalf("mkdir state: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "broken.json"), []byte("{not-json"), 0o600); err != nil {
+		t.Fatalf("write corrupt state: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: my-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: `+stateDir+`
+
+  - name: my-vpc
+    type: infra.vpc
+    config:
+      provider: my-provider
+      region: nyc3
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	err := applyInfraModules(context.Background(), cfgPath, "")
+	if err == nil {
+		t.Fatal("expected corrupt state error, got nil")
+	}
+	if !strings.Contains(err.Error(), "load current state") || !strings.Contains(err.Error(), "parse state") {
+		t.Fatalf("error = %v, want load current state parse state", err)
 	}
 }
 
@@ -172,5 +287,84 @@ modules:
 	}
 	if states[0].Type != "infra.vpc" {
 		t.Errorf("persisted resource type = %q, want infra.vpc", states[0].Type)
+	}
+}
+
+func TestResourceStateModuleConversion_PreservesProviderMetadata(t *testing.T) {
+	state := interfaces.ResourceState{
+		ID:            "site-dns",
+		Name:          "site-dns",
+		Type:          "infra.dns",
+		Provider:      "digitalocean",
+		ProviderRef:   "do-provider",
+		ProviderID:    "do-domain-123",
+		ConfigHash:    "live-config-hash",
+		AppliedConfig: map[string]any{"domain": "example.com"},
+		Outputs:       map[string]any{"domain": "example.com"},
+		Dependencies:  []string{"site-app"},
+	}
+
+	moduleState := resourceStateToIaCState(state)
+	if moduleState.ProviderID != "do-domain-123" {
+		t.Fatalf("module ProviderID = %q, want do-domain-123", moduleState.ProviderID)
+	}
+	if moduleState.ProviderRef != "do-provider" {
+		t.Fatalf("module ProviderRef = %q, want do-provider", moduleState.ProviderRef)
+	}
+	if moduleState.ConfigHash != "live-config-hash" {
+		t.Fatalf("module ConfigHash = %q, want live-config-hash", moduleState.ConfigHash)
+	}
+	if len(moduleState.Dependencies) != 1 || moduleState.Dependencies[0] != "site-app" {
+		t.Fatalf("module Dependencies = %#v, want [site-app]", moduleState.Dependencies)
+	}
+
+	roundTripped := iacStateToResourceState(&module.IaCState{
+		ResourceID:   "site-dns",
+		ResourceType: "infra.dns",
+		Provider:     "digitalocean",
+		ProviderRef:  "do-provider",
+		ProviderID:   "do-domain-123",
+		ConfigHash:   "live-config-hash",
+		Config:       map[string]any{"domain": "example.com"},
+		Outputs:      map[string]any{"domain": "example.com"},
+		Dependencies: []string{"site-app"},
+	})
+	if roundTripped.ProviderID != "do-domain-123" {
+		t.Fatalf("round-tripped ProviderID = %q, want do-domain-123", roundTripped.ProviderID)
+	}
+	if roundTripped.ProviderRef != "do-provider" {
+		t.Fatalf("round-tripped ProviderRef = %q, want do-provider", roundTripped.ProviderRef)
+	}
+	if roundTripped.ConfigHash != "live-config-hash" {
+		t.Fatalf("round-tripped ConfigHash = %q, want live-config-hash", roundTripped.ConfigHash)
+	}
+	if len(roundTripped.Dependencies) != 1 || roundTripped.Dependencies[0] != "site-app" {
+		t.Fatalf("round-tripped Dependencies = %#v, want [site-app]", roundTripped.Dependencies)
+	}
+}
+
+func TestFSStateStore_RoundTripsDependencies(t *testing.T) {
+	store := &fsWfctlStateStore{dir: t.TempDir()}
+	state := interfaces.ResourceState{
+		ID:            "site-app",
+		Name:          "site-app",
+		Type:          "infra.container_service",
+		Provider:      "digitalocean",
+		ProviderID:    "app-123",
+		AppliedConfig: map[string]any{"image": "example/app:latest"},
+		Dependencies:  []string{"site-db", "site-dns"},
+	}
+	if err := store.SaveResource(t.Context(), state); err != nil {
+		t.Fatalf("SaveResource: %v", err)
+	}
+	states, err := store.ListResources(t.Context())
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("states = %d, want 1", len(states))
+	}
+	if len(states[0].Dependencies) != 2 || states[0].Dependencies[0] != "site-db" || states[0].Dependencies[1] != "site-dns" {
+		t.Fatalf("Dependencies = %#v, want [site-db site-dns]", states[0].Dependencies)
 	}
 }

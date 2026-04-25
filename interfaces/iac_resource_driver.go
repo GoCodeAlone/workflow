@@ -31,6 +31,15 @@ type ResourceDriver interface {
 	SensitiveKeys() []string
 }
 
+// ResourceAdoptionLocator is an optional interface ResourceDriver
+// implementations may provide when a desired ResourceSpec can be resolved to a
+// live provider resource before local state exists. wfctl infra apply uses this
+// to adopt existing resources into state and then computes an update/delete
+// plan from real current state instead of blindly creating duplicates.
+type ResourceAdoptionLocator interface {
+	AdoptionRef(spec ResourceSpec) (ResourceRef, bool, error)
+}
+
 // ResourceOutput is the concrete output of a provisioned or read resource.
 type ResourceOutput struct {
 	Name       string          `json:"name"`
@@ -131,8 +140,9 @@ func (f ProviderIDFormat) String() string {
 //     format. On mismatch, wfctl logs a warning but still calls the driver so
 //     its own heal logic (if any) can run.
 //   - Output: after Apply, probe r.ProviderID before persisting to state.
-//     Mismatch for non-Unknown, non-Freeform formats is a HARD failure — the
-//     driver has a bug and state must not be corrupted.
+//     Mismatch for non-Unknown formats is a HARD failure — the driver has a
+//     bug and state must not be corrupted. Freeform accepts any non-empty
+//     ProviderID; Unknown disables output validation.
 //
 // Drivers that do not implement this interface receive today's behavior:
 // no validation, no warning, no failure.
