@@ -118,6 +118,7 @@ type iacStateRecord struct {
 	ResourceID   string         `json:"resource_id"`
 	ResourceType string         `json:"resource_type"`
 	Provider     string         `json:"provider"`
+	ProviderRef  string         `json:"provider_ref,omitempty"`
 	ProviderID   string         `json:"provider_id,omitempty"`
 	ConfigHash   string         `json:"config_hash,omitempty"`
 	Status       string         `json:"status"`
@@ -162,6 +163,7 @@ func (s *fsWfctlStateStore) SaveResource(_ context.Context, state interfaces.Res
 		ResourceID:   state.ID,
 		ResourceType: state.Type,
 		Provider:     state.Provider,
+		ProviderRef:  state.ProviderRef,
 		ProviderID:   state.ProviderID,
 		ConfigHash:   state.ConfigHash,
 		Status:       "active",
@@ -308,6 +310,7 @@ func iacRecordToResourceState(r iacStateRecord) interfaces.ResourceState {
 		Name:          r.ResourceID,
 		Type:          r.ResourceType,
 		Provider:      r.Provider,
+		ProviderRef:   r.ProviderRef,
 		ProviderID:    providerID,
 		ConfigHash:    cfgHash,
 		AppliedConfig: r.Config,
@@ -329,6 +332,7 @@ func iacStateToResourceState(r *module.IaCState) interfaces.ResourceState {
 		Name:          r.ResourceID,
 		Type:          r.ResourceType,
 		Provider:      r.Provider,
+		ProviderRef:   r.ProviderRef,
 		ProviderID:    providerID,
 		ConfigHash:    cfgHash,
 		AppliedConfig: r.Config,
@@ -342,6 +346,7 @@ func resourceStateToIaCState(state interfaces.ResourceState) *module.IaCState {
 		ResourceID:   state.ID,
 		ResourceType: state.Type,
 		Provider:     state.Provider,
+		ProviderRef:  state.ProviderRef,
 		ProviderID:   state.ProviderID,
 		ConfigHash:   state.ConfigHash,
 		Status:       "active",

@@ -60,6 +60,9 @@ Actions:
 
 Options:
   --config <file>      Config file (default: infra.yaml or config/infra.yaml)
+  --env <name>         Environment name for config/state resolution
+  --name <resource>    Desired resource name from config (import only)
+  --id <provider-id>   Cloud-provider resource ID (import only; optional)
   --auto-approve       Skip confirmation prompt (apply/destroy only)
   --format <fmt>       Output format: table (default) or markdown (plan only)
   --output <file>      Write plan to JSON file (plan only)
@@ -866,6 +869,7 @@ func resourceStateFromImportedState(spec interfaces.ResourceSpec, providerType s
 		Name:          spec.Name,
 		Type:          spec.Type,
 		Provider:      providerType,
+		ProviderRef:   resourceSpecProviderRef(spec),
 		ProviderID:    providerID,
 		ConfigHash:    cfgHash,
 		AppliedConfig: appliedConfig,

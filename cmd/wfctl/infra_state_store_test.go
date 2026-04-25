@@ -182,6 +182,7 @@ func TestResourceStateModuleConversion_PreservesProviderMetadata(t *testing.T) {
 		Name:          "site-dns",
 		Type:          "infra.dns",
 		Provider:      "digitalocean",
+		ProviderRef:   "do-provider",
 		ProviderID:    "do-domain-123",
 		ConfigHash:    "live-config-hash",
 		AppliedConfig: map[string]any{"domain": "example.com"},
@@ -192,6 +193,9 @@ func TestResourceStateModuleConversion_PreservesProviderMetadata(t *testing.T) {
 	if moduleState.ProviderID != "do-domain-123" {
 		t.Fatalf("module ProviderID = %q, want do-domain-123", moduleState.ProviderID)
 	}
+	if moduleState.ProviderRef != "do-provider" {
+		t.Fatalf("module ProviderRef = %q, want do-provider", moduleState.ProviderRef)
+	}
 	if moduleState.ConfigHash != "live-config-hash" {
 		t.Fatalf("module ConfigHash = %q, want live-config-hash", moduleState.ConfigHash)
 	}
@@ -200,6 +204,7 @@ func TestResourceStateModuleConversion_PreservesProviderMetadata(t *testing.T) {
 		ResourceID:   "site-dns",
 		ResourceType: "infra.dns",
 		Provider:     "digitalocean",
+		ProviderRef:  "do-provider",
 		ProviderID:   "do-domain-123",
 		ConfigHash:   "live-config-hash",
 		Config:       map[string]any{"domain": "example.com"},
@@ -207,6 +212,9 @@ func TestResourceStateModuleConversion_PreservesProviderMetadata(t *testing.T) {
 	})
 	if roundTripped.ProviderID != "do-domain-123" {
 		t.Fatalf("round-tripped ProviderID = %q, want do-domain-123", roundTripped.ProviderID)
+	}
+	if roundTripped.ProviderRef != "do-provider" {
+		t.Fatalf("round-tripped ProviderRef = %q, want do-provider", roundTripped.ProviderRef)
 	}
 	if roundTripped.ConfigHash != "live-config-hash" {
 		t.Fatalf("round-tripped ConfigHash = %q, want live-config-hash", roundTripped.ConfigHash)

@@ -299,6 +299,78 @@ modules:
 	}
 }
 
+func TestApplyInfraModules_SameProviderTypeDoesNotDeleteOtherProviderInstanceState(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: east-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+
+  - name: west-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud
+
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: `+stateDir+`
+
+  - name: west-vpc
+    type: infra.vpc
+    config:
+      provider: west-provider
+      region: sfo3
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	store := &fsWfctlStateStore{dir: stateDir}
+	eastState := interfaces.ResourceState{
+		ID:            "east-vpc",
+		Name:          "east-vpc",
+		Type:          "infra.vpc",
+		Provider:      "fake-cloud",
+		ProviderID:    "east-vpc-id",
+		ConfigHash:    configHashMap(map[string]any{"provider": "east-provider", "region": "nyc3"}),
+		AppliedConfig: map[string]any{"provider": "east-provider", "region": "nyc3"},
+	}
+	if err := store.SaveResource(context.Background(), eastState); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+
+	fake := &applyCapture{}
+	orig := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, providerType string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		if providerType != "fake-cloud" {
+			t.Fatalf("providerType = %q, want fake-cloud", providerType)
+		}
+		return fake, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = orig })
+
+	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
+		t.Fatalf("applyInfraModules: %v", err)
+	}
+
+	fake.mu.Lock()
+	appliedPlan := fake.appliedPlan
+	fake.mu.Unlock()
+	if appliedPlan == nil {
+		t.Fatal("expected apply plan for west-vpc create")
+	}
+	for _, action := range appliedPlan.Actions {
+		if action.Action == "delete" && action.Resource.Name == "east-vpc" {
+			t.Fatalf("west-provider plan included east-provider delete: %+v", appliedPlan.Actions)
+		}
+	}
+}
+
 // ── fakeStateStore ─────────────────────────────────────────────────────────────
 
 // fakeStateStore captures SaveResource and DeleteResource calls for use in tests.
@@ -565,6 +637,38 @@ func TestApplyWithProvider_DNSAdoptionSaveFailureFailsBeforeApply(t *testing.T) 
 	provider.mu.Unlock()
 	if applyCalled {
 		t.Fatal("Apply should not be called after adopted state persistence fails")
+	}
+}
+
+func TestApplyWithProvider_DNSAdoptionRequiresWritableStateStore(t *testing.T) {
+	spec := interfaces.ResourceSpec{
+		Name:   "site-dns",
+		Type:   "infra.dns",
+		Config: map[string]any{"domain": "example.com"},
+	}
+	driver := &readDriver{
+		expectedProviderID: "example.com",
+		readOut: &interfaces.ResourceOutput{
+			Name:       "site-dns",
+			Type:       "infra.dns",
+			ProviderID: "example.com",
+			Outputs:    map[string]any{"domain": "example.com"},
+		},
+	}
+	provider := &readBackedProvider{driver: driver}
+
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, nil, io.Discard, "")
+	if err == nil {
+		t.Fatal("expected adoption to fail with noop state store")
+	}
+	if !strings.Contains(err.Error(), "writable iac.state") {
+		t.Fatalf("error = %v, want writable iac.state message", err)
+	}
+	provider.mu.Lock()
+	applyCalled := provider.applyCalled
+	provider.mu.Unlock()
+	if applyCalled {
+		t.Fatal("Apply should not be called when DNS adoption cannot be persisted")
 	}
 }
 
@@ -869,10 +973,10 @@ func TestApplyWithProvider_SavesStateOnPartialFailure(t *testing.T) {
 	}
 }
 
-// TestApplyWithProvider_StoreSaveFailureIsNonFatal asserts that a SaveResource
-// error does NOT cause applyWithProviderAndStore to fail — the cloud resource
-// already exists and the warning is logged.
-func TestApplyWithProvider_StoreSaveFailureIsNonFatal(t *testing.T) {
+// TestApplyWithProvider_StoreSaveFailureFails asserts that a SaveResource error
+// after a successful provider mutation fails the command so callers cannot miss
+// out-of-sync state.
+func TestApplyWithProvider_StoreSaveFailureFails(t *testing.T) {
 	specs := []interfaces.ResourceSpec{
 		{Name: "r1", Type: "infra.vpc", Config: nil},
 	}
@@ -883,9 +987,12 @@ func TestApplyWithProvider_StoreSaveFailureIsNonFatal(t *testing.T) {
 	}
 	store := &fakeStateStore{saveErr: fmt.Errorf("disk full")}
 
-	// Should succeed even though SaveResource errors.
-	if err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, ""); err != nil {
-		t.Fatalf("expected no error despite save failure, got: %v", err)
+	err := applyWithProviderAndStore(t.Context(), fake, "fake-cloud", specs, nil, store, io.Discard, "")
+	if err == nil {
+		t.Fatal("expected save failure after apply, got nil")
+	}
+	if !strings.Contains(err.Error(), "persist state") || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("error = %v, want hard state persistence failure", err)
 	}
 }
 

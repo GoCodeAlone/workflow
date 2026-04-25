@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"flag"
+	"strings"
 	"testing"
 )
 
@@ -62,6 +64,25 @@ func TestInfraImport_ConfigAwareFlags(t *testing.T) {
 	for _, staleFlag := range []string{"provider", "p", "type", "t"} {
 		if fs.Lookup(staleFlag) != nil {
 			t.Fatalf("import should not expose stale --%s flag after config-aware import", staleFlag)
+		}
+	}
+}
+
+func TestInfraUsageDocumentsConfigAwareImportFlags(t *testing.T) {
+	var buf bytes.Buffer
+	oldOutput := flag.CommandLine.Output()
+	flag.CommandLine.SetOutput(&buf)
+	t.Cleanup(func() { flag.CommandLine.SetOutput(oldOutput) })
+
+	_ = infraUsage()
+	out := buf.String()
+	for _, want := range []string{
+		"--env <name>",
+		"--name <resource>",
+		"--id <provider-id>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("infra usage missing %q:\n%s", want, out)
 		}
 	}
 }
