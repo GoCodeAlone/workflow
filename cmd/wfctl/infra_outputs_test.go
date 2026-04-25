@@ -15,7 +15,8 @@ import (
 // captureStdout redirects os.Stdout to a pipe for the duration of fn, drains
 // the pipe in a goroutine to prevent deadlocks when fn writes more than the
 // OS pipe buffer (~64 KB), and returns the captured output alongside any error
-// fn returned. os.Stdout is restored via t.Cleanup.
+// fn returned. The read end is closed by the goroutine; os.Stdout is restored
+// immediately after fn returns.
 func captureStdout(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
 	r, w, err := os.Pipe()

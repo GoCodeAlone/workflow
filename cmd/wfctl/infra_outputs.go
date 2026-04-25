@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -199,25 +200,30 @@ func infraOutputsEnv(entries []infraOutputEntry) error {
 }
 
 // shellQuote returns a single-quoted POSIX shell literal for any value.
-// Non-string scalars are formatted with %v; maps and slices are rendered as
-// compact JSON. Single-quote characters inside the value are escaped using
-// the standard POSIX sequence: close the literal, emit a backslash-quoted
-// single-quote, then reopen the literal (the four-character sequence apostrophe
-// backslash apostrophe apostrophe).
+// Strings are used as-is. Maps and slices of any concrete type are
+// JSON-serialized (via reflection) so callers get valid JSON rather than
+// Go's %v formatting. All other scalars are formatted with %v. Single-quote
+// characters inside the value are escaped using the standard POSIX sequence:
+// close the literal, emit a backslash-quoted single-quote, then reopen the
+// literal (the four-character sequence apostrophe backslash apostrophe
+// apostrophe).
 func shellQuote(v any) string {
 	var s string
 	switch tv := v.(type) {
 	case string:
 		s = tv
-	case map[string]any, []any:
-		b, err := json.Marshal(tv)
-		if err != nil {
-			s = fmt.Sprint(tv)
-		} else {
-			s = string(b)
-		}
 	default:
-		s = fmt.Sprint(tv)
+		rv := reflect.ValueOf(v)
+		if rv.IsValid() && (rv.Kind() == reflect.Map || rv.Kind() == reflect.Slice) {
+			b, err := json.Marshal(tv)
+			if err != nil {
+				s = fmt.Sprint(tv)
+			} else {
+				s = string(b)
+			}
+		} else {
+			s = fmt.Sprint(tv)
+		}
 	}
 	// Escape single-quotes: end the current literal, emit an escaped ', reopen.
 	escaped := strings.ReplaceAll(s, "'", `'\''`)
