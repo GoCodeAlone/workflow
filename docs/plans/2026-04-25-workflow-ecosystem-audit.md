@@ -466,3 +466,23 @@ Expected: both exit 0 in default mode and print findings summaries.
 git add docs/WFCTL.md docs/plans/2026-04-25-workflow-ecosystem-audit-design.md docs/plans/2026-04-25-workflow-ecosystem-audit.md
 git commit -m "docs: document workflow ecosystem audit commands"
 ```
+
+## Execution Notes
+
+Implementation commits:
+
+- `b07721e`: plan metadata parser.
+- `b82891f`: generated `docs/plans/INDEX.md`.
+- `521d6b9`: `wfctl audit plans` and restored wfctl's embedded CLI workflow dispatcher config.
+- `a29ea93`: plugin manifest shape audit model.
+- `4a977ca`: `wfctl audit plugins`.
+- `c42d6e3`: preserved wfctl's embedded CLI workflow config when plugin removal sees an unrelated `wfctl.yaml`.
+
+Verification evidence:
+
+- `GOWORK=off go test ./cmd/wfctl -run 'TestRunAudit|TestParsePlanDoc|TestRenderPlanIndex|TestAuditPlugin' -count=1`
+- `GOWORK=off go test ./cmd/wfctl ./interfaces ./plugin/...`
+- `GOWORK=off go run ./cmd/wfctl audit plans --dir docs/plans`
+- `GOWORK=off go run ./cmd/wfctl audit plugins --repo-root /Users/jon/workspace`
+
+Dogfooding note: runtime verification exposed that `cmd/wfctl/wfctl.yaml` had regressed to a two-line config and no longer created the CLI workflow handler. The implementation restored the embedded CLI workflow and pipeline config, then used `wfctl audit ...` itself for runtime checks. Broader tests then exposed that `wfctl plugin remove` could rewrite an unrelated `wfctl.yaml`; that source issue was fixed so dogfood tests no longer clobber wfctl's own embedded CLI config.
