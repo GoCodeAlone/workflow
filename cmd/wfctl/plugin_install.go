@@ -1014,7 +1014,7 @@ func verifyChecksum(data []byte, expected string) error {
 	h := sha256.Sum256(data)
 	got := hex.EncodeToString(h[:])
 	if !strings.EqualFold(got, expected) {
-		return fmt.Errorf("checksum mismatch:\n  got:  %s\n  want: %s\nThis may indicate a corrupted download or a supply-chain attack.", got, expected)
+		return fmt.Errorf("checksum mismatch: got: %s, want: %s -- may indicate a corrupted download or a supply-chain attack", got, expected)
 	}
 	return nil
 }
