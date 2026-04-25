@@ -11,6 +11,7 @@ type IaCState struct {
 	Status       string         `json:"status"`  // planned, provisioning, active, destroying, destroyed, error
 	Outputs      map[string]any `json:"outputs"` // provider-specific outputs
 	Config       map[string]any `json:"config"`  // the config used to provision
+	Dependencies []string       `json:"dependencies,omitempty"`
 	CreatedAt    string         `json:"created_at"`
 	UpdatedAt    string         `json:"updated_at"`
 	Error        string         `json:"error,omitempty"`

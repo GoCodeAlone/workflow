@@ -1228,7 +1228,7 @@ func (p *stateReturningProvider) Close() error { return nil }
 func TestApplyWithProvider_SavesStateForSuccessfulResources(t *testing.T) {
 	specs := []interfaces.ResourceSpec{
 		{Name: "r1", Type: "infra.vpc", Config: map[string]any{"region": "nyc3"}},
-		{Name: "r2", Type: "infra.database", Config: map[string]any{"engine": "postgres"}},
+		{Name: "r2", Type: "infra.database", Config: map[string]any{"engine": "postgres"}, DependsOn: []string{"r1"}},
 	}
 	fake := &stateReturningProvider{
 		applyResult: &interfaces.ApplyResult{
@@ -1258,6 +1258,19 @@ func TestApplyWithProvider_SavesStateForSuccessfulResources(t *testing.T) {
 	}
 	if found["r2"] != "db-1" {
 		t.Errorf("r2 ProviderID = %q, want db-1", found["r2"])
+	}
+	var r2State *interfaces.ResourceState
+	for i := range store.saved {
+		if store.saved[i].Name == "r2" {
+			r2State = &store.saved[i]
+			break
+		}
+	}
+	if r2State == nil {
+		t.Fatal("r2 state not saved")
+	}
+	if len(r2State.Dependencies) != 1 || r2State.Dependencies[0] != "r1" {
+		t.Fatalf("r2 Dependencies = %#v, want [r1]", r2State.Dependencies)
 	}
 }
 

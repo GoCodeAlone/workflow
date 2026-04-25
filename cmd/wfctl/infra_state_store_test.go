@@ -301,6 +301,7 @@ func TestResourceStateModuleConversion_PreservesProviderMetadata(t *testing.T) {
 		ConfigHash:    "live-config-hash",
 		AppliedConfig: map[string]any{"domain": "example.com"},
 		Outputs:       map[string]any{"domain": "example.com"},
+		Dependencies:  []string{"site-app"},
 	}
 
 	moduleState := resourceStateToIaCState(state)
@@ -313,6 +314,9 @@ func TestResourceStateModuleConversion_PreservesProviderMetadata(t *testing.T) {
 	if moduleState.ConfigHash != "live-config-hash" {
 		t.Fatalf("module ConfigHash = %q, want live-config-hash", moduleState.ConfigHash)
 	}
+	if len(moduleState.Dependencies) != 1 || moduleState.Dependencies[0] != "site-app" {
+		t.Fatalf("module Dependencies = %#v, want [site-app]", moduleState.Dependencies)
+	}
 
 	roundTripped := iacStateToResourceState(&module.IaCState{
 		ResourceID:   "site-dns",
@@ -323,6 +327,7 @@ func TestResourceStateModuleConversion_PreservesProviderMetadata(t *testing.T) {
 		ConfigHash:   "live-config-hash",
 		Config:       map[string]any{"domain": "example.com"},
 		Outputs:      map[string]any{"domain": "example.com"},
+		Dependencies: []string{"site-app"},
 	})
 	if roundTripped.ProviderID != "do-domain-123" {
 		t.Fatalf("round-tripped ProviderID = %q, want do-domain-123", roundTripped.ProviderID)
@@ -332,5 +337,34 @@ func TestResourceStateModuleConversion_PreservesProviderMetadata(t *testing.T) {
 	}
 	if roundTripped.ConfigHash != "live-config-hash" {
 		t.Fatalf("round-tripped ConfigHash = %q, want live-config-hash", roundTripped.ConfigHash)
+	}
+	if len(roundTripped.Dependencies) != 1 || roundTripped.Dependencies[0] != "site-app" {
+		t.Fatalf("round-tripped Dependencies = %#v, want [site-app]", roundTripped.Dependencies)
+	}
+}
+
+func TestFSStateStore_RoundTripsDependencies(t *testing.T) {
+	store := &fsWfctlStateStore{dir: t.TempDir()}
+	state := interfaces.ResourceState{
+		ID:            "site-app",
+		Name:          "site-app",
+		Type:          "infra.container_service",
+		Provider:      "digitalocean",
+		ProviderID:    "app-123",
+		AppliedConfig: map[string]any{"image": "example/app:latest"},
+		Dependencies:  []string{"site-db", "site-dns"},
+	}
+	if err := store.SaveResource(t.Context(), state); err != nil {
+		t.Fatalf("SaveResource: %v", err)
+	}
+	states, err := store.ListResources(t.Context())
+	if err != nil {
+		t.Fatalf("ListResources: %v", err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("states = %d, want 1", len(states))
+	}
+	if len(states[0].Dependencies) != 2 || states[0].Dependencies[0] != "site-db" || states[0].Dependencies[1] != "site-dns" {
+		t.Fatalf("Dependencies = %#v, want [site-db site-dns]", states[0].Dependencies)
 	}
 }

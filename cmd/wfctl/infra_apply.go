@@ -399,10 +399,12 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 			// Find the matching spec to get the applied config.
 			var appliedCfg map[string]any
 			var providerRef string
+			var dependencies []string
 			for i := range specs {
 				if specs[i].Name == r.Name {
 					appliedCfg = specs[i].Config
 					providerRef, _ = specs[i].Config["provider"].(string)
+					dependencies = append([]string(nil), specs[i].DependsOn...)
 					break
 				}
 			}
@@ -418,6 +420,7 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 				ConfigHash:    configHashMap(appliedCfg),
 				AppliedConfig: appliedCfg,
 				Outputs:       r.Outputs,
+				Dependencies:  dependencies,
 				CreatedAt:     now,
 				UpdatedAt:     now,
 			}

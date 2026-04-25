@@ -52,8 +52,8 @@ func (r *scanSuccessRows) Next() bool {
 }
 
 func (r *scanSuccessRows) Scan(dest ...any) error {
-	if len(dest) != 9 {
-		return fmt.Errorf("dest len = %d, want 9", len(dest))
+	if len(dest) != 10 {
+		return fmt.Errorf("dest len = %d, want 10", len(dest))
 	}
 	*(dest[0].(*string)) = "site-dns"
 	*(dest[1].(*string)) = "infra.dns"
@@ -64,6 +64,7 @@ func (r *scanSuccessRows) Scan(dest ...any) error {
 	*(dest[6].(*string)) = "active"
 	*(dest[7].(*string)) = `{"domain":"example.com"}`
 	*(dest[8].(*string)) = `{"records":[]}`
+	*(dest[9].(*[]string)) = []string{"network"}
 	return nil
 }
 
@@ -78,8 +79,8 @@ func (r *scanBadJSONRows) Next() bool {
 }
 
 func (r *scanBadJSONRows) Scan(dest ...any) error {
-	if len(dest) != 9 {
-		return fmt.Errorf("dest len = %d, want 9", len(dest))
+	if len(dest) != 10 {
+		return fmt.Errorf("dest len = %d, want 10", len(dest))
 	}
 	*(dest[0].(*string)) = "site-dns"
 	*(dest[1].(*string)) = "infra.dns"
@@ -90,6 +91,7 @@ func (r *scanBadJSONRows) Scan(dest ...any) error {
 	*(dest[6].(*string)) = "active"
 	*(dest[7].(*string)) = r.cfgJSON
 	*(dest[8].(*string)) = r.outJSON
+	*(dest[9].(*[]string)) = []string{"network"}
 	return nil
 }
 
@@ -188,6 +190,7 @@ func TestPostgresIaCStateStore_SaveAndGetState(t *testing.T) {
 		Status:       "active",
 		Config:       map[string]any{"region": "us-east-1"},
 		Outputs:      map[string]any{"endpoint": "https://k8s.example.com"},
+		Dependencies: []string{"network"},
 	}
 	if err := store.SaveState(state); err != nil {
 		t.Fatalf("SaveState: %v", err)
@@ -214,6 +217,9 @@ func TestPostgresIaCStateStore_SaveAndGetState(t *testing.T) {
 	}
 	if got.Status != "active" {
 		t.Errorf("Status = %q, want %q", got.Status, "active")
+	}
+	if strings.Join(got.Dependencies, ",") != "network" {
+		t.Errorf("Dependencies = %#v, want network", got.Dependencies)
 	}
 }
 
@@ -296,6 +302,9 @@ func TestScanIaCStateRows_PopulatesProviderRef(t *testing.T) {
 	}
 	if got.Config["domain"] != "example.com" {
 		t.Fatalf("Config = %#v, want domain", got.Config)
+	}
+	if strings.Join(got.Dependencies, ",") != "network" {
+		t.Fatalf("Dependencies = %#v, want network", got.Dependencies)
 	}
 }
 

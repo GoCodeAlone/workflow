@@ -255,8 +255,8 @@ func (c *pgxRealConn) UpsertState(ctx context.Context, st *IaCState) error {
 		return err
 	}
 	_, err = c.pool.Exec(ctx, `
-		INSERT INTO iac_resources (name, type, provider, provider_ref, provider_id, config_hash, status, applied_config, outputs, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+		INSERT INTO iac_resources (name, type, provider, provider_ref, provider_id, config_hash, status, applied_config, outputs, dependencies, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
 		ON CONFLICT (name) DO UPDATE SET
 			type           = EXCLUDED.type,
 			provider       = EXCLUDED.provider,
@@ -266,8 +266,9 @@ func (c *pgxRealConn) UpsertState(ctx context.Context, st *IaCState) error {
 			status         = EXCLUDED.status,
 			applied_config = EXCLUDED.applied_config,
 			outputs        = EXCLUDED.outputs,
+			dependencies   = EXCLUDED.dependencies,
 			updated_at     = NOW()
-	`, st.ResourceID, st.ResourceType, st.Provider, st.ProviderRef, st.ProviderID, st.ConfigHash, st.Status, string(cfg), string(out))
+	`, st.ResourceID, st.ResourceType, st.Provider, st.ProviderRef, st.ProviderID, st.ConfigHash, st.Status, string(cfg), string(out), st.Dependencies)
 	return err
 }
 
@@ -286,6 +287,7 @@ func (c *pgxRealConn) GetState(ctx context.Context, name string) (*IaCState, err
 		}
 		return nil, err
 	}
+	st.Dependencies = append([]string(nil), deps...)
 	if err := decodeIaCStatePayloads(&st, cfgJSON, outJSON); err != nil {
 		return nil, err
 	}
@@ -294,7 +296,7 @@ func (c *pgxRealConn) GetState(ctx context.Context, name string) (*IaCState, err
 
 func (c *pgxRealConn) ListRows(ctx context.Context) ([]*IaCState, error) {
 	rows, err := c.pool.Query(ctx, `
-		SELECT name, type, provider, provider_ref, provider_id, config_hash, status, applied_config::text, outputs::text
+		SELECT name, type, provider, provider_ref, provider_id, config_hash, status, applied_config::text, outputs::text, dependencies
 		FROM iac_resources
 	`)
 	if err != nil {
@@ -315,7 +317,7 @@ func scanIaCStateRows(rows iacStateRows) ([]*IaCState, error) {
 	for rows.Next() {
 		var st IaCState
 		var cfgJSON, outJSON string
-		if err := rows.Scan(&st.ResourceID, &st.ResourceType, &st.Provider, &st.ProviderRef, &st.ProviderID, &st.ConfigHash, &st.Status, &cfgJSON, &outJSON); err != nil {
+		if err := rows.Scan(&st.ResourceID, &st.ResourceType, &st.Provider, &st.ProviderRef, &st.ProviderID, &st.ConfigHash, &st.Status, &cfgJSON, &outJSON, &st.Dependencies); err != nil {
 			return nil, fmt.Errorf("scan iac_resources row: %w", err)
 		}
 		if err := decodeIaCStatePayloads(&st, cfgJSON, outJSON); err != nil {

@@ -123,6 +123,7 @@ type iacStateRecord struct {
 	Status       string         `json:"status"`
 	Config       map[string]any `json:"config"`
 	Outputs      map[string]any `json:"outputs"`
+	Dependencies []string       `json:"dependencies,omitempty"`
 	CreatedAt    string         `json:"created_at"`
 	UpdatedAt    string         `json:"updated_at"`
 }
@@ -168,6 +169,7 @@ func (s *fsWfctlStateStore) SaveResource(_ context.Context, state interfaces.Res
 		Status:       "active",
 		Config:       state.AppliedConfig,
 		Outputs:      state.Outputs,
+		Dependencies: append([]string(nil), state.Dependencies...),
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -314,6 +316,7 @@ func iacRecordToResourceState(r iacStateRecord) interfaces.ResourceState {
 		ConfigHash:    cfgHash,
 		AppliedConfig: r.Config,
 		Outputs:       r.Outputs,
+		Dependencies:  append([]string(nil), r.Dependencies...),
 	}
 }
 
@@ -336,6 +339,7 @@ func iacStateToResourceState(r *module.IaCState) interfaces.ResourceState {
 		ConfigHash:    cfgHash,
 		AppliedConfig: r.Config,
 		Outputs:       r.Outputs,
+		Dependencies:  append([]string(nil), r.Dependencies...),
 	}
 }
 
@@ -351,6 +355,7 @@ func resourceStateToIaCState(state interfaces.ResourceState) *module.IaCState {
 		Status:       "active",
 		Config:       state.AppliedConfig,
 		Outputs:      state.Outputs,
+		Dependencies: append([]string(nil), state.Dependencies...),
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
