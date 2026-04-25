@@ -169,7 +169,7 @@ error: plugin "foo" downloaded from <url> has no SHA-256 in its manifest and
 no checksums.txt was found at <release-url>/checksums.txt.
 
 To proceed without verification (not recommended):
-  wfctl plugin install foo --skip-checksum
+  wfctl plugin install --skip-checksum foo
 
 To add verification, ask the plugin author to publish a checksums.txt
 alongside their release assets (goreleaser does this automatically).
