@@ -66,7 +66,10 @@ func runInfraStateList(args []string) error {
 		}
 	}
 
-	states := loadCurrentState(cfgFile, "")
+	states, err := loadCurrentState(cfgFile, "")
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
 	if len(states) == 0 {
 		fmt.Println("No resources tracked in state.")
 		return nil
@@ -106,10 +109,12 @@ func runInfraStateExport(args []string) error {
 		}
 	}
 
-	states := loadCurrentState(cfgFile, "")
+	states, err := loadCurrentState(cfgFile, "")
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
 
 	var data []byte
-	var err error
 	switch formatVal {
 	case "tfstate":
 		data, err = exportAsTFState(states)

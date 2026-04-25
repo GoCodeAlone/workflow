@@ -35,6 +35,8 @@ func runInfra(args []string) error {
 		return runInfraState(args[1:])
 	case "bootstrap":
 		return runInfraBootstrap(args[1:])
+	case "outputs":
+		return runInfraOutputs(args[1:])
 	default:
 		return infraUsage()
 	}
@@ -53,6 +55,7 @@ Actions:
   destroy   Tear down infrastructure
   import    Import an existing cloud resource into state
   state     Manage IaC state (list, export, import)
+  outputs   Print captured resource outputs from state
 
 Options:
   --config <file>      Config file (default: infra.yaml or config/infra.yaml)
@@ -155,7 +158,7 @@ func runInfraPlan(args []string) error {
 		return err
 	}
 
-	current := loadCurrentState(cfgFile, envName)
+	current, _ := loadCurrentState(cfgFile, envName) // nil on first run is valid
 
 	plan, err := platform.ComputePlan(desired, current)
 	if err != nil {
@@ -338,20 +341,22 @@ func isContainerType(t string) bool {
 }
 
 // loadCurrentState loads ResourceStates from the configured iac.state backend.
-// Returns nil on any error (first run or unconfigured backend). Uses
-// resolveStateStore so that remote backends (Spaces, S3, etc.) are supported.
-// envName is forwarded to resolveStateStore so per-env backend config
-// (e.g. region, prefix) is applied when reading state.
-func loadCurrentState(cfgFile, envName string) []interfaces.ResourceState {
+// Returns an error when the state store cannot be resolved or read; callers
+// that treat "no prior state" as a valid first-run condition should swallow the
+// error explicitly with a comment. Uses resolveStateStore so that remote
+// backends (Spaces, S3, etc.) are supported. envName is forwarded to
+// resolveStateStore so per-env backend config (e.g. region, prefix) is applied
+// when reading state.
+func loadCurrentState(cfgFile, envName string) ([]interfaces.ResourceState, error) {
 	store, err := resolveStateStore(cfgFile, envName)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("resolve state store: %w", err)
 	}
 	states, err := store.ListResources(context.Background())
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("list state resources: %w", err)
 	}
-	return states
+	return states, nil
 }
 
 // configHashMap delegates to platform.ConfigHash so that the CLI always
@@ -824,7 +829,7 @@ func runInfraApply(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve secrets provider for infra_output sync: %w", err)
 	}
-	states := loadCurrentState(cfgFile, envName)
+	states, _ := loadCurrentState(cfgFile, envName) // nil on missing/empty state is valid for sync
 	// Only reload the workflow config when env resolution is actually needed:
 	// it is needed only when --env is set AND at least one infra_output secret
 	// generator is configured (otherwise syncInfraOutputSecrets is a no-op for

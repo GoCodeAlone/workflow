@@ -89,7 +89,9 @@ graph TD
     infra --> infra-status["status"]
     infra --> infra-drift["drift"]
     infra --> infra-import["import"]
+    infra --> infra-bootstrap["bootstrap"]
     infra --> infra-state["state"]
+    infra --> infra-outputs["outputs"]
 
     infra-state --> infra-state-list["list"]
     infra-state --> infra-state-export["export"]
@@ -153,7 +155,7 @@ graph TD
 | **Validation & Inspection** | `validate`, `inspect`, `schema`, `compat check`, `template validate`, `editor-schemas`, `dsl-reference` |
 | **API & Contract** | `api extract`, `contract test`, `diff` |
 | **Deployment** | `deploy docker/kubernetes/helm/cloud`, `build-ui`, `generate github-actions` |
-| **Infrastructure** | `infra plan/apply/destroy/status/drift/import`, `infra state list/export/import` |
+| **Infrastructure** | `infra plan/apply/destroy/status/drift/import/bootstrap/outputs`, `infra state list/export/import` |
 | **CI/CD** | `ci generate`, `generate github-actions` |
 | **Documentation** | `docs generate` |
 | **Plugin Management** | `plugin`, `registry`, `publish` |
@@ -967,7 +969,9 @@ wfctl infra <action> [options] [config.yaml]
 | `drift` | Detect configuration drift between desired and actual state |
 | `destroy` | Tear down all managed infrastructure |
 | `import` | Import existing resources into IaC state |
+| `bootstrap` | Generate secrets and initialise state backend before first apply |
 | `state` | Manage state storage (list/export/import) |
+| `outputs` | Print resource outputs from state (yaml/json/env formats) |
 
 | Flag | Default | Description |
 |------|---------|-------------|
