@@ -95,10 +95,9 @@ func runPluginInstall(args []string) error {
 		return fmt.Errorf("--skip-checksum and --sha256 are contradictory: cannot skip verification while supplying an expected hash")
 	}
 	if *skipChecksum {
-		// The flag only bypasses the fail-closed error when integrity cannot be verified.
-		// Installs still verify when the manifest supplies a SHA256 or the URL is a
-		// GitHub release (checksums.txt auto-fetched). The flag is not a full bypass.
-		fmt.Fprintf(os.Stderr, "WARNING: --skip-checksum is set; install will proceed even if integrity cannot be verified.\n")
+		// Full bypass: ALL checksum verification is skipped, including manifest SHA256
+		// and GitHub checksums.txt auto-fetch. Use only for trusted internal URLs.
+		fmt.Fprintf(os.Stderr, "WARNING: --skip-checksum is set; ALL integrity verification is disabled.\n")
 	}
 
 	// --from-config: batch install from workflow requires.plugins[].
