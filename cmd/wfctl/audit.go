@@ -74,6 +74,7 @@ Subjects:
 
 func runAuditPlansWithOutput(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("audit plans", flag.ContinueOnError)
+	fs.SetOutput(out)
 	dir := fs.String("dir", "docs/plans", "Directory containing plan docs")
 	jsonOut := fs.Bool("json", false, "Write JSON output")
 	staleAfter := fs.String("stale-after", "30d", "Warn when verification is older than this duration")
@@ -178,6 +179,7 @@ func parsePlanAuditDuration(value string) (time.Duration, error) {
 
 func runAuditPluginsWithOutput(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("audit plugins", flag.ContinueOnError)
+	fs.SetOutput(out)
 	repoRoot := fs.String("repo-root", defaultPluginAuditRepoRoot(), "Directory containing workflow-plugin-* repos")
 	jsonOut := fs.Bool("json", false, "Write JSON output")
 	strict := fs.Bool("strict", false, "Treat warnings as failures")

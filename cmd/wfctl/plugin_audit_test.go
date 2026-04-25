@@ -123,6 +123,9 @@ func TestAuditPluginManifestReadErrorIsNotInvalidJSON(t *testing.T) {
 	if err := os.WriteFile(manifestPath, []byte(`{"name":"workflow-plugin-unreadable"}`), 0o000); err != nil {
 		t.Fatalf("write plugin.json: %v", err)
 	}
+	if _, err := os.ReadFile(manifestPath); err == nil {
+		t.Skip("chmod 000 did not make plugin.json unreadable in this environment")
+	}
 	t.Cleanup(func() {
 		_ = os.Chmod(manifestPath, 0o644)
 	})

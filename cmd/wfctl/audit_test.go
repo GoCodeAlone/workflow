@@ -175,6 +175,25 @@ func TestAuditCommandRouting(t *testing.T) {
 	}
 }
 
+func TestRunAuditFlagParseErrorsUseProvidedWriter(t *testing.T) {
+	tests := [][]string{
+		{"plans", "--unknown"},
+		{"plugins", "--unknown"},
+	}
+	for _, args := range tests {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var out bytes.Buffer
+			err := runAuditWithOutput(args, &out)
+			if err == nil {
+				t.Fatal("expected flag parse error")
+			}
+			if !strings.Contains(out.String(), "flag provided but not defined") {
+				t.Fatalf("expected flag error in provided writer, got:\n%s", out.String())
+			}
+		})
+	}
+}
+
 func TestRunAuditPlugins(t *testing.T) {
 	root := t.TempDir()
 	writePluginAuditRepoAt(t, root, "workflow-plugin-good", `{
