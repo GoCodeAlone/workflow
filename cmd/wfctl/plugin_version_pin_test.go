@@ -72,6 +72,7 @@ func TestInstallPluginFromManifest_NoDoubleVInSuccessMessage(t *testing.T) {
 	installErr := runPluginInstall([]string{
 		"--config", regCfgPath,
 		"--plugin-dir", pluginsDir,
+		"--skip-checksum", // test server is not a GitHub URL; skip integrity check
 		pluginName,
 	})
 
@@ -296,7 +297,8 @@ func TestRunPluginInstall_NoVersionUsesManifest(t *testing.T) {
 	if err := runPluginInstall([]string{
 		"--config", regCfgPath,
 		"--plugin-dir", pluginsDir,
-		pluginName, // no @version
+		"--skip-checksum", // test server is not a GitHub URL; skip integrity check
+		pluginName,        // no @version
 	}); err != nil {
 		t.Fatalf("runPluginInstall (no version): %v", err)
 	}
@@ -393,6 +395,7 @@ func TestRunPluginInstall_VersionPinHitsNewURL(t *testing.T) {
 	err = runPluginInstall([]string{
 		"--config", regCfgPath,
 		"--plugin-dir", pluginsDir,
+		"--skip-checksum", // test server is not a GitHub URL; skip integrity check
 		pluginName + "@" + newVersion,
 	})
 	if err != nil {
@@ -577,6 +580,7 @@ func TestRunPluginInstall_FullNameNotNormalizedBeforeLookup(t *testing.T) {
 	if err := runPluginInstall([]string{
 		"--config", regCfgPath,
 		"--plugin-dir", pluginsDir,
+		"--skip-checksum", // test server is not a GitHub URL; skip integrity check
 		"workflow-plugin-auth@" + externalVersion,
 	}); err != nil {
 		t.Fatalf("runPluginInstall workflow-plugin-auth: %v", err)

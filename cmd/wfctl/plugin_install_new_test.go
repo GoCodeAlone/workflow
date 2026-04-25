@@ -84,7 +84,7 @@ func TestInstallFromURL(t *testing.T) {
 
 	pluginsDir := t.TempDir()
 
-	if err := installFromURL(srv.URL+"/"+pluginName+".tar.gz", pluginsDir); err != nil {
+	if err := installFromURL(srv.URL+"/"+pluginName+".tar.gz", pluginsDir, "", true); err != nil {
 		t.Fatalf("installFromURL: %v", err)
 	}
 
@@ -130,7 +130,7 @@ func TestInstallFromURL_404(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := installFromURL(srv.URL+"/missing.tar.gz", t.TempDir())
+	err := installFromURL(srv.URL+"/missing.tar.gz", t.TempDir(), "", true)
 	if err == nil {
 		t.Fatal("expected error for 404, got nil")
 	}
@@ -152,7 +152,7 @@ func TestInstallFromURL_MissingPluginJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := installFromURL(srv.URL+"/plugin.tar.gz", t.TempDir())
+	err := installFromURL(srv.URL+"/plugin.tar.gz", t.TempDir(), "", true)
 	if err == nil {
 		t.Fatal("expected error for missing plugin.json, got nil")
 	}
@@ -188,7 +188,7 @@ func TestInstallFromURL_NameNormalization(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(origWD) }) //nolint:errcheck
 
 	pluginsDir := t.TempDir()
-	if err := installFromURL(srv.URL+"/plugin.tar.gz", pluginsDir); err != nil {
+	if err := installFromURL(srv.URL+"/plugin.tar.gz", pluginsDir, "", true); err != nil {
 		t.Fatalf("installFromURL: %v", err)
 	}
 

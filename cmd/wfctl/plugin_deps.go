@@ -108,7 +108,7 @@ func installPluginReqDirect(pluginDir, registryCfgPath string, req config.Plugin
 		}
 	}
 
-	return installPluginFromManifest(pluginDir, pluginName, manifest, req.Verify)
+	return installPluginFromManifest(pluginDir, pluginName, manifest, req.Verify, false)
 }
 
 // runPluginDeps lists dependencies for a plugin without installing them.
@@ -265,7 +265,7 @@ func resolveDependencies(
 
 		// Install the dependency.
 		fmt.Fprintf(os.Stderr, "Installing %s v%s (dependency of %s)...\n", dep.Name, depManifest.Version, pluginName)
-		if err := installPluginFromManifest(pluginDir, dep.Name, depManifest, nil); err != nil {
+		if err := installPluginFromManifest(pluginDir, dep.Name, depManifest, nil, false); err != nil {
 			return fmt.Errorf("install dependency %q of %q: %w", dep.Name, pluginName, err)
 		}
 		resolved[dep.Name] = depManifest.Version
