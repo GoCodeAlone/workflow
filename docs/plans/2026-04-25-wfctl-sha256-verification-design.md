@@ -102,9 +102,15 @@ The `checksums.txt` format is the goreleaser standard:
 Parsing uses the goreleaser standard format (`<sha256hex>  <filename>`), the same format as
 the existing `verifyAssetChecksum` in `update.go`.
 
-A new shared helper `lookupChecksumForURL(downloadURL, assetName string) (string, error)` is
-added. It derives the checksums.txt URL from the release asset URL (stripping the asset
-filename and appending `checksums.txt`), downloads it, and returns the expected SHA256 hex.
+A new shared helper `lookupChecksumForURL(downloadURL string) (string, error)` is added. It
+derives the `checksums.txt` URL from the release asset URL (stripping the asset filename and
+appending `checksums.txt`), downloads it, parses each `<sha256hex>  <filename>` line, and
+returns the expected SHA256 hex for the asset matching the basename of `downloadURL`.
+
+`assetName` is derived internally as `path.Base(url.PathUnescape(downloadURL))` — the
+URL-decoded last path segment — so that URL-encoded characters in filenames are normalised
+before matching against plain-text `checksums.txt` entries.
+
 The `wfctl update` path is refactored to call this same helper, replacing its current
 `findChecksumAsset(rel.Assets)` + `verifyAssetChecksum` pattern — the new helper derives the
 URL from the asset's `BrowserDownloadURL` directly rather than searching the API asset list
@@ -116,10 +122,12 @@ logic.
 When a user specifies `--url <url>` directly:
 
 - If `--sha256 <hex>` is also provided: download, verify, succeed.
-- If the URL matches the GitHub release download pattern
-  (`github.com/<owner>/<repo>/releases/download/<tag>/<file>`) and no `--sha256` is given:
-  auto-fetch `checksums.txt` from the same release tag (via `lookupChecksumForURL`). Fail if
-  the file is absent or the asset is not listed.
+- If the URL matches the GitHub release download pattern and no `--sha256` is given:
+  auto-fetch `checksums.txt` via `lookupChecksumForURL`. Fail if the file is absent or the
+  asset is not listed. The match uses the same constraints as `parseGitHubReleaseDownloadURL`:
+  HTTPS scheme only, host must be `github.com` or a `*.github.com` subdomain (the dot
+  separator prevents matching lookalike domains such as `evilgithub.com`), and path must be
+  exactly `/owner/repo/releases/download/tag/filename`.
 - For any other URL with no `--sha256`: fail with a clear error explaining how to provide
   a hash or use `--skip-checksum`.
 
@@ -216,8 +224,10 @@ This design does not change the cosign hook path. The two layers can coexist: SH
 verification runs by default on every install and is fail-closed — a binary that cannot be
 verified does not install. It can be bypassed with `--skip-checksum` (emits a warning), or
 implicitly skipped for a lockfile entry with an empty SHA (the SHA is recorded on first
-successful install). Cosign verification runs only when `verify.signature_identity` is
-configured in `app.yaml`'s `requires.plugins` entry.
+successful install). Cosign verification runs only when `verify.signature` is set to `required` in
+`app.yaml`'s `requires.plugins[*].verify` entry (`PluginVerifyConfig.Signature`).
+The `verify` block also controls `sbom` (SBOM presence) and `vuln_policy` (OSV scan
+policy) — all independent of SHA-256 integrity verification.
 
 ---
 
