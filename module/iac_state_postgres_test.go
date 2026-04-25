@@ -244,26 +244,34 @@ func TestPostgresIaCStateStore_Migration_AddsColumnsForExistingPreChangeSchema(t
 		"status":         true,
 		"applied_config": true,
 		"outputs":        true,
-		"dependencies":   true,
 		"created_at":     true,
 		"updated_at":     true,
 	}
-	newColumns := []string{"provider", "provider_id", "config_hash"}
+	newColumns := []string{"provider", "provider_id", "config_hash", "dependencies"}
 
 	for _, col := range newColumns {
 		if legacySchemaColumns[col] {
 			t.Fatalf("test setup invalid: %s already exists in legacy schema", col)
 		}
-		needle := "ADD COLUMN IF NOT EXISTS " + col
 		found := false
 		for _, stmt := range module.MigrateTableSQL {
-			if strings.Contains(stmt, needle) {
+			fields := strings.Fields(stmt)
+			if len(fields) >= 9 &&
+				strings.EqualFold(fields[0], "ALTER") &&
+				strings.EqualFold(fields[1], "TABLE") &&
+				fields[2] == "iac_resources" &&
+				strings.EqualFold(fields[3], "ADD") &&
+				strings.EqualFold(fields[4], "COLUMN") &&
+				strings.EqualFold(fields[5], "IF") &&
+				strings.EqualFold(fields[6], "NOT") &&
+				strings.EqualFold(fields[7], "EXISTS") &&
+				fields[8] == col {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("MigrateTableSQL missing %q for pre-change schema", needle)
+			t.Errorf("MigrateTableSQL missing additive migration for %q", col)
 		}
 	}
 }

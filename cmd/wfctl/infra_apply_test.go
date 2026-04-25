@@ -119,6 +119,19 @@ func (p *readBackedProvider) ResourceDriver(_ string) (interfaces.ResourceDriver
 	return p.driver, nil
 }
 
+type readBackedFailingApplyProvider struct {
+	readBackedProvider
+	applyErr error
+}
+
+func (p *readBackedFailingApplyProvider) Apply(_ context.Context, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error) {
+	p.mu.Lock()
+	p.applyCalled = true
+	p.appliedPlan = plan
+	p.mu.Unlock()
+	return nil, p.applyErr
+}
+
 // ── TestApplyInfraModules_DirectPath ───────────────────────────────────────────
 
 // TestApplyInfraModules_DirectPath verifies that applyInfraModules:
@@ -190,6 +203,98 @@ modules:
 	for _, name := range []string{"bmw-db", "bmw-app"} {
 		if actions[name] != "create" {
 			t.Errorf("action for %q: want create, got %q", name, actions[name])
+		}
+	}
+}
+
+func TestApplyInfraModules_ScopesCurrentStatePerProvider(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	cfgPath := filepath.Join(dir, "infra.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+modules:
+  - name: do-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud-a
+
+  - name: aws-provider
+    type: iac.provider
+    config:
+      provider: fake-cloud-b
+
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: `+stateDir+`
+
+  - name: do-vpc
+    type: infra.vpc
+    config:
+      provider: do-provider
+      region: nyc3
+
+  - name: aws-vpc
+    type: infra.vpc
+    config:
+      provider: aws-provider
+      region: us-east-1
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	store := &fsWfctlStateStore{dir: stateDir}
+	for _, st := range []interfaces.ResourceState{
+		{
+			ID:            "do-vpc",
+			Name:          "do-vpc",
+			Type:          "infra.vpc",
+			Provider:      "fake-cloud-a",
+			ProviderID:    "do-vpc-id",
+			ConfigHash:    configHashMap(map[string]any{"provider": "do-provider", "region": "nyc3"}),
+			AppliedConfig: map[string]any{"provider": "do-provider", "region": "nyc3"},
+		},
+		{
+			ID:            "aws-vpc",
+			Name:          "aws-vpc",
+			Type:          "infra.vpc",
+			Provider:      "fake-cloud-b",
+			ProviderID:    "aws-vpc-id",
+			ConfigHash:    configHashMap(map[string]any{"provider": "aws-provider", "region": "us-east-1"}),
+			AppliedConfig: map[string]any{"provider": "aws-provider", "region": "us-east-1"},
+		},
+	} {
+		if err := store.SaveResource(context.Background(), st); err != nil {
+			t.Fatalf("seed state %s: %v", st.Name, err)
+		}
+	}
+
+	providers := map[string]*applyCapture{
+		"fake-cloud-a": {},
+		"fake-cloud-b": {},
+	}
+	orig := resolveIaCProvider
+	resolveIaCProvider = func(_ context.Context, providerType string, _ map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		p, ok := providers[providerType]
+		if !ok {
+			t.Fatalf("unexpected provider type %q", providerType)
+		}
+		return p, nil, nil
+	}
+	t.Cleanup(func() { resolveIaCProvider = orig })
+
+	if err := applyInfraModules(context.Background(), cfgPath, ""); err != nil {
+		t.Fatalf("applyInfraModules: %v", err)
+	}
+
+	for providerType, provider := range providers {
+		provider.mu.Lock()
+		applyCalled := provider.applyCalled
+		appliedPlan := provider.appliedPlan
+		provider.mu.Unlock()
+		if applyCalled {
+			t.Fatalf("%s Apply was called with plan %+v; provider-scoped current state should produce no changes", providerType, appliedPlan)
 		}
 	}
 }
@@ -335,14 +440,70 @@ func TestApplyWithProvider_AdoptsExistingDNSBeforeComputePlan(t *testing.T) {
 	if adopted.Outputs["domain"] != "old.example.com" {
 		t.Fatalf("adopted Outputs = %#v, want live outputs", adopted.Outputs)
 	}
-	if adopted.AppliedConfig["domain"] != "example.com" {
-		t.Fatalf("adopted AppliedConfig = %#v, want desired config", adopted.AppliedConfig)
+	if adopted.AppliedConfig["domain"] != "old.example.com" {
+		t.Fatalf("adopted AppliedConfig = %#v, want live config", adopted.AppliedConfig)
 	}
 	if adopted.ConfigHash != configHashMap(liveConfig) {
 		t.Fatalf("adopted ConfigHash = %q, want live config hash %q", adopted.ConfigHash, configHashMap(liveConfig))
 	}
 	if adopted.ConfigHash == configHashMap(desiredConfig) {
 		t.Fatalf("adopted ConfigHash matched desired hash; ComputePlan would skip required update")
+	}
+}
+
+func TestApplyWithProvider_DNSAdoptionFailedUpdateKeepsLiveAppliedConfig(t *testing.T) {
+	desiredConfig := map[string]any{
+		"provider": "do-provider",
+		"domain":   "example.com",
+		"ttl":      300,
+	}
+	liveConfig := map[string]any{
+		"provider": "do-provider",
+		"domain":   "old.example.com",
+		"ttl":      100,
+	}
+	spec := interfaces.ResourceSpec{
+		Name:   "site-dns",
+		Type:   "infra.dns",
+		Config: desiredConfig,
+	}
+	driver := &readDriver{
+		expectedProviderID: "example.com",
+		readOut: &interfaces.ResourceOutput{
+			Name:       "site-dns",
+			Type:       "infra.dns",
+			ProviderID: "do-domain-123",
+			Outputs: map[string]any{
+				"domain": "old.example.com",
+				"config": liveConfig,
+			},
+		},
+	}
+	provider := &readBackedFailingApplyProvider{
+		readBackedProvider: readBackedProvider{driver: driver},
+		applyErr:           errors.New("provider update failed"),
+	}
+	store := &fakeStateStore{}
+
+	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, io.Discard, "")
+	if err == nil {
+		t.Fatal("expected apply failure, got nil")
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 1 {
+		t.Fatalf("saved states = %d, want only the adopted live state", len(store.saved))
+	}
+	adopted := store.saved[0]
+	if adopted.AppliedConfig["domain"] != "old.example.com" || fmt.Sprint(adopted.AppliedConfig["ttl"]) != "100" {
+		t.Fatalf("adopted AppliedConfig after failed update = %#v, want live config", adopted.AppliedConfig)
+	}
+	if adopted.ConfigHash != configHashMap(liveConfig) {
+		t.Fatalf("adopted ConfigHash = %q, want live hash %q", adopted.ConfigHash, configHashMap(liveConfig))
+	}
+	if adopted.ConfigHash == configHashMap(desiredConfig) {
+		t.Fatalf("adopted ConfigHash matched desired hash after failed update")
 	}
 }
 

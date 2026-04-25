@@ -190,8 +190,8 @@ func TestInfraImport_ConfigAwareWithIDUsesProviderImport(t *testing.T) {
 	if got.ProviderID != "provider-domain-id" {
 		t.Fatalf("saved ProviderID = %q, want provider-domain-id", got.ProviderID)
 	}
-	if got.AppliedConfig["domain"] != desiredConfig["domain"] || fmt.Sprint(got.AppliedConfig["ttl"]) != fmt.Sprint(desiredConfig["ttl"]) {
-		t.Fatalf("saved AppliedConfig = %#v, want desired config", got.AppliedConfig)
+	if got.AppliedConfig["domain"] != "old.example.com" || fmt.Sprint(got.AppliedConfig["ttl"]) != "300" {
+		t.Fatalf("saved AppliedConfig = %#v, want imported live config", got.AppliedConfig)
 	}
 	if got.ConfigHash == configHashMap(desiredConfig) {
 		t.Fatalf("saved ConfigHash matched desired hash; next apply would not reconcile imported live drift")

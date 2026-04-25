@@ -46,8 +46,8 @@ func validateInputProviderIDs(provider interfaces.IaCProvider, plan *interfaces.
 }
 
 // validateOutputProviderID probes the driver for ProviderIDValidator and
-// rejects malformed ProviderIDs for strict formats (UUID, DomainName, ARN).
-// Freeform and Unknown formats pass through. Returns a detailed error on
+// rejects malformed ProviderIDs for strict formats and empty Freeform IDs.
+// Unknown formats pass through. Returns a detailed error on
 // violation so operators can identify the buggy driver immediately.
 func validateOutputProviderID(provider interfaces.IaCProvider, providerType string, r *interfaces.ResourceOutput) error {
 	return validateProviderID(provider, providerType, r.Type, r.Name, r.ProviderID)
@@ -68,7 +68,7 @@ func validateProviderID(provider interfaces.IaCProvider, providerType, resourceT
 		return nil
 	}
 	format := v.ProviderIDFormat()
-	if format == interfaces.IDFormatUnknown || format == interfaces.IDFormatFreeform {
+	if format == interfaces.IDFormatUnknown {
 		return nil
 	}
 	if !interfaces.ValidateProviderID(providerID, format) {

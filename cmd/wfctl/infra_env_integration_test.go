@@ -33,19 +33,15 @@ func newInfraFlagSet(cmd string) *flag.FlagSet {
 		fs.Bool("auto-approve", false, "Skip confirmation")
 		fs.Bool("y", false, "Skip confirmation (short for --auto-approve)")
 	case "import":
-		// --env intentionally absent — env-scoped import is a follow-up.
-		fs.String("provider", "", "Provider name")
-		fs.String("p", "", "Provider name (short for --provider)")
-		fs.String("type", "", "Abstract resource type")
-		fs.String("t", "", "Abstract resource type (short for --type)")
+		fs.String("env", "", "Environment name")
+		fs.String("name", "", "Desired resource name from config")
 		fs.String("id", "", "Cloud-provider resource ID")
 	}
 	return fs
 }
 
 func TestInfraCommands_AllHonorEnvFlag(t *testing.T) {
-	// import intentionally excluded — env-scoped import is a follow-up.
-	cmds := []string{"plan", "apply", "status", "drift", "bootstrap", "destroy"}
+	cmds := []string{"plan", "apply", "status", "drift", "bootstrap", "destroy", "import"}
 	for _, cmd := range cmds {
 		t.Run(cmd, func(t *testing.T) {
 			fs := newInfraFlagSet(cmd)
@@ -56,9 +52,16 @@ func TestInfraCommands_AllHonorEnvFlag(t *testing.T) {
 	}
 }
 
-func TestInfraImport_NoEnvFlag(t *testing.T) {
+func TestInfraImport_ConfigAwareFlags(t *testing.T) {
 	fs := newInfraFlagSet("import")
-	if fs.Lookup("env") != nil {
-		t.Fatal("import should NOT have --env flag until config-aware import is implemented")
+	for _, flagName := range []string{"env", "name", "id"} {
+		if fs.Lookup(flagName) == nil {
+			t.Fatalf("import is missing --%s flag", flagName)
+		}
+	}
+	for _, staleFlag := range []string{"provider", "p", "type", "t"} {
+		if fs.Lookup(staleFlag) != nil {
+			t.Fatalf("import should not expose stale --%s flag after config-aware import", staleFlag)
+		}
 	}
 }

@@ -172,7 +172,8 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 				}
 			}()
 		}
-		return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, current, store, os.Stderr, envName)
+		scopedCurrent := filterCurrentStateForProvider(current, g.provType, moduleRef, g.specs, len(groupOrder) == 1)
+		return applyWithProviderAndStore(ctx, provider, g.provType, g.specs, scopedCurrent, store, os.Stderr, envName)
 	}
 	for _, moduleRef := range groupOrder {
 		if err := applyGroup(moduleRef, groups[moduleRef]); err != nil {
@@ -180,6 +181,39 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 		}
 	}
 	return nil
+}
+
+func filterCurrentStateForProvider(current []interfaces.ResourceState, providerType, moduleRef string, specs []interfaces.ResourceSpec, singleProvider bool) []interfaces.ResourceState {
+	if len(current) == 0 {
+		return nil
+	}
+	desiredNames := make(map[string]struct{}, len(specs))
+	for i := range specs {
+		desiredNames[specs[i].Name] = struct{}{}
+	}
+	scoped := make([]interfaces.ResourceState, 0, len(current))
+	for i := range current {
+		st := current[i]
+		if st.Provider == providerType || appliedConfigProviderRef(st) == moduleRef {
+			scoped = append(scoped, st)
+			continue
+		}
+		if st.Provider != "" {
+			continue
+		}
+		if _, desired := desiredNames[st.Name]; desired || singleProvider {
+			scoped = append(scoped, st)
+		}
+	}
+	return scoped
+}
+
+func appliedConfigProviderRef(st interfaces.ResourceState) string {
+	if st.AppliedConfig == nil {
+		return ""
+	}
+	providerRef, _ := st.AppliedConfig["provider"].(string)
+	return providerRef
 }
 
 // applyWithProviderAndStore computes a diff plan for the given specs against
@@ -226,15 +260,10 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 		}
 	}
 
-	// Pass the full current state to ComputePlan so that resources which were
-	// previously provisioned but are no longer in the desired spec set generate
-	// delete actions rather than being silently ignored.
-	//
-	// NOTE: in multi-provider configs each provider will see state entries it
-	// does not own, which could produce spurious delete actions. Proper
-	// provider-scoped state isolation requires a "provider" field on
-	// ResourceState (tracked as a follow-up). For the common single-provider
-	// case this is correct and complete.
+	// Pass the caller-provided current state to ComputePlan so resources that
+	// were previously provisioned but are no longer desired generate deletes.
+	// Multi-provider callers must pass only the state owned by this provider
+	// group; applyInfraModules does that before invoking this helper.
 
 	var err error
 	current, err = adoptExistingDNSResources(ctx, provider, providerType, specs, current, store)
@@ -440,6 +469,7 @@ func resourceStateFromLiveOutput(spec interfaces.ResourceSpec, providerType stri
 	if live.ProviderID == "" {
 		return interfaces.ResourceState{}, fmt.Errorf("%s/%s: live resource returned empty ProviderID; state not persisted", spec.Type, spec.Name)
 	}
+	appliedConfig := liveConfigFromOutputs(live.Outputs)
 	now := time.Now().UTC()
 	return interfaces.ResourceState{
 		ID:            spec.Name,
@@ -447,8 +477,8 @@ func resourceStateFromLiveOutput(spec interfaces.ResourceSpec, providerType stri
 		Type:          spec.Type,
 		Provider:      providerType,
 		ProviderID:    live.ProviderID,
-		ConfigHash:    configHashMap(liveConfigFromOutputs(live.Outputs)),
-		AppliedConfig: cloneMap(spec.Config),
+		ConfigHash:    configHashMap(appliedConfig),
+		AppliedConfig: appliedConfig,
 		Outputs:       cloneMap(live.Outputs),
 		Dependencies:  append([]string(nil), spec.DependsOn...),
 		CreatedAt:     now,

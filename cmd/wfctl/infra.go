@@ -842,12 +842,13 @@ func resourceStateFromImportedState(spec interfaces.ResourceSpec, providerType s
 	if providerID == "" {
 		return interfaces.ResourceState{}, fmt.Errorf("%s/%s: imported resource returned empty ProviderID; state not persisted", spec.Type, spec.Name)
 	}
+	appliedConfig := cloneMap(imported.AppliedConfig)
+	if appliedConfig == nil {
+		appliedConfig = liveConfigFromOutputs(imported.Outputs)
+	}
 	cfgHash := imported.ConfigHash
 	if cfgHash == "" {
-		cfgHash = configHashMap(imported.AppliedConfig)
-	}
-	if cfgHash == "" {
-		cfgHash = configHashMap(liveConfigFromOutputs(imported.Outputs))
+		cfgHash = configHashMap(appliedConfig)
 	}
 	now := imported.CreatedAt
 	if now.IsZero() {
@@ -867,7 +868,7 @@ func resourceStateFromImportedState(spec interfaces.ResourceSpec, providerType s
 		Provider:      providerType,
 		ProviderID:    providerID,
 		ConfigHash:    cfgHash,
-		AppliedConfig: cloneMap(spec.Config),
+		AppliedConfig: appliedConfig,
 		Outputs:       cloneMap(imported.Outputs),
 		Dependencies:  append([]string(nil), spec.DependsOn...),
 		CreatedAt:     now,

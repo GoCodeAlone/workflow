@@ -177,6 +177,7 @@ var MigrateTableSQL = []string{
 	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS provider_id TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS config_hash TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS dependencies TEXT[] NOT NULL DEFAULT '{}'`,
 }
 
 func (c *pgxRealConn) createTable(ctx context.Context) error {
