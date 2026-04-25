@@ -50,7 +50,7 @@ func installFromWfctlLockfile(pluginDirVal, lockPath string, lf *config.WfctlLoc
 		platKey := currentPlatformKey()
 		if plat, ok := entry.Platforms[platKey]; ok && plat.URL != "" {
 			destDir := filepath.Join(pluginDirVal, fsName)
-			if err := installFromURL(plat.URL, pluginDirVal); err != nil {
+			if err := installFromURL(plat.URL, pluginDirVal, "", true); err != nil {
 				fmt.Fprintf(os.Stderr, "error installing %s from URL: %v\n", name, err)
 				failed = append(failed, name)
 				continue

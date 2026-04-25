@@ -78,12 +78,17 @@ func runPluginInstall(args []string) error {
 	directURL := fs.String("url", "", "Install from a direct download URL (tar.gz archive)")
 	localPath := fs.String("local", "", "Install from a local plugin directory")
 	fromConfig := fs.String("from-config", "", "Install all requires.plugins[] from a workflow config file")
+	sha256Flag := fs.String("sha256", "", "Expected SHA256 hex digest of the downloaded archive (for --url installs)")
+	skipChecksum := fs.Bool("skip-checksum", false, "Skip integrity verification (WARNING: disables supply-chain protection)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin install [options] [<name>[@<version>]]\n\nInstall a plugin from the registry, a URL, a local directory, or from the lockfile.\n\n  wfctl plugin install <name>              Install latest from registry\n  wfctl plugin install <name>@v1.0.0       Install specific version\n  wfctl plugin install --url <url>          Install from a direct download URL\n  wfctl plugin install --local <dir>        Install from a local build directory\n  wfctl plugin install --from-config <f>    Install all requires.plugins[] from workflow config\n  wfctl plugin install                      Install all plugins from .wfctl-lock.yaml\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *skipChecksum {
+		fmt.Fprintf(os.Stderr, "WARNING: --skip-checksum is set; integrity verification is disabled.\n")
 	}
 
 	// --from-config: batch install from workflow requires.plugins[].
@@ -107,7 +112,7 @@ func runPluginInstall(args []string) error {
 	}
 
 	if *directURL != "" {
-		return installFromURL(*directURL, pluginDirVal)
+		return installFromURL(*directURL, pluginDirVal, *sha256Flag, *skipChecksum)
 	}
 
 	if *localPath != "" {
@@ -189,7 +194,7 @@ func runPluginInstall(args []string) error {
 		}
 	}
 
-	if err := installPluginFromManifest(pluginDirVal, pluginName, manifest, nil); err != nil {
+	if err := installPluginFromManifest(pluginDirVal, pluginName, manifest, nil, *skipChecksum); err != nil {
 		if requestedVersion != "" && requestedVersion != registryVersion {
 			return fmt.Errorf("requested version %s not available for %q (registry manifest is at %s): %w",
 				requestedVersion, pluginName, registryVersion, err)
@@ -220,7 +225,11 @@ func runPluginInstall(args []string) error {
 // When verify is non-nil, the install_verify hook is emitted after tarball download
 // and before extraction. If the hook dispatcher returns a non-zero error the install
 // is aborted and the error is returned.
-func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryManifest, verify *config.PluginVerifyConfig) error {
+//
+// skipChecksum bypasses integrity verification. When false (the default), installation
+// fails unless the checksum can be verified via the manifest SHA256, auto-fetched
+// checksums.txt (for GitHub release URLs), or a supplied expected hash.
+func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryManifest, verify *config.PluginVerifyConfig, skipChecksum bool) error {
 	dl, err := manifest.FindDownload(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return err
@@ -237,11 +246,25 @@ func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryMan
 		return fmt.Errorf("download plugin: %w", err)
 	}
 
+	// Integrity check: fail closed unless the checksum can be verified.
 	if dl.SHA256 != "" {
+		// Manifest provides SHA256 directly — verify it.
 		if err := verifyChecksum(data, dl.SHA256); err != nil {
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "Checksum verified.\n")
+	} else if _, _, _, _, isGH := parseGitHubReleaseDownloadURL(dl.URL); isGH {
+		// GitHub release URL without a manifest SHA — auto-fetch checksums.txt.
+		expectedSHA, lookupErr := lookupChecksumForURL(dl.URL)
+		if lookupErr != nil {
+			return fmt.Errorf("auto-fetch checksum for %q: %w", dl.URL, lookupErr)
+		}
+		if err := verifyChecksum(data, expectedSHA); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "Checksum verified (auto-fetched from checksums.txt).\n")
+	} else if !skipChecksum {
+		return fmt.Errorf("cannot verify integrity of %q: no SHA256 in manifest and URL is not a GitHub release download (use --skip-checksum to bypass)", dl.URL)
 	}
 
 	// Emit install_verify hook after download and before extraction (opt-in via req.Verify).
@@ -407,7 +430,7 @@ func runPluginUpdate(args []string) error {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
-		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil)
+		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil, false)
 	}
 
 	// Registry lookup failed. If the plugin's manifest declares a repository
@@ -428,7 +451,7 @@ func runPluginUpdate(args []string) error {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
-		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil)
+		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil, false)
 	}
 
 	return registryErr
@@ -582,11 +605,35 @@ func runPluginInfo(args []string) error {
 }
 
 // installFromURL downloads a plugin tarball from a direct URL and installs it.
-func installFromURL(url, pluginDir string) error {
+//
+// expectedSHA256, when non-empty, is verified against the downloaded archive.
+// skipChecksum bypasses integrity enforcement; when false and expectedSHA256 is
+// empty, the URL must be a GitHub release download so checksums.txt can be
+// auto-fetched. Non-GitHub URLs with no SHA and skipChecksum=false are rejected.
+func installFromURL(rawURL, pluginDir, expectedSHA256 string, skipChecksum bool) error {
+	url := rawURL
 	fmt.Fprintf(os.Stderr, "Downloading %s...\n", url)
 	data, err := downloadURL(url)
 	if err != nil {
 		return fmt.Errorf("download: %w", err)
+	}
+
+	// Integrity check: fail closed unless the checksum can be verified.
+	if expectedSHA256 != "" {
+		if err := verifyChecksum(data, expectedSHA256); err != nil {
+			return err
+		}
+	} else if _, _, _, _, isGH := parseGitHubReleaseDownloadURL(rawURL); isGH {
+		// GitHub release URL — auto-fetch checksums.txt.
+		expectedSHA, lookupErr := lookupChecksumForURL(rawURL)
+		if lookupErr != nil {
+			return fmt.Errorf("auto-fetch checksum for %q: %w", rawURL, lookupErr)
+		}
+		if err := verifyChecksum(data, expectedSHA); err != nil {
+			return err
+		}
+	} else if !skipChecksum {
+		return fmt.Errorf("cannot verify integrity of %q: no --sha256 provided and URL is not a GitHub release download (use --skip-checksum to bypass)", rawURL)
 	}
 
 	tmpDir, err := os.MkdirTemp("", "wfctl-plugin-*")
@@ -955,7 +1002,7 @@ func verifyChecksum(data []byte, expected string) error {
 	h := sha256.Sum256(data)
 	got := hex.EncodeToString(h[:])
 	if !strings.EqualFold(got, expected) {
-		return fmt.Errorf("checksum mismatch: got %s, want %s", got, expected)
+		return fmt.Errorf("checksum mismatch:\n  got:  %s\n  want: %s\nThis may indicate a corrupted download or a supply-chain attack.", got, expected)
 	}
 	return nil
 }
