@@ -154,6 +154,58 @@ func TestValidatePlanDocsAcceptsExistingCommitAndSupersession(t *testing.T) {
 	}
 }
 
+func TestRenderPlanIndex(t *testing.T) {
+	docs := []planDoc{
+		{
+			Path:         "docs/plans/a.md",
+			Title:        "A",
+			Status:       "implemented",
+			Area:         "wfctl",
+			Owner:        "workflow",
+			ExternalRefs: []string{"#15"},
+			Verification: planVerification{Result: "pass", LastChecked: "2026-04-25"},
+		},
+		{
+			Path:         "docs/plans/b.md",
+			Title:        "B",
+			Status:       "approved",
+			Area:         "plugins",
+			Owner:        "workflow",
+			ExternalRefs: []string{"#76"},
+			Verification: planVerification{Result: "partial", LastChecked: "2026-04-25"},
+		},
+	}
+
+	got := renderPlanIndex(docs)
+	for _, want := range []string{"# Plans Index", "| A |", "| implemented |", "| plugins |", "#76"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("index missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWritePlanIndexFixture(t *testing.T) {
+	if os.Getenv("WFCTL_WRITE_PLAN_INDEX") != "1" {
+		t.Skip("set WFCTL_WRITE_PLAN_INDEX=1 to regenerate docs/plans/INDEX.md")
+	}
+	root := discoverPlanAuditRepoRoot(".")
+	if root == "" {
+		t.Fatal("could not discover repo root")
+	}
+	plansDir := filepath.Join(root, "docs/plans")
+	docs, findings, err := collectPlanDocs(plansDir, planAuditNow(), 30*24*time.Hour)
+	if err != nil {
+		t.Fatalf("collect plans: %v", err)
+	}
+	if len(docs) == 0 {
+		t.Fatal("no plan docs collected")
+	}
+	_ = findings
+	if err := os.WriteFile(filepath.Join(plansDir, "INDEX.md"), []byte(renderPlanIndex(docs)), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+}
+
 func hasPlanFinding(findings []planFinding, level, code string) bool {
 	for _, finding := range findings {
 		if finding.Level == level && finding.Code == code {
