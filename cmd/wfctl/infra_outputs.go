@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -143,6 +144,11 @@ func infraOutputsJSON(entries []infraOutputEntry) error {
 //
 //	BMW_STAGING_DB_HOST=db.example.com
 //	BMW_STAGING_DB_URI=postgresql://...
+//
+// Values are single-quoted so the output can be safely eval'd by a POSIX
+// shell regardless of whether the value contains spaces, dollar signs,
+// backslashes, or other special characters. Non-scalar values (maps/slices)
+// are serialised as compact JSON before quoting.
 func infraOutputsEnv(entries []infraOutputEntry) error {
 	for _, e := range entries {
 		prefix := infraEnvVarName(e.module)
@@ -152,14 +158,45 @@ func infraOutputsEnv(entries []infraOutputEntry) error {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			fmt.Printf("%s_%s=%v\n", prefix, infraEnvVarName(k), e.outputs[k])
+			fmt.Printf("%s_%s=%s\n", prefix, infraEnvVarName(k), shellQuote(e.outputs[k]))
 		}
 	}
 	return nil
 }
 
+// shellQuote returns a single-quoted POSIX shell literal for any value.
+// Non-string scalars are formatted with %v; maps and slices are rendered as
+// compact JSON. Any single-quote characters inside the value are escaped as
+// the sequence '\”.
+func shellQuote(v any) string {
+	var s string
+	switch tv := v.(type) {
+	case string:
+		s = tv
+	case map[string]any, []any:
+		b, err := json.Marshal(tv)
+		if err != nil {
+			s = fmt.Sprint(tv)
+		} else {
+			s = string(b)
+		}
+	default:
+		s = fmt.Sprint(tv)
+	}
+	// Escape single-quotes: end the current literal, emit an escaped ', reopen.
+	escaped := strings.ReplaceAll(s, "'", `'\''`)
+	return "'" + escaped + "'"
+}
+
+// infraEnvVarNameInvalidChars matches any character that is not a letter,
+// digit, or underscore — all of which are invalid in environment variable names.
+var infraEnvVarNameInvalidChars = regexp.MustCompile(`[^A-Z0-9_]`)
+
 // infraEnvVarName converts a module or field name to an environment-variable-
-// safe uppercase string, replacing hyphens and dots with underscores.
+// safe uppercase identifier. All characters that are not ASCII letters, digits,
+// or underscores (including hyphens, dots, slashes, colons, etc.) are replaced
+// with underscores.
 func infraEnvVarName(s string) string {
-	return strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(s))
+	upper := strings.ToUpper(s)
+	return infraEnvVarNameInvalidChars.ReplaceAllString(upper, "_")
 }

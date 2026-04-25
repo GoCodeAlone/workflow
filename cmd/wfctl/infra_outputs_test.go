@@ -16,11 +16,39 @@ func TestInfraEnvVarName(t *testing.T) {
 		{"uri", "URI"},
 		{"host.name", "HOST_NAME"},
 		{"MY_MODULE", "MY_MODULE"},
+		// Characters beyond hyphen/dot must also be sanitised.
+		{"module/v2:resource", "MODULE_V2_RESOURCE"},
+		{"a\\b", "A_B"},
+		{"a:b:c", "A_B_C"},
 	}
 	for _, tc := range cases {
 		got := infraEnvVarName(tc.in)
 		if got != tc.want {
 			t.Errorf("infraEnvVarName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// ── shellQuote ───────────────────────────────────────────────────────────────
+
+func TestShellQuote(t *testing.T) {
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{"simple", "'simple'"},
+		{"with space", "'with space'"},
+		{"has'quote", `'has'\''quote'`},
+		{"dollar $VAR", "'dollar $VAR'"},
+		{42, "'42'"},
+		{true, "'true'"},
+		// Non-scalar: map serialised as compact JSON then single-quoted.
+		{map[string]any{"k": "v"}, `'{"k":"v"}'`},
+	}
+	for _, tc := range cases {
+		got := shellQuote(tc.in)
+		if got != tc.want {
+			t.Errorf("shellQuote(%v) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
@@ -49,9 +77,9 @@ func TestInfraOutputsEnv(t *testing.T) {
 	out := buf.String()
 
 	wantLines := []string{
-		"BMW_STAGING_DB_HOST=db.example.com",
-		"BMW_STAGING_DB_PORT=5432",
-		"BMW_APP_URL=https://app.example.com",
+		"BMW_STAGING_DB_HOST='db.example.com'",
+		"BMW_STAGING_DB_PORT='5432'",
+		"BMW_APP_URL='https://app.example.com'",
 	}
 	for _, line := range wantLines {
 		if !strings.Contains(out, line) {
