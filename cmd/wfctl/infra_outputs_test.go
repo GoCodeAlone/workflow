@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"os"
@@ -11,10 +12,10 @@ import (
 
 // ── stdout/stderr capture helpers ────────────────────────────────────────────
 
-// captureStdout redirects os.Stdout to a pipe for the duration of fn, then
-// returns the captured output alongside any error fn returned. os.Stdout is
-// restored via t.Cleanup so it is always recovered even when fn panics or
-// t.Fatalf is called from within fn.
+// captureStdout redirects os.Stdout to a pipe for the duration of fn, drains
+// the pipe in a goroutine to prevent deadlocks when fn writes more than the
+// OS pipe buffer (~64 KB), and returns the captured output alongside any error
+// fn returned. os.Stdout is restored via t.Cleanup.
 func captureStdout(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -25,11 +26,15 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 	os.Stdout = w
 	t.Cleanup(func() { os.Stdout = orig })
 
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() { io.Copy(&buf, r); close(done) }()
+
 	fnErr := fn()
 
 	w.Close()
-	out, _ := io.ReadAll(r)
-	return string(out), fnErr
+	<-done
+	return buf.String(), fnErr
 }
 
 // captureStderr is the stderr equivalent of captureStdout.
@@ -43,11 +48,15 @@ func captureStderr(t *testing.T, fn func() error) (string, error) {
 	os.Stderr = w
 	t.Cleanup(func() { os.Stderr = orig })
 
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() { io.Copy(&buf, r); close(done) }()
+
 	fnErr := fn()
 
 	w.Close()
-	out, _ := io.ReadAll(r)
-	return string(out), fnErr
+	<-done
+	return buf.String(), fnErr
 }
 
 // ── infraEnvVarName ──────────────────────────────────────────────────────────
@@ -282,10 +291,44 @@ func TestRunInfraOutputs_SkipsEmptyOutputs(t *testing.T) {
 	}
 }
 
+// TestRunInfraOutputs_EnvModuleFilter verifies that --module accepts the base
+// config name and correctly matches the env-resolved name in state. When
+// --env staging is used, the module "bmw-database" is stored in state as
+// "bmw-staging-db" (per-env name override). The filter must resolve the base
+// name before comparing to state records.
+func TestRunInfraOutputs_EnvModuleFilter(t *testing.T) {
+	dir := t.TempDir()
+	// State holds the resolved name "bmw-staging-db".
+	writeInfraOutputsStateFile(t, dir, "bmw-staging-db", map[string]any{"uri": "postgresql://staging/db"})
+	writeInfraOutputsStateFile(t, dir, "other-module", map[string]any{"key": "val"})
+
+	// Config has "bmw-database" as the base name; per-env staging it resolves to "bmw-staging-db".
+	cfgFile := writeInfraOutputsEnvTestConfig(t, dir)
+
+	out, err := captureStdout(t, func() error {
+		return runInfraOutputs([]string{
+			"--config", cfgFile,
+			"--env", "staging",
+			"--module", "bmw-database", // base config name
+			"--format", "yaml",
+		})
+	})
+	if err != nil {
+		t.Fatalf("runInfraOutputs --env --module: %v", err)
+	}
+
+	if !strings.Contains(out, "bmw-staging-db:") {
+		t.Errorf("expected 'bmw-staging-db:' in output (env-resolved name), got:\n%s", out)
+	}
+	if strings.Contains(out, "other-module") {
+		t.Errorf("other-module should be filtered out, got:\n%s", out)
+	}
+}
+
 // ── test helpers ─────────────────────────────────────────────────────────────
 
-// writeInfraOutputsTestConfig writes a minimal infra.yaml that points the
-// filesystem state store at dir, then returns the file path.
+// writeInfraOutputsTestConfig writes a minimal infra.yaml (no env overrides)
+// that points the filesystem state store at dir, then returns the file path.
 func writeInfraOutputsTestConfig(t *testing.T, stateDir string) string {
 	t.Helper()
 	content := `modules:
@@ -300,6 +343,37 @@ func writeInfraOutputsTestConfig(t *testing.T, stateDir string) string {
 	}
 	if _, err := f.WriteString(content); err != nil {
 		t.Fatalf("write config: %v", err)
+	}
+	f.Close()
+	return f.Name()
+}
+
+// writeInfraOutputsEnvTestConfig writes a config that has a "bmw-database"
+// module whose per-env staging name resolves to "bmw-staging-db", used by
+// TestRunInfraOutputs_EnvModuleFilter.
+func writeInfraOutputsEnvTestConfig(t *testing.T, stateDir string) string {
+	t.Helper()
+	content := `modules:
+  - name: iac-state
+    type: iac.state
+    config:
+      backend: filesystem
+      directory: ` + stateDir + `
+  - name: bmw-database
+    type: infra.database
+    config:
+      engine: pg
+    environments:
+      staging:
+        config:
+          name: bmw-staging-db
+` + "\n"
+	f, err := os.CreateTemp(t.TempDir(), "infra-env-*.yaml")
+	if err != nil {
+		t.Fatalf("create env config: %v", err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatalf("write env config: %v", err)
 	}
 	f.Close()
 	return f.Name()

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,13 +45,24 @@ func runInfraOutputs(args []string) error {
 
 	states := loadCurrentState(cfgFile, envFlag)
 
+	// When --env is used, module names in state are stored under their
+	// env-resolved names (e.g. "bmw-database" resolves to "bmw-staging-db"
+	// under --env staging). Resolve --module through the same mechanism so
+	// the caller can pass the base config name and still get a match.
+	resolvedModuleFilter := moduleFlag
+	if moduleFlag != "" && envFlag != "" {
+		if resolved := resolveModuleNameForEnv(cfgFile, moduleFlag, envFlag); resolved != "" {
+			resolvedModuleFilter = resolved
+		}
+	}
+
 	// Collect modules with non-empty outputs, in stable alphabetical order.
 	var entries []infraOutputEntry
 	for _, s := range states {
 		if len(s.Outputs) == 0 {
 			continue
 		}
-		if moduleFlag != "" && s.Name != moduleFlag {
+		if resolvedModuleFilter != "" && s.Name != resolvedModuleFilter {
 			continue
 		}
 		entries = append(entries, infraOutputEntry{module: s.Name, outputs: s.Outputs})
@@ -72,6 +84,29 @@ func runInfraOutputs(args []string) error {
 	default:
 		return fmt.Errorf("unknown format %q (supported: yaml, json, env)", formatFlag)
 	}
+}
+
+// resolveModuleNameForEnv returns the env-resolved name for the module whose
+// base config name equals baseName. If the module has no name override for
+// envName, the baseName is returned unchanged. On any load/parse error the
+// baseName is returned so callers degrade gracefully.
+func resolveModuleNameForEnv(cfgFile, baseName, envName string) string {
+	cfg, err := config.LoadFromFile(cfgFile)
+	if err != nil {
+		return baseName
+	}
+	for i := range cfg.Modules {
+		m := &cfg.Modules[i]
+		if m.Name != baseName {
+			continue
+		}
+		rm, ok := m.ResolveForEnv(envName)
+		if !ok {
+			return baseName // module disabled for this env
+		}
+		return rm.Name
+	}
+	return baseName
 }
 
 // infraOutputsYAML prints outputs as a YAML document keyed by module name.
@@ -140,15 +175,14 @@ func infraOutputsJSON(entries []infraOutputEntry) error {
 
 // infraOutputsEnv prints outputs as shell-ready KEY=value lines, with the
 // key formed from the module name and output field name joined by underscores
-// and uppercased:
+// and uppercased. Values are single-quoted so the output can be safely
+// eval'd by a POSIX shell:
 //
-//	BMW_STAGING_DB_HOST=db.example.com
-//	BMW_STAGING_DB_URI=postgresql://...
+//	BMW_STAGING_DB_HOST='db.example.com'
+//	BMW_STAGING_DB_URI='postgresql://...'
 //
-// Values are single-quoted so the output can be safely eval'd by a POSIX
-// shell regardless of whether the value contains spaces, dollar signs,
-// backslashes, or other special characters. Non-scalar values (maps/slices)
-// are serialised as compact JSON before quoting.
+// Non-scalar values (maps/slices) are serialised as compact JSON before
+// quoting.
 func infraOutputsEnv(entries []infraOutputEntry) error {
 	for _, e := range entries {
 		prefix := infraEnvVarName(e.module)
