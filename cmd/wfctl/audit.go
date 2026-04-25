@@ -97,7 +97,14 @@ func runAuditPlansWithOutput(args []string, out io.Writer) error {
 	}
 
 	if *fixIndex {
-		if err := os.WriteFile(filepath.Join(*dir, "INDEX.md"), []byte(renderPlanIndex(docs)), 0o600); err != nil {
+		indexPath := filepath.Join(*dir, "INDEX.md")
+		indexMode := os.FileMode(0o644)
+		if info, err := os.Stat(indexPath); err == nil {
+			indexMode = info.Mode().Perm()
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("stat plan index: %w", err)
+		}
+		if err := os.WriteFile(indexPath, []byte(renderPlanIndex(docs)), indexMode); err != nil {
 			return fmt.Errorf("write plan index: %w", err)
 		}
 	}

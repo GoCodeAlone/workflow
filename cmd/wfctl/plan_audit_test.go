@@ -56,6 +56,17 @@ func TestParsePlanDocLegacyWarning(t *testing.T) {
 	}
 }
 
+func TestParsePlanDocCRLFFrontmatter(t *testing.T) {
+	input := "---\r\nstatus: approved\r\narea: wfctl\r\nowner: workflow\r\nimplementation_refs: []\r\nverification:\r\n  last_checked: 2026-04-25\r\n  commands: []\r\n  result: pass\r\n---\r\n\r\n# CRLF Plan\r\n"
+	doc, findings := parsePlanDoc("docs/plans/crlf.md", []byte(input), fixedPlanAuditNow(), 30*24*time.Hour)
+	if len(findings) != 0 {
+		t.Fatalf("findings = %v", findings)
+	}
+	if !doc.HasFrontmatter || doc.Title != "CRLF Plan" || doc.Status != "approved" {
+		t.Fatalf("unexpected doc: %+v", doc)
+	}
+}
+
 func TestValidatePlanDocFindings(t *testing.T) {
 	now := fixedPlanAuditNow()
 	input := `---

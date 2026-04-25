@@ -326,13 +326,14 @@ func renderPlanIndex(docs []planDoc) string {
 }
 
 func splitPlanFrontmatter(data []byte) ([]byte, []byte, bool) {
-	if !bytes.HasPrefix(data, []byte("---\n")) {
-		return nil, data, false
+	normalized := bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+	if !bytes.HasPrefix(normalized, []byte("---\n")) {
+		return nil, normalized, false
 	}
-	rest := data[len("---\n"):]
+	rest := normalized[len("---\n"):]
 	idx := bytes.Index(rest, []byte("\n---\n"))
 	if idx < 0 {
-		return nil, data, false
+		return nil, normalized, false
 	}
 	return rest[:idx], rest[idx+len("\n---\n"):], true
 }
