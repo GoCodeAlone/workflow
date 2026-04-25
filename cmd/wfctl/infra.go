@@ -35,6 +35,8 @@ func runInfra(args []string) error {
 		return runInfraState(args[1:])
 	case "bootstrap":
 		return runInfraBootstrap(args[1:])
+	case "outputs":
+		return runInfraOutputs(args[1:])
 	default:
 		return infraUsage()
 	}
@@ -53,6 +55,7 @@ Actions:
   destroy   Tear down infrastructure
   import    Import an existing cloud resource into state
   state     Manage IaC state (list, export, import)
+  outputs   Print captured resource outputs from state
 
 Options:
   --config <file>      Config file (default: infra.yaml or config/infra.yaml)
