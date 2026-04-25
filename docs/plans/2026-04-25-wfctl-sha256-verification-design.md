@@ -31,7 +31,7 @@ there is no manifest SHA to check against.
 | `wfctl plugin install --url <url>` | ⚠️ no verification | ❌ requires `--sha256 <hex>` or auto-fetch |
 | `wfctl update` (self-update) — `checksums.txt` present | ✅ verifies | unchanged |
 | `wfctl update` — `checksums.txt` absent | ⚠️ skips silently | ❌ fails closed |
-| Lockfile-based reinstalls (`.wfctl-lock.yaml` SHA present) | ⚠️ not enforced | ✅ use lockfile SHA |
+| Lockfile-based reinstalls (`.wfctl-lock.yaml` SHA present) | ✅ already enforced — hard-fails on mismatch | unchanged |
 | `setup-wfctl` action | ⚠️ no verification | out of scope (separate repo) |
 
 ---
@@ -99,21 +99,32 @@ The `checksums.txt` format is the goreleaser standard:
 ```
 <sha256hex>  <filename>
 ```
-Parsing reuses the same logic already in `verifyAssetChecksum` (used by `wfctl update`).
+Parsing uses the goreleaser standard format (`<sha256hex>  <filename>`), the same format as
+the existing `verifyAssetChecksum` in `update.go`.
 
-The function that derives the `checksums.txt` URL from a release asset URL is extracted
-into a shared helper so both `plugin install` and `wfctl update` use identical logic.
+A new shared helper `lookupChecksumForURL(downloadURL, assetName string) (string, error)` is
+added. It derives the checksums.txt URL from the release asset URL (stripping the asset
+filename and appending `checksums.txt`), downloads it, and returns the expected SHA256 hex.
+The `wfctl update` path is refactored to call this same helper, replacing its current
+`findChecksumAsset(rel.Assets)` + `verifyAssetChecksum` pattern — the new helper derives the
+URL from the asset's `BrowserDownloadURL` directly rather than searching the API asset list
+for a `checksums.txt` entry. Both paths become consistent and share the same verification
+logic.
 
 ### 2. Plugin install with `--url`
 
 When a user specifies `--url <url>` directly:
 
 - If `--sha256 <hex>` is also provided: download, verify, succeed.
-- If the URL is a GitHub release asset and no `--sha256` is given: auto-fetch
-  `checksums.txt` as above.
-- Otherwise: fail with a message explaining how to supply the expected hash.
+- If the URL matches the GitHub release download pattern
+  (`github.com/<owner>/<repo>/releases/download/<tag>/<file>`) and no `--sha256` is given:
+  auto-fetch `checksums.txt` from the same release tag (via `lookupChecksumForURL`). Fail if
+  the file is absent or the asset is not listed.
+- For any other URL with no `--sha256`: fail with a clear error explaining how to provide
+  a hash or use `--skip-checksum`.
 
-This prevents `--url` from being a silent bypass for the integrity policy.
+This prevents `--url` from being a silent bypass for the integrity policy regardless of
+whether the user provides an explicit hash or relies on auto-fetch for GitHub releases.
 
 ### 3. `wfctl update` hardening
 
@@ -124,12 +135,14 @@ unless `--skip-checksum` is passed.
 ### 4. Lockfile write-back
 
 After a successful verified install (via manifest SHA or auto-fetched checksums.txt),
-write the verified SHA256 to the corresponding `WfctlLockPlatform.SHA256` field in
-`.wfctl-lock.yaml`. On subsequent installs (same plugin version), use the lockfile SHA as
-the authoritative source — skip the extra `checksums.txt` HTTP call.
+write the verified SHA256 to `WfctlLockPluginEntry.SHA256` in `.wfctl-lock.yaml` — the
+top-level per-plugin binary hash field. On subsequent installs (same plugin version), this
+field is already checked and enforced by `installFromLockfile` / `installFromWfctlLockfile`
+(both paths already hard-fail on SHA mismatch when the field is non-empty).
 
-This field already exists in the lockfile schema (`WfctlLockPlatform.SHA256`); this
-change makes it load-on-install and enforce-on-reinstall.
+Note: `WfctlLockPlatform.SHA256` is a separate per-platform hash for the download archive.
+This design writes to `WfctlLockPluginEntry.SHA256` (the installed binary hash), matching
+the write-back pattern in `installFromWfctlLockfile`.
 
 ### 5. Escape hatch: `--skip-checksum`
 
@@ -141,8 +154,9 @@ warning: --skip-checksum is set; binary integrity not verified
 ```
 
 The flag name `--skip-checksum` is intentionally longer than `--no-verify` to create
-friction and make it visible in CI logs. It is not documented in `--help` short form; it
-appears in the extended help only.
+friction and make it visible in CI logs. It is registered via the standard Go `flag` package
+and appears in `wfctl plugin install --help` and `wfctl update --help` output alongside all
+other flags.
 
 ---
 
@@ -185,8 +199,11 @@ download → SHA-256 verify (this design) → cosign verify (install_verify hook
 ```
 
 This design does not change the cosign hook path. The two layers can coexist: SHA-256
-runs unconditionally on every install; cosign runs only when `verify.signature_identity`
-is configured in `app.yaml`'s `requires.plugins` entry.
+verification runs by default on every install and is fail-closed — a binary that cannot be
+verified does not install. It can be bypassed with `--skip-checksum` (emits a warning), or
+implicitly skipped for a lockfile entry with an empty SHA (the SHA is recorded on first
+successful install). Cosign verification runs only when `verify.signature_identity` is
+configured in `app.yaml`'s `requires.plugins` entry.
 
 ---
 
