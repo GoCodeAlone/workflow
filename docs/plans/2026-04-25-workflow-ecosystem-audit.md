@@ -23,8 +23,13 @@ Add tests for:
 - document with YAML frontmatter
 - legacy document without frontmatter
 - invalid status
+- invalid area
 - implemented doc without implementation refs
+- implemented doc without verification commands
 - stale verification date
+- broken `superseded_by` target
+- duplicate active designs for the same area/topic
+- referenced local commit that cannot be found
 
 Example test shape:
 
@@ -103,7 +108,11 @@ Parser behavior:
 - `external_refs` is optional and preserved for index output
 - invalid enum values produce errors
 - `implemented` without refs produces error
+- `implemented` without verification commands produces error
 - stale verification date produces warning
+- `superseded_by` paths must resolve inside the audited plan set
+- duplicate active documents for the same area/topic produce warnings
+- local commit refs are checked with `git cat-file -e` when a repo path is available
 
 **Step 4: Run tests to verify they pass**
 
@@ -195,6 +204,7 @@ git commit -m "feat(wfctl): generate plans index"
 Add tests for:
 
 - `runAudit([]string{"plans", "--dir", tmpDir})` returns findings for missing frontmatter
+- `runAudit([]string{"plans", "--dir", tmpDir})` returns all initial design findings: invalid status/area, implemented-without-evidence, stale verification, broken supersession, duplicate active designs, and missing local commits
 - `runAudit([]string{"plans", "--dir", tmpDir, "--json"})` returns valid JSON
 - `runAudit([]string{"plans", "--dir", tmpDir, "--fix-index"})` writes `INDEX.md`
 - unknown subcommand returns a helpful error
