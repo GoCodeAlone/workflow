@@ -692,6 +692,7 @@ func (d *remoteResourceDriver) Troubleshoot(ctx context.Context, ref interfaces.
 	// Pass ref as flat primitives — structpb.NewStruct (the gRPC transport)
 	// cannot encode arbitrary Go structs; each field must be a scalar.
 	res, err := d.invoker.InvokeService("ResourceDriver.Troubleshoot", map[string]any{
+		"resource_type":   d.resourceType,
 		"ref_name":        ref.Name,
 		"ref_provider_id": ref.ProviderID,
 		"ref_type":        ref.Type,

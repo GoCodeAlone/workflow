@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.11.1] - 2026-04-25
+
+### Fixed
+
+- **`remoteResourceDriver.Troubleshoot` missing `resource_type` arg** — the Troubleshoot method was the only `remoteResourceDriver` dispatcher that omitted `"resource_type": d.resourceType` from its `InvokeService` args map, causing the plugin to return `"missing resource_type arg"` and silently swallow auto-troubleshoot output (BMW deploy run 24917452388). Fixed by adding the missing arg. Regression gate added: `TestRemoteDriver_AllMethodsSendResourceType` is a 9-case table test covering every public ResourceDriver method; any future omission causes an immediate CI failure.
+
 ## [0.18.11] - 2026-04-24
 
 ### Added
