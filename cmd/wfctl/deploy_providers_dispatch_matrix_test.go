@@ -1,6 +1,18 @@
 package main
 
-// dispatch_matrix_test.go — comprehensive IaCProvider + ResourceDriver gRPC dispatch matrix.
+// deploy_providers_dispatch_matrix_test.go — comprehensive IaCProvider + ResourceDriver
+// gRPC dispatch matrix.
+//
+// Design: this file tests the wfctl DISPATCH LAYER only — specifically whether
+// remoteResourceDriver and remoteIaCProvider forward the correct RPC method name
+// and all required arg keys to InvokeService. The invoker is mocked; no real plugin
+// binary runs. This means the matrix is plugin-agnostic: it does not care whether the
+// backing provider is DigitalOcean, AWS, Terraform, OpenTofu, or any other plugin.
+//
+// Error-classification tests (TestDispatchMatrix_ErrorClassification) verify wfctl's
+// wrapIaCError normalization — the contract between wfctl and ANY plugin implementation.
+// A plugin that emits a non-matching error string will not be normalized, which is a
+// bug in that plugin, not in this matrix.
 //
 // For every method on remoteResourceDriver and remoteIaCProvider this file verifies:
 //  1. The exact RPC method name passed to InvokeService.
@@ -12,7 +24,7 @@ package main
 // Invariant proof: temporarily comment out one key in the real dispatcher and this
 // test will fail for the corresponding row. Restore to make it pass again.
 //
-// Run: go test ./cmd/wfctl/... -run Dispatch -v
+// Run: go test ./cmd/wfctl/ -run TestDispatchMatrix -v
 
 import (
 	"context"
