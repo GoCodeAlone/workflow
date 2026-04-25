@@ -168,6 +168,78 @@ func TestAuditCommandRouting(t *testing.T) {
 	}
 }
 
+func TestRunAuditPlugins(t *testing.T) {
+	root := t.TempDir()
+	writePluginAuditRepoAt(t, root, "workflow-plugin-good", `{
+  "name": "workflow-plugin-good",
+  "version": "0.1.0",
+  "capabilities": {}
+}`)
+	writePluginAuditRepoAt(t, root, "workflow-plugin-legacy", `{
+  "name": "workflow-plugin-legacy",
+  "version": "0.1.0",
+  "moduleTypes": ["legacy.module"]
+}`)
+	missing := filepath.Join(root, "workflow-plugin-missing")
+	if err := os.MkdirAll(missing, 0o755); err != nil {
+		t.Fatalf("mkdir missing plugin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(missing, "go.mod"), []byte("module example.com/workflow-plugin-missing\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := runAuditWithOutput([]string{"plugins", "--repo-root", root}, &out)
+	if err != nil {
+		t.Fatalf("audit plugins: %v", err)
+	}
+	for _, want := range []string{"canonical", "legacy", "missing", "missing_plugin_manifest"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q in output:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestRunAuditPluginsJSON(t *testing.T) {
+	root := t.TempDir()
+	writePluginAuditRepoAt(t, root, "workflow-plugin-good", `{
+  "name": "workflow-plugin-good",
+  "version": "0.1.0",
+  "capabilities": {}
+}`)
+
+	var out bytes.Buffer
+	err := runAuditWithOutput([]string{"plugins", "--repo-root", root, "--json"}, &out)
+	if err != nil {
+		t.Fatalf("audit plugins json: %v", err)
+	}
+	var report pluginAuditReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	if report.Summary.Total != 1 || report.Summary.Canonical != 1 {
+		t.Fatalf("unexpected report: %+v", report)
+	}
+}
+
+func TestRunAuditPluginsStrictFailsOnWarnings(t *testing.T) {
+	root := t.TempDir()
+	writePluginAuditRepoAt(t, root, "workflow-plugin-legacy", `{
+  "name": "workflow-plugin-legacy",
+  "version": "0.1.0",
+  "moduleTypes": ["legacy.module"]
+}`)
+
+	var out bytes.Buffer
+	err := runAuditWithOutput([]string{"plugins", "--repo-root", root, "--strict"}, &out)
+	if err == nil {
+		t.Fatal("expected strict audit failure")
+	}
+	if !strings.Contains(err.Error(), "plugin audit finding") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func writePlanAuditDoc(t *testing.T, dir, name, content string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {

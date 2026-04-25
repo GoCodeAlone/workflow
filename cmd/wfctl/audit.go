@@ -25,6 +25,24 @@ type auditSummary struct {
 	Errors   int    `json:"errors"`
 }
 
+type pluginAuditReport struct {
+	Plugins  []pluginAuditResult `json:"plugins"`
+	Findings []planFinding       `json:"findings"`
+	Summary  pluginAuditSummary  `json:"summary"`
+}
+
+type pluginAuditSummary struct {
+	Status    string         `json:"status"`
+	Total     int            `json:"total"`
+	Canonical int            `json:"canonical"`
+	Legacy    int            `json:"legacy"`
+	Missing   int            `json:"missing"`
+	Invalid   int            `json:"invalid"`
+	Warnings  int            `json:"warnings"`
+	Errors    int            `json:"errors"`
+	Shapes    map[string]int `json:"shapes"`
+}
+
 func runAudit(args []string) error {
 	return runAuditWithOutput(args, os.Stdout)
 }
@@ -37,7 +55,7 @@ func runAuditWithOutput(args []string, out io.Writer) error {
 	case "plans":
 		return runAuditPlansWithOutput(args[1:], out)
 	case "plugins":
-		return fmt.Errorf("audit plugins is not implemented yet")
+		return runAuditPluginsWithOutput(args[1:], out)
 	default:
 		return fmt.Errorf("unknown audit subcommand %q (try: plans, plugins)", args[0])
 	}
@@ -149,4 +167,119 @@ func parsePlanAuditDuration(value string) (time.Duration, error) {
 		return 0, fmt.Errorf("parse stale-after %q: %w", value, err)
 	}
 	return duration, nil
+}
+
+func runAuditPluginsWithOutput(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("audit plugins", flag.ContinueOnError)
+	repoRoot := fs.String("repo-root", defaultPluginAuditRepoRoot(), "Directory containing workflow-plugin-* repos")
+	jsonOut := fs.Bool("json", false, "Write JSON output")
+	strict := fs.Bool("strict", false, "Treat warnings as failures")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	results, err := auditPluginRepos(*repoRoot)
+	if err != nil {
+		return err
+	}
+	report := pluginAuditReport{
+		Plugins: results,
+		Summary: summarizePluginAudit(results),
+	}
+	for _, result := range results {
+		report.Findings = append(report.Findings, result.Findings...)
+	}
+
+	if *jsonOut {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			return err
+		}
+	} else {
+		renderPluginAuditReport(out, report)
+	}
+
+	if *strict && (report.Summary.Errors > 0 || report.Summary.Warnings > 0) {
+		return fmt.Errorf("%d plugin audit finding(s) found", report.Summary.Errors+report.Summary.Warnings)
+	}
+	return nil
+}
+
+func summarizePluginAudit(results []pluginAuditResult) pluginAuditSummary {
+	summary := pluginAuditSummary{
+		Status: "PASS",
+		Total:  len(results),
+		Shapes: make(map[string]int),
+	}
+	for _, result := range results {
+		summary.Shapes[result.ManifestShape]++
+		switch result.ManifestShape {
+		case "canonical":
+			summary.Canonical++
+		case "missing":
+			summary.Missing++
+		case "invalid-json":
+			summary.Invalid++
+		default:
+			summary.Legacy++
+		}
+		for _, finding := range result.Findings {
+			switch finding.Level {
+			case "ERROR":
+				summary.Errors++
+			case "WARN":
+				summary.Warnings++
+			}
+		}
+	}
+	if summary.Errors > 0 {
+		summary.Status = "FAIL"
+	} else if summary.Warnings > 0 {
+		summary.Status = "WARN"
+	}
+	return summary
+}
+
+func renderPluginAuditReport(out io.Writer, report pluginAuditReport) {
+	fmt.Fprintf(out, "%s plugins audit: %d plugin(s), %d canonical, %d legacy, %d missing, %d invalid, %d warning(s), %d error(s)\n",
+		report.Summary.Status,
+		report.Summary.Total,
+		report.Summary.Canonical,
+		report.Summary.Legacy,
+		report.Summary.Missing,
+		report.Summary.Invalid,
+		report.Summary.Warnings,
+		report.Summary.Errors,
+	)
+	if len(report.Plugins) == 0 {
+		return
+	}
+
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "PLUGIN\tSHAPE\tFINDINGS")
+	fmt.Fprintln(tw, "------\t-----\t--------")
+	for _, result := range report.Plugins {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", result.Name, result.ManifestShape, strings.Join(pluginFindingCodes(result.Findings), ", "))
+	}
+	_ = tw.Flush()
+}
+
+func pluginFindingCodes(findings []planFinding) []string {
+	if len(findings) == 0 {
+		return []string{"-"}
+	}
+	codes := make([]string, 0, len(findings))
+	for _, finding := range findings {
+		codes = append(codes, finding.Code)
+	}
+	return codes
+}
+
+func defaultPluginAuditRepoRoot() string {
+	root := discoverPlanAuditRepoRoot(".")
+	if root == "" {
+		return "."
+	}
+	return filepath.Dir(root)
 }
