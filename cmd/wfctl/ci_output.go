@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -21,7 +23,7 @@ type CIGroupEmitter interface {
 func detectCIProvider() CIGroupEmitter {
 	switch {
 	case os.Getenv("GITHUB_ACTIONS") == "true":
-		return githubEmitter{summaryPath: os.Getenv("GITHUB_STEP_SUMMARY")}
+		return githubEmitter{summaryPath: githubStepSummaryPath()}
 	case os.Getenv("GITLAB_CI") == "true":
 		return &gitlabEmitter{}
 	case os.Getenv("JENKINS_HOME") != "":
@@ -31,6 +33,21 @@ func detectCIProvider() CIGroupEmitter {
 	default:
 		return plainEmitter{}
 	}
+}
+
+func githubStepSummaryPath() string {
+	path := os.Getenv("GITHUB_STEP_SUMMARY")
+	if path == "" {
+		return ""
+	}
+	if runningAsGoTest() && os.Getenv("WFCTL_ALLOW_TEST_STEP_SUMMARY") != "true" {
+		return ""
+	}
+	return path
+}
+
+func runningAsGoTest() bool {
+	return strings.HasSuffix(filepath.Base(os.Args[0]), ".test")
 }
 
 // --- GitHub Actions ---

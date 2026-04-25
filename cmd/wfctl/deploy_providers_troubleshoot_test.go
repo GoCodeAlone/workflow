@@ -86,6 +86,7 @@ func TestHealthPollTimeout_WritesStepSummaryOnTimeout(t *testing.T) {
 	summaryPath := filepath.Join(tmp, "summary.md")
 	t.Setenv("GITHUB_ACTIONS", "true")
 	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+	t.Setenv("WFCTL_ALLOW_TEST_STEP_SUMMARY", "true")
 
 	f := &fakeTroubleshootingDriver{
 		diags: []interfaces.Diagnostic{
@@ -125,6 +126,7 @@ func TestHealthPollTimeout_EmptyLastMsgFallback(t *testing.T) {
 	summaryPath := filepath.Join(tmp, "summary.md")
 	t.Setenv("GITHUB_ACTIONS", "true")
 	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+	t.Setenv("WFCTL_ALLOW_TEST_STEP_SUMMARY", "true")
 
 	f := &fakeTroubleshootingDriver{}
 	err := healthPollTimeout(
