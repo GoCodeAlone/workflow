@@ -224,8 +224,9 @@ func shellQuote(v any) string {
 	return "'" + escaped + "'"
 }
 
-// infraEnvVarNameInvalidChars matches any character that is not a letter,
-// digit, or underscore — all of which are invalid in environment variable names.
+// infraEnvVarNameInvalidChars matches any character that is NOT alphanumeric
+// or underscore — these are replaced with '_' to produce a valid POSIX shell
+// environment variable name.
 var infraEnvVarNameInvalidChars = regexp.MustCompile(`[^A-Z0-9_]`)
 
 // infraEnvVarName converts a module or field name to an environment-variable-

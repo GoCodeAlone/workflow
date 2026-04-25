@@ -24,15 +24,15 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 	}
 	orig := os.Stdout
 	os.Stdout = w
-	t.Cleanup(func() { os.Stdout = orig })
 
 	var buf bytes.Buffer
 	done := make(chan struct{})
-	go func() { io.Copy(&buf, r); close(done) }()
+	go func() { defer r.Close(); io.Copy(&buf, r); close(done) }()
 
 	fnErr := fn()
 
 	w.Close()
+	os.Stdout = orig // restore immediately so later writes in the test are not captured
 	<-done
 	return buf.String(), fnErr
 }
@@ -46,15 +46,15 @@ func captureStderr(t *testing.T, fn func() error) (string, error) {
 	}
 	orig := os.Stderr
 	os.Stderr = w
-	t.Cleanup(func() { os.Stderr = orig })
 
 	var buf bytes.Buffer
 	done := make(chan struct{})
-	go func() { io.Copy(&buf, r); close(done) }()
+	go func() { defer r.Close(); io.Copy(&buf, r); close(done) }()
 
 	fnErr := fn()
 
 	w.Close()
+	os.Stderr = orig // restore immediately so later writes in the test are not captured
 	<-done
 	return buf.String(), fnErr
 }
