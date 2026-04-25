@@ -195,8 +195,13 @@ var infraEnvVarNameInvalidChars = regexp.MustCompile(`[^A-Z0-9_]`)
 // infraEnvVarName converts a module or field name to an environment-variable-
 // safe uppercase identifier. All characters that are not ASCII letters, digits,
 // or underscores (including hyphens, dots, slashes, colons, etc.) are replaced
-// with underscores.
+// with underscores. A leading digit is prefixed with an underscore because POSIX
+// environment variable names must begin with a letter or underscore.
 func infraEnvVarName(s string) string {
 	upper := strings.ToUpper(s)
-	return infraEnvVarNameInvalidChars.ReplaceAllString(upper, "_")
+	sanitized := infraEnvVarNameInvalidChars.ReplaceAllString(upper, "_")
+	if len(sanitized) > 0 && sanitized[0] >= '0' && sanitized[0] <= '9' {
+		sanitized = "_" + sanitized
+	}
+	return sanitized
 }

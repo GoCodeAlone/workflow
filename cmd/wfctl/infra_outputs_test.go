@@ -20,6 +20,9 @@ func TestInfraEnvVarName(t *testing.T) {
 		{"module/v2:resource", "MODULE_V2_RESOURCE"},
 		{"a\\b", "A_B"},
 		{"a:b:c", "A_B_C"},
+		// Leading digit: POSIX env var names must start with letter or underscore.
+		{"1st-module", "_1ST_MODULE"},
+		{"42", "_42"},
 	}
 	for _, tc := range cases {
 		got := infraEnvVarName(tc.in)
