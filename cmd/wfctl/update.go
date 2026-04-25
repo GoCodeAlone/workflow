@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -259,33 +257,28 @@ func findChecksumAsset(assets []githubAsset) *githubAsset {
 }
 
 // verifyAssetChecksum downloads checksums.txt and verifies the SHA256 of data
-// matches the entry for assetName. The checksums file uses the format produced
-// by sha256sum: "<hash>  <filename>" per line.
+// matches the entry for assetName. The checksums file must use the goreleaser
+// format: "<sha256hex>  <filename>" (exactly two spaces between hash and name).
+//
+// Parsing is delegated to parseChecksumsTxt (plugin_checksum.go) to keep a
+// single authoritative parser and prevent whitespace-handling drift.
 func verifyAssetChecksum(checksumAsset *githubAsset, assetName string, data []byte) error {
 	checksumData, err := downloadWithTimeout(checksumAsset.BrowserDownloadURL, 30*time.Second)
 	if err != nil {
 		return fmt.Errorf("download checksums.txt: %w", err)
 	}
 
-	for _, line := range strings.Split(string(checksumData), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.Fields(line)
-		if len(parts) != 2 {
-			continue
-		}
-		if strings.EqualFold(parts[1], assetName) {
-			h := sha256.Sum256(data)
-			got := hex.EncodeToString(h[:])
-			if !strings.EqualFold(got, parts[0]) {
-				return fmt.Errorf("checksum mismatch for %s: got %s, want %s", assetName, got, parts[0])
-			}
-			return nil
-		}
+	entries, err := parseChecksumsTxt(string(checksumData))
+	if err != nil {
+		return fmt.Errorf("parse checksums.txt: %w", err)
 	}
-	return fmt.Errorf("checksum for %q not found in checksums.txt", assetName)
+
+	expectedSHA, ok := entries[assetName]
+	if !ok {
+		return fmt.Errorf("checksum for %q not found in checksums.txt", assetName)
+	}
+
+	return verifyChecksum(data, expectedSHA)
 }
 
 // downloadWithTimeout fetches a URL using an HTTP client with the given timeout.

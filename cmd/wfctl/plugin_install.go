@@ -87,8 +87,18 @@ func runPluginInstall(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// Validate flag combinations before doing anything else.
+	if *sha256Flag != "" && *directURL == "" {
+		return fmt.Errorf("--sha256 requires --url (no download URL specified)")
+	}
+	if *skipChecksum && *sha256Flag != "" {
+		return fmt.Errorf("--skip-checksum and --sha256 are contradictory: cannot skip verification while supplying an expected hash")
+	}
 	if *skipChecksum {
-		fmt.Fprintf(os.Stderr, "WARNING: --skip-checksum is set; integrity verification is disabled.\n")
+		// The flag only bypasses the fail-closed error when integrity cannot be verified.
+		// Installs still verify when the manifest supplies a SHA256 or the URL is a
+		// GitHub release (checksums.txt auto-fetched). The flag is not a full bypass.
+		fmt.Fprintf(os.Stderr, "WARNING: --skip-checksum is set; install will proceed even if integrity cannot be verified.\n")
 	}
 
 	// --from-config: batch install from workflow requires.plugins[].
@@ -227,8 +237,8 @@ func runPluginInstall(args []string) error {
 // is aborted and the error is returned.
 //
 // skipChecksum bypasses integrity verification. When false (the default), installation
-// fails unless the checksum can be verified via the manifest SHA256, auto-fetched
-// checksums.txt (for GitHub release URLs), or a supplied expected hash.
+// fails unless the checksum can be verified via the manifest SHA256 or auto-fetched
+// checksums.txt (for GitHub release URLs).
 func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryManifest, verify *config.PluginVerifyConfig, skipChecksum bool) error {
 	dl, err := manifest.FindDownload(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
@@ -861,8 +871,10 @@ func parseGitHubReleaseDownloadURL(rawURL string) (owner, repo, tag, filename st
 	if u.User != nil {
 		return
 	}
-	// Reject URLs with a non-default port. u.Hostname() strips the port before
+	// Reject URLs with any explicit port. u.Hostname() strips the port before
 	// isGitHubHost sees it, so https://github.com:8080/... would pass without this check.
+	// Even the HTTPS default port (:443) is rejected — an explicit port signals a proxy
+	// or redirect and should not be trusted as a canonical GitHub release URL.
 	if u.Port() != "" {
 		return
 	}
