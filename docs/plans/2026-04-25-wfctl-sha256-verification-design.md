@@ -134,25 +134,29 @@ unless `--skip-checksum` is passed.
 
 ### 4. Lockfile write-back
 
-Plugin releases ship as archives (e.g. `.tar.gz`). The integrity check verifies the
-**archive** SHA against `checksums.txt` (or the manifest `sha256` field). After extraction,
-the installed **binary** may have a different hash than the archive.
+Both `WfctlLockPlatform.SHA256` and `WfctlLockPluginEntry.SHA256` represent
+**installed-binary SHAs** — hashes of the extracted plugin binary on disk, NOT of the
+download archive. This is confirmed by `installFromWfctlLockfile`, which verifies both
+fields against `hashFileSHA256(destDir/fsName)` after extraction.
 
-Two distinct SHAs are involved:
+The archive SHA verified against `checksums.txt` at download time is a separate,
+transient check — it is not stored in any lockfile field.
 
-- **Archive SHA** — verified at download time against `checksums.txt` (or manifest). This
-  is what goreleaser signs and publishes. Stored in `WfctlLockPlatform.SHA256` (the
-  per-platform archive hash already recorded by the existing lockfile write-back path in
-  `installFromWfctlLockfile`).
-- **Binary SHA** — computed after extraction from the archive. Stored in
-  `WfctlLockPluginEntry.SHA256` (the top-level per-plugin installed-binary hash). This is
-  the value enforced on lockfile reinstalls by `installFromLockfile` and
-  `installFromWfctlLockfile` (both already hard-fail on mismatch when non-empty).
+Current write-back behavior:
 
-This design adds write-back of the **binary SHA** to `WfctlLockPluginEntry.SHA256` after a
-successful first install. On subsequent installs (same plugin version), the lockfile
-enforces this binary-level hash without requiring a network round-trip — the archive SHA
-path (`checksums.txt` fetch) is skipped entirely for lockfile reinstalls.
+- `WfctlLockPluginEntry.SHA256` (top-level binary hash): written by `installFromWfctlLockfile`
+  after each successful install via `hashFileSHA256(binaryPath)`. Enforced on subsequent
+  reinstalls by both `installFromLockfile` and `installFromWfctlLockfile` (hard-fail on
+  mismatch when non-empty).
+- `WfctlLockPlatform.SHA256` (per-platform binary hash): verified when non-empty, but
+  **not written** by any current code path — it must be pre-populated externally (e.g. by
+  `wfctl plugin lock` or a future write-back).
+
+This design adds write-back of the binary SHA to `WfctlLockPluginEntry.SHA256` in the
+`installPluginFromManifest` path (first install from a registry manifest or `--url`). The
+`installFromWfctlLockfile` path already writes this field. On subsequent installs (same
+plugin version), the lockfile enforces the binary-level hash without a network round-trip
+— the `checksums.txt` fetch is skipped entirely for lockfile reinstalls.
 
 ### 5. Escape hatch: `--skip-checksum`
 
