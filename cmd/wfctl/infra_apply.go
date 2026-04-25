@@ -191,6 +191,9 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) error { //n
 // Callers pass a nil store (or noopStateStore) when state persistence is not
 // required. w receives diagnostic output; callers typically pass os.Stderr but
 // tests may supply a bytes.Buffer to capture and assert the output.
+// envName labels the failure step-summary output (e.g. "staging", "prod");
+// pass empty string when not running in a CI context or when env metadata is
+// unavailable.
 func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore, w io.Writer, envName string) error {
 	if store == nil {
 		store = &noopStateStore{}

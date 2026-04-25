@@ -117,7 +117,9 @@ func TestInfraApply_NonTroubleshooterNocrash(t *testing.T) {
 }
 
 // TestInfraApply_WritesStepSummaryOnFailure verifies that applyWithProviderAndStore
-// writes a GHA step summary even when the provider has no Troubleshooter.
+// writes a GHA step summary even when the provider has no Troubleshooter (empty
+// diagnostics). WriteStepSummary is called unconditionally after the troubleshoot
+// block, so the failure header and root cause still appear.
 // TDD invariant: removing the WriteStepSummary call causes this test to fail.
 func TestInfraApply_WritesStepSummaryOnFailure(t *testing.T) {
 	tmp := t.TempDir()
@@ -125,17 +127,10 @@ func TestInfraApply_WritesStepSummaryOnFailure(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "true")
 	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
 
-	diags := []interfaces.Diagnostic{
-		{ID: "dep-abc", Phase: "pre_deploy", Cause: "migration failed", At: mustTime("2026-04-24T00:00:00Z")},
-	}
-	tsCalls := 0
-	provider := &applyFailProvider{
-		applyErr: errors.New("API error"),
-		tsDriver: &troubleshootingRD{diags: diags, tsCalls: &tsCalls},
-	}
-
-	infraApplyTroubleshootTimeout = 5 * time.Second
-	defer func() { infraApplyTroubleshootTimeout = 30 * time.Second }()
+	// plainFailProvider has no Troubleshooter — ResourceDriver returns (nil, nil).
+	// This exercises the important branch where diagnostics are empty but the
+	// summary is still written with the failure header and root cause.
+	provider := &plainFailProvider{applyErr: errors.New("apply: resource quota exceeded")}
 
 	specs := []interfaces.ResourceSpec{{Name: "bmw-staging", Type: "app_platform"}}
 	var diagBuf bytes.Buffer
@@ -152,7 +147,8 @@ func TestInfraApply_WritesStepSummaryOnFailure(t *testing.T) {
 	if !strings.Contains(got, "bmw-staging") {
 		t.Errorf("summary missing resource name: %q", got)
 	}
-	if !strings.Contains(got, "migration failed") {
-		t.Errorf("summary missing diagnostic cause: %q", got)
+	// No diagnostics — diagBuf must be empty (no Troubleshooter output).
+	if diagBuf.Len() != 0 {
+		t.Errorf("no-troubleshooter path should produce no diagnostic output, got: %q", diagBuf.String())
 	}
 }

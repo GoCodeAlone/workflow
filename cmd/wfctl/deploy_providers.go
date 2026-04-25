@@ -1107,6 +1107,7 @@ var healthPollProgressInterval = 30 * time.Second
 // healthPollProgressInterval so the user can see the deploy is still running.
 // On timeout, if the driver implements interfaces.Troubleshooter, recent
 // provider-side events are fetched and printed in a structured failure block.
+// envName threads through to healthPollTimeout for step-summary labeling.
 func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref interfaces.ResourceRef, name, envName string) error {
 	deadline := time.Now().Add(healthPollDefaultTimeout)
 	pollCtx, cancel := context.WithDeadline(ctx, deadline)
@@ -1181,7 +1182,8 @@ func pollUntilHealthy(ctx context.Context, driver interfaces.ResourceDriver, ref
 }
 
 // healthPollTimeout builds the timeout error, emits a structured failure block,
-// and auto-troubleshoots via the driver's Troubleshooter (if any) before returning.
+// auto-troubleshoots via the driver's Troubleshooter (if any), and writes a GHA
+// step summary via WriteStepSummary (no-op on non-GHA runners) before returning.
 func healthPollTimeout(ctx context.Context, driver interfaces.ResourceDriver, ref interfaces.ResourceRef, name, lastMsg string, start time.Time, envName string) error {
 	elapsed := time.Since(start).Round(time.Second)
 
